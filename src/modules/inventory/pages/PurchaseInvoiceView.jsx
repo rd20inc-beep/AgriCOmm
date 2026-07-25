@@ -119,7 +119,7 @@ export default function PurchaseInvoiceView() {
         <h3 className="text-sm font-semibold text-gray-700 mb-3 inline-flex items-center gap-1.5"><Truck size={15} /> Inbound (purchase) vehicles</h3>
         <div className="flex flex-wrap gap-2 text-xs">
           {intakeVehicles.length > 0
-            ? intakeVehicles.map((v, i) => <Chip key={i}>Truck {v.vehicleNo}{v.driverName ? ` · ${v.driverName}` : ''}{v.weightMt ? ` · ${v.weightMt} MT` : ''}{v.totalBags ? ` · ${v.totalBags} bags` : ''}{v.arrivalDate ? ` · ${dt(v.arrivalDate)}` : ''}</Chip>)
+            ? intakeVehicles.map((v, i) => <Chip key={i}>Truck {v.vehicleNo}{v.gatePassNo ? ` · GP ${v.gatePassNo}` : ''}{v.driverName ? ` · ${v.driverName}` : ''}{v.haulerName ? ` · ${v.haulerName}` : ''}{v.weightKg ? ` · ${Math.round(v.weightKg).toLocaleString()} kg` : ''}{v.totalBags ? ` · ${v.totalBags} bags` : ''}{v.arrivalDate ? ` · ${dt(v.arrivalDate)}` : ''}</Chip>)
             : <span className="text-gray-400">No intake vehicle recorded for this lot.</span>}
         </div>
       </div>

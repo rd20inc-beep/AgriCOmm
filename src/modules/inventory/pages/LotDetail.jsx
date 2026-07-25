@@ -4,7 +4,7 @@ import PartyLink from '../../../shared/components/PartyLink';
 import {
   ArrowLeft, Package, Truck, DollarSign, FileText, BarChart3,
   Plus, Save, Edit3, AlertTriangle, Warehouse, ShoppingBag, Scale,
-  Activity, ChevronRight, TrendingUp, Clock, Factory, Play, Trash2, Loader2, Printer,
+  Activity, ChevronRight, TrendingUp, Clock, Factory, Play, Trash2, Loader2, Printer, Pencil,
   ArrowDownLeft, ArrowUpRight, Calendar, Hash, Wrench, Boxes, ArrowRightLeft, Lock, CheckCircle2,
 } from 'lucide-react';
 import {
@@ -71,6 +71,7 @@ export default function LotDetail() {
   const [showAllocateModal, setShowAllocateModal] = useState(false);
   const [showStartMilling, setShowStartMilling] = useState(false);
   const [showAddVehicle, setShowAddVehicle] = useState(false);
+  const [editVehicle, setEditVehicle] = useState(null);
   const [showAddPurchase, setShowAddPurchase] = useState(false);
   const [showQualityModal, setShowQualityModal] = useState(false);
   const [showTransfer, setShowTransfer] = useState(false);
@@ -811,6 +812,7 @@ export default function LotDetail() {
               lot={lot}
               vehicles={lotVehicles}
               onAdd={() => setShowAddVehicle(true)}
+              onEdit={(v) => setEditVehicle(v)}
               onRefresh={loadLotVehicles}
               addToast={addToast}
             />
@@ -1254,9 +1256,10 @@ export default function LotDetail() {
       <PriceEditModal isOpen={showPriceModal} onClose={() => setShowPriceModal(false)} lot={lot} addToast={addToast} refetch={refetch} />
       <ReceivedQtyModal isOpen={showReceivedModal} onClose={() => setShowReceivedModal(false)} lot={lot} addToast={addToast} refetch={refetch} />
       <AllocateToBatchModal isOpen={showAllocateModal} onClose={() => setShowAllocateModal(false)} lot={lot} addToast={addToast} refetch={refetch} />
-      <AddLotVehicleModal
-        isOpen={showAddVehicle}
-        onClose={() => setShowAddVehicle(false)}
+      <LotVehicleDrawer
+        isOpen={showAddVehicle || !!editVehicle}
+        vehicle={editVehicle}
+        onClose={() => { setShowAddVehicle(false); setEditVehicle(null); }}
         lot={lot}
         addToast={addToast}
         onSaved={() => { loadLotVehicles(); }}
@@ -1977,7 +1980,7 @@ function AllocateToBatchModal({ isOpen, onClose, lot, addToast, refetch }) {
 }
 
 // ─── Lot Vehicles Panel ───
-function LotVehiclesPanel({ lot, vehicles, onAdd, onRefresh, addToast }) {
+function LotVehiclesPanel({ lot, vehicles, onAdd, onEdit, onRefresh, addToast }) {
   const safe = Array.isArray(vehicles) ? vehicles : [];
   async function handleDelete(v) {
     if (!confirm(`Delete vehicle ${v.vehicle_no || ''}?`)) return;
@@ -2012,7 +2015,9 @@ function LotVehiclesPanel({ lot, vehicles, onAdd, onRefresh, addToast }) {
             <thead className="border-b border-gray-200">
               <tr className="text-left text-[11px] font-semibold text-gray-500 uppercase">
                 <th className="py-2">Vehicle</th>
+                <th className="py-2">Gate Pass</th>
                 <th className="py-2">Driver</th>
+                <th className="py-2">Hauler</th>
                 <th className="py-2 text-right">Weight (kg)</th>
                 <th className="py-2 text-right">Bags</th>
                 <th className="py-2">Date</th>
@@ -2024,10 +2029,12 @@ function LotVehiclesPanel({ lot, vehicles, onAdd, onRefresh, addToast }) {
               {safe.map(v => (
                 <tr key={v.id} className="hover:bg-gray-50">
                   <td data-label="Vehicle" className="py-2 font-mono font-medium text-gray-900">{v.vehicle_no || '—'}</td>
+                  <td data-label="Gate Pass" className="py-2 font-mono text-gray-700">{v.gate_pass_no || '—'}</td>
                   <td data-label="Driver" className="mob-hide py-2 text-gray-700">
                     {v.driver_name || '—'}
                     {v.driver_phone && <span className="text-xs text-gray-400 ml-1">· {v.driver_phone}</span>}
                   </td>
+                  <td data-label="Hauler" className="mob-hide py-2 text-gray-700">{v.hauler_name || '—'}</td>
                   <td data-label="Weight (kg)" className="py-2 text-right tabular-nums font-medium">{Math.round(parseFloat(v.weight_kg) || 0).toLocaleString()}</td>
                   <td data-label="Bags" className="py-2 text-right tabular-nums">{v.total_bags || '—'}</td>
                   <td data-label="Date" className="mob-hide py-2 text-gray-600">{fmtDate(v.arrival_date)}</td>
@@ -2040,9 +2047,14 @@ function LotVehiclesPanel({ lot, vehicles, onAdd, onRefresh, addToast }) {
                   </td>
                   <td data-label="Actions" className="py-2 text-right">
                     {!v.batch_id && (
-                      <button onClick={() => handleDelete(v)} className="text-red-600 hover:text-red-700" title="Remove">
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      <div className="inline-flex items-center gap-2">
+                        <button onClick={() => onEdit?.(v)} className="text-blue-600 hover:text-blue-700" title="Edit">
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                        <button onClick={() => handleDelete(v)} className="text-red-600 hover:text-red-700" title="Remove">
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     )}
                   </td>
                 </tr>
@@ -2055,24 +2067,46 @@ function LotVehiclesPanel({ lot, vehicles, onAdd, onRefresh, addToast }) {
   );
 }
 
-// ─── Add Lot Vehicle Modal ───
-function AddLotVehicleModal({ isOpen, onClose, lot, addToast, onSaved }) {
-  const [form, setForm] = useState({
+// ─── Add / Edit Lot Vehicle Drawer (right-side slider, item #3/#4) ───
+function LotVehicleDrawer({ isOpen, onClose, lot, vehicle, addToast, onSaved }) {
+  const isEdit = !!vehicle;
+  const blankForm = () => ({
     vehicle_no: '', driver_name: '', driver_phone: '',
-    weight_kg: '', total_bags: '',
-    arrival_date: new Date().toISOString().slice(0, 10), notes: '',
+    weight_kg: '', total_bags: '', bag_size_kg: '',
+    hauler_id: '', gate_pass_no: '',
+    arrival_date: new Date().toISOString().slice(0, 10), departure_date: '',
   });
+  const [form, setForm] = useState(blankForm);
   const [saving, setSaving] = useState(false);
 
+  const iso = (d) => (d ? String(d).slice(0, 10) : '');
   useEffect(() => {
-    if (isOpen) {
+    if (!isOpen) return;
+    if (vehicle) {
+      // Edit — hydrate from the existing arrival.
       setForm({
-        vehicle_no: '', driver_name: '', driver_phone: '',
-        weight_kg: '', total_bags: '',
-        arrival_date: new Date().toISOString().slice(0, 10), notes: '',
+        vehicle_no: vehicle.vehicle_no || '',
+        driver_name: vehicle.driver_name || '',
+        driver_phone: vehicle.driver_phone || '',
+        weight_kg: vehicle.weight_kg != null ? String(Math.round(parseFloat(vehicle.weight_kg))) : '',
+        total_bags: vehicle.total_bags != null ? String(vehicle.total_bags) : '',
+        bag_size_kg: vehicle.bag_size_kg != null ? String(vehicle.bag_size_kg) : '',
+        hauler_id: vehicle.hauler_id ? String(vehicle.hauler_id) : '',
+        gate_pass_no: vehicle.gate_pass_no || '',
+        arrival_date: iso(vehicle.arrival_date) || new Date().toISOString().slice(0, 10),
+        departure_date: iso(vehicle.departure_date),
+      });
+    } else {
+      // Add — prefill the lot's context (bag size + the lot's default hauler) so
+      // the operator only fills the truck-specific fields.
+      setForm({
+        ...blankForm(),
+        bag_size_kg: lot?.bagSizeKg != null ? String(lot.bagSizeKg) : '',
+        hauler_id: lot?.haulerId ? String(lot.haulerId) : '',
       });
     }
-  }, [isOpen]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, vehicle?.id]);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -2081,91 +2115,156 @@ function AddLotVehicleModal({ isOpen, onClose, lot, addToast, onSaved }) {
       return;
     }
     setSaving(true);
+    const payload = {
+      vehicle_no: form.vehicle_no.trim(),
+      driver_name: form.driver_name.trim() || null,
+      driver_phone: form.driver_phone.trim() || null,
+      weight_kg: form.weight_kg ? parseFloat(form.weight_kg) : null,
+      total_bags: form.total_bags ? parseInt(form.total_bags, 10) : null,
+      bag_size_kg: form.bag_size_kg ? parseFloat(form.bag_size_kg) : null,
+      hauler_id: form.hauler_id ? parseInt(form.hauler_id, 10) : null,
+      gate_pass_no: form.gate_pass_no.trim() || null,
+      arrival_date: form.arrival_date || null,
+      departure_date: form.departure_date || null,
+    };
     try {
-      await lotInventoryApi.addLotVehicle(lot.id, {
-        vehicle_no: form.vehicle_no.trim(),
-        driver_name: form.driver_name.trim() || null,
-        driver_phone: form.driver_phone.trim() || null,
-        weight_kg: form.weight_kg ? parseFloat(form.weight_kg) : null,
-        total_bags: form.total_bags ? parseInt(form.total_bags, 10) : null,
-        arrival_date: form.arrival_date || null,
-        notes: form.notes.trim() || null,
-      });
-      addToast?.(`Vehicle ${form.vehicle_no} added`, 'success');
+      if (isEdit) {
+        await lotInventoryApi.updateLotVehicle(lot.id, vehicle.id, payload);
+        addToast?.(`Vehicle ${form.vehicle_no} updated`, 'success');
+      } else {
+        await lotInventoryApi.addLotVehicle(lot.id, payload);
+        addToast?.(`Vehicle ${form.vehicle_no} added`, 'success');
+      }
       onSaved?.();
       onClose();
     } catch (err) {
-      addToast?.(err?.response?.data?.message || err.message || 'Failed to add vehicle', 'error');
+      addToast?.(err?.response?.data?.message || err.message || 'Failed to save vehicle', 'error');
     } finally {
       setSaving(false);
     }
   }
 
+  // Auto-derive bags from weight ÷ bag size (mirrors the New Purchase Lot form),
+  // unless the operator has typed a bag count of their own.
+  const bagsHint = (() => {
+    const wk = parseFloat(form.weight_kg) || 0;
+    const bs = parseFloat(form.bag_size_kg) || 0;
+    if (!(wk > 0 && bs > 0)) return null;
+    const raw = wk / bs;
+    return Number.isInteger(raw)
+      ? `${raw} bags (exact)`
+      : `≈ ${raw.toFixed(1)} → ${Math.ceil(raw)} bags (last partially filled)`;
+  })();
+
+  const inp = 'w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500';
+  const lbl = 'block text-sm font-medium text-gray-700 mb-1';
+
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={`Add vehicle to ${lot.lotNo || 'lot'}`} size="md">
-      <form onSubmit={handleSubmit} className="space-y-4">
+    <SlideDrawer
+      open={isOpen}
+      onClose={onClose}
+      title={isEdit ? `Edit vehicle — ${lot?.lotNo || 'lot'}` : `Add vehicle — ${lot?.lotNo || 'lot'}`}
+      subtitle={lot?.lotNo}
+      icon={Truck}
+      size="lg"
+      footer={
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={onClose} className="btn btn-secondary">Cancel</button>
+          <button type="submit" form="lot-vehicle-form" disabled={saving} className="btn btn-primary disabled:opacity-50">
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+            {isEdit ? 'Save Changes' : 'Add Vehicle'}
+          </button>
+        </div>
+      }
+    >
+      <form id="lot-vehicle-form" onSubmit={handleSubmit} className="space-y-5">
+        {/* Lot context — read from the lot, shown so the operator has the full
+            picture while recording the truck. */}
+        <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+          <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-2">Lot context</p>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
+            <div><span className="text-gray-500">Lot</span> <span className="font-medium text-gray-900">{lot?.lotNo || '—'}</span></div>
+            <div><span className="text-gray-500">Supplier</span> <span className="font-medium text-gray-900">{lot?.supplierName || '—'}</span></div>
+            <div><span className="text-gray-500">Variety</span> <span className="font-medium text-gray-900">{lot?.variety || '—'}</span></div>
+            <div><span className="text-gray-500">Grade</span> <span className="font-medium text-gray-900">{lot?.grade || '—'}</span></div>
+            <div><span className="text-gray-500">Ordered</span> <span className="font-medium text-gray-900">{lot?.orderedNetWeightKg != null ? `${Math.round(parseFloat(lot.orderedNetWeightKg)).toLocaleString()} kg` : '—'}</span></div>
+            <div><span className="text-gray-500">Received</span> <span className="font-medium text-gray-900">{lot?.receivedNetWeightKg != null ? `${Math.round(parseFloat(lot.receivedNetWeightKg)).toLocaleString()} kg` : '—'}</span></div>
+          </div>
+        </div>
+
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Vehicle / Truck Number *</label>
+            <label className={lbl}>Vehicle / Truck Number *</label>
             <input type="text" required value={form.vehicle_no}
               onChange={(e) => setForm(p => ({ ...p, vehicle_no: e.target.value }))}
-              placeholder="e.g. ABC-1234"
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
+              placeholder="e.g. ABC-1234" className={inp} />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Arrival Date</label>
-            <input type="date" value={form.arrival_date}
-              onChange={(e) => setForm(p => ({ ...p, arrival_date: e.target.value }))}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
+            <label className={lbl}>Gate Pass Number</label>
+            <input type="text" value={form.gate_pass_no}
+              onChange={(e) => setForm(p => ({ ...p, gate_pass_no: e.target.value }))}
+              placeholder="e.g. GP-000123" className={`${inp} font-mono`} />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Driver Name</label>
+            <label className={lbl}>Driver Name</label>
             <input type="text" value={form.driver_name}
               onChange={(e) => setForm(p => ({ ...p, driver_name: e.target.value }))}
-              placeholder="e.g. Muhammad Ali"
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
+              placeholder="e.g. Muhammad Ali" className={inp} />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Driver Phone</label>
+            <label className={lbl}>Driver Contact</label>
             <input type="text" value={form.driver_phone}
               onChange={(e) => setForm(p => ({ ...p, driver_phone: e.target.value }))}
-              placeholder="e.g. 0300-1234567"
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
+              placeholder="e.g. 0300-1234567" className={inp} />
+          </div>
+          <div className="col-span-2">
+            <HaulerPicker
+              label={<span className={lbl}>Transport / Hauler</span>}
+              value={form.hauler_id}
+              onChange={(id) => setForm(p => ({ ...p, hauler_id: id || '' }))}
+              addToast={addToast}
+              clearable
+              placeholder="Search hauler / transporter…"
+            />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Weight (KG)</label>
+            <label className={lbl}>Bag Size (kg)</label>
+            <input type="number" step="1" min="0" value={form.bag_size_kg}
+              onChange={(e) => setForm(p => ({ ...p, bag_size_kg: e.target.value }))}
+              placeholder="e.g. 50" className={inp} />
+          </div>
+          <div>
+            <label className={lbl}>Number of Bags</label>
+            <input type="number" step="1" min="0" value={form.total_bags}
+              onChange={(e) => setForm(p => ({ ...p, total_bags: e.target.value }))}
+              placeholder="e.g. 600" className={inp} />
+            {bagsHint && <p className="text-[11px] text-gray-400 mt-0.5">{bagsHint}</p>}
+          </div>
+          <div>
+            <label className={lbl}>Weight (kg)</label>
             <input type="number" step="1" min="0" value={form.weight_kg}
               onChange={(e) => setForm(p => ({ ...p, weight_kg: e.target.value }))}
-              placeholder="e.g. 30000"
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
+              placeholder="e.g. 30000" className={inp} />
             {form.weight_kg && (
               <p className="text-[11px] text-gray-400 mt-0.5">{Math.round(parseFloat(form.weight_kg) || 0).toLocaleString()} kg</p>
             )}
           </div>
+          <div />
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Number of Bags</label>
-            <input type="number" step="1" min="0" value={form.total_bags}
-              onChange={(e) => setForm(p => ({ ...p, total_bags: e.target.value }))}
-              placeholder="e.g. 600"
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
+            <label className={lbl}>Arrival Date</label>
+            <input type="date" value={form.arrival_date}
+              onChange={(e) => setForm(p => ({ ...p, arrival_date: e.target.value }))}
+              className={inp} />
           </div>
-          <div className="col-span-2">
-            <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
-            <input type="text" value={form.notes}
-              onChange={(e) => setForm(p => ({ ...p, notes: e.target.value }))}
-              placeholder="e.g. Weigh bridge slip #123"
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
+          <div>
+            <label className={lbl}>Departure Date</label>
+            <input type="date" value={form.departure_date}
+              onChange={(e) => setForm(p => ({ ...p, departure_date: e.target.value }))}
+              className={inp} />
           </div>
-        </div>
-        <div className="flex justify-end gap-2 pt-2 border-t">
-          <button type="button" onClick={onClose} className="btn btn-secondary">Cancel</button>
-          <button type="submit" disabled={saving} className="btn btn-primary disabled:opacity-50">
-            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-            Add Vehicle
-          </button>
         </div>
       </form>
-    </Modal>
+    </SlideDrawer>
   );
 }
 

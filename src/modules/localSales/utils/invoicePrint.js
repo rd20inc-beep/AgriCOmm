@@ -244,8 +244,8 @@ export function printAdminInvoice(data, company) {
 export function printPurchaseInvoice(data, company) {
   const { purchase: p, costs = {}, intakeVehicles = [], payments = [], producedByproducts = [] } = data;
   const vehRows = (intakeVehicles || []).map(v => `<tr>
-    <td>${esc(v.vehicleNo)}</td><td>${esc(v.driverName || '—')}</td>
-    <td class="r">${(v.weightMt || 0).toFixed(2)}</td><td class="r">${v.totalBags != null ? v.totalBags : '—'}</td><td>${dt(v.arrivalDate)}</td>
+    <td>${esc(v.vehicleNo)}</td><td>${esc(v.gatePassNo || '—')}</td><td>${esc(v.driverName || '—')}</td><td>${esc(v.haulerName || '—')}</td>
+    <td class="r">${((v.weightKg || 0) / 1000).toFixed(2)}</td><td class="r">${v.totalBags != null ? v.totalBags : '—'}</td><td>${dt(v.arrivalDate)}</td>
   </tr>`).join('');
   const payRows = (payments || []).map(e => `<tr>
     <td>${dt(e.date)}</td><td>${e.kind === 'created' ? 'Purchase recorded' : esc(e.paymentNo || 'Payment')}</td>
@@ -288,7 +288,7 @@ export function printPurchaseInvoice(data, company) {
       <tr><td>Outstanding</td><td class="r">${pkr(p.outstanding)}</td></tr>
     </table>
     <div class="sec"><h4>Inbound (purchase) vehicles</h4>
-      ${vehRows ? `<table><thead><tr><th>Vehicle</th><th>Driver</th><th class="r">Weight (MT)</th><th class="r">Bags</th><th>Arrived</th></tr></thead><tbody>${vehRows}</tbody></table>`
+      ${vehRows ? `<table><thead><tr><th>Vehicle</th><th>Gate Pass</th><th>Driver</th><th>Hauler</th><th class="r">Weight (MT)</th><th class="r">Bags</th><th>Arrived</th></tr></thead><tbody>${vehRows}</tbody></table>`
         : '<div class="note">No intake vehicle recorded for this lot.</div>'}
     </div>
     ${(producedByproducts || []).length ? `<div class="banner">INTERNAL — PRODUCED BY-PRODUCT PRICING · NOT FOR SUPPLIER</div>` + (producedByproducts).map(bp => `<div class="sec"><h4>Produced — Batch ${esc(bp.batchNo)}${bp.sharePct < 99.5 ? ` (${bp.sharePct.toFixed(0)}% of this lot)` : ''} — By-product Pricing</h4>

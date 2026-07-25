@@ -66,7 +66,7 @@ const defaultForm = () => ({
   vehicles: [],
 });
 
-const emptyVehicle = () => ({ vehicle_no: '', driver_name: '', driver_phone: '', weight_kg: '', total_bags: '', weighbridge_kg: '', accepted_kg: '', arrival_date: new Date().toISOString().slice(0, 10), notes: '', quality: {} });
+const emptyVehicle = () => ({ vehicle_no: '', driver_name: '', driver_phone: '', weight_kg: '', total_bags: '', weighbridge_kg: '', accepted_kg: '', arrival_date: new Date().toISOString().slice(0, 10), gate_pass_no: '', quality: {} });
 
 // Per-truck quality fields captured at intake (stored in the arrival's quality_json).
 const VEHICLE_QUALITY_FIELDS = [
@@ -381,7 +381,8 @@ export default function PurchaseLotDrawer({
               // Per-truck sack size = the lot's chosen nominal size (backend snaps).
               bag_size_kg: bagSize > 0 ? bagSize : null,
               arrival_date: v.arrival_date || form.purchase_date || null,
-              notes: v.notes || null,
+              // #4 dedicated Gate Pass Number (replaces the free-text notes field).
+              gate_pass_no: v.gate_pass_no ? String(v.gate_pass_no).trim() : null,
               quality_json: Object.keys(q).length ? q : null,
             };
           }),
@@ -955,8 +956,8 @@ export default function PurchaseLotDrawer({
                       );
                       return <div className="flex flex-wrap gap-1.5 text-[11px]">{chip('vs declared', wbD)}{chip('accepted vs weighbridge', accD)}</div>;
                     })()}
-                    <Input label="Notes" value={v.notes}
-                      onChange={(val) => setV('notes', val)} placeholder="Optional" />
+                    <Input label="Gate Pass Number" value={v.gate_pass_no}
+                      onChange={(val) => setV('gate_pass_no', val)} placeholder="e.g. GP-000123" />
 
                     {/* Per-truck quality (optional, collapsed) */}
                     <div className="border-t border-gray-200 pt-2">

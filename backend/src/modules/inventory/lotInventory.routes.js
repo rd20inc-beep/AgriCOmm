@@ -159,6 +159,12 @@ router.post(
   auditAction('add_lot_vehicle', 'inventory_lot', (req) => req.params.id),
   controller.addLotVehicle
 );
+router.put(
+  '/lots/:id/vehicles/:vehicleId',
+  authorize('milling', 'add_vehicle'),
+  auditAction('update_lot_vehicle', 'inventory_lot', (req) => req.params.id),
+  controller.updateLotVehicle
+);
 router.delete(
   '/lots/:id/vehicles/:vehicleId',
   authorize('milling', 'edit'),

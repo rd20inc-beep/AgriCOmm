@@ -351,7 +351,13 @@ module.exports = {
             .orWhere('l.grade', 'ilike', `%${search}%`)
             .orWhere('p.code', 'ilike', `%${search}%`)
             .orWhere('p.name', 'ilike', `%${search}%`)
-            .orWhere('s.name', 'ilike', `%${search}%`);
+            .orWhere('s.name', 'ilike', `%${search}%`)
+            // #4 — a lot is findable by any of its vehicles' gate pass numbers.
+            .orWhereExists(function () {
+              this.select(db.raw('1')).from('milling_vehicle_arrivals as mva')
+                .whereRaw('mva.lot_id = l.id')
+                .andWhere('mva.gate_pass_no', 'ilike', `%${search}%`);
+            });
         });
       }
 
@@ -420,9 +426,13 @@ module.exports = {
         return res.status(400).json({ success: false, message: 'A purchase invoice is only available for purchased rice lots.' });
       }
 
-      const vehs = await db('milling_vehicle_arrivals').where('lot_id', lot.id)
-        .select('vehicle_no', 'driver_name', 'driver_phone', 'weight_kg', 'weighbridge_kg', 'accepted_kg', 'total_bags', 'arrival_date')
-        .orderBy('id', 'asc');
+      const vehs = await db('milling_vehicle_arrivals as mva')
+        .leftJoin('haulers as h', 'mva.hauler_id', 'h.id')
+        .where('mva.lot_id', lot.id)
+        .select('mva.vehicle_no', 'mva.driver_name', 'mva.driver_phone', 'mva.weight_kg',
+          'mva.weighbridge_kg', 'mva.accepted_kg', 'mva.total_bags', 'mva.arrival_date',
+          'mva.departure_date', 'mva.gate_pass_no', db.raw('h.name as hauler_name'))
+        .orderBy('mva.id', 'asc');
 
       // Supplier payable for this lot (auto-created with linked_ref = lot_no).
       // The payable is the source of truth for what's been paid — the lot's own
@@ -560,7 +570,7 @@ module.exports = {
             packing: num(lot.packing_cost), other: num(lot.other_cost),
             landedTotal: landed,
           },
-          intakeVehicles: vehs.map(v => ({ vehicleNo: v.vehicle_no, driverName: v.driver_name || null, driverPhone: v.driver_phone || null, weightKg: num(v.weight_kg), weighbridgeKg: num(v.weighbridge_kg), acceptedKg: num(v.accepted_kg), totalBags: v.total_bags != null ? Number(v.total_bags) : null, arrivalDate: v.arrival_date || null })),
+          intakeVehicles: vehs.map(v => ({ vehicleNo: v.vehicle_no, driverName: v.driver_name || null, driverPhone: v.driver_phone || null, weightKg: num(v.weight_kg), weighbridgeKg: num(v.weighbridge_kg), acceptedKg: num(v.accepted_kg), totalBags: v.total_bags != null ? Number(v.total_bags) : null, arrivalDate: v.arrival_date || null, departureDate: v.departure_date || null, gatePassNo: v.gate_pass_no || null, haulerName: v.hauler_name || null })),
           payments: timeline,
           payable: payable ? { payNo: payable.pay_no, outstanding: num(payable.outstanding), status: payable.status } : null,
           producedByproducts, // INTERNAL/ADMIN ONLY — empty for non-admin viewers
@@ -1022,6 +1032,11 @@ module.exports = {
             // Per-truck quality captured at intake (moisture/broken/purity/price…).
             quality_json: sanitizeLotQuality(v.quality_json || v.quality),
             arrival_date: v.arrival_date || purchase_date || new Date().toISOString().slice(0, 10),
+            departure_date: v.departure_date || null,
+            // #4 dedicated Gate Pass Number (replaces the free-text notes field).
+            gate_pass_no: v.gate_pass_no || null,
+            // #3 per-truck hauler; defaults to the lot's hauler when not set.
+            hauler_id: (v.hauler_id != null && v.hauler_id !== '') ? parseInt(v.hauler_id, 10) : (haulerId || null),
             notes: v.notes || null,
             created_by: req.user?.id || null,
           });
@@ -2603,6 +2618,8 @@ module.exports = {
       const lotId = parseInt(req.params.id, 10);
       if (!lotId) return res.status(400).json({ success: false, message: 'Invalid lot id.' });
       const rows = await db('milling_vehicle_arrivals')
+        .leftJoin('haulers as h', 'milling_vehicle_arrivals.hauler_id', 'h.id')
+        .select('milling_vehicle_arrivals.*', db.raw('h.name as hauler_name'))
         .where(function () { this.where('lot_id', lotId); })
         .orWhereExists(function () {
           // Also surface vehicles that were originally added to the lot
@@ -2642,7 +2659,7 @@ module.exports = {
             });
         })
         .orderBy('arrival_date', 'desc')
-        .orderBy('id', 'desc');
+        .orderBy('milling_vehicle_arrivals.id', 'desc');
       return res.json({ success: true, data: { vehicles: rows } });
     } catch (err) {
       console.error('listLotVehicles error:', err);
@@ -2660,7 +2677,7 @@ module.exports = {
       const {
         vehicle_no, driver_name, driver_phone,
         weight_kg, weight_mt, total_bags, bag_size_kg,
-        arrival_date, notes,
+        arrival_date, departure_date, gate_pass_no, hauler_id, notes,
       } = req.body || {};
 
       // Canonicalise weight to KG (Phase 5c)
@@ -2680,6 +2697,8 @@ module.exports = {
       // straight to that batch so it shows up on the batch detail page too.
       const sourceLink = await db('batch_source_lots').where({ lot_id: lotId }).first('batch_id');
 
+      const haulerIdNum = (hauler_id != null && hauler_id !== '') ? parseInt(hauler_id, 10) : null;
+
       const [vehicle] = await db('milling_vehicle_arrivals').insert({
         lot_id: lotId,
         batch_id: sourceLink?.batch_id || null,
@@ -2690,6 +2709,9 @@ module.exports = {
         bag_size_kg: parsedBagSize,
         total_bags: parsedTotalBags,
         arrival_date: arrival_date || db.fn.now(),
+        departure_date: departure_date || null,
+        gate_pass_no: gate_pass_no || null,
+        hauler_id: haulerIdNum,
         notes: notes || null,
         created_by: req.user?.id || null,
       }).returning('*');
@@ -2697,6 +2719,53 @@ module.exports = {
       return res.status(201).json({ success: true, data: { vehicle } });
     } catch (err) {
       console.error('addLotVehicle error:', err);
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  },
+
+  // Edit an existing vehicle arrival on a lot (item #3/#4 — lets operators fix
+  // the vehicle/driver/hauler/gate-pass/weight after it was recorded). Only the
+  // supplied fields are patched; weight is re-canonicalised to KG.
+  async updateLotVehicle(req, res) {
+    try {
+      const lotId = parseInt(req.params.id, 10);
+      const vehicleId = parseInt(req.params.vehicleId, 10);
+      if (!lotId || !vehicleId) return res.status(400).json({ success: false, message: 'Invalid id.' });
+
+      const existing = await db('milling_vehicle_arrivals').where({ id: vehicleId, lot_id: lotId }).first();
+      if (!existing) return res.status(404).json({ success: false, message: 'Vehicle not found on this lot.' });
+
+      const {
+        vehicle_no, driver_name, driver_phone,
+        weight_kg, weight_mt, total_bags, bag_size_kg,
+        arrival_date, departure_date, gate_pass_no, hauler_id, notes,
+      } = req.body || {};
+
+      const patch = {};
+      if (vehicle_no !== undefined) patch.vehicle_no = vehicle_no || null;
+      if (driver_name !== undefined) patch.driver_name = driver_name || null;
+      if (driver_phone !== undefined) patch.driver_phone = driver_phone || null;
+      if (weight_kg !== undefined || weight_mt !== undefined) {
+        let weightKg = null;
+        if (weight_kg != null && weight_kg !== '') weightKg = parseFloat(weight_kg);
+        else if (weight_mt != null && weight_mt !== '') weightKg = parseFloat(weight_mt) * 1000;
+        patch.weight_kg = weightKg;
+      }
+      if (total_bags !== undefined) patch.total_bags = total_bags != null && total_bags !== '' ? parseInt(total_bags, 10) : null;
+      if (bag_size_kg !== undefined) {
+        const bs = bag_size_kg != null && bag_size_kg !== '' ? parseFloat(bag_size_kg) : null;
+        patch.bag_size_kg = bs ? (uc.snapBagSizeKg(bs) || null) : null;
+      }
+      if (arrival_date !== undefined) patch.arrival_date = arrival_date || null;
+      if (departure_date !== undefined) patch.departure_date = departure_date || null;
+      if (gate_pass_no !== undefined) patch.gate_pass_no = gate_pass_no || null;
+      if (hauler_id !== undefined) patch.hauler_id = (hauler_id != null && hauler_id !== '') ? parseInt(hauler_id, 10) : null;
+      if (notes !== undefined) patch.notes = notes || null;
+
+      const [vehicle] = await db('milling_vehicle_arrivals').where({ id: vehicleId }).update(patch).returning('*');
+      return res.json({ success: true, data: { vehicle } });
+    } catch (err) {
+      console.error('updateLotVehicle error:', err);
       return res.status(500).json({ success: false, message: err.message });
     }
   },
