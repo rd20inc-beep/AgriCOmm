@@ -1081,7 +1081,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
               {cashLedger.length === 0 ? (
                 <div className="p-6 text-center text-sm text-gray-400">No cash transactions in this period.</div>
               ) : (
-                <table className="w-full text-sm">
+                <table className="w-full text-sm mobile-cards">
                   <thead>
                     <tr className="bg-gray-50 text-[11px] uppercase tracking-wide text-gray-500">
                       <th className="text-left font-medium px-3 py-2">Date</th>
@@ -1095,15 +1095,15 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
                   <tbody className="divide-y divide-gray-100">
                     {cashLedger.map((r) => (
                       <tr key={`${r.direction}-${r.id}`} onClick={() => setCashEntry(r)} className="hover:bg-gray-50/60 cursor-pointer" title="View voucher / receipt">
-                        <td className="px-3 py-1.5 whitespace-nowrap text-gray-600">{fmtDate(r.payment_date)}</td>
-                        <td className="px-3 py-1.5">
+                        <td data-label="Date" className="px-3 py-1.5 whitespace-nowrap text-gray-600">{fmtDate(r.payment_date)}</td>
+                        <td data-label="Description" className="px-3 py-1.5">
                           <span className="text-gray-800">{r.counterparty || '—'}</span>
                           <span className="text-[10px] text-gray-400 ml-1.5">{r.category}{r.ref ? ` · ${r.ref}` : ''}</span>
                         </td>
-                        <td className="px-3 py-1.5 text-gray-500 capitalize">{r.payment_method || '—'}</td>
-                        <td className="px-3 py-1.5 text-right tabular-nums text-red-600">{r.direction === 'out' ? PKR(r.amount_pkr) : ''}</td>
-                        <td className="px-3 py-1.5 text-right tabular-nums text-emerald-600">{r.direction === 'in' ? PKR(r.amount_pkr) : ''}</td>
-                        <td className={`px-3 py-1.5 text-right tabular-nums ${r.balance < 0 ? 'text-red-700' : 'text-gray-800'}`}>{PKR(r.balance)}</td>
+                        <td data-label="Method" className="mob-hide px-3 py-1.5 text-gray-500 capitalize">{r.payment_method || '—'}</td>
+                        <td data-label="Out" className="px-3 py-1.5 text-right tabular-nums text-red-600">{r.direction === 'out' ? PKR(r.amount_pkr) : ''}</td>
+                        <td data-label="In" className="px-3 py-1.5 text-right tabular-nums text-emerald-600">{r.direction === 'in' ? PKR(r.amount_pkr) : ''}</td>
+                        <td data-label="Balance" className={`px-3 py-1.5 text-right tabular-nums ${r.balance < 0 ? 'text-red-700' : 'text-gray-800'}`}>{PKR(r.balance)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -1186,7 +1186,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
               {supplierRows.length === 0 ? (
                 <div className="p-6 text-center text-sm text-gray-400">No mill supplier payables yet.</div>
               ) : (
-                <table className="w-full text-sm">
+                <table className="w-full text-sm mobile-cards">
                   <thead>
                     <tr className="bg-gray-50 text-[11px] uppercase tracking-wide text-gray-500">
                       <th className="text-left font-medium px-4 py-2">Supplier</th>
@@ -1204,12 +1204,12 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
                         className={`hover:bg-blue-50/40 ${r.id ? 'cursor-pointer' : ''} ${selectedSupplier?.id === r.id ? 'bg-blue-50/60' : ''}`}
                         onClick={() => r.id && setSelectedSupplier({ id: r.id, name: r.name })}
                       >
-                        <td className="px-4 py-2 font-medium text-gray-800">{r.name}</td>
-                        <td className="px-4 py-2 text-right tabular-nums text-gray-500">{r.count}</td>
-                        <td className="px-4 py-2 text-right tabular-nums text-gray-700">{PKR(r.billed)}</td>
-                        <td className="px-4 py-2 text-right tabular-nums text-emerald-600">{PKR(r.paid)}</td>
-                        <td className={`px-4 py-2 text-right tabular-nums font-medium ${r.outstanding > 0 ? 'text-amber-600' : 'text-gray-400'}`}>{PKR(r.outstanding)}</td>
-                        <td className="px-2 py-2 text-right whitespace-nowrap">
+                        <td data-label="Supplier" className="px-4 py-2 font-medium text-gray-800">{r.name}</td>
+                        <td data-label="Invoices" className="mob-hide px-4 py-2 text-right tabular-nums text-gray-500">{r.count}</td>
+                        <td data-label="Billed" className="px-4 py-2 text-right tabular-nums text-gray-700">{PKR(r.billed)}</td>
+                        <td data-label="Paid" className="mob-hide px-4 py-2 text-right tabular-nums text-emerald-600">{PKR(r.paid)}</td>
+                        <td data-label="Outstanding" className={`px-4 py-2 text-right tabular-nums font-medium ${r.outstanding > 0 ? 'text-amber-600' : 'text-gray-400'}`}>{PKR(r.outstanding)}</td>
+                        <td data-label="" className="px-2 py-2 text-right whitespace-nowrap">
                           {canPay && r.id && r.outstanding > 0 && (
                             <button
                               onClick={(e) => { e.stopPropagation(); setPaySupplier({ id: r.id, name: r.name }); }}
@@ -1284,7 +1284,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
               {customerRows.length === 0 ? (
                 <div className="p-6 text-center text-sm text-gray-400">No local customers yet.</div>
               ) : (
-                <table className="w-full text-sm">
+                <table className="w-full text-sm mobile-cards">
                   <thead>
                     <tr className="bg-gray-50 text-[11px] uppercase tracking-wide text-gray-500">
                       <th className="text-left font-medium px-4 py-2">Customer</th>
@@ -1300,17 +1300,17 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
                       <tr key={r.id}
                         className={`cursor-pointer hover:bg-blue-50/40 ${selectedCustomer?.id === r.id ? 'bg-blue-50/60' : ''}`}
                         onClick={() => setSelectedCustomer({ id: r.id, name: r.name })}>
-                        <td className="px-4 py-2 font-medium text-gray-900">
+                        <td data-label="Customer" className="px-4 py-2 font-medium text-gray-900">
                           {r.name}
                           {(r.contact || r.country) && (
                             <span className="block text-[10px] text-gray-400 font-normal">{[r.contact, r.country].filter(Boolean).join(' · ')}</span>
                           )}
                         </td>
-                        <td className="px-4 py-2 text-right tabular-nums text-gray-500">{r.count}</td>
-                        <td className="px-4 py-2 text-right tabular-nums text-gray-700">{PKR(r.billed)}</td>
-                        <td className="px-4 py-2 text-right tabular-nums text-emerald-600">{PKR(r.paid)}</td>
-                        <td className={`px-4 py-2 text-right tabular-nums font-medium ${r.outstanding > 0 ? 'text-amber-600' : 'text-gray-400'}`}>{PKR(r.outstanding)}</td>
-                        <td className="px-2 py-2 text-right whitespace-nowrap">
+                        <td data-label="Invoices" className="mob-hide px-4 py-2 text-right tabular-nums text-gray-500">{r.count}</td>
+                        <td data-label="Billed" className="px-4 py-2 text-right tabular-nums text-gray-700">{PKR(r.billed)}</td>
+                        <td data-label="Received" className="mob-hide px-4 py-2 text-right tabular-nums text-emerald-600">{PKR(r.paid)}</td>
+                        <td data-label="Outstanding" className={`px-4 py-2 text-right tabular-nums font-medium ${r.outstanding > 0 ? 'text-amber-600' : 'text-gray-400'}`}>{PKR(r.outstanding)}</td>
+                        <td data-label="" className="px-2 py-2 text-right whitespace-nowrap">
                           {canPay && r.outstanding > 0 && (
                             <button
                               onClick={(e) => { e.stopPropagation(); setPayCustomer({ id: r.id, name: r.name }); }}
@@ -1343,7 +1343,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
             </button>
           </div>
           <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-            <table className="w-full text-sm">
+            <table className="w-full text-sm mobile-cards">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-100 text-xs text-gray-600 uppercase tracking-wide">
                   <th className="text-left px-4 py-3 font-medium">Date</th>
@@ -1358,24 +1358,24 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
               <tbody className="divide-y divide-gray-100">
                 {expenses.map(e => (
                   <tr key={e.id} onClick={() => setPayExpense(e)} className="hover:bg-gray-50 cursor-pointer" title="View voucher / pay">
-                    <td className="px-4 py-3 text-gray-600">{e.expenseDate}</td>
-                    <td className="px-4 py-3">
+                    <td data-label="Date" className="px-4 py-3 text-gray-600">{e.expenseDate}</td>
+                    <td data-label="Category" className="px-4 py-3">
                       <span className="capitalize">{e.category}</span>
                       {e.isRecurring && <span className="ml-1.5 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium bg-violet-100 text-violet-700 uppercase"><RefreshCw className="w-2.5 h-2.5" />{e.recurrence || 'recurring'}</span>}
                     </td>
-                    <td className="px-4 py-3 text-gray-600">
+                    <td data-label="Description" className="mob-hide px-4 py-3 text-gray-600">
                       {e.description || '—'}
                       {(e.employeeName || e.subcategory) && <span className="block text-[10px] text-gray-400">{e.employeeName || e.subcategory}</span>}
                     </td>
-                    <td className="px-4 py-3 text-gray-500 text-xs">{e.reference || e.invoiceReference || '—'}</td>
-                    <td className="px-4 py-3">
+                    <td data-label="Reference" className="mob-hide px-4 py-3 text-gray-500 text-xs">{e.reference || e.invoiceReference || '—'}</td>
+                    <td data-label="Status" className="px-4 py-3">
                       <span className={`px-2 py-0.5 rounded-full text-[11px] font-medium ${(e.paymentStatus === 'Paid') ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
                         {e.paymentStatus || 'Pending'}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-right font-medium tabular-nums">{PKR(parseFloat(e.amount))}</td>
+                    <td data-label="Amount" className="px-4 py-3 text-right font-medium tabular-nums">{PKR(parseFloat(e.amount))}</td>
                     {canPay && (
-                      <td className="px-4 py-3 text-right no-print">
+                      <td data-label="Action" className="px-4 py-3 text-right no-print">
                         {(e.paymentStatus !== 'Paid') ? (
                           <button
                             onClick={(ev) => { ev.stopPropagation(); setPayExpense(e); }}
@@ -1418,7 +1418,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
             <Stat tone="slate" icon={DollarSign} label="Monthly-equiv." value={PKR(recurring.reduce((s, r) => { const a = parseFloat(r.amount) || 0; return s + (r.recurrence === 'weekly' ? a * 4.33 : r.recurrence === 'quarterly' ? a / 3 : r.recurrence === 'yearly' ? a / 12 : a); }, 0))} sub="Approx run-rate" />
           </div>
           <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-            <table className="w-full text-sm">
+            <table className="w-full text-sm mobile-cards">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-100 text-xs text-gray-600 uppercase tracking-wide">
                   <th className="text-left px-4 py-3 font-medium">Category</th>
@@ -1433,18 +1433,18 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
               <tbody className="divide-y divide-gray-100">
                 {recurring.map(r => (
                   <tr key={r.id} className={`hover:bg-gray-50 ${r.due ? 'bg-amber-50/40' : ''}`}>
-                    <td className="px-4 py-3 capitalize font-medium text-gray-800">{r.category}</td>
-                    <td className="px-4 py-3 text-gray-600">{r.payee || r.subcategory || '—'}</td>
-                    <td className="px-4 py-3 capitalize text-gray-600">{r.recurrence}</td>
-                    <td className="px-4 py-3 text-right tabular-nums">{PKR(r.amount)}</td>
-                    <td className="px-4 py-3 text-gray-500">{fmtDate(r.lastDate)}</td>
-                    <td className="px-4 py-3">
+                    <td data-label="Category" className="px-4 py-3 capitalize font-medium text-gray-800">{r.category}</td>
+                    <td data-label="Payee / detail" className="px-4 py-3 text-gray-600">{r.payee || r.subcategory || '—'}</td>
+                    <td data-label="Repeats" className="mob-hide px-4 py-3 capitalize text-gray-600">{r.recurrence}</td>
+                    <td data-label="Amount" className="px-4 py-3 text-right tabular-nums">{PKR(r.amount)}</td>
+                    <td data-label="Last paid" className="mob-hide px-4 py-3 text-gray-500">{fmtDate(r.lastDate)}</td>
+                    <td data-label="Next due" className="px-4 py-3">
                       <span className={`inline-flex items-center gap-1 ${r.due ? 'text-amber-700 font-medium' : 'text-gray-600'}`}>
                         {fmtDate(r.nextDue)}
                         {r.due && <span className="px-1.5 py-0.5 rounded text-[9px] bg-amber-100 text-amber-700 uppercase">Due</span>}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-right no-print">
+                    <td data-label="Action" className="px-4 py-3 text-right no-print">
                       <button
                         onClick={() => handleMaterialize(r)}
                         disabled={!r.due || materializeMut.isPending}
@@ -1540,7 +1540,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
             <Stat tone="slate" icon={Factory}       label="Batches"       value={completed.length}             sub={`${Math.round((efficiency.totalRaw || 0) * 1000).toLocaleString()} kg processed`} />
           </div>
           <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-            <table className="w-full text-sm">
+            <table className="w-full text-sm mobile-cards">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-100 text-xs text-gray-600 uppercase tracking-wide">
                   <th className="text-left px-4 py-3 font-medium">Batch</th>
@@ -1558,12 +1558,12 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
                   const wastePct = b.rawQtyMT > 0 ? ((b.wastageMT || 0) / b.rawQtyMT * 100).toFixed(1) : 0;
                   return (
                     <tr key={b.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 font-medium"><Link to={`/milling/${b.id}`} className="text-blue-600">{b.id}</Link></td>
-                      <td className="px-4 py-3 text-right tabular-nums">{Math.round(b.rawQtyKg).toLocaleString()}</td>
-                      <td className="px-4 py-3 text-right tabular-nums">{Math.round(b.actualFinishedKg).toLocaleString()}</td>
-                      <td className="px-4 py-3 text-right font-medium tabular-nums">{b.yieldPct}%</td>
-                      <td className="px-4 py-3 text-right text-red-600 tabular-nums">{wastePct}%</td>
-                      <td className="px-4 py-3 text-right tabular-nums">Rs {costKg.toFixed(2)}</td>
+                      <td data-label="Batch" className="px-4 py-3 font-medium"><Link to={`/milling/${b.id}`} className="text-blue-600">{b.id}</Link></td>
+                      <td data-label="Raw kg" className="mob-hide px-4 py-3 text-right tabular-nums">{Math.round(b.rawQtyKg).toLocaleString()}</td>
+                      <td data-label="Finished kg" className="px-4 py-3 text-right tabular-nums">{Math.round(b.actualFinishedKg).toLocaleString()}</td>
+                      <td data-label="Yield %" className="px-4 py-3 text-right font-medium tabular-nums">{b.yieldPct}%</td>
+                      <td data-label="Wastage %" className="px-4 py-3 text-right text-red-600 tabular-nums">{wastePct}%</td>
+                      <td data-label="Cost/KG" className="px-4 py-3 text-right tabular-nums">Rs {costKg.toFixed(2)}</td>
                     </tr>
                   );
                 })}
@@ -1584,7 +1584,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
             <span>Batches flagged when actual output is more than 3% below expected. May indicate loss, theft, or measurement errors.</span>
           </div>
           <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-            <table className="w-full text-sm">
+            <table className="w-full text-sm mobile-cards">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-100 text-xs text-gray-600 uppercase tracking-wide">
                   <th className="text-left px-4 py-3 font-medium">Batch</th>
@@ -1599,13 +1599,13 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
               <tbody className="divide-y divide-gray-100">
                 {lossData.map(b => (
                   <tr key={b.id} className={`hover:bg-gray-50 ${b.flagged ? 'bg-red-50/50' : ''}`}>
-                    <td className="px-4 py-3 font-medium"><Link to={`/milling/${b.id}`} className="text-blue-600">{b.id}</Link></td>
-                    <td className="px-4 py-3 text-right tabular-nums">{Math.round(b.rawQtyKg).toLocaleString()}</td>
-                    <td className="px-4 py-3 text-right tabular-nums">{Math.round(b.expected * 1000).toLocaleString()}</td>
-                    <td className="px-4 py-3 text-right tabular-nums">{Math.round(b.actualFinishedKg).toLocaleString()}</td>
-                    <td className={`px-4 py-3 text-right font-medium tabular-nums ${b.variance < 0 ? 'text-red-600' : 'text-emerald-600'}`}>{b.variance > 0 ? '+' : ''}{Math.round(b.variance * 1000).toLocaleString()}</td>
-                    <td className={`px-4 py-3 text-right font-medium tabular-nums ${parseFloat(b.variancePct) < -3 ? 'text-red-600' : 'text-gray-600'}`}>{b.variancePct}%</td>
-                    <td className="px-4 py-3 text-center">
+                    <td data-label="Batch" className="px-4 py-3 font-medium"><Link to={`/milling/${b.id}`} className="text-blue-600">{b.id}</Link></td>
+                    <td data-label="Raw kg" className="mob-hide px-4 py-3 text-right tabular-nums">{Math.round(b.rawQtyKg).toLocaleString()}</td>
+                    <td data-label="Expected" className="px-4 py-3 text-right tabular-nums">{Math.round(b.expected * 1000).toLocaleString()}</td>
+                    <td data-label="Actual" className="px-4 py-3 text-right tabular-nums">{Math.round(b.actualFinishedKg).toLocaleString()}</td>
+                    <td data-label="Var kg" className={`px-4 py-3 text-right font-medium tabular-nums ${b.variance < 0 ? 'text-red-600' : 'text-emerald-600'}`}>{b.variance > 0 ? '+' : ''}{Math.round(b.variance * 1000).toLocaleString()}</td>
+                    <td data-label="Var %" className={`px-4 py-3 text-right font-medium tabular-nums ${parseFloat(b.variancePct) < -3 ? 'text-red-600' : 'text-gray-600'}`}>{b.variancePct}%</td>
+                    <td data-label="Status" className="px-4 py-3 text-center">
                       {b.flagged
                         ? <span className="px-2 py-0.5 bg-red-100 text-red-700 rounded-full text-[11px] font-medium">Investigate</span>
                         : <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded-full text-[11px] font-medium">Normal</span>}
@@ -1802,7 +1802,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
             </div>
           )}
           <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-            <table className="w-full text-sm">
+            <table className="w-full text-sm mobile-cards">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-100 text-xs text-gray-600 uppercase tracking-wide">
                   <th className="text-left px-4 py-3 font-medium">Employee</th>
@@ -1821,33 +1821,33 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
                   const monthly = w.payType === 'monthly';
                   return (
                   <tr key={w.id} className={`hover:bg-gray-50 ${!w.isActive ? 'opacity-50' : ''}`}>
-                    <td className="px-4 py-3">
+                    <td data-label="Employee" className="px-4 py-3">
                       <div className="font-medium text-gray-900 flex items-center gap-2">
                         <button type="button" onClick={() => setLedgerWorker(w)} className="text-blue-600 hover:underline text-left" title="View ledger — all amounts paid to this employee">{w.name}</button>
                         {!w.isActive && <span className="px-1.5 py-0.5 rounded text-[10px] bg-gray-200 text-gray-600 uppercase">Inactive</span>}
                       </div>
                       <div className="text-xs text-gray-400 capitalize">{w.role}{w.phone ? ` · ${w.phone}` : ''}</div>
                     </td>
-                    <td className="px-4 py-3">
+                    <td data-label="Pay basis" className="mob-hide px-4 py-3">
                       <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium uppercase mr-1.5 ${monthly ? 'bg-violet-100 text-violet-700' : 'bg-sky-100 text-sky-700'}`}>{monthly ? 'Salary' : 'Daily'}</span>
                       <span className="tabular-nums text-gray-700">{monthly ? `${PKR(w.monthlySalary)}/mo` : `${PKR(w.dailyWage)}/day`}</span>
                     </td>
-                    <td className="px-4 py-3 text-right tabular-nums text-gray-600">
+                    <td data-label="Days / OT" className="mob-hide px-4 py-3 text-right tabular-nums text-gray-600">
                       {p ? `${p.effectiveDays} d` : '—'}{p && p.totalOT ? ` · ${p.totalOT}h OT` : ''}
                       {p && monthly && <span className="block text-[10px] text-gray-300">salary fixed</span>}
                     </td>
-                    <td className="px-4 py-3 text-right tabular-nums">{p ? PKR(p.grossPay) : '—'}</td>
-                    <td className="px-4 py-3 text-right tabular-nums">
+                    <td data-label="Gross" className="px-4 py-3 text-right tabular-nums">{p ? PKR(p.grossPay) : '—'}</td>
+                    <td data-label="Advance" className="mob-hide px-4 py-3 text-right tabular-nums">
                       {adv > 0
                         ? <button onClick={() => setAdvancesPanelWorker(w)} className="text-amber-700 font-medium hover:underline">−{PKR(adv)}</button>
                         : <span className="text-gray-300">—</span>}
                     </td>
-                    <td className="px-4 py-3 text-right font-semibold tabular-nums">
+                    <td data-label="Net pay" className="px-4 py-3 text-right font-semibold tabular-nums">
                       {p?.paid
                         ? <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-100 text-emerald-700 uppercase">Paid</span>
                         : (p ? PKR(p.netPay) : '—')}
                     </td>
-                    <td className="px-4 py-3 no-print">
+                    <td data-label="Actions" className="px-4 py-3 no-print">
                       <div className="flex items-center justify-end gap-1">
                         {canPreparePayroll && p && !p.committed && p.grossPay > 0 && (
                           <button title="Prepare for this employee" onClick={() => openRunDrawer(w.id)} className="p-1.5 rounded-md text-emerald-600 hover:bg-emerald-50"><Wallet className="w-3.5 h-3.5" /></button>
@@ -1871,9 +1871,9 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
                 {payrollSummary.length > 0 && (
                   <tr className="bg-gray-50 font-semibold text-gray-800">
                     <td colSpan={3} className="px-4 py-3 text-right">Grand Total</td>
-                    <td className="px-4 py-3 text-right tabular-nums">{PKR(payrollGross)}</td>
-                    <td className="px-4 py-3 text-right tabular-nums text-amber-700">−{PKR(payrollAdvances)}</td>
-                    <td className="px-4 py-3 text-right tabular-nums">{PKR(payrollTotal)}</td>
+                    <td data-label="Gross" className="px-4 py-3 text-right tabular-nums">{PKR(payrollGross)}</td>
+                    <td data-label="Advance" className="px-4 py-3 text-right tabular-nums text-amber-700">−{PKR(payrollAdvances)}</td>
+                    <td data-label="Net pay" className="px-4 py-3 text-right tabular-nums">{PKR(payrollTotal)}</td>
                     <td className="no-print" />
                   </tr>
                 )}
@@ -1903,7 +1903,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
             })}
           </div>
           <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-            <table className="w-full text-sm">
+            <table className="w-full text-sm mobile-cards">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-100 text-xs text-gray-600 uppercase tracking-wide">
                   <th className="text-left px-4 py-3 font-medium">Date</th>
@@ -1915,10 +1915,10 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
               <tbody className="divide-y divide-gray-100">
                 {expenses.filter(e => ['utilities', 'fuel', 'maintenance', 'rent'].includes(e.category)).map(e => (
                   <tr key={e.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 text-gray-600">{e.expenseDate}</td>
-                    <td className="px-4 py-3 capitalize">{e.category}</td>
-                    <td className="px-4 py-3 text-gray-600">{e.description || '—'}</td>
-                    <td className="px-4 py-3 text-right font-medium tabular-nums">{PKR(parseFloat(e.amount))}</td>
+                    <td data-label="Date" className="px-4 py-3 text-gray-600">{e.expenseDate}</td>
+                    <td data-label="Category" className="px-4 py-3 capitalize">{e.category}</td>
+                    <td data-label="Description" className="mob-hide px-4 py-3 text-gray-600">{e.description || '—'}</td>
+                    <td data-label="Amount" className="px-4 py-3 text-right font-medium tabular-nums">{PKR(parseFloat(e.amount))}</td>
                   </tr>
                 ))}
                 {expenses.filter(e => ['utilities', 'fuel', 'maintenance', 'rent'].includes(e.category)).length === 0 && (
@@ -3206,11 +3206,11 @@ function AttendanceImportDrawer({ employees, month, addToast, onClose }) {
             </div>
             {parsed.valid.length > 0 && (
               <div className="rounded-lg border border-gray-200 overflow-hidden">
-                <table className="w-full text-xs">
+                <table className="w-full text-xs mobile-cards">
                   <thead><tr className="bg-gray-50 text-gray-500"><th className="text-left px-3 py-1.5">Employee</th><th className="text-left px-3 py-1.5">Date</th><th className="text-left px-3 py-1.5">Status</th><th className="text-right px-3 py-1.5">OT</th></tr></thead>
                   <tbody className="divide-y divide-gray-100">
                     {parsed.valid.slice(0, 60).map((v, i) => (
-                      <tr key={i}><td className="px-3 py-1 text-gray-800">{v.workerName}</td><td className="px-3 py-1 text-gray-500">{v.date}</td><td className="px-3 py-1 capitalize">{v.status.replace('_', ' ')}</td><td className="px-3 py-1 text-right tabular-nums">{v.overtime_hours || ''}</td></tr>
+                      <tr key={i}><td data-label="OT" data-label="Status" data-label="Date" data-label="Employee" className="px-3 py-1 text-gray-800">{v.workerName}</td><td className="px-3 py-1 text-gray-500">{v.date}</td><td className="px-3 py-1 capitalize">{v.status.replace('_', ' ')}</td><td className="px-3 py-1 text-right tabular-nums">{v.overtime_hours || ''}</td></tr>
                     ))}
                   </tbody>
                 </table>
@@ -3484,16 +3484,16 @@ function AdvanceLedgerDrawer({ advanceId, onClose }) {
           {schedule.length > 0 && (
             <div className="rounded-lg border border-gray-200 overflow-hidden">
               <div className="px-3 py-2 border-b border-gray-100 text-xs font-semibold text-gray-700">Recovery schedule</div>
-              <table className="w-full text-xs">
+              <table className="w-full text-xs mobile-cards">
                 <thead className="text-gray-500"><tr><th className="text-left px-3 py-1.5">Period</th><th className="text-right px-3 py-1.5">Scheduled</th><th className="text-right px-3 py-1.5">Recovered</th><th className="text-left px-3 py-1.5">Status</th><th className="text-left px-3 py-1.5">Run</th></tr></thead>
                 <tbody className="divide-y divide-gray-100">
                   {schedule.map(s => (
                     <tr key={s.id}>
-                      <td className="px-3 py-1.5">{s.period}</td>
-                      <td className="px-3 py-1.5 text-right tabular-nums">{PKR(s.scheduled_amount)}</td>
-                      <td className="px-3 py-1.5 text-right tabular-nums">{PKR(s.recovered_amount)}</td>
-                      <td className="px-3 py-1.5"><span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${SCH_TONE[s.status] || 'bg-gray-100 text-gray-600'}`}>{String(s.status || '').replace('_', ' ')}</span>{s.skip_reason ? <span className="ml-1 text-[10px] text-gray-400" title={s.skip_reason}>ⓘ</span> : null}</td>
-                      <td className="px-3 py-1.5 text-gray-500">{s.payroll_run_id ? `PR-${s.payroll_run_id}` : '—'}</td>
+                      <td data-label="Period" className="px-3 py-1.5">{s.period}</td>
+                      <td data-label="Scheduled" className="px-3 py-1.5 text-right tabular-nums">{PKR(s.scheduled_amount)}</td>
+                      <td data-label="Recovered" className="px-3 py-1.5 text-right tabular-nums">{PKR(s.recovered_amount)}</td>
+                      <td data-label="Status" className="px-3 py-1.5"><span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${SCH_TONE[s.status] || 'bg-gray-100 text-gray-600'}`}>{String(s.status || '').replace('_', ' ')}</span>{s.skip_reason ? <span className="ml-1 text-[10px] text-gray-400" title={s.skip_reason}>ⓘ</span> : null}</td>
+                      <td data-label="Run" className="px-3 py-1.5 text-gray-500">{s.payroll_run_id ? `PR-${s.payroll_run_id}` : '—'}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -3503,16 +3503,16 @@ function AdvanceLedgerDrawer({ advanceId, onClose }) {
 
           <div className="rounded-lg border border-gray-200 overflow-hidden">
             <div className="px-3 py-2 border-b border-gray-100 text-xs font-semibold text-gray-700">Transactions</div>
-            <table className="w-full text-xs">
+            <table className="w-full text-xs mobile-cards">
               <thead className="text-gray-500"><tr><th className="text-left px-3 py-1.5">Date</th><th className="text-left px-3 py-1.5">Description</th><th className="text-right px-3 py-1.5">Debit</th><th className="text-right px-3 py-1.5">Credit</th><th className="text-right px-3 py-1.5">Balance</th></tr></thead>
               <tbody className="divide-y divide-gray-100">
                 {entries.map((e, i) => (
                   <tr key={i}>
-                    <td className="px-3 py-1.5">{fmtDate(e.date)}</td>
-                    <td className="px-3 py-1.5">{e.description}{e.ref ? <span className="text-gray-400"> · {e.ref}</span> : ''}</td>
-                    <td className="px-3 py-1.5 text-right tabular-nums">{e.debit ? PKR(e.debit) : '—'}</td>
-                    <td className="px-3 py-1.5 text-right tabular-nums">{e.credit ? PKR(e.credit) : '—'}</td>
-                    <td className="px-3 py-1.5 text-right tabular-nums font-medium">{PKR(e.balance)}</td>
+                    <td data-label="Date" className="px-3 py-1.5">{fmtDate(e.date)}</td>
+                    <td data-label="Description" className="px-3 py-1.5">{e.description}{e.ref ? <span className="text-gray-400"> · {e.ref}</span> : ''}</td>
+                    <td data-label="Debit" className="px-3 py-1.5 text-right tabular-nums">{e.debit ? PKR(e.debit) : '—'}</td>
+                    <td data-label="Credit" className="px-3 py-1.5 text-right tabular-nums">{e.credit ? PKR(e.credit) : '—'}</td>
+                    <td data-label="Balance" className="px-3 py-1.5 text-right tabular-nums font-medium">{PKR(e.balance)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -3965,7 +3965,7 @@ function PayrollRunDrawer({ month, entity = 'mill', employees, preselectId, bank
             <span className="text-[11px] text-gray-400">{rows.length} unpaid</span>
           </div>
           <div className="rounded-lg border border-gray-200 overflow-hidden">
-            <table className="w-full text-xs">
+            <table className="w-full text-xs mobile-cards">
               <thead>
                 <tr className="bg-gray-50 text-gray-500">
                   <th className="text-left px-3 py-2 w-8"></th>
@@ -3983,10 +3983,10 @@ function PayrollRunDrawer({ month, entity = 'mill', employees, preselectId, bank
                   return (
                   <Fragment key={r.id}>
                   <tr className={r.include ? '' : 'opacity-40'}>
-                    <td className="px-3 py-1.5">
+                    <td data-label="" className="mob-hide px-3 py-1.5">
                       <input type="checkbox" checked={r.include} onChange={e => setRow(r.id, { include: e.target.checked })} className="rounded border-gray-300" />
                     </td>
-                    <td className="px-3 py-1.5">
+                    <td data-label="Employee" className="px-3 py-1.5">
                       <div className="text-gray-800 font-medium">{r.name}</div>
                       {(r.bonus > 0 || r.deduction > 0 || r.statutory > 0 || r.prorated) && (
                         <div className="text-[10px] mt-0.5">
@@ -4003,17 +4003,17 @@ function PayrollRunDrawer({ month, entity = 'mill', employees, preselectId, bank
                         </div>
                       )}
                     </td>
-                    <td className="px-3 py-1.5 text-right tabular-nums text-gray-600">{PKR(r.gross)}</td>
-                    <td className="px-3 py-1.5 text-right tabular-nums text-amber-700">{r.outstanding > 0 ? PKR(r.outstanding) : '—'}</td>
-                    <td className="px-3 py-1.5 text-right tabular-nums text-gray-500">{r.outstanding > 0 ? PKR(r.scheduled) : '—'}</td>
-                    <td className="px-3 py-1.5 text-right">
+                    <td data-label="Gross" className="px-3 py-1.5 text-right tabular-nums text-gray-600">{PKR(r.gross)}</td>
+                    <td data-label="Advance out" className="mob-hide px-3 py-1.5 text-right tabular-nums text-amber-700">{r.outstanding > 0 ? PKR(r.outstanding) : '—'}</td>
+                    <td data-label="Scheduled" className="px-3 py-1.5 text-right tabular-nums text-gray-500">{r.outstanding > 0 ? PKR(r.scheduled) : '—'}</td>
+                    <td data-label="Deducting" className="px-3 py-1.5 text-right">
                       {r.outstanding > 0 ? (
                         <input type="number" min="0" max={Math.min(r.outstanding, r.gross)} value={r.advance} disabled={!r.include}
                           onChange={e => onAdvance(r, e.target.value)}
                           className={`w-24 border rounded px-2 py-1 text-right tabular-nums focus:outline-none focus:border-gray-900 disabled:bg-gray-50 ${changed ? 'border-amber-400 bg-amber-50' : 'border-gray-200'}`} />
                       ) : <span className="text-gray-300">—</span>}
                     </td>
-                    <td className="px-3 py-1.5 text-right">
+                    <td data-label="Paying now" className="px-3 py-1.5 text-right">
                       <input type="number" min="0" value={r.net} disabled={!r.include}
                         onChange={e => onNet(r, e.target.value)}
                         className="w-28 border border-gray-200 rounded px-2 py-1 text-right tabular-nums font-medium focus:outline-none focus:border-gray-900 disabled:bg-gray-50" />
@@ -4036,10 +4036,10 @@ function PayrollRunDrawer({ month, entity = 'mill', employees, preselectId, bank
               {included.length > 0 && (
                 <tfoot>
                   <tr className="bg-gray-50 font-semibold text-gray-800">
-                    <td></td><td className="px-3 py-2">Total ({included.length})</td>
+                    <td></td><td className="mob-full px-3 py-2">Total ({included.length})</td>
                     <td></td><td></td><td></td>
-                    <td className="px-3 py-2 text-right tabular-nums text-amber-700">{totalAdvance ? `−${PKR(totalAdvance)}` : '—'}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{PKR(totalNet)}</td>
+                    <td data-label="Advance out" className="px-3 py-2 text-right tabular-nums text-amber-700">{totalAdvance ? `−${PKR(totalAdvance)}` : '—'}</td>
+                    <td data-label="Paying now" className="px-3 py-2 text-right tabular-nums">{PKR(totalNet)}</td>
                   </tr>
                 </tfoot>
               )}
@@ -5133,17 +5133,17 @@ function PayrollReport({ companyProfile, entity = 'mill', onOpenRun }) {
               </button>
               {open && (
                 <div className="border-t border-gray-100 px-4 py-2">
-                  <table className="w-full text-xs">
+                  <table className="w-full text-xs mobile-cards">
                     <thead><tr className="text-gray-500"><th className="text-left py-1.5">Employee</th><th className="text-right">Days</th><th className="text-right">Gross</th><th className="text-right">Advance</th><th className="text-right">Net</th><th className="text-right no-print">Payslip</th></tr></thead>
                     <tbody className="divide-y divide-gray-100">
                       {(r.lines || []).map(l => (
                         <tr key={l.id}>
-                          <td className="py-1.5 text-gray-800">{l.workerName}<span className="text-gray-400 capitalize"> · {l.payType === 'monthly' ? 'salary' : 'daily'}</span></td>
-                          <td className="py-1.5 text-right tabular-nums text-gray-500">{l.effectiveDays} d{parseFloat(l.otHours) ? ` · ${l.otHours}h OT` : ''}</td>
-                          <td className="py-1.5 text-right tabular-nums">{PKR(l.grossPay)}</td>
-                          <td className="py-1.5 text-right tabular-nums text-amber-700">{parseFloat(l.advanceDeducted) ? `−${PKR(l.advanceDeducted)}` : '—'}</td>
-                          <td className="py-1.5 text-right tabular-nums font-semibold">{PKR(l.netPay)}</td>
-                          <td className="py-1.5 text-right no-print"><button onClick={() => printPayslip(r, l, companyProfile)} className="text-blue-700 hover:underline">print</button></td>
+                          <td data-label="Employee" className="py-1.5 text-gray-800">{l.workerName}<span className="text-gray-400 capitalize"> · {l.payType === 'monthly' ? 'salary' : 'daily'}</span></td>
+                          <td data-label="Days" className="mob-hide py-1.5 text-right tabular-nums text-gray-500">{l.effectiveDays} d{parseFloat(l.otHours) ? ` · ${l.otHours}h OT` : ''}</td>
+                          <td data-label="Gross" className="py-1.5 text-right tabular-nums">{PKR(l.grossPay)}</td>
+                          <td data-label="Advance" className="mob-hide py-1.5 text-right tabular-nums text-amber-700">{parseFloat(l.advanceDeducted) ? `−${PKR(l.advanceDeducted)}` : '—'}</td>
+                          <td data-label="Net" className="py-1.5 text-right tabular-nums font-semibold">{PKR(l.netPay)}</td>
+                          <td data-label="Payslip" className="py-1.5 text-right no-print"><button onClick={() => printPayslip(r, l, companyProfile)} className="text-blue-700 hover:underline">print</button></td>
                         </tr>
                       ))}
                     </tbody>
@@ -5213,7 +5213,7 @@ function EmployeeLedgerDrawer({ worker, onClose }) {
             <p className="text-sm text-gray-400 py-8 text-center">No payments recorded for this employee yet.</p>
           ) : (
             <div className="border border-gray-200 rounded-lg overflow-hidden">
-              <table className="w-full text-sm">
+              <table className="w-full text-sm mobile-cards">
                 <thead className="bg-gray-50 text-[11px] text-gray-500 uppercase">
                   <tr>
                     <th className="text-left px-3 py-2">Date</th>
@@ -5226,11 +5226,11 @@ function EmployeeLedgerDrawer({ worker, onClose }) {
                 <tbody className="divide-y divide-gray-100">
                   {entries.map((e, i) => (
                     <tr key={i} className="hover:bg-gray-50">
-                      <td className="px-3 py-2 whitespace-nowrap text-gray-600">{e.date ? new Date(e.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}</td>
-                      <td className="px-3 py-2 text-gray-700">{e.label}{e.note ? <span className="text-gray-400 text-xs"> · {e.note}</span> : ''}</td>
-                      <td className="px-3 py-2 text-right tabular-nums text-red-600">{e.debit ? rs(e.debit) : '—'}</td>
-                      <td className="px-3 py-2 text-right tabular-nums text-emerald-600">{e.credit ? rs(e.credit) : '—'}</td>
-                      <td className={`px-3 py-2 text-right tabular-nums font-medium ${e.balance < 0 ? 'text-red-600' : 'text-gray-900'}`}>{rs(e.balance)}</td>
+                      <td data-label="Date" className="px-3 py-2 whitespace-nowrap text-gray-600">{e.date ? new Date(e.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}</td>
+                      <td data-label="Description" className="px-3 py-2 text-gray-700">{e.label}{e.note ? <span className="text-gray-400 text-xs"> · {e.note}</span> : ''}</td>
+                      <td data-label="Debit" className="px-3 py-2 text-right tabular-nums text-red-600">{e.debit ? rs(e.debit) : '—'}</td>
+                      <td data-label="Credit" className="px-3 py-2 text-right tabular-nums text-emerald-600">{e.credit ? rs(e.credit) : '—'}</td>
+                      <td data-label="Balance" className={`px-3 py-2 text-right tabular-nums font-medium ${e.balance < 0 ? 'text-red-600' : 'text-gray-900'}`}>{rs(e.balance)}</td>
                     </tr>
                   ))}
                 </tbody>
