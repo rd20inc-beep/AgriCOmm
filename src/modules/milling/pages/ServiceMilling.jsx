@@ -111,7 +111,7 @@ export default function ServiceMilling() {
           <Users size={15} className="text-gray-400" />
           <h2 className="text-sm font-semibold text-gray-900">Service Milling Lots</h2>
         </div>
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto mobile-cards">
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-[11px] uppercase tracking-wide text-gray-500 border-b border-gray-100">
@@ -147,30 +147,30 @@ export default function ServiceMilling() {
                 const inStock = num(b.rollup?.remainingKg) || num(b.quantities?.inStockKg);
                 return (
                 <tr key={b.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-2.5">
+                  <td data-label="Lot" className="px-4 py-2.5">
                     <Link to={`/service-milling/${b.batch_no || b.id}`} className="font-semibold text-blue-600 hover:underline">{b.batch_no || `#${b.id}`}</Link>
                     {b.batch_name && <div className="text-[11px] font-medium text-gray-600 truncate max-w-[180px]" title={b.batch_name}>{b.batch_name}</div>}
                     {b.date_received && <div className="text-[11px] text-gray-400">{new Date(b.date_received).toLocaleDateString('en-GB')}</div>}
                   </td>
-                  <td className="px-4 py-2.5 text-gray-800">{b.client_name || <span className="text-gray-400">—</span>}</td>
-                  <td className="px-4 py-2.5 text-right text-gray-700">
+                  <td data-label="Client" className="px-4 py-2.5 text-gray-800">{b.client_name || <span className="text-gray-400">—</span>}</td>
+                  <td data-label="Kattas / Bags" className="mob-hide px-4 py-2.5 text-right text-gray-700">
                     {num(b.katta_count) > 0
                       ? <span>{num(b.katta_count).toLocaleString()} <span className="text-gray-400 text-xs">kattas</span></span>
                       : num(b.bag_count) > 0
                         ? <span>{num(b.bag_count).toLocaleString()} <span className="text-gray-400 text-xs">bags</span></span>
                         : '—'}
                   </td>
-                  <td className="px-4 py-2.5 text-right text-gray-700">
+                  <td data-label="Raw / Milled" className="mob-hide px-4 py-2.5 text-right text-gray-700">
                     {kg(rawLeft)}
                     {milled > 0 && <div className="text-[11px] text-gray-400">{kg(milled)} milled</div>}
                   </td>
-                  <td className="px-4 py-2.5 text-right font-medium text-indigo-700">{kg(finished)}</td>
-                  <td className="px-4 py-2.5 text-right text-gray-600">{byproduct > 0 ? kg(byproduct) : '—'}</td>
-                  <td className="px-4 py-2.5 text-right font-medium text-emerald-700">{kg(inStock)}</td>
-                  <td className="px-4 py-2.5"><Chip text={b.service_lot_status} map={LOT_STATUS_STYLE} /></td>
-                  <td className="px-4 py-2.5 text-right font-medium text-gray-900">{pkr(b.service_total_amount)}</td>
-                  <td className="px-4 py-2.5"><Chip text={b.billing_status} map={BILLING_STYLE} /></td>
-                  <td className="px-4 py-2.5 text-right whitespace-nowrap">
+                  <td data-label="Finished" className="px-4 py-2.5 text-right font-medium text-indigo-700">{kg(finished)}</td>
+                  <td data-label="By-product" className="mob-hide px-4 py-2.5 text-right text-gray-600">{byproduct > 0 ? kg(byproduct) : '—'}</td>
+                  <td data-label="In Stock" className="px-4 py-2.5 text-right font-medium text-emerald-700">{kg(inStock)}</td>
+                  <td data-label="Lot Status" className="px-4 py-2.5"><Chip text={b.service_lot_status} map={LOT_STATUS_STYLE} /></td>
+                  <td data-label="Service Amt" className="px-4 py-2.5 text-right font-medium text-gray-900">{pkr(b.service_total_amount)}</td>
+                  <td data-label="Billing" className="px-4 py-2.5"><Chip text={b.billing_status} map={BILLING_STYLE} /></td>
+                  <td data-label="Actions" className="px-4 py-2.5 text-right whitespace-nowrap">
                     {b.billing_status === 'Not Invoiced' ? (
                       canInvoice ? (
                         <button onClick={() => setInvoiceBatch(b)} className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100">

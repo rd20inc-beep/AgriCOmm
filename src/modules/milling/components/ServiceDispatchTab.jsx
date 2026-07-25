@@ -91,7 +91,7 @@ export default function ServiceDispatchTab({ routeId, onChanged }) {
         {lots.length === 0 ? (
           <p className="p-6 text-center text-sm text-gray-400">No client-owned output yet. Record the yield first — the milled stock will appear here to dispatch.</p>
         ) : (
-          <table className="w-full text-sm">
+          <table className="w-full text-sm mobile-cards">
             <thead>
               <tr className="text-left text-[11px] uppercase tracking-wide text-gray-500 border-b border-gray-100">
                 <th className="px-4 py-2 font-semibold">Lot</th>
@@ -103,13 +103,13 @@ export default function ServiceDispatchTab({ routeId, onChanged }) {
             <tbody className="divide-y divide-gray-50">
               {lots.map((l) => (
                 <tr key={l.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-2.5 font-medium text-gray-900">{l.lot_no}</td>
-                  <td className="px-4 py-2.5 text-gray-700">
+                  <td data-label="Lot" className="px-4 py-2.5 font-medium text-gray-900">{l.lot_no}</td>
+                  <td data-label="Item" className="px-4 py-2.5 text-gray-700">
                     {l.item_name}
                     {l.type === 'byproduct' && <span className="ml-1.5 text-[10px] font-semibold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded">by-product</span>}
                   </td>
-                  <td className="px-4 py-2.5 text-right text-gray-700">{kg(l.available_qty)}</td>
-                  <td className="px-4 py-2.5 text-right">
+                  <td data-label="Available" className="px-4 py-2.5 text-right text-gray-700">{kg(l.available_qty)}</td>
+                  <td data-label="Actions" className="px-4 py-2.5 text-right">
                     {num(l.available_qty) > 0 && canDispatch ? (
                       <button onClick={() => openDispatch(l)} className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100">
                         <Send size={12} /> Dispatch
@@ -130,7 +130,7 @@ export default function ServiceDispatchTab({ routeId, onChanged }) {
             <Truck size={15} className="text-gray-400" />
             <h2 className="text-sm font-semibold text-gray-900">Dispatch History</h2>
           </div>
-          <table className="w-full text-sm">
+          <table className="w-full text-sm mobile-cards">
             <thead>
               <tr className="text-left text-[11px] uppercase tracking-wide text-gray-500 border-b border-gray-100">
                 <th className="px-4 py-2 font-semibold">Dispatch #</th>
@@ -144,12 +144,12 @@ export default function ServiceDispatchTab({ routeId, onChanged }) {
             <tbody className="divide-y divide-gray-50">
               {dispatches.map((d) => (
                 <tr key={d.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-2.5 font-medium text-gray-900">{d.dispatch_no}</td>
-                  <td className="px-4 py-2.5 text-gray-600">{d.dispatch_date ? new Date(d.dispatch_date).toLocaleDateString('en-GB') : '—'}</td>
-                  <td className="px-4 py-2.5 text-gray-600">{d.lot_no}</td>
-                  <td className="px-4 py-2.5 text-gray-600">{d.vehicle_no || '—'}{d.driver_name ? <span className="text-gray-400"> · {d.driver_name}</span> : null}</td>
-                  <td className="px-4 py-2.5 text-right text-gray-700">{kg(d.qty_kg)}{d.bag_count ? <span className="text-gray-400"> · {d.bag_count} bags</span> : null}</td>
-                  <td className="px-4 py-2.5 text-right">
+                  <td data-label="Dispatch #" className="px-4 py-2.5 font-medium text-gray-900">{d.dispatch_no}</td>
+                  <td data-label="Date" className="mob-hide px-4 py-2.5 text-gray-600">{d.dispatch_date ? new Date(d.dispatch_date).toLocaleDateString('en-GB') : '—'}</td>
+                  <td data-label="Lot" className="px-4 py-2.5 text-gray-600">{d.lot_no}</td>
+                  <td data-label="Vehicle" className="mob-hide px-4 py-2.5 text-gray-600">{d.vehicle_no || '—'}{d.driver_name ? <span className="text-gray-400"> · {d.driver_name}</span> : null}</td>
+                  <td data-label="Qty" className="px-4 py-2.5 text-right text-gray-700">{kg(d.qty_kg)}{d.bag_count ? <span className="text-gray-400"> · {d.bag_count} bags</span> : null}</td>
+                  <td data-label="Actions" className="px-4 py-2.5 text-right">
                     {canDispatch && (
                       <button onClick={() => { if (window.confirm(`Reverse dispatch ${d.dispatch_no}? Stock returns to service inventory.`)) deleteMut.mutate(d.id); }}
                         className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg">

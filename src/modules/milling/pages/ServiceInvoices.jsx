@@ -63,7 +63,7 @@ export default function ServiceInvoices() {
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto mobile-cards">
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-[11px] uppercase tracking-wide text-gray-500 border-b border-gray-100">
@@ -84,14 +84,14 @@ export default function ServiceInvoices() {
                 <tr><td colSpan={8} className="px-4 py-10 text-center text-gray-400">No service-milling invoices yet.</td></tr>
               ) : rows.map((r) => (
                 <tr key={r.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-2.5 font-semibold text-gray-900">{r.invoice_no}<div className="text-[11px] text-gray-400">{r.invoice_date ? new Date(r.invoice_date).toLocaleDateString('en-GB') : ''}</div></td>
-                  <td className="px-4 py-2.5 text-gray-800">{r.client_name || '—'}</td>
-                  <td className="px-4 py-2.5 text-gray-500">{r.batch_no || '—'}</td>
-                  <td className="px-4 py-2.5 text-right font-medium text-gray-900">{pkr(r.total_amount)}</td>
-                  <td className="px-4 py-2.5 text-right text-emerald-700">{pkr(r.received_amount)}</td>
-                  <td className="px-4 py-2.5 text-right text-rose-600">{pkr(r.balance_amount)}</td>
-                  <td className="px-4 py-2.5"><span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold ${BILLING_STYLE[r.payment_status] || 'bg-gray-100 text-gray-600'}`}>{r.payment_status}</span></td>
-                  <td className="px-4 py-2.5 text-right whitespace-nowrap">
+                  <td data-label="Invoice" className="px-4 py-2.5 font-semibold text-gray-900">{r.invoice_no}<div className="text-[11px] text-gray-400">{r.invoice_date ? new Date(r.invoice_date).toLocaleDateString('en-GB') : ''}</div></td>
+                  <td data-label="Client" className="px-4 py-2.5 text-gray-800">{r.client_name || '—'}</td>
+                  <td data-label="Batch" className="mob-hide px-4 py-2.5 text-gray-500">{r.batch_no || '—'}</td>
+                  <td data-label="Total" className="px-4 py-2.5 text-right font-medium text-gray-900">{pkr(r.total_amount)}</td>
+                  <td data-label="Received" className="mob-hide px-4 py-2.5 text-right text-emerald-700">{pkr(r.received_amount)}</td>
+                  <td data-label="Balance" className="px-4 py-2.5 text-right text-rose-600">{pkr(r.balance_amount)}</td>
+                  <td data-label="Status" className="px-4 py-2.5"><span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold ${BILLING_STYLE[r.payment_status] || 'bg-gray-100 text-gray-600'}`}>{r.payment_status}</span></td>
+                  <td data-label="Action" className="px-4 py-2.5 text-right whitespace-nowrap">
                     <button onClick={() => viewInvoice(r.id)} className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 mr-2"><Printer size={12} /> View</button>
                     {r.payment_status !== 'Paid' && canPay && (
                       <button onClick={() => openPayment(r.id)} className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100"><Wallet size={12} /> Pay</button>

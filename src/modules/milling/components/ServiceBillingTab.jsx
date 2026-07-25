@@ -168,14 +168,14 @@ export default function ServiceBillingTab({ routeId, batchDbId, onChanged }) {
           {Array.isArray(invoice.payments) && invoice.payments.length > 0 && (
             <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
               <div className="px-4 py-3 border-b border-gray-100 text-sm font-semibold text-gray-900">Payments</div>
-              <table className="w-full text-sm">
+              <table className="w-full text-sm mobile-cards">
                 <tbody className="divide-y divide-gray-50">
                   {invoice.payments.map((p) => (
                     <tr key={p.id}>
-                      <td className="px-4 py-2 text-gray-700">{p.payment_no}</td>
-                      <td className="px-4 py-2 text-gray-500">{p.payment_date ? new Date(p.payment_date).toLocaleDateString('en-GB') : ''}</td>
-                      <td className="px-4 py-2 text-gray-500 capitalize">{(p.payment_method || '').replace('_', ' ')}</td>
-                      <td className="px-4 py-2 text-right font-medium text-gray-900">{pkr(p.amount)}</td>
+                      <td data-label="Payment No" className="px-4 py-2 text-gray-700">{p.payment_no}</td>
+                      <td data-label="Date" className="mob-hide px-4 py-2 text-gray-500">{p.payment_date ? new Date(p.payment_date).toLocaleDateString('en-GB') : ''}</td>
+                      <td data-label="Method" className="px-4 py-2 text-gray-500 capitalize">{(p.payment_method || '').replace('_', ' ')}</td>
+                      <td data-label="Amount" className="px-4 py-2 text-right font-medium text-gray-900">{pkr(p.amount)}</td>
                     </tr>
                   ))}
                 </tbody>

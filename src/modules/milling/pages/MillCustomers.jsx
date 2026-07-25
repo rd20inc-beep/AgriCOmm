@@ -77,7 +77,7 @@ export default function MillCustomers() {
         <EmptyState icon={Users} title="No customers yet" message="Local-sale customers appear here once a credit sale registers them." />
       ) : (
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-          <table className="w-full text-sm">
+          <table className="w-full text-sm mobile-cards">
             <thead>
               <tr className="bg-gray-50 text-left text-[11px] uppercase text-gray-500">
                 <th className="px-4 py-3">Customer</th>
@@ -89,16 +89,16 @@ export default function MillCustomers() {
             <tbody>
               {rows.map(c => (
                 <tr key={c.id} className="border-t border-gray-100 hover:bg-gray-50">
-                  <td className="px-4 py-3 font-medium text-gray-900">{c.name}</td>
-                  <td className="px-4 py-3 text-gray-700">
+                  <td data-label="Customer" className="px-4 py-3 font-medium text-gray-900">{c.name}</td>
+                  <td data-label="Contact" className="mob-hide px-4 py-3 text-gray-700">
                     <div>{c.contact || '—'}</div>
                     {c.phone && <div className="text-xs text-gray-500 flex items-center gap-1 mt-0.5"><Phone className="w-3 h-3" />{c.phone}</div>}
                   </td>
-                  <td className="px-4 py-3 text-gray-700">
+                  <td data-label="Country / Port" className="mob-hide px-4 py-3 text-gray-700">
                     {c.country ? <span className="inline-flex items-center gap-1"><Globe className="w-3.5 h-3.5 text-gray-400" />{c.country}</span> : <span className="text-gray-400">—</span>}
                     {c.port && <div className="text-xs text-gray-500 flex items-center gap-1 mt-0.5"><Anchor className="w-3 h-3" />{c.port}</div>}
                   </td>
-                  <td className="px-4 py-3">
+                  <td data-label="Actions" className="px-4 py-3">
                     <div className="flex items-center justify-end gap-1.5">
                       {canPay && (
                         <button onClick={() => setPayCustomer({ id: c.id, name: c.name })}

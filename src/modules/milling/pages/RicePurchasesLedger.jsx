@@ -214,7 +214,7 @@ export default function RicePurchasesLedger() {
             No rice purchases match these filters.
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto mobile-cards">
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr className="text-left text-xs font-medium text-gray-600 uppercase">
@@ -240,19 +240,19 @@ export default function RicePurchasesLedger() {
                   const wt = parseFloat(r.weight_mt) || 0;
                   return (
                     <tr key={r.id} className="hover:bg-gray-50">
-                      <td className="px-3 py-2 text-gray-700">
+                      <td data-label="Date" className="px-3 py-2 text-gray-700">
                         {r.arrival_date ? new Date(r.arrival_date).toISOString().split('T')[0] : '—'}
                       </td>
-                      <td className="px-3 py-2 font-medium text-gray-900">{r.vehicle_no || '—'}</td>
-                      <td className="px-3 py-2 text-gray-700">{r.supplier_name || '—'}</td>
-                      <td className="px-3 py-2">
+                      <td data-label="Vehicle" className="px-3 py-2 font-medium text-gray-900">{r.vehicle_no || '—'}</td>
+                      <td data-label="Supplier" className="px-3 py-2 text-gray-700">{r.supplier_name || '—'}</td>
+                      <td data-label="Variety" className="mob-hide px-3 py-2">
                         {r.product_name || r.product_code ? (
                           <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-50 text-amber-700">
                             {r.product_name || r.product_code}
                           </span>
                         ) : '—'}
                       </td>
-                      <td className="px-3 py-2">
+                      <td data-label="Lot No" className="px-3 py-2">
                         {r.lot_id ? (
                           <Link to={`/lot-inventory/${r.lot_id}`} className="text-blue-600 hover:underline font-mono text-xs">
                             {r.lot_no}
@@ -261,26 +261,26 @@ export default function RicePurchasesLedger() {
                           <span className="font-mono text-xs text-gray-400">{r.lot_no || '—'}</span>
                         )}
                       </td>
-                      <td className="px-3 py-2">
+                      <td data-label="Batch" className="mob-hide px-3 py-2">
                         {r.batch_id ? (
                           <Link to={`/milling/${r.batch_id}`} className="text-blue-600 hover:underline">
                             {r.batch_no}
                           </Link>
                         ) : '—'}
                       </td>
-                      <td className="px-3 py-2 text-right font-medium">{wt ? wt.toFixed(2) : '—'}</td>
-                      <td className="px-3 py-2 text-right">{r.total_bags || '—'}</td>
-                      <td className="px-3 py-2 text-right">{price ? formatPKR(price) : '—'}</td>
-                      <td className="px-3 py-2 text-right font-medium">
+                      <td data-label="Weight" className="px-3 py-2 text-right font-medium">{wt ? wt.toFixed(2) : '—'}</td>
+                      <td data-label="Bags" className="mob-hide px-3 py-2 text-right">{r.total_bags || '—'}</td>
+                      <td data-label="Price/MT" className="mob-hide px-3 py-2 text-right">{price ? formatPKR(price) : '—'}</td>
+                      <td data-label="Value" className="px-3 py-2 text-right font-medium">
                         {price && wt ? formatPKR(price * wt) : '—'}
                       </td>
-                      <td className="px-3 py-2 text-right">
+                      <td data-label="Moisture" className="mob-hide px-3 py-2 text-right">
                         {q.moisture != null ? `${q.moisture}%` : '—'}
                       </td>
-                      <td className="px-3 py-2 text-right">
+                      <td data-label="Broken" className="mob-hide px-3 py-2 text-right">
                         {q.broken != null ? `${q.broken}%` : '—'}
                       </td>
-                      <td className="px-3 py-2 text-gray-600">{r.driver_name || '—'}</td>
+                      <td data-label="Driver" className="mob-hide px-3 py-2 text-gray-600">{r.driver_name || '—'}</td>
                     </tr>
                   );
                 })}

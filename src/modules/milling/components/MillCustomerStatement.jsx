@@ -106,7 +106,7 @@ export default function MillCustomerStatement({ customerId, customerName, params
         <Tile label="They owe" value={fmtCur(closing, cur)} icon={Scale} tone={closing > 0 ? 'text-amber-500' : 'text-emerald-500'} bold />
       </div>
 
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto mobile-cards">
         {isLoading ? (
           <div className="p-6 text-center text-sm text-gray-400">Loading statement…</div>
         ) : isError ? (
@@ -128,35 +128,35 @@ export default function MillCustomerStatement({ customerId, customerName, params
             </thead>
             <tbody className="divide-y divide-gray-100">
               <tr className="bg-gray-50/60 text-gray-500">
-                <td className="px-3 py-1.5" colSpan={6}>Opening balance</td>
-                <td className="px-3 py-1.5 text-right tabular-nums">{fmtCur(opening, cur)}</td>
+                <td className="mob-full px-3 py-1.5" colSpan={6}>Opening balance</td>
+                <td data-label="Opening balance" className="px-3 py-1.5 text-right tabular-nums">{fmtCur(opening, cur)}</td>
               </tr>
               {transactions.map((t, i) => {
                 const link = refLink(t.ref_no);
                 return (
                   <tr key={i} className={STATUS_ROW[t.status] || 'hover:bg-gray-50/60'}>
-                    <td className="px-3 py-1.5 whitespace-nowrap text-gray-600">{fmtDate(t.date)}</td>
-                    <td className="px-3 py-1.5 whitespace-nowrap text-xs text-gray-500">{t.vch_type || '—'}</td>
-                    <td className="px-3 py-1.5 whitespace-nowrap text-xs">
+                    <td data-label="Date" className="px-3 py-1.5 whitespace-nowrap text-gray-600">{fmtDate(t.date)}</td>
+                    <td data-label="Type" className="mob-hide px-3 py-1.5 whitespace-nowrap text-xs text-gray-500">{t.vch_type || '—'}</td>
+                    <td data-label="Voucher No." className="px-3 py-1.5 whitespace-nowrap text-xs">
                       {link ? <Link to={link} className="text-blue-600 hover:underline">{t.ref_no || t.vch_no}</Link> : (t.ref_no || t.vch_no || "—")}
                     </td>
-                    <td className="px-3 py-1.5 min-w-[200px] max-w-[420px]">
+                    <td data-label="Description" className="mob-hide px-3 py-1.5 min-w-[200px] max-w-[420px]">
                       <span className="block text-gray-700 whitespace-normal break-words">
                         {t.status && <span className={`mr-1.5 px-1.5 py-0.5 rounded text-[9px] font-semibold align-middle ${STATUS_PILL[t.status]}`}>{t.status}</span>}
                         {t.description || '—'}
                       </span>
                     </td>
-                    <td className="px-3 py-1.5 text-right tabular-nums text-gray-800">{parseFloat(t.debit) ? fmtCur(t.debit, cur) : ''}</td>
-                    <td className="px-3 py-1.5 text-right tabular-nums text-emerald-600">{parseFloat(t.credit) ? fmtCur(t.credit, cur) : ''}</td>
-                    <td className="px-3 py-1.5 text-right tabular-nums text-gray-800">{fmtCur(t.running_balance, cur)}</td>
+                    <td data-label="Charge (Dr)" className="px-3 py-1.5 text-right tabular-nums text-gray-800">{parseFloat(t.debit) ? fmtCur(t.debit, cur) : ''}</td>
+                    <td data-label="Received (Cr)" className="px-3 py-1.5 text-right tabular-nums text-emerald-600">{parseFloat(t.credit) ? fmtCur(t.credit, cur) : ''}</td>
+                    <td data-label="Balance" className="px-3 py-1.5 text-right tabular-nums text-gray-800">{fmtCur(t.running_balance, cur)}</td>
                   </tr>
                 );
               })}
               <tr className="bg-gray-50 font-semibold border-t-2 border-gray-200">
-                <td className="px-3 py-2" colSpan={4}>Closing balance</td>
-                <td className="px-3 py-2 text-right tabular-nums text-gray-700">{fmtCur(totalDebit, cur)}</td>
-                <td className="px-3 py-2 text-right tabular-nums text-emerald-700">{fmtCur(totalCredit, cur)}</td>
-                <td className="px-3 py-2 text-right tabular-nums">{fmtCur(closing, cur)}</td>
+                <td className="mob-full px-3 py-2" colSpan={4}>Closing balance</td>
+                <td data-label="Total charge" className="px-3 py-2 text-right tabular-nums text-gray-700">{fmtCur(totalDebit, cur)}</td>
+                <td data-label="Total received" className="px-3 py-2 text-right tabular-nums text-emerald-700">{fmtCur(totalCredit, cur)}</td>
+                <td data-label="Closing balance" className="px-3 py-2 text-right tabular-nums">{fmtCur(closing, cur)}</td>
               </tr>
             </tbody>
           </table>

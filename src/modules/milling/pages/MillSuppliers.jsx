@@ -74,7 +74,7 @@ export default function MillSuppliers() {
         <EmptyState icon={Truck} title="No suppliers yet" message="Add suppliers from a purchase or the supplier picker." />
       ) : (
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-          <table className="w-full text-sm">
+          <table className="w-full text-sm mobile-cards">
             <thead>
               <tr className="bg-gray-50 text-left text-[11px] uppercase text-gray-500">
                 <th className="px-4 py-3">Supplier</th>
@@ -86,15 +86,15 @@ export default function MillSuppliers() {
             <tbody>
               {rows.map(s => (
                 <tr key={s.id} className="border-t border-gray-100 hover:bg-gray-50">
-                  <td className="px-4 py-3 font-medium text-gray-900">{s.name}</td>
-                  <td className="px-4 py-3 text-gray-700">
+                  <td data-label="Supplier" className="px-4 py-3 font-medium text-gray-900">{s.name}</td>
+                  <td data-label="Contact" className="mob-hide px-4 py-3 text-gray-700">
                     <div>{s.contact || '—'}</div>
                     {s.phone && <div className="text-xs text-gray-500 flex items-center gap-1 mt-0.5"><Phone className="w-3 h-3" />{s.phone}</div>}
                   </td>
-                  <td className="px-4 py-3 text-gray-700">
+                  <td data-label="Country" className="mob-hide px-4 py-3 text-gray-700">
                     {s.country ? <span className="inline-flex items-center gap-1"><Globe className="w-3.5 h-3.5 text-gray-400" />{s.country}</span> : <span className="text-gray-400">—</span>}
                   </td>
-                  <td className="px-4 py-3">
+                  <td data-label="Actions" className="px-4 py-3">
                     <div className="flex items-center justify-end gap-1.5">
                       {canPay && (
                         <button onClick={() => setPaySupplier({ id: s.id, name: s.name })}
