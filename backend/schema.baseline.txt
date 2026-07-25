@@ -898,6 +898,19 @@ COL goods_receipt_notes.updated_at:timestamp with time zone:NOT NULL
 COL goods_receipt_notes.uuid:uuid:NULL
 COL goods_receipt_notes.vehicle_no:character varying:NULL
 COL goods_receipt_notes.warehouse_id:integer:NULL
+COL haulers.address:text:NULL
+COL haulers.contact_person:character varying:NULL
+COL haulers.created_at:timestamp with time zone:NULL
+COL haulers.created_by:integer:NULL
+COL haulers.email:character varying:NULL
+COL haulers.id:integer:NOT NULL
+COL haulers.is_active:boolean:NOT NULL
+COL haulers.name:character varying:NOT NULL
+COL haulers.notes:text:NULL
+COL haulers.ntn:character varying:NULL
+COL haulers.phone:character varying:NULL
+COL haulers.updated_at:timestamp with time zone:NULL
+COL haulers.vehicle_types:character varying:NULL
 COL historical_cost_repair_log.batch_id:integer:NULL
 COL historical_cost_repair_log.created_at:timestamp with time zone:NULL
 COL historical_cost_repair_log.id:integer:NOT NULL
@@ -974,6 +987,7 @@ COL inventory_lots.export_display_name:character varying:NULL
 COL inventory_lots.export_ready:boolean:NOT NULL
 COL inventory_lots.grade:character varying:NULL
 COL inventory_lots.gross_weight_kg:numeric:NOT NULL
+COL inventory_lots.hauler_id:integer:NULL
 COL inventory_lots.id:integer:NOT NULL
 COL inventory_lots.item_name:character varying:NOT NULL
 COL inventory_lots.labor_cost:numeric:NOT NULL
@@ -1808,6 +1822,7 @@ COL milling_vehicle_arrivals.created_at:timestamp with time zone:NULL
 COL milling_vehicle_arrivals.created_by:integer:NULL
 COL milling_vehicle_arrivals.driver_name:character varying:NULL
 COL milling_vehicle_arrivals.driver_phone:character varying:NULL
+COL milling_vehicle_arrivals.hauler_id:integer:NULL
 COL milling_vehicle_arrivals.id:integer:NOT NULL
 COL milling_vehicle_arrivals.lot_id:integer:NULL
 COL milling_vehicle_arrivals.notes:text:NULL
@@ -1876,6 +1891,7 @@ COL payables.currency:character varying:NOT NULL
 COL payables.device_uuid:text:NULL
 COL payables.due_date:date:NULL
 COL payables.entity:character varying:NOT NULL
+COL payables.hauler_id:integer:NULL
 COL payables.id:integer:NOT NULL
 COL payables.linked_ref:character varying:NULL
 COL payables.local_ts:timestamp with time zone:NULL
@@ -2956,6 +2972,8 @@ CON goods_receipt_notes.goods_receipt_notes_status_check(c)
 CON goods_receipt_notes.goods_receipt_notes_supplier_id_foreign(f)
 CON goods_receipt_notes.goods_receipt_notes_warehouse_id_foreign(f)
 CON goods_receipt_notes.uq_goods_receipt_notes_uuid(u)
+CON haulers.haulers_created_by_foreign(f)
+CON haulers.haulers_pkey(p)
 CON historical_cost_repair_log.historical_cost_repair_log_batch_id_foreign(f)
 CON historical_cost_repair_log.historical_cost_repair_log_lot_id_foreign(f)
 CON historical_cost_repair_log.historical_cost_repair_log_order_id_foreign(f)
@@ -3010,6 +3028,7 @@ CON inventory_lots.inventory_lots_available_nonneg_chk(c)
 CON inventory_lots.inventory_lots_broker_id_foreign(f)
 CON inventory_lots.inventory_lots_created_by_foreign(f)
 CON inventory_lots.inventory_lots_entity_check(c)
+CON inventory_lots.inventory_lots_hauler_id_foreign(f)
 CON inventory_lots.inventory_lots_lot_no_unique(u)
 CON inventory_lots.inventory_lots_milling_status_check(c)
 CON inventory_lots.inventory_lots_netweight_nonneg_chk(c)
@@ -3331,6 +3350,7 @@ CON milling_vehicle_arrivals.milling_vehicle_arrivals_bags_nonneg_chk(c)
 CON milling_vehicle_arrivals.milling_vehicle_arrivals_bagsize_pos_chk(c)
 CON milling_vehicle_arrivals.milling_vehicle_arrivals_batch_id_foreign(f)
 CON milling_vehicle_arrivals.milling_vehicle_arrivals_created_by_fk(f)
+CON milling_vehicle_arrivals.milling_vehicle_arrivals_hauler_id_foreign(f)
 CON milling_vehicle_arrivals.milling_vehicle_arrivals_lot_id_foreign(f)
 CON milling_vehicle_arrivals.milling_vehicle_arrivals_pkey(p)
 CON milling_vehicle_arrivals.milling_vehicle_arrivals_weight_nonneg_chk(c)
@@ -3356,6 +3376,7 @@ CON payables.chk_payables_outstanding_nonneg(c)
 CON payables.chk_payables_paid_amount_nonneg(c)
 CON payables.chk_payables_status_valid(c)
 CON payables.payables_created_by_foreign(f)
+CON payables.payables_hauler_id_foreign(f)
 CON payables.payables_pay_no_unique(u)
 CON payables.payables_pkey(p)
 CON payables.payables_supplier_id_foreign(f)

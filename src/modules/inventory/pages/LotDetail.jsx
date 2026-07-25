@@ -9,9 +9,9 @@ import {
 } from 'lucide-react';
 import {
   useLotDetail, useRecordLotTransaction, useLocalSalesByLot,
-  useMillingBatches, useAllocateLotToBatch, useSuppliers,
+  useMillingBatches, useAllocateLotToBatch,
 } from '../../../api/queries';
-import SupplierPicker from '../../../components/SupplierPicker';
+import HaulerPicker from '../../../components/HaulerPicker';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import OrderRefLink from '../../../shared/components/OrderRefLink';
@@ -61,7 +61,6 @@ export default function LotDetail() {
   const { user, hasPermission } = useAuth();
   const canReports = hasPermission('reports', 'view');
   const canExport = hasPermission('export_orders', 'view');
-  const { data: suppliersList = [] } = useSuppliers();
   const [activeTab, setActiveTab] = useState('overview');
   const [displayUnit, setDisplayUnit] = useState('katta');
   const [showTxnModal, setShowTxnModal] = useState(false);
@@ -1251,7 +1250,7 @@ export default function LotDetail() {
 
       {/* ─── Modals ─── */}
       <TransactionModal isOpen={showTxnModal} onClose={() => setShowTxnModal(false)} lotId={lot.id} lotNo={lot.lotNo} availableKg={availKg} bagWeightKg={bw} defaultRateKg={landedKg || rateKg} warehouses={warehousesList} addToast={addToast} refetch={refetch} mutation={txnMutation} />
-      <CostEditModal isOpen={showCostModal} onClose={() => setShowCostModal(false)} lot={lot} milled={millingBatches.length > 0 || outboundTxns.length > 0} suppliers={suppliersList} addToast={addToast} refetch={refetch} />
+      <CostEditModal isOpen={showCostModal} onClose={() => setShowCostModal(false)} lot={lot} milled={millingBatches.length > 0 || outboundTxns.length > 0} addToast={addToast} refetch={refetch} />
       <PriceEditModal isOpen={showPriceModal} onClose={() => setShowPriceModal(false)} lot={lot} addToast={addToast} refetch={refetch} />
       <ReceivedQtyModal isOpen={showReceivedModal} onClose={() => setShowReceivedModal(false)} lot={lot} addToast={addToast} refetch={refetch} />
       <AllocateToBatchModal isOpen={showAllocateModal} onClose={() => setShowAllocateModal(false)} lot={lot} addToast={addToast} refetch={refetch} />
@@ -1662,11 +1661,11 @@ function ReceivedQtyModal({ isOpen, onClose, lot, addToast, refetch }) {
   );
 }
 
-function CostEditModal({ isOpen, onClose, lot, milled, suppliers = [], addToast, refetch }) {
+function CostEditModal({ isOpen, onClose, lot, milled, addToast, refetch }) {
   const blank = {
     transport_cost: lot.transportCost || '', labor_cost: lot.laborCost || '', unloading_cost: lot.unloadingCost || '',
     packing_cost: lot.packingCost || '', other_cost: lot.otherCost || '', bag_cost_per_bag: lot.bagCostPerBag || '',
-    transport_vendor_id: lot.transportVendorId ? String(lot.transportVendorId) : '',
+    hauler_id: lot.haulerId ? String(lot.haulerId) : '',
   };
   const [costs, setCosts] = useState(blank);
   const [saving, setSaving] = useState(false);
@@ -1684,12 +1683,12 @@ function CostEditModal({ isOpen, onClose, lot, milled, suppliers = [], addToast,
   const bagTotal = n('bag_cost_per_bag') * bags;
   const landedAdditional = flatTotal + bagTotal; // in rice COGS
   const perKg = receivedKg > 0 ? landedAdditional / receivedKg : 0;
-  const transportNeedsHauler = transport > 0 && !costs.transport_vendor_id;
+  const transportNeedsHauler = transport > 0 && !costs.hauler_id;
 
   async function handleSave() {
     setSaving(true);
     try {
-      const res = await lotInventoryApi.updateLotCosts(lot.id, { ...costs, transport_vendor_id: costs.transport_vendor_id || null });
+      const res = await lotInventoryApi.updateLotCosts(lot.id, { ...costs, hauler_id: costs.hauler_id || null });
       const prop = res?.data?.propagation;
       const msg = prop?.affectedBatches > 0
         ? `Costs updated — cascaded into ${prop.affectedBatches} batch(es)`
@@ -1733,7 +1732,7 @@ function CostEditModal({ isOpen, onClose, lot, milled, suppliers = [], addToast,
               <input type="number" value={costs.transport_cost} onChange={e => setC('transport_cost', e.target.value)} className="form-input pl-7 text-right" placeholder="0" min="0" />
             </div>
           </div>
-          <SupplierPicker label="Hauler" value={costs.transport_vendor_id} onChange={(id) => setC('transport_vendor_id', id || '')} suppliers={suppliers} placeholder="Search hauler / transporter…" addToast={addToast} clearable />
+          <HaulerPicker label="Hauler" value={costs.hauler_id} onChange={(id) => setC('hauler_id', id || '')} placeholder="Search hauler / transporter…" addToast={addToast} clearable />
           {transportNeedsHauler && <p className="text-[11px] text-amber-600">Pick a hauler so the transport payable can be raised.</p>}
         </div>
 

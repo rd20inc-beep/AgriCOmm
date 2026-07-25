@@ -1511,12 +1511,9 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
                               ? <span className="text-[11px] text-amber-600 whitespace-nowrap">no hauler set</span>
                               : <span className="text-[11px] text-gray-500 truncate">{l.haulerName || '—'}{l.outstanding > 0 ? ` · ${PKR(l.outstanding)} due` : ' · paid'}</span>
                           )}
-                          {cat.key === 'transport' && canPay && l.haulerId && l.outstanding > 0 && (
-                            <button onClick={() => setPayParty({ id: l.haulerId, name: l.haulerName })}
-                              className="inline-flex items-center gap-1 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white px-2 py-1 text-[11px] font-medium shrink-0">
-                              <Banknote size={11} /> Pay
-                            </button>
-                          )}
+                          {/* Hauler payments are settled via the vendor payables rail — a
+                              dedicated per-hauler payment flow is not yet wired, so the
+                              inline Pay shortcut is intentionally omitted for transport. */}
                           <span className="font-medium text-gray-900 tabular-nums shrink-0">{PKR(l.amount)}</span>
                         </div>
                       </div>

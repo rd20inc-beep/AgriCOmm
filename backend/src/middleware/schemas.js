@@ -228,6 +228,7 @@ const createPurchaseLot = Joi.object({
   supplier_id: Joi.number().integer().positive().allow(null),
   broker_id: Joi.number().integer().positive().allow(null),
   transport_vendor_id: Joi.number().integer().positive().allow(null, ''),
+  hauler_id: Joi.number().integer().positive().allow(null, ''),
   commission_per_bag: Joi.number().min(0).allow(null),
   commission_total: Joi.number().min(0).allow(null),
   purchase_date: Joi.date().iso().allow(null, ''),
@@ -334,6 +335,7 @@ const updateLotCosts = Joi.object({
   other_cost: Joi.number().min(0).allow(null),
   bag_cost_per_bag: Joi.number().min(0).allow(null),
   transport_vendor_id: Joi.number().integer().positive().allow(null, ''),
+  hauler_id: Joi.number().integer().positive().allow(null, ''),
 });
 
 // Edit a lot's recorded quality after creation. moisture/broken come through
