@@ -261,12 +261,26 @@ function renderHeader(company) {
     </div>`;
 }
 
-function renderCompanyFooter(company) {
+// ─── Shared export-document footer (single source of truth) ───
+// The footer shown on the Commercial Invoice — company name/address + contact
+// line — used by EVERY export document. Change the company address / contact
+// details here ONCE and they update across all documents. The `agri-ftr` class
+// is what buildDocHtml / the preview pin to the bottom of the A4 page.
+function renderExportDocumentFooter(company) {
+  const bits = [
+    company.phone ? `Tel: ${company.phone}` : '',
+    company.email ? `Email: ${company.email}` : '',
+    company.website ? `Web: ${company.website}` : '',
+  ].filter(Boolean).join('  ·  ');
   return `
-    <div class="agri-ftr" style="text-align:center; margin-top:30px; padding-top:10px; border-top:1px solid #ccc; font-size:12px; color:#666;">
-      ${company.address}<br/>
-      Tel: ${company.phone} &nbsp; Fax: ${company.fax} &nbsp; Email: ${company.email} &nbsp; Website: ${company.website}
+    <div class="agri-ftr" style="margin-top:36px; background:#1e3a5f; color:#fff; text-align:center; font-size:12px; padding:8px 10px; line-height:1.5;">
+      ${company.name ? `<b>${company.name}</b><br/>` : ''}${company.address}<br/>${bits}
     </div>`;
+}
+// Both historical footer names now delegate to the single shared footer so every
+// document renders the identical Commercial Invoice footer (no duplicated code).
+function renderCompanyFooter(company) {
+  return renderExportDocumentFooter(company);
 }
 
 function renderProformaInvoice(doc) {
@@ -1088,12 +1102,11 @@ function renderComplianceHeader(company) {
       <div style="flex:0 0 120px;"></div>
     </div>`;
 }
+// Delegates to the single shared footer (defined above) — kept as an alias so
+// the many existing call sites need no change; every document renders the
+// identical Commercial Invoice footer.
 function renderComplianceFooter(company) {
-  const bits = [company.phone ? `Tel: ${company.phone}` : '', company.email ? `Email: ${company.email}` : '', company.website ? `Web: ${company.website}` : ''].filter(Boolean).join('  ·  ');
-  return `
-    <div class="agri-ftr" style="margin-top:36px; background:#1e3a5f; color:#fff; text-align:center; font-size:12px; padding:8px 10px; line-height:1.5;">
-      ${company.address}<br/>${bits}
-    </div>`;
+  return renderExportDocumentFooter(company);
 }
 function signatureBlock(company) {
   return `
