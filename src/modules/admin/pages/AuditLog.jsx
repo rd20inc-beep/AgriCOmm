@@ -205,7 +205,7 @@ export default function AuditLog() {
       </div>
 
       {/* Table */}
-      <div className="table-container">
+      <div className="table-container mobile-cards">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
@@ -222,13 +222,13 @@ export default function AuditLog() {
             <tbody className="divide-y divide-gray-100">
               {filtered.map((log, i) => (
                 <tr key={log.id || i} className="hover:bg-gray-50 transition-colors">
-                  <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
+                  <td data-label="Timestamp" className="px-4 py-3 text-gray-600 whitespace-nowrap">
                     <div className="flex items-center gap-1.5">
                       <Clock className="w-3.5 h-3.5 text-gray-400" />
                       {formatDate(log.createdAt)}
                     </div>
                   </td>
-                  <td className="px-4 py-3">
+                  <td data-label="User" className="px-4 py-3">
                     <div className="flex items-center gap-2">
                       <div className="w-7 h-7 rounded-full bg-indigo-100 flex items-center justify-center">
                         <User className="w-3.5 h-3.5 text-indigo-600" />
@@ -239,15 +239,15 @@ export default function AuditLog() {
                       </div>
                     </div>
                   </td>
-                  <td className="px-4 py-3">
+                  <td data-label="Action" className="px-4 py-3">
                     <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getActionColor(log.action)}`}>
                       {log.action}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-gray-700 font-medium">{log.entityType || '—'}</td>
-                  <td className="px-4 py-3 text-gray-600 font-mono text-xs">{log.entityId || '—'}</td>
-                  <td className="px-4 py-3 text-gray-500 font-mono text-xs">{log.ipAddress || '—'}</td>
-                  <td className="px-4 py-3 text-center">
+                  <td data-label="Entity" className="px-4 py-3 text-gray-700 font-medium">{log.entityType || '—'}</td>
+                  <td data-label="Entity ID" className="mob-hide px-4 py-3 text-gray-600 font-mono text-xs">{log.entityId || '—'}</td>
+                  <td data-label="IP Address" className="mob-hide px-4 py-3 text-gray-500 font-mono text-xs">{log.ipAddress || '—'}</td>
+                  <td data-label="Details" className="px-4 py-3 text-center">
                     <button
                       onClick={() => setSelectedLog(log)}
                       className="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-800 text-xs font-medium"

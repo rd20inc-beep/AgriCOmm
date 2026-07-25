@@ -167,7 +167,7 @@ export default function UsersRolesTab() {
             <Plus className="w-4 h-4" /> Invite User
           </button>
         </div>
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto mobile-cards">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200">
@@ -186,14 +186,14 @@ export default function UsersRolesTab() {
                 <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-500">No users found.</td></tr>
               ) : users.map(user => (
                 <tr key={user.id} className="hover:bg-gray-50 transition-colors">
-                  <td className="py-3 px-4 font-medium text-gray-900">{user.fullName}</td>
-                  <td className="py-3 px-4 text-gray-600">{user.email}</td>
-                  <td className="py-3 px-4">
+                  <td data-label="Name" className="py-3 px-4 font-medium text-gray-900">{user.fullName}</td>
+                  <td data-label="Email" className="py-3 px-4 text-gray-600">{user.email}</td>
+                  <td data-label="Role" className="py-3 px-4">
                     <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${getRoleColor(user.roleName)}`}>
                       {user.roleName || 'Unknown'}
                     </span>
                   </td>
-                  <td className="py-3 px-4">
+                  <td data-label="Status" className="py-3 px-4">
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <span className={`px-2.5 py-1 rounded-full text-xs font-medium capitalize ${STATUS_BADGE[user.status] || (user.isActive ? STATUS_BADGE.active : STATUS_BADGE.deactivated)}`}>
                         {user.status || (user.isActive ? 'active' : 'deactivated')}
@@ -201,10 +201,10 @@ export default function UsersRolesTab() {
                       {user.forcePasswordChange && <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-purple-50 text-purple-700" title="Must reset password at next sign-in">pw reset</span>}
                     </div>
                   </td>
-                  <td className="py-3 px-4 text-gray-500 text-xs">
+                  <td data-label="Last Login" className="mob-hide py-3 px-4 text-gray-500 text-xs">
                     {user.lastLogin ? new Date(user.lastLogin).toLocaleDateString() : 'Never'}
                   </td>
-                  <td className="py-3 px-4">
+                  <td data-label="Actions" className="py-3 px-4">
                     <div className="flex items-center justify-center gap-1.5 flex-wrap">
                       <button
                         onClick={() => openEdit(user)}

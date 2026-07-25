@@ -143,7 +143,7 @@ export default function BankAccountsTab() {
           <span>USD Accounts: <strong className="text-blue-700">{accounts.filter(a => a.currency === 'USD').length}</strong></span>
           <span>Cash Accounts: <strong className="text-emerald-700">{accounts.filter(a => a.type === 'cash').length}</strong></span>
         </div>
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto mobile-cards">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200">
@@ -160,12 +160,12 @@ export default function BankAccountsTab() {
             <tbody className="divide-y divide-gray-100">
               {accounts.map(a => (
                 <tr key={a.id || a.uid} className="hover:bg-gray-50 transition-colors">
-                  <td className="px-4 py-3 text-gray-500 font-mono text-xs">{a.uid || a.id}</td>
-                  <td className="px-4 py-3 font-medium text-gray-900">
+                  <td data-label="UID" className="mob-hide px-4 py-3 text-gray-500 font-mono text-xs">{a.uid || a.id}</td>
+                  <td data-label="Account Name" className="px-4 py-3 font-medium text-gray-900">
                     {a.name || a.accountName}
                     {a.isExportDefault && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 align-middle">EXPORT DEFAULT</span>}
                   </td>
-                  <td className="px-4 py-3">
+                  <td data-label="Type" className="px-4 py-3">
                     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
                       a.type === 'bank' ? 'bg-blue-100 text-blue-700' :
                       a.type === 'cash' ? 'bg-emerald-100 text-emerald-700' :
@@ -174,9 +174,9 @@ export default function BankAccountsTab() {
                       {a.type}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-gray-600">{a.bankName || '—'}</td>
-                  <td className="px-4 py-3 text-gray-600 font-mono text-xs">{a.accountNumber || '—'}</td>
-                  <td className="px-4 py-3">
+                  <td data-label="Bank Name" className="mob-hide px-4 py-3 text-gray-600">{a.bankName || '—'}</td>
+                  <td data-label="Account Number" className="mob-hide px-4 py-3 text-gray-600 font-mono text-xs">{a.accountNumber || '—'}</td>
+                  <td data-label="Currency" className="px-4 py-3">
                     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
                       a.currency === 'PKR' ? 'bg-emerald-100 text-emerald-700' :
                       a.currency === 'USD' ? 'bg-blue-100 text-blue-700' :
@@ -185,10 +185,10 @@ export default function BankAccountsTab() {
                       {a.currency}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-right font-medium text-gray-900">
+                  <td data-label="Balance" className="px-4 py-3 text-right font-medium text-gray-900">
                     {a.currency === 'PKR' ? 'Rs ' : a.currency === 'USD' ? '$' : ''}{Number(a.currentBalance || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </td>
-                  <td className="px-4 py-3 text-right">
+                  <td data-label="Actions" className="px-4 py-3 text-right">
                     <div className="inline-flex gap-1">
                       <button onClick={() => openEdit(a)} className="p-1.5 rounded hover:bg-blue-50 text-blue-600" title="Edit">
                         <Pencil className="w-4 h-4" />

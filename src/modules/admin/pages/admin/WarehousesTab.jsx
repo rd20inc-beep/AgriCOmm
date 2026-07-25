@@ -72,7 +72,7 @@ export default function WarehousesTab() {
             Add New
           </button>
         </div>
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto mobile-cards">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200">
@@ -86,16 +86,16 @@ export default function WarehousesTab() {
             <tbody className="divide-y divide-gray-100">
               {warehousesList.map(w => (
                 <tr key={w.id} className="hover:bg-gray-50 transition-colors">
-                  <td className="px-4 py-3 text-gray-500 font-mono text-xs">{w.id}</td>
-                  <td className="px-4 py-3 font-medium text-gray-900">{w.name}</td>
-                  <td className="px-4 py-3">
+                  <td data-label="ID" className="mob-hide px-4 py-3 text-gray-500 font-mono text-xs">{w.id}</td>
+                  <td data-label="Warehouse Name" className="px-4 py-3 font-medium text-gray-900">{w.name}</td>
+                  <td data-label="Entity" className="px-4 py-3">
                     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
                       w.entity === 'mill' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'
                     }`}>
                       {w.entity === 'mill' ? 'Mill' : 'Export'}
                     </span>
                   </td>
-                  <td className="px-4 py-3">
+                  <td data-label="Type" className="px-4 py-3">
                     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
                       w.type === 'raw' ? 'bg-amber-100 text-amber-700' :
                       w.type === 'finished' ? 'bg-emerald-100 text-emerald-700' :
@@ -105,7 +105,7 @@ export default function WarehousesTab() {
                       {(w.type || '').charAt(0).toUpperCase() + (w.type || '').slice(1)}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-right">
+                  <td data-label="Actions" className="px-4 py-3 text-right">
                     <div className="inline-flex gap-1">
                       <button onClick={() => openEdit(w)} className="p-1.5 rounded hover:bg-blue-50 text-blue-600" title="Edit">
                         <Pencil className="w-4 h-4" />

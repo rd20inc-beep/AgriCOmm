@@ -104,7 +104,7 @@ export default function DocTemplatesTab() {
             <Plus className="w-4 h-4" /> Add Template
           </button>
         </div>
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto mobile-cards">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200">
@@ -125,16 +125,16 @@ export default function DocTemplatesTab() {
                 const active = t.isActive !== false;
                 return (
                   <tr key={t.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="py-3 px-4 font-medium text-gray-900">{t.name}</td>
-                    <td className="py-3 px-4 text-gray-700">{docTypeLabel}</td>
-                    <td className="py-3 px-4 text-gray-600 capitalize">{t.entity || '—'}</td>
-                    <td className="py-3 px-4">
+                    <td data-label="Name" className="py-3 px-4 font-medium text-gray-900">{t.name}</td>
+                    <td data-label="Document Type" className="py-3 px-4 text-gray-700">{docTypeLabel}</td>
+                    <td data-label="Entity" className="mob-hide py-3 px-4 text-gray-600 capitalize">{t.entity || '—'}</td>
+                    <td data-label="Status" className="py-3 px-4">
                       <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${active ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'}`}>
                         {active ? <CheckCircle className="w-3 h-3" /> : <XCircle className="w-3 h-3" />}
                         {active ? 'Active' : 'Inactive'}
                       </span>
                     </td>
-                    <td className="py-3 px-4 text-right">
+                    <td data-label="Actions" className="py-3 px-4 text-right">
                       <div className="inline-flex gap-1">
                         <button onClick={() => openEdit(t)} className="p-1.5 rounded hover:bg-blue-50 text-blue-600" title="Edit">
                           <Pencil className="w-4 h-4" />

@@ -83,7 +83,7 @@ export default function CostCategoriesTab() {
             </button>
           </div>
         )}
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto mobile-cards">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200">
@@ -94,8 +94,8 @@ export default function CostCategoriesTab() {
             <tbody className="divide-y divide-gray-100">
               {(exportCostCategories || []).map((cat, idx) => (
                 <tr key={cat.key || idx} className="hover:bg-gray-50 transition-colors">
-                  <td className="px-4 py-3 text-gray-500 font-mono text-xs">{cat.key}</td>
-                  <td className="px-4 py-3 font-medium text-gray-900">{cat.label}</td>
+                  <td data-label="Key" className="px-4 py-3 text-gray-500 font-mono text-xs">{cat.key}</td>
+                  <td data-label="Label" className="px-4 py-3 font-medium text-gray-900">{cat.label}</td>
                 </tr>
               ))}
             </tbody>
@@ -163,7 +163,7 @@ export default function CostCategoriesTab() {
             </button>
           </div>
         )}
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto mobile-cards">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200">
@@ -174,8 +174,8 @@ export default function CostCategoriesTab() {
             <tbody className="divide-y divide-gray-100">
               {(millingCostCategories || []).map((cat, idx) => (
                 <tr key={cat.key || idx} className="hover:bg-gray-50 transition-colors">
-                  <td className="px-4 py-3 text-gray-500 font-mono text-xs">{cat.key}</td>
-                  <td className="px-4 py-3 font-medium text-gray-900">{cat.label}</td>
+                  <td data-label="Key" className="px-4 py-3 text-gray-500 font-mono text-xs">{cat.key}</td>
+                  <td data-label="Label" className="px-4 py-3 font-medium text-gray-900">{cat.label}</td>
                 </tr>
               ))}
             </tbody>

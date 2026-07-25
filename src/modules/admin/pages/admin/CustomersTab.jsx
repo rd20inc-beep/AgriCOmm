@@ -98,7 +98,7 @@ export default function CustomersTab() {
             Add New
           </button>
         </div>
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto mobile-cards">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200">
@@ -115,7 +115,7 @@ export default function CustomersTab() {
             <tbody className="divide-y divide-gray-100">
               {sortedCustomers.map(c => (
                 <tr key={c.id} className="hover:bg-gray-50 transition-colors">
-                  <td className="text-center px-2 py-3">
+                  <td data-label="" className="mob-hide text-center px-2 py-3">
                     <button
                       onClick={() => toggleFavorite(c)}
                       title={c.isFavorite ? 'Remove from favorites' : 'Mark as favorite'}
@@ -124,28 +124,28 @@ export default function CustomersTab() {
                       <Star className={`w-4 h-4 ${c.isFavorite ? 'fill-amber-400 text-amber-500' : 'text-gray-300'}`} />
                     </button>
                   </td>
-                  <td className="px-4 py-3 text-gray-500 font-mono text-xs">{c.id}</td>
-                  <td className="px-4 py-3 font-medium"><PartyLink type="customer" id={c.id} name={c.name} /></td>
-                  <td className="px-4 py-3 text-gray-600">
+                  <td data-label="ID" className="mob-hide px-4 py-3 text-gray-500 font-mono text-xs">{c.id}</td>
+                  <td data-label="Name" className="px-4 py-3 font-medium"><PartyLink type="customer" id={c.id} name={c.name} /></td>
+                  <td data-label="Country" className="px-4 py-3 text-gray-600">
                     <span className="inline-flex items-center gap-1">
                       <Globe className="w-3.5 h-3.5 text-gray-400" />
                       {c.country}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-gray-900">{c.contact}</td>
-                  <td className="px-4 py-3 text-gray-600">
+                  <td data-label="Contact Person" className="mob-hide px-4 py-3 text-gray-900">{c.contact}</td>
+                  <td data-label="Email" className="px-4 py-3 text-gray-600">
                     <span className="inline-flex items-center gap-1">
                       <Mail className="w-3.5 h-3.5 text-gray-400" />
                       {c.email}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-gray-600">
+                  <td data-label="Phone" className="mob-hide px-4 py-3 text-gray-600">
                     <span className="inline-flex items-center gap-1">
                       <Phone className="w-3.5 h-3.5 text-gray-400" />
                       {c.phone}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-right">
+                  <td data-label="Actions" className="px-4 py-3 text-right">
                     <div className="inline-flex gap-1">
                       <button
                         onClick={() => navigate(`/finance/statements?type=customer&id=${c.id}`)}

@@ -139,7 +139,7 @@ export default function ExpenseVendorsTab() {
           ))}
         </div>
 
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto mobile-cards">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200 text-xs text-gray-600 uppercase tracking-wide">
@@ -158,17 +158,17 @@ export default function ExpenseVendorsTab() {
               ) : (
                 filtered.map((v) => (
                   <tr key={v.id} className={`hover:bg-gray-50 ${!v.is_active ? 'opacity-50' : ''}`}>
-                    <td className="px-4 py-3 capitalize text-gray-700">{v.category}</td>
-                    <td className="px-4 py-3 font-medium text-gray-900">{v.name}</td>
-                    <td className="px-4 py-3 text-right text-gray-500 tabular-nums">{v.sort_order}</td>
-                    <td className="px-4 py-3">
+                    <td data-label="Category" className="px-4 py-3 capitalize text-gray-700">{v.category}</td>
+                    <td data-label="Provider Name" className="px-4 py-3 font-medium text-gray-900">{v.name}</td>
+                    <td data-label="Sort" className="mob-hide px-4 py-3 text-right text-gray-500 tabular-nums">{v.sort_order}</td>
+                    <td data-label="Status" className="px-4 py-3">
                       <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium ${
                         v.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-600'
                       }`}>
                         {v.is_active ? 'Active' : 'Hidden'}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-center">
+                    <td data-label="Actions" className="px-4 py-3 text-center">
                       <div className="inline-flex items-center gap-1">
                         <button
                           onClick={() => handleToggle(v)}

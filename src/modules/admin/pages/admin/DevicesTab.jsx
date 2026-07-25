@@ -71,7 +71,7 @@ export default function DevicesTab() {
       ) : devices.length === 0 ? (
         <div className="p-6 text-sm text-gray-500">No devices registered yet.</div>
       ) : (
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto mobile-cards">
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-gray-500 border-b border-gray-200">
@@ -92,7 +92,7 @@ export default function DevicesTab() {
                 const busy = busyId === dev.id;
                 return (
                   <tr key={dev.id} className="border-b border-gray-100 last:border-0">
-                    <td className="px-5 py-3">
+                    <td data-label="Device" className="px-5 py-3">
                       <div className="flex items-center gap-2.5">
                         <span className="flex-shrink-0 w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center">
                           <PIcon className="w-4 h-4 text-gray-500" />
@@ -108,11 +108,11 @@ export default function DevicesTab() {
                         </div>
                       </div>
                     </td>
-                    <td className="px-5 py-3">
+                    <td data-label="User" className="px-5 py-3">
                       <div className="text-gray-900">{dev.user_name || dev.user_email || `User #${dev.user_id ?? '—'}`}</div>
                       {dev.role_name && <div className="text-xs text-gray-400">{dev.role_name}</div>}
                     </td>
-                    <td className="px-5 py-3">
+                    <td data-label="Status" className="px-5 py-3">
                       {revoked ? (
                         <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-full bg-red-50 text-red-600">
                           <ShieldOff className="w-3 h-3" /> Revoked
@@ -123,10 +123,10 @@ export default function DevicesTab() {
                         </span>
                       )}
                     </td>
-                    <td className="px-5 py-3 text-gray-600">{fmt(dev.last_seen_at)}</td>
-                    <td className="px-5 py-3 text-gray-600">{fmt(dev.registered_at)}</td>
+                    <td data-label="Last seen" className="mob-hide px-5 py-3 text-gray-600">{fmt(dev.last_seen_at)}</td>
+                    <td data-label="Registered" className="mob-hide px-5 py-3 text-gray-600">{fmt(dev.registered_at)}</td>
                     {canManage && (
-                      <td className="px-5 py-3 text-right">
+                      <td data-label="Actions" className="px-5 py-3 text-right">
                         {revoked ? (
                           <button
                             onClick={() => reactivate(dev)}
