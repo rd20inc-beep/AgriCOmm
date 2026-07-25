@@ -91,7 +91,7 @@ export default function BagTypesTab() {
           <span>Branded: <strong>{bagTypesList.filter(b => b.category === 'branded').length}</strong></span>
           <span>Consumable: <strong>{bagTypesList.filter(b => b.category === 'consumable').length}</strong></span>
         </div>
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto mobile-cards">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200">
@@ -108,9 +108,9 @@ export default function BagTypesTab() {
             <tbody className="divide-y divide-gray-100">
               {bagTypesList.map(b => (
                 <tr key={b.id} className="hover:bg-gray-50 transition-colors">
-                  <td className="px-4 py-3 text-gray-500 font-mono text-xs">{b.id}</td>
-                  <td className="px-4 py-3 font-medium text-gray-900">{b.name}</td>
-                  <td className="px-4 py-3">
+                  <td data-label="ID" className="mob-hide px-4 py-3 text-gray-500 font-mono text-xs">{b.id}</td>
+                  <td data-label="Name" className="px-4 py-3 font-medium text-gray-900">{b.name}</td>
+                  <td data-label="Category" className="px-4 py-3">
                     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
                       b.category === 'empty' ? 'bg-gray-100 text-gray-700' :
                       b.category === 'branded' ? 'bg-blue-100 text-blue-700' :
@@ -119,11 +119,11 @@ export default function BagTypesTab() {
                       {b.category}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-right font-medium text-gray-900">{b.sizeKg || '—'}</td>
-                  <td className="px-4 py-3 text-gray-600">{b.material || '—'}</td>
-                  <td className="px-4 py-3 text-gray-500 text-xs max-w-[200px] truncate">{b.description || '—'}</td>
-                  <td className="px-4 py-3 text-right text-gray-900">{b.reorderLevel}</td>
-                  <td className="px-4 py-3 text-right">
+                  <td data-label="Size (kg)" className="px-4 py-3 text-right font-medium text-gray-900">{b.sizeKg || '—'}</td>
+                  <td data-label="Material" className="mob-hide px-4 py-3 text-gray-600">{b.material || '—'}</td>
+                  <td data-label="Description" className="mob-hide px-4 py-3 text-gray-500 text-xs max-w-[200px] truncate">{b.description || '—'}</td>
+                  <td data-label="Reorder Level" className="mob-hide px-4 py-3 text-right text-gray-900">{b.reorderLevel}</td>
+                  <td data-label="Actions" className="px-4 py-3 text-right">
                     <div className="inline-flex gap-1">
                       <button onClick={() => openEdit(b)} className="p-1.5 rounded hover:bg-blue-50 text-blue-600" title="Edit">
                         <Pencil className="w-4 h-4" />

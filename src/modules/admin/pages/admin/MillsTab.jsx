@@ -84,7 +84,7 @@ export default function MillsTab() {
             <Plus className="w-4 h-4" /> Add Mill
           </button>
         </div>
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto mobile-cards">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200">
@@ -103,11 +103,11 @@ export default function MillsTab() {
                 <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-500">No mills configured yet.</td></tr>
               ) : mills.map(mill => (
                 <tr key={mill.id} className="hover:bg-gray-50 transition-colors">
-                  <td className="py-3 px-4 font-medium text-gray-900">{mill.name}</td>
-                  <td className="py-3 px-4 text-gray-600">{mill.location || '—'}</td>
-                  <td className="py-3 px-4 text-right text-gray-900">{mill.capacityMtPerDay || '—'}</td>
-                  <td className="py-3 px-4 text-gray-600">{mill.contactPerson || '—'}</td>
-                  <td className="py-3 px-4">
+                  <td data-label="Name" className="py-3 px-4 font-medium text-gray-900">{mill.name}</td>
+                  <td data-label="Location" className="mob-hide py-3 px-4 text-gray-600">{mill.location || '—'}</td>
+                  <td data-label="Capacity (MT/day)" className="py-3 px-4 text-right text-gray-900">{mill.capacityMtPerDay || '—'}</td>
+                  <td data-label="Contact" className="mob-hide py-3 px-4 text-gray-600">{mill.contactPerson || '—'}</td>
+                  <td data-label="Status" className="py-3 px-4">
                     <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${
                       mill.status === 'Active' ? 'bg-emerald-100 text-emerald-700' :
                       mill.status === 'Maintenance' ? 'bg-amber-100 text-amber-700' :
@@ -116,7 +116,7 @@ export default function MillsTab() {
                       {mill.status || 'Active'}
                     </span>
                   </td>
-                  <td className="py-3 px-4 text-right">
+                  <td data-label="Actions" className="py-3 px-4 text-right">
                     <div className="inline-flex gap-1">
                       <button onClick={() => openEdit(mill)} className="p-1.5 rounded hover:bg-blue-50 text-blue-600" title="Edit">
                         <Pencil className="w-4 h-4" />

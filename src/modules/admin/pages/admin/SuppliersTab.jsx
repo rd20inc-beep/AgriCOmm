@@ -103,7 +103,7 @@ export default function SuppliersTab() {
             Add New
           </button>
         </div>
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto mobile-cards">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200">
@@ -119,7 +119,7 @@ export default function SuppliersTab() {
             <tbody className="divide-y divide-gray-100">
               {sortedSuppliers.map(s => (
                 <tr key={s.id} className="hover:bg-gray-50 transition-colors">
-                  <td className="text-center px-2 py-3">
+                  <td data-label="" className="mob-hide text-center px-2 py-3">
                     <button
                       onClick={() => toggleFavorite(s)}
                       title={s.isFavorite ? 'Remove from favorites' : 'Mark as favorite'}
@@ -128,9 +128,9 @@ export default function SuppliersTab() {
                       <Star className={`w-4 h-4 ${s.isFavorite ? 'fill-amber-400 text-amber-500' : 'text-gray-300'}`} />
                     </button>
                   </td>
-                  <td className="px-4 py-3 text-gray-500 font-mono text-xs">{s.id}</td>
-                  <td className="px-4 py-3 font-medium"><PartyLink type="supplier" id={s.id} name={s.name} /></td>
-                  <td className="px-4 py-3">
+                  <td data-label="ID" className="mob-hide px-4 py-3 text-gray-500 font-mono text-xs">{s.id}</td>
+                  <td data-label="Name" className="px-4 py-3 font-medium"><PartyLink type="supplier" id={s.id} name={s.name} /></td>
+                  <td data-label="Type" className="px-4 py-3">
                     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
                       s.type === 'Rice Supplier' ? 'bg-blue-100 text-blue-700' :
                       s.type === 'Broker' ? 'bg-purple-100 text-purple-700' :
@@ -139,14 +139,14 @@ export default function SuppliersTab() {
                       {s.type}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-gray-600">
+                  <td data-label="Location" className="mob-hide px-4 py-3 text-gray-600">
                     <span className="inline-flex items-center gap-1">
                       <MapPin className="w-3.5 h-3.5 text-gray-400" />
                       {s.location}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-gray-900">{s.contact}</td>
-                  <td className="px-4 py-3 text-right">
+                  <td data-label="Contact Person" className="mob-hide px-4 py-3 text-gray-900">{s.contact}</td>
+                  <td data-label="Actions" className="px-4 py-3 text-right">
                     <div className="inline-flex gap-1">
                       <button onClick={() => navigate(`/finance/statements?type=supplier&id=${s.id}`)} className="p-1.5 rounded hover:bg-emerald-50 text-emerald-600" title="View ledger">
                         <BookOpen className="w-4 h-4" />

@@ -89,7 +89,7 @@ export default function ProductsTab() {
           <span>Rice Products: <strong className="text-gray-900">{productsList.filter(p => !p.isByproduct).length}</strong></span>
           <span>By-Products: <strong className="text-amber-700">{productsList.filter(p => p.isByproduct).length}</strong></span>
         </div>
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto mobile-cards">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200">
@@ -104,24 +104,24 @@ export default function ProductsTab() {
             <tbody className="divide-y divide-gray-100">
               {productsList.map(p => (
                 <tr key={p.id} className={`hover:bg-gray-50 transition-colors ${p.isByproduct ? 'bg-amber-50/30' : ''}`}>
-                  <td className="px-4 py-3 text-gray-500 font-mono text-xs">{p.id}</td>
-                  <td className="px-4 py-3 font-medium text-gray-900">{p.name}</td>
-                  <td className="px-4 py-3">
+                  <td data-label="ID" className="mob-hide px-4 py-3 text-gray-500 font-mono text-xs">{p.id}</td>
+                  <td data-label="Product Name" className="px-4 py-3 font-medium text-gray-900">{p.name}</td>
+                  <td data-label="Category" className="px-4 py-3">
                     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
                       p.category === 'By-Product' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'
                     }`}>
                       {p.category || 'Rice'}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-gray-600">{p.grade || '—'}</td>
-                  <td className="px-4 py-3 text-center">
+                  <td data-label="Grade" className="mob-hide px-4 py-3 text-gray-600">{p.grade || '—'}</td>
+                  <td data-label="Type" className="px-4 py-3 text-center">
                     {p.isByproduct ? (
                       <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">By-Product</span>
                     ) : (
                       <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">Finished</span>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-right">
+                  <td data-label="Actions" className="px-4 py-3 text-right">
                     <div className="inline-flex gap-1">
                       <button onClick={() => openEdit(p)} className="p-1.5 rounded hover:bg-blue-50 text-blue-600" title="Edit">
                         <Pencil className="w-4 h-4" />
