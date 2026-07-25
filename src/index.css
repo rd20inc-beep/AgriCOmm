@@ -638,10 +638,17 @@ input, select, textarea { font-size: 14px; }
 .doc-a4-preview .agri-doc > div {
   width: 281mm;
   max-width: 100%;
+  min-height: 194mm;              /* full A4 landscape page height */
   margin: 0 auto !important;
   background: #fff;
   box-shadow: 0 1px 6px rgba(0, 0, 0, 0.15);
   box-sizing: border-box;
+  display: flex;                  /* pin the footer to the bottom, like print */
+  flex-direction: column;
 }
+/* The shared footer (.agri-ftr) is pushed to the page bottom regardless of how
+   little content sits above it — matching the printed / PDF output. !important
+   overrides the footer's inline margin-top (same as the print path does). */
+.doc-a4-preview .agri-doc > div > .agri-ftr { margin-top: auto !important; }
 .doc-a4-preview .agri-doc table { width: 100%; max-width: 100%; }
 .doc-a4-preview .agri-doc td, .doc-a4-preview .agri-doc th { overflow-wrap: anywhere; }

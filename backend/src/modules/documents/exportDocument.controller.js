@@ -119,18 +119,18 @@ function formatMoney(amount, currency = 'USD') {
   return `${currency} ${num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-// The SBP / bank compliance documents (Export Undertaking, Appendix V-10A, ITRS,
-// Indemnity) use the DHA export-office letterhead, not the Uni Plaza head office.
-const DHA_OFFICE = {
+// The company's current export office — the SINGLE source of the address /
+// contact details printed on EVERY export document (header + shared footer).
+// (Previously only the SBP/bank compliance docs used this office while ~9 other
+// documents still showed an old Uni Plaza head-office address; now unified.)
+// Update here once and it changes across all documents.
+const OFFICE_ADDRESS = {
   address: 'Suite # 302, 3rd Floor, Building # 35C, Main Badar Commercial, Phase 5, DHA, Karachi-75500',
   phone: '+92 300 8234924 & +92 300 8997323',
   fax: '',
   email: 'export@agririce.com',
   website: 'www.agririce.com',
 };
-function withDhaOffice(company) {
-  return { ...company, ...DHA_OFFICE };
-}
 
 // Incoterm-aware delivery / freight & insurance terms — used so the compliance
 // documents state the correct responsibilities for the order's incoterm.
@@ -234,15 +234,17 @@ const exportDocumentController = {
         company: {
           name: 'AGRI COMMODITIES',
           tagline: 'Serving Natural Nutrition',
-          address: 'Suite No. 1012, 10th Floor, Uni Plaza, I.I. Chundrigar Road, Karachi-74000, Pakistan',
-          phone: '+92 21 32426534',
-          fax: '+92 2132427990',
-          email: 'export@agririce.com',
-          website: 'www.agririce.com',
           ntn: '1251720-8',
           proprietor: 'AKMAL AMIN PARACHA',
           rexNumber: settings.rex_number || 'PKREXPK12517208',
           kcciMembership: settings.kcci_membership || '29463',
+          // Current registered office — the SINGLE source for the address /
+          // phone / email / website shown on EVERY export document (header + the
+          // shared footer). Update it in ONE place (OFFICE_ADDRESS) and it
+          // updates across all documents. Previously the address differed per
+          // document (an old Uni Plaza address lingered on ~9 docs while the
+          // Commercial Invoice and compliance docs already used this office).
+          ...OFFICE_ADDRESS,
           // Real, selectable bank account (Phase A/B) — masked per viewer.
           bank: companyBank,
         },
@@ -461,7 +463,6 @@ const exportDocumentController = {
           document = {
             type: 'Export Undertaking',
             ...common,
-            company: withDhaOffice(common.company),
             specific: {
               incotermTerms: incotermTerms(common.order.incoterm, common.order.portOfLoading, common.order.destinationPort),
             },
@@ -472,7 +473,6 @@ const exportDocumentController = {
           document = {
             type: 'Appendix V-10A',
             ...common,
-            company: withDhaOffice(common.company),
           };
           break;
 
@@ -480,7 +480,6 @@ const exportDocumentController = {
           document = {
             type: 'ITRS',
             ...common,
-            company: withDhaOffice(common.company),
             specific: {
               incotermTerms: incotermTerms(common.order.incoterm, common.order.portOfLoading, common.order.destinationPort),
             },
@@ -491,7 +490,6 @@ const exportDocumentController = {
           document = {
             type: 'Indemnity',
             ...common,
-            company: withDhaOffice(common.company),
             specific: {
               // Related-party indemnity is between us and the order's buyer (importer).
               counterParty: common.buyer.name || '',
@@ -510,7 +508,6 @@ const exportDocumentController = {
           document = {
             type: 'Commercial Invoice',
             ...common,
-            company: withDhaOffice(common.company),
           };
           break;
 
@@ -532,7 +529,6 @@ const exportDocumentController = {
           document = {
             type: 'Packing Certificate',
             ...common,
-            company: withDhaOffice(common.company),
           };
           break;
 
@@ -540,7 +536,6 @@ const exportDocumentController = {
           document = {
             type: 'Packing List',
             ...common,
-            company: withDhaOffice(common.company),
           };
           break;
 
@@ -555,7 +550,6 @@ const exportDocumentController = {
           document = {
             type: 'Statement of Origin',
             ...common,
-            company: withDhaOffice(common.company),
             specific: {
               originDeclaration: `We M/s. ${common.company.name}, "The exporter under Rex reg #${common.company.rexNumber} of the products covered by this document declares that, except where otherwise clearly indicated, these products are of Pakistani preferential origin according to rules of origin of the Generalized System of Preferences of the European Union and that the origin criterion met is P."`,
             },
@@ -567,7 +561,7 @@ const exportDocumentController = {
           break;
 
         case 'buyer-covering-letter':
-          document = { type: 'Buyer Covering Letter', ...common, company: withDhaOffice(common.company) };
+          document = { type: 'Buyer Covering Letter', ...common };
           break;
 
         case 'lab-test-request':
