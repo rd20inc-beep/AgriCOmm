@@ -21,6 +21,7 @@ export const lotInventoryApi = {
   // Lot-level vehicles + multi-pass Start Milling
   listLotVehicles: (id) => api.get(`/api/lot-inventory/lots/${id}/vehicles`),
   addLotVehicle: (id, data) => api.post(`/api/lot-inventory/lots/${id}/vehicles`, data),
+  updateLotVehicle: (id, vehicleId, data) => api.put(`/api/lot-inventory/lots/${id}/vehicles/${vehicleId}`, data),
   deleteLotVehicle: (id, vehicleId) => api.delete(`/api/lot-inventory/lots/${id}/vehicles/${vehicleId}`),
   startMillingForLot: (id, data) => api.post(`/api/lot-inventory/lots/${id}/start-milling`, data),
   recordTransaction: (lotId, data) => api.post(`/api/lot-inventory/lots/${lotId}/transactions`, data),

@@ -281,6 +281,11 @@ const createPurchaseLot = Joi.object({
     weighbridge_kg: Joi.number().min(0).allow(null, ''),
     accepted_kg: Joi.number().min(0).allow(null, ''),
     arrival_date: Joi.date().iso().allow(null, ''),
+    departure_date: Joi.date().iso().allow(null, ''),
+    // #4 dedicated Gate Pass Number (replaces the free-text notes field) + #3
+    // per-truck hauler.
+    gate_pass_no: Joi.string().max(80).allow(null, ''),
+    hauler_id: Joi.number().integer().positive().allow(null, ''),
     notes: Joi.string().allow(null, ''),
     // Per-truck quality at intake — free-form object, whitelisted server-side.
     quality_json: Joi.object().unknown(true).allow(null),

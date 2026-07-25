@@ -1820,8 +1820,10 @@ COL milling_vehicle_arrivals.bag_size_kg:numeric:NULL
 COL milling_vehicle_arrivals.batch_id:integer:NULL
 COL milling_vehicle_arrivals.created_at:timestamp with time zone:NULL
 COL milling_vehicle_arrivals.created_by:integer:NULL
+COL milling_vehicle_arrivals.departure_date:date:NULL
 COL milling_vehicle_arrivals.driver_name:character varying:NULL
 COL milling_vehicle_arrivals.driver_phone:character varying:NULL
+COL milling_vehicle_arrivals.gate_pass_no:character varying:NULL
 COL milling_vehicle_arrivals.hauler_id:integer:NULL
 COL milling_vehicle_arrivals.id:integer:NOT NULL
 COL milling_vehicle_arrivals.lot_id:integer:NULL
