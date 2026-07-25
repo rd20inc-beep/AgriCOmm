@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Search, Plus, Truck, Package, DollarSign, CheckCircle2, AlertCircle, Loader2, Star } from 'lucide-react';
 import Drawer from '../../../components/Drawer';
 import SupplierPicker from '../../../components/SupplierPicker';
@@ -108,11 +108,32 @@ export default function PurchaseLotDrawer({
   const [localSuppliers, setLocalSuppliers] = useState([]);
   const [localProducts, setLocalProducts] = useState([]);
   const [lotNoTouched, setLotNoTouched] = useState(false); // user edited the lot no
+  // Item 1: default the commission recipient (broker) to the selected supplier
+  // until the user picks a different broker. Item 2: auto-fill bags from
+  // received weight ÷ bag size until the user hand-adjusts the bag count.
+  const brokerTouched = useRef(false);
+  const bagsTouched = useRef(false);
+
+  // Item 2: keep the bag count in sync with received weight ÷ bag size, until
+  // the user hand-adjusts it (then bagsTouched stops the auto-fill so we never
+  // silently overwrite their physical count).
+  useEffect(() => {
+    if (bagsTouched.current) return;
+    const wk = parseFloat(form.weight_kg) || 0;
+    const bs = parseInt(form.bag_size_kg, 10) || 0;
+    if (wk > 0 && bs > 0) {
+      const raw = wk / bs;
+      const val = Number.isInteger(raw) ? raw : Math.ceil(raw);
+      setForm(prev => (String(prev.total_bags) === String(val) ? prev : { ...prev, total_bags: String(val) }));
+    }
+  }, [form.weight_kg, form.bag_size_kg]);
 
   useEffect(() => {
     if (isOpen) {
       setForm(defaultForm());
       setLotNoTouched(false);
+      brokerTouched.current = false;
+      bagsTouched.current = false;
       setShowMore(false);
       setShowVehicles(false);
       setVehQualityOpen({});
@@ -234,6 +255,19 @@ export default function PurchaseLotDrawer({
   const bagSize = parseInt(form.bag_size_kg, 10) || 0;
   const detectedBagSize = snapBagSizeKg(avgBagKg); // 49.3 → 50, 24.5 → 25, 45 → 45
   const bagSizeMismatch = avgBagKg > 0 && detectedBagSize > 0 && detectedBagSize !== bagSize;
+  // Item 2: bags implied by received weight ÷ bag size. A whole result is
+  // "exact"; a fractional one means the last bag is partially filled, so the
+  // suggested physical count rounds up.
+  const calcBagsRaw = bagSize > 0 && weightKg > 0 ? weightKg / bagSize : 0;
+  const calcBagsExact = calcBagsRaw > 0 && Number.isInteger(calcBagsRaw);
+  const suggestedBags = calcBagsRaw > 0 ? Math.ceil(calcBagsRaw) : 0;
+  const bagsHint = calcBagsRaw > 0
+    ? (bagsTouched.current && bags !== suggestedBags
+        ? `Calculated ${calcBagsExact ? suggestedBags : `≈${calcBagsRaw.toFixed(2)} → ${suggestedBags}`} — you set ${bags}`
+        : (calcBagsExact
+            ? `${suggestedBags} bags (exact)`
+            : `≈${calcBagsRaw.toFixed(2)} → ${suggestedBags} bags (last partially filled)`))
+    : (avgBagKg > 0 ? `${avgBagKg.toFixed(2)} kg/bag avg` : null);
   const totalValue = weightKg * ratePerKg;
   // Commission (per bag/katta) + transport fold into the Final Cost per KG (and
   // become separate broker/hauler payables server-side).
@@ -496,7 +530,14 @@ export default function PurchaseLotDrawer({
           </div>
           <SearchableSelect
             value={form.supplier_id}
-            onChange={(id) => setForm(prev => ({ ...prev, supplier_id: id }))}
+            onChange={(id) => setForm(prev => ({
+              ...prev,
+              supplier_id: id,
+              // Item 1: default Commission Paid To / Broker to the supplier,
+              // unless the user has already chosen a different broker. Stored
+              // separately (broker_id) so reporting stays accurate.
+              broker_id: brokerTouched.current ? prev.broker_id : (id || ''),
+            }))}
             search={supplierSearch}
             onSearchChange={setSupplierSearch}
             items={filteredSuppliers}
@@ -635,9 +676,9 @@ export default function PurchaseLotDrawer({
             label="Bags"
             type="number" step="1" min="0"
             value={form.total_bags}
-            onChange={(v) => setForm(prev => ({ ...prev, total_bags: v }))}
-            placeholder="e.g. 600"
-            hint={avgBagKg > 0 ? `${avgBagKg.toFixed(2)} kg/bag avg` : null}
+            onChange={(v) => { bagsTouched.current = true; setForm(prev => ({ ...prev, total_bags: v })); }}
+            placeholder="auto from weight ÷ bag size"
+            hint={bagsHint}
           />
         </div>
 
@@ -769,9 +810,9 @@ export default function PurchaseLotDrawer({
             </div>
             <div>
               <SupplierPicker
-                label={<span className="text-xs font-medium text-gray-600">Broker (paid the commission)</span>}
+                label={<span className="text-xs font-medium text-gray-600">Commission paid to (broker)</span>}
                 value={form.broker_id}
-                onChange={(id) => setForm(prev => ({ ...prev, broker_id: id }))}
+                onChange={(id) => { brokerTouched.current = true; setForm(prev => ({ ...prev, broker_id: id })); }}
                 suppliers={mergedSuppliers}
                 onCreated={(s) => setLocalSuppliers(prev => [s, ...prev])}
                 addToast={addToast}
