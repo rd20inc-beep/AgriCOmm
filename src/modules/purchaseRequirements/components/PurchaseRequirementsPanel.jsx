@@ -68,7 +68,7 @@ export default function PurchaseRequirementsPanel({ embedded = false, defaultTab
   );
 
   const table = (
-    <div className={embedded ? 'overflow-x-auto border border-gray-100 rounded-lg' : 'bg-white rounded-xl border border-gray-200 overflow-x-auto'}>
+    <div className={embedded ? 'overflow-x-auto mobile-cards border border-gray-100 rounded-lg' : 'bg-white rounded-xl border border-gray-200 overflow-x-auto mobile-cards'}>
       <table className="w-full text-sm">
         <thead>
           <tr className="bg-gray-50 border-b text-xs text-gray-500 uppercase">
@@ -89,14 +89,14 @@ export default function PurchaseRequirementsPanel({ embedded = false, defaultTab
             <tr><td colSpan={8} className="px-4 py-10 text-center text-gray-400">No purchase requirements.</td></tr>
           ) : rows.map((r) => (
             <tr key={r.id} className="hover:bg-gray-50">
-              <td className="px-4 py-2.5 font-medium text-gray-800">{r.pr_no}</td>
-              <td className="px-4 py-2.5 text-gray-700">{r.item_name}</td>
-              <td className="px-4 py-2.5 text-right tabular-nums">{Math.round(parseFloat(r.shortage_qty) || 0).toLocaleString()} {r.unit}</td>
-              <td className="px-4 py-2.5 text-right tabular-nums">{money(r.est_amount, r.currency)}</td>
-              {!masked && <td className="px-4 py-2.5 text-gray-500">{r.department}</td>}
-              {!masked && <td className="px-4 py-2.5 text-gray-500">{r.linked_ref || '—'}</td>}
-              <td className="px-4 py-2.5 text-center"><span className={`px-2 py-0.5 rounded text-[11px] font-semibold capitalize ${STATUS_TONE[r.status] || 'bg-gray-100 text-gray-500'}`}>{r.status}</span></td>
-              <td className="px-4 py-2.5">
+              <td data-label="PR #" className="px-4 py-2.5 font-medium text-gray-800">{r.pr_no}</td>
+              <td data-label="Item" className="px-4 py-2.5 text-gray-700">{r.item_name}</td>
+              <td data-label="Shortage" className="px-4 py-2.5 text-right tabular-nums">{Math.round(parseFloat(r.shortage_qty) || 0).toLocaleString()} {r.unit}</td>
+              <td data-label="Est. Amount" className="px-4 py-2.5 text-right tabular-nums">{money(r.est_amount, r.currency)}</td>
+              {!masked && <td data-label="Department" className="mob-hide px-4 py-2.5 text-gray-500">{r.department}</td>}
+              {!masked && <td data-label="Ref" className="mob-hide px-4 py-2.5 text-gray-500">{r.linked_ref || '—'}</td>}
+              <td data-label="Status" className="px-4 py-2.5 text-center"><span className={`px-2 py-0.5 rounded text-[11px] font-semibold capitalize ${STATUS_TONE[r.status] || 'bg-gray-100 text-gray-500'}`}>{r.status}</span></td>
+              <td data-label="Actions" className="px-4 py-2.5">
                 <div className="flex items-center justify-end gap-1.5">
                   {r.status === 'pending' && canApprove && (
                     <>

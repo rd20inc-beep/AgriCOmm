@@ -119,7 +119,7 @@ export default function SampleAnalysis() {
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto mobile-cards">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-gray-500 text-xs">
               <tr>
@@ -143,21 +143,21 @@ export default function SampleAnalysis() {
                   const editable = s.status !== 'Converted';
                   return (
                     <tr key={s.id} className="hover:bg-gray-50">
-                      <td className="px-2 py-2 text-center"><input type="checkbox" checked={selected.has(s.id)} onChange={() => toggleSel(s.id)} /></td>
-                      <td className="px-3 py-2"><button onClick={() => setDrawer({ mode: 'analyze', sample: s })} className="font-mono text-blue-600 hover:underline">{s.sample_no}</button><div className="text-[11px] text-gray-400">{String(s.sample_date).slice(0, 10)}</div></td>
-                      <td className="px-3 py-2 text-gray-700 max-w-[10rem] truncate" title={s.supplier_name || ''}>{s.supplier_name || '—'}</td>
-                      <td className="px-3 py-2 text-gray-700">{s.variety || s.product_name || '—'}{s.claimed_grade ? <span className="text-gray-400"> ({s.claimed_grade})</span> : ''}</td>
-                      <td className="px-3 py-2 text-right tabular-nums">{kg(s.offered_qty_kg)}<div className="text-[11px] text-gray-400">{rs(s.offered_rate_per_kg)}/kg</div></td>
-                      <td className="px-3 py-2 text-right tabular-nums">{kg(m.expectedFinishedKg)}<div className="text-[11px] text-gray-400">{m.expectedFinishedPct ?? '—'}%</div></td>
-                      <td className="px-3 py-2 text-right tabular-nums font-medium">{rs(m.expectedCostPerFinishedKg)}</td>
-                      <td className="px-3 py-2 text-center">
+                      <td data-label="" className="mob-hide px-2 py-2 text-center"><input type="checkbox" checked={selected.has(s.id)} onChange={() => toggleSel(s.id)} /></td>
+                      <td data-label="Sample" className="px-3 py-2"><button onClick={() => setDrawer({ mode: 'analyze', sample: s })} className="font-mono text-blue-600 hover:underline">{s.sample_no}</button><div className="text-[11px] text-gray-400">{String(s.sample_date).slice(0, 10)}</div></td>
+                      <td data-label="Supplier" className="mob-hide px-3 py-2 text-gray-700 max-w-[10rem] truncate" title={s.supplier_name || ''}>{s.supplier_name || '—'}</td>
+                      <td data-label="Variety / Grade" className="px-3 py-2 text-gray-700">{s.variety || s.product_name || '—'}{s.claimed_grade ? <span className="text-gray-400"> ({s.claimed_grade})</span> : ''}</td>
+                      <td data-label="Offered" className="px-3 py-2 text-right tabular-nums">{kg(s.offered_qty_kg)}<div className="text-[11px] text-gray-400">{rs(s.offered_rate_per_kg)}/kg</div></td>
+                      <td data-label="Exp. Finished" className="mob-hide px-3 py-2 text-right tabular-nums">{kg(m.expectedFinishedKg)}<div className="text-[11px] text-gray-400">{m.expectedFinishedPct ?? '—'}%</div></td>
+                      <td data-label="Exp. Cost/kg" className="mob-hide px-3 py-2 text-right tabular-nums font-medium">{rs(m.expectedCostPerFinishedKg)}</td>
+                      <td data-label="Status" className="px-3 py-2 text-center">
                         {editable ? (
                           <select value={s.status} onChange={(e) => statusMut.mutate({ id: s.id, status: e.target.value })} className={`text-[11px] font-medium border rounded-full px-2 py-0.5 cursor-pointer ${STATUS_CLS[s.status] || ''}`}>
                             {SHORTLIST.map((st) => <option key={st} value={st}>{st}</option>)}
                           </select>
                         ) : <span className={`inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium border ${STATUS_CLS[s.status]}`}>{s.status}</span>}
                       </td>
-                      <td className="px-3 py-2 text-right whitespace-nowrap">
+                      <td data-label="Actions" className="px-3 py-2 text-right whitespace-nowrap">
                         {editable && <button onClick={() => setDrawer({ mode: 'analyze', sample: s })} className="text-xs text-blue-600 hover:underline mr-2">Analyze</button>}
                         {canConvert && <button onClick={() => setDrawer({ mode: 'convert', sample: s })} className="text-xs font-medium text-emerald-700 hover:underline mr-2 inline-flex items-center gap-0.5">Convert <ArrowRight size={11} /></button>}
                         {s.converted_lot_no && <Link to={`/lot-inventory/${s.converted_lot_id}`} className="text-xs text-gray-500 hover:underline mr-2">{s.converted_lot_no}</Link>}
@@ -303,14 +303,14 @@ function AnalysisDrawer({ sampleId, onClose, onDone, addToast }) {
           {hasBoth && (
             <div className="mt-2">
               <p className="text-sm font-semibold text-gray-800 mb-2">Initial vs Final differences</p>
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto mobile-cards">
                 <table className="w-full text-xs">
                   <thead className="text-gray-400"><tr><th className="text-left py-1">Field</th><th className="text-right">Initial</th><th className="text-right">Final</th><th className="text-right">Δ</th></tr></thead>
                   <tbody>
                     {ANALYSIS_FIELDS.filter((f) => initial[f.k] != null || final[f.k] != null).map((f) => {
                       const i = parseFloat(initial[f.k]); const fi = parseFloat(final[f.k]);
                       const d = (Number.isFinite(fi) ? fi : 0) - (Number.isFinite(i) ? i : 0);
-                      return <tr key={f.k} className="border-t border-gray-100"><td className="py-1 text-gray-600">{f.l}</td><td className="text-right tabular-nums">{initial[f.k] ?? '—'}</td><td className="text-right tabular-nums">{final[f.k] ?? '—'}</td><td className={`text-right tabular-nums font-medium ${d > 0 ? 'text-red-600' : d < 0 ? 'text-emerald-600' : 'text-gray-400'}`}>{d ? (d > 0 ? '+' : '') + d.toFixed(2) : '—'}</td></tr>;
+                      return <tr key={f.k} className="border-t border-gray-100"><td data-label="Δ" data-label="Final" data-label="Initial" data-label="Field" className="py-1 text-gray-600">{f.l}</td><td className="text-right tabular-nums">{initial[f.k] ?? '—'}</td><td className="text-right tabular-nums">{final[f.k] ?? '—'}</td><td className={`text-right tabular-nums font-medium ${d > 0 ? 'text-red-600' : d < 0 ? 'text-emerald-600' : 'text-gray-400'}`}>{d ? (d > 0 ? '+' : '') + d.toFixed(2) : '—'}</td></tr>;
                     })}
                   </tbody>
                 </table>
