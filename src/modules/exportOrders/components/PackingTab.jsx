@@ -178,7 +178,7 @@ export default function PackingTab({ order, onUpdated }) {
                   <div className="px-5 py-3 border-b border-gray-100 bg-gray-50">
                     <h4 className="text-sm font-semibold text-gray-700">Per-item Packing ({items.length})</h4>
                   </div>
-                  <table className="w-full">
+                  <table className="w-full mobile-cards">
                     <thead>
                       <tr className="border-b border-gray-100 text-xs text-gray-500 uppercase">
                         <th className="px-4 py-2 text-left">#</th>
@@ -193,14 +193,14 @@ export default function PackingTab({ order, onUpdated }) {
                         const b = itemBag(it);
                         return (
                           <tr key={it.id || i} className="border-b border-gray-50 last:border-0 hover:bg-gray-50">
-                            <td className="px-4 py-2.5 text-sm text-gray-500">{b.lineNo || i + 1}</td>
-                            <td className="px-4 py-2.5 text-sm font-medium text-gray-900">{b.product || '—'}</td>
-                            <td className="px-4 py-2.5 text-sm">{b.type || '—'}</td>
-                            <td className="px-4 py-2.5 text-sm whitespace-nowrap">
+                            <td data-label="#" className="mob-hide px-4 py-2.5 text-sm text-gray-500">{b.lineNo || i + 1}</td>
+                            <td data-label="Product" className="px-4 py-2.5 text-sm font-medium text-gray-900">{b.product || '—'}</td>
+                            <td data-label="Bag Type" className="px-4 py-2.5 text-sm">{b.type || '—'}</td>
+                            <td data-label="Bag Size" className="px-4 py-2.5 text-sm whitespace-nowrap">
                               {b.sizeKg ? `${b.sizeKg} KG` : '—'}
                               {b.masterKg ? <span className="text-amber-700"> · master {b.masterKg} KG</span> : ''}
                             </td>
-                            <td className="px-4 py-2.5 text-sm text-gray-700">{b.brand || '—'}</td>
+                            <td data-label="Brand / Marking" className="px-4 py-2.5 text-sm text-gray-700">{b.brand || '—'}</td>
                           </tr>
                         );
                       })}
@@ -215,7 +215,7 @@ export default function PackingTab({ order, onUpdated }) {
                   <div className="px-5 py-3 border-b border-gray-100 bg-gray-50">
                     <h4 className="text-sm font-semibold text-gray-700">Packing Lines ({packingLines.length})</h4>
                   </div>
-                  <table className="w-full">
+                  <table className="w-full mobile-cards">
                     <thead>
                       <tr className="border-b border-gray-100 text-xs text-gray-500 uppercase">
                         <th className="px-4 py-2 text-left">#</th>
@@ -231,20 +231,20 @@ export default function PackingTab({ order, onUpdated }) {
                     <tbody>
                       {packingLines.map((line, i) => (
                         <tr key={line.id || i} className="border-b border-gray-50 hover:bg-gray-50">
-                          <td className="px-4 py-2.5 text-sm text-gray-500">{line.lineNo || line.line_no || i + 1}</td>
-                          <td className="px-4 py-2.5 text-sm font-medium">{line.bagType || line.bag_type || '—'}</td>
-                          <td className="px-4 py-2.5 text-sm">{line.bagQuality || line.bag_quality || '—'}</td>
-                          <td className="px-4 py-2.5 text-sm text-right tabular-nums">{line.fillWeightKg || line.fill_weight_kg || '—'}</td>
-                          <td className="px-4 py-2.5 text-sm text-right tabular-nums font-medium">{(line.bagCount || line.bag_count || 0).toLocaleString()}</td>
-                          <td className="px-4 py-2.5 text-sm text-right tabular-nums">{((parseFloat(line.fillWeightKg || line.fill_weight_kg || 0)) * (parseInt(line.bagCount || line.bag_count || 0))).toLocaleString()} KG</td>
-                          <td className="px-4 py-2.5 text-sm">{line.bagPrinting || line.bag_printing || '—'}</td>
-                          <td className="px-4 py-2.5 text-sm text-gray-500">{line.notes || '—'}</td>
+                          <td data-label="#" className="mob-hide px-4 py-2.5 text-sm text-gray-500">{line.lineNo || line.line_no || i + 1}</td>
+                          <td data-label="Bag Type" className="px-4 py-2.5 text-sm font-medium">{line.bagType || line.bag_type || '—'}</td>
+                          <td data-label="Quality" className="px-4 py-2.5 text-sm">{line.bagQuality || line.bag_quality || '—'}</td>
+                          <td data-label="Fill (KG)" className="mob-hide px-4 py-2.5 text-sm text-right tabular-nums">{line.fillWeightKg || line.fill_weight_kg || '—'}</td>
+                          <td data-label="Bags" className="px-4 py-2.5 text-sm text-right tabular-nums font-medium">{(line.bagCount || line.bag_count || 0).toLocaleString()}</td>
+                          <td data-label="Total (KG)" className="px-4 py-2.5 text-sm text-right tabular-nums">{((parseFloat(line.fillWeightKg || line.fill_weight_kg || 0)) * (parseInt(line.bagCount || line.bag_count || 0))).toLocaleString()} KG</td>
+                          <td data-label="Printing" className="mob-hide px-4 py-2.5 text-sm">{line.bagPrinting || line.bag_printing || '—'}</td>
+                          <td data-label="Notes" className="mob-hide px-4 py-2.5 text-sm text-gray-500">{line.notes || '—'}</td>
                         </tr>
                       ))}
                       <tr className="bg-gray-50 font-semibold text-sm">
-                        <td colSpan={4} className="px-4 py-2 text-right">Total</td>
-                        <td className="px-4 py-2 text-right tabular-nums">{packingLines.reduce((s, l) => s + (parseInt(l.bagCount || l.bag_count || 0)), 0).toLocaleString()}</td>
-                        <td className="px-4 py-2 text-right tabular-nums">{packingLines.reduce((s, l) => s + (parseFloat(l.fillWeightKg || l.fill_weight_kg || 0) * parseInt(l.bagCount || l.bag_count || 0)), 0).toLocaleString()} KG</td>
+                        <td colSpan={4} className="mob-full px-4 py-2 text-right">Total</td>
+                        <td data-label="Bags" className="px-4 py-2 text-right tabular-nums">{packingLines.reduce((s, l) => s + (parseInt(l.bagCount || l.bag_count || 0)), 0).toLocaleString()}</td>
+                        <td data-label="Total (KG)" className="px-4 py-2 text-right tabular-nums">{packingLines.reduce((s, l) => s + (parseFloat(l.fillWeightKg || l.fill_weight_kg || 0) * parseInt(l.bagCount || l.bag_count || 0)), 0).toLocaleString()} KG</td>
                         <td colSpan={2}></td>
                       </tr>
                     </tbody>

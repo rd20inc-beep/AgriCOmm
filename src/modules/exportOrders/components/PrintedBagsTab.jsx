@@ -139,7 +139,7 @@ export default function PrintedBagsTab({ order, onUpdated }) {
         </div>
       ) : (
         <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-          <table className="w-full text-sm">
+          <table className="w-full text-sm mobile-cards">
             <thead className="bg-gray-50 text-gray-500 text-xs uppercase">
               <tr>
                 <th className="text-left px-4 py-2 font-medium">Order</th>
@@ -156,18 +156,18 @@ export default function PrintedBagsTab({ order, onUpdated }) {
             <tbody className="divide-y divide-gray-100">
               {rows.map(r => (
                 <tr key={r.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-2 font-mono text-xs text-gray-600">{r.pbo_no}</td>
-                  <td className="px-4 py-2">
+                  <td data-label="Order" className="px-4 py-2 font-mono text-xs text-gray-600">{r.pbo_no}</td>
+                  <td data-label="Bag / Printing" className="px-4 py-2">
                     <div className="font-medium text-gray-900">{r.bag_type_name || r.bag_type_current_name || '—'}{r.bag_size_kg ? ` · ${r.bag_size_kg}kg` : ''}</div>
                     {(r.printing || r.brand_marking) && <div className="text-xs text-gray-500">{[r.printing, r.brand_marking].filter(Boolean).join(' · ')}</div>}
                   </td>
-                  <td className="px-4 py-2 text-gray-700">{r.vendor_name || <span className="text-gray-400">—</span>}</td>
-                  <td className="px-4 py-2 text-right text-gray-700">{(parseInt(r.quantity, 10) || 0).toLocaleString()}</td>
-                  <td className="px-4 py-2 text-right text-gray-700">{rs(r.unit_cost)}</td>
-                  <td className="px-4 py-2 text-right font-semibold text-gray-900">{rs(r.total_amount)}</td>
-                  <td className="px-4 py-2"><StatusPill status={r.status} /></td>
-                  <td className="px-4 py-2"><PayPill status={r.payment_status} outstanding={r.outstanding} /></td>
-                  <td className="px-4 py-2">
+                  <td data-label="Vendor" className="mob-hide px-4 py-2 text-gray-700">{r.vendor_name || <span className="text-gray-400">—</span>}</td>
+                  <td data-label="Qty" className="px-4 py-2 text-right text-gray-700">{(parseInt(r.quantity, 10) || 0).toLocaleString()}</td>
+                  <td data-label="Unit" className="mob-hide px-4 py-2 text-right text-gray-700">{rs(r.unit_cost)}</td>
+                  <td data-label="Total" className="px-4 py-2 text-right font-semibold text-gray-900">{rs(r.total_amount)}</td>
+                  <td data-label="Status" className="px-4 py-2"><StatusPill status={r.status} /></td>
+                  <td data-label="Payment" className="px-4 py-2"><PayPill status={r.payment_status} outstanding={r.outstanding} /></td>
+                  <td data-label="" className="px-4 py-2">
                     <div className="flex items-center justify-end gap-1.5">
                       {r.status !== 'Received' && (
                         <button onClick={() => receive(r)} disabled={busyId === r.id} title="Mark received"

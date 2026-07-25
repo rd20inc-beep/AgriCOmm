@@ -59,7 +59,7 @@ export default function MaterialRequirementsCard({ order }) {
       {loading ? (
         <div className="text-sm text-gray-400 py-4 text-center">Calculating…</div>
       ) : (
-        <table className="w-full text-sm">
+        <table className="w-full text-sm mobile-cards">
           <thead>
             <tr className="text-xs text-gray-500 uppercase border-b">
               <th className="text-left py-2">Material</th>
@@ -74,13 +74,13 @@ export default function MaterialRequirementsCard({ order }) {
               const short = parseFloat(l.shortage) || 0;
               return (
                 <tr key={i}>
-                  <td className="py-2 text-gray-800">{l.label}</td>
-                  <td className="py-2 text-right tabular-nums">{n0(l.required)} {l.unit}</td>
-                  <td className="py-2 text-right tabular-nums text-gray-500">{n0(l.available)}</td>
-                  <td className={`py-2 text-right tabular-nums font-medium ${short > 0 ? 'text-amber-700' : 'text-emerald-600'}`}>
+                  <td data-label="Material" className="py-2 text-gray-800">{l.label}</td>
+                  <td data-label="Required" className="py-2 text-right tabular-nums">{n0(l.required)} {l.unit}</td>
+                  <td data-label="In Stock" className="mob-hide py-2 text-right tabular-nums text-gray-500">{n0(l.available)}</td>
+                  <td data-label="Shortage" className={`py-2 text-right tabular-nums font-medium ${short > 0 ? 'text-amber-700' : 'text-emerald-600'}`}>
                     {short > 0 ? `${n0(short)} short` : 'OK'}
                   </td>
-                  <td className="py-2 text-right tabular-nums text-gray-500">{l.est_amount != null ? `Rs ${n0(l.est_amount)}` : '—'}</td>
+                  <td data-label="Est. Cost" className="mob-hide py-2 text-right tabular-nums text-gray-500">{l.est_amount != null ? `Rs ${n0(l.est_amount)}` : '—'}</td>
                 </tr>
               );
             })}

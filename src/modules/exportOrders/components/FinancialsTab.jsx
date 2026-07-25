@@ -126,7 +126,7 @@ export default function FinancialsTab({ order, formatCurrency, formatPKR, totalC
                 <a href={bp.batchHref} className="text-sm font-medium text-blue-600 hover:underline">Batch {bp.batchNo}</a>
                 {bp.byproductRecovery > 0 && <span className="text-xs text-emerald-700">By-product recovery {formatCost(bp.byproductRecovery)}</span>}
               </div>
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto mobile-cards">
                 <table className="w-full text-sm">
                   <thead className="text-gray-500 text-xs">
                     <tr>
@@ -142,13 +142,13 @@ export default function FinancialsTab({ order, formatCurrency, formatPKR, totalC
                   <tbody className="divide-y divide-gray-100">
                     {bp.outputs.map((o) => (
                       <tr key={o.lotId}>
-                        <td className="px-6 py-2"><a href={o.href} className="text-blue-600 hover:underline">{o.productGrade}</a></td>
-                        <td className="px-3 py-2 text-gray-600">{o.type === 'byproduct' ? 'by-product' : 'finished'}</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{Math.round(o.producedKg).toLocaleString()} kg</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{o.costPerKg ? formatCost(o.costPerKg) : '—'}</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{o.salePricePerKg ? formatCost(o.salePricePerKg) : '—'}</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{o.recoveryValue ? formatCost(o.recoveryValue) : '—'}</td>
-                        <td className="px-3 py-2 text-gray-600">{o.warehouse || '—'}</td>
+                        <td data-label="Product / grade" className="px-6 py-2"><a href={o.href} className="text-blue-600 hover:underline">{o.productGrade}</a></td>
+                        <td data-label="Type" className="mob-hide px-3 py-2 text-gray-600">{o.type === 'byproduct' ? 'by-product' : 'finished'}</td>
+                        <td data-label="Produced" className="px-3 py-2 text-right tabular-nums">{Math.round(o.producedKg).toLocaleString()} kg</td>
+                        <td data-label="Cost/kg" className="mob-hide px-3 py-2 text-right tabular-nums">{o.costPerKg ? formatCost(o.costPerKg) : '—'}</td>
+                        <td data-label="Sale price/kg" className="mob-hide px-3 py-2 text-right tabular-nums">{o.salePricePerKg ? formatCost(o.salePricePerKg) : '—'}</td>
+                        <td data-label="Recovery value" className="px-3 py-2 text-right tabular-nums">{o.recoveryValue ? formatCost(o.recoveryValue) : '—'}</td>
+                        <td data-label="Warehouse" className="mob-hide px-3 py-2 text-gray-600">{o.warehouse || '—'}</td>
                       </tr>
                     ))}
                   </tbody>
