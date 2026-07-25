@@ -4,6 +4,7 @@ import { useAuth } from '../../../context/AuthContext';
 
 import CustomersTab from './admin/CustomersTab';
 import SuppliersTab from './admin/SuppliersTab';
+import HaulersTab from './admin/HaulersTab';
 import ProductsTab from './admin/ProductsTab';
 import CategoriesTab from './admin/CategoriesTab';
 import BagTypesTab from './admin/BagTypesTab';
@@ -27,6 +28,7 @@ const tabs = [
   { key: 'approvals', label: 'Approvals', icon: Inbox, badge: 'pendingApprovalsCount' },
   { key: 'customers', label: 'Customers', icon: Users },
   { key: 'suppliers', label: 'Suppliers', icon: Truck },
+  { key: 'haulers', label: 'Haulers', icon: Truck },
   { key: 'products', label: 'Products', icon: Package },
   { key: 'categories', label: 'Categories', icon: Tags },
   { key: 'bagTypes', label: 'Bag Types', icon: ShoppingBag },
@@ -49,6 +51,7 @@ const tabComponents = {
   approvals: MasterDataApprovalsTab,
   customers: CustomersTab,
   suppliers: SuppliersTab,
+  haulers: HaulersTab,
   products: ProductsTab,
   categories: CategoriesTab,
   bagTypes: BagTypesTab,
@@ -74,7 +77,7 @@ const tabByKey = Object.fromEntries(tabs.map((t) => [t.key, t]));
 // group = { label, icon, keys:[…] } (keys reference the flat tabs above).
 const NAV = [
   { key: 'approvals' },
-  { label: 'Master Data', icon: Database,  keys: ['customers', 'suppliers', 'products', 'categories', 'bagTypes', 'costCategories', 'expenseVendors', 'bankAccounts'] },
+  { label: 'Master Data', icon: Database,  keys: ['customers', 'suppliers', 'haulers', 'products', 'categories', 'bagTypes', 'costCategories', 'expenseVendors', 'bankAccounts'] },
   { label: 'Facilities',  icon: Warehouse, keys: ['warehouses', 'mills'] },
   { label: 'Documents',   icon: Files,     keys: ['docTemplates', 'whatsapp'] },
   { label: 'Access',      icon: Shield,    keys: ['users', 'permissions', 'devices', 'mobileNav'] },

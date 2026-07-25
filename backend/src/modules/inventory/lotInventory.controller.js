@@ -297,7 +297,12 @@ function lotRowQuery() {
     .leftJoin('warehouses as w', 'l.warehouse_id', 'w.id')
     .leftJoin('products as p', 'l.product_id', 'p.id')
     .leftJoin('suppliers as s', 'l.supplier_id', 's.id')
-    .select('l.*', 'w.name as warehouse_name', 'p.name as product_name', 'p.code as product_code', 's.name as supplier_name');
+    .leftJoin('haulers as h', 'l.hauler_id', 'h.id')
+    .leftJoin('suppliers as tv', 'l.transport_vendor_id', 'tv.id')
+    .select('l.*', 'w.name as warehouse_name', 'p.name as product_name', 'p.code as product_code',
+      's.name as supplier_name',
+      db.raw('COALESCE(h.name, tv.name) as transport_vendor_name'),
+      'h.name as hauler_name');
 }
 
 module.exports = {
@@ -400,10 +405,12 @@ module.exports = {
         .leftJoin('products as p', 'l.product_id', 'p.id')
         .leftJoin('suppliers as s', 'l.supplier_id', 's.id')
         .leftJoin('suppliers as tv', 'l.transport_vendor_id', 'tv.id')
+        .leftJoin('haulers as h', 'l.hauler_id', 'h.id')
         .where(isNumeric ? { 'l.id': +id } : { 'l.lot_no': id })
         .select('l.*', 'w.name as warehouse_name', 'p.name as product_name',
           's.name as supplier_name', 's.phone as supplier_phone', 's.address as supplier_address', 's.email as supplier_email',
-          'tv.name as transport_vendor_name')
+          db.raw('COALESCE(h.name, tv.name) as transport_vendor_name'),
+          'h.name as hauler_name')
         .first();
       if (!lot) return res.status(404).json({ success: false, message: 'Lot not found.' });
       // #9-scoping: same guard as the lot detail — no out-of-scope lot by direct id.
@@ -645,7 +652,7 @@ module.exports = {
       const {
         item_name, type = 'raw', entity = 'mill', warehouse_id, product_id,
         lot_no: customLotNo,
-        supplier_id, broker_id, transport_vendor_id, purchase_date, crop_year,
+        supplier_id, broker_id, transport_vendor_id, hauler_id, purchase_date, crop_year,
         // Commission (per bag/katta) → broker payable; folds into landed cost.
         commission_per_bag = 0, commission_total: commissionTotalInput = 0,
         variety, grade, moisture_pct, broken_pct, sortex_status, whiteness, quality_notes,
@@ -705,7 +712,10 @@ module.exports = {
         ? uc.round2(commissionPerBag * totalBags)
         : (parseFloat(commissionTotalInput) || 0);
       const transportCost = parseFloat(transport_cost) || 0;
-      const haulerId = (transport_vendor_id != null && transport_vendor_id !== '') ? parseInt(transport_vendor_id, 10) : null;
+      // Transport now points at the dedicated haulers registry (item #5). Prefer
+      // hauler_id; fall back to transport_vendor_id for legacy/offline payloads.
+      const rawHauler = (hauler_id != null && hauler_id !== '') ? hauler_id : transport_vendor_id;
+      const haulerId = (rawHauler != null && rawHauler !== '') ? parseInt(rawHauler, 10) : null;
       const brokerIdNum = (broker_id != null && broker_id !== '') ? parseInt(broker_id, 10) : null;
       // Supplier-owed direct costs (transport + commission are NOT here — they go
       // to the hauler/broker payables).
@@ -864,7 +874,8 @@ module.exports = {
           purchase_amount: purchaseAmount,
           // Costs
           transport_cost: transportCost,
-          transport_vendor_id: haulerId,
+          hauler_id: haulerId,           // dedicated haulers registry (item #5)
+          transport_vendor_id: null,     // legacy supplier-based field, no longer written
           commission_per_bag: commissionPerBag || 0,
           commission_total: commissionTotal || 0,
           labor_cost: parseFloat(labor_cost) || 0,
@@ -952,12 +963,19 @@ module.exports = {
         // each uses the purchase_invoice rule (Dr Raw Inventory / Cr party AP) —
         // NOT the expense rule — keeping the books balanced (Dr 1210 = supplier +
         // hauler + broker) and the cost inside inventory, not double-expensed.
-        const postPartyCost = async ({ amount, partyId, category, sourceTable, refType, label }) => {
+        // partyKind selects the AP counterparty column: brokers/suppliers ride
+        // supplier_id (party ledger unchanged); the hauler freight payable rides
+        // the new hauler_id (supplier_id NULL) — the GL journal is identical
+        // (Dr Raw Inventory / Cr AP), only the party STAMP differs, so the books
+        // stay balanced without a finance-engine rewrite.
+        const postPartyCost = async ({ amount, partyId, partyKind = 'supplier', category, sourceTable, refType, label }) => {
           if (!(amount > 0) || !partyId) return;
           const payNo = await generatePayNo(trx);
           await trx('payables').insert({
             pay_no: payNo, entity: 'mill', payable_type: 'vendor', category,
-            supplier_id: partyId, linked_ref: lotNo,
+            supplier_id: partyKind === 'supplier' ? partyId : null,
+            hauler_id: partyKind === 'hauler' ? partyId : null,
+            linked_ref: lotNo,
             source_table: sourceTable, source_id: lot.id,
             original_amount: amount, paid_amount: 0, outstanding: amount, status: 'Pending',
             due_date: addDays(purchase_date, 30), currency: 'PKR',
@@ -966,11 +984,11 @@ module.exports = {
           await accountingService.autoPost(trx, {
             triggerEvent: 'purchase_invoice', entity: 'mill', amount, currency: 'PKR',
             refType, refNo: lotNo, description: `${label} — lot ${lotNo}`,
-            userId: req.user?.id || null, partyType: 'supplier', partyId,
+            userId: req.user?.id || null, partyType: partyKind, partyId,
           });
         };
-        await postPartyCost({ amount: transportCost, partyId: haulerId, category: 'Transport', sourceTable: 'lot_transport', refType: 'Lot Transport', label: 'Transport (hauler)' });
-        await postPartyCost({ amount: commissionTotal, partyId: brokerIdNum, category: 'Commission', sourceTable: 'lot_commission', refType: 'Lot Commission', label: 'Commission (broker)' });
+        await postPartyCost({ amount: transportCost, partyId: haulerId, partyKind: 'hauler', category: 'Transport', sourceTable: 'lot_transport', refType: 'Lot Transport', label: 'Transport (hauler)' });
+        await postPartyCost({ amount: commissionTotal, partyId: brokerIdNum, partyKind: 'supplier', category: 'Commission', sourceTable: 'lot_commission', refType: 'Lot Commission', label: 'Commission (broker)' });
 
         // Optional vehicle arrival(s) captured on the New Purchase Lot form —
         // each delivering truck, linked straight to this (pre-batch) lot. Rows
@@ -1624,7 +1642,7 @@ module.exports = {
   async updateLotCosts(req, res) {
     try {
       const { id } = req.params;
-      const { transport_cost, labor_cost, unloading_cost, packing_cost, other_cost, bag_cost_per_bag, transport_vendor_id } = req.body;
+      const { transport_cost, labor_cost, unloading_cost, packing_cost, other_cost, bag_cost_per_bag, transport_vendor_id, hauler_id } = req.body;
 
       const result = await db.transaction(async (trx) => {
         const lot = await trx('inventory_lots').where({ id }).first();
@@ -1658,13 +1676,17 @@ module.exports = {
         const directCosts = lc + ulc + pc + oc;
         const landedTotal = uc.round2(purchaseAmount + directCosts + totalBagCost);
         const landedPerKg = receivedKg > 0 ? uc.round4(landedTotal / receivedKg) : 0;
-        const haulerId = (transport_vendor_id != null && transport_vendor_id !== '')
-          ? parseInt(transport_vendor_id, 10) : (lot.transport_vendor_id || null);
+        // Transport now points at the dedicated haulers registry (item #5).
+        // Prefer hauler_id; fall back to legacy transport_vendor_id / stored value.
+        const rawHauler = (hauler_id != null && hauler_id !== '')
+          ? hauler_id
+          : (transport_vendor_id != null && transport_vendor_id !== '' ? transport_vendor_id : null);
+        const haulerId = rawHauler != null ? parseInt(rawHauler, 10) : (lot.hauler_id || null);
 
         await trx('inventory_lots').where({ id }).update({
           transport_cost: tc, labor_cost: lc, unloading_cost: ulc,
           packing_cost: pc, other_cost: oc, bag_cost_per_bag: bcpb,
-          transport_vendor_id: haulerId,
+          hauler_id: haulerId,
           total_bag_cost: totalBagCost,
           landed_cost_total: landedTotal,
           landed_cost_per_kg: landedPerKg,
@@ -1684,7 +1706,7 @@ module.exports = {
         if (wantBill) {
           if (existingTp) {
             await trx('payables').where({ id: existingTp.id }).update({
-              supplier_id: haulerId, category: 'Transport', original_amount: tc,
+              supplier_id: null, hauler_id: haulerId, category: 'Transport', original_amount: tc,
               outstanding: Math.max(0, uc.round2(tc - paidSoFar)),
               status: (tc - paidSoFar) <= 0.01 ? 'Paid' : (paidSoFar > 0 ? 'Partial' : 'Pending'),
               linked_ref: lot.lot_no, updated_at: trx.fn.now(),
@@ -1693,7 +1715,7 @@ module.exports = {
             const payNo = await generatePayNo(trx);
             await trx('payables').insert({
               pay_no: payNo, entity: 'mill', payable_type: 'vendor', category: 'Transport',
-              supplier_id: haulerId, linked_ref: lot.lot_no,
+              supplier_id: null, hauler_id: haulerId, linked_ref: lot.lot_no,
               source_table: 'lot_transport', source_id: lotId,
               original_amount: tc, paid_amount: 0, outstanding: tc, status: 'Pending',
               currency: 'PKR', notes: `Transport (hauler) for lot ${lot.lot_no}`,
@@ -1720,7 +1742,7 @@ module.exports = {
           const oldBilled = parseFloat(prevAp?.[0]?.net) || 0;
           const newBilled = wantBill ? tc : 0;
           const tDelta = uc.round2(newBilled - oldBilled);
-          const tHauler = haulerId || lot.transport_vendor_id || null;
+          const tHauler = haulerId || lot.hauler_id || null;
           if (Math.abs(tDelta) > 0.01 && tHauler) {
             const rule = await trx('posting_rules')
               .where({ trigger_event: 'expense_recorded', is_active: true })
@@ -1746,7 +1768,7 @@ module.exports = {
                 refType: 'Lot Transport', refNo: lot.lot_no,
                 description: `Lot ${lot.lot_no} transport adjustment (Rs ${tDelta >= 0 ? '+' : ''}${tDelta})`,
                 lines, currency: 'PKR', isAuto: true, postingRuleId: rule.id,
-                userId: req.user?.id, partyType: 'supplier', partyId: tHauler,
+                userId: req.user?.id, partyType: 'hauler', partyId: tHauler,
               });
               await accountingService.postJournal(trx, adj.id);
             }

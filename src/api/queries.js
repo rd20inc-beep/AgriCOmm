@@ -1015,6 +1015,63 @@ export function useDeleteExpenseVendor() {
   });
 }
 
+// ===================== HAULERS (transport contractors) =====================
+// Dedicated transport/hauler registry (item #5), separate from suppliers —
+// powers the Admin → Haulers tab and the HaulerPicker.
+
+export function useHaulers({ includeInactive = false, search = '' } = {}) {
+  return useQuery({
+    queryKey: ['haulers', { includeInactive, search }],
+    queryFn: async () => {
+      const params = {};
+      if (includeInactive) params.include_inactive = '1';
+      if (search) params.search = search;
+      const res = await api.get('/api/haulers', params);
+      const data = res?.data || res || {};
+      return Array.isArray(data.haulers) ? data.haulers : [];
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useHauler(id) {
+  return useQuery({
+    queryKey: ['hauler', id],
+    enabled: !!id,
+    queryFn: async () => {
+      const res = await api.get(`/api/haulers/${id}`);
+      return res?.data || res || {};
+    },
+  });
+}
+
+export function useCreateHauler() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data) => api.post('/api/haulers', data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['haulers'] }),
+  });
+}
+
+export function useUpdateHauler() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }) => api.put(`/api/haulers/${id}`, data),
+    onSuccess: (_r, v) => {
+      qc.invalidateQueries({ queryKey: ['haulers'] });
+      if (v?.id) qc.invalidateQueries({ queryKey: ['hauler', v.id] });
+    },
+  });
+}
+
+export function useDeleteHauler() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id) => api.delete(`/api/haulers/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['haulers'] }),
+  });
+}
+
 // ===================== MASTER DATA MUTATIONS =====================
 
 export function useCreateCustomer() {

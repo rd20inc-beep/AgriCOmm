@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Search, Plus, Truck, Package, DollarSign, CheckCircle2, AlertCircle, Loader2, Star } from 'lucide-react';
 import Drawer from '../../../components/Drawer';
 import SupplierPicker from '../../../components/SupplierPicker';
+import HaulerPicker from '../../../components/HaulerPicker';
 import { lotInventoryApi } from '../api/services';
 import { useCreatePurchaseLot } from '../../../api/queries';
 import { STANDARD_BAG_SIZES, snapBagSizeKg, isStandardBagSize, DEFAULT_BAG_SIZE_KG } from '../../../utils/bagSize';
@@ -57,7 +58,7 @@ const defaultForm = () => ({
   commission_per_bag: '', // broker commission per bag/katta → broker payable + cost
   broker_id: '',
   transport_cost: '',     // freight → hauler payable + cost
-  transport_vendor_id: '',
+  hauler_id: '',          // transport contractor (dedicated haulers registry, item #5)
   purchase_date: new Date().toISOString().slice(0, 10),
   warehouse_id: '',
   notes: '',
@@ -162,7 +163,7 @@ export default function PurchaseLotDrawer({
       } catch { /* preview is best-effort; backend still auto-generates if left blank */ }
     })();
     return () => { cancelled = true; };
-  }, [isOpen, lotNoTouched, form.supplier_id, form.product_id, form.purchase_date]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isOpen, lotNoTouched, form.supplier_id, form.product_id, form.purchase_date]);
 
   async function regenerateLotNo() {
     if (!form.supplier_id || !form.product_id) return;
@@ -334,7 +335,7 @@ export default function PurchaseLotDrawer({
         commission_total: totalCommission > 0 ? totalCommission : null,
         broker_id: form.broker_id ? parseInt(form.broker_id, 10) : null,
         transport_cost: transportCost > 0 ? transportCost : null,
-        transport_vendor_id: form.transport_vendor_id ? parseInt(form.transport_vendor_id, 10) : null,
+        hauler_id: form.hauler_id ? parseInt(form.hauler_id, 10) : null,
         purchase_date: form.purchase_date,
         variety,
         grade: product?.grade || null,
@@ -827,12 +828,10 @@ export default function PurchaseLotDrawer({
                 placeholder="0" className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
             </div>
             <div>
-              <SupplierPicker
+              <HaulerPicker
                 label={<span className="text-xs font-medium text-gray-600">Transporter / hauler</span>}
-                value={form.transport_vendor_id}
-                onChange={(id) => setForm(prev => ({ ...prev, transport_vendor_id: id }))}
-                suppliers={mergedSuppliers}
-                onCreated={(s) => setLocalSuppliers(prev => [s, ...prev])}
+                value={form.hauler_id}
+                onChange={(id) => setForm(prev => ({ ...prev, hauler_id: id }))}
                 addToast={addToast}
                 clearable
                 placeholder="Search transporter…"

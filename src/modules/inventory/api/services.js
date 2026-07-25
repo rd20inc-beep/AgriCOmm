@@ -61,6 +61,15 @@ export const lotInventoryApi = {
   deleteTemplate: (id) => api.delete(`/api/lot-inventory/templates/${id}`),
 };
 
+// Transport / Hauler master (item #5) — dedicated registry, separate from suppliers.
+export const haulersApi = {
+  list: (params) => api.get('/api/haulers', params),
+  get: (id) => api.get(`/api/haulers/${id}`),
+  create: (data) => api.post('/api/haulers', data),
+  update: (id, data) => api.put(`/api/haulers/${id}`, data),
+  remove: (id) => api.delete(`/api/haulers/${id}`),
+};
+
 // Stock-take / physical count (backend: /api/control/stock-counts)
 export const stockCountApi = {
   list: (params) => api.get('/api/control/stock-counts', params),

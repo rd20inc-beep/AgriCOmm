@@ -536,6 +536,9 @@ const financeController = {
   async getMillLotCosts(req, res) {
     try {
       const lots = await db('inventory_lots as l')
+        // Transport is owed to a hauler (item #5). New lots carry hauler_id;
+        // legacy lots may still carry the supplier-based transport_vendor_id.
+        .leftJoin('haulers as h', 'l.hauler_id', 'h.id')
         .leftJoin('suppliers as tv', 'l.transport_vendor_id', 'tv.id')
         .where(function () {
           this.where('l.transport_cost', '>', 0).orWhere('l.labor_cost', '>', 0)
@@ -543,7 +546,9 @@ const financeController = {
             .orWhere('l.total_bag_cost', '>', 0).orWhere('l.other_cost', '>', 0);
         })
         .select('l.id', 'l.lot_no', 'l.transport_cost', 'l.labor_cost', 'l.unloading_cost',
-          'l.packing_cost', 'l.total_bag_cost', 'l.other_cost', 'l.transport_vendor_id', 'tv.name as hauler_name')
+          'l.packing_cost', 'l.total_bag_cost', 'l.other_cost',
+          db.raw('COALESCE(l.hauler_id, l.transport_vendor_id) as transport_vendor_id'),
+          db.raw('COALESCE(h.name, tv.name) as hauler_name'))
         .orderBy('l.lot_no', 'asc');
 
       // Stored transport payables (one per lot) for paid/outstanding on the hauler line.

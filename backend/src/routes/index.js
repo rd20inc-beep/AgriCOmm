@@ -12,6 +12,7 @@ router.use('/streams', require('./streams'));
 router.use('/users', authenticate, require('./users'));
 router.use('/customers', authenticate, require('./customers'));
 router.use('/suppliers', authenticate, require('./suppliers'));
+router.use('/haulers', authenticate, require('../modules/haulers/haulers.routes'));
 router.use('/products', authenticate, require('./products'));
 router.use('/export-orders', authenticate, require('./exportOrders'));
 router.use('/quotations', authenticate, require('../modules/quotations/quotations.routes'));
