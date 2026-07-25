@@ -250,7 +250,7 @@ export default function Accounting() {
             {journalData.length === 0 ? 'No journal entries posted in this date range.' : 'No entries match the current filters.'}
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto mobile-cards">
           <table className="w-full text-sm min-w-[760px]">
             <thead>
               <tr className="border-b border-gray-200 bg-gray-50 text-xs uppercase text-gray-500">
@@ -283,20 +283,20 @@ export default function Accounting() {
                     <tr key={id}
                         className={`hover:bg-gray-50 cursor-pointer ${isOpen ? 'bg-blue-50/30' : ''}`}
                         onClick={() => toggle(id)}>
-                      <td className="py-2.5 px-2 text-gray-400">
+                      <td data-label="" className="mob-hide py-2.5 px-2 text-gray-400">
                         {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                       </td>
-                      <td className="py-2.5 px-3 font-mono text-xs text-gray-700 whitespace-nowrap" title={fullJournalNo}>{shortJournalNo}</td>
-                      <td className="py-2.5 px-3 text-gray-600 whitespace-nowrap text-xs"
+                      <td data-label="Journal #" className="py-2.5 px-3 font-mono text-xs text-gray-700 whitespace-nowrap" title={fullJournalNo}>{shortJournalNo}</td>
+                      <td data-label="Date" className="mob-hide py-2.5 px-3 text-gray-600 whitespace-nowrap text-xs"
                           title={j.date ? new Date(j.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : ''}>
                         {j.date ? new Date(j.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }) : '—'}
                       </td>
-                      <td className="py-2.5 px-3">
+                      <td data-label="Entity" className="mob-hide py-2.5 px-3">
                         <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${ENTITY_TONE[j.entity] || 'bg-gray-100 text-gray-600'}`}>
                           {j.entity || 'general'}
                         </span>
                       </td>
-                      <td className="py-2.5 px-3 text-xs whitespace-nowrap">
+                      <td data-label="Reference" className="py-2.5 px-3 text-xs whitespace-nowrap">
                         {(() => {
                           if (!refNo) return <span className="text-gray-400">—</span>;
                           // LOT-YYYYMMDD-NNNN → LOT-NNNN (date is in the Date column already)
@@ -309,7 +309,7 @@ export default function Accounting() {
                             : <span className="text-gray-700">{inner}</span>;
                         })()}
                       </td>
-                      <td className="py-2.5 px-3 text-gray-700" style={{ maxWidth: 280, width: 280 }}>
+                      <td data-label="Description" className="mob-hide py-2.5 px-3 text-gray-700" style={{ maxWidth: 280, width: 280 }}>
                         <span className="block truncate" title={j.description || ''}>{j.description || '—'}</span>
                       </td>
                       {(() => {
@@ -323,7 +323,7 @@ export default function Accounting() {
                         const balanced = drift < 1;
                         const orig = fmtOriginal(j.totalDebit || j.total_debit, j.currency);
                         return (
-                          <td className={`py-2.5 px-3 text-right font-medium whitespace-nowrap ${balanced ? 'text-gray-900' : 'text-red-700'}`}
+                          <td data-label="Amount" className={`py-2.5 px-3 text-right font-medium whitespace-nowrap ${balanced ? 'text-gray-900' : 'text-red-700'}`}
                               title={balanced ? '' : `Imbalanced — DR ${fmtPkr(drPkr)} · CR ${fmtPkr(crPkr)}`}>
                             {fmtPkr(drPkr)}
                             {!balanced && <span className="ml-1 text-[10px]">⚠</span>}
@@ -331,7 +331,7 @@ export default function Accounting() {
                           </td>
                         );
                       })()}
-                      <td className="py-2.5 px-3">
+                      <td data-label="Status" className="py-2.5 px-3">
                         <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
                           j.status === 'Posted' ? 'bg-emerald-50 text-emerald-700'
                           : j.status === 'Reversed' ? 'bg-red-50 text-red-700'
@@ -343,7 +343,7 @@ export default function Accounting() {
                     {isOpen && (
                       <tr key={`${id}-lines`} className="bg-blue-50/20">
                         <td></td>
-                        <td colSpan={8} className="px-4 py-3">
+                        <td colSpan={8} className="mob-full px-4 py-3">
                           {lines.length === 0 ? (
                             <p className="text-xs text-gray-400 italic">No journal lines stored for this entry (older entry posted before line tracking).</p>
                           ) : (
@@ -369,15 +369,15 @@ export default function Accounting() {
                                   const crPkr = cur === 'PKR' ? cr : cr * fx;
                                   return (
                                     <tr key={l.id || i} className="text-gray-700">
-                                      <td className="py-1.5 pr-3 font-medium">{l.account || `#${l.account_id}`}</td>
-                                      <td className="py-1.5 pr-3 text-gray-500">{l.narration || '—'}</td>
-                                      <td className="py-1.5 pr-3 text-right whitespace-nowrap">
+                                      <td data-label="Account" className="py-1.5 pr-3 font-medium">{l.account || `#${l.account_id}`}</td>
+                                      <td data-label="Narration" className="mob-hide py-1.5 pr-3 text-gray-500">{l.narration || '—'}</td>
+                                      <td data-label="Debit" className="py-1.5 pr-3 text-right whitespace-nowrap">
                                         {dr > 0 ? fmtPkr(drPkr) : '—'}
                                         {dr > 0 && fmtOriginal(dr, j.currency) && (
                                           <div className="text-[10px] text-gray-400 font-normal">{fmtOriginal(dr, j.currency)}</div>
                                         )}
                                       </td>
-                                      <td className="py-1.5 text-right whitespace-nowrap">
+                                      <td data-label="Credit" className="py-1.5 text-right whitespace-nowrap">
                                         {cr > 0 ? fmtPkr(crPkr) : '—'}
                                         {cr > 0 && fmtOriginal(cr, j.currency) && (
                                           <div className="text-[10px] text-gray-400 font-normal">{fmtOriginal(cr, j.currency)}</div>
@@ -387,9 +387,9 @@ export default function Accounting() {
                                   );
                                 })}
                                 <tr className="font-semibold border-t-2 border-blue-200">
-                                  <td colSpan={2} className="pt-1.5 text-gray-500 uppercase text-[10px]">Totals</td>
-                                  <td className="pt-1.5 pr-3 text-right">{fmtPkr(toPkr(j, 'totalDebit'))}</td>
-                                  <td className="pt-1.5 text-right">{fmtPkr(toPkr(j, 'totalCredit'))}</td>
+                                  <td colSpan={2} className="mob-full pt-1.5 text-gray-500 uppercase text-[10px]">Totals</td>
+                                  <td data-label="Total debit" className="pt-1.5 pr-3 text-right">{fmtPkr(toPkr(j, 'totalDebit'))}</td>
+                                  <td data-label="Total credit" className="pt-1.5 text-right">{fmtPkr(toPkr(j, 'totalCredit'))}</td>
                                 </tr>
                               </tbody>
                             </table>

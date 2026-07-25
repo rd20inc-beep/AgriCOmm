@@ -947,7 +947,7 @@ function ExpenseTable({ loading, rows, onPay, onView }) {
   }
   return (
     <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto mobile-cards">
       <table className="w-full text-sm min-w-[760px]">
         <thead>
           <tr className="border-b border-gray-200 bg-gray-50">
@@ -964,36 +964,36 @@ function ExpenseTable({ loading, rows, onPay, onView }) {
         <tbody className="divide-y divide-gray-100">
           {rows.map(e => (
             <tr key={e.id} className="hover:bg-gray-50">
-              <td className="py-2.5 px-4">
+              <td data-label="Ref / Type" className="py-2.5 px-4">
                 <p className="font-mono text-xs text-gray-700">{e.expense_no}</p>
                 <p className="text-[10px] text-gray-400 capitalize">{e.expense_type}</p>
               </td>
-              <td className="py-2.5 px-4 text-gray-600">{e.expense_date ? new Date(e.expense_date).toLocaleDateString('en-GB') : '—'}</td>
-              <td className="py-2.5 px-4">
+              <td data-label="Date" className="mob-hide py-2.5 px-4 text-gray-600">{e.expense_date ? new Date(e.expense_date).toLocaleDateString('en-GB') : '—'}</td>
+              <td data-label="Vendor / Description" className="py-2.5 px-4">
                 <p className="font-medium text-gray-900 truncate max-w-[240px]">
                   {e.vendor_name || e.supplier_name_joined || '—'}
                 </p>
                 {e.description && <p className="text-[11px] text-gray-500 truncate max-w-[240px]">{e.description}</p>}
               </td>
-              <td className="py-2.5 px-4">
+              <td data-label="Category" className="mob-hide py-2.5 px-4">
                 <span className="inline-block px-2 py-0.5 text-xs font-medium rounded-full bg-gray-100 text-gray-700 capitalize">
                   {(e.category || '').replace(/_/g, ' ')}
                 </span>
               </td>
-              <td className="py-2.5 px-4 text-right font-bold text-gray-900">
+              <td data-label="Amount" className="py-2.5 px-4 text-right font-bold text-gray-900">
                 {e.currency === 'PKR' ? fmtPKR(e.amount) : `${e.currency} ${Number(e.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
               </td>
-              <td className="py-2.5 px-4 text-xs">
+              <td data-label="Linked To" className="mob-hide py-2.5 px-4 text-xs">
                 {e.batch_no ? <span className="text-blue-600 font-medium">{e.batch_no}</span>
                  : e.order_no ? <span className="text-emerald-600 font-medium">{e.order_no}</span>
                  : <span className="text-gray-400">—</span>}
               </td>
-              <td className="py-2.5 px-4">
+              <td data-label="Status" className="py-2.5 px-4">
                 <span className={`inline-block px-2 py-0.5 text-xs font-medium rounded-full ${STATUS_COLORS[e.payment_status] || 'bg-gray-100'}`}>
                   {e.payment_status}
                 </span>
               </td>
-              <td className="py-2.5 px-4 text-right">
+              <td data-label="Actions" className="py-2.5 px-4 text-right">
                 <div className="inline-flex items-center gap-1.5">
                   {e.payment_status !== 'Paid' && (
                     <button onClick={() => onPay(e)}

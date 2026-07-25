@@ -334,6 +334,34 @@ input, select, textarea { font-size: 14px; }
   .mobile-cards .mob-hide {
     display: none;
   }
+  /* Escape hatch for a full-width cell that is NOT a label:value pair — e.g. an
+     expandable detail row's colSpan panel, or a rich cell that renders its own
+     layout. Renders as a plain block: no flex, no space-between, no ::before. */
+  .mobile-cards tbody td.mob-full,
+  .mobile-cards tfoot td.mob-full {
+    display: block;
+    text-align: left;
+    padding: 0;
+    border-bottom: none;
+  }
+  .mobile-cards tbody td.mob-full::before,
+  .mobile-cards tfoot td.mob-full::before {
+    content: none;
+  }
+  /* Loading / empty-state / any colSpan cell that isn't a label:value pair:
+     render as a centered full-width message, not a flex card row. Auto-covers
+     every "No records", "Loading…" and spanning summary cell across all carded
+     tables without per-file markup. (Explicit .mob-full cells opt out above.) */
+  .mobile-cards tbody td[colspan]:not([data-label]):not(.mob-full),
+  .mobile-cards tfoot td[colspan]:not([data-label]):not(.mob-full) {
+    display: block;
+    text-align: center;
+    border-bottom: none;
+  }
+  .mobile-cards tbody td[colspan]:not([data-label]):not(.mob-full)::before,
+  .mobile-cards tfoot td[colspan]:not([data-label]):not(.mob-full)::before {
+    content: none;
+  }
 }
 
 /* Give scrollable content room to clear the floating chat button on phones. */

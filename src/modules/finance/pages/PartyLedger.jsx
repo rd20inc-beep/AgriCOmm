@@ -291,7 +291,7 @@ export default function PartyLedger() {
                 Couldn’t load statement{error?.message ? ` — ${error.message}` : ''}.
               </div>
             ) : (
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto mobile-cards">
                 <table className="w-full text-sm min-w-[720px]">
                   <thead>
                     <tr className="border-b border-gray-200 bg-gray-50 text-xs uppercase text-gray-500">
@@ -307,8 +307,8 @@ export default function PartyLedger() {
                   <tbody className="divide-y divide-gray-100">
                     {/* Opening balance row */}
                     <tr className="bg-gray-50/60 text-gray-500">
-                      <td className="py-2 px-3 text-xs" colSpan={6}>Opening balance</td>
-                      <td className="py-2 px-3 text-right font-medium tabular-nums">
+                      <td className="mob-full py-2 px-3 text-xs" colSpan={6}>Opening balance</td>
+                      <td data-label="Opening balance" className="py-2 px-3 text-right font-medium tabular-nums">
                         {fmtCurSigned(opening, cur)}
                         {showUsd && <span className="block text-[10px] text-gray-400 font-normal">≈ {fmtCurSigned(openingUsd, 'USD')}</span>}
                       </td>
@@ -326,33 +326,33 @@ export default function PartyLedger() {
                         const cr = parseFloat(t.credit) || 0;
                         return (
                           <tr key={`${t.journal_no || 'jl'}-${i}`} className={STATUS_ROW[t.status] || 'hover:bg-gray-50'}>
-                            <td className="py-2.5 px-3 text-gray-600 whitespace-nowrap text-xs">
+                            <td data-label="Date" className="py-2.5 px-3 text-gray-600 whitespace-nowrap text-xs">
                               {t.date ? new Date(t.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }) : '—'}
                             </td>
-                            <td className="py-2.5 px-3 text-xs text-gray-600 whitespace-nowrap">{t.vch_type || '—'}</td>
-                            <td className="py-2.5 px-3 text-xs whitespace-nowrap">
+                            <td data-label="Type" className="mob-hide py-2.5 px-3 text-xs text-gray-600 whitespace-nowrap">{t.vch_type || '—'}</td>
+                            <td data-label="Voucher No." className="py-2.5 px-3 text-xs whitespace-nowrap">
                               {t.ref_no
                                 ? (href
                                     ? <Link to={href} className="text-blue-600 hover:underline font-medium">{t.ref_no}</Link>
                                     : <span className="text-gray-700">{t.ref_no}</span>)
                                 : <span className="text-gray-400">—</span>}
                             </td>
-                            <td className="py-2.5 px-3 text-gray-700 min-w-[220px]" style={{ maxWidth: 420 }}>
+                            <td data-label="Description" className="py-2.5 px-3 text-gray-700 min-w-[220px]" style={{ maxWidth: 420 }}>
                               <span className="block whitespace-normal break-words">
                                 {t.status && <span className={`mr-1.5 px-1.5 py-0.5 rounded text-[9px] font-semibold align-middle ${STATUS_PILL[t.status]}`}>{t.status}</span>}
                                 {t.description || '—'}
                               </span>
                               {t.account_name && <span className="block text-[10px] text-gray-400 whitespace-normal break-words">{t.account_code} · {t.account_name}</span>}
                             </td>
-                            <td className="py-2.5 px-3 text-right tabular-nums whitespace-nowrap">
+                            <td data-label="Debit" className="py-2.5 px-3 text-right tabular-nums whitespace-nowrap">
                               {dr > 0 ? fmtCur(dr, cur) : '—'}
                               {showUsd && dr > 0 && <span className="block text-[10px] text-gray-400">{fmtCur(t.debit_usd, 'USD')}</span>}
                             </td>
-                            <td className="py-2.5 px-3 text-right tabular-nums whitespace-nowrap">
+                            <td data-label="Credit" className="py-2.5 px-3 text-right tabular-nums whitespace-nowrap">
                               {cr > 0 ? fmtCur(cr, cur) : '—'}
                               {showUsd && cr > 0 && <span className="block text-[10px] text-gray-400">{fmtCur(t.credit_usd, 'USD')}</span>}
                             </td>
-                            <td className="py-2.5 px-3 text-right font-medium tabular-nums whitespace-nowrap">
+                            <td data-label="Balance" className="py-2.5 px-3 text-right font-medium tabular-nums whitespace-nowrap">
                               {fmtCurSigned(t.running_balance, cur)}
                               {showUsd && <span className="block text-[10px] text-gray-400 font-normal">≈ {fmtCurSigned(t.running_balance_usd, 'USD')}</span>}
                             </td>
@@ -362,16 +362,16 @@ export default function PartyLedger() {
                     )}
                     {/* Closing balance row */}
                     <tr className="bg-gray-50 font-semibold border-t-2 border-gray-200">
-                      <td className="py-2.5 px-3 text-gray-600 uppercase text-[11px]" colSpan={4}>Closing balance</td>
-                      <td className="py-2.5 px-3 text-right tabular-nums">
+                      <td className="mob-full py-2.5 px-3 text-gray-600 uppercase text-[11px]" colSpan={4}>Closing balance</td>
+                      <td data-label="Total debit" className="py-2.5 px-3 text-right tabular-nums">
                         {fmtCur(totalDebit, cur)}
                         {showUsd && <span className="block text-[10px] text-gray-400 font-normal">{fmtCur(totalDebitUsd, 'USD')}</span>}
                       </td>
-                      <td className="py-2.5 px-3 text-right tabular-nums">
+                      <td data-label="Total credit" className="py-2.5 px-3 text-right tabular-nums">
                         {fmtCur(totalCredit, cur)}
                         {showUsd && <span className="block text-[10px] text-gray-400 font-normal">{fmtCur(totalCreditUsd, 'USD')}</span>}
                       </td>
-                      <td className="py-2.5 px-3 text-right tabular-nums">
+                      <td data-label="Closing balance" className="py-2.5 px-3 text-right tabular-nums">
                         {fmtCurSigned(closing, cur)}
                         {showUsd && <span className="block text-[10px] text-gray-400 font-normal">≈ {fmtCurSigned(closingUsd, 'USD')}</span>}
                       </td>

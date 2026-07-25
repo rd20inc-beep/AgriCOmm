@@ -102,7 +102,7 @@ export default function Suspense() {
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto mobile-cards">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-gray-500 text-xs">
               <tr>
@@ -126,15 +126,15 @@ export default function Suspense() {
                   const canReverse = e.status !== 'Reversed';
                   return (
                     <tr key={e.id} className="hover:bg-gray-50">
-                      <td className="px-3 py-2 font-mono text-blue-600">{e.entry_no}</td>
-                      <td className="px-3 py-2 text-gray-600">{String(e.date).slice(0, 10)}</td>
-                      <td className="px-3 py-2">{e.direction === 'receipt' ? <span className="text-emerald-700">Receipt</span> : <span className="text-red-600">Payment</span>}</td>
-                      <td className="px-3 py-2 text-gray-700 max-w-[12rem] truncate" title={e.party_details || ''}>{e.party_details || '—'}</td>
-                      <td className="px-3 py-2 text-gray-500 text-xs">{e.bank_account_name || '—'}</td>
-                      <td className="px-3 py-2 text-right tabular-nums">{PKR(e.amount)}</td>
-                      <td className="px-3 py-2 text-right tabular-nums font-medium">{outstanding > 0.01 ? PKR(outstanding) : '—'}</td>
-                      <td className="px-3 py-2 text-center"><span className={`inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium border ${STATUS_META[e.status] || ''}`}>{e.status}</span></td>
-                      <td className="px-3 py-2 text-right whitespace-nowrap">
+                      <td data-label="Entry" className="px-3 py-2 font-mono text-blue-600">{e.entry_no}</td>
+                      <td data-label="Date" className="mob-hide px-3 py-2 text-gray-600">{String(e.date).slice(0, 10)}</td>
+                      <td data-label="Type" className="mob-hide px-3 py-2">{e.direction === 'receipt' ? <span className="text-emerald-700">Receipt</span> : <span className="text-red-600">Payment</span>}</td>
+                      <td data-label="Payer / Payee" className="px-3 py-2 text-gray-700 max-w-[12rem] truncate" title={e.party_details || ''}>{e.party_details || '—'}</td>
+                      <td data-label="Account" className="mob-hide px-3 py-2 text-gray-500 text-xs">{e.bank_account_name || '—'}</td>
+                      <td data-label="Amount" className="px-3 py-2 text-right tabular-nums">{PKR(e.amount)}</td>
+                      <td data-label="Outstanding" className="mob-hide px-3 py-2 text-right tabular-nums font-medium">{outstanding > 0.01 ? PKR(outstanding) : '—'}</td>
+                      <td data-label="Status" className="px-3 py-2 text-center"><span className={`inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium border ${STATUS_META[e.status] || ''}`}>{e.status}</span></td>
+                      <td data-label="Actions" className="px-3 py-2 text-right whitespace-nowrap">
                         {canResolve && <button onClick={() => setResolveFor(e)} className="text-xs font-medium text-emerald-700 hover:underline mr-2">Resolve</button>}
                         {e.status === 'Open' && <button onClick={() => reviewMut.mutate(e.id)} className="text-xs text-amber-600 hover:underline mr-2">Review</button>}
                         {canReverse && <button onClick={() => { if (window.confirm(`Reverse ${e.entry_no}? This unwinds the money movement and all reclassifications.`)) reverseMut.mutate(e.id); }} className="text-xs text-red-600 hover:underline">Reverse</button>}

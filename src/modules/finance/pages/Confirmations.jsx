@@ -555,7 +555,7 @@ export default function FinanceConfirmations() {
               {partialPayments.length} order{partialPayments.length !== 1 ? 's' : ''}
             </span>
           </div>
-          <div className="table-container">
+          <div className="table-container mobile-cards">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-100">
@@ -575,20 +575,20 @@ export default function FinanceConfirmations() {
                   const advPartial = o.advanceReceived > 0 && o.advanceReceived < o.advanceExpected;
                   return (
                     <tr key={o.id} className="border-b border-gray-50 hover:bg-gray-50">
-                      <td className="py-2.5 px-3">
+                      <td data-label="Order" className="py-2.5 px-3">
                         {orderRef(o.id)}
                       </td>
-                      <td className="py-2.5 px-3 text-gray-600 truncate max-w-[150px]"><PartyLink type="customer" id={o.customerId} name={o.customerName} /></td>
-                      <td className="py-2.5 px-3 text-right text-gray-700">{formatCurrency(o.advanceExpected)}</td>
-                      <td className={`py-2.5 px-3 text-right font-medium ${o.advanceReceived >= o.advanceExpected ? 'text-emerald-600' : 'text-amber-600'}`}>
+                      <td data-label="Customer" className="py-2.5 px-3 text-gray-600 truncate max-w-[150px]"><PartyLink type="customer" id={o.customerId} name={o.customerName} /></td>
+                      <td data-label="Adv Expected" className="mob-hide py-2.5 px-3 text-right text-gray-700">{formatCurrency(o.advanceExpected)}</td>
+                      <td data-label="Adv Received" className={`py-2.5 px-3 text-right font-medium ${o.advanceReceived >= o.advanceExpected ? 'text-emerald-600' : 'text-amber-600'}`}>
                         {formatCurrency(o.advanceReceived)}
                       </td>
-                      <td className="py-2.5 px-3 text-right text-gray-700">{formatCurrency(o.balanceExpected)}</td>
-                      <td className={`py-2.5 px-3 text-right font-medium ${o.balanceReceived >= o.balanceExpected ? 'text-emerald-600' : 'text-amber-600'}`}>
+                      <td data-label="Bal Expected" className="mob-hide py-2.5 px-3 text-right text-gray-700">{formatCurrency(o.balanceExpected)}</td>
+                      <td data-label="Bal Received" className={`py-2.5 px-3 text-right font-medium ${o.balanceReceived >= o.balanceExpected ? 'text-emerald-600' : 'text-amber-600'}`}>
                         {formatCurrency(o.balanceReceived)}
                       </td>
-                      <td className="py-2.5 px-3 text-right font-bold text-red-600">{formatCurrency(outstanding)}</td>
-                      <td className="py-2.5 px-3 text-center">
+                      <td data-label="Outstanding" className="py-2.5 px-3 text-right font-bold text-red-600">{formatCurrency(outstanding)}</td>
+                      <td data-label="Action" className="py-2.5 px-3 text-center">
                         <button
                           onClick={() => openModal(o, advPartial ? 'advance' : 'balance')}
                           className="text-xs text-blue-600 hover:text-blue-800 font-medium"
@@ -613,7 +613,7 @@ export default function FinanceConfirmations() {
             Accounts Receivable — All Orders
           </h2>
         </div>
-        <div className="table-container">
+        <div className="table-container mobile-cards">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-200 bg-gray-50">
@@ -640,17 +640,17 @@ export default function FinanceConfirmations() {
                   const days = daysSince(o.createdAt);
                   return (
                     <tr key={o.id} className={`border-b border-gray-50 hover:bg-gray-50 ${outstanding > 0 ? '' : 'opacity-60'}`}>
-                      <td className="py-2 px-3">
+                      <td data-label="Order" className="py-2 px-3">
                         {orderRef(o.id)}
                       </td>
-                      <td className="py-2 px-3 text-gray-600 truncate max-w-[150px]"><PartyLink type="customer" id={o.customerId} name={o.customerName} /></td>
-                      <td className="py-2 px-3 text-right text-gray-700">{formatCurrency(o.contractValue)}</td>
-                      <td className="py-2 px-3 text-right text-emerald-600 font-medium">{formatCurrency(totalReceived)}</td>
-                      <td className={`py-2 px-3 text-right font-bold ${outstanding > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+                      <td data-label="Customer" className="py-2 px-3 text-gray-600 truncate max-w-[150px]"><PartyLink type="customer" id={o.customerId} name={o.customerName} /></td>
+                      <td data-label="Contract Value" className="mob-hide py-2 px-3 text-right text-gray-700">{formatCurrency(o.contractValue)}</td>
+                      <td data-label="Total Received" className="py-2 px-3 text-right text-emerald-600 font-medium">{formatCurrency(totalReceived)}</td>
+                      <td data-label="Outstanding" className={`py-2 px-3 text-right font-bold ${outstanding > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
                         {outstanding > 0 ? formatCurrency(outstanding) : 'Paid'}
                       </td>
-                      <td className="py-2 px-3 text-center"><StatusBadge status={o.status} /></td>
-                      <td className={`py-2 px-3 text-center text-xs font-medium ${days > 60 ? 'text-red-600' : days > 30 ? 'text-amber-600' : 'text-gray-500'}`}>
+                      <td data-label="Status" className="py-2 px-3 text-center"><StatusBadge status={o.status} /></td>
+                      <td data-label="Days" className={`mob-hide py-2 px-3 text-center text-xs font-medium ${days > 60 ? 'text-red-600' : days > 30 ? 'text-amber-600' : 'text-gray-500'}`}>
                         {days}d
                       </td>
                     </tr>
