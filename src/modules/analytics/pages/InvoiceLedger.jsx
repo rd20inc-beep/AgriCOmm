@@ -165,7 +165,7 @@ export default function InvoiceLedger() {
       {error && <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700 inline-flex items-center gap-1.5"><AlertTriangle size={14} /> {error}</div>}
 
       {/* Table */}
-      <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
+      <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto mobile-cards">
         <table className="w-full text-sm">
           <thead className="bg-gray-50 text-gray-500 text-xs">
             <tr>
@@ -190,24 +190,24 @@ export default function InvoiceLedger() {
             ) : rows.map((r) => { const bpKey = `${r.kind}-${r.id}`; const isOpen = expanded.has(bpKey); return (
               <Fragment key={bpKey}>
               <tr className="hover:bg-blue-50/40">
-                <td className="px-3 py-2"><span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${r.kind === 'purchase' ? 'bg-violet-100 text-violet-700' : 'bg-blue-100 text-blue-700'}`}>{r.kind === 'purchase' ? 'Purchase' : 'Sale'}</span></td>
-                <td className="px-3 py-2">
+                <td data-label="Type" className="px-3 py-2"><span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${r.kind === 'purchase' ? 'bg-violet-100 text-violet-700' : 'bg-blue-100 text-blue-700'}`}>{r.kind === 'purchase' ? 'Purchase' : 'Sale'}</span></td>
+                <td data-label="Invoice" className="px-3 py-2">
                   <Link to={r.href} className="font-mono text-blue-600 hover:underline inline-flex items-center gap-1">{r.invoiceNo} <ChevronRight size={12} /></Link>
                 </td>
-                <td className="px-3 py-2 whitespace-nowrap text-gray-600">{dt(r.date)}</td>
-                <td className="px-3 py-2">{(r.partyHref || r.customerHref) ? <Link to={r.partyHref || r.customerHref} className="text-blue-600 hover:underline">{r.party || r.customer}</Link> : (r.party || r.customer)}</td>
-                <td className="px-3 py-2 max-w-[16rem] truncate" title={(r.items || []).join(', ')}>{(r.items || []).join(', ') || '—'}</td>
-                <td className="px-3 py-2 text-xs text-gray-500">
+                <td data-label="Date" className="mob-hide px-3 py-2 whitespace-nowrap text-gray-600">{dt(r.date)}</td>
+                <td data-label="Party" className="px-3 py-2">{(r.partyHref || r.customerHref) ? <Link to={r.partyHref || r.customerHref} className="text-blue-600 hover:underline">{r.party || r.customer}</Link> : (r.party || r.customer)}</td>
+                <td data-label="Items" className="mob-hide px-3 py-2 max-w-[16rem] truncate" title={(r.items || []).join(', ')}>{(r.items || []).join(', ') || '—'}</td>
+                <td data-label="Traceability" className="mob-hide px-3 py-2 text-xs text-gray-500">
                   {(r.lots || []).length > 0 && <span>Lot {(r.lots || []).join(', ')}</span>}
                   {(r.batches || []).length > 0 && <span>{(r.lots || []).length ? ' · ' : ''}Batch {(r.batches || []).join(', ')}</span>}
                   {(r.lots || []).length === 0 && (r.batches || []).length === 0 && <span>—</span>}
                 </td>
-                <td className="px-3 py-2 text-right tabular-nums">{pkr(r.total)}</td>
-                <td className="px-3 py-2 text-right tabular-nums text-emerald-700">{pkr(r.received)}</td>
-                <td className={`px-3 py-2 text-right tabular-nums ${r.outstanding > 0 ? 'text-red-600' : 'text-gray-400'}`}>{pkr(r.outstanding)}</td>
-                <td className="px-3 py-2"><span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_TONE[r.paymentStatus] || 'bg-gray-100 text-gray-600'}`}>{r.paymentStatus}</span></td>
+                <td data-label="Total" className="px-3 py-2 text-right tabular-nums">{pkr(r.total)}</td>
+                <td data-label="Settled" className="mob-hide px-3 py-2 text-right tabular-nums text-emerald-700">{pkr(r.received)}</td>
+                <td data-label="Outstanding" className={`px-3 py-2 text-right tabular-nums ${r.outstanding > 0 ? 'text-red-600' : 'text-gray-400'}`}>{pkr(r.outstanding)}</td>
+                <td data-label="Status" className="px-3 py-2"><span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_TONE[r.paymentStatus] || 'bg-gray-100 text-gray-600'}`}>{r.paymentStatus}</span></td>
                 {canSeePricing && (
-                  <td className="px-3 py-2">
+                  <td data-label="By-products" className="mob-hide px-3 py-2">
                     <button onClick={() => toggleBp(r)} className={`inline-flex items-center gap-1 text-xs px-2 py-1 rounded-lg border ${isOpen ? 'bg-amber-50 border-amber-200 text-amber-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
                       <Factory size={12} /> {isOpen ? 'Hide' : 'Pricing'} {isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
                     </button>
@@ -245,7 +245,7 @@ function BpPanel({ groups, loading, kind }) {
             <Link to={bp.batchHref} className="text-xs font-medium text-blue-600 hover:underline">Batch {bp.batchNo}{bp.sharePct != null && bp.sharePct < 99.5 ? ` · ${Math.round(bp.sharePct)}% of this lot` : ''}</Link>
             {bp.byproductRecovery > 0 && <span className="text-xs text-emerald-700">By-product recovery {pkr(bp.byproductRecovery)}</span>}
           </div>
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto mobile-cards">
             <table className="w-full text-xs">
               <thead className="text-gray-500">
                 <tr>
@@ -261,13 +261,13 @@ function BpPanel({ groups, loading, kind }) {
               <tbody className="divide-y divide-gray-100">
                 {bp.outputs.map((o) => (
                   <tr key={o.lotId}>
-                    <td className="px-3 py-1.5"><Link to={o.href} className="text-blue-600 hover:underline">{o.productGrade}</Link></td>
-                    <td className="px-3 py-1.5 text-gray-600">{o.type === 'byproduct' ? 'by-product' : 'finished'}</td>
-                    <td className="px-3 py-1.5 text-right tabular-nums">{Math.round(o.producedKg).toLocaleString()} kg</td>
-                    <td className="px-3 py-1.5 text-right tabular-nums">{o.costPerKg ? pkr(o.costPerKg) : '—'}</td>
-                    <td className="px-3 py-1.5 text-right tabular-nums">{o.salePricePerKg ? pkr(o.salePricePerKg) : '—'}</td>
-                    <td className="px-3 py-1.5 text-right tabular-nums">{o.recoveryValue ? pkr(o.recoveryValue) : '—'}</td>
-                    <td className="px-3 py-1.5 text-gray-600">{o.warehouse || '—'}</td>
+                    <td data-label="Product / grade" className="px-3 py-1.5"><Link to={o.href} className="text-blue-600 hover:underline">{o.productGrade}</Link></td>
+                    <td data-label="Type" className="mob-hide px-3 py-1.5 text-gray-600">{o.type === 'byproduct' ? 'by-product' : 'finished'}</td>
+                    <td data-label="Produced" className="px-3 py-1.5 text-right tabular-nums">{Math.round(o.producedKg).toLocaleString()} kg</td>
+                    <td data-label="Cost/kg" className="mob-hide px-3 py-1.5 text-right tabular-nums">{o.costPerKg ? pkr(o.costPerKg) : '—'}</td>
+                    <td data-label="Sale price/kg" className="mob-hide px-3 py-1.5 text-right tabular-nums">{o.salePricePerKg ? pkr(o.salePricePerKg) : '—'}</td>
+                    <td data-label="Recovery value" className="px-3 py-1.5 text-right tabular-nums">{o.recoveryValue ? pkr(o.recoveryValue) : '—'}</td>
+                    <td data-label="Warehouse" className="mob-hide px-3 py-1.5 text-gray-600">{o.warehouse || '—'}</td>
                   </tr>
                 ))}
               </tbody>

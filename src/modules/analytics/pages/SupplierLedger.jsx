@@ -53,7 +53,7 @@ function SupplierPicker() {
           className="w-full pl-9 pr-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100" />
       </div>
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto mobile-cards">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-gray-500 text-xs">
               <tr>
@@ -72,12 +72,12 @@ function SupplierPicker() {
                   ? <tr><td colSpan={6} className="px-3 py-6 text-center text-gray-400">No suppliers with purchased rice lots.</td></tr>
                   : rows.map(r => (
                     <tr key={r.supplierId} className="hover:bg-gray-50 cursor-pointer" onClick={() => navigate(`/reports/supplier-ledger/${r.supplierId}`)}>
-                      <td className="px-3 py-2"><span className="font-medium text-blue-600">{r.supplier}</span></td>
-                      <td className="px-3 py-2 text-right tabular-nums">{r.lotCount}</td>
-                      <td className="px-3 py-2 text-right tabular-nums">{kg(r.purchasedKg)}</td>
-                      <td className="px-3 py-2 text-right tabular-nums text-emerald-700">{kg(r.remainingKg)}</td>
-                      <td className="px-3 py-2 text-right tabular-nums">{pkr(r.stockValue)}</td>
-                      <td className={`px-3 py-2 text-right tabular-nums ${r.payableOutstanding > 0 ? 'text-red-600' : ''}`}>{pkr(r.payableOutstanding)}</td>
+                      <td data-label="Supplier" className="px-3 py-2"><span className="font-medium text-blue-600">{r.supplier}</span></td>
+                      <td data-label="Lots" className="mob-hide px-3 py-2 text-right tabular-nums">{r.lotCount}</td>
+                      <td data-label="Purchased" className="px-3 py-2 text-right tabular-nums">{kg(r.purchasedKg)}</td>
+                      <td data-label="Remaining" className="px-3 py-2 text-right tabular-nums text-emerald-700">{kg(r.remainingKg)}</td>
+                      <td data-label="Stock value" className="px-3 py-2 text-right tabular-nums">{pkr(r.stockValue)}</td>
+                      <td data-label="Payable outstanding" className={`px-3 py-2 text-right tabular-nums ${r.payableOutstanding > 0 ? 'text-red-600' : ''}`}>{pkr(r.payableOutstanding)}</td>
                     </tr>
                   ))}
             </tbody>
@@ -195,7 +195,7 @@ function SupplierDetail({ id }) {
 
       {/* Per-lot table */}
       <Section icon={Package} title="Lots from this supplier">
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto mobile-cards">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-gray-500 text-xs">
               <tr>
@@ -217,20 +217,20 @@ function SupplierDetail({ id }) {
                 ? <tr><td colSpan={11} className="px-3 py-6 text-center text-gray-400">No purchased rice lots for this supplier.</td></tr>
                 : lots.map(l => (
                   <tr key={l.lotId} className="hover:bg-gray-50">
-                    <td className="px-3 py-2">
+                    <td data-label="Lot" className="px-3 py-2">
                       <Link to={l.href} className="font-mono text-blue-600 hover:underline">{l.lotNo}</Link>
                       {l.isServiceMilling && <span className="ml-1.5 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-800 align-middle">Service Milling</span>}
                     </td>
-                    <td className="px-3 py-2">{l.riceType || '—'}{l.grade ? <span className="text-gray-400"> · {l.grade}</span> : ''}</td>
-                    <td className="px-3 py-2">{dt(l.purchaseDate)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{kg(l.purchasedKg)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{kg(l.milledKg)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{kg(l.soldKg)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-emerald-700">{kg(l.remainingKg)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{l.costPerKg ? pkr(l.costPerKg) : '—'}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{pkr(l.stockValue)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{pkr(l.revenue)}</td>
-                    <td className={`px-3 py-2 text-right tabular-nums ${l.realizedProfit >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>{pkr(l.realizedProfit)}</td>
+                    <td data-label="Rice type" className="px-3 py-2">{l.riceType || '—'}{l.grade ? <span className="text-gray-400"> · {l.grade}</span> : ''}</td>
+                    <td data-label="Date" className="mob-hide px-3 py-2">{dt(l.purchaseDate)}</td>
+                    <td data-label="Purchased" className="px-3 py-2 text-right tabular-nums">{kg(l.purchasedKg)}</td>
+                    <td data-label="Milled" className="mob-hide px-3 py-2 text-right tabular-nums">{kg(l.milledKg)}</td>
+                    <td data-label="Sold" className="mob-hide px-3 py-2 text-right tabular-nums">{kg(l.soldKg)}</td>
+                    <td data-label="Remaining" className="px-3 py-2 text-right tabular-nums text-emerald-700">{kg(l.remainingKg)}</td>
+                    <td data-label="Cost/kg" className="mob-hide px-3 py-2 text-right tabular-nums">{l.costPerKg ? pkr(l.costPerKg) : '—'}</td>
+                    <td data-label="Stock value" className="px-3 py-2 text-right tabular-nums">{pkr(l.stockValue)}</td>
+                    <td data-label="Revenue" className="mob-hide px-3 py-2 text-right tabular-nums">{pkr(l.revenue)}</td>
+                    <td data-label="Realized profit" className={`px-3 py-2 text-right tabular-nums ${l.realizedProfit >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>{pkr(l.realizedProfit)}</td>
                   </tr>
                 ))}
             </tbody>

@@ -288,7 +288,7 @@ function YieldSimulator() {
           subtitle={`${formatCurrency(sim.profitPerKg, 'PKR')}/kg raw`} positive={sim.profit >= 0} />
       </div>
 
-      <div className="table-container">
+      <div className="table-container mobile-cards">
         <div className="px-5 py-3 border-b border-gray-200"><h3 className="text-sm font-semibold text-gray-700 uppercase">Output Mix &amp; Value</h3></div>
         <div className="table-scroll">
           <table className="w-full">
@@ -296,17 +296,17 @@ function YieldSimulator() {
             <tbody>
               {sim.lines.map(l => (
                 <tr key={l.key}>
-                  <td className="font-medium text-gray-900">{l.label}</td>
-                  <td className="text-right">{fmtKg(l.outKg)}</td>
-                  <td className="text-right text-gray-500">{sim.raw > 0 ? (l.outKg / sim.raw * 100).toFixed(1) : '0.0'}%</td>
-                  <td className="text-right">{l.priceKg > 0 ? formatCurrency(l.priceKg, 'PKR') : <span className="text-gray-300">—</span>}</td>
-                  <td className="text-right font-semibold">{l.value > 0 ? formatCurrency(l.value, 'PKR') : <span className="text-gray-300">—</span>}</td>
+                  <td data-label="Category" className="font-medium text-gray-900">{l.label}</td>
+                  <td data-label="Output" className="text-right">{fmtKg(l.outKg)}</td>
+                  <td data-label="% of Raw" className="text-right text-gray-500">{sim.raw > 0 ? (l.outKg / sim.raw * 100).toFixed(1) : '0.0'}%</td>
+                  <td data-label="Price / kg" className="text-right">{l.priceKg > 0 ? formatCurrency(l.priceKg, 'PKR') : <span className="text-gray-300">—</span>}</td>
+                  <td data-label="Value" className="text-right font-semibold">{l.value > 0 ? formatCurrency(l.value, 'PKR') : <span className="text-gray-300">—</span>}</td>
                 </tr>
               ))}
             </tbody>
             <tfoot><tr className="border-t border-gray-200 font-semibold">
-              <td className="text-gray-900">Total Revenue</td><td></td><td></td><td></td>
-              <td className="text-right text-emerald-600">{formatCurrency(sim.revenue, 'PKR')}</td>
+              <td className="text-gray-900">Total Revenue</td><td data-label="Total Revenue"></td><td></td><td></td>
+              <td data-label="Value" className="text-right text-emerald-600">{formatCurrency(sim.revenue, 'PKR')}</td>
             </tr></tfoot>
           </table>
         </div>

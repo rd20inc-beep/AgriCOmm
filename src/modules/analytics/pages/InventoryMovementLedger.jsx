@@ -154,7 +154,7 @@ export default function InventoryMovementLedger() {
 
               {/* Movement feed */}
               <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-                <div className="overflow-x-auto">
+                <div className="overflow-x-auto mobile-cards">
                   <table className="w-full text-sm">
                     <thead className="bg-gray-50 text-gray-500 text-xs">
                       <tr>
@@ -171,15 +171,15 @@ export default function InventoryMovementLedger() {
                         ? <tr><td colSpan={6} className="px-3 py-6 text-center text-gray-400">No movements recorded for this filter.</td></tr>
                         : rows.map(r => (
                           <tr key={r.id} className="hover:bg-gray-50">
-                            <td className="px-3 py-1.5 whitespace-nowrap text-gray-600">{dt(r.date)}</td>
-                            <td className="px-3 py-1.5 font-medium text-gray-800">{r.label}{r.lotType ? <span className="text-gray-400 font-normal"> · {r.lotType}</span> : ''}</td>
-                            <td className="px-3 py-1.5">
+                            <td data-label="Date" className="px-3 py-1.5 whitespace-nowrap text-gray-600">{dt(r.date)}</td>
+                            <td data-label="Movement" className="px-3 py-1.5 font-medium text-gray-800">{r.label}{r.lotType ? <span className="text-gray-400 font-normal"> · {r.lotType}</span> : ''}</td>
+                            <td data-label="Lot / Batch" className="px-3 py-1.5">
                               {r.lotId ? <Link to={r.href || `/lot-inventory/${r.lotId}`} className="font-mono text-blue-600 hover:underline">{r.lotNo || `#${r.lotId}`}</Link>
                                 : r.batchNo ? <Link to={r.href} className="text-blue-600 hover:underline">{r.batchNo}</Link> : '—'}
                             </td>
-                            <td className="px-3 py-1.5 text-gray-500 text-xs">{[r.fromWh, r.toWh].filter(Boolean).join(' → ') || r.reference || '—'}</td>
-                            <td className={`px-3 py-1.5 text-right tabular-nums ${r.direction === 'out' ? 'text-red-700' : 'text-emerald-700'}`}>{r.direction === 'out' ? '−' : '+'}{n0(r.qtyKg)}</td>
-                            <td className="px-3 py-1.5 text-right tabular-nums text-gray-600">{r.costPkr > 0 ? pkr(r.costPkr) : '—'}</td>
+                            <td data-label="Where" className="mob-hide px-3 py-1.5 text-gray-500 text-xs">{[r.fromWh, r.toWh].filter(Boolean).join(' → ') || r.reference || '—'}</td>
+                            <td data-label="Qty (kg)" className={`px-3 py-1.5 text-right tabular-nums ${r.direction === 'out' ? 'text-red-700' : 'text-emerald-700'}`}>{r.direction === 'out' ? '−' : '+'}{n0(r.qtyKg)}</td>
+                            <td data-label="Cost" className="mob-hide px-3 py-1.5 text-right tabular-nums text-gray-600">{r.costPkr > 0 ? pkr(r.costPkr) : '—'}</td>
                           </tr>
                         ))}
                     </tbody>

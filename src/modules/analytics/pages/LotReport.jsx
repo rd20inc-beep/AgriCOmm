@@ -155,7 +155,7 @@ export default function LotReport() {
 
       {/* Lot picker — hidden when printing */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden print:hidden">
-        <div className="overflow-x-auto max-h-80 overflow-y-auto">
+        <div className="overflow-x-auto mobile-cards max-h-80 overflow-y-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b border-gray-200 sticky top-0">
               <tr className="text-left text-xs font-medium text-gray-600 uppercase">
@@ -184,16 +184,16 @@ export default function LotReport() {
                   className={`cursor-pointer hover:bg-blue-50/40 ${selected.has(l.id) ? 'bg-blue-50' : ''}`}
                   onClick={() => toggleOne(l.id)}
                 >
-                  <td className="px-3 py-2">
+                  <td data-label="" className="mob-hide px-3 py-2">
                     {selected.has(l.id) ? <CheckSquare size={16} className="text-blue-600" /> : <Square size={16} className="text-gray-300" />}
                   </td>
-                  <td className="px-3 py-2 font-mono text-xs font-medium text-gray-900">{l.lot_no || `#${l.id}`}</td>
-                  <td className="px-3 py-2 text-gray-700">{typeLabel(l.type)}</td>
-                  <td className="px-3 py-2 text-gray-700">{l.variety || l.item_name || l.product_name || '—'}</td>
-                  <td className="px-3 py-2 text-gray-700">{l.supplier_name || '—'}</td>
-                  <td className="px-3 py-2 text-right">{fmtMt(l.qty)}</td>
-                  <td className="px-3 py-2 text-right">{fmtMt(l.available_qty)}</td>
-                  <td className="px-3 py-2 text-gray-600">{l.status || '—'}</td>
+                  <td data-label="Lot No" className="px-3 py-2 font-mono text-xs font-medium text-gray-900">{l.lot_no || `#${l.id}`}</td>
+                  <td data-label="Type" className="mob-hide px-3 py-2 text-gray-700">{typeLabel(l.type)}</td>
+                  <td data-label="Variety" className="px-3 py-2 text-gray-700">{l.variety || l.item_name || l.product_name || '—'}</td>
+                  <td data-label="Supplier" className="mob-hide px-3 py-2 text-gray-700">{l.supplier_name || '—'}</td>
+                  <td data-label="Total MT" className="px-3 py-2 text-right">{fmtMt(l.qty)}</td>
+                  <td data-label="Avail MT" className="px-3 py-2 text-right">{fmtMt(l.available_qty)}</td>
+                  <td data-label="Status" className="px-3 py-2 text-gray-600">{l.status || '—'}</td>
                 </tr>
               ))}
             </tbody>
