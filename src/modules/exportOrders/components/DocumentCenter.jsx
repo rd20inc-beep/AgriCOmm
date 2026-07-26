@@ -1540,132 +1540,112 @@ function renderStatementOfOrigin(doc) {
   return commercialInvoiceHtml(doc, { originBox, title: 'STATEMENT OF ORIGIN' });
 }
 
-// ─── Certificate of Origin (data for KCCI form) ───
+// ─── Certificate of Origin — TEXT-ONLY overlay for the pre-printed KCCI form ───
+// The Karachi Chamber form (logo, boxes, labels, flag, certifying-body text) is
+// pre-printed on the physical page; we print ONLY the variable text, positioned
+// to land inside the template's boxes. Coordinates are % of an A4 PORTRAIT page,
+// calibrated against the cleared KCCI template. Nudge these if a test print is
+// off — top increases downward, left increases rightward. buildDocHtml() prints
+// this docType portrait with 0 margin so the % positions map 1:1 to the page.
+// A faint template image is shown ON SCREEN ONLY (for alignment) and never prints.
+const COO_TEMPLATE_URL = '/coo-kcci-template.jpg';
+const COO_POS = {
+  exporter:    { l: 2.2,  t: 4.8,  w: 42,   al: 'left',   fs: 10.5, b: 1, lh: 1.35 },
+  consignee:   { l: 2.2,  t: 16.8, w: 42,   al: 'left',   fs: 10.5, b: 1, lh: 1.35 },
+  membership:  { l: 33,   t: 23.5, w: 25,   al: 'left',   fs: 11,   b: 1, lh: 1.2 },
+  transport:   { l: 4,    t: 31.0, w: 42,   al: 'left',   fs: 10.5, b: 1, lh: 1.2 },
+  reference:   { l: 61,   t: 3.2,  w: 34,   al: 'center', fs: 15,   b: 1, lh: 1.2 },
+  marks:       { l: 1.5,  t: 46,   w: 12,   al: 'center', fs: 10.5, b: 1, lh: 1.4 },
+  packages:    { l: 14.5, t: 46,   w: 10,   al: 'center', fs: 10.5, b: 0, lh: 1.4 },
+  descFcl:     { l: 24,   t: 43,   w: 47.5, al: 'center', fs: 11,   b: 1, lh: 1.2, ul: 1 },
+  descBody:    { l: 24,   t: 47.5, w: 47.5, al: 'center', fs: 10.5, b: 0, lh: 1.5 },
+  totals:      { l: 26,   t: 63,   w: 45,   al: 'left',   fs: 10.5, b: 1, lh: 1.5 },
+  gross:       { l: 70,   t: 46,   w: 12,   al: 'center', fs: 11,   b: 0, lh: 1.2 },
+  originate:   { l: 39,   t: 82.9, w: 22,   al: 'left',   fs: 11,   b: 1, lh: 1.2 },
+  name:        { l: 13,   t: 89.8, w: 25,   al: 'left',   fs: 10.5, b: 1, lh: 1.2 },
+  designation: { l: 13,   t: 92.2, w: 25,   al: 'left',   fs: 10.5, b: 1, lh: 1.2 },
+  companyName: { l: 13,   t: 94.2, w: 25,   al: 'left',   fs: 10.5, b: 1, lh: 1.2 },
+  place:       { l: 15,   t: 97.6, w: 13,   al: 'left',   fs: 10.5, b: 0, lh: 1.2 },
+  date:        { l: 38,   t: 97.6, w: 15,   al: 'left',   fs: 10.5, b: 0, lh: 1.2 },
+  issuePlace:  { l: 53,   t: 88.0, w: 25,   al: 'left',   fs: 11,   b: 1, lh: 1.2 },
+};
+function cooField(key, inner) {
+  const p = COO_POS[key];
+  if (!p || inner == null || inner === '') return '';
+  const s = `position:absolute;left:${p.l}%;top:${p.t}%;width:${p.w}%;`
+    + `text-align:${p.al};font-size:${p.fs}pt;line-height:${p.lh};`
+    + `font-weight:${p.b ? 'bold' : 'normal'};${p.ul ? 'text-decoration:underline;' : ''}`;
+  return `<div style="${s}">${inner}</div>`;
+}
+
 function renderCertificateOfOrigin(doc) {
   const { company, buyer, order, shipment, containers, items } = doc;
 
-  const fmtKg = (n) => (parseFloat(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  const esc = (v) => (v == null ? '' : String(v));
+  const brk = (v) => esc(v).replace(/\n/g, '<br/>');
+  // kg → metric tonnes, 3 decimals (e.g. 48200 → "48.200").
+  const mt = (kg) => ((parseFloat(kg) || 0) / 1000).toLocaleString('en-US', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
 
-  // Build one row per multi-line P.I. item, falling back to a single
-  // synthesized row from the order's summary fields. Per-row weight is the
-  // item's weight in kg (rice + packaging tare when known).
-  const rows = (items && items.length > 0)
-    ? items.map((it, idx) => {
-        const bagSize = it.bagSizeKg || order.bagSizeKg || 50;
-        const bagType = it.bagType || order.bagType || 'PP';
-        const bagCount = it.bagCount || (it.qtyMT && bagSize ? Math.round((it.qtyMT * 1000) / bagSize) : 0);
-        const grossKg = it.qtyMT * 1000;
-        const tarePerBagKg = order.bagWeightGm ? (order.bagWeightGm / 1000) : 0;
-        const netKg = grossKg + bagCount * tarePerBagKg;
-        const containerLabel = `1X20 FCL ${Math.round(it.qtyMT)} MT`;
-        const qualityText = it.qualityDescription
-          || `${it.productName || 'Rice'} max 0-${it.brokenPctTarget != null ? it.brokenPctTarget : (order.brokenPctTarget || 2)}% broken, double (silky) polished and sortexed. Product to meet EU regulations at all times. Latest crop.`;
-        return {
-          label: it.productName || `Item ${idx + 1}`,
-          bags: bagCount,
-          description: `${containerLabel} ${qualityText}<br/>Packed in ${bagSize}KG bags`,
-          weightKg: netKg,
-          hsCode: it.hsCode || '',
-        };
-      })
-    : (() => {
-        const bagSize = order.bagSizeKg || 50;
-        const bagType = order.bagType || 'PP';
-        const totalBags = order.totalBags || (order.qtyMT && bagSize ? Math.round((order.qtyMT * 1000) / bagSize) : 0);
-        const grossKg = order.qtyMT * 1000;
-        return [{
-          label: order.brandMarking || order.product || '',
-          bags: totalBags,
-          description: `${containers.length || 1}X20 FCL ${Math.round(order.qtyMT)} MT ${order.qualityDescription || order.product || ''}<br/>Packed in ${bagSize}KG bags`,
-          weightKg: grossKg,
-          hsCode: order.hsCode || '',
-        }];
-      })();
-
-  const totalBags = rows.reduce((s, r) => s + (r.bags || 0), 0);
-  const totalWeightKg = rows.reduce((s, r) => s + (r.weightKg || 0), 0);
-  const totalNetKg = order.qtyMT ? order.qtyMT * 1000 : totalWeightKg;
-  const containerCount = containers && containers.length > 0
+  // Totals — bags, net weight (rice), gross weight (net + bag tare when known).
+  const firstItem = (items && items.length > 0) ? items[0] : {};
+  const bagSize = order.bagSizeKg || firstItem.bagSizeKg || 50;
+  const totalBags = order.totalBags
+    || ((items && items.length > 0)
+        ? items.reduce((s, it) => s + (it.bagCount || (it.qtyMT ? Math.round((it.qtyMT * 1000) / (it.bagSizeKg || bagSize)) : 0)), 0)
+        : (order.qtyMT ? Math.round((order.qtyMT * 1000) / bagSize) : 0));
+  const totalNetKg = order.qtyMT ? order.qtyMT * 1000 : 0;
+  const tareKg = order.bagWeightGm ? (totalBags * order.bagWeightGm) / 1000 : 0;
+  const totalGrossKg = totalNetKg + tareKg;
+  const containerCount = (containers && containers.length > 0)
     ? containers.length
-    : (shipment && shipment.containerCount ? shipment.containerCount : rows.length);
+    : (shipment && shipment.containerCount ? shipment.containerCount : ((items && items.length) || 1));
 
-  // HS codes — show all distinct codes across items so multi-line P.I.s with
-  // different HS codes per product render correctly.
-  const distinctHs = [...new Set(rows.map((r) => r.hsCode).filter(Boolean))];
-  const hsLine = distinctHs.length > 0 ? distinctHs.join(', ') : (order.hsCode || '');
+  // Package-kind label: jumbo packing → "Big Bags", otherwise "Bags".
+  const kind = order.packingType === 'jumbo' ? 'Big Bags' : (order.packageKind || 'Bags');
+  const packages = `${totalBags.toLocaleString()} ${kind}`;
 
-  const refNo = company.kcciMembership || '';
+  // Field values (best-effort defaults; every field is editable in the preview
+  // before printing, so operators can fine-tune per shipment).
+  const exporterHtml = `<div style="font-size:11pt;">${esc(company.name)}</div>${brk(company.address)}`;
+  const consigneeHtml = `<div>${esc(buyer.name)}</div>${brk(buyer.address)}${buyer.country ? `<br/>${esc(buyer.country)}` : ''}`;
+  const transport = shipment.vesselName
+    ? `BY SEA&nbsp;&nbsp;&nbsp;${esc(shipment.vesselName)}${shipment.voyageNumber ? ` V ${esc(shipment.voyageNumber)}` : ''}`
+    : '';
+  const marks = brk(order.brandMarking || order.marksNumbers || '');
+  const descBody = [order.product || firstItem.productName || 'RICE', 'PACKING AS PER PACKING LIST']
+    .map(esc).join('<br/>');
+  const originCountry = (order.originCountry || 'PAKISTAN').toUpperCase();
+  const signName = company.signatoryName || company.proprietor || '';
+  const signDesignation = company.signatoryDesignation || 'PROPRIETOR';
+  const issuePlace = order.cooIssuePlace || `${(company.city || 'KARACHI').toUpperCase()} ${originCountry}`;
 
+  // Text-only overlay on an A4 portrait canvas. The template image is shown ON
+  // SCREEN ONLY (faint, for alignment) via class="coo-tpl" and is hidden when
+  // printing (see buildDocHtml) — the physical page is the pre-printed KCCI form.
   return `
-    <div style="font-family: Arial, sans-serif; font-size:12px; max-width:820px; margin:0 auto; padding:18px;">
-
-      <table style="width:100%; border-collapse:collapse;">
-        <tr>
-          <td style="border:1px solid #333; padding:10px; vertical-align:top; width:65%;">
-            <strong style="font-size:13px;">${company.name || ''}</strong><br/>
-            ${(company.address || '').replace(/\n/g, '<br/>')}
-          </td>
-          <td style="border:1px solid #333; padding:10px; text-align:right; vertical-align:top; width:35%;">
-            <span style="font-size:18px; font-weight:bold;">${refNo}</span>
-          </td>
-        </tr>
-        <tr>
-          <td style="border:1px solid #333; padding:10px; vertical-align:top;">
-            <strong style="text-transform:uppercase;">${buyer.name || ''}</strong><br/>
-            ${(buyer.address || '').replace(/\n/g, '<br/>')}${buyer.country ? `<br/>${buyer.country}` : ''}
-          </td>
-          <td style="border:1px solid #333; padding:10px; vertical-align:bottom; text-align:right; font-weight:bold;">
-            Total Gr. Weight
-          </td>
-        </tr>
-      </table>
-
-      <div style="margin:14px 0 6px; font-weight:bold;">
-        BY SEA &nbsp;&nbsp; ${shipment.vesselName || ''}${shipment.voyageNumber ? ` / ${shipment.voyageNumber}` : ''}
+    <div class="coo-overlay" style="position:relative; width:210mm; height:297mm; margin:0 auto; font-family: Arial, Helvetica, sans-serif; color:#000; background:#fff;">
+      <img class="coo-tpl" src="${COO_TEMPLATE_URL}" alt="" aria-hidden="true"
+        style="position:absolute; inset:0; width:100%; height:100%; object-fit:fill; opacity:0.45; z-index:0; pointer-events:none;"/>
+      <div style="position:absolute; inset:0; z-index:1;">
+        ${cooField('exporter', exporterHtml)}
+        ${cooField('consignee', consigneeHtml)}
+        ${cooField('membership', esc(company.kcciMembership))}
+        ${cooField('transport', transport)}
+        ${cooField('reference', esc(order.cooReferenceNo || order.referenceNumber || ''))}
+        ${cooField('marks', marks)}
+        ${cooField('packages', packages)}
+        ${cooField('descFcl', `${containerCount} x 20' FCL`)}
+        ${cooField('descBody', descBody)}
+        ${cooField('totals', `TOTAL BAGS&nbsp;&nbsp;&nbsp;:&nbsp;&nbsp;${packages}<br/>TOTAL NET WT&nbsp;:&nbsp;&nbsp;${mt(totalNetKg)} MT`)}
+        ${cooField('gross', mt(totalGrossKg))}
+        ${cooField('originate', `(${originCountry})`)}
+        ${cooField('name', esc(signName))}
+        ${cooField('designation', esc(signDesignation))}
+        ${cooField('companyName', esc(company.name))}
+        ${cooField('place', esc(company.city || 'Karachi'))}
+        ${cooField('date', esc(order.cooDate || ''))}
+        ${cooField('issuePlace', esc(issuePlace))}
       </div>
-      <div style="font-weight:bold;">
-        BL# : ${shipment.blNumber || ''} &nbsp;&nbsp; Dated : ${shipment.blDate || ''}
-      </div>
-
-      <div style="text-align:center; margin:12px 0 6px; font-weight:bold; text-decoration:underline;">
-        ${containerCount} X 20' FCL
-      </div>
-
-      <table style="width:100%; border-collapse:collapse; font-size:12px;">
-        <tbody>
-          ${rows.map((r) => `
-            <tr>
-              <td style="padding:8px 6px; vertical-align:top; font-style:italic; width:18%; font-weight:bold;">${r.label}</td>
-              <td style="padding:8px 6px; vertical-align:top; width:8%; text-align:right;">${(r.bags || 0).toLocaleString()}</td>
-              <td style="padding:8px 6px; vertical-align:top; width:60%; line-height:1.4;">${r.description}</td>
-              <td style="padding:8px 6px; vertical-align:top; width:14%; text-align:right; font-weight:bold;">${fmtKg(r.weightKg)} MT</td>
-            </tr>
-          `).join('')}
-          <tr>
-            <td colspan="3" style="border-top:1px solid #333; padding:8px 6px; text-align:right; font-weight:bold;">Total Gr. Weight</td>
-            <td style="border-top:1px solid #333; padding:8px 6px; text-align:right; font-weight:bold;">${fmtKg(totalWeightKg)}</td>
-          </tr>
-        </tbody>
-      </table>
-
-      <div style="margin-top:10px; line-height:1.7;">
-        <div><strong>SALES CONTRACT #</strong> ${order.contractNumber || ''}${order.date ? ` Dated: ${order.date}` : ''}</div>
-      </div>
-
-      ${docSummaryBlock(doc, { packLabel: 'Bags', marginTop: 6 })}
-
-      <div style="margin-top:30px; text-align:center; font-weight:bold; font-size:13px; line-height:1.5;">
-        CERTIFIED THAT THE ABOVE GOODS<br/>
-        ARE OF PAKISTANI ORIGIN
-      </div>
-
-      <div style="margin-top:50px; text-align:center; line-height:2;">
-        <div style="font-weight:bold;">${company.proprietor || ''}</div>
-        <div style="font-weight:bold;">PROPRIETOR</div>
-        <div style="font-weight:bold;">${company.name || ''}</div>
-      </div>
-
-      ${renderCompanyFooter(company)}
     </div>`;
 }
 
@@ -1846,6 +1826,34 @@ function renderDocument(doc, style) {
 // a window and prints) and Send (autoPrint:false, posted to the server which
 // renders it to a PDF with the identical layout).
 function buildDocHtml(editedHtml, docType, title, { autoPrint }) {
+  // Certificate of Origin is an overlay for the pre-printed KCCI form: print A4
+  // PORTRAIT with ZERO margin (the % field positions map 1:1 to the physical
+  // page) and TEXT-ONLY — the on-screen template guide (.coo-tpl) is hidden so
+  // nothing but the variable text lands on the pre-printed sheet.
+  if (docType === 'certificate-of-origin') {
+    return `<!doctype html>
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <title>${title || 'Certificate of Origin'}</title>
+        <style>
+          @page { size: A4 portrait; margin: 0; }
+          *, *::before, *::after { box-sizing: border-box; }
+          html, body { margin: 0; padding: 0; width: 210mm; background: #fff; color: #000; }
+          .coo-overlay { width: 210mm !important; height: 297mm !important; margin: 0 auto !important; }
+          /* The template image is a screen-only alignment aid — never printed. */
+          @media print { .coo-tpl { display: none !important; } }
+          @media print { html, body { width: 210mm; } }
+        </style>
+      </head>
+      <body>
+        ${editedHtml}
+        <script>
+          window.onload = function() { ${autoPrint ? 'window.print();' : ''} };
+        </script>
+      </body>
+    </html>`;
+  }
   // Every export document prints A4 LANDSCAPE (297×210) with 8mm margins, so the
   // wide invoice/contract/packing tables get the full 281mm printable width and
   // stay readable at a 12px floor. Printable area = 281×194mm.
