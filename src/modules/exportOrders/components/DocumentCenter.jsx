@@ -1837,7 +1837,10 @@ function buildDocHtml(editedHtml, docType, title, { autoPrint }) {
         <meta charset="utf-8">
         <title>${title || 'Certificate of Origin'}</title>
         <style>
-          @page { size: A4 portrait; margin: 0; }
+          /* margin in explicit mm units so the server PDF path (pdf.service.js)
+             parses it as 0 — otherwise it falls back to 8mm and offsets the
+             overlay. Zero margin keeps the % field positions mapped 1:1. */
+          @page { size: A4 portrait; margin: 0mm; }
           *, *::before, *::after { box-sizing: border-box; }
           html, body { margin: 0; padding: 0; width: 210mm; background: #fff; color: #000; }
           .coo-overlay { width: 210mm !important; height: 297mm !important; margin: 0 auto !important; }
