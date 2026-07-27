@@ -497,6 +497,7 @@ COL document_templates.entity:character varying:NULL
 COL document_templates.id:integer:NOT NULL
 COL document_templates.is_active:boolean:NOT NULL
 COL document_templates.name:character varying:NOT NULL
+COL document_templates.orientation:character varying:NOT NULL
 COL document_templates.template_content:text:NULL
 COL document_templates.updated_at:timestamp with time zone:NOT NULL
 COL document_templates.variables:jsonb:NULL
@@ -2851,6 +2852,7 @@ CON document_store.document_store_doc_uid_unique(u)
 CON document_store.document_store_pkey(p)
 CON document_store.document_store_previous_version_id_foreign(f)
 CON document_store.document_store_uploaded_by_foreign(f)
+CON document_templates.chk_doc_templates_orientation(c)
 CON document_templates.document_templates_created_by_foreign(f)
 CON document_templates.document_templates_pkey(p)
 CON email_logs.chk_email_logs_status_valid(c)

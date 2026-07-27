@@ -7,6 +7,7 @@ import Modal from '../../../components/Modal';
 import WhatsAppSendModal from '../../../components/WhatsAppSendModal';
 import EmailSendModal from '../../../components/EmailSendModal';
 import { incotermLabel } from '../../../shared/constants/incoterms';
+import { useDocumentTemplates } from '../../../api/queries';
 
 // ─── Document Templates ───
 // Each function takes the document JSON and returns printable HTML
@@ -1825,7 +1826,7 @@ function renderDocument(doc, style) {
 // full-length fill + one-page auto-fit). Shared by Print (autoPrint:true, opens
 // a window and prints) and Send (autoPrint:false, posted to the server which
 // renders it to a PDF with the identical layout).
-function buildDocHtml(editedHtml, docType, title, { autoPrint }) {
+function buildDocHtml(editedHtml, docType, title, { autoPrint, orientation = 'portrait' }) {
   // Certificate of Origin is an overlay for the pre-printed KCCI form: print A4
   // PORTRAIT with ZERO margin (the % field positions map 1:1 to the physical
   // page) and TEXT-ONLY — the on-screen template guide (.coo-tpl) is hidden so
@@ -1857,13 +1858,19 @@ function buildDocHtml(editedHtml, docType, title, { autoPrint }) {
       </body>
     </html>`;
   }
-  // Every export document prints A4 LANDSCAPE (297×210) with 8mm margins, so the
-  // wide invoice/contract/packing tables get the full 281mm printable width and
-  // stay readable at a 12px floor. Printable area = 281×194mm.
-  const pageRule = '@page { size: A4 landscape; margin: 8mm; }';
-  const printW = '281mm';   // 297 − 2×8mm
-  const printH = '194mm';   // 210 − 2×8mm
-  const pageHpx = Math.round((210 - 16) * 96 / 25.4);
+  // #13 — export documents default to A4 PORTRAIT; an admin can flip a specific
+  // document to landscape in Admin › Document Templates (never chosen automatically
+  // from table width). Orientation drives the @page rule AND the pinned body width
+  // so preview, print, PDF and WhatsApp/email all match. Portrait printable area =
+  // 186×273mm (12mm margins); landscape = 281×194mm (8mm margins). Wide tables fit
+  // portrait via full-width layout, wrapping, repeated headers and page-splitting
+  // (CSS below) — text stays at the 12px readable floor, never shrunk.
+  const isLandscape = orientation === 'landscape';
+  const marginMm = isLandscape ? 8 : 12;
+  const pageRule = `@page { size: A4 ${isLandscape ? 'landscape' : 'portrait'}; margin: ${marginMm}mm; }`;
+  const printW = isLandscape ? '281mm' : '186mm';   // (297 or 210) − 2×margin
+  const printH = isLandscape ? '194mm' : '273mm';   // (210 or 297) − 2×margin
+  const pageHpx = Math.round(((isLandscape ? 210 : 297) - 2 * marginMm) * 96 / 25.4);
   return `<!doctype html>
     <html>
       <head>
@@ -1944,6 +1951,28 @@ const BANK_DOC_TYPES = new Set([
   'bank-fi-request', 'bank-covering-letter', 'export-undertaking', 'itrs',
   'bill-of-lading', 'lab-test-request',
 ]);
+// #13 — resolve a document's page orientation from its Admin › Document
+// Templates setting. Default is PORTRAIT; landscape only when an active template
+// for that doc type explicitly sets it. Template doc_type keys use underscores
+// (or short aliases like 'coo'); renderer docTypes use hyphens — canon() strips
+// separators so both match, and a small alias map covers the odd ones.
+const ORIENT_ALIAS = {
+  certificateoforigin: 'coo', coo: 'certificateoforigin',
+  billoflading: 'bldraft', bldraft: 'billoflading',
+};
+const canonType = (s) => String(s || '').toLowerCase().replace(/[-_\s]+/g, '');
+function resolveOrientation(docType, templates) {
+  if (!docType || !Array.isArray(templates)) return 'portrait';
+  const want = canonType(docType);
+  const alias = ORIENT_ALIAS[want];
+  const row = templates.find((t) => {
+    if (t.isActive === false) return false;
+    const k = canonType(t.docType || t.doc_type);
+    return k === want || (alias && k === alias);
+  });
+  return row && (row.orientation === 'landscape') ? 'landscape' : 'portrait';
+}
+
 const STATUS_BADGE = {
   'Draft': 'bg-gray-100 text-gray-600',
   'Under Review': 'bg-blue-100 text-blue-700',
@@ -1958,6 +1987,8 @@ const STATUS_BADGE = {
 export default function DocumentCenter({ order }) {
   const { addToast } = useApp();
   const { hasPermission } = useAuth();
+  // #13 — per-doc-type orientation (admin-configured; defaults to portrait).
+  const { data: docTemplates = [] } = useDocumentTemplates();
   const [availableDocs, setAvailableDocs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [previewDoc, setPreviewDoc] = useState(null);
@@ -2147,7 +2178,7 @@ export default function DocumentCenter({ order }) {
   }
 
   function handlePrint() {
-    const html = buildDocHtml(currentEditedHtml(), previewDoc?._docType, `${previewDoc?.type || 'Document'} — ${order.id}`, { autoPrint: true });
+    const html = buildDocHtml(currentEditedHtml(), previewDoc?._docType, `${previewDoc?.type || 'Document'} — ${order.id}`, { autoPrint: true, orientation: resolveOrientation(previewDoc?._docType, docTemplates) });
     const printWindow = window.open('', '_blank');
     printWindow.document.write(html);
     printWindow.document.close();
@@ -2159,7 +2190,7 @@ export default function DocumentCenter({ order }) {
   async function downloadServerPdf() {
     setPdfBusy(true);
     try {
-      const html = buildDocHtml(currentEditedHtml(), previewDoc?._docType, `${previewDoc?.type || 'Document'} — ${order.id}`, { autoPrint: false });
+      const html = buildDocHtml(currentEditedHtml(), previewDoc?._docType, `${previewDoc?.type || 'Document'} — ${order.id}`, { autoPrint: false, orientation: resolveOrientation(previewDoc?._docType, docTemplates) });
       const filename = `${(previewDoc?.type || 'document').replace(/[^\w.\- ]+/g, '_')} — ${order.id}.pdf`;
       await api.downloadPost(`/api/export-orders/${oid}/documents/${previewKey}/pdf`, { html, filename }, filename);
     } catch (err) {
@@ -2203,7 +2234,7 @@ export default function DocumentCenter({ order }) {
   async function sendEmail({ email, subject }) {
     setEmailSending(true);
     try {
-      const html = buildDocHtml(currentEditedHtml(), previewDoc?._docType, previewDoc?.type, { autoPrint: false });
+      const html = buildDocHtml(currentEditedHtml(), previewDoc?._docType, previewDoc?.type, { autoPrint: false, orientation: resolveOrientation(previewDoc?._docType, docTemplates) });
       const filename = `${(previewDoc?.type || 'document').replace(/[^\w.\- ]+/g, '_')} — ${order.id}.pdf`;
       const res = await api.post(`/api/export-orders/${oid}/documents/${previewKey}/send-email`, { html, to: email, subject, filename });
       addToast(`Emailed to ${res?.data?.to || email}`, 'success');
@@ -2234,7 +2265,7 @@ export default function DocumentCenter({ order }) {
   async function sendWhatsApp(digits) {
     setWaSending(true);
     try {
-      const html = buildDocHtml(currentEditedHtml(), previewDoc?._docType, previewDoc?.type, { autoPrint: false });
+      const html = buildDocHtml(currentEditedHtml(), previewDoc?._docType, previewDoc?.type, { autoPrint: false, orientation: resolveOrientation(previewDoc?._docType, docTemplates) });
       const filename = `${(previewDoc?.type || 'document').replace(/[^\w.\- ]+/g, '_')} — ${order.id}.pdf`;
       const caption = buildExportCaption();
       const res = await api.post(`/api/export-orders/${oid}/documents/${previewKey}/send-whatsapp`, { html, to: digits, caption, filename });
@@ -2508,7 +2539,7 @@ export default function DocumentCenter({ order }) {
               ref={printRef}
               contentEditable
               suppressContentEditableWarning
-              className="doc-a4-preview border border-gray-200 rounded-lg overflow-auto max-h-[70vh] focus:outline-none focus:ring-2 focus:ring-blue-200"
+              className={`doc-a4-preview ${resolveOrientation(previewDoc?._docType, docTemplates) === 'landscape' ? 'is-landscape' : ''} border border-gray-200 rounded-lg overflow-auto max-h-[70vh] focus:outline-none focus:ring-2 focus:ring-blue-200`}
               dangerouslySetInnerHTML={{ __html: previewHtml }}
             />
           </div>
