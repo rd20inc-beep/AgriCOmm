@@ -14,15 +14,27 @@ const EMPTY = {
   doc_type: 'proforma_invoice',
   entity: 'export',
   template_content: '',
+  orientation: 'portrait',
   is_active: true,
 };
 
+// Keys canon-match the document renderers (separators are ignored), so setting
+// orientation here drives the actual export-document page orientation (#13).
 const DOC_TYPES = [
   { value: 'proforma_invoice', label: 'Proforma Invoice' },
   { value: 'commercial_invoice', label: 'Commercial Invoice' },
+  { value: 'sales_contract', label: 'Sales Contract' },
   { value: 'packing_list', label: 'Packing List' },
-  { value: 'bl_draft', label: 'Bill of Lading (Draft)' },
+  { value: 'export_undertaking', label: 'Export Undertaking' },
+  { value: 'bl_draft', label: 'Bill of Lading' },
   { value: 'coo', label: 'Certificate of Origin' },
+  { value: 'statement_of_origin', label: 'Statement of Origin' },
+  { value: 'bank_covering_letter', label: 'Bank Covering Letter' },
+  { value: 'buyer_covering_letter', label: 'Buyer Covering Letter' },
+  { value: 'bank_fi_request', label: 'Bank FI Request' },
+  { value: 'itrs', label: 'ITRS' },
+  { value: 'packing_certificate', label: 'Packing Certificate' },
+  { value: 'lab_test_request', label: 'Lab Test Request' },
   { value: 'phyto', label: 'Phytosanitary Certificate' },
   { value: 'fumigation', label: 'Fumigation Certificate' },
   { value: 'inspection_report', label: 'Inspection Report' },
@@ -52,6 +64,7 @@ export default function DocTemplatesTab() {
       doc_type: t.docType || t.doc_type || 'proforma_invoice',
       entity: t.entity || 'export',
       template_content: t.templateContent || t.template_content || '',
+      orientation: t.orientation === 'landscape' ? 'landscape' : 'portrait',
       is_active: t.isActive !== false,
     });
     setOpen(true);
@@ -65,6 +78,7 @@ export default function DocTemplatesTab() {
       doc_type: form.doc_type,
       entity: form.entity,
       template_content: form.template_content || null,
+      orientation: form.orientation === 'landscape' ? 'landscape' : 'portrait',
       is_active: !!form.is_active,
     };
     try {
@@ -110,6 +124,7 @@ export default function DocTemplatesTab() {
               <tr className="bg-gray-50 border-b border-gray-200">
                 <th className="text-left py-3 px-4 font-semibold text-gray-600">Name</th>
                 <th className="text-left py-3 px-4 font-semibold text-gray-600">Document Type</th>
+                <th className="text-left py-3 px-4 font-semibold text-gray-600">Orientation</th>
                 <th className="text-left py-3 px-4 font-semibold text-gray-600">Entity</th>
                 <th className="text-left py-3 px-4 font-semibold text-gray-600">Status</th>
                 <th className="text-right py-3 px-4 font-semibold text-gray-600">Actions</th>
@@ -117,9 +132,9 @@ export default function DocTemplatesTab() {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {isLoading ? (
-                <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-500">Loading templates...</td></tr>
+                <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-500">Loading templates...</td></tr>
               ) : templates.length === 0 ? (
-                <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-500">No templates yet — click Add Template.</td></tr>
+                <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-500">No templates yet — click Add Template.</td></tr>
               ) : templates.map(t => {
                 const docTypeLabel = DOC_TYPES.find(d => d.value === (t.docType || t.doc_type))?.label || t.docType || t.doc_type;
                 const active = t.isActive !== false;
@@ -127,6 +142,11 @@ export default function DocTemplatesTab() {
                   <tr key={t.id} className="hover:bg-gray-50 transition-colors">
                     <td data-label="Name" className="py-3 px-4 font-medium text-gray-900">{t.name}</td>
                     <td data-label="Document Type" className="py-3 px-4 text-gray-700">{docTypeLabel}</td>
+                    <td data-label="Orientation" className="py-3 px-4">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium capitalize ${(t.orientation === 'landscape') ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'}`}>
+                        {t.orientation === 'landscape' ? 'Landscape' : 'Portrait'}
+                      </span>
+                    </td>
                     <td data-label="Entity" className="mob-hide py-3 px-4 text-gray-600 capitalize">{t.entity || '—'}</td>
                     <td data-label="Status" className="py-3 px-4">
                       <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${active ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'}`}>
@@ -151,7 +171,7 @@ export default function DocTemplatesTab() {
           </table>
         </div>
         <div className="m-4 p-3 bg-blue-50 rounded-lg border border-blue-200 text-xs text-blue-700">
-          Templates here describe metadata + custom HTML. The document renderers in the order's Documents tab still drive the standard layouts; this list lets you keep the catalog of available document types in sync with the renderers.
+          Templates here describe metadata + custom HTML, and the <b>Page Orientation</b> set here drives how that document type prints, downloads and previews in the order's Documents tab (portrait by default). The built-in renderers still produce the standard layouts; this list keeps the catalog in sync and lets you flip a specific document to landscape when it's been approved for it.
         </div>
       </div>
 
@@ -174,6 +194,14 @@ export default function DocTemplatesTab() {
                 {ENTITIES.map(e => <option key={e} value={e} className="capitalize">{e}</option>)}
               </select>
             </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Page Orientation</label>
+            <select value={form.orientation} onChange={e => set('orientation', e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white">
+              <option value="portrait">Portrait (A4 — default)</option>
+              <option value="landscape">Landscape (A4)</option>
+            </select>
+            <p className="text-[11px] text-gray-500 mt-1">Controls how this document type prints, downloads (PDF) and previews. Export documents default to portrait; choose landscape only for documents formally approved for it.</p>
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Template Content (optional HTML)</label>

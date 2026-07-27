@@ -635,16 +635,23 @@ input, select, textarea { font-size: 14px; }
    screens (max-width:100%) so there is no horizontal scroll. */
 .doc-a4-preview { background: #eef0f3; padding: 16px; }
 .doc-a4-preview .agri-doc { max-width: 100%; margin: 0 auto; font-size: 12px; }
+/* #13 — the on-screen page mirrors the PRINT orientation so preview == PDF.
+   Default is A4 PORTRAIT (186×273mm printable); add .is-landscape for the
+   docs an admin has configured landscape. */
 .doc-a4-preview .agri-doc > div {
-  width: 281mm;
+  width: 186mm;                   /* A4 portrait printable width (210 − 2×12mm) */
   max-width: 100%;
-  min-height: 194mm;              /* full A4 landscape page height */
+  min-height: 273mm;              /* full A4 portrait page height */
   margin: 0 auto !important;
   background: #fff;
   box-shadow: 0 1px 6px rgba(0, 0, 0, 0.15);
   box-sizing: border-box;
   display: flex;                  /* pin the footer to the bottom, like print */
   flex-direction: column;
+}
+.doc-a4-preview.is-landscape .agri-doc > div {
+  width: 281mm;                   /* A4 landscape printable width (297 − 2×8mm) */
+  min-height: 194mm;
 }
 /* The shared footer (.agri-ftr) is pushed to the page bottom regardless of how
    little content sits above it — matching the printed / PDF output. !important
