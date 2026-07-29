@@ -449,8 +449,9 @@ function commercialInvoiceHtml(doc, opts = {}) {
   const routeFrom = order.portOfLoading || 'Karachi, Pakistan';
   const routeTo = [order.destinationPort, buyer.country].filter(Boolean).join(', ') || dischargePort;
 
-  // Payment & banking — the resolved company account (already masked server-side).
-  const bank = company.bank || {};
+  // #CI — the "Payment & Banking Details" section was removed from the commercial
+  // invoice per client request; the invoice carries only currency + payment term
+  // in its header table. (Bank details still print on the dedicated bank documents.)
   const cellL = 'border:1px solid #333; padding:2.5px 6px; font-weight:bold; background:#f7f7f7; white-space:nowrap;';
   const cellV = 'border:1px solid #333; padding:2.5px 6px;';
   const infoRow = (l1, v1, l2, v2) => `
@@ -458,21 +459,6 @@ function commercialInvoiceHtml(doc, opts = {}) {
       <td style="${cellL} width:19%;">${l1}</td><td style="${cellV} width:31%;">${v1 || ''}</td>
       <td style="${cellL} width:19%;">${l2}</td><td style="${cellV} width:31%;">${v2 || ''}</td>
     </tr>`;
-
-  const bankingSection = bank.withheld ? `
-    <div style="border:1px solid #333; padding:8px; margin-top:10px; font-size:12px; color:#555;">
-      Banking details available to authorised recipients on request.
-    </div>` : `
-    <table style="width:100%; border-collapse:collapse; margin-top:6px; font-size:12px;">
-      <tr><td colspan="4" style="border:1px solid #333; padding:3px 7px; font-weight:bold; background:#eef2f7; text-transform:uppercase; letter-spacing:.3px;">Payment &amp; Banking Details</td></tr>
-      ${infoRow('Payment Term', order.paymentTerms, 'Payment Due', order.paymentDueDate)}
-      ${infoRow('Currency', cur, 'Beneficiary', bank.title || company.name)}
-      ${infoRow('Bank', bank.name, 'Branch', bank.branch)}
-      ${infoRow('Account #', bank.account, 'IBAN', bank.iban)}
-      ${infoRow('SWIFT / BIC', bank.swift, 'Bank Address', bank.address || bank.city)}
-      ${bank.correspondent ? infoRow('Correspondent Bank', bank.correspondent.name, 'Corr. SWIFT / A/C', [bank.correspondent.swift, bank.correspondent.account].filter(Boolean).join(' / ')) : ''}
-    </table>
-    ${bank.masked ? '<div style="font-size:12px; color:#888; margin-top:2px;">Account number / IBAN partially masked — full details visible to authorised finance users.</div>' : ''}`;
 
   return `
     <div style="font-family: Arial, sans-serif; font-size:12px; max-width:820px; margin:0 auto; padding:10px 16px; color:#111;">
@@ -570,8 +556,6 @@ function commercialInvoiceHtml(doc, opts = {}) {
 
       ${containers && containers.length > 0 ? `
         <div style="margin-top:4px; font-size:12px; color:#333;">Container #: ${containers.map(c => c.containerNo).filter(Boolean).join(', ')}</div>` : ''}
-
-      ${bankingSection}
 
       ${doc._notes ? `<div style="margin-top:5px; font-size:12px;"><strong>Notes:</strong> ${doc._notes}</div>` : ''}
 
@@ -1947,7 +1931,8 @@ const wfBtn = 'inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs f
 // only these get the bank-account selector (and the audience/masking control)
 // in the preview. Others (Packing List, Certificate of Origin, …) don't.
 const BANK_DOC_TYPES = new Set([
-  'commercial-invoice', 'statement-of-origin', 'proforma-invoice',
+  // 'commercial-invoice' removed — its Payment & Banking section was dropped.
+  'statement-of-origin', 'proforma-invoice',
   'bank-fi-request', 'bank-covering-letter', 'export-undertaking', 'itrs',
   'bill-of-lading', 'lab-test-request',
 ]);
