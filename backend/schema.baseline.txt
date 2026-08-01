@@ -2609,6 +2609,28 @@ COL tasks_assignments.status:character varying:NOT NULL
 COL tasks_assignments.task_no:character varying:NOT NULL
 COL tasks_assignments.title:character varying:NOT NULL
 COL tasks_assignments.updated_at:timestamp with time zone:NOT NULL
+COL transport_costs.amount:numeric:NOT NULL
+COL transport_costs.attachment_path:character varying:NULL
+COL transport_costs.batch_id:integer:NULL
+COL transport_costs.created_at:timestamp with time zone:NULL
+COL transport_costs.created_by:integer:NULL
+COL transport_costs.customer_id:integer:NULL
+COL transport_costs.doc_no:character varying:NULL
+COL transport_costs.driver_name:character varying:NULL
+COL transport_costs.entity:character varying:NOT NULL
+COL transport_costs.expense_date:date:NULL
+COL transport_costs.hauler_id:integer:NULL
+COL transport_costs.id:integer:NOT NULL
+COL transport_costs.lot_id:integer:NULL
+COL transport_costs.notes:text:NULL
+COL transport_costs.paid_by:character varying:NOT NULL
+COL transport_costs.payable_id:integer:NULL
+COL transport_costs.status:character varying:NOT NULL
+COL transport_costs.supplier_id:integer:NULL
+COL transport_costs.transport_type:character varying:NULL
+COL transport_costs.updated_at:timestamp with time zone:NULL
+COL transport_costs.vehicle_no:character varying:NULL
+COL transport_costs.warehouse_id:integer:NULL
 COL user_preferences.created_at:timestamp with time zone:NOT NULL
 COL user_preferences.currency_display:character varying:NOT NULL
 COL user_preferences.dashboard_layout:jsonb:NULL
@@ -3654,6 +3676,17 @@ CON tasks_assignments.tasks_assignments_assigned_by_foreign(f)
 CON tasks_assignments.tasks_assignments_assigned_to_foreign(f)
 CON tasks_assignments.tasks_assignments_pkey(p)
 CON tasks_assignments.tasks_assignments_task_no_unique(u)
+CON transport_costs.chk_transport_costs_paid_by(c)
+CON transport_costs.chk_transport_costs_status(c)
+CON transport_costs.transport_costs_batch_id_foreign(f)
+CON transport_costs.transport_costs_created_by_foreign(f)
+CON transport_costs.transport_costs_customer_id_foreign(f)
+CON transport_costs.transport_costs_hauler_id_foreign(f)
+CON transport_costs.transport_costs_lot_id_foreign(f)
+CON transport_costs.transport_costs_payable_id_foreign(f)
+CON transport_costs.transport_costs_pkey(p)
+CON transport_costs.transport_costs_supplier_id_foreign(f)
+CON transport_costs.transport_costs_warehouse_id_foreign(f)
 CON user_preferences.user_preferences_pkey(p)
 CON user_preferences.user_preferences_user_id_foreign(f)
 CON user_preferences.user_preferences_user_id_unique(u)

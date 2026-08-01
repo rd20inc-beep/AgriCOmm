@@ -59,6 +59,7 @@ const defaultForm = () => ({
   broker_id: '',
   transport_cost: '',     // freight → hauler payable + cost
   hauler_id: '',          // transport contractor (dedicated haulers registry, item #5)
+  transport_paid_by: 'company', // #14 — who bears the freight (company → payable)
   purchase_date: new Date().toISOString().slice(0, 10),
   warehouse_id: '',
   notes: '',
@@ -336,6 +337,8 @@ export default function PurchaseLotDrawer({
         broker_id: form.broker_id ? parseInt(form.broker_id, 10) : null,
         transport_cost: transportCost > 0 ? transportCost : null,
         hauler_id: form.hauler_id ? parseInt(form.hauler_id, 10) : null,
+        transport_paid_by: form.transport_paid_by || 'company', // #14
+
         purchase_date: form.purchase_date,
         variety,
         grade: product?.grade || null,
@@ -837,6 +840,26 @@ export default function PurchaseLotDrawer({
                 clearable
                 placeholder="Search transporter…"
               />
+            </div>
+            {/* #14 — who bears the freight. 'Company' creates a transporter
+                payable (Finance → Accounts Payable); other options record the
+                charge without a company payable. */}
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Transport paid by</label>
+              <select value={form.transport_paid_by}
+                onChange={(e) => setForm(prev => ({ ...prev, transport_paid_by: e.target.value }))}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 bg-white">
+                <option value="company">Company (creates payable)</option>
+                <option value="supplier">Supplier</option>
+                <option value="customer">Customer</option>
+                <option value="service_client">Service Milling Client</option>
+                <option value="included_in_supplier_rate">Included in Supplier Rate</option>
+                <option value="deduct_from_supplier">Deduct from Supplier Payment</option>
+                <option value="other">Other</option>
+              </select>
+              {form.transport_paid_by && form.transport_paid_by !== 'company' && (
+                <p className="text-[11px] text-amber-600 mt-0.5">No company payable will be created; charge is recorded for tracking.</p>
+              )}
             </div>
           </div>
           {finalCostPerKg > 0 && (
