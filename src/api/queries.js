@@ -1045,6 +1045,19 @@ export function useHauler(id) {
   });
 }
 
+// #14 — transporter ledger (opening balance, charges, payments, running balance).
+// api.get does NOT transform keys, so the response is used as-is (snake_case).
+export function useHaulerLedger(id) {
+  return useQuery({
+    queryKey: ['hauler-ledger', id],
+    enabled: !!id,
+    queryFn: async () => {
+      const res = await api.get(`/api/haulers/${id}/ledger`);
+      return res?.data || res || {};
+    },
+  });
+}
+
 export function useCreateHauler() {
   const qc = useQueryClient();
   return useMutation({

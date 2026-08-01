@@ -9,6 +9,7 @@ const ctrl = require('./haulers.controller');
 const canRead = authorizeAny(['milling', 'view'], ['inventory', 'view'], ['admin', 'view']);
 
 router.get('/', canRead, ctrl.list);
+router.get('/:id/ledger', canRead, ctrl.getLedger);
 router.get('/:id', canRead, ctrl.getOne);
 router.post('/', authorize('admin', 'update'), ctrl.create);
 router.put('/:id', authorize('admin', 'update'), ctrl.update);

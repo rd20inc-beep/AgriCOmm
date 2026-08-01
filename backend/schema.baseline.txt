@@ -909,6 +909,7 @@ COL haulers.is_active:boolean:NOT NULL
 COL haulers.name:character varying:NOT NULL
 COL haulers.notes:text:NULL
 COL haulers.ntn:character varying:NULL
+COL haulers.opening_balance:numeric:NOT NULL
 COL haulers.phone:character varying:NULL
 COL haulers.updated_at:timestamp with time zone:NULL
 COL haulers.vehicle_types:character varying:NULL
