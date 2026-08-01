@@ -607,7 +607,8 @@ const financeController = {
       // avoid double-counting.
       const storedRows = await db('payables as p')
         .leftJoin('suppliers as s', 'p.supplier_id', 's.id')
-        .select('p.*', 's.name as supplier_name')
+        .leftJoin('haulers as h', 'p.hauler_id', 'h.id')  // #14 transporter payables
+        .select('p.*', 's.name as supplier_name', db.raw('h.name as hauler_name'))
         .where(function() {
           this.whereIn('p.payable_type', ['vendor', 'expense', 'purchase'])
               .orWhereNull('p.payable_type');
@@ -1279,6 +1280,14 @@ const financeController = {
                   payment_status: fullyPaid ? 'Paid' : 'Partial',
                   updated_at: trx.fn.now(),
                 });
+            }
+            // #14 — mirror the payment onto the transport_costs record so the
+            // transporter ledger / AP show the correct paid state (lowercase
+            // lifecycle: paid | partially_paid).
+            if (payable.hauler_id || payable.source_table === 'lot_transport') {
+              await trx('transport_costs')
+                .where({ payable_id: payable.id })
+                .update({ status: fullyPaid ? 'paid' : 'partially_paid', updated_at: trx.fn.now() });
             }
           }
           if (bank_account_id) {
