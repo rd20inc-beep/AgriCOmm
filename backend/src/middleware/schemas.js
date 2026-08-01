@@ -230,6 +230,10 @@ const createPurchaseLot = Joi.object({
   broker_id: Joi.number().integer().positive().allow(null),
   transport_vendor_id: Joi.number().integer().positive().allow(null, ''),
   hauler_id: Joi.number().integer().positive().allow(null, ''),
+  // #14 — transport responsibility + operational refs for the transport_costs record.
+  transport_paid_by: Joi.string().valid('company', 'supplier', 'customer', 'service_client', 'included_in_supplier_rate', 'deduct_from_supplier', 'other').allow(null, ''),
+  transport_doc_no: Joi.string().max(80).allow(null, ''),
+  transport_notes: Joi.string().allow(null, ''),
   commission_per_bag: Joi.number().min(0).allow(null),
   commission_total: Joi.number().min(0).allow(null),
   purchase_date: Joi.date().iso().allow(null, ''),

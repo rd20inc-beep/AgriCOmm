@@ -662,7 +662,7 @@ module.exports = {
       const {
         item_name, type = 'raw', entity = 'mill', warehouse_id, product_id,
         lot_no: customLotNo,
-        supplier_id, broker_id, transport_vendor_id, hauler_id, purchase_date, crop_year,
+        supplier_id, broker_id, transport_vendor_id, hauler_id, transport_paid_by, purchase_date, crop_year,
         // Commission (per bag/katta) → broker payable; folds into landed cost.
         commission_per_bag = 0, commission_total: commissionTotalInput = 0,
         variety, grade, moisture_pct, broken_pct, sortex_status, whiteness, quality_notes,
@@ -727,12 +727,19 @@ module.exports = {
       const rawHauler = (hauler_id != null && hauler_id !== '') ? hauler_id : transport_vendor_id;
       const haulerId = (rawHauler != null && rawHauler !== '') ? parseInt(rawHauler, 10) : null;
       const brokerIdNum = (broker_id != null && broker_id !== '') ? parseInt(broker_id, 10) : null;
+      // #14 — who bears the transport charge. Only 'company' creates a company
+      // payable AND capitalises the cost into the lot; other responsibilities are
+      // recorded (transport_costs) but not charged to the company here.
+      const transportPaidBy = ['company', 'supplier', 'customer', 'service_client', 'included_in_supplier_rate', 'deduct_from_supplier', 'other']
+        .includes(transport_paid_by) ? transport_paid_by : 'company';
+      const transportCapitalised = transportPaidBy === 'company';
       // Supplier-owed direct costs (transport + commission are NOT here — they go
       // to the hauler/broker payables).
       const supplierDirect = [labor_cost, unloading_cost, packing_cost, other_cost].reduce((s, c) => s + (parseFloat(c) || 0), 0);
       const totalBagCost = (bag_cost_included ? 0 : (parseFloat(bag_cost_per_bag) || 0) * totalBags);
-      // Full landed cost (all parties) → drives landed_cost_per_kg + costing sheet.
-      const landedCostTotal = uc.round2(purchaseAmount + supplierDirect + totalBagCost + transportCost + commissionTotal);
+      // Full landed cost → drives landed_cost_per_kg + costing sheet. Transport is
+      // capitalised only when the company bears it (#14).
+      const landedCostTotal = uc.round2(purchaseAmount + supplierDirect + totalBagCost + (transportCapitalised ? transportCost : 0) + commissionTotal);
       const landedCostPerKg = netWeightKg > 0 ? uc.round4(landedCostTotal / netWeightKg) : 0;
       // The SUPPLIER payable covers only the supplier-owed portion.
       const supplierPortion = uc.round2(purchaseAmount + supplierDirect + totalBagCost);
@@ -979,9 +986,9 @@ module.exports = {
         // (Dr Raw Inventory / Cr AP), only the party STAMP differs, so the books
         // stay balanced without a finance-engine rewrite.
         const postPartyCost = async ({ amount, partyId, partyKind = 'supplier', category, sourceTable, refType, label }) => {
-          if (!(amount > 0) || !partyId) return;
+          if (!(amount > 0) || !partyId) return null;
           const payNo = await generatePayNo(trx);
-          await trx('payables').insert({
+          const [payable] = await trx('payables').insert({
             pay_no: payNo, entity: 'mill', payable_type: 'vendor', category,
             supplier_id: partyKind === 'supplier' ? partyId : null,
             hauler_id: partyKind === 'hauler' ? partyId : null,
@@ -990,15 +997,51 @@ module.exports = {
             original_amount: amount, paid_amount: 0, outstanding: amount, status: 'Pending',
             due_date: addDays(purchase_date, 30), currency: 'PKR',
             notes: `${label} for purchase lot ${lotNo}`,
-          });
+          }).returning('*');
           await accountingService.autoPost(trx, {
             triggerEvent: 'purchase_invoice', entity: 'mill', amount, currency: 'PKR',
             refType, refNo: lotNo, description: `${label} — lot ${lotNo}`,
             userId: req.user?.id || null, partyType: partyKind, partyId,
           });
+          return payable;
         };
-        await postPartyCost({ amount: transportCost, partyId: haulerId, partyKind: 'hauler', category: 'Transport', sourceTable: 'lot_transport', refType: 'Lot Transport', label: 'Transport (hauler)' });
+        // #14 — a company transporter payable is created ONLY when the company
+        // bears the transport (paid_by='company', the default). For supplier- or
+        // client-paid transport the charge is still RECORDED in transport_costs
+        // (operational + ledger), but no company payable is raised and it is not
+        // capitalised as a company cost (its landed-cost line is already gated on
+        // transportCapitalised above). Downstream supplier-deduction / client
+        // invoicing lands in a later phase.
+        const transportPayable = transportCapitalised
+          ? await postPartyCost({ amount: transportCost, partyId: haulerId, partyKind: 'hauler', category: 'Transport', sourceTable: 'lot_transport', refType: 'Lot Transport', label: 'Transport (hauler)' })
+          : null;
         await postPartyCost({ amount: commissionTotal, partyId: brokerIdNum, partyKind: 'supplier', category: 'Commission', sourceTable: 'lot_commission', refType: 'Lot Commission', label: 'Commission (broker)' });
+
+        // #14 — record the transport charge in the transport_costs backbone
+        // (drives AP → Transporters, the transporter ledger, reports and
+        // reconciliation). Company-paid rows link to the payable + start 'unpaid';
+        // other responsibilities are recorded without a company payable.
+        if (transportCost > 0 && (haulerId || transportPaidBy !== 'company')) {
+          const firstVeh = (Array.isArray(req.body.vehicles) ? req.body.vehicles : [])[0] || {};
+          await trx('transport_costs').insert({
+            hauler_id: haulerId || null,
+            lot_id: lot.id,
+            warehouse_id: warehouse_id || null,
+            supplier_id: ['supplier', 'included_in_supplier_rate', 'deduct_from_supplier'].includes(transportPaidBy) ? (supplier_id || null) : null,
+            vehicle_no: (firstVeh.vehicle_no || '').toString().trim() || null,
+            driver_name: firstVeh.driver_name || null,
+            transport_type: 'inbound',
+            amount: transportCost,
+            paid_by: transportPaidBy,
+            status: transportCapitalised ? 'unpaid' : 'approved',
+            expense_date: purchase_date || new Date().toISOString().slice(0, 10),
+            doc_no: req.body.transport_doc_no || null,
+            notes: req.body.transport_notes || null,
+            entity: 'mill',
+            payable_id: transportPayable ? transportPayable.id : null,
+            created_by: req.user?.id || null,
+          });
+        }
 
         // Optional vehicle arrival(s) captured on the New Purchase Lot form —
         // each delivering truck, linked straight to this (pre-batch) lot. Rows
