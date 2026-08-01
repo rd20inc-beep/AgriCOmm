@@ -66,6 +66,7 @@ export const lotInventoryApi = {
 export const haulersApi = {
   list: (params) => api.get('/api/haulers', params),
   get: (id) => api.get(`/api/haulers/${id}`),
+  ledger: (id) => api.get(`/api/haulers/${id}/ledger`),
   create: (data) => api.post('/api/haulers', data),
   update: (id, data) => api.put(`/api/haulers/${id}`, data),
   remove: (id) => api.delete(`/api/haulers/${id}`),
