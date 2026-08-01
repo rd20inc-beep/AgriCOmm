@@ -140,7 +140,14 @@ export default function MoneyOut() {
       </span>
     )},
     { key: 'category', label: 'Category', sortable: true },
-    { key: 'supplierName', label: 'Supplier', sortable: true, render: (v, row) => <PartyLink type="supplier" id={row.supplierId} name={v} /> },
+    // #14 — party is the supplier, or the transporter (hauler) for transport payables.
+    { key: 'supplierName', label: 'Supplier / Transporter', sortable: true, render: (v, row) => (
+      v
+        ? <PartyLink type="supplier" id={row.supplierId} name={v} />
+        : (row.haulerName
+            ? <span className="inline-flex items-center gap-1 text-gray-800"><span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-600 font-medium">Transporter</span>{row.haulerName}</span>
+            : <span className="text-gray-400">—</span>)
+    ) },
     { key: 'linkedRef', label: 'Linked To', sortable: true, render: (v) => {
       if (!v) return '—';
       const isEx = v.startsWith('EX-'), isMill = v.startsWith('M-');
@@ -184,7 +191,7 @@ export default function MoneyOut() {
         bank_reference: payForm.chequeNo || null,
         due_date: payForm.dueDate || null,
         linked_payable_id: pay.dbId || pay.id,
-        notes: payForm.notes || `Payment for ${pay.payNo} - ${pay.supplierName || pay.category}`,
+        notes: payForm.notes || `Payment for ${pay.payNo} - ${pay.supplierName || pay.haulerName || pay.category}`,
       });
       addToast(`Payment of ${fmtAmount(amount, pay.currency)} recorded for ${pay.payNo}`, 'success');
       setDrawer(null);
@@ -256,7 +263,7 @@ export default function MoneyOut() {
       {/* Table */}
       <FinanceTable
         columns={columns} data={filtered}
-        searchKeys={['supplierName', 'payNo', 'category', 'linkedRef']}
+        searchKeys={['supplierName', 'haulerName', 'payNo', 'category', 'linkedRef']}
         onRowClick={openDrawer} exportFilename="payables" emptyText="No payables found" loading={isLoading}
         actions={(row) => (
           <div className="inline-flex items-center gap-1.5">
@@ -435,7 +442,7 @@ export default function MoneyOut() {
                   <label className="text-xs text-gray-500 block mb-1">Notes (optional)</label>
                   <input type="text" value={payForm.notes}
                     onChange={e => setPayForm({ ...payForm, notes: e.target.value })}
-                    placeholder={`Payment for ${drawer.supplierName || drawer.category}`}
+                    placeholder={`Payment for ${drawer.supplierName || drawer.haulerName || drawer.category}`}
                     className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                 </div>
 
