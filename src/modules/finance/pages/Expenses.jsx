@@ -9,6 +9,7 @@ import SlideDrawer from '../../../components/SlideDrawer';
 import { downloadCSV } from '../../../utils/csvExport';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useApp } from '../../../context/AppContext';
+import { useAuth } from '../../../context/AuthContext';
 import api from '../../../api/client';
 import { useExpenseVendors } from '../../../api/queries';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
@@ -614,6 +615,10 @@ function ExpenseForm({
   showBatchPicker, showOrderPicker, showOwnerField,
   createMut, handleCreate, onCancel,
 }) {
+  // Only Super Admin / Owner see the batch's supplier / order's customer in the
+  // link pickers — restricted roles pick by reference number (batch/order) only.
+  const { user } = useAuth();
+  const canSeeNames = user?.role === 'Owner' || user?.role === 'Super Admin';
   return (
     <form onSubmit={handleCreate} className="bg-white rounded-xl border border-blue-200 p-5 space-y-5">
       <div className="flex items-center justify-between">
@@ -744,7 +749,7 @@ function ExpenseForm({
             <option value="">No specific batch — general mill expense</option>
             {safeBatches.filter(b => !['Closed', 'Cancelled', 'Rejected'].includes(b.status)).map(b =>
               <option key={b.id} value={b.dbId || b.id}>
-                {b.id} — {b.supplierName || 'Unknown'} ({Number(b.rawQtyMT || 0).toFixed(1)} MT) [{b.status}]
+                {b.id}{canSeeNames ? ` — ${b.supplierName || 'Unknown'}` : ''} ({Number(b.rawQtyMT || 0).toFixed(1)} MT) [{b.status}]
               </option>
             )}
           </select>
@@ -760,7 +765,7 @@ function ExpenseForm({
             <option value="">No specific order — general export expense</option>
             {safeOrders.filter(o => !['Closed', 'Cancelled'].includes(o.status)).map(o =>
               <option key={o.id} value={o.dbId || o.id}>
-                {o.id} — {o.customerName} ({Number(o.qtyMT || 0).toFixed(1)} MT, {o.country}) [{o.status}]
+                {o.id}{canSeeNames ? ` — ${o.customerName}` : ''} ({Number(o.qtyMT || 0).toFixed(1)} MT, {o.country}) [{o.status}]
               </option>
             )}
           </select>
