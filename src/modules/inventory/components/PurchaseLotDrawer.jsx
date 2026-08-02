@@ -857,7 +857,16 @@ export default function PurchaseLotDrawer({
                 <option value="deduct_from_supplier">Deduct from Supplier Payment</option>
                 <option value="other">Other</option>
               </select>
-              {form.transport_paid_by && form.transport_paid_by !== 'company' && (
+              {form.transport_paid_by === 'deduct_from_supplier' && (
+                <p className="text-[11px] text-amber-600 mt-0.5">Freight is paid to the hauler (a transporter payable) and deducted from the supplier’s bill — it shows as a deduction on their statement.</p>
+              )}
+              {['supplier', 'included_in_supplier_rate'].includes(form.transport_paid_by) && (
+                <p className="text-[11px] text-amber-600 mt-0.5">The supplier bears this freight — no company payable; recorded for tracking.</p>
+              )}
+              {['customer', 'service_client'].includes(form.transport_paid_by) && (
+                <p className="text-[11px] text-amber-600 mt-0.5">Client-borne freight — recovered from the client; no company payable.</p>
+              )}
+              {form.transport_paid_by === 'other' && (
                 <p className="text-[11px] text-amber-600 mt-0.5">No company payable will be created; charge is recorded for tracking.</p>
               )}
             </div>
