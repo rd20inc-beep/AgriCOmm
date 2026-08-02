@@ -1833,6 +1833,51 @@ module.exports = {
           }
         }
 
+        // #14 — the supplier-owed portion (rice + labor + unloading + packing +
+        // other + bag = landedTotal here, transport excluded) is carried on the
+        // lot's 'Raw Material' supplier payable. Editing these costs must keep
+        // that payable (and its GL) in step, otherwise the added cost never
+        // reaches Accounts Payable / Money Out. Match createPurchaseLot's payable
+        // (category 'Raw Material', linked_ref = lot_no).
+        const supPay = await trx('payables')
+          .where({ linked_ref: lot.lot_no, category: 'Raw Material' })
+          .modify((q) => { if (lot.supplier_id) q.where('supplier_id', lot.supplier_id); })
+          .first();
+        if (supPay) {
+          const supPaid = parseFloat(supPay.paid_amount) || 0;
+          const oldSup = parseFloat(supPay.original_amount) || 0;
+          const newSup = landedTotal; // rice + direct + bag (transport excluded)
+          if (Math.abs(newSup - oldSup) > 0.01) {
+            await trx('payables').where({ id: supPay.id }).update({
+              original_amount: newSup,
+              outstanding: Math.max(0, uc.round2(newSup - supPaid)),
+              status: (newSup - supPaid) <= 0.01 ? 'Paid' : (supPaid > 0 ? 'Partial' : 'Pending'),
+              updated_at: trx.fn.now(),
+            });
+            // Signed-delta GL (Dr 1210 Raw Inventory / Cr 2010 Supplier Payable),
+            // only while unpaid so a settled payment is never orphaned.
+            if (supPaid <= 0.01) {
+              const raw = await trx('chart_of_accounts').where({ code: '1210' }).first();
+              const ap = await trx('chart_of_accounts').where({ code: '2010' }).first();
+              if (raw && ap) {
+                const d = uc.round2(newSup - oldSup); const up = d > 0; const a = Math.abs(d);
+                const j = await accountingService.createJournal(trx, {
+                  date: new Date().toISOString().slice(0, 10), entity: 'mill',
+                  refType: 'Purchase Lot', refNo: lot.lot_no,
+                  description: `Lot ${lot.lot_no} cost adjustment (Rs ${d >= 0 ? '+' : ''}${d})`,
+                  currency: 'PKR', fxRate: 1, isAuto: true, userId: req.user?.id,
+                  partyType: lot.supplier_id ? 'supplier' : null, partyId: lot.supplier_id || null,
+                  lines: [
+                    { account_id: raw.id, account: raw.name, debit: up ? a : 0, credit: up ? 0 : a, narration: `${up ? 'DR' : 'CR'} ${raw.code} ${raw.name} — lot cost adj` },
+                    { account_id: ap.id, account: ap.name, debit: up ? 0 : a, credit: up ? a : 0, narration: `${up ? 'CR' : 'DR'} ${ap.code} ${ap.name} — lot cost adj` },
+                  ],
+                });
+                if (j?.id) await accountingService.postJournal(trx, j.id);
+              }
+            }
+          }
+        }
+
         // Cascade the corrected cost into any batch that already consumed this
         // lot (batch_source_lots, raw-cost pool, output-lot costs, non-locked
         // COGS). No-op when the lot hasn't been milled.
