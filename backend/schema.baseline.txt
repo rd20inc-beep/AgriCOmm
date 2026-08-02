@@ -2349,6 +2349,8 @@ COL service_milling_invoices.created_by:integer:NULL
 COL service_milling_invoices.device_uuid:text:NULL
 COL service_milling_invoices.discount:numeric:NULL
 COL service_milling_invoices.extra_charges:numeric:NULL
+COL service_milling_invoices.freight_amount:numeric:NOT NULL
+COL service_milling_invoices.freight_hauler_id:integer:NULL
 COL service_milling_invoices.id:integer:NOT NULL
 COL service_milling_invoices.invoice_date:date:NOT NULL
 COL service_milling_invoices.invoice_no:character varying:NOT NULL
@@ -3590,6 +3592,7 @@ CON service_milling_dispatches.service_milling_dispatches_service_batch_id_forei
 CON service_milling_dispatches.uq_service_milling_dispatches_uuid(u)
 CON service_milling_invoices.chk_service_milling_invoices_payment_status_valid(c)
 CON service_milling_invoices.service_milling_invoices_client_customer_id_foreign(f)
+CON service_milling_invoices.service_milling_invoices_freight_hauler_id_foreign(f)
 CON service_milling_invoices.service_milling_invoices_invoice_no_unique(u)
 CON service_milling_invoices.service_milling_invoices_pkey(p)
 CON service_milling_invoices.service_milling_invoices_service_batch_id_foreign(f)
