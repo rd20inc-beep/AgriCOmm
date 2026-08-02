@@ -888,7 +888,7 @@ const millingAdvancedController = {
       const STREAM_CASE = `CASE
             WHEN category = 'Transport' OR source_table IN ('lot_transport', 'batch_transport') THEN 'Transport (haulers)'
             WHEN category = 'Commission' OR source_table = 'lot_commission' THEN 'Commission (brokers)'
-            WHEN category = 'Raw Material' OR source_table = 'inventory_lots' THEN 'Rice & lot costs'
+            WHEN category = 'Raw Material' OR source_table IN ('inventory_lots', 'lot_labor', 'lot_unloading', 'lot_packing', 'lot_other', 'lot_bag') THEN 'Rice & lot costs'
             WHEN source_table = 'milling_costs' THEN 'Milling & batch costs'
             WHEN source_table = 'mill_purchases' THEN 'Mill store purchases'
             WHEN source_table IN ('mill_expenses', 'business_expenses') THEN 'Expenses & overhead'

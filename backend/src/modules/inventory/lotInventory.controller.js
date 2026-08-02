@@ -944,22 +944,47 @@ module.exports = {
         });
 
         if (landedPayableAmount > 0 && supplier_id) {
-          const payNo = await generatePayNo(trx);
-
-          await trx('payables').insert({
-            pay_no: payNo,
-            entity: 'mill',
-            category: 'Raw Material',
-            supplier_id: supplier_id || null,
-            linked_ref: lotNo,
-            original_amount: landedPayableAmount,
-            paid_amount: paidAmount,
-            outstanding: Math.max(0, landedPayableAmount - paidAmount),
-            due_date: addDays(purchase_date, 30),
-            status: payableStatus,
-            currency: 'PKR',
-            notes: `Auto-created from purchase lot ${lotNo}`,
-          });
+          // #14 — ITEMISED supplier payables: rice + each additional cost is its
+          // own separately-payable line (all owed to the supplier), so Money Out
+          // shows and settles them individually instead of as one bundled row.
+          // The GL is unchanged — ONE purchase-invoice journal for the supplier
+          // portion (Dr 1210 Raw Inventory / Cr 2010 Supplier AP) — because the
+          // payable rows just partition that same total. Rice keeps the legacy
+          // shape (category 'Raw Material', no source_table); the additional
+          // costs carry a lot_* source_table so the edit path can reconcile them.
+          const supplierComponents = [
+            { amount: purchaseAmount, category: 'Raw Material', sourceTable: null, label: 'Rice purchase' },
+            { amount: parseFloat(labor_cost) || 0, category: 'Labor', sourceTable: 'lot_labor', label: 'Labor' },
+            { amount: parseFloat(unloading_cost) || 0, category: 'Unloading', sourceTable: 'lot_unloading', label: 'Unloading' },
+            { amount: parseFloat(packing_cost) || 0, category: 'Packing', sourceTable: 'lot_packing', label: 'Packing' },
+            { amount: parseFloat(other_cost) || 0, category: 'Other Cost', sourceTable: 'lot_other', label: 'Other cost' },
+            { amount: totalBagCost, category: 'Bags', sourceTable: 'lot_bag', label: 'Bags' },
+          ].filter((c) => c.amount > 0.01);
+          // Any up-front payment settles the lines in order (rice first).
+          let remainingPaid = paidAmount;
+          for (const c of supplierComponents) {
+            const compPayNo = await generatePayNo(trx);
+            const amt = uc.round2(c.amount);
+            const cPaid = uc.round2(Math.min(remainingPaid, amt));
+            remainingPaid = uc.round2(remainingPaid - cPaid);
+            await trx('payables').insert({
+              pay_no: compPayNo,
+              entity: 'mill',
+              payable_type: 'vendor',
+              category: c.category,
+              supplier_id: supplier_id || null,
+              linked_ref: lotNo,
+              source_table: c.sourceTable,
+              source_id: lot.id,
+              original_amount: amt,
+              paid_amount: cPaid,
+              outstanding: Math.max(0, uc.round2(amt - cPaid)),
+              due_date: addDays(purchase_date, 30),
+              status: cPaid >= amt - 0.01 ? 'Paid' : cPaid > 0 ? 'Partial' : 'Pending',
+              currency: 'PKR',
+              notes: `${c.label} — purchase lot ${lotNo}`,
+            });
+          }
 
           await accountingService.autoPost(trx, {
             triggerEvent: 'purchase_invoice',
@@ -1835,46 +1860,92 @@ module.exports = {
 
         // #14 — the supplier-owed portion (rice + labor + unloading + packing +
         // other + bag = landedTotal here, transport excluded) is carried on the
-        // lot's 'Raw Material' supplier payable. Editing these costs must keep
-        // that payable (and its GL) in step, otherwise the added cost never
-        // reaches Accounts Payable / Money Out. Match createPurchaseLot's payable
-        // (category 'Raw Material', linked_ref = lot_no).
-        const supPay = await trx('payables')
-          .where({ linked_ref: lot.lot_no, category: 'Raw Material' })
-          .modify((q) => { if (lot.supplier_id) q.where('supplier_id', lot.supplier_id); })
-          .first();
-        if (supPay) {
-          const supPaid = parseFloat(supPay.paid_amount) || 0;
-          const oldSup = parseFloat(supPay.original_amount) || 0;
-          const newSup = landedTotal; // rice + direct + bag (transport excluded)
-          if (Math.abs(newSup - oldSup) > 0.01) {
-            await trx('payables').where({ id: supPay.id }).update({
-              original_amount: newSup,
-              outstanding: Math.max(0, uc.round2(newSup - supPaid)),
-              status: (newSup - supPaid) <= 0.01 ? 'Paid' : (supPaid > 0 ? 'Partial' : 'Pending'),
-              updated_at: trx.fn.now(),
-            });
-            // Signed-delta GL (Dr 1210 Raw Inventory / Cr 2010 Supplier Payable),
-            // only while unpaid so a settled payment is never orphaned.
-            if (supPaid <= 0.01) {
-              const raw = await trx('chart_of_accounts').where({ code: '1210' }).first();
-              const ap = await trx('chart_of_accounts').where({ code: '2010' }).first();
-              if (raw && ap) {
-                const d = uc.round2(newSup - oldSup); const up = d > 0; const a = Math.abs(d);
-                const j = await accountingService.createJournal(trx, {
-                  date: new Date().toISOString().slice(0, 10), entity: 'mill',
-                  refType: 'Purchase Lot', refNo: lot.lot_no,
-                  description: `Lot ${lot.lot_no} cost adjustment (Rs ${d >= 0 ? '+' : ''}${d})`,
-                  currency: 'PKR', fxRate: 1, isAuto: true, userId: req.user?.id,
-                  partyType: lot.supplier_id ? 'supplier' : null, partyId: lot.supplier_id || null,
-                  lines: [
-                    { account_id: raw.id, account: raw.name, debit: up ? a : 0, credit: up ? 0 : a, narration: `${up ? 'DR' : 'CR'} ${raw.code} ${raw.name} — lot cost adj` },
-                    { account_id: ap.id, account: ap.name, debit: up ? 0 : a, credit: up ? a : 0, narration: `${up ? 'CR' : 'DR'} ${ap.code} ${ap.name} — lot cost adj` },
-                  ],
-                });
-                if (j?.id) await accountingService.postJournal(trx, j.id);
-              }
+        // lot's supplier payables. Each additional cost is ITEMISED as its own
+        // separately-payable line (matching createPurchaseLot), so Money Out shows
+        // and settles them individually. Editing costs must keep these in step,
+        // else an added cost never reaches Accounts Payable / Money Out.
+        //
+        // A signed-delta GL keeps the books balanced without reverse+repost
+        // (Dr 1210 Raw Inventory / Cr 2010 Supplier Payable), only for the UNPAID
+        // change so a settled payment is never orphaned.
+        const postSupplierDelta = async (delta) => {
+          const d = uc.round2(delta);
+          if (Math.abs(d) <= 0.01) return;
+          const raw = await trx('chart_of_accounts').where({ code: '1210' }).first();
+          const ap = await trx('chart_of_accounts').where({ code: '2010' }).first();
+          if (!raw || !ap) return;
+          const up = d > 0; const a = Math.abs(d);
+          const j = await accountingService.createJournal(trx, {
+            date: new Date().toISOString().slice(0, 10), entity: 'mill',
+            refType: 'Purchase Lot', refNo: lot.lot_no,
+            description: `Lot ${lot.lot_no} cost adjustment (Rs ${d >= 0 ? '+' : ''}${d})`,
+            currency: 'PKR', fxRate: 1, isAuto: true, userId: req.user?.id,
+            partyType: lot.supplier_id ? 'supplier' : null, partyId: lot.supplier_id || null,
+            lines: [
+              { account_id: raw.id, account: raw.name, debit: up ? a : 0, credit: up ? 0 : a, narration: `${up ? 'DR' : 'CR'} ${raw.code} ${raw.name} — lot cost adj` },
+              { account_id: ap.id, account: ap.name, debit: up ? 0 : a, credit: up ? a : 0, narration: `${up ? 'CR' : 'DR'} ${ap.code} ${ap.name} — lot cost adj` },
+            ],
+          });
+          if (j?.id) await accountingService.postJournal(trx, j.id);
+        };
+
+        if (lot.supplier_id) {
+          const SUP_CATS = ['Raw Material', 'Labor', 'Unloading', 'Packing', 'Other Cost', 'Bags'];
+          const supRows = await trx('payables')
+            .where({ linked_ref: lot.lot_no, entity: 'mill', supplier_id: lot.supplier_id })
+            .whereIn('category', SUP_CATS);
+          const isPaid = (r) => (parseFloat(r.paid_amount) || 0) > 0.01;
+          const hasItemised = supRows.some((r) => ['lot_labor', 'lot_unloading', 'lot_packing', 'lot_other', 'lot_bag'].includes(r.source_table));
+          const bundled = supRows.find((r) => r.category === 'Raw Material' && !r.source_table);
+
+          if (!hasItemised && bundled && isPaid(bundled)) {
+            // LEGACY paid bundled lot — do NOT re-split a settled payable. Keep the
+            // single 'Raw Material' payable and update it to the whole landed total.
+            const oldSup = parseFloat(bundled.original_amount) || 0;
+            const paid = parseFloat(bundled.paid_amount) || 0;
+            if (Math.abs(landedTotal - oldSup) > 0.01) {
+              await trx('payables').where({ id: bundled.id }).update({
+                original_amount: landedTotal,
+                outstanding: Math.max(0, uc.round2(landedTotal - paid)),
+                status: (landedTotal - paid) <= 0.01 ? 'Paid' : (paid > 0 ? 'Partial' : 'Pending'),
+                updated_at: trx.fn.now(),
+              });
+              // paid → no GL delta (would orphan the settlement).
             }
+          } else {
+            // ITEMISE: keep any PAID component untouched, re-split the UNPAID rest.
+            const paidRows = supRows.filter(isPaid);
+            const unpaidRows = supRows.filter((r) => !isPaid(r));
+            const oldUnpaidBilled = unpaidRows.reduce((s, r) => s + (parseFloat(r.original_amount) || 0), 0);
+            const paidKeys = new Set(paidRows.map((r) => r.source_table || 'raw'));
+            for (const r of unpaidRows) await trx('payables').where({ id: r.id }).del();
+
+            const components = [
+              { amount: purchaseAmount, category: 'Raw Material', sourceTable: null, label: 'Rice purchase' },
+              { amount: lc, category: 'Labor', sourceTable: 'lot_labor', label: 'Labor' },
+              { amount: ulc, category: 'Unloading', sourceTable: 'lot_unloading', label: 'Unloading' },
+              { amount: pc, category: 'Packing', sourceTable: 'lot_packing', label: 'Packing' },
+              { amount: oc, category: 'Other Cost', sourceTable: 'lot_other', label: 'Other cost' },
+              { amount: totalBagCost, category: 'Bags', sourceTable: 'lot_bag', label: 'Bags' },
+            ];
+            let newUnpaidBilled = 0;
+            for (const c of components) {
+              const key = c.sourceTable || 'raw';
+              if (paidKeys.has(key)) continue; // already exists & settled — leave it
+              const amt = uc.round2(c.amount);
+              if (amt <= 0.01) continue;
+              const compPayNo = await generatePayNo(trx);
+              await trx('payables').insert({
+                pay_no: compPayNo, entity: 'mill', payable_type: 'vendor', category: c.category,
+                supplier_id: lot.supplier_id, linked_ref: lot.lot_no,
+                source_table: c.sourceTable, source_id: lotId,
+                original_amount: amt, paid_amount: 0, outstanding: amt, status: 'Pending',
+                due_date: addDays(lot.purchase_date, 30), currency: 'PKR',
+                notes: `${c.label} — purchase lot ${lot.lot_no}`,
+              });
+              newUnpaidBilled += amt;
+            }
+            await postSupplierDelta(newUnpaidBilled - oldUnpaidBilled);
           }
         }
 
