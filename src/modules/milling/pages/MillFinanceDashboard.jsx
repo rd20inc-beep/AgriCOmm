@@ -26,7 +26,7 @@ import {
   useFinalSettlement, useFinalizeSettlement, usePayrollAudit, useSalaryRevisions, useReviseSalary,
   usePayrollSchedule, useSavePayrollSchedule, useRunPayrollNow,
   usePayables, useSuppliers, useCustomers, usePurchases, useLocalSalesSummary, useMillCashFlow, useAcceptFundTransfer,
-  useMillLotCosts, useLocalSales, useRecordPayment, usePayablePayments,
+  useMillLotCosts, useLocalSales, useRecordPayment, usePayablePayments, useBankAccounts,
 } from '../../../api/queries';
 import TransactionDocument from '../../../components/TransactionDocument';
 import NewPurchaseDrawer from '../../../components/NewPurchaseDrawer';
@@ -140,6 +140,100 @@ function Stat({ label, value, sub, tone = 'slate', icon: Icon }) {
 }
 
 // `payrollOnly` renders JUST the Payroll tab (no mill hero/KPIs/fund-transfers or
+// #14 — Pay Transporter slider: settles a real transporter payable via
+// recordPayment (cash/bank mandatory, full or partial) straight from the Mill
+// Finance transport breakdown, so the Mill Manager can pay where they see the
+// due amount. (WHT / discount / attachment land in a later phase.)
+function PayTransporterDrawer({ payTransport, onClose, addToast }) {
+  const { data: bankAccounts = [] } = useBankAccounts();
+  const recordMut = useRecordPayment();
+  const [form, setForm] = useState({
+    amount: String(payTransport.outstanding || ''),
+    method: 'bank_transfer',
+    bankAccountId: '',
+    date: new Date().toISOString().slice(0, 10),
+    reference: '',
+    notes: '',
+  });
+  const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
+  const inp = 'w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 bg-white';
+
+  async function submit(e) {
+    e.preventDefault();
+    const amt = parseFloat(form.amount) || 0;
+    if (!(amt > 0)) { addToast('Enter a positive amount', 'error'); return; }
+    if (amt - Number(payTransport.outstanding) > 0.01) { addToast(`Amount exceeds the outstanding ${PKR(payTransport.outstanding)}.`, 'error'); return; }
+    if (!form.bankAccountId) { addToast('Select a cash or bank account', 'error'); return; }
+    try {
+      await recordMut.mutateAsync({
+        type: 'payment', linked_payable_id: payTransport.payableId, amount: amt, currency: 'PKR',
+        payment_method: form.method, bank_account_id: parseInt(form.bankAccountId, 10),
+        bank_reference: form.reference || null, payment_date: form.date,
+        notes: form.notes || `Transport payment — ${payTransport.haulerName || ''}`.trim(),
+      });
+      addToast('Transporter paid', 'success');
+      onClose();
+    } catch (err) {
+      addToast(err?.data?.message || err?.message || 'Payment failed', 'error');
+    }
+  }
+
+  return (
+    <SlideDrawer open onClose={onClose} title={`Pay ${payTransport.haulerName || 'Transporter'}`}
+      subtitle={`${payTransport.lotNo ? `Lot ${payTransport.lotNo} · ` : ''}${PKR(payTransport.outstanding)} due`} icon={Banknote} size="md"
+      footer={(
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
+          <button type="submit" form="pay-transporter-form" disabled={recordMut.isPending}
+            className="px-4 py-2 text-sm text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-60">
+            {recordMut.isPending ? 'Paying…' : 'Pay Transporter'}
+          </button>
+        </div>
+      )}>
+      <form id="pay-transporter-form" onSubmit={submit} className="space-y-4">
+        <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm flex justify-between">
+          <span className="text-gray-500">Outstanding</span>
+          <span className="font-semibold text-amber-700">{PKR(payTransport.outstanding)}</span>
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">Amount to pay *</label>
+          <input type="number" step="0.01" min="0" value={form.amount} onChange={(e) => set('amount', e.target.value)} className={inp} />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Method</label>
+            <select value={form.method} onChange={(e) => set('method', e.target.value)} className={inp}>
+              <option value="bank_transfer">Bank Transfer</option>
+              <option value="cash">Cash</option>
+              <option value="cheque">Cheque</option>
+              <option value="online">Online</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Date</label>
+            <input type="date" value={form.date} onChange={(e) => set('date', e.target.value)} className={inp} />
+          </div>
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">Cash / Bank account *</label>
+          <select value={form.bankAccountId} onChange={(e) => set('bankAccountId', e.target.value)} className={inp}>
+            <option value="">Select account…</option>
+            {(bankAccounts || []).map((a) => <option key={a.id} value={a.id}>{a.name}{a.bankName ? ` — ${a.bankName}` : ''}{a.type === 'cash' ? ' (Cash)' : ''}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">Cheque / Transaction reference</label>
+          <input type="text" value={form.reference} onChange={(e) => set('reference', e.target.value)} placeholder="Optional" className={inp} />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">Remarks</label>
+          <textarea value={form.notes} onChange={(e) => set('notes', e.target.value)} rows={2} placeholder="Optional" className={inp} />
+        </div>
+      </form>
+    </SlideDrawer>
+  );
+}
+
 // other tabs) so the SAME payroll UI can be surfaced on the Head Office finance
 // dashboard (/finance/payroll) — payroll is a single set of mill workers.
 export default function MillFinanceDashboard({ payrollOnly = false }) {
@@ -285,6 +379,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
   const canDeletePayroll = hasPermission('payroll', 'delete');
   const canExportPayroll = hasPermission('payroll', 'export');
   const [payParty, setPayParty] = useState(null);
+  const [payTransport, setPayTransport] = useState(null); // #14 — Pay Transporter slider target
   const [paySupplier, setPaySupplier] = useState(null);
   const [payExpense, setPayExpense] = useState(null); // pay a specific mill expense
   const [cashEntry, setCashEntry] = useState(null); // view a cash-ledger entry's voucher/receipt
@@ -1511,9 +1606,14 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
                               ? <span className="text-[11px] text-amber-600 whitespace-nowrap">no hauler set</span>
                               : <span className="text-[11px] text-gray-500 truncate">{l.haulerName || '—'}{l.outstanding > 0 ? ` · ${PKR(l.outstanding)} due` : ' · paid'}</span>
                           )}
-                          {/* Hauler payments are settled via the vendor payables rail — a
-                              dedicated per-hauler payment flow is not yet wired, so the
-                              inline Pay shortcut is intentionally omitted for transport. */}
+                          {/* #14 — pay the transporter right here (opens a slider that
+                              records against the real transporter payable). */}
+                          {cat.key === 'transport' && canPay && l.payableId && l.outstanding > 0 && (
+                            <button onClick={() => setPayTransport({ payableId: l.payableId, haulerName: l.haulerName, outstanding: l.outstanding, lotNo: l.lotNo })}
+                              className="inline-flex items-center gap-1 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white px-2 py-1 text-[11px] font-medium shrink-0">
+                              <Banknote size={11} /> Pay
+                            </button>
+                          )}
                           <span className="font-medium text-gray-900 tabular-nums shrink-0">{PKR(l.amount)}</span>
                         </div>
                       </div>
@@ -2621,6 +2721,16 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
           mode="supplier"
           party={payParty}
           onClose={() => setPayParty(null)}
+        />
+      )}
+
+      {/* #14 — Pay Transporter: settle a transporter payable straight from the
+          Mill Finance cost breakdown (cash/bank, full or partial). */}
+      {payTransport && (
+        <PayTransporterDrawer
+          payTransport={payTransport}
+          onClose={() => setPayTransport(null)}
+          addToast={addToast}
         />
       )}
 
