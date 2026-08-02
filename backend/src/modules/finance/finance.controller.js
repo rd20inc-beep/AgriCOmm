@@ -2309,7 +2309,15 @@ financeController.listPurchases = async (req, res) => {
       if (da !== dbt) return dbt - da;
       return String(b.ref || '').localeCompare(String(a.ref || ''));
     });
-    const sliced = all.slice(0, parseInt(limit, 10));
+    let sliced = all.slice(0, parseInt(limit, 10));
+
+    // Confidentiality: restricted roles (everyone except Super Admin / Owner) see
+    // the reference (lot / batch / order / expense no) but NOT the supplier name.
+    if (await isPartyMasked(req)) {
+      sliced = sliced.map((r) => (r.supplier_name
+        ? { ...r, supplier_name: 'Supplier', supplier_id: null }
+        : r));
+    }
 
     // Aggregate totals across the FILTERED set so the FE can show
     // top-line spend without a second round-trip.
