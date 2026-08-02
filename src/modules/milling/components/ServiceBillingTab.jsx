@@ -156,6 +156,7 @@ export default function ServiceBillingTab({ routeId, batchDbId, onChanged }) {
               {num(invoice.extra_charges) > 0 && <Line label="Extra charges" value={invoice.extra_charges} />}
               {num(invoice.discount) > 0 && <Line label="Discount" value={-num(invoice.discount)} />}
               {num(invoice.tax_amount) > 0 && <Line label={`Tax (${num(invoice.tax_pct)}%)`} value={invoice.tax_amount} />}
+              {num(invoice.freight_amount) > 0 && <Line label="Client freight (recovered)" value={invoice.freight_amount} />}
               <div className="flex justify-between px-1 py-2 mt-1 border-t border-gray-200 font-bold"><span>Total</span><span>{pkr(invoice.total_amount)}</span></div>
               <div className="grid grid-cols-2 gap-2 pt-2">
                 <div className="rounded-lg bg-emerald-50 p-2 text-center"><p className="text-[10px] uppercase text-emerald-600">Received</p><p className="font-bold text-emerald-700">{pkr(invoice.received_amount)}</p></div>

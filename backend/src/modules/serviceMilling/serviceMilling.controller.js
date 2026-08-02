@@ -180,7 +180,17 @@ module.exports = {
         const labourAmount = round2(labourKattas * labourRate);
         const subtotal = round2(millingAmount + rentalAmount + labourAmount + extra - discount);
         const taxAmount = round2(subtotal * (taxPct / 100));
-        const total = round2(subtotal + taxAmount);
+        // #14 Phase 2b-ii — client-borne freight recovered on the bill. It adds to
+        // the client's total (untaxed pass-through) but is NOT service revenue; we
+        // front the hauler and the freight washes through 1450 Freight Recoverable.
+        // A freight charge requires the hauler we're fronting.
+        const freight = round2(b.freight_amount);
+        const freightHaulerId = b.freight_hauler_id ? parseInt(b.freight_hauler_id, 10) : null;
+        if (freight > 0 && !freightHaulerId) {
+          throw new Error('Select the hauler for the client freight (we front the hauler and recover it on the bill).');
+        }
+        const serviceTotal = round2(subtotal + taxAmount); // taxed service portion (revenue)
+        const total = round2(serviceTotal + freight);
         if (total <= 0) throw new Error('Invoice total must be greater than zero — enter at least one service rate');
 
         const invoiceNo = await nextDocNo(trx, { table: 'service_milling_invoices', column: 'invoice_no', prefix: 'SMI-', pad: 0 });
@@ -194,6 +204,7 @@ module.exports = {
           rental_from: b.rental_from || null, rental_to: b.rental_to || null,
           labour_kattas: labourKattas, labour_rate_per_katta: labourRate, labour_amount: labourAmount,
           extra_charges: extra, discount, tax_pct: taxPct, tax_amount: taxAmount,
+          freight_amount: freight, freight_hauler_id: freightHaulerId,
           subtotal, total_amount: total,
           received_amount: 0, balance_amount: total, payment_status: 'Unpaid',
           notes: b.notes || null, created_by: req.user?.id || null,
@@ -209,14 +220,71 @@ module.exports = {
           notes: `Service milling invoice ${invoiceNo} — batch ${batch.batch_no}`,
         });
 
-        // Revenue journal — DR 1120 Local AR / CR 4050 Service Milling Revenue.
+        // Revenue journal — DR 1120 Local AR / CR 4050 Service Milling Revenue,
+        // for the SERVICE portion only (freight is a recovery, not revenue).
         // Posted ONCE (signed-delta convention); the invoice is immutable after this.
         await accountingService.autoPost(trx, {
-          triggerEvent: 'service_milling_invoice_recorded', entity: 'mill', amount: total, currency: 'PKR',
+          triggerEvent: 'service_milling_invoice_recorded', entity: 'mill', amount: serviceTotal, currency: 'PKR',
           refType: 'Service Milling Invoice', refNo: invoiceNo,
           description: `Service milling invoice ${invoiceNo} — batch ${batch.batch_no}`.slice(0, 240),
           partyType: 'customer', partyId: batch.client_customer_id, userId: req.user?.id,
         });
+
+        // #14 2b-ii — client freight recovery. We front the hauler (a transporter
+        // payable) and bill the client; the freight washes through 1450 Freight
+        // Recoverable so it's neither revenue nor a company cost:
+        //   Dr 1120 (client) / Cr 1450   — freight billed to the client
+        //   Dr 1450 / Cr 2010 (hauler)   — freight payable to the hauler
+        // Net: 1450 = 0, client AR +freight, hauler AP +freight.
+        if (freight > 0 && freightHaulerId) {
+          const last = await trx('payables').whereRaw("pay_no ~ '^PAY-[0-9]+$'")
+            .orderByRaw('CAST(SUBSTRING(pay_no FROM 5) AS INTEGER) DESC').first('pay_no');
+          const seq = last?.pay_no ? (parseInt(last.pay_no.replace('PAY-', ''), 10) || 0) + 1 : 1;
+          const [haulPay] = await trx('payables').insert({
+            pay_no: `PAY-${String(seq).padStart(3, '0')}`, entity: 'mill', payable_type: 'vendor',
+            category: 'Transport', supplier_id: null, hauler_id: freightHaulerId,
+            linked_ref: invoiceNo, source_table: 'service_transport', source_id: inv.id,
+            original_amount: freight, paid_amount: 0, outstanding: freight, status: 'Pending',
+            due_date: b.due_date || new Date(Date.now() + 30 * 864e5).toISOString().split('T')[0],
+            currency: 'PKR', notes: `Client freight (hauler) for service invoice ${invoiceNo} — recovered from client`,
+          }).returning('*');
+          // Link the transport_costs backbone for the transporter ledger/reports.
+          await trx('transport_costs').insert({
+            hauler_id: freightHaulerId, batch_id: batch.id, transport_type: 'service',
+            amount: freight, paid_by: 'service_client', status: 'unpaid',
+            expense_date: (b.invoice_date ? new Date(b.invoice_date) : new Date()).toISOString().slice(0, 10),
+            entity: 'mill', payable_id: haulPay.id, created_by: req.user?.id || null,
+            notes: `Client freight for service invoice ${invoiceNo}`,
+          });
+          const [ar, rec, ap] = await Promise.all([
+            trx('chart_of_accounts').where({ code: '1120' }).first(),
+            trx('chart_of_accounts').where({ code: '1450' }).first(),
+            trx('chart_of_accounts').where({ code: '2010' }).first(),
+          ]);
+          if (ar && rec && ap) {
+            const d0 = (b.invoice_date ? new Date(b.invoice_date) : new Date()).toISOString().slice(0, 10);
+            const jc = await accountingService.createJournal(trx, {
+              date: d0, entity: 'mill', refType: 'Service Milling Invoice', refNo: invoiceNo,
+              description: `Client freight recovery — invoice ${invoiceNo}`,
+              currency: 'PKR', fxRate: 1, isAuto: true, userId: req.user?.id, partyType: 'customer', partyId: batch.client_customer_id,
+              lines: [
+                { account_id: ar.id, account: ar.name, debit: freight, credit: 0, narration: `DR ${ar.code} ${ar.name} — client freight` },
+                { account_id: rec.id, account: rec.name, debit: 0, credit: freight, narration: `CR ${rec.code} ${rec.name} — freight recovered` },
+              ],
+            });
+            if (jc?.id) await accountingService.postJournal(trx, jc.id);
+            const jh = await accountingService.createJournal(trx, {
+              date: d0, entity: 'mill', refType: 'Service Milling Invoice', refNo: invoiceNo,
+              description: `Freight payable to hauler — invoice ${invoiceNo}`,
+              currency: 'PKR', fxRate: 1, isAuto: true, userId: req.user?.id, partyType: 'hauler', partyId: freightHaulerId,
+              lines: [
+                { account_id: rec.id, account: rec.name, debit: freight, credit: 0, narration: `DR ${rec.code} ${rec.name} — freight recoverable` },
+                { account_id: ap.id, account: ap.name, debit: 0, credit: freight, narration: `CR ${ap.code} ${ap.name} — hauler freight payable` },
+              ],
+            });
+            if (jh?.id) await accountingService.postJournal(trx, jh.id);
+          }
+        }
 
         return inv;
       });

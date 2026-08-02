@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import { FileText, Wallet } from 'lucide-react';
 import SlideDrawer from '../../../components/SlideDrawer';
 import { serviceMillingApi } from '../api/services';
+import { useHaulers } from '../../../api/queries';
 
 const num = (v) => parseFloat(v) || 0;
 const pkr = (v) => `PKR ${(num(v)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -30,20 +31,24 @@ export function CreateInvoiceDrawer({ open, batch, onClose, onCreated, addToast 
     labour_kattas: String(Math.round(num(q.receivedBags) || num(batch.katta_count) || num(batch.bag_count) || 0)),
     labour_rate_per_katta: batch.service_labour_rate_per_katta ?? '',
     extra_charges: '', discount: '', tax_pct: '', notes: '',
+    freight_amount: '', freight_hauler_id: '',
   } : null), [batch]);
   const form = f || init || {};
   const set = (k, v) => setF({ ...form, [k]: v });
   const [saving, setSaving] = useState(false);
+  const { data: haulers = [] } = useHaulers();
 
   const milling = num(form.milling_qty_kg) * num(form.milling_rate_per_kg);
   const rental = num(form.rental_kattas) * num(form.rental_rate_per_katta);
   const labour = num(form.labour_kattas) * num(form.labour_rate_per_katta);
   const subtotal = milling + rental + labour + num(form.extra_charges) - num(form.discount);
   const tax = subtotal * (num(form.tax_pct) / 100);
-  const total = subtotal + tax;
+  const freight = num(form.freight_amount);
+  const total = subtotal + tax + freight;
 
   async function submit() {
     if (total <= 0) { addToast?.('Enter at least one service rate — total must be > 0', 'error'); return; }
+    if (freight > 0 && !form.freight_hauler_id) { addToast?.('Select the hauler for the client freight.', 'error'); return; }
     setSaving(true);
     try {
       const res = await serviceMillingApi.createInvoice({ service_batch_id: batch.id, ...form });
@@ -163,6 +168,27 @@ export function CreateInvoiceDrawer({ open, batch, onClose, onCreated, addToast 
           <div><label className="block text-[11px] font-medium text-gray-600 mb-1">Tax %</label><input type="number" min="0" step="0.01" value={form.tax_pct ?? ''} onChange={e => set('tax_pct', e.target.value)} className={inputCls} /></div>
         </div>
 
+        {/* #14 2b-ii — client freight recovered on the bill (we front the hauler) */}
+        <div className="rounded-lg border border-gray-200 p-3">
+          <div className="flex justify-between items-center mb-2">
+            <div><p className="text-sm font-semibold text-gray-800">Client Freight <span className="text-[11px] font-normal text-gray-400">(recovered — not revenue)</span></p><p className="text-[11px] text-gray-400">we pay the hauler and bill it to the client</p></div>
+            <span className="text-sm font-semibold text-emerald-700">{pkr(freight)}</span>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="block text-[11px] font-medium text-gray-600 mb-1">Freight amount</label>
+              <input type="number" step="0.01" min="0" value={form.freight_amount ?? ''} onChange={e => set('freight_amount', e.target.value)} placeholder="0" className={inputCls} />
+            </div>
+            <div>
+              <label className="block text-[11px] font-medium text-gray-600 mb-1">Hauler {freight > 0 && <span className="text-red-500">*</span>}</label>
+              <select value={form.freight_hauler_id ?? ''} onChange={e => set('freight_hauler_id', e.target.value)} className={inputCls} disabled={freight <= 0}>
+                <option value="">Select hauler…</option>
+                {(haulers || []).map(h => <option key={h.id} value={h.id}>{h.name}</option>)}
+              </select>
+            </div>
+          </div>
+        </div>
+
         {/* Totals */}
         <div className="rounded-lg border border-gray-200 divide-y divide-gray-100 text-sm">
           <div className="flex justify-between px-3 py-1.5"><span className="text-gray-500">Milling ({bags0(form.milling_qty_kg)} kg)</span><span>{pkr(milling)}</span></div>
@@ -170,6 +196,7 @@ export function CreateInvoiceDrawer({ open, batch, onClose, onCreated, addToast 
           <div className="flex justify-between px-3 py-1.5"><span className="text-gray-500">Labour ({bags0(form.labour_kattas)} bags)</span><span>{pkr(labour)}</span></div>
           <div className="flex justify-between px-3 py-1.5"><span className="text-gray-500">Subtotal (+extra −disc)</span><span>{pkr(subtotal)}</span></div>
           <div className="flex justify-between px-3 py-1.5"><span className="text-gray-500">Tax</span><span>{pkr(tax)}</span></div>
+          {freight > 0 && <div className="flex justify-between px-3 py-1.5"><span className="text-gray-500">Client freight (recovered)</span><span>{pkr(freight)}</span></div>}
           <div className="flex justify-between px-3 py-2 bg-gray-50 font-bold"><span>Total Payable</span><span className="text-emerald-700">{pkr(total)}</span></div>
         </div>
         <div><label className="block text-[11px] font-medium text-gray-600 mb-1">Notes</label><input type="text" value={form.notes ?? ''} onChange={e => set('notes', e.target.value)} className={inputCls} /></div>

@@ -1042,10 +1042,75 @@ module.exports = {
           : null;
         await postPartyCost({ amount: commissionTotal, partyId: brokerIdNum, partyKind: 'supplier', category: 'Commission', sourceTable: 'lot_commission', refType: 'Lot Commission', label: 'Commission (broker)' });
 
+        // #14 Phase 2b — "deduct from supplier": we pay the hauler but the freight
+        // is borne by the supplier, recovered by deducting it from their rice bill.
+        // Front & recover:
+        //   • hauler payable +T (paid normally, drives the transporter ledger) — NOT
+        //     capitalised, because the freight is the supplier's cost, not ours;
+        //   • the supplier's rice payable is reduced by T (a visible deduction);
+        //   • GL bridged through 1450 Freight Recoverable so it nets to zero (no
+        //     P&L, no inventory): Dr 1450 / Cr 2010(hauler) and Dr 2010(supplier)
+        //     / Cr 1450 — party-stamped so the deduction lands on the supplier's
+        //     statement and the payable on the hauler's ledger.
+        let deductTransportPayable = null;
+        if (transportPaidBy === 'deduct_from_supplier' && transportCost > 0 && haulerId && supplier_id) {
+          const hpNo = await generatePayNo(trx);
+          [deductTransportPayable] = await trx('payables').insert({
+            pay_no: hpNo, entity: 'mill', payable_type: 'vendor', category: 'Transport',
+            supplier_id: null, hauler_id: haulerId, linked_ref: lotNo,
+            source_table: 'lot_transport', source_id: lot.id,
+            original_amount: transportCost, paid_amount: 0, outstanding: transportCost, status: 'Pending',
+            due_date: addDays(purchase_date, 30), currency: 'PKR',
+            notes: `Transport (hauler) for lot ${lotNo} — recovered from supplier`,
+          }).returning('*');
+          // Reduce the supplier's rice ('Raw Material') payable by the freight.
+          const ricePay = await trx('payables').where({ linked_ref: lotNo, category: 'Raw Material', supplier_id }).first();
+          if (ricePay) {
+            const paid = parseFloat(ricePay.paid_amount) || 0;
+            const newAmt = Math.max(0, uc.round2((parseFloat(ricePay.original_amount) || 0) - transportCost));
+            await trx('payables').where({ id: ricePay.id }).update({
+              original_amount: newAmt,
+              outstanding: Math.max(0, uc.round2(newAmt - paid)),
+              status: (newAmt - paid) <= 0.01 ? 'Paid' : (paid > 0 ? 'Partial' : 'Pending'),
+              notes: `${ricePay.notes || ''} · net of Rs ${transportCost} freight deducted (paid to hauler)`.trim(),
+              updated_at: trx.fn.now(),
+            });
+          }
+          const [rec, ap] = await Promise.all([
+            trx('chart_of_accounts').where({ code: '1450' }).first(),
+            trx('chart_of_accounts').where({ code: '2010' }).first(),
+          ]);
+          if (rec && ap) {
+            const d0 = (purchase_date ? new Date(purchase_date) : new Date()).toISOString().slice(0, 10);
+            const jh = await accountingService.createJournal(trx, {
+              date: d0, entity: 'mill', refType: 'Lot Transport', refNo: lotNo,
+              description: `Freight payable to hauler — lot ${lotNo} (recover from supplier)`,
+              currency: 'PKR', fxRate: 1, isAuto: true, userId: req.user?.id, partyType: 'hauler', partyId: haulerId,
+              lines: [
+                { account_id: rec.id, account: rec.name, debit: transportCost, credit: 0, narration: `DR ${rec.code} ${rec.name} — freight recoverable` },
+                { account_id: ap.id, account: ap.name, debit: 0, credit: transportCost, narration: `CR ${ap.code} ${ap.name} — hauler freight payable` },
+              ],
+            });
+            if (jh?.id) await accountingService.postJournal(trx, jh.id);
+            const js = await accountingService.createJournal(trx, {
+              date: d0, entity: 'mill', refType: 'Lot Transport', refNo: lotNo,
+              description: `Freight deducted from supplier — lot ${lotNo}`,
+              currency: 'PKR', fxRate: 1, isAuto: true, userId: req.user?.id, partyType: 'supplier', partyId: supplier_id,
+              lines: [
+                { account_id: ap.id, account: ap.name, debit: transportCost, credit: 0, narration: `DR ${ap.code} ${ap.name} — freight deducted from supplier` },
+                { account_id: rec.id, account: rec.name, debit: 0, credit: transportCost, narration: `CR ${rec.code} ${rec.name} — clear recoverable` },
+              ],
+            });
+            if (js?.id) await accountingService.postJournal(trx, js.id);
+          }
+        }
+
         // #14 — record the transport charge in the transport_costs backbone
         // (drives AP → Transporters, the transporter ledger, reports and
-        // reconciliation). Company-paid rows link to the payable + start 'unpaid';
-        // other responsibilities are recorded without a company payable.
+        // reconciliation). Company-paid + deduct-from-supplier rows link to the
+        // hauler payable + start 'unpaid'; other responsibilities are recorded
+        // without a company payable.
+        const transportCostPayable = transportPayable || deductTransportPayable;
         if (transportCost > 0 && (haulerId || transportPaidBy !== 'company')) {
           const firstVeh = (Array.isArray(req.body.vehicles) ? req.body.vehicles : [])[0] || {};
           await trx('transport_costs').insert({
@@ -1058,12 +1123,12 @@ module.exports = {
             transport_type: 'inbound',
             amount: transportCost,
             paid_by: transportPaidBy,
-            status: transportCapitalised ? 'unpaid' : 'approved',
+            status: transportCostPayable ? 'unpaid' : 'approved',
             expense_date: purchase_date || new Date().toISOString().slice(0, 10),
             doc_no: req.body.transport_doc_no || null,
             notes: req.body.transport_notes || null,
             entity: 'mill',
-            payable_id: transportPayable ? transportPayable.id : null,
+            payable_id: transportCostPayable ? transportCostPayable.id : null,
             created_by: req.user?.id || null,
           });
         }
