@@ -554,7 +554,7 @@ const financeController = {
 
       // Stored transport payables (one per lot) for paid/outstanding on the hauler line.
       const tps = await db('payables').where({ source_table: 'lot_transport' })
-        .select('source_id', 'paid_amount', 'outstanding', 'supplier_id', 'status');
+        .select('id', 'source_id', 'paid_amount', 'outstanding', 'supplier_id', 'status');
       const tpByLot = {};
       for (const p of tps) tpByLot[p.source_id] = p;
 
@@ -577,6 +577,7 @@ const financeController = {
               const p = tpByLot[l.id];
               base.haulerId = l.transport_vendor_id || null;
               base.haulerName = l.hauler_name || null;
+              base.payableId = p ? p.id : null; // #14 — target for the Pay Transporter slider
               base.paid = p ? parseFloat(p.paid_amount) || 0 : 0;
               base.outstanding = p ? parseFloat(p.outstanding) || 0 : (l.transport_vendor_id ? amount : 0);
               base.unassigned = !l.transport_vendor_id; // recorded but no hauler/payable yet
