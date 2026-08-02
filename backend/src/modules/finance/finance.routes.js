@@ -101,6 +101,9 @@ router.get('/payments/attachment/:file', authorize('finance', 'view'), (req, res
 });
 router.get('/payments', authorize('finance', 'view'), controller.listPayments);
 router.get('/purchases', authorize('finance', 'view'), controller.listPurchases);
+// Batch/order reference options for the Expenses link pickers (no party names) —
+// so payments-only roles that can't load /milling|/export can still link.
+router.get('/expense-link-options', authorize('finance', 'view'), controller.getExpenseLinkOptions);
 router.post(
   '/purchases/pay',
   authorize('finance', 'confirm_payment'),
