@@ -44,6 +44,7 @@ import YieldOutputDrawer from '../components/YieldOutputDrawer';
 import VehicleArrivalDrawer from '../components/VehicleArrivalDrawer';
 import StatusBadge from '../../../components/StatusBadge';
 import MillingCostSheet from '../components/MillingCostSheet';
+import HaulerPicker from '../../../components/HaulerPicker';
 import ConsumptionPanel from '../../millStore/components/ConsumptionPanel';
 import PackingPanel from '../../millStore/components/PackingPanel';
 
@@ -163,6 +164,9 @@ export default function MillingBatchDetail() {
   });
   const [showCostModal, setShowCostModal] = useState(false);
   const [costForm, setCostForm] = useState({});
+  // #14 — transporter + who bears the freight, for the Transport cost row.
+  const [transportHaulerId, setTransportHaulerId] = useState('');
+  const [transportPaidBy, setTransportPaidBy] = useState('company');
   const [showCostSheet, setShowCostSheet] = useState(false);
   const [showVehicleModal, setShowVehicleModal] = useState(false);
   const [showPriceModal, setShowPriceModal] = useState(false);
@@ -653,7 +657,12 @@ export default function MillingBatchDetail() {
         const amount = parseFloat(costForm[cat.key]) || 0;
         if (amount > 0) {
           const category = existingKeyByNorm[norm(cat.key)] || cat.key;
-          await addCostMut.mutateAsync({ id: batchId, data: { category, amount } });
+          // #14 — transport carries the transporter + who bears it, so a
+          // company-paid freight raises a real transporter payable.
+          const extra = norm(cat.key) === 'transport'
+            ? { hauler_id: transportHaulerId ? parseInt(transportHaulerId, 10) : null, transport_paid_by: transportPaidBy }
+            : {};
+          await addCostMut.mutateAsync({ id: batchId, data: { category, amount, ...extra } });
           total += amount;
         }
       }
@@ -1951,6 +1960,44 @@ export default function MillingBatchDetail() {
               </div>
             ))}
           </div>
+
+          {/* #14 — Transport payable details: shown when a transport amount is
+              entered. Company-paid freight raises a transporter payable. */}
+          {(parseFloat(costForm.transport) || 0) > 0 && (
+            <div className="mt-4 rounded-lg border border-indigo-200 bg-indigo-50/50 p-3 space-y-3">
+              <p className="text-xs font-semibold text-indigo-700 uppercase tracking-wide">Transport — transporter &amp; payment</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <HaulerPicker
+                    label={<span className="text-xs font-medium text-gray-600">Transporter / hauler</span>}
+                    value={transportHaulerId}
+                    onChange={(id) => setTransportHaulerId(id)}
+                    addToast={addToast}
+                    clearable
+                    placeholder="Search transporter…"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Transport paid by</label>
+                  <select value={transportPaidBy} onChange={(e) => setTransportPaidBy(e.target.value)}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 bg-white">
+                    <option value="company">Company (creates payable)</option>
+                    <option value="supplier">Supplier</option>
+                    <option value="customer">Customer</option>
+                    <option value="service_client">Service Milling Client</option>
+                    <option value="included_in_supplier_rate">Included in Supplier Rate</option>
+                    <option value="deduct_from_supplier">Deduct from Supplier Payment</option>
+                    <option value="other">Other</option>
+                  </select>
+                </div>
+              </div>
+              <p className="text-[11px] text-gray-500">
+                {transportPaidBy === 'company'
+                  ? 'A transporter payable will be created (Finance → Accounts Payable → Transporters) and the freight capitalised into the batch cost.'
+                  : 'The freight is recorded for tracking; no company payable is created.'}
+              </p>
+            </div>
+          )}
 
           {/* Live total */}
           {(() => {
