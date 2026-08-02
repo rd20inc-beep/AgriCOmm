@@ -184,8 +184,22 @@ export default function Expenses() {
   const payMut = usePayExpense();
 
   const safeExpenses = Array.isArray(expenses) ? expenses : [];
-  const safeBatches = Array.isArray(millingBatches) ? millingBatches : [];
-  const safeOrders = Array.isArray(exportOrders) ? exportOrders : [];
+  // Payments-only roles (Finance Manager) can't load /milling|/export, so the
+  // AppContext batch/order lists are empty for them. Fall back to the finance
+  // reference-only feed (batch/order numbers, no party names) so the link
+  // pickers still populate. Owner/Mill/Export keep the richer AppContext list.
+  const { data: linkOpts } = useQuery({
+    queryKey: ['finance', 'expense-link-options'],
+    queryFn: async () => {
+      const res = await api.get('/api/finance/expense-link-options');
+      return res?.data || res || { batches: [], orders: [] };
+    },
+    staleTime: 60 * 1000,
+  });
+  const ctxBatches = Array.isArray(millingBatches) ? millingBatches : [];
+  const ctxOrders = Array.isArray(exportOrders) ? exportOrders : [];
+  const safeBatches = ctxBatches.length ? ctxBatches : (linkOpts?.batches || []);
+  const safeOrders = ctxOrders.length ? ctxOrders : (linkOpts?.orders || []);
 
   const filtered = search
     ? safeExpenses.filter(e =>

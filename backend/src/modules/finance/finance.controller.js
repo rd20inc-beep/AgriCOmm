@@ -2337,6 +2337,40 @@ financeController.listPurchases = async (req, res) => {
   }
 };
 
+// Batch / order reference lists for the Expenses "link to batch/order" pickers.
+// A payments-only role (Finance Manager) can't load /milling/batches or
+// /export-orders (403), so those pickers were empty. This finance-view endpoint
+// returns just the REFERENCE (batch/order no + qty + status), NO party names, so
+// Finance can link an expense to the right batch/order. Shape matches the FE
+// pickers (id = display no, dbId = numeric id). Confidential fields are omitted.
+financeController.getExpenseLinkOptions = async (req, res) => {
+  try {
+    const [batchRows, orderRows] = await Promise.all([
+      db('milling_batches')
+        .whereNotIn('status', ['Closed', 'Cancelled', 'Rejected'])
+        .orderBy('id', 'desc').limit(500)
+        .select('id', 'batch_no', 'raw_qty_kg', 'status'),
+      db('export_orders')
+        .whereNotIn('status', ['Closed', 'Cancelled'])
+        .orderBy('id', 'desc').limit(500)
+        .select('id', 'order_no', 'qty_mt', 'country', 'status'),
+    ]);
+    const batches = batchRows.map((b) => ({
+      id: b.batch_no || b.id, dbId: b.id,
+      rawQtyMT: (parseFloat(b.raw_qty_kg) || 0) / 1000, status: b.status || 'Queued',
+    }));
+    const orders = orderRows.map((o) => ({
+      id: o.order_no || o.id, dbId: o.id,
+      qtyMT: parseFloat(o.qty_mt) || 0, country: o.country || '',
+      status: o.status || 'Draft',
+    }));
+    return res.json({ success: true, data: { batches, orders } });
+  } catch (err) {
+    console.error('Finance getExpenseLinkOptions error:', err);
+    return res.status(500).json({ success: false, message: 'Internal server error.' });
+  }
+};
+
 // ─── Unified "Mark Purchase Paid" ──────────────────────────────────────
 // /finance/purchases aggregates four source tables (inventory_lots,
 // mill_purchases, export_order_costs, business_expenses). Each has its
