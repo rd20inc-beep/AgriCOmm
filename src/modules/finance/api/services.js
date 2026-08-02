@@ -9,6 +9,7 @@ export const financeApi = {
   purchasePaymentTrail: (source, sourceId) => api.get(`/api/finance/purchases/${source}/${sourceId}/payments`),
   payables: (params) => api.get('/api/finance/payables', params),
   recordPayment: (data) => api.post('/api/finance/payments', data),
+  reversePayment: (id, reason) => api.post(`/api/finance/payments/${id}/reverse`, { reason }),
   payments: (params) => api.get('/api/finance/payments', params),
   purchases: (params) => api.get('/api/finance/purchases', params),
   payPurchase: (data) => api.post('/api/finance/purchases/pay', data),

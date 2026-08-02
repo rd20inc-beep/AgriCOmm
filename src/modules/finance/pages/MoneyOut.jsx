@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import OrderRefLink from '../../../shared/components/OrderRefLink';
 import { ArrowUpRight, AlertTriangle, CheckCircle, Clock, Eye, X, DollarSign, Landmark, Printer } from 'lucide-react';
 import { FinanceKPI, FinanceTable, FinanceFilterBar } from '../../../components/finance';
-import { usePayables, useRecordPayment, useBankAccounts, useReceivables, usePayablePayments } from '../../../api/queries';
+import { usePayables, useRecordPayment, useBankAccounts, useReceivables, usePayablePayments, useReversePayment } from '../../../api/queries';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { useApp } from '../../../context/AppContext';
 import TransactionDocument from '../../../components/TransactionDocument';
@@ -50,6 +50,21 @@ export default function MoneyOut() {
   const { data: bankAccounts = [] } = useBankAccounts();
   const { data: receivables = [] } = useReceivables();
   const recordPaymentMut = useRecordPayment();
+  const reversePaymentMut = useReversePayment();
+
+  // #14 — reverse an incorrect payment (finance): confirm, capture a reason,
+  // then restore the payable / bank / GL and stamp the payment Reversed.
+  async function handleReversePayment(p) {
+    if (!p?.id) { addToast('This payment cannot be reversed (no id captured).', 'error'); return; }
+    const reason = window.prompt('Reverse this payment? Enter a reason (optional):', '');
+    if (reason === null) return; // cancelled
+    try {
+      await reversePaymentMut.mutateAsync({ id: p.id, reason: reason || null });
+      addToast('Payment reversed — payable, bank and ledger restored.', 'success');
+    } catch (err) {
+      addToast(err?.data?.message || err?.message || 'Reversal failed', 'error');
+    }
+  }
   const [entityFilter, setEntityFilter] = useState('All');
   const [categoryFilter, setCategoryFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState('All');
@@ -339,9 +354,9 @@ export default function MoneyOut() {
                       let from = [p.accountName, p.bankName].filter(Boolean).join(' · ');
                       if (!from) from = p.paymentMethod === 'cash' ? 'Cash (in hand)' : (p.synthesized ? 'Recorded — account not captured' : '—');
                       return (
-                        <div key={p.id || idx} className="border border-gray-200 rounded-lg px-3 py-2">
+                        <div key={p.id || idx} className={`border border-gray-200 rounded-lg px-3 py-2 ${p.status === 'Reversed' ? 'opacity-60' : ''}`}>
                           <div className="flex items-center justify-between">
-                            <span className="text-sm font-semibold text-emerald-700">{fmtAmount(p.amount, p.currency || drawer.currency)}</span>
+                            <span className={`text-sm font-semibold ${p.status === 'Reversed' ? 'text-gray-500 line-through' : 'text-emerald-700'}`}>{fmtAmount(p.amount, p.currency || drawer.currency)}</span>
                             <span className="text-xs text-gray-500">{p.paymentDate ? new Date(p.paymentDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}</span>
                           </div>
                           <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-gray-500">
@@ -350,6 +365,17 @@ export default function MoneyOut() {
                             {p.bankReference && <span>Ref/Cheque: <span className="font-medium text-gray-700">{p.bankReference}</span></span>}
                           </div>
                           {p.notes && <p className="mt-0.5 text-[11px] text-gray-400 truncate" title={p.notes}>{p.notes}</p>}
+                          <div className="mt-1 flex items-center justify-between">
+                            {p.status === 'Reversed'
+                              ? <span className="text-[11px] font-medium text-red-500">Reversed</span>
+                              : <span />}
+                            {p.status !== 'Reversed' && p.id && (
+                              <button type="button" onClick={() => handleReversePayment(p)} disabled={reversePaymentMut.isPending}
+                                className="text-[11px] text-red-600 hover:text-red-700 hover:underline disabled:opacity-50">
+                                Reverse payment
+                              </button>
+                            )}
+                          </div>
                         </div>
                       );
                     })}

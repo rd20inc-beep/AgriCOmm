@@ -224,7 +224,7 @@ const financeController = {
       const viaPayments = await db('payments as p')
         .leftJoin('bank_accounts as ba', 'ba.id', 'p.bank_account_id')
         .where('p.linked_payable_id', id)
-        .select('p.amount', 'p.payment_method', 'p.payment_date', 'p.bank_reference',
+        .select('p.id', 'p.status', 'p.payment_no', 'p.amount', 'p.payment_method', 'p.payment_date', 'p.bank_reference',
           'ba.name as account_name', 'ba.bank_name', 'ba.type as account_type');
 
       // (2) bank_transactions from the Purchases-tab payPurchase flow (no
@@ -241,6 +241,7 @@ const financeController = {
 
       const norm = [];
       for (const p of viaPayments) norm.push({
+        id: p.id, status: p.status, payment_no: p.payment_no,
         amount: parseFloat(p.amount) || 0, payment_method: p.payment_method, payment_date: p.payment_date,
         bank_reference: p.bank_reference, account_name: p.account_name, bank_name: p.bank_name, account_type: p.account_type,
       });
@@ -1409,6 +1410,126 @@ const financeController = {
     } catch (err) {
       console.error('Record payment error:', err);
       const code = err.statusCode || 500;
+      return res.status(code).json({ success: false, message: code === 500 ? 'Internal server error.' : err.message });
+    }
+  },
+
+  // #14 Phase 1d — reverse an incorrect payment against a payable (transporter,
+  // supplier, expense). Undoes the payable settlement, restores the bank balance
+  // with a reversing bank_transaction, posts an inverse GL entry (Dr Cash /
+  // Cr Payable — a fresh Posted journal, NOT reverseJournal, so the Posted-only
+  // trial balance nets to zero, per the GL reversal rules), reverts any linked
+  // transport_costs status, and stamps the payment 'Reversed'. Receipts are not
+  // reversed here.
+  async reversePayment(req, res) {
+    try {
+      const paymentId = parseInt(req.params.id, 10);
+      const reason = (req.body && req.body.reason) || null;
+      if (!paymentId) return res.status(400).json({ success: false, message: 'Invalid payment id.' });
+
+      const out = await db.transaction(async (trx) => {
+        const pay = await trx('payments').where({ id: paymentId }).first();
+        if (!pay) { const e = new Error('Payment not found.'); e.statusCode = 404; throw e; }
+        if (pay.status === 'Reversed') { const e = new Error('This payment has already been reversed.'); e.statusCode = 400; throw e; }
+        if (pay.type !== 'payment' || !pay.linked_payable_id) {
+          const e = new Error('Only payments made against a payable can be reversed here.'); e.statusCode = 400; throw e;
+        }
+        const amt = parseFloat(pay.amount) || 0;
+        const amtPkr = parseFloat(pay.base_amount_pkr) || amt;
+        const wasCleared = pay.cleared !== false; // uncleared post-dated cheque never moved money
+
+        // 1) Restore the payable.
+        const payable = await trx('payables').where({ id: pay.linked_payable_id }).first();
+        if (payable) {
+          const newPaid = Math.max(0, (parseFloat(payable.paid_amount) || 0) - amt);
+          const orig = parseFloat(payable.original_amount) || 0;
+          const newStatus = newPaid <= 0.01 ? 'Pending' : (newPaid < orig - 0.01 ? 'Partial' : 'Paid');
+          await trx('payables').where({ id: payable.id }).update({
+            paid_amount: newPaid,
+            outstanding: Math.max(0, orig - newPaid),
+            status: newStatus,
+            updated_at: trx.fn.now(),
+          });
+          // Mirror to source rows (same tables recordPayment mirrors to).
+          if (payable.source_table === 'business_expenses' && payable.source_id) {
+            const src = await trx('business_expenses').where({ id: payable.source_id }).first();
+            const srcPaid = Math.max(0, (parseFloat(src?.paid_amount) || 0) - amtPkr);
+            await trx('business_expenses').where({ id: payable.source_id }).update({
+              paid_amount: srcPaid, payment_status: srcPaid <= 0.01 ? 'Pending' : 'Partial', updated_at: trx.fn.now(),
+            });
+          } else if (payable.source_table === 'mill_purchases' && payable.source_id) {
+            const src = await trx('mill_purchases').where({ id: payable.source_id }).first();
+            const srcPaid = Math.max(0, (parseFloat(src?.paid_amount) || 0) - amtPkr);
+            await trx('mill_purchases').where({ id: payable.source_id }).update({
+              paid_amount: srcPaid, payment_status: srcPaid <= 0.01 ? 'Pending' : 'Partial', updated_at: trx.fn.now(),
+            });
+          }
+          // #14 — revert the transport_costs status from the payable's new state.
+          if (payable.hauler_id || payable.source_table === 'lot_transport') {
+            const tcStatus = newPaid <= 0.01 ? 'unpaid' : (newPaid < orig - 0.01 ? 'partially_paid' : 'paid');
+            await trx('transport_costs').where({ payable_id: payable.id })
+              .update({ status: tcStatus, updated_at: trx.fn.now() });
+          }
+        }
+
+        // 2) Restore the bank balance + a reversing sub-ledger row (only if the
+        //    original payment actually moved money).
+        if (wasCleared && pay.bank_account_id) {
+          const acct = await trx('bank_accounts').where({ id: pay.bank_account_id }).first();
+          const bankMove = acct && acct.currency === pay.currency ? amt : amtPkr;
+          await trx('bank_accounts').where({ id: pay.bank_account_id }).increment('current_balance', bankMove);
+          if (await trx.schema.hasTable('bank_transactions')) {
+            const lastBt = await trx('bank_transactions').where('transaction_no', 'like', 'BT-%').orderBy('id', 'desc').first('transaction_no');
+            const seq = lastBt ? (parseInt(String(lastBt.transaction_no).replace(/^BT-/, ''), 10) || 0) + 1 : 1;
+            await trx('bank_transactions').insert({
+              transaction_no: `BT-${String(seq).padStart(4, '0')}`,
+              bank_account_id: pay.bank_account_id, type: 'credit', amount: bankMove,
+              currency: acct?.currency || 'PKR', transaction_date: new Date(),
+              reference: pay.payment_no, counterparty: null,
+              notes: `Reversal of payment ${pay.payment_no}`, source: 'payment_reversal',
+              linked_payment_id: pay.id, created_by: req.user?.id || null,
+            });
+          }
+        }
+
+        // 3) Inverse GL entry (Dr Cash / Cr Payable) — a fresh Posted journal.
+        if (wasCleared) {
+          try {
+            const cashAndBank = await trx('chart_of_accounts').where({ code: '1000' }).first();
+            const counterAcc = await trx('chart_of_accounts').where({ code: '2010' }).first();
+            if (cashAndBank && counterAcc) {
+              let partyType = null, partyId = null;
+              if (payable?.supplier_id) { partyType = 'supplier'; partyId = payable.supplier_id; }
+              else if (payable?.hauler_id) { partyType = 'hauler'; partyId = payable.hauler_id; }
+              const j = await accountingService.createJournal(trx, {
+                date: new Date().toISOString().slice(0, 10), entity: 'mill',
+                refType: 'Payment Reversal', refNo: pay.payment_no,
+                description: `Reversal of payment ${pay.payment_no}${reason ? ` — ${reason}` : ''}`,
+                currency: 'PKR', fxRate: 1, isAuto: true, userId: req.user?.id, partyType, partyId,
+                lines: [
+                  { account_id: cashAndBank.id, account: cashAndBank.name, debit: amtPkr, credit: 0, narration: `DR ${cashAndBank.code} ${cashAndBank.name} — reversal ${pay.payment_no}` },
+                  { account_id: counterAcc.id, account: counterAcc.name, debit: 0, credit: amtPkr, narration: `CR ${counterAcc.code} ${counterAcc.name} — reversal ${pay.payment_no}` },
+                ],
+              });
+              if (j?.id) await accountingService.postJournal(trx, j.id);
+            }
+          } catch (jeErr) {
+            console.error('reversePayment journal error (reversal still applied):', jeErr.message);
+          }
+        }
+
+        // 4) Stamp the payment Reversed (kept for audit).
+        const [updated] = await trx('payments').where({ id: paymentId }).update({
+          status: 'Reversed', reversed_at: trx.fn.now(), reversed_by: req.user?.id || null,
+          reversal_reason: reason, updated_at: trx.fn.now(),
+        }).returning('*');
+        return updated;
+      });
+
+      return res.json({ success: true, data: { payment: out } });
+    } catch (err) {
+      const code = err.statusCode || 500;
+      if (code === 500) console.error('reversePayment error:', err);
       return res.status(code).json({ success: false, message: code === 500 ? 'Internal server error.' : err.message });
     }
   },

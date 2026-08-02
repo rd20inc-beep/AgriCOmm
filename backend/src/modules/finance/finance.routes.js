@@ -58,6 +58,12 @@ router.post(
   auditAction('record_payment', 'finance', (req, data) => data.data && data.data.id ? data.data.id : null),
   controller.recordPayment
 );
+router.post(
+  '/payments/:id/reverse',
+  authorize('finance', 'confirm_payment'),
+  auditAction('reverse_payment', 'payment', (req) => req.params.id),
+  controller.reversePayment
+);
 router.get('/payments', authorize('finance', 'view'), controller.listPayments);
 router.get('/purchases', authorize('finance', 'view'), controller.listPurchases);
 router.post(
