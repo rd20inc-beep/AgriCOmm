@@ -1,5 +1,8 @@
 const express = require('express');
 const router = express.Router();
+const path = require('path');
+const fs = require('fs');
+const multer = require('multer');
 const controller = require('../../controllers/financeController');
 const authorize = require('../../middleware/rbac');
 const { authorizeAny } = require('../../middleware/rbac');
@@ -8,6 +11,23 @@ const validate = require('../../middleware/validate');
 const schemas = require('../../middleware/schemas');
 const fundTransfers = require('../finance/fundTransfers.service');
 const ownerApproval = require('../../middleware/ownerApproval');
+
+// #14 Phase 1e — supporting-document upload for payments (WHT certificate,
+// vendor invoice, receipt). Disk storage under uploads/payments, mirroring the
+// documents module. The stored relative name is saved on the payment as
+// attachment_url and served back via the GET route below.
+const PAY_UPLOAD_DIR = path.join(__dirname, '../../uploads/payments');
+const payAttachStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    if (!fs.existsSync(PAY_UPLOAD_DIR)) fs.mkdirSync(PAY_UPLOAD_DIR, { recursive: true });
+    cb(null, PAY_UPLOAD_DIR);
+  },
+  filename: (req, file, cb) => {
+    const unique = Date.now() + '-' + Math.round(Math.random() * 1e6);
+    cb(null, unique + path.extname(file.originalname));
+  },
+});
+const payAttachUpload = multer({ storage: payAttachStorage, limits: { fileSize: 25 * 1024 * 1024 } });
 
 // ── Head Office ⇄ Mill fund transfers ──
 router.get('/fund-transfers', authorize('finance', 'view'), async (req, res) => {
@@ -64,6 +84,21 @@ router.post(
   auditAction('reverse_payment', 'payment', (req) => req.params.id),
   controller.reversePayment
 );
+// #14 1e — upload a payment's supporting document, returns { url, name }.
+router.post('/payments/attachment', authorize('finance', 'confirm_payment'), payAttachUpload.single('file'), (req, res) => {
+  if (!req.file) return res.status(400).json({ success: false, message: 'No file uploaded.' });
+  return res.json({ success: true, data: { url: req.file.filename, name: req.file.originalname } });
+});
+// Serve a stored payment attachment. The :file segment is a generated basename
+// (no path separators) — resolve within the upload dir and reject traversal.
+router.get('/payments/attachment/:file', authorize('finance', 'view'), (req, res) => {
+  const safe = path.basename(req.params.file || '');
+  const full = path.join(PAY_UPLOAD_DIR, safe);
+  if (!full.startsWith(PAY_UPLOAD_DIR) || !fs.existsSync(full)) {
+    return res.status(404).json({ success: false, message: 'Attachment not found.' });
+  }
+  return res.sendFile(full);
+});
 router.get('/payments', authorize('finance', 'view'), controller.listPayments);
 router.get('/purchases', authorize('finance', 'view'), controller.listPurchases);
 router.post(

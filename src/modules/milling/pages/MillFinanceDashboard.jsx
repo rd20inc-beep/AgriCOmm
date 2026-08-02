@@ -4,7 +4,7 @@ import {
   DollarSign, Users, Zap, Shield, TrendingUp, TrendingDown, AlertTriangle,
   Plus, UserPlus, Package, Factory, Wallet, ArrowUpRight, ArrowDownRight, Printer,
   Building2, Banknote, Receipt, Layers, Truck, ExternalLink,
-  Pencil, Trash2, HandCoins, CalendarDays, Phone, CreditCard, Power, X, FileText, RefreshCw, Sparkles, ArrowLeftRight, Inbox, Check, ShoppingCart, Clock, Landmark, LogOut, History, ChevronDown, ChevronRight,
+  Pencil, Trash2, HandCoins, CalendarDays, Phone, CreditCard, Power, X, FileText, RefreshCw, Sparkles, ArrowLeftRight, Inbox, Check, ShoppingCart, Clock, Landmark, LogOut, History, ChevronDown, ChevronRight, Paperclip, Percent,
 } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
@@ -30,6 +30,7 @@ import {
 } from '../../../api/queries';
 import TransactionDocument from '../../../components/TransactionDocument';
 import NewPurchaseDrawer from '../../../components/NewPurchaseDrawer';
+import api from '../../../api/client';
 import { downloadCSV } from '../../../utils/csvExport';
 import StatusBadge from '../../../components/StatusBadge';
 import { useCommodityPrices } from '../hooks/useCommodityPrices';
@@ -141,9 +142,83 @@ function Stat({ label, value, sub, tone = 'slate', icon: Icon }) {
 
 // `payrollOnly` renders JUST the Payroll tab (no mill hero/KPIs/fund-transfers or
 // #14 — Pay Transporter slider: settles a real transporter payable via
+// #14 Phase 1e — WHT + early-payment discount + supporting document, shared by
+// every Pay drawer. WHT and discount reduce the CASH paid but not the amount
+// cleared against the payable (the vendor's claim is settled in full; the tax is
+// remitted to FBR and the discount booked as income). Returns the fields via the
+// parent's form + set(); the parent sends wht_amount / wht_rate / discount_amount
+// / attachment_url / attachment_name to recordPayment and shows the net cash.
+function PaymentExtras({ form, set, gross, addToast }) {
+  const [uploading, setUploading] = useState(false);
+  const inp = 'w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 bg-white';
+  const wht = parseFloat(form.whtAmount) || 0;
+  const disc = parseFloat(form.discountAmount) || 0;
+  const net = Math.max(0, (parseFloat(form.amount) || 0) - wht - disc);
+
+  const onRate = (v) => {
+    set('whtRate', v);
+    const pct = parseFloat(v);
+    if (Number.isFinite(pct) && gross > 0) set('whtAmount', String(Math.round(gross * pct) / 100));
+  };
+
+  async function onFile(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await api.upload('/finance/payments/attachment', fd);
+      const d = res?.data || res;
+      if (d?.url) { set('attachmentUrl', d.url); set('attachmentName', d.name || file.name); }
+      else if (res?._offlineQueued) addToast?.('Offline — the document will upload when the connection returns.', 'info');
+      else throw new Error('Upload failed');
+    } catch (err) {
+      addToast?.(err?.data?.message || err?.message || 'Attachment upload failed', 'error');
+    } finally { setUploading(false); }
+  }
+
+  return (
+    <div className="rounded-lg border border-gray-200 p-3 space-y-3 bg-gray-50/60">
+      <div className="text-xs font-semibold text-gray-600">Tax, discount &amp; document <span className="font-normal text-gray-400">(optional)</span></div>
+      <div className="grid grid-cols-3 gap-3">
+        <div>
+          <label className="block text-[11px] font-medium text-gray-500 mb-1 inline-flex items-center gap-1"><Percent size={11} /> WHT rate</label>
+          <input type="number" step="0.01" min="0" max="100" value={form.whtRate || ''} onChange={(e) => onRate(e.target.value)} placeholder="e.g. 2" className={inp} />
+        </div>
+        <div>
+          <label className="block text-[11px] font-medium text-gray-500 mb-1">WHT amount</label>
+          <input type="number" step="0.01" min="0" value={form.whtAmount || ''} onChange={(e) => set('whtAmount', e.target.value)} placeholder="0" className={inp} />
+        </div>
+        <div>
+          <label className="block text-[11px] font-medium text-gray-500 mb-1">Discount</label>
+          <input type="number" step="0.01" min="0" value={form.discountAmount || ''} onChange={(e) => set('discountAmount', e.target.value)} placeholder="0" className={inp} />
+        </div>
+      </div>
+      <div className="flex items-center justify-between text-xs bg-white rounded-md border border-gray-200 px-3 py-2">
+        <span className="text-gray-500">Net cash to pay</span>
+        <span className="font-semibold text-gray-800 tabular-nums">{PKR(net)}</span>
+      </div>
+      <div>
+        <label className="block text-[11px] font-medium text-gray-500 mb-1 inline-flex items-center gap-1"><Paperclip size={11} /> Supporting document</label>
+        {form.attachmentUrl ? (
+          <div className="flex items-center justify-between text-xs bg-white rounded-md border border-gray-200 px-3 py-2">
+            <span className="text-gray-700 truncate inline-flex items-center gap-1.5"><FileText size={13} className="text-emerald-600" /> {form.attachmentName || 'Attached'}</span>
+            <button type="button" onClick={() => { set('attachmentUrl', ''); set('attachmentName', ''); }} className="text-red-500 hover:text-red-600"><X size={14} /></button>
+          </div>
+        ) : (
+          <input type="file" onChange={onFile} disabled={uploading}
+            className="block w-full text-xs text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100" />
+        )}
+        {uploading && <p className="text-[11px] text-gray-400 mt-1">Uploading…</p>}
+      </div>
+    </div>
+  );
+}
+
 // recordPayment (cash/bank mandatory, full or partial) straight from the Mill
 // Finance transport breakdown, so the Mill Manager can pay where they see the
-// due amount. (WHT / discount / attachment land in a later phase.)
+// due amount. WHT / early-payment discount / attachment via PaymentExtras (#14 1e).
 function PayTransporterDrawer({ payTransport, onClose, addToast }) {
   const { data: bankAccounts = [] } = useBankAccounts();
   const recordMut = useRecordPayment();
@@ -154,6 +229,7 @@ function PayTransporterDrawer({ payTransport, onClose, addToast }) {
     date: new Date().toISOString().slice(0, 10),
     reference: '',
     notes: '',
+    whtRate: '', whtAmount: '', discountAmount: '', attachmentUrl: '', attachmentName: '',
   });
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
   const inp = 'w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 bg-white';
@@ -161,8 +237,11 @@ function PayTransporterDrawer({ payTransport, onClose, addToast }) {
   async function submit(e) {
     e.preventDefault();
     const amt = parseFloat(form.amount) || 0;
+    const wht = parseFloat(form.whtAmount) || 0;
+    const disc = parseFloat(form.discountAmount) || 0;
     if (!(amt > 0)) { addToast('Enter a positive amount', 'error'); return; }
     if (amt - Number(payTransport.outstanding) > 0.01) { addToast(`Amount exceeds the outstanding ${PKR(payTransport.outstanding)}.`, 'error'); return; }
+    if (wht + disc - amt > 0.01) { addToast('WHT + discount cannot exceed the amount.', 'error'); return; }
     if (!form.bankAccountId) { addToast('Select a cash or bank account', 'error'); return; }
     try {
       await recordMut.mutateAsync({
@@ -170,6 +249,8 @@ function PayTransporterDrawer({ payTransport, onClose, addToast }) {
         payment_method: form.method, bank_account_id: parseInt(form.bankAccountId, 10),
         bank_reference: form.reference || null, payment_date: form.date,
         notes: form.notes || `Transport payment — ${payTransport.haulerName || ''}`.trim(),
+        wht_amount: wht, wht_rate: form.whtRate ? parseFloat(form.whtRate) : null,
+        discount_amount: disc, attachment_url: form.attachmentUrl || null, attachment_name: form.attachmentName || null,
       });
       addToast('Transporter paid', 'success');
       onClose();
@@ -225,6 +306,7 @@ function PayTransporterDrawer({ payTransport, onClose, addToast }) {
           <label className="block text-xs font-medium text-gray-600 mb-1">Cheque / Transaction reference</label>
           <input type="text" value={form.reference} onChange={(e) => set('reference', e.target.value)} placeholder="Optional" className={inp} />
         </div>
+        <PaymentExtras form={form} set={set} gross={parseFloat(form.amount) || 0} addToast={addToast} />
         <div>
           <label className="block text-xs font-medium text-gray-600 mb-1">Remarks</label>
           <textarea value={form.notes} onChange={(e) => set('notes', e.target.value)} rows={2} placeholder="Optional" className={inp} />
@@ -249,6 +331,7 @@ function PayPayableDrawer({ payTarget, onClose, addToast }) {
     date: new Date().toISOString().slice(0, 10),
     reference: '',
     notes: '',
+    whtRate: '', whtAmount: '', discountAmount: '', attachmentUrl: '', attachmentName: '',
   });
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
   const inp = 'w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 bg-white';
@@ -256,8 +339,11 @@ function PayPayableDrawer({ payTarget, onClose, addToast }) {
   async function submit(e) {
     e.preventDefault();
     const amt = parseFloat(form.amount) || 0;
+    const wht = parseFloat(form.whtAmount) || 0;
+    const disc = parseFloat(form.discountAmount) || 0;
     if (!(amt > 0)) { addToast('Enter a positive amount', 'error'); return; }
     if (amt - Number(payTarget.outstanding) > 0.01) { addToast(`Amount exceeds the outstanding ${PKR(payTarget.outstanding)}.`, 'error'); return; }
+    if (wht + disc - amt > 0.01) { addToast('WHT + discount cannot exceed the amount.', 'error'); return; }
     if (!form.bankAccountId) { addToast('Select a cash or bank account', 'error'); return; }
     try {
       await recordMut.mutateAsync({
@@ -265,6 +351,8 @@ function PayPayableDrawer({ payTarget, onClose, addToast }) {
         payment_method: form.method, bank_account_id: parseInt(form.bankAccountId, 10),
         bank_reference: form.reference || null, payment_date: form.date,
         notes: form.notes || `${payTarget.stream || 'Payable'} payment — ${payTarget.party || ''}`.trim(),
+        wht_amount: wht, wht_rate: form.whtRate ? parseFloat(form.whtRate) : null,
+        discount_amount: disc, attachment_url: form.attachmentUrl || null, attachment_name: form.attachmentName || null,
       });
       addToast(`Paid ${payTarget.party || 'payable'}`, 'success');
       onClose();
@@ -322,6 +410,7 @@ function PayPayableDrawer({ payTarget, onClose, addToast }) {
           <label className="block text-xs font-medium text-gray-600 mb-1">Cheque / Transaction reference</label>
           <input type="text" value={form.reference} onChange={(e) => set('reference', e.target.value)} placeholder="Optional" className={inp} />
         </div>
+        <PaymentExtras form={form} set={set} gross={parseFloat(form.amount) || 0} addToast={addToast} />
         <div>
           <label className="block text-xs font-medium text-gray-600 mb-1">Remarks</label>
           <textarea value={form.notes} onChange={(e) => set('notes', e.target.value)} rows={2} placeholder="Optional" className={inp} />

@@ -1085,6 +1085,11 @@ const financeController = {
         bank_reference,
         due_date,
         notes,
+        wht_amount,
+        wht_rate,
+        discount_amount,
+        attachment_url,
+        attachment_name,
       } = req.body;
 
       const entity_type = type === 'receipt' ? 'receivable' : 'payable';
@@ -1094,6 +1099,19 @@ const financeController = {
         return res.status(400).json({
           success: false,
           message: 'type, linked_receivable_id or linked_payable_id, and a positive amount are required.',
+        });
+      }
+
+      // #14 Phase 1e — WHT + early-payment discount (payments only). Both reduce the
+      // CASH paid out but NOT the amount cleared against the payable: the vendor's
+      // claim is settled in full (net cash to them + tax remitted to FBR on their
+      // behalf + discount they granted). netCash = amount − wht − discount.
+      const whtNum = type === 'payment' ? Math.max(0, parseFloat(wht_amount) || 0) : 0;
+      const discNum = type === 'payment' ? Math.max(0, parseFloat(discount_amount) || 0) : 0;
+      if (whtNum + discNum - parseFloat(amount) > 0.01) {
+        return res.status(400).json({
+          success: false,
+          message: 'Withholding tax + discount cannot exceed the payment amount.',
         });
       }
 
@@ -1172,6 +1190,11 @@ const financeController = {
             payment_date: payment_date || trx.fn.now(),
             notes: notes || null,
             local_sale_id: localSaleId,
+            wht_amount: whtNum,
+            wht_rate: (type === 'payment' && wht_rate != null && wht_rate !== '') ? parseFloat(wht_rate) : null,
+            discount_amount: discNum,
+            attachment_url: attachment_url || null,
+            attachment_name: attachment_name || null,
             created_by: req.user.id,
           })
           .returning('*');
@@ -1305,8 +1328,9 @@ const financeController = {
             // Currency-aware bank move (see the receipt block): a foreign account
             // matching the payment currency moves natively, else PKR — and the
             // bank_transactions row carries the same figure so it reconciles.
+            // #14 1e — only the NET cash (after WHT + discount) leaves the bank.
             const acct = await trx('bank_accounts').where({ id: bank_account_id }).first();
-            const bankMove = acct && acct.currency === cur ? amtNum : stampedPkr;
+            const bankMove = (acct && acct.currency === cur ? amtNum : stampedPkr) - whtNum - discNum;
             await trx('bank_accounts')
               .where({ id: bank_account_id })
               .increment('current_balance', bankMove * -1);
@@ -1385,6 +1409,29 @@ const financeController = {
             // a no-op. The original foreign amount is captured in the
             // description for traceability.
             const noteOriginal = cur !== 'PKR' ? ` (orig ${cur} ${amtNum.toLocaleString()} @ ${stampedFxRate})` : '';
+            let lines;
+            if (!isReceivable && (whtNum > 0 || discNum > 0)) {
+              // #14 1e — split the credit: net cash + WHT payable + discount income
+              // (the debit still clears the payable for the full gross amount).
+              const netCashPkr = Number((stampedAmtPkr - whtNum - discNum).toFixed(2));
+              lines = [
+                { account_id: counterAcc.id, account: counterAcc.name, debit: stampedAmtPkr, credit: 0, narration: `DR ${counterAcc.code} ${counterAcc.name} — ${paymentNo}` },
+                { account_id: cashAndBank.id, account: cashAndBank.name, debit: 0, credit: netCashPkr, narration: `CR ${cashAndBank.code} ${cashAndBank.name} — net cash ${paymentNo}` },
+              ];
+              if (whtNum > 0) {
+                const whtAcc = await trx('chart_of_accounts').where({ code: '2060' }).first();
+                if (whtAcc) lines.push({ account_id: whtAcc.id, account: whtAcc.name, debit: 0, credit: Number(whtNum.toFixed(2)), narration: `CR ${whtAcc.code} ${whtAcc.name} — WHT ${paymentNo}` });
+              }
+              if (discNum > 0) {
+                const discAcc = await trx('chart_of_accounts').where({ code: '4060' }).first();
+                if (discAcc) lines.push({ account_id: discAcc.id, account: discAcc.name, debit: 0, credit: Number(discNum.toFixed(2)), narration: `CR ${discAcc.code} ${discAcc.name} — discount ${paymentNo}` });
+              }
+            } else {
+              lines = [
+                { account_id: debitAcc.id,  account: debitAcc.name,  debit: stampedAmtPkr, credit: 0,              narration: `DR ${debitAcc.code} ${debitAcc.name} — ${paymentNo}` },
+                { account_id: creditAcc.id, account: creditAcc.name, debit: 0,             credit: stampedAmtPkr,  narration: `CR ${creditAcc.code} ${creditAcc.name} — ${paymentNo}` },
+              ];
+            }
             const journal = await accountingService.createJournal(trx, {
               date: (payment_date ? new Date(payment_date) : new Date()).toISOString().slice(0, 10),
               entity: isReceivable ? counterEntity : 'mill',
@@ -1397,10 +1444,7 @@ const financeController = {
               userId: req.user.id,
               partyType,
               partyId,
-              lines: [
-                { account_id: debitAcc.id,  account: debitAcc.name,  debit: stampedAmtPkr, credit: 0,              narration: `DR ${debitAcc.code} ${debitAcc.name} — ${paymentNo}` },
-                { account_id: creditAcc.id, account: creditAcc.name, debit: 0,             credit: stampedAmtPkr,  narration: `CR ${creditAcc.code} ${creditAcc.name} — ${paymentNo}` },
-              ],
+              lines,
             });
             if (journal?.id) await accountingService.postJournal(trx, journal.id);
           } else {
@@ -1446,6 +1490,11 @@ const financeController = {
         }
         const amt = parseFloat(pay.amount) || 0;
         const amtPkr = parseFloat(pay.base_amount_pkr) || amt;
+        // #14 1e — the original payment split its credit into net cash + WHT +
+        // discount. Reversing must unwind each: restore the bank by the NET cash
+        // only, and debit back the WHT payable / discount income.
+        const whtR = parseFloat(pay.wht_amount) || 0;
+        const discR = parseFloat(pay.discount_amount) || 0;
         const wasCleared = pay.cleared !== false; // uncleared post-dated cheque never moved money
 
         // 1) Restore the payable.
@@ -1486,7 +1535,8 @@ const financeController = {
         //    original payment actually moved money).
         if (wasCleared && pay.bank_account_id) {
           const acct = await trx('bank_accounts').where({ id: pay.bank_account_id }).first();
-          const bankMove = acct && acct.currency === pay.currency ? amt : amtPkr;
+          // Restore only the NET cash the original payment actually took out.
+          const bankMove = (acct && acct.currency === pay.currency ? amt : amtPkr) - whtR - discR;
           await trx('bank_accounts').where({ id: pay.bank_account_id }).increment('current_balance', bankMove);
           if (await trx.schema.hasTable('bank_transactions')) {
             const lastBt = await trx('bank_transactions').where('transaction_no', 'like', 'BT-%').orderBy('id', 'desc').first('transaction_no');
@@ -1511,15 +1561,27 @@ const financeController = {
               let partyType = null, partyId = null;
               if (payable?.supplier_id) { partyType = 'supplier'; partyId = payable.supplier_id; }
               else if (payable?.hauler_id) { partyType = 'hauler'; partyId = payable.hauler_id; }
+              // Inverse of the original split: Dr net Cash (+ Dr WHT + Dr Discount)
+              // / Cr Payable (gross). Balances because netCash + wht + disc = gross.
+              const netCashPkr = Number((amtPkr - whtR - discR).toFixed(2));
+              const revLines = [
+                { account_id: cashAndBank.id, account: cashAndBank.name, debit: netCashPkr, credit: 0, narration: `DR ${cashAndBank.code} ${cashAndBank.name} — reversal ${pay.payment_no}` },
+              ];
+              if (whtR > 0) {
+                const whtAcc = await trx('chart_of_accounts').where({ code: '2060' }).first();
+                if (whtAcc) revLines.push({ account_id: whtAcc.id, account: whtAcc.name, debit: Number(whtR.toFixed(2)), credit: 0, narration: `DR ${whtAcc.code} ${whtAcc.name} — WHT reversal ${pay.payment_no}` });
+              }
+              if (discR > 0) {
+                const discAcc = await trx('chart_of_accounts').where({ code: '4060' }).first();
+                if (discAcc) revLines.push({ account_id: discAcc.id, account: discAcc.name, debit: Number(discR.toFixed(2)), credit: 0, narration: `DR ${discAcc.code} ${discAcc.name} — discount reversal ${pay.payment_no}` });
+              }
+              revLines.push({ account_id: counterAcc.id, account: counterAcc.name, debit: 0, credit: amtPkr, narration: `CR ${counterAcc.code} ${counterAcc.name} — reversal ${pay.payment_no}` });
               const j = await accountingService.createJournal(trx, {
                 date: new Date().toISOString().slice(0, 10), entity: 'mill',
                 refType: 'Payment Reversal', refNo: pay.payment_no,
                 description: `Reversal of payment ${pay.payment_no}${reason ? ` — ${reason}` : ''}`,
                 currency: 'PKR', fxRate: 1, isAuto: true, userId: req.user?.id, partyType, partyId,
-                lines: [
-                  { account_id: cashAndBank.id, account: cashAndBank.name, debit: amtPkr, credit: 0, narration: `DR ${cashAndBank.code} ${cashAndBank.name} — reversal ${pay.payment_no}` },
-                  { account_id: counterAcc.id, account: counterAcc.name, debit: 0, credit: amtPkr, narration: `CR ${counterAcc.code} ${counterAcc.name} — reversal ${pay.payment_no}` },
-                ],
+                lines: revLines,
               });
               if (j?.id) await accountingService.postJournal(trx, j.id);
             }
