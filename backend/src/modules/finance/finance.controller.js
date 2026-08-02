@@ -620,6 +620,13 @@ const financeController = {
         storedRows.filter((r) => r.source_table === 'milling_raw_rice' && r.source_id != null)
           .map((r) => r.source_id),
       );
+      // #14 — batch transport now materialises a real transporter payable
+      // (source_table 'batch_transport'); suppress its derived milling_costs
+      // transport duplicate so it isn't counted twice.
+      const storedBatchTransportBatchIds = new Set(
+        storedRows.filter((r) => r.source_table === 'batch_transport' && r.source_id != null)
+          .map((r) => r.source_id),
+      );
       // A batch fed by source LOTS (lot-started or blend) gets its raw cost from
       // those lots — whose own purchase payables already capture the supplier debt.
       // Deriving a raw_rice payable for such a batch would double-count, so skip it.
@@ -677,6 +684,8 @@ const financeController = {
         // Batch fed by source lots → its raw cost is already owed via those lots'
         // purchase payables; deriving it again would double-count the supplier.
         if (mc.category === 'raw_rice' && batchesFromSourceLots.has(mc.batch_id)) return;
+        // #14 — transport for this batch is a real (payable) transporter payable.
+        if (mc.category === 'transport' && storedBatchTransportBatchIds.has(mc.batch_id)) return;
         derived.push({
           id: `MC-${mc.id}`,
           pay_no: `MC-${mc.id}`,

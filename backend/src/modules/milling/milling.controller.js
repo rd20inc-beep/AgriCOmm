@@ -1607,6 +1607,8 @@ const millingController = {
       const id = await resolveBatchId(req.params.id);
       if (!id) return res.status(404).json({ success: false, message: 'Batch not found.' });
       let { category, amount, notes } = req.body;
+      // #14 — transport added as a milling cost can be owed to a transporter.
+      const { hauler_id, transport_paid_by, vehicle_no, doc_no } = req.body;
       // Duplicate-post guard: the cost drawer's "Bagging / Packing" (packing) and
       // the mill-store packing flow (packaging) are the same bag cost. Canonicalize
       // to 'packaging' so the upsert-by-(batch, category) keeps a SINGLE row instead
@@ -1675,6 +1677,86 @@ const millingController = {
               });
               if (journal?.id) await accountingService.postJournal(trx, journal.id);
             }
+          }
+        }
+
+        // #14 — a transport milling cost can be owed to a transporter. Record it
+        // in the transport_costs backbone, and when the COMPANY bears it, raise a
+        // real transporter payable so it is visible + payable in AP and appears on
+        // the transporter ledger. The freight is ALSO capitalised into the batch
+        // cost (via the milling_costs row → milling_completion Dr Finished/Cr Raw at
+        // yield). To avoid double-posting we accrue only Dr Raw / Cr Transporter
+        // Payable for the delta: pre-yield it stands and yield moves it to Finished;
+        // post-yield it combines with the delta journal above (Dr Finished/Cr Raw)
+        // to net Dr Finished / Cr Transporter Payable.
+        if (category === 'transport') {
+          const paidBy = ['company', 'supplier', 'customer', 'service_client', 'included_in_supplier_rate', 'deduct_from_supplier', 'other']
+            .includes(transport_paid_by) ? transport_paid_by : 'company';
+          const haulerIdNum = (hauler_id != null && hauler_id !== '') ? parseInt(hauler_id, 10) : null;
+          let payableId = null;
+
+          if (paidBy === 'company' && haulerIdNum && newAmt > 0) {
+            // Upsert the transporter payable keyed to this batch's transport.
+            const existingPay = await trx('payables')
+              .where({ source_table: 'batch_transport', source_id: id }).first();
+            const paidSoFar = existingPay ? (parseFloat(existingPay.paid_amount) || 0) : 0;
+            const payStatus = paidSoFar <= 0.01 ? 'Pending' : (paidSoFar < newAmt - 0.01 ? 'Partial' : 'Paid');
+            if (existingPay) {
+              await trx('payables').where({ id: existingPay.id }).update({
+                hauler_id: haulerIdNum, supplier_id: null, original_amount: newAmt,
+                outstanding: Math.max(0, newAmt - paidSoFar), status: payStatus,
+                linked_ref: batch.batch_no, updated_at: trx.fn.now(),
+              });
+              payableId = existingPay.id;
+            } else {
+              const payNo = await require('../../utils/docNumber').nextDocNo(trx, { table: 'payables', column: 'pay_no', prefix: 'PAY-', pad: 4 });
+              const [np] = await trx('payables').insert({
+                pay_no: payNo, entity: 'mill', payable_type: 'vendor', category: 'Transport',
+                hauler_id: haulerIdNum, supplier_id: null, linked_ref: batch.batch_no,
+                source_table: 'batch_transport', source_id: id,
+                original_amount: newAmt, paid_amount: 0, outstanding: newAmt, status: 'Pending',
+                currency: 'PKR', notes: `Transport (hauler) for batch ${batch.batch_no}`,
+              }).returning('*');
+              payableId = np.id;
+            }
+            // Accrue the DELTA: Dr Raw / Cr Transporter Payable (reversed if reduced).
+            if (Math.abs(delta) > 0.01) {
+              const raw = await trx('chart_of_accounts').where({ code: '1210' }).first();
+              const ap = await trx('chart_of_accounts').where({ code: '2010' }).first();
+              if (raw && ap) {
+                const absD = Math.abs(delta); const up = delta > 0;
+                const j = await accountingService.createJournal(trx, {
+                  date: new Date().toISOString().slice(0, 10), entity: 'mill',
+                  refType: 'Batch Transport', refNo: batch.batch_no,
+                  description: `Transport payable ${up ? '' : '(reduced) '}for batch ${batch.batch_no}`,
+                  currency: 'PKR', fxRate: 1, isAuto: true, userId: req.user?.id || null,
+                  partyType: 'hauler', partyId: haulerIdNum,
+                  lines: [
+                    { account_id: raw.id, account: raw.name, debit: up ? absD : 0, credit: up ? 0 : absD, narration: `${up ? 'DR' : 'CR'} ${raw.code} ${raw.name} — transport ${batch.batch_no}` },
+                    { account_id: ap.id, account: ap.name, debit: up ? 0 : absD, credit: up ? absD : 0, narration: `${up ? 'CR' : 'DR'} ${ap.code} ${ap.name} — transport ${batch.batch_no}` },
+                  ],
+                });
+                if (j?.id) await accountingService.postJournal(trx, j.id);
+              }
+            }
+          }
+
+          // Upsert the transport_costs record (drives AP → Transporters + ledger).
+          const existingTc = await trx('transport_costs').where({ batch_id: id }).whereNull('lot_id').first();
+          const tcStatus = payableId ? 'unpaid' : 'approved';
+          if (existingTc) {
+            await trx('transport_costs').where({ id: existingTc.id }).update({
+              hauler_id: haulerIdNum, amount: newAmt, paid_by: paidBy,
+              vehicle_no: vehicle_no || existingTc.vehicle_no || null, doc_no: doc_no || existingTc.doc_no || null,
+              payable_id: payableId || existingTc.payable_id || null, updated_at: trx.fn.now(),
+            });
+          } else {
+            await trx('transport_costs').insert({
+              batch_id: id, hauler_id: haulerIdNum, amount: newAmt, paid_by: paidBy,
+              status: tcStatus, transport_type: 'milling', vehicle_no: vehicle_no || null,
+              doc_no: doc_no || null, expense_date: new Date().toISOString().slice(0, 10),
+              entity: 'mill', payable_id: payableId, created_by: req.user?.id || null,
+            });
           }
         }
 
