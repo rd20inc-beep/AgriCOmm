@@ -712,6 +712,22 @@ export function useRecordPayment() {
   });
 }
 
+// #14 — reverse an incorrect payment (restores payable/bank/GL, stamps Reversed).
+export function useReversePayment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, reason }) => financeApi.reversePayment(id, reason),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.payables.all });
+      qc.invalidateQueries({ queryKey: queryKeys.financeOverview });
+      qc.invalidateQueries({ queryKey: queryKeys.journals.all });
+      qc.invalidateQueries({ queryKey: queryKeys.bankAccounts.all });
+      qc.invalidateQueries({ queryKey: ['hauler-ledger'] });
+      qc.invalidateQueries({ queryKey: ['finance-bank-transactions'] });
+    },
+  });
+}
+
 export function usePayPurchase() {
   const qc = useQueryClient();
   return useMutation({

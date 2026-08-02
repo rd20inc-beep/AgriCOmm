@@ -1938,6 +1938,9 @@ COL payments.payment_method:character varying:NULL
 COL payments.payment_no:character varying:NOT NULL
 COL payments.record_version:integer:NOT NULL
 COL payments.reject_reason:text:NULL
+COL payments.reversal_reason:text:NULL
+COL payments.reversed_at:timestamp with time zone:NULL
+COL payments.reversed_by:integer:NULL
 COL payments.server_ts:timestamp with time zone:NULL
 COL payments.service_invoice_id:integer:NULL
 COL payments.source_id:integer:NULL
@@ -3421,6 +3424,7 @@ CON payments.payments_linked_receivable_id_foreign(f)
 CON payments.payments_local_sale_id_foreign(f)
 CON payments.payments_payment_no_unique(u)
 CON payments.payments_pkey(p)
+CON payments.payments_reversed_by_foreign(f)
 CON payments.payments_service_invoice_id_foreign(f)
 CON payments.payments_type_check(c)
 CON payments.uq_payments_uuid(u)
