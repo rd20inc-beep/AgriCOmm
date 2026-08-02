@@ -1061,6 +1061,29 @@ export function useHauler(id) {
   });
 }
 
+// #14 Phase 3 — legacy transport charges lacking a transporter payable/record.
+export function useUnreconciledTransport() {
+  return useQuery({
+    queryKey: ['transport-unreconciled'],
+    queryFn: async () => {
+      const res = await api.get('/api/transport-costs/unreconciled');
+      return res?.data || res || {};
+    },
+  });
+}
+
+export function useReconcileTransport() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data) => api.post('/api/transport-costs/reconcile', data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['transport-unreconciled'] });
+      qc.invalidateQueries({ queryKey: ['payables'] });
+      qc.invalidateQueries({ queryKey: ['hauler-ledger'] });
+    },
+  });
+}
+
 // #14 — transporter ledger (opening balance, charges, payments, running balance).
 // api.get does NOT transform keys, so the response is used as-is (snake_case).
 export function useHaulerLedger(id) {

@@ -62,6 +62,13 @@ export const lotInventoryApi = {
   deleteTemplate: (id) => api.delete(`/api/lot-inventory/templates/${id}`),
 };
 
+// Transport costs (item #14) — records + reconciliation of legacy charges.
+export const transportCostsApi = {
+  list: (params) => api.get('/api/transport-costs', params),
+  unreconciled: () => api.get('/api/transport-costs/unreconciled'),
+  reconcile: (data) => api.post('/api/transport-costs/reconcile', data),
+};
+
 // Transport / Hauler master (item #5) — dedicated registry, separate from suppliers.
 export const haulersApi = {
   list: (params) => api.get('/api/haulers', params),

@@ -7,9 +7,88 @@ import {
   useCreateHauler,
   useUpdateHauler,
   useDeleteHauler,
+  useUnreconciledTransport,
+  useReconcileTransport,
 } from '../../../../api/queries';
 import { useApp } from '../../../../context/AppContext';
 import SlideDrawer from '../../../../components/SlideDrawer';
+import HaulerPicker from '../../../../components/HaulerPicker';
+
+const PAID_BY_OPTS = [
+  ['company', 'Company (creates payable)'], ['supplier', 'Supplier'], ['customer', 'Customer'],
+  ['service_client', 'Service Milling Client'], ['included_in_supplier_rate', 'Included in Supplier Rate'],
+  ['deduct_from_supplier', 'Deduct from Supplier Payment'], ['other', 'Other'],
+];
+
+// #14 Phase 3 — reconcile legacy transport charges (lot / batch) that never
+// became a transporter payable: pick a transporter + who bears it, then create
+// the payable (company) or exclude the charge.
+function ReconcileDrawer({ open, onClose, addToast }) {
+  const { data, isLoading } = useUnreconciledTransport();
+  const reconcileMut = useReconcileTransport();
+  const [rowState, setRowState] = useState({}); // key -> { hauler_id, paid_by }
+  const rows = [
+    ...((data?.lots) || []).map((r) => ({ ...r, source: 'lot', key: `lot-${r.id}`, ref: r.lot_no, sid: r.id })),
+    ...((data?.batches) || []).map((r) => ({ ...r, source: 'batch', key: `batch-${r.batch_id}`, ref: r.batch_no, sid: r.batch_id })),
+  ];
+  const setRow = (k, patch) => setRowState((p) => ({ ...p, [k]: { ...(p[k] || { paid_by: 'company' }), ...patch } }));
+
+  async function doReconcile(row, action) {
+    const st = rowState[row.key] || { paid_by: 'company' };
+    try {
+      await reconcileMut.mutateAsync({
+        source: row.source, source_id: row.sid,
+        hauler_id: st.hauler_id ? parseInt(st.hauler_id, 10) : null,
+        paid_by: st.paid_by || 'company', action,
+      });
+      addToast(action === 'exclude' ? `${row.ref} excluded` : `${row.ref} reconciled — payable created`, 'success');
+    } catch (err) {
+      addToast(err?.data?.message || err?.message || 'Reconcile failed', 'error');
+    }
+  }
+
+  return (
+    <SlideDrawer open={open} onClose={onClose} title="Reconcile transport costs" subtitle="Legacy charges without a transporter payable" icon={History} size="lg">
+      {isLoading ? (
+        <div className="py-10 text-center text-gray-400">Loading…</div>
+      ) : rows.length === 0 ? (
+        <div className="py-10 text-center text-gray-400">Nothing to reconcile — every transport charge is linked.</div>
+      ) : (
+        <div className="space-y-3">
+          <p className="text-[12px] text-gray-500">Assign a transporter and who bears each charge. <b>Company</b> creates a transporter payable (payable in Money Out); <b>Exclude</b> dismisses the charge.</p>
+          {rows.map((row) => {
+            const st = rowState[row.key] || { paid_by: 'company' };
+            return (
+              <div key={row.key} className="rounded-lg border border-gray-200 p-3">
+                <div className="flex items-center justify-between mb-2">
+                  <div>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 uppercase mr-2">{row.source}</span>
+                    <span className="font-medium text-gray-900">{row.ref}</span>
+                    <span className="text-gray-400 text-xs ml-2">{row.date ? String(row.date).slice(0, 10) : ''}{row.supplier_name ? ` · ${row.supplier_name}` : ''}</span>
+                  </div>
+                  <span className="font-semibold tabular-nums">Rs {Number(row.amount).toLocaleString('en-PK', { maximumFractionDigits: 0 })}</span>
+                </div>
+                <div className="grid grid-cols-2 gap-2 mb-2">
+                  <HaulerPicker value={st.hauler_id || ''} onChange={(id) => setRow(row.key, { hauler_id: id })} addToast={addToast} clearable placeholder="Transporter…" />
+                  <select value={st.paid_by || 'company'} onChange={(e) => setRow(row.key, { paid_by: e.target.value })}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white h-[38px] self-end">
+                    {PAID_BY_OPTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                  </select>
+                </div>
+                <div className="flex justify-end gap-2">
+                  <button onClick={() => doReconcile(row, 'exclude')} disabled={reconcileMut.isPending}
+                    className="px-3 py-1.5 text-xs text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 disabled:opacity-50">Exclude</button>
+                  <button onClick={() => doReconcile(row, 'create')} disabled={reconcileMut.isPending}
+                    className="px-3 py-1.5 text-xs text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">Create payable</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </SlideDrawer>
+  );
+}
 
 const EMPTY = {
   name: '', contact_person: '', phone: '', email: '',
@@ -117,6 +196,9 @@ export default function HaulersTab() {
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(EMPTY);
   const [historyId, setHistoryId] = useState(null);
+  const [reconcileOpen, setReconcileOpen] = useState(false);
+  const { data: unrec } = useUnreconciledTransport();
+  const unrecCount = unrec?.total || 0;
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
 
   const filtered = useMemo(() => {
@@ -187,6 +269,12 @@ export default function HaulersTab() {
               placeholder="Search haulers…"
               className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900"
             />
+            <button
+              onClick={() => setReconcileOpen(true)}
+              className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm border ${unrecCount > 0 ? 'border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+            >
+              <History className="w-4 h-4" /> Reconcile{unrecCount > 0 ? ` (${unrecCount})` : ''}
+            </button>
             <button
               onClick={openCreate}
               className="inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 font-medium text-sm"
@@ -335,6 +423,7 @@ export default function HaulersTab() {
       </SlideDrawer>
 
       <HaulerLedgerDrawer id={historyId} open={!!historyId} onClose={() => setHistoryId(null)} />
+      <ReconcileDrawer open={reconcileOpen} onClose={() => setReconcileOpen(false)} addToast={addToast} />
     </>
   );
 }
