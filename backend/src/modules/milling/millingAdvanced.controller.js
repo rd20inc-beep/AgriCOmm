@@ -885,22 +885,47 @@ const millingAdvancedController = {
       // Material' payable (rice + labor + unloading + packing + bag + other)
       // has NO source_table, so we key off `category` first, then source_table,
       // and never fall back to a raw table name or a bare 'Other'.
-      const streamRows = await db('payables')
-        .where('entity', 'mill')
-        .select(
-          db.raw(`CASE
+      const STREAM_CASE = `CASE
             WHEN category = 'Transport' OR source_table IN ('lot_transport', 'batch_transport') THEN 'Transport (haulers)'
             WHEN category = 'Commission' OR source_table = 'lot_commission' THEN 'Commission (brokers)'
             WHEN category = 'Raw Material' OR source_table = 'inventory_lots' THEN 'Rice & lot costs'
             WHEN source_table = 'milling_costs' THEN 'Milling & batch costs'
             WHEN source_table = 'mill_purchases' THEN 'Mill store purchases'
             WHEN source_table IN ('mill_expenses', 'business_expenses') THEN 'Expenses & overhead'
-            ELSE COALESCE(NULLIF(category, ''), source_table, 'Other') END as stream`),
+            ELSE COALESCE(NULLIF(category, ''), source_table, 'Other') END`;
+      const streamRows = await db('payables')
+        .where('entity', 'mill')
+        .select(
+          db.raw(`${STREAM_CASE} as stream`),
           db.raw('SUM(original_amount) as billed'),
           db.raw('SUM(paid_amount) as paid'),
           db.raw('SUM(outstanding) as outstanding')
         )
         .groupBy('stream');
+
+      // Individual OUTSTANDING payables behind each stream, so the Money Out view
+      // can be drilled down and each unpaid bill settled inline (same recordPayment
+      // path as the transporter/expense drawers). Party name resolves supplier →
+      // hauler; ref prefers the linked lot/batch, else the pay_no.
+      const streamPayables = (await db('payables as p')
+        .where('p.entity', 'mill')
+        .where('p.outstanding', '>', 0.01)
+        .leftJoin('suppliers as s', 's.id', 'p.supplier_id')
+        .leftJoin('haulers as h', 'h.id', 'p.hauler_id')
+        .select(
+          'p.id', 'p.pay_no', 'p.category', 'p.linked_ref', 'p.source_table',
+          'p.original_amount as billed', 'p.paid_amount as paid', 'p.outstanding',
+          'p.status', 'p.due_date',
+          db.raw('COALESCE(s.name, h.name) as party'),
+          db.raw(`${STREAM_CASE} as stream`)
+        )
+        .orderBy('p.outstanding', 'desc'))
+        .map((r) => ({
+          id: r.id, stream: r.stream, payNo: r.pay_no, category: r.category,
+          party: r.party || 'Unknown', ref: r.linked_ref || r.pay_no,
+          billed: num(r.billed), paid: num(r.paid), outstanding: num(r.outstanding),
+          status: r.status, dueDate: r.due_date,
+        }));
 
       // Money-in summary: local-sale collected vs outstanding.
       const inSummary = await db('local_sales')
@@ -919,6 +944,7 @@ const millingAdvancedController = {
           moneyOutStreams: streamRows.map((r) => ({
             stream: r.stream, billed: num(r.billed), paid: num(r.paid), outstanding: num(r.outstanding),
           })).sort((a, b) => b.billed - a.billed),
+          moneyOutPayables: streamPayables,
           moneyInSummary: {
             billed: num(inSummary?.billed), collected: num(inSummary?.collected), outstanding: num(inSummary?.outstanding),
           },

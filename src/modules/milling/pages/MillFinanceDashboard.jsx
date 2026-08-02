@@ -4,7 +4,7 @@ import {
   DollarSign, Users, Zap, Shield, TrendingUp, TrendingDown, AlertTriangle,
   Plus, UserPlus, Package, Factory, Wallet, ArrowUpRight, ArrowDownRight, Printer,
   Building2, Banknote, Receipt, Layers, Truck, ExternalLink,
-  Pencil, Trash2, HandCoins, CalendarDays, Phone, CreditCard, Power, X, FileText, RefreshCw, Sparkles, ArrowLeftRight, Inbox, Check, ShoppingCart, Clock, Landmark, LogOut, History, ChevronDown,
+  Pencil, Trash2, HandCoins, CalendarDays, Phone, CreditCard, Power, X, FileText, RefreshCw, Sparkles, ArrowLeftRight, Inbox, Check, ShoppingCart, Clock, Landmark, LogOut, History, ChevronDown, ChevronRight,
 } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
@@ -234,6 +234,122 @@ function PayTransporterDrawer({ payTransport, onClose, addToast }) {
   );
 }
 
+// #14 — pay ANY Money Out payable inline (rice, milling, transport, commission,
+// expenses…), from the drilled-down stream in the money-flow tab. Same
+// recordPayment path as the transporter/expense drawers (cash/bank mandatory,
+// full or partial); settling any payable posts the GL + moves the account.
+function PayPayableDrawer({ payTarget, onClose, addToast }) {
+  const { data: bankAccounts = [] } = useBankAccounts();
+  const recordMut = useRecordPayment();
+  const { data: payHistory, isLoading: payHistLoading } = usePayablePayments(payTarget.payableId, !!payTarget.payableId);
+  const [form, setForm] = useState({
+    amount: String(payTarget.outstanding || ''),
+    method: 'bank_transfer',
+    bankAccountId: '',
+    date: new Date().toISOString().slice(0, 10),
+    reference: '',
+    notes: '',
+  });
+  const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
+  const inp = 'w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 bg-white';
+
+  async function submit(e) {
+    e.preventDefault();
+    const amt = parseFloat(form.amount) || 0;
+    if (!(amt > 0)) { addToast('Enter a positive amount', 'error'); return; }
+    if (amt - Number(payTarget.outstanding) > 0.01) { addToast(`Amount exceeds the outstanding ${PKR(payTarget.outstanding)}.`, 'error'); return; }
+    if (!form.bankAccountId) { addToast('Select a cash or bank account', 'error'); return; }
+    try {
+      await recordMut.mutateAsync({
+        type: 'payment', linked_payable_id: payTarget.payableId, amount: amt, currency: 'PKR',
+        payment_method: form.method, bank_account_id: parseInt(form.bankAccountId, 10),
+        bank_reference: form.reference || null, payment_date: form.date,
+        notes: form.notes || `${payTarget.stream || 'Payable'} payment — ${payTarget.party || ''}`.trim(),
+      });
+      addToast(`Paid ${payTarget.party || 'payable'}`, 'success');
+      onClose();
+    } catch (err) {
+      addToast(err?.data?.message || err?.message || 'Payment failed', 'error');
+    }
+  }
+
+  return (
+    <SlideDrawer open onClose={onClose} title={`Pay ${payTarget.party || 'Payable'}`}
+      subtitle={`${payTarget.ref ? `${payTarget.ref} · ` : ''}${PKR(payTarget.outstanding)} due`} icon={Banknote} size="md"
+      footer={(
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
+          <button type="submit" form="pay-payable-form" disabled={recordMut.isPending}
+            className="px-4 py-2 text-sm text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-60">
+            {recordMut.isPending ? 'Paying…' : 'Record Payment'}
+          </button>
+        </div>
+      )}>
+      <form id="pay-payable-form" onSubmit={submit} className="space-y-4">
+        <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm space-y-1">
+          {payTarget.stream && (
+            <div className="flex justify-between"><span className="text-gray-500">Category</span><span className="text-gray-700">{payTarget.stream}</span></div>
+          )}
+          <div className="flex justify-between"><span className="text-gray-500">Outstanding</span><span className="font-semibold text-amber-700">{PKR(payTarget.outstanding)}</span></div>
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">Amount to pay *</label>
+          <input type="number" step="0.01" min="0" value={form.amount} onChange={(e) => set('amount', e.target.value)} className={inp} />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Method</label>
+            <select value={form.method} onChange={(e) => set('method', e.target.value)} className={inp}>
+              <option value="bank_transfer">Bank Transfer</option>
+              <option value="cash">Cash</option>
+              <option value="cheque">Cheque</option>
+              <option value="online">Online</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Date</label>
+            <input type="date" value={form.date} onChange={(e) => set('date', e.target.value)} className={inp} />
+          </div>
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">Cash / Bank account *</label>
+          <select value={form.bankAccountId} onChange={(e) => set('bankAccountId', e.target.value)} className={inp}>
+            <option value="">Select account…</option>
+            {(bankAccounts || []).map((a) => <option key={a.id} value={a.id}>{a.name}{a.bankName ? ` — ${a.bankName}` : ''}{a.type === 'cash' ? ' (Cash)' : ''}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">Cheque / Transaction reference</label>
+          <input type="text" value={form.reference} onChange={(e) => set('reference', e.target.value)} placeholder="Optional" className={inp} />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">Remarks</label>
+          <textarea value={form.notes} onChange={(e) => set('notes', e.target.value)} rows={2} placeholder="Optional" className={inp} />
+        </div>
+        {payTarget.payableId && (
+          <div>
+            <div className="text-xs font-medium text-gray-600 mb-1">Payment history</div>
+            {payHistLoading ? (
+              <div className="text-xs text-gray-400">Loading…</div>
+            ) : (payHistory?.payments?.length) ? (
+              <div className="rounded-lg border border-gray-200 divide-y divide-gray-100 text-xs">
+                {payHistory.payments.map((h, idx) => (
+                  <div key={h.id || idx} className="flex justify-between px-2.5 py-1.5">
+                    <span className="text-gray-500">{fmtDate(h.paymentDate)} · {h.paymentNo || '—'}</span>
+                    <span className="tabular-nums text-emerald-600">{PKR(h.amount)}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-xs text-gray-400">No payments yet.</div>
+            )}
+          </div>
+        )}
+      </form>
+    </SlideDrawer>
+  );
+}
+
 // other tabs) so the SAME payroll UI can be surfaced on the Head Office finance
 // dashboard (/finance/payroll) — payroll is a single set of mill workers.
 export default function MillFinanceDashboard({ payrollOnly = false }) {
@@ -380,6 +496,8 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
   const canExportPayroll = hasPermission('payroll', 'export');
   const [payParty, setPayParty] = useState(null);
   const [payTransport, setPayTransport] = useState(null); // #14 — Pay Transporter slider target
+  const [payPayable, setPayPayable] = useState(null); // #14 — inline pay of any Money Out payable
+  const [openStream, setOpenStream] = useState(null); // Money Out: expanded stream drill-down
   const [paySupplier, setPaySupplier] = useState(null);
   const [payExpense, setPayExpense] = useState(null); // pay a specific mill expense
   const [cashEntry, setCashEntry] = useState(null); // view a cash-ledger entry's voucher/receipt
@@ -408,6 +526,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
   }, [cashFlow]);
   const cashSummary = cashFlow?.summary || { cashIn: 0, cashOut: 0, net: 0, count: 0 };
   const moneyOutStreams = cashFlow?.moneyOutStreams || [];
+  const moneyOutPayables = cashFlow?.moneyOutPayables || [];
   const moneyInSummary = cashFlow?.moneyInSummary || { billed: 0, collected: 0, outstanding: 0 };
   const pendingTransfers = cashFlow?.pendingTransfers || [];
   const pendingTransfersTotal = cashFlow?.pendingTransfersTotal || 0;
@@ -1133,23 +1252,59 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
                 <div className="p-4 text-center text-sm text-gray-400">No mill payables.</div>
               ) : moneyOutStreams.map((s) => {
                 const pct = s.billed > 0 ? Math.round((s.paid / s.billed) * 100) : 0;
+                const rows = moneyOutPayables.filter((p) => p.stream === s.stream);
+                const isOpen = openStream === s.stream;
+                const canExpand = rows.length > 0;
                 return (
-                  <div key={s.stream} className="p-3">
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="font-medium text-gray-800">{s.stream}</span>
-                      <span className="text-gray-500 text-xs">{PKR(s.billed)} billed</span>
-                    </div>
-                    <div className="mt-1.5 h-2 rounded-full bg-amber-100 overflow-hidden">
-                      <div className="h-full bg-emerald-500" style={{ width: `${pct}%` }} />
-                    </div>
-                    <div className="mt-1 flex justify-between text-[11px]">
-                      <span className="text-emerald-600">{PKR(s.paid)} paid ({pct}%)</span>
-                      <span className="text-amber-600">{PKR(s.outstanding)} outstanding</span>
-                    </div>
+                  <div key={s.stream}>
+                    <button type="button" disabled={!canExpand}
+                      onClick={() => setOpenStream(isOpen ? null : s.stream)}
+                      className={`w-full text-left p-3 ${canExpand ? 'hover:bg-gray-50/60 cursor-pointer' : 'cursor-default'}`}>
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="font-medium text-gray-800 flex items-center gap-1.5">
+                          {canExpand && <ChevronRight size={14} className={`text-gray-400 transition-transform ${isOpen ? 'rotate-90' : ''}`} />}
+                          {s.stream}
+                          {canExpand && <span className="text-[11px] font-normal text-gray-400">({rows.length} unpaid)</span>}
+                        </span>
+                        <span className="text-gray-500 text-xs">{PKR(s.billed)} billed</span>
+                      </div>
+                      <div className="mt-1.5 h-2 rounded-full bg-amber-100 overflow-hidden">
+                        <div className="h-full bg-emerald-500" style={{ width: `${pct}%` }} />
+                      </div>
+                      <div className="mt-1 flex justify-between text-[11px]">
+                        <span className="text-emerald-600">{PKR(s.paid)} paid ({pct}%)</span>
+                        <span className="text-amber-600">{PKR(s.outstanding)} outstanding</span>
+                      </div>
+                    </button>
+                    {isOpen && canExpand && (
+                      <div className="bg-gray-50/70 border-t border-gray-100 divide-y divide-gray-100">
+                        {rows.map((p) => (
+                          <div key={p.id} className="flex items-center justify-between gap-3 px-3 py-2 pl-8 text-sm">
+                            <div className="min-w-0">
+                              <div className="text-gray-800 truncate">{p.party}</div>
+                              <div className="text-[11px] text-gray-400">
+                                {p.category}{p.ref ? ` · ${p.ref}` : ''}
+                                {p.dueDate ? ` · due ${fmtDate(p.dueDate)}` : ''}
+                                {p.paid > 0 ? ` · ${PKR(p.paid)} paid` : ''}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-3 shrink-0">
+                              <span className="tabular-nums text-amber-700 font-medium">{PKR(p.outstanding)}</span>
+                              {canPay && (
+                                <button type="button"
+                                  onClick={() => setPayPayable({ payableId: p.id, party: p.party, outstanding: p.outstanding, ref: p.ref, stream: p.stream })}
+                                  className="px-2.5 py-1 text-xs text-white bg-emerald-600 rounded-md hover:bg-emerald-700">Pay</button>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 );
               })}
             </div>
+            <p className="mt-1.5 text-[11px] text-gray-400">Click a stream to see and pay each unpaid bill.</p>
           </div>
 
           {/* Money IN — local sales collected vs outstanding */}
@@ -2730,6 +2885,15 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
         <PayTransporterDrawer
           payTransport={payTransport}
           onClose={() => setPayTransport(null)}
+          addToast={addToast}
+        />
+      )}
+
+      {/* Inline-pay any Money Out payable drilled down from a stream. */}
+      {payPayable && (
+        <PayPayableDrawer
+          payTarget={payPayable}
+          onClose={() => setPayPayable(null)}
           addToast={addToast}
         />
       )}
