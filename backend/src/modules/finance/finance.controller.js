@@ -4,6 +4,21 @@ const accountingService = require('../../services/accountingService');
 const fxRateService = require('./fxRate.service');
 const { nextDocNo } = require('../../utils/docNumber');
 
+// Finance-dashboard confidentiality: every role EXCEPT Super Admin / Owner sees
+// reference NUMBERS (export order, mill batch, lot) but NOT the trading-party
+// NAMES (customers + suppliers). Transporters (haulers) stay visible — they're
+// operational. Resolve the caller's role name (cached on req.user._roleName when
+// available, else looked up by role_id) and return true when names must be hidden.
+const PARTY_VISIBLE_ROLES = ['Super Admin', 'Owner', 'Admin'];
+async function isPartyMasked(req) {
+  let roleName = req.user && req.user._roleName;
+  if (!roleName && req.user && req.user.role_id) {
+    const rr = await db('roles').where({ id: req.user.role_id }).first('name');
+    roleName = rr && rr.name;
+  }
+  return !PARTY_VISIBLE_ROLES.includes(roleName);
+}
+
 // Resolve a payment row to its PKR equivalent using the strongest
 // signal we have: stored base_amount_pkr first, then amount × fx_rate
 // when the rate is real (>1), then amount × 280 as a final fallback
@@ -121,20 +136,18 @@ const financeController = {
       const total = combined.length;
       let sliced = combined.slice(offset, offset + parseInt(limit));
 
-      // Domain separation: the Finance Manager collects export advances/balances
-      // but must NOT see the export customer or which order/goods it was for —
-      // only that a payment is expected. Mask the export-side rows (customer name,
-      // customer link, and order id — the last also removes the FE's export-detail
-      // link, which Finance can't open). Local-sale rows are left intact.
-      let _roleName = req.user && req.user._roleName;
-      if (!_roleName && req.user && req.user.role_id) {
-        const rr = await db('roles').where({ id: req.user.role_id }).first('name');
-        _roleName = rr && rr.name;
-      }
-      if (_roleName === 'Finance Manager') {
-        sliced = sliced.map((r) => (r.kind === 'receivable'
-          ? { ...r, customer_name: 'Export customer', customer_id: null, order_id: null }
-          : r));
+      // Confidentiality: every role except Super Admin / Owner sees the reference
+      // (recv_no / sale_no) but NOT the trading-party name. Mask the CUSTOMER on
+      // both export receivables and local sales, drop the customer link, and null
+      // the export order link (opening it would reveal the customer). Reference
+      // numbers stay so the payment can still be identified.
+      if (await isPartyMasked(req)) {
+        sliced = sliced.map((r) => ({
+          ...r,
+          customer_name: r.kind === 'receivable' ? 'Export customer' : 'Customer',
+          customer_id: null,
+          order_id: null,
+        }));
       }
 
       return res.json({
@@ -709,25 +722,16 @@ const financeController = {
       });
 
       // Domain separation: the Finance Manager settles export costs and needs the
-      // export ORDER NUMBER to identify what a payment is for, but must NOT see the
-      // export CUSTOMER. Owner/Admin (and mill roles) keep the full context.
-      // Resolve the caller's role once.
-      let _roleName = req.user && req.user._roleName;
-      if (!_roleName && req.user && req.user.role_id) {
-        const rr = await db('roles').where({ id: req.user.role_id }).first('name');
-        _roleName = rr && rr.name;
-      }
-      const maskExport = _roleName === 'Finance Manager';
-
+      // export ORDER NUMBER to identify what a payment is for, but restricted roles
+      // must NOT see the export CUSTOMER — party names are masked uniformly after
+      // paging (see below); here we carry the real values.
       exportCosts.forEach(ec => {
         derived.push({
           id: `EC-${ec.id}`,
           pay_no: `EC-${ec.id}`,
           entity: 'export',
           category: categoryLabel(ec.category),
-          // Finance Manager: keep the order number (so they can identify the
-          // payment) but hide the customer name.
-          supplier_name: maskExport ? null : (ec.customer_name || null),
+          supplier_name: ec.customer_name || null, // the export customer
           linked_ref: ec.order_no,
           original_amount: parseFloat(ec.amount),
           paid_amount: 0,
@@ -783,7 +787,19 @@ const financeController = {
       filtered.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
 
       const total = filtered.length;
-      const paged = filtered.slice(offset, offset + parseInt(limit));
+      let paged = filtered.slice(offset, offset + parseInt(limit));
+
+      // Confidentiality: restricted roles (everyone except Super Admin / Owner)
+      // see the reference (order / batch / lot) but NOT the trading-party name.
+      // Mask the supplier/customer name to a generic label and drop the party
+      // link; transporter (hauler) names stay visible (operational).
+      if (await isPartyMasked(req)) {
+        paged = paged.map((r) => {
+          if (r.hauler_name && !r.supplier_name) return r; // transporter payable — keep
+          if (!r.supplier_name) return r; // no party name to hide (e.g. mill expense)
+          return { ...r, supplier_name: r.entity === 'export' ? 'Customer' : 'Supplier', supplier_id: null };
+        });
+      }
 
       return res.json({
         success: true,
@@ -1006,15 +1022,12 @@ const financeController = {
         .orderBy('p.id', 'desc')
         .limit(parseInt(limit));
 
-      // Domain separation: the Finance Manager records export receipts but must not
-      // see the export customer — only that a payment was received. Mask the
-      // export-side receipt counterparty (local-sale receipts stay intact).
-      let _roleName = req.user && req.user._roleName;
-      if (!_roleName && req.user && req.user.role_id) {
-        const rr = await db('roles').where({ id: req.user.role_id }).first('name');
-        _roleName = rr && rr.name;
-      }
-      const maskExport = _roleName === 'Finance Manager';
+      // Confidentiality: restricted roles (everyone except Super Admin / Owner)
+      // see the reference (recv_no / sale_no / pay_no) but NOT the trading-party
+      // name — both customers and suppliers are masked to a generic label with no
+      // link. Transporter references (pay_linked_ref on freight payments) are not
+      // party names, so they stay.
+      const masked = await isPartyMasked(req);
 
       // Compose a single counterparty + source label per row so the FE
       // doesn't have to do the joining gymnastics.
@@ -1027,8 +1040,8 @@ const financeController = {
         let counterparty_id = null;
         if (r.type === 'receipt') {
           const isLocalSale = (r.recv_no && r.recv_no.startsWith('RCV-LS')) || !!r.local_sale_id;
-          if (maskExport && !isLocalSale) {
-            counterparty = 'Export customer';
+          if (masked) {
+            counterparty = isLocalSale ? 'Customer' : 'Export customer';
             counterparty_id = null;
           } else {
             counterparty = r.customer_name || r.sale_buyer || 'Walk-in customer';
@@ -1040,6 +1053,14 @@ const financeController = {
           // the RCV-LS receivables and the party-ledger receipts that carry a
           // local_sale_id (their recv_no is null, so the prefix check missed them).
           if (isLocalSale) sourceHref = '/local-sales';
+        } else if (masked) {
+          // Restricted roles: never expose a party name here. Do NOT fall back to
+          // pay_linked_ref — it can hold a name (e.g. a payroll worker), not just a
+          // reference. The payment is still identified by sourceRef (pay_no).
+          counterparty = r.supplier_name ? 'Supplier' : 'Vendor';
+          counterparty_id = null;
+          sourceRef = r.pay_no || null;
+          counterparty_type = 'supplier';
         } else {
           counterparty = r.supplier_name || r.pay_linked_ref || 'Vendor';
           sourceRef = r.pay_no || null;
