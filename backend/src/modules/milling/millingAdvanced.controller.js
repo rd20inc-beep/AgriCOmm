@@ -877,15 +877,25 @@ const millingAdvancedController = {
       const cashOut = outRows.reduce((s, r) => s + num(r.amount_pkr), 0) + ftRows.filter((r) => r.direction === 'out').reduce((s, r) => s + r.amount_pkr, 0);
       const cashIn = inRows.reduce((s, r) => s + num(r.amount_pkr), 0) + ftRows.filter((r) => r.direction === 'in').reduce((s, r) => s + r.amount_pkr, 0);
 
-      // Money-out streams: current paid-vs-outstanding snapshot.
+      // Money-out streams: current paid-vs-outstanding snapshot. Every mill
+      // payable is bucketed into a human-readable stream so transport, commission
+      // and the lot's additional costs are visible here — not just in the
+      // Additional Costs tab. Transport/commission carry a source_table
+      // (lot_transport/batch_transport/lot_commission); the supplier 'Raw
+      // Material' payable (rice + labor + unloading + packing + bag + other)
+      // has NO source_table, so we key off `category` first, then source_table,
+      // and never fall back to a raw table name or a bare 'Other'.
       const streamRows = await db('payables')
         .where('entity', 'mill')
         .select(
           db.raw(`CASE
-            WHEN source_table = 'milling_costs' THEN 'Rice & batch costs'
+            WHEN category = 'Transport' OR source_table IN ('lot_transport', 'batch_transport') THEN 'Transport (haulers)'
+            WHEN category = 'Commission' OR source_table = 'lot_commission' THEN 'Commission (brokers)'
+            WHEN category = 'Raw Material' OR source_table = 'inventory_lots' THEN 'Rice & lot costs'
+            WHEN source_table = 'milling_costs' THEN 'Milling & batch costs'
             WHEN source_table = 'mill_purchases' THEN 'Mill store purchases'
             WHEN source_table IN ('mill_expenses', 'business_expenses') THEN 'Expenses & overhead'
-            ELSE COALESCE(source_table, 'Other') END as stream`),
+            ELSE COALESCE(NULLIF(category, ''), source_table, 'Other') END as stream`),
           db.raw('SUM(original_amount) as billed'),
           db.raw('SUM(paid_amount) as paid'),
           db.raw('SUM(outstanding) as outstanding')
