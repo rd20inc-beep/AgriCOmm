@@ -1915,6 +1915,8 @@ COL payables.sync_status:character varying:NOT NULL
 COL payables.updated_at:timestamp with time zone:NOT NULL
 COL payables.uuid:uuid:NULL
 COL payments.amount:numeric:NOT NULL
+COL payments.attachment_name:text:NULL
+COL payments.attachment_url:text:NULL
 COL payments.bank_account_id:integer:NULL
 COL payments.bank_reference:character varying:NULL
 COL payments.base_amount_pkr:numeric:NOT NULL
@@ -1925,6 +1927,7 @@ COL payments.created_at:timestamp with time zone:NOT NULL
 COL payments.created_by:integer:NULL
 COL payments.currency:character varying:NOT NULL
 COL payments.device_uuid:text:NULL
+COL payments.discount_amount:numeric:NOT NULL
 COL payments.due_date:date:NULL
 COL payments.fx_rate:numeric:NOT NULL
 COL payments.id:integer:NOT NULL
@@ -1950,6 +1953,8 @@ COL payments.sync_status:character varying:NOT NULL
 COL payments.type:character varying:NOT NULL
 COL payments.updated_at:timestamp with time zone:NULL
 COL payments.uuid:uuid:NULL
+COL payments.wht_amount:numeric:NOT NULL
+COL payments.wht_rate:numeric:NULL
 COL permissions.action:character varying:NOT NULL
 COL permissions.created_at:timestamp with time zone:NULL
 COL permissions.description:text:NULL

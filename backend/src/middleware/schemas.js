@@ -412,6 +412,15 @@ const recordPayment = Joi.object({
   linked_receivable_id: Joi.number().integer().allow(null),
   linked_payable_id: Joi.number().integer().allow(null),
   notes: Joi.string().allow('', null),
+  // #14 Phase 1e — withholding tax, early-payment discount, supporting document.
+  // wht/discount reduce the CASH paid but not the amount settled against the
+  // payable (the vendor's claim is cleared in full; the withheld tax is remitted
+  // to FBR and the discount is booked as income). Payments only.
+  wht_amount: Joi.number().min(0).allow(null),
+  wht_rate: Joi.number().min(0).max(100).allow(null),
+  discount_amount: Joi.number().min(0).allow(null),
+  attachment_url: Joi.string().allow('', null),
+  attachment_name: Joi.string().allow('', null),
 });
 
 // ===================== JOURNAL ENTRIES =====================
