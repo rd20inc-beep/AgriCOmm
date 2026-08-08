@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const controller = require('../../controllers/localSalesController');
-const { authorize, authorizeRole } = require('../../middleware/rbac');
+const { authorize, authorizeRole, authorizeAny } = require('../../middleware/rbac');
 const auditAction = require('../../middleware/audit');
 
 // Admin invoice copy exposes internal cost/margin — restrict to these roles.
@@ -25,7 +25,10 @@ router.post('/:id/confirm', authorizeRole(...CONFIRM_ROLES), auditAction('confir
 router.post('/:id/reject', authorizeRole(...CONFIRM_ROLES), auditAction('reject_local_sale', 'local_sale'), controller.rejectSale);
 router.post(
   '/:id/payments',
-  authorize('inventory', 'create'),
+  // Recording a receipt against a local-sale receivable is a FINANCE action, so a
+  // payments-only Finance Manager (finance.confirm_payment) must be able to do it
+  // from Money In — not only inventory/mill roles (inventory.create).
+  authorizeAny(['inventory', 'create'], ['finance', 'confirm_payment']),
   auditAction('accept_local_sale_payment', 'local_sale'),
   controller.acceptPayment
 );
