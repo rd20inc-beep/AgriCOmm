@@ -34,7 +34,7 @@ const sidebarNav = [
       { label: 'Quality', to: '/quality', icon: FlaskConical, permission: { module: 'milling', action: 'view' } },
       { label: 'Adjustments', to: '/stock-adjustments', icon: AlertTriangle, permission: { module: 'inventory', action: 'view' } },
       { label: 'Transfers', to: '/transfer', icon: ArrowRightLeft, permission: { module: 'finance', action: 'view' } },
-      { label: 'Local Sales', to: '/local-sales', permission: { module: 'inventory', action: 'view' } },
+      { label: 'Local Sales', to: '/local-sales', anyOf: [{ module: 'inventory', action: 'view' }, { module: 'finance', action: 'view' }] },
     ],
   },
   { section: 'Reports' },

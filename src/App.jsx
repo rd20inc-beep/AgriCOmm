@@ -286,10 +286,10 @@ function StandardRoutes() {
         <Route path="/lot-inventory" element={<ProtectedRoute module="inventory" action="view"><LotInventory /></ProtectedRoute>} />
         <Route path="/stock-summary" element={<ProtectedRoute module="inventory" action="view"><StockSummary /></ProtectedRoute>} />
         <Route path="/stock-count" element={<ProtectedRoute module="inventory" action="view"><StockCount /></ProtectedRoute>} />
-        <Route path="/local-sales" element={<ProtectedRoute module="inventory" action="view"><LocalSales /></ProtectedRoute>} />
-        <Route path="/local-sales/:id/invoice" element={<ProtectedRoute module="inventory" action="view"><InvoiceView /></ProtectedRoute>} />
-        <Route path="/local-sales/:id/print" element={<ProtectedRoute module="inventory" action="view"><InvoiceView /></ProtectedRoute>} />
-        <Route path="/local-sales/:id" element={<ProtectedRoute module="inventory" action="view"><LocalSaleDetail /></ProtectedRoute>} />
+        <Route path="/local-sales" element={<ProtectedRoute anyOf={[{ module: 'inventory', action: 'view' }, { module: 'finance', action: 'view' }]}><LocalSales /></ProtectedRoute>} />
+        <Route path="/local-sales/:id/invoice" element={<ProtectedRoute anyOf={[{ module: 'inventory', action: 'view' }, { module: 'finance', action: 'view' }]}><InvoiceView /></ProtectedRoute>} />
+        <Route path="/local-sales/:id/print" element={<ProtectedRoute anyOf={[{ module: 'inventory', action: 'view' }, { module: 'finance', action: 'view' }]}><InvoiceView /></ProtectedRoute>} />
+        <Route path="/local-sales/:id" element={<ProtectedRoute anyOf={[{ module: 'inventory', action: 'view' }, { module: 'finance', action: 'view' }]}><LocalSaleDetail /></ProtectedRoute>} />
         <Route path="/lot-inventory/:id/purchase-invoice" element={<ProtectedRoute module="inventory" action="view"><PurchaseInvoiceView /></ProtectedRoute>} />
         <Route path="/lot-inventory/:id" element={<ProtectedRoute module="inventory" action="view"><LotDetail /></ProtectedRoute>} />
         <Route path="/documents" element={<ProtectedRoute module="documents" action="view"><Documents /></ProtectedRoute>} />

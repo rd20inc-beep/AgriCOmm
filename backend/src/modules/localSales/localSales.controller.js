@@ -8,6 +8,7 @@ const inventoryService = require('../../services/inventoryService');
 const accountingService = require('../accounting/accounting.service');
 const { resolveCashAccountId } = require('../../shared/cashAccounts');
 const { nextDocNo } = require('../../utils/docNumber');
+const { isPartyMasked } = require('../../shared/partyMask');
 
 async function generateSaleNo(trx) {
   return nextDocNo(trx || db, { table: 'local_sales', column: 'sale_no', prefix: 'LS-' });
@@ -490,7 +491,13 @@ module.exports = {
       }
 
       const [{ count: total }] = await query.clone().clearSelect().count('ls.id as count');
-      const sales = await query.orderBy('ls.sale_date', 'desc').limit(limit).offset(offset);
+      let sales = await query.orderBy('ls.sale_date', 'desc').limit(limit).offset(offset);
+
+      // Confidentiality: a finance-readable (non Owner/Admin) role sees the sale
+      // reference but NOT the customer name — mask customer_name + buyer_name.
+      if (await isPartyMasked(req)) {
+        sales = sales.map((s) => ({ ...s, customer_name: 'Customer', buyer_name: s.buyer_name ? 'Customer' : s.buyer_name }));
+      }
 
       return res.json({ success: true, data: { sales, pagination: { page: +page, limit: +limit, total: +total } } });
     } catch (err) {
@@ -519,6 +526,12 @@ module.exports = {
         .where(where).first();
 
       if (!sale) return res.status(404).json({ success: false, message: 'Sale not found.' });
+      // Mask the customer for finance-readable (non Owner/Admin) roles — same as
+      // the list — so the detail shows the sale reference, not the buyer name.
+      if (await isPartyMasked(req)) {
+        sale.customer_name = 'Customer';
+        if (sale.buyer_name) sale.buyer_name = 'Customer';
+      }
       return res.json({ success: true, data: { sale } });
     } catch (err) {
       return res.status(500).json({ success: false, message: err.message });
