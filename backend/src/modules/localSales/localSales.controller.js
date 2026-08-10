@@ -674,6 +674,13 @@ module.exports = {
               e.status = 400; throw e;
             }
             costPerKg = parseFloat(lot.landed_cost_per_kg) || (parseFloat(lot.cost_per_unit) || 0) || (parseFloat(lot.rate_per_kg) || 0);
+            // Guard: a lot with no recorded cost can't be sold — the sale would book
+            // Rs 0 COGS → 100% "profit" and no real margin. Price the lot first
+            // (set its purchase price / repair its cost), then sell.
+            if (costPerKg <= 0) {
+              const e = new Error(`${lot.lot_no} has no recorded cost (Rs 0/kg). Set the lot's purchase price before selling — a sale needs a cost basis to compute profit.`);
+              e.status = 400; throw e;
+            }
             landedCostTotal = uc.round2(l.qtyKg * costPerKg);
             lotNo = lot.lot_no;
           }

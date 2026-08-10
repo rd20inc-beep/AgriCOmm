@@ -600,6 +600,12 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
     // Without it the sale books 100% profit and can't be traced. Service charges
     // (repacking labour) are added via the repack panel, not here.
     if (!line.lot_id && !line.mill_item_id) { addToast('Select the lot (or packaging item) this is sold from', 'error'); return; }
+    // A lot with no recorded cost can't be sold — COGS would be Rs 0 (100% profit).
+    // Price the lot first (set its purchase price / repair its cost), then sell.
+    if (!isPkg && selectedLot) {
+      const lotCost = parseFloat(selectedLot.landedCostPerKg) || parseFloat(selectedLot.costPerUnit) || parseFloat(selectedLot.ratePerKg) || 0;
+      if (lotCost <= 0) { addToast(`${selectedLot.lotNo || 'This lot'} has no recorded cost (Rs 0/kg). Set its purchase price before selling.`, 'error'); return; }
+    }
     if (lineOverSell) { addToast(isPkg ? `Only ${Math.round(lineAvailCount).toLocaleString()} in stock` : `Only ${Math.round(lineAvailKg).toLocaleString()} kg left for this lot`, 'error'); return; }
     setCart(c => [...c, {
       ...line, qtyKg: lineQtyKg, ratePerKg: lineRatePerKg, total: lineTotal,
