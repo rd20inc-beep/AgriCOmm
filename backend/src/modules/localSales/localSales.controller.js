@@ -96,6 +96,32 @@ async function postSaleSideEffects(trx, saleRows, { userId } = {}) {
         costPerUnit: parseFloat(lot.cost_per_unit) || 0, currency: 'PKR', userId,
       });
       await trx('inventory_lots').where({ id: sale.lot_id }).update({ sold_weight_kg: (parseFloat(lot.sold_weight_kg) || 0) + qtyKg });
+
+      // Post COGS to the GL so the P&L reflects real cost of goods sold + gross
+      // profit, and inventory is relieved when stock leaves. Dr 5000 COGS /
+      // Cr the lot's inventory account (raw 1210, finished mill 1220 / export
+      // 1230). Without this the sale only posted revenue → P&L showed 100% margin.
+      const cogsAmt = uc.round2(parseFloat(sale.landed_cost_total) || (parseFloat(sale.cost_per_kg) || 0) * qtyKg);
+      if (cogsAmt > 0) {
+        const invCode = lot.type === 'finished' ? (lot.entity === 'export' ? '1230' : '1220') : '1210';
+        const [cogsAcc, invAcc] = await Promise.all([
+          trx('chart_of_accounts').where({ code: '5000' }).first(),
+          trx('chart_of_accounts').where({ code: invCode }).first(),
+        ]);
+        if (cogsAcc && invAcc) {
+          const j = await accountingService.createJournal(trx, {
+            date: (sale.sale_date ? new Date(sale.sale_date) : new Date()).toISOString().slice(0, 10),
+            entity: 'mill', refType: 'Local Sale COGS', refNo: sale.sale_no,
+            description: `COGS — local sale ${sale.sale_no} — ${sale.item_name}`.slice(0, 240),
+            currency: 'PKR', fxRate: 1, isAuto: true, userId,
+            lines: [
+              { account_id: cogsAcc.id, account: cogsAcc.name, debit: cogsAmt, credit: 0, narration: `DR ${cogsAcc.code} ${cogsAcc.name} — ${sale.sale_no}` },
+              { account_id: invAcc.id, account: invAcc.name, debit: 0, credit: cogsAmt, narration: `CR ${invAcc.code} ${invAcc.name} — ${sale.sale_no}` },
+            ],
+          });
+          if (j?.id) await accountingService.postJournal(trx, j.id);
+        }
+      }
     }
 
     if (paid > 0) {
