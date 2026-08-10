@@ -29,19 +29,20 @@ ${headHtml}
     font-family: Inter, system-ui, sans-serif;
     -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .lot-cost-sheet { width: 100%; }
-  /* Keep each major panel and each table intact across page boundaries
-     where the page is tall enough. Browsers honour this as a hint —
-     they'll still split when a single block exceeds one page. */
-  .lot-cost-sheet > div,
-  .lot-cost-sheet table,
-  .lot-cost-sheet tr {
-    break-inside: avoid;
-    page-break-inside: avoid;
-  }
-  /* When a table does split, repeat its header on the next page */
-  .lot-cost-sheet thead { display: table-header-group; }
-  .lot-cost-sheet tfoot { display: table-footer-group; }
-  /* Don't strand a heading at the bottom of a page */
+  /* CRITICAL: the sheet's tables use the app's "mobile-cards" reflow, scoped to
+     @media (max-width: 767px). A4 print width (~718px) is UNDER that breakpoint,
+     so every table would explode into tall stacked "Label: value" cards — turning
+     a 1-2 page sheet into many. Force real table layout for the print document. */
+  .lot-cost-sheet table { display: table !important; width: 100% !important; }
+  .lot-cost-sheet thead { display: table-header-group !important; position: static !important; }
+  .lot-cost-sheet tbody { display: table-row-group !important; }
+  .lot-cost-sheet tfoot { display: table-footer-group !important; }
+  .lot-cost-sheet tr { display: table-row !important; }
+  .lot-cost-sheet th, .lot-cost-sheet td { display: table-cell !important; }
+  .lot-cost-sheet td::before { content: none !important; display: none !important; }
+  .lot-cost-sheet .mob-hide, .lot-cost-sheet .mob-full { display: table-cell !important; }
+  /* Keep individual rows intact; let sections flow so pages pack tight. */
+  .lot-cost-sheet tr { break-inside: avoid; page-break-inside: avoid; }
   .lot-cost-sheet h1, .lot-cost-sheet h2, .lot-cost-sheet h3 {
     break-after: avoid;
     page-break-after: avoid;

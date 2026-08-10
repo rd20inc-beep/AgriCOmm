@@ -44,19 +44,23 @@ ${headHtml}
   html, body { margin: 0; padding: 0; background: white;
     font-family: Inter, system-ui, sans-serif; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .cost-sheet { width: 100%; }
-  /* Keep each major panel and each table intact across page boundaries
-     where the page is tall enough. Browsers honour this as a hint —
-     they'll still split when a single block exceeds one page. */
-  .cost-sheet > div,
-  .cost-sheet table,
-  .cost-sheet tr {
-    break-inside: avoid;
-    page-break-inside: avoid;
-  }
-  /* When a table does split, repeat its header on the next page */
-  .cost-sheet thead { display: table-header-group; }
-  .cost-sheet tfoot { display: table-footer-group; }
-  /* Don't strand a heading at the bottom of a page */
+  /* CRITICAL: the sheet's tables use the app's "mobile-cards" reflow, scoped to
+     @media (max-width: 767px). A4 print width (~718px) is UNDER that breakpoint,
+     so every table would explode into tall stacked "Label: value" cards — turning
+     a 1-2 page sheet into 5. Force real table layout for the print document and
+     drop the data-label pseudo-content so it stays tabular and compact. */
+  .cost-sheet table { display: table !important; width: 100% !important; }
+  .cost-sheet thead { display: table-header-group !important; position: static !important; }
+  .cost-sheet tbody { display: table-row-group !important; }
+  .cost-sheet tfoot { display: table-footer-group !important; }
+  .cost-sheet tr { display: table-row !important; }
+  .cost-sheet th, .cost-sheet td { display: table-cell !important; }
+  .cost-sheet td::before { content: none !important; display: none !important; }
+  .cost-sheet .mob-hide, .cost-sheet .mob-full { display: table-cell !important; }
+  /* Keep individual rows intact; let sections flow so pages pack tight (a
+     section-level break-inside:avoid strands big sections onto fresh pages,
+     padding the sheet with whitespace). */
+  .cost-sheet tr { break-inside: avoid; page-break-inside: avoid; }
   .cost-sheet h1, .cost-sheet h2, .cost-sheet h3 {
     break-after: avoid;
     page-break-after: avoid;
