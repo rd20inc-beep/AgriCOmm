@@ -1257,6 +1257,14 @@ const millingController = {
             (await trx('milling_costs').where({ batch_id: batch.id })
               .where('category', 'raw_rice').sum('amount as total').first())?.total
           ) || 0;
+          // Guard: a company (non-service) batch must have a raw-material cost before
+          // yield — otherwise the finished/by-product lots inherit Rs 0 cost and any
+          // later sale books 100% "profit". The cost comes from the source lot's
+          // purchase price, so this means: price the raw lot before milling it.
+          if (finished + broken + bran + husk + sortex + powder + sweeping + choba > 0 && rawCostTotal <= 0.01) {
+            const e = new Error('This batch has no recorded raw-material cost. Set the source lot\'s purchase price before recording yield — otherwise the finished rice would be costed at Rs 0.');
+            e.status = 400; throw e;
+          }
           const processingCosts = parseFloat(
             (await trx('milling_costs').where({ batch_id: batch.id })
               .whereNotIn('category', ['raw_rice', 'packaging']).sum('amount as total').first())?.total
@@ -1539,8 +1547,9 @@ const millingController = {
         warning: yieldWarning,
       });
     } catch (err) {
-      console.error('Milling recordYield error:', err);
-      return res.status(500).json({ success: false, message: err.message || 'Internal server error.' });
+      const status = err.status || 500;
+      if (status === 500) console.error('Milling recordYield error:', err);
+      return res.status(status).json({ success: false, message: err.message || 'Internal server error.' });
     }
   },
 
