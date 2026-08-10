@@ -595,6 +595,11 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
 
   function addLine() {
     if (!line.item_name || !(parseFloat(line.quantity_input) > 0) || !(parseFloat(line.rate_input) > 0)) { addToast('Item, quantity and rate are required', 'error'); return; }
+    // A goods line MUST come from an inventory lot (or a packaging item) — that's
+    // the cost basis (milled/raw price) and the traceability back to the lot.
+    // Without it the sale books 100% profit and can't be traced. Service charges
+    // (repacking labour) are added via the repack panel, not here.
+    if (!line.lot_id && !line.mill_item_id) { addToast('Select the lot (or packaging item) this is sold from', 'error'); return; }
     if (lineOverSell) { addToast(isPkg ? `Only ${Math.round(lineAvailCount).toLocaleString()} in stock` : `Only ${Math.round(lineAvailKg).toLocaleString()} kg left for this lot`, 'error'); return; }
     setCart(c => [...c, {
       ...line, qtyKg: lineQtyKg, ratePerKg: lineRatePerKg, total: lineTotal,

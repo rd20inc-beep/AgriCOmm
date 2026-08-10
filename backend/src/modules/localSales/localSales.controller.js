@@ -583,6 +583,16 @@ module.exports = {
             bagWt: 0, qtyKg: count, ratePerKg: rate, total: uc.round2(count * rate),
           };
         }
+        // A goods line MUST reference an inventory lot — that's its cost basis
+        // (milled/raw landed cost) and the traceability back to the source lot.
+        // Without it the sale would book 100% profit and no lot lineage. Explicit
+        // service charges (e.g. repacking labour) are exempt — they have no COGS.
+        const SERVICE_TYPES = ['labour', 'labor', 'service', 'charge'];
+        const isService = SERVICE_TYPES.includes(String(it.item_type || '').toLowerCase());
+        if (!it.lot_id && !isService) {
+          const e = new Error(`Item ${i + 1} (${it.item_name}): select the inventory lot it is sold from — needed for cost and traceability.`);
+          e.status = 400; throw e;
+        }
         const bagWt = parseFloat(it.bag_weight_kg) || 50;
         const qtyKg = uc.toKg(it.quantity_input, it.quantity_unit || 'kg', bagWt);
         const ratePerKg = uc.rateToPerKg(it.rate_input, it.rate_unit || 'kg', bagWt);
