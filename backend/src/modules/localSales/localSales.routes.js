@@ -11,10 +11,14 @@ const ADMIN_INVOICE_ROLES = ['Super Admin', 'Owner', 'Finance Manager', 'Mill Ma
 // it (Batch 6 · item 9). Same roles may reject a pending sale.
 const CONFIRM_ROLES = ['Super Admin', 'Owner', 'Mill Manager'];
 
-router.get('/', authorize('inventory', 'view'), controller.list);
-router.get('/summary', authorize('inventory', 'view'), controller.summary);
-router.get('/pending', authorize('inventory', 'view'), controller.listPending);
-router.get('/:id', authorize('inventory', 'view'), controller.getById);
+// READ routes accept inventory.view OR finance.view — a payments-only Finance
+// Manager gets read-only Local Sales (to match what they see in Money In) without
+// gaining broad inventory access. Write routes below stay inventory/mill-gated.
+const canReadSales = authorizeAny(['inventory', 'view'], ['finance', 'view']);
+router.get('/', canReadSales, controller.list);
+router.get('/summary', canReadSales, controller.summary);
+router.get('/pending', canReadSales, controller.listPending);
+router.get('/:id', canReadSales, controller.getById);
 router.post(
   '/',
   authorize('inventory', 'create'),
@@ -32,8 +36,8 @@ router.post(
   auditAction('accept_local_sale_payment', 'local_sale'),
   controller.acceptPayment
 );
-router.get('/:id/payments', authorize('inventory', 'view'), controller.getPayments);
-router.get('/:id/invoice', authorize('inventory', 'view'), controller.getInvoice);
+router.get('/:id/payments', canReadSales, controller.getPayments);
+router.get('/:id/invoice', canReadSales, controller.getInvoice);
 router.get('/:id/invoice-admin', authorizeRole(...ADMIN_INVOICE_ROLES), controller.getInvoiceAdmin);
 router.post('/:id/email-invoice', authorize('inventory', 'create'), controller.emailInvoice);
 

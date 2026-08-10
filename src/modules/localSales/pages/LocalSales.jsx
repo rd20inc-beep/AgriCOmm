@@ -57,8 +57,10 @@ export default function LocalSales() {
   const payMutation = useAcceptLocalSalePayment();
   // Sale confirmation (Batch 6 · item 9): only a Mill Manager/Owner releases a
   // pending sale's stock + revenue.
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
   const canConfirm = ['Super Admin', 'Owner', 'Mill Manager'].includes(user?.role);
+  // Read-only roles (e.g. Finance Manager viewing to reconcile) can't create sales.
+  const canCreate = hasPermission('inventory', 'create');
   const { data: pendingSales = [] } = usePendingLocalSales(canConfirm);
   const confirmSaleMut = useConfirmLocalSale();
   const rejectSaleMut = useRejectLocalSale();
@@ -149,10 +151,12 @@ export default function LocalSales() {
           <button onClick={() => refetch()} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg">
             <RefreshCw size={16} />
           </button>
-          <button onClick={() => setShowSaleModal(true)}
-            className="flex items-center gap-2 whitespace-nowrap px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700">
-            <Plus size={16} className="shrink-0" /> New Sale
-          </button>
+          {canCreate && (
+            <button onClick={() => setShowSaleModal(true)}
+              className="flex items-center gap-2 whitespace-nowrap px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700">
+              <Plus size={16} className="shrink-0" /> New Sale
+            </button>
+          )}
         </div>
       </div>
 
