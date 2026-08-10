@@ -50,9 +50,23 @@ ${headHtml}
 </style>
 </head><body>${node.outerHTML}</body></html>`);
   win.document.close();
-  const trigger = () => { try { win.focus(); win.print(); } catch { /* user cancelled */ } setTimeout(() => win.close(), 500); };
-  if (win.document.readyState === 'complete') setTimeout(trigger, 250);
-  else win.addEventListener('load', trigger);
+  // Fit-to-one-page: measure the rendered sheet and shrink with `zoom` so it lands
+  // on a single A4 page (content height ≈ 1040px at 96dpi, 10mm margins). Floor at
+  // 0.55 so a very long sheet stays legible.
+  const trigger = () => {
+    try {
+      const sheet = win.document.querySelector('.lot-cost-sheet');
+      if (sheet) {
+        const PAGE_H = 1040;
+        const h = sheet.scrollHeight;
+        if (h > PAGE_H) sheet.style.zoom = String(Math.max(0.55, PAGE_H / h));
+      }
+      win.focus(); win.print();
+    } catch { /* user cancelled */ }
+    setTimeout(() => win.close(), 500);
+  };
+  if (win.document.readyState === 'complete') setTimeout(trigger, 300);
+  else win.addEventListener('load', () => setTimeout(trigger, 300));
 }
 
 function numberToWords(num) {
