@@ -2595,6 +2595,16 @@ const exportOrderController = {
           throw err;
         }
 
+        // A lot with no recorded cost can't be allocated/shipped — COGS at shipment
+        // (locked from the lot's cost) would be Rs 0 → 100% phantom margin on the
+        // export P&L. Price the lot first. Mirrors the local-sale / yield guards.
+        const lotCostPerKg = parseFloat(lot.landed_cost_per_kg) || parseFloat(lot.cost_per_unit) || parseFloat(lot.rate_per_kg) || 0;
+        if (lotCostPerKg <= 0) {
+          const err = new Error(`${lot.lot_no} has no recorded cost (Rs 0/kg). Set the lot's price before allocating it to an export order — the shipment needs a cost basis for COGS/profit.`);
+          err.statusCode = 400;
+          throw err;
+        }
+
         const available = parseFloat(lot.available_qty) || 0; // KG (Phase 5c)
         const qtyKg = qtyMT * 1000; // FE sends MT; engine reserves in KG
         if (qtyKg > available) {
