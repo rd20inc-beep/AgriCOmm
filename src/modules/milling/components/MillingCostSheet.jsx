@@ -70,10 +70,25 @@ ${headHtml}
 <body>${node.outerHTML}</body>
 </html>`);
   win.document.close();
-  // Give stylesheets a moment to load
-  const trigger = () => { try { win.focus(); win.print(); } catch { /* user cancelled */ } setTimeout(() => win.close(), 500); };
-  if (win.document.readyState === 'complete') setTimeout(trigger, 250);
-  else win.addEventListener('load', trigger);
+  // Give stylesheets a moment to load, then FIT-TO-ONE-PAGE: measure the rendered
+  // sheet and shrink it with `zoom` (Chrome reflows + paginates on zoom) so the
+  // whole costing sheet lands on a single A4 page. A4 portrait content height at
+  // 96dpi minus 10mm margins ≈ 1040px. Floor at 0.55 so a very long sheet stays
+  // legible rather than shrinking to nothing.
+  const trigger = () => {
+    try {
+      const sheet = win.document.querySelector('.cost-sheet');
+      if (sheet) {
+        const PAGE_H = 1040;
+        const h = sheet.scrollHeight;
+        if (h > PAGE_H) sheet.style.zoom = String(Math.max(0.55, PAGE_H / h));
+      }
+      win.focus(); win.print();
+    } catch { /* user cancelled */ }
+    setTimeout(() => win.close(), 500);
+  };
+  if (win.document.readyState === 'complete') setTimeout(trigger, 300);
+  else win.addEventListener('load', () => setTimeout(trigger, 300));
 }
 
 // Costing figures show 2 decimals — especially the per-kg costs, where rounding
