@@ -43,6 +43,7 @@ import MillCustomerPayDrawer from '../components/MillCustomerPayDrawer';
 import StatementPayDrawer from '../../finance/components/StatementPayDrawer';
 import TransferFundsDrawer from '../../finance/components/TransferFundsDrawer';
 import AnomalyWatchCard from '../../ai/components/AnomalyWatchCard';
+import { favStar } from '../../../shared/utils/favorites';
 
 const PKR = (v) => 'Rs ' + (v || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtDate = (d) => {
@@ -299,7 +300,7 @@ function PayTransporterDrawer({ payTransport, onClose, addToast }) {
           <label className="block text-xs font-medium text-gray-600 mb-1">Cash / Bank account *</label>
           <select value={form.bankAccountId} onChange={(e) => set('bankAccountId', e.target.value)} className={inp}>
             <option value="">Select account…</option>
-            {(bankAccounts || []).map((a) => <option key={a.id} value={a.id}>{a.name}{a.bankName ? ` — ${a.bankName}` : ''}{a.type === 'cash' ? ' (Cash)' : ''}</option>)}
+            {(bankAccounts || []).map((a) => <option key={a.id} value={a.id}>{favStar(a)}{a.name}{a.bankName ? ` — ${a.bankName}` : ''}{a.type === 'cash' ? ' (Cash)' : ''}</option>)}
           </select>
         </div>
         <div>
@@ -403,7 +404,7 @@ function PayPayableDrawer({ payTarget, onClose, addToast }) {
           <label className="block text-xs font-medium text-gray-600 mb-1">Cash / Bank account *</label>
           <select value={form.bankAccountId} onChange={(e) => set('bankAccountId', e.target.value)} className={inp}>
             <option value="">Select account…</option>
-            {(bankAccounts || []).map((a) => <option key={a.id} value={a.id}>{a.name}{a.bankName ? ` — ${a.bankName}` : ''}{a.type === 'cash' ? ' (Cash)' : ''}</option>)}
+            {(bankAccounts || []).map((a) => <option key={a.id} value={a.id}>{favStar(a)}{a.name}{a.bankName ? ` — ${a.bankName}` : ''}{a.type === 'cash' ? ' (Cash)' : ''}</option>)}
           </select>
         </div>
         <div>
@@ -4308,7 +4309,7 @@ function PayrollRunDrawer({ month, entity = 'mill', employees, preselectId, bank
             >
               <option value="cash">Mill Cash</option>
               {payBanks.map(a => (
-                <option key={a.id} value={`bank:${a.id}`}>{a.name}{a.bank_name ? ` · ${a.bank_name}` : ''}</option>
+                <option key={a.id} value={`bank:${a.id}`}>{favStar(a)}{a.name}{a.bank_name ? ` · ${a.bank_name}` : ''}</option>
               ))}
             </select>
           </div>
@@ -4840,7 +4841,7 @@ function FinalSettlementDrawer({ worker, bankAccounts = [], company, onClose, ad
               <label className="block text-[11px] text-gray-500 mb-1">Pay via</label>
               <select value={form.pay_method === 'bank' ? `bank:${form.bank_account_id}` : 'cash'} onChange={(e) => { const v = e.target.value; if (v === 'cash') set({ pay_method: 'cash', bank_account_id: '' }); else set({ pay_method: 'bank', bank_account_id: v.replace('bank:', '') }); }} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white">
                 <option value="cash">Mill Cash</option>
-                {payBanks.map((a) => <option key={a.id} value={`bank:${a.id}`}>{a.name}</option>)}
+                {payBanks.map((a) => <option key={a.id} value={`bank:${a.id}`}>{favStar(a)}{a.name}</option>)}
               </select>
             </div>
             <div>
@@ -5136,7 +5137,7 @@ function StatutoryRemittancePanel({ canPay, entity = 'mill', bankAccounts = [], 
               <label className="block text-[11px] text-gray-500 mb-1">Pay via</label>
               <select value={form.pay_method === 'bank' ? `bank:${form.bank_account_id}` : 'cash'} onChange={(e) => { const v = e.target.value; if (v === 'cash') set({ pay_method: 'cash', bank_account_id: '' }); else set({ pay_method: 'bank', bank_account_id: v.replace('bank:', '') }); }} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white">
                 <option value="cash">Mill Cash</option>
-                {payBanks.map((a) => <option key={a.id} value={`bank:${a.id}`}>{a.name}</option>)}
+                {payBanks.map((a) => <option key={a.id} value={`bank:${a.id}`}>{favStar(a)}{a.name}</option>)}
               </select>
             </div>
             <div>

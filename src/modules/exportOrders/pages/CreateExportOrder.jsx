@@ -20,6 +20,7 @@ import { INCOTERMS, incotermHint, advancePctForIncoterm } from '../../../shared/
 import { PAYMENT_TERMS } from '../../../shared/constants/paymentTerms';
 import { COUNTRY_OPTIONS } from '../../../shared/constants/countries';
 import { PORTS } from '../../../shared/constants/ports';
+import { favStar } from '../../../shared/utils/favorites';
 
 const RECEIVING_MODES = [
   { value: 'bags', label: 'In Bags', desc: 'Standard packed bags', icon: ShoppingBag },
@@ -626,7 +627,7 @@ export default function CreateExportOrder() {
             <select value={form.bankAccountId || ''} onChange={e => set('bankAccountId', e.target.value)} required className="form-input">
               <option value="">Select a bank account…</option>
               {(bankAccountsList || []).filter(b => b.type !== 'cash').map(b => (
-                <option key={b.id} value={b.id}>{b.name}{b.bankName ? ` — ${b.bankName}` : ''}</option>
+                <option key={b.id} value={b.id}>{favStar(b)}{b.name}{b.bankName ? ` — ${b.bankName}` : ''}</option>
               ))}
             </select>
           </div>

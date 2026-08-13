@@ -8,6 +8,7 @@ import SlideDrawer from '../../../components/SlideDrawer';
 import SearchSelect from '../../../components/SearchSelect';
 import { financeApi } from '../api/services';
 import { useApp } from '../../../context/AppContext';
+import { favStar } from '../../../shared/utils/favorites';
 
 const PKR = (v) => 'Rs ' + Math.round(parseFloat(v) || 0).toLocaleString();
 const STATUS_META = {
@@ -184,7 +185,7 @@ function RecordDrawer({ bankAccounts, onClose, onDone, addToast }) {
         <Field label="Bank / Cash Account">
           <select value={form.bank_account_id} onChange={(e) => set('bank_account_id', e.target.value)} className="form-input">
             <option value="">Select account…</option>
-            {(bankAccounts || []).map((a) => <option key={a.id} value={a.id}>{a.name} ({a.currency})</option>)}
+            {(bankAccounts || []).map((a) => <option key={a.id} value={a.id}>{favStar(a)}{a.name} ({a.currency})</option>)}
           </select>
           <p className="text-[11px] text-gray-400 mt-1">The account the money physically sits in. {form.direction === 'receipt' ? 'Balance increases now.' : 'Balance decreases now.'}</p>
         </Field>

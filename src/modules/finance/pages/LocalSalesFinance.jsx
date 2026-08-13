@@ -10,6 +10,7 @@ import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { downloadCSV } from '../../../utils/csvExport';
 import { useApp } from '../../../context/AppContext';
 import SlideDrawer from '../../../components/SlideDrawer';
+import { favStar } from '../../../shared/utils/favorites';
 
 function fmtPKR(n) {
   const v = parseFloat(n) || 0;
@@ -293,7 +294,7 @@ export default function LocalSalesFinance() {
                   <select value={payForm.bankAccountId} onChange={(e) => setPayForm({ ...payForm, bankAccountId: e.target.value })}
                     className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white">
                     <option value="">Select bank account…</option>
-                    {bankAccounts.filter(a => a.type !== 'cash').map(a => <option key={a.id} value={a.id}>{a.name}{a.bankName ? ` — ${a.bankName}` : ''}</option>)}
+                    {bankAccounts.filter(a => a.type !== 'cash').map(a => <option key={a.id} value={a.id}>{favStar(a)}{a.name}{a.bankName ? ` — ${a.bankName}` : ''}</option>)}
                   </select>
                 )}
                 {payForm.method === 'cheque' && (

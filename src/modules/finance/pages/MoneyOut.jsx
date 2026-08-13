@@ -10,6 +10,7 @@ import StatusBadge from '../../../components/StatusBadge';
 import PartyLink from '../../../shared/components/PartyLink';
 import { toPkr } from '../utils/fx';
 import { shortenRef } from '../utils/refs';
+import { favStar } from '../../../shared/utils/favorites';
 
 // Currency-aware formatter — picks Rs / $ / € / £ / AED based on the row's currency
 function fmtCur(n, currency = 'PKR') {
@@ -439,7 +440,7 @@ export default function MoneyOut() {
                       <option value="">Select account...</option>
                       {bankOnlyAccounts.map(a => (
                         <option key={a.id} value={a.id}>
-                          {a.name} — {a.bankName || ''} ({a.currency || 'PKR'} {(parseFloat(a.currentBalance) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
+                          {favStar(a)}{a.name} — {a.bankName || ''} ({a.currency || 'PKR'} {(parseFloat(a.currentBalance) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
                         </option>
                       ))}
                     </select>

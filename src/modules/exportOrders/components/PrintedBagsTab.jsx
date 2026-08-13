@@ -7,6 +7,7 @@ import SlideDrawer from '../../../components/SlideDrawer';
 import BagTypePicker from '../../../components/BagTypePicker';
 import SupplierPicker from '../../../components/SupplierPicker';
 import { printedBagsApi } from '../api/services';
+import { favStar } from '../../../shared/utils/favorites';
 
 const PRINTING_OPTIONS = ['Plain', 'Buyer Logo', 'Buyer Logo + Text', 'Custom Design'];
 const rs = (n) => `Rs ${(parseFloat(n) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -325,7 +326,7 @@ function PayDrawer({ target, bankAccounts = [], onClose, onPaid, addToast }) {
           <label className="block text-sm font-medium text-gray-700 mb-1">Pay from account</label>
           <select value={bankId} onChange={e => setBankId(e.target.value)} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500">
             <option value="">— none —</option>
-            {bankAccounts.map(a => <option key={a.id} value={a.id}>{a.name}{a.bank_name ? ` (${a.bank_name})` : ''}</option>)}
+            {bankAccounts.map(a => <option key={a.id} value={a.id}>{favStar(a)}{a.name}{a.bank_name ? ` (${a.bank_name})` : ''}</option>)}
           </select>
         </div>
         {method === 'cheque' && (

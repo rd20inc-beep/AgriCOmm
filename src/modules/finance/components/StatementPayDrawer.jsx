@@ -4,6 +4,7 @@ import { CheckCircle, Wallet, HandCoins, Info } from 'lucide-react';
 import SlideDrawer from '../../../components/SlideDrawer';
 import { useReceivables, usePayables, useBankAccounts, useRecordPayment } from '../../../api/queries';
 import { useApp } from '../../../context/AppContext';
+import { favStar } from '../../../shared/utils/favorites';
 
 // Small currency formatter — mirrors the symbols used across the finance pages.
 function curSymbol(cur) {
@@ -264,7 +265,7 @@ export default function StatementPayDrawer({ mode, party, onClose }) {
               <option value="">Select bank account…</option>
               {bankAccounts.map((a) => (
                 <option key={a.id} value={a.id}>
-                  {a.name} — {a.bankName || ''} ({a.currency || 'PKR'} {(parseFloat(a.currentBalance) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
+                  {favStar(a)}{a.name} — {a.bankName || ''} ({a.currency || 'PKR'} {(parseFloat(a.currentBalance) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
                 </option>
               ))}
             </select>

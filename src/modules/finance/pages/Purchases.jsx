@@ -13,6 +13,7 @@ import { downloadCSV } from '../../../utils/csvExport';
 import { useApp } from '../../../context/AppContext';
 import { shortenRef } from '../utils/refs';
 import PartyLink from '../../../shared/components/PartyLink';
+import { favStar } from '../../../shared/utils/favorites';
 
 function fmtPKR(n) {
   const v = Number(n) || 0;
@@ -678,7 +679,7 @@ function PayPurchaseDrawer({ purchase, bankAccounts, isPending, onClose, onSubmi
                 <option value="">Select a bank account…</option>
                 {bankAccounts.map(a => (
                   <option key={a.id} value={a.id}>
-                    {a.name} · {a.bankName || '—'} ({a.currency || 'PKR'} {(parseFloat(a.currentBalance) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
+                    {favStar(a)}{a.name} · {a.bankName || '—'} ({a.currency || 'PKR'} {(parseFloat(a.currentBalance) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
                   </option>
                 ))}
               </select>
