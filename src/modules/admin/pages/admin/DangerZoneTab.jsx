@@ -3,6 +3,7 @@ import { AlertTriangle, Trash2, Landmark, Box, Receipt, ShieldAlert } from 'luci
 import { useApp } from '../../../../context/AppContext';
 import { useLotInventory } from '../../../../api/queries';
 import { adminApi } from '../../api/services';
+import { favStar } from '../../../../shared/utils/favorites';
 
 const TXN_TYPES = [
   { value: 'local_sale',     label: 'Local Sale',     hint: 'restocks the lot, deletes its payment/receivable/journal' },
@@ -199,7 +200,7 @@ export default function DangerZoneTab() {
             <select className={INPUT} value={bankId} onChange={e => setBankId(e.target.value)}>
               <option value="">Select an account…</option>
               {bankAccountsList.map(b => (
-                <option key={b.id} value={b.id}>{b.name} ({b.currency || 'PKR'} {Number(b.current_balance ?? b.currentBalance ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})</option>
+                <option key={b.id} value={b.id}>{favStar(b)}{b.name} ({b.currency || 'PKR'} {Number(b.current_balance ?? b.currentBalance ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})</option>
               ))}
             </select>
           </div>

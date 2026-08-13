@@ -9,6 +9,7 @@ import { useBankAccounts } from '../../../api/queries';
 import NewPurchaseDrawer from '../../../components/NewPurchaseDrawer';
 import SlideDrawer from '../../../components/SlideDrawer';
 import { useApp } from '../../../context/AppContext';
+import { favStar } from '../../../shared/utils/favorites';
 
 function formatPKR(v) {
   const n = Number(v) || 0;
@@ -346,7 +347,7 @@ function PurchasePaymentsCard() {
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white">
                 <option value="">Select account…</option>
                 {bankAccounts.filter(a => form.method === 'cash' ? a.type === 'cash' : a.type !== 'cash').map(a => (
-                  <option key={a.id} value={a.id}>{a.name}{a.bankName ? ` — ${a.bankName}` : ''}</option>
+                  <option key={a.id} value={a.id}>{favStar(a)}{a.name}{a.bankName ? ` — ${a.bankName}` : ''}</option>
                 ))}
               </select>
             </div>

@@ -23,6 +23,7 @@ import { useUpdateOrderStatus, useRecordExportReceipt, usePendingExportReceipts,
 import Modal from '../../../components/Modal';
 import StatusBadge from '../../../components/StatusBadge';
 import EmailComposer from '../../../components/EmailComposer';
+import { favStar } from '../../../shared/utils/favorites';
 
 function formatCurrency(value) {
   return '$' + value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -796,7 +797,7 @@ export default function FinanceConfirmations() {
                 <option value="">Select account...</option>
                 {(bankAccountsList || []).map(a => (
                   <option key={a.id} value={a.id}>
-                    {a.name} ({a.currency}) — {a.bankName}
+                    {favStar(a)}{a.name} ({a.currency}) — {a.bankName}
                   </option>
                 ))}
               </select>

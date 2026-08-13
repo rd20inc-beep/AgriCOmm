@@ -13,6 +13,7 @@ import { useAuth } from '../../../context/AuthContext';
 import api from '../../../api/client';
 import { useExpenseVendors } from '../../../api/queries';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
+import { favStar } from '../../../shared/utils/favorites';
 
 // ─── Formatting ──────────────────────────────────────────────────────
 function fmtPKR(n) {
@@ -580,7 +581,7 @@ export default function Expenses() {
                     className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
                     <option value="">Select bank account…</option>
                     {(bankAccountsList || []).map(b => (
-                      <option key={b.id} value={b.id}>{b.name} — {b.bankName || ''} ({b.currency || 'PKR'} {(parseFloat(b.currentBalance) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})</option>
+                      <option key={b.id} value={b.id}>{favStar(b)}{b.name} — {b.bankName || ''} ({b.currency || 'PKR'} {(parseFloat(b.currentBalance) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})</option>
                     ))}
                   </select>
                 </div>
@@ -801,7 +802,7 @@ function ExpenseForm({
               <select value={form.bank_account_id} onChange={e => setF('bank_account_id', e.target.value)}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none bg-white">
                 <option value="">Select bank</option>
-                {bankAccountsList.map(b => <option key={b.id} value={b.id}>{b.name} ({b.currency})</option>)}
+                {bankAccountsList.map(b => <option key={b.id} value={b.id}>{favStar(b)}{b.name} ({b.currency})</option>)}
               </select>
             </div>
             <div>

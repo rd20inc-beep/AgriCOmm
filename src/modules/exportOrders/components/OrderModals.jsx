@@ -5,6 +5,7 @@ import EmailComposer from '../../../components/EmailComposer';
 import SearchSelect from '../../../components/SearchSelect';
 import { AlertTriangle, Boxes, Factory, CheckCircle } from 'lucide-react';
 import StockAllocationPicker from './StockAllocationPicker';
+import { favStar } from '../../../shared/utils/favorites';
 
 export function AdvancePaymentModal({
   isOpen, onClose, order, formatCurrency,
@@ -111,7 +112,7 @@ export function AdvancePaymentModal({
           >
             <option value="">Select account...</option>
             {(bankAccountsList || []).map(a => (
-              <option key={a.id} value={a.id}>{a.name} ({a.currency}) — {a.bankName}</option>
+              <option key={a.id} value={a.id}>{favStar(a)}{a.name} ({a.currency}) — {a.bankName}</option>
             ))}
           </select>
         </div>
@@ -264,7 +265,7 @@ export function BalancePaymentModal({
           <select value={balanceBankAccountId || ''} onChange={e => setBalanceBankAccountId(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white">
             <option value="">Select account...</option>
             {(bankAccountsList || []).map(a => (
-              <option key={a.id} value={a.id}>{a.name} ({a.currency}) — {a.bankName}</option>
+              <option key={a.id} value={a.id}>{favStar(a)}{a.name} ({a.currency}) — {a.bankName}</option>
             ))}
           </select>
         </div>
@@ -769,7 +770,7 @@ export function ShipmentModal({
             <label className="block text-sm font-medium text-gray-700 mb-1">Company Bank Account <span className="text-gray-400 font-normal">— shown on this order's documents</span></label>
             <select value={shipBankAccountId || ''} onChange={e => setShipBankAccountId(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white">
               <option value="">Use export default</option>
-              {bankOptions.map((b) => <option key={b.id} value={b.id}>{b.name}{b.bankName ? ` — ${b.bankName}` : ''}{b.iban ? ` (${b.iban})` : ''}</option>)}
+              {bankOptions.map((b) => <option key={b.id} value={b.id}>{favStar(b)}{b.name}{b.bankName ? ` — ${b.bankName}` : ''}{b.iban ? ` (${b.iban})` : ''}</option>)}
             </select>
           </div>
         </div>

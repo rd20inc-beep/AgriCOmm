@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ArrowLeftRight, Building2, Factory } from 'lucide-react';
 import SlideDrawer from '../../../components/SlideDrawer';
 import { useBankAccounts, useCreateFundTransfer } from '../../../api/queries';
+import { favStar } from '../../../shared/utils/favorites';
 
 const TODAY = () => new Date().toISOString().slice(0, 10);
 const fmt = (n) => `Rs ${(parseFloat(n) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -115,7 +116,7 @@ export default function TransferFundsDrawer({ open, onClose, defaultDirection = 
           <label className="block text-xs font-medium text-gray-600 mb-1">From account ({direction === 'ho_to_mill' ? 'Head Office' : 'Mill'})</label>
           <select value={fromId} onChange={(e) => setFromId(e.target.value)} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900">
             <option value="">Select account…</option>
-            {fromOptions.map((a) => <option key={a.id} value={a.id}>{a.name} — {fmt(a.currentBalance)}</option>)}
+            {fromOptions.map((a) => <option key={a.id} value={a.id}>{favStar(a)}{a.name} — {fmt(a.currentBalance)}</option>)}
           </select>
         </div>
 
@@ -124,7 +125,7 @@ export default function TransferFundsDrawer({ open, onClose, defaultDirection = 
           <label className="block text-xs font-medium text-gray-600 mb-1">To account ({direction === 'ho_to_mill' ? 'Mill' : 'Head Office'})</label>
           <select value={toId} onChange={(e) => setToId(e.target.value)} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900">
             <option value="">Select account…</option>
-            {toOptions.map((a) => <option key={a.id} value={a.id}>{a.name}{hideToBalance ? '' : ` — ${fmt(a.currentBalance)}`}</option>)}
+            {toOptions.map((a) => <option key={a.id} value={a.id}>{favStar(a)}{a.name}{hideToBalance ? '' : ` — ${fmt(a.currentBalance)}`}</option>)}
           </select>
         </div>
 

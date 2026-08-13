@@ -12,6 +12,7 @@ import PartyLink from '../../../shared/components/PartyLink';
 import { toPkr } from '../utils/fx';
 import { bucketize, BUCKET_KEYS } from '../utils/aging';
 import { shortenRef } from '../utils/refs';
+import { favStar } from '../../../shared/utils/favorites';
 
 // Currency-aware formatter — picks $ / Rs / € / £ from the row's currency.
 function fmtCur(n, currency = 'USD') {
@@ -401,7 +402,7 @@ export default function MoneyIn() {
                       <option value="">Select bank account...</option>
                       {bankAccounts.map(a => (
                         <option key={a.id} value={a.id}>
-                          {a.name} — {a.bankName || ''} ({a.currency || 'PKR'} {(parseFloat(a.currentBalance) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
+                          {favStar(a)}{a.name} — {a.bankName || ''} ({a.currency || 'PKR'} {(parseFloat(a.currentBalance) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
                         </option>
                       ))}
                     </select>

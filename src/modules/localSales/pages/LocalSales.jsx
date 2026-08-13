@@ -20,6 +20,7 @@ import { localSalesApi } from '../../../api/services';
 import { toKg, fromKg, rateToPerKg, allEquivalents, allRateEquivalents, UNITS } from '../../../utils/unitConversion';
 import { downloadCSV } from '../../../utils/csvExport';
 import { lotCategory, CAT_ORDER, CAT_COLOR } from '../../../utils/lotCategory';
+import { favStar } from '../../../shared/utils/favorites';
 
 function fmtPKR(v) { return 'Rs ' + (parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 
@@ -493,7 +494,7 @@ export default function LocalSales() {
               <label className={LABEL}>Bank Account *</label>
               <select value={payForm.bank_account_id} onChange={e => setPayForm(p => ({...p, bank_account_id: e.target.value}))} className={SELECT}>
                 <option value="">Select bank account…</option>
-                {bankOpts.map(b => <option key={b.id} value={b.id}>{b.name}{(b.bankName || b.bank_name) ? ` — ${b.bankName || b.bank_name}` : ''}</option>)}
+                {bankOpts.map(b => <option key={b.id} value={b.id}>{favStar(b)}{b.name}{(b.bankName || b.bank_name) ? ` — ${b.bankName || b.bank_name}` : ''}</option>)}
               </select>
             </div>
           )}
@@ -1100,7 +1101,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
               <select value={form.bank_account_id} onChange={e => set('bank_account_id', e.target.value)} className={SELECT}>
                 <option value="">Select bank account…</option>
                 {bankOptions.map(b => (
-                  <option key={b.id} value={b.id}>{b.name}{(b.bankName || b.bank_name) ? ` — ${b.bankName || b.bank_name}` : ''}{b.currency && b.currency !== 'PKR' ? ` (${b.currency})` : ''}</option>
+                  <option key={b.id} value={b.id}>{favStar(b)}{b.name}{(b.bankName || b.bank_name) ? ` — ${b.bankName || b.bank_name}` : ''}{b.currency && b.currency !== 'PKR' ? ` (${b.currency})` : ''}</option>
                 ))}
               </select>
             </div>
