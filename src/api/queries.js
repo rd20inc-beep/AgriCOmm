@@ -797,7 +797,14 @@ export function useBankAccounts(opts = {}) {
       const res = await financeApi.bankAccounts();
       const raw = res?.data || res || {};
       const accounts = raw.bank_accounts || raw.accounts || [];
-      return accounts.map(transformBankAccount);
+      // Favorites first, then alphabetical. The cloud list arrives in this
+      // order already; sorting here as well keeps the offline/site replica
+      // (and any cached payload from before mig 293) consistent, and this is
+      // the single list behind every payment dropdown + AppContext.
+      return accounts.map(transformBankAccount).sort((a, b) => {
+        if (!!a.isFavorite !== !!b.isFavorite) return a.isFavorite ? -1 : 1;
+        return (a.name || '').localeCompare(b.name || '');
+      });
     },
     ...opts,
   });

@@ -1631,7 +1631,11 @@ const financeController = {
 
   async getBankAccounts(req, res) {
     try {
-      const accounts = await db('bank_accounts').orderBy('name', 'asc');
+      // Starred accounts first (mig 293), then alphabetical — this one list
+      // feeds every payment dropdown in the app, so the ordering is set here.
+      const accounts = await db('bank_accounts')
+        .orderBy('is_favorite', 'desc')
+        .orderBy('name', 'asc');
 
       // The Mill role transacts only through its own Mill Cash account and must
       // NOT see Head Office bank balances. For that role, blank out the balance

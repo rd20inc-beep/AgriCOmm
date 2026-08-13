@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Landmark, Plus, Pencil, Trash2 } from 'lucide-react';
+import { Landmark, Plus, Pencil, Trash2, Star } from 'lucide-react';
 import { useApp } from '../../../../context/AppContext';
 import {
   useCreateBankAccount,
@@ -108,6 +108,17 @@ export default function BankAccountsTab() {
     }
   };
 
+  // Toggle the favorite flag — a partial update, same as the suppliers /
+  // customers tabs. Starred accounts sort to the top of this list and of
+  // every payment dropdown (the sort lives in useBankAccounts).
+  const toggleFavorite = async (a) => {
+    try {
+      await updateMut.mutateAsync({ id: a.id, data: { is_favorite: !a.isFavorite } });
+    } catch (err) {
+      addToast(err.message || 'Failed to update favorite', 'error');
+    }
+  };
+
   const handleDelete = async (a) => {
     const label = a.name || a.accountName || `account #${a.id}`;
     if (!window.confirm(`Delete bank account "${label}"? This cannot be undone.`)) return;
@@ -147,6 +158,7 @@ export default function BankAccountsTab() {
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200">
+                <th className="text-center px-2 py-3 font-semibold text-gray-600 w-10" title="Favorite"><Star className="w-3.5 h-3.5 inline text-gray-400" /></th>
                 <th className="text-left px-4 py-3 font-semibold text-gray-600">UID</th>
                 <th className="text-left px-4 py-3 font-semibold text-gray-600">Account Name</th>
                 <th className="text-left px-4 py-3 font-semibold text-gray-600">Type</th>
@@ -160,6 +172,15 @@ export default function BankAccountsTab() {
             <tbody className="divide-y divide-gray-100">
               {accounts.map(a => (
                 <tr key={a.id || a.uid} className="hover:bg-gray-50 transition-colors">
+                  <td data-label="" className="mob-hide text-center px-2 py-3">
+                    <button
+                      onClick={() => toggleFavorite(a)}
+                      title={a.isFavorite ? 'Remove from favorites' : 'Mark as favorite'}
+                      className="p-1 rounded hover:bg-amber-50 transition-colors"
+                    >
+                      <Star className={`w-4 h-4 ${a.isFavorite ? 'fill-amber-400 text-amber-500' : 'text-gray-300'}`} />
+                    </button>
+                  </td>
                   <td data-label="UID" className="mob-hide px-4 py-3 text-gray-500 font-mono text-xs">{a.uid || a.id}</td>
                   <td data-label="Account Name" className="px-4 py-3 font-medium text-gray-900">
                     {a.name || a.accountName}
