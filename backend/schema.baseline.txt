@@ -144,6 +144,7 @@ COL bank_accounts.iban:character varying:NULL
 COL bank_accounts.id:integer:NOT NULL
 COL bank_accounts.is_active:boolean:NOT NULL
 COL bank_accounts.is_export_default:boolean:NOT NULL
+COL bank_accounts.is_favorite:boolean:NOT NULL
 COL bank_accounts.name:character varying:NOT NULL
 COL bank_accounts.swift_bic:character varying:NULL
 COL bank_accounts.type:character varying:NULL

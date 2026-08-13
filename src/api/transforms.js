@@ -451,6 +451,7 @@ export function transformBankAccount(db) {
     correspondentAccount: db.correspondent_account || '',
     isExportDefault: db.is_export_default || false,
     approvedForCustomer: db.approved_for_customer || false,
+    isFavorite: !!db.is_favorite,
   };
 }
 
