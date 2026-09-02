@@ -2149,12 +2149,24 @@ export default function DocumentCenter({ order }) {
     } finally { setWfBusy(false); }
   }
 
+  // Copy label / audience / bank account. These re-render the document from
+  // source, which used to wipe a hand-edited preview — the operator changed a
+  // dropdown and their typing vanished. A document that has been edited keeps
+  // what's on screen instead; the setting is stored either way and is picked up
+  // the next time the document is revised. A pristine document still takes the
+  // fresh render, so the new Copy/Audience shows immediately.
   async function saveSettings(patch) {
     if (!version?.id) return;
     setWfBusy(true);
     try {
+      const onScreen = currentEditedHtml();
       const res = await api.put(versionUrl('settings'), patch);
-      applyVersion(res?.data);
+      const hasEdits = !!res?.data?.editedHtml;
+      applyVersion(res?.data, previewKey);
+      if (hasEdits) {
+        setPreviewHtml(onScreen);
+        addToast('Setting saved. Your edits are kept — Revise to rebuild the document with it.', 'info');
+      }
     } catch (err) {
       addToast(err.message || 'Update failed', 'error');
     } finally { setWfBusy(false); }
