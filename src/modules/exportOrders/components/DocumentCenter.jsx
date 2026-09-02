@@ -2112,6 +2112,13 @@ export default function DocumentCenter({ order }) {
     }
   }
 
+  // Version-addressed document endpoints are mounted at
+  // /api/export-orders/documents/:genId/… — WITHOUT the order id, because a
+  // generated-document id is already globally unique (see exportOrders.routes.js).
+  // Passing the order id as well matched no route at all, so every save and
+  // workflow action came back 404.
+  const versionUrl = (suffix) => `/api/export-orders/documents/${version.id}/${suffix}`;
+
   // Persist preview edits (inline HTML + structured signatory/notes) as an
   // overrides patch — never touches the order/customer source record.
   async function saveEdits(extraOverrides = {}) {
@@ -2119,7 +2126,7 @@ export default function DocumentCenter({ order }) {
     setWfBusy(true);
     try {
       const editedHtml = printRef.current ? printRef.current.innerHTML : previewHtml;
-      const res = await api.put(`/api/export-orders/${oid}/documents/${version.id}/overrides`, {
+      const res = await api.put(versionUrl('overrides'), {
         overrides: extraOverrides, editedHtml,
       });
       // Keep the edited preview on screen (don't re-render from the snapshot,
@@ -2135,7 +2142,7 @@ export default function DocumentCenter({ order }) {
     if (!version?.id) return;
     setWfBusy(true);
     try {
-      const res = await api.put(`/api/export-orders/${oid}/documents/${version.id}/settings`, patch);
+      const res = await api.put(versionUrl('settings'), patch);
       applyVersion(res?.data);
     } catch (err) {
       addToast(err.message || 'Update failed', 'error');
@@ -2148,7 +2155,7 @@ export default function DocumentCenter({ order }) {
     setWfBusy(true);
     try {
       const method = kind === 'revise' ? 'post' : 'put';
-      const res = await api[method](`/api/export-orders/${oid}/documents/${version.id}/${kind}`, body);
+      const res = await api[method](versionUrl(kind), body);
       applyVersion(res?.data, previewKey);
       loadVersions(previewKey);
       addToast(`Document ${res?.data?.version?.status || 'updated'}`, 'success');
