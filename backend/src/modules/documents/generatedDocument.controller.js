@@ -152,7 +152,10 @@ const generatedDocumentController = {
         copyLabel: req.body.copyLabel,
       }, req.user && req.user.id);
       const document = await renderRow(row, req);
-      return res.json({ success: true, data: { version: meta(row), document } });
+      // `editedHtml` rides along (as it does on getCurrent) so the preview can
+      // tell a hand-edited document from a pristine one and keep the operator's
+      // edits on screen instead of replacing them with the fresh render.
+      return res.json({ success: true, data: { version: meta(row), document, editedHtml: row.edited_html || null } });
     } catch (err) {
       if (err.status) return res.status(err.status).json({ success: false, code: err.code, message: err.message });
       console.error('updateSettings error:', err);
