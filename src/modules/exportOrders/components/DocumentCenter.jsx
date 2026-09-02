@@ -1992,6 +1992,14 @@ export default function DocumentCenter({ order }) {
   const [pdfBusy, setPdfBusy] = useState(false);         // server-side PDF download in flight
   const printRef = useRef(null);
   const validation = useMemo(() => validateExportDoc(previewDoc), [previewDoc]);
+  // The preview is contentEditable, so the user's inline edits live in the DOM
+  // until they're saved. React 19 compares props by REFERENCE and re-applies
+  // dangerouslySetInnerHTML whenever the object differs — a fresh `{ __html }`
+  // literal each render meant every unrelated re-render (a workflow button
+  // going busy, a toast, a refetch) reset the node to `previewHtml` and threw
+  // the edits away. Memoising it keeps the DOM untouched until the HTML itself
+  // actually changes.
+  const previewInnerHtml = useMemo(() => ({ __html: previewHtml }), [previewHtml]);
   const canApprove = hasPermission('documents', 'approve');
   const locked = !!(version && version.locked);
   const showBank = BANK_DOC_TYPES.has(previewKey);
@@ -2130,7 +2138,10 @@ export default function DocumentCenter({ order }) {
         overrides: extraOverrides, editedHtml,
       });
       // Keep the edited preview on screen (don't re-render from the snapshot,
-      // which would discard the just-made inline / per-word formatting).
+      // which would discard the just-made inline / per-word formatting) — and
+      // adopt the HTML we just persisted as state, so React, the DOM and the
+      // server all hold the same document.
+      setPreviewHtml(editedHtml);
       if (res?.data?.version) setVersion(res.data.version);
       addToast('Document edits saved', 'success');
     } catch (err) {
@@ -2532,7 +2543,7 @@ export default function DocumentCenter({ order }) {
               contentEditable
               suppressContentEditableWarning
               className={`doc-a4-preview ${resolveOrientation(previewDoc?._docType, docTemplates) === 'landscape' ? 'is-landscape' : ''} border border-gray-200 rounded-lg overflow-auto max-h-[70vh] focus:outline-none focus:ring-2 focus:ring-blue-200`}
-              dangerouslySetInnerHTML={{ __html: previewHtml }}
+              dangerouslySetInnerHTML={previewInnerHtml}
             />
           </div>
         </Modal>
