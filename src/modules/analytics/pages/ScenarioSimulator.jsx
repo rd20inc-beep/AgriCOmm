@@ -7,6 +7,7 @@ import { useApp } from '../../../context/AppContext';
 import { useRunScenario, useCostPredict } from '../../../api/queries';
 import { useCommodityPrices } from '../../../modules/milling/hooks/useCommodityPrices';
 import { INCOTERMS } from '../../../shared/constants/incoterms';
+import { favStar } from '../../../shared/utils/favorites';
 
 function formatCurrency(v, cur = 'USD') {
   if (!v && v !== 0) return '—';
@@ -352,7 +353,7 @@ function FullOrderSimulator() {
           <label className="form-label">Customer</label>
           <select value={form.customer_id} onChange={e => setForm(p => ({ ...p, customer_id: e.target.value }))} className="form-input">
             <option value="">Select customer...</option>
-            {customersList.slice(0, 100).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            {customersList.slice(0, 100).map(c => <option key={c.id} value={c.id}>{favStar(c)}{c.name}</option>)}
           </select>
         </div>
         <div className="form-group">

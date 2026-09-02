@@ -17,6 +17,7 @@ import StatusBadge from '../../../components/StatusBadge';
 import Modal from '../../../components/Modal';
 import PurchaseLotDrawer from '../components/PurchaseLotDrawer';
 import { fromKg, rateFromPerKg, allEquivalents, allRateEquivalents, toKg, rateToPerKg, UNITS, formatQty, formatRate } from '../../../utils/unitConversion';
+import { favStar } from '../../../shared/utils/favorites';
 
 const STATUS_TABS = ['All', 'Available', 'Reserved', 'Closed'];
 const TYPE_TABS = ['All', 'raw', 'finished', 'byproduct'];
@@ -1213,7 +1214,7 @@ function PurchaseLotModal({ isOpen, onClose, suppliers, warehouses, products, ad
                 {!showAddSupplier ? (
                   <select value={form.supplier_id} onChange={e => set('supplier_id', e.target.value)} className={inputCls}>
                     <option value="">Select…</option>
-                    {suppliers.slice(0, 200).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    {suppliers.slice(0, 200).map(s => <option key={s.id} value={s.id}>{favStar(s)}{s.name}</option>)}
                   </select>
                 ) : (
                   <div className="flex gap-2 items-end">

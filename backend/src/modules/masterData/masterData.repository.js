@@ -18,7 +18,9 @@ const masterDataRepository = {
 
     const countQuery = query.clone().clearSelect().clearOrder().count('id as total').first();
     const [items, countResult] = await Promise.all([
-      query.orderBy('name', 'asc').limit(limit).offset(offset),
+      // Starred parties first (mig 131), then alphabetical — same contract as
+      // the bank-account list (mig 293): the pickers show them at the top.
+      query.orderBy('is_favorite', 'desc').orderBy('name', 'asc').limit(limit).offset(offset),
       countQuery,
     ]);
     return { items, total: parseInt(countResult.total) };
@@ -74,7 +76,7 @@ const masterDataRepository = {
 
     const countQuery = query.clone().clearSelect().clearOrder().count('id as total').first();
     const [items, countResult] = await Promise.all([
-      query.orderBy('name', 'asc').limit(limit).offset(offset),
+      query.orderBy('is_favorite', 'desc').orderBy('name', 'asc').limit(limit).offset(offset),
       countQuery,
     ]);
     return { items, total: parseInt(countResult.total) };

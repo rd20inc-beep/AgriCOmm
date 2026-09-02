@@ -401,7 +401,7 @@ export function MillingDemandModal({
               <SearchSelect
                 value={millingSupplier}
                 onChange={setMillingSupplier}
-                options={(suppliersList || []).map(s => ({ value: s.id, label: s.name, sub: s.location || s.type || '' }))}
+                options={(suppliersList || []).map(s => ({ value: s.id, label: `${favStar(s)}${s.name}`, sub: s.location || s.type || '' }))}
                 placeholder="Type to search supplier or leave for mill to decide..."
               />
               <p className="text-xs text-gray-400 mt-1">Optional — mill can assign the supplier later</p>

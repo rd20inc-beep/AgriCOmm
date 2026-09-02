@@ -513,7 +513,7 @@ export default function CreateExportOrder() {
             <SearchSelect
               value={form.customerId}
               onChange={val => set('customerId', val)}
-              options={customers.filter(c => (c.customerType || 'export') === 'export').map(c => ({ value: c.id, label: c.name, sub: c.country }))}
+              options={customers.filter(c => (c.customerType || 'export') === 'export').map(c => ({ value: c.id, label: `${favStar(c)}${c.name}`, sub: c.country }))}
               placeholder="Type to search buyer..."
             />
           </div>

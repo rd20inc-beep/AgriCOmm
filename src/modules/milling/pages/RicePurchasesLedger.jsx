@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Truck, Search, Filter, Download } from 'lucide-react';
 import api from '../../../api/client';
+import { favStar } from '../../../shared/utils/favorites';
 
 function formatPKR(value) {
   if (!value) return '—';
@@ -177,7 +178,7 @@ export default function RicePurchasesLedger() {
               onChange={(e) => setFilters(f => ({ ...f, supplierId: e.target.value }))}
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm">
               <option value="">All</option>
-              {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              {suppliers.map(s => <option key={s.id} value={s.id}>{favStar(s)}{s.name}</option>)}
             </select>
           </div>
           <div>

@@ -17,6 +17,7 @@ import {
   transformCustomer, transformSupplier, transformProduct, transformBankAccount,
   transformKeys,
 } from './transforms';
+import { byFavoriteThenName } from '../shared/utils/favorites';
 
 // ===================== HELPERS =====================
 
@@ -801,10 +802,7 @@ export function useBankAccounts(opts = {}) {
       // order already; sorting here as well keeps the offline/site replica
       // (and any cached payload from before mig 293) consistent, and this is
       // the single list behind every payment dropdown + AppContext.
-      return accounts.map(transformBankAccount).sort((a, b) => {
-        if (!!a.isFavorite !== !!b.isFavorite) return a.isFavorite ? -1 : 1;
-        return (a.name || '').localeCompare(b.name || '');
-      });
+      return accounts.map(transformBankAccount).sort(byFavoriteThenName);
     },
     ...opts,
   });
@@ -936,7 +934,10 @@ export function useCustomers(params = {}, opts = {}) {
     queryFn: async () => {
       const res = await customersApi.list({ limit: 3000, ...params });
       const list = unwrap(res, 'customers') || [];
-      return list.map(transformCustomer);
+      // Favorites first, then alphabetical — same contract as useBankAccounts.
+      // The server orders this way too; sorting here keeps the offline/site
+      // replica and any pre-existing cached payload consistent.
+      return list.map(transformCustomer).sort(byFavoriteThenName);
     },
     staleTime: 5 * 60 * 1000,
     ...opts,
@@ -949,7 +950,7 @@ export function useSuppliers(params = {}, opts = {}) {
     queryFn: async () => {
       const res = await api.get('/api/suppliers', { limit: 500, ...params });
       const list = unwrap(res, 'suppliers') || [];
-      return list.map(transformSupplier);
+      return list.map(transformSupplier).sort(byFavoriteThenName);
     },
     staleTime: 5 * 60 * 1000,
     ...opts,

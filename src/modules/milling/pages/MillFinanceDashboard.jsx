@@ -1490,7 +1490,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
                 const s = suppliers.find((x) => String(x.id) === String(val));
                 setSelectedSupplier(s ? { id: s.id, name: s.name } : null);
               }}
-              options={suppliers.map((s) => ({ value: s.id, label: s.name, sub: s.location || s.city || s.country || '' }))}
+              options={suppliers.map((s) => ({ value: s.id, label: `${favStar(s)}${s.name}`, sub: s.location || s.city || s.country || '' }))}
               placeholder="Search suppliers…"
             />
           </div>
@@ -1588,7 +1588,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
                 const c = localCustomers.find((x) => String(x.id) === String(val));
                 setSelectedCustomer(c ? { id: c.id, name: c.name } : null);
               }}
-              options={localCustomers.map((c) => ({ value: c.id, label: c.name, sub: c.country || c.port || '' }))}
+              options={localCustomers.map((c) => ({ value: c.id, label: `${favStar(c)}${c.name}`, sub: c.country || c.port || '' }))}
               placeholder="Search customers…"
             />
           </div>
