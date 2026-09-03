@@ -11,6 +11,7 @@ import PartyAllocationLedger from '../../milling/components/PartyAllocationLedge
 import OpenItemsPanel from '../../milling/components/OpenItemsPanel';
 import { accountingApi } from '../../accounting/api/services';
 import { useCustomers, useSuppliers } from '../../../api/queries';
+import { favStar } from '../../../shared/utils/favorites';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { useApp } from '../../../context/AppContext';
 
@@ -90,7 +91,7 @@ export default function PartyLedger() {
   // Options for the searchable picker — country/location shown as the sub-label
   // so it's searchable too.
   const partyOptions = useMemo(
-    () => parties.map((p) => ({ value: p.id, label: p.name, sub: p.country || p.location || '' })),
+    () => parties.map((p) => ({ value: p.id, label: `${favStar(p)}${p.name}`, sub: p.country || p.location || '' })),
     [parties],
   );
 

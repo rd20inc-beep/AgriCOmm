@@ -923,7 +923,7 @@ function VendorSection({ vendorKind, apiVendors, apiCategory, form, setF, suppli
             }}
             className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500 bg-white">
             <option value="">— Pick a supplier —</option>
-            {suppliersList.map(s => <option key={s.id} value={s.id}>{s.name}{s.country ? ` · ${s.country}` : ''}</option>)}
+            {suppliersList.map(s => <option key={s.id} value={s.id}>{favStar(s)}{s.name}{s.country ? ` · ${s.country}` : ''}</option>)}
           </select>
           {!form.supplier_id && (
             <input type="text" value={form.vendor_name} onChange={e => setF('vendor_name', e.target.value)}

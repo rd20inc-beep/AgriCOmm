@@ -810,7 +810,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
                 onChange={e => { const v = e.target.value; setForm(p => ({ ...p, customer_id: v, ...(v ? { buyer_name: '', buyer_phone: '' } : {}) })); }}
                 className={SELECT}>
                 <option value="">Walk-in / not registered</option>
-                {(customers || []).filter(c => (c.customerType || 'local') !== 'export').map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                {(customers || []).filter(c => (c.customerType || 'local') !== 'export').map(c => <option key={c.id} value={c.id}>{favStar(c)}{c.name}</option>)}
               </select>
             </div>
             {isWalkIn && (

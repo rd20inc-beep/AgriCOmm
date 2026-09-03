@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { Plus, Trash2, ShoppingCart, Package, ExternalLink } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
 import { useMillStoreItems, useCreatePurchase } from '../api/queries';
+import { favStar } from '../../../shared/utils/favorites';
 
 export default function NewPurchase() {
   const navigate = useNavigate();
@@ -87,7 +88,7 @@ export default function NewPurchase() {
                 <option value="">Select supplier…</option>
                 <option value="__walkin__">Cash / Walk-in (enter name)</option>
                 {(suppliersList || []).map(s => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
+                  <option key={s.id} value={s.id}>{favStar(s)}{s.name}</option>
                 ))}
               </select>
               {supplierId === '__walkin__' && (

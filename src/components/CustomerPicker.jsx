@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect } from 'react';
-import { Search, Plus, X } from 'lucide-react';
+import { Search, Plus, X, Star } from 'lucide-react';
+import { isFavorite, byFavoriteThenName } from '../shared/utils/favorites';
 import { customersApi, adminApi } from '../modules/admin/api/services';
 
 /**
@@ -59,10 +60,12 @@ export default function CustomerPicker({
     return out;
   }, [customers, fetched, local]);
 
+  // Favorites first, then alphabetical — matching the list hooks and the admin
+  // tabs. Sorted here (not in `merged`) so the dedupe precedence above stands.
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return merged;
-    return merged.filter(c => (c.name || '').toLowerCase().includes(q));
+    const rows = q ? merged.filter(c => (c.name || '').toLowerCase().includes(q)) : merged;
+    return [...rows].sort(byFavoriteThenName);
   }, [merged, search]);
 
   const selected = merged.find(c => String(c.id) === String(value));
@@ -115,6 +118,7 @@ export default function CustomerPicker({
         {value && selected && !open ? (
           <div className="w-full px-3 py-2 rounded-lg border border-gray-300 bg-white flex items-center justify-between gap-2">
             <button type="button" onClick={() => { setOpen(true); setSearch(''); }} className="flex-1 text-left truncate text-gray-900 font-medium">
+              {isFavorite(selected) && <Star className="w-3.5 h-3.5 inline-block mr-1 -mt-0.5 fill-amber-400 text-amber-500" />}
               {selected.name}
             </button>
             <div className="flex items-center gap-2 flex-shrink-0">
@@ -137,7 +141,10 @@ export default function CustomerPicker({
                   <button key={c.id} type="button"
                     onClick={() => { onChange(String(c.id)); setSearch(''); setOpen(false); }}
                     className={`w-full text-left px-3 py-2 text-sm hover:bg-blue-50 flex items-center justify-between gap-2 ${String(c.id) === String(value) ? 'bg-blue-50 text-blue-700 font-medium' : 'text-gray-900'}`}>
-                    <span className="truncate">{c.name}</span>
+                    <span className="truncate flex items-center gap-1.5">
+                      {isFavorite(c) && <Star className="w-3.5 h-3.5 flex-shrink-0 fill-amber-400 text-amber-500" />}
+                      {c.name}
+                    </span>
                     {c.approval_status === 'pending' && <PendingBadge />}
                   </button>
                 ))}

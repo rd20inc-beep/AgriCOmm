@@ -49,6 +49,7 @@ import ConsumptionPanel from '../../millStore/components/ConsumptionPanel';
 import PackingPanel from '../../millStore/components/PackingPanel';
 
 import { qualityParams } from '../qualityParams';
+import { favStar } from '../../../shared/utils/favorites';
 
 const tabs = [
   { key: 'overview', label: 'Overview', icon: Package },
@@ -2242,7 +2243,7 @@ export default function MillingBatchDetail() {
             <SearchSelect
               value={selectedSupplier}
               onChange={setSelectedSupplier}
-              options={(suppliersList || []).map(s => ({ value: s.id, label: s.name, sub: s.location || s.type || '' }))}
+              options={(suppliersList || []).map(s => ({ value: s.id, label: `${favStar(s)}${s.name}`, sub: s.location || s.type || '' }))}
               placeholder="Type to search supplier..."
             />
           </div>
