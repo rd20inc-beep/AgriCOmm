@@ -278,11 +278,6 @@ function renderExportDocumentFooter(company) {
       ${company.name ? `<b>${company.name}</b><br/>` : ''}${company.address}<br/>${bits}
     </div>`;
 }
-// Both historical footer names now delegate to the single shared footer so every
-// document renders the identical Commercial Invoice footer (no duplicated code).
-function renderCompanyFooter(company) {
-  return renderExportDocumentFooter(company);
-}
 
 function renderProformaInvoice(doc) {
   const { company, buyer, order, shipment } = doc;
@@ -389,16 +384,9 @@ function renderProformaInvoice(doc) {
       </div>`;
       })()}
 
-      <div style="margin-top:48px; display:flex; justify-content:space-between; gap:24px;">
-        <div style="text-align:center; width:240px;">
-          <div style="border-top:1px solid #333; padding-top:4px; font-size:12px;"><b>${company.name}</b><br/>Proprietor<br/><span style="color:#666;">(Authorised Signature &amp; Stamp)</span></div>
-        </div>
-        <div style="text-align:center; width:240px;">
-          <div style="border-top:1px solid #333; padding-top:4px; font-size:12px;"><b>${buyer.name}</b><br/>Buyer / Consignee<br/><span style="color:#666;">(Authorised Signature &amp; Stamp)</span></div>
-        </div>
-      </div>
+      ${dualSignatureBlock(company, buyer)}
 
-      ${renderComplianceFooter(company)}
+      ${renderExportDocumentFooter(company)}
     </div>`;
 }
 
@@ -437,7 +425,9 @@ function commercialInvoiceHtml(doc, opts = {}) {
   const netKg = (totals && totals.netWeightKg) || (parseFloat(order.qtyMT) || 0) * 1000;
   const grossKg = (totals && totals.grossWeightKg) || netKg;
   const totalPackages = (totals && totals.totalPackages) || totalBags || 0;
-  const fmtKg = (kg) => `${(parseFloat(kg) || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })} KG (${((parseFloat(kg) || 0) / 1000).toFixed(3)} MT)`;
+  // Named fmtWeight, not fmtKg: renderPackingList has its own fmtKg with a
+  // different output format ("486,750.00" vs "486,750 KG (486.750 MT)").
+  const fmtWeight = (kg) => `${(parseFloat(kg) || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })} KG (${((parseFloat(kg) || 0) / 1000).toFixed(3)} MT)`;
 
   // HS codes — one or more codes joined with " & " (e.g. "1006.3010 & 1006.3090").
   const hs = order.hsCodes || { list: order.hsCode ? [order.hsCode] : [], multiple: false, single: order.hsCode || '' };
@@ -497,8 +487,10 @@ function commercialInvoiceHtml(doc, opts = {}) {
         ${infoRow('Vessel / Voyage', `${shipment.vesselName || ''}${shipment.voyageNumber ? ` / ${shipment.voyageNumber}` : ''}`, 'F.I. #', [shipment.fiNumber, shipment.fiNumber2, shipment.fiNumber3].filter(Boolean).join(', '))}
         ${infoRow('F.I. Date', shipment.fiDate, 'Bill of Lading #', shipment.blNumber)}
         ${infoRow('BL Date', shipment.blDate, 'HS Code', hsSummary)}
-        ${infoRow('Total Packages', `${(totalPackages || 0).toLocaleString()} Bags`, 'Net Weight', fmtKg(netKg))}
-        ${infoRow('Gross Weight', fmtKg(grossKg), '', '')}
+        <!-- Total Packages / Net Weight / Gross Weight are NOT repeated here:
+             the totals table below the item table prints all three (as Total
+             Packages / Total Net Weight / Total Gross Weight) next to the
+             invoice amount. They used to print identically in both places. -->
       </table>
 
       <!-- Column widths are FIXED (colgroup + table-layout:fixed), not content-
@@ -555,7 +547,7 @@ function commercialInvoiceHtml(doc, opts = {}) {
 
       <table style="width:100%; border-collapse:collapse; margin-top:6px; font-size:12px;">
         ${infoRow('Total Quantity', `${fmtMt(totalQtyMT)} MT`, 'Total Packages', `${(totalPackages || 0).toLocaleString()} Bags`)}
-        ${infoRow('Total Net Weight', fmtKg(netKg), 'Total Gross Weight', fmtKg(grossKg))}
+        ${infoRow('Total Net Weight', fmtWeight(netKg), 'Total Gross Weight', fmtWeight(grossKg))}
         <tr>
           <td style="${cellL} width:19%;">Total Invoice Amount</td>
           <td colspan="3" style="border:1px solid #333; padding:3px 7px; font-weight:bold; font-size:13px;">${curShort} ${fmtMoney(subTotal)}</td>
@@ -575,7 +567,7 @@ function commercialInvoiceHtml(doc, opts = {}) {
         <p style="margin:0;">Name of Signing authority:</p>
         <div style="margin-top:14px; font-weight:bold;">${opts.signatory || doc._signatory || company.proprietor}<br/>Proprietor<br/>${company.name}</div>
       </div>
-      ${renderComplianceFooter(company)}
+      ${renderExportDocumentFooter(company)}
     </div>`;
 }
 
@@ -590,70 +582,63 @@ function renderPackingList(doc) {
   const fmtKg = (n) => (parseFloat(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const fmtMT = (kg) => ((parseFloat(kg) || 0) / 1000).toLocaleString('en-US', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
 
-  // Build the row source. Multi-line P.I.s use items[]; otherwise fall back
-  // to a single synthesized row from the order's summary fields so legacy
-  // single-product orders still render.
+  // ONE row builder for both sources. Multi-line P.I.s use items[]; legacy
+  // single-product orders synthesize a single row from the order summary. The
+  // two branches used to be near-identical copies of the same packing /
+  // quantity / weight composition — they now differ only in what is fed in.
+  const tarePerBagKg = (bagSize) => {
+    const defaultTareGm = bagSize >= 50 ? 90 : bagSize >= 25 ? 50 : bagSize >= 10 ? 30 : 20;
+    return (order.bagWeightGm || defaultTareGm) / 1000;
+  };
+  const makeRow = ({ label, description, bagSize, masterBagSize, bagCount, qtyMT, packingBase, netKgOverride, grossKgOverride }) => {
+    const masterBagCount = masterBagSize > 0 ? Math.ceil((qtyMT * 1000) / masterBagSize) : 0;
+    // NET is the rice, GROSS is the rice plus the bags it travels in. These were
+    // the wrong way round: gross was set to the product weight and net to
+    // product + tare, so the printed NET came out HEAVIER than the GROSS and
+    // contradicted the summary block below the table (which reads the backend's
+    // own totals). Prefer those totals whenever the backend supplies them.
+    const netKg = netKgOverride != null ? netKgOverride : qtyMT * 1000;
+    const grossKg = grossKgOverride != null ? grossKgOverride : netKg + bagCount * tarePerBagKg(bagSize);
+    const packing = masterBagSize > 0
+      ? `${packingBase}<br/><span style="color:#92400e">Master pack: ${masterBagCount.toLocaleString()} × ${masterBagSize} KG outer (${Math.floor(masterBagSize / bagSize)} retail bags per master)</span>`
+      : packingBase;
+    const quantity = masterBagSize > 0
+      ? `${bagCount.toLocaleString()} retail bags<br/>${masterBagCount.toLocaleString()} master bags`
+      : `${bagCount.toLocaleString()} Bags`;
+    return { label, description, packing, quantity, grossKg, netKg, bagCount, masterBagCount };
+  };
+
   const rows = (items && items.length > 0)
     ? items.map((it) => {
         const bagSize = it.bagSizeKg || order.bagSizeKg || 50;
         const bagType = it.bagType || order.bagType || 'PP';
-        const masterBagSize = parseFloat(it.masterBagSizeKg) || parseFloat(order.masterBagSizeKg) || 0;
-        const bagCount = it.bagCount || (it.qtyMT && bagSize ? Math.round((it.qtyMT * 1000) / bagSize) : 0);
-        const masterBagCount = masterBagSize > 0 ? Math.ceil((it.qtyMT * 1000) / masterBagSize) : 0;
-        const grossKg = it.qtyMT * 1000;
-        const defaultTareGm = bagSize >= 50 ? 90 : bagSize >= 25 ? 50 : bagSize >= 10 ? 30 : 20;
-        const tarePerBagKg = (order.bagWeightGm || defaultTareGm) / 1000;
-        const netKg = grossKg + bagCount * tarePerBagKg;
-        const description = it.qualityDescription
-          || `${it.productName || order.product || 'Rice'} max 0-${it.brokenPctTarget != null ? it.brokenPctTarget : (order.brokenPctTarget || 2)}% broken, double (silky) polished and sortexed. Sound, loyal and merchantable, fit for human consumption at any stage. Free from alive and dead weevils/insects. GMO Free. Product to meet EU regulations at all times. Latest crop.${it.hsCode ? `<br/><strong>HS CODE ${it.hsCode}</strong>` : ''}`;
-        const packingBase = it.packing || `PACKED IN ${bagSize} KGS ${bagType} BAG`;
-        const packing = masterBagSize > 0
-          ? `${packingBase}<br/><span style="color:#92400e">Master pack: ${masterBagCount.toLocaleString()} × ${masterBagSize} KG outer (${Math.floor(masterBagSize / bagSize)} retail bags per master)</span>`
-          : packingBase;
-        const quantity = masterBagSize > 0
-          ? `${bagCount.toLocaleString()} retail bags<br/>${masterBagCount.toLocaleString()} master bags`
-          : `${bagCount.toLocaleString()} Bags`;
-        return {
+        return makeRow({
           label: (it.productName || order.product || '').toUpperCase(),
-          description,
-          packing,
-          quantity,
-          grossKg,
-          netKg,
-          bagCount,
-          masterBagCount,
-        };
+          description: it.qualityDescription
+            || `${it.productName || order.product || 'Rice'} max 0-${it.brokenPctTarget != null ? it.brokenPctTarget : (order.brokenPctTarget || 2)}% broken, double (silky) polished and sortexed. Sound, loyal and merchantable, fit for human consumption at any stage. Free from alive and dead weevils/insects. GMO Free. Product to meet EU regulations at all times. Latest crop.${it.hsCode ? `<br/><strong>HS CODE ${it.hsCode}</strong>` : ''}`,
+          bagSize,
+          masterBagSize: parseFloat(it.masterBagSizeKg) || parseFloat(order.masterBagSizeKg) || 0,
+          bagCount: it.bagCount || (it.qtyMT && bagSize ? Math.round((it.qtyMT * 1000) / bagSize) : 0),
+          qtyMT: parseFloat(it.qtyMT) || 0,
+          packingBase: it.packing || `PACKED IN ${bagSize} KGS ${bagType} BAG`,
+        });
       })
-    : (() => {
+    : [(() => {
         const bagSize = order.bagSizeKg || 50;
         const bagType = order.bagType || 'PP';
-        const masterBagSize = parseFloat(order.masterBagSizeKg) || 0;
-        const totalBags = order.totalBags || (order.qtyMT && bagSize ? Math.round((order.qtyMT * 1000) / bagSize) : 0);
-        const masterBagCount = masterBagSize > 0 ? Math.ceil(((parseFloat(order.qtyMT) || 0) * 1000) / masterBagSize) : 0;
-        const grossKg = (totals && totals.grossWeightMT ? totals.grossWeightMT : order.qtyMT) * 1000;
-        const defaultTareGm = bagSize >= 50 ? 90 : bagSize >= 25 ? 50 : bagSize >= 10 ? 30 : 20;
-        const tarePerBagKg = (order.bagWeightGm || defaultTareGm) / 1000;
-        const netKg = (totals && totals.netWeightMT)
-          ? totals.netWeightMT * 1000
-          : grossKg + totalBags * tarePerBagKg;
-        const packingBase = `PACKED IN ${bagSize} KGS ${bagType} BAG`;
-        const packing = masterBagSize > 0
-          ? `${packingBase}<br/><span style="color:#92400e">Master pack: ${masterBagCount.toLocaleString()} × ${masterBagSize} KG outer (${Math.floor(masterBagSize / bagSize)} retail bags per master)</span>`
-          : packingBase;
-        const quantity = masterBagSize > 0
-          ? `${totalBags.toLocaleString()} retail bags<br/>${masterBagCount.toLocaleString()} master bags`
-          : `${totalBags.toLocaleString()} Bags`;
-        return [{
+        const qtyMT = parseFloat(order.qtyMT) || 0;
+        return makeRow({
           label: (order.brandMarking || order.product || '').toUpperCase(),
           description: order.qualityDescription || order.product || '',
-          packing,
-          quantity,
-          grossKg,
-          netKg,
-          bagCount: totalBags,
-          masterBagCount,
-        }];
-      })();
+          bagSize,
+          masterBagSize: parseFloat(order.masterBagSizeKg) || 0,
+          bagCount: order.totalBags || (bagSize ? Math.round((qtyMT * 1000) / bagSize) : 0),
+          qtyMT,
+          packingBase: `PACKED IN ${bagSize} KGS ${bagType} BAG`,
+          netKgOverride: (totals && totals.netWeightMT) ? totals.netWeightMT * 1000 : null,
+          grossKgOverride: (totals && totals.grossWeightMT) ? totals.grossWeightMT * 1000 : null,
+        });
+      })()];
 
   const totalBags = rows.reduce((s, r) => s + (r.bagCount || 0), 0);
   const totalGrossKg = rows.reduce((s, r) => s + (r.grossKg || 0), 0);
@@ -712,12 +697,9 @@ function renderPackingList(doc) {
           <td style="border:1px solid #333; padding:5px 8px; font-weight:bold;">BL Date</td>
           <td style="border:1px solid #333; padding:5px 8px;">${shipment.blDate || ''}</td>
         </tr>
-        <tr>
-          <td style="border:1px solid #333; padding:5px 8px; font-weight:bold;">HS Code</td>
-          <td style="border:1px solid #333; padding:5px 8px;">${(() => { const h = order.hsCodes || {}; return (h.list && h.list.length) ? h.list.join(' & ') : (h.single || order.hsCode || ''); })()}</td>
-          <td style="border:1px solid #333; padding:5px 8px; font-weight:bold;">Total Packages</td>
-          <td style="border:1px solid #333; padding:5px 8px;">${(((totals && totals.totalPackages) || 0).toLocaleString())} Bags</td>
-        </tr>
+        <!-- HS Code / Total Packages are NOT repeated here: docSummaryBlock
+             below the item table already prints both (with the net and gross
+             weights). They used to print identically in both places. -->
       </table>
 
       <!-- Column widths are FIXED (colgroup + table-layout:fixed). This table
@@ -775,7 +757,7 @@ function renderPackingList(doc) {
         Certification: Goods are shipped from Pakistan origin
       </p>
 
-      ${renderComplianceFooter(company)}
+      ${renderExportDocumentFooter(company)}
     </div>`;
 }
 
@@ -844,7 +826,7 @@ function renderGenericDocument(doc) {
       <div style="margin-top:50px; text-align:right;">
         <p style="font-weight:bold;">${company.name}<br/>${company.proprietor}<br/>Proprietor</p>
       </div>
-      ${renderCompanyFooter(company)}
+      ${renderExportDocumentFooter(company)}
     </div>`;
 }
 
@@ -912,15 +894,8 @@ function renderSalesContract(doc) {
 
       <p style="margin-top:15px; font-size:12px;">This contract shall be signed by the buyer and returned. Failure to do so and buyer's retention of the contract shall constitute in acceptance of terms and conditions hereof.</p>
 
-      <div style="margin-top:48px; display:flex; justify-content:space-between; gap:24px;">
-        <div style="text-align:center; width:240px;">
-          <div style="border-top:1px solid #333; padding-top:4px; font-size:12px;"><b>${company.name}</b><br/>Proprietor<br/><span style="color:#666;">(Authorised Signature &amp; Stamp)</span></div>
-        </div>
-        <div style="text-align:center; width:240px;">
-          <div style="border-top:1px solid #333; padding-top:4px; font-size:12px;"><b>${buyer.name}</b><br/>Buyer / Consignee<br/><span style="color:#666;">(Authorised Signature &amp; Stamp)</span></div>
-        </div>
-      </div>
-      ${renderComplianceFooter(company)}
+      ${dualSignatureBlock(company, buyer)}
+      ${renderExportDocumentFooter(company)}
     </div>`;
 }
 
@@ -1097,7 +1072,7 @@ function renderBankFIRequest(doc) {
       <div style="margin-top:40px; text-align:right;">
         <p style="font-weight:bold;">${company.name}<br/>Proprietor</p>
       </div>
-      ${renderCompanyFooter(company)}
+      ${renderExportDocumentFooter(company)}
     </div>`;
 }
 
@@ -1119,11 +1094,16 @@ function renderComplianceHeader(company) {
       <div style="flex:0 0 120px;"></div>
     </div>`;
 }
-// Delegates to the single shared footer (defined above) — kept as an alias so
-// the many existing call sites need no change; every document renders the
-// identical Commercial Invoice footer.
-function renderComplianceFooter(company) {
-  return renderExportDocumentFooter(company);
+// Two-column seller/buyer signature strip — the Proforma Invoice and the Sales
+// Contract carried byte-identical copies of this markup.
+function dualSignatureBlock(company, buyer) {
+  const col = (name, role) => `
+        <div style="text-align:center; width:240px;">
+          <div style="border-top:1px solid #333; padding-top:4px; font-size:12px;"><b>${name || ''}</b><br/>${role}<br/><span style="color:#666;">(Authorised Signature &amp; Stamp)</span></div>
+        </div>`;
+  return `
+      <div style="margin-top:48px; display:flex; justify-content:space-between; gap:24px;">${col(company.name, 'Proprietor')}${col(buyer.name, 'Buyer / Consignee')}
+      </div>`;
 }
 function signatureBlock(company) {
   return `
@@ -1201,7 +1181,7 @@ function renderExportUndertaking(doc) {
 
       <p style="margin-top:18px;">Yours faithfully,</p>
       ${signatureBlock(company)}
-      ${renderComplianceFooter(company)}
+      ${renderExportDocumentFooter(company)}
     </div>`;
 }
 
@@ -1225,7 +1205,7 @@ function renderAppendixV10A(doc) {
         `I/We hereby expressly authorize the State Bank of Pakistan (SBP) to share my/our outstanding overdue information with ADs/ banks, for the purpose of conducting due diligence related to my/our export activities (Irrespective of the fact whether the same is challenged before a Court or otherwise). I/We also permit the ADs/banks to access my/our outstanding overdue information available on the Exporter's Information Portal (EIP) maintained by SBP. This authorization is given in terms of Section 3(4) of the Foreign Exchange Regulation Act, 1947, to facilitate the assessment of my/our export performance and repatriation of proceeds thereof.`
       ])}
       ${signatureBlock(company)}
-      ${renderComplianceFooter(company)}
+      ${renderExportDocumentFooter(company)}
     </div>`;
 }
 
@@ -1245,7 +1225,7 @@ function renderIndemnity(doc) {
       <p>We hereby agree to keep Bank AL Habib Limited indemnified against all demands, actions, proceedings, liabilities, claims, damages, costs and expenses in relation to or arising out of subject transaction and undertake to pay Bank AL Habib Limited immediately on demand all payments, losses, costs and expenses made or suffered by the Bank in consequence thereof.</p>
       <p>We, M/s <b>${company.name}</b> agree that the obligations on our part contained in this Indemnity shall continue to bind us notwithstanding any change in our constitution or change in the share-holding or amalgamation/ absorption/transfer of assets/novation of liabilities.</p>
       ${signatureBlock(company)}
-      ${renderComplianceFooter(company)}
+      ${renderExportDocumentFooter(company)}
     </div>`;
 }
 
@@ -1284,7 +1264,7 @@ function renderITRS(doc) {
       </div>
       <div style="background:#2e7d32; color:#fff; text-align:center; font-weight:bold; padding:5px; margin:18px 0 8px;">For Bank use only</div>
       <div style="font-size:12px; color:#555;">Transaction reference No: ____________________ &nbsp; Transaction Date: ____________<br/><br/>Scan Reference No: ____________________<br/><br/><br/>Reviewed by (Name &amp; Signature): ________________ &nbsp;&nbsp; Approved by (Name &amp; Signature): ________________</div>
-      ${renderComplianceFooter(company)}
+      ${renderExportDocumentFooter(company)}
     </div>`;
 }
 
@@ -1356,7 +1336,7 @@ function renderInvoice(doc) {
       <div style="margin-top:40px; text-align:right;">
         <p style="font-weight:bold;">${company.name}<br/>Proprietor</p>
       </div>
-      ${renderCompanyFooter(company)}
+      ${renderExportDocumentFooter(company)}
     </div>`;
 }
 
@@ -1539,7 +1519,7 @@ function renderPackingCertificate(doc) {
         <p>Name of Signing authority:</p>
         <p style="font-weight:bold;">${company.proprietor}<br/>${company.name}<br/>Proprietor</p>
       </div>
-      ${renderComplianceFooter(company)}
+      ${renderExportDocumentFooter(company)}
     </div>`;
 }
 
@@ -1701,7 +1681,7 @@ function renderBankCoveringLetter(doc) {
       ${(notifyParty?.name) ? `<p>Therefore, you are requested to please endorse the Original Bill of Lading in the name of Notify party: <strong>${notifyParty.name}, ${notifyParty.address || buyer.country}</strong></p>` : ''}
 
       <div style="margin-top:40px;"><p>Best Regards,</p><p style="font-weight:bold;">${company.name}<br/>Proprietor</p></div>
-      ${renderCompanyFooter(company)}
+      ${renderExportDocumentFooter(company)}
     </div>`;
 }
 
@@ -1742,7 +1722,7 @@ function renderBuyerCoveringLetter(doc) {
 
       <p>THANK YOU AND WAITING FOR YOUR NEXT CONSIGNMENT.</p>
       <div style="margin-top:40px;"><p>Best Regards,</p><p style="font-weight:bold;">${company.name}<br/>Proprietor</p></div>
-      ${renderComplianceFooter(company)}
+      ${renderExportDocumentFooter(company)}
     </div>`;
 }
 
@@ -1782,7 +1762,7 @@ function renderLabTestRequest(doc) {
 
       <p style="margin-top:15px;">Thanking you,<br/>Yours truly,</p>
       <p style="margin-top:20px;">For: ${company.name},<br/>Proprietor</p>
-      ${renderCompanyFooter(company)}
+      ${renderExportDocumentFooter(company)}
     </div>`;
 }
 
