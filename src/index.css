@@ -658,4 +658,8 @@ input, select, textarea { font-size: 14px; }
    overrides the footer's inline margin-top (same as the print path does). */
 .doc-a4-preview .agri-doc > div > .agri-ftr { margin-top: auto !important; }
 .doc-a4-preview .agri-doc table { width: 100%; max-width: 100%; }
-.doc-a4-preview .agri-doc td, .doc-a4-preview .agri-doc th { overflow-wrap: anywhere; }
+.doc-a4-preview .agri-doc td, .doc-a4-preview .agri-doc th { overflow-wrap: break-word; }
+/* Numeric columns (money / weights / quantities) never break: `break-word` above
+   only splits a token that cannot fit its line at all, and these cells are sized
+   by their document's <colgroup> to hold the widest realistic value. */
+.doc-a4-preview .agri-doc .agri-num { white-space: nowrap; }

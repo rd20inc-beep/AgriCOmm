@@ -501,42 +501,52 @@ function commercialInvoiceHtml(doc, opts = {}) {
         ${infoRow('Gross Weight', fmtKg(grossKg), '', '')}
       </table>
 
-      <table style="width:100%; border-collapse:collapse; margin-top:7px; font-size:12px;">
+      <!-- Column widths are FIXED (colgroup + table-layout:fixed), not content-
+           sized. Sized at the 186mm portrait printable width (item table ≈ 671px,
+           6px cell padding) to hold the widest realistic value at the 12px floor:
+           QUANTITY "16,000 Bags" (67px), HS CODE "1006.3010" (57px), UNIT PRICE
+           / AMOUNT a 7-figure "1,234,567.89" (70px). Description takes what is
+           left (25%) — it is the only column that should absorb the slack. -->
+      <table style="width:100%; border-collapse:collapse; table-layout:fixed; margin-top:7px; font-size:12px;">
+        <colgroup>
+          <col style="width:13%;"/><col style="width:12.5%;"/><col style="width:13%;"/>
+          <col style="width:25%;"/><col style="width:11%;"/><col style="width:12.5%;"/><col style="width:13%;"/>
+        </colgroup>
         <thead>
           <tr style="background:#f0f0f0;">
-            <th style="border:1px solid #333; padding:6px; width:12%;">MARKS &amp; NOS.</th>
-            <th style="border:1px solid #333; padding:6px; width:12%;">QUANTITY</th>
-            <th style="border:1px solid #333; padding:6px; width:16%;">PACKAGING</th>
+            <th style="border:1px solid #333; padding:6px;">MARKS &amp; NOS.</th>
+            <th style="border:1px solid #333; padding:6px;">QUANTITY</th>
+            <th style="border:1px solid #333; padding:6px;">PACKAGING</th>
             <th style="border:1px solid #333; padding:6px;">DESCRIPTION</th>
-            <th style="border:1px solid #333; padding:6px; width:10%;">HS CODE</th>
-            <th style="border:1px solid #333; padding:6px; width:12%;">UNIT PRICE<br/>${basisLabel}<br/>PMT(${curShort})</th>
-            <th style="border:1px solid #333; padding:6px; width:13%;">AMOUNT ${term}<br/>(${curShort})</th>
+            <th style="border:1px solid #333; padding:6px;">HS CODE</th>
+            <th style="border:1px solid #333; padding:6px;">UNIT PRICE<br/>${basisLabel}<br/>PMT(${curShort})</th>
+            <th style="border:1px solid #333; padding:6px;">AMOUNT ${term}<br/>(${curShort})</th>
           </tr>
         </thead>
         <tbody>
           ${lines.map((l) => `
             <tr>
               <td style="border:1px solid #333; padding:6px; text-align:center; font-weight:bold; font-style:italic; color:#c79a3a;">${l.brand}</td>
-              <td style="border:1px solid #333; padding:6px; text-align:center;">${(l.bagCount || 0).toLocaleString()} Bags<br/>${fmtMt(l.qtyMT)} MT</td>
+              <td class="agri-num" style="border:1px solid #333; padding:6px; text-align:center;">${(l.bagCount || 0).toLocaleString()} Bags<br/>${fmtMt(l.qtyMT)} MT</td>
               <td style="border:1px solid #333; padding:6px; font-size:12px;">${l.packing || ''}</td>
               <td style="border:1px solid #333; padding:6px;">${String(l.description || '').replace(/<br\/?>\s*<strong>HS CODE[^<]*<\/strong>/i, '')}</td>
-              <td style="border:1px solid #333; padding:6px; text-align:center; white-space:nowrap;">${l.hsCode || hs.single || ''}</td>
-              <td style="border:1px solid #333; padding:6px; text-align:center;">${fmtMoney(l.pricePerMT)}</td>
-              <td style="border:1px solid #333; padding:6px; text-align:right;">${fmtMoney(l.amount)}</td>
+              <td class="agri-num" style="border:1px solid #333; padding:6px; text-align:center;">${l.hsCode || hs.single || ''}</td>
+              <td class="agri-num" style="border:1px solid #333; padding:6px; text-align:center;">${fmtMoney(l.pricePerMT)}</td>
+              <td class="agri-num" style="border:1px solid #333; padding:6px; text-align:right;">${fmtMoney(l.amount)}</td>
             </tr>
           `).join('')}
           <tr style="font-weight:bold; background:#fafafa;">
             <td colspan="6" style="border:1px solid #333; padding:6px; text-align:right;">Total</td>
-            <td style="border:1px solid #333; padding:6px; text-align:right;">${fmtMoney(totalAmt)}</td>
+            <td class="agri-num" style="border:1px solid #333; padding:6px; text-align:right;">${fmtMoney(totalAmt)}</td>
           </tr>
           ${showAdvance ? `
           <tr style="font-weight:bold;">
             <td colspan="6" style="border:1px solid #333; padding:6px; text-align:right;">ADVANCE PAID${advancePct ? ` ${advancePct}%` : ''}</td>
-            <td style="border:1px solid #333; padding:6px; text-align:right;">${fmtMoney(advanceAmt)}</td>
+            <td class="agri-num" style="border:1px solid #333; padding:6px; text-align:right;">${fmtMoney(advanceAmt)}</td>
           </tr>
           <tr style="font-weight:bold;">
             <td colspan="6" style="border:1px solid #333; padding:6px; text-align:right;">SUB TOTAL</td>
-            <td style="border:1px solid #333; padding:6px; text-align:right;">${fmtMoney(subTotal)}</td>
+            <td class="agri-num" style="border:1px solid #333; padding:6px; text-align:right;">${fmtMoney(subTotal)}</td>
           </tr>` : ''}
         </tbody>
       </table>
@@ -710,7 +720,20 @@ function renderPackingList(doc) {
         </tr>
       </table>
 
-      <table style="width:100%; border-collapse:collapse; font-size:12px;">
+      <!-- Column widths are FIXED (colgroup + table-layout:fixed). This table
+           declared NO widths, so auto layout handed DESCRIPTION ~55% and left
+           the two WEIGHT columns ~36px each — every figure split mid-number
+           ("24|4,5|00.|00") and the QUANTITY header broke as "QUA|NTITY".
+           Sized at the 186mm portrait printable width (table ≈ 663px, 8px cell
+           padding): weights hold a 7-figure "1,234,567.89" (70px) on one line,
+           QUANTITY holds "16,000 retail" (66px), PACKING holds "PACKED IN 50"
+           (81px). DESCRIPTION absorbs the rest. Only the two weight columns are
+           agri-num (nowrap) - QUANTITY carries phrases that must wrap at spaces. -->
+      <table style="width:100%; border-collapse:collapse; table-layout:fixed; font-size:12px;">
+        <colgroup>
+          <col style="width:11.5%;"/><col style="width:30%;"/><col style="width:16.5%;"/>
+          <col style="width:15%;"/><col style="width:13.5%;"/><col style="width:13.5%;"/>
+        </colgroup>
         <thead>
           <tr style="background:#f5f5f5;">
             <th style="border:1px solid #333; padding:6px;">Container No.</th>
@@ -727,8 +750,8 @@ function renderPackingList(doc) {
               <td style="border:1px solid #333; padding:8px; vertical-align:top; font-size:12px; line-height:1.4;">${r.description}</td>
               <td style="border:1px solid #333; padding:8px; vertical-align:top; text-align:center;">${r.packing}</td>
               <td style="border:1px solid #333; padding:8px; vertical-align:top; text-align:center;">${r.quantity}</td>
-              <td style="border:1px solid #333; padding:8px; vertical-align:top; text-align:right;">${fmtKg(r.grossKg)}</td>
-              <td style="border:1px solid #333; padding:8px; vertical-align:top; text-align:right;">${fmtKg(r.netKg)}</td>
+              <td class="agri-num" style="border:1px solid #333; padding:8px; vertical-align:top; text-align:right;">${fmtKg(r.grossKg)}</td>
+              <td class="agri-num" style="border:1px solid #333; padding:8px; vertical-align:top; text-align:right;">${fmtKg(r.netKg)}</td>
             </tr>
           `).join('')}
           <tr>
@@ -738,8 +761,8 @@ function renderPackingList(doc) {
               <div style="font-weight:bold;">NET WEIGHT &nbsp;:&nbsp; ${fmtMT(totalNetKg)} MTS</div>
             </td>
             <td style="border:1px solid #333; padding:8px; text-align:center; font-weight:bold;" rowspan="3">Total</td>
-            <td style="border:1px solid #333; padding:8px; text-align:right; font-weight:bold;" rowspan="3">${fmtKg(totalGrossKg)}</td>
-            <td style="border:1px solid #333; padding:8px; text-align:right; font-weight:bold;" rowspan="3">${fmtKg(totalNetKg)}</td>
+            <td class="agri-num" style="border:1px solid #333; padding:8px; text-align:right; font-weight:bold;" rowspan="3">${fmtKg(totalGrossKg)}</td>
+            <td class="agri-num" style="border:1px solid #333; padding:8px; text-align:right; font-weight:bold;" rowspan="3">${fmtKg(totalNetKg)}</td>
           </tr>
           <tr></tr>
           <tr></tr>
@@ -832,6 +855,11 @@ function renderSalesContract(doc) {
   const totalQty = lines.reduce((s, l) => s + (l.qtyMT || 0), 0);
   const totalAmt = lines.reduce((s, l) => s + (l.amount || 0), 0);
   const isMulti = lines.length > 1;
+  // The stored port of loading is already fully qualified ("Karachi, Pakistan"),
+  // so only append the country when it isn't there — the Price line used to read
+  // "CFR Karachi, Pakistan, Pakistan".
+  const loadingPort = order.portOfLoading || 'Karachi';
+  const loadingPortFull = /pakistan/i.test(loadingPort) ? loadingPort : `${loadingPort}, Pakistan`;
 
   // Per-line description block — bullet list when multi-line, single
   // paragraph when there's only one item to keep the legacy look intact.
@@ -848,8 +876,12 @@ function renderSalesContract(doc) {
       ${renderComplianceHeader(company)}
       <h2 style="text-align:center; font-size:18px; font-style:italic; margin:10px 0;">Sales Contract</h2>
 
-      <table style="width:100%; font-size:12px; line-height:1.8;">
-        <tr><td style="width:130px; font-weight:bold; vertical-align:top;">Date:</td><td>${order.date}</td></tr>
+      <!-- Label column pinned at 130px (colgroup + fixed layout) so a longer
+           label can never steal width from the value column or wrap mid-word;
+           the value column takes the rest. -->
+      <table style="width:100%; font-size:12px; line-height:1.8; table-layout:fixed;">
+        <colgroup><col style="width:130px;"/><col/></colgroup>
+        <tr><td style="font-weight:bold; vertical-align:top; white-space:nowrap;">Date:</td><td>${order.date}</td></tr>
         <tr><td style="font-weight:bold; vertical-align:top;">Contract #</td><td>${order.contractNumber || order.orderNo}</td></tr>
         <tr><td style="font-weight:bold; vertical-align:top;">Buyer:</td><td>${buyer.name}<br/>${buyer.address}<br/>${buyer.country}${buyer.vatNumber ? `<br/>VAT: ${buyer.vatNumber}` : ''}</td></tr>
         <tr><td style="font-weight:bold; vertical-align:top;">Seller:</td><td>${company.name}<br/>${company.address}</td></tr>
@@ -857,8 +889,8 @@ function renderSalesContract(doc) {
         <tr><td style="font-weight:bold; vertical-align:top;">Product${isMulti ? 's' : ''}:</td><td>${productHtml}</td></tr>
         <tr><td style="font-weight:bold;">Quality:</td><td>Aflatoxins, Ochratoxins, Heavy metal and Pesticide residues are in line with EU law.</td></tr>
         <tr><td style="font-weight:bold; vertical-align:top;">Price:</td><td>${isMulti
-          ? `Per-line rates as above. Incoterm ${order.incoterm} ${order.portOfLoading || 'Karachi'}, Pakistan.`
-          : `@ ${order.currency} ${fmtMoney(lines[0]?.pricePerMT || order.pricePerMT)} per metric ton ${order.incoterm} ${order.portOfLoading || 'Karachi'}, Pakistan`}</td></tr>
+          ? `Per-line rates as above. Incoterm ${order.incoterm} ${loadingPortFull}.`
+          : `@ ${order.currency} ${fmtMoney(lines[0]?.pricePerMT || order.pricePerMT)} per metric ton ${order.incoterm} ${loadingPortFull}`}</td></tr>
         <tr><td style="font-weight:bold;">Total Amount:</td><td>${order.currency} ${fmtMoney(totalAmt)}</td></tr>
         <tr><td style="font-weight:bold;">Shipment:</td><td>${packing?.shipmentWindowStart || '—'} - ${packing?.shipmentWindowEnd || '—'}</td></tr>
         <tr><td style="font-weight:bold;">Payment:</td><td>${order.paymentTerms}</td></tr>
@@ -1883,9 +1915,23 @@ function buildDocHtml(editedHtml, docType, title, { autoPrint, orientation = 'po
              with uneven columns, so a fixed/equal layout starves the wide
              Description column (excessive wrapping → many extra pages). Auto
              layout gives each column a sensible width and keeps docs to one page
-             where they fit; overflow-wrap still prevents any overflow. */
+             where they fit; overflow-wrap still prevents any overflow.
+             The item tables of the widest documents (Commercial Invoice, Packing
+             List, Sales Contract) opt OUT of auto layout with their own
+             <colgroup> + table-layout:fixed, because auto layout gave the wide
+             Description column ~55% and starved the numeric ones.
+             overflow-wrap is break-word, NOT anywhere: anywhere also collapses a
+             column's min-content width to a single CHARACTER, which is what let
+             auto layout squeeze the money/weight columns to ~35px and split
+             figures mid-number ("493,4|20.|00"). break-word still breaks a token
+             that cannot fit its line (so nothing overflows the page) but keeps
+             the intrinsic column width honest.
+             (No backticks in this comment - it lives inside a template literal.) */
           .agri-doc table { width: 100%; max-width: 100%; border-collapse: collapse; }
-          .agri-doc td, .agri-doc th { padding: 3px 5px; line-height: 1.35; vertical-align: top; overflow-wrap: anywhere; word-break: normal; }
+          .agri-doc td, .agri-doc th { padding: 3px 5px; line-height: 1.35; vertical-align: top; overflow-wrap: break-word; word-break: normal; }
+          /* Money / weight / quantity cells never break mid-figure — their
+             <colgroup> width is sized to hold the widest realistic value. */
+          .agri-doc .agri-num { white-space: nowrap; }
           /* Multi-page documents: repeat table headers (and footers/totals) on
              every A4 page and never split a row across a page break. */
           .agri-doc thead { display: table-header-group; }
