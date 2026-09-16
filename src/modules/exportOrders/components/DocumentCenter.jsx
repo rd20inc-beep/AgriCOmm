@@ -99,6 +99,23 @@ function buildLineItems(doc) {
   }];
 }
 
+// ─── Shared inline styles ───
+// Every renderer emits HTML as a string, so these constants are the closest
+// thing the export documents have to a stylesheet. They used to be pasted
+// literally at ~360 call sites, which made changing a cell's padding a
+// find-and-replace across all 18 documents.
+const DOC_PAGE = 'font-family: Arial, sans-serif; font-size:12px; max-width:820px; margin:0 auto; padding:20px;';
+const CELL = 'border:1px solid #333; padding:6px;';
+const CELL_C = `${CELL} text-align:center;`;
+const CELL_R = `${CELL} text-align:right;`;
+const CELL_B = `${CELL} font-weight:bold;`;
+const CELL_SM = 'border:1px solid #333; padding:4px;';
+const CELL_SM_B = `${CELL_SM} font-weight:bold;`;
+const CELL_WIDE = 'border:1px solid #333; padding:5px 8px;';
+const CELL_WIDE_B = `${CELL_WIDE} font-weight:bold;`;
+const CELL_PAD8 = 'border:1px solid #333; padding:4px 8px;';
+const CELL_PAD8_B = `${CELL_PAD8} font-weight:bold;`;
+
 // Number formatting helpers used by renderers.
 const fmtMoney = (n) => (parseFloat(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtMt = (n) => (parseFloat(n) || 0).toFixed(3);
@@ -254,14 +271,6 @@ function docSummaryBlock(doc, opts = {}) {
     ${showAmount ? `<div style="margin-top:4px;font-style:italic;font-size:12px;"><strong>Total Amount in ${curShort}:</strong> ${amountInWords(totalAmt, cur)}</div>` : ''}`;
 }
 
-function renderHeader(company) {
-  return `
-    <div style="text-align:center; margin-bottom:20px; border-bottom:2px solid #1e3a5f; padding-bottom:15px;">
-      <h1 style="font-size:24px; font-weight:bold; color:#1e3a5f; margin:0;">AGRI COMMODITIES</h1>
-      <p style="font-style:italic; color:#666; margin:4px 0;">${company.tagline}</p>
-    </div>`;
-}
-
 // ─── Shared export-document footer (single source of truth) ───
 // The footer shown on the Commercial Invoice — company name/address + contact
 // line — used by EVERY export document. Change the company address / contact
@@ -278,11 +287,6 @@ function renderExportDocumentFooter(company) {
       ${company.name ? `<b>${company.name}</b><br/>` : ''}${company.address}<br/>${bits}
     </div>`;
 }
-// Both historical footer names now delegate to the single shared footer so every
-// document renders the identical Commercial Invoice footer (no duplicated code).
-function renderCompanyFooter(company) {
-  return renderExportDocumentFooter(company);
-}
 
 function renderProformaInvoice(doc) {
   const { company, buyer, order, shipment } = doc;
@@ -292,7 +296,7 @@ function renderProformaInvoice(doc) {
   const totalAmt = lines.reduce((s, l) => s + (l.amount || 0), 0);
   return `
     <div style="font-family: Arial, sans-serif; font-size:12px; width:100%; max-width:1040px; margin:0 auto; padding:20px; color:#111;">
-      ${renderComplianceHeader(company)}
+      ${renderExportDocumentHeader(company)}
       <h2 style="text-align:center; font-size:16px; margin:10px 0;">PROFORMA INVOICE</h2>
 
       <table style="width:100%; margin-bottom:15px;">
@@ -309,14 +313,14 @@ function renderProformaInvoice(doc) {
           </td>
           <td style="vertical-align:top; width:45%;">
             <table style="border-collapse:collapse; width:100%;">
-              <tr><td style="border:1px solid #333; padding:4px 8px; font-weight:bold;">Date</td><td style="border:1px solid #333; padding:4px 8px;">${order.date}</td></tr>
-              <tr><td style="border:1px solid #333; padding:4px 8px; font-weight:bold;">Invoice No.</td><td style="border:1px solid #333; padding:4px 8px;">${order.invoiceNumber}</td></tr>
-              <tr><td style="border:1px solid #333; padding:4px 8px; font-weight:bold;">Contract No</td><td style="border:1px solid #333; padding:4px 8px;">${order.contractNumber}</td></tr>
+              <tr><td style="${CELL_PAD8_B}">Date</td><td style="${CELL_PAD8}">${order.date}</td></tr>
+              <tr><td style="${CELL_PAD8_B}">Invoice No.</td><td style="${CELL_PAD8}">${order.invoiceNumber}</td></tr>
+              <tr><td style="${CELL_PAD8_B}">Contract No</td><td style="${CELL_PAD8}">${order.contractNumber}</td></tr>
             </table>
             <table style="border-collapse:collapse; width:100%; margin-top:10px;">
-              <tr><td style="border:1px solid #333; padding:4px 8px; font-weight:bold;">Payment Terms</td><td style="border:1px solid #333; padding:4px 8px;">${order.paymentTerms}</td></tr>
-              <tr><td style="border:1px solid #333; padding:4px 8px; font-weight:bold;">Shipment Ports</td><td style="border:1px solid #333; padding:4px 8px;">${order.destinationPort}, ${buyer.country}</td></tr>
-              <tr><td style="border:1px solid #333; padding:4px 8px; font-weight:bold;">No. of Containers</td><td style="border:1px solid #333; padding:4px 8px;">${shipment.containerCount}X${shipment.containerType === '20ft' ? "20'" : "40'"} FCL</td></tr>
+              <tr><td style="${CELL_PAD8_B}">Payment Terms</td><td style="${CELL_PAD8}">${order.paymentTerms}</td></tr>
+              <tr><td style="${CELL_PAD8_B}">Shipment Ports</td><td style="${CELL_PAD8}">${order.destinationPort}, ${buyer.country}</td></tr>
+              <tr><td style="${CELL_PAD8_B}">No. of Containers</td><td style="${CELL_PAD8}">${shipment.containerCount}X${shipment.containerType === '20ft' ? "20'" : "40'"} FCL</td></tr>
             </table>
           </td>
         </tr>
@@ -325,37 +329,37 @@ function renderProformaInvoice(doc) {
       <table style="width:100%; border-collapse:collapse; margin-top:15px;">
         <thead>
           <tr style="background:#1e3a5f; color:white;">
-            <th style="border:1px solid #333; padding:6px;">S.No.</th>
-            <th style="border:1px solid #333; padding:6px;">Brand</th>
-            <th style="border:1px solid #333; padding:6px;">Description</th>
-            <th style="border:1px solid #333; padding:6px;">Packing</th>
-            <th style="border:1px solid #333; padding:6px;">Bag Size<br/>(Kgs)</th>
-            <th style="border:1px solid #333; padding:6px;">Bag (Qty)</th>
-            <th style="border:1px solid #333; padding:6px;">Weight in MT<br/>(Approx.)</th>
-            <th style="border:1px solid #333; padding:6px;">FOB<br/>Price Per MT<br/>(${order.currency})</th>
-            <th style="border:1px solid #333; padding:6px;">Total Amount<br/>(${order.currency})</th>
+            <th style="${CELL}">S.No.</th>
+            <th style="${CELL}">Brand</th>
+            <th style="${CELL}">Description</th>
+            <th style="${CELL}">Packing</th>
+            <th style="${CELL}">Bag Size<br/>(Kgs)</th>
+            <th style="${CELL}">Bag (Qty)</th>
+            <th style="${CELL}">Weight in MT<br/>(Approx.)</th>
+            <th style="${CELL}">FOB<br/>Price Per MT<br/>(${order.currency})</th>
+            <th style="${CELL}">Total Amount<br/>(${order.currency})</th>
           </tr>
         </thead>
         <tbody>
           ${lines.map((l) => `
             <tr>
-              <td style="border:1px solid #333; padding:6px; text-align:center;">${l.sno}</td>
+              <td style="${CELL_C}">${l.sno}</td>
               <td style="border:1px solid #333; padding:6px; text-align:center; font-weight:bold; color:#d4a017;">${l.brand}</td>
-              <td style="border:1px solid #333; padding:6px;">${l.description}</td>
-              <td style="border:1px solid #333; padding:6px; text-align:center;">${l.packing || '—'}</td>
-              <td style="border:1px solid #333; padding:6px; text-align:center;">${l.bagSizeKg}</td>
-              <td style="border:1px solid #333; padding:6px; text-align:center;">${(l.bagCount || 0).toLocaleString()}</td>
-              <td style="border:1px solid #333; padding:6px; text-align:center;">${fmtMt(l.qtyMT)}</td>
-              <td style="border:1px solid #333; padding:6px; text-align:center;">${fmtMoney(l.pricePerMT)}</td>
-              <td style="border:1px solid #333; padding:6px; text-align:right;">${fmtMoney(l.amount)}</td>
+              <td style="${CELL}">${l.description}</td>
+              <td style="${CELL_C}">${l.packing || '—'}</td>
+              <td style="${CELL_C}">${l.bagSizeKg}</td>
+              <td style="${CELL_C}">${(l.bagCount || 0).toLocaleString()}</td>
+              <td style="${CELL_C}">${fmtMt(l.qtyMT)}</td>
+              <td style="${CELL_C}">${fmtMoney(l.pricePerMT)}</td>
+              <td style="${CELL_R}">${fmtMoney(l.amount)}</td>
             </tr>
           `).join('')}
           <tr style="font-weight:bold;">
-            <td colspan="5" style="border:1px solid #333; padding:6px; text-align:center;">Total</td>
-            <td style="border:1px solid #333; padding:6px; text-align:center;">${totalBags.toLocaleString()}</td>
-            <td style="border:1px solid #333; padding:6px; text-align:center;">${totalQty.toFixed(2)}</td>
-            <td style="border:1px solid #333; padding:6px; text-align:center;">${order.currency}</td>
-            <td style="border:1px solid #333; padding:6px; text-align:right;">${fmtMoney(totalAmt)}</td>
+            <td colspan="5" style="${CELL_C}">Total</td>
+            <td style="${CELL_C}">${totalBags.toLocaleString()}</td>
+            <td style="${CELL_C}">${totalQty.toFixed(2)}</td>
+            <td style="${CELL_C}">${order.currency}</td>
+            <td style="${CELL_R}">${fmtMoney(totalAmt)}</td>
           </tr>
         </tbody>
       </table>
@@ -389,16 +393,9 @@ function renderProformaInvoice(doc) {
       </div>`;
       })()}
 
-      <div style="margin-top:48px; display:flex; justify-content:space-between; gap:24px;">
-        <div style="text-align:center; width:240px;">
-          <div style="border-top:1px solid #333; padding-top:4px; font-size:12px;"><b>${company.name}</b><br/>Proprietor<br/><span style="color:#666;">(Authorised Signature &amp; Stamp)</span></div>
-        </div>
-        <div style="text-align:center; width:240px;">
-          <div style="border-top:1px solid #333; padding-top:4px; font-size:12px;"><b>${buyer.name}</b><br/>Buyer / Consignee<br/><span style="color:#666;">(Authorised Signature &amp; Stamp)</span></div>
-        </div>
-      </div>
+      ${dualSignatureBlock(company, buyer)}
 
-      ${renderComplianceFooter(company)}
+      ${renderExportDocumentFooter(company)}
     </div>`;
 }
 
@@ -437,7 +434,9 @@ function commercialInvoiceHtml(doc, opts = {}) {
   const netKg = (totals && totals.netWeightKg) || (parseFloat(order.qtyMT) || 0) * 1000;
   const grossKg = (totals && totals.grossWeightKg) || netKg;
   const totalPackages = (totals && totals.totalPackages) || totalBags || 0;
-  const fmtKg = (kg) => `${(parseFloat(kg) || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })} KG (${((parseFloat(kg) || 0) / 1000).toFixed(3)} MT)`;
+  // Named fmtWeight, not fmtKg: renderPackingList has its own fmtKg with a
+  // different output format ("486,750.00" vs "486,750 KG (486.750 MT)").
+  const fmtWeight = (kg) => `${(parseFloat(kg) || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })} KG (${((parseFloat(kg) || 0) / 1000).toFixed(3)} MT)`;
 
   // HS codes — one or more codes joined with " & " (e.g. "1006.3010 & 1006.3090").
   const hs = order.hsCodes || { list: order.hsCode ? [order.hsCode] : [], multiple: false, single: order.hsCode || '' };
@@ -462,7 +461,7 @@ function commercialInvoiceHtml(doc, opts = {}) {
 
   return `
     <div style="font-family: Arial, sans-serif; font-size:12px; max-width:820px; margin:0 auto; padding:10px 16px; color:#111;">
-      ${renderComplianceHeader(company)}
+      ${renderExportDocumentHeader(company)}
       <p style="text-align:center; font-weight:bold; text-decoration:underline; margin:0 0 2px;">${opts.copyLabel || doc._copyLabel || 'ORIGINAL'}</p>
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px;">
         <div style="flex:1;"></div>
@@ -497,46 +496,58 @@ function commercialInvoiceHtml(doc, opts = {}) {
         ${infoRow('Vessel / Voyage', `${shipment.vesselName || ''}${shipment.voyageNumber ? ` / ${shipment.voyageNumber}` : ''}`, 'F.I. #', [shipment.fiNumber, shipment.fiNumber2, shipment.fiNumber3].filter(Boolean).join(', '))}
         ${infoRow('F.I. Date', shipment.fiDate, 'Bill of Lading #', shipment.blNumber)}
         ${infoRow('BL Date', shipment.blDate, 'HS Code', hsSummary)}
-        ${infoRow('Total Packages', `${(totalPackages || 0).toLocaleString()} Bags`, 'Net Weight', fmtKg(netKg))}
-        ${infoRow('Gross Weight', fmtKg(grossKg), '', '')}
+        <!-- Total Packages / Net Weight / Gross Weight are NOT repeated here:
+             the totals table below the item table prints all three (as Total
+             Packages / Total Net Weight / Total Gross Weight) next to the
+             invoice amount. They used to print identically in both places. -->
       </table>
 
-      <table style="width:100%; border-collapse:collapse; margin-top:7px; font-size:12px;">
+      <!-- Column widths are FIXED (colgroup + table-layout:fixed), not content-
+           sized. Sized at the 186mm portrait printable width (item table ≈ 671px,
+           6px cell padding) to hold the widest realistic value at the 12px floor:
+           QUANTITY "16,000 Bags" (67px), HS CODE "1006.3010" (57px), UNIT PRICE
+           / AMOUNT a 7-figure "1,234,567.89" (70px). Description takes what is
+           left (25%) — it is the only column that should absorb the slack. -->
+      <table style="width:100%; border-collapse:collapse; table-layout:fixed; margin-top:7px; font-size:12px;">
+        <colgroup>
+          <col style="width:13%;"/><col style="width:12.5%;"/><col style="width:13%;"/>
+          <col style="width:25%;"/><col style="width:11%;"/><col style="width:12.5%;"/><col style="width:13%;"/>
+        </colgroup>
         <thead>
           <tr style="background:#f0f0f0;">
-            <th style="border:1px solid #333; padding:6px; width:12%;">MARKS &amp; NOS.</th>
-            <th style="border:1px solid #333; padding:6px; width:12%;">QUANTITY</th>
-            <th style="border:1px solid #333; padding:6px; width:16%;">PACKAGING</th>
-            <th style="border:1px solid #333; padding:6px;">DESCRIPTION</th>
-            <th style="border:1px solid #333; padding:6px; width:10%;">HS CODE</th>
-            <th style="border:1px solid #333; padding:6px; width:12%;">UNIT PRICE<br/>${basisLabel}<br/>PMT(${curShort})</th>
-            <th style="border:1px solid #333; padding:6px; width:13%;">AMOUNT ${term}<br/>(${curShort})</th>
+            <th style="${CELL}">MARKS &amp; NOS.</th>
+            <th style="${CELL}">QUANTITY</th>
+            <th style="${CELL}">PACKAGING</th>
+            <th style="${CELL}">DESCRIPTION</th>
+            <th style="${CELL}">HS CODE</th>
+            <th style="${CELL}">UNIT PRICE<br/>${basisLabel}<br/>PMT(${curShort})</th>
+            <th style="${CELL}">AMOUNT ${term}<br/>(${curShort})</th>
           </tr>
         </thead>
         <tbody>
           ${lines.map((l) => `
             <tr>
               <td style="border:1px solid #333; padding:6px; text-align:center; font-weight:bold; font-style:italic; color:#c79a3a;">${l.brand}</td>
-              <td style="border:1px solid #333; padding:6px; text-align:center;">${(l.bagCount || 0).toLocaleString()} Bags<br/>${fmtMt(l.qtyMT)} MT</td>
+              <td class="agri-num" style="${CELL_C}">${(l.bagCount || 0).toLocaleString()} Bags<br/>${fmtMt(l.qtyMT)} MT</td>
               <td style="border:1px solid #333; padding:6px; font-size:12px;">${l.packing || ''}</td>
-              <td style="border:1px solid #333; padding:6px;">${String(l.description || '').replace(/<br\/?>\s*<strong>HS CODE[^<]*<\/strong>/i, '')}</td>
-              <td style="border:1px solid #333; padding:6px; text-align:center; white-space:nowrap;">${l.hsCode || hs.single || ''}</td>
-              <td style="border:1px solid #333; padding:6px; text-align:center;">${fmtMoney(l.pricePerMT)}</td>
-              <td style="border:1px solid #333; padding:6px; text-align:right;">${fmtMoney(l.amount)}</td>
+              <td style="${CELL}">${String(l.description || '').replace(/<br\/?>\s*<strong>HS CODE[^<]*<\/strong>/i, '')}</td>
+              <td class="agri-num" style="${CELL_C}">${l.hsCode || hs.single || ''}</td>
+              <td class="agri-num" style="${CELL_C}">${fmtMoney(l.pricePerMT)}</td>
+              <td class="agri-num" style="${CELL_R}">${fmtMoney(l.amount)}</td>
             </tr>
           `).join('')}
           <tr style="font-weight:bold; background:#fafafa;">
-            <td colspan="6" style="border:1px solid #333; padding:6px; text-align:right;">Total</td>
-            <td style="border:1px solid #333; padding:6px; text-align:right;">${fmtMoney(totalAmt)}</td>
+            <td colspan="6" style="${CELL_R}">Total</td>
+            <td class="agri-num" style="${CELL_R}">${fmtMoney(totalAmt)}</td>
           </tr>
           ${showAdvance ? `
           <tr style="font-weight:bold;">
-            <td colspan="6" style="border:1px solid #333; padding:6px; text-align:right;">ADVANCE PAID${advancePct ? ` ${advancePct}%` : ''}</td>
-            <td style="border:1px solid #333; padding:6px; text-align:right;">${fmtMoney(advanceAmt)}</td>
+            <td colspan="6" style="${CELL_R}">ADVANCE PAID${advancePct ? ` ${advancePct}%` : ''}</td>
+            <td class="agri-num" style="${CELL_R}">${fmtMoney(advanceAmt)}</td>
           </tr>
           <tr style="font-weight:bold;">
-            <td colspan="6" style="border:1px solid #333; padding:6px; text-align:right;">SUB TOTAL</td>
-            <td style="border:1px solid #333; padding:6px; text-align:right;">${fmtMoney(subTotal)}</td>
+            <td colspan="6" style="${CELL_R}">SUB TOTAL</td>
+            <td class="agri-num" style="${CELL_R}">${fmtMoney(subTotal)}</td>
           </tr>` : ''}
         </tbody>
       </table>
@@ -545,7 +556,7 @@ function commercialInvoiceHtml(doc, opts = {}) {
 
       <table style="width:100%; border-collapse:collapse; margin-top:6px; font-size:12px;">
         ${infoRow('Total Quantity', `${fmtMt(totalQtyMT)} MT`, 'Total Packages', `${(totalPackages || 0).toLocaleString()} Bags`)}
-        ${infoRow('Total Net Weight', fmtKg(netKg), 'Total Gross Weight', fmtKg(grossKg))}
+        ${infoRow('Total Net Weight', fmtWeight(netKg), 'Total Gross Weight', fmtWeight(grossKg))}
         <tr>
           <td style="${cellL} width:19%;">Total Invoice Amount</td>
           <td colspan="3" style="border:1px solid #333; padding:3px 7px; font-weight:bold; font-size:13px;">${curShort} ${fmtMoney(subTotal)}</td>
@@ -565,7 +576,7 @@ function commercialInvoiceHtml(doc, opts = {}) {
         <p style="margin:0;">Name of Signing authority:</p>
         <div style="margin-top:14px; font-weight:bold;">${opts.signatory || doc._signatory || company.proprietor}<br/>Proprietor<br/>${company.name}</div>
       </div>
-      ${renderComplianceFooter(company)}
+      ${renderExportDocumentFooter(company)}
     </div>`;
 }
 
@@ -580,70 +591,85 @@ function renderPackingList(doc) {
   const fmtKg = (n) => (parseFloat(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const fmtMT = (kg) => ((parseFloat(kg) || 0) / 1000).toLocaleString('en-US', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
 
-  // Build the row source. Multi-line P.I.s use items[]; otherwise fall back
-  // to a single synthesized row from the order's summary fields so legacy
-  // single-product orders still render.
+  // ONE row builder for both sources. Multi-line P.I.s use items[]; legacy
+  // single-product orders synthesize a single row from the order summary. The
+  // two branches used to be near-identical copies of the same packing /
+  // quantity / weight composition — they now differ only in what is fed in.
+  // ONE tare source. The backend already states the order's net and gross, so
+  // the difference between them IS the packaging — spread it over the bags
+  // instead of letting the document guess its own tare. That second guess is
+  // what made the item table's total gross (487.835 MT) disagree with the
+  // summary block below it (493.420 MT) for the same shipment.
+  const backendNetKg = (totals && parseFloat(totals.netWeightKg)) || null;
+  const backendGrossKg = (totals && parseFloat(totals.grossWeightKg)) || null;
+  const backendTareKg = (() => {
+    const bags = totals && parseFloat(totals.totalPackages);
+    if (!backendNetKg || !backendGrossKg || !bags || backendGrossKg <= backendNetKg) return null;
+    return (backendGrossKg - backendNetKg) / bags;
+  })();
+  const tarePerBagKg = (bagSize) => {
+    if (backendTareKg != null) return backendTareKg;
+    const defaultTareGm = bagSize >= 50 ? 90 : bagSize >= 25 ? 50 : bagSize >= 10 ? 30 : 20;
+    return (order.bagWeightGm || defaultTareGm) / 1000;
+  };
+  const makeRow = ({ label, description, bagSize, masterBagSize, bagCount, qtyMT, packingBase, netKgOverride, grossKgOverride }) => {
+    const masterBagCount = masterBagSize > 0 ? Math.ceil((qtyMT * 1000) / masterBagSize) : 0;
+    // NET is the rice, GROSS is the rice plus the bags it travels in. These were
+    // the wrong way round: gross was set to the product weight and net to
+    // product + tare, so the printed NET came out HEAVIER than the GROSS and
+    // contradicted the summary block below the table (which reads the backend's
+    // own totals). Prefer those totals whenever the backend supplies them.
+    const netKg = netKgOverride != null ? netKgOverride : qtyMT * 1000;
+    const grossKg = grossKgOverride != null ? grossKgOverride : netKg + bagCount * tarePerBagKg(bagSize);
+    const packing = masterBagSize > 0
+      ? `${packingBase}<br/><span style="color:#92400e">Master pack: ${masterBagCount.toLocaleString()} × ${masterBagSize} KG outer (${Math.floor(masterBagSize / bagSize)} retail bags per master)</span>`
+      : packingBase;
+    const quantity = masterBagSize > 0
+      ? `${bagCount.toLocaleString()} retail bags<br/>${masterBagCount.toLocaleString()} master bags`
+      : `${bagCount.toLocaleString()} Bags`;
+    return { label, description, packing, quantity, grossKg, netKg, bagCount, masterBagCount };
+  };
+
   const rows = (items && items.length > 0)
     ? items.map((it) => {
         const bagSize = it.bagSizeKg || order.bagSizeKg || 50;
         const bagType = it.bagType || order.bagType || 'PP';
-        const masterBagSize = parseFloat(it.masterBagSizeKg) || parseFloat(order.masterBagSizeKg) || 0;
-        const bagCount = it.bagCount || (it.qtyMT && bagSize ? Math.round((it.qtyMT * 1000) / bagSize) : 0);
-        const masterBagCount = masterBagSize > 0 ? Math.ceil((it.qtyMT * 1000) / masterBagSize) : 0;
-        const grossKg = it.qtyMT * 1000;
-        const defaultTareGm = bagSize >= 50 ? 90 : bagSize >= 25 ? 50 : bagSize >= 10 ? 30 : 20;
-        const tarePerBagKg = (order.bagWeightGm || defaultTareGm) / 1000;
-        const netKg = grossKg + bagCount * tarePerBagKg;
-        const description = it.qualityDescription
-          || `${it.productName || order.product || 'Rice'} max 0-${it.brokenPctTarget != null ? it.brokenPctTarget : (order.brokenPctTarget || 2)}% broken, double (silky) polished and sortexed. Sound, loyal and merchantable, fit for human consumption at any stage. Free from alive and dead weevils/insects. GMO Free. Product to meet EU regulations at all times. Latest crop.${it.hsCode ? `<br/><strong>HS CODE ${it.hsCode}</strong>` : ''}`;
-        const packingBase = it.packing || `PACKED IN ${bagSize} KGS ${bagType} BAG`;
-        const packing = masterBagSize > 0
-          ? `${packingBase}<br/><span style="color:#92400e">Master pack: ${masterBagCount.toLocaleString()} × ${masterBagSize} KG outer (${Math.floor(masterBagSize / bagSize)} retail bags per master)</span>`
-          : packingBase;
-        const quantity = masterBagSize > 0
-          ? `${bagCount.toLocaleString()} retail bags<br/>${masterBagCount.toLocaleString()} master bags`
-          : `${bagCount.toLocaleString()} Bags`;
-        return {
+        return makeRow({
           label: (it.productName || order.product || '').toUpperCase(),
-          description,
-          packing,
-          quantity,
-          grossKg,
-          netKg,
-          bagCount,
-          masterBagCount,
-        };
+          description: it.qualityDescription
+            || `${it.productName || order.product || 'Rice'} max 0-${it.brokenPctTarget != null ? it.brokenPctTarget : (order.brokenPctTarget || 2)}% broken, double (silky) polished and sortexed. Sound, loyal and merchantable, fit for human consumption at any stage. Free from alive and dead weevils/insects. GMO Free. Product to meet EU regulations at all times. Latest crop.${it.hsCode ? `<br/><strong>HS CODE ${it.hsCode}</strong>` : ''}`,
+          bagSize,
+          masterBagSize: parseFloat(it.masterBagSizeKg) || parseFloat(order.masterBagSizeKg) || 0,
+          bagCount: it.bagCount || (it.qtyMT && bagSize ? Math.round((it.qtyMT * 1000) / bagSize) : 0),
+          qtyMT: parseFloat(it.qtyMT) || 0,
+          packingBase: it.packing || `PACKED IN ${bagSize} KGS ${bagType} BAG`,
+        });
       })
-    : (() => {
+    : [(() => {
         const bagSize = order.bagSizeKg || 50;
         const bagType = order.bagType || 'PP';
-        const masterBagSize = parseFloat(order.masterBagSizeKg) || 0;
-        const totalBags = order.totalBags || (order.qtyMT && bagSize ? Math.round((order.qtyMT * 1000) / bagSize) : 0);
-        const masterBagCount = masterBagSize > 0 ? Math.ceil(((parseFloat(order.qtyMT) || 0) * 1000) / masterBagSize) : 0;
-        const grossKg = (totals && totals.grossWeightMT ? totals.grossWeightMT : order.qtyMT) * 1000;
-        const defaultTareGm = bagSize >= 50 ? 90 : bagSize >= 25 ? 50 : bagSize >= 10 ? 30 : 20;
-        const tarePerBagKg = (order.bagWeightGm || defaultTareGm) / 1000;
-        const netKg = (totals && totals.netWeightMT)
-          ? totals.netWeightMT * 1000
-          : grossKg + totalBags * tarePerBagKg;
-        const packingBase = `PACKED IN ${bagSize} KGS ${bagType} BAG`;
-        const packing = masterBagSize > 0
-          ? `${packingBase}<br/><span style="color:#92400e">Master pack: ${masterBagCount.toLocaleString()} × ${masterBagSize} KG outer (${Math.floor(masterBagSize / bagSize)} retail bags per master)</span>`
-          : packingBase;
-        const quantity = masterBagSize > 0
-          ? `${totalBags.toLocaleString()} retail bags<br/>${masterBagCount.toLocaleString()} master bags`
-          : `${totalBags.toLocaleString()} Bags`;
-        return [{
+        const qtyMT = parseFloat(order.qtyMT) || 0;
+        return makeRow({
           label: (order.brandMarking || order.product || '').toUpperCase(),
           description: order.qualityDescription || order.product || '',
-          packing,
-          quantity,
-          grossKg,
-          netKg,
-          bagCount: totalBags,
-          masterBagCount,
-        }];
-      })();
+          bagSize,
+          masterBagSize: parseFloat(order.masterBagSizeKg) || 0,
+          bagCount: order.totalBags || (bagSize ? Math.round((qtyMT * 1000) / bagSize) : 0),
+          qtyMT,
+          packingBase: `PACKED IN ${bagSize} KGS ${bagType} BAG`,
+          netKgOverride: (totals && totals.netWeightMT) ? totals.netWeightMT * 1000 : null,
+          grossKgOverride: (totals && totals.grossWeightMT) ? totals.grossWeightMT * 1000 : null,
+        });
+      })()];
+
+  // A packing list has to foot: when the backend states the order totals, the
+  // last row carries the per-bag rounding remainder so the printed column adds
+  // up to the stated total exactly (the way a real packing list balances).
+  if (backendNetKg && backendGrossKg && rows.length) {
+    const last = rows[rows.length - 1];
+    last.netKg += backendNetKg - rows.reduce((sum, r) => sum + (r.netKg || 0), 0);
+    last.grossKg += backendGrossKg - rows.reduce((sum, r) => sum + (r.grossKg || 0), 0);
+  }
 
   const totalBags = rows.reduce((s, r) => s + (r.bagCount || 0), 0);
   const totalGrossKg = rows.reduce((s, r) => s + (r.grossKg || 0), 0);
@@ -653,8 +679,8 @@ function renderPackingList(doc) {
     : (shipment && shipment.containerCount ? `${String(shipment.containerCount).padStart(2, '0')} X 20' Fcl` : '');
 
   return `
-    <div style="font-family: Arial, sans-serif; font-size:12px; max-width:820px; margin:0 auto; padding:20px;">
-      ${renderComplianceHeader(company)}
+    <div style="${DOC_PAGE}">
+      ${renderExportDocumentHeader(company)}
       <p style="text-align:center; font-weight:bold; text-decoration:underline; margin:0 0 6px;">ORIGINAL</p>
       <h2 style="text-align:center; font-size:16px; margin:6px 0 16px; letter-spacing:1px; text-decoration:underline;">PACKING LIST</h2>
 
@@ -669,9 +695,9 @@ function renderPackingList(doc) {
           </td>
           <td style="vertical-align:top; width:45%;">
             <table style="border-collapse:collapse; width:100%;">
-              <tr><td style="border:1px solid #333; padding:5px 8px; font-weight:bold; width:42%;">INVOICE NO:</td><td style="border:1px solid #333; padding:5px 8px;">${order.invoiceNumber || ''}</td></tr>
-              <tr><td style="border:1px solid #333; padding:5px 8px; font-weight:bold;">CONTRACT No.</td><td style="border:1px solid #333; padding:5px 8px;">${order.contractNumber || ''}</td></tr>
-              <tr><td style="border:1px solid #333; padding:5px 8px; font-weight:bold;">INVOICE DT:</td><td style="border:1px solid #333; padding:5px 8px;">${order.date || ''}</td></tr>
+              <tr><td style="border:1px solid #333; padding:5px 8px; font-weight:bold; width:42%;">INVOICE NO:</td><td style="${CELL_WIDE}">${order.invoiceNumber || ''}</td></tr>
+              <tr><td style="${CELL_WIDE_B}">CONTRACT No.</td><td style="${CELL_WIDE}">${order.contractNumber || ''}</td></tr>
+              <tr><td style="${CELL_WIDE_B}">INVOICE DT:</td><td style="${CELL_WIDE}">${order.date || ''}</td></tr>
             </table>
           </td>
         </tr>
@@ -685,39 +711,49 @@ function renderPackingList(doc) {
           <td style="border:1px solid #333; padding:5px 8px; width:32%;">${shipment.fiNumber || ''}</td>
         </tr>
         <tr>
-          <td style="border:1px solid #333; padding:5px 8px; font-weight:bold;">No. of Container</td>
-          <td style="border:1px solid #333; padding:5px 8px;">${containerCount}</td>
-          <td style="border:1px solid #333; padding:5px 8px; font-weight:bold;">F.I Date</td>
-          <td style="border:1px solid #333; padding:5px 8px;">${shipment.fiDate || ''}</td>
+          <td style="${CELL_WIDE_B}">No. of Container</td>
+          <td style="${CELL_WIDE}">${containerCount}</td>
+          <td style="${CELL_WIDE_B}">F.I Date</td>
+          <td style="${CELL_WIDE}">${shipment.fiDate || ''}</td>
         </tr>
         <tr>
-          <td style="border:1px solid #333; padding:5px 8px; font-weight:bold;">Shipped by Sea as</td>
-          <td style="border:1px solid #333; padding:5px 8px;">${shipment.vesselName || ''}${shipment.voyageNumber ? ` / ${shipment.voyageNumber}` : ''}</td>
-          <td style="border:1px solid #333; padding:5px 8px; font-weight:bold;">Payment Term</td>
-          <td style="border:1px solid #333; padding:5px 8px;">${order.paymentTerms || ''}</td>
+          <td style="${CELL_WIDE_B}">Shipped by Sea as</td>
+          <td style="${CELL_WIDE}">${shipment.vesselName || ''}${shipment.voyageNumber ? ` / ${shipment.voyageNumber}` : ''}</td>
+          <td style="${CELL_WIDE_B}">Payment Term</td>
+          <td style="${CELL_WIDE}">${order.paymentTerms || ''}</td>
         </tr>
         <tr>
-          <td style="border:1px solid #333; padding:5px 8px; font-weight:bold;">Bill of Lading #</td>
-          <td style="border:1px solid #333; padding:5px 8px;">${shipment.blNumber || ''}</td>
-          <td style="border:1px solid #333; padding:5px 8px; font-weight:bold;">BL Date</td>
-          <td style="border:1px solid #333; padding:5px 8px;">${shipment.blDate || ''}</td>
+          <td style="${CELL_WIDE_B}">Bill of Lading #</td>
+          <td style="${CELL_WIDE}">${shipment.blNumber || ''}</td>
+          <td style="${CELL_WIDE_B}">BL Date</td>
+          <td style="${CELL_WIDE}">${shipment.blDate || ''}</td>
         </tr>
-        <tr>
-          <td style="border:1px solid #333; padding:5px 8px; font-weight:bold;">HS Code</td>
-          <td style="border:1px solid #333; padding:5px 8px;">${(() => { const h = order.hsCodes || {}; return (h.list && h.list.length) ? h.list.join(' & ') : (h.single || order.hsCode || ''); })()}</td>
-          <td style="border:1px solid #333; padding:5px 8px; font-weight:bold;">Total Packages</td>
-          <td style="border:1px solid #333; padding:5px 8px;">${(((totals && totals.totalPackages) || 0).toLocaleString())} Bags</td>
-        </tr>
+        <!-- HS Code / Total Packages are NOT repeated here: docSummaryBlock
+             below the item table already prints both (with the net and gross
+             weights). They used to print identically in both places. -->
       </table>
 
-      <table style="width:100%; border-collapse:collapse; font-size:12px;">
+      <!-- Column widths are FIXED (colgroup + table-layout:fixed). This table
+           declared NO widths, so auto layout handed DESCRIPTION ~55% and left
+           the two WEIGHT columns ~36px each — every figure split mid-number
+           ("24|4,5|00.|00") and the QUANTITY header broke as "QUA|NTITY".
+           Sized at the 186mm portrait printable width (table ≈ 663px, 8px cell
+           padding): weights hold a 7-figure "1,234,567.89" (70px) on one line,
+           QUANTITY holds "16,000 retail" (66px), PACKING holds "PACKED IN 50"
+           (81px). DESCRIPTION absorbs the rest. Only the two weight columns are
+           agri-num (nowrap) - QUANTITY carries phrases that must wrap at spaces. -->
+      <table style="width:100%; border-collapse:collapse; table-layout:fixed; font-size:12px;">
+        <colgroup>
+          <col style="width:11.5%;"/><col style="width:30%;"/><col style="width:16.5%;"/>
+          <col style="width:15%;"/><col style="width:13.5%;"/><col style="width:13.5%;"/>
+        </colgroup>
         <thead>
           <tr style="background:#f5f5f5;">
-            <th style="border:1px solid #333; padding:6px;">Container No.</th>
-            <th style="border:1px solid #333; padding:6px;">DESCRIPTION</th>
-            <th style="border:1px solid #333; padding:6px;">PACKING</th>
-            <th style="border:1px solid #333; padding:6px;">QUANTITY</th>
-            <th style="border:1px solid #333; padding:6px;" colspan="2">WEIGHT (IN KGS)<br/><span style="font-weight:normal; font-size:12px;">Gross &nbsp;|&nbsp; Net</span></th>
+            <th style="${CELL}">Container No.</th>
+            <th style="${CELL}">DESCRIPTION</th>
+            <th style="${CELL}">PACKING</th>
+            <th style="${CELL}">QUANTITY</th>
+            <th style="${CELL}" colspan="2">WEIGHT (IN KGS)<br/><span style="font-weight:normal; font-size:12px;">Gross &nbsp;|&nbsp; Net</span></th>
           </tr>
         </thead>
         <tbody>
@@ -727,8 +763,8 @@ function renderPackingList(doc) {
               <td style="border:1px solid #333; padding:8px; vertical-align:top; font-size:12px; line-height:1.4;">${r.description}</td>
               <td style="border:1px solid #333; padding:8px; vertical-align:top; text-align:center;">${r.packing}</td>
               <td style="border:1px solid #333; padding:8px; vertical-align:top; text-align:center;">${r.quantity}</td>
-              <td style="border:1px solid #333; padding:8px; vertical-align:top; text-align:right;">${fmtKg(r.grossKg)}</td>
-              <td style="border:1px solid #333; padding:8px; vertical-align:top; text-align:right;">${fmtKg(r.netKg)}</td>
+              <td class="agri-num" style="border:1px solid #333; padding:8px; vertical-align:top; text-align:right;">${fmtKg(r.grossKg)}</td>
+              <td class="agri-num" style="border:1px solid #333; padding:8px; vertical-align:top; text-align:right;">${fmtKg(r.netKg)}</td>
             </tr>
           `).join('')}
           <tr>
@@ -738,8 +774,8 @@ function renderPackingList(doc) {
               <div style="font-weight:bold;">NET WEIGHT &nbsp;:&nbsp; ${fmtMT(totalNetKg)} MTS</div>
             </td>
             <td style="border:1px solid #333; padding:8px; text-align:center; font-weight:bold;" rowspan="3">Total</td>
-            <td style="border:1px solid #333; padding:8px; text-align:right; font-weight:bold;" rowspan="3">${fmtKg(totalGrossKg)}</td>
-            <td style="border:1px solid #333; padding:8px; text-align:right; font-weight:bold;" rowspan="3">${fmtKg(totalNetKg)}</td>
+            <td class="agri-num" style="border:1px solid #333; padding:8px; text-align:right; font-weight:bold;" rowspan="3">${fmtKg(totalGrossKg)}</td>
+            <td class="agri-num" style="border:1px solid #333; padding:8px; text-align:right; font-weight:bold;" rowspan="3">${fmtKg(totalNetKg)}</td>
           </tr>
           <tr></tr>
           <tr></tr>
@@ -752,7 +788,7 @@ function renderPackingList(doc) {
         Certification: Goods are shipped from Pakistan origin
       </p>
 
-      ${renderComplianceFooter(company)}
+      ${renderExportDocumentFooter(company)}
     </div>`;
 }
 
@@ -764,8 +800,8 @@ function renderGenericDocument(doc) {
   const distinctHs = [...new Set(lines.map((l) => l.hsCode).filter(Boolean))];
   const isMulti = lines.length > 1;
   return `
-    <div style="font-family: Arial, sans-serif; font-size:12px; max-width:820px; margin:0 auto; padding:20px;">
-      ${renderHeader(company)}
+    <div style="${DOC_PAGE}">
+      ${renderExportDocumentHeader(company)}
       <h2 style="text-align:center; font-size:16px; margin:10px 0;">${doc.type.toUpperCase()}</h2>
       <table style="width:100%; font-size:12px; margin:15px 0;">
         <tr><td style="padding:4px 0; font-weight:bold; width:160px;">Buyer:</td><td>${buyer.name}, ${buyer.country}</td></tr>
@@ -821,7 +857,7 @@ function renderGenericDocument(doc) {
       <div style="margin-top:50px; text-align:right;">
         <p style="font-weight:bold;">${company.name}<br/>${company.proprietor}<br/>Proprietor</p>
       </div>
-      ${renderCompanyFooter(company)}
+      ${renderExportDocumentFooter(company)}
     </div>`;
 }
 
@@ -832,6 +868,11 @@ function renderSalesContract(doc) {
   const totalQty = lines.reduce((s, l) => s + (l.qtyMT || 0), 0);
   const totalAmt = lines.reduce((s, l) => s + (l.amount || 0), 0);
   const isMulti = lines.length > 1;
+  // The stored port of loading is already fully qualified ("Karachi, Pakistan"),
+  // so only append the country when it isn't there — the Price line used to read
+  // "CFR Karachi, Pakistan, Pakistan".
+  const loadingPort = order.portOfLoading || 'Karachi';
+  const loadingPortFull = /pakistan/i.test(loadingPort) ? loadingPort : `${loadingPort}, Pakistan`;
 
   // Per-line description block — bullet list when multi-line, single
   // paragraph when there's only one item to keep the legacy look intact.
@@ -845,11 +886,15 @@ function renderSalesContract(doc) {
 
   return `
     <div style="font-family: Arial, sans-serif; font-size:12px; max-width:820px; margin:0 auto; padding:20px; color:#111;">
-      ${renderComplianceHeader(company)}
+      ${renderExportDocumentHeader(company)}
       <h2 style="text-align:center; font-size:18px; font-style:italic; margin:10px 0;">Sales Contract</h2>
 
-      <table style="width:100%; font-size:12px; line-height:1.8;">
-        <tr><td style="width:130px; font-weight:bold; vertical-align:top;">Date:</td><td>${order.date}</td></tr>
+      <!-- Label column pinned at 130px (colgroup + fixed layout) so a longer
+           label can never steal width from the value column or wrap mid-word;
+           the value column takes the rest. -->
+      <table style="width:100%; font-size:12px; line-height:1.8; table-layout:fixed;">
+        <colgroup><col style="width:130px;"/><col/></colgroup>
+        <tr><td style="font-weight:bold; vertical-align:top; white-space:nowrap;">Date:</td><td>${order.date}</td></tr>
         <tr><td style="font-weight:bold; vertical-align:top;">Contract #</td><td>${order.contractNumber || order.orderNo}</td></tr>
         <tr><td style="font-weight:bold; vertical-align:top;">Buyer:</td><td>${buyer.name}<br/>${buyer.address}<br/>${buyer.country}${buyer.vatNumber ? `<br/>VAT: ${buyer.vatNumber}` : ''}</td></tr>
         <tr><td style="font-weight:bold; vertical-align:top;">Seller:</td><td>${company.name}<br/>${company.address}</td></tr>
@@ -857,8 +902,8 @@ function renderSalesContract(doc) {
         <tr><td style="font-weight:bold; vertical-align:top;">Product${isMulti ? 's' : ''}:</td><td>${productHtml}</td></tr>
         <tr><td style="font-weight:bold;">Quality:</td><td>Aflatoxins, Ochratoxins, Heavy metal and Pesticide residues are in line with EU law.</td></tr>
         <tr><td style="font-weight:bold; vertical-align:top;">Price:</td><td>${isMulti
-          ? `Per-line rates as above. Incoterm ${order.incoterm} ${order.portOfLoading || 'Karachi'}, Pakistan.`
-          : `@ ${order.currency} ${fmtMoney(lines[0]?.pricePerMT || order.pricePerMT)} per metric ton ${order.incoterm} ${order.portOfLoading || 'Karachi'}, Pakistan`}</td></tr>
+          ? `Per-line rates as above. Incoterm ${order.incoterm} ${loadingPortFull}.`
+          : `@ ${order.currency} ${fmtMoney(lines[0]?.pricePerMT || order.pricePerMT)} per metric ton ${order.incoterm} ${loadingPortFull}`}</td></tr>
         <tr><td style="font-weight:bold;">Total Amount:</td><td>${order.currency} ${fmtMoney(totalAmt)}</td></tr>
         <tr><td style="font-weight:bold;">Shipment:</td><td>${packing?.shipmentWindowStart || '—'} - ${packing?.shipmentWindowEnd || '—'}</td></tr>
         <tr><td style="font-weight:bold;">Payment:</td><td>${order.paymentTerms}</td></tr>
@@ -880,15 +925,8 @@ function renderSalesContract(doc) {
 
       <p style="margin-top:15px; font-size:12px;">This contract shall be signed by the buyer and returned. Failure to do so and buyer's retention of the contract shall constitute in acceptance of terms and conditions hereof.</p>
 
-      <div style="margin-top:48px; display:flex; justify-content:space-between; gap:24px;">
-        <div style="text-align:center; width:240px;">
-          <div style="border-top:1px solid #333; padding-top:4px; font-size:12px;"><b>${company.name}</b><br/>Proprietor<br/><span style="color:#666;">(Authorised Signature &amp; Stamp)</span></div>
-        </div>
-        <div style="text-align:center; width:240px;">
-          <div style="border-top:1px solid #333; padding-top:4px; font-size:12px;"><b>${buyer.name}</b><br/>Buyer / Consignee<br/><span style="color:#666;">(Authorised Signature &amp; Stamp)</span></div>
-        </div>
-      </div>
-      ${renderComplianceFooter(company)}
+      ${dualSignatureBlock(company, buyer)}
+      ${renderExportDocumentFooter(company)}
     </div>`;
 }
 
@@ -899,8 +937,8 @@ function renderProductionPlan(doc) {
   const totalQty = lines.reduce((s, l) => s + (l.qtyMT || 0), 0);
   const totalBags = lines.reduce((s, l) => s + (l.bagCount || 0), 0);
   return `
-    <div style="font-family: Arial, sans-serif; font-size:12px; max-width:820px; margin:0 auto; padding:20px;">
-      ${renderHeader(company)}
+    <div style="${DOC_PAGE}">
+      ${renderExportDocumentHeader(company)}
       <h2 style="text-align:center; font-size:14px; text-decoration:underline; margin:10px 0;">PRODUCTION PLAN - ${containers.length > 0 ? containers.length : '—'}X${containers[0]?.containerType === '40ft' ? '40' : '20'} FCL</h2>
 
       <div style="color:red; text-align:center; font-weight:bold; margin:10px 0;">
@@ -915,32 +953,32 @@ function renderProductionPlan(doc) {
       <table style="width:100%; border-collapse:collapse; font-size:12px;">
         <thead>
           <tr style="background:#f5f5f5;">
-            <th style="border:1px solid #333; padding:6px;">Container #</th>
-            <th style="border:1px solid #333; padding:6px;">BRAND</th>
-            <th style="border:1px solid #333; padding:6px;">DESCRIPTION</th>
-            <th style="border:1px solid #333; padding:6px;">BROKEN %</th>
-            <th style="border:1px solid #333; padding:6px;">TOTAL QTY IN MT</th>
-            <th style="border:1px solid #333; padding:6px;">PACKING / MASTER BAGS</th>
-            <th style="border:1px solid #333; padding:6px;">NO OF BAGS</th>
+            <th style="${CELL}">Container #</th>
+            <th style="${CELL}">BRAND</th>
+            <th style="${CELL}">DESCRIPTION</th>
+            <th style="${CELL}">BROKEN %</th>
+            <th style="${CELL}">TOTAL QTY IN MT</th>
+            <th style="${CELL}">PACKING / MASTER BAGS</th>
+            <th style="${CELL}">NO OF BAGS</th>
           </tr>
         </thead>
         <tbody>
           ${lines.map((l) => `
             <tr>
-              <td style="border:1px solid #333; padding:6px; text-align:center;">${l.sno}</td>
-              <td style="border:1px solid #333; padding:6px; text-align:center;">${l.brand}</td>
-              <td style="border:1px solid #333; padding:6px;">${l.description}</td>
-              <td style="border:1px solid #333; padding:6px; text-align:center;">${order.brokenPctTarget || '—'}%</td>
-              <td style="border:1px solid #333; padding:6px; text-align:center;">${fmtMt(l.qtyMT)}</td>
-              <td style="border:1px solid #333; padding:6px; text-align:center;">${l.packing}</td>
-              <td style="border:1px solid #333; padding:6px; text-align:center;">${(l.bagCount || 0).toLocaleString()}</td>
+              <td style="${CELL_C}">${l.sno}</td>
+              <td style="${CELL_C}">${l.brand}</td>
+              <td style="${CELL}">${l.description}</td>
+              <td style="${CELL_C}">${order.brokenPctTarget || '—'}%</td>
+              <td style="${CELL_C}">${fmtMt(l.qtyMT)}</td>
+              <td style="${CELL_C}">${l.packing}</td>
+              <td style="${CELL_C}">${(l.bagCount || 0).toLocaleString()}</td>
             </tr>
           `).join('')}
           <tr style="font-weight:bold;">
-            <td colspan="4" style="border:1px solid #333; padding:6px; text-align:right;">Total</td>
-            <td style="border:1px solid #333; padding:6px; text-align:center;">${totalQty.toFixed(3)}</td>
-            <td style="border:1px solid #333; padding:6px;"></td>
-            <td style="border:1px solid #333; padding:6px; text-align:center;">${totalBags.toLocaleString()}</td>
+            <td colspan="4" style="${CELL_R}">Total</td>
+            <td style="${CELL_C}">${totalQty.toFixed(3)}</td>
+            <td style="${CELL}"></td>
+            <td style="${CELL_C}">${totalBags.toLocaleString()}</td>
           </tr>
         </tbody>
       </table>
@@ -988,8 +1026,8 @@ function renderProductionPlan(doc) {
 function renderBankFIRequest(doc) {
   const { company, buyer, order, shipment } = doc;
   return `
-    <div style="font-family: Arial, sans-serif; font-size:12px; max-width:820px; margin:0 auto; padding:20px;">
-      ${renderHeader(company)}
+    <div style="${DOC_PAGE}">
+      ${renderExportDocumentHeader(company)}
       <h3 style="text-align:center; font-size:13px; margin:10px 0;">REQUEST FOR GENERATION OF FINANCIAL INSTRUMENT<br/>(FOR EXPORT TRANSACTION)</h3>
 
       <div style="text-align:right; margin-bottom:15px;"><strong>DATE</strong> &nbsp; ${order.date}</div>
@@ -1017,42 +1055,42 @@ function renderBankFIRequest(doc) {
 
       <table style="width:70%; border-collapse:collapse; margin:15px 0;">
         <tr>
-          <td style="border:1px solid #333; padding:6px; font-weight:bold;">CURRENCY</td>
-          <td style="border:1px solid #333; padding:6px; font-weight:bold;">AMOUNT</td>
-          <td style="border:1px solid #333; padding:6px; font-weight:bold;">EXPIRY DATE</td>
+          <td style="${CELL_B}">CURRENCY</td>
+          <td style="${CELL_B}">AMOUNT</td>
+          <td style="${CELL_B}">EXPIRY DATE</td>
         </tr>
         <tr>
-          <td style="border:1px solid #333; padding:6px;">${order.currency}</td>
-          <td style="border:1px solid #333; padding:6px;">${order.contractValue.toLocaleString('en-US', {minimumFractionDigits:2})}</td>
-          <td style="border:1px solid #333; padding:6px;"></td>
+          <td style="${CELL}">${order.currency}</td>
+          <td style="${CELL}">${order.contractValue.toLocaleString('en-US', {minimumFractionDigits:2})}</td>
+          <td style="${CELL}"></td>
         </tr>
       </table>
 
       <h4 style="margin-top:15px;">DETAILS OF LC / CONTRACT / ADVANCE PAYMENT</h4>
       <table style="border-collapse:collapse; width:50%; font-size:12px;">
-        <tr><td style="border:1px solid #333; padding:4px;">TOTAL VALUE</td><td style="border:1px solid #333; padding:4px;">${order.currency} ${order.contractValue.toLocaleString('en-US', {minimumFractionDigits:2})}</td></tr>
-        <tr><td style="border:1px solid #333; padding:4px;">CURRENT REQUEST</td><td style="border:1px solid #333; padding:4px;">${order.currency} ${order.contractValue.toLocaleString('en-US', {minimumFractionDigits:2})}</td></tr>
+        <tr><td style="${CELL_SM}">TOTAL VALUE</td><td style="${CELL_SM}">${order.currency} ${order.contractValue.toLocaleString('en-US', {minimumFractionDigits:2})}</td></tr>
+        <tr><td style="${CELL_SM}">CURRENT REQUEST</td><td style="${CELL_SM}">${order.currency} ${order.contractValue.toLocaleString('en-US', {minimumFractionDigits:2})}</td></tr>
       </table>
 
       <h4 style="margin-top:15px;">GOODS DETAILS</h4>
       <table style="width:100%; border-collapse:collapse; font-size:12px;">
         <thead><tr style="background:#f5f5f5;">
-          <th style="border:1px solid #333; padding:6px;">HS CODE</th>
-          <th style="border:1px solid #333; padding:6px;">GOODS DESCRIPTION</th>
-          <th style="border:1px solid #333; padding:6px;">QTY</th>
-          <th style="border:1px solid #333; padding:6px;">UNIT</th>
-          <th style="border:1px solid #333; padding:6px;">ORIGIN</th>
-          <th style="border:1px solid #333; padding:6px;">UNIT PRICE</th>
+          <th style="${CELL}">HS CODE</th>
+          <th style="${CELL}">GOODS DESCRIPTION</th>
+          <th style="${CELL}">QTY</th>
+          <th style="${CELL}">UNIT</th>
+          <th style="${CELL}">ORIGIN</th>
+          <th style="${CELL}">UNIT PRICE</th>
         </tr></thead>
         <tbody>
           ${buildLineItems(doc).map((l) => `
             <tr>
-              <td style="border:1px solid #333; padding:6px;">${l.hsCode || '—'}</td>
-              <td style="border:1px solid #333; padding:6px;">${l.productName}</td>
-              <td style="border:1px solid #333; padding:6px;">${fmtMt(l.qtyMT)}</td>
-              <td style="border:1px solid #333; padding:6px;">MT</td>
-              <td style="border:1px solid #333; padding:6px;">PAKISTAN</td>
-              <td style="border:1px solid #333; padding:6px;">${order.currency} ${fmtMoney(l.pricePerMT)}</td>
+              <td style="${CELL}">${l.hsCode || '—'}</td>
+              <td style="${CELL}">${l.productName}</td>
+              <td style="${CELL}">${fmtMt(l.qtyMT)}</td>
+              <td style="${CELL}">MT</td>
+              <td style="${CELL}">PAKISTAN</td>
+              <td style="${CELL}">${order.currency} ${fmtMoney(l.pricePerMT)}</td>
             </tr>
           `).join('')}
         </tbody>
@@ -1065,7 +1103,7 @@ function renderBankFIRequest(doc) {
       <div style="margin-top:40px; text-align:right;">
         <p style="font-weight:bold;">${company.name}<br/>Proprietor</p>
       </div>
-      ${renderCompanyFooter(company)}
+      ${renderExportDocumentFooter(company)}
     </div>`;
 }
 
@@ -1076,7 +1114,11 @@ function complianceLogo(company) {
   const src = (typeof location !== 'undefined' ? location.origin : '') + (company.logo || '/logo.jpg');
   return `<img src="${src}" alt="" style="height:56px; max-width:120px; object-fit:contain;" onerror="this.style.display='none'"/>`;
 }
-function renderComplianceHeader(company) {
+// ─── Shared export-document letterhead (single source of truth) ───
+// Pairs with renderExportDocumentFooter. There used to be a second, logo-less
+// letterhead (renderHeader) on six documents, so the company presented two
+// different letterheads depending on which document you printed.
+function renderExportDocumentHeader(company) {
   return `
     <div style="display:flex; align-items:center; gap:16px; border-bottom:2px solid #1e3a5f; padding-bottom:10px; margin-bottom:14px;">
       <div style="flex:0 0 auto;">${complianceLogo(company)}</div>
@@ -1087,11 +1129,16 @@ function renderComplianceHeader(company) {
       <div style="flex:0 0 120px;"></div>
     </div>`;
 }
-// Delegates to the single shared footer (defined above) — kept as an alias so
-// the many existing call sites need no change; every document renders the
-// identical Commercial Invoice footer.
-function renderComplianceFooter(company) {
-  return renderExportDocumentFooter(company);
+// Two-column seller/buyer signature strip — the Proforma Invoice and the Sales
+// Contract carried byte-identical copies of this markup.
+function dualSignatureBlock(company, buyer) {
+  const col = (name, role) => `
+        <div style="text-align:center; width:240px;">
+          <div style="border-top:1px solid #333; padding-top:4px; font-size:12px;"><b>${name || ''}</b><br/>${role}<br/><span style="color:#666;">(Authorised Signature &amp; Stamp)</span></div>
+        </div>`;
+  return `
+      <div style="margin-top:48px; display:flex; justify-content:space-between; gap:24px;">${col(company.name, 'Proprietor')}${col(buyer.name, 'Buyer / Consignee')}
+      </div>`;
 }
 function signatureBlock(company) {
   return `
@@ -1140,7 +1187,7 @@ function renderExportUndertaking(doc) {
   const inc = doc.specific && doc.specific.incotermTerms;
   return `
     <div style="font-family: Arial, sans-serif; font-size:12px; max-width:820px; margin:0 auto; padding:20px; color:#111;">
-      ${renderComplianceHeader(company)}
+      ${renderExportDocumentHeader(company)}
       <p style="margin:0 0 12px;">The Manager<br/>${company.bank.name} - ${company.bank.branch},<br/>Karachi.</p>
       <p style="margin:0 0 6px;">Dear Sir,</p>
       <h3 style="text-align:center; text-decoration:underline; margin:14px 0; font-size:13px;">EXPORT UNDERTAKING</h3>
@@ -1169,7 +1216,7 @@ function renderExportUndertaking(doc) {
 
       <p style="margin-top:18px;">Yours faithfully,</p>
       ${signatureBlock(company)}
-      ${renderComplianceFooter(company)}
+      ${renderExportDocumentFooter(company)}
     </div>`;
 }
 
@@ -1178,7 +1225,7 @@ function renderAppendixV10A(doc) {
   const { company } = doc;
   return `
     <div style="font-family: Arial, sans-serif; font-size:12px; max-width:820px; margin:0 auto; padding:20px; color:#111;">
-      ${renderComplianceHeader(company)}
+      ${renderExportDocumentHeader(company)}
       <div style="text-align:right; font-weight:bold; margin-bottom:6px;">Appendix V-10A</div>
       <p style="font-weight:bold;">[Declaration to be furnished by exporters pursuant to section 12(1) of the Foreign Exchange Regulation Act, 1947 read with government notifications No. 1(6)-ECS/48 and No. 1(7)-ECS/48 both dated the 1st July, 1948.]</p>
       <p>{Documents covering the goods in the Financial Instrument (FI) including full set of bills of lading, railway receipt and/or other documents of the title to the goods must be passed through an Authorized Dealer (AD) in Foreign Exchange. In no case may they be dispatched directly without prior special/general authority in writing of the State Bank of Pakistan.}</p>
@@ -1193,7 +1240,7 @@ function renderAppendixV10A(doc) {
         `I/We hereby expressly authorize the State Bank of Pakistan (SBP) to share my/our outstanding overdue information with ADs/ banks, for the purpose of conducting due diligence related to my/our export activities (Irrespective of the fact whether the same is challenged before a Court or otherwise). I/We also permit the ADs/banks to access my/our outstanding overdue information available on the Exporter's Information Portal (EIP) maintained by SBP. This authorization is given in terms of Section 3(4) of the Foreign Exchange Regulation Act, 1947, to facilitate the assessment of my/our export performance and repatriation of proceeds thereof.`
       ])}
       ${signatureBlock(company)}
-      ${renderComplianceFooter(company)}
+      ${renderExportDocumentFooter(company)}
     </div>`;
 }
 
@@ -1203,7 +1250,7 @@ function renderIndemnity(doc) {
   const counterParty = (doc.specific && doc.specific.counterParty) || (doc.buyer && doc.buyer.name) || '';
   return `
     <div style="font-family: Arial, sans-serif; font-size:12px; max-width:820px; margin:0 auto; padding:20px; color:#111;">
-      ${renderComplianceHeader(company)}
+      ${renderExportDocumentHeader(company)}
       <div style="text-align:right; font-weight:bold; text-decoration:underline; margin-bottom:6px;">Annexure IV</div>
       <h3 style="text-align:center; text-decoration:underline; margin:6px 0 12px; font-size:13px;">Customer Indemnity for Related Party Transaction</h3>
       <p style="margin:0 0 10px;"><b>Name of the Counter Party:</b> <u>${counterParty || '________________________'}</u> (Importer/Exporter)</p>
@@ -1213,7 +1260,7 @@ function renderIndemnity(doc) {
       <p>We hereby agree to keep Bank AL Habib Limited indemnified against all demands, actions, proceedings, liabilities, claims, damages, costs and expenses in relation to or arising out of subject transaction and undertake to pay Bank AL Habib Limited immediately on demand all payments, losses, costs and expenses made or suffered by the Bank in consequence thereof.</p>
       <p>We, M/s <b>${company.name}</b> agree that the obligations on our part contained in this Indemnity shall continue to bind us notwithstanding any change in our constitution or change in the share-holding or amalgamation/ absorption/transfer of assets/novation of liabilities.</p>
       ${signatureBlock(company)}
-      ${renderComplianceFooter(company)}
+      ${renderExportDocumentFooter(company)}
     </div>`;
 }
 
@@ -1225,7 +1272,7 @@ function renderITRS(doc) {
   const row = (label, val) => `<tr><td style="padding:4px 6px; font-weight:bold; white-space:nowrap; vertical-align:top;">${label}</td><td style="padding:4px 6px; border-bottom:1px solid #999;">${val || ''}</td></tr>`;
   return `
     <div style="font-family: Arial, sans-serif; font-size:12px; max-width:820px; margin:0 auto; padding:20px; color:#111;">
-      ${renderComplianceHeader(company)}
+      ${renderExportDocumentHeader(company)}
       <div style="background:#2e7d32; color:#fff; text-align:center; font-weight:bold; padding:6px; margin-bottom:12px;">SBP C-ITRS Reporting Variables &mdash; Import/Export</div>
       <table style="width:100%; border-collapse:collapse;">
         ${row('Branch Name:', company.bank.branch)}
@@ -1252,7 +1299,7 @@ function renderITRS(doc) {
       </div>
       <div style="background:#2e7d32; color:#fff; text-align:center; font-weight:bold; padding:5px; margin:18px 0 8px;">For Bank use only</div>
       <div style="font-size:12px; color:#555;">Transaction reference No: ____________________ &nbsp; Transaction Date: ____________<br/><br/>Scan Reference No: ____________________<br/><br/><br/>Reviewed by (Name &amp; Signature): ________________ &nbsp;&nbsp; Approved by (Name &amp; Signature): ________________</div>
-      ${renderComplianceFooter(company)}
+      ${renderExportDocumentFooter(company)}
     </div>`;
 }
 
@@ -1263,8 +1310,8 @@ function renderInvoice(doc) {
   const totalBags = lines.reduce((s, l) => s + (l.bagCount || 0), 0);
   const totalQty = lines.reduce((s, l) => s + (l.qtyMT || 0), 0);
   return `
-    <div style="font-family: Arial, sans-serif; font-size:12px; max-width:820px; margin:0 auto; padding:20px;">
-      ${renderHeader(company)}
+    <div style="${DOC_PAGE}">
+      ${renderExportDocumentHeader(company)}
       <h2 style="text-align:center; font-size:16px; text-decoration:underline; margin:10px 0;">INVOICE</h2>
 
       <table style="width:100%; margin:15px 0;">
@@ -1277,9 +1324,9 @@ function renderInvoice(doc) {
           </td>
           <td style="vertical-align:top; width:45%;">
             <table style="border-collapse:collapse; width:100%;">
-              <tr><td style="border:1px solid #333; padding:4px; font-weight:bold;">INVOICE NO:</td><td style="border:1px solid #333; padding:4px;">${order.invoiceNumber}</td></tr>
-              <tr><td style="border:1px solid #333; padding:4px; font-weight:bold;">CONTRACT No.</td><td style="border:1px solid #333; padding:4px;">${order.contractNumber}</td></tr>
-              <tr><td style="border:1px solid #333; padding:4px; font-weight:bold;">INVOICE DT:</td><td style="border:1px solid #333; padding:4px;">${order.date}</td></tr>
+              <tr><td style="${CELL_SM_B}">INVOICE NO:</td><td style="${CELL_SM}">${order.invoiceNumber}</td></tr>
+              <tr><td style="${CELL_SM_B}">CONTRACT No.</td><td style="${CELL_SM}">${order.contractNumber}</td></tr>
+              <tr><td style="${CELL_SM_B}">INVOICE DT:</td><td style="${CELL_SM}">${order.date}</td></tr>
             </table>
           </td>
         </tr>
@@ -1287,12 +1334,12 @@ function renderInvoice(doc) {
 
       <table style="width:100%; border-collapse:collapse; font-size:12px; margin-bottom:15px;">
         <tr>
-          <td style="border:1px solid #333; padding:4px; font-weight:bold;">Shipment Port</td>
-          <td style="border:1px solid #333; padding:4px;">${order.portOfLoading} to ${order.destinationPort}, ${buyer.country}</td>
+          <td style="${CELL_SM_B}">Shipment Port</td>
+          <td style="${CELL_SM}">${order.portOfLoading} to ${order.destinationPort}, ${buyer.country}</td>
         </tr>
         <tr>
-          <td style="border:1px solid #333; padding:4px; font-weight:bold;">Payment Term</td>
-          <td style="border:1px solid #333; padding:4px;">${order.paymentTerms}</td>
+          <td style="${CELL_SM_B}">Payment Term</td>
+          <td style="${CELL_SM}">${order.paymentTerms}</td>
         </tr>
       </table>
 
@@ -1324,7 +1371,7 @@ function renderInvoice(doc) {
       <div style="margin-top:40px; text-align:right;">
         <p style="font-weight:bold;">${company.name}<br/>Proprietor</p>
       </div>
-      ${renderCompanyFooter(company)}
+      ${renderExportDocumentFooter(company)}
     </div>`;
 }
 
@@ -1435,9 +1482,9 @@ function renderBillOfLading(doc) {
 
       <table style="width:100%; border-collapse:collapse; font-size:12px;">
         <tr>
-          <td style="border:1px solid #333; padding:4px;"><strong>Total No of Containers</strong><br/>${containerCount} x ${containerType === '40' ? "40'" : "20'"}HC</td>
-          <td style="border:1px solid #333; padding:4px;"><strong>Movement</strong></td>
-          <td style="border:1px solid #333; padding:4px;"><strong>Freight</strong></td>
+          <td style="${CELL_SM}"><strong>Total No of Containers</strong><br/>${containerCount} x ${containerType === '40' ? "40'" : "20'"}HC</td>
+          <td style="${CELL_SM}"><strong>Movement</strong></td>
+          <td style="${CELL_SM}"><strong>Freight</strong></td>
         </tr>
       </table>
 
@@ -1450,8 +1497,8 @@ function renderPackingCertificate(doc) {
   const { company, buyer, order, shipment, containers, totals, packing } = doc;
   const totalBags = totals?.totalBags || order.totalBags;
   return `
-    <div style="font-family: Arial, sans-serif; font-size:12px; max-width:820px; margin:0 auto; padding:20px;">
-      ${renderComplianceHeader(company)}
+    <div style="${DOC_PAGE}">
+      ${renderExportDocumentHeader(company)}
       <p style="text-align:center; font-weight:bold; text-decoration:underline;">ORIGINAL</p>
       <h2 style="text-align:center; font-size:16px; margin:5px 0; text-decoration:underline;">PACKING CERTIFICATE</h2>
 
@@ -1483,16 +1530,16 @@ function renderPackingCertificate(doc) {
       ${containers.length > 0 ? `
         <table style="width:80%; border-collapse:collapse; margin:15px 0; font-size:12px;">
           <thead><tr style="background:#f5f5f5;">
-            <th style="border:1px solid #333; padding:4px;">S.NO</th>
-            <th style="border:1px solid #333; padding:4px;">CONTAINER #</th>
-            <th style="border:1px solid #333; padding:4px;">NO OF BAGS</th>
-            <th style="border:1px solid #333; padding:4px;">NET WT IN M/TONS</th>
-            <th style="border:1px solid #333; padding:4px;">GROSS WT IN M/TONS</th>
+            <th style="${CELL_SM}">S.NO</th>
+            <th style="${CELL_SM}">CONTAINER #</th>
+            <th style="${CELL_SM}">NO OF BAGS</th>
+            <th style="${CELL_SM}">NET WT IN M/TONS</th>
+            <th style="${CELL_SM}">GROSS WT IN M/TONS</th>
           </tr></thead>
           <tbody>
             ${containers.map((c, i) => `<tr>
               <td style="border:1px solid #333; padding:4px; text-align:center;">${i + 1}</td>
-              <td style="border:1px solid #333; padding:4px;">${c.containerNo}</td>
+              <td style="${CELL_SM}">${c.containerNo}</td>
               <td style="border:1px solid #333; padding:4px; text-align:center;">${c.bagsCount}</td>
               <td style="border:1px solid #333; padding:4px; text-align:right;">${(c.netWeightKg / 1000).toFixed(2)}</td>
               <td style="border:1px solid #333; padding:4px; text-align:right;">${(c.grossWeightKg / 1000).toFixed(3)}</td>
@@ -1507,7 +1554,7 @@ function renderPackingCertificate(doc) {
         <p>Name of Signing authority:</p>
         <p style="font-weight:bold;">${company.proprietor}<br/>${company.name}<br/>Proprietor</p>
       </div>
-      ${renderComplianceFooter(company)}
+      ${renderExportDocumentFooter(company)}
     </div>`;
 }
 
@@ -1639,8 +1686,8 @@ function renderBankCoveringLetter(doc) {
   const { company, buyer, order, shipment, containers, notifyParty } = doc;
   const fiNumbers = [shipment.fiNumber, shipment.fiNumber2, shipment.fiNumber3].filter(Boolean);
   return `
-    <div style="font-family: Arial, sans-serif; font-size:12px; max-width:820px; margin:0 auto; padding:20px;">
-      ${renderHeader(company)}
+    <div style="${DOC_PAGE}">
+      ${renderExportDocumentHeader(company)}
       <p>Date: ${order.date}</p>
       <p style="margin-top:15px;">${company.bank.name}<br/>${company.bank.branch}<br/>Karachi</p>
       <p style="float:right; margin-top:-40px; font-weight:bold; color:red;">ONLY FOR LODGEMENT</p>
@@ -1651,25 +1698,25 @@ function renderBankCoveringLetter(doc) {
 
       <table style="width:100%; border-collapse:collapse; margin:20px 0; font-size:12px;">
         <thead><tr style="background:#f5f5f5;">
-          <th style="border:1px solid #333; padding:6px;">S.No.</th>
-          <th style="border:1px solid #333; padding:6px;">Documents</th>
-          <th style="border:1px solid #333; padding:6px;">Document Type</th>
-          <th style="border:1px solid #333; padding:6px;">Marks & Nos.</th>
+          <th style="${CELL}">S.No.</th>
+          <th style="${CELL}">Documents</th>
+          <th style="${CELL}">Document Type</th>
+          <th style="${CELL}">Marks & Nos.</th>
         </tr></thead>
         <tbody>
-          <tr><td style="border:1px solid #333; padding:6px;">1</td><td style="border:1px solid #333; padding:6px;">BILL OF LADING</td><td style="border:1px solid #333; padding:6px;">3 Original + NN COPY</td><td style="border:1px solid #333; padding:6px;">${shipment.blNumber} - ${shipment.blDate}</td></tr>
-          <tr><td style="border:1px solid #333; padding:6px;">2</td><td style="border:1px solid #333; padding:6px;">COMMERCIAL INVOICE</td><td style="border:1px solid #333; padding:6px;">Original</td><td style="border:1px solid #333; padding:6px;">${order.invoiceNumber}</td></tr>
-          <tr><td style="border:1px solid #333; padding:6px;">3</td><td style="border:1px solid #333; padding:6px;">PACKING LIST</td><td style="border:1px solid #333; padding:6px;">Original</td><td style="border:1px solid #333; padding:6px;">${order.invoiceNumber} (${containers.length} X 20 Containers)</td></tr>
-          <tr><td style="border:1px solid #333; padding:6px;">4</td><td style="border:1px solid #333; padding:6px;">STATEMENT OF ORIGIN</td><td style="border:1px solid #333; padding:6px;">Original</td><td style="border:1px solid #333; padding:6px;">${order.invoiceNumber}</td></tr>
-          <tr><td style="border:1px solid #333; padding:6px;">5</td><td style="border:1px solid #333; padding:6px;">FI</td><td style="border:1px solid #333; padding:6px;">Original</td><td style="border:1px solid #333; padding:6px;">${fiNumbers.join(' & ')}</td></tr>
-          ${shipment.gdNumber ? `<tr><td style="border:1px solid #333; padding:6px;">6</td><td style="border:1px solid #333; padding:6px;">GD</td><td style="border:1px solid #333; padding:6px;">Original</td><td style="border:1px solid #333; padding:6px;">${shipment.gdNumber} - ${shipment.gdDate}</td></tr>` : ''}
+          <tr><td style="${CELL}">1</td><td style="${CELL}">BILL OF LADING</td><td style="${CELL}">3 Original + NN COPY</td><td style="${CELL}">${shipment.blNumber} - ${shipment.blDate}</td></tr>
+          <tr><td style="${CELL}">2</td><td style="${CELL}">COMMERCIAL INVOICE</td><td style="${CELL}">Original</td><td style="${CELL}">${order.invoiceNumber}</td></tr>
+          <tr><td style="${CELL}">3</td><td style="${CELL}">PACKING LIST</td><td style="${CELL}">Original</td><td style="${CELL}">${order.invoiceNumber} (${containers.length} X 20 Containers)</td></tr>
+          <tr><td style="${CELL}">4</td><td style="${CELL}">STATEMENT OF ORIGIN</td><td style="${CELL}">Original</td><td style="${CELL}">${order.invoiceNumber}</td></tr>
+          <tr><td style="${CELL}">5</td><td style="${CELL}">FI</td><td style="${CELL}">Original</td><td style="${CELL}">${fiNumbers.join(' & ')}</td></tr>
+          ${shipment.gdNumber ? `<tr><td style="${CELL}">6</td><td style="${CELL}">GD</td><td style="${CELL}">Original</td><td style="${CELL}">${shipment.gdNumber} - ${shipment.gdDate}</td></tr>` : ''}
         </tbody>
       </table>
 
       ${(notifyParty?.name) ? `<p>Therefore, you are requested to please endorse the Original Bill of Lading in the name of Notify party: <strong>${notifyParty.name}, ${notifyParty.address || buyer.country}</strong></p>` : ''}
 
       <div style="margin-top:40px;"><p>Best Regards,</p><p style="font-weight:bold;">${company.name}<br/>Proprietor</p></div>
-      ${renderCompanyFooter(company)}
+      ${renderExportDocumentFooter(company)}
     </div>`;
 }
 
@@ -1677,8 +1724,8 @@ function renderBankCoveringLetter(doc) {
 function renderBuyerCoveringLetter(doc) {
   const { company, buyer, order, shipment, containers, notifyParty } = doc;
   return `
-    <div style="font-family: Arial, sans-serif; font-size:12px; max-width:820px; margin:0 auto; padding:20px;">
-      ${renderComplianceHeader(company)}
+    <div style="${DOC_PAGE}">
+      ${renderExportDocumentHeader(company)}
       <p>Date: ${order.date}</p>
       <p style="margin-top:15px;">${[buyer.name, buyer.address, buyer.country, buyer.vatNumber ? `VAT NO: ${buyer.vatNumber}` : ''].filter(Boolean).join('<br/>')}</p>
 
@@ -1688,29 +1735,29 @@ function renderBuyerCoveringLetter(doc) {
 
       <table style="width:100%; border-collapse:collapse; margin:20px 0; font-size:12px;">
         <thead><tr style="background:#f5f5f5;">
-          <th style="border:1px solid #333; padding:6px;">S.No.</th>
-          <th style="border:1px solid #333; padding:6px;">Documents</th>
-          <th style="border:1px solid #333; padding:6px;">Document Type</th>
-          <th style="border:1px solid #333; padding:6px;">Marks & Nos.</th>
-          <th style="border:1px solid #333; padding:6px;">Copies</th>
+          <th style="${CELL}">S.No.</th>
+          <th style="${CELL}">Documents</th>
+          <th style="${CELL}">Document Type</th>
+          <th style="${CELL}">Marks & Nos.</th>
+          <th style="${CELL}">Copies</th>
         </tr></thead>
         <tbody>
-          <tr><td style="border:1px solid #333; padding:6px;">1</td><td style="border:1px solid #333; padding:6px;">BILL OF LADING ENDORSED</td><td style="border:1px solid #333; padding:6px;">3 Original + NN COPY</td><td style="border:1px solid #333; padding:6px;">${shipment.blNumber}</td><td style="border:1px solid #333; padding:6px;">01</td></tr>
-          <tr><td style="border:1px solid #333; padding:6px;">2</td><td style="border:1px solid #333; padding:6px;">COMMERCIAL INVOICE</td><td style="border:1px solid #333; padding:6px;">Original</td><td style="border:1px solid #333; padding:6px;">${order.invoiceNumber}</td><td style="border:1px solid #333; padding:6px;">5</td></tr>
-          <tr><td style="border:1px solid #333; padding:6px;">3</td><td style="border:1px solid #333; padding:6px;">PACKING LIST & CERTIFICATE</td><td style="border:1px solid #333; padding:6px;">Original</td><td style="border:1px solid #333; padding:6px;">${containers.length} x 20</td><td style="border:1px solid #333; padding:6px;">5</td></tr>
-          <tr><td style="border:1px solid #333; padding:6px;">4</td><td style="border:1px solid #333; padding:6px;">STATEMENT OF ORIGIN</td><td style="border:1px solid #333; padding:6px;">Original</td><td style="border:1px solid #333; padding:6px;">${order.invoiceNumber}</td><td style="border:1px solid #333; padding:6px;">3</td></tr>
-          <tr><td style="border:1px solid #333; padding:6px;">5</td><td style="border:1px solid #333; padding:6px;">CERTIFICATE OF ORIGIN</td><td style="border:1px solid #333; padding:6px;">Original</td><td style="border:1px solid #333; padding:6px;">—</td><td style="border:1px solid #333; padding:6px;">01</td></tr>
-          <tr><td style="border:1px solid #333; padding:6px;">6</td><td style="border:1px solid #333; padding:6px;">PHYTOSANITARY CERTIFICATE</td><td style="border:1px solid #333; padding:6px;">Original + Duplicate</td><td style="border:1px solid #333; padding:6px;">—</td><td style="border:1px solid #333; padding:6px;">1</td></tr>
-          <tr><td style="border:1px solid #333; padding:6px;">7</td><td style="border:1px solid #333; padding:6px;">FUMIGATION CERTIFICATE</td><td style="border:1px solid #333; padding:6px;">Original + Duplicate</td><td style="border:1px solid #333; padding:6px;">${containers.length} x 20</td><td style="border:1px solid #333; padding:6px;">1</td></tr>
-          <tr><td style="border:1px solid #333; padding:6px;">8</td><td style="border:1px solid #333; padding:6px;">PCSIR AFLATOXIN REPORT</td><td style="border:1px solid #333; padding:6px;">Original</td><td style="border:1px solid #333; padding:6px;">—</td><td style="border:1px solid #333; padding:6px;">1</td></tr>
-          <tr><td style="border:1px solid #333; padding:6px;">9</td><td style="border:1px solid #333; padding:6px;">PCSIR NON GMO REPORT</td><td style="border:1px solid #333; padding:6px;">Original</td><td style="border:1px solid #333; padding:6px;">—</td><td style="border:1px solid #333; padding:6px;">1</td></tr>
-          <tr><td style="border:1px solid #333; padding:6px;">10</td><td style="border:1px solid #333; padding:6px;">SGS INSPECTION REPORTS</td><td style="border:1px solid #333; padding:6px;">Original</td><td style="border:1px solid #333; padding:6px;">—</td><td style="border:1px solid #333; padding:6px;">1</td></tr>
+          <tr><td style="${CELL}">1</td><td style="${CELL}">BILL OF LADING ENDORSED</td><td style="${CELL}">3 Original + NN COPY</td><td style="${CELL}">${shipment.blNumber}</td><td style="${CELL}">01</td></tr>
+          <tr><td style="${CELL}">2</td><td style="${CELL}">COMMERCIAL INVOICE</td><td style="${CELL}">Original</td><td style="${CELL}">${order.invoiceNumber}</td><td style="${CELL}">5</td></tr>
+          <tr><td style="${CELL}">3</td><td style="${CELL}">PACKING LIST & CERTIFICATE</td><td style="${CELL}">Original</td><td style="${CELL}">${containers.length} x 20</td><td style="${CELL}">5</td></tr>
+          <tr><td style="${CELL}">4</td><td style="${CELL}">STATEMENT OF ORIGIN</td><td style="${CELL}">Original</td><td style="${CELL}">${order.invoiceNumber}</td><td style="${CELL}">3</td></tr>
+          <tr><td style="${CELL}">5</td><td style="${CELL}">CERTIFICATE OF ORIGIN</td><td style="${CELL}">Original</td><td style="${CELL}">—</td><td style="${CELL}">01</td></tr>
+          <tr><td style="${CELL}">6</td><td style="${CELL}">PHYTOSANITARY CERTIFICATE</td><td style="${CELL}">Original + Duplicate</td><td style="${CELL}">—</td><td style="${CELL}">1</td></tr>
+          <tr><td style="${CELL}">7</td><td style="${CELL}">FUMIGATION CERTIFICATE</td><td style="${CELL}">Original + Duplicate</td><td style="${CELL}">${containers.length} x 20</td><td style="${CELL}">1</td></tr>
+          <tr><td style="${CELL}">8</td><td style="${CELL}">PCSIR AFLATOXIN REPORT</td><td style="${CELL}">Original</td><td style="${CELL}">—</td><td style="${CELL}">1</td></tr>
+          <tr><td style="${CELL}">9</td><td style="${CELL}">PCSIR NON GMO REPORT</td><td style="${CELL}">Original</td><td style="${CELL}">—</td><td style="${CELL}">1</td></tr>
+          <tr><td style="${CELL}">10</td><td style="${CELL}">SGS INSPECTION REPORTS</td><td style="${CELL}">Original</td><td style="${CELL}">—</td><td style="${CELL}">1</td></tr>
         </tbody>
       </table>
 
       <p>THANK YOU AND WAITING FOR YOUR NEXT CONSIGNMENT.</p>
       <div style="margin-top:40px;"><p>Best Regards,</p><p style="font-weight:bold;">${company.name}<br/>Proprietor</p></div>
-      ${renderComplianceFooter(company)}
+      ${renderExportDocumentFooter(company)}
     </div>`;
 }
 
@@ -1718,8 +1765,8 @@ function renderBuyerCoveringLetter(doc) {
 function renderLabTestRequest(doc) {
   const { company, order } = doc;
   return `
-    <div style="font-family: Arial, sans-serif; font-size:12px; max-width:820px; margin:0 auto; padding:20px;">
-      ${renderHeader(company)}
+    <div style="${DOC_PAGE}">
+      ${renderExportDocumentHeader(company)}
       <p style="text-align:right;">Date: ${order.date}</p>
       <p>INVOICE NO: ${order.invoiceNumber}</p>
 
@@ -1750,7 +1797,7 @@ function renderLabTestRequest(doc) {
 
       <p style="margin-top:15px;">Thanking you,<br/>Yours truly,</p>
       <p style="margin-top:20px;">For: ${company.name},<br/>Proprietor</p>
-      ${renderCompanyFooter(company)}
+      ${renderExportDocumentFooter(company)}
     </div>`;
 }
 
@@ -1883,9 +1930,23 @@ function buildDocHtml(editedHtml, docType, title, { autoPrint, orientation = 'po
              with uneven columns, so a fixed/equal layout starves the wide
              Description column (excessive wrapping → many extra pages). Auto
              layout gives each column a sensible width and keeps docs to one page
-             where they fit; overflow-wrap still prevents any overflow. */
+             where they fit; overflow-wrap still prevents any overflow.
+             The item tables of the widest documents (Commercial Invoice, Packing
+             List, Sales Contract) opt OUT of auto layout with their own
+             <colgroup> + table-layout:fixed, because auto layout gave the wide
+             Description column ~55% and starved the numeric ones.
+             overflow-wrap is break-word, NOT anywhere: anywhere also collapses a
+             column's min-content width to a single CHARACTER, which is what let
+             auto layout squeeze the money/weight columns to ~35px and split
+             figures mid-number ("493,4|20.|00"). break-word still breaks a token
+             that cannot fit its line (so nothing overflows the page) but keeps
+             the intrinsic column width honest.
+             (No backticks in this comment - it lives inside a template literal.) */
           .agri-doc table { width: 100%; max-width: 100%; border-collapse: collapse; }
-          .agri-doc td, .agri-doc th { padding: 3px 5px; line-height: 1.35; vertical-align: top; overflow-wrap: anywhere; word-break: normal; }
+          .agri-doc td, .agri-doc th { padding: 3px 5px; line-height: 1.35; vertical-align: top; overflow-wrap: break-word; word-break: normal; }
+          /* Money / weight / quantity cells never break mid-figure — their
+             <colgroup> width is sized to hold the widest realistic value. */
+          .agri-doc .agri-num { white-space: nowrap; }
           /* Multi-page documents: repeat table headers (and footers/totals) on
              every A4 page and never split a row across a page break. */
           .agri-doc thead { display: table-header-group; }
