@@ -236,11 +236,27 @@ function validateExportDoc(doc) {
   return { errors, warnings };
 }
 
+// Guarantee an item's description carries its HS code EXACTLY once. The default
+// quality texts already weave the code into the sentence; an operator-written
+// qualityDescription may not, and those documents hide the summary block's HS
+// row — so without this the code would vanish from a custom description, and
+// with a blind append it would print twice on a default one.
+function withHsCode(description, hsCode) {
+  const text = description || '';
+  if (!hsCode) return text;
+  return text.includes(hsCode) ? text : `${text}<br/><strong>HS CODE ${hsCode}</strong>`;
+}
+
 // Shared shipment/commercial SUMMARY block — HS Code (multiple codes joined
 // with " & "), Total Packages, Net Weight (MT), Gross Weight (MT), Total Amount
 // and the amount in words. Added consistently to the Commercial Invoice, Packing
 // List, Statement of Origin, Bill of Lading and Certificate of Origin so every
 // document surfaces the same verified figures.
+//
+// `hideHs` drops the HS Code row for documents that already print the code
+// against each item line (see withHsCode). The rule across every export document
+// is that a field prints ONCE: where a per-line code exists it wins, and the
+// summary row stands down — otherwise the same code lands twice on one page.
 function docSummaryBlock(doc, opts = {}) {
   const { order, totals } = doc;
   const cur = order.currency || 'USD';
@@ -255,16 +271,29 @@ function docSummaryBlock(doc, opts = {}) {
     : (lines.reduce((s, l) => s + (l.amount || 0), 0) || parseFloat(order.contractValue) || 0);
   const mt = (kg) => `${((parseFloat(kg) || 0) / 1000).toFixed(3)} MT`;
   const showAmount = opts.showAmount !== false;
+  const showHs = !opts.hideHs;
   const packLabel = opts.packLabel || order.packagesLabel || 'Bags';
   const L = 'border:1px solid #333;padding:3px 7px;font-weight:bold;white-space:nowrap;background:#f7f7f7;';
   const V = 'border:1px solid #333;padding:3px 7px;';
+  // The amount cell spans whatever rows actually render, so dropping the HS row
+  // does not leave it overhanging the bottom of the table.
+  const amountCell = showAmount
+    ? `<td rowspan="${showHs ? 4 : 3}" style="border:1px solid #333;padding:6px;text-align:right;vertical-align:middle;width:24%;font-weight:bold;font-size:13px;">${curShort} ${fmtMoney(totalAmt)}</td>`
+    : '';
   return `
     <table style="width:100%;border-collapse:collapse;margin-top:${opts.marginTop || 8}px;font-size:12px;">
+      ${showHs ? `
       <tr>
         <td style="${L}width:20%;">HS Code</td><td style="${V}">${hsText}</td>
-        ${showAmount ? `<td rowspan="4" style="border:1px solid #333;padding:6px;text-align:right;vertical-align:middle;width:24%;font-weight:bold;font-size:13px;">${curShort} ${fmtMoney(totalAmt)}</td>` : ''}
+        ${amountCell}
       </tr>
       <tr><td style="${L}">Total Packages</td><td style="${V}">${pkgs.toLocaleString()} ${packLabel}</td></tr>
+      ` : `
+      <tr>
+        <td style="${L}width:20%;">Total Packages</td><td style="${V}">${pkgs.toLocaleString()} ${packLabel}</td>
+        ${amountCell}
+      </tr>
+      `}
       <tr><td style="${L}">Net Weight</td><td style="${V}">${mt(net)}</td></tr>
       <tr><td style="${L}">Gross Weight</td><td style="${V}">${mt(gross)}</td></tr>
     </table>
@@ -438,11 +467,9 @@ function commercialInvoiceHtml(doc, opts = {}) {
   // different output format ("486,750.00" vs "486,750 KG (486.750 MT)").
   const fmtWeight = (kg) => `${(parseFloat(kg) || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })} KG (${((parseFloat(kg) || 0) / 1000).toFixed(3)} MT)`;
 
-  // HS codes — one or more codes joined with " & " (e.g. "1006.3010 & 1006.3090").
+  // HS codes — the per-line HS CODE column is the only place these print, so the
+  // single-code fallback below is all the item table needs.
   const hs = order.hsCodes || { list: order.hsCode ? [order.hsCode] : [], multiple: false, single: order.hsCode || '' };
-  const hsSummary = (hs.list && hs.list.length)
-    ? hs.list.join(' & ')
-    : (hs.single || order.hsCode || '');
 
   // Shipment route (loading → discharge).
   const routeFrom = order.portOfLoading || 'Karachi, Pakistan';
@@ -495,7 +522,14 @@ function commercialInvoiceHtml(doc, opts = {}) {
         ${infoRow('Shipment Route', [routeFrom, routeTo].filter(Boolean).join(' → '), 'No. of Containers', `${shipment.containerCount} X ${shipment.containerType === '40ft' ? "40'" : "20'"} FCL`)}
         ${infoRow('Vessel / Voyage', `${shipment.vesselName || ''}${shipment.voyageNumber ? ` / ${shipment.voyageNumber}` : ''}`, 'F.I. #', [shipment.fiNumber, shipment.fiNumber2, shipment.fiNumber3].filter(Boolean).join(', '))}
         ${infoRow('F.I. Date', shipment.fiDate, 'Bill of Lading #', shipment.blNumber)}
-        ${infoRow('BL Date', shipment.blDate, 'HS Code', hsSummary)}
+        <!-- HS Code is NOT printed here: the item table below carries a per-line
+             HS CODE column, which is the code that matters to customs (a mixed
+             shipment has a different code per line). This row printed the joined
+             summary of the very same codes directly above it. -->
+        <tr>
+          <td style="${cellL} width:19%;">BL Date</td>
+          <td style="${cellV}" colspan="3">${shipment.blDate || ''}</td>
+        </tr>
         <!-- Total Packages / Net Weight / Gross Weight are NOT repeated here:
              the totals table below the item table prints all three (as Total
              Packages / Total Net Weight / Total Gross Weight) next to the
@@ -636,8 +670,11 @@ function renderPackingList(doc) {
         const bagType = it.bagType || order.bagType || 'PP';
         return makeRow({
           label: (it.productName || order.product || '').toUpperCase(),
-          description: it.qualityDescription
-            || `${it.productName || order.product || 'Rice'} max 0-${it.brokenPctTarget != null ? it.brokenPctTarget : (order.brokenPctTarget || 2)}% broken, double (silky) polished and sortexed. Sound, loyal and merchantable, fit for human consumption at any stage. Free from alive and dead weevils/insects. GMO Free. Product to meet EU regulations at all times. Latest crop.${it.hsCode ? `<br/><strong>HS CODE ${it.hsCode}</strong>` : ''}`,
+          description: withHsCode(
+            it.qualityDescription
+              || `${it.productName || order.product || 'Rice'} max 0-${it.brokenPctTarget != null ? it.brokenPctTarget : (order.brokenPctTarget || 2)}% broken, double (silky) polished and sortexed. Sound, loyal and merchantable, fit for human consumption at any stage. Free from alive and dead weevils/insects. GMO Free. Product to meet EU regulations at all times. Latest crop.`,
+            it.hsCode,
+          ),
           bagSize,
           masterBagSize: parseFloat(it.masterBagSizeKg) || parseFloat(order.masterBagSizeKg) || 0,
           bagCount: it.bagCount || (it.qtyMT && bagSize ? Math.round((it.qtyMT * 1000) / bagSize) : 0),
@@ -651,7 +688,7 @@ function renderPackingList(doc) {
         const qtyMT = parseFloat(order.qtyMT) || 0;
         return makeRow({
           label: (order.brandMarking || order.product || '').toUpperCase(),
-          description: order.qualityDescription || order.product || '',
+          description: withHsCode(order.qualityDescription || order.product || '', order.hsCode),
           bagSize,
           masterBagSize: parseFloat(order.masterBagSizeKg) || 0,
           bagCount: order.totalBags || (bagSize ? Math.round((qtyMT * 1000) / bagSize) : 0),
@@ -728,9 +765,11 @@ function renderPackingList(doc) {
           <td style="${CELL_WIDE_B}">BL Date</td>
           <td style="${CELL_WIDE}">${shipment.blDate || ''}</td>
         </tr>
-        <!-- HS Code / Total Packages are NOT repeated here: docSummaryBlock
-             below the item table already prints both (with the net and gross
-             weights). They used to print identically in both places. -->
+        <!-- Total Packages is NOT repeated here: docSummaryBlock below the item
+             table already prints it (with the net and gross weights). HS Code is
+             not printed in either place on this document - each item line shows
+             its own code in the DESCRIPTION column, so the summary row stands
+             down (hideHs) rather than repeating the same code lower down. -->
       </table>
 
       <!-- Column widths are FIXED (colgroup + table-layout:fixed). This table
@@ -782,7 +821,7 @@ function renderPackingList(doc) {
         </tbody>
       </table>
 
-      ${docSummaryBlock(doc, { packLabel: 'Bags' })}
+      ${docSummaryBlock(doc, { packLabel: 'Bags', hideHs: true })}
 
       <p style="font-style:italic; font-size:12px; margin-top:12px; text-decoration:underline;">
         Certification: Goods are shipped from Pakistan origin
@@ -1395,9 +1434,12 @@ function renderBillOfLading(doc) {
         const bagCount = it.bagCount || (it.qtyMT && bagSize ? Math.round((it.qtyMT * 1000) / bagSize) : 0);
         const qualityText = it.qualityDescription
           || `Pakistani ${it.productName || 'Rice'} - ${it.brokenPctTarget != null ? it.brokenPctTarget : (order.brokenPctTarget || 2)}% Broken - Double (silky) polished & color sorted, Latest Crop - PACKED IN ${bagSize} KGS ${bagType} BAG${it.hsCode ? ` - HS CODE: ${it.hsCode}` : ''} - GMO FREE, FIT FOR HUMAN CONSUMPTION AT ANY STAGE, FREE FROM ALIVE AND DEAD WEEVILS/INSECTS`;
-        return `<div style="margin-bottom:6px;"><strong>${(it.productName || '').toUpperCase()}</strong> — ${bagCount.toLocaleString()} bags<br/>${qualityText}${it.hsCode ? `<br/>HS code ${it.hsCode}` : ''}</div>`;
+        // withHsCode, not a blind append: the default quality text above already
+        // carries "- HS CODE: x -" mid-sentence, so appending unconditionally
+        // printed the same code twice on adjacent lines.
+        return `<div style="margin-bottom:6px;"><strong>${(it.productName || '').toUpperCase()}</strong> — ${bagCount.toLocaleString()} bags<br/>${withHsCode(qualityText, it.hsCode)}</div>`;
       }).join('')
-    : `${order.qualityDescription || ''}${order.hsCode ? `<br/>HS code ${order.hsCode}` : ''}`;
+    : withHsCode(order.qualityDescription || '', order.hsCode);
 
   // Place-of-delivery / discharge: avoid leading commas when port is empty.
   const placeOfDelivery = [order.destinationPort, buyer.country].filter(Boolean).join(', ');
@@ -1488,7 +1530,7 @@ function renderBillOfLading(doc) {
         </tr>
       </table>
 
-      ${docSummaryBlock(doc, { showAmount: false, packLabel: 'Bags' })}
+      ${docSummaryBlock(doc, { showAmount: false, packLabel: 'Bags', hideHs: true })}
     </div>`;
 }
 
@@ -1496,6 +1538,22 @@ function renderBillOfLading(doc) {
 function renderPackingCertificate(doc) {
   const { company, buyer, order, shipment, containers, totals, packing } = doc;
   const totalBags = totals?.totalBags || order.totalBags;
+
+  // ONE weight source for the whole certificate. The QUANTITY line and the
+  // TARE/NET/GROSS block used to derive their figures independently — QUANTITY
+  // from the backend totals (falling back to qtyMT + 0.1), the block from
+  // containers[0] (falling back to a hardcoded 0.025 tare). With no containers
+  // captured that printed two DIFFERENT gross weights on the same page, under a
+  // paragraph certifying the weights are correct. Now both read these.
+  const netKg = (totals && parseFloat(totals.netWeightKg)) || (parseFloat(order.qtyMT) || 0) * 1000;
+  const grossKg = (totals && parseFloat(totals.grossWeightKg)) || netKg;
+  const tareKg = Math.max(grossKg - netKg, 0);
+  // Where containers were captured their table below states each one's weights;
+  // where none were, these shipment figures print instead. The old text said
+  // "PER CONTAINER" either way while showing containers[0] — or the whole
+  // shipment divided by a container count of one.
+  const mtOf = (kg) => (kg / 1000).toFixed(3);
+
   return `
     <div style="${DOC_PAGE}">
       ${renderExportDocumentHeader(company)}
@@ -1507,7 +1565,7 @@ function renderPackingCertificate(doc) {
         <tr><td style="font-weight:bold;">SHIPPER:</td><td>${company.name}</td></tr>
         <tr><td style="font-weight:bold;">SHIPPER ADD:</td><td>${company.address}</td></tr>
         <tr><td style="font-weight:bold;">INVOICE #</td><td>${order.invoiceNumber} DATED: ${order.date}</td></tr>
-        <tr><td style="font-weight:bold;">QUANTITY:</td><td>${totalBags} BAGS - ${order.qtyMT.toFixed(2)} MT NET WEIGHT AND ${(totals?.grossWeightMT || order.qtyMT + 0.1).toFixed(2)} MT GROSS WEIGHT</td></tr>
+        <tr><td style="font-weight:bold;">QUANTITY:</td><td>${totalBags} BAGS - ${(netKg / 1000).toFixed(2)} MT NET WEIGHT AND ${(grossKg / 1000).toFixed(2)} MT GROSS WEIGHT</td></tr>
         <tr><td style="font-weight:bold; vertical-align:top;">QUALITY:</td><td>${order.qualityDescription} - HS CODE: ${order.hsCode}</td></tr>
       </table>
 
@@ -1521,18 +1579,17 @@ function renderPackingCertificate(doc) {
         <tr><td style="font-weight:bold;">PLACE OF DESTINATION:</td><td>${order.destinationPort}, ${buyer.country}</td></tr>
       </table>
 
-      <p style="margin-top:10px; font-size:12px;">
-        TARE WEIGHT OF BAGS PER CONTAINER: ${containers.length > 0 ? ((containers[0].grossWeightKg - containers[0].netWeightKg) / 1000).toFixed(3) : '0.025'} M/TONS<br/>
-        NET WEIGHT PER CONTAINER: ${containers.length > 0 ? (containers[0].netWeightKg / 1000).toFixed(3) : (order.qtyMT / (containers.length || 1)).toFixed(3)} M/TONS<br/>
-        GROSS WEIGHT PER CONTAINER: ${containers.length > 0 ? (containers[0].grossWeightKg / 1000).toFixed(3) : ((order.qtyMT / (containers.length || 1)) + 0.025).toFixed(3)} M/TONS
-      </p>
-
+      <!-- Tare / net / gross print in ONE place. Where containers were captured
+           the table states all three per container (tare is a column here, which
+           is why the prose block below is not also printed); with none captured
+           there is no table, so the prose block carries the shipment figures. -->
       ${containers.length > 0 ? `
         <table style="width:80%; border-collapse:collapse; margin:15px 0; font-size:12px;">
           <thead><tr style="background:#f5f5f5;">
             <th style="${CELL_SM}">S.NO</th>
             <th style="${CELL_SM}">CONTAINER #</th>
             <th style="${CELL_SM}">NO OF BAGS</th>
+            <th style="${CELL_SM}">TARE WT IN M/TONS</th>
             <th style="${CELL_SM}">NET WT IN M/TONS</th>
             <th style="${CELL_SM}">GROSS WT IN M/TONS</th>
           </tr></thead>
@@ -1541,12 +1598,19 @@ function renderPackingCertificate(doc) {
               <td style="border:1px solid #333; padding:4px; text-align:center;">${i + 1}</td>
               <td style="${CELL_SM}">${c.containerNo}</td>
               <td style="border:1px solid #333; padding:4px; text-align:center;">${c.bagsCount}</td>
-              <td style="border:1px solid #333; padding:4px; text-align:right;">${(c.netWeightKg / 1000).toFixed(2)}</td>
-              <td style="border:1px solid #333; padding:4px; text-align:right;">${(c.grossWeightKg / 1000).toFixed(3)}</td>
+              <td style="border:1px solid #333; padding:4px; text-align:right;">${mtOf(Math.max((c.grossWeightKg || 0) - (c.netWeightKg || 0), 0))}</td>
+              <td style="border:1px solid #333; padding:4px; text-align:right;">${mtOf(c.netWeightKg || 0)}</td>
+              <td style="border:1px solid #333; padding:4px; text-align:right;">${mtOf(c.grossWeightKg || 0)}</td>
             </tr>`).join('')}
           </tbody>
         </table>
-      ` : ''}
+      ` : `
+        <p style="margin-top:10px; font-size:12px;">
+          TARE WEIGHT OF BAGS FOR THIS SHIPMENT: ${mtOf(tareKg)} M/TONS<br/>
+          NET WEIGHT FOR THIS SHIPMENT: ${mtOf(netKg)} M/TONS<br/>
+          GROSS WEIGHT FOR THIS SHIPMENT: ${mtOf(grossKg)} M/TONS
+        </p>
+      `}
 
       <p style="font-size:12px; margin-top:15px;">WITH REFERENCE TO ABOVE, WE HEREBY CONFIRM THAT THE GROSS, NET AND TARE WEIGHT OF THE CONTAINER IS CORRECT AS MENTIONED ON THE ABOVE BL AND PACKING LIST.</p>
 
