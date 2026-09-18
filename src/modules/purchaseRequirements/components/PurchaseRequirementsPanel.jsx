@@ -25,6 +25,12 @@ export default function PurchaseRequirementsPanel({ embedded = false, defaultTab
   const canPurchase = ['Super Admin', 'Owner', 'Mill Manager', 'Finance Manager'].includes(role);
 
   const [tab, setTab] = useState(defaultTab);
+  // Row id currently being rejected + the typed reason. Rejecting inline rather
+  // than through a browser prompt, and the reason is REQUIRED - the endpoint has
+  // always accepted one (body.reason) but the UI sent {}, so every rejection
+  // landed with no record of why.
+  const [rejecting, setRejecting] = useState(null);
+  const [rejectReason, setRejectReason] = useState('');
   const [rows, setRows] = useState([]);
   const [masked, setMasked] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -101,13 +107,34 @@ export default function PurchaseRequirementsPanel({ embedded = false, defaultTab
                   {r.status === 'pending' && canApprove && (
                     <>
                       <button onClick={() => act(purchaseRequirementsApi.approve, r.id, 'Approved — sent to Finance')} className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-white bg-emerald-600 rounded hover:bg-emerald-700"><Check size={13} /> Approve</button>
-                      <button onClick={() => act((id) => purchaseRequirementsApi.reject(id, {}), r.id, 'Rejected')} className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-red-600 bg-red-50 rounded hover:bg-red-100"><X size={13} /> Reject</button>
+                      <button onClick={() => { setRejecting(r.id); setRejectReason(''); }} className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-red-600 bg-red-50 rounded hover:bg-red-100"><X size={13} /> Reject</button>
                     </>
                   )}
                   {r.status === 'approved' && canPurchase && (
                     <button onClick={() => act(purchaseRequirementsApi.markPurchased, r.id, 'Marked purchased')} className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-blue-700 bg-blue-50 rounded hover:bg-blue-100"><CheckCircle2 size={13} /> Mark Purchased</button>
                   )}
                 </div>
+                {rejecting === r.id && (
+                  <div className="mt-2 flex items-center justify-end gap-1.5">
+                    <input
+                      autoFocus
+                      value={rejectReason}
+                      onChange={(e) => setRejectReason(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Escape') setRejecting(null); }}
+                      placeholder="Reason for rejecting…"
+                      className="w-56 px-2 py-1 text-xs border border-gray-300 rounded focus:ring-2 focus:ring-red-200 focus:border-red-400"
+                    />
+                    <button
+                      disabled={!rejectReason.trim()}
+                      onClick={async () => {
+                        await act((id) => purchaseRequirementsApi.reject(id, { reason: rejectReason.trim() }), r.id, 'Rejected');
+                        setRejecting(null);
+                      }}
+                      className="px-2 py-1 text-xs font-medium text-white bg-red-600 rounded hover:bg-red-700 disabled:opacity-50"
+                    >Confirm</button>
+                    <button onClick={() => setRejecting(null)} className="px-2 py-1 text-xs text-gray-500 hover:text-gray-700">Cancel</button>
+                  </div>
+                )}
               </td>
             </tr>
           ))}
