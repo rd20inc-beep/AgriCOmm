@@ -236,6 +236,21 @@ function validateExportDoc(doc) {
   return { errors, warnings };
 }
 
+// Compose "port, country" for a document. The discharge port is NOT always in
+// the buyer's country - a Czech buyer routinely takes delivery at Hamburg - so
+// blindly appending buyer.country produced "Hamburg, Czech Republic". When the
+// port field already names its own country (it contains a comma, e.g.
+// "Hamburg, Germany") it is authoritative and nothing is appended.
+function portWithCountry(port, country) {
+  const p = String(port || '').trim();
+  const c = String(country || '').trim();
+  if (!p) return c;
+  if (!c) return p;
+  if (p.includes(',')) return p;
+  if (p.toLowerCase().endsWith(c.toLowerCase())) return p;
+  return `${p}, ${c}`;
+}
+
 // Guarantee an item's description carries its HS code EXACTLY once. The default
 // quality texts already weave the code into the sentence; an operator-written
 // qualityDescription may not, and those documents hide the summary block's HS
@@ -356,7 +371,7 @@ function renderProformaInvoice(doc) {
             </table>
             <table style="border-collapse:collapse; width:100%; margin-top:10px;">
               <tr><td style="${CELL_PAD8_B}">Payment Terms</td><td style="${CELL_PAD8}">${order.paymentTerms}</td></tr>
-              <tr><td style="${CELL_PAD8_B}">Shipment Ports</td><td style="${CELL_PAD8}">${order.destinationPort}, ${buyer.country}</td></tr>
+              <tr><td style="${CELL_PAD8_B}">Shipment Ports</td><td style="${CELL_PAD8}">${portWithCountry(order.destinationPort, buyer.country)}</td></tr>
               <tr><td style="${CELL_PAD8_B}">No. of Containers</td><td style="${CELL_PAD8}">${shipment.containerCount}X${shipment.containerType === '20ft' ? "20'" : "40'"} FCL</td></tr>
             </table>
           </td>
@@ -481,7 +496,7 @@ function commercialInvoiceHtml(doc, opts = {}) {
 
   // Shipment route (loading → discharge).
   const routeFrom = order.portOfLoading || 'Karachi, Pakistan';
-  const routeTo = [order.destinationPort, buyer.country].filter(Boolean).join(', ') || dischargePort;
+  const routeTo = portWithCountry(order.destinationPort, buyer.country) || dischargePort;
 
   // #CI — the "Payment & Banking Details" section was removed from the commercial
   // invoice per client request; the invoice carries only currency + payment term
@@ -869,7 +884,7 @@ function renderGenericDocument(doc) {
         <tr><td style="padding:4px 0; font-weight:bold;">HS Code${distinctHs.length > 1 ? 's' : ''}:</td><td>${distinctHs.length > 0 ? distinctHs.join(', ') : (order.hsCode || '—')}</td></tr>
         <tr><td style="padding:4px 0; font-weight:bold;">Payment Terms:</td><td>${order.paymentTerms}</td></tr>
         <tr><td style="padding:4px 0; font-weight:bold;">Port of Loading:</td><td>${order.portOfLoading}</td></tr>
-        <tr><td style="padding:4px 0; font-weight:bold;">Destination:</td><td>${order.destinationPort}, ${buyer.country}</td></tr>
+        <tr><td style="padding:4px 0; font-weight:bold;">Destination:</td><td>${portWithCountry(order.destinationPort, buyer.country)}</td></tr>
         ${shipment.vesselName ? `<tr><td style="padding:4px 0; font-weight:bold;">Vessel:</td><td>${shipment.vesselName}</td></tr>` : ''}
         ${shipment.blNumber ? `<tr><td style="padding:4px 0; font-weight:bold;">BL Number:</td><td>${shipment.blNumber}</td></tr>` : ''}
         ${shipment.fiNumber ? `<tr><td style="padding:4px 0; font-weight:bold;">F.I. Number:</td><td>${shipment.fiNumber}</td></tr>` : ''}
@@ -1235,7 +1250,7 @@ function renderExportUndertaking(doc) {
   const hsCodes = [...new Set(lines.map((l) => l.hsCode).filter(Boolean))];
   const hs = hsCodes.length > 0 ? hsCodes.join(', ') : (order.hsCode || '—');
   const client = [buyer.name, buyer.country].filter(Boolean).join(', ');
-  const pod = [order.destinationPort, buyer.country].filter(Boolean).join(', ') || '—';
+  const pod = portWithCountry(order.destinationPort, buyer.country) || '—';
   const inc = doc.specific && doc.specific.incotermTerms;
   return `
     <div style="font-family: Arial, sans-serif; font-size:12px; max-width:820px; margin:0 auto; padding:20px; color:#111;">
@@ -1387,7 +1402,7 @@ function renderInvoice(doc) {
       <table style="width:100%; border-collapse:collapse; font-size:12px; margin-bottom:15px;">
         <tr>
           <td style="${CELL_SM_B}">Shipment Port</td>
-          <td style="${CELL_SM}">${order.portOfLoading} to ${order.destinationPort}, ${buyer.country}</td>
+          <td style="${CELL_SM}">${order.portOfLoading} to ${portWithCountry(order.destinationPort, buyer.country)}</td>
         </tr>
         <tr>
           <td style="${CELL_SM_B}">Payment Term</td>
@@ -1457,7 +1472,7 @@ function renderBillOfLading(doc) {
     : withHsCode(order.qualityDescription || '', order.hsCode);
 
   // Place-of-delivery / discharge: avoid leading commas when port is empty.
-  const placeOfDelivery = [order.destinationPort, buyer.country].filter(Boolean).join(', ');
+  const placeOfDelivery = portWithCountry(order.destinationPort, buyer.country);
   const portOfDischarge = order.destinationPort || buyer.country || '';
 
   // Notify party — explicit notify_party_* on order beats buyer fallback.
