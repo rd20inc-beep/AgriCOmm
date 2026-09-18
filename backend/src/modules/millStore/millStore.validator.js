@@ -31,6 +31,11 @@ const updateItemSchema = Joi.object({
   tare_weight_kg: Joi.number().min(0).allow(null).optional(),
   notes: Joi.string().allow(null, '').optional(),
   is_active: Joi.boolean().optional(),
+  // Costing. avg_cost_per_unit values the stock AND prices the export orders'
+  // material-requirement estimates, so it has to be correctable by hand when
+  // no purchase has set it yet.
+  avg_cost_per_unit: Joi.number().min(0).allow(null).optional(),
+  last_purchase_cost: Joi.number().min(0).allow(null).optional(),
 }).min(1);
 
 // Direct, audit-logged stock edit (no approval gate) — sets the on-hand

@@ -1014,9 +1014,22 @@ const exportOrderController = {
       });
 
       emitExportOrderUpdate(result.id, 'created', { status: result.status });
+
+      // Packing materials the mill will have to buy for this order (bags, master
+      // bags, polythene, pallets) become purchase requests straight away, so the
+      // Owner and Mill Manager see them on Purchase Requirements with the most
+      // lead time to buy. Deliberately OUTSIDE the transaction and non-fatal: a
+      // requisition problem must never roll back or fail an accepted order.
+      let materialRequests = [];
+      try {
+        materialRequests = await exportOrderController._raiseMaterialsFor(result, req.user?.id);
+      } catch (mrErr) {
+        console.error('Auto material requirements failed for', result.order_no, mrErr.message);
+      }
+
       return res.status(201).json({
         success: true,
-        data: { order: result },
+        data: { order: result, materialRequests },
       });
     } catch (err) {
       console.error('Export order create error:', err);
@@ -2989,25 +3002,35 @@ const exportOrderController = {
     } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
   },
 
+  // Raise a Purchase Requirement for every short material on an order. Shared by
+  // the manual "raise purchase requests" button and the automatic raise on
+  // create. prService.raise() dedupes on (item_name, linked_ref) while a request
+  // is pending or approved, so calling this twice never doubles up - it only
+  // grows an existing request when the shortage has grown.
+  async _raiseMaterialsFor(order, userId) {
+    const lines = await exportOrderController._materialLines(order);
+    const prService = require('../purchaseRequirements/purchaseRequirements.service');
+    const raised = [];
+    for (const l of lines) {
+      if (!(l.shortage > 0)) continue;
+      const pr = await prService.raise(db, {
+        itemId: l.item_id, itemName: l.item_name, unit: l.unit,
+        qtyNeeded: l.required, availableQty: l.available, shortageQty: l.shortage,
+        estUnitCost: l.est_unit_cost, department: 'Packing', linkedRef: order.order_no,
+        reason: `Proactive material requirement for order ${order.order_no}`, raisedBy: userId || null,
+      });
+      if (pr) raised.push(pr.pr_no);
+    }
+    return raised;
+  },
+
   // Raise a Purchase Requirement for each short material (deduped per item + order).
   async raiseMaterialRequirements(req, res) {
     try {
       const id = await resolveExportOrderId(req.params.id);
       if (!id) return res.status(404).json({ success: false, message: 'Export order not found.' });
       const order = await db('export_orders').where({ id }).first();
-      const lines = await exportOrderController._materialLines(order);
-      const prService = require('../purchaseRequirements/purchaseRequirements.service');
-      const raised = [];
-      for (const l of lines) {
-        if (!(l.shortage > 0)) continue;
-        const pr = await prService.raise(db, {
-          itemId: l.item_id, itemName: l.item_name, unit: l.unit,
-          qtyNeeded: l.required, availableQty: l.available, shortageQty: l.shortage,
-          estUnitCost: l.est_unit_cost, department: 'Packing', linkedRef: order.order_no,
-          reason: `Proactive material requirement for order ${order.order_no}`, raisedBy: req.user?.id || null,
-        });
-        if (pr) raised.push(pr.pr_no);
-      }
+      const raised = await exportOrderController._raiseMaterialsFor(order, req.user?.id);
       return res.json({ success: true, data: { raised, count: raised.length } });
     } catch (err) { console.error('raiseMaterialRequirements error:', err); return res.status(500).json({ success: false, message: err.message }); }
   },
