@@ -2950,70 +2950,13 @@ const exportOrderController = {
     const pt = order.packing_type || 'retail';
     if (pt === 'container' || orderKg <= 0) return [];
     const lines = [];
-    // Does the order call for PRINTED bags? Printed stock is buyer-specific and
-    // is bought through the printed-bag vendor flow, not the mill store, so a
-    // plain order must never be matched to a printed SKU.
-    const wantsPrinted = !!((order.bag_printing || '').trim() || (order.bag_brand || '').trim());
+    // Matching an order's packing spec to a mill-store item lives in ONE place
+    // (millStore/packagingMatch.service) - the export documents resolve the same
+    // items for their tare weights and the two must never disagree.
+    const { matchPackagingItem, wantsPrintedBags } = require('../millStore/packagingMatch.service');
+    const wantsPrinted = wantsPrintedBags(order);
+    const matchStock = (opts) => matchPackagingItem({ ...opts, wantsPrinted });
 
-    // Pick the mill-store item an order line should consume. Several items can
-    // share a capacity (5 kg alone has plain PP, printed BOPP and non-woven), so
-    // candidates are RANKED rather than taking whichever row Postgres returned
-    // first - that was unordered, so the pick was arbitrary AND unstable.
-    //
-    // Ranked on ordered keys, not weighted points: printing intent decides
-    // first (a plain order must never be sent to a printed SKU, whatever its
-    // name looks like), then how well the name matches, then whether any is
-    // actually on the shelf, then id so the result is stable.
-    const nameScore = (name, hint) => {
-      if (!hint) return 0;
-      if (name === hint) return 3;
-      if (name.startsWith(hint)) return 2;
-      // "PP Bag" is a SUBSTRING of "BOPP Bag" - plain substring matching sent a
-      // plain-bag order to the printed SKU. A word-boundary hit ranks above a
-      // loose one, which counts for almost nothing.
-      if (new RegExp(`\\b${hint.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`).test(name)) return 1;
-      return name.includes(hint) ? 0 : -1;
-    };
-    const rankKeys = (r, hint) => {
-      const name = String(r.name || '').toLowerCase();
-      const isPrinted = /print/.test(name);
-      return [
-        isPrinted === wantsPrinted ? 1 : 0,
-        nameScore(name, hint),
-        (parseFloat(r.avail) || 0) > 0 ? 1 : 0,
-      ];
-    };
-    const byRank = (hint) => (a, b) => {
-      const ka = rankKeys(a, hint); const kb = rankKeys(b, hint);
-      for (let i = 0; i < ka.length; i += 1) if (kb[i] !== ka[i]) return kb[i] - ka[i];
-      return a.id - b.id;
-    };
-
-    const matchStock = async ({ capacityKg = null, code = null, materialHint = null }) => {
-      const base = () => db('mill_items as i')
-        .leftJoin('mill_stock as s', function () { this.on('s.item_id', 'i.id').andOnNull('s.warehouse_id'); })
-        .where('i.category', 'packaging')
-        .where('i.is_active', true)
-        .select('i.id', 'i.code', 'i.name', 'i.unit', 'i.avg_cost_per_unit', db.raw('COALESCE(s.quantity_available, 0) as avail'));
-      let rows = [];
-      if (code) rows = await base().where('i.code', code);
-      // One capacity query, then rank - the old code ran a narrowed ILIKE first
-      // and took its first row, which hid the better candidates entirely.
-      if (!rows.length && capacityKg) rows = await base().where('i.capacity_kg', capacityKg);
-      if (!rows.length) return { itemId: null, itemName: null, itemCode: null, unit: 'pcs', cost: null, available: 0, candidates: 0 };
-      const hint = String(materialHint || '').trim().toLowerCase();
-      const ranked = [...rows].sort(byRank(hint));
-      const r = ranked[0];
-      return {
-        itemId: r.id, itemName: r.name, itemCode: r.code, unit: r.unit || 'pcs',
-        cost: r.avg_cost_per_unit != null ? parseFloat(r.avg_cost_per_unit) : null,
-        available: parseFloat(r.avail) || 0,
-        // How many items shared this capacity, so the UI can flag an ambiguous
-        // match rather than silently standing behind one.
-        candidates: rows.length,
-        alternatives: ranked.slice(1, 4).map((x) => `${x.code} — ${x.name}`),
-      };
-    };
     const mk = (label, required, m) => ({
       item_id: m.itemId, item_name: m.itemName || label, item_code: m.itemCode || null,
       candidates: m.candidates || 0, alternatives: m.alternatives || [],

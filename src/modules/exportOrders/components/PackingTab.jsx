@@ -311,19 +311,28 @@ export default function PackingTab({ order, onUpdated }) {
                   placeholder="25" className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
               </div>
               <div>
-                <label className="text-xs text-gray-500 block mb-1">Bag Weight (gm, empty)</label>
-                <input type="number" value={form.bag_weight_gm} onChange={e => setForm({ ...form, bag_weight_gm: e.target.value })}
-                  placeholder="120" className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
-              </div>
-              <div>
                 <label className="text-xs text-gray-500 block mb-1">Master Bag (KG)</label>
                 <input type="number" value={form.master_bag_size_kg} onChange={e => setForm({ ...form, master_bag_size_kg: e.target.value })}
                   placeholder="20" className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
               </div>
+              {/* Tare normally comes from the mill-store item (Stock Overview ▸
+                  Tare kg/bag), which is where the mill records bag weights and
+                  where the packing flow already reads them. These two only
+                  OVERRIDE it for this one order, so they stay blank by default. */}
               <div>
-                <label className="text-xs text-gray-500 block mb-1">Master Bag Weight (gm, empty)</label>
+                <label className="text-xs text-gray-500 block mb-1">Bag Weight override (gm)</label>
+                <input type="number" value={form.bag_weight_gm} onChange={e => setForm({ ...form, bag_weight_gm: e.target.value })}
+                  placeholder="from mill store" className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 block mb-1">Master Bag Weight override (gm)</label>
                 <input type="number" value={form.master_bag_weight_gm} onChange={e => setForm({ ...form, master_bag_weight_gm: e.target.value })}
-                  placeholder="180" className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
+                  placeholder="from mill store" className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
+              </div>
+              <div className="col-span-2">
+                <p className="text-[11px] text-gray-400">
+                  Empty-bag weights come from Mill Store ▸ Stock Overview (Tare kg/bag) and are added to net to give the gross weight on the export documents. Fill these only to override them for this order.
+                </p>
               </div>
               <div>
                 <label className="text-xs text-gray-500 block mb-1">Printing</label>
