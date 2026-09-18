@@ -12,6 +12,7 @@ import {
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import { useMasterDataApprovalsCount } from '../modules/admin/api/queries';
+import { usePurchaseRequirementsCount } from '../modules/purchaseRequirements/api/queries';
 import { RouteErrorBoundary } from './ErrorBoundary';
 import ChatWidget from './ChatWidget';
 import OfflineBanner from './OfflineBanner';
@@ -190,7 +191,7 @@ function SidebarLink({ to, icon: Icon, label, nested, collapsed, onNavigate, bad
   );
 }
 
-function SidebarSection({ item, collapsed, onNavigate, badge = 0 }) {
+function SidebarSection({ item, collapsed, onNavigate, badge = 0, childBadges = {} }) {
   const location = useLocation();
   const isChildActive = item.children?.some((child) =>
     location.pathname === child.to || location.pathname.startsWith(child.to + '/')
@@ -241,6 +242,7 @@ function SidebarSection({ item, collapsed, onNavigate, badge = 0 }) {
               nested
               collapsed={false}
               onNavigate={onNavigate}
+              badge={childBadges[child.label] || 0}
             />
           ))}
         </div>
@@ -259,6 +261,7 @@ export default function Layout({ children }) {
   const { alerts, addToast, entityFilter, setEntityFilter, dismissAlert, dataLoading } = useApp();
   const { user, logout, hasPermission } = useAuth();
   const { data: pendingApprovals = 0 } = useMasterDataApprovalsCount();
+  const { data: pendingPurchaseReqs = 0 } = usePurchaseRequirementsCount();
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -336,7 +339,14 @@ export default function Layout({ children }) {
 
   // Map nav label → notification badge count. The master-data approval queue
   // lives under Admin → Approvals, so surface its pending count on the Admin tab.
-  const navBadges = { Admin: pendingApprovals };
+  // Purchase Requirements is the tenth item inside the Mill group, so a request
+  // raised against an export order was invisible until you went looking. Badge
+  // the group (visible while it is collapsed) AND the item itself.
+  const navBadges = {
+    Admin: pendingApprovals,
+    Mill: pendingPurchaseReqs,
+    'Purchase Requirements': pendingPurchaseReqs,
+  };
 
   const handleSidebarNavigate = () => setSidebarOpen(false);
 
@@ -393,7 +403,7 @@ export default function Layout({ children }) {
                 </div>
               );
             }
-            return <SidebarSection key={item.label} item={item} collapsed={sidebarCollapsed} onNavigate={handleSidebarNavigate} badge={navBadges[item.label] || 0} />;
+            return <SidebarSection key={item.label} item={item} collapsed={sidebarCollapsed} onNavigate={handleSidebarNavigate} badge={navBadges[item.label] || 0} childBadges={navBadges} />;
           })}
         </nav>
 
