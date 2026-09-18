@@ -281,6 +281,11 @@ function docSummaryBlock(doc, opts = {}) {
   const net = (totals && totals.netWeightKg) || 0;
   const gross = (totals && totals.grossWeightKg) || net;
   const pkgs = (totals && totals.totalPackages) || 0;
+  // Packages the carrier receives: the master bags when retail bags travel
+  // inside them, with the retail count as the make-up. Same rule as the
+  // Commercial Invoice's own totals block.
+  const masterCount = (totals && parseInt(totals.masterBagCount, 10)) || 0;
+  const masterSize = parseFloat(order.masterBagSizeKg) || 0;
   const lines = buildLineItems(doc);
   const totalAmt = opts.amount != null ? opts.amount
     : (lines.reduce((s, l) => s + (l.amount || 0), 0) || parseFloat(order.contractValue) || 0);
@@ -296,6 +301,9 @@ function docSummaryBlock(doc, opts = {}) {
     <div style="margin-top:2px;font-style:italic;font-size:12px;"><strong>Total Amount in ${curShort}:</strong> ${amountInWords(totalAmt, cur)}</div>`;
   }
   const packLabel = opts.packLabel || order.packagesLabel || 'Bags';
+  const packagesText = masterCount > 0
+    ? `${masterCount.toLocaleString()} Master Bags of ${masterSize} KG (${pkgs.toLocaleString()} retail ${packLabel.toLowerCase()})`
+    : `${pkgs.toLocaleString()} ${packLabel}`;
   const L = 'border:1px solid #333;padding:3px 7px;font-weight:bold;white-space:nowrap;background:#f7f7f7;';
   const V = 'border:1px solid #333;padding:3px 7px;';
   // The amount cell spans whatever rows actually render, so dropping the HS row
@@ -310,10 +318,10 @@ function docSummaryBlock(doc, opts = {}) {
         <td style="${L}width:20%;">HS Code</td><td style="${V}">${hsText}</td>
         ${amountCell}
       </tr>
-      <tr><td style="${L}">Total Packages</td><td style="${V}">${pkgs.toLocaleString()} ${packLabel}</td></tr>
+      <tr><td style="${L}">Total Packages</td><td style="${V}">${packagesText}</td></tr>
       ` : `
       <tr>
-        <td style="${L}width:20%;">Total Packages</td><td style="${V}">${pkgs.toLocaleString()} ${packLabel}</td>
+        <td style="${L}width:20%;">Total Packages</td><td style="${V}">${packagesText}</td>
         ${amountCell}
       </tr>
       `}
@@ -486,6 +494,18 @@ function commercialInvoiceHtml(doc, opts = {}) {
   const netKg = (totals && totals.netWeightKg) || (parseFloat(order.qtyMT) || 0) * 1000;
   const grossKg = (totals && totals.grossWeightKg) || netKg;
   const totalPackages = (totals && totals.totalPackages) || totalBags || 0;
+  // Packages = what the carrier actually receives. When retail bags travel
+  // inside master bags, the masters are the packages; the retail count is
+  // already on every item line, so it is shown as the make-up rather than as
+  // the headline figure.
+  const masterBagCount = (totals && parseInt(totals.masterBagCount, 10)) || 0;
+  const masterBagSizeKg = parseFloat(order.masterBagSizeKg) || 0;
+  const packagesText = masterBagCount > 0
+    ? `${masterBagCount.toLocaleString()} Master Bags of ${masterBagSizeKg} KG (${(totalPackages || 0).toLocaleString()} retail bags)`
+    : `${(totalPackages || 0).toLocaleString()} Bags`;
+  // Ordered quantity vs packed net: equal on a normal shipment, so only worth
+  // printing separately when they actually differ (tolerance = 1 kg).
+  const quantityDiffersFromNet = Math.abs((totalQtyMT * 1000) - netKg) > 1;
   // Named fmtWeight, not fmtKg: renderPackingList has its own fmtKg with a
   // different output format ("486,750.00" vs "486,750 KG (486.750 MT)").
   const fmtWeight = (kg) => `${(parseFloat(kg) || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })} KG (${((parseFloat(kg) || 0) / 1000).toFixed(3)} MT)`;
@@ -612,7 +632,14 @@ function commercialInvoiceHtml(doc, opts = {}) {
       ${opts.originBox || ''}
 
       <table style="width:100%; border-collapse:collapse; margin-top:6px; font-size:12px;">
-        ${infoRow('Total Quantity', `${fmtMt(totalQtyMT)} MT`, 'Total Packages', `${(totalPackages || 0).toLocaleString()} Bags`)}
+        <!-- Total Quantity is only shown when it DIFFERS from the net weight.
+             Ordered quantity and packed net are the same number on a normal
+             shipment, so printing both just said 24.000 MT twice; they part
+             company only when the packed net was weighed and came out short or
+             over, which is exactly when the difference is worth seeing. -->
+        ${quantityDiffersFromNet
+          ? infoRow('Total Quantity (ordered)', `${fmtMt(totalQtyMT)} MT`, 'Total Packages', packagesText)
+          : `<tr><td style="${cellL} width:19%;">Total Packages</td><td colspan="3" style="${cellV}">${packagesText}</td></tr>`}
         ${infoRow('Total Net Weight', fmtWeight(netKg), 'Total Gross Weight', fmtWeight(grossKg))}
         <tr>
           <td style="${cellL} width:19%;">Total Invoice Amount</td>
