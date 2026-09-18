@@ -8,6 +8,7 @@ import { useMillStoreItems, useMillStoreSummary, useSetMillStock, useUpdateMillS
 import { useBankAccounts } from '../../../api/queries';
 import NewPurchaseDrawer from '../../../components/NewPurchaseDrawer';
 import SlideDrawer from '../../../components/SlideDrawer';
+import SupplierPicker from '../../../components/SupplierPicker';
 import { useApp } from '../../../context/AppContext';
 import { favStar } from '../../../shared/utils/favorites';
 
@@ -371,7 +372,7 @@ function PurchasePaymentsCard() {
 }
 
 function StockEditDrawer({ item, onClose }) {
-  const { addToast } = useApp();
+  const { addToast, suppliersList } = useApp();
   const setStock = useSetMillStock();
   const updateItem = useUpdateMillStoreItem();
   const [form, setForm] = useState(null);
@@ -383,33 +384,60 @@ function StockEditDrawer({ item, onClose }) {
       reorder_level: String(Number(item.reorder_level) || 0),
       capacity_kg: item.capacity_kg != null ? String(item.capacity_kg) : '',
       tare_weight_kg: item.tare_weight_kg != null ? String(item.tare_weight_kg) : '',
+      avg_cost_per_unit: item.avg_cost_per_unit != null ? String(item.avg_cost_per_unit) : '',
+      last_purchase_cost: item.last_purchase_cost != null ? String(item.last_purchase_cost) : '',
+      preferred_supplier_id: item.preferred_supplier_id ? String(item.preferred_supplier_id) : '',
+      category: item.category || 'packaging',
+      subcategory: item.subcategory || '',
+      unit: item.unit || 'piece',
+      is_active: item.is_active !== false,
+      notes: item.notes || '',
       reason: '',
     });
   }, [item]);
 
   if (!item || !form) return null;
-  const isPackaging = item.category === 'packaging';
+  const isPackaging = form.category === 'packaging';
   const saving = setStock.isPending || updateItem.isPending;
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
+
+  // Only send what actually changed - updateItemSchema is .min(1) and a no-op
+  // PUT would fail validation.
+  const numOrNull = (v) => (v === '' ? null : parseFloat(v));
+  const asNum = (v) => (v == null ? null : Number(v));
 
   async function save() {
     try {
       const newQty = parseFloat(form.quantity);
       if (Number.isNaN(newQty) || newQty < 0) { addToast('Enter a valid quantity.', 'error'); return; }
 
-      // Master fields (reorder + bag weights) — only send what changed.
-      const itemPatch = {};
+      const patch = {};
       const reorder = parseFloat(form.reorder_level);
-      if (!Number.isNaN(reorder) && reorder !== Number(item.reorder_level)) itemPatch.reorder_level = reorder;
-      if (isPackaging) {
-        const cap = form.capacity_kg === '' ? null : parseFloat(form.capacity_kg);
-        const tare = form.tare_weight_kg === '' ? null : parseFloat(form.tare_weight_kg);
-        if (cap !== (item.capacity_kg == null ? null : Number(item.capacity_kg))) itemPatch.capacity_kg = cap;
-        if (tare !== (item.tare_weight_kg == null ? null : Number(item.tare_weight_kg))) itemPatch.tare_weight_kg = tare;
-      }
-      if (Object.keys(itemPatch).length) await updateItem.mutateAsync({ id: item.id, data: itemPatch });
+      if (!Number.isNaN(reorder) && reorder !== Number(item.reorder_level)) patch.reorder_level = reorder;
 
-      // Direct stock set if quantity changed.
+      if (isPackaging) {
+        const cap = numOrNull(form.capacity_kg);
+        const tare = numOrNull(form.tare_weight_kg);
+        if (cap !== asNum(item.capacity_kg)) patch.capacity_kg = cap;
+        if (tare !== asNum(item.tare_weight_kg)) patch.tare_weight_kg = tare;
+      }
+
+      const avg = numOrNull(form.avg_cost_per_unit);
+      const lastCost = numOrNull(form.last_purchase_cost);
+      if (avg !== asNum(item.avg_cost_per_unit)) patch.avg_cost_per_unit = avg;
+      if (lastCost !== asNum(item.last_purchase_cost)) patch.last_purchase_cost = lastCost;
+
+      const supplierId = form.preferred_supplier_id ? Number(form.preferred_supplier_id) : null;
+      if (supplierId !== (item.preferred_supplier_id || null)) patch.preferred_supplier_id = supplierId;
+
+      if (form.category !== item.category) patch.category = form.category;
+      if ((form.subcategory || '') !== (item.subcategory || '')) patch.subcategory = form.subcategory || null;
+      if (form.unit !== item.unit) patch.unit = form.unit;
+      if (form.is_active !== (item.is_active !== false)) patch.is_active = form.is_active;
+      if ((form.notes || '') !== (item.notes || '')) patch.notes = form.notes || null;
+
+      if (Object.keys(patch).length) await updateItem.mutateAsync({ id: item.id, data: patch });
+
       if (newQty !== Number(item.quantity_available)) {
         await setStock.mutateAsync({ id: item.id, data: { quantity_available: newQty, reason: form.reason || null } });
       }
@@ -422,6 +450,11 @@ function StockEditDrawer({ item, onClose }) {
 
   const lbl = 'block text-xs font-medium text-gray-600 mb-1';
   const inp = 'w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500';
+  const section = 'text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-2';
+
+  const qty = parseFloat(form.quantity) || 0;
+  const unitCost = parseFloat(form.avg_cost_per_unit) || 0;
+  const stockValue = qty * unitCost;
 
   return (
     <SlideDrawer
@@ -439,24 +472,79 @@ function StockEditDrawer({ item, onClose }) {
         </div>
       }
     >
-      <div className="space-y-4">
+      <div className="space-y-5">
         <div>
-          <label className={lbl}>On-hand quantity ({item.unit})</label>
-          <input type="number" min="0" step="0.01" value={form.quantity} onChange={(e) => set('quantity', e.target.value)} className={inp} />
+          <p className={section}>Stock</p>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={lbl}>On-hand ({form.unit})</label>
+              <input type="number" min="0" step="0.01" value={form.quantity} onChange={(e) => set('quantity', e.target.value)} className={inp} />
+            </div>
+            <div>
+              <label className={lbl}>Reorder level</label>
+              <input type="number" min="0" step="0.01" value={form.reorder_level} onChange={(e) => set('reorder_level', e.target.value)} className={inp} />
+            </div>
+          </div>
+          <label className={`${lbl} mt-3`}>Reason for change (optional)</label>
+          <input value={form.reason} onChange={(e) => set('reason', e.target.value)} className={inp} placeholder="e.g. physical count correction" />
           <p className="text-[11px] text-gray-400 mt-1">Sets stock directly — change is logged to the movement ledger.</p>
         </div>
-        <div>
-          <label className={lbl}>Reason for change (optional)</label>
-          <input value={form.reason} onChange={(e) => set('reason', e.target.value)} className={inp} placeholder="e.g. physical count correction" />
+
+        {/* Costing — what values this stock and what prices the purchase
+            requests raised for export orders. */}
+        <div className="border-t border-gray-200 pt-4">
+          <p className={section}>Pricing</p>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={lbl}>Cost per {form.unit} (Rs)</label>
+              <input type="number" min="0" step="0.0001" value={form.avg_cost_per_unit} onChange={(e) => set('avg_cost_per_unit', e.target.value)} className={inp} placeholder="0.00" />
+            </div>
+            <div>
+              <label className={lbl}>Last purchase cost (Rs)</label>
+              <input type="number" min="0" step="0.0001" value={form.last_purchase_cost} onChange={(e) => set('last_purchase_cost', e.target.value)} className={inp} placeholder="0.00" />
+            </div>
+          </div>
+          <p className="text-[11px] text-gray-400 mt-1">
+            Cost per unit values the stock and prices the purchase requests raised for export orders.
+            {stockValue > 0 && <> Current stock value: <span className="font-medium text-gray-600">Rs {stockValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>.</>}
+          </p>
+          <label className={`${lbl} mt-3`}>Preferred supplier</label>
+          <SupplierPicker
+            value={form.preferred_supplier_id}
+            onChange={(v) => set('preferred_supplier_id', v || '')}
+            suppliers={suppliersList || []}
+            addToast={addToast}
+            placeholder="Search supplier (or + Add new)…"
+          />
         </div>
-        <div>
-          <label className={lbl}>Reorder level</label>
-          <input type="number" min="0" step="0.01" value={form.reorder_level} onChange={(e) => set('reorder_level', e.target.value)} className={inp} />
+
+        <div className="border-t border-gray-200 pt-4">
+          <p className={section}>Classification</p>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={lbl}>Category</label>
+              <select value={form.category} onChange={(e) => set('category', e.target.value)} className={inp}>
+                {['packaging', 'operational', 'fuel', 'maintenance'].map((c) => (
+                  <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className={lbl}>Unit</label>
+              <select value={form.unit} onChange={(e) => set('unit', e.target.value)} className={inp}>
+                {['piece', 'kg', 'liter', 'meter', 'roll', 'bag', 'box', 'set'].map((u) => (
+                  <option key={u} value={u}>{u}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <label className={`${lbl} mt-3`}>Subcategory</label>
+          <input value={form.subcategory} onChange={(e) => set('subcategory', e.target.value)} className={inp} placeholder="e.g. retail bag, master bag" />
         </div>
 
         {isPackaging && (
           <div className="border-t border-gray-200 pt-4">
-            <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-2">Bag weights</p>
+            <p className={section}>Bag weights</p>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className={lbl}>Capacity (kg/bag)</label>
@@ -470,7 +558,18 @@ function StockEditDrawer({ item, onClose }) {
             <p className="text-[11px] text-gray-400 mt-1">Capacity = rice a bag holds; tare = empty-bag weight. Used when packing a batch.</p>
           </div>
         )}
+
+        <div className="border-t border-gray-200 pt-4">
+          <p className={section}>Other</p>
+          <label className="flex items-center gap-2 text-sm text-gray-700">
+            <input type="checkbox" checked={form.is_active} onChange={(e) => set('is_active', e.target.checked)} className="rounded border-gray-300" />
+            Active — uncheck to retire this item from pickers without deleting it
+          </label>
+          <label className={`${lbl} mt-3`}>Notes</label>
+          <textarea value={form.notes} onChange={(e) => set('notes', e.target.value)} rows={2} className={inp} placeholder="Optional" />
+        </div>
       </div>
     </SlideDrawer>
   );
 }
+
