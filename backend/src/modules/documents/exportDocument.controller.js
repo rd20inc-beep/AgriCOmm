@@ -214,13 +214,29 @@ const exportDocumentController = {
       const netWeightKg = containerNetKg
         || (packingWeight && parseFloat(packingWeight.packed_net_rice_kg))
         || (parseFloat(order.qty_mt) || 0) * 1000;
-      const grossWeightKg = containerGrossKg
-        || (packingWeight && parseFloat(packingWeight.gross_weight_kg))
-        || netWeightKg;
       const totalPackages = containers.reduce((s, c) => s + (c.bags_count || 0), 0)
         || order.total_bags
         || (items || []).reduce((s, it) => s + (parseInt(it.bag_count) || 0), 0)
         || 0;
+
+      // Packaging tare — the ONE place it is worked out, so every document
+      // quotes the same gross. Retail bags plus, where the retail bags travel
+      // inside master bags, the outer bags too: a 24 MT order of 5 KG retail
+      // bags in 20 KG masters carries 4,800 inner AND 1,200 outer bags, and
+      // gross used to count neither. Weighed containers or a packing-weight
+      // record still win over this estimate.
+      const retailBagSizeKg = parseFloat(order.bag_size_kg) || 0;
+      const masterBagSizeKg = parseFloat(order.master_bag_size_kg) || 0;
+      const masterBagCount = masterBagSizeKg > 0
+        ? Math.ceil(netWeightKg / masterBagSizeKg)
+        : 0;
+      const bagTareKg = ((parseFloat(order.bag_weight_gm) || 0) * totalPackages) / 1000;
+      const masterBagTareKg = ((parseFloat(order.master_bag_weight_gm) || 0) * masterBagCount) / 1000;
+      const packagingTareKg = bagTareKg + masterBagTareKg;
+
+      const grossWeightKg = containerGrossKg
+        || (packingWeight && parseFloat(packingWeight.gross_weight_kg))
+        || (netWeightKg + packagingTareKg);
 
       // Company bank block from the resolved account — UNMASKED here. Masking
       // is applied per-viewer at response time (below) so a stored draft
@@ -286,6 +302,15 @@ const exportDocumentController = {
           bagSizeKg: parseFloat(order.bag_size_kg) || 50,
           bagType: order.bag_type || 'PP',
           bagQuality: order.bag_quality || '',
+          // Master (outer) bag — retail packing sends 5 KG bags inside 20 KG
+          // masters, and the documents have to state both or the buyer cannot
+          // tell how the pallet arrives. bagWeightGm / masterBagWeightGm are the
+          // tare figures behind totals.packagingTareKg.
+          masterBagSizeKg: parseFloat(order.master_bag_size_kg) || 0,
+          masterBagType: order.master_bag_type || '',
+          unitsPerBag: parseInt(order.units_per_bag, 10) || 0,
+          bagWeightGm: parseFloat(order.bag_weight_gm) || 0,
+          masterBagWeightGm: parseFloat(order.master_bag_weight_gm) || 0,
           pricePerMT: parseFloat(order.price_per_mt) || 0,
           currency: order.currency || 'USD',
           contractValue: parseFloat(order.contract_value) || 0,
@@ -369,6 +394,13 @@ const exportDocumentController = {
           grossWeightKg,
           grossWeightMT: grossWeightKg / 1000,
           netWeightMT: netWeightKg / 1000,
+          // Packaging breakdown behind the gross, so a renderer never has to
+          // re-derive a tare of its own (they used to, and disagreed).
+          masterBagCount,
+          bagTareKg,
+          masterBagTareKg,
+          packagingTareKg,
+          tareKg: Math.max(grossWeightKg - netWeightKg, 0),
         },
 
         // Packing

@@ -304,7 +304,7 @@ const ALLOWED_UPDATE_FIELDS = [
   'shipment_eta', 'source', 'notes',
   'bag_type', 'bag_quality', 'bag_size_kg', 'bag_weight_gm',
   'bag_printing', 'bag_color', 'bag_brand', 'bag_notes',
-  'master_bag_size_kg', 'master_bag_type',
+  'master_bag_size_kg', 'master_bag_type', 'master_bag_weight_gm',
   'bag_material', 'packing_type', 'palletized',
   'receiving_mode', 'quantity_unit', 'packing_notes',
   'packing_lines', 'doc_address_mode',
@@ -337,7 +337,7 @@ function packingCapacityError(qtyMt, palletized, packingType) {
 const NUMERIC_UPDATE_FIELDS = new Set([
   'qty_mt', 'price_per_mt', 'advance_pct',
   'bag_size_kg', 'bag_weight_gm', 'broken_pct_target',
-  'master_bag_size_kg',
+  'master_bag_size_kg', 'master_bag_weight_gm',
 ]);
 const DATE_UPDATE_FIELDS = new Set([
   'shipment_eta', 'production_date', 'expiry_date',
@@ -737,6 +737,7 @@ const exportOrderController = {
         bag_notes,
         master_bag_size_kg,
         master_bag_type,
+        master_bag_weight_gm,
         // Batch 7 — structured packing spec
         bag_material,
         packing_type,
@@ -850,6 +851,7 @@ const exportOrderController = {
             bag_notes: bag_notes || null,
             master_bag_size_kg: master_bag_size_kg ? parseFloat(master_bag_size_kg) : null,
             master_bag_type: master_bag_type || null,
+            master_bag_weight_gm: master_bag_weight_gm ? parseFloat(master_bag_weight_gm) : null,
             // Batch 7 — structured packing spec
             bag_material: bag_material || null,
             packing_type: ['retail', 'jumbo', 'container'].includes(packing_type) ? packing_type : 'retail',

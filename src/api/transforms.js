@@ -190,6 +190,7 @@ export function transformOrder(dbOrder) {
     bagBrand: dbOrder.bag_brand || '',
     masterBagSizeKg: dbOrder.master_bag_size_kg ? parseFloat(dbOrder.master_bag_size_kg) : null,
     masterBagType: dbOrder.master_bag_type || '',
+    masterBagWeightGm: dbOrder.master_bag_weight_gm ? parseFloat(dbOrder.master_bag_weight_gm) : null,
     unitsPerBag: dbOrder.units_per_bag ? parseInt(dbOrder.units_per_bag) : null,
     bagNotes: dbOrder.bag_notes || '',
     // Batch 7 — structured packing spec

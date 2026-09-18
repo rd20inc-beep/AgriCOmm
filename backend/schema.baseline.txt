@@ -687,6 +687,7 @@ COL export_orders.invoice_number:character varying:NULL
 COL export_orders.local_ts:timestamp with time zone:NULL
 COL export_orders.master_bag_size_kg:numeric:NULL
 COL export_orders.master_bag_type:character varying:NULL
+COL export_orders.master_bag_weight_gm:numeric:NULL
 COL export_orders.milling_order_id:integer:NULL
 COL export_orders.notes:text:NULL
 COL export_orders.notify_party_address:text:NULL
