@@ -230,8 +230,22 @@ const exportDocumentController = {
       const masterBagCount = masterBagSizeKg > 0
         ? Math.ceil(netWeightKg / masterBagSizeKg)
         : 0;
-      const bagTareKg = ((parseFloat(order.bag_weight_gm) || 0) * totalPackages) / 1000;
-      const masterBagTareKg = ((parseFloat(order.master_bag_weight_gm) || 0) * masterBagCount) / 1000;
+      // Per-bag tare, in KG. The order's own gram fields win when set, but the
+      // weights normally live ONCE on the mill-store item (mill_items.
+      // tare_weight_kg, in kg - where the mill already records them and where
+      // the packing flow reads them), resolved through the same matcher the
+      // material requirements use. Asking for the same fact again per order is
+      // what left gross equal to net while the weights sat filled in already.
+      const { resolveOrderPackaging } = require('../millStore/packagingMatch.service');
+      const packagingItems = await resolveOrderPackaging(order);
+      const bagTarePerUnitKg = order.bag_weight_gm != null
+        ? (parseFloat(order.bag_weight_gm) || 0) / 1000
+        : (packagingItems.retail.tareKg || 0);
+      const masterTarePerUnitKg = order.master_bag_weight_gm != null
+        ? (parseFloat(order.master_bag_weight_gm) || 0) / 1000
+        : (packagingItems.master.tareKg || 0);
+      const bagTareKg = bagTarePerUnitKg * totalPackages;
+      const masterBagTareKg = masterTarePerUnitKg * masterBagCount;
       const packagingTareKg = bagTareKg + masterBagTareKg;
 
       const grossWeightKg = containerGrossKg
@@ -400,6 +414,12 @@ const exportDocumentController = {
           bagTareKg,
           masterBagTareKg,
           packagingTareKg,
+          // Per-bag figures and which item they came from, so a document (or a
+          // reader wondering why gross moved) can show the basis.
+          bagTarePerUnitKg,
+          masterTarePerUnitKg,
+          bagItemCode: packagingItems.retail.itemCode,
+          masterItemCode: packagingItems.master.itemCode,
           tareKg: Math.max(grossWeightKg - netWeightKg, 0),
         },
 
