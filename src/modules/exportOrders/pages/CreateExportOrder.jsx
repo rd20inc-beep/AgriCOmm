@@ -101,7 +101,7 @@ export default function CreateExportOrder() {
     receivingMode: '',
     // Section 6: Bag spec (shown only when receiving mode needs it)
     bagType: '', bagQuality: '', bagSizeKg: '25', bagWeightGm: '', bagPrinting: '', bagColor: '', bagBrand: '',
-    masterBagSizeKg: '', masterBagType: '',
+    masterBagSizeKg: '', masterBagType: '', masterBagWeightGm: '',
     // Batch 7: structured packing spec + palletization
     packingType: 'retail', bagMaterial: '', palletized: false, palletCost: '',
     // Section 7: Contract & Product Specs (for document generation)
@@ -326,6 +326,9 @@ export default function CreateExportOrder() {
       payload.bag_brand = form.bagBrand || null;
       payload.total_bags = singleBagCount || null;
       payload.master_bag_size_kg = form.masterBagSizeKg ? parseFloat(form.masterBagSizeKg) : null;
+      // Empty-master-bag tare; entered on the order's Packing tab, carried here
+      // so a value set before save is not dropped. Feeds the documents' gross.
+      payload.master_bag_weight_gm = form.masterBagWeightGm ? parseFloat(form.masterBagWeightGm) : null;
       // Retail bags packed per master bag (e.g. 20kg master ÷ 2kg retail = 10).
       payload.units_per_bag = (requiresMasterBag(form.bagSizeKg) && form.masterBagSizeKg && form.bagSizeKg)
         ? Math.floor(parseFloat(form.masterBagSizeKg) / (parseFloat(form.bagSizeKg) || 1)) : null;

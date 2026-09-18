@@ -46,6 +46,7 @@ export default function PackingTab({ order, onUpdated }) {
     color: order.bagColor || order.bag_color || '',
     brand: order.bagBrand || order.bag_brand || '',
     masterKg: order.masterBagSizeKg || order.master_bag_size_kg || '',
+    masterWeightGm: order.masterBagWeightGm || order.master_bag_weight_gm || '',
   };
   const receivingMode = order.receivingMode || order.receiving_mode || '';
   const totalBags = order.totalBags || order.total_bags || 0;
@@ -54,6 +55,12 @@ export default function PackingTab({ order, onUpdated }) {
   const masterKg = parseFloat(bagSpec.masterKg) || 0;
   const masterBagCount = masterKg > 0 ? Math.ceil(orderKg / masterKg) : 0;
   const retailPerMaster = (masterKg > 0 && parseFloat(bagSpec.sizeKg) > 0) ? Math.floor(masterKg / parseFloat(bagSpec.sizeKg)) : 0;
+  // What the documents add to net to reach gross: every retail bag plus every
+  // master bag it travels inside. Mirrors the server's totals.packagingTareKg
+  // (exportDocument.controller.js) — shown here so the figure is visible where
+  // it is entered rather than only on a printed document.
+  const tareKg = ((parseFloat(bagSpec.weightGm) || 0) * totalBags
+    + (parseFloat(bagSpec.masterWeightGm) || 0) * masterBagCount) / 1000;
   const packingNotes = order.packingNotes || order.packing_notes || '';
   const packingLines = order.packingLines || order.packing_lines || [];
   // Per-item packing (multi-product P.I.) — each line can carry its own bag.
@@ -74,6 +81,7 @@ export default function PackingTab({ order, onUpdated }) {
     setForm({
       bag_type: bagSpec.type, bag_quality: bagSpec.quality,
       bag_size_kg: bagSpec.sizeKg, bag_weight_gm: bagSpec.weightGm,
+      master_bag_size_kg: bagSpec.masterKg, master_bag_weight_gm: bagSpec.masterWeightGm,
       bag_printing: bagSpec.printing, bag_color: bagSpec.color, bag_brand: bagSpec.brand,
       receiving_mode: receivingMode, packing_notes: packingNotes,
       packing_lines: packingLines.length > 0
@@ -162,7 +170,9 @@ export default function PackingTab({ order, onUpdated }) {
                     {bagSpec.sizeKg && <div><p className="text-xs text-gray-500">Bag Size</p><p className="text-sm font-medium">{bagSpec.sizeKg} KG</p></div>}
                     {masterKg > 0 && <div><p className="text-xs text-gray-500">Master Bag</p><p className="text-sm font-medium">{masterKg} KG{retailPerMaster > 0 ? ` (${retailPerMaster} × ${bagSpec.sizeKg}kg)` : ''}</p></div>}
                     {masterBagCount > 0 && <div><p className="text-xs text-gray-500">Master Bags</p><p className="text-sm font-medium text-amber-700">{masterBagCount.toLocaleString()}</p></div>}
-                    {bagSpec.weightGm && <div><p className="text-xs text-gray-500">Bag Weight</p><p className="text-sm font-medium">{bagSpec.weightGm} gm</p></div>}
+                    {bagSpec.weightGm && <div><p className="text-xs text-gray-500">Bag Weight (empty)</p><p className="text-sm font-medium">{bagSpec.weightGm} gm</p></div>}
+                    {bagSpec.masterWeightGm && <div><p className="text-xs text-gray-500">Master Bag Weight (empty)</p><p className="text-sm font-medium">{bagSpec.masterWeightGm} gm</p></div>}
+                    {tareKg > 0 && <div><p className="text-xs text-gray-500">Packaging Tare</p><p className="text-sm font-medium text-amber-700" title="Added to net weight to give the gross weight printed on the export documents">{tareKg.toLocaleString(undefined, { maximumFractionDigits: 3 })} KG</p></div>}
                     {bagSpec.printing && <div><p className="text-xs text-gray-500">Printing</p><p className="text-sm font-medium">{bagSpec.printing}</p></div>}
                     {bagSpec.color && <div><p className="text-xs text-gray-500">Color</p><p className="text-sm font-medium">{bagSpec.color}</p></div>}
                     {bagSpec.brand && <div><p className="text-xs text-gray-500">Brand / Mark</p><p className="text-sm font-medium">{bagSpec.brand}</p></div>}
@@ -301,9 +311,19 @@ export default function PackingTab({ order, onUpdated }) {
                   placeholder="25" className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
               </div>
               <div>
-                <label className="text-xs text-gray-500 block mb-1">Bag Weight (gm)</label>
+                <label className="text-xs text-gray-500 block mb-1">Bag Weight (gm, empty)</label>
                 <input type="number" value={form.bag_weight_gm} onChange={e => setForm({ ...form, bag_weight_gm: e.target.value })}
                   placeholder="120" className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 block mb-1">Master Bag (KG)</label>
+                <input type="number" value={form.master_bag_size_kg} onChange={e => setForm({ ...form, master_bag_size_kg: e.target.value })}
+                  placeholder="20" className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 block mb-1">Master Bag Weight (gm, empty)</label>
+                <input type="number" value={form.master_bag_weight_gm} onChange={e => setForm({ ...form, master_bag_weight_gm: e.target.value })}
+                  placeholder="180" className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
               </div>
               <div>
                 <label className="text-xs text-gray-500 block mb-1">Printing</label>

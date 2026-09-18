@@ -52,6 +52,9 @@ const createExportOrder = Joi.object({
   // they only persist on a later edit. See [[project_validation_stripunknown]].
   master_bag_size_kg: Joi.number().positive().allow(null, ''),
   master_bag_type: Joi.string().max(100).allow('', null),
+  // Tare of one EMPTY master bag, in grams. With bag_weight_gm it is what the
+  // documents add to net to reach a gross the shipping line would agree with.
+  master_bag_weight_gm: Joi.number().min(0).allow(null, ''),
   // Batch 7 — structured packing spec (material + packing type + palletized).
   bag_material: Joi.string().valid('Polythene', 'Woven', 'Non-Woven', 'Cotton').allow('', null),
   packing_type: Joi.string().valid('retail', 'jumbo', 'container').default('retail'),
