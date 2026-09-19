@@ -10,6 +10,9 @@ export const documentsApi = {
   finalize: (id) => api.put(`/api/documents/${id}/finalize`),
   getByRef: (type, id) => api.get(`/api/documents/ref/${type}/${id}`),
   download: (id, filename) => api.download(`/api/documents/${id}/download`, filename),
+  // Same endpoint, opened in a tab rather than saved — a stored document should
+  // be viewable without downloading it first.
+  open: (id, filename) => api.open(`/api/documents/${id}/download`, filename),
   checklist: (type, id) => api.get(`/api/documents/checklist/${type}/${id}`),
   missingDocs: (type, id) => api.get(`/api/documents/checklist/${type}/${id}/missing`),
   dispatch: (id, data) => api.post(`/api/documents/${id}/dispatch`, data),

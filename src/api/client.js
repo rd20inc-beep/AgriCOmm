@@ -307,6 +307,39 @@ async function downloadFile(endpoint, filename) {
   saveBlob(blob, fallbackName());
 }
 
+// Authenticated OPEN-IN-TAB. Same fetch as a download (the endpoint needs the
+// bearer token, so a plain <a href> cannot reach it), but the blob is handed to
+// a new tab instead of the save dialog — you should be able to LOOK at a stored
+// document without first downloading it. Returns false when the browser blocked
+// the popup, so the caller can fall back to saving.
+async function openFile(endpoint, filename) {
+  if (!isOnline()) {
+    const cached = await getCachedDownload(endpoint);
+    if (!cached?.blob) throw new ApiError('This document is not available offline. Open it once online first.', 0);
+    return openBlob(cached.blob);
+  }
+  const token = getToken();
+  const headers = {};
+  if (token && token !== 'mock-prototype-token') headers['Authorization'] = `Bearer ${token}`;
+  const res = await fetch(`${API_BASE}${endpoint}`, { headers });
+  markServerOnline();
+  if (!res.ok) {
+    const data = await res.json().catch(() => null);
+    throw new ApiError(data?.message || 'Could not open document', res.status, data);
+  }
+  const blob = await res.blob();
+  cacheDownload(endpoint, blob, filename);
+  return openBlob(blob);
+}
+
+function openBlob(blob) {
+  const url = URL.createObjectURL(blob);
+  const win = window.open(url, '_blank', 'noopener');
+  // Revoke late: too early and the new tab never finishes loading the blob.
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+  return !!win;
+}
+
 // Authenticated download via POST (the request carries a large body — e.g. the
 // document HTML to render server-side to a PDF — so it can't be a GET link).
 // Fetches the response as a blob and triggers a browser save.
@@ -350,6 +383,7 @@ const api = {
   delete: (endpoint) => request(endpoint, { method: 'DELETE' }),
   upload: uploadFile,
   download: downloadFile,
+  open: openFile,
   downloadPost: downloadFilePost,
 };
 

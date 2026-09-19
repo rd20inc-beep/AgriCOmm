@@ -889,7 +889,19 @@ export default function ExportOrderDetail() {
         {activeTab === 'printedBags' && <PrintedBagsTab order={order} onUpdated={invalidateOrder} />}
         {activeTab === 'documents' && (
           <>
-            <DocumentsTab order={order} onUpload={handleDocumentUpload} onApprove={handleDocumentApprove} onPreviewInvoice={() => setShowInvoicePreview(true)} />
+            <DocumentsTab
+              order={order}
+              onUpload={handleDocumentUpload}
+              onApprove={handleDocumentApprove}
+              // The checklist's Preview passes WHICH document it wants. Only the
+              // invoice has a modal of its own; the Packing List and COO are
+              // rendered by the Document Center below, so send the reader there
+              // rather than opening the invoice for all three.
+              onPreviewInvoice={(docKey) => {
+                if (!docKey || docKey === 'invoice') { setShowInvoicePreview(true); return; }
+                document.getElementById('export-document-center')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              }}
+            />
             <DocumentCenter order={order} />
           </>
         )}
