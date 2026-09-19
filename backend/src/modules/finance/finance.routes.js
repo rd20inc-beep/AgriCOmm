@@ -16,7 +16,7 @@ const ownerApproval = require('../../middleware/ownerApproval');
 // vendor invoice, receipt). Disk storage under uploads/payments, mirroring the
 // documents module. The stored relative name is saved on the payment as
 // attachment_url and served back via the GET route below.
-const PAY_UPLOAD_DIR = path.join(__dirname, '../../uploads/payments');
+const PAY_UPLOAD_DIR = require('../../config/paths').uploadPath('payments');
 const payAttachStorage = multer.diskStorage({
   destination: (req, file, cb) => {
     if (!fs.existsSync(PAY_UPLOAD_DIR)) fs.mkdirSync(PAY_UPLOAD_DIR, { recursive: true });

@@ -46,18 +46,23 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
     },
     enabled: !!orderDbId,
   });
+  // ALL files per type, newest first. This used to keep only the first one, so
+  // a second upload against the same document type replaced the first on screen
+  // and the earlier file became unreachable even though it was still stored.
   const storedByType = React.useMemo(() => {
     const m = {};
     for (const d of (Array.isArray(storedDocs) ? storedDocs : [])) {
       const key = d.doc_type || d.document_type || d.type;
-      if (key && !m[key]) m[key] = d; // keep the latest (list is newest-first)
+      if (!key) continue;
+      (m[key] ||= []).push(d);
     }
     return m;
   }, [storedDocs]);
+  const latestOf = (key) => (storedByType[key] || [])[0];
 
   const isReady = (key) => {
     const doc = order.documents?.[key];
-    return (doc && ['Approved', 'Final', 'Draft Uploaded'].includes(doc.status)) || !!storedByType[key];
+    return (doc && ['Approved', 'Final', 'Draft Uploaded'].includes(doc.status)) || !!latestOf(key);
   };
   const confirmable = DOC_KEYS.filter((k) => k !== 'custom');
   const allChecked = confirmable.every(isReady);
@@ -72,18 +77,23 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
 
   function pickFile(key) { fileInputs.current[key]?.click(); }
   async function onFileChosen(key, e) {
-    const file = e.target.files?.[0];
+    const files = Array.from(e.target.files || []);
     e.target.value = '';
-    if (!file) return;
-    if (typeof onUpload === 'function') await onUpload(key, file);
+    if (!files.length) return;
+    // Sequential, not Promise.all: each upload writes a document_store row and
+    // bumps the order's document status, and the server is happier with one at
+    // a time than with ten parallel multipart writes.
+    for (const file of files) {
+      if (typeof onUpload === 'function') await onUpload(key, file);
+    }
     refetchStored();
   }
   // Open an uploaded file in a new tab. Every stored document can be previewed,
   // not just the three the system renders itself — a green row with a file
   // attached used to offer Download only, so the only way to look at a
   // phytosanitary or BL scan was to save it first.
-  async function previewStored(key) {
-    const d = storedByType[key];
+  async function previewStored(key, doc) {
+    const d = doc || latestOf(key);
     if (!d) return;
     try {
       const opened = await documentsApi.open(d.id, d.file_name || d.title);
@@ -91,8 +101,8 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
     } catch (_) { /* toast handled upstream */ }
   }
 
-  async function downloadStored(key) {
-    const d = storedByType[key];
+  async function downloadStored(key, doc) {
+    const d = doc || latestOf(key);
     if (!d) return;
     try { await documentsApi.download(d.id, d.file_name || d.title || `${LABELS[key]}.pdf`); } catch (_) { /* toast handled upstream */ }
   }
@@ -135,7 +145,8 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 divide-y divide-gray-100">
         {DOC_KEYS.map((key) => {
           const doc = order.documents?.[key] || {};
-          const stored = storedByType[key];
+          const files = storedByType[key] || [];
+          const stored = files[0];
           const isChecked = isReady(key);
           const uploadOnly = UPLOAD_ONLY.has(key);
           const systemDoc = SYSTEM_GENERATED.has(key);
@@ -148,16 +159,27 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
                   <p className={`text-sm font-medium ${isChecked ? 'text-emerald-800' : 'text-gray-900'}`}>{LABELS[key]}</p>
                   {uploadOnly && !stored && <span className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-full"><ExternalLink className="w-2.5 h-2.5" /> Upload</span>}
                   {systemDoc && <span className="text-[10px] font-medium px-1.5 py-0.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-full">System-generated</span>}
-                  {stored && <span className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full"><FileText className="w-2.5 h-2.5" /> File attached</span>}
+                  {stored && <span className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full"><FileText className="w-2.5 h-2.5" /> {files.length > 1 ? `${files.length} files attached` : 'File attached'}</span>}
                 </div>
                 {uploadOnly && !stored && <p className="text-[11px] text-gray-500 mt-0.5">{UPLOAD_HINTS[key]}</p>}
-                {stored && <p className="text-[11px] text-gray-500 mt-0.5 truncate">{stored.file_name || stored.title}{stored.created_at ? ` · ${new Date(stored.created_at).toLocaleDateString('en-GB')}` : ''}</p>}
+                {/* Every attached file, not just the newest — a document type
+                    can legitimately carry several (a BL plus its amendment, a
+                    multi-page scan sent as separate images). */}
+                {files.map((f) => (
+                  <div key={f.id} className="flex items-center gap-2 mt-0.5">
+                    <p className="text-[11px] text-gray-500 truncate">
+                      {f.file_name || f.title}{f.created_at ? ` · ${new Date(f.created_at).toLocaleDateString('en-GB')}` : ''}
+                    </p>
+                    <button onClick={() => previewStored(key, f)} className="text-[11px] text-blue-600 hover:underline flex-shrink-0">view</button>
+                    <button onClick={() => downloadStored(key, f)} className="text-[11px] text-gray-500 hover:underline flex-shrink-0">download</button>
+                  </div>
+                ))}
                 {isChecked && doc.date && !stored && <p className="text-xs text-emerald-600 mt-0.5">Confirmed {doc.date}</p>}
               </div>
 
               <div className="flex items-center gap-2 flex-shrink-0">
                 {/* hidden file input for real uploads */}
-                <input ref={(el) => { fileInputs.current[key] = el; }} type="file" className="hidden" onChange={(e) => onFileChosen(key, e)} />
+                <input ref={(el) => { fileInputs.current[key] = el; }} type="file" multiple className="hidden" onChange={(e) => onFileChosen(key, e)} />
                 {/* Preview: the uploaded file when there is one, otherwise the
                     system's own rendering for the three it can generate. Passing
                     the key matters — all three used to open the invoice. */}
@@ -170,15 +192,9 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
                     <Eye className="w-3.5 h-3.5" /> Preview
                   </button>
                 )}
-                {stored ? (
-                  <button onClick={() => downloadStored(key)} className="inline-flex items-center gap-1 text-xs font-medium px-3 py-1.5 bg-gray-50 text-gray-700 border border-gray-200 rounded-lg hover:bg-gray-100">
-                    <Download className="w-3.5 h-3.5" /> Download
-                  </button>
-                ) : (
-                  <button onClick={() => pickFile(key)} className="inline-flex items-center gap-1 text-xs font-medium px-3 py-1.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg hover:bg-amber-100">
-                    <Upload className="w-3.5 h-3.5" /> Upload
-                  </button>
-                )}
+                <button onClick={() => pickFile(key)} className="inline-flex items-center gap-1 text-xs font-medium px-3 py-1.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg hover:bg-amber-100">
+                  <Upload className="w-3.5 h-3.5" /> {stored ? 'Add file' : 'Upload'}
+                </button>
                 {key !== 'custom' && (isChecked ? (
                   <span className="text-xs font-medium text-emerald-600 bg-emerald-100 px-2 py-1 rounded-full">Ready</span>
                 ) : (

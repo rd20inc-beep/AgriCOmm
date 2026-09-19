@@ -2,7 +2,7 @@ const path = require('path');
 const fs = require('fs');
 const db = require('../../config/database');
 
-const UPLOAD_DIR = path.join(__dirname, '../../uploads');
+const { UPLOADS_ROOT: UPLOAD_DIR } = require('../../config/paths');
 
 // Ensure upload directory exists
 if (!fs.existsSync(UPLOAD_DIR)) {
