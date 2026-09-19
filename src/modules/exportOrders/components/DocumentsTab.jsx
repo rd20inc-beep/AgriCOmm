@@ -28,13 +28,23 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
   const fileInputs = useRef({});
 
   // Actually-stored files uploaded for this order (global documents module).
+  // MUST be the numeric id: document_store.linked_id is an integer column and
+  // the transform sets order.id to the ORDER NUMBER ("EX-006"), which the upload
+  // never used. Uploads were written against the numeric id while this read
+  // asked for "EX-006" - parseInt made that NaN and the request 500'd, so an
+  // uploaded file could never be seen again.
+  const orderDbId = order?.dbId || order?.id;
   const { data: storedDocs = [], refetch: refetchStored } = useQuery({
-    queryKey: ['export-order-docs', order?.id],
+    queryKey: ['export-order-docs', orderDbId],
     queryFn: async () => {
-      const res = await documentsApi.getByRef('export_order', order.id);
-      return res?.data || res || [];
+      const res = await documentsApi.getByRef('export_order', orderDbId);
+      // The endpoint answers { success, data: { documents: [...] } }, so res.data
+      // is an OBJECT. Returning it straight through handed an object to the
+      // Array.isArray() guard below, which silently produced an empty list even
+      // when files existed - the second reason an upload could never be seen.
+      return res?.data?.documents || res?.documents || (Array.isArray(res) ? res : []);
     },
-    enabled: !!order?.id,
+    enabled: !!orderDbId,
   });
   const storedByType = React.useMemo(() => {
     const m = {};

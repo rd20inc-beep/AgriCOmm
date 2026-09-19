@@ -59,7 +59,12 @@ const documentController = {
   async getByRef(req, res) {
     try {
       const { linkedType, linkedId } = req.params;
-      const documents = await documentService.getDocumentsByRef(linkedType, parseInt(linkedId));
+      // linked_id is an integer column; a non-numeric reference (an order NUMBER
+      // like "EX-006" rather than its id) used to reach the query as NaN and
+      // fail with a 500. Nothing is linked to a non-numeric id, so answer empty.
+      const id = parseInt(linkedId, 10);
+      if (!Number.isFinite(id)) return res.json({ success: true, data: { documents: [] } });
+      const documents = await documentService.getDocumentsByRef(linkedType, id);
 
       return res.json({ success: true, data: { documents } });
     } catch (err) {
