@@ -3,18 +3,15 @@ const router = express.Router();
 const multer = require('multer');
 const path = require('path');
 const controller = require('../../controllers/documentController');
+const { ensureUploadDir } = require('../../config/paths');
 const authorize = require('../../middleware/rbac');
 const auditAction = require('../../middleware/audit');
 
 // Multer configuration for file uploads
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    const uploadDir = path.join(__dirname, '../../uploads/temp');
-    const fs = require('fs');
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
-    }
-    cb(null, uploadDir);
+    // Persisted uploads volume — NOT src/uploads, which the next deploy wipes.
+    cb(null, ensureUploadDir('temp'));
   },
   filename: function (req, file, cb) {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e6);

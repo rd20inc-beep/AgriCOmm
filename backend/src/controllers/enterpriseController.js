@@ -114,7 +114,7 @@ const enterpriseController = {
       if (rawData && Array.isArray(rawData)) {
         const fs = require('fs');
         const path = require('path');
-        const tempDir = path.join(__dirname, '../../uploads/imports');
+        const tempDir = require('../config/paths').uploadPath('imports');
         if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
         const tempFile = path.join(tempDir, `import_${importRecord.id}.json`);
         fs.writeFileSync(tempFile, JSON.stringify(rawData));
