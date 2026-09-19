@@ -2493,7 +2493,10 @@ export default function DocumentCenter({ order }) {
   const lockedCount = availableDocs.filter(d => !d.ready).length;
 
   return (
-    <div className="space-y-6">
+    // id is a scroll target: the checklist above previews the invoice in its own
+    // modal, but the Packing List / COO are rendered here, so its Preview jumps
+    // the reader to this panel instead of opening the wrong document.
+    <div className="space-y-6" id="export-document-center">
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
         <div className="flex items-center justify-between mb-4">
           <div>
