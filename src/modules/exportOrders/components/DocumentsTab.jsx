@@ -78,6 +78,19 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
     if (typeof onUpload === 'function') await onUpload(key, file);
     refetchStored();
   }
+  // Open an uploaded file in a new tab. Every stored document can be previewed,
+  // not just the three the system renders itself — a green row with a file
+  // attached used to offer Download only, so the only way to look at a
+  // phytosanitary or BL scan was to save it first.
+  async function previewStored(key) {
+    const d = storedByType[key];
+    if (!d) return;
+    try {
+      const opened = await documentsApi.open(d.id, d.file_name || d.title);
+      if (!opened) await documentsApi.download(d.id, d.file_name || d.title || `${LABELS[key]}.pdf`);
+    } catch (_) { /* toast handled upstream */ }
+  }
+
   async function downloadStored(key) {
     const d = storedByType[key];
     if (!d) return;
@@ -145,8 +158,15 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
               <div className="flex items-center gap-2 flex-shrink-0">
                 {/* hidden file input for real uploads */}
                 <input ref={(el) => { fileInputs.current[key] = el; }} type="file" className="hidden" onChange={(e) => onFileChosen(key, e)} />
-                {systemDoc && (
-                  <button onClick={onPreviewInvoice} className="inline-flex items-center gap-1 text-xs font-medium px-3 py-1.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg hover:bg-blue-100">
+                {/* Preview: the uploaded file when there is one, otherwise the
+                    system's own rendering for the three it can generate. Passing
+                    the key matters — all three used to open the invoice. */}
+                {stored ? (
+                  <button onClick={() => previewStored(key)} className="inline-flex items-center gap-1 text-xs font-medium px-3 py-1.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg hover:bg-blue-100">
+                    <Eye className="w-3.5 h-3.5" /> Preview
+                  </button>
+                ) : systemDoc && (
+                  <button onClick={() => onPreviewInvoice?.(key)} className="inline-flex items-center gap-1 text-xs font-medium px-3 py-1.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg hover:bg-blue-100">
                     <Eye className="w-3.5 h-3.5" /> Preview
                   </button>
                 )}
