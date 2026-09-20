@@ -66,22 +66,20 @@ const documentService = {
       fs.unlinkSync(file.path);
     }
 
-    // Check for previous version of same linkedType+linkedId+docType
-    let version = 1;
-    let previousVersionId = null;
-
-    const existingDoc = await conn('document_store')
-      .where({ linked_type: linkedType, linked_id: linkedId, doc_type: docType, is_latest: true })
+    // A plain upload ADDS a file; it does not replace one. This used to
+    // supersede any existing file of the same type, which meant a document type
+    // could only ever hold one file — a phytosanitary certificate scanned as
+    // three pages lost the first two, and getDocumentsByRef (is_latest only)
+    // would never show them again. Replacing a file is the explicit
+    // "new version" action (uploadNewVersion), which still supersedes.
+    //
+    // version numbers the files within a type so the order is still legible.
+    const siblingCount = await conn('document_store')
+      .where({ linked_type: linkedType, linked_id: linkedId, doc_type: docType })
+      .count('id as n')
       .first();
-
-    if (existingDoc) {
-      // Mark old as not latest
-      await conn('document_store')
-        .where({ id: existingDoc.id })
-        .update({ is_latest: false, status: 'Superseded', updated_at: conn.fn.now() });
-      version = existingDoc.version + 1;
-      previousVersionId = existingDoc.id;
-    }
+    const version = (parseInt(siblingCount && siblingCount.n, 10) || 0) + 1;
+    const previousVersionId = null;
 
     const docUid = await this.generateDocUid(conn);
 
