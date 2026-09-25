@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { FileText, CheckCircle, Circle, Eye, Upload, ExternalLink, Download, FolderOpen } from 'lucide-react';
 import { documentLabels } from './constants';
 import { documentsApi } from '../../documents/api/services';
+import api from '../../../api/client';
 import { useAuth } from '../../../context/AuthContext';
 import { useApp } from '../../../context/AppContext';
 
@@ -12,10 +13,27 @@ const UPLOAD_ONLY = new Set(['phyto', 'fumigation', 'blDraft', 'blFinal', 'quali
 // Documents the system can render — clicking opens the preview.
 const SYSTEM_GENERATED = new Set(['invoice', 'packingList', 'coo']);
 
-// All document types shown on the tab (extends the base checklist with a
-// Quality/Inspection certificate + a free-form custom upload slot).
-const DOC_KEYS = ['phyto', 'blDraft', 'blFinal', 'invoice', 'packingList', 'coo', 'fumigation', 'quality', 'custom'];
-const LABELS = { ...documentLabels, quality: 'Quality / Inspection Certificate', custom: 'Other / Custom Document' };
+// Documents issued OUTSIDE the system, which therefore only ever arrive as an
+// upload. Everything else the system can generate is pulled from the canonical
+// catalogue (/documents/available) so a file can be attached to ANY of them —
+// this list used to be a hardcoded nine, which left Sales Contract, Proforma,
+// Bank FI Request, ITRS, Statement of Origin and the rest with nowhere to
+// upload to at all.
+const EXTERNAL_KEYS = ['phyto', 'blFinal', 'fumigation', 'quality', 'custom'];
+
+// The system's own key vocabulary differs from the checklist's older one, so a
+// generated type that already has a slot is not listed twice.
+const CANONICAL_ALIAS = {
+  'commercial-invoice': 'invoice',
+  'bill-of-lading': 'blDraft',
+  'certificate-of-origin': 'coo',
+  'packing-list': 'packingList',
+};
+const BASE_LABELS = {
+  ...documentLabels,
+  quality: 'Quality / Inspection Certificate',
+  custom: 'Other / Custom Document',
+};
 
 const UPLOAD_HINTS = {
   phyto: 'Issued by Department of Plant Protection after inspection.',
@@ -57,6 +75,32 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
   // ALL files per type, newest first. This used to keep only the first one, so
   // a second upload against the same document type replaced the first on screen
   // and the earlier file became unreachable even though it was still stored.
+  // Every document type the system knows about, so each one gets an upload slot.
+  const { data: catalogue = [] } = useQuery({
+    queryKey: ['export-order-doc-catalogue', orderDbId],
+    queryFn: async () => {
+      const res = await api.get(`/api/export-orders/${orderDbId}/documents/available`);
+      return (res?.data?.documents || res?.documents || []);
+    },
+    enabled: !!orderDbId,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  // EXTERNAL first (they need chasing from third parties), then everything the
+  // system generates, minus the ones already covered under an older key.
+  const { DOC_KEYS, LABELS } = React.useMemo(() => {
+    const labels = { ...BASE_LABELS };
+    const keys = [...EXTERNAL_KEYS.filter((k) => k !== 'custom')];
+    for (const d of catalogue) {
+      const key = CANONICAL_ALIAS[d.key] || d.key;
+      if (!labels[key]) labels[key] = d.label || key;
+      if (!keys.includes(key)) keys.push(key);
+    }
+    // Custom stays last: it is the catch-all for anything with no slot of its own.
+    keys.push('custom');
+    return { DOC_KEYS: keys, LABELS: labels };
+  }, [catalogue]);
+
   const storedByType = React.useMemo(() => {
     const m = {};
     for (const d of (Array.isArray(storedDocs) ? storedDocs : [])) {
@@ -101,7 +145,9 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
     // bumps the order's document status, and the server is happier with one at
     // a time than with ten parallel multipart writes.
     for (const file of files) {
-      if (typeof onUpload === 'function') await onUpload(key, file);
+      // Pass the label too: the page's own map only knows the original seven
+      // types, so anything else was stored as its raw key ("custom - EX-006").
+      if (typeof onUpload === 'function') await onUpload(key, file, LABELS[key]);
     }
     refetchStored();
   }

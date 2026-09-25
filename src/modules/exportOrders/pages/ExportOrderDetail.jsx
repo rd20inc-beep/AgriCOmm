@@ -559,14 +559,17 @@ export default function ExportOrderDetail() {
     setShowExpenseModal(false);
   };
 
-  const handleDocumentUpload = async (docKey, file) => {
+  const handleDocumentUpload = async (docKey, file, docLabel) => {
+    // docLabel comes from the Documents tab, which knows every document type;
+    // documentLabels here only covers the original seven.
+    const label = docLabel || documentLabels[docKey] || docKey;
     if (file) {
       const formData = new FormData();
       formData.append('file', file);
       formData.append('doc_type', docKey);
       formData.append('linked_type', 'export_order');
       formData.append('linked_id', orderId);
-      formData.append('title', `${documentLabels[docKey] || docKey} - ${order.id}`);
+      formData.append('title', `${label} - ${order.id}`);
       try {
         await api.upload('/api/documents/upload', formData);
       } catch (uploadErr) {
@@ -578,9 +581,9 @@ export default function ExportOrderDetail() {
         id: orderId,
         data: { doc_type: docKey, file_path: file ? file.name : null },
       });
-      addToast(`${documentLabels[docKey] || docKey} uploaded${file ? ` (${file.name})` : ''}`);
+      addToast(`${label} uploaded${file ? ` (${file.name})` : ''}`);
     } catch (err) {
-      addToast(`Failed to upload ${documentLabels[docKey] || docKey}: ${err.message}`, 'error');
+      addToast(`Failed to upload ${label}: ${err.message}`, 'error');
     }
   };
 
