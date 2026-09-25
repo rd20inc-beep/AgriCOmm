@@ -1,9 +1,10 @@
 import React, { useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { FileText, CheckCircle, Circle, Eye, Upload, ExternalLink, Download, FolderOpen } from 'lucide-react';
+import { FileText, CheckCircle, Circle, Eye, Upload, ExternalLink, Download, FolderOpen, Loader2, Package } from 'lucide-react';
 import { documentLabels } from './constants';
 import { documentsApi } from '../../documents/api/services';
 import api from '../../../api/client';
+import { renderDocument, buildDocHtml } from './DocumentCenter';
 import { useAuth } from '../../../context/AuthContext';
 import { useApp } from '../../../context/AppContext';
 
@@ -29,6 +30,10 @@ const CANONICAL_ALIAS = {
   'certificate-of-origin': 'coo',
   'packing-list': 'packingList',
 };
+// checklist key → the system's own doc type, for rendering a generated copy.
+const CANONICAL_BY_ALIAS = Object.fromEntries(
+  Object.entries(CANONICAL_ALIAS).map(([canonical, alias]) => [alias, canonical]),
+);
 const BASE_LABELS = {
   ...documentLabels,
   quality: 'Quality / Inspection Certificate',
@@ -164,6 +169,63 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
     } catch (_) { /* toast handled upstream */ }
   }
 
+  // Multi-select for a single combined download. Keyed by document type: a type
+  // contributes its live uploaded file if it has one, otherwise the system's
+  // generated rendering of it.
+  const [selected, setSelected] = React.useState(() => new Set());
+  const [bundling, setBundling] = React.useState(false);
+  const toggleSelected = (key) => setSelected((prev) => {
+    const next = new Set(prev);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    return next;
+  });
+  const selectableKeys = React.useMemo(
+    () => DOC_KEYS.filter((k) => liveOf(k) || CANONICAL_BY_ALIAS[k] || catalogue.some((d) => d.key === k)),
+    [DOC_KEYS, storedByType, catalogue],
+  );
+  const allSelected = selectableKeys.length > 0 && selectableKeys.every((k) => selected.has(k));
+  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(selectableKeys));
+
+  async function downloadSelected() {
+    if (!selected.size) return;
+    setBundling(true);
+    try {
+      const uploadedIds = [];
+      const generated = [];
+      for (const key of selected) {
+        const file = liveOf(key);
+        if (file) { uploadedIds.push(file.id); continue; }
+        // No uploaded file — render the system's own version, exactly as the
+        // Document Center would, so the PDF in the zip matches a single download.
+        const docType = CANONICAL_BY_ALIAS[key] || key;
+        try {
+          const res = await api.get(`/api/export-orders/${orderDbId}/documents/${docType}/current`);
+          const payload = res?.data || res;
+          const doc = payload?.document || payload;
+          if (!doc) continue;
+          const html = payload.editedHtml || renderDocument({ ...doc, _docType: docType }, doc.style || {});
+          generated.push({
+            docType,
+            filename: LABELS[key] || docType,
+            html: buildDocHtml(html, docType, LABELS[key] || docType, { autoPrint: false, orientation: 'portrait' }),
+          });
+        } catch { /* skipped; the server lists what it could not include */ }
+      }
+      if (!uploadedIds.length && !generated.length) {
+        addToast?.('Nothing to download for the selected documents.', 'error');
+        return;
+      }
+      await api.downloadPost(
+        `/api/export-orders/${orderDbId}/documents/bundle`,
+        { uploadedIds, generated, zipName: `${order.id} documents` },
+        `${order.id} documents.zip`,
+      );
+      addToast?.(`Downloaded ${uploadedIds.length + generated.length} document(s).`, 'success');
+    } catch (e) {
+      addToast?.(e?.data?.message || e.message || 'Download failed', 'error');
+    } finally { setBundling(false); }
+  }
+
   async function act(fn, okMsg) {
     try { await fn(); addToast?.(okMsg, 'success'); refetchStored(); }
     catch (e) { addToast?.(e?.data?.message || e.message || 'Action failed', 'error'); }
@@ -213,6 +275,22 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
         </div>
       </div>
 
+      {/* Bulk download bar */}
+      <div className="flex items-center justify-between gap-3 flex-wrap bg-white rounded-xl border border-gray-200 px-4 py-2.5">
+        <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+          <input type="checkbox" checked={allSelected} onChange={toggleAll} className="rounded border-gray-300" />
+          Select all ({selectableKeys.length})
+        </label>
+        <button
+          onClick={downloadSelected}
+          disabled={!selected.size || bundling}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-slate-700 rounded-lg hover:bg-slate-800 disabled:opacity-50"
+        >
+          {bundling ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Package className="w-3.5 h-3.5" />}
+          {bundling ? 'Preparing ZIP…' : `Download selected${selected.size ? ` (${selected.size})` : ''}`}
+        </button>
+      </div>
+
       {/* Documents list */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 divide-y divide-gray-100">
         {DOC_KEYS.map((key) => {
@@ -226,6 +304,14 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
 
           return (
             <div key={key} className={`flex items-center gap-4 px-5 py-4 transition-colors ${isChecked ? 'bg-emerald-50/50' : 'hover:bg-gray-50'}`}>
+              <input
+                type="checkbox"
+                checked={selected.has(key)}
+                onChange={() => toggleSelected(key)}
+                disabled={!selectableKeys.includes(key)}
+                title={selectableKeys.includes(key) ? 'Include in the combined download' : 'Nothing to download for this document yet'}
+                className="rounded border-gray-300 flex-shrink-0 disabled:opacity-30"
+              />
               {isChecked ? <CheckCircle className="w-6 h-6 text-emerald-500 flex-shrink-0" /> : <Circle className="w-6 h-6 text-gray-300 flex-shrink-0" />}
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">

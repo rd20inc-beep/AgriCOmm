@@ -2163,6 +2163,11 @@ const STATUS_BADGE = {
   'Cancelled': 'bg-red-100 text-red-600',
 };
 
+// Exported so the Documents tab can render the SAME html when bundling several
+// documents into one download — a bundled copy must match a singly-downloaded
+// one, which means one renderer, not a second implementation.
+export { renderDocument, buildDocHtml, resolveOrientation };
+
 export default function DocumentCenter({ order }) {
   const { addToast } = useApp();
   const { hasPermission } = useAuth();
