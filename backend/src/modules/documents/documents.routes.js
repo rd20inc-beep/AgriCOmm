@@ -116,6 +116,22 @@ router.put(
   controller.submitForReview
 );
 
+// Requesting a deletion is an ordinary edit-level action — the Export Manager
+// can ask at any time. Approving it (below) is what actually removes anything.
+router.put(
+  '/:id/request-delete',
+  authorize('documents', 'edit'),
+  auditAction('request_delete', 'document', (req) => req.params.id),
+  controller.requestDelete
+);
+
+router.put(
+  '/:id/cancel-delete',
+  authorize('documents', 'edit'),
+  auditAction('cancel_delete', 'document', (req) => req.params.id),
+  controller.cancelDelete
+);
+
 router.put(
   '/:id/approve',
   authorize('documents', 'approve'),
