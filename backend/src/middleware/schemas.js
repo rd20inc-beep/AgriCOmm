@@ -610,6 +610,8 @@ const bundleDocuments = Joi.object({
     html: Joi.string().required(),
   })).default([]),
   zipName: Joi.string().max(120).allow('', null),
+  // 'pdf' merges everything into one file; 'zip' keeps them separate.
+  format: Joi.string().valid('zip', 'pdf').default('zip'),
 });
 
 const downloadDocumentPdf = Joi.object({
