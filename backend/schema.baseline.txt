@@ -975,6 +975,7 @@ COL inventory_lots.bag_weight_gm:numeric:NULL
 COL inventory_lots.bag_weight_kg:numeric:NULL
 COL inventory_lots.batch_ref:character varying:NULL
 COL inventory_lots.blend_batch_no:character varying:NULL
+COL inventory_lots.brand:character varying:NULL
 COL inventory_lots.broken_pct:numeric:NULL
 COL inventory_lots.broker_id:integer:NULL
 COL inventory_lots.commission_per_bag:numeric:NULL
