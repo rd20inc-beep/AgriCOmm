@@ -1,4 +1,7 @@
 const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { execFileSync } = require('child_process');
 const archiver = require('archiver');
 const db = require('../../config/database');
 const pdfService = require('./pdf.service');
@@ -26,6 +29,31 @@ const safeName = (s, fallback) => String(s || fallback || 'document')
 // Merge every source into ONE pdf. Anything that is not a PDF (a scanned JPG,
 // a spreadsheet) cannot be merged, so it is named on a trailing page rather than
 // vanishing — the same honesty as MISSING.txt in the zip.
+// Official certificates are routinely issued as ENCRYPTED PDFs. pdf-lib cannot
+// decrypt; loading one with ignoreEncryption silently copies pages that render
+// blank, which is how a 25-page merge came out with 22 empty pages. qpdf strips
+// the encryption first — it needs no password when only an owner password is
+// set, which is the usual case for issued certificates.
+function decryptIfNeeded(bytes, label) {
+  const looksEncrypted = bytes.slice(-3072).toString('latin1').includes('/Encrypt')
+    || bytes.slice(0, 2048).toString('latin1').includes('/Encrypt');
+  if (!looksEncrypted) return { bytes, note: null };
+
+  const tmpIn = path.join(os.tmpdir(), `dec-in-${Date.now()}-${Math.random().toString(36).slice(2)}.pdf`);
+  const tmpOut = `${tmpIn}.out.pdf`;
+  try {
+    fs.writeFileSync(tmpIn, bytes);
+    // --decrypt removes encryption; a non-zero exit means a user password is
+    // required, which we cannot supply.
+    execFileSync('qpdf', ['--decrypt', tmpIn, tmpOut], { stdio: 'pipe', timeout: 30000 });
+    return { bytes: fs.readFileSync(tmpOut), note: null };
+  } catch (err) {
+    return { bytes: null, note: `${label} (password-protected — could not be combined)` };
+  } finally {
+    for (const f of [tmpIn, tmpOut]) { try { if (fs.existsSync(f)) fs.unlinkSync(f); } catch (_) { /* ignore */ } }
+  }
+}
+
 async function mergeToPdf(sources) {
   const { PDFDocument, StandardFonts, rgb } = require('pdf-lib');
   const merged = await PDFDocument.create();
@@ -33,14 +61,18 @@ async function mergeToPdf(sources) {
 
   for (const src of sources) {
     try {
-      const bytes = src.bytes || fs.readFileSync(src.path);
+      const raw = src.bytes || fs.readFileSync(src.path);
       // %PDF- magic: trust the file, not the stored mime type
-      if (Buffer.from(bytes.slice(0, 5)).toString() !== '%PDF-') {
+      if (Buffer.from(raw.slice(0, 5)).toString() !== '%PDF-') {
         skipped.push(`${src.name} (not a PDF — ${src.mime || 'unknown type'})`);
         continue;
       }
-      const doc = await PDFDocument.load(bytes, { ignoreEncryption: true });
+      const { bytes, note } = decryptIfNeeded(Buffer.from(raw), src.name);
+      if (!bytes) { skipped.push(note); continue; }
+
+      const doc = await PDFDocument.load(bytes);
       const pages = await merged.copyPages(doc, doc.getPageIndices());
+      if (!pages.length) { skipped.push(`${src.name} (no pages)`); continue; }
       pages.forEach((pg) => merged.addPage(pg));
     } catch (err) {
       console.error('Document merge failed for', src.name, err.message);
