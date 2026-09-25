@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
+import PendingDocumentApprovals from '../../../documents/components/PendingDocumentApprovals';
 import { CheckCircle2, XCircle, Clock, User as UserIcon, Calendar, RefreshCw, Truck, Package, AlertCircle, Loader2, Users } from 'lucide-react';
 import { adminApi } from '../../api/services';
 import { useApp } from '../../../../context/AppContext';
@@ -239,9 +240,15 @@ export default function MasterDataApprovalsTab() {
         </div>
       </div>
 
+      {/* Documents waiting on an Owner / Super Admin. This tab is where the
+          Admin badge leads, so the document queue has to live HERE — it was
+          added to the separate /approvals workflow page first, which is why the
+          badge counted items the page never showed. */}
+      <PendingDocumentApprovals />
+
       {(suppliers.length + products.length + customers.length) === 0 && !loading && (
         <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 text-sm text-emerald-800 flex items-center gap-2">
-          <CheckCircle2 size={16} /> {statusFilter === 'pending' ? 'All caught up — no pending submissions.' : 'Nothing to show for this filter.'}
+          <CheckCircle2 size={16} /> {statusFilter === 'pending' ? 'All caught up — no pending master-data submissions.' : 'Nothing to show for this filter.'}
         </div>
       )}
 
