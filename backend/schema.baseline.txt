@@ -485,6 +485,9 @@ COL document_store.is_latest:boolean:NOT NULL
 COL document_store.linked_id:integer:NULL
 COL document_store.linked_type:character varying:NOT NULL
 COL document_store.mime_type:character varying:NULL
+COL document_store.pending_action:character varying:NULL
+COL document_store.pending_at:timestamp with time zone:NULL
+COL document_store.pending_by:integer:NULL
 COL document_store.previous_version_id:integer:NULL
 COL document_store.status:character varying:NOT NULL
 COL document_store.title:character varying:NOT NULL
@@ -2881,6 +2884,7 @@ CON document_dispatch_log.chk_document_dispatch_log_status_valid(c)
 CON document_dispatch_log.document_dispatch_log_dispatched_by_foreign(f)
 CON document_dispatch_log.document_dispatch_log_document_id_foreign(f)
 CON document_dispatch_log.document_dispatch_log_pkey(p)
+CON document_store.chk_document_store_pending_action_valid(c)
 CON document_store.chk_document_store_status_valid(c)
 CON document_store.chk_document_store_version_nn(c)
 CON document_store.document_store_doc_uid_unique(u)
