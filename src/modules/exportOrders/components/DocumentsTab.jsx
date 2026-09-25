@@ -180,21 +180,29 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
     return next;
   });
   const selectableKeys = React.useMemo(
-    () => DOC_KEYS.filter((k) => liveOf(k) || CANONICAL_BY_ALIAS[k] || catalogue.some((d) => d.key === k)),
+    // ANY attached file counts, not just the approved one — selecting a type
+    // with five uploads used to contribute a single file, and a type whose
+    // uploads were all awaiting approval contributed nothing at all.
+    () => DOC_KEYS.filter((k) => (storedByType[k] || []).length || CANONICAL_BY_ALIAS[k] || catalogue.some((d) => d.key === k)),
     [DOC_KEYS, storedByType, catalogue],
   );
   const allSelected = selectableKeys.length > 0 && selectableKeys.every((k) => selected.has(k));
   const toggleAll = () => setSelected(allSelected ? new Set() : new Set(selectableKeys));
 
-  async function downloadSelected() {
+  async function downloadSelected(format = 'pdf') {
     if (!selected.size) return;
-    setBundling(true);
+    setBundling(format);
     try {
       const uploadedIds = [];
       const generated = [];
       for (const key of selected) {
-        const file = liveOf(key);
-        if (file) { uploadedIds.push(file.id); continue; }
+        const files = storedByType[key] || [];
+        if (files.length) {
+          // Oldest first, so a multi-page certificate scanned as separate files
+          // reads in the order it was uploaded.
+          [...files].reverse().forEach((f) => uploadedIds.push(f.id));
+          continue;
+        }
         // No uploaded file — render the system's own version, exactly as the
         // Document Center would, so the PDF in the zip matches a single download.
         const docType = CANONICAL_BY_ALIAS[key] || key;
@@ -217,14 +225,25 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
       }
       await api.downloadPost(
         `/api/export-orders/${orderDbId}/documents/bundle`,
-        { uploadedIds, generated, zipName: `${order.id} documents` },
-        `${order.id} documents.zip`,
+        { uploadedIds, generated, zipName: `${order.id} documents`, format },
+        `${order.id} documents.${format === 'pdf' ? 'pdf' : 'zip'}`,
       );
-      addToast?.(`Downloaded ${uploadedIds.length + generated.length} document(s).`, 'success');
+      addToast?.(`Downloaded ${uploadedIds.length + generated.length} document(s)${format === 'pdf' ? ' as one PDF' : ' as a ZIP'}.`, 'success');
     } catch (e) {
       addToast?.(e?.data?.message || e.message || 'Download failed', 'error');
     } finally { setBundling(false); }
   }
+
+  // How many FILES the selection will produce — a type can hold several, so the
+  // count on the button is not the number of ticks.
+  const selectedFileCount = React.useMemo(() => {
+    let n = 0;
+    for (const key of selected) {
+      const files = (storedByType[key] || []).length;
+      n += files || 1; // no file yet → one generated copy
+    }
+    return n;
+  }, [selected, storedByType]);
 
   async function act(fn, okMsg) {
     try { await fn(); addToast?.(okMsg, 'success'); refetchStored(); }
@@ -281,14 +300,26 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
           <input type="checkbox" checked={allSelected} onChange={toggleAll} className="rounded border-gray-300" />
           Select all ({selectableKeys.length})
         </label>
-        <button
-          onClick={downloadSelected}
-          disabled={!selected.size || bundling}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-slate-700 rounded-lg hover:bg-slate-800 disabled:opacity-50"
-        >
-          {bundling ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Package className="w-3.5 h-3.5" />}
-          {bundling ? 'Preparing ZIP…' : `Download selected${selected.size ? ` (${selected.size})` : ''}`}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => downloadSelected('pdf')}
+            disabled={!selected.size || !!bundling}
+            title="Every selected document combined into one PDF"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-slate-700 rounded-lg hover:bg-slate-800 disabled:opacity-50"
+          >
+            {bundling === 'pdf' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
+            {bundling === 'pdf' ? 'Combining…' : `Download as one PDF${selectedFileCount ? ` (${selectedFileCount})` : ''}`}
+          </button>
+          <button
+            onClick={() => downloadSelected('zip')}
+            disabled={!selected.size || !!bundling}
+            title="Keep the documents as separate files inside a ZIP"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+          >
+            {bundling === 'zip' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Package className="w-3.5 h-3.5" />}
+            {bundling === 'zip' ? 'Zipping…' : 'ZIP'}
+          </button>
+        </div>
       </div>
 
       {/* Documents list */}

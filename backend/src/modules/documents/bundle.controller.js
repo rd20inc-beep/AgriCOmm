@@ -23,8 +23,52 @@ const safeName = (s, fallback) => String(s || fallback || 'document')
   .trim()
   .slice(0, 120);
 
+// Merge every source into ONE pdf. Anything that is not a PDF (a scanned JPG,
+// a spreadsheet) cannot be merged, so it is named on a trailing page rather than
+// vanishing — the same honesty as MISSING.txt in the zip.
+async function mergeToPdf(sources) {
+  const { PDFDocument, StandardFonts, rgb } = require('pdf-lib');
+  const merged = await PDFDocument.create();
+  const skipped = [];
+
+  for (const src of sources) {
+    try {
+      const bytes = src.bytes || fs.readFileSync(src.path);
+      // %PDF- magic: trust the file, not the stored mime type
+      if (Buffer.from(bytes.slice(0, 5)).toString() !== '%PDF-') {
+        skipped.push(`${src.name} (not a PDF — ${src.mime || 'unknown type'})`);
+        continue;
+      }
+      const doc = await PDFDocument.load(bytes, { ignoreEncryption: true });
+      const pages = await merged.copyPages(doc, doc.getPageIndices());
+      pages.forEach((pg) => merged.addPage(pg));
+    } catch (err) {
+      console.error('Document merge failed for', src.name, err.message);
+      skipped.push(`${src.name} (could not be read)`);
+    }
+  }
+
+  if (skipped.length) {
+    const page = merged.addPage([595, 842]);
+    const font = await merged.embedFont(StandardFonts.Helvetica);
+    page.drawText('Not included in this file', { x: 50, y: 790, size: 14, font, color: rgb(0.6, 0.1, 0.1) });
+    skipped.forEach((label, i) => {
+      page.drawText(`- ${label}`.slice(0, 95), { x: 50, y: 760 - i * 18, size: 10, font, color: rgb(0.2, 0.2, 0.2) });
+    });
+    page.drawText('Download these individually, or as a ZIP.', { x: 50, y: 760 - skipped.length * 18 - 20, size: 10, font, color: rgb(0.4, 0.4, 0.4) });
+  }
+
+  if (merged.getPageCount() === 0) {
+    const page = merged.addPage([595, 842]);
+    const font = await merged.embedFont(StandardFonts.Helvetica);
+    page.drawText('None of the selected documents could be merged into a PDF.', { x: 50, y: 790, size: 12, font });
+  }
+  // Uint8Array from pdf-lib; res.send needs a Buffer.
+  return Buffer.from(await merged.save());
+}
+
 async function bundle(req, res) {
-  const { uploadedIds = [], generated = [] } = req.body || {};
+  const { uploadedIds = [], generated = [], format = 'zip' } = req.body || {};
   if (!uploadedIds.length && !generated.length) {
     return res.status(400).json({ success: false, message: 'Select at least one document.' });
   }
@@ -35,6 +79,36 @@ async function bundle(req, res) {
   const rows = uploadedIds.length
     ? await db('document_store').whereIn('id', uploadedIds.map((n) => parseInt(n, 10)).filter(Boolean))
     : [];
+
+  if (format === 'pdf') {
+    const sources = [];
+    for (const row of rows) {
+      if (row.file_path && fs.existsSync(row.file_path)) {
+        sources.push({ name: row.file_name || row.title, path: row.file_path, mime: row.mime_type });
+      } else {
+        sources.push({ name: row.title || `document #${row.id}`, bytes: Buffer.alloc(0), mime: 'missing' });
+      }
+    }
+    for (const g of generated) {
+      if (!g || !g.html) continue;
+      try {
+        const pdf = await pdfService.htmlToPdf(g.html);
+        sources.push({ name: g.filename || g.docType, bytes: Buffer.isBuffer(pdf) ? pdf : Buffer.from(pdf), mime: 'application/pdf' });
+      } catch (err) {
+        console.error('Document bundle PDF failed for', g.docType, err.message);
+        sources.push({ name: g.filename || g.docType, bytes: Buffer.alloc(0), mime: 'render failed' });
+      }
+    }
+    try {
+      const out = await mergeToPdf(sources);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${safeName(req.body.zipName, 'documents')}.pdf"`);
+      return res.send(out);
+    } catch (err) {
+      console.error('Document merge error:', err);
+      return res.status(500).json({ success: false, message: 'Could not build the combined PDF.' });
+    }
+  }
 
   const zipName = safeName(req.body.zipName, 'documents') + '.zip';
   res.setHeader('Content-Type', 'application/zip');
