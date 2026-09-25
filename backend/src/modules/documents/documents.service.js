@@ -78,8 +78,15 @@ const documentService = {
       .where({ linked_type: linkedType, linked_id: linkedId, doc_type: docType })
       .count('id as n')
       .first();
-    const version = (parseInt(siblingCount && siblingCount.n, 10) || 0) + 1;
+    const existingCount = parseInt(siblingCount && siblingCount.n, 10) || 0;
+    const version = existingCount + 1;
     const previousVersionId = null;
+
+    // Approval protects what is already in place. Filling an EMPTY slot changes
+    // nothing and nobody has to wait for it, so the first file of a type is live
+    // at once. Anything after that alters a document the business is already
+    // relying on, so it waits for an Owner / Super Admin.
+    const status = existingCount === 0 ? 'Approved' : 'Pending Review';
 
     const docUid = await this.generateDocUid(conn);
 
@@ -99,10 +106,10 @@ const documentService = {
         version,
         is_latest: true,
         previous_version_id: previousVersionId,
-        // Pending, not live: a change only takes effect once an Owner or Super
-        // Admin approves it. Whatever was approved before stays current in the
-        // meantime, so an unapproved file can never be the one sent to a bank.
-        status: 'Pending Review',
+        // First file of its type goes live immediately; a later one waits for
+        // approval, with the approved copy staying current in the meantime, so
+        // an unapproved replacement can never be the one sent to a bank.
+        status,
         uploaded_by: uploadedBy,
       })
       .returning('*');
