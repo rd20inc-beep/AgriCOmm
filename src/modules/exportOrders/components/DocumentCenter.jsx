@@ -2633,10 +2633,14 @@ export default function DocumentCenter({ order }) {
               </div>
               <button onClick={() => applyStyle({ fontFamily: DEFAULT_DOC_FONT, fontScale: 1 })}
                 className="text-xs text-gray-500 hover:text-gray-700 underline">Reset</button>
+              {/* NOT a second save for the document. This sets the customer's
+                  default font for future documents, and reading as "Save …"
+                  next to the document's own Save is what made the preview look
+                  like it had two save buttons. */}
               <button onClick={saveCustomerStyle} disabled={wfBusy || !styleDirty}
                 className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
                 title="Use this font on all future documents for this customer">
-                <Save className="w-3.5 h-3.5" /> Save for this customer
+                <Type className="w-3.5 h-3.5" /> Use this font for all their documents
               </button>
             </div>
 
