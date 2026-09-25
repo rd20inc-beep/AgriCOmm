@@ -31,6 +31,11 @@ router.get(
   controller.stats
 );
 
+// === Approval queue (must be before /:id routes) ===
+// Visible to approvers only — it is the owner's to-do list, not a public view.
+router.get('/pending-approvals', authorize('documents', 'approve'), controller.pendingApprovals);
+router.get('/pending-approvals/count', authorize('documents', 'approve'), controller.pendingApprovalsCount);
+
 // === Checklists (must be before /:id routes) ===
 router.get(
   '/checklist/:linkedType/:linkedId',

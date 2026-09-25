@@ -8,6 +8,7 @@ import { usePendingApprovals, useMyApprovalRequests, useApproveRequest, useRejec
 import { useApp } from '../../../context/AppContext';
 import { LoadingSpinner, ErrorState } from '../../../components/LoadingState';
 import Modal from '../../../components/Modal';
+import PendingDocumentApprovals from '../../documents/components/PendingDocumentApprovals';
 
 const TYPE_LABELS = {
   payment_confirmation: 'Payment Confirmation',
@@ -161,6 +162,11 @@ export default function Approvals() {
           Refresh
         </button>
       </div>
+
+      {/* Documents waiting on an Owner / Super Admin. Rendered above the
+          master-data queue because a held document blocks a shipment, whereas a
+          pending supplier record rarely does. Hides itself for non-approvers. */}
+      <PendingDocumentApprovals />
 
       {/* Summary Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">

@@ -13,6 +13,7 @@ import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import { useMasterDataApprovalsCount } from '../modules/admin/api/queries';
 import { usePurchaseRequirementsCount } from '../modules/purchaseRequirements/api/queries';
+import { usePendingDocumentApprovalsCount } from '../modules/documents/api/queries';
 import { RouteErrorBoundary } from './ErrorBoundary';
 import ChatWidget from './ChatWidget';
 import OfflineBanner from './OfflineBanner';
@@ -262,6 +263,7 @@ export default function Layout({ children }) {
   const { user, logout, hasPermission } = useAuth();
   const { data: pendingApprovals = 0 } = useMasterDataApprovalsCount();
   const { data: pendingPurchaseReqs = 0 } = usePurchaseRequirementsCount();
+  const { data: pendingDocApprovals = 0 } = usePendingDocumentApprovalsCount();
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -343,7 +345,8 @@ export default function Layout({ children }) {
   // raised against an export order was invisible until you went looking. Badge
   // the group (visible while it is collapsed) AND the item itself.
   const navBadges = {
-    Admin: pendingApprovals,
+    Admin: pendingApprovals + pendingDocApprovals,
+    Approvals: pendingApprovals + pendingDocApprovals,
     Mill: pendingPurchaseReqs,
     'Purchase Requirements': pendingPurchaseReqs,
   };
