@@ -274,7 +274,7 @@ export default function LotDetail() {
               </span>
             )}
           </div>
-          <p className="text-sm text-gray-500 mt-0.5">{lot.itemName}{lot.variety && lot.variety !== lot.itemName ? ` — ${lot.variety}` : ''}{lot.grade && lot.grade !== lot.itemName ? ` (${lot.grade})` : ''}</p>
+          <p className="text-sm text-gray-500 mt-0.5">{lot.itemName}{lot.variety && lot.variety !== lot.itemName ? ` — ${lot.variety}` : ''}{lot.grade && lot.grade !== lot.itemName ? ` (${lot.grade})` : ''}{lot.brand ? ` · ${lot.brand}` : ''}</p>
         </div>
         <button onClick={() => setShowCostSheet(true)} className="btn btn-primary btn-sm">
           <FileText className="w-4 h-4" /> Costing Sheet
@@ -556,6 +556,10 @@ export default function LotDetail() {
                 ['Rice Type', raw(lot.itemName)],
                 ['Variety', raw(lot.variety)],
                 ['Grade', raw(qv('grade', 'gradeAssigned'))],
+                // Who the lot is packed for (finished) or the supplier's lot
+                // reference (raw) — the marking that separates two otherwise
+                // identical lots.
+                ['Brand / marking', lot.brand || null],
                 ['Sortex Status', raw(lot.sortexStatus)],
                 ['Whiteness', raw(qv('whiteness'))],
                 ['Grain length', (() => { const g = qv('grainLength', 'grainSize'); return g == null ? '—' : `${g} mm`; })()],

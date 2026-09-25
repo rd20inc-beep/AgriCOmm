@@ -270,6 +270,7 @@ export default function LotInventory() {
           (l.itemName || '').toLowerCase().includes(t) ||
           (l.variety || '').toLowerCase().includes(t) ||
           (l.grade || '').toLowerCase().includes(t) ||
+          (l.brand || '').toLowerCase().includes(t) ||
           (l.supplierName || '').toLowerCase().includes(t) ||
           (l.warehouseName || '').toLowerCase().includes(t) ||
           (l.batchRef || '').toLowerCase().includes(t)
