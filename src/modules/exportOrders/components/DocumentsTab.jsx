@@ -193,6 +193,19 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
     if (!selected.size) return;
     setBundling(format);
     try {
+      // Re-read the file list first. Approving a deletion elsewhere (the queue
+      // in Admin ▸ Approvals) removes rows this tab may still be holding, and
+      // sending a deleted id produced a one-page "nothing to merge" PDF that
+      // looked simply blank.
+      const fresh = await refetchStored();
+      const current = fresh?.data;
+      if (Array.isArray(current)) {
+        const alive = new Set(current.map((f) => f.id));
+        for (const key of selected) {
+          const stale = (storedByType[key] || []).some((f) => !alive.has(f.id));
+          if (stale) addToast?.('The document list had changed — using the latest files.', 'info');
+        }
+      }
       const uploadedIds = [];
       const generated = [];
       for (const key of selected) {

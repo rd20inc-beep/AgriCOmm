@@ -99,6 +99,16 @@ async function bundle(req, res) {
         sources.push({ name: g.filename || g.docType, bytes: Buffer.alloc(0), mime: 'render failed' });
       }
     }
+    // Everything asked for is gone (rows deleted since the page loaded), so
+    // there is nothing to merge. Returning a one-page "nothing here" PDF looked
+    // to the user like a blank download; a refusal the UI can show is honest.
+    const mergeable = sources.filter((x) => x.path || (x.bytes && x.bytes.length));
+    if (!mergeable.length) {
+      return res.status(409).json({
+        success: false,
+        message: 'Those documents are no longer available — they may have been deleted or replaced. Refresh the page and try again.',
+      });
+    }
     try {
       const out = await mergeToPdf(sources);
       res.setHeader('Content-Type', 'application/pdf');
@@ -108,6 +118,14 @@ async function bundle(req, res) {
       console.error('Document merge error:', err);
       return res.status(500).json({ success: false, message: 'Could not build the combined PDF.' });
     }
+  }
+
+  const stillThere = rows.filter((r) => r.file_path && fs.existsSync(r.file_path));
+  if (!stillThere.length && !generated.length) {
+    return res.status(409).json({
+      success: false,
+      message: 'Those documents are no longer available — they may have been deleted or replaced. Refresh the page and try again.',
+    });
   }
 
   const zipName = safeName(req.body.zipName, 'documents') + '.zip';
