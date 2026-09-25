@@ -213,6 +213,13 @@ router.post(
 // Document generation
 const docController = require('../../controllers/exportDocumentController');
 router.get('/:id/documents/available', authorize('export_orders', 'view'), docController.available);
+// Download a selection of documents as one ZIP (stored files + generated PDFs).
+router.post(
+  '/:id/documents/bundle',
+  authorize('export_orders', 'view'),
+  validate(schemas.bundleDocuments),
+  require('../../modules/documents/bundle.controller').bundle
+);
 router.get('/:id/documents/generate/:docType', authorize('export_orders', 'view'), docController.generate);
 
 // Persisted / versioned generated documents (Phase E).

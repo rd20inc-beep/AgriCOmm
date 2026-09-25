@@ -599,12 +599,26 @@ const sendDocumentEmail = Joi.object({
   filename: Joi.string().max(120).allow('', null),
 });
 
+// Bundle several documents into one ZIP: stored files by id, plus generated
+// documents whose HTML the browser renders and sends (the renderers are
+// client-side, so the server cannot produce that HTML itself).
+const bundleDocuments = Joi.object({
+  uploadedIds: Joi.array().items(Joi.number().integer().positive()).default([]),
+  generated: Joi.array().items(Joi.object({
+    docType: Joi.string().max(60).required(),
+    filename: Joi.string().max(160).allow('', null),
+    html: Joi.string().required(),
+  })).default([]),
+  zipName: Joi.string().max(120).allow('', null),
+});
+
 const downloadDocumentPdf = Joi.object({
   html: Joi.string().required(),
   filename: Joi.string().max(160).allow('', null),
 });
 
 module.exports = {
+  bundleDocuments,
   createExportOrder,
   updateExportShipment,
   exportPackingWeight,
