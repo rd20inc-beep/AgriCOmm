@@ -44,6 +44,9 @@ async function bundle(req, res) {
   // Headers are already sent by the time anything can fail, so a late error can
   // only be logged and the stream cut — the client sees a truncated download
   // rather than a misleading 200 with a valid-looking empty zip.
+  // Headers are already sent, so a late failure cannot become a clean HTTP
+  // error. Log it and cut the stream — the client sees a truncated download
+  // rather than a valid-looking zip that is quietly missing documents.
   archive.on('error', (err) => { console.error('Document bundle error:', err); res.destroy(err); });
   archive.on('warning', (err) => { if (err.code !== 'ENOENT') console.error('Document bundle warning:', err); });
   archive.pipe(res);
@@ -75,7 +78,12 @@ async function bundle(req, res) {
     if (!g || !g.html) continue;
     try {
       const pdf = await pdfService.htmlToPdf(g.html);
-      archive.append(pdf, { name: uniqueName(`${safeName(g.filename || g.docType, 'document')}.pdf`) });
+      // Buffer.from: puppeteer returns a Uint8Array, and archiver accepts only a
+      // Buffer or a Stream — appending the raw Uint8Array throws
+      // INPUTSTEAMBUFFERREQUIRED and kills the response mid-stream.
+      archive.append(Buffer.isBuffer(pdf) ? pdf : Buffer.from(pdf), {
+        name: uniqueName(`${safeName(g.filename || g.docType, 'document')}.pdf`),
+      });
     } catch (err) {
       console.error('Document bundle PDF failed for', g.docType, err.message);
       missing.push(g.filename || g.docType);
