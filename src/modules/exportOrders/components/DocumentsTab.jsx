@@ -3,6 +3,8 @@ import { useQuery } from '@tanstack/react-query';
 import { FileText, CheckCircle, Circle, Eye, Upload, ExternalLink, Download, FolderOpen } from 'lucide-react';
 import { documentLabels } from './constants';
 import { documentsApi } from '../../documents/api/services';
+import { useAuth } from '../../../context/AuthContext';
+import { useApp } from '../../../context/AppContext';
 
 // Documents issued externally (regulator / shipping line / fumigator / inspector)
 // — upload-only; they cannot be system-generated.
@@ -26,6 +28,12 @@ const UPLOAD_HINTS = {
 
 export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvoice }) {
   const fileInputs = useRef({});
+  const { hasPermission } = useAuth();
+  const { addToast } = useApp();
+  // Only an Owner / Super Admin can make a change take effect. Everyone else
+  // can upload, replace and request deletion freely — they are never blocked,
+  // their changes simply wait.
+  const canApprove = hasPermission('documents', 'approve');
 
   // Actually-stored files uploaded for this order (global documents module).
   // MUST be the numeric id: document_store.linked_id is an integer column and
@@ -58,11 +66,20 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
     }
     return m;
   }, [storedDocs]);
-  const latestOf = (key) => (storedByType[key] || [])[0];
+  // The LIVE file for a type is the latest APPROVED one. A pending upload or a
+  // pending deletion does not change what the order counts as its document, so
+  // preview/download keep pointing at the approved copy until an owner acts.
+  const liveOf = (key) => {
+    const list = storedByType[key] || [];
+    return list.find((f) => f.status === 'Approved' && f.pending_action !== 'delete') || null;
+  };
+  const latestOf = (key) => liveOf(key) || (storedByType[key] || [])[0];
 
   const isReady = (key) => {
     const doc = order.documents?.[key];
-    return (doc && ['Approved', 'Final', 'Draft Uploaded'].includes(doc.status)) || !!latestOf(key);
+    // Green means the document is actually in place — an approved file, or the
+    // order's own confirmation. A file still awaiting approval is not yet one.
+    return (doc && ['Approved', 'Final', 'Draft Uploaded'].includes(doc.status)) || !!liveOf(key);
   };
   const confirmable = DOC_KEYS.filter((k) => k !== 'custom');
   const allChecked = confirmable.every(isReady);
@@ -100,6 +117,15 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
       if (!opened) await documentsApi.download(d.id, d.file_name || d.title || `${LABELS[key]}.pdf`);
     } catch (_) { /* toast handled upstream */ }
   }
+
+  async function act(fn, okMsg) {
+    try { await fn(); addToast?.(okMsg, 'success'); refetchStored(); }
+    catch (e) { addToast?.(e?.data?.message || e.message || 'Action failed', 'error'); }
+  }
+  const requestDelete = (f) => act(() => documentsApi.requestDelete(f.id), 'Deletion requested — awaiting owner approval.');
+  const cancelDelete = (f) => act(() => documentsApi.cancelDelete(f.id), 'Deletion request withdrawn.');
+  const approveFile = (f) => act(() => documentsApi.approve(f.id, {}), f.pending_action === 'delete' ? 'Deletion approved — document removed.' : 'Approved — this version is now live.');
+  const rejectFile = (f) => act(() => documentsApi.reject(f.id, {}), 'Rejected.');
 
   async function downloadStored(key, doc) {
     const d = doc || latestOf(key);
@@ -147,6 +173,7 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
           const doc = order.documents?.[key] || {};
           const files = storedByType[key] || [];
           const stored = files[0];
+          const pendingCount = files.filter((f) => f.status !== 'Approved' || f.pending_action === 'delete').length;
           const isChecked = isReady(key);
           const uploadOnly = UPLOAD_ONLY.has(key);
           const systemDoc = SYSTEM_GENERATED.has(key);
@@ -160,20 +187,52 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
                   {uploadOnly && !stored && <span className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-full"><ExternalLink className="w-2.5 h-2.5" /> Upload</span>}
                   {systemDoc && <span className="text-[10px] font-medium px-1.5 py-0.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-full">System-generated</span>}
                   {stored && <span className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full"><FileText className="w-2.5 h-2.5" /> {files.length > 1 ? `${files.length} files attached` : 'File attached'}</span>}
+                  {pendingCount > 0 && <span className="text-[10px] font-medium px-1.5 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-full">{pendingCount} awaiting approval</span>}
                 </div>
                 {uploadOnly && !stored && <p className="text-[11px] text-gray-500 mt-0.5">{UPLOAD_HINTS[key]}</p>}
                 {/* Every attached file, not just the newest — a document type
                     can legitimately carry several (a BL plus its amendment, a
                     multi-page scan sent as separate images). */}
-                {files.map((f) => (
-                  <div key={f.id} className="flex items-center gap-2 mt-0.5">
-                    <p className="text-[11px] text-gray-500 truncate">
-                      {f.file_name || f.title}{f.created_at ? ` · ${new Date(f.created_at).toLocaleDateString('en-GB')}` : ''}
-                    </p>
-                    <button onClick={() => previewStored(key, f)} className="text-[11px] text-blue-600 hover:underline flex-shrink-0">view</button>
-                    <button onClick={() => downloadStored(key, f)} className="text-[11px] text-gray-500 hover:underline flex-shrink-0">download</button>
-                  </div>
-                ))}
+                {files.map((f) => {
+                  const pendingDelete = f.pending_action === 'delete';
+                  const live = f.status === 'Approved' && !pendingDelete;
+                  return (
+                    <div key={f.id} className="flex items-center gap-2 mt-0.5 flex-wrap">
+                      <p className="text-[11px] text-gray-500 truncate">
+                        {f.file_name || f.title}{f.created_at ? ` · ${new Date(f.created_at).toLocaleDateString('en-GB')}` : ''}
+                      </p>
+                      {/* What this file's state actually means, in words */}
+                      {pendingDelete ? (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200" title={f.pending_by_name ? `Requested by ${f.pending_by_name}` : undefined}>deletion awaiting approval</span>
+                      ) : live ? (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">approved</span>
+                      ) : f.status === 'Rejected' ? (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500 border border-gray-200">rejected</span>
+                      ) : (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">awaiting approval</span>
+                      )}
+                      <button onClick={() => previewStored(key, f)} className="text-[11px] text-blue-600 hover:underline flex-shrink-0">view</button>
+                      <button onClick={() => downloadStored(key, f)} className="text-[11px] text-gray-500 hover:underline flex-shrink-0">download</button>
+                      {canApprove ? (
+                        <>
+                          {(f.status !== 'Approved' || pendingDelete) && (
+                            <button onClick={() => approveFile(f)} className="text-[11px] text-emerald-700 hover:underline flex-shrink-0">approve</button>
+                          )}
+                          {!pendingDelete && f.status !== 'Rejected' && (
+                            <button onClick={() => rejectFile(f)} className="text-[11px] text-red-600 hover:underline flex-shrink-0">reject</button>
+                          )}
+                          {pendingDelete && (
+                            <button onClick={() => cancelDelete(f)} className="text-[11px] text-gray-500 hover:underline flex-shrink-0">keep</button>
+                          )}
+                        </>
+                      ) : pendingDelete ? (
+                        <button onClick={() => cancelDelete(f)} className="text-[11px] text-gray-500 hover:underline flex-shrink-0">withdraw</button>
+                      ) : (
+                        <button onClick={() => requestDelete(f)} className="text-[11px] text-red-600 hover:underline flex-shrink-0">request delete</button>
+                      )}
+                    </div>
+                  );
+                })}
                 {isChecked && doc.date && !stored && <p className="text-xs text-emerald-600 mt-0.5">Confirmed {doc.date}</p>}
               </div>
 

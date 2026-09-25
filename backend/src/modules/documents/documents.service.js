@@ -99,7 +99,10 @@ const documentService = {
         version,
         is_latest: true,
         previous_version_id: previousVersionId,
-        status: 'Draft',
+        // Pending, not live: a change only takes effect once an Owner or Super
+        // Admin approves it. Whatever was approved before stays current in the
+        // meantime, so an unapproved file can never be the one sent to a bank.
+        status: 'Pending Review',
         uploaded_by: uploadedBy,
       })
       .returning('*');
@@ -131,12 +134,53 @@ const documentService = {
     return { ...doc, approvals };
   },
 
+  // Everything attached to a reference — approved AND awaiting approval. The
+  // caller marks the pending ones; hiding them would leave an Export Manager
+  // unable to see the file they just uploaded.
   async getDocumentsByRef(linkedType, linkedId) {
     return db('document_store as ds')
       .leftJoin('users as u', 'ds.uploaded_by', 'u.id')
-      .select('ds.*', 'u.full_name as uploaded_by_name')
+      .leftJoin('users as p', 'ds.pending_by', 'p.id')
+      .select('ds.*', 'u.full_name as uploaded_by_name', 'p.full_name as pending_by_name')
       .where({ 'ds.linked_type': linkedType, 'ds.linked_id': linkedId, 'ds.is_latest': true })
       .orderBy('ds.created_at', 'desc');
+  },
+
+  // Ask for a document to be deleted. Nothing is removed until an approver
+  // agrees — the file stays downloadable and current until then.
+  async requestDelete(trx, { documentId, userId }) {
+    const conn = trx || db;
+    const doc = await conn('document_store').where({ id: documentId }).first();
+    if (!doc) throw new Error('Document not found');
+    if (doc.pending_action === 'delete') return doc;
+    await conn('document_store').where({ id: documentId }).update({
+      pending_action: 'delete', pending_by: userId || null, pending_at: conn.fn.now(), updated_at: conn.fn.now(),
+    });
+    return conn('document_store').where({ id: documentId }).first();
+  },
+
+  // Withdraw a deletion request (the requester changed their mind, or an
+  // approver refused it).
+  async cancelDelete(trx, { documentId }) {
+    const conn = trx || db;
+    await conn('document_store').where({ id: documentId }).update({
+      pending_action: null, pending_by: null, pending_at: null, updated_at: conn.fn.now(),
+    });
+    return conn('document_store').where({ id: documentId }).first();
+  },
+
+  // Approver agreed to a deletion: remove the row and its file for real.
+  async applyDelete(trx, { documentId }) {
+    const conn = trx || db;
+    const doc = await conn('document_store').where({ id: documentId }).first();
+    if (!doc) throw new Error('Document not found');
+    if (doc.file_path) {
+      try { if (fs.existsSync(doc.file_path)) fs.unlinkSync(doc.file_path); } catch (e) { console.error('applyDelete file removal failed:', e.message); }
+    }
+    await conn('document_approvals').where({ document_id: documentId }).del();
+    await conn('document_checklists').where({ document_id: documentId }).update({ document_id: null, is_fulfilled: false });
+    await conn('document_store').where({ id: documentId }).del();
+    return { deleted: true, id: documentId };
   },
 
   // === Version Control ===
@@ -199,7 +243,10 @@ const documentService = {
         version: existing.version + 1,
         is_latest: true,
         previous_version_id: documentId,
-        status: 'Draft',
+        // Pending, not live: a change only takes effect once an Owner or Super
+        // Admin approves it. Whatever was approved before stays current in the
+        // meantime, so an unapproved file can never be the one sent to a bank.
+        status: 'Pending Review',
         uploaded_by: uploadedBy,
       })
       .returning('*');

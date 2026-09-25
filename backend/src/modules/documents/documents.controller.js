@@ -55,6 +55,33 @@ const documentController = {
     }
   },
 
+  // === Deletion requests ===
+  // An Export Manager asks; nothing is removed until an approver agrees. The
+  // requester is never blocked — they carry on uploading and editing while this
+  // sits pending.
+  async requestDelete(req, res) {
+    try {
+      const doc = await documentService.requestDelete(null, {
+        documentId: parseInt(req.params.id, 10),
+        userId: req.user.id,
+      });
+      return res.json({ success: true, data: { document: doc }, message: 'Deletion requested — awaiting owner approval.' });
+    } catch (err) {
+      console.error('Document requestDelete error:', err);
+      return res.status(500).json({ success: false, message: err.message || 'Internal server error.' });
+    }
+  },
+
+  async cancelDelete(req, res) {
+    try {
+      const doc = await documentService.cancelDelete(null, { documentId: parseInt(req.params.id, 10) });
+      return res.json({ success: true, data: { document: doc }, message: 'Deletion request withdrawn.' });
+    } catch (err) {
+      console.error('Document cancelDelete error:', err);
+      return res.status(500).json({ success: false, message: err.message || 'Internal server error.' });
+    }
+  },
+
   // === Get by Reference ===
   async getByRef(req, res) {
     try {
@@ -181,6 +208,14 @@ const documentController = {
     try {
       const { id } = req.params;
       const { comments } = req.body;
+
+      // A row flagged for deletion is approved by actually deleting it — the
+      // approval IS the change taking effect, exactly as it is for an upload.
+      const flagged = await db('document_store').where({ id: parseInt(id, 10) }).first();
+      if (flagged && flagged.pending_action === 'delete') {
+        const out = await db.transaction((trx) => documentService.applyDelete(trx, { documentId: parseInt(id, 10) }));
+        return res.json({ success: true, data: out, message: 'Deletion approved — document removed.' });
+      }
 
       const result = await db.transaction(async (trx) => {
         const doc = await documentService.approveDocument(trx, {
