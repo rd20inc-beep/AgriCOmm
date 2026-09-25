@@ -53,6 +53,12 @@ export default function UsersRolesTab() {
 
   const [pwUser, setPwUser] = useState(null);   // user whose password is being set
   const [pwValue, setPwValue] = useState('');
+  // Whether the user must choose their own password at next sign-in. OFF by
+  // default: this dialog never sent the flag, the endpoint defaults it to TRUE,
+  // and the result was that every admin-set password became "temporary" — the
+  // user then hit a change screen demanding the password the admin had just
+  // set, and was locked out of their own account if they had not been told it.
+  const [pwForceChange, setPwForceChange] = useState(false);
 
   const [editUser, setEditUser] = useState(null);  // user being edited
   const [editForm, setEditForm] = useState({ fullName: '', email: '', roleId: '2' });
@@ -78,9 +84,12 @@ export default function UsersRolesTab() {
   const handleSetPassword = async () => {
     if (!pwValue || pwValue.length < 8) { addToast('Password must be at least 8 characters', 'error'); return; }
     try {
-      await setPasswordMut.mutateAsync({ id: pwUser.id, password: pwValue });
-      addToast(`Password updated for ${pwUser.fullName}`, 'success');
-      setPwUser(null); setPwValue('');
+      await setPasswordMut.mutateAsync({ id: pwUser.id, password: pwValue, force: pwForceChange });
+      addToast(
+        `Password updated for ${pwUser.fullName}${pwForceChange ? ' — they must choose their own at next sign-in' : ''}`,
+        'success',
+      );
+      setPwUser(null); setPwValue(''); setPwForceChange(false);
     } catch (err) {
       addToast(`Failed to update password: ${err.message}`, 'error');
     }
@@ -333,8 +342,17 @@ export default function UsersRolesTab() {
               className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
             />
           </div>
+          <label className="flex items-start gap-2 text-sm text-gray-700">
+            <input type="checkbox" checked={pwForceChange} onChange={e => setPwForceChange(e.target.checked)} className="mt-0.5 rounded border-gray-300" />
+            <span>
+              Treat this as temporary — make them choose their own at next sign-in
+              <span className="block text-[11px] text-gray-400">
+                Only tick this if you are giving them the password above. They will be asked for it as their “current password”, and cannot sign in without it.
+              </span>
+            </span>
+          </label>
           <div className="flex justify-end gap-2 pt-2 border-t border-gray-200">
-            <button onClick={() => setPwUser(null)} className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">Cancel</button>
+            <button onClick={() => { setPwUser(null); setPwForceChange(false); }} className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">Cancel</button>
             <button onClick={handleSetPassword} disabled={setPasswordMut.isPending || pwValue.length < 8} className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors">Update Password</button>
           </div>
         </div>
