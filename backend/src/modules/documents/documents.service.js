@@ -313,7 +313,10 @@ const documentService = {
 
     const doc = await conn('document_store').where({ id: documentId }).first();
     if (!doc) throw new Error('Document not found');
-    if (!['Pending Review', 'Under Review'].includes(doc.status)) {
+    // Draft included: files uploaded before the approval rule existed are Draft,
+    // and an approver must be able to make one live without an artificial
+    // "submit for review" step in between.
+    if (!['Draft', 'Pending Review', 'Under Review'].includes(doc.status)) {
       throw new Error(`Cannot approve: document is in '${doc.status}' status`);
     }
 

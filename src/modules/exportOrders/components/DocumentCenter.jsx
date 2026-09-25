@@ -2577,10 +2577,14 @@ export default function DocumentCenter({ order }) {
                 )}
               </div>
               <div className="flex items-center gap-2">
+                {/* THE save for this document — text edits and formatting both.
+                    There used to be a second, identical one inside the
+                    formatting toolbar below. */}
                 {!locked && version?.id && (
                   <button onClick={() => saveEdits()} disabled={wfBusy}
+                    title="Save your changes to this document"
                     className="inline-flex items-center gap-1.5 px-3 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 disabled:opacity-50">
-                    {wfBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Edit2 className="w-4 h-4" />} Save edits
+                    {wfBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Save
                   </button>
                 )}
                 <button onClick={openEmail} disabled={emailSending}
@@ -2652,11 +2656,9 @@ export default function DocumentCenter({ order }) {
                 </select>
                 <button onMouseDown={(e) => e.preventDefault()} onClick={toggleSelectionWeight} className="px-2 py-1 border border-gray-300 rounded-lg text-xs font-bold text-gray-700 hover:bg-gray-50" title="Bold">B</button>
                 <button onMouseDown={(e) => e.preventDefault()} onClick={toggleSelectionItalic} className="px-2 py-1 border border-gray-300 rounded-lg text-xs italic text-gray-700 hover:bg-gray-50" title="Italic">I</button>
-                {version?.id && (
-                  <button onClick={() => saveEdits()} disabled={wfBusy} className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50">
-                    {wfBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />} Save edits
-                  </button>
-                )}
+                {/* No save button here: this box is per-selection formatting, and a
+                    Save inside it read as "save the formatting". There is ONE
+                    save for the document, in the action bar above. */}
               </div>
             )}
 
