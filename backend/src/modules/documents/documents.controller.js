@@ -55,6 +55,45 @@ const documentController = {
     }
   },
 
+  // === Pending approvals, across every order ===
+  // Without this an approver had to already know WHICH order was waiting and
+  // open its Documents tab to find out — there was no queue anywhere.
+  async pendingApprovals(req, res) {
+    try {
+      const rows = await db('document_store as ds')
+        .leftJoin('users as u', 'ds.uploaded_by', 'u.id')
+        .leftJoin('users as p', 'ds.pending_by', 'p.id')
+        .leftJoin('export_orders as eo', function joinOrder() {
+          this.on('eo.id', 'ds.linked_id').andOn(db.raw("ds.linked_type = 'export_order'"));
+        })
+        .where((q) => q.where('ds.status', 'Pending Review').orWhere('ds.pending_action', 'delete'))
+        .select(
+          'ds.id', 'ds.doc_type', 'ds.title', 'ds.file_name', 'ds.status', 'ds.pending_action',
+          'ds.linked_type', 'ds.linked_id', 'ds.created_at', 'ds.version',
+          'u.full_name as uploaded_by_name', 'p.full_name as requested_by_name',
+          'eo.order_no as order_no',
+        )
+        .orderBy('ds.created_at', 'desc')
+        .limit(500);
+      return res.json({ success: true, data: { documents: rows, count: rows.length } });
+    } catch (err) {
+      console.error('Document pendingApprovals error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
+  // Count only — for the sidebar badge, so it stays cheap to poll.
+  async pendingApprovalsCount(req, res) {
+    try {
+      const r = await db('document_store')
+        .where((q) => q.where('status', 'Pending Review').orWhere('pending_action', 'delete'))
+        .count('id as c').first();
+      return res.json({ success: true, data: { pending: parseInt(r?.c, 10) || 0 } });
+    } catch (err) {
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  },
+
   // === Deletion requests ===
   // An Export Manager asks; nothing is removed until an approver agrees. The
   // requester is never blocked — they carry on uploading and editing while this
