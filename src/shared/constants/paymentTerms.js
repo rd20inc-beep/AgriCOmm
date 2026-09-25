@@ -19,6 +19,9 @@ export const PAYMENT_TERMS = [
   'LC 120 Days',
   'Advance (100%)',
   'Partial Advance + Balance LC',
+  // Part of the value up front, the balance released against documents — the
+  // common arrangement where the buyer is trusted but not fully.
+  'Partial Advance + CAD',
   'Net 15',
   'Net 30',
   'Net 45',
