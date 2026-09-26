@@ -44,8 +44,12 @@ export default function YieldOutputDrawer({ open, onClose, form, setForm, onSubm
             {(() => {
               const total = ['b1MT','b2MT','b3MT','csrMT','shortGrainMT']
                 .reduce((s, k) => s + (parseFloat(form[k]) || 0), 0);
+              // Labelled explicitly. Reading plain "Total" here, directly above
+              // the by-products, made it look as though Powder / S.W / Choba
+              // were being left out of the yield — they are not (see Total
+              // Output below), this subtotal simply never covered them.
               return total > 0 ? (
-                <span className="text-xs font-medium text-amber-700">Total: {Math.round(total).toLocaleString()} kg</span>
+                <span className="text-xs font-medium text-amber-700">Grades subtotal: {Math.round(total).toLocaleString()} kg</span>
               ) : null;
             })()}
           </div>
@@ -89,6 +93,16 @@ export default function YieldOutputDrawer({ open, onClose, form, setForm, onSubm
         </div>
 
         {/* By-products */}
+        <div className="flex items-center justify-between mb-1.5">
+          <label className="block text-sm font-medium text-gray-700">By-products (KG)</label>
+          {(() => {
+            const bp = ['sortexMT', 'powderMT', 'sweepingMT', 'chobaMT']
+              .reduce((s2, k) => s2 + (parseFloat(form[k]) || 0), 0);
+            return bp > 0 ? (
+              <span className="text-xs font-medium text-emerald-700">By-products subtotal: {Math.round(bp).toLocaleString()} kg</span>
+            ) : null;
+          })()}
+        </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Sortex Rejects (KG)</label>
