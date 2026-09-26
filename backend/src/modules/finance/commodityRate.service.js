@@ -8,7 +8,7 @@ const commodityRateService = {
   /**
    * Get the latest effective rate for a rate_type + product_type.
    */
-  async getRate(rateType, productType = null, asOfDate = null) {
+  async getRate(rateType, productType = null, asOfDate = null, productId = null) {
     // Safe check — table may not exist on pre-migration databases
     const exists = await db.schema.hasTable('commodity_rate_master');
     if (!exists) return null;
@@ -17,6 +17,7 @@ const commodityRateService = {
       .where('rate_type', rateType);
 
     if (productType) query = query.where('product_type', productType);
+    if (productId) query = query.where('product_id', productId);
     if (asOfDate) query = query.where('effective_date', '<=', asOfDate);
 
     const row = await query.orderBy('effective_date', 'desc').first();
@@ -49,15 +50,22 @@ const commodityRateService = {
   async getCurrentRates() {
     const exists = await db.schema.hasTable('commodity_rate_master');
     if (!exists) return [];
-    const all = await db('commodity_rate_master').orderBy('effective_date', 'desc');
+    const all = await db('commodity_rate_master as c')
+      .leftJoin('products as p', 'p.id', 'c.product_id')
+      .select('c.*', 'p.name as product_name')
+      .orderBy('c.effective_date', 'desc');
     const latest = {};
     for (const r of all) {
-      const key = `${r.rate_type}:${r.product_type || ''}`;
+      // product_id MUST be part of the key. Without it two products sharing a
+      // rate_type collapse into one and only the newer is ever shown.
+      const key = `${r.rate_type}:${r.product_id || ''}:${r.product_type || ''}`;
       if (!latest[key]) latest[key] = r;
     }
     return Object.values(latest).map(r => ({
       id: r.id,
       rateType: r.rate_type,
+      productId: r.product_id,
+      productName: r.product_name,
       productType: r.product_type,
       unit: r.unit,
       currency: r.rate_currency,
@@ -70,9 +78,12 @@ const commodityRateService = {
   /**
    * Add or update a commodity rate.
    */
-  async upsertRate({ rateType, productType = null, unit = 'per_mt', currency = 'PKR', rateValue, effectiveDate, isLocked = false, sourceReference = null, notes = null, createdBy = null }) {
+  async upsertRate({ rateType, productId = null, productType = null, unit = 'per_mt', currency = 'PKR', rateValue, effectiveDate, isLocked = false, sourceReference = null, notes = null, createdBy = null }) {
     const [row] = await db('commodity_rate_master').insert({
       rate_type: rateType,
+      // The picker sends a string; '' means "any product" and must become NULL,
+      // not 0, which would be a product id that does not exist.
+      product_id: productId ? Number(productId) : null,
       product_type: productType,
       unit,
       rate_currency: currency,
