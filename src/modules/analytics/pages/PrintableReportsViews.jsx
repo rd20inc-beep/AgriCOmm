@@ -698,6 +698,29 @@ export function StockDetailView({ data, companyName }) {
   const shownValue = shown.reduce((s, r) => s + (r.valuePkr || 0), 0);
   const shownBags = shown.reduce((s, r) => s + (parseFloat(r.bags) || 0), 0);
 
+  // One section per category. Raw then finished lead — that is the order the
+  // mill thinks in — and every by-product follows alphabetically, so the report
+  // reads the same way every time regardless of which categories happen to have
+  // stock. Selecting a single tag collapses this to that one section.
+  const LEAD = ['Unprocessed Rice', 'Finished Rice'];
+  const sections = (tag === 'all' ? tags : [tag])
+    .filter(t => byTag[t])
+    .sort((a, b) => {
+      const ia = LEAD.indexOf(a), ib = LEAD.indexOf(b);
+      if (ia !== -1 || ib !== -1) return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+      return a.localeCompare(b);
+    })
+    .map(t => {
+      const rws = rows.filter(r => (r.subtype || 'Other') === t);
+      return {
+        name: t,
+        rows: rws,
+        mt: rws.reduce((s2, r) => s2 + (r.onHandMt || 0), 0),
+        value: rws.reduce((s2, r) => s2 + (r.valuePkr || 0), 0),
+        bags: rws.reduce((s2, r) => s2 + (parseFloat(r.bags) || 0), 0),
+      };
+    });
+
   return (
     <div className="print-report space-y-6 text-sm text-gray-900">
       <Header companyName={companyName} title="Stock — Detailed & Traceable" subtitle={`As of ${new Date().toLocaleString()}${tag !== 'all' ? ` · ${tag}` : ''}`} />
@@ -728,25 +751,44 @@ export function StockDetailView({ data, companyName }) {
         {tags.map(t => <TagChip key={t} label={t} count={byTag[t].count} active={tag === t} onClick={() => setTag(t)} />)}
       </div>
 
-      <Section title={tag === 'all' ? 'Rice Stock — by lot, traced to its source' : `${tag} — ${shown.length} lot${shown.length === 1 ? '' : 's'} · ${fmtMt(shownMt)} MT · ${fmtPkr(shownValue)}`}>
-        <Table
-          head={['Lot', 'Tag', 'Item', 'Variety/Grade', 'On hand (MT)', 'kg', 'Per kg', 'Katta', 'Available', 'Source / Supplier', 'Warehouse', 'Value (PKR)']}
-          align={['left', 'left', 'left', 'left', 'right', 'right', 'right', 'right', 'right', 'left', 'left', 'right']}
-          rows={shown.map(r => [
-            <RefLink to={`/lot-inventory/${r.lotId}`}>{r.lotNo}</RefLink>,
-            <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-medium bg-gray-100 text-gray-700 print:bg-transparent print:px-0">{r.subtype}</span>,
-            r.item || '—', r.variety || r.grade || '—',
-            fmtMt(r.onHandMt), fmtKg(r.onHandMt * 1000), fmtPkr(r.costPerKg), fmtKg(r.bags),
-            fmtMt(r.availableMt),
-            r.supplier
-              ? (r.supplierId ? <RefLink to={`/finance/statements?type=supplier&id=${r.supplierId}`}>{r.supplier}</RefLink> : r.supplier)
-              : (r.sourceSupplier ? <span className="text-gray-600">milled from {r.sourceSupplier}{r.sourceBatch ? ` · ${r.sourceBatch}` : ''}</span> : '—'),
-            r.warehouse || '—', fmtPkr(r.valuePkr),
-          ])}
-          empty="No stock for this tag."
-          totalRow={['', '', '', 'TOTAL', fmtMt(shownMt), fmtKg(shownMt * 1000), '', fmtKg(shownBags), '', '', '', fmtPkr(shownValue)]}
-        />
-      </Section>
+      {/* One report covering every category, each under its own heading. Raw and
+          finished lead because that is how the mill thinks about its stock; the
+          by-products follow in alphabetical order. Picking a single tag still
+          prints just that one, as before. */}
+      {sections.map(sec => (
+        <Section key={sec.name}
+          title={`${sec.name} — ${sec.rows.length} lot${sec.rows.length === 1 ? '' : 's'} · ${fmtMt(sec.mt)} MT · ${fmtPkr(sec.value)}`}>
+          <Table
+            head={['Lot', 'Tag', 'Item', 'Variety/Grade', 'On hand (MT)', 'kg', 'Per kg', 'Katta', 'Available', 'Source / Supplier', 'Warehouse', 'Value (PKR)']}
+            align={['left', 'left', 'left', 'left', 'right', 'right', 'right', 'right', 'right', 'left', 'left', 'right']}
+            rows={sec.rows.map(r => [
+              <RefLink to={`/lot-inventory/${r.lotId}`}>{r.lotNo}</RefLink>,
+              <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-medium bg-gray-100 text-gray-700 print:bg-transparent print:px-0">{r.subtype}</span>,
+              r.item || '—', r.variety || r.grade || '—',
+              fmtMt(r.onHandMt), fmtKg(r.onHandMt * 1000), fmtPkr(r.costPerKg), fmtKg(r.bags),
+              fmtMt(r.availableMt),
+              r.supplier
+                ? (r.supplierId ? <RefLink to={`/finance/statements?type=supplier&id=${r.supplierId}`}>{r.supplier}</RefLink> : r.supplier)
+                : (r.sourceSupplier ? <span className="text-gray-600">milled from {r.sourceSupplier}{r.sourceBatch ? ` · ${r.sourceBatch}` : ''}</span> : '—'),
+              r.warehouse || '—', fmtPkr(r.valuePkr),
+            ])}
+            empty="No stock in this category."
+            totalRow={['', '', '', `${sec.name} TOTAL`, fmtMt(sec.mt), fmtKg(sec.mt * 1000), '', fmtKg(sec.bags), '', '', '', fmtPkr(sec.value)]}
+          />
+        </Section>
+      ))}
+
+      {/* With several sections above, the report needs one line that adds them up. */}
+      {sections.length > 1 && (
+        <Section title="All categories — total">
+          <Table
+            head={['Category', 'Lots', 'On hand (MT)', 'kg', 'Katta', 'Value (PKR)']}
+            align={['left', 'right', 'right', 'right', 'right', 'right']}
+            rows={sections.map(sec => [sec.name, sec.rows.length, fmtMt(sec.mt), fmtKg(sec.mt * 1000), fmtKg(sec.bags), fmtPkr(sec.value)])}
+            totalRow={['TOTAL', shown.length, fmtMt(shownMt), fmtKg(shownMt * 1000), fmtKg(shownBags), fmtPkr(shownValue)]}
+          />
+        </Section>
+      )}
       {tag === 'all' && millStore.length > 0 && (
         <Section title="Mill Store — packaging & consumables">
           <Table
