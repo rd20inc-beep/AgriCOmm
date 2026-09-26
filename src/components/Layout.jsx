@@ -3,7 +3,7 @@ import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Ship, Factory, Package, DollarSign, FileText,
   BarChart3, Settings, Search, Bell, ChevronDown, ChevronRight,
-  User, Users, Plus, X, LogOut, AlertTriangle, AlertCircle, Info, CreditCard,
+  User, Users, Plus, X, LogOut, KeyRound, AlertTriangle, AlertCircle, Info, CreditCard,
   ArrowRightLeft, FlaskConical, Menu, ShieldCheck, Shield,
   ChevronsLeft, ChevronsRight, Sun, Moon,
   Zap, Brain, Beaker, Printer, Boxes, ClipboardCheck, Sparkles, ShoppingCart,
@@ -573,6 +573,14 @@ export default function Layout({ children }) {
                 <button onClick={() => { setUserMenuOpen(false); navigate('/admin'); }}
                   className="flex items-center gap-2.5 w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
                   <Settings size={15} /> Settings
+                </button>
+                {/* /change-password has always existed and supports self-service,
+                    but nothing linked to it — a user could only reach it by
+                    typing the URL, so in practice nobody could change their own
+                    password without an admin resetting it for them. */}
+                <button onClick={() => { setUserMenuOpen(false); navigate('/change-password'); }}
+                  className="flex items-center gap-2.5 w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                  <KeyRound size={15} /> Change password
                 </button>
                 <button onClick={() => setDarkMode(prev => !prev)}
                   className="flex items-center gap-2.5 w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
