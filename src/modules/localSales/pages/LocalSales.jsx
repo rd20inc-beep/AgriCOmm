@@ -618,6 +618,27 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
   }
   const removeLine = (i) => setCart(c => c.filter((_, idx) => idx !== i));
 
+  // #6 — an arbitrary charge on the same invoice (loading, transport, weighing,
+  // a one-off). The backend already accepts a service line: an item whose type
+  // is labour/service/charge needs no lot and books no COGS. Shaped exactly like
+  // the repacking-labour line, which has always worked: quantity 1 at the charge
+  // amount, so the invoice reads "Loading  1  Rs 3,000  Rs 3,000".
+  const [charge, setCharge] = useState({ desc: '', amount: '' });
+  function addCharge() {
+    const desc = charge.desc.trim();
+    const amount = parseFloat(charge.amount) || 0;
+    if (!desc) { addToast('Describe the charge', 'error'); return; }
+    if (!(amount > 0)) { addToast('Enter an amount', 'error'); return; }
+    setCart(c => [...c, {
+      isCharge: true, item_name: desc, item_type: 'charge',
+      quantity_input: 1, quantity_unit: 'kg', bag_weight_kg: 1,
+      rate_input: amount, rate_unit: 'kg',
+      qtyKg: 0,            // not goods — must not count toward rice sold
+      ratePerKg: amount, total: amount, category: 'Charge',
+    }]);
+    setCharge({ desc: '', amount: '' });
+  }
+
   // #5 Repacking-derived charges. Company bags = new_bag_count × bag_rate;
   // labour = per-bag / per-kg (over rice sold) / fixed.
   const cartRiceKg = cart.filter(c => !c.isMillItem).reduce((s, c) => s + (c.qtyKg || 0), 0);
@@ -669,7 +690,11 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
         vehicle_no: form.vehicle_no || null, driver_name: form.driver_name || null, notes: form.notes || null,
         gate_pass_no: form.gate_pass_no?.trim() || null, // #6
         items: [
-          ...cart.map(c => c.isMillItem ? ({
+          ...cart.map(c => c.isCharge ? ({
+            item_name: c.item_name, item_type: 'charge',
+            quantity_input: 1, quantity_unit: 'kg', bag_weight_kg: 1,
+            rate_input: parseFloat(c.rate_input), rate_unit: 'kg',
+          }) : c.isMillItem ? ({
             mill_item_id: Number(c.mill_item_id), item_name: c.item_name,
             quantity_input: c.count, rate_input: parseFloat(c.rate_input),
           }) : ({
@@ -960,14 +985,38 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
                         </div>
                         {c.lotNo && <div className="text-[11px] text-gray-400">{c.lotNo}</div>}
                       </td>
-                      <td className="px-3 py-2 text-right tabular-nums">{Math.round(c.qtyKg).toLocaleString()} {c.isMillItem ? 'pcs' : 'kg'}</td>
-                      <td className="px-3 py-2 text-right tabular-nums">Rs {(c.ratePerKg).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{c.isMillItem ? ' ea' : '/kg'}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{c.isCharge ? <span className="text-gray-400">—</span> : `${Math.round(c.qtyKg).toLocaleString()} ${c.isMillItem ? 'pcs' : 'kg'}`}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{c.isCharge ? <span className="text-gray-400">—</span> : `Rs ${(c.ratePerKg).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${c.isMillItem ? ' ea' : '/kg'}`}</td>
                       <td className="px-3 py-2 text-right font-semibold tabular-nums">Rs {c.total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                       <td className="px-3 py-2 text-right"><button onClick={() => removeLine(i)} className="text-gray-300 hover:text-red-500"><X size={15} /></button></td>
                     </tr>
                   ))}
                 </tbody>
                 <tfoot>
+                  {/* #6 — put a non-goods charge on the SAME invoice: loading,
+                      transport, weighing, a one-off. It carries no lot and no
+                      COGS, and prints as its own line on the one invoice. */}
+                  <tr className="border-t border-gray-100 bg-white">
+                    <td className="px-3 py-2" colSpan={2}>
+                      <input value={charge.desc} onChange={e => setCharge(c => ({ ...c, desc: e.target.value }))}
+                        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addCharge(); } }}
+                        placeholder="Add another charge — e.g. Loading, Transport"
+                        className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-gray-900" />
+                    </td>
+                    <td className="px-3 py-2">
+                      <input type="number" min="0" step="0.01" value={charge.amount}
+                        onChange={e => setCharge(c => ({ ...c, amount: e.target.value }))}
+                        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addCharge(); } }}
+                        placeholder="Amount"
+                        className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm text-right tabular-nums focus:outline-none focus:border-gray-900" />
+                    </td>
+                    <td className="px-3 py-2 text-right" colSpan={2}>
+                      <button type="button" onClick={addCharge}
+                        className="px-3 py-1.5 text-xs font-medium text-white bg-gray-800 rounded-lg hover:bg-gray-900">
+                        Add charge
+                      </button>
+                    </td>
+                  </tr>
                   <tr className="bg-gray-50 font-bold text-gray-900">
                     <td className="px-3 py-2" colSpan={3}>Total ({cart.length})</td>
                     <td className="px-3 py-2 text-right text-emerald-700 tabular-nums">Rs {grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td><td></td>
