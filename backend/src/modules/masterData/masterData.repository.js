@@ -66,8 +66,14 @@ const masterDataRepository = {
   },
 
   // ===================== SUPPLIERS =====================
+  // Archived suppliers are excluded, exactly as listCustomers does. Without this
+  // an archived supplier kept appearing in every picker and dropdown (they are all
+  // fed from GET /api/suppliers), so archiving one had no visible effect. The
+  // admin master-data screen uses createCrud in admin.controller and is
+  // deliberately unfiltered, so archived rows stay visible — and restorable —
+  // there, and getSupplierById still resolves one by id for historical records.
   async listSuppliers({ page = 1, limit = 50, offset = 0, search } = {}) {
-    let query = db('suppliers');
+    let query = db('suppliers').where('archived', false);
     if (search) {
       query = query.where(function () {
         this.whereILike('name', `%${search}%`);
