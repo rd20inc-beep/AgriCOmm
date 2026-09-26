@@ -4,7 +4,7 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { FlaskConical, Plus, Search, GitCompare, Trash2, ArrowRight, X } from 'lucide-react';
+import { FlaskConical, Plus, Search, GitCompare, Trash2, ArrowRight, X, Pencil, Check } from 'lucide-react';
 import SlideDrawer from '../../../components/SlideDrawer';
 import Modal from '../../../components/Modal';
 import SupplierPicker from '../../../components/SupplierPicker';
@@ -54,6 +54,14 @@ export default function SampleAnalysis() {
   const statusMut = useMutation({
     mutationFn: ({ id, status }) => sampleApi.setStatus(id, { status }),
     onSuccess: () => { addToast('Sample status updated', 'success'); invalidate(); },
+    onError: (e) => addToast(e?.data?.message || e?.message || 'Failed', 'error'),
+  });
+  // Sample IDs are editable until the sample becomes a lot — after that the
+  // number is referenced by the lot and the audit trail.
+  const [renaming, setRenaming] = useState(null);   // { id, value }
+  const renameMut = useMutation({
+    mutationFn: ({ id, sampleNo }) => sampleApi.rename(id, sampleNo),
+    onSuccess: () => { addToast('Sample ID updated', 'success'); setRenaming(null); invalidate(); },
     onError: (e) => addToast(e?.data?.message || e?.message || 'Failed', 'error'),
   });
   const deleteMut = useMutation({
@@ -144,7 +152,32 @@ export default function SampleAnalysis() {
                   return (
                     <tr key={s.id} className="hover:bg-gray-50">
                       <td data-label="" className="mob-hide px-2 py-2 text-center"><input type="checkbox" checked={selected.has(s.id)} onChange={() => toggleSel(s.id)} /></td>
-                      <td data-label="Sample" className="px-3 py-2"><button onClick={() => setDrawer({ mode: 'analyze', sample: s })} className="font-mono text-blue-600 hover:underline">{s.sample_no}</button><div className="text-[11px] text-gray-400">{String(s.sample_date).slice(0, 10)}</div></td>
+                      <td data-label="Sample" className="px-3 py-2">
+                        {renaming?.id === s.id ? (
+                          <span className="flex items-center gap-1">
+                            <input autoFocus value={renaming.value}
+                              onChange={(e) => setRenaming({ id: s.id, value: e.target.value })}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') renameMut.mutate({ id: s.id, sampleNo: renaming.value });
+                                if (e.key === 'Escape') setRenaming(null);
+                              }}
+                              className="font-mono text-xs border border-blue-300 rounded px-1.5 py-0.5 w-44" />
+                            <button onClick={() => renameMut.mutate({ id: s.id, sampleNo: renaming.value })}
+                              disabled={renameMut.isPending}
+                              className="text-emerald-600 hover:text-emerald-700" title="Save"><Check size={13} /></button>
+                            <button onClick={() => setRenaming(null)} className="text-gray-400 hover:text-gray-600" title="Cancel"><X size={13} /></button>
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1">
+                            <button onClick={() => setDrawer({ mode: 'analyze', sample: s })} className="font-mono text-blue-600 hover:underline">{s.sample_no}</button>
+                            {editable && (
+                              <button onClick={() => setRenaming({ id: s.id, value: s.sample_no })}
+                                className="text-gray-300 hover:text-blue-600" title="Edit this sample ID"><Pencil size={11} /></button>
+                            )}
+                          </span>
+                        )}
+                        <div className="text-[11px] text-gray-400">{String(s.sample_date).slice(0, 10)}</div>
+                      </td>
                       <td data-label="Supplier" className="mob-hide px-3 py-2 text-gray-700 max-w-[10rem] truncate" title={s.supplier_name || ''}>{s.supplier_name || '—'}</td>
                       <td data-label="Variety / Grade" className="px-3 py-2 text-gray-700">{s.variety || s.product_name || '—'}{s.claimed_grade ? <span className="text-gray-400"> ({s.claimed_grade})</span> : ''}</td>
                       <td data-label="Offered" className="px-3 py-2 text-right tabular-nums">{kg(s.offered_qty_kg)}<div className="text-[11px] text-gray-400">{rs(s.offered_rate_per_kg)}/kg</div></td>
@@ -207,7 +240,7 @@ function QualityGrid({ values, onChange }) {
 function SampleDrawer({ onClose, onDone, addToast }) {
   const { data: suppliers = [] } = useSuppliers();
   const { data: products = [] } = useProducts();
-  const [form, setForm] = useState({ supplier_id: '', product_id: '', variety: '', claimed_grade: '', origin_area: '', crop_year: '', offered_qty_kg: '', offered_rate_per_kg: '', bags: '', bag_weight_kg: 50, supplier_sample_ref: '', remarks: '', sample_date: new Date().toISOString().slice(0, 10) });
+  const [form, setForm] = useState({ sample_no: '', supplier_id: '', product_id: '', variety: '', claimed_grade: '', origin_area: '', crop_year: '', offered_qty_kg: '', offered_rate_per_kg: '', bags: '', bag_weight_kg: 50, supplier_sample_ref: '', remarks: '', sample_date: new Date().toISOString().slice(0, 10) });
   const [analysis, setAnalysis] = useState({});
   const [file, setFile] = useState(null);
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
@@ -241,6 +274,11 @@ function SampleDrawer({ onClose, onDone, addToast }) {
     <SlideDrawer open onClose={onClose} title="New Sample" subtitle="Stage 1 — sample received + initial analysis" icon={FlaskConical} footer={footer} size="xl">
       <div className="space-y-4">
         <div className="grid grid-cols-2 gap-3">
+          <Field label="Sample ID">
+            <input value={form.sample_no} onChange={(e) => set('sample_no', e.target.value)} className="form-input font-mono"
+              placeholder="auto — supplier, variety & date" />
+            <p className="text-[11px] text-gray-400 mt-0.5">Leave blank to number it like the lot it will become, e.g. SHAP-1121BASM-260926-01</p>
+          </Field>
           <Field label="Supplier"><SupplierPicker value={form.supplier_id} onChange={(v) => set('supplier_id', v)} suppliers={suppliers} addToast={addToast} /></Field>
           <Field label="Rice Type"><RiceTypePicker value={form.product_id} onChange={(v) => set('product_id', v)} products={products} addToast={addToast} /></Field>
           <Field label="Variety"><input value={form.variety} onChange={(e) => set('variety', e.target.value)} className="form-input" placeholder="e.g. 1121 Basmati" /></Field>

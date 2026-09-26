@@ -8,5 +8,6 @@ export const sampleApi = {
   updateAnalysis: (id, data) => api.put(`/api/sample-analysis/${id}/analysis`, data),
   setStatus: (id, data) => api.post(`/api/sample-analysis/${id}/status`, data),
   convert: (id, data) => api.post(`/api/sample-analysis/${id}/convert`, data || {}),
+  rename: (id, sample_no) => api.patch(`/api/sample-analysis/${id}/sample-no`, { sample_no }),
   remove: (id) => api.delete(`/api/sample-analysis/${id}`),
 };
