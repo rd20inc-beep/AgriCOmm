@@ -34,6 +34,8 @@ export const lotInventoryApi = {
   transferLotToExport: (id, data) => api.post(`/api/lot-inventory/lots/${id}/transfer-to-export`, data),
   transferLotToMill: (id, data) => api.post(`/api/lot-inventory/lots/${id}/transfer-to-mill`, data),
   stockReport: (params) => api.get('/api/lot-inventory/reports/stock', params),
+  // Held-stock profit: cost vs selling price (commodity_rate_master, per grade/variety).
+  stockValuation: (params) => api.get('/api/lot-inventory/valuation', params),
   setReorderLevel: (productId, reorder_level) => api.put(`/api/lot-inventory/products/${productId}/reorder-level`, { reorder_level }),
   getLotAncestry: (id) => api.get(`/api/lot-inventory/lots/${id}/ancestry`),
   getLotDescendants: (id) => api.get(`/api/lot-inventory/lots/${id}/descendants`),

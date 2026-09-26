@@ -26,8 +26,7 @@ import {
   useFinalSettlement, useFinalizeSettlement, usePayrollAudit, useSalaryRevisions, useReviseSalary,
   usePayrollSchedule, useSavePayrollSchedule, useRunPayrollNow,
   usePayables, useSuppliers, useCustomers, usePurchases, useLocalSalesSummary, useMillCashFlow, useAcceptFundTransfer,
-  useMillLotCosts, useLocalSales, useRecordPayment, usePayablePayments, useBankAccounts,
-} from '../../../api/queries';
+  useMillLotCosts, useLocalSales, useRecordPayment, usePayablePayments, useBankAccounts, useHeldStockProfit } from '../../../api/queries';
 import TransactionDocument from '../../../components/TransactionDocument';
 import NewPurchaseDrawer from '../../../components/NewPurchaseDrawer';
 import api from '../../../api/client';
@@ -449,6 +448,19 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
   const DEFAULT_PRICES = { finished: cp.finished, broken: cp.broken, bran: cp.bran, husk: cp.husk };
   const batchPrice = (b, product) => b[`${product}PricePerMT`] || DEFAULT_PRICES[product];
   const { data: directInventory = [] } = useInventory({});
+  // Cost lives on the lot; the selling price comes from commodity_rate_master.
+  const { data: valuation } = useHeldStockProfit({ entity: 'mill' });
+  const heldProfit = useMemo(() => {
+    const t = valuation?.summary?.total;
+    return {
+      marketValue: t?.marketValue || 0,
+      profit: t?.profit || 0,
+      pricedCostValue: t?.pricedCostValue || 0,
+      unpricedCostValue: t?.unpricedCostValue || 0,
+      unpricedLots: t?.unpricedLots || 0,
+      ratesConfigured: valuation?.ratesConfigured || 0,
+    };
+  }, [valuation]);
   const inventory = Array.isArray(directInventory) ? directInventory : [];
   const pf = (v) => parseFloat(v) || 0;
 
@@ -1199,6 +1211,29 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
             <Stat tone="green"  label="Finished Rice" value={PKR(inventoryValue.fin)} sub={`${(inventory.filter(i => i.type === 'finished').reduce((s, i) => s + pf(i.availableQty), 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg`} />
             <Stat tone="purple" label="Byproducts"    value={PKR(inventoryValue.bp)}  sub={`${(inventory.filter(i => i.type === 'byproduct').reduce((s, i) => s + pf(i.availableQty), 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg`} />
             <Stat tone="blue"   label="Working Cap."  value={PKR(inventoryValue.total)} sub="Locked in stock" />
+          </div>
+
+          {/* Held-stock profit — what the stock on hand is worth at SELLING price,
+              against what it cost. Only shown for stock that has a selling rate;
+              unpriced stock is called out rather than valued at cost. */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-3">
+            <Stat tone="slate" label="Stock at Selling Price"
+                  value={heldProfit.ratesConfigured === 0 ? '—' : PKR(heldProfit.marketValue)}
+                  sub={heldProfit.ratesConfigured === 0
+                    ? 'No selling rates set — Finance ▸ Rates'
+                    : `${PKR(heldProfit.pricedCostValue)} at cost`} />
+            <Stat tone={heldProfit.profit >= 0 ? 'green' : 'red'} label="Profit on Stock Held"
+                  value={heldProfit.ratesConfigured === 0 ? '—' : PKR(heldProfit.profit)}
+                  sub={heldProfit.ratesConfigured === 0
+                    ? 'needs a price per grade / variety'
+                    : (heldProfit.pricedCostValue > 0
+                        ? `${(100 * heldProfit.profit / heldProfit.pricedCostValue).toFixed(1)}% on priced stock`
+                        : '—')} />
+            <Stat tone="amber" label="Not Yet Priced"
+                  value={heldProfit.unpricedLots ? PKR(heldProfit.unpricedCostValue) : PKR(0)}
+                  sub={heldProfit.unpricedLots ? `${heldProfit.unpricedLots} lot(s) at cost — no selling rate` : 'every lot has a rate'} />
+            <Stat tone="blue" label="Selling Rates Set" value={String(heldProfit.ratesConfigured)}
+                  sub="per grade / variety" />
           </div>
 
           {/* Net profit & margin breakdown */}

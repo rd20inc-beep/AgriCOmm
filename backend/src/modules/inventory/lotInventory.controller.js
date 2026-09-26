@@ -14,6 +14,7 @@ const { blendPurchaseIntoLot } = require('./lotCosting');
 const { nextDocNo } = require('../../utils/docNumber');
 // #9-scoping: per-user warehouse restriction, applied to READ paths only.
 const whScope = require('../../utils/warehouseScope');
+const stockValuation = require('./stockValuation');
 
 async function generateTxnNo(trx) {
   const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
@@ -3234,6 +3235,53 @@ module.exports = {
       const status = err.statusCode || 500;
       if (status === 500) console.error('startMillingForLot error:', err);
       return res.status(status).json({ success: false, message: err.message });
+    }
+  },
+  // ─── Held-stock profit ───
+  // Cost is on the lot; the SELLING price comes from commodity_rate_master, keyed
+  // by product + grade (by-products are priced per grade, finished/raw per
+  // variety). Stock with no rate set is reported separately and never valued at
+  // cost — that would understate profit while looking like a real number.
+  async getStockValuation(req, res) {
+    try {
+      const { entity, type, status = 'Available', ownership } = req.query;
+
+      let query = db('inventory_lots as l')
+        .leftJoin('products as p', 'l.product_id', 'p.id')
+        .select('l.id', 'l.lot_no', 'l.type', 'l.grade', 'l.brand', 'l.product_id',
+                'l.available_qty', 'l.cost_per_unit', 'l.entity', 'l.warehouse_id',
+                'p.name as product_name');
+
+      if (ownership === 'client') query = query.where('l.ownership', 'client');
+      else if (ownership !== 'all') query = query.where('l.ownership', 'company');
+      if (status && status !== 'all') query = query.where('l.status', status);
+      if (entity) query = query.where('l.entity', entity);
+      if (type) query = query.where('l.type', type);
+      query = whScope.applyWarehouseScope(query, await whScope.resolveWarehouseScope(req), 'l.warehouse_id');
+      query = query.where('l.available_qty', '>', 0);
+
+      const lots = await query.orderBy('l.type').orderBy('l.available_qty', 'desc');
+
+      const hasRates = await db.schema.hasTable('commodity_rate_master');
+      const rateRows = hasRates ? await db('commodity_rate_master').select('*') : [];
+      const idx = stockValuation.buildRateIndex(rateRows);
+
+      const priced = lots.map((lot) => ({
+        ...lot,
+        valuation: stockValuation.valueLot(lot, idx),
+      }));
+
+      return res.json({
+        success: true,
+        data: {
+          lots: priced,
+          summary: stockValuation.summarise(lots, idx),
+          ratesConfigured: idx.size,
+        },
+      });
+    } catch (err) {
+      console.error('getStockValuation error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
     }
   },
 };
