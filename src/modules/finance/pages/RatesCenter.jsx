@@ -2,9 +2,13 @@ import { useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { DollarSign, Package, Plus, RefreshCw, Check, Lock, AlertTriangle } from 'lucide-react';
 import { FinanceTable, FinanceKPI } from '../../../components/finance';
-import { useFxRates, useCommodityRates } from '../../../api/queries';
+import { useFxRates, useCommodityRates, useProducts } from '../../../api/queries';
 import { financeApi } from '../../../api/services';
 import { useApp } from '../../../context/AppContext';
+
+// By-product grades a rate can be scoped to; blank means the product as a whole.
+// Finished rice and raw are priced per product, so they leave this empty.
+const BYPRODUCT_GRADES = ['B1', 'B2', 'B3', 'CSR', 'SWEEPING', 'STONE', 'POWDER', 'CHOBA'];
 
 const SUB_TABS = [
   { key: 'fx', label: 'FX Rates', icon: DollarSign },
@@ -27,7 +31,14 @@ export default function RatesCenter() {
 
   // Add Commodity Rate form
   const [showCrForm, setShowCrForm] = useState(false);
-  const [crForm, setCrForm] = useState({ rateType: '', productType: '', unit: 'per_mt', currency: 'PKR', rateValue: '', effectiveDate: new Date().toISOString().split('T')[0], notes: '' });
+  const [crForm, setCrForm] = useState({ rateType: '', productId: '', productType: '', unit: 'per_kg', currency: 'PKR', rateValue: '', effectiveDate: new Date().toISOString().split('T')[0], notes: '' });
+  // Products for the picker — a rate is keyed by product (+ grade for by-products),
+  // which is how held-stock profit finds the selling price for each lot.
+  const { data: productsData } = useProducts({ limit: 500 });
+  const productOptions = useMemo(() => {
+    const raw = productsData?.products || productsData || [];
+    return (Array.isArray(raw) ? raw : []).map((p) => ({ id: p.id, name: p.name })).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  }, [productsData]);
 
   async function handleAddFxRate(e) {
     e.preventDefault();
@@ -80,7 +91,8 @@ export default function RatesCenter() {
 
   const crColumns = [
     { key: 'rateType', label: 'Rate Type', sortable: true, render: (v) => (v || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) },
-    { key: 'productType', label: 'Product', sortable: true, render: (v) => v || '—' },
+    { key: 'productName', label: 'Product', sortable: true, render: (v) => v || <span className="text-gray-300">any</span> },
+    { key: 'productType', label: 'Grade', sortable: true, render: (v) => v || <span className="text-gray-300">all</span> },
     { key: 'unit', label: 'Unit', render: (v) => v || 'per_mt' },
     { key: 'currency', label: 'Currency', render: (v) => v || 'PKR' },
     { key: 'rateValue', label: 'Rate', sortable: true, align: 'right', render: (v) => `Rs ${parseFloat(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` },
@@ -219,14 +231,42 @@ export default function RatesCenter() {
                 </select>
               </div>
               <div>
-                <label className="text-xs text-gray-500 block mb-1">Product Type</label>
-                <input type="text" value={crForm.productType} onChange={e => setCrForm({ ...crForm, productType: e.target.value })}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm" placeholder="e.g. IRRI-6" />
+                <label className="text-xs text-gray-500 block mb-1">Product</label>
+                <select value={crForm.productId} onChange={e => setCrForm({ ...crForm, productId: e.target.value })}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm">
+                  <option value="">Any product</option>
+                  {productOptions.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
               </div>
               <div>
-                <label className="text-xs text-gray-500 block mb-1">Rate (PKR)</label>
+                <label className="text-xs text-gray-500 block mb-1">Grade <span className="text-gray-400">(by-products)</span></label>
+                <select value={crForm.productType} onChange={e => setCrForm({ ...crForm, productType: e.target.value })}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm">
+                  <option value="">All grades</option>
+                  {BYPRODUCT_GRADES.map((g) => <option key={g} value={g}>{g}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 block mb-1">Unit</label>
+                <select value={crForm.unit} onChange={e => setCrForm({ ...crForm, unit: e.target.value })}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm" required>
+                  <option value="per_kg">per KG</option>
+                  <option value="per_mt">per MT (tonne)</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 block mb-1">Rate ({crForm.currency})</label>
                 <input type="number" step="0.01" required value={crForm.rateValue} onChange={e => setCrForm({ ...crForm, rateValue: e.target.value })}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm" placeholder="95000" />
+                  className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm"
+                  placeholder={crForm.unit === 'per_kg' ? '115.00' : '115000'} />
+                <p className="text-[10px] text-gray-400 mt-0.5">
+                  {crForm.unit === 'per_kg' ? 'price for ONE kilo' : 'price for ONE tonne (1000 kg)'}
+                </p>
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 block mb-1">Effective From</label>
+                <input type="date" required value={crForm.effectiveDate} onChange={e => setCrForm({ ...crForm, effectiveDate: e.target.value })}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
               </div>
               <button type="submit" className="bg-blue-600 text-white rounded-lg px-4 py-1.5 text-sm font-medium hover:bg-blue-700">Save</button>
             </form>
