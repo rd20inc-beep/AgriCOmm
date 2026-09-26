@@ -26,7 +26,7 @@ import {
   useFinalSettlement, useFinalizeSettlement, usePayrollAudit, useSalaryRevisions, useReviseSalary,
   usePayrollSchedule, useSavePayrollSchedule, useRunPayrollNow,
   usePayables, useSuppliers, useCustomers, usePurchases, useLocalSalesSummary, useMillCashFlow, useAcceptFundTransfer,
-  useMillLotCosts, useLocalSales, useRecordPayment, usePayablePayments, useBankAccounts, useHeldStockProfit } from '../../../api/queries';
+  useMillLotCosts, useLocalSales, useRecordPayment, usePayablePayments, useBankAccounts, useHeldStockProfit, useProfitLoss } from '../../../api/queries';
 import TransactionDocument from '../../../components/TransactionDocument';
 import NewPurchaseDrawer from '../../../components/NewPurchaseDrawer';
 import api from '../../../api/client';
@@ -448,6 +448,20 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
   const DEFAULT_PRICES = { finished: cp.finished, broken: cp.broken, bran: cp.bran, husk: cp.husk };
   const batchPrice = (b, product) => b[`${product}PricePerMT`] || DEFAULT_PRICES[product];
   const { data: directInventory = [] } = useInventory({});
+  // THE BOOKS. The cards below this row are derived from milling batches, which
+  // only count once a batch is Completed — so with a batch still pending, they
+  // reported Revenue 0 and a loss equal to the month's expenses while real sales
+  // sat posted in the ledger. This is the ledger's own answer, and it cannot
+  // double-count the way adding estimated batch revenue to actual sales would.
+  const { data: glPnl } = useProfitLoss({ entity: 'mill' });
+  const books = useMemo(() => ({
+    revenue: parseFloat(glPnl?.revenue?.total) || 0,
+    cogs: parseFloat(glPnl?.cogs?.total) || 0,
+    expenses: parseFloat(glPnl?.expenses?.total) || 0,
+    grossProfit: parseFloat(glPnl?.grossProfit) || 0,
+    netProfit: parseFloat(glPnl?.netProfit) || 0,
+    hasData: !!glPnl,
+  }), [glPnl]);
   // Cost lives on the lot; the selling price comes from commodity_rate_master.
   const { data: valuation } = useHeldStockProfit({ entity: 'mill' });
   const heldProfit = useMemo(() => {
@@ -1196,13 +1210,29 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
         <div className="space-y-5">
           {/* Top KPI row */}
           <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
-            <Stat tone="blue"   icon={TrendingUp}   label="Revenue"        value={PKR(kpis.totalRev)}   sub={`Finished ${COMPACT_PKR(kpis.finishedRev)}`} />
+            <Stat tone="blue"   icon={TrendingUp}   label="Production Value" value={PKR(kpis.totalRev)} sub={completed.length ? `${completed.length} completed batch(es)` : 'no completed batches'} />
             <Stat tone="red"    icon={TrendingDown} label="Raw Material"   value={PKR(kpis.totalRaw)}   sub="Rice purchase" />
             <Stat tone="purple" icon={Factory}      label="Milling Cost"   value={PKR(kpis.totalMilling)} sub="Processing fee" />
             <Stat tone="amber"  icon={DollarSign}   label="Operating"      value={PKR(kpis.totalOtherCosts + totalOverhead)} sub={`Batch ${COMPACT_PKR(kpis.totalOtherCosts)} · OH ${COMPACT_PKR(totalOverhead)}`} />
-            <Stat tone={kpis.netProfit >= 0 ? 'green' : 'red'} icon={TrendingUp} label="Net Profit" value={PKR(kpis.netProfit)} sub={`Margin ${margin}%`} />
+            <Stat tone={kpis.netProfit >= 0 ? 'green' : 'red'} icon={TrendingUp} label="Production Margin" value={PKR(kpis.netProfit)} sub={`Margin ${margin}% · milling only`} />
             <Stat tone="slate"  icon={DollarSign}   label="Cost/kg"        value={`Rs ${kpis.costPerKg.toFixed(2)}`} sub="All-in" />
             <Stat tone="purple" icon={Package}      label="Inventory"      value={PKR(inventoryValue.total)} sub={`Raw ${COMPACT_PKR(inventoryValue.raw)}`} />
+          </div>
+
+          {/* ── The books. Straight from the general ledger, so it agrees with the
+               trial balance and includes sales the batch figures above cannot
+               see (a sale posts revenue whether or not its batch is Completed). ── */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <Stat tone="blue" icon={TrendingUp} label="Revenue (books)"
+                  value={books.hasData ? PKR(books.revenue) : '—'} sub="posted to the ledger" />
+            <Stat tone="red" icon={TrendingDown} label="Cost of Goods Sold"
+                  value={books.hasData ? PKR(books.cogs) : '—'} sub="cost of what was sold" />
+            <Stat tone={books.grossProfit >= 0 ? 'green' : 'red'} icon={DollarSign} label="Gross Profit"
+                  value={books.hasData ? PKR(books.grossProfit) : '—'}
+                  sub={books.revenue > 0 ? `${(100 * books.grossProfit / books.revenue).toFixed(1)}% of revenue` : 'no sales yet'} />
+            <Stat tone={books.netProfit >= 0 ? 'green' : 'red'} icon={TrendingUp} label="Net Profit (books)"
+                  value={books.hasData ? PKR(books.netProfit) : '—'}
+                  sub={`after ${COMPACT_PKR(books.expenses)} expenses`} />
           </div>
 
           {/* Inventory breakdown */}
