@@ -44,6 +44,7 @@ import StatementPayDrawer from '../../finance/components/StatementPayDrawer';
 import TransferFundsDrawer from '../../finance/components/TransferFundsDrawer';
 import AnomalyWatchCard from '../../ai/components/AnomalyWatchCard';
 import { favStar } from '../../../shared/utils/favorites';
+import { valueInventory } from '../utils/inventoryValue';
 
 const PKR = (v) => 'Rs ' + (v || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtDate = (d) => {
@@ -451,22 +452,9 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
   const inventory = Array.isArray(directInventory) ? directInventory : [];
   const pf = (v) => parseFloat(v) || 0;
 
-  const inventoryValue = useMemo(() => {
-    let raw = 0, fin = 0, bp = 0;
-    for (const lot of inventory) {
-      const qty = pf(lot.availableQty || lot.qty);
-      const netKg = pf(lot.netWeightKg) || qty * 1000;
-      const costKg = pf(lot.landedCostPerKg) || pf(lot.ratePerKg);
-      if (lot.type === 'raw')       raw += (costKg || 150) * netKg;
-      else if (lot.type === 'finished')  fin += (costKg || 190) * qty * 1000;
-      else if (lot.type === 'byproduct') {
-        const name = (lot.itemName || '').toLowerCase();
-        const rate = name.includes('broken') ? 38 : name.includes('bran') ? 28 : 8.4;
-        bp += (costKg || rate) * qty * 1000;
-      }
-    }
-    return { raw, fin, bp, total: raw + fin + bp };
-  }, [inventory]);
+  // Quantities are KG, so they must NOT be multiplied by 1000 — see
+  // utils/inventoryValue.js for why the lot's "MT" unit label is a trap.
+  const inventoryValue = useMemo(() => valueInventory(inventory), [inventory]);
 
   const { data: vendorData } = useExpenseVendors();
   // category → [{ id, name, ... }] for the Provider dropdown
