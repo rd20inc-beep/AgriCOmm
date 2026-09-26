@@ -23,6 +23,7 @@ export const enterpriseApi = {
   integrations: () => api.get('/api/enterprise/integrations'),
   syncCRM: () => api.post('/api/enterprise/sync/crm'),
   preferences: () => api.get('/api/enterprise/preferences'),
+  getPreferences: () => api.get('/api/enterprise/preferences'),
   updatePreferences: (data) => api.put('/api/enterprise/preferences', data),
 };
 

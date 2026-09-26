@@ -362,7 +362,7 @@ export default function ExportLayout({ children }) {
                   <p className="text-xs text-gray-400 truncate">{userEmail}</p>
                   <p className="text-[10px] text-blue-600 uppercase tracking-wider font-semibold mt-1">{user?.role || 'Export Manager'}</p>
                 </div>
-                <button onClick={() => { setUserMenuOpen(false); }}
+                <button onClick={() => { setUserMenuOpen(false); navigate('/profile'); }}
                   className="flex items-center gap-2.5 w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
                   <User size={15} /> Profile
                 </button>
