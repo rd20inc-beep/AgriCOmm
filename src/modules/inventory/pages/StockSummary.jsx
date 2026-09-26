@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Boxes, Package, Wallet, ArrowRight, Layers, AlertTriangle, Check, X, Pencil } from 'lucide-react';
 import { lotInventoryApi } from '../api/services';
+import { useHeldStockProfit } from '../../../api/queries';
 
 const n = (v) => Number(v) || 0;
 const toMT = (kg) => n(kg) / 1000;
@@ -35,6 +36,23 @@ export default function StockSummary() {
     staleTime: 10 * 1000,
   });
 
+  // Selling price per grade / variety, so each product row can show what its
+  // stock is worth to sell and the profit sitting in it. Lots with no rate are
+  // counted separately rather than valued at cost.
+  const { data: valuation } = useHeldStockProfit(entity ? { entity } : {});
+  const valueByProduct = useMemo(() => {
+    const m = new Map();
+    for (const lot of valuation?.lots || []) {
+      const k = lot.product_id;
+      const v = lot.valuation || {};
+      const cur = m.get(k) || { marketValue: 0, profit: 0, unpricedLots: 0, pricedLots: 0 };
+      if (v.hasRate) { cur.marketValue += v.marketValue || 0; cur.profit += v.profit || 0; cur.pricedLots += 1; }
+      else cur.unpricedLots += 1;
+      m.set(k, cur);
+    }
+    return m;
+  }, [valuation]);
+
   const saveReorder = useMutation({
     mutationFn: ({ id, level }) => lotInventoryApi.setReorderLevel(id, level),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['stock-summary'] }); setEditId(null); },
@@ -54,6 +72,19 @@ export default function StockSummary() {
   );
   const rows = useMemo(() => (lowOnly ? allRows.filter((r) => r.isLow) : allRows), [allRows, lowOnly]);
   const lowCount = useMemo(() => allRows.filter((r) => r.isLow).length, [allRows]);
+
+  // Footer totals come from the rows actually displayed, so filtering the table
+  // never leaves the total disagreeing with the column above it.
+  const heldTotals = useMemo(() => {
+    let marketValue = 0, profit = 0, pricedLots = 0, unpricedLots = 0;
+    for (const r of rows) {
+      const v = valueByProduct.get(r.group_id);
+      if (!v) continue;
+      marketValue += v.marketValue; profit += v.profit;
+      pricedLots += v.pricedLots; unpricedLots += v.unpricedLots;
+    }
+    return { marketValue, profit, pricedLots, unpricedLots };
+  }, [rows, valueByProduct]);
   const totals = useMemo(
     () => rows.reduce((a, r) => ({
       onHand: a.onHand + n(r.total_kg),
@@ -121,6 +152,8 @@ export default function StockSummary() {
                   <th className="px-4 py-2.5 text-right" title="Reserved against export orders">Committed</th>
                   <th className="px-4 py-2.5 text-right" title="Warn me when on-hand drops below this">Reorder at</th>
                   <th className="px-4 py-2.5 text-right" title="What this stock cost (landed)">Stock value</th>
+                  <th className="px-4 py-2.5 text-right" title="What the stock on hand is worth at its selling price (Finance ▸ Rates)">At selling price</th>
+                  <th className="px-4 py-2.5 text-right" title="Selling price minus cost, on the stock still held">Profit if sold</th>
                   <th className="px-4 py-2.5"></th>
                 </tr>
               </thead>
@@ -162,6 +195,25 @@ export default function StockSummary() {
                         )}
                       </td>
                       <td data-label="Stock value" className="px-4 py-2.5 text-right font-semibold text-gray-900 tabular-nums">{fmtPKR(r.total_value)}</td>
+                      {(() => {
+                        const v = valueByProduct.get(r.group_id);
+                        const none = !v || v.pricedLots === 0;
+                        return (
+                          <>
+                            <td data-label="At selling price" className="px-4 py-2.5 text-right tabular-nums text-gray-700">
+                              {none ? <span className="text-gray-300" title="No selling rate set for this grade / variety">—</span> : fmtPKR(v.marketValue)}
+                            </td>
+                            <td data-label="Profit if sold" className={`px-4 py-2.5 text-right tabular-nums font-medium ${none ? '' : (v.profit >= 0 ? 'text-emerald-600' : 'text-red-600')}`}>
+                              {none ? <span className="text-gray-300">—</span> : fmtPKR(v.profit)}
+                              {!none && v.unpricedLots > 0 && (
+                                <span className="block text-[10px] font-normal text-amber-600" title="Some lots of this product have no selling rate, so they are excluded">
+                                  {v.unpricedLots} lot(s) unpriced
+                                </span>
+                              )}
+                            </td>
+                          </>
+                        );
+                      })()}
                       <td className="px-4 py-2.5 text-right">
                         <button onClick={() => setDetailRow(r)} title="See what's in stock"><ArrowRight className="w-4 h-4 text-gray-300 hover:text-blue-500 inline" /></button>
                       </td>
@@ -178,6 +230,12 @@ export default function StockSummary() {
                   <td data-label="Committed" className="mob-hide px-4 py-2.5 text-right tabular-nums">{totals.reserved > 0 ? fmtMT(totals.reserved) : '—'}</td>
                   <td className="px-4 py-2.5"></td>
                   <td data-label="Stock value" className="px-4 py-2.5 text-right tabular-nums">{fmtPKR(totals.value)}</td>
+                  <td data-label="At selling price" className="px-4 py-2.5 text-right tabular-nums">
+                    {heldTotals.pricedLots === 0 ? <span className="text-gray-300">—</span> : fmtPKR(heldTotals.marketValue)}
+                  </td>
+                  <td data-label="Profit if sold" className={`px-4 py-2.5 text-right tabular-nums ${heldTotals.pricedLots === 0 ? '' : (heldTotals.profit >= 0 ? 'text-emerald-600' : 'text-red-600')}`}>
+                    {heldTotals.pricedLots === 0 ? <span className="text-gray-300">—</span> : fmtPKR(heldTotals.profit)}
+                  </td>
                   <td></td>
                 </tr>
               </tfoot>

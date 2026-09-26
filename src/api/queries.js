@@ -475,6 +475,24 @@ export function useInventory(params = {}, opts = {}) {
   });
 }
 
+/**
+ * Stock valued at its SELLING price so held profit is visible.
+ * Distinct from useStockValuation below, which is the cost-only report.
+ * Lots with no rate configured come back hasRate:false and are reported
+ * separately — never valued at cost, which would look like real profit.
+ */
+export function useHeldStockProfit(params = {}, opts = {}) {
+  return useQuery({
+    queryKey: ['held-stock-profit', params],
+    queryFn: async () => {
+      const res = await lotInventoryApi.stockValuation(params);
+      return res?.data ?? { lots: [], summary: null, ratesConfigured: 0 };
+    },
+    staleTime: 60 * 1000,
+    ...opts,
+  });
+}
+
 export function useInventorySummary() {
   return useQuery({
     queryKey: queryKeys.inventory.summary,
