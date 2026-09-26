@@ -1499,6 +1499,23 @@ export function useCreateMillExpense() {
   });
 }
 
+/** Expense heads offered by the mill expense form — built-ins plus any added. */
+export function useMillExpenseHeads() {
+  return useQuery({
+    queryKey: ['mill-expense-heads'],
+    queryFn: async () => (await millingApi.listExpenseHeads())?.data?.heads || [],
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useCreateMillExpenseHead() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (head) => millingApi.createExpenseHead(head),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['mill-expense-heads'] }),
+  });
+}
+
 export function useRecurringExpenses() {
   return useQuery({
     queryKey: ['recurring-expenses'],

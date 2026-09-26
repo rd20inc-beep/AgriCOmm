@@ -26,7 +26,7 @@ import {
   useFinalSettlement, useFinalizeSettlement, usePayrollAudit, useSalaryRevisions, useReviseSalary,
   usePayrollSchedule, useSavePayrollSchedule, useRunPayrollNow,
   usePayables, useSuppliers, useCustomers, usePurchases, useLocalSalesSummary, useMillCashFlow, useAcceptFundTransfer,
-  useMillLotCosts, useLocalSales, useRecordPayment, usePayablePayments, useBankAccounts, useHeldStockProfit, useProfitLoss } from '../../../api/queries';
+  useMillLotCosts, useLocalSales, useRecordPayment, usePayablePayments, useBankAccounts, useHeldStockProfit, useProfitLoss, useMillExpenseHeads, useCreateMillExpenseHead } from '../../../api/queries';
 import TransactionDocument from '../../../components/TransactionDocument';
 import NewPurchaseDrawer from '../../../components/NewPurchaseDrawer';
 import api from '../../../api/client';
@@ -495,6 +495,26 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
 
   const { data: expData } = useMillExpenses();
   const createExpMut = useCreateMillExpense();
+  // Expense heads are server-side now; EXPENSE_CATS remains only as the fallback
+  // while the list loads, so the form is never an empty dropdown.
+  const { data: headsData } = useMillExpenseHeads();
+  const expenseHeads = (headsData && headsData.length) ? headsData : EXPENSE_CATS;
+  const [addingHead, setAddingHead] = useState(false);
+  const [newHead, setNewHead] = useState('');
+  const headMut = useCreateMillExpenseHead();
+  const saveHead = async () => {
+    const name = newHead.trim();
+    if (!name) return;
+    try {
+      const res = await headMut.mutateAsync(name);
+      const saved = res?.data?.head || name.toLowerCase();
+      setExpForm(p => ({ ...p, category: saved, vendor_preset: '', vendor_name: '', subcategory: '', employee_id: '' }));
+      setAddingHead(false); setNewHead('');
+      addToast(`Added "${saved}" — it will be on the list from now on`, 'success');
+    } catch (e) {
+      addToast(e?.data?.message || e?.message || 'Could not add that head', 'error');
+    }
+  };
   const { data: recurringData } = useRecurringExpenses();
   const recurring = recurringData?.recurring || [];
   const materializeMut = useMaterializeRecurring();
@@ -2373,13 +2393,40 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Category *</label>
-              <select
-                value={expForm.category}
-                onChange={e => setExpForm(p => ({ ...p, category: e.target.value, vendor_preset: '', vendor_name: '', subcategory: '', employee_id: '' }))}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900 bg-white"
-              >
-                {EXPENSE_CATS.map(c => <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>)}
-              </select>
+              {/* Heads come from the server (built-ins + any added + anything
+                  already used), so an operator can book a cost that nobody
+                  thought of when this list was written — a lunch, a tea run, a
+                  one-off charge — without waiting for a developer. */}
+              {addingHead ? (
+                <div className="flex items-center gap-1.5">
+                  <input autoFocus value={newHead} maxLength={40}
+                    onChange={e => setNewHead(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') { e.preventDefault(); saveHead(); }
+                      if (e.key === 'Escape') { setAddingHead(false); setNewHead(''); }
+                    }}
+                    placeholder="e.g. lunch"
+                    className="flex-1 border border-blue-300 rounded-lg px-3 py-2 text-sm focus:outline-none" />
+                  <button type="button" onClick={saveHead} disabled={headMut.isPending || !newHead.trim()}
+                    className="px-2.5 py-2 text-xs font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">
+                    {headMut.isPending ? '…' : 'Add'}
+                  </button>
+                  <button type="button" onClick={() => { setAddingHead(false); setNewHead(''); }}
+                    className="px-2 py-2 text-gray-400 hover:text-gray-600"><X size={14} /></button>
+                </div>
+              ) : (
+                <select
+                  value={expForm.category}
+                  onChange={e => {
+                    if (e.target.value === '__add__') { setAddingHead(true); return; }
+                    setExpForm(p => ({ ...p, category: e.target.value, vendor_preset: '', vendor_name: '', subcategory: '', employee_id: '' }));
+                  }}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900 bg-white"
+                >
+                  {expenseHeads.map(c => <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>)}
+                  <option value="__add__">+ Add a new head…</option>
+                </select>
+              )}
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Amount (PKR) *</label>

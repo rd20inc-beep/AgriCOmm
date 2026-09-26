@@ -587,6 +587,87 @@ router.get('/expenses', authorize('milling', 'view'), async (req, res) => {
   }
 });
 
+// ── Expense heads ────────────────────────────────────────────────────────────
+// The category on a mill expense is free text — the insert never validated it —
+// but the form only ever offered a hardcoded list, so an operator could not
+// record anything outside it (a lunch, a tea run, a one-off charge).
+//
+// Heads live in system_settings alongside companyProfile rather than in a table
+// of their own: it is a short list of labels with no relationships, and it
+// avoids a migration for what is effectively a preference.
+//
+// The list offered is the built-ins, plus anything saved here, plus any category
+// already present on a mill expense — so a head used before this existed does
+// not disappear from the dropdown.
+const MILL_EXPENSE_HEADS_KEY = 'mill_expense_heads';
+const BUILT_IN_MILL_HEADS = [
+  'salaries', 'utilities', 'rent', 'maintenance', 'insurance',
+  'transport', 'fuel', 'packaging', 'inspection', 'freight',
+  'commission', 'miscellaneous',
+];
+
+// 'Night Shift  Lunch ' → 'night shift lunch'. Stored lowercase so the same head
+// typed with different capitalisation cannot appear twice in the list.
+function normaliseHead(raw) {
+  return String(raw || '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+async function readCustomHeads() {
+  const row = await db('system_settings').where({ key: MILL_EXPENSE_HEADS_KEY }).first();
+  if (!row || !row.value) return [];
+  try {
+    const parsed = JSON.parse(row.value);
+    return Array.isArray(parsed) ? parsed.map(normaliseHead).filter(Boolean) : [];
+  } catch (_) { return []; }   // corrupt value must not break the expense form
+}
+
+router.get('/expenses/heads', authorize('milling', 'view'), async (_req, res) => {
+  try {
+    const custom = await readCustomHeads();
+    const used = (await db('business_expenses').where('expense_type', 'mill').distinct('category'))
+      .map((r) => normaliseHead(r.category)).filter(Boolean);
+    const all = [...new Set([...BUILT_IN_MILL_HEADS, ...custom, ...used])].sort();
+    return res.json({ success: true, data: { heads: all, builtIn: BUILT_IN_MILL_HEADS, custom } });
+  } catch (err) {
+    console.error('list expense heads error:', err);
+    return res.status(500).json({ success: false, message: 'Internal server error.' });
+  }
+});
+
+// Same permission as recording an expense: if you can book the cost, you can
+// name the head it goes under.
+router.post('/expenses/heads', authorize('milling', 'create'),
+  auditAction('create', 'mill_expense_head'),
+  async (req, res) => {
+    try {
+      const head = normaliseHead(req.body?.head);
+      if (!head) return res.status(400).json({ success: false, message: 'A name is required.' });
+      if (head.length > 40) return res.status(400).json({ success: false, message: 'Keep the name to 40 characters or fewer.' });
+      if (!/^[a-z0-9][a-z0-9 \-_/&]*$/.test(head)) {
+        return res.status(400).json({ success: false, message: 'Use letters, numbers, spaces and - _ / & only.' });
+      }
+      const custom = await readCustomHeads();
+      if (BUILT_IN_MILL_HEADS.includes(head) || custom.includes(head)) {
+        return res.status(409).json({ success: false, message: `"${head}" is already on the list.` });
+      }
+      const next = [...custom, head];
+      const existing = await db('system_settings').where({ key: MILL_EXPENSE_HEADS_KEY }).first();
+      if (existing) {
+        await db('system_settings').where({ key: MILL_EXPENSE_HEADS_KEY })
+          .update({ value: JSON.stringify(next), updated_by: req.user?.id || null, updated_at: db.fn.now() });
+      } else {
+        await db('system_settings').insert({
+          key: MILL_EXPENSE_HEADS_KEY, value: JSON.stringify(next), category: 'mill',
+          updated_by: req.user?.id || null,
+        });
+      }
+      return res.json({ success: true, data: { head, heads: [...new Set([...BUILT_IN_MILL_HEADS, ...next])].sort() } });
+    } catch (err) {
+      console.error('create expense head error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  });
+
 router.post('/expenses', authorize('milling', 'create'),
   auditAction('create', 'mill_expense', (req, data) => data.data?.expense?.id),
   async (req, res) => {
