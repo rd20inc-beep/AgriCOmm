@@ -1,14 +1,6 @@
 import { useState, useRef, useEffect, Suspense } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
-import {
-  LayoutDashboard, Ship, Factory, Package, DollarSign, FileText,
-  BarChart3, Settings, Search, Bell, ChevronDown, ChevronRight,
-  User, Users, Plus, X, LogOut, KeyRound, AlertTriangle, AlertCircle, Info, CreditCard,
-  ArrowRightLeft, FlaskConical, Menu, ShieldCheck, Shield,
-  ChevronsLeft, ChevronsRight, Sun, Moon,
-  Zap, Brain, Beaker, Printer, Boxes, ClipboardCheck, Sparkles, ShoppingCart,
-  ScanLine,
-} from 'lucide-react';
+import { LayoutDashboard, Ship, Factory, Package, DollarSign, FileText, BarChart3, Settings, Search, Bell, ChevronDown, ChevronRight, User, Users, Plus, X, LogOut, KeyRound, AlertTriangle, AlertCircle, Info, CreditCard, ArrowRightLeft, FlaskConical, Menu, ShieldCheck, Shield, ChevronsLeft, ChevronsRight, Sun, Moon, Zap, Brain, Beaker, Printer, Boxes, ClipboardCheck, Sparkles, ShoppingCart, ScanLine, MessageCircle, MessageCircleOff } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import { useMasterDataApprovalsCount } from '../modules/admin/api/queries';
@@ -25,6 +17,7 @@ import ScanDrawer from './ScanDrawer';
 import MobileBottomNav from './MobileBottomNav';
 import { cardifyTables, scheduleCardify } from '../lib/mobileCards';
 import { SkeletonPage } from '../shared/components/Skeleton';
+import { isChatHidden, setChatHidden as setChatHiddenPref, onChatPrefsChange } from './chatBubblePrefs';
 
 const sidebarNav = [
   { section: 'Main' },
@@ -267,6 +260,10 @@ export default function Layout({ children }) {
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  // Mirrors the stored preference so the menu label matches the bubble,
+  // including when it is dismissed from the bubble itself or another tab.
+  const [chatHidden, setChatHidden] = useState(() => isChatHidden());
+  useEffect(() => onChatPrefsChange(() => setChatHidden(isChatHidden())), []);
   const [notifOpen, setNotifOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -581,6 +578,12 @@ export default function Layout({ children }) {
                 <button onClick={() => { setUserMenuOpen(false); navigate('/change-password'); }}
                   className="flex items-center gap-2.5 w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
                   <KeyRound size={15} /> Change password
+                </button>
+                {/* The chat bubble floats over the page; this is how it comes back
+                    once someone has dismissed it. */}
+                <button onClick={() => setChatHiddenPref(!chatHidden)}
+                  className="flex items-center gap-2.5 w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                  {chatHidden ? <MessageCircle size={15} /> : <MessageCircleOff size={15} />} {chatHidden ? 'Show chat bubble' : 'Hide chat bubble'}
                 </button>
                 <button onClick={() => setDarkMode(prev => !prev)}
                   className="flex items-center gap-2.5 w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
