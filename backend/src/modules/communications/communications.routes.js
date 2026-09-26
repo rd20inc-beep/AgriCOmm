@@ -32,21 +32,25 @@ router.get('/whatsapp/logs', communicationController.getWhatsAppLogs);
 // QR-pairing channel (WhatsApp Web). Free, no Meta API, but breaks ToS
 // — use for internal comms; keep API for customer-facing transactional.
 const whatsappQr = require('./whatsappQr.service');
-router.get('/whatsapp/qr/status', async (_req, res) => {
-  return res.json({ success: true, data: whatsappQr.getStatus() });
+// Status / pairing / unpairing are all scoped to the CALLER. Each user links
+// their own WhatsApp, so one person pairing no longer makes them the sender for
+// everybody else.
+router.get('/whatsapp/qr/status', async (req, res) => {
+  return res.json({ success: true, data: whatsappQr.getStatus(req.user?.id) });
 });
-router.post('/whatsapp/qr/start', async (_req, res) => {
-  // R6 (offline Stage 16): the WhatsApp-QR session keeps in-memory, single-instance
-  // state. Only the cloud instance may own it — a LAN site box must not pair a second
-  // session against the same number. Site devices reach WhatsApp when the cloud is up.
+router.post('/whatsapp/qr/start', async (req, res) => {
+  // R6 (offline Stage 16): WhatsApp-QR sessions keep in-memory, single-instance
+  // state. Only the cloud instance may own them — a LAN site box must not pair a
+  // second session against the same number. Site devices reach WhatsApp when the
+  // cloud is up.
   if (require('../../config').site?.enabled) {
     return res.status(409).json({ success: false, message: 'WhatsApp pairing is managed on the cloud server, not the site server.' });
   }
-  const status = await whatsappQr.start();
+  const status = await whatsappQr.start(req.user?.id);
   return res.json({ success: true, data: status });
 });
-router.post('/whatsapp/qr/logout', async (_req, res) => {
-  const status = await whatsappQr.logout();
+router.post('/whatsapp/qr/logout', async (req, res) => {
+  const status = await whatsappQr.logout(req.user?.id);
   return res.json({ success: true, data: status });
 });
 

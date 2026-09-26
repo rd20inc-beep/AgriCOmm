@@ -143,7 +143,7 @@ export default function TransactionDocument({ kind = 'receipt', data, companyPro
     try {
       const st = await api.get('/api/communication/whatsapp/qr/status');
       const status = st?.data?.status || st?.status;
-      if (status !== 'connected') { addToast('WhatsApp is not connected. Connect it in Admin → WhatsApp (scan the QR).', 'error'); return; }
+      if (status !== 'connected') { addToast('Your WhatsApp is not connected. Pair your own account in Admin → WhatsApp (scan the QR).', 'error'); return; }
     } catch { /* the send endpoint re-checks and reports clearly */ }
 
     // Prefer a number on file — from the record, else the customer master.

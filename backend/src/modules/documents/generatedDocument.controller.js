@@ -214,9 +214,9 @@ const generatedDocumentController = {
       toName = cust && cust.name;
       if (!phone) return res.status(400).json({ success: false, code: 'NO_PHONE', message: 'No WhatsApp number for this customer. Add a phone on the customer record, or enter one to send.' });
 
-      const wa = whatsappQr.getStatus();
+      const wa = whatsappQr.getStatus(req.user?.id);
       if (wa.status !== 'connected') {
-        return res.status(409).json({ success: false, code: 'WA_NOT_CONNECTED', message: 'WhatsApp is not connected. Connect it in Admin → WhatsApp by scanning the QR code.' });
+        return res.status(409).json({ success: false, code: 'WA_NOT_CONNECTED', message: 'Your WhatsApp is not connected. Pair your own account in Communications by scanning the QR code.' });
       }
 
       let pdf;
@@ -227,7 +227,7 @@ const generatedDocumentController = {
       }
 
       const safeName = String(filename || `${req.params.docType}.pdf`).replace(/[^\w.\- ]+/g, '_');
-      const result = await whatsappQr.sendDocument(phone, pdf, { fileName: safeName, caption });
+      const result = await whatsappQr.sendDocument(req.user?.id, phone, pdf, { fileName: safeName, caption });
 
       whatsappService.logMessage({
         to_phone: phone, to_name: toName, body: caption || `Document: ${req.params.docType}`,
