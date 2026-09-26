@@ -1,12 +1,6 @@
 import { useState, useRef, useEffect, Suspense } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
-import {
-  LayoutDashboard, Factory, Package, DollarSign,
-  BarChart3, Search, Bell, ChevronDown,
-  User, Settings, X, LogOut, AlertTriangle, AlertCircle, Info,
-  FlaskConical, Menu, ArrowRightLeft, ShoppingCart, ClipboardEdit, Gauge,
-  ChevronsLeft, ChevronsRight, Sun, Moon, Truck, Printer, Users, FileText,
-} from 'lucide-react';
+import { LayoutDashboard, Factory, Package, DollarSign, BarChart3, Search, Bell, ChevronDown, User, Settings, X, LogOut, AlertTriangle, AlertCircle, Info, FlaskConical, Menu, ArrowRightLeft, ShoppingCart, ClipboardEdit, Gauge, ChevronsLeft, ChevronsRight, Sun, Moon, Truck, Printer, Users, FileText, MessageCircle, MessageCircleOff } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import { RouteErrorBoundary } from './ErrorBoundary';
@@ -14,6 +8,7 @@ import ChatWidget from './ChatWidget';
 import MobileBottomNav from './MobileBottomNav';
 import { cardifyTables, scheduleCardify } from '../lib/mobileCards';
 import { SkeletonPage } from '../shared/components/Skeleton';
+import { isChatHidden, setChatHidden as setChatHiddenPref, onChatPrefsChange } from './chatBubblePrefs';
 
 const millNav = [
   { section: 'Mill' },
@@ -161,6 +156,10 @@ export default function MillLayout({ children }) {
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  // Mirrors the stored preference so the menu label matches the bubble,
+  // including when it is dismissed from the bubble itself or another tab.
+  const [chatHidden, setChatHidden] = useState(() => isChatHidden());
+  useEffect(() => onChatPrefsChange(() => setChatHidden(isChatHidden())), []);
   const [notifOpen, setNotifOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -406,6 +405,12 @@ export default function MillLayout({ children }) {
                 <button onClick={() => { setUserMenuOpen(false); }}
                   className="flex items-center gap-2.5 w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
                   <User size={15} /> Profile
+                </button>
+                {/* The chat bubble floats over the page; this is how it comes back
+                    once someone has dismissed it. */}
+                <button onClick={() => setChatHiddenPref(!chatHidden)}
+                  className="flex items-center gap-2.5 w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                  {chatHidden ? <MessageCircle size={15} /> : <MessageCircleOff size={15} />} {chatHidden ? 'Show chat bubble' : 'Hide chat bubble'}
                 </button>
                 <button onClick={() => setDarkMode(prev => !prev)}
                   className="flex items-center gap-2.5 w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">

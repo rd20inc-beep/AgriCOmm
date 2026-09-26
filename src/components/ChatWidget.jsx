@@ -6,6 +6,7 @@ import { chatApi } from '../modules/chat/api';
 import { useOwnerAuth } from '../context/OwnerAuthContext';
 import { useCalling } from '../modules/chat/useCalling';
 import { useAcceptFundTransfer } from '../api/queries';
+import { isChatHidden, setChatHidden, getChatPos, setChatPos, clampToViewport, onChatPrefsChange } from './chatBubblePrefs';
 import { useAuth } from '../context/AuthContext';
 
 const unwrap = (res) => res?.data || res || {};
@@ -48,6 +49,43 @@ export default function ChatWidget() {
   const acceptTransfer = useAcceptFundTransfer();
   const { requestOwnerApproval } = useOwnerAuth();
   const [open, setOpen] = useState(false);
+  // The bubble floats above everything, so it covers whatever is underneath.
+  // It can be dragged out of the way or hidden entirely (restored from the user
+  // menu) — see chatBubblePrefs.
+  const [hidden, setHidden] = useState(() => isChatHidden());
+  const [pos, setPos] = useState(() => getChatPos());
+  const dragRef = useRef(null);   // { dx, dy, moved } while a drag is in flight
+
+  useEffect(() => onChatPrefsChange(() => { setHidden(isChatHidden()); setPos(getChatPos()); }), []);
+
+  // A dragged bubble must not be stranded off-screen when the window shrinks.
+  useEffect(() => {
+    if (!pos) return undefined;
+    const onResize = () => setPos((p) => (p ? clampToViewport(p) : p));
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, [pos]);
+
+  const startDrag = (e) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    dragRef.current = { dx: e.clientX - rect.left, dy: e.clientY - rect.top, moved: false };
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+  };
+  const onDrag = (e) => {
+    const d = dragRef.current;
+    if (!d) return;
+    // A few pixels of slop so a normal click still opens the chat.
+    if (!d.moved && Math.abs(e.movementX) + Math.abs(e.movementY) < 2) return;
+    d.moved = true;
+    setPos(clampToViewport({ x: e.clientX - d.dx, y: e.clientY - d.dy }));
+  };
+  const endDrag = (e) => {
+    const d = dragRef.current;
+    dragRef.current = null;
+    e.currentTarget.releasePointerCapture?.(e.pointerId);
+    if (d?.moved) { setChatPos(pos); return; }   // a drag, not a click
+    setOpen(true); setView('list');
+  };
   const [view, setView] = useState('list');      // 'list' | 'thread' | 'new'
   const [active, setActive] = useState(null);     // {type:'broadcast'} | {type:'peer', id, name}
   const [draft, setDraft] = useState('');
@@ -174,22 +212,42 @@ export default function ChatWidget() {
   return (
     <div className="no-print">
       {/* Floating button */}
-      {!open && (
-        <button onClick={() => { setOpen(true); setView('list'); }}
-          className="fixed bottom-[4.25rem] right-4 lg:bottom-5 lg:right-5 z-[60] w-12 h-12 lg:w-14 lg:h-14 rounded-full bg-blue-600 hover:bg-blue-700 text-white shadow-lg flex items-center justify-center transition-colors"
-          title="Team chat">
-          <MessageCircle className="w-6 h-6" />
-          {totalBadge > 0 && (
-            <span className="absolute -top-1 -right-1 min-w-[20px] h-5 px-1 rounded-full bg-red-500 text-white text-[11px] font-bold flex items-center justify-center ring-2 ring-white">
-              {totalBadge > 99 ? '99+' : totalBadge}
-            </span>
-          )}
-        </button>
+      {!open && !hidden && (
+        <div
+          className={`fixed z-[60] group ${pos ? '' : 'bottom-[4.25rem] right-4 lg:bottom-5 lg:right-5'}`}
+          style={pos ? { left: pos.x, top: pos.y } : undefined}
+        >
+          <button
+            onPointerDown={startDrag}
+            onPointerMove={onDrag}
+            onPointerUp={endDrag}
+            className="w-12 h-12 lg:w-14 lg:h-14 rounded-full bg-blue-600 hover:bg-blue-700 text-white shadow-lg flex items-center justify-center transition-colors touch-none cursor-grab active:cursor-grabbing"
+            title="Team chat — drag to move">
+            <MessageCircle className="w-6 h-6" />
+            {totalBadge > 0 && (
+              <span className="absolute -top-1 -right-1 min-w-[20px] h-5 px-1 rounded-full bg-red-500 text-white text-[11px] font-bold flex items-center justify-center ring-2 ring-white">
+                {totalBadge > 99 ? '99+' : totalBadge}
+              </span>
+            )}
+          </button>
+          {/* Dismiss. Appears on hover/focus so it never competes with the badge,
+              and the user menu says how to bring it back. */}
+          <button
+            onClick={() => setChatHidden(true)}
+            title="Hide the chat bubble — restore it from the menu under your name"
+            aria-label="Hide chat bubble"
+            className="absolute -top-1 -left-1 w-5 h-5 rounded-full bg-gray-700 text-white shadow flex items-center justify-center opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity">
+            <X className="w-3 h-3" />
+          </button>
+        </div>
       )}
 
       {/* Panel */}
       {open && (
-        <div className="fixed bottom-[4.25rem] right-4 lg:bottom-5 lg:right-5 z-[60] w-[92vw] sm:w-96 h-[520px] max-h-[75vh] bg-white rounded-2xl shadow-2xl border border-gray-200 flex flex-col overflow-hidden">
+        <div
+          className={`fixed z-[60] w-[92vw] sm:w-96 h-[520px] max-h-[75vh] bg-white rounded-2xl shadow-2xl border border-gray-200 flex flex-col overflow-hidden ${pos ? '' : 'bottom-[4.25rem] right-4 lg:bottom-5 lg:right-5'}`}
+          style={pos ? { left: Math.min(pos.x, Math.max(0, window.innerWidth - 384 - 8)), top: Math.max(8, Math.min(pos.y, Math.max(0, window.innerHeight - 520 - 8))) } : undefined}
+        >
           {/* Header */}
           <div className="px-4 py-3 bg-blue-600 text-white flex items-center gap-2">
             {(view === 'thread' || view === 'new' || view === 'approvals') && (
