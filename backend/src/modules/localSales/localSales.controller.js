@@ -9,6 +9,7 @@ const accountingService = require('../accounting/accounting.service');
 const { resolveCashAccountId } = require('../../shared/cashAccounts');
 const { nextDocNo } = require('../../utils/docNumber');
 const { isPartyMasked } = require('../../shared/partyMask');
+const { inventoryAccountForLot } = require('./inventoryAccount');
 
 async function generateSaleNo(trx) {
   return nextDocNo(trx || db, { table: 'local_sales', column: 'sale_no', prefix: 'LS-' });
@@ -99,11 +100,12 @@ async function postSaleSideEffects(trx, saleRows, { userId } = {}) {
 
       // Post COGS to the GL so the P&L reflects real cost of goods sold + gross
       // profit, and inventory is relieved when stock leaves. Dr 5000 COGS /
-      // Cr the lot's inventory account (raw 1210, finished mill 1220 / export
-      // 1230). Without this the sale only posted revenue → P&L showed 100% margin.
+      // Cr the lot's inventory account — raw 1210, finished mill 1220 / export
+      // 1230, by-product 1240. Without this the sale only posted revenue → P&L
+      // showed 100% margin.
       const cogsAmt = uc.round2(parseFloat(sale.landed_cost_total) || (parseFloat(sale.cost_per_kg) || 0) * qtyKg);
       if (cogsAmt > 0) {
-        const invCode = lot.type === 'finished' ? (lot.entity === 'export' ? '1230' : '1220') : '1210';
+        const invCode = inventoryAccountForLot(lot);
         const [cogsAcc, invAcc] = await Promise.all([
           trx('chart_of_accounts').where({ code: '5000' }).first(),
           trx('chart_of_accounts').where({ code: invCode }).first(),
