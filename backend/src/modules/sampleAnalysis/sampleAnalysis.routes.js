@@ -31,6 +31,12 @@ router.post('/:id/status', canEdit,
   auditAction('shortlist_sample', 'rice_samples', (req) => req.params.id),
   wrap((req) => service.setStatus(req.params.id, req.body?.status, req.body?.notes, req.user?.id)));
 
+// Rename a sample. Kept separate from the analysis/status routes because it is a
+// plain identity edit, and blocked once the sample has become a lot.
+router.patch('/:id/sample-no', canEdit,
+  auditAction('rename_sample', 'rice_samples', (req) => req.params.id),
+  wrap((req) => service.rename(req.params.id, req.body?.sample_no)));
+
 router.post('/:id/convert', canEdit,
   auditAction('convert_sample', 'rice_samples', (req) => req.params.id),
   wrap((req) => service.convertToLot(req.params.id, req.body, req.user?.id)));

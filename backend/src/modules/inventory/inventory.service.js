@@ -3004,4 +3004,9 @@ const inventoryService = {
   },
 };
 
+// Shared with Sample Analysis so a sample number and the lot it becomes derive
+// the supplier / variety codes identically.
+inventoryService.deriveSupplierCode = deriveSupplierCode;
+inventoryService.deriveProductCode = deriveProductCode;
+
 module.exports = inventoryService;

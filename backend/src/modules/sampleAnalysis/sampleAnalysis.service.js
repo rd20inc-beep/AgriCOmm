@@ -1,6 +1,7 @@
 const db = require('../../config/database');
 const { nextDocNo } = require('../../utils/docNumber');
 const { NotFoundError, ValidationError } = require('../../shared/errors');
+const inventoryService = require('../inventory/inventory.service');
 
 // Sample Analysis & Purchase Shortlisting (#7). Samples carry a quality analysis
 // stored as jsonb using the SAME key set as inventory_lots.quality_json (plus a
@@ -54,10 +55,66 @@ function deriveMetrics(sample) {
   };
 }
 
+// Sample numbers used to be SMP-2026-0001 — opaque, and nothing like the lot the
+// sample turns into. This mirrors the purchase-lot pattern (SUP-VARIETY-YYMMDD-SEQ,
+// e.g. SHAP-1121BASM-260926-01) using the SAME helpers, so a sample and its lot
+// abbreviate a supplier identically. Falls back to the old format when there is no
+// supplier yet to key on.
+async function buildSampleNo(trx, { supplierId, productId, date }) {
+  if (!supplierId) {
+    return nextDocNo(trx, { table: 'rice_samples', column: 'sample_no', prefix: `SMP-${new Date().getFullYear()}-`, pad: 4 });
+  }
+  const d = date ? new Date(date) : new Date();
+  const dateStr = String(d.getFullYear()).slice(-2)
+    + String(d.getMonth() + 1).padStart(2, '0')
+    + String(d.getDate()).padStart(2, '0');
+  const supCode = await inventoryService.deriveSupplierCode(trx, 'suppliers', supplierId, 'SUP');
+  const varCode = productId ? await inventoryService.deriveProductCode(trx, productId) : 'SAMPLE';
+  const prefix = `${supCode}-${varCode}-${dateStr}-`;
+  const last = await trx('rice_samples').where('sample_no', 'like', `${prefix}%`).orderBy('sample_no', 'desc').first('sample_no');
+  let seq = 1;
+  if (last && last.sample_no) {
+    const n = parseInt(last.sample_no.slice(prefix.length), 10);
+    if (!Number.isNaN(n)) seq = n + 1;
+  }
+  return `${prefix}${String(seq).padStart(2, '0')}`;
+}
+
+// sample_no carries a UNIQUE index, so a clash must be reported as a plain
+// message rather than surfacing a raw constraint violation.
+async function assertSampleNoFree(trx, sampleNo, exceptId) {
+  const q = trx('rice_samples').whereRaw('lower(sample_no) = ?', [sampleNo.toLowerCase()]);
+  if (exceptId) q.whereNot('id', exceptId);
+  if (await q.first()) throw new ValidationError(`Sample ID "${sampleNo}" is already in use.`);
+}
+
+// Rename a sample. Allowed until it has been converted — after that the number is
+// referenced by the lot it produced and by the audit trail.
+async function rename(sampleId, sampleNo) {
+  const wanted = String(sampleNo || '').trim();
+  if (!wanted) throw new ValidationError('A sample ID is required.');
+  if (wanted.length > 60) throw new ValidationError('Sample ID must be 60 characters or fewer.');
+  const sample = await db('rice_samples').where({ id: sampleId }).first();
+  if (!sample) throw new NotFoundError('Sample not found.');
+  if (sample.status === 'Converted') throw new ValidationError('This sample has been converted to a purchase lot — its ID can no longer be changed.');
+  if (wanted === sample.sample_no) return get(sampleId);
+  await db.transaction(async (trx) => {
+    await assertSampleNoFree(trx, wanted, sampleId);
+    await trx('rice_samples').where({ id: sampleId }).update({ sample_no: wanted, updated_at: trx.fn.now() });
+  });
+  return get(sampleId);
+}
+
 async function create(payload, userId) {
   const p = payload || {};
   return db.transaction(async (trx) => {
-    const sampleNo = await nextDocNo(trx, { table: 'rice_samples', column: 'sample_no', prefix: `SMP-${new Date().getFullYear()}-`, pad: 4 });
+    let sampleNo = String(p.sample_no || '').trim();
+    if (sampleNo) {
+      if (sampleNo.length > 60) throw new ValidationError('Sample ID must be 60 characters or fewer.');
+      await assertSampleNoFree(trx, sampleNo, null);
+    } else {
+      sampleNo = await buildSampleNo(trx, { supplierId: p.supplier_id, productId: p.product_id, date: p.sample_date });
+    }
     const [row] = await trx('rice_samples').insert({
       sample_no: sampleNo,
       sample_date: p.sample_date || new Date().toISOString().slice(0, 10),
@@ -218,4 +275,4 @@ async function compare(ids) {
   return { samples: rows.map(enrich), fields: SAMPLE_QUALITY_KEYS };
 }
 
-module.exports = { create, updateAnalysis, setStatus, convertToLot, remove, list, get, compare, deriveMetrics, SAMPLE_QUALITY_KEYS };
+module.exports = { create, updateAnalysis, setStatus, convertToLot, rename, remove, list, get, compare, deriveMetrics, buildSampleNo, SAMPLE_QUALITY_KEYS };
