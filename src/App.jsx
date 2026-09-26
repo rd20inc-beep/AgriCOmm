@@ -39,6 +39,7 @@ function lazyWithReload(factory) {
 // Lazy-loaded page components (pointing at modular locations)
 const Login = lazyWithReload(() => import('./modules/admin/pages/Login'));
 const ChangePassword = lazyWithReload(() => import('./modules/admin/pages/ChangePassword'));
+const Profile = lazyWithReload(() => import('./modules/admin/pages/Profile'));
 const EmployeePortal = lazyWithReload(() => import('./modules/portal/EmployeePortal'));
 const Dashboard = lazyWithReload(() => import('./modules/dashboard/pages/Dashboard'));
 const Buyers = lazyWithReload(() => import('./modules/exportOrders/pages/Buyers'));
@@ -193,6 +194,11 @@ function ExportRoutes() {
         <Route path="/reports/service-milling-reconciliation" element={<ServiceMillingReconciliation />} />
         <Route path="/reports/inventory-movement-ledger" element={<InventoryMovementLedger />} />
         <Route path="/reports/stock-ledger" element={<StockLedger />} />
+        {/* Personal pages. Without these the scoped layouts' catch-all
+            redirect sends a Mill or Export user back to the dashboard when
+            they click Profile or Change password in their own menu. */}
+        <Route path="/profile" element={<Profile />} />
+        <Route path="/change-password" element={<ChangePassword />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </ExportLayout>
@@ -255,6 +261,11 @@ function MillRoutes() {
         <Route path="/reports/service-milling-reconciliation" element={<ServiceMillingReconciliation />} />
         <Route path="/reports/inventory-movement-ledger" element={<InventoryMovementLedger />} />
         <Route path="/reports/stock-ledger" element={<StockLedger />} />
+        {/* Personal pages. Without these the scoped layouts' catch-all
+            redirect sends a Mill or Export user back to the dashboard when
+            they click Profile or Change password in their own menu. */}
+        <Route path="/profile" element={<Profile />} />
+        <Route path="/change-password" element={<ChangePassword />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </MillLayout>
@@ -330,6 +341,11 @@ function StandardRoutes() {
         <Route path="/approvals" element={<ProtectedRoute module="admin" action="view"><Approvals /></ProtectedRoute>} />
         <Route path="/audit" element={<ProtectedRoute module="admin" action="view"><AuditLog /></ProtectedRoute>} />
         <Route path="/admin" element={<ProtectedRoute module="admin" action="view"><Admin /></ProtectedRoute>} />
+        {/* Personal pages. Without these the scoped layouts' catch-all
+            redirect sends a Mill or Export user back to the dashboard when
+            they click Profile or Change password in their own menu. */}
+        <Route path="/profile" element={<Profile />} />
+        <Route path="/change-password" element={<ChangePassword />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Layout>
@@ -357,6 +373,7 @@ function App() {
               {/* #9 Forced/self-service password change — auth-gated, standalone
                   (outside the app shell) so a force_password_change user lands here. */}
               <Route path="/change-password" element={<ProtectedRoute><ChangePassword /></ProtectedRoute>} />
+              <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
               {/* Employee self-service portal — fully public (own CNIC+PIN auth),
                   mounted OUTSIDE the staff app shell / ProtectedRoute. */}
               <Route path="/portal" element={<EmployeePortal />} />

@@ -563,11 +563,11 @@ export default function Layout({ children }) {
                   <p className="text-sm font-medium text-gray-900">{userFullName}</p>
                   <p className="text-xs text-gray-400 truncate">{userEmail}</p>
                 </div>
-                <button onClick={() => { setUserMenuOpen(false); navigate('/admin'); }}
+                <button onClick={() => { setUserMenuOpen(false); navigate('/profile'); }}
                   className="flex items-center gap-2.5 w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
                   <User size={15} /> Profile
                 </button>
-                <button onClick={() => { setUserMenuOpen(false); navigate('/admin'); }}
+                <button onClick={() => { setUserMenuOpen(false); navigate('/profile'); }}
                   className="flex items-center gap-2.5 w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
                   <Settings size={15} /> Settings
                 </button>
