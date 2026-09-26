@@ -1400,16 +1400,40 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
                 const canExpand = rows.length > 0;
                 return (
                   <div key={s.stream}>
+                    {/* The only hint that these rows opened used to be a 14px grey
+                        chevron and a grey "(n unpaid)" whisper, so people did not
+                        know the detail — and the Pay buttons inside it — were
+                        there at all. The chevron now sits in its own tinted
+                        control, the unpaid count is a badge rather than a
+                        parenthetical, and the row says in words what clicking
+                        does. */}
                     <button type="button" disabled={!canExpand}
+                      aria-expanded={canExpand ? isOpen : undefined}
+                      title={canExpand ? (isOpen ? `Hide the ${rows.length} unpaid ${s.stream} item(s)` : `Show the ${rows.length} unpaid ${s.stream} item(s) and pay them`) : undefined}
                       onClick={() => setOpenStream(isOpen ? null : s.stream)}
-                      className={`w-full text-left p-3 ${canExpand ? 'hover:bg-gray-50/60 cursor-pointer' : 'cursor-default'}`}>
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="font-medium text-gray-800 flex items-center gap-1.5">
-                          {canExpand && <ChevronRight size={14} className={`text-gray-400 transition-transform ${isOpen ? 'rotate-90' : ''}`} />}
-                          {s.stream}
-                          {canExpand && <span className="text-[11px] font-normal text-gray-400">({rows.length} unpaid)</span>}
+                      className={`w-full text-left p-3 transition-colors ${canExpand ? 'hover:bg-blue-50/50 cursor-pointer' : 'cursor-default'}`}>
+                      <div className="flex items-center justify-between text-sm gap-2">
+                        <span className="font-medium text-gray-800 flex items-center gap-2 min-w-0">
+                          {canExpand && (
+                            <span className={`shrink-0 grid place-items-center w-5 h-5 rounded-md border transition-colors ${isOpen ? 'bg-blue-100 border-blue-200 text-blue-700' : 'bg-gray-100 border-gray-200 text-gray-600'}`}>
+                              <ChevronRight size={14} className={`transition-transform ${isOpen ? 'rotate-90' : ''}`} />
+                            </span>
+                          )}
+                          <span className="truncate">{s.stream}</span>
+                          {canExpand && (
+                            <span className="shrink-0 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-800">
+                              {rows.length} unpaid
+                            </span>
+                          )}
                         </span>
-                        <span className="text-gray-500 text-xs">{PKR(s.billed)} billed</span>
+                        <span className="flex items-center gap-2 shrink-0">
+                          <span className="text-gray-500 text-xs">{PKR(s.billed)} billed</span>
+                          {canExpand && (
+                            <span className="hidden sm:inline text-[11px] font-medium text-blue-600">
+                              {isOpen ? 'Hide' : 'View & pay'}
+                            </span>
+                          )}
+                        </span>
                       </div>
                       <div className="mt-1.5 h-2 rounded-full bg-amber-100 overflow-hidden">
                         <div className="h-full bg-emerald-500" style={{ width: `${pct}%` }} />
