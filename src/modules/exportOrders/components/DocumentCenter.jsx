@@ -2464,7 +2464,7 @@ export default function DocumentCenter({ order }) {
       const st = await api.get('/api/communication/whatsapp/qr/status');
       const status = st?.data?.status || st?.status;
       if (status !== 'connected') {
-        addToast('WhatsApp is not connected. Connect it in Admin → WhatsApp (scan the QR).', 'error');
+        addToast('Your WhatsApp is not connected. Pair your own account in Admin → WhatsApp (scan the QR).', 'error');
         return;
       }
     } catch { /* proceed; the send endpoint re-checks and reports clearly */ }

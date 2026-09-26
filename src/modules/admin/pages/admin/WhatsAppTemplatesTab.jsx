@@ -268,13 +268,13 @@ export default function WhatsAppTemplatesTab() {
   };
 
   const handleQrLogout = async () => {
-    if (!window.confirm('Disconnect the WhatsApp QR session? Templates routed via QR will stop sending until you re-pair.')) return;
+    if (!window.confirm('Disconnect YOUR WhatsApp? You will not be able to send until you pair again. Other users are unaffected.')) return;
     setQrBusy(true);
     try {
       const res = await api.post('/api/communication/whatsapp/qr/logout', {});
       const next = res?.data || res;
       if (next?.status) setQrStatus(next);
-      addToast('Disconnected from WhatsApp', 'info');
+      addToast('Your WhatsApp has been disconnected', 'info');
     } catch (err) {
       addToast(err.message || 'Logout failed', 'error');
     } finally {
@@ -591,8 +591,8 @@ export default function WhatsAppTemplatesTab() {
         {qrStatus.status === 'connected' ? (
           <div className="flex items-center justify-between bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3">
             <div className="text-sm text-emerald-800">
-              <div className="font-medium">Linked to {qrStatus.phone ? `+${qrStatus.phone}` : 'this device'}</div>
-              <div className="text-xs text-emerald-700 mt-0.5">Templates with channel "QR" will send through this connection.</div>
+              <div className="font-medium">Your WhatsApp is linked{qrStatus.phone ? ` — +${qrStatus.phone}` : ''}</div>
+              <div className="text-xs text-emerald-700 mt-0.5">Documents and QR-channel templates you send will go out from this number. Other users pair their own.</div>
             </div>
             <button
               onClick={handleQrLogout}

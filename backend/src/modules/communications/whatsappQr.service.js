@@ -10,7 +10,7 @@
  *
  * Design notes:
  *  - State is held in memory + a folder (auth_info_baileys) for the
- *    multi-file auth state. The folder must persist across container
+ *    multi-file auth st. The folder must persist across container
  *    restarts — docker-compose mounts a named volume at WA_SESSION_DIR.
  *  - The QR string is captured into module state and re-emitted to the
  *    HTTP poller until pairing succeeds, after which it goes null.
@@ -23,30 +23,61 @@
 const fs = require('fs');
 const path = require('path');
 
-const SESSION_DIR = process.env.WA_SESSION_DIR || path.join('/app', 'wa-session');
+const SESSION_ROOT = process.env.WA_SESSION_DIR || path.join('/app', 'wa-session');
 
-// In-memory state — single global session for the whole process.
-const state = {
-  sock: null,
-  status: 'disconnected', // 'disconnected' | 'connecting' | 'qr' | 'connected' | 'error'
-  qrString: null,
-  qrDataUrl: null,
-  error: null,
-  phone: null, // E.164 of paired number once known
-  startedAt: null,
-  // Self-heal a corrupt persisted session: if the handshake keeps failing
-  // before we ever show a QR or open, the saved creds are bad — wipe + re-pair.
-  qrShown: false,
-  everOpen: false,
-  failCount: 0,
-  wiped: false, // only auto-wipe a corrupt session once per pairing attempt
-};
+// ONE SESSION PER USER. This used to be a single global socket, so whoever
+// scanned the QR became the sender for everyone — invoices went out from one
+// phone regardless of who pressed Send. Each user now pairs their own WhatsApp
+// and sends as themselves, which is what the mill operator and finance need.
+//
+// Credentials live in a per-user subdirectory of the same volume, so sessions
+// survive restarts exactly as the single one did.
+const sessions = new Map(); // userId(String) → state
 
-function wipeSession() {
+function sessionDirFor(userId) {
+  return path.join(SESSION_ROOT, String(userId));
+}
+
+function freshState() {
+  return {
+    sock: null,
+    status: 'disconnected', // 'disconnected' | 'connecting' | 'qr' | 'connected' | 'error'
+    qrString: null,
+    qrDataUrl: null,
+    error: null,
+    phone: null, // E.164 of paired number once known
+    startedAt: null,
+    // Self-heal a corrupt persisted session: if the handshake keeps failing
+    // before we ever show a QR or open, the saved creds are bad — wipe + re-pair.
+    qrShown: false,
+    everOpen: false,
+    failCount: 0,
+    wiped: false, // only auto-wipe a corrupt session once per pairing attempt
+  };
+}
+
+function sessionFor(userId) {
+  const key = String(userId);
+  if (!sessions.has(key)) sessions.set(key, freshState());
+  return sessions.get(key);
+}
+
+// Every entry point needs a user — without one we cannot know whose WhatsApp to
+// use, and silently falling back to "somebody's" session is how invoices went
+// out from the wrong phone.
+function requireUser(userId) {
+  if (userId === undefined || userId === null || userId === '') {
+    throw new Error('A user is required to use WhatsApp — each user pairs their own account.');
+  }
+  return String(userId);
+}
+
+function wipeSession(userId) {
+  const SESSION_DIR = sessionDirFor(userId);
   // SESSION_DIR is a Docker volume MOUNT POINT — rmSync on the dir itself fails
   // (can't remove a mountpoint) and, with force:true, the error is swallowed, so
   // the credentials never actually clear. Delete the CONTENTS instead.
-  ensureDir();
+  ensureDir(userId);
   try {
     for (const entry of fs.readdirSync(SESSION_DIR)) {
       fs.rmSync(path.join(SESSION_DIR, entry), { recursive: true, force: true });
@@ -56,9 +87,10 @@ function wipeSession() {
 
 // Detach + close any existing socket so a fresh one can be created without the
 // old one's listeners firing (which would otherwise trigger a reconnect).
-function teardown() {
-  const old = state.sock;
-  state.sock = null;
+function teardown(userId) {
+  const st = sessionFor(userId);
+  const old = st.sock;
+  st.sock = null;
   if (!old) return;
   try { old.ev.removeAllListeners('connection.update'); } catch (_) { /* ignore */ }
   try { old.ev.removeAllListeners('creds.update'); } catch (_) { /* ignore */ }
@@ -66,7 +98,8 @@ function teardown() {
   try { old.ws && old.ws.close(); } catch (_) { /* ignore */ }
 }
 
-function ensureDir() {
+function ensureDir(userId) {
+  const SESSION_DIR = sessionDirFor(userId);
   if (!fs.existsSync(SESSION_DIR)) fs.mkdirSync(SESSION_DIR, { recursive: true });
 }
 
@@ -87,35 +120,38 @@ function getWaLogger() {
   return _waLogger;
 }
 
-async function start(force = false) {
+async function start(userId, force = false) {
+  const uid = requireUser(userId);
+  const st = sessionFor(uid);
+  const SESSION_DIR = sessionDirFor(uid);
   // Already linked — nothing to pair. Use Disconnect to re-pair.
-  if (!force && state.status === 'connected' && state.sock) {
-    return getStatus();
+  if (!force && st.status === 'connected' && st.sock) {
+    return getStatus(uid);
   }
   if (!force) {
     // User clicked "Generate QR Code": tear down any stale / stuck session and
     // start fresh so a NEW QR is produced on EVERY click. (The old guard made a
     // click while status was 'connecting' a no-op, so the QR never appeared.)
-    teardown();
+    teardown(uid);
     // A QR is only ever for a FRESH pairing, so clear any persisted credentials
     // first. This is decisive: leftover/corrupt creds make Baileys try to RESUME
     // (→ "Connection Failure", no QR); with none on disk it registers fresh and
     // emits a QR immediately. (To relink, the user is scanning anyway.)
-    wipeSession();
-    state.qrString = null;
-    state.qrDataUrl = null;
-    state.error = null;
-    state.qrShown = false;
-    state.everOpen = false;
-    state.failCount = 0;
-    state.wiped = false;
+    wipeSession(uid);
+    st.qrString = null;
+    st.qrDataUrl = null;
+    st.error = null;
+    st.qrShown = false;
+    st.everOpen = false;
+    st.failCount = 0;
+    st.wiped = false;
   }
-  state.status = 'connecting';
-  state.error = null;
-  state.startedAt = Date.now();
+  st.status = 'connecting';
+  st.error = null;
+  st.startedAt = Date.now();
 
   try {
-    ensureDir();
+    ensureDir(uid);
     const baileys = require('@whiskeysockets/baileys');
     const QRCode = require('qrcode');
     const {
@@ -169,97 +205,99 @@ async function start(force = false) {
       // block on a lookup it can't satisfy.
       getMessage: async () => undefined,
     });
-    state.sock = sock;
+    st.sock = sock;
 
-    // Only the CURRENT socket may write creds or drive state. A superseded
+    // Only the CURRENT socket may write creds or drive st. A superseded
     // socket (e.g. an in-flight reconnect from before the user hit "Generate QR
     // Code") must not resurrect old credentials on disk after a wipe, nor fire
     // its own reconnects — otherwise a stale registration keeps coming back.
-    sock.ev.on('creds.update', async () => { if (state.sock === sock) { try { await saveCreds(); } catch (_) { /* ignore */ } } });
+    sock.ev.on('creds.update', async () => { if (st.sock === sock) { try { await saveCreds(); } catch (_) { /* ignore */ } } });
 
     sock.ev.on('connection.update', async (update) => {
-      if (state.sock !== sock) return; // ignore events from a superseded socket
+      if (st.sock !== sock) return; // ignore events from a superseded socket
       const { connection, lastDisconnect, qr } = update;
 
       if (qr) {
-        state.qrString = qr;
-        state.qrDataUrl = await QRCode.toDataURL(qr, { width: 320, margin: 1 });
-        state.status = 'qr';
-        state.qrShown = true;      // reached the QR stage — session isn't corrupt
-        state.failCount = 0;
+        st.qrString = qr;
+        st.qrDataUrl = await QRCode.toDataURL(qr, { width: 320, margin: 1 });
+        st.status = 'qr';
+        st.qrShown = true;      // reached the QR stage — session isn't corrupt
+        st.failCount = 0;
       }
 
       if (connection === 'open') {
-        state.status = 'connected';
-        state.qrString = null;
-        state.qrDataUrl = null;
-        state.error = null;
-        state.everOpen = true;
-        state.failCount = 0;
-        state.phone = sock.user?.id ? String(sock.user.id).split(':')[0].split('@')[0] : null;
+        st.status = 'connected';
+        st.qrString = null;
+        st.qrDataUrl = null;
+        st.error = null;
+        st.everOpen = true;
+        st.failCount = 0;
+        st.phone = sock.user?.id ? String(sock.user.id).split(':')[0].split('@')[0] : null;
       }
 
       if (connection === 'close') {
         const code = lastDisconnect?.error?.output?.statusCode;
         const loggedOut = code === DisconnectReason.loggedOut;
-        state.sock = null;
-        state.failCount += 1;
+        st.sock = null;
+        st.failCount += 1;
 
         // Self-heal: the handshake keeps failing BEFORE we ever showed a QR or
         // connected → the persisted creds are stale/corrupt (a common leftover
         // of earlier failed attempts). Wipe the session and re-pair from clean,
         // which forces a fresh QR instead of an endless "Connection Failure".
-        const corruptSession = !loggedOut && !state.everOpen && !state.qrShown && state.failCount >= 2 && !state.wiped;
+        const corruptSession = !loggedOut && !st.everOpen && !st.qrShown && st.failCount >= 2 && !st.wiped;
 
         if (loggedOut) {
           // Phone unlinked us or banned. Clear the auth folder so the
           // next start() generates a fresh QR.
-          state.status = 'disconnected';
-          state.qrString = null;
-          state.qrDataUrl = null;
-          state.error = 'Logged out from WhatsApp. Scan a fresh QR to reconnect.';
-          state.phone = null;
-          wipeSession();
+          st.status = 'disconnected';
+          st.qrString = null;
+          st.qrDataUrl = null;
+          st.error = 'Logged out from WhatsApp. Scan a fresh QR to reconnect.';
+          st.phone = null;
+          wipeSession(uid);
         } else if (corruptSession) {
-          state.status = 'connecting';
-          state.qrString = null;
-          state.qrDataUrl = null;
-          state.error = null;
-          state.failCount = 0;
-          state.wiped = true;
+          st.status = 'connecting';
+          st.qrString = null;
+          st.qrDataUrl = null;
+          st.error = null;
+          st.failCount = 0;
+          st.wiped = true;
           wipeSession();
-          setTimeout(() => start(true).catch(() => {}), 300);
+          setTimeout(() => start(uid, true).catch(() => {}), 300);
         } else {
           // Transient (incl. the expected post-scan "restart required", 515) —
           // reconnect. force=true so the guard in start() doesn't swallow it.
-          state.status = 'connecting';
+          st.status = 'connecting';
           const restartRequired = code === DisconnectReason.restartRequired;
-          setTimeout(() => start(true).catch(() => {}), restartRequired ? 200 : 2500);
+          setTimeout(() => start(uid, true).catch(() => {}), restartRequired ? 200 : 2500);
         }
       }
     });
   } catch (err) {
-    state.status = 'error';
-    state.error = err.message || 'Failed to start WhatsApp QR session';
-    state.sock = null;
+    st.status = 'error';
+    st.error = err.message || 'Failed to start WhatsApp QR session';
+    st.sock = null;
   }
-  return getStatus();
+  return getStatus(uid);
 }
 
-async function logout() {
+async function logout(userId) {
+  const uid = requireUser(userId);
+  const st = sessionFor(uid);
   try {
-    if (state.sock) {
-      try { await state.sock.logout(); } catch (_) { /* ignore */ }
+    if (st.sock) {
+      try { await st.sock.logout(); } catch (_) { /* ignore */ }
     }
   } finally {
-    teardown();
-    state.status = 'disconnected';
-    state.qrString = null;
-    state.qrDataUrl = null;
-    state.phone = null;
-    wipeSession(); // delete the volume CONTENTS (see wipeSession)
+    teardown(uid);
+    st.status = 'disconnected';
+    st.qrString = null;
+    st.qrDataUrl = null;
+    st.phone = null;
+    wipeSession(uid); // delete this user's session contents (see wipeSession)
   }
-  return getStatus();
+  return getStatus(uid);
 }
 
 /**
@@ -276,13 +314,36 @@ async function logout() {
  */
 async function resumeOnBoot() {
   try {
-    // A LAN site box must never own the single WhatsApp session (see routes).
+    // A LAN site box must never own a WhatsApp session (see routes).
     if (require('../../config').site?.enabled) return;
-    const credsFile = path.join(SESSION_DIR, 'creds.json');
-    if (!fs.existsSync(credsFile)) {
-      console.log('[WhatsApp] No saved session; awaiting QR pairing.');
+    if (!fs.existsSync(SESSION_ROOT)) {
+      console.log('[WhatsApp] No saved sessions; awaiting QR pairing.');
       return;
     }
+    // Each paired user has their own subdirectory. A creds.json sitting at the
+    // ROOT is from the old single-session design and belongs to nobody we can
+    // identify, so it is reported rather than silently adopted by some user.
+    if (fs.existsSync(path.join(SESSION_ROOT, 'creds.json'))) {
+      console.log('[WhatsApp] A legacy shared session is on the volume; it is ignored — each user now pairs their own. Delete it once everyone has re-paired.');
+    }
+    const userDirs = fs.readdirSync(SESSION_ROOT, { withFileTypes: true })
+      .filter((e) => e.isDirectory() && /^\d+$/.test(e.name))
+      .map((e) => e.name);
+    if (userDirs.length === 0) {
+      console.log('[WhatsApp] No saved sessions; awaiting QR pairing.');
+      return;
+    }
+    for (const uid of userDirs) await resumeUser(uid);
+  } catch (err) {
+    console.error('[WhatsApp] resumeOnBoot failed:', err && err.message);
+  }
+}
+
+// Resume ONE user's linked session, without showing a QR.
+async function resumeUser(uid) {
+  try {
+    const credsFile = path.join(sessionDirFor(uid), 'creds.json');
+    if (!fs.existsSync(credsFile)) return;
     // A session is LINKED once it has a paired account identity (creds.me). Some
     // Baileys flows leave the `registered` boolean false even on a fully paired,
     // stable connection — so `me` is the authoritative signal. Resume when either
@@ -293,25 +354,31 @@ async function resumeOnBoot() {
       linked = c.registered === true || !!(c.me && c.me.id);
     } catch (_) { /* corrupt */ }
     if (!linked) {
-      console.log('[WhatsApp] Saved session is not linked; awaiting a fresh QR scan.');
+      console.log(`[WhatsApp] user ${uid}: saved session is not linked; awaiting a fresh QR scan.`);
       return;
     }
-    console.log('[WhatsApp] Resuming linked session from saved credentials…');
+    console.log(`[WhatsApp] user ${uid}: resuming linked session from saved credentials…`);
     // force=true → connect with the existing creds (no wipe, no QR). A registered
     // session re-opens; a transient failure hits the normal auto-reconnect path.
-    await start(true);
+    await start(uid, true);
   } catch (err) {
-    console.error('[WhatsApp] resumeOnBoot failed:', err && err.message);
+    console.error(`[WhatsApp] resume failed for user ${uid}:`, err && err.message);
   }
 }
 
-function getStatus() {
+function getStatus(userId) {
+  // No user → report disconnected rather than throwing; callers render a status
+  // panel before anyone has paired anything.
+  if (userId === undefined || userId === null || userId === '') {
+    return { status: 'disconnected', qrDataUrl: null, phone: null, error: null, startedAt: null };
+  }
+  const st = sessionFor(String(userId));
   return {
-    status: state.status,
-    qrDataUrl: state.qrDataUrl,
-    phone: state.phone,
-    error: state.error,
-    startedAt: state.startedAt,
+    status: st.status,
+    qrDataUrl: st.qrDataUrl,
+    phone: st.phone,
+    error: st.error,
+    startedAt: st.startedAt,
   };
 }
 
@@ -320,15 +387,16 @@ function getStatus() {
  * `phone` is digits only (E.164 without +), e.g. '923001234567'.
  * Returns { ok, messageId? , error? }.
  */
-async function sendMessage(phone, text) {
-  if (state.status !== 'connected' || !state.sock) {
-    return { ok: false, error: 'WhatsApp QR session is not connected.' };
+async function sendMessage(userId, phone, text) {
+  const st = sessionFor(requireUser(userId));
+  if (st.status !== 'connected' || !st.sock) {
+    return { ok: false, error: 'Your WhatsApp is not connected — pair it from Communications first.' };
   }
   const digits = String(phone || '').replace(/\D/g, '');
   if (!digits) return { ok: false, error: 'Invalid phone number' };
   const jid = `${digits}@s.whatsapp.net`;
   try {
-    const res = await state.sock.sendMessage(jid, { text });
+    const res = await st.sock.sendMessage(jid, { text });
     return { ok: true, messageId: res?.key?.id || null };
   } catch (err) {
     return { ok: false, error: err.message || 'sendMessage failed' };
@@ -342,9 +410,10 @@ async function sendMessage(phone, text) {
  * @param {object} opts   { fileName, mimetype='application/pdf', caption }
  * Returns { ok, messageId?, error? }.
  */
-async function sendDocument(phone, buffer, { fileName = 'document.pdf', mimetype = 'application/pdf', caption } = {}) {
-  if (state.status !== 'connected' || !state.sock) {
-    return { ok: false, error: 'WhatsApp QR session is not connected.' };
+async function sendDocument(userId, phone, buffer, { fileName = 'document.pdf', mimetype = 'application/pdf', caption } = {}) {
+  const st = sessionFor(requireUser(userId));
+  if (st.status !== 'connected' || !st.sock) {
+    return { ok: false, error: 'Your WhatsApp is not connected — pair it from Communications first.' };
   }
   const digits = String(phone || '').replace(/\D/g, '');
   if (!digits) return { ok: false, error: 'Invalid phone number' };
@@ -355,7 +424,7 @@ async function sendDocument(phone, buffer, { fileName = 'document.pdf', mimetype
   if (!buf || !buf.length) return { ok: false, error: 'Empty document' };
   const jid = `${digits}@s.whatsapp.net`;
   try {
-    const res = await state.sock.sendMessage(jid, {
+    const res = await st.sock.sendMessage(jid, {
       document: buf, mimetype, fileName, caption: caption || undefined,
     });
     return { ok: true, messageId: res?.key?.id || null };

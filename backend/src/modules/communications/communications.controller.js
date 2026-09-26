@@ -32,9 +32,9 @@ const communicationController = {
       if (!to || !String(to).trim()) return res.status(400).json({ success: false, message: 'Recipient WhatsApp number is required.' });
       if (!html || !String(html).trim()) return res.status(400).json({ success: false, message: 'Document content is required.' });
 
-      const wa = whatsappQr.getStatus();
+      const wa = whatsappQr.getStatus(req.user?.id);
       if (wa.status !== 'connected') {
-        return res.status(409).json({ success: false, code: 'WA_NOT_CONNECTED', message: 'WhatsApp is not connected. Connect it in Admin → WhatsApp by scanning the QR code.' });
+        return res.status(409).json({ success: false, code: 'WA_NOT_CONNECTED', message: 'Your WhatsApp is not connected. Pair your own account in Communications by scanning the QR code.' });
       }
 
       let pdf;
@@ -45,7 +45,7 @@ const communicationController = {
       }
 
       const safeName = String(filename || 'document.pdf').replace(/[^\w.\- ]+/g, '_');
-      const result = await whatsappQr.sendDocument(String(to).trim(), pdf, { fileName: safeName, caption });
+      const result = await whatsappQr.sendDocument(req.user?.id, String(to).trim(), pdf, { fileName: safeName, caption });
 
       try {
         await db('whatsapp_logs').insert({
