@@ -701,12 +701,25 @@ export function StockDetailView({ data, companyName }) {
   return (
     <div className="print-report space-y-6 text-sm text-gray-900">
       <Header companyName={companyName} title="Stock — Detailed & Traceable" subtitle={`As of ${new Date().toLocaleString()}${tag !== 'all' ? ` · ${tag}` : ''}`} />
-      <SummaryRow items={[
+      {/* The summary must describe the rows actually being reported. It used to
+          read `totals`, the whole warehouse, so picking CSR still showed every
+          category's quantity and value at the top — the figure people read
+          first and quote. It now follows the selected tag, and mill-store
+          packaging (which is not rice and belongs to no rice category) drops
+          out entirely rather than inflating a category it has nothing to do
+          with. On "All" this is identical to what it always showed. */}
+      <SummaryRow items={tag === 'all' ? [
         { label: 'Lots on hand', value: totals.lots },
         { label: 'Total Qty', value: `${fmtMt(totals.mt)} MT` },
         { label: 'Stock Value', value: fmtPkr(totals.valuePkr) },
         { label: 'Mill Store Items', value: millStore.length },
         { label: 'Mill Store Value', value: fmtPkr(totals.millStoreValue) },
+      ] : [
+        { label: `${tag} — lots`, value: shown.length },
+        { label: `${tag} — Qty`, value: `${fmtMt(shownMt)} MT` },
+        { label: `${tag} — Value`, value: fmtPkr(shownValue) },
+        { label: 'Katta', value: fmtKg(shownBags) },
+        { label: 'Share of stock', value: totals.mt > 0 ? `${(100 * shownMt / totals.mt).toFixed(1)}%` : '—' },
       ]} />
 
       {/* Inventory tags — click to filter the detail to that subtype. */}
@@ -734,7 +747,7 @@ export function StockDetailView({ data, companyName }) {
           totalRow={['', '', '', 'TOTAL', fmtMt(shownMt), fmtKg(shownMt * 1000), '', fmtKg(shownBags), '', '', '', fmtPkr(shownValue)]}
         />
       </Section>
-      {millStore.length > 0 && (
+      {tag === 'all' && millStore.length > 0 && (
         <Section title="Mill Store — packaging & consumables">
           <Table
             head={['Item', 'Category', 'Qty', 'Unit', 'Cost/unit', 'Supplier', 'Value (PKR)']}
