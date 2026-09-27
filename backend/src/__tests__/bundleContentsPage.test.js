@@ -1,8 +1,6 @@
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const { execFileSync } = require('child_process');
-const { PDFDocument } = require('pdf-lib');
+const {
+  PDFDocument, PDFArray, PDFRawStream, decodePDFRawStream,
+} = require('pdf-lib');
 const {
   mergeToPdf, contentsRows, contentsSheetCount, asciiSafe,
 } = require('../modules/documents/bundle.controller');
@@ -15,17 +13,56 @@ async function stub(width, pages = 1) {
 const widths = async (bytes) => (await PDFDocument.load(bytes))
   .getPages().map((pg) => Math.round(pg.getWidth()));
 
-// Read a page's text with pdftotext, so the assertions are about what is
-// actually PRINTED on the contents sheet rather than what we believe we drew.
-function pageText(bytes, page) {
-  const file = path.join(os.tmpdir(), `contents-${Date.now()}-${Math.random().toString(36).slice(2)}.pdf`);
-  try {
-    fs.writeFileSync(file, bytes);
-    return execFileSync('pdftotext', ['-f', String(page), '-l', String(page), file, '-'], { encoding: 'utf8' });
-  } finally {
-    try { fs.unlinkSync(file); } catch (_) { /* ignore */ }
+// Read back what was actually DRAWN on a page, rather than trusting that the
+// drawing code did what it meant to. pdf-lib writes each string as a hex literal
+// preceded by its text matrix, so position comes with it for free:
+//
+//   1 0 0 1 81 726 Tm  <436F6D6D65726369616C20496E766F696365> Tj
+//
+// An external extractor (pdftotext) would have been simpler, but the CI runner
+// has no such binary and the resulting ENOENT could not be serialised by
+// jest-worker, which failed the whole suite with "Converting circular structure
+// to JSON" instead of naming the missing tool. This needs nothing but pdf-lib.
+async function drawnItems(bytes, pageIndex) {
+  const doc = await PDFDocument.load(bytes);
+  const contents = doc.getPage(pageIndex).node.Contents();
+  const streams = contents instanceof PDFArray
+    ? Array.from({ length: contents.size() }, (_, i) => doc.context.lookup(contents.get(i)))
+    : [contents];
+  let raw = '';
+  for (const st of streams) {
+    const bytesOut = st instanceof PDFRawStream ? decodePDFRawStream(st).decode() : st.getContents();
+    raw += Buffer.from(bytesOut).toString('latin1');
   }
+  const re = /1 0 0 1 (-?[\d.]+) (-?[\d.]+) Tm\s*<([0-9A-Fa-f]*)>\s*Tj/g;
+  return [...raw.matchAll(re)].map((m) => ({
+    x: parseFloat(m[1]),
+    y: parseFloat(m[2]),
+    text: Buffer.from(m[3], 'hex').toString('latin1'),
+  }));
 }
+
+// The sheet as rows: everything sharing a baseline, left to right, with the dot
+// leader dropped. A contents line becomes ['1.', 'Commercial Invoice', '2'].
+async function contentsSheet(bytes, pageIndex = 0) {
+  const items = await drawnItems(bytes, pageIndex);
+  const byLine = new Map();
+  for (const it of items) {
+    if (/^\.+$/.test(it.text)) continue;            // dot leader
+    const key = Math.round(it.y);
+    if (!byLine.has(key)) byLine.set(key, []);
+    byLine.get(key).push(it);
+  }
+  return [...byLine.entries()]
+    .sort((a, b) => b[0] - a[0])                     // top of the page down
+    .map(([, row]) => row.sort((a, b) => a.x - b.x).map((i) => i.text));
+}
+
+// The page (or range) a named document is listed against.
+const listedAt = (rows, name) => {
+  const row = rows.find((r) => r.some((cell) => cell.includes(name)));
+  return row ? row[row.length - 1] : null;
+};
 
 describe('contentsRows — the page numbers account for the contents itself', () => {
   const outline = [
@@ -86,25 +123,22 @@ describe('the contents page, end to end', () => {
     // One contents sheet (A4), then the five document pages in order.
     expect(w).toEqual([595, 300, 100, 100, 100, 200]);
 
-    const text = pageText(out, 1);
-    expect(text).toContain('Contents');
-    expect(text).toContain('EX-001 documents');
+    const rows = await contentsSheet(out);
+    expect(rows[0]).toEqual(['Contents']);
+    expect(rows[1]).toEqual(['EX-001 documents']);
+    // Numbered, in order, each against the page it starts on.
+    expect(rows[2]).toEqual(['1.', 'Commercial Invoice', '2']);
+    expect(rows[3]).toEqual(['2.', 'Packing List', '3-5']);
+    expect(rows[4]).toEqual(['3.', 'Certificate of Origin', '6']);
 
-    // Pull "<name> ....... <page or range>" off the sheet and check the page
-    // really holds that document, identified by its distinctive width.
+    // And the page it names really does hold that document, identified by width.
     const expected = { 'Commercial Invoice': 300, 'Packing List': 100, 'Certificate of Origin': 200 };
-    let checked = 0;
     for (const [name, width] of Object.entries(expected)) {
-      const line = text.split('\n').find((l) => l.includes(name));
-      if (!line) throw new Error(`no contents line for ${name} in:\n${text}`);
-      const m = line.match(/(\d+)(?:-(\d+))?\s*$/);
-      if (!m) throw new Error(`no page number on "${line}"`);
-      const from = parseInt(m[1], 10);
-      const to = m[2] ? parseInt(m[2], 10) : from;
-      for (let p = from; p <= to; p += 1) expect(w[p - 1]).toBe(width);
-      checked += 1;
+      const label = listedAt(rows, name);
+      if (!label) throw new Error(`${name} is not listed on the contents sheet`);
+      const [from, to = from] = label.split('-').map(Number);
+      for (let page = from; page <= to; page += 1) expect(w[page - 1]).toBe(width);
     }
-    expect(checked).toBe(3);
   });
 
   test('past 26 documents the contents runs to a second sheet, numbers still true', async () => {
@@ -116,12 +150,16 @@ describe('the contents page, end to end', () => {
     const w = await widths(out);
     expect(w.slice(0, 2)).toEqual([595, 595]);          // two contents sheets
     expect(w).toHaveLength(32);
-    expect(pageText(out, 2)).toContain('Contents (continued)');
 
-    // The 30th document is the last page, and the sheet must say page 32.
-    const line = `${pageText(out, 1)}\n${pageText(out, 2)}`.split('\n').find((l) => /Document 30\b/.test(l));
-    expect(line).toBeTruthy();
-    expect(line.match(/(\d+)\s*$/)[1]).toBe('32');
+    const sheet1 = await contentsSheet(out, 0);
+    const sheet2 = await contentsSheet(out, 1);
+    expect(sheet2[0]).toEqual(['Contents (continued)']);
+
+    // The first document is page 3 (two contents sheets ahead of it) and the
+    // thirtieth is the last page, 32.
+    expect(listedAt(sheet1, 'Document 1')).toBe('3');
+    expect(listedAt(sheet2, 'Document 30')).toBe('32');
+    expect(w[2]).toBe(120);
     expect(w[31]).toBe(149);
   });
 
@@ -132,9 +170,8 @@ describe('the contents page, end to end', () => {
     ], { contentsPage: true });
     const w = await widths(out);
     expect(w).toEqual([595, 300, 595]);   // contents, the invoice, the notice page
-    const text = pageText(out, 1);
-    expect(text).toContain('Not included in this file');
+    const rows = await contentsSheet(out);
     // The notice is page 3 and the contents has to say so.
-    expect(text.split('\n').find((l) => l.includes('Not included'))).toMatch(/3\s*$/);
+    expect(listedAt(rows, 'Not included in this file')).toBe('3');
   });
 });
