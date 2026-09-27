@@ -174,6 +174,10 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
   // generated rendering of it.
   const [selected, setSelected] = React.useState(() => new Set());
   const [bundling, setBundling] = React.useState(false);
+  // Opt-in: a contents sheet earns its place in a 25-page merged set, but it is
+  // an extra page to discard when the set is printed for a bank, so it is not
+  // put in front of someone's documents unasked.
+  const [withContents, setWithContents] = React.useState(false);
   const toggleSelected = (key) => setSelected((prev) => {
     const next = new Set(prev);
     if (next.has(key)) next.delete(key); else next.add(key);
@@ -251,7 +255,7 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
       }
       await api.downloadPost(
         `/api/export-orders/${orderDbId}/documents/bundle`,
-        { uploadedIds, generated, order: sequence, zipName: `${order.id} documents`, format },
+        { uploadedIds, generated, order: sequence, contentsPage: format === 'pdf' && withContents, zipName: `${order.id} documents`, format },
         `${order.id} documents.${format === 'pdf' ? 'pdf' : 'zip'}`,
       );
       addToast?.(`Downloaded ${uploadedIds.length + generated.length} document(s)${format === 'pdf' ? ' as one PDF' : ' as a ZIP'}.`, 'success');
@@ -327,6 +331,18 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
           Select all ({selectableKeys.length})
         </label>
         <div className="flex items-center gap-2">
+          <label
+            className="inline-flex items-center gap-1.5 text-xs text-gray-600 mr-1"
+            title="Put a contents sheet in front of the combined PDF, listing each document and the page it starts on. Does not apply to a ZIP."
+          >
+            <input
+              type="checkbox"
+              checked={withContents}
+              onChange={(e) => setWithContents(e.target.checked)}
+              className="rounded border-gray-300"
+            />
+            Contents page
+          </label>
           <button
             onClick={() => downloadSelected('pdf')}
             disabled={!selected.size || !!bundling}
