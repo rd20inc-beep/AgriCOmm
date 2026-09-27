@@ -53,8 +53,13 @@ export const tabList = [
  * workflow reaches the stage where they become actionable.
  */
 export function getVisibleTabs(status) {
-  // Always-visible (packing specs are set at creation, always relevant)
-  const visible = ['overview', 'packing', 'printedBags', 'timeline'];
+  // Always-visible (packing specs are set at creation, always relevant).
+  // Documents belongs here too: the proforma invoice and sales contract are
+  // what the buyer is sent in order to OBTAIN the advance, so gating the tab
+  // on the workflow made the export manager wait for the very payment those
+  // documents exist to request. Every document generates from whatever data
+  // the order has, leaving later fields blank until they are known.
+  const visible = ['overview', 'packing', 'printedBags', 'documents', 'timeline'];
 
   // Financials: visible from Awaiting Advance onwards (payment related)
   const financialsFrom = ['Awaiting Advance', 'Advance Received', 'Procurement Pending',
@@ -67,11 +72,6 @@ export function getVisibleTabs(status) {
   const procurementFrom = ['Awaiting Advance', 'Advance Received', 'Procurement Pending', 'In Milling',
     'Docs In Preparation', 'Awaiting Balance', 'Ready to Ship', 'Shipped', 'Arrived', 'Closed'];
   if (procurementFrom.includes(status)) visible.push('procurement');
-
-  // Documents: visible from In Milling onwards (export docs preparation)
-  const docsFrom = ['In Milling', 'Docs In Preparation', 'Awaiting Balance',
-    'Ready to Ship', 'Shipped', 'Arrived', 'Closed'];
-  if (docsFrom.includes(status)) visible.push('documents');
 
   // Shipment: visible from Ready to Ship onwards
   const shipmentFrom = ['Ready to Ship', 'Shipped', 'Arrived', 'Closed'];
