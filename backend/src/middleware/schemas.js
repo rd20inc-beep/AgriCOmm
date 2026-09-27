@@ -17,6 +17,13 @@ const createExportOrder = Joi.object({
   // then had to be filled in again from the Shipment form. The port prints on the
   // documents and drives the incoterm wording, so it matters from the start.
   destination_port: Joi.string().allow('', null),
+  // Order-level HS code / quality / broken %. These are declared per line under
+  // `items`, but create() ALSO reads them off the top level via req.body.x to
+  // materialise a single item row when no items are sent — and an order-level
+  // value was stripped before it got there, so that row was written with nulls.
+  hs_code: Joi.string().allow('', null),
+  quality_description: Joi.string().allow('', null),
+  broken_pct_target: Joi.number().min(0).allow(null),
   qty_mt: Joi.number().positive().required().messages({
     'number.positive': 'Quantity must be greater than zero',
   }),
@@ -502,6 +509,11 @@ const submitApproval = Joi.object({
   entity_type: Joi.string().required(),
   entity_id: Joi.number().integer().required(),
   entity_ref: Joi.string().allow('', null),
+  // The "before" snapshot. control.service stores it as
+  // `current_data: currentData ? JSON.stringify(currentData) : null`, so being
+  // undeclared meant stripUnknown deleted it and the column was ALWAYS null —
+  // an approver saw what was proposed but not what it was changing from.
+  current_data: Joi.object().allow(null),
   proposed_data: Joi.object().required(),
   amount: Joi.number().min(0).default(0),
   currency: Joi.string().valid('USD', 'PKR').default('USD'),
