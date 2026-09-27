@@ -172,3 +172,45 @@ describe('createExportOrder — contract fields the form always sent but nothing
     }).error).toBeUndefined();
   });
 });
+
+// Column widths read off the live database, not guessed. A value longer than the
+// column used to pass Joi and then fail in Postgres, which surfaces as a 500 with
+// no indication of which field was at fault.
+describe('string limits match the columns they are written to', () => {
+  const WIDTHS = {
+    createExportOrder: { contract_number: 50, consignee_type: 20, hs_code: 20, destination_port: 255 },
+    updateExportShipment: {
+      voyage_number: 50, gd_number: 100, fi_number: 100, fi_number_2: 100, fi_number_3: 100,
+      freight_terms: 20, consignee_type: 20,
+      notify_party_name: 255, notify_party_phone: 50, notify_party_email: 255,
+    },
+  };
+  const base = {
+    createExportOrder: {
+      customer_id: 1, product_id: 1, qty_mt: 10, price_per_mt: 500,
+      contract_value: 5000, incoterm: 'FOB', bank_account_id: 2,
+    },
+    updateExportShipment: {},
+  };
+
+  for (const [schemaName, fields] of Object.entries(WIDTHS)) {
+    for (const [field, width] of Object.entries(fields)) {
+      test(`${schemaName}.${field} accepts ${width} chars and refuses ${width + 1}`, () => {
+        const at = run(schemas[schemaName], { ...base[schemaName], [field]: 'x'.repeat(width) });
+        expect(at.error).toBeUndefined();
+        const over = run(schemas[schemaName], { ...base[schemaName], [field]: 'x'.repeat(width + 1) });
+        expect(over.error).toBeDefined();
+        // The refusal has to name the field, or the user cannot tell what to fix.
+        expect(over.error.details.some((d) => d.path.includes(field))).toBe(true);
+      });
+    }
+  }
+
+  test('the unbounded text columns stay unbounded', () => {
+    const long = 'x'.repeat(5000);
+    expect(run(schemas.updateExportShipment, { notify_party_address: long, shipment_remarks: long }).error)
+      .toBeUndefined();
+    expect(run(schemas.createExportOrder, { ...base.createExportOrder, quality_description: long }).error)
+      .toBeUndefined();
+  });
+});
