@@ -16,24 +16,27 @@ const createExportOrder = Joi.object({
   // stripUnknown removed it and the port was null on every order ever created —
   // then had to be filled in again from the Shipment form. The port prints on the
   // documents and drives the incoterm wording, so it matters from the start.
-  destination_port: Joi.string().allow('', null),
+  destination_port: Joi.string().max(255).allow('', null),
   // Order-level HS code / quality / broken %. These are declared per line under
   // `items`, but create() ALSO reads them off the top level via req.body.x to
   // materialise a single item row when no items are sent — and an order-level
   // value was stripped before it got there, so that row was written with nulls.
-  hs_code: Joi.string().allow('', null),
-  quality_description: Joi.string().allow('', null),
+  hs_code: Joi.string().max(20).allow('', null),
+  quality_description: Joi.string().allow('', null),   // text column, unbounded
   broken_pct_target: Joi.number().min(0).allow(null),
   // The create form has always sent these four; create() never read them, so
   // they were not stripped — just never saved, and had to be re-entered from the
   // Shipment form. contract_number heads the documents, consignee_type decides
   // the BL consignee line, and the window is on the sales contract.
-  contract_number: Joi.string().max(60).allow('', null),
+  contract_number: Joi.string().max(50).allow('', null),
   // Not an enum: the form's own options are 'to_order_of_bank' and 'direct', and
   // updateExportShipment accepts any string. The BL renderer treats anything
   // other than 'to_order_of_bank' as direct-to-buyer, so a strict list here would
-  // only reject values the rest of the system already handles.
-  consignee_type: Joi.string().max(30).allow('', null),
+  // only reject values the rest of the system already handles. The max matches
+  // the column, so an over-long value is a field-level 400 and not a 500 from
+  // Postgres. Every max below is the column width, checked against the live
+  // database rather than guessed.
+  consignee_type: Joi.string().max(20).allow('', null),
   shipment_window_start: Joi.date().iso().allow(null, ''),
   shipment_window_end: Joi.date().iso().allow(null, ''),
   qty_mt: Joi.number().positive().required().messages({
@@ -159,7 +162,7 @@ const updateExportShipment = Joi.object({
   atd: Joi.date().iso().allow(null, ''),
   eta: Joi.date().iso().allow(null, ''),
   ata: Joi.date().iso().allow(null, ''),
-  destination_port: Joi.string().allow('', null),
+  destination_port: Joi.string().max(255).allow('', null),
   gate_pass_no: Joi.string().allow('', null),
   // Everything below was read by updateShipment and sent by the Shipment form,
   // but never declared here — so stripUnknown deleted it on arrival. The fields
@@ -167,22 +170,22 @@ const updateExportShipment = Joi.object({
   // voyage_number, gd_number and gd_date have no fallback, so every shipment
   // save overwrote them with NULL and lost whatever was there.
   bl_date: Joi.date().iso().allow(null, ''),
-  voyage_number: Joi.string().allow('', null),
-  gd_number: Joi.string().allow('', null),
+  voyage_number: Joi.string().max(50).allow('', null),
+  gd_number: Joi.string().max(100).allow('', null),
   gd_date: Joi.date().iso().allow(null, ''),
-  fi_number: Joi.string().allow('', null),
-  fi_number_2: Joi.string().allow('', null),
-  fi_number_3: Joi.string().allow('', null),
+  fi_number: Joi.string().max(100).allow('', null),
+  fi_number_2: Joi.string().max(100).allow('', null),
+  fi_number_3: Joi.string().max(100).allow('', null),
   fi_date: Joi.date().iso().allow(null, ''),
-  freight_terms: Joi.string().allow('', null),
-  consignee_type: Joi.string().allow('', null),
+  freight_terms: Joi.string().max(20).allow('', null),
+  consignee_type: Joi.string().max(20).allow('', null),
   shipment_window_start: Joi.date().iso().allow(null, ''),
   shipment_window_end: Joi.date().iso().allow(null, ''),
-  notify_party_name: Joi.string().allow('', null),
-  notify_party_address: Joi.string().allow('', null),
-  notify_party_phone: Joi.string().allow('', null),
-  notify_party_email: Joi.string().allow('', null),
-  shipment_remarks: Joi.string().allow('', null),
+  notify_party_name: Joi.string().max(255).allow('', null),
+  notify_party_address: Joi.string().allow('', null),    // text column, unbounded
+  notify_party_phone: Joi.string().max(50).allow('', null),
+  notify_party_email: Joi.string().max(255).allow('', null),
+  shipment_remarks: Joi.string().allow('', null),        // text column, unbounded
   // Company bank account whose details print on this order's documents.
   bank_account_id: Joi.number().integer().positive().allow(null),
   notes: Joi.string().allow('', null),
