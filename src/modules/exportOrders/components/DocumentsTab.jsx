@@ -208,12 +208,24 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
       }
       const uploadedIds = [];
       const generated = [];
-      for (const key of selected) {
+      // `sequence` fixes the order of the combined PDF. Iterating `selected`
+      // walked a Set in insertion order — the order the boxes happened to be
+      // ticked — and the server then emitted every uploaded file before every
+      // generated one. So the document set came out shuffled. Walking DOC_KEYS
+      // instead means the download reads in the same order this tab lists.
+      const sequence = [];
+      const orderedKeys = [
+        ...DOC_KEYS.filter((k) => selected.has(k)),
+        // Anything selected that is not in DOC_KEYS (a key that disappeared from
+        // the catalogue mid-session) still goes in, at the end.
+        ...[...selected].filter((k) => !DOC_KEYS.includes(k)),
+      ];
+      for (const key of orderedKeys) {
         const files = storedByType[key] || [];
         if (files.length) {
           // Oldest first, so a multi-page certificate scanned as separate files
           // reads in the order it was uploaded.
-          [...files].reverse().forEach((f) => uploadedIds.push(f.id));
+          [...files].reverse().forEach((f) => { uploadedIds.push(f.id); sequence.push({ k: 'u', id: f.id }); });
           continue;
         }
         // No uploaded file — render the system's own version, exactly as the
@@ -230,6 +242,7 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
             filename: LABELS[key] || docType,
             html: buildDocHtml(html, docType, LABELS[key] || docType, { autoPrint: false, orientation: 'portrait' }),
           });
+          sequence.push({ k: 'g', i: generated.length - 1 });
         } catch { /* skipped; the server lists what it could not include */ }
       }
       if (!uploadedIds.length && !generated.length) {
@@ -238,7 +251,7 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
       }
       await api.downloadPost(
         `/api/export-orders/${orderDbId}/documents/bundle`,
-        { uploadedIds, generated, zipName: `${order.id} documents`, format },
+        { uploadedIds, generated, order: sequence, zipName: `${order.id} documents`, format },
         `${order.id} documents.${format === 'pdf' ? 'pdf' : 'zip'}`,
       );
       addToast?.(`Downloaded ${uploadedIds.length + generated.length} document(s)${format === 'pdf' ? ' as one PDF' : ' as a ZIP'}.`, 'success');
