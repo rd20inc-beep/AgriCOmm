@@ -720,6 +720,10 @@ const exportOrderController = {
         incoterm,
         country,
         destination_port,
+        contract_number,
+        consignee_type,
+        shipment_window_start,
+        shipment_window_end,
         advance_pct,
         shipment_eta,
         source,
@@ -825,6 +829,12 @@ const exportOrderController = {
             incoterm: incoterm || null,
             country: country || null,
             destination_port: destination_port || null,
+            contract_number: contract_number || null,
+            // NOT NULL with a default of 'to_order_of_bank' — a blank from the
+            // form must fall back to the default, not be written as null.
+            consignee_type: consignee_type || 'to_order_of_bank',
+            shipment_window_start: shipment_window_start || null,
+            shipment_window_end: shipment_window_end || null,
             advance_pct: advancePct,
             advance_expected: advanceExpected,
             balance_expected: balanceExpected,
