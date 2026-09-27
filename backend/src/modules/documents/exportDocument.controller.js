@@ -114,11 +114,6 @@ function formatDate(d) {
   return date.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
-function formatMoney(amount, currency = 'USD') {
-  const num = parseFloat(amount) || 0;
-  return `${currency} ${num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
 // The company's current export office — the SINGLE source of the address /
 // contact details printed on EVERY export document (header + shared footer).
 // (Previously only the SBP/bank compliance docs used this office while ~9 other
@@ -184,7 +179,7 @@ const exportDocumentController = {
         return res.status(404).json({ success: false, message: 'Order not found.' });
       }
 
-      const { order, containers, settings, costs, items, packingWeight, bankAccount } = data;
+      const { order, containers, settings, items, packingWeight, bankAccount } = data;
 
       // Single source of truth for HS code: first item → order (legacy) →
       // settings default. Item-level wins because that's where the user
@@ -225,7 +220,6 @@ const exportDocumentController = {
       // bags in 20 KG masters carries 4,800 inner AND 1,200 outer bags, and
       // gross used to count neither. Weighed containers or a packing-weight
       // record still win over this estimate.
-      const retailBagSizeKg = parseFloat(order.bag_size_kg) || 0;
       const masterBagSizeKg = parseFloat(order.master_bag_size_kg) || 0;
       const masterBagCount = masterBagSizeKg > 0
         ? Math.ceil(netWeightKg / masterBagSizeKg)
@@ -672,7 +666,13 @@ const exportDocumentController = {
 
   /**
    * GET /api/export-orders/:id/documents/available
-   * Returns which documents can be generated at the current workflow step
+   * Returns the catalogue of documents for an order.
+   *
+   * Nothing here is gated: every document generates from whatever data the
+   * order has, leaving the fields that are not known yet blank. `availableFrom`
+   * is the workflow step at which a document normally becomes relevant, and is
+   * used only for the hint under a card in the Document Center — it does not
+   * withhold anything.
    */
   async available(req, res) {
     try {
@@ -686,15 +686,11 @@ const exportDocumentController = {
         return res.status(404).json({ success: false, message: 'Order not found.' });
       }
 
-      const step = order.current_step || 1;
-      const hasBasicData = !!(order.customer_id && order.qty_mt > 0);
-      const hasVessel = !!order.vessel_name;
-      const hasContainers = await db('shipment_containers').where({ order_id: order.id }).count('id as c').first();
-      const containerCount = parseInt(hasContainers?.c) || 0;
-      const hasBL = !!order.bl_number;
-
-      // All 15 documents always ready — generate with whatever data is available,
-      // missing fields show as blanks. User fills in shipment details as they become known.
+      // Every document is ready — it generates with whatever data is available and
+      // missing fields show as blanks, so the readiness flags that used to be
+      // computed here (step, vessel, BL number, and a count query against
+      // shipment_containers) decided nothing. They cost a query per call and read
+      // as though they still gated something.
       const docs = [
         { key: 'sales-contract', label: 'Sales Contract', availableFrom: 2, ready: true },
         { key: 'proforma-invoice', label: 'Proforma Invoice', availableFrom: 2, ready: true },
