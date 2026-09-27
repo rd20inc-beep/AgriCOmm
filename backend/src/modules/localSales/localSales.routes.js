@@ -25,6 +25,12 @@ router.post(
   auditAction('create_local_sale', 'local_sale'),
   controller.create
 );
+// Edit a sale. Presentation fields on any sale; quantity/rate only while Pending
+// (see controller.update). Same permission as recording one.
+router.put('/:id', authorize('inventory', 'create'),
+  auditAction('update_local_sale', 'local_sale', (req) => req.params.id),
+  controller.update);
+
 router.post('/:id/confirm', authorizeRole(...CONFIRM_ROLES), auditAction('confirm_local_sale', 'local_sale'), controller.confirmSale);
 router.post('/:id/reject', authorizeRole(...CONFIRM_ROLES), auditAction('reject_local_sale', 'local_sale'), controller.rejectSale);
 router.post(
