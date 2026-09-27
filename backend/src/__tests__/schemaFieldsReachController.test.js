@@ -90,3 +90,47 @@ describe('createExportOrder — destination_port must reach the controller', () 
     expect(run(schemas.createExportOrder, minimal).error).toBeUndefined();
   });
 });
+
+describe('submitApproval — the before-snapshot must reach the service', () => {
+  const minimal = {
+    approval_type: 'cost_edit', entity_type: 'lot', entity_id: 5,
+    proposed_data: { cost: 120 },
+  };
+
+  test('current_data survives Joi', () => {
+    // control.service writes `current_data: currentData ? JSON.stringify(...) : null`,
+    // so stripping it meant the column was always null and the approver could not
+    // see what the change was FROM.
+    const { error, value } = run(schemas.submitApproval, { ...minimal, current_data: { cost: 100 } });
+    expect(error).toBeUndefined();
+    expect(value.current_data).toEqual({ cost: 100 });
+  });
+
+  test('it stays optional — a first-time request has no before state', () => {
+    expect(run(schemas.submitApproval, minimal).error).toBeUndefined();
+    expect(run(schemas.submitApproval, { ...minimal, current_data: null }).error).toBeUndefined();
+  });
+});
+
+describe('createExportOrder — order-level item fields reach create()', () => {
+  const minimal = {
+    customer_id: 1, product_id: 1, qty_mt: 10, price_per_mt: 500,
+    contract_value: 5000, incoterm: 'FOB', bank_account_id: 2,
+  };
+
+  test('hs_code, quality_description and broken_pct_target come through', () => {
+    // create() reads these as req.body.x (not via its destructure, which is why
+    // reading the destructure alone missed them) to build a single item row when
+    // no items are sent. Stripped, that row was written with nulls.
+    const { error, value } = run(schemas.createExportOrder, {
+      ...minimal,
+      hs_code: '1006.30.90',
+      quality_description: '2% broken, double polished',
+      broken_pct_target: 2,
+    });
+    expect(error).toBeUndefined();
+    expect(value.hs_code).toBe('1006.30.90');
+    expect(value.quality_description).toBe('2% broken, double polished');
+    expect(value.broken_pct_target).toBe(2);
+  });
+});

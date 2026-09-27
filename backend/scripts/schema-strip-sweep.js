@@ -78,25 +78,54 @@ for (const [srcFile, src] of SRC) {
 }
 
 // ---- body fields, following `const x = req.body` aliases ---------------
+// Fields a handler reads off the request body.
+//
+// Finding the destructure with a forward regex does not work. `{([\s\S]*?)}\s*=\s*req.body`
+// happily starts at the function's own opening brace and runs across anything in
+// between — including `res.status(404).json({ message: '...' })` — so `message`
+// was reported as a stripped body field on seven different routes. Restricting it
+// to `[^{}]*` fixes that but then silently skips any destructure containing a
+// nested brace. So: find each `= req.body`, then walk LEFT from the `}` before it
+// to its matching `{`. That reads the pattern exactly, nesting and all.
+function destructuredKeys(text, rhs) {
+  const out = [];
+  const re = new RegExp(`\\}\\s*=\\s*${rhs}\\b`, 'g');
+  for (const m of text.matchAll(re)) {
+    const closeIdx = text.indexOf('}', m.index);
+    let d = 0, open = -1;
+    for (let j = closeIdx; j >= 0; j -= 1) {
+      const c = text[j];
+      if ('}])'.includes(c)) d += 1;
+      else if ('{[('.includes(c)) { d -= 1; if (d === 0) { open = j; break; } }
+    }
+    if (open < 0) continue;
+    const inner = text.slice(open + 1, closeIdx);
+    // top-level names only — a nested pattern's inner names are not body keys
+    let depth = 0, token = '';
+    const push = () => {
+      const k = token.trim().split(/[:=]/)[0].trim().replace(/^\.\.\./, '');
+      if (/^[A-Za-z_$][\w$]*$/.test(k)) out.push(k);
+      token = '';
+    };
+    for (const c of inner) {
+      if ('{[('.includes(c)) depth += 1;
+      else if ('}])'.includes(c)) depth -= 1;
+      if (c === ',' && depth === 0) push(); else token += c;
+    }
+    push();
+  }
+  return out;
+}
+
 function bodyFields(text) {
   const f = new Set();
   for (const m of text.matchAll(/req\.body\.([A-Za-z_$][\w$]*)/g)) f.add(m[1]);
-  for (const m of text.matchAll(/\{([\s\S]*?)\}\s*=\s*req\.body/g)) {
-    for (const part of m[1].split(',')) {
-      const k = part.trim().split(/[:=]/)[0].trim().replace(/^\.\.\./, '');
-      if (/^[A-Za-z_$][\w$]*$/.test(k)) f.add(k);
-    }
-  }
-  // const data = req.body  →  data.field
+  for (const k of destructuredKeys(text, 'req\\.body')) f.add(k);
+  // const data = req.body  →  data.field / { a, b } = data
   for (const m of text.matchAll(/(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*req\.body\s*[;,\n]/g)) {
     const alias = m[1];
     for (const u of text.matchAll(new RegExp(`\\b${alias}\\.([A-Za-z_$][\\w$]*)`, 'g'))) f.add(u[1]);
-    for (const u of text.matchAll(new RegExp(`\\{([\\s\\S]*?)\\}\\s*=\\s*${alias}\\b`, 'g'))) {
-      for (const part of u[1].split(',')) {
-        const k = part.trim().split(/[:=]/)[0].trim().replace(/^\.\.\./, '');
-        if (/^[A-Za-z_$][\w$]*$/.test(k)) f.add(k);
-      }
-    }
+    for (const k of destructuredKeys(text, alias)) f.add(k);
   }
   return [...f];
 }
@@ -120,6 +149,8 @@ for (const file of FILES.filter((f) => f.endsWith('.routes.js'))) {
     const tail = call.slice(sm.index);
 
     const reads = new Set(bodyFields(call));
+    const provenance = new Map();
+    for (const f of reads) provenance.set(f, new Set(['the route file itself']));
     const hits = [];
     const ambiguous = [];
     // A handler name alone is not unique — 'create' is defined in a dozen
@@ -136,16 +167,25 @@ for (const file of FILES.filter((f) => f.endsWith('.routes.js'))) {
       if (!chosen.length && defs.length === 1) chosen = defs;
       if (!chosen.length) { ambiguous.push(`${name}(${defs.length} defs)`); continue; }
       hits.push(`${name}`);
-      for (const d of chosen) for (const f of bodyFields(d.body)) reads.add(f);
+      for (const d of chosen) {
+        for (const f of bodyFields(d.body)) {
+          reads.add(f);
+          if (!provenance.has(f)) provenance.set(f, new Set());
+          provenance.get(f).add(`${name}() in ${path.relative(ROOT, d.file)}`);
+        }
+      }
     }
     const missing = [...reads].filter((f) => keys && !keys.includes(f));
-    if (missing.length) findings.push({ file: path.relative(ROOT, file), routePath, schema, missing });
+    if (missing.length) findings.push({ file: path.relative(ROOT, file), routePath, schema, missing, provenance });
     if (!reads.size) blind.push(`${schema}  ${routePath}  [${path.relative(ROOT, file)}]  handlers: ${hits.join(', ') || 'NONE'}${ambiguous.length ? '  AMBIGUOUS: ' + ambiguous.join(', ') : ''}`);
   }
 }
 console.log('validated write-routes examined:', examined);
 console.log('\n=== POSSIBLE STRIPPED FIELDS (need manual confirmation) ===');
 if (!findings.length) console.log('  none');
-for (const f of findings) console.log(`  !! ${f.schema}  ${f.routePath}  [${f.file}]\n     ${f.missing.join(', ')}`);
+for (const f of findings) {
+  console.log(`  !! ${f.schema}  ${f.routePath}  [${f.file}]`);
+  for (const m of f.missing) console.log(`       ${m}  <-- read by ${[...(f.provenance.get(m) || [])].join(' / ')}`);
+}
 console.log(`\n=== still blind (handler body not located): ${blind.length} ===`);
 blind.forEach((b) => console.log('  ' + b));
