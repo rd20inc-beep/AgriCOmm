@@ -54,10 +54,106 @@ function decryptIfNeeded(bytes, label) {
   }
 }
 
-async function mergeToPdf(sources) {
+// pdf-lib's standard fonts encode WinAnsi only, and drawText THROWS on a glyph
+// it cannot encode — so a document named in Urdu would not merely print oddly,
+// it would fail the whole combined download with a 500. Everything drawn onto a
+// page we create is reduced to plain ASCII first.
+const asciiSafe = (value, fallback = 'Document') => {
+  const out = String(value == null ? '' : value)
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[\u201C\u201D]/g, '"')
+    .replace(/[\u2013\u2014]/g, '-')
+    .replace(/\u2026/g, '...')
+    .replace(/[^\x20-\x7E]/g, '')
+    .trim();
+  return out || fallback;
+};
+
+// How many entries fit on one contents sheet, below its heading.
+const CONTENTS_ROWS_PER_PAGE = 26;
+
+/**
+ * Where each document lands once the contents sheets are in front of it.
+ *
+ * The contents has to state page numbers, and inserting it at the front moves
+ * every document along by however many sheets the contents itself takes — which
+ * depends on how many documents there are. Kept separate from the drawing so the
+ * arithmetic can be tested on its own.
+ */
+function contentsRows(outline, sheets) {
+  return outline.map((item, i) => {
+    const from = item.start + sheets;
+    const to = from + Math.max(1, item.pages) - 1;
+    return {
+      index: i + 1,
+      name: asciiSafe(item.name, `Document ${i + 1}`),
+      from,
+      to,
+      label: to > from ? `${from}-${to}` : `${from}`,
+    };
+  });
+}
+
+const contentsSheetCount = (entries) => Math.max(1, Math.ceil(entries / CONTENTS_ROWS_PER_PAGE));
+
+// Draw the contents onto sheets inserted at the front of the merged document.
+async function prependContents(merged, outline, title) {
+  const { StandardFonts, rgb } = require('pdf-lib');
+  const font = await merged.embedFont(StandardFonts.Helvetica);
+  const bold = await merged.embedFont(StandardFonts.HelveticaBold);
+  const sheets = contentsSheetCount(outline.length);
+  const rows = contentsRows(outline, sheets);
+
+  for (let i = 0; i < sheets; i += 1) merged.insertPage(i, [595, 842]);
+
+  const LEFT = 55;
+  const RIGHT = 540;
+  const NAME_X = LEFT + 26;
+  const SIZE = 10;
+  const grey = rgb(0.45, 0.45, 0.45);
+  const ink = rgb(0.1, 0.1, 0.1);
+
+  // Trim a name to the space between its number and its page number.
+  const fit = (text, maxWidth) => {
+    let t = text;
+    if (font.widthOfTextAtSize(t, SIZE) <= maxWidth) return t;
+    while (t.length > 1 && font.widthOfTextAtSize(`${t}...`, SIZE) > maxWidth) t = t.slice(0, -1);
+    return `${t}...`;
+  };
+
+  for (let sheet = 0; sheet < sheets; sheet += 1) {
+    const page = merged.getPage(sheet);
+    page.drawText(sheet === 0 ? 'Contents' : 'Contents (continued)', {
+      x: LEFT, y: 782, size: 17, font: bold, color: ink,
+    });
+    if (sheet === 0 && title) {
+      page.drawText(asciiSafe(title, 'Documents'), { x: LEFT, y: 762, size: 10, font, color: grey });
+    }
+    let y = 726;
+    for (const row of rows.slice(sheet * CONTENTS_ROWS_PER_PAGE, (sheet + 1) * CONTENTS_ROWS_PER_PAGE)) {
+      const numW = font.widthOfTextAtSize(row.label, SIZE);
+      const name = fit(row.name, RIGHT - numW - NAME_X - 14);
+      page.drawText(`${row.index}.`, { x: LEFT, y, size: SIZE, font, color: grey });
+      page.drawText(name, { x: NAME_X, y, size: SIZE, font, color: ink });
+      // Dot leader, so the eye can follow a short title across to its page.
+      const gapFrom = NAME_X + font.widthOfTextAtSize(name, SIZE) + 4;
+      const gapTo = RIGHT - numW - 4;
+      const dotW = font.widthOfTextAtSize('.', SIZE);
+      if (gapTo > gapFrom && dotW > 0) {
+        page.drawText('.'.repeat(Math.floor((gapTo - gapFrom) / dotW)), { x: gapFrom, y, size: SIZE, font, color: grey });
+      }
+      page.drawText(row.label, { x: RIGHT - numW, y, size: SIZE, font, color: ink });
+      y -= 20;
+    }
+  }
+  return sheets;
+}
+
+async function mergeToPdf(sources, opts = {}) {
   const { PDFDocument, StandardFonts, rgb } = require('pdf-lib');
   const merged = await PDFDocument.create();
   const skipped = [];
+  const outline = [];   // what went in, and where — for the optional contents sheet
 
   for (const src of sources) {
     try {
@@ -73,7 +169,9 @@ async function mergeToPdf(sources) {
       const doc = await PDFDocument.load(bytes);
       const pages = await merged.copyPages(doc, doc.getPageIndices());
       if (!pages.length) { skipped.push(`${src.name} (no pages)`); continue; }
+      const startsAt = merged.getPageCount() + 1;
       pages.forEach((pg) => merged.addPage(pg));
+      outline.push({ name: src.name, start: startsAt, pages: pages.length });
     } catch (err) {
       console.error('Document merge failed for', src.name, err.message);
       skipped.push(`${src.name} (could not be read)`);
@@ -81,13 +179,17 @@ async function mergeToPdf(sources) {
   }
 
   if (skipped.length) {
+    const noticeStart = merged.getPageCount() + 1;
     const page = merged.addPage([595, 842]);
     const font = await merged.embedFont(StandardFonts.Helvetica);
     page.drawText('Not included in this file', { x: 50, y: 790, size: 14, font, color: rgb(0.6, 0.1, 0.1) });
     skipped.forEach((label, i) => {
-      page.drawText(`- ${label}`.slice(0, 95), { x: 50, y: 760 - i * 18, size: 10, font, color: rgb(0.2, 0.2, 0.2) });
+      // asciiSafe: a name pdf-lib cannot encode used to throw here and fail the
+      // whole download rather than the one document it could not include.
+      page.drawText(asciiSafe(`- ${label}`, '- a document').slice(0, 95), { x: 50, y: 760 - i * 18, size: 10, font, color: rgb(0.2, 0.2, 0.2) });
     });
     page.drawText('Download these individually, or as a ZIP.', { x: 50, y: 760 - skipped.length * 18 - 20, size: 10, font, color: rgb(0.4, 0.4, 0.4) });
+    outline.push({ name: 'Not included in this file', start: noticeStart, pages: 1 });
   }
 
   if (merged.getPageCount() === 0) {
@@ -95,6 +197,12 @@ async function mergeToPdf(sources) {
     const font = await merged.embedFont(StandardFonts.Helvetica);
     page.drawText('None of the selected documents could be merged into a PDF.', { x: 50, y: 790, size: 12, font });
   }
+  // Opt-in, and last, so the sheets land in front of a finished document set and
+  // the page numbers it prints are the ones the reader will see.
+  if (opts.contentsPage && outline.length) {
+    await prependContents(merged, outline, opts.title);
+  }
+
   // Uint8Array from pdf-lib; res.send needs a Buffer.
   return Buffer.from(await merged.save());
 }
@@ -150,7 +258,7 @@ function sequenceEntries(uploadedIds, generated, order) {
 }
 
 async function bundle(req, res) {
-  const { uploadedIds = [], generated = [], order, format = 'zip' } = req.body || {};
+  const { uploadedIds = [], generated = [], order, contentsPage = false, format = 'zip' } = req.body || {};
   if (!uploadedIds.length && !generated.length) {
     return res.status(400).json({ success: false, message: 'Select at least one document.' });
   }
@@ -200,7 +308,10 @@ async function bundle(req, res) {
       });
     }
     try {
-      const out = await mergeToPdf(sources);
+      const out = await mergeToPdf(sources, {
+        contentsPage: !!contentsPage,
+        title: req.body.zipName || null,
+      });
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="${safeName(req.body.zipName, 'documents')}.pdf"`);
       return res.send(out);
@@ -289,4 +400,4 @@ async function bundle(req, res) {
   await archive.finalize();
 }
 
-module.exports = { bundle, sequenceEntries, mergeToPdf };
+module.exports = { bundle, sequenceEntries, mergeToPdf, contentsRows, contentsSheetCount, asciiSafe };
