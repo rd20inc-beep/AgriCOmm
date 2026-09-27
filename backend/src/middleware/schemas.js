@@ -12,6 +12,11 @@ const createExportOrder = Joi.object({
   product_id: Joi.number().integer().positive().required(),
   product_name: Joi.string().allow('', null),
   country: Joi.string().allow('', null),
+  // create() writes `destination_port || null` but this was never declared, so
+  // stripUnknown removed it and the port was null on every order ever created —
+  // then had to be filled in again from the Shipment form. The port prints on the
+  // documents and drives the incoterm wording, so it matters from the start.
+  destination_port: Joi.string().allow('', null),
   qty_mt: Joi.number().positive().required().messages({
     'number.positive': 'Quantity must be greater than zero',
   }),
@@ -137,6 +142,28 @@ const updateExportShipment = Joi.object({
   ata: Joi.date().iso().allow(null, ''),
   destination_port: Joi.string().allow('', null),
   gate_pass_no: Joi.string().allow('', null),
+  // Everything below was read by updateShipment and sent by the Shipment form,
+  // but never declared here — so stripUnknown deleted it on arrival. The fields
+  // with an `|| order.x` fallback in the controller simply could not be changed;
+  // voyage_number, gd_number and gd_date have no fallback, so every shipment
+  // save overwrote them with NULL and lost whatever was there.
+  bl_date: Joi.date().iso().allow(null, ''),
+  voyage_number: Joi.string().allow('', null),
+  gd_number: Joi.string().allow('', null),
+  gd_date: Joi.date().iso().allow(null, ''),
+  fi_number: Joi.string().allow('', null),
+  fi_number_2: Joi.string().allow('', null),
+  fi_number_3: Joi.string().allow('', null),
+  fi_date: Joi.date().iso().allow(null, ''),
+  freight_terms: Joi.string().allow('', null),
+  consignee_type: Joi.string().allow('', null),
+  shipment_window_start: Joi.date().iso().allow(null, ''),
+  shipment_window_end: Joi.date().iso().allow(null, ''),
+  notify_party_name: Joi.string().allow('', null),
+  notify_party_address: Joi.string().allow('', null),
+  notify_party_phone: Joi.string().allow('', null),
+  notify_party_email: Joi.string().allow('', null),
+  shipment_remarks: Joi.string().allow('', null),
   // Company bank account whose details print on this order's documents.
   bank_account_id: Joi.number().integer().positive().allow(null),
   notes: Joi.string().allow('', null),
