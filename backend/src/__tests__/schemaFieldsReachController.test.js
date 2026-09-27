@@ -134,3 +134,41 @@ describe('createExportOrder — order-level item fields reach create()', () => {
     expect(value.broken_pct_target).toBe(2);
   });
 });
+
+describe('createExportOrder — contract fields the form always sent but nothing saved', () => {
+  const minimal = {
+    customer_id: 1, product_id: 1, qty_mt: 10, price_per_mt: 500,
+    contract_value: 5000, incoterm: 'FOB', bank_account_id: 2,
+  };
+
+  test('all four reach the controller', () => {
+    const { error, value } = run(schemas.createExportOrder, {
+      ...minimal,
+      contract_number: 'AGRI/2026/014',
+      consignee_type: 'direct',
+      shipment_window_start: '2026-10-01',
+      shipment_window_end: '2026-10-31',
+    });
+    expect(error).toBeUndefined();
+    expect(value.contract_number).toBe('AGRI/2026/014');
+    expect(value.consignee_type).toBe('direct');
+    expect(value.shipment_window_start).toBeInstanceOf(Date);
+    expect(value.shipment_window_end).toBeInstanceOf(Date);
+  });
+
+  test('consignee_type is not a closed list', () => {
+    // The create form offers 'direct', updateExportShipment accepts any string,
+    // and the BL renderer treats anything but 'to_order_of_bank' as direct — so a
+    // strict enum here would reject values the rest of the system handles.
+    for (const v of ['to_order_of_bank', 'direct', '']) {
+      expect(run(schemas.createExportOrder, { ...minimal, consignee_type: v }).error).toBeUndefined();
+    }
+  });
+
+  test('omitting them is still fine, and blanks do not 400', () => {
+    expect(run(schemas.createExportOrder, minimal).error).toBeUndefined();
+    expect(run(schemas.createExportOrder, {
+      ...minimal, contract_number: '', shipment_window_start: '', shipment_window_end: null,
+    }).error).toBeUndefined();
+  });
+});

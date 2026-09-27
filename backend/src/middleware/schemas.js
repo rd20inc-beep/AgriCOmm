@@ -24,6 +24,18 @@ const createExportOrder = Joi.object({
   hs_code: Joi.string().allow('', null),
   quality_description: Joi.string().allow('', null),
   broken_pct_target: Joi.number().min(0).allow(null),
+  // The create form has always sent these four; create() never read them, so
+  // they were not stripped — just never saved, and had to be re-entered from the
+  // Shipment form. contract_number heads the documents, consignee_type decides
+  // the BL consignee line, and the window is on the sales contract.
+  contract_number: Joi.string().max(60).allow('', null),
+  // Not an enum: the form's own options are 'to_order_of_bank' and 'direct', and
+  // updateExportShipment accepts any string. The BL renderer treats anything
+  // other than 'to_order_of_bank' as direct-to-buyer, so a strict list here would
+  // only reject values the rest of the system already handles.
+  consignee_type: Joi.string().max(30).allow('', null),
+  shipment_window_start: Joi.date().iso().allow(null, ''),
+  shipment_window_end: Joi.date().iso().allow(null, ''),
   qty_mt: Joi.number().positive().required().messages({
     'number.positive': 'Quantity must be greater than zero',
   }),
