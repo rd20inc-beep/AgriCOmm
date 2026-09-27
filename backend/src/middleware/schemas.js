@@ -609,6 +609,17 @@ const bundleDocuments = Joi.object({
     filename: Joi.string().max(160).allow('', null),
     html: Joi.string().required(),
   })).default([]),
+  // The sequence to merge in: { k: 'u', id } for an uploaded file, { k: 'g', i }
+  // for a generated one. validate() runs with stripUnknown, so a field missing
+  // from here never reaches the controller — leaving it out silently disabled
+  // the ordering fix in production while the code sat there looking correct.
+  order: Joi.array().items(Joi.object({
+    k: Joi.string().valid('u', 'g').required(),
+    id: Joi.number().integer().positive(),
+    i: Joi.number().integer().min(0),
+  })),
+  // Opt-in contents sheet in front of the combined PDF.
+  contentsPage: Joi.boolean().default(false),
   zipName: Joi.string().max(120).allow('', null),
   // 'pdf' merges everything into one file; 'zip' keeps them separate.
   format: Joi.string().valid('zip', 'pdf').default('zip'),
