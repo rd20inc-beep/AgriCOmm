@@ -99,8 +99,58 @@ async function mergeToPdf(sources) {
   return Buffer.from(await merged.save());
 }
 
+// Put the documents in the order the client asked for.
+//
+// The combined PDF used to come out in two blocks — every uploaded file, then
+// every generated one — and within the uploaded block in whatever order
+// Postgres returned the `whereIn`. So a set read in the sequence the user had
+// ticked the checkboxes, not the sequence the Documents tab lists, and the
+// deliberate oldest-first ordering of a certificate scanned as several files
+// was thrown away. The client now sends an explicit `order` of tokens
+// ({ k: 'u', id } for an uploaded file, { k: 'g', i } for a generated one) and
+// the merge walks it.
+//
+// The order has to account for every document exactly once to be used at all;
+// anything else (an older cached client that sends no order, a token that does
+// not line up) falls back to the previous behaviour rather than dropping a
+// document from someone's bank submission.
+function sequenceEntries(uploadedIds, generated, order) {
+  const ids = [];
+  for (const raw of Array.isArray(uploadedIds) ? uploadedIds : []) {
+    const id = parseInt(raw, 10);
+    if (Number.isFinite(id) && id > 0 && !ids.includes(id)) ids.push(id);
+  }
+  const gens = Array.isArray(generated) ? generated : [];
+  const fallback = () => [
+    ...ids.map((id) => ({ kind: 'uploaded', id })),
+    ...gens.map((doc, index) => ({ kind: 'generated', doc, index })),
+  ];
+
+  if (!Array.isArray(order) || order.length !== ids.length + gens.length) return fallback();
+
+  const seen = new Set();
+  const out = [];
+  for (const tok of order) {
+    if (!tok || typeof tok !== 'object') return fallback();
+    if (tok.k === 'u') {
+      const id = parseInt(tok.id, 10);
+      if (!ids.includes(id) || seen.has(`u${id}`)) return fallback();
+      seen.add(`u${id}`);
+      out.push({ kind: 'uploaded', id });
+    } else if (tok.k === 'g') {
+      const index = parseInt(tok.i, 10);
+      if (!(index >= 0 && index < gens.length) || seen.has(`g${index}`)) return fallback();
+      seen.add(`g${index}`);
+      out.push({ kind: 'generated', doc: gens[index], index });
+    } else {
+      return fallback();
+    }
+  }
+  return out;
+}
+
 async function bundle(req, res) {
-  const { uploadedIds = [], generated = [], format = 'zip' } = req.body || {};
+  const { uploadedIds = [], generated = [], order, format = 'zip' } = req.body || {};
   if (!uploadedIds.length && !generated.length) {
     return res.status(400).json({ success: false, message: 'Select at least one document.' });
   }
@@ -111,17 +161,25 @@ async function bundle(req, res) {
   const rows = uploadedIds.length
     ? await db('document_store').whereIn('id', uploadedIds.map((n) => parseInt(n, 10)).filter(Boolean))
     : [];
+  // A `whereIn` comes back in no particular order, so the requested sequence is
+  // re-applied by id rather than read off the result set.
+  const rowById = new Map(rows.map((r) => [r.id, r]));
+  const entries = sequenceEntries(uploadedIds, generated, order);
 
   if (format === 'pdf') {
     const sources = [];
-    for (const row of rows) {
-      if (row.file_path && fs.existsSync(row.file_path)) {
-        sources.push({ name: row.file_name || row.title, path: row.file_path, mime: row.mime_type });
-      } else {
-        sources.push({ name: row.title || `document #${row.id}`, bytes: Buffer.alloc(0), mime: 'missing' });
+    for (const entry of entries) {
+      if (entry.kind === 'uploaded') {
+        const row = rowById.get(entry.id);
+        if (!row) continue;   // deleted since the page loaded; reported below
+        if (row.file_path && fs.existsSync(row.file_path)) {
+          sources.push({ name: row.file_name || row.title, path: row.file_path, mime: row.mime_type });
+        } else {
+          sources.push({ name: row.title || `document #${row.id}`, bytes: Buffer.alloc(0), mime: 'missing' });
+        }
+        continue;
       }
-    }
-    for (const g of generated) {
+      const g = entry.doc;
       if (!g || !g.html) continue;
       try {
         const pdf = await pdfService.htmlToPdf(g.html);
@@ -190,15 +248,20 @@ async function bundle(req, res) {
 
   const missing = [];
 
-  for (const row of rows) {
-    if (row.file_path && fs.existsSync(row.file_path)) {
-      archive.file(row.file_path, { name: uniqueName(safeName(row.file_name || row.title, `document-${row.id}`)) });
-    } else {
-      missing.push(row.title || row.file_name || `document #${row.id}`);
+  // Same sequence as the combined PDF, so the archive lists the documents in
+  // the order the Documents tab shows them.
+  for (const entry of entries) {
+    if (entry.kind === 'uploaded') {
+      const row = rowById.get(entry.id);
+      if (!row) continue;
+      if (row.file_path && fs.existsSync(row.file_path)) {
+        archive.file(row.file_path, { name: uniqueName(safeName(row.file_name || row.title, `document-${row.id}`)) });
+      } else {
+        missing.push(row.title || row.file_name || `document #${row.id}`);
+      }
+      continue;
     }
-  }
-
-  for (const g of generated) {
+    const g = entry.doc;
     if (!g || !g.html) continue;
     try {
       const pdf = await pdfService.htmlToPdf(g.html);
@@ -226,4 +289,4 @@ async function bundle(req, res) {
   await archive.finalize();
 }
 
-module.exports = { bundle };
+module.exports = { bundle, sequenceEntries, mergeToPdf };
