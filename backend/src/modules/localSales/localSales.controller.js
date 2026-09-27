@@ -838,6 +838,99 @@ module.exports = {
   // Confirm a pending sale — Mill Manager/Owner only (route-gated). Runs the
   // deferred stock/money side-effects (re-checking availability) and marks the
   // whole sale group Completed. Idempotent-safe: only Pending rows are posted.
+  // ── Edit a sale ─────────────────────────────────────────────────────────────
+  // What may change depends entirely on whether the sale has been CONFIRMED,
+  // because that is the moment anything leaves the local_sales row:
+  // postSaleSideEffects deducts the lot, writes the receivable and posts the
+  // revenue and COGS journals. A Pending sale is just a row.
+  //
+  //   Pending    → quantity, rate, item and the presentation fields. Nothing
+  //                downstream exists yet, so the money is simply recomputed.
+  //   Confirmed  → presentation only: who it is for, how it left, what it says.
+  //                Changing a confirmed quantity or rate would mean unwinding a
+  //                stock movement and two journals and re-posting them, which is
+  //                the reverse-and-repost pattern that double-counts. Refused
+  //                with that reason rather than half-done.
+  async update(req, res) {
+    // Safe on any sale: none of these touch stock, the ledger or a balance.
+    const PRESENTATION = [
+      'buyer_name', 'buyer_phone', 'buyer_address', 'vehicle_no', 'driver_name',
+      'notes', 'gate_pass_no', 'collection_location',
+    ];
+    // Only while Pending — each of these changes what will be posted.
+    const PENDING_ONLY = [
+      'item_name', 'quantity_input', 'quantity_unit', 'bag_weight_kg',
+      'rate_input', 'rate_unit', 'sale_date', 'due_date',
+    ];
+    try {
+      const sale = await db('local_sales').where({ id: req.params.id }).first();
+      if (!sale) return res.status(404).json({ success: false, message: 'Sale not found.' });
+
+      const body = req.body || {};
+      const isPending = sale.status === 'Pending';
+      const patch = {};
+      for (const f of PRESENTATION) if (body[f] !== undefined) patch[f] = body[f] === '' ? null : body[f];
+
+      const moneyFields = PENDING_ONLY.filter((f) => body[f] !== undefined);
+      if (moneyFields.length && !isPending) {
+        return res.status(409).json({
+          success: false,
+          code: 'SALE_ALREADY_CONFIRMED',
+          message: `${sale.sale_no} has been confirmed — its stock and ledger entries are posted, so ${moneyFields.join(', ')} can no longer be changed here. Correct it with a credit note or return instead.`,
+        });
+      }
+
+      if (isPending && moneyFields.length) {
+        for (const f of PENDING_ONLY) if (body[f] !== undefined) patch[f] = body[f] === '' ? null : body[f];
+
+        // Recompute with the SAME helpers the sale was created with, so an
+        // edited line cannot disagree with a created one.
+        const bagWt = parseFloat(patch.bag_weight_kg ?? sale.bag_weight_kg) || 50;
+        const qtyInput = parseFloat(patch.quantity_input ?? sale.quantity_input);
+        const rateInput = parseFloat(patch.rate_input ?? sale.rate_input);
+        if (!(qtyInput > 0)) return res.status(400).json({ success: false, message: 'Quantity must be greater than zero.' });
+        if (!(rateInput >= 0)) return res.status(400).json({ success: false, message: 'Rate cannot be negative.' });
+
+        const qtyKg = uc.toKg(qtyInput, patch.quantity_unit ?? sale.quantity_unit ?? 'kg', bagWt);
+        const ratePerKg = uc.rateToPerKg(rateInput, patch.rate_unit ?? sale.rate_unit ?? 'kg', bagWt);
+        const total = uc.round2(qtyKg * ratePerKg);
+
+        // Never sell more than the lot holds. The check has to happen here too:
+        // create enforces it, and without this an edit could walk straight past it.
+        if (sale.lot_id) {
+          const lot = await db('inventory_lots').where({ id: sale.lot_id }).first();
+          const available = parseFloat(lot?.available_qty) || 0;
+          if (qtyKg > available + 0.001) {
+            return res.status(400).json({ success: false, message: `Only ${Math.round(available).toLocaleString()} kg is left on ${lot?.lot_no || 'this lot'}.` });
+          }
+        }
+
+        const paid = parseFloat(sale.paid_amount) || 0;
+        patch.bag_weight_kg = bagWt;
+        patch.quantity_kg = qtyKg;
+        patch.rate_per_kg = ratePerKg;
+        patch.total_amount = total;
+        patch.due_amount = uc.round2(Math.max(0, total - paid));
+        // A tendered amount now exceeding the total would leave a phantom credit.
+        if (paid > total + 0.01) {
+          return res.status(400).json({ success: false, message: `Rs ${paid.toLocaleString()} has already been taken against this sale — the new total of Rs ${total.toLocaleString()} is lower. Refund or cancel instead.` });
+        }
+        patch.payment_status = patch.due_amount <= 0.01 ? 'Paid' : (paid > 0 ? 'Partial' : (sale.payment_mode === 'credit' ? 'Credit' : 'Pending'));
+      }
+
+      if (!Object.keys(patch).length) {
+        return res.status(400).json({ success: false, message: 'Nothing to change.' });
+      }
+      patch.updated_at = db.fn.now();
+      await db('local_sales').where({ id: sale.id }).update(patch);
+      const updated = await db('local_sales').where({ id: sale.id }).first();
+      return res.json({ success: true, data: { sale: updated, editable: isPending ? 'all' : 'presentation' } });
+    } catch (err) {
+      console.error('update local sale error:', err);
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  },
+
   async confirmSale(req, res) {
     try {
       const { id } = req.params;

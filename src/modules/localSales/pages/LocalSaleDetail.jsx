@@ -4,7 +4,11 @@ import {
   ArrowLeft, Store, Package, Truck, CreditCard, CheckCircle, Clock,
   AlertCircle, Receipt, User, Phone, FileText, Calendar,
 } from 'lucide-react';
+import { useState } from 'react';
+import { useMutation } from '@tanstack/react-query';
 import { useLocalSale, useLocalSalePayments } from '../../../api/queries';
+import { localSalesApi } from '../api/services';
+import { useApp } from '../../../context/AppContext';
 import { LoadingSpinner, ErrorState } from '../../../components/LoadingState';
 
 function fmtPkr(n) {
@@ -28,6 +32,16 @@ export default function LocalSaleDetail() {
   const navigate = useNavigate();
   const { data: sale, isLoading, error, refetch } = useLocalSale(id);
   const { data: payments = [] } = useLocalSalePayments(id);
+  const { addToast } = useApp();
+  // A confirmed sale has already moved stock and posted its journals, so only
+  // the presentation fields can change. While it is still Pending nothing
+  // downstream exists, so quantity and rate are editable too.
+  const [edit, setEdit] = useState(null);
+  const saveMut = useMutation({
+    mutationFn: (patch) => localSalesApi.update(id, patch),
+    onSuccess: () => { addToast('Sale updated', 'success'); setEdit(null); refetch(); },
+    onError: (e) => addToast(e?.data?.message || e?.message || 'Could not update the sale', 'error'),
+  });
 
   if (isLoading) return <LoadingSpinner message="Loading sale…" />;
   if (error)     return <ErrorState message={error.message} onRetry={refetch} />;
@@ -81,9 +95,77 @@ export default function LocalSaleDetail() {
             <div className="opacity-80 text-right">
               {profitPkr !== 0 && <>Profit {fmtPkr(profitPkr)} ({marginPct.toFixed(1)}%)</>}
             </div>
+            <button onClick={() => setEdit({
+              buyer_name: sale.buyerName || '', buyer_phone: sale.buyerPhone || '',
+              buyer_address: sale.buyerAddress || '', vehicle_no: sale.vehicleNo || '',
+              driver_name: sale.driverName || '', gate_pass_no: sale.gatePassNo || '',
+              notes: sale.notes || '',
+              quantity_input: sale.quantityInput ?? '', rate_input: sale.rateInput ?? '',
+            })}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/15 ring-1 ring-white/30 hover:bg-white/25 font-medium">
+              Edit invoice
+            </button>
           </div>
         </div>
       </div>
+
+      {/* Edit. Presentation fields always; quantity and rate only while Pending,
+          because a confirmed sale has posted its stock movement and journals. */}
+      {edit && (
+        <div className="bg-white rounded-xl border border-blue-200 p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-gray-900">Edit {sale.saleNo}</h3>
+            <span className={`text-[11px] px-2 py-0.5 rounded-full ${sale.status === 'Pending' ? 'bg-amber-50 text-amber-700' : 'bg-gray-100 text-gray-500'}`}>
+              {sale.status === 'Pending' ? 'Pending — quantity and rate can still change' : 'Confirmed — details only'}
+            </span>
+          </div>
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+            {[['buyer_name', 'Buyer'], ['buyer_phone', 'Phone'], ['buyer_address', 'Address'],
+              ['vehicle_no', 'Vehicle'], ['driver_name', 'Driver'], ['gate_pass_no', 'Gate pass']].map(([k, label]) => (
+              <label key={k} className="block">
+                <span className="text-[11px] text-gray-500">{label}</span>
+                <input value={edit[k]} onChange={(e) => setEdit(p => ({ ...p, [k]: e.target.value }))}
+                  className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm" />
+              </label>
+            ))}
+            {sale.status === 'Pending' && (
+              <>
+                <label className="block">
+                  <span className="text-[11px] text-gray-500">Quantity ({sale.quantityUnit || 'kg'})</span>
+                  <input type="number" min="0" step="0.01" value={edit.quantity_input}
+                    onChange={(e) => setEdit(p => ({ ...p, quantity_input: e.target.value }))}
+                    className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm text-right tabular-nums" />
+                </label>
+                <label className="block">
+                  <span className="text-[11px] text-gray-500">Rate (per {sale.rateUnit || 'kg'})</span>
+                  <input type="number" min="0" step="0.01" value={edit.rate_input}
+                    onChange={(e) => setEdit(p => ({ ...p, rate_input: e.target.value }))}
+                    className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm text-right tabular-nums" />
+                </label>
+              </>
+            )}
+          </div>
+          <label className="block">
+            <span className="text-[11px] text-gray-500">Notes</span>
+            <textarea rows={2} value={edit.notes} onChange={(e) => setEdit(p => ({ ...p, notes: e.target.value }))}
+              className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm" />
+          </label>
+          <div className="flex justify-end gap-2">
+            <button onClick={() => setEdit(null)} className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900">Cancel</button>
+            <button disabled={saveMut.isPending}
+              onClick={() => {
+                const patch = { ...edit };
+                // Don't send quantity/rate on a confirmed sale — the server would
+                // refuse the whole request rather than saving the buyer's name.
+                if (sale.status !== 'Pending') { delete patch.quantity_input; delete patch.rate_input; }
+                saveMut.mutate(patch);
+              }}
+              className="px-4 py-1.5 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">
+              {saveMut.isPending ? 'Saving…' : 'Save changes'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ─── Key facts grid ───────────────────────────────────────── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
