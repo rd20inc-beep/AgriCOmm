@@ -110,6 +110,23 @@ jobs:
     needs: [test-backend, build-frontend, schema-drift]
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    # Only ONE deploy may touch the server at a time. Without this, two merges a
+    # few minutes apart both SSH in and run `docker-compose build --no-cache`,
+    # `up -d --force-recreate` and `docker image prune -f` at once. They collide
+    # on the recreate — compose renames the running container to a temporary
+    # name and the second run finds it taken:
+    #
+    #   Conflict. The container name "/<hash>_riceflow-db" is already in use
+    #
+    # which fails a deploy that had already built successfully, and leaves the
+    # site 502 for longer than one recreate should take.
+    #
+    # cancel-in-progress is FALSE on purpose: a half-finished deploy must be
+    # allowed to finish. Cancelling one mid-build could leave the box with new
+    # code rsynced but old containers running.
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
     steps:
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.2.5
