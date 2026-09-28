@@ -430,17 +430,28 @@ const reportingService = {
       .select('batch_id', 'category', 'amount');
     const catCost = {}; // { batchId: { raw, pack, proc } }
     for (const c of costRows) {
-      const m = catCost[c.batch_id] || (catCost[c.batch_id] = { raw: 0, pack: 0, proc: 0 });
+      const m = catCost[c.batch_id] || (catCost[c.batch_id] = { raw: 0, pack: 0, proc: 0, milling: 0 });
       const amt = num(c.amount);
       if (c.category === 'raw_rice') m.raw += amt;
       else if (c.category === 'packaging') m.pack += amt;
-      else m.proc += amt;
+      else {
+        m.proc += amt;
+        // Tracked separately so the manual Milling Cost can override this
+        // category rather than be added on top of it — the same charge was
+        // being counted on both lines.
+        if (c.category === 'processing') m.milling += amt;
+      }
     }
     const costMap = {};
     for (const b of batches) {
-      const cb = catCost[b.id] || { raw: 0, pack: 0, proc: 0 };
-      const millingFee = b.manual_milling_cost_pkr != null ? num(b.manual_milling_cost_pkr) : 0;
-      const other = b.manual_other_expenses_pkr != null ? num(b.manual_other_expenses_pkr) : cb.proc;
+      const cb = catCost[b.id] || { raw: 0, pack: 0, proc: 0, milling: 0 };
+      // Mirrors computeResidualAllocation: the manual figure OVERRIDES the
+      // "Milling / Processing" category, it does not add to it.
+      const manualMilling = num(b.manual_milling_cost_pkr);
+      const millingFee = manualMilling > 0 ? manualMilling : cb.milling;
+      const other = num(b.manual_other_expenses_pkr) > 0
+        ? num(b.manual_other_expenses_pkr)
+        : Math.max(0, cb.proc - cb.milling);
       costMap[b.id] = cb.raw + millingFee + other + cb.pack;
     }
 

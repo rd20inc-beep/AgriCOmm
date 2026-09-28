@@ -2333,18 +2333,30 @@ const inventoryService = {
   // By-products are costed at price/1000 (NRV → zero gain on sale). Pure function
   // of the batch row + the two cost sums, so recordYield and the price-confirm
   // reallocation produce identical numbers.
-  computeResidualAllocation(batch, rawCostTotal, processingCosts, packingCost = 0) {
+  computeResidualAllocation(batch, rawCostTotal, processingCosts, packingCost = 0, millingCategoryCost = 0) {
     const p = (v) => parseFloat(v) || 0;
     // Milling Cost is operator-entered; until they enter it, it's 0 (the milling
     // fee is NOT auto-added). Other Expenses falls back to recorded processing
     // costs (consumption etc.) so those real costs still count. Packing (bag) cost
     // is a SEPARATE always-added term — it stands even when a manual Other figure
     // overrides the auto processing costs, so bagging always loads the finished cost.
-    const millingCost = batch.manual_milling_cost_pkr != null ? p(batch.manual_milling_cost_pkr) : 0;
+    // The Milling Cost box and the "Milling / Processing" cost category are the
+    // same charge entered in two places, and both used to be added: a batch with
+    // manual_milling_cost_pkr 17,672 AND a `processing` row of 17,672 counted it
+    // TWICE in Net Purchase. The manual figure now OVERRIDES that category,
+    // exactly as manual_other_expenses_pkr overrides the rest — one number wins,
+    // never both. With no manual figure the recorded row still counts, once.
+    const manualMilling = p(batch.manual_milling_cost_pkr);
+    const millingCategory = p(millingCategoryCost);
+    const millingCost = manualMilling > 0 ? manualMilling : millingCategory;
     // A 0 (unset) manual Other must NOT hide the real recorded processing costs —
     // only a positive manual figure overrides them (was `!= null`, which let a
-    // stored 0 zero-out itemized labor/stitching/etc.).
-    const otherExpenses = p(batch.manual_other_expenses_pkr) > 0 ? p(batch.manual_other_expenses_pkr) : processingCosts;
+    // stored 0 zero-out itemized labor/stitching/etc.). Whatever the milling cost
+    // is taken from, the milling category is removed from here so it cannot be
+    // counted on both lines.
+    const otherExpenses = p(batch.manual_other_expenses_pkr) > 0
+      ? p(batch.manual_other_expenses_pkr)
+      : Math.max(0, processingCosts - millingCategory);
     const packing = p(packingCost);
     const netPurchase = rawCostTotal + millingCost + otherExpenses + packing;
 
@@ -2491,7 +2503,12 @@ const inventoryService = {
       (await trx('milling_costs').where({ batch_id: batchId, category: 'packaging' }).sum('amount as t').first())?.t
     ) || 0;
 
-    const a = inventoryService.computeResidualAllocation(batch, rawCostTotal, processingCosts, packingCost);
+    // The "Milling / Processing" category on its own, so the engine can let the
+    // manual Milling Cost override it rather than add to it.
+    const millingCategoryCost = parseFloat(
+      (await trx('milling_costs').where({ batch_id: batchId, category: 'processing' }).sum('amount as t').first())?.t,
+    ) || 0;
+    const a = inventoryService.computeResidualAllocation(batch, rawCostTotal, processingCosts, packingCost, millingCategoryCost);
     const alloc = { finished: { qty: finished, costPerKg: a.finishedCostPerKg } };
     for (const [k, perKg] of Object.entries(a.byCostPerKg)) alloc[k] = { qty: 1, costPerKg: perKg };
     const brokenTierCostPerKg = a.brokenTierCostPerKg;
@@ -3051,7 +3068,12 @@ const inventoryService = {
     const rawCostTotal = p((await trx('milling_costs').where({ batch_id: batchId }).where('category', 'raw_rice').sum('amount as t').first())?.t);
     const processingCosts = p((await trx('milling_costs').where({ batch_id: batchId }).whereNotIn('category', ['raw_rice', 'packaging']).sum('amount as t').first())?.t);
     const packingCost = p((await trx('milling_costs').where({ batch_id: batchId, category: 'packaging' }).sum('amount as t').first())?.t);
-    const a = inventoryService.computeResidualAllocation(batch, rawCostTotal, processingCosts, packingCost);
+    // The "Milling / Processing" category on its own, so the engine can let the
+    // manual Milling Cost override it rather than add to it.
+    const millingCategoryCost = parseFloat(
+      (await trx('milling_costs').where({ batch_id: batchId, category: 'processing' }).sum('amount as t').first())?.t,
+    ) || 0;
+    const a = inventoryService.computeResidualAllocation(batch, rawCostTotal, processingCosts, packingCost, millingCategoryCost);
     const alloc = {};
     for (const [k, perKg] of Object.entries(a.byCostPerKg)) alloc[k] = perKg;
 
