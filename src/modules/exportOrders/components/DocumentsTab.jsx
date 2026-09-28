@@ -1,6 +1,7 @@
 import React, { useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { FileText, CheckCircle, Circle, Eye, Upload, ExternalLink, Download, FolderOpen, Loader2, Package } from 'lucide-react';
+import { FileText, CheckCircle, Circle, Eye, Upload, ExternalLink, Download, FolderOpen, Loader2, Package, ChevronUp, ChevronDown } from 'lucide-react';
+import { togglePick, movePick, inReferenceOrder } from '../utils/pickOrder';
 import { documentLabels } from './constants';
 import { documentsApi } from '../../documents/api/services';
 import api from '../../../api/client';
@@ -172,17 +173,27 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
   // Multi-select for a single combined download. Keyed by document type: a type
   // contributes its live uploaded file if it has one, otherwise the system's
   // generated rendering of it.
-  const [selected, setSelected] = React.useState(() => new Set());
+  // The selection is an ORDERED list, because its order IS the page order of the
+  // combined PDF. A Set could not express "this one is page 1".
+  const [picked, setPicked] = React.useState([]);
+  // Once the operator moves something by hand, stop re-sorting their arrangement
+  // when they tick another document — it goes on the end instead.
+  const [handSorted, setHandSorted] = React.useState(false);
   const [bundling, setBundling] = React.useState(false);
   // Opt-in: a contents sheet earns its place in a 25-page merged set, but it is
   // an extra page to discard when the set is printed for a bank, so it is not
   // put in front of someone's documents unasked.
   const [withContents, setWithContents] = React.useState(false);
-  const toggleSelected = (key) => setSelected((prev) => {
-    const next = new Set(prev);
-    if (next.has(key)) next.delete(key); else next.add(key);
-    return next;
-  });
+  const pickedSet = React.useMemo(() => new Set(picked), [picked]);
+  const toggleSelected = (key) => setPicked((prev) => togglePick(prev, key, { reference: DOC_KEYS, handSorted }));
+  const movePicked = (key, delta) => {
+    setHandSorted(true);
+    setPicked((prev) => movePick(prev, key, delta));
+  };
+  const resetOrder = () => {
+    setHandSorted(false);
+    setPicked((prev) => inReferenceOrder(prev, DOC_KEYS));
+  };
   const selectableKeys = React.useMemo(
     // ANY attached file counts, not just the approved one — selecting a type
     // with five uploads used to contribute a single file, and a type whose
@@ -190,11 +201,14 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
     () => DOC_KEYS.filter((k) => (storedByType[k] || []).length || CANONICAL_BY_ALIAS[k] || catalogue.some((d) => d.key === k)),
     [DOC_KEYS, storedByType, catalogue],
   );
-  const allSelected = selectableKeys.length > 0 && selectableKeys.every((k) => selected.has(k));
-  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(selectableKeys));
+  const allSelected = selectableKeys.length > 0 && selectableKeys.every((k) => pickedSet.has(k));
+  const toggleAll = () => {
+    setHandSorted(false);
+    setPicked(allSelected ? [] : selectableKeys.slice());
+  };
 
   async function downloadSelected(format = 'pdf') {
-    if (!selected.size) return;
+    if (!picked.length) return;
     setBundling(format);
     try {
       // Re-read the file list first. Approving a deletion elsewhere (the queue
@@ -205,26 +219,20 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
       const current = fresh?.data;
       if (Array.isArray(current)) {
         const alive = new Set(current.map((f) => f.id));
-        for (const key of selected) {
+        for (const key of picked) {
           const stale = (storedByType[key] || []).some((f) => !alive.has(f.id));
           if (stale) addToast?.('The document list had changed — using the latest files.', 'info');
         }
       }
       const uploadedIds = [];
       const generated = [];
-      // `sequence` fixes the order of the combined PDF. Iterating `selected`
-      // walked a Set in insertion order — the order the boxes happened to be
-      // ticked — and the server then emitted every uploaded file before every
-      // generated one. So the document set came out shuffled. Walking DOC_KEYS
-      // instead means the download reads in the same order this tab lists.
+      // `sequence` fixes the order of the combined PDF, and `picked` already IS
+      // that order — whatever the operator arranged with the up/down controls,
+      // defaulting to the order this tab lists. The server used to emit every
+      // uploaded file before every generated one, so the set came out shuffled
+      // whatever was asked for; it now walks this sequence.
       const sequence = [];
-      const orderedKeys = [
-        ...DOC_KEYS.filter((k) => selected.has(k)),
-        // Anything selected that is not in DOC_KEYS (a key that disappeared from
-        // the catalogue mid-session) still goes in, at the end.
-        ...[...selected].filter((k) => !DOC_KEYS.includes(k)),
-      ];
-      for (const key of orderedKeys) {
+      for (const key of picked) {
         const files = storedByType[key] || [];
         if (files.length) {
           // Oldest first, so a multi-page certificate scanned as separate files
@@ -268,12 +276,12 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
   // count on the button is not the number of ticks.
   const selectedFileCount = React.useMemo(() => {
     let n = 0;
-    for (const key of selected) {
+    for (const key of picked) {
       const files = (storedByType[key] || []).length;
       n += files || 1; // no file yet → one generated copy
     }
     return n;
-  }, [selected, storedByType]);
+  }, [picked, storedByType]);
 
   async function act(fn, okMsg) {
     try { await fn(); addToast?.(okMsg, 'success'); refetchStored(); }
@@ -330,7 +338,22 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
           <input type="checkbox" checked={allSelected} onChange={toggleAll} className="rounded border-gray-300" />
           Select all ({selectableKeys.length})
         </label>
+        {picked.length > 0 && (
+          <p className="text-xs text-gray-500 order-last w-full sm:order-none sm:w-auto">
+            {picked.length} selected — the numbers are the page order of the combined PDF. Use the arrows to change it.
+          </p>
+        )}
         <div className="flex items-center gap-2">
+          {handSorted && (
+            <button
+              type="button"
+              onClick={resetOrder}
+              title="Put the documents back in the order this tab lists"
+              className="text-xs text-blue-600 hover:text-blue-800 underline mr-1"
+            >
+              Default order
+            </button>
+          )}
           <label
             className="inline-flex items-center gap-1.5 text-xs text-gray-600 mr-1"
             title="Put a contents sheet in front of the combined PDF, listing each document and the page it starts on. Does not apply to a ZIP."
@@ -345,7 +368,7 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
           </label>
           <button
             onClick={() => downloadSelected('pdf')}
-            disabled={!selected.size || !!bundling}
+            disabled={!picked.length || !!bundling}
             title="Every selected document combined into one PDF"
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-slate-700 rounded-lg hover:bg-slate-800 disabled:opacity-50"
           >
@@ -354,7 +377,7 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
           </button>
           <button
             onClick={() => downloadSelected('zip')}
-            disabled={!selected.size || !!bundling}
+            disabled={!picked.length || !!bundling}
             title="Keep the documents as separate files inside a ZIP"
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
           >
@@ -379,12 +402,44 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
             <div key={key} className={`flex items-center gap-4 px-5 py-4 transition-colors ${isChecked ? 'bg-emerald-50/50' : 'hover:bg-gray-50'}`}>
               <input
                 type="checkbox"
-                checked={selected.has(key)}
+                checked={pickedSet.has(key)}
                 onChange={() => toggleSelected(key)}
                 disabled={!selectableKeys.includes(key)}
                 title={selectableKeys.includes(key) ? 'Include in the combined download' : 'Nothing to download for this document yet'}
                 className="rounded border-gray-300 flex-shrink-0 disabled:opacity-30"
               />
+              {/* Where this document falls in the download, and the controls to
+                  move it. The number is the point: it answers "which one is
+                  page 1" at a glance, which a checkbox alone never could. */}
+              {pickedSet.has(key) ? (
+                <div className="flex items-center gap-0.5 flex-shrink-0" title="Position in the combined download">
+                  <span className="w-5 h-5 rounded-full bg-slate-700 text-white text-[11px] font-semibold inline-flex items-center justify-center">
+                    {picked.indexOf(key) + 1}
+                  </span>
+                  <div className="flex flex-col">
+                    <button
+                      type="button"
+                      onClick={() => movePicked(key, -1)}
+                      disabled={picked.indexOf(key) === 0}
+                      title="Move earlier"
+                      className="text-gray-400 hover:text-gray-700 disabled:opacity-25 leading-none"
+                    >
+                      <ChevronUp className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => movePicked(key, 1)}
+                      disabled={picked.indexOf(key) === picked.length - 1}
+                      title="Move later"
+                      className="text-gray-400 hover:text-gray-700 disabled:opacity-25 leading-none"
+                    >
+                      <ChevronDown className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <span className="w-[38px] flex-shrink-0" aria-hidden="true" />
+              )}
               {isChecked ? <CheckCircle className="w-6 h-6 text-emerald-500 flex-shrink-0" /> : <Circle className="w-6 h-6 text-gray-300 flex-shrink-0" />}
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
