@@ -1876,6 +1876,7 @@ const reportingController = {
       const lots = await q.select(
         'l.id', 'l.lot_no', 'l.type', 'l.item_name', 'l.variety', 'l.grade', 'l.processing_type',
         'l.blend_batch_no', 'l.batch_ref', 'l.supplier_id', 'l.status', 'l.total_bags',
+        'l.bag_weight_kg', 'l.bag_size_kg', 'l.received_net_weight_kg',
         's.name as supplier_name', 'p.name as product_name', 'w.name as warehouse_name',
         db.raw('COALESCE(NULLIF(l.net_weight_kg,0), l.qty) as on_hand_kg'),
         db.raw('l.available_qty as available_kg'),
@@ -1905,13 +1906,33 @@ const reportingController = {
         if (l.type === 'raw') return 'Unprocessed Rice';
         return 'Other';
       };
+      // Katta still on hand for a lot. Prefers scaling the COUNTED intake sacks by
+      // the weight remaining, so a part-filled sack stays a sack: a lot holding
+      // 22,995 kg in 530 physical katta divides out to 460 at the nominal 50 kg,
+      // which would replace a counted figure with a computed one. The division is
+      // only the fallback, for lots with no intake count to scale.
+      const kattaOnHand = (l, onHandKg) => {
+        const intake = l.total_bags == null ? null : Number(l.total_bags);
+        const received = parseFloat(l.received_net_weight_kg) || 0;
+        if (intake != null && intake > 0 && received > 0) {
+          return Math.min(intake, Math.round(intake * (onHandKg / received)));
+        }
+        const per = parseFloat(l.bag_weight_kg) || parseFloat(l.bag_size_kg) || 50;
+        return per > 0 ? Math.round(onHandKg / per) : 0;
+      };
       const rows = lots.map((l) => {
         const onHand = parseFloat(l.on_hand_kg) || 0; const cpk = parseFloat(l.cost_per_kg) || 0; const src = batchSrc[l.batch_ref];
         return { lotId: l.id, lotNo: l.lot_no, type: l.type, item: l.product_name || l.item_name, variety: l.variety, grade: l.grade,
           subtype: tagOf(l),
           supplier: l.supplier_name, supplierId: l.supplier_id,
           sourceBatch: src?.batchNo || l.blend_batch_no || null, sourceBatchName: src?.batchName || null, sourceBatchTags: src?.customTags || [], sourceSupplier: src?.supplier || null,
-          warehouse: l.warehouse_name, status: l.status, bags: l.total_bags,
+          warehouse: l.warehouse_name, status: l.status,
+          // Katta ON HAND, not the intake count. total_bags is what arrived and
+          // is never decremented — milling consumes the rice, not the row — so a
+          // fully milled lot still carried its 1,000 katta into a stock report
+          // showing 0 kg on hand.
+          bags: kattaOnHand(l, onHand),
+          intakeBags: l.total_bags,
           onHandMt: onHand / 1000, availableMt: (parseFloat(l.available_kg) || 0) / 1000, reservedMt: (parseFloat(l.reserved_kg) || 0) / 1000,
           costPerKg: cpk, valuePkr: onHand * cpk };
       });
