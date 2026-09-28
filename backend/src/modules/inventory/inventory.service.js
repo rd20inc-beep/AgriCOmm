@@ -2931,7 +2931,10 @@ const inventoryService = {
         const size = usePacked ? packedSpec.sizeKg : predSize;
         const bags = Math.ceil(kg / size);
         if (!usePacked) packed += bags;   // only katta-packed output consumes katta
-        await trx('inventory_lots').where('id', l.id).update({ total_bags: bags, bag_size_kg: size, updated_at: trx.fn.now() });
+        // bag_weight_kg moves with the size: it is what every kg <-> katta
+        // conversion divides by (quantity_bags = kg / bag_weight_kg), so leaving it
+        // behind made a 100 x 25kg lot report as 50 katta.
+        await trx('inventory_lots').where('id', l.id).update({ total_bags: bags, bag_size_kg: size, bag_weight_kg: size, updated_at: trx.fn.now() });
       }
 
       // Apply per size: +freed (return); the predominant size also -packed (consumption).
@@ -2961,14 +2964,15 @@ const inventoryService = {
       const kg = num(l.net_weight_kg) > 0 ? num(l.net_weight_kg) : num(l.qty);
       if (l.type === 'finished' && exportPack.packSize == null) {
         // Container / bulk — finished rice ships loose, no bagging.
-        await trx('inventory_lots').where('id', l.id).update({ total_bags: 0, bag_size_kg: null, updated_at: trx.fn.now() });
+        // Bulk container load — no bags at all, so no per-bag weight either.
+        await trx('inventory_lots').where('id', l.id).update({ total_bags: 0, bag_size_kg: null, bag_weight_kg: null, updated_at: trx.fn.now() });
         continue;
       }
       const size = l.type === 'finished' ? exportPack.packSize : predSize;
       const bags = Math.ceil(kg / size);
       packed += bags;
       consumeBySize.set(size, (consumeBySize.get(size) || 0) + bags);
-      await trx('inventory_lots').where('id', l.id).update({ total_bags: bags, bag_size_kg: size, updated_at: trx.fn.now() });
+      await trx('inventory_lots').where('id', l.id).update({ total_bags: bags, bag_size_kg: size, bag_weight_kg: size, updated_at: trx.fn.now() });
     }
 
     const movements = [];
