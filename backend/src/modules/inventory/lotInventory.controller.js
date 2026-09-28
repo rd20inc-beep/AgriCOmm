@@ -673,7 +673,7 @@ module.exports = {
         bag_type, bag_quality, bag_size_kg, bag_weight_gm, bag_color,
         bag_cost_per_bag, bag_cost_included,
         // Quantity — user enters in chosen unit
-        quantity_input, quantity_unit = 'katta', bag_weight_kg = 50,
+        quantity_input, quantity_unit = 'katta', bag_weight_kg,
         // Rate — user enters in chosen unit
         rate_input, rate_unit = 'katta',
         // Additional costs
@@ -704,7 +704,13 @@ module.exports = {
         });
       }
 
-      const bagWt = parseFloat(bag_weight_kg) || 50;
+      // Kg per bag defaults to the SACK SIZE, not a flat 50. A lot entered as
+      // 25kg bags with no explicit per-bag weight was stored as size 25 /
+      // weight 50, and bagWt is what every katta <-> kg conversion divides by —
+      // so a katta-denominated 25kg lot came out at twice its real weight and
+      // then reported half its real bag count. 50 stays the fallback only when
+      // neither figure is given.
+      const bagWt = parseFloat(bag_weight_kg) || parseFloat(bag_size_kg) || 50;
       const netWeightKg = uc.toKg(quantity_input, quantity_unit, bagWt);
       // Ordered quantity (what was ordered, vs the received netWeightKg above).
       // Defaults to received when not supplied, so a fully-received lot shows no variance.
