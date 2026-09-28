@@ -125,6 +125,15 @@ export default function PackingTab({ order, onUpdated }) {
     setSaving(false);
   }
 
+  // What the mill actually packed, from its packing runs, as against the spec
+  // this order carries. The two are separate records and can disagree — an order
+  // agreed at 50kg can be packed in 25kg bags — and a spec nobody packed to
+  // follows the rice onto the documents.
+  const actualPacking = order.actualPacking || order.actual_packing || [];
+  const specSizeKg = parseFloat(bagSpec.sizeKg) || 0;
+  const packedDiffers = actualPacking.length > 0 && specSizeKg > 0
+    && !actualPacking.some((p) => Math.abs((parseFloat(p.bagSizeKg) || 0) - specSizeKg) < 0.01);
+
   const hasBagSpec = bagSpec.type || bagSpec.sizeKg || bagSpec.printing;
   const hasLines = packingLines.length > 0;
   const isEmpty = !hasBagSpec && !hasLines && !hasItemPacking && !receivingMode && !packingNotes;
@@ -136,6 +145,38 @@ export default function PackingTab({ order, onUpdated }) {
 
       {/* Packed-weight variance (Phase 1) */}
       <PackingWeightCard order={order} onUpdated={onUpdated} />
+
+      {/* What the mill actually packed */}
+      {actualPacking.length > 0 && (
+        <div className={`rounded-xl border p-4 ${packedDiffers ? 'border-amber-300 bg-amber-50/60' : 'border-gray-200 bg-white'}`}>
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-sm font-semibold text-gray-800 flex items-center gap-2">
+              <Package size={16} className={packedDiffers ? 'text-amber-600' : 'text-gray-400'} />
+              Actually packed by the mill
+            </h3>
+            {packedDiffers && (
+              <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">
+                Does not match the spec below
+              </span>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {actualPacking.map((p, i) => (
+              <span key={i} className="text-sm bg-white border border-gray-200 rounded-lg px-3 py-1.5 tabular-nums">
+                <span className="font-semibold">{p.bags}</span> × <span className="font-semibold">{p.bagSizeKg}kg</span>
+                {p.bagName ? <span className="text-gray-500"> · {p.bagName}</span> : null}
+                {p.packedWeightKg ? <span className="text-gray-400"> · {Number(p.packedWeightKg).toLocaleString()} kg</span> : null}
+              </span>
+            ))}
+          </div>
+          {packedDiffers && (
+            <p className="text-[11px] text-amber-800 mt-2">
+              The order is specified at {specSizeKg}kg. The documents are built from the specification,
+              so update it above if the mill&apos;s packing is what the buyer is getting.
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Header */}
       <div className="flex items-center justify-between">

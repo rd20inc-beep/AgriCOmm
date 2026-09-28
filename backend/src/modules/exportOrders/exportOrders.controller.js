@@ -441,7 +441,7 @@ const exportOrderController = {
       }
 
       const orderId = order.id; // resolved numeric ID
-      const [costs, documents, statusHistory, millingBatch, packingLines, shipmentContainers, items] = await Promise.all([
+      const [costs, documents, statusHistory, millingBatch, packingLines, actualPacking, shipmentContainers, items] = await Promise.all([
         db('export_order_costs').where({ order_id: orderId }).orderBy('created_at', 'asc'),
         db('export_order_documents').where({ order_id: orderId }).orderBy('created_at', 'asc'),
         db('export_order_status_history as h')
@@ -452,6 +452,20 @@ const exportOrderController = {
             'h.changed_by', 'h.reason', 'h.created_at', 'u.full_name as changed_by_name'),
         db('milling_batches').where({ linked_export_order_id: orderId }).first(),
         db('order_packing_lines').where({ order_id: orderId }).orderBy('line_no', 'asc'),
+        // What the mill ACTUALLY packed for this order, as against the spec the
+        // order carries. The two are separate records and can disagree — an order
+        // agreed at 50kg can be packed in 25kg bags — and until now only the spec
+        // was visible, so the tab (and the documents behind it) showed a figure
+        // nobody had packed.
+        db('mill_packing_logs as pl')
+          .join('milling_batches as mb', 'mb.id', 'pl.batch_id')
+          .leftJoin('mill_items as bg', 'bg.id', 'pl.bag_item_id')
+          .where('mb.linked_export_order_id', orderId)
+          .groupBy('pl.capacity_kg_per_bag', 'bg.name')
+          .select('pl.capacity_kg_per_bag as bag_size_kg', 'bg.name as bag_name')
+          .sum({ bags_count: 'pl.bags_count' })
+          .sum({ packed_weight_kg: 'pl.packed_weight_kg' })
+          .orderBy('pl.capacity_kg_per_bag', 'asc'),
         db('shipment_containers').where({ order_id: orderId }).orderBy('sequence_no', 'asc'),
         db('export_order_items as i')
           .leftJoin('products as p', 'i.product_id', 'p.id')
@@ -697,6 +711,14 @@ const exportOrderController = {
           statusHistory,
           millingBatch: millingBatch || null,
           packingLines: packingLines || [],
+          // Per bag size actually packed by the mill, so the tab can show it
+          // beside the agreed spec rather than silently disagreeing with it.
+          actualPacking: (actualPacking || []).map((r) => ({
+            bagSizeKg: parseFloat(r.bag_size_kg) || 0,
+            bagName: r.bag_name || null,
+            bags: parseInt(r.bags_count, 10) || 0,
+            packedWeightKg: parseFloat(r.packed_weight_kg) || 0,
+          })),
           shipmentContainers: withLots,
           purchaseLots,
           canSeeSupplierName, // FE gates the linked-batch supplier link on this
