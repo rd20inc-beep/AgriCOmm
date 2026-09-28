@@ -3,6 +3,7 @@ import { Landmark, FileText } from 'lucide-react';
 import SlideDrawer from '../../../components/SlideDrawer';
 import { useApp } from '../../../context/AppContext';
 import { usePayables, useRecordPayment } from '../../../api/queries';
+import { payablesForRow } from '../utils/payableBuckets';
 
 const PKR = (v) => `Rs ${(parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const fmtDate = (d) => { if (!d) return ''; const dt = new Date(d); return Number.isNaN(dt.getTime()) ? '' : dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }); };
@@ -16,9 +17,10 @@ export default function MillSupplierPayDrawer({ supplier, onClose }) {
   const payMut = useRecordPayment();
   const [saving, setSaving] = useState(false);
 
-  // Open invoices (outstanding > 0) for this supplier, oldest first.
-  const openInvoices = useMemo(() => (payables || [])
-    .filter((p) => String(p.supplierId) === String(supplier.id))
+  // Open invoices (outstanding > 0) for this supplier, oldest first. `supplier.id`
+  // can be the UNASSIGNED bucket, which collects every stored bill that has no
+  // supplier on it — those are still debts and still have to be settleable.
+  const openInvoices = useMemo(() => payablesForRow(payables, supplier.id)
     .filter((p) => (parseFloat(p.outstanding) || 0) > 0.001 && (p.status || '').toLowerCase() !== 'paid')
     .sort((a, b) => {
       const da = a.dueDate ? new Date(a.dueDate).getTime() : Infinity;
