@@ -6,6 +6,7 @@ const automationService = require('../../services/automationService');
 const emailService = require('../../services/emailService');
 const { publishExportOrderUpdate } = require('../../services/exportOrderEventBus');
 const workflowService = require('../../services/exportOrderWorkflowService');
+const { resolveShipmentField, resolveRequiredField } = require('./shipmentField');
 const notificationService = require('../../services/notificationService');
 // #9-scoping: per-user warehouse restriction, applied to stock READ paths only
 // (the dispatch/reservation engine is never scoped).
@@ -1494,39 +1495,35 @@ const exportOrderController = {
           vessel_name: vessel_name || null,
           booking_no: booking_no || null,
           bl_number: bl_number || null,
-          bl_date: bl_date || order.bl_date || null,
+          bl_date: resolveShipmentField(bl_date, order.bl_date),
           shipping_line: shipping_line || null,
           etd: etd || null,
           atd: atd || null,
           eta: eta || null,
           ata: ata || null,
           destination_port: destination_port || null,
-          gate_pass_no: gate_pass_no || order.gate_pass_no || null,
-          // Blanking the field on the form CLEARS the contract number, but a
-          // request that does not mention it at all leaves it alone. Those are
-          // different intentions and a plain `x || null` cannot tell them apart:
-          // it would let an older cached client, or any caller sending a partial
-          // shipment payload, wipe a number it never knew about. That is how
-          // voyage_number and gd_number came to be nulled on every save.
-          contract_number: contract_number === undefined
-            ? (order.contract_number || null)
-            : (contract_number || null),
+          gate_pass_no: resolveShipmentField(gate_pass_no, order.gate_pass_no),
+          // Blank clears, absent keeps — see resolveShipmentField for why neither
+          // `x || null` nor `x || stored || null` is correct on its own.
+          contract_number: resolveShipmentField(contract_number, order.contract_number),
           voyage_number: voyage_number || null,
           gd_number: gd_number || null,
           gd_date: gd_date || null,
-          fi_number: fi_number || order.fi_number || null,
-          fi_number_2: fi_number_2 || order.fi_number_2 || null,
-          fi_number_3: fi_number_3 || order.fi_number_3 || null,
-          fi_date: fi_date || order.fi_date || null,
-          freight_terms: freight_terms || order.freight_terms || null,
-          consignee_type: consignee_type || order.consignee_type || null,
-          shipment_window_start: shipment_window_start || order.shipment_window_start || null,
-          shipment_window_end: shipment_window_end || order.shipment_window_end || null,
-          notify_party_name: notify_party_name || order.notify_party_name || null,
-          notify_party_address: notify_party_address || order.notify_party_address || null,
-          notify_party_phone: notify_party_phone || order.notify_party_phone || null,
-          notify_party_email: notify_party_email || order.notify_party_email || null,
-          shipment_remarks: shipment_remarks || order.shipment_remarks || null,
+          fi_number: resolveShipmentField(fi_number, order.fi_number),
+          fi_number_2: resolveShipmentField(fi_number_2, order.fi_number_2),
+          fi_number_3: resolveShipmentField(fi_number_3, order.fi_number_3),
+          fi_date: resolveShipmentField(fi_date, order.fi_date),
+          freight_terms: resolveShipmentField(freight_terms, order.freight_terms),
+          // NOT NULL with a default of 'to_order_of_bank', so clearing it returns
+          // to that default rather than to null, which the constraint forbids.
+          consignee_type: resolveRequiredField(consignee_type, order.consignee_type, 'to_order_of_bank'),
+          shipment_window_start: resolveShipmentField(shipment_window_start, order.shipment_window_start),
+          shipment_window_end: resolveShipmentField(shipment_window_end, order.shipment_window_end),
+          notify_party_name: resolveShipmentField(notify_party_name, order.notify_party_name),
+          notify_party_address: resolveShipmentField(notify_party_address, order.notify_party_address),
+          notify_party_phone: resolveShipmentField(notify_party_phone, order.notify_party_phone),
+          notify_party_email: resolveShipmentField(notify_party_email, order.notify_party_email),
+          shipment_remarks: resolveShipmentField(shipment_remarks, order.shipment_remarks),
           // Preserve the existing bank when the field isn't sent; allow clearing.
           bank_account_id: bank_account_id === undefined ? order.bank_account_id : (bank_account_id || null),
           updated_at: trx.fn.now(),
