@@ -446,6 +446,7 @@ export function ShipmentModal({
   shipNotifyEmail, setShipNotifyEmail,
   shipRemarks, setShipRemarks,
   shipGatePass, setShipGatePass,
+  shipContractNo, setShipContractNo,
   shipBankAccountId, setShipBankAccountId,
   bankAccountsList = [],
   shipmentContainers, setShipmentContainers,
@@ -699,6 +700,12 @@ export function ShipmentModal({
           <input type="text" value={shipGatePass || ''} onChange={e => setShipGatePass(e.target.value)} placeholder="e.g. GP-2026-014"
             className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
           <p className="text-xs text-gray-400 mt-1">Recorded when the goods leave the premises (set an ATD to mark departure). Tracked on the order.</p>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Contract No</label>
+          <input type="text" value={shipContractNo || ''} onChange={e => setShipContractNo(e.target.value)} placeholder="e.g. AGRI/2026/014" maxLength={50}
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+          <p className="text-xs text-gray-400 mt-1">Heads every generated document. Also set when the order is created and on the Overview tab — leaving this blank keeps the existing number.</p>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
