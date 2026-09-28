@@ -235,10 +235,11 @@ describe('updateExportShipment — contract_number', () => {
 });
 
 // The Shipment form is the third place the contract number can be set, after
-// creation and the Overview specs form. A blank must therefore KEEP what is
-// already stored rather than null it — the mistake voyage_number and gd_number
-// made, where every save wiped the value.
-describe('updateShipment persists contract_number without wiping it', () => {
+// creation and the Overview specs form. Blanking the field there CLEARS it, but a
+// request that never mentions it leaves it alone — two different intentions that a
+// plain `x || null` cannot tell apart. Getting that wrong is how voyage_number and
+// gd_number came to be nulled on every save.
+describe('updateShipment resolves contract_number three ways', () => {
   const fs = require('fs');
   const path = require('path');
   const src = fs.readFileSync(
@@ -261,11 +262,31 @@ describe('updateShipment persists contract_number without wiping it', () => {
     expect(/const \{[\s\S]*?contract_number[\s\S]*?\} = req\.body/.test(updateBlock)).toBe(true);
   });
 
-  test('it is written with a fallback to the stored value', () => {
-    expect(updateBlock).toMatch(/contract_number:\s*contract_number\s*\|\|\s*order\.contract_number\s*\|\|\s*null/);
+  // The written expression, evaluated rather than pattern-matched, so the test is
+  // about behaviour and not about how the line happens to be spelled.
+  const resolve = (() => {
+    const m = /contract_number:\s*([\s\S]*?),\n\s{10}voyage_number:/.exec(updateBlock);
+    if (!m) throw new Error('could not find the contract_number expression');
+    // eslint-disable-next-line no-new-func
+    return new Function('contract_number', 'order', `return (${m[1]});`);
+  })();
+
+  test('a value sets it', () => {
+    expect(resolve('AGRI/2026/014', { contract_number: 'OLD/1' })).toBe('AGRI/2026/014');
   });
 
-  test('it is not written as a bare `x || null`, which would wipe on blank', () => {
-    expect(updateBlock).not.toMatch(/contract_number:\s*contract_number\s*\|\|\s*null/);
+  test('a blank clears it', () => {
+    expect(resolve('', { contract_number: 'OLD/1' })).toBeNull();
+    expect(resolve(null, { contract_number: 'OLD/1' })).toBeNull();
+  });
+
+  test('not sending it at all keeps the stored value', () => {
+    // An older cached client, or any caller posting a partial shipment payload,
+    // must not wipe a number it never knew about.
+    expect(resolve(undefined, { contract_number: 'OLD/1' })).toBe('OLD/1');
+  });
+
+  test('absent with nothing stored stays null', () => {
+    expect(resolve(undefined, { contract_number: null })).toBeNull();
   });
 });
