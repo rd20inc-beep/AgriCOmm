@@ -1132,6 +1132,9 @@ COL local_sale_repacking.bag_source:character varying:NOT NULL
 COL local_sale_repacking.created_at:timestamp with time zone:NOT NULL
 COL local_sale_repacking.created_by:integer:NULL
 COL local_sale_repacking.final_dispatched_kg:numeric:NULL
+COL local_sale_repacking.freed_katta_count:integer:NULL
+COL local_sale_repacking.freed_katta_size_kg:numeric:NULL
+COL local_sale_repacking.freed_katta_to_store:boolean:NOT NULL
 COL local_sale_repacking.id:integer:NOT NULL
 COL local_sale_repacking.labour_mode:character varying:NULL
 COL local_sale_repacking.labour_rate:numeric:NULL

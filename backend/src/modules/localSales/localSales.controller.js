@@ -5,6 +5,7 @@
 const db = require('../../config/database');
 const uc = require('../../services/unitConversion');
 const inventoryService = require('../../services/inventoryService');
+const { freedKattaFrom } = require('./freedKatta');
 const accountingService = require('../accounting/accounting.service');
 const { resolveCashAccountId } = require('../../shared/cashAccounts');
 const { nextDocNo } = require('../../utils/docNumber');
@@ -61,7 +62,39 @@ async function recorderCanAutoConfirm(trx, roleId) {
 // the cash/bank balance), open a receivable for any balance owed, lock COGS and
 // post the revenue/AR journal. Re-checks availability — a Pending sale can't
 // oversell if the stock moved while it waited for confirmation.
+// Repacking a sale tips the rice out of the katta it was held in. Those empties
+// go back to the mill store as KATTA-<size>, at zero value — they are worth
+// something only when sold. A sale that is NOT repacked frees nothing: the rice
+// ships in its original sacks and they leave with it. And a buyer can ask to
+// keep the empties, which is what freed_katta_to_store: false records.
+//
+// Credited on confirmation, not on entry, because a pending sale that is
+// rejected must not leave sacks behind. Idempotent per sale.
+async function returnRepackedKatta(trx, saleRows, userId) {
+  const first = saleRows && saleRows[0];
+  if (!first) return;
+  const rp = first.sale_group_no
+    ? await trx('local_sale_repacking').where({ sale_group_no: first.sale_group_no }).first()
+    : await trx('local_sale_repacking').where({ local_sale_id: first.id }).first();
+  const freed = freedKattaFrom(rp);
+  if (!freed) return;
+
+  const credited = await inventoryService.creditFreedKatta(trx, {
+    sizeKg: freed.sizeKg,
+    count: freed.count,
+    referenceType: 'sale_repack_katta',
+    referenceId: rp.id,
+    userId,
+    notes: `Empty ${freed.sizeKg}kg katta freed by repacking sale ${first.sale_group_no || first.id}`,
+  });
+  if (credited) {
+    await trx('local_sale_repacking').where({ id: rp.id })
+      .update({ freed_katta_count: credited.bags, freed_katta_size_kg: credited.sizeKg, updated_at: trx.fn.now() });
+  }
+}
+
 async function postSaleSideEffects(trx, saleRows, { userId } = {}) {
+  await returnRepackedKatta(trx, saleRows, userId);
   const groupPaid = uc.round2(saleRows.reduce((s, r) => s + (parseFloat(r.paid_amount) || 0), 0));
   const first = saleRows[0] || {};
   const receiptAccountId = await resolveReceiptAccountId(trx, {
@@ -773,6 +806,13 @@ module.exports = {
             packing_loss_kg: numOrNull(rp.packing_loss_kg),
             final_dispatched_kg: numOrNull(rp.final_dispatched_kg),
             notes: rp.notes || null,
+            // Repacking empties the katta the rice was held in. Those sacks
+            // normally come back to the mill, but a buyer can ask to keep them,
+            // so the choice is recorded rather than assumed. The store is only
+            // credited when the sale is CONFIRMED (see postSaleSideEffects) —
+            // crediting here would hand us sacks for a sale that is later
+            // rejected.
+            freed_katta_to_store: rp.freed_katta_to_store !== false,
             created_by: req.user?.id || null,
           });
         }

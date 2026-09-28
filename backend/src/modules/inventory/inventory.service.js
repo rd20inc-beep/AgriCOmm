@@ -2730,6 +2730,69 @@ const inventoryService = {
    * size item) first, so re-recording reconciles cleanly. No-op for batches with
    * no vehicle-bag intake (blends / lot-started).
    */
+  /**
+   * Return emptied katta to the mill store.
+   *
+   * Milling already does this for the sacks a batch consumes; repacking a local
+   * sale empties sacks too — the rice moves into the customer's bags or into our
+   * own of a different size, and the originals come back empty. Same store item
+   * (`KATTA-<size>`), same movement ledger, so the two sources are one stock.
+   *
+   * Freed katta enter at ZERO value and are worth something only when sold, so
+   * nothing here touches item cost — only the quantity.
+   *
+   * Idempotent on (referenceType, referenceId): a prior credit for the same
+   * reference is reversed before the new one is applied, so editing a sale does
+   * not stack duplicate sacks into the store.
+   */
+  async creditFreedKatta(trx, { sizeKg, count, referenceType, referenceId, userId, notes }) {
+    const size = uc.snapBagSizeKg(parseFloat(sizeKg) || 0);
+    const bags = Math.round(parseFloat(count) || 0);
+
+    // Reverse any earlier credit for this same reference first.
+    const prior = await trx('mill_stock_movements')
+      .where({ reference_type: referenceType, reference_id: referenceId })
+      .select('item_id', 'quantity');
+    for (const m of prior) {
+      await trx('mill_stock').where({ item_id: m.item_id, warehouse_id: null })
+        .update({ quantity_available: trx.raw('quantity_available - ?', [parseFloat(m.quantity) || 0]), updated_at: trx.fn.now() });
+    }
+    if (prior.length) {
+      await trx('mill_stock_movements').where({ reference_type: referenceType, reference_id: referenceId }).del();
+    }
+
+    if (size <= 0 || bags <= 0) return null;   // nothing to return
+
+    const code = `KATTA-${size}`;
+    let item = await trx('mill_items').where('code', code).first();
+    if (!item) {
+      [item] = await trx('mill_items').insert({
+        code, name: `Katta ${size}kg`, category: 'packaging', unit: 'pcs',
+        capacity_kg: size, reorder_level: 0, is_active: true,
+        notes: 'Auto-managed: empty bags freed from milled raw or repacked stock.',
+        created_by: userId || null,
+      }).returning('*');
+    }
+    const stock = await trx('mill_stock').where({ item_id: item.id, warehouse_id: null }).first();
+    if (!stock) {
+      await trx('mill_stock').insert({ item_id: item.id, warehouse_id: null, quantity_available: bags, quantity_reserved: 0 });
+    } else {
+      await trx('mill_stock').where({ item_id: item.id, warehouse_id: null })
+        .update({ quantity_available: trx.raw('quantity_available + ?', [bags]), updated_at: trx.fn.now() });
+    }
+    // 'return' is the movement type the milling katta path uses, and the only
+    // inbound value the movement_type CHECK allows ('purchase', 'consumption',
+    // 'adjustment', 'reservation', 'return'). The columns are `reason` and
+    // `performed_by` — there is no notes/created_by on this table.
+    await trx('mill_stock_movements').insert({
+      item_id: item.id, warehouse_id: null, movement_type: 'return', quantity: bags,
+      reference_type: referenceType, reference_id: referenceId,
+      reason: notes || `Empty ${size}kg katta freed (${bags})`,
+      performed_by: userId || null,
+    });
+    return { itemId: item.id, code, sizeKg: size, bags };
+  },
+
   async reconcileBatchKatta(trx, batchId, userId) {
     const num = (v) => parseFloat(v) || 0;
     const vehs = await trx('milling_vehicle_arrivals').where('batch_id', batchId)

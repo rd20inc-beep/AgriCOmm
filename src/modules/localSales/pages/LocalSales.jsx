@@ -553,6 +553,8 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
   const [repack, setRepack] = useState({
     enabled: false, bag_source: 'none', packaging_item_id: '',
     original_bag_size_kg: '', original_bag_count: '', new_bag_size_kg: '', new_bag_count: '',
+    // The emptied katta normally come back to the mill; the buyer can ask to keep them.
+    freed_katta_to_store: true,
     bag_rate: '', labour_enabled: false, labour_mode: 'per_bag', labour_rate: '',
     packing_loss_kg: '', final_dispatched_kg: '', notes: '',
   });
@@ -666,7 +668,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
   function reset() {
     setForm({ customer_id: '', buyer_name: '', buyer_phone: '', payment_mode: 'cash', paid_amount: '', collection_location: 'Mill', bank_account_id: '', cheque_no: '', due_date: '', vehicle_no: '', driver_name: '', notes: '', gate_pass_no: '' });
     setCart([]); setLine(EMPTY_LINE); setTag('All'); setStep(1);
-    setRepack({ enabled: false, bag_source: 'none', packaging_item_id: '', original_bag_size_kg: '', original_bag_count: '', new_bag_size_kg: '', new_bag_count: '', bag_rate: '', labour_enabled: false, labour_mode: 'per_bag', labour_rate: '', packing_loss_kg: '', final_dispatched_kg: '', notes: '' });
+    setRepack({ enabled: false, bag_source: 'none', packaging_item_id: '', freed_katta_to_store: true, original_bag_size_kg: '', original_bag_count: '', new_bag_size_kg: '', new_bag_count: '', bag_rate: '', labour_enabled: false, labour_mode: 'per_bag', labour_rate: '', packing_loss_kg: '', final_dispatched_kg: '', notes: '' });
   }
 
   async function handleSubmit() {
@@ -710,6 +712,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
             required: true, bag_source: repack.bag_source,
             packaging_item_id: repack.bag_source === 'company' ? (repack.packaging_item_id || null) : null,
             original_bag_size_kg: repack.original_bag_size_kg || null, original_bag_count: repack.original_bag_count || null,
+            freed_katta_to_store: repack.freed_katta_to_store !== false,
             new_bag_size_kg: repack.new_bag_size_kg || null, new_bag_count: repack.new_bag_count || null,
             bag_rate: repack.bag_source === 'company' ? (repack.bag_rate || null) : null,
             packaging_charge: rpPackagingCharge || null,
@@ -1050,6 +1053,26 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
                   <RpNum label="New bag kg" value={repack.new_bag_size_kg} onChange={v => setRp('new_bag_size_kg', v)} />
                   <RpNum label="New bags" value={repack.new_bag_count} onChange={v => setRp('new_bag_count', v)} />
                 </div>
+                {/* The emptied sacks. They come back to the mill unless the buyer
+                    asks to keep them, so this is a choice, not an assumption. */}
+                <label className="flex items-start gap-2 text-xs text-gray-700 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
+                  <input
+                    type="checkbox"
+                    checked={repack.freed_katta_to_store !== false}
+                    onChange={e => setRp('freed_katta_to_store', e.target.checked)}
+                    className="rounded border-gray-300 mt-0.5"
+                  />
+                  <span>
+                    Empty katta come back to the mill
+                    {Number(repack.original_bag_count) > 0 && Number(repack.original_bag_size_kg) > 0 && (
+                      <span className="font-medium"> — {repack.original_bag_count} × {repack.original_bag_size_kg}kg</span>
+                    )}
+                    <span className="block text-[11px] text-gray-500">
+                      Added to mill store at no value once the sale is confirmed; they are worth something when sold.
+                      Untick if the buyer is keeping them.
+                    </span>
+                  </span>
+                </label>
                 {repack.bag_source === 'company' && (
                   <div className="grid grid-cols-2 gap-2">
                     <div>
