@@ -1395,7 +1395,7 @@ const exportOrderController = {
       const {
         vessel_name, booking_no, container_no, containers,
         bl_number, bl_date, shipping_line, etd, atd, eta, ata,
-        destination_port, notes, gate_pass_no,
+        destination_port, notes, gate_pass_no, contract_number,
         voyage_number, gd_number, gd_date,
         fi_number, fi_number_2, fi_number_3, fi_date,
         freight_terms, consignee_type,
@@ -1502,6 +1502,11 @@ const exportOrderController = {
           ata: ata || null,
           destination_port: destination_port || null,
           gate_pass_no: gate_pass_no || order.gate_pass_no || null,
+          // Keeps what is already there when the field comes back blank. The
+          // contract number is also set at creation and from the Overview specs
+          // form, and saving the Shipment form must not quietly wipe it — which is
+          // precisely what voyage_number and gd_number used to do.
+          contract_number: contract_number || order.contract_number || null,
           voyage_number: voyage_number || null,
           gd_number: gd_number || null,
           gd_date: gd_date || null,

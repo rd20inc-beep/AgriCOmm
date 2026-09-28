@@ -169,6 +169,9 @@ const updateExportShipment = Joi.object({
   // with an `|| order.x` fallback in the controller simply could not be changed;
   // voyage_number, gd_number and gd_date have no fallback, so every shipment
   // save overwrote them with NULL and lost whatever was there.
+  // Also settable at creation and from the Overview specs form; the Shipment
+  // form is simply the third place it can be corrected. max matches varchar(50).
+  contract_number: Joi.string().max(50).allow('', null),
   bl_date: Joi.date().iso().allow(null, ''),
   voyage_number: Joi.string().max(50).allow('', null),
   gd_number: Joi.string().max(100).allow('', null),

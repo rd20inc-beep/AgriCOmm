@@ -214,3 +214,58 @@ describe('string limits match the columns they are written to', () => {
       .toBeUndefined();
   });
 });
+
+describe('updateExportShipment — contract_number', () => {
+  test('reaches the controller', () => {
+    const { error, value } = run(schemas.updateExportShipment, { contract_number: 'AGRI/2026/014' });
+    expect(error).toBeUndefined();
+    expect(value.contract_number).toBe('AGRI/2026/014');
+  });
+
+  test('capped at the column width, refused by name past it', () => {
+    expect(run(schemas.updateExportShipment, { contract_number: 'x'.repeat(50) }).error).toBeUndefined();
+    const over = run(schemas.updateExportShipment, { contract_number: 'x'.repeat(51) });
+    expect(over.error).toBeDefined();
+    expect(over.error.details.some((d) => d.path.includes('contract_number'))).toBe(true);
+  });
+
+  test('a blank is allowed through — the controller decides what it means', () => {
+    expect(run(schemas.updateExportShipment, { contract_number: '' }).error).toBeUndefined();
+  });
+});
+
+// The Shipment form is the third place the contract number can be set, after
+// creation and the Overview specs form. A blank must therefore KEEP what is
+// already stored rather than null it — the mistake voyage_number and gd_number
+// made, where every save wiped the value.
+describe('updateShipment persists contract_number without wiping it', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const src = fs.readFileSync(
+    path.join(__dirname, '../modules/exportOrders/exportOrders.controller.js'), 'utf8',
+  );
+  // Brace-balanced, because slicing to the next `async ` stops at the inner
+  // `async (trx)` and cuts the function off before its update statement.
+  const updateBlock = (() => {
+    const at = src.indexOf('async updateShipment');
+    const open = src.indexOf('{', at);
+    let d = 0;
+    for (let i = open; i < src.length; i += 1) {
+      if (src[i] === '{') d += 1;
+      else if (src[i] === '}') { d -= 1; if (d === 0) return src.slice(at, i + 1); }
+    }
+    throw new Error('updateShipment not found');
+  })();
+
+  test('it is destructured from the body', () => {
+    expect(/const \{[\s\S]*?contract_number[\s\S]*?\} = req\.body/.test(updateBlock)).toBe(true);
+  });
+
+  test('it is written with a fallback to the stored value', () => {
+    expect(updateBlock).toMatch(/contract_number:\s*contract_number\s*\|\|\s*order\.contract_number\s*\|\|\s*null/);
+  });
+
+  test('it is not written as a bare `x || null`, which would wipe on blank', () => {
+    expect(updateBlock).not.toMatch(/contract_number:\s*contract_number\s*\|\|\s*null/);
+  });
+});
