@@ -1635,8 +1635,17 @@ export default function MillingBatchDetail() {
           const packingCostVal = parseFloat(batch.costs?.packaging) || 0;
           const procCosts = Object.entries(batch.costs || {}).reduce(
             (s, [k, v]) => (k === 'raw_rice' || k === 'packaging' ? s : s + (parseFloat(v) || 0)), 0);
-          const millingCostVal = batch.manualMillingCostPkr != null ? parseFloat(batch.manualMillingCostPkr) : 0;
-          const otherExpVal = batch.manualOtherExpensesPkr != null ? parseFloat(batch.manualOtherExpensesPkr) : procCosts;
+          // The Milling Cost box and the "Milling / Processing" cost category are
+          // the same charge entered in two places. Adding both counted it twice
+          // in Net Purchase; the manual figure now OVERRIDES the category, the
+          // same way the manual Other figure overrides the rest. Mirrors
+          // computeResidualAllocation so the sheet and the engine agree.
+          const millingCatVal = parseFloat(batch.costs?.processing) || 0;
+          const manualMillingVal = parseFloat(batch.manualMillingCostPkr) || 0;
+          const millingCostVal = manualMillingVal > 0 ? manualMillingVal : millingCatVal;
+          const otherExpVal = parseFloat(batch.manualOtherExpensesPkr) > 0
+            ? parseFloat(batch.manualOtherExpensesPkr)
+            : Math.max(0, procCosts - millingCatVal);
           const netPurchase = effectiveRawCost + millingCostVal + otherExpVal + packingCostVal;
           const finishedKG = (parseFloat(batch.actualFinishedMT)||0) * 1000;
           const netCostPerKG = parseFloat(batch.totalCostPerKgFinished) || 0;
