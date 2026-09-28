@@ -77,6 +77,11 @@ describe('every document field in updateShipment goes through a resolver', () =>
     'shipment_window_start', 'shipment_window_end',
     'notify_party_name', 'notify_party_address', 'notify_party_phone', 'notify_party_email',
     'shipment_remarks',
+    // The rest of the shipment row. These already cleared on blank, but as a bare
+    // `x || null` they also nulled themselves when a caller left them out.
+    'vessel_name', 'booking_no', 'bl_number', 'shipping_line',
+    'etd', 'atd', 'eta', 'ata', 'destination_port',
+    'voyage_number', 'gd_number', 'gd_date',
   ];
 
   test.each(GUARDED)('%s is resolved, not written bare', (field) => {
@@ -88,7 +93,24 @@ describe('every document field in updateShipment goes through a resolver', () =>
     expect(updateBlock).not.toContain(`${field}: ${field} || order.${field} || null`);
   });
 
-  test('all sixteen are covered', () => {
-    expect(GUARDED).toHaveLength(16);
+  test('every field the update writes is covered', () => {
+    expect(GUARDED).toHaveLength(28);
+  });
+
+  test('no bare `x || null` survives anywhere in the update', () => {
+    // Catches a field added later that this list does not know about.
+    const bare = [...updateBlock.matchAll(/^\s+([a-z_0-9]+): \1 \|\| null,$/gm)].map((m) => m[1]);
+    expect(bare).toEqual([]);
+  });
+
+  test('the transition snapshot resolves the same way as the update', () => {
+    // `let currentOrder = { ...order, ... }` is handed to transitionOrder. If it
+    // resolved differently it would claim a field is empty while the row holds a
+    // value, and a transition checking for that field would refuse wrongly.
+    const snap = updateBlock.slice(updateBlock.indexOf('let currentOrder = {'));
+    const head = snap.slice(0, snap.indexOf('};'));
+    for (const f of ['vessel_name', 'booking_no', 'bl_number', 'shipping_line', 'etd', 'atd', 'eta', 'ata', 'destination_port']) {
+      expect(head).toContain(`${f}: resolveShipmentField(${f}, order.${f})`);
+    }
   });
 });
