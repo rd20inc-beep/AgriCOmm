@@ -1502,11 +1502,15 @@ const exportOrderController = {
           ata: ata || null,
           destination_port: destination_port || null,
           gate_pass_no: gate_pass_no || order.gate_pass_no || null,
-          // Keeps what is already there when the field comes back blank. The
-          // contract number is also set at creation and from the Overview specs
-          // form, and saving the Shipment form must not quietly wipe it — which is
-          // precisely what voyage_number and gd_number used to do.
-          contract_number: contract_number || order.contract_number || null,
+          // Blanking the field on the form CLEARS the contract number, but a
+          // request that does not mention it at all leaves it alone. Those are
+          // different intentions and a plain `x || null` cannot tell them apart:
+          // it would let an older cached client, or any caller sending a partial
+          // shipment payload, wipe a number it never knew about. That is how
+          // voyage_number and gd_number came to be nulled on every save.
+          contract_number: contract_number === undefined
+            ? (order.contract_number || null)
+            : (contract_number || null),
           voyage_number: voyage_number || null,
           gd_number: gd_number || null,
           gd_date: gd_date || null,
