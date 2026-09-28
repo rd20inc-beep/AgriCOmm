@@ -25,7 +25,7 @@ import {
   useApproveLeaveRequest, useRejectLeaveRequest,
   useFinalSettlement, useFinalizeSettlement, usePayrollAudit, useSalaryRevisions, useReviseSalary,
   usePayrollSchedule, useSavePayrollSchedule, useRunPayrollNow,
-  usePayables, useSuppliers, useCustomers, usePurchases, useLocalSalesSummary, useMillCashFlow, useAcceptFundTransfer,
+  usePayables, useReceivables, useSuppliers, useCustomers, usePurchases, useLocalSalesSummary, useMillCashFlow, useAcceptFundTransfer,
   useMillLotCosts, useLocalSales, useRecordPayment, usePayablePayments, useBankAccounts, useHeldStockProfit, useProfitLoss, useMillExpenseHeads, useCreateMillExpenseHead } from '../../../api/queries';
 import TransactionDocument from '../../../components/TransactionDocument';
 import NewPurchaseDrawer from '../../../components/NewPurchaseDrawer';
@@ -38,6 +38,7 @@ import SearchSelect from '../../../shared/components/SearchSelect';
 import MillSupplierStatement from '../components/MillSupplierStatement';
 import MillSupplierPayDrawer from '../components/MillSupplierPayDrawer';
 import { UNASSIGNED, isStoredPayable } from '../utils/payableBuckets';
+import { buildCustomerRows } from '../utils/customerDirectory';
 import MillCustomerStatement from '../components/MillCustomerStatement';
 import MillCustomerPayDrawer from '../components/MillCustomerPayDrawer';
 import StatementPayDrawer from '../../finance/components/StatementPayDrawer';
@@ -605,6 +606,13 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
   const [selectedSupplier, setSelectedSupplier] = useState(null);
   const { data: localCustomers = [] } = useCustomers({ type: 'local' });
   const { data: allLocalSales = [] } = useLocalSales({ limit: 1000 });
+  // Receivables that are NOT local sales — opening balances, and anything else
+  // billed outside a sale. The endpoint returns BOTH kinds: rows from the
+  // receivables table (kind 'receivable') and rows derived from local_sales
+  // (kind 'local_sale'). The directory already counts the sales, so only the
+  // former may be folded in — taking the lot double counted every sale.
+  const { data: allReceivables = [] } = useReceivables({ limit: 500 });
+
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [payCustomer, setPayCustomer] = useState(null);
   // Pay a supplier with the same drawer the Finance dashboard uses.
@@ -881,30 +889,10 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
   // are matched by customer_id, or by buyer name for walk-ins that were never
   // linked (same rule the statement uses). Invoice count is distinct sale
   // groups (multi-item sales share one group).
-  const customerRows = useMemo(() => {
-    const byId = {};
-    const byName = {};
-    for (const c of localCustomers) {
-      const row = { id: c.id, name: c.name, contact: c.contact || c.phone || '', country: c.country || '', billed: 0, paid: 0, outstanding: 0, _inv: new Set() };
-      byId[c.id] = row;
-      if (c.name) byName[c.name.trim().toLowerCase()] = row;
-    }
-    for (const s of allLocalSales) {
-      const total = parseFloat(s.totalAmount) || 0;
-      const due = parseFloat(s.dueAmount) || 0;
-      let row = null;
-      if (s.customerId != null) row = byId[s.customerId];
-      if (!row && s.buyerName) row = byName[s.buyerName.trim().toLowerCase()];
-      if (!row) continue; // unregistered walk-in — not in the directory
-      row.billed += total;
-      row.paid += (total - due);
-      row.outstanding += due;
-      row._inv.add(s.saleGroupNo || s.saleNo || s.id);
-    }
-    return Object.values(byId)
-      .map((r) => ({ ...r, count: r._inv.size }))
-      .sort((a, b) => b.outstanding - a.outstanding || b.billed - a.billed);
-  }, [localCustomers, allLocalSales]);
+  const customerRows = useMemo(
+    () => buildCustomerRows(localCustomers, allLocalSales, allReceivables),
+    [localCustomers, allLocalSales, allReceivables],
+  );
 
   const customerTotals = useMemo(() => customerRows.reduce(
     (acc, r) => ({ billed: acc.billed + r.billed, paid: acc.paid + r.paid, outstanding: acc.outstanding + r.outstanding }),
