@@ -1492,23 +1492,23 @@ const exportOrderController = {
         }
 
         await trx('export_orders').where({ id }).update({
-          vessel_name: vessel_name || null,
-          booking_no: booking_no || null,
-          bl_number: bl_number || null,
+          vessel_name: resolveShipmentField(vessel_name, order.vessel_name),
+          booking_no: resolveShipmentField(booking_no, order.booking_no),
+          bl_number: resolveShipmentField(bl_number, order.bl_number),
           bl_date: resolveShipmentField(bl_date, order.bl_date),
-          shipping_line: shipping_line || null,
-          etd: etd || null,
-          atd: atd || null,
-          eta: eta || null,
-          ata: ata || null,
-          destination_port: destination_port || null,
+          shipping_line: resolveShipmentField(shipping_line, order.shipping_line),
+          etd: resolveShipmentField(etd, order.etd),
+          atd: resolveShipmentField(atd, order.atd),
+          eta: resolveShipmentField(eta, order.eta),
+          ata: resolveShipmentField(ata, order.ata),
+          destination_port: resolveShipmentField(destination_port, order.destination_port),
           gate_pass_no: resolveShipmentField(gate_pass_no, order.gate_pass_no),
           // Blank clears, absent keeps — see resolveShipmentField for why neither
           // `x || null` nor `x || stored || null` is correct on its own.
           contract_number: resolveShipmentField(contract_number, order.contract_number),
-          voyage_number: voyage_number || null,
-          gd_number: gd_number || null,
-          gd_date: gd_date || null,
+          voyage_number: resolveShipmentField(voyage_number, order.voyage_number),
+          gd_number: resolveShipmentField(gd_number, order.gd_number),
+          gd_date: resolveShipmentField(gd_date, order.gd_date),
           fi_number: resolveShipmentField(fi_number, order.fi_number),
           fi_number_2: resolveShipmentField(fi_number_2, order.fi_number_2),
           fi_number_3: resolveShipmentField(fi_number_3, order.fi_number_3),
@@ -1529,17 +1529,21 @@ const exportOrderController = {
           updated_at: trx.fn.now(),
         });
 
+        // The snapshot handed to transitionOrder. It resolves each field exactly
+        // as the update above did, or it would claim a field is empty when the row
+        // still holds a value — and a transition that checks for one would refuse
+        // on a field the order actually has.
         let currentOrder = {
           ...order,
-          vessel_name: vessel_name || null,
-          booking_no: booking_no || null,
-          bl_number: bl_number || null,
-          shipping_line: shipping_line || null,
-          etd: etd || null,
-          atd: atd || null,
-          eta: eta || null,
-          ata: ata || null,
-          destination_port: destination_port || null,
+          vessel_name: resolveShipmentField(vessel_name, order.vessel_name),
+          booking_no: resolveShipmentField(booking_no, order.booking_no),
+          bl_number: resolveShipmentField(bl_number, order.bl_number),
+          shipping_line: resolveShipmentField(shipping_line, order.shipping_line),
+          etd: resolveShipmentField(etd, order.etd),
+          atd: resolveShipmentField(atd, order.atd),
+          eta: resolveShipmentField(eta, order.eta),
+          ata: resolveShipmentField(ata, order.ata),
+          destination_port: resolveShipmentField(destination_port, order.destination_port),
         };
 
         if (ata) {
