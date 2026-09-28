@@ -96,11 +96,21 @@ export default function PackingPanel({ batchId, batchStatus, addToast, exportOrd
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
           <div className="flex items-center gap-2 mb-3">
             <Boxes size={16} className="text-amber-600" />
-            <h4 className="text-sm font-semibold text-amber-900">Katta (bags){katta.capacityKg ? ` · ${katta.capacityKg} kg each` : ''}</h4>
+            <h4 className="text-sm font-semibold text-amber-900">
+              Katta from raw{katta.capacityKg ? ` · ${katta.capacityKg} kg` : ''}
+            </h4>
           </div>
+          {/* The heading size is the RAW sack the paddy arrived in — what this
+              ledger frees and consumes. Output packed into a different size (a
+              store bag) is listed below at its own size, and saying "50 kg each"
+              over the top of a 25 kg output line read as a contradiction. */}
+          <p className="text-[11px] text-amber-700 -mt-2 mb-3">
+            The sacks the raw arrived in, freed as it was milled. Output packed into
+            a different size is shown at its own size below.
+          </p>
           <div className="grid grid-cols-3 gap-3 text-center">
             <div><p className="text-[11px] uppercase tracking-wide text-amber-700">Freed from raw</p><p className="text-lg font-bold text-emerald-700">+{num(katta.freed).toLocaleString()}</p></div>
-            <div><p className="text-[11px] uppercase tracking-wide text-amber-700">Packed into output</p><p className="text-lg font-bold text-red-600">−{num(katta.packed).toLocaleString()}</p></div>
+            <div><p className="text-[11px] uppercase tracking-wide text-amber-700">Re-used to pack</p><p className="text-lg font-bold text-red-600">−{num(katta.packed).toLocaleString()}</p></div>
             <div><p className="text-[11px] uppercase tracking-wide text-amber-700">Net to store</p><p className="text-lg font-bold text-gray-900">{katta.net >= 0 ? '+' : ''}{num(katta.net).toLocaleString()}</p></div>
           </div>
 
@@ -129,7 +139,7 @@ export default function PackingPanel({ batchId, batchStatus, addToast, exportOrd
           {/* Katta packed per output */}
           {katta.lots?.some((l) => l.bags > 0) && (
             <div className="mt-3 pt-3 border-t border-amber-200">
-              <p className="text-[11px] uppercase tracking-wide text-amber-700 mb-1.5">Packed per output</p>
+              <p className="text-[11px] uppercase tracking-wide text-amber-700 mb-1.5">Bags per output</p>
               <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-amber-800">
                 {katta.lots.filter((l) => l.bags > 0).map((l, i) => (
                   <span key={i}>{l.item_name || l.lot_no}: <span className="font-semibold">{l.bags}</span>{l.sizeKg ? <span className="text-amber-600"> ×{l.sizeKg}kg</span> : null}</span>
