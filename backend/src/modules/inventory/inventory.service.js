@@ -2870,8 +2870,55 @@ const inventoryService = {
       }
     }
 
+    // What the mill ACTUALLY packed the finished rice into, if it recorded a
+    // packing run. This beats every inference: the predominant raw katta size is
+    // what the paddy ARRIVED in, not what the rice left in. Batch M-001 arrived
+    // in 50kg katta and was packed into 100 × 25kg bags, and the output lot was
+    // stamped 50 × 50kg — a figure nobody had packed, which then followed the
+    // rice onto the order and the documents.
+    const packLogs = await trx('mill_packing_logs')
+      .where({ batch_id: batchId })
+      .select('capacity_kg_per_bag')
+      .sum({ bags: 'bags_count' })
+      .groupBy('capacity_kg_per_bag');
+    let packedSpec = null;   // { sizeKg, bags } — the predominant PACKED size
+    for (const r of packLogs) {
+      const sizeKg = num(r.capacity_kg_per_bag);
+      const bags = Math.round(num(r.bags));
+      if (sizeKg <= 0 || bags <= 0) continue;
+      if (!packedSpec || bags > packedSpec.bags) packedSpec = { sizeKg, bags };
+    }
+
     let freed = 0; bySize.forEach((b) => { freed += b; });
-    if (freed <= 0) return null; // no katta intake
+    if (freed <= 0) {
+      // No katta to free — a batch fed by FINISHED or by-product lots rather than
+      // raw (a re-mill of owned stock), so there are no sacks to return. The
+      // packing run is still the truth about how the output is bagged, and used
+      // to be lost here: M-002 packed 960 × 25kg and its output lot carried no
+      // bag spec at all, because this returned before the stamping below.
+      if (packedSpec) {
+        const finishedLots = await trx('inventory_lots')
+          .where({ batch_ref: `batch-${batchId}` }).where('type', 'finished');
+        let stamped = 0;
+        for (const l of finishedLots) {
+          const kg = num(l.net_weight_kg) > 0 ? num(l.net_weight_kg) : num(l.qty);
+          const bags = Math.ceil(kg / packedSpec.sizeKg);
+          stamped += bags;
+          await trx('inventory_lots').where('id', l.id).update({
+            total_bags: bags,
+            bag_size_kg: packedSpec.sizeKg,
+            bag_weight_kg: packedSpec.sizeKg,
+            updated_at: trx.fn.now(),
+          });
+        }
+        return {
+          capacityKg: packedSpec.sizeKg, rawBags: 0, freed: 0,
+          outputBags: stamped, packed: 0, net: 0,
+          sizes: [], shortages: [], packedFromRun: true,
+        };
+      }
+      return null; // no katta intake and nothing packed
+    }
 
     // Predominant size (most bags) — what the outputs are packed in.
     let predSize = 0, predBags = -1;
@@ -2920,25 +2967,6 @@ const inventoryService = {
     await trx('mill_stock_movements').where({ reference_type: 'batch_katta', reference_id: batchId }).del();
 
     const outLots = await trx('inventory_lots').where({ batch_ref: `batch-${batchId}` }).whereIn('type', ['finished', 'byproduct']);
-
-    // What the mill ACTUALLY packed the finished rice into, if it recorded a
-    // packing run. This beats every inference: the predominant raw katta size is
-    // what the paddy ARRIVED in, not what the rice left in. Batch M-001 arrived
-    // in 50kg katta and was packed into 100 × 25kg bags, and the output lot was
-    // stamped 50 × 50kg — a figure nobody had packed, which then followed the
-    // rice onto the order and the documents.
-    const packLogs = await trx('mill_packing_logs')
-      .where({ batch_id: batchId })
-      .select('capacity_kg_per_bag')
-      .sum({ bags: 'bags_count' })
-      .groupBy('capacity_kg_per_bag');
-    let packedSpec = null;   // { sizeKg, bags } — the predominant PACKED size
-    for (const r of packLogs) {
-      const sizeKg = num(r.capacity_kg_per_bag);
-      const bags = Math.round(num(r.bags));
-      if (sizeKg <= 0 || bags <= 0) continue;
-      if (!packedSpec || bags > packedSpec.bags) packedSpec = { sizeKg, bags };
-    }
 
     if (!exportPack) {
       // ── Standard path: byproducts go into the predominant raw katta. Finished

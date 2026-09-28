@@ -111,3 +111,55 @@ describe('bag_weight_kg moves with bag_size_kg', () => {
     }
   });
 });
+
+// A batch fed by FINISHED or by-product lots (a re-mill of owned stock) frees no
+// katta — there are no raw sacks to return. The function bailed out at
+// `if (freed <= 0) return null` BEFORE the stamping, so M-002, which packed
+// 960 × 25kg, carried no bag spec at all on its output lot.
+describe('a batch with no katta still records how its output was packed', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const src = fs.readFileSync(
+    path.join(__dirname, '../modules/inventory/inventory.service.js'), 'utf8',
+  );
+  const fn = (() => {
+    const at = src.indexOf('async reconcileBatchKatta');
+    const open = src.indexOf('{', src.indexOf(')', src.indexOf('(', at)));
+    let d = 0;
+    for (let i = open; i < src.length; i += 1) {
+      if (src[i] === '{') d += 1;
+      else if (src[i] === '}') { d -= 1; if (d === 0) return src.slice(at, i + 1); }
+    }
+    throw new Error('reconcileBatchKatta not found');
+  })();
+
+  test('the packing run is read BEFORE the no-katta exit', () => {
+    const packIdx = fn.indexOf("trx('mill_packing_logs')");
+    const exitIdx = fn.indexOf('if (freed <= 0)');
+    expect(packIdx).toBeGreaterThan(-1);
+    expect(exitIdx).toBeGreaterThan(-1);
+    expect(packIdx).toBeLessThan(exitIdx);
+  });
+
+  test('the no-katta path still stamps the finished lots from it', () => {
+    const at = fn.indexOf('if (freed <= 0)');
+    const branch = fn.slice(at, at + 1400);
+    expect(branch).toContain('if (packedSpec)');
+    expect(branch).toMatch(/total_bags: bags/);
+    expect(branch).toMatch(/bag_size_kg: packedSpec\.sizeKg/);
+    expect(branch).toMatch(/bag_weight_kg: packedSpec\.sizeKg/);
+  });
+
+  test('it still returns null when there is no katta AND no packing run', () => {
+    const at = fn.indexOf('if (freed <= 0)');
+    expect(fn.slice(at, at + 1600)).toMatch(/return null; \/\/ no katta intake and nothing packed/);
+  });
+
+  test('the size and the per-bag weight are stamped together here too', () => {
+    const at = fn.indexOf('if (freed <= 0)');
+    const branch = fn.slice(at, at + 1400);
+    const size = /bag_size_kg: ([A-Za-z0-9_.]+)/.exec(branch);
+    const weight = /bag_weight_kg: ([A-Za-z0-9_.]+)/.exec(branch);
+    expect(weight[1]).toBe(size[1]);
+  });
+});
