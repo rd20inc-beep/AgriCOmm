@@ -9,15 +9,11 @@ const { nextDocNo } = require('../../utils/docNumber');
 // NAMES (customers + suppliers). Transporters (haulers) stay visible — they're
 // operational. Resolve the caller's role name (cached on req.user._roleName when
 // available, else looked up by role_id) and return true when names must be hidden.
-const PARTY_VISIBLE_ROLES = ['Super Admin', 'Owner', 'Admin'];
-async function isPartyMasked(req) {
-  let roleName = req.user && req.user._roleName;
-  if (!roleName && req.user && req.user.role_id) {
-    const rr = await db('roles').where({ id: req.user.role_id }).first('name');
-    roleName = rr && rr.name;
-  }
-  return !PARTY_VISIBLE_ROLES.includes(roleName);
-}
+// This used to be a second copy of the rule, with its own PARTY_VISIBLE_ROLES
+// list. Two copies meant the shared helper could be changed while the one that
+// actually masks payables carried on with the old list — so the policy now has a
+// single home in shared/partyMask.js.
+const { isPartyMasked } = require('../../shared/partyMask');
 
 // Resolve a payment row to its PKR equivalent using the strongest
 // signal we have: stored base_amount_pkr first, then amount × fx_rate

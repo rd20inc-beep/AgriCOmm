@@ -37,6 +37,7 @@ import SlideDrawer from '../../../components/SlideDrawer';
 import SearchSelect from '../../../shared/components/SearchSelect';
 import MillSupplierStatement from '../components/MillSupplierStatement';
 import MillSupplierPayDrawer from '../components/MillSupplierPayDrawer';
+import { UNASSIGNED, isStoredPayable } from '../utils/payableBuckets';
 import MillCustomerStatement from '../components/MillCustomerStatement';
 import MillCustomerPayDrawer from '../components/MillCustomerPayDrawer';
 import StatementPayDrawer from '../../finance/components/StatementPayDrawer';
@@ -843,9 +844,23 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
     const map = {};
     for (const p of payables) {
       const name = p.supplierName;
-      if (!name) continue;
-      const key = p.supplierId || name;
-      if (!map[key]) map[key] = { id: p.supplierId || null, name, billed: 0, paid: 0, outstanding: 0, count: 0 };
+      // A bill with no supplier on it is still a bill. Mill expenses (fuel,
+      // lunch, maintenance, a one-off transport run) are often entered without
+      // naming a vendor, and they used to be dropped here — so they could not be
+      // seen or settled from this tab at all. They now collect under one row.
+      const key = name ? (p.supplierId || name) : (isStoredPayable(p) ? UNASSIGNED : null);
+      // Cost-derived rows (MC-/EC-/ME-) are NOT debts. A batch's packaging cost
+      // is the allocation of bags already bought — the money owed for them sits
+      // on the store purchase, under that vendor. Offering to "pay" the
+      // allocation as well would pay for the same bags twice.
+      if (!key) continue;
+      if (!map[key]) {
+        map[key] = {
+          id: name ? (p.supplierId || null) : UNASSIGNED,
+          name: name || 'Unassigned — no supplier on the bill',
+          billed: 0, paid: 0, outstanding: 0, count: 0,
+        };
+      }
       map[key].billed += parseFloat(p.originalAmount) || 0;
       map[key].paid += parseFloat(p.paidAmount) || 0;
       map[key].outstanding += parseFloat(p.outstanding) || 0;
@@ -1638,8 +1653,8 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
                     {supplierRows.map((r) => (
                       <tr
                         key={r.id || r.name}
-                        className={`hover:bg-blue-50/40 ${r.id ? 'cursor-pointer' : ''} ${selectedSupplier?.id === r.id ? 'bg-blue-50/60' : ''}`}
-                        onClick={() => r.id && setSelectedSupplier({ id: r.id, name: r.name })}
+                        className={`hover:bg-blue-50/40 ${r.id && r.id !== UNASSIGNED ? 'cursor-pointer' : ''} ${selectedSupplier?.id === r.id ? 'bg-blue-50/60' : ''}`}
+                        onClick={() => r.id && r.id !== UNASSIGNED && setSelectedSupplier({ id: r.id, name: r.name })}
                       >
                         <td data-label="Supplier" className="px-4 py-2 font-medium text-gray-800">{r.name}</td>
                         <td data-label="Invoices" className="mob-hide px-4 py-2 text-right tabular-nums text-gray-500">{r.count}</td>
@@ -1655,7 +1670,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
                               <Banknote size={12} /> Pay
                             </button>
                           )}
-                          {r.id && <span className="text-blue-500 text-xs">View →</span>}
+                          {r.id && r.id !== UNASSIGNED && <span className="text-blue-500 text-xs">View →</span>}
                         </td>
                       </tr>
                     ))}
