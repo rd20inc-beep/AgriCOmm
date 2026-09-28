@@ -2899,15 +2899,39 @@ const inventoryService = {
 
     const outLots = await trx('inventory_lots').where({ batch_ref: `batch-${batchId}` }).whereIn('type', ['finished', 'byproduct']);
 
+    // What the mill ACTUALLY packed the finished rice into, if it recorded a
+    // packing run. This beats every inference: the predominant raw katta size is
+    // what the paddy ARRIVED in, not what the rice left in. Batch M-001 arrived
+    // in 50kg katta and was packed into 100 × 25kg bags, and the output lot was
+    // stamped 50 × 50kg — a figure nobody had packed, which then followed the
+    // rice onto the order and the documents.
+    const packLogs = await trx('mill_packing_logs')
+      .where({ batch_id: batchId })
+      .select('capacity_kg_per_bag')
+      .sum({ bags: 'bags_count' })
+      .groupBy('capacity_kg_per_bag');
+    let packedSpec = null;   // { sizeKg, bags } — the predominant PACKED size
+    for (const r of packLogs) {
+      const sizeKg = num(r.capacity_kg_per_bag);
+      const bags = Math.round(num(r.bags));
+      if (sizeKg <= 0 || bags <= 0) continue;
+      if (!packedSpec || bags > packedSpec.bags) packedSpec = { sizeKg, bags };
+    }
+
     if (!exportPack) {
-      // ── Standard path (unchanged): pack all outputs into the predominant size. ──
-      // Output katta = Σ ceil(output kg ÷ predominant size); stamp count + size on lots.
+      // ── Standard path: byproducts go into the predominant raw katta. Finished
+      // rice goes into whatever the packing run actually used, when there was
+      // one — and those bags come from mill store (deducted by the packing
+      // service), so they must NOT also consume freed katta. Without a packing
+      // run the old behaviour stands: everything into the predominant katta.
       let packed = 0;
       for (const l of outLots) {
         const kg = num(l.net_weight_kg) > 0 ? num(l.net_weight_kg) : num(l.qty);
-        const bags = Math.ceil(kg / predSize);
-        packed += bags;
-        await trx('inventory_lots').where('id', l.id).update({ total_bags: bags, bag_size_kg: predSize, updated_at: trx.fn.now() });
+        const usePacked = packedSpec && l.type === 'finished';
+        const size = usePacked ? packedSpec.sizeKg : predSize;
+        const bags = Math.ceil(kg / size);
+        if (!usePacked) packed += bags;   // only katta-packed output consumes katta
+        await trx('inventory_lots').where('id', l.id).update({ total_bags: bags, bag_size_kg: size, updated_at: trx.fn.now() });
       }
 
       // Apply per size: +freed (return); the predominant size also -packed (consumption).
