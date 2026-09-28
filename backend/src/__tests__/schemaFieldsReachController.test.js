@@ -234,12 +234,12 @@ describe('updateExportShipment — contract_number', () => {
   });
 });
 
-// The Shipment form is the third place the contract number can be set, after
-// creation and the Overview specs form. Blanking the field there CLEARS it, but a
-// request that never mentions it leaves it alone — two different intentions that a
-// plain `x || null` cannot tell apart. Getting that wrong is how voyage_number and
-// gd_number came to be nulled on every save.
-describe('updateShipment resolves contract_number three ways', () => {
+// How contract_number (and the other fifteen shipment fields) resolve — blank
+// clears, absent keeps — is covered directly in shipmentField.test.js, against the
+// exported helper rather than by scraping the expression out of the controller.
+// What is still worth asserting here is that the field is READ from the body at
+// all: declared in the schema but never destructured would be just as dead.
+describe('updateShipment reads contract_number from the body', () => {
   const fs = require('fs');
   const path = require('path');
   const src = fs.readFileSync(
@@ -258,35 +258,11 @@ describe('updateShipment resolves contract_number three ways', () => {
     throw new Error('updateShipment not found');
   })();
 
-  test('it is destructured from the body', () => {
+  test('it is destructured from req.body', () => {
     expect(/const \{[\s\S]*?contract_number[\s\S]*?\} = req\.body/.test(updateBlock)).toBe(true);
   });
 
-  // The written expression, evaluated rather than pattern-matched, so the test is
-  // about behaviour and not about how the line happens to be spelled.
-  const resolve = (() => {
-    const m = /contract_number:\s*([\s\S]*?),\n\s{10}voyage_number:/.exec(updateBlock);
-    if (!m) throw new Error('could not find the contract_number expression');
-    // eslint-disable-next-line no-new-func
-    return new Function('contract_number', 'order', `return (${m[1]});`);
-  })();
-
-  test('a value sets it', () => {
-    expect(resolve('AGRI/2026/014', { contract_number: 'OLD/1' })).toBe('AGRI/2026/014');
-  });
-
-  test('a blank clears it', () => {
-    expect(resolve('', { contract_number: 'OLD/1' })).toBeNull();
-    expect(resolve(null, { contract_number: 'OLD/1' })).toBeNull();
-  });
-
-  test('not sending it at all keeps the stored value', () => {
-    // An older cached client, or any caller posting a partial shipment payload,
-    // must not wipe a number it never knew about.
-    expect(resolve(undefined, { contract_number: 'OLD/1' })).toBe('OLD/1');
-  });
-
-  test('absent with nothing stored stays null', () => {
-    expect(resolve(undefined, { contract_number: null })).toBeNull();
+  test('and written into the update', () => {
+    expect(updateBlock).toContain('contract_number: resolveShipmentField(');
   });
 });
