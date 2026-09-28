@@ -1109,8 +1109,13 @@ const inventoryService = {
       const [lot] = await trx('inventory_lots')
         .insert({
           lot_no: lotNo,
-          // Every blended byproduct is per-batch: broken via grade (M-033-B1),
-          // bran/husk/sortex via the name + blend_batch_no.
+          // Every blended byproduct is per-batch — via lot_no (M-001-B2-01),
+          // blend_batch_no, variety and batch_ref, all set below. It used to be
+          // done by prefixing the GRADE too (M-001-B2), which cost the column its
+          // meaning: every classifier matches the grade exactly
+          // (`grade IN ('B1','B2','B3','CSR','Short Grain')`, `g === 'B1'`), so a
+          // blended lot fell through to the catch-all bucket AND missed its
+          // per-grade by-product price. The grade is the grade.
           item_name: isBlend ? `Blend ${blendNo} — ${bp.name}` : bp.name,
           type: 'byproduct',
           entity: 'mill',
@@ -1132,7 +1137,7 @@ const inventoryService = {
           landed_cost_per_kg: bpCostPerKg,
           raw_cost_component: bpCostPerKg,
           cost_incomplete: bpCostPerKg === 0,
-          grade: (isBlend && bp.grade) ? `${blendNo}-${bp.grade}` : (bp.grade || null),
+          grade: bp.grade || null,
           // By-products are identified by their grade/category (B1, B2, CSR, …)
           // in item_name + grade (→ the "Subtype" column) — never tagged "Broken".
           // variety carries the SOURCE RICE TYPE NAME so the "Item / Variety"
