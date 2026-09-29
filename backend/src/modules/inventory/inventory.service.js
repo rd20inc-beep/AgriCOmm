@@ -836,6 +836,33 @@ const inventoryService = {
   // =========================================================================
   // Record milling output (finished rice + by-products)
   // =========================================================================
+  /**
+   * Create an output lot, or update the one this batch already produced.
+   *
+   * Re-recording a yield used to DELETE every output lot and insert fresh ones.
+   * That threw away three things the lot owns: its lot_no (a hand-given name
+   * like "WHITE HORSE D98 2.5 TON LOT" reverted to M-001-FIN-01), its id (so
+   * anything pointing at it broke), and its ledger (lot_transactions were
+   * deleted with it, which is why a re-yielded lot looked like it had no
+   * history). Matching the existing lot and updating it keeps all three.
+   *
+   * `match` identifies the same output across re-yields: the finished lot of a
+   * batch, or a by-product of a given grade / name.
+   */
+  async upsertOutputLot(trx, match, row) {
+    const existing = await trx('inventory_lots').where(match).first();
+    if (!existing) {
+      const [created] = await trx('inventory_lots').insert(row).returning('*');
+      return created;
+    }
+    // Keep what belongs to the lot rather than to this yield: its number (which
+    // may have been renamed by hand) and its identity.
+    const { lot_no: _generated, ...rest } = row;
+    await trx('inventory_lots').where('id', existing.id)
+      .update({ ...rest, updated_at: trx.fn.now() });
+    return trx('inventory_lots').where('id', existing.id).first();
+  },
+
   async recordMillingOutput(trx, {
     batchId,
     finishedKg,
@@ -990,8 +1017,11 @@ const inventoryService = {
         batchNo: batchRow && batchRow.batch_no,
         type: 'finished',
       });
-      const [lot] = await trx('inventory_lots')
-        .insert({
+      // One finished lot per batch — matched on that, so a re-yield updates it
+      // instead of replacing it and losing its name, id and ledger.
+      const lot = await inventoryService.upsertOutputLot(trx, {
+        batch_ref: `batch-${batchId}`, type: 'finished',
+      }, {
           lot_no: lotNo,
           item_name: isBlend ? `Blend ${blendNo} — Finished Rice` : (productName || 'Finished Rice'),
           type: 'finished',
@@ -1025,8 +1055,7 @@ const inventoryService = {
           raw_cost_component: rawCostComponent || null,
           milling_cost_component: millingCostComponent || null,
           ...svcOwnership,
-        })
-        .returning('*');
+      });
 
       const movement = await inventoryService.postMovement(trx, {
         movementType: MOVEMENT_TYPES.PRODUCTION_OUTPUT,
@@ -1113,8 +1142,13 @@ const inventoryService = {
         grade: bp.grade, // B1/B2/B3/CSR/Short Grain — null for sortex/bran/husk
       });
       const bpProductId = await byproductProductLookup(bp.name);
-      const [lot] = await trx('inventory_lots')
-        .insert({
+      // The same by-product across re-yields: a graded one is identified by its
+      // grade, an ungraded one (Powder, Sweeping, Bran…) by its product. Match
+      // on that and update, so the lot keeps its number, id and ledger.
+      const bpMatch = bp.grade
+        ? { batch_ref: `batch-${batchId}`, type: 'byproduct', grade: bp.grade }
+        : { batch_ref: `batch-${batchId}`, type: 'byproduct', product_id: bpProductId };
+      const lot = await inventoryService.upsertOutputLot(trx, bpMatch, {
           lot_no: lotNo,
           // Every blended byproduct is per-batch — via lot_no (M-001-B2-01),
           // blend_batch_no, variety and batch_ref, all set below. It used to be
@@ -1153,8 +1187,7 @@ const inventoryService = {
           status: 'Available',
           created_by: userId || null,
           ...svcOwnership,
-        })
-        .returning('*');
+      });
 
       const movement = await inventoryService.postMovement(trx, {
         movementType: MOVEMENT_TYPES.BYPRODUCT_OUTPUT,
@@ -3083,6 +3116,7 @@ const inventoryService = {
     const powder = p(batch.powder_kg), sweeping = p(batch.sweeping_kg), choba = p(batch.choba_kg);
 
     // 1. Existing output lots + safety: must be untouched (not reserved/sold/consumed).
+    const resyncStartedAt = new Date();
     const outLots = await trx('inventory_lots')
       .where({ batch_ref: `batch-${batchId}` }).whereIn('type', ['finished', 'byproduct'])
       .select('id', 'reserved_qty', 'sold_weight_kg');
@@ -3095,12 +3129,19 @@ const inventoryService = {
         const e = new Error('This batch\'s output has already been reserved, sold or re-milled, so its yield can\'t be re-recorded. Reverse those movements first, or use a stock adjustment.');
         e.status = 409; throw e;
       }
-      // 2. Delete output lots + their ledger/lineage (raw lots stay consumed).
-      await trx('lot_source_mapping').where((q) => q.whereIn('parent_lot_id', outIds).orWhereIn('child_lot_id', outIds)).del();
-      await trx('lot_transactions').whereIn('lot_id', outIds).del();
-      await trx('stock_adjustments').whereIn('lot_id', outIds).del();
-      await trx('stock_count_items').whereIn('lot_id', outIds).del();
-      await trx('inventory_lots').whereIn('id', outIds).del();
+      // 2. The lots are NOT deleted. recordMillingOutput below matches each
+      // output to the lot this batch already produced and updates it, so the
+      // lot keeps its number (which may have been renamed by hand), its id and
+      // its ledger. Deleting and re-inserting is what turned
+      // "WHITE HORSE D98 2.5 TON LOT" back into M-001-FIN-01 and left the
+      // re-yielded lot looking like it had no history.
+      //
+      // Only the movement rows this batch itself wrote are cleared, so the
+      // re-recorded yield does not stack a second production receipt on top of
+      // the first. Anything else on the lot is left alone — and the guard above
+      // has already refused if the output was reserved, sold or re-milled.
+      await trx('lot_transactions').whereIn('lot_id', outIds)
+        .where({ reference_module: 'milling_batch', reference_id: batchId }).del();
     }
 
     // 3. Residual allocation from the batch's current state (same as fresh yield).
@@ -3153,7 +3194,27 @@ const inventoryService = {
     // Re-account katta (freed from raw / consumed packing the new outputs).
     const katta = await inventoryService.reconcileBatchKatta(trx, batchId, userId);
 
-    return { resynced: true, recreatedFrom: outIds.length, finishedCostPerKg: a.finishedCostPerKg, netPurchase: a.netPurchase, byproductValue: a.byproductValue, katta };
+    // An output that is no longer produced at all — a grade zeroed out on the
+    // edited yield — is retired rather than left behind as a phantom lot. Only
+    // ones this resync did not just touch, and only while they hold nothing.
+    let retired = 0;
+    if (outIds.length) {
+      const stale = await trx('inventory_lots')
+        .whereIn('id', outIds)
+        .where('updated_at', '<', resyncStartedAt)
+        .whereRaw('COALESCE(qty, 0) = 0')
+        .select('id');
+      if (stale.length) {
+        const staleIds = stale.map((r) => r.id);
+        await trx('lot_source_mapping').where((q) => q.whereIn('parent_lot_id', staleIds).orWhereIn('child_lot_id', staleIds)).del();
+        await trx('lot_transactions').whereIn('lot_id', staleIds).del();
+        await trx('stock_adjustments').whereIn('lot_id', staleIds).del();
+        await trx('stock_count_items').whereIn('lot_id', staleIds).del();
+        retired = await trx('inventory_lots').whereIn('id', staleIds).del();
+      }
+    }
+
+    return { resynced: true, updatedInPlace: outIds.length, retired, finishedCostPerKg: a.finishedCostPerKg, netPurchase: a.netPurchase, byproductValue: a.byproductValue, katta };
   },
 };
 
