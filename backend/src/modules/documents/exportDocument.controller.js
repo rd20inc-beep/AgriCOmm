@@ -74,6 +74,13 @@ async function gatherOrderData(orderId) {
     .where({ order_id: orderId })
     .orderBy('sequence_no', 'asc');
 
+  // Freight escalation debit notes (mig 304). Cancelled ones are withdrawn
+  // claims and must not print — the buyer would read a cancelled note as owing.
+  const debitNotes = await db('export_debit_notes')
+    .where({ order_id: orderId, status: 'Issued' })
+    .orderBy('issue_date', 'asc')
+    .orderBy('id', 'asc');
+
   // Company profile from system_settings
   const settingsRows = await db('system_settings').select('key', 'value');
   const settings = {};
@@ -410,6 +417,21 @@ const exportDocumentController = {
           shipmentRemarks: order.shipment_remarks || '',
         },
 
+        // Freight escalation debit notes — the claims raised under the clause
+        // on the Proforma and the Sales Contract, rendered by the Freight Debit
+        // Note document.
+        debitNotes: debitNotes.map((d) => ({
+          debitNoteNo: d.debit_note_no,
+          issueDate: formatDate(d.issue_date),
+          currency: d.currency || order.currency || 'USD',
+          amount: parseFloat(d.amount) || 0,
+          basis: d.basis || 'freight_escalation',
+          oldRatePerMT: d.old_rate_per_mt == null ? null : parseFloat(d.old_rate_per_mt),
+          newRatePerMT: d.new_rate_per_mt == null ? null : parseFloat(d.new_rate_per_mt),
+          qtyMT: d.qty_mt == null ? null : parseFloat(d.qty_mt),
+          reason: d.reason || '',
+        })),
+
         // Containers
         containers: containers.map((c, i) => ({
           sequenceNo: c.sequence_no || i + 1,
@@ -606,6 +628,13 @@ const exportDocumentController = {
           };
           break;
 
+        case 'freight-debit-note':
+          document = {
+            type: 'Freight Debit Note',
+            ...common,
+          };
+          break;
+
         case 'packing-list':
           document = {
             type: 'Packing List',
@@ -739,6 +768,16 @@ const exportDocumentController = {
         { key: 'buyer-covering-letter', label: 'Buyer Covering Letter', availableFrom: 9, ready: true },
         { key: 'lab-test-request', label: 'PCSIR / Lab Test Request', availableFrom: 5, ready: true },
       ];
+
+      // The freight debit note is the only document here that is not always
+      // offered: it exists only once a claim has actually been raised, and an
+      // empty one would say nothing to the buyer. Everything else generates with
+      // blanks, which is why the rest of this list is unconditional.
+      const hasDebitNote = await db('export_debit_notes')
+        .where({ order_id: order.id, status: 'Issued' }).first('id');
+      if (hasDebitNote) {
+        docs.push({ key: 'freight-debit-note', label: 'Freight Debit Note', availableFrom: 9, ready: true });
+      }
 
       return res.json({
         success: true,

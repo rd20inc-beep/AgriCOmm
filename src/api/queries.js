@@ -120,6 +120,40 @@ export function useConfirmBalance() {
   });
 }
 
+// ── Freight escalation debit notes ──
+// Issuing one moves the order's balance and posts to the GL, so everything that
+// reads either has to be refreshed: the order, its receivables and the ledger.
+export function useDebitNotes(orderId) {
+  return useQuery({
+    queryKey: ['export', 'debit-notes', orderId],
+    queryFn: async () => (await exportOrdersApi.listDebitNotes(orderId))?.data || [],
+    enabled: !!orderId,
+  });
+}
+
+function debitNoteInvalidation(qc, id) {
+  qc.invalidateQueries({ queryKey: ['export', 'debit-notes', id] });
+  qc.invalidateQueries({ queryKey: queryKeys.orders.detail(id) });
+  qc.invalidateQueries({ queryKey: queryKeys.orders.all });
+  qc.invalidateQueries({ queryKey: queryKeys.receivables.all });
+}
+
+export function useIssueDebitNote() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }) => exportOrdersApi.issueDebitNote(id, data),
+    onSuccess: (_, { id }) => debitNoteInvalidation(qc, id),
+  });
+}
+
+export function useCancelDebitNote() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, noteId, data }) => exportOrdersApi.cancelDebitNote(id, noteId, data),
+    onSuccess: (_, { id }) => debitNoteInvalidation(qc, id),
+  });
+}
+
 // Item 14 — export receipt: record pending / Finance confirm / reject / inbox.
 export function useRecordExportReceipt() {
   const qc = useQueryClient();

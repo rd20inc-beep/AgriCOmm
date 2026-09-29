@@ -1,7 +1,8 @@
 import React from 'react';
 import { DollarSign, Plus, Factory } from 'lucide-react';
+import DebitNotesPanel from './DebitNotesPanel';
 
-export default function FinancialsTab({ order, formatCurrency, formatPKR, totalCosts, grossProfit, marginPct, onConfirmAdvance, onRequestBalance, onAddExpense, onAddReceivable, canConfirmAdvance, canRequestBalance, exportCostCategories }) {
+export default function FinancialsTab({ order, formatCurrency, formatPKR, totalCosts, grossProfit, marginPct, onConfirmAdvance, onRequestBalance, onAddExpense, onAddReceivable, canConfirmAdvance, canRequestBalance, exportCostCategories, addToast }) {
   const formatCost = formatPKR || formatCurrency;
   const totalReceivables = order.advanceExpected + order.balanceExpected;
   const totalReceived = order.advanceReceived + order.balanceReceived;
@@ -33,8 +34,17 @@ export default function FinancialsTab({ order, formatCurrency, formatPKR, totalC
             <span className="text-gray-700">Total Receivables</span>
             <span className="text-gray-900">{formatCurrency(totalReceivables)}</span>
           </div>
+          <div className="flex justify-between text-sm">
+            <span className="text-gray-600">Outstanding</span>
+            <span className={`font-medium ${outstandingBalance > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>{formatCurrency(outstandingBalance)}</span>
+          </div>
         </div>
       </div>
+
+      {/* Freight escalation debit notes. Raised after shipment, when the
+          carrier's actual charge is known — the claim lands on the balance
+          above, which is what the clause the buyer signed promises. */}
+      <DebitNotesPanel order={order} addToast={addToast} />
 
       {/* Outflows — mill→export costing order with a Korra Ready Rice subtotal (Batch 7) */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">

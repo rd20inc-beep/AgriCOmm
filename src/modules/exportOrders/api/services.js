@@ -8,6 +8,11 @@ export const exportOrdersApi = {
   cancel: (id, data) => api.post(`/api/export-orders/${id}/cancel`, data),
   confirmAdvance: (id, data) => api.post(`/api/export-orders/${id}/confirm-advance`, data),
   confirmBalance: (id, data) => api.post(`/api/export-orders/${id}/confirm-balance`, data),
+  // Freight escalation debit notes — raised after shipment when the carrier's
+  // actual charge is known; the claim is added to the order's balance.
+  listDebitNotes: (id) => api.get(`/api/export-orders/${id}/debit-notes`),
+  issueDebitNote: (id, data) => api.post(`/api/export-orders/${id}/debit-notes`, data),
+  cancelDebitNote: (id, noteId, data) => api.post(`/api/export-orders/${id}/debit-notes/${noteId}/cancel`, data),
   // Batch 4: export-ready stock pool (redacted for export users).
   listExportReadyStock: () => api.get('/api/export-orders/available-stock'),
   // Item 14: record a PENDING export receipt → Finance confirms with FX.
