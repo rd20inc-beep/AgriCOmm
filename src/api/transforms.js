@@ -124,6 +124,19 @@ export function transformOrder(dbOrder) {
     customerPort: dbOrder.customer_port || '',
     country: dbOrder.customer_country || dbOrder.country || '',
     docAddressMode: dbOrder.doc_address_mode || 'country',
+    // Unit the EXPORT DOCUMENTS print weights in — 'kg', or 'lb' for the USA and
+    // Canada. Presentation only: everything stored and reported stays KG.
+    docWeightUnit: dbOrder.doc_weight_unit || 'kg',
+    // Freight held as data rather than typed into the document by hand. See
+    // src/shared/constants/exportFreight.js — freightDisplay decides whether the
+    // real CFR/CIF term prints with the price broken down inside it, or the price
+    // stays FOB with freight added as a line underneath.
+    freightPerMT: dbOrder.freight_per_mt == null ? null : parseFloat(dbOrder.freight_per_mt),
+    insurancePerMT: dbOrder.insurance_per_mt == null ? null : parseFloat(dbOrder.insurance_per_mt),
+    freightBasisDate: dbOrder.freight_basis_date || '',
+    freightValidUntil: dbOrder.freight_valid_until || '',
+    freightDisplay: dbOrder.freight_display || 'in_price',
+    freightClause: dbOrder.freight_clause || '',
     productId: dbOrder.product_id,
     productName: dbOrder.product_name || '',
     qtyMT: parseFloat(dbOrder.qty_mt) || 0,
