@@ -1317,6 +1317,28 @@ const reportingController = {
     try {
       const db = require('../../config/database');
       const { group_by = 'product', status = 'Available' } = req.query;
+      const includeEmpty = String(req.query.include_empty || '') === 'true';
+
+      // A lot holding nothing is not stock. Its row stays 'Available' after the
+      // rice is milled or sold, so it was reported at 0 kg — and, worse, still
+      // carrying its full intake sack count. Hidden unless include_empty=true.
+      const ON_HAND = '(CASE WHEN l.net_weight_kg > 0 THEN l.net_weight_kg ELSE CAST(l.qty AS DECIMAL) END)';
+      // Sacks/bags STILL ON HAND. total_bags is the intake count and is never
+      // decremented — milling consumes the rice, not the row — so it has to be
+      // scaled by the weight remaining. Lots with no intake count to scale fall
+      // back to dividing the weight by the pack size.
+      const PACK_KG = 'COALESCE(NULLIF(l.bag_weight_kg, 0), NULLIF(l.bag_size_kg, 0), 0)';
+      const UNITS_ON_HAND = `(CASE
+        WHEN COALESCE(l.total_bags, 0) > 0 AND COALESCE(l.received_net_weight_kg, 0) > 0
+          THEN LEAST(l.total_bags::numeric, ROUND(l.total_bags * (${ON_HAND} / l.received_net_weight_kg)))
+        ELSE ROUND(${ON_HAND} / COALESCE(NULLIF(${PACK_KG}, 0), 50))
+      END)`;
+      // A KATTA is the standard 50 kg sack; anything packed smaller is a retail
+      // bag and is counted under its own heading, never added to the katta.
+      // An unknown pack size is a sack — that is what loose intake is counted in.
+      const IS_KATTA = `(${PACK_KG} = 0 OR ${PACK_KG} >= 50)`;
+      const KATTA_ON_HAND = `(CASE WHEN ${IS_KATTA} THEN ${UNITS_ON_HAND} ELSE 0 END)`;
+      const BAGS_ON_HAND  = `(CASE WHEN ${IS_KATTA} THEN 0 ELSE ${UNITS_ON_HAND} END)`;
 
       let groupCol, nameCol;
       // "Subtype" mirrors the UI's lotSubtype() classification — splits
@@ -1383,6 +1405,7 @@ const reportingController = {
         .leftJoin('products as p',   'l.product_id',   'p.id');
       if (status && status !== 'all') q = q.where('l.status', status);
       if (group_by === 'byproduct') q = q.where('l.type', 'byproduct');
+      if (!includeEmpty) q = q.whereRaw(`${ON_HAND} > 0`);
       q = whScope.applyWarehouseScope(q, scope, 'l.warehouse_id');
 
       const rows = await q
@@ -1396,7 +1419,12 @@ const reportingController = {
           db.raw('COALESCE(SUM(CASE WHEN l.net_weight_kg > 0 THEN l.net_weight_kg ELSE CAST(l.qty AS DECIMAL) END), 0)::numeric as total_kg'),
           db.raw('COALESCE(SUM(CAST(l.available_qty AS DECIMAL)), 0)::numeric as available_kg'),
           db.raw('COALESCE(SUM(CAST(l.reserved_qty AS DECIMAL)), 0)::numeric as reserved_kg'),
-          db.raw('COALESCE(SUM(l.total_bags), 0)::int as total_bags'),
+          db.raw(`COALESCE(SUM(${KATTA_ON_HAND}), 0)::int as total_bags`),
+          db.raw(`COALESCE(SUM(${BAGS_ON_HAND}), 0)::int as total_bag_units`),
+          // One pack size across the group prints as "480 x 25 kg"; a mixed
+          // group has no single size and prints the count alone.
+          db.raw(`(CASE WHEN COUNT(DISTINCT CASE WHEN NOT ${IS_KATTA} THEN ${PACK_KG} END) = 1
+                        THEN MAX(CASE WHEN NOT ${IS_KATTA} THEN ${PACK_KG} END) END)::numeric as bag_size_kg`),
           // Value of what's on hand = on-hand kg × cost/kg (NOT the stale
           // landed_cost_total, which carries the original intake value).
           db.raw(`COALESCE(SUM(
@@ -1420,6 +1448,7 @@ const reportingController = {
         .leftJoin('products as p',   'l.product_id',   'p.id');
       if (status && status !== 'all') lotsQ = lotsQ.where('l.status', status);
       if (group_by === 'byproduct') lotsQ = lotsQ.where('l.type', 'byproduct');
+      if (!includeEmpty) lotsQ = lotsQ.whereRaw(`${ON_HAND} > 0`);
       lotsQ = whScope.applyWarehouseScope(lotsQ, scope, 'l.warehouse_id');
       const lotRows = await lotsQ.select(
         db.raw(`COALESCE(${nameCol}, '—') as group_name`),
@@ -1428,7 +1457,9 @@ const reportingController = {
         'l.variety', 'l.grade',
         db.raw('(CASE WHEN l.net_weight_kg > 0 THEN l.net_weight_kg ELSE CAST(l.qty AS DECIMAL) END)::numeric as on_hand_kg'),
         db.raw('(CAST(l.available_qty AS DECIMAL))::numeric as available_kg'),
-        db.raw('COALESCE(l.total_bags, 0)::int as bags'),
+        db.raw(`COALESCE(${KATTA_ON_HAND}, 0)::int as bags`),
+        db.raw(`COALESCE(${BAGS_ON_HAND}, 0)::int as bag_units`),
+        db.raw(`NULLIF(${PACK_KG}, 0)::numeric as pack_kg`),
         db.raw('COALESCE(NULLIF(l.landed_cost_per_kg, 0), NULLIF(l.rate_per_kg, 0), CAST(l.cost_per_unit AS DECIMAL), 0)::numeric as cost_per_kg'),
         'l.supplier_id', db.raw("COALESCE(s.name, '—') as supplier"),
         db.raw("COALESCE(w.name, '—') as warehouse"),
@@ -1440,6 +1471,7 @@ const reportingController = {
         (lotsByGroup[lr.group_name] = lotsByGroup[lr.group_name] || []).push({
           lotId: lr.lot_id, lotNo: lr.lot_no, item: lr.item, variety: lr.variety, grade: lr.grade,
           onHandKg: onHand, availableKg: parseFloat(lr.available_kg) || 0, bags: parseInt(lr.bags, 10) || 0,
+          bagUnits: parseInt(lr.bag_units, 10) || 0, bagSizeKg: lr.pack_kg == null ? null : Number(lr.pack_kg),
           perKg, supplier: lr.supplier, supplierId: lr.supplier_id || null, warehouse: lr.warehouse,
           valuePkr: Math.round(onHand * perKg * 100) / 100,
         });
@@ -1453,9 +1485,10 @@ const reportingController = {
           availableKg: a.availableKg + num(r.available_kg),
           reservedKg: a.reservedKg + num(r.reserved_kg),
           bags: a.bags + (parseInt(r.total_bags, 10) || 0),
+          bagUnits: a.bagUnits + (parseInt(r.total_bag_units, 10) || 0),
           valuePkr: a.valuePkr + num(r.total_value_pkr),
         }),
-        { lotCount: 0, totalKg: 0, availableKg: 0, reservedKg: 0, bags: 0, valuePkr: 0 }
+        { lotCount: 0, totalKg: 0, availableKg: 0, reservedKg: 0, bags: 0, bagUnits: 0, valuePkr: 0 }
       );
       grand.perKg = grand.totalKg > 0 ? grand.valuePkr / grand.totalKg : 0;
 
@@ -1472,6 +1505,8 @@ const reportingController = {
             availableKg: num(r.available_kg),
             reservedKg:  num(r.reserved_kg),
             bags:        parseInt(r.total_bags, 10) || 0,
+            bagUnits:    parseInt(r.total_bag_units, 10) || 0,
+            bagSizeKg:   r.bag_size_kg == null ? null : Number(r.bag_size_kg),
             perKg:       num(r.total_kg) > 0 ? num(r.total_value_pkr) / num(r.total_kg) : 0,
             valuePkr:    num(r.total_value_pkr),
             lots:        lotsByGroup[r.group_name] || [],
@@ -1871,6 +1906,12 @@ const reportingController = {
         .leftJoin('products as p', 'l.product_id', 'p.id')
         .leftJoin('warehouses as w', 'l.warehouse_id', 'w.id');
       if (status && status !== 'all') q = q.where('l.status', status);
+      // A fully milled or sold lot holds nothing and is not stock, but its row
+      // stays 'Available', so it was listed at 0 MT / 0 katta / Rs 0. Drop it.
+      // include_empty=true brings them back for anyone reconciling history.
+      if (String(req.query.include_empty || '') !== 'true') {
+        q = q.whereRaw('COALESCE(NULLIF(l.net_weight_kg, 0), l.qty, 0) > 0');
+      }
       // #9-scoping: printable stock detail lists only the caller's warehouses.
       q = whScope.applyWarehouseScope(q, await whScope.resolveWarehouseScope(req), 'l.warehouse_id');
       const lots = await q.select(
@@ -1920,8 +1961,18 @@ const reportingController = {
         const per = parseFloat(l.bag_weight_kg) || parseFloat(l.bag_size_kg) || 50;
         return per > 0 ? Math.round(onHandKg / per) : 0;
       };
+      // A KATTA is the standard 50 kg sack. Anything packed smaller is a retail
+      // bag and belongs under its own heading with its size — counting a
+      // 960 x 25 kg pack as 960 katta overstates the sacks and mixes two units.
+      const KATTA_MIN_KG = 50;
+      const packSizeOf = (l) => parseFloat(l.bag_weight_kg) || parseFloat(l.bag_size_kg) || 0;
+
       const rows = lots.map((l) => {
         const onHand = parseFloat(l.on_hand_kg) || 0; const cpk = parseFloat(l.cost_per_kg) || 0; const src = batchSrc[l.batch_ref];
+        const units = kattaOnHand(l, onHand);
+        const packKg = packSizeOf(l);
+        // An unknown pack size is a sack: that is what loose intake is counted in.
+        const isKatta = packKg === 0 || packKg >= KATTA_MIN_KG;
         return { lotId: l.id, lotNo: l.lot_no, type: l.type, item: l.product_name || l.item_name, variety: l.variety, grade: l.grade,
           subtype: tagOf(l),
           supplier: l.supplier_name, supplierId: l.supplier_id,
@@ -1931,7 +1982,12 @@ const reportingController = {
           // is never decremented — milling consumes the rice, not the row — so a
           // fully milled lot still carried its 1,000 katta into a stock report
           // showing 0 kg on hand.
-          bags: kattaOnHand(l, onHand),
+          // `bags` stays the KATTA count so existing readers are unaffected; a
+          // sub-50 kg pack reports no katta and appears under bagUnits instead.
+          bags: isKatta ? units : 0,
+          bagUnits: isKatta ? 0 : units,
+          bagSizeKg: packKg || null,
+          isKatta,
           intakeBags: l.total_bags,
           onHandMt: onHand / 1000, availableMt: (parseFloat(l.available_kg) || 0) / 1000, reservedMt: (parseFloat(l.reserved_kg) || 0) / 1000,
           costPerKg: cpk, valuePkr: onHand * cpk };

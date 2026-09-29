@@ -128,6 +128,10 @@ export function ProductionReportView({ data, companyName, range, preset }) {
 export function StockReportView({ data, companyName, groupLabel }) {
   const { rows, grand, asOf, groupBy } = data;
   const isSupplier = groupBy === 'supplier';
+  // Katta are the 50 kg sacks; anything packed smaller (25 kg, 10 kg ...) is a
+  // bag and is reported under its own heading with its size, never added in as
+  // sacks. One size prints as "480 x 25 kg", a mix prints the count alone.
+  const bagCell = (n, sizeKg) => (!n ? '—' : (sizeKg ? `${fmtKg(n)} \u00d7 ${Number(sizeKg)} kg` : fmtKg(n)));
   // Variety / Grade / By-product group lines link to the stock movement ledger.
   const ledgerLink = (r) => {
     if (groupBy === 'variety') return `/reports/stock-ledger?dimension=variety&key=${encodeURIComponent(r.name)}`;
@@ -146,6 +150,7 @@ export function StockReportView({ data, companyName, groupLabel }) {
         { label: 'Lots', value: grand.lotCount },
         { label: 'Total', value: `${fmtKg(grand.totalKg)} kg` },
         { label: 'Katta', value: fmtKg(grand.bags) },
+        { label: 'Bags', value: bagCell(grand.bagUnits) },
         { label: 'Available', value: `${fmtKg(grand.availableKg)} kg` },
         { label: 'Per kg', value: fmtPkr(grand.perKg) },
         { label: 'Value', value: fmtPkr(grand.valuePkr) },
@@ -153,15 +158,15 @@ export function StockReportView({ data, companyName, groupLabel }) {
 
       <Section title="Stock Breakdown">
         <ExpandableGroupTable
-          head={[`${groupLabel || 'Group'} / Lot`, 'Lots', 'On hand (kg)', 'Katta', 'Available (kg)', 'Reserved (kg)', 'Per kg', 'Value (PKR)']}
-          align={['left', 'right', 'right', 'right', 'right', 'right', 'right', 'right']}
+          head={[`${groupLabel || 'Group'} / Lot`, 'Lots', 'On hand (kg)', 'Katta', 'Bags', 'Available (kg)', 'Reserved (kg)', 'Per kg', 'Value (PKR)']}
+          align={['left', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right']}
           groups={(rows || []).map((r, idx) => ({
             key: `${r.name}-${idx}`,
             cells: [
               (isSupplier && r.supplierId)
                 ? <RefLink to={`/finance/statements?type=supplier&id=${r.supplierId}`}>{r.name}</RefLink>
                 : (ledgerLink(r) ? <RefLink to={ledgerLink(r)}>{r.name}</RefLink> : r.name),
-              r.lotCount, fmtKg(r.totalKg), fmtKg(r.bags), fmtKg(r.availableKg), fmtKg(r.reservedKg), fmtPkr(r.perKg), fmtPkr(r.valuePkr),
+              r.lotCount, fmtKg(r.totalKg), fmtKg(r.bags), bagCell(r.bagUnits, r.bagSizeKg), fmtKg(r.availableKg), fmtKg(r.reservedKg), fmtPkr(r.perKg), fmtPkr(r.valuePkr),
             ],
             childRows: (r.lots || []).map(l => [
               <span>
@@ -170,10 +175,10 @@ export function StockReportView({ data, companyName, groupLabel }) {
                 {(l.supplier && l.supplier !== '—') && <> · {l.supplierId ? <RefLink to={`/finance/statements?type=supplier&id=${l.supplierId}`}>{l.supplier}</RefLink> : <span className="text-gray-500">{l.supplier}</span>}</>}
                 {(l.warehouse && l.warehouse !== '—') && <span className="text-gray-400"> · {l.warehouse}</span>}
               </span>,
-              '', fmtKg(l.onHandKg), fmtKg(l.bags), fmtKg(l.availableKg), '', fmtPkr(l.perKg), fmtPkr(l.valuePkr),
+              '', fmtKg(l.onHandKg), fmtKg(l.bags), bagCell(l.bagUnits, l.bagSizeKg), fmtKg(l.availableKg), '', fmtPkr(l.perKg), fmtPkr(l.valuePkr),
             ]),
           }))}
-          totalRow={['TOTAL', grand.lotCount, fmtKg(grand.totalKg), fmtKg(grand.bags), fmtKg(grand.availableKg), fmtKg(grand.reservedKg), fmtPkr(grand.perKg), fmtPkr(grand.valuePkr)]}
+          totalRow={['TOTAL', grand.lotCount, fmtKg(grand.totalKg), fmtKg(grand.bags), bagCell(grand.bagUnits), fmtKg(grand.availableKg), fmtKg(grand.reservedKg), fmtPkr(grand.perKg), fmtPkr(grand.valuePkr)]}
           empty="No stock to report."
           hint="Click a group to expand its lots."
         />
@@ -697,6 +702,18 @@ export function StockDetailView({ data, companyName }) {
   const shownMt = shown.reduce((s, r) => s + (r.onHandMt || 0), 0);
   const shownValue = shown.reduce((s, r) => s + (r.valuePkr || 0), 0);
   const shownBags = shown.reduce((s, r) => s + (parseFloat(r.bags) || 0), 0);
+  // Bags are the sub-50 kg packs (25 kg, 10 kg, 5 kg ...). They are counted and
+  // reported separately from katta because a 25 kg bag is not a sack, and
+  // adding the two together gives a sack count nobody can reconcile.
+  const shownBagUnits = shown.reduce((s, r) => s + (parseFloat(r.bagUnits) || 0), 0);
+  // A bag column is only meaningful with its size. One size across the rows
+  // prints as "480 x 25 kg"; several print as a plain count.
+  const bagLabel = (rws) => {
+    const sizes = [...new Set(rws.filter(r => (parseFloat(r.bagUnits) || 0) > 0).map(r => Number(r.bagSizeKg)))];
+    const n = rws.reduce((s2, r) => s2 + (parseFloat(r.bagUnits) || 0), 0);
+    if (!n) return '—';
+    return sizes.length === 1 ? `${fmtKg(n)} \u00d7 ${sizes[0]} kg` : fmtKg(n);
+  };
 
   // One section per category. Raw then finished lead — that is the order the
   // mill thinks in — and every by-product follows alphabetically, so the report
@@ -718,6 +735,8 @@ export function StockDetailView({ data, companyName }) {
         mt: rws.reduce((s2, r) => s2 + (r.onHandMt || 0), 0),
         value: rws.reduce((s2, r) => s2 + (r.valuePkr || 0), 0),
         bags: rws.reduce((s2, r) => s2 + (parseFloat(r.bags) || 0), 0),
+        bagUnits: rws.reduce((s2, r) => s2 + (parseFloat(r.bagUnits) || 0), 0),
+        bagLabel: bagLabel(rws),
       };
     });
 
@@ -742,6 +761,7 @@ export function StockDetailView({ data, companyName }) {
         { label: `${tag} — Qty`, value: `${fmtMt(shownMt)} MT` },
         { label: `${tag} — Value`, value: fmtPkr(shownValue) },
         { label: 'Katta', value: fmtKg(shownBags) },
+        { label: 'Bags', value: bagLabel(shown) },
         { label: 'Share of stock', value: totals.mt > 0 ? `${(100 * shownMt / totals.mt).toFixed(1)}%` : '—' },
       ]} />
 
@@ -759,13 +779,14 @@ export function StockDetailView({ data, companyName }) {
         <Section key={sec.name}
           title={`${sec.name} — ${sec.rows.length} lot${sec.rows.length === 1 ? '' : 's'} · ${fmtMt(sec.mt)} MT · ${fmtPkr(sec.value)}`}>
           <Table
-            head={['Lot', 'Tag', 'Item', 'Variety/Grade', 'On hand (MT)', 'kg', 'Per kg', 'Katta', 'Available', 'Source / Supplier', 'Warehouse', 'Value (PKR)']}
-            align={['left', 'left', 'left', 'left', 'right', 'right', 'right', 'right', 'right', 'left', 'left', 'right']}
+            head={['Lot', 'Tag', 'Item', 'Variety/Grade', 'On hand (MT)', 'kg', 'Per kg', 'Katta', 'Bags', 'Available', 'Source / Supplier', 'Warehouse', 'Value (PKR)']}
+            align={['left', 'left', 'left', 'left', 'right', 'right', 'right', 'right', 'right', 'right', 'left', 'left', 'right']}
             rows={sec.rows.map(r => [
               <RefLink to={`/lot-inventory/${r.lotId}`}>{r.lotNo}</RefLink>,
               <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-medium bg-gray-100 text-gray-700 print:bg-transparent print:px-0">{r.subtype}</span>,
               r.item || '—', r.variety || r.grade || '—',
               fmtMt(r.onHandMt), fmtKg(r.onHandMt * 1000), fmtPkr(r.costPerKg), fmtKg(r.bags),
+              (parseFloat(r.bagUnits) || 0) > 0 ? `${fmtKg(r.bagUnits)} \u00d7 ${Number(r.bagSizeKg)} kg` : '—',
               fmtMt(r.availableMt),
               r.supplier
                 ? (r.supplierId ? <RefLink to={`/finance/statements?type=supplier&id=${r.supplierId}`}>{r.supplier}</RefLink> : r.supplier)
@@ -773,7 +794,7 @@ export function StockDetailView({ data, companyName }) {
               r.warehouse || '—', fmtPkr(r.valuePkr),
             ])}
             empty="No stock in this category."
-            totalRow={['', '', '', `${sec.name} TOTAL`, fmtMt(sec.mt), fmtKg(sec.mt * 1000), '', fmtKg(sec.bags), '', '', '', fmtPkr(sec.value)]}
+            totalRow={['', '', '', `${sec.name} TOTAL`, fmtMt(sec.mt), fmtKg(sec.mt * 1000), '', fmtKg(sec.bags), sec.bagLabel, '', '', '', fmtPkr(sec.value)]}
           />
         </Section>
       ))}
@@ -782,10 +803,10 @@ export function StockDetailView({ data, companyName }) {
       {sections.length > 1 && (
         <Section title="All categories — total">
           <Table
-            head={['Category', 'Lots', 'On hand (MT)', 'kg', 'Katta', 'Value (PKR)']}
-            align={['left', 'right', 'right', 'right', 'right', 'right']}
-            rows={sections.map(sec => [sec.name, sec.rows.length, fmtMt(sec.mt), fmtKg(sec.mt * 1000), fmtKg(sec.bags), fmtPkr(sec.value)])}
-            totalRow={['TOTAL', shown.length, fmtMt(shownMt), fmtKg(shownMt * 1000), fmtKg(shownBags), fmtPkr(shownValue)]}
+            head={['Category', 'Lots', 'On hand (MT)', 'kg', 'Katta', 'Bags', 'Value (PKR)']}
+            align={['left', 'right', 'right', 'right', 'right', 'right', 'right']}
+            rows={sections.map(sec => [sec.name, sec.rows.length, fmtMt(sec.mt), fmtKg(sec.mt * 1000), fmtKg(sec.bags), sec.bagLabel, fmtPkr(sec.value)])}
+            totalRow={['TOTAL', shown.length, fmtMt(shownMt), fmtKg(shownMt * 1000), fmtKg(shownBags), shownBagUnits ? fmtKg(shownBagUnits) : '—', fmtPkr(shownValue)]}
           />
         </Section>
       )}

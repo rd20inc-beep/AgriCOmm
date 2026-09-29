@@ -63,7 +63,10 @@ describe('the stock report uses it', () => {
   );
 
   test('the katta column is derived, not the raw intake count', () => {
-    expect(src).toContain('bags: kattaOnHand(l, onHand),');
+    // The derived count now also splits katta from sub-50 kg bags, so it is
+    // held in `units` and only the sacks land in `bags`.
+    expect(src).toContain('const units = kattaOnHand(l, onHand);');
+    expect(src).toContain('bags: isKatta ? units : 0,');
     expect(src).not.toContain('status: l.status, bags: l.total_bags,');
   });
 
