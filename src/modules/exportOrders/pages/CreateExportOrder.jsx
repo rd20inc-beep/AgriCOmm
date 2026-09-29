@@ -17,6 +17,8 @@ import SupplierPicker from '../../../components/SupplierPicker';
 import SlideDrawer from '../../../components/SlideDrawer';
 import { printedBagsApi, exportOrdersApi } from '../api/services';
 import { INCOTERMS, incotermHint, advancePctForIncoterm } from '../../../shared/constants/incoterms';
+import { WEIGHT_UNITS, weightUnit } from '../../../shared/constants/weightUnits';
+import { FREIGHT_DISPLAYS, incotermCarriesFreight } from '../../../shared/constants/exportFreight';
 import { PAYMENT_TERMS } from '../../../shared/constants/paymentTerms';
 import { COUNTRY_OPTIONS } from '../../../shared/constants/countries';
 import { PORTS } from '../../../shared/constants/ports';
@@ -97,6 +99,15 @@ export default function CreateExportOrder() {
     // Section 4: Order terms
     currency: 'USD', incoterm: 'FOB', advancePct: 20, source: 'Internal Mill',
     paymentTerms: 'CAD', docAddressMode: 'country',
+    // Documents print in KG, or LBS for the USA and Canada. Presentation only —
+    // the engine stores kilograms whatever this says.
+    docWeightUnit: 'kg',
+    // Freight, when it is being charged. Entering it here rather than after the
+    // fact is the point: the quote goes out with the rate and the date it holds
+    // to, so the escalation clause has something to escalate FROM.
+    freightPerMT: '', insurancePerMT: '',
+    freightBasisDate: new Date().toISOString().slice(0, 10), freightValidUntil: '',
+    freightDisplay: 'in_price', freightClause: '',
     // Section 5: Receiving mode (shown after qty entered)
     receivingMode: '',
     // Section 6: Bag spec (shown only when receiving mode needs it)
@@ -190,7 +201,14 @@ export default function CreateExportOrder() {
     const riceCost = estimatedRawQty * pricePerMT * 0.5;
     const loadingCost = qtyMT * 15;
     const clearingCost = qtyMT * 12;
-    const freightCost = (form.incoterm === 'CIF' || form.incoterm === 'CNF') ? qtyMT * 65 : 0;
+    // Freight actually entered on this order wins over the old flat $65/MT
+    // guess, which was only ever a placeholder for CIF/CNF. With a real rate the
+    // margin below is the real margin.
+    const freightPerMt = parseFloat(form.freightPerMT) || 0;
+    const insurancePerMt = parseFloat(form.insurancePerMT) || 0;
+    const freightCost = (freightPerMt + insurancePerMt) > 0
+      ? qtyMT * (freightPerMt + insurancePerMt)
+      : ((form.incoterm === 'CIF' || form.incoterm === 'CNF') ? qtyMT * 65 : 0);
     const totalEstimatedCost = riceCost + bagsCost + loadingCost + clearingCost + freightCost;
     const estimatedGrossProfit = contractValue - totalEstimatedCost;
     const marginPct = contractValue > 0 ? ((estimatedGrossProfit / contractValue) * 100) : 0;
@@ -199,7 +217,8 @@ export default function CreateExportOrder() {
     const advanceExpected = contractValue * (advPct / 100);
     const balanceExpected = contractValue - advanceExpected;
     return { estimatedRawQty, bagsCost, riceCost, loadingCost, clearingCost, freightCost, totalEstimatedCost, contractValue, estimatedGrossProfit, marginPct, advPct, advanceExpected, balanceExpected };
-  }, [qtyMT, pricePerMT, form.incoterm, form.receivingMode, form.advancePct, contractValue]);
+  }, [qtyMT, pricePerMT, form.incoterm, form.receivingMode, form.advancePct, contractValue,
+    form.freightPerMT, form.insurancePerMT]);
 
   const fmtUSD = (v) => '$' + (v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -268,6 +287,15 @@ export default function CreateExportOrder() {
       contract_value: contractValue,
       incoterm: form.incoterm,
       doc_address_mode: form.docAddressMode || 'country',
+      doc_weight_unit: form.docWeightUnit || 'kg',
+      // Blank stays blank — an order with no freight figure prints and bills
+      // exactly as it always did.
+      freight_per_mt: form.freightPerMT === '' ? null : parseFloat(form.freightPerMT),
+      insurance_per_mt: form.insurancePerMT === '' ? null : parseFloat(form.insurancePerMT),
+      freight_basis_date: form.freightPerMT === '' ? null : (form.freightBasisDate || null),
+      freight_valid_until: form.freightValidUntil || null,
+      freight_display: form.freightDisplay || 'in_price',
+      freight_clause: form.freightClause || null,
       advance_pct: advPct,
       advance_expected: advExpected,
       balance_expected: contractValue - advExpected,
@@ -643,6 +671,81 @@ export default function CreateExportOrder() {
               <option value="full">Full address + country</option>
             </select>
             <p className="text-[11px] text-gray-500 mt-1 leading-snug">Controls which buyer location lines print on the proforma &amp; export docs.</p>
+          </div>
+          <div className="form-group">
+            <label className="form-label">Weights on Export Documents</label>
+            <select value={form.docWeightUnit} onChange={e => set('docWeightUnit', e.target.value)} className="form-input">
+              {WEIGHT_UNITS.map(u => <option key={u.code} value={u.code}>{u.label}</option>)}
+            </select>
+            <p className="text-[11px] text-gray-500 mt-1 leading-snug">
+              {weightUnit(form.docWeightUnit).description} Documents only — stock, costing and reports stay in kilograms.
+            </p>
+          </div>
+        </div>
+
+        {/* ── Freight ──
+            Entered at the QUOTE, not after the fact: the escalation clause on
+            the proforma and the contract can only protect a rate that was
+            actually stated, with the date it holds to. Leaving it blank prints
+            and bills exactly as an order always has. */}
+        <div className="mt-5 pt-5 border-t border-gray-200">
+          <div className="flex items-baseline justify-between mb-3">
+            <h3 className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Freight</h3>
+            <span className="text-[11px] text-gray-400">optional — leave blank if the buyer arranges it</span>
+          </div>
+          <div className="form-grid">
+            <div className="form-group">
+              <label className="form-label">Ocean freight per MT ({form.currency})</label>
+              <input type="number" min="0" step="0.01" placeholder="—" value={form.freightPerMT}
+                onChange={e => set('freightPerMT', e.target.value)} className="form-input" />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Insurance per MT ({form.currency})</label>
+              <input type="number" min="0" step="0.01" placeholder="—" value={form.insurancePerMT}
+                onChange={e => set('insurancePerMT', e.target.value)} className="form-input" />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Rate quoted on</label>
+              <input type="date" value={form.freightBasisDate}
+                onChange={e => set('freightBasisDate', e.target.value)} className="form-input" />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Holds until</label>
+              <input type="date" value={form.freightValidUntil}
+                onChange={e => set('freightValidUntil', e.target.value)} className="form-input" />
+              <p className="text-[11px] text-gray-500 mt-1 leading-snug">After this date a rise is charged to the buyer by debit note.</p>
+            </div>
+            <div className="form-group sm:col-span-2">
+              <label className="form-label">How it prints</label>
+              <select value={form.freightDisplay} onChange={e => set('freightDisplay', e.target.value)} className="form-input">
+                {FREIGHT_DISPLAYS.map(d => <option key={d.code} value={d.code}>{d.label}</option>)}
+              </select>
+              <p className="text-[11px] text-gray-500 mt-1 leading-snug">
+                {(FREIGHT_DISPLAYS.find(d => d.code === form.freightDisplay) || FREIGHT_DISPLAYS[0]).description}
+              </p>
+              {/* Under FOB the BUYER nominates the vessel and pays the freight,
+                  so there is no delivered price to break a freight figure out of. */}
+              {parseFloat(form.freightPerMT) > 0 && !incotermCarriesFreight(form.incoterm) && form.freightDisplay === 'in_price' && (
+                <p className="text-[11px] text-amber-700 mt-1 leading-snug">
+                  {form.incoterm} does not put the freight on the seller, so there is no delivered price
+                  to break down. Set the Incoterm to CFR/CIF, or print the freight as a separate line.
+                </p>
+              )}
+              {parseFloat(form.freightPerMT) > 0 && form.freightDisplay === 'in_price' && pricePerMT > 0
+                && pricePerMT <= (parseFloat(form.freightPerMT) + (parseFloat(form.insurancePerMT) || 0)) && (
+                <p className="text-[11px] text-red-600 mt-1 leading-snug">
+                  Freight is not smaller than the price per MT, so the FOB value would come out at zero
+                  or below. Check whether a per-container rate was entered per MT.
+                </p>
+              )}
+              {parseFloat(form.freightPerMT) > 0 && (
+                <p className="text-[11px] text-gray-600 mt-1 leading-snug">
+                  {form.freightDisplay === 'in_price'
+                    ? `The price per MT above is read as the delivered ${form.incoterm} price, and the documents show the FOB value inside it.`
+                    : `The price per MT above is read as the FOB price; freight is charged beside it, so the buyer owes ${fmtUSD(qtyMT * ((parseFloat(form.freightPerMT) || 0) + (parseFloat(form.insurancePerMT) || 0)))} on top of the contract value.`}
+                </p>
+              )}
+            </div>
           </div>
         </div>
 
