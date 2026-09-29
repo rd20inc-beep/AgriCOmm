@@ -103,12 +103,57 @@ export default function LotLedger() {
         <Cell label="Supplier" value={lot.supplierHref ? <Link to={lot.supplierHref} className="text-blue-600 hover:underline">{lot.supplier || '—'}</Link> : (lot.supplier || '—')} />
         <Cell label="Purchase date" value={dt(lot.purchaseDate)} />
         <Cell label="Rice type / variety" value={lot.riceType || '—'} />
+        {/* Where a milled lot came from. A blend's own variety is the blend
+            label ("Blend M-001"), so a by-product could not be traced back to
+            the rice it was milled from without opening the batch. */}
+        {lot.source && (
+          <Cell
+            label="Milled from"
+            value={
+              <Link to={lot.source.batchHref} className="text-blue-600 hover:underline">
+                {lot.source.batchNo}{lot.source.batchName ? ` · ${lot.source.batchName}` : ''}
+              </Link>
+            }
+            sub={lot.sourceVarieties?.length ? lot.sourceVarieties.join(', ') : null}
+          />
+        )}
         <Cell label="Warehouse" value={lot.warehouse || '—'} />
         <Cell label="Truck" value={lot.truck || '—'} sub={lot.driver ? `Driver: ${lot.driver}` : null} />
         <Cell label="Quality grade" value={lot.grade || '—'} sub={lot.moisturePct != null ? `Moisture ${lot.moisturePct}%` : null} />
         <Cell label="Bags" value={lot.bags != null ? `${lot.bags}${lot.bagWeightKg ? ` × ${lot.bagWeightKg}kg` : ''}` : '—'} />
         <Cell label="Purchase rate / Landed" value={`${lot.ratePerKg ? pkr(lot.ratePerKg) : '—'} / ${lot.costPerKg ? pkr(lot.costPerKg) : '—'}`} sub={`Total ${pkr(lot.valuePkr)}`} />
       </div>
+
+      {/* What this lot was milled from — a blend takes several varieties, so the
+          single "Milled from" line above cannot say how much of each. */}
+      {lot.source?.sourceLots?.length > 0 && (
+        <Section icon={Package} title={`Milled from ${lot.source.batchNo}${lot.source.processingType === 'blended' ? ' (blend)' : ''}`}>
+          <div className="overflow-x-auto mobile-cards">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-gray-50 text-[11px] uppercase tracking-wide text-gray-500">
+                  <th className="text-left font-medium px-4 py-2">Source lot</th>
+                  <th className="text-left font-medium px-4 py-2">Rice type / variety</th>
+                  <th className="text-right font-medium px-4 py-2">Quantity used</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {lot.source.sourceLots.map((sl, i) => (
+                  <tr key={sl.lotId ?? i}>
+                    <td data-label="Source lot" className="px-4 py-2">
+                      {sl.href
+                        ? <Link to={sl.href} className="text-blue-600 hover:underline">{sl.lotNo || '—'}</Link>
+                        : (sl.lotNo || '—')}
+                    </td>
+                    <td data-label="Rice type / variety" className="px-4 py-2 text-gray-700">{sl.variety || '—'}</td>
+                    <td data-label="Quantity used" className="px-4 py-2 text-right tabular-nums">{kg(sl.qtyKg)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Section>
+      )}
 
       {/* Quantity summary */}
       <Section icon={Package} title="Lot quantity summary">

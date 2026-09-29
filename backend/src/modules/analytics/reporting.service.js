@@ -1317,10 +1317,51 @@ const reportingService = {
     const expectedProfitRemaining = remainingKg > 0 ? (remainingKg * avgSaleRate) - remainingStockValue : 0;
 
     const q = lot.quality_json || {};
+    // Where a milled lot CAME FROM. A blend's own variety is the blend label
+    // ("Blend M-001"), so a by-product row could not be traced to the rice it
+    // was milled from without opening the batch: the source varieties are on the
+    // lots that fed it. Single-variety batches already carry the real variety,
+    // and this agrees with them rather than replacing it.
+    let sourceTrace = null;
+    if (lot.batch_ref && /^batch-\d+$/.test(String(lot.batch_ref))) {
+      const srcBatchId = parseInt(String(lot.batch_ref).split('-')[1], 10);
+      const srcBatch = await db('milling_batches').where({ id: srcBatchId })
+        .first('id', 'batch_no', 'batch_name', 'processing_type');
+      if (srcBatch) {
+        const srcLots = await db('batch_source_lots as bsl')
+          .leftJoin('inventory_lots as il', 'il.id', 'bsl.lot_id')
+          .leftJoin('products as p', 'p.id', 'il.product_id')
+          .where('bsl.batch_id', srcBatchId)
+          .select('il.id', 'il.lot_no', 'il.variety', 'il.item_name', 'p.name as product_name', 'bsl.qty_kg');
+        const varieties = [...new Set(srcLots
+          .map((r) => r.variety || r.product_name || r.item_name)
+          .filter(Boolean))];
+        sourceTrace = {
+          batchId: srcBatch.id,
+          batchNo: srcBatch.batch_no,
+          batchName: srcBatch.batch_name || null,
+          batchHref: `/milling/${srcBatch.batch_no}`,
+          processingType: srcBatch.processing_type || null,
+          varieties,
+          // Every source lot, so a blend shows what actually went in and how much.
+          sourceLots: srcLots.map((r) => ({
+            lotId: r.id, lotNo: r.lot_no,
+            variety: r.variety || r.product_name || r.item_name || null,
+            qtyKg: num(r.qty_kg),
+            href: r.id ? `/lot-inventory/${r.id}` : null,
+          })),
+        };
+      }
+    }
+
     return {
       lot: {
         id: lot.id, lotNo: lot.lot_no, type: lot.type, entity: lot.entity,
         riceType: lot.variety || lot.product_name || lot.item_name, variety: lot.variety, grade: lot.grade,
+        // Traceability for anything milled: which batch made it, and from what.
+        sourceBatchNo: sourceTrace ? sourceTrace.batchNo : null,
+        sourceVarieties: sourceTrace ? sourceTrace.varieties : [],
+        source: sourceTrace,
         supplier: lot.supplier_name, supplierId: lot.supplier_id,
         supplierHref: lot.supplier_id ? `/finance/statements?type=supplier&id=${lot.supplier_id}` : null,
         warehouse: lot.warehouse_name,
