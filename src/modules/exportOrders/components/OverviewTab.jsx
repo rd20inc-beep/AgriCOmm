@@ -6,7 +6,7 @@ import { useUpdateOrder } from '../../../api/queries';
 import { useApp } from '../../../context/AppContext';
 import { INCOTERMS, incotermHint } from '../../../shared/constants/incoterms';
 import { WEIGHT_UNITS, weightUnit } from '../../../shared/constants/weightUnits';
-import { FREIGHT_DISPLAYS, incotermCarriesFreight } from '../../../shared/constants/exportFreight';
+import { FREIGHT_DISPLAYS, incotermCarriesFreight, receivableFreight } from '../../../shared/constants/exportFreight';
 import { PAYMENT_TERMS } from '../../../shared/constants/paymentTerms';
 
 // Statuses where ANY contract field is fully editable.
@@ -400,6 +400,15 @@ export default function OverviewTab({ order, formatCurrency, formatPKR, totalCos
               <span className="text-gray-500">Expected: {formatCurrency(order.balanceExpected)}</span>
               <span className="font-medium text-gray-900">Received: {formatCurrency(order.balanceReceived)}</span>
             </div>
+            {/* Freight charged beside an FOB price rides on the balance — it is
+                paid against documents like the rest of it. Saying so stops the
+                balance looking like it disagrees with the contract value. */}
+            {receivableFreight(order) > 0 && (
+              <p className="text-[11px] text-gray-500 mt-0.5">
+                Includes {formatCurrency(receivableFreight(order))} freight
+                {order.insurancePerMT > 0 ? ' & insurance' : ''}, charged beside the FOB price.
+              </p>
+            )}
             <div className="mt-1 w-full bg-gray-200 rounded-full h-1.5">
               <div
                 className={`h-1.5 rounded-full ${order.balanceReceived >= order.balanceExpected ? 'bg-emerald-500' : 'bg-amber-500'}`}

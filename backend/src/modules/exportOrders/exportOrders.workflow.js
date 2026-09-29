@@ -2,6 +2,7 @@ const documentService = require('../documents/documents.service');
 const inventoryService = require('../inventory/inventory.service');
 const automationService = require('../admin/automation.service');
 const accountingService = require('../accounting/accounting.service');
+const { billableFreight } = require('./billableFreight');
 
 const STATUS_TRANSITIONS = {
   'Draft': ['Awaiting Advance', 'Advance Received'],
@@ -216,6 +217,45 @@ async function runTransitionSideEffects(trx, order, toStatus, userId) {
             origCurrency: foreign ? o.currency : null,
             origFxRate: foreign ? bookedRate : null,
           });
+        }
+
+        // Freight charged BESIDE an FOB price is revenue too, and AR was just
+        // debited only for the goods — so without this the buyer's ledger is
+        // short by the freight they are being asked to pay. It is credited to
+        // 4070 Freight & Insurance Recovered, never to 4010 Export Sales: it is
+        // not rice, and netting it into sales would hide whether what is charged
+        // to buyers covers what is paid to carriers (6010). A CFR/CIF order
+        // priced 'in_price' has its freight inside contract_value already, so
+        // billableFreight returns 0 and nothing posts here.
+        const freightForeign = billableFreight(o);
+        if (freightForeign > 0) {
+          const freightPkr = parseFloat((freightForeign * (bookedRate || 1)).toFixed(2));
+          const [exportAR, freightRev] = await Promise.all([
+            sp('chart_of_accounts').where({ code: '1110' }).first(),
+            sp('chart_of_accounts').where({ code: '4070' }).first(),
+          ]);
+          if (exportAR && freightRev && freightPkr > 0) {
+            const jrnl = await accountingService.createJournal(sp, {
+              date: new Date().toISOString().slice(0, 10),
+              entity: 'export',
+              refType: 'Export Order', refNo: o.order_no,
+              description: foreign
+                ? `Freight recovered ${o.order_no} (${o.currency} ${freightForeign.toLocaleString()} @ ${bookedRate || '—'})`
+                : `Freight recovered ${o.order_no}`,
+              currency: 'PKR', fxRate: 1, isAuto: true, userId,
+              partyType: o.customer_id ? 'customer' : null,
+              partyId: o.customer_id || null,
+              origCurrency: foreign ? o.currency : null,
+              origFxRate: foreign ? bookedRate : null,
+              lines: [
+                { account_id: exportAR.id,   account: exportAR.name,   debit: freightPkr, credit: 0,          narration: `DR 1110 ${exportAR.name} — freight charged ${o.order_no}` },
+                { account_id: freightRev.id, account: freightRev.name, debit: 0,          credit: freightPkr, narration: `CR 4070 ${freightRev.name} — ${o.order_no}` },
+              ],
+            });
+            if (jrnl?.id) await accountingService.postJournal(sp, jrnl.id);
+          } else {
+            console.warn(`Freight recovery skipped for ${o.order_no}: chart_of_accounts missing 1110/4070`);
+          }
         }
 
         const cogsPkr = parseFloat(o.inventory_cogs_total_pkr) || 0;

@@ -173,6 +173,20 @@ export function escalationClause(order, ctx = {}) {
     + ' and shall be invoiced by debit note, payable together with the balance of the contract value.';
 }
 
+/**
+ * How much freight the BUYER owes ON TOP of the contract value — the figure the
+ * receivable carries. Only the 'separate' presentation adds anything: with
+ * 'in_price' the freight is already inside price_per_mt and so already in the
+ * contract value, in AR and on the statement. Mirrors billableFreight() in
+ * backend/src/modules/exportOrders/billableFreight.js, which is what actually
+ * writes the receivable; this copy is for showing the same number in the UI.
+ */
+export function receivableFreight(order) {
+  const f = freightBreakdown(order);
+  if (!f.active || !f.addsToTotal) return 0;
+  return Math.round((f.freightAmount + f.insuranceAmount) * 100) / 100;
+}
+
 // Does this order's Incoterm actually put the freight on the seller? Used by the
 // UI to warn when a freight figure is entered against an FOB / EXW order.
 export function incotermCarriesFreight(code) {
