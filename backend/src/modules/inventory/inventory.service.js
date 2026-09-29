@@ -778,7 +778,14 @@ const inventoryService = {
         movements.push(m);
         const remaining = avail - consume;
         await trx('inventory_lots').where({ id: lot.id }).update({
-          milling_status: remaining <= 1e-6 ? 'Consumed' : 'In Milling',
+          // A part-consumed lot goes back to AVAILABLE, not 'In Milling'. This
+          // runs at yield — the milling is finished — and the batch picker hides
+          // 'In Milling' and 'Consumed', so leaving it there stranded the
+          // remainder: 48,450 kg of IRI6 ND LOT1 sat in the stock report and
+          // could not be chosen for the next batch. Only a fully consumed lot is
+          // 'Consumed'. (null / 'In Milling' / 'Consumed' are the only values the
+          // CHECK constraint allows.)
+          milling_status: remaining <= 1e-6 ? 'Consumed' : null,
           updated_at: trx.fn.now(),
         });
       }

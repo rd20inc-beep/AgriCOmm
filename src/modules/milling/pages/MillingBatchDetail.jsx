@@ -656,7 +656,12 @@ export default function MillingBatchDetail() {
       let total = 0;
       for (const cat of millingCostCategories) {
         const amount = parseFloat(costForm[cat.key]) || 0;
-        if (amount > 0) {
+        // Send a category when it has a value OR when it already had one and is
+        // now being cleared. `amount > 0` alone skipped every clear-to-zero, so
+        // emptying a cost appeared to save and the old figure stayed. Untouched
+        // empty categories are still skipped, so no spurious zero rows.
+        const hadStored = existingKeyByNorm[norm(cat.key)] != null;
+        if (amount > 0 || hadStored) {
           const category = existingKeyByNorm[norm(cat.key)] || cat.key;
           // #14 — transport carries the transporter + who bears it, so a
           // company-paid freight raises a real transporter payable.

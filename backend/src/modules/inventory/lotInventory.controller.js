@@ -2593,7 +2593,10 @@ module.exports = {
         const fullyConsumed = newAvailable <= 0.0001;
         await trx('inventory_lots').where({ id: lotId }).update({
           available_qty: Math.max(0, newAvailable),
-          milling_status: fullyConsumed ? 'Consumed' : (lot.milling_status || 'Partial'),
+          // 'Partial' is NOT a legal value — the CHECK allows only null,
+          // 'In Milling' and 'Consumed' — so `|| 'Partial'` would have thrown
+          // whenever the source lot had no status yet. Keep whatever it has.
+          milling_status: fullyConsumed ? 'Consumed' : (lot.milling_status || null),
           updated_at: trx.fn.now(),
         });
 
