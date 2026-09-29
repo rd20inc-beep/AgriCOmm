@@ -7,7 +7,31 @@ import Modal from '../../../components/Modal';
 import WhatsAppSendModal from '../../../components/WhatsAppSendModal';
 import EmailSendModal from '../../../components/EmailSendModal';
 import { incotermLabel } from '../../../shared/constants/incoterms';
+import { formatWeight, formatPackSize, weightUnit } from '../../../shared/constants/weightUnits';
+import { freightBreakdown } from '../../../shared/constants/exportFreight';
 import { useDocumentTemplates } from '../../../api/queries';
+
+// ─── Weights on export documents ───
+// Shipments to the USA and Canada state their weights in POUNDS; everywhere
+// else expects kilograms. The document payload is ALWAYS kilograms — the engine
+// stores nothing else — so the conversion happens here, at the last moment,
+// driven by `doc_weight_unit` on the order (migration 302). Nothing stored,
+// costed or reported moves with this setting.
+//
+// METRIC TONS ARE NOT CONVERTED. A contract is agreed in MT and priced per MT
+// whichever unit the weights print in, so quantity and unit price stay as they
+// are; only the net / gross / tare / bag-size figures follow the setting.
+const unitOf = (doc) => (doc && doc.order && doc.order.docWeightUnit) || 'kg';
+// "KG" / "LBS" for inline use, "KGS" / "LBS" where a heading reads better plural.
+const wtUnit = (doc) => weightUnit(unitOf(doc)).short;
+const wtUnitPl = (doc) => weightUnit(unitOf(doc)).plural;
+// A weight with its unit — "24,000.00 KG", "52,910.94 LBS".
+const wt = (kg, doc, decimals = 2) => formatWeight(kg, unitOf(doc), { decimals });
+// The same number without the unit, for a column whose header already carries it.
+const wtNum = (kg, doc, decimals = 2) => formatWeight(kg, unitOf(doc), { decimals, withUnit: false });
+// A bag or pack size, which people say as a whole number — "50 KGS", "8 LBS".
+const packSize = (kg, doc) => formatPackSize(kg, unitOf(doc));
+const packSizeNum = (kg, doc) => formatPackSize(kg, unitOf(doc), { withUnit: false });
 
 // ─── Document Templates ───
 // Each function takes the document JSON and returns printable HTML
@@ -41,8 +65,10 @@ function buildLineItems(doc) {
     // "PP BAG", not "PP BAG BAG").
     const t = (bagType || 'PP').toString().trim().toUpperCase();
     const phrase = /\bBAG\b/.test(t) ? t : `${t} BAG`;
-    const base = `PACKED IN ${bagSize} KG${bagSize === 1 ? '' : 'S'} ${phrase}`;
-    return masterBagSize > 0 ? `${base}, MASTER ${masterBagSize} KG OUTER` : base;
+    // Sizes are stored in KG and print in the order's document unit, so an 8 lb
+    // retail bag reads "PACKED IN 8 LBS PP BAG" on a US shipment.
+    const base = `PACKED IN ${packSize(bagSize, doc)} ${phrase}`;
+    return masterBagSize > 0 ? `${base}, MASTER ${packSize(masterBagSize, doc)} OUTER` : base;
   };
 
   if (Array.isArray(items) && items.length > 0) {
@@ -118,6 +144,64 @@ const CELL_PAD8_B = `${CELL_PAD8} font-weight:bold;`;
 
 // Number formatting helpers used by renderers.
 const fmtMoney = (n) => (parseFloat(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+// ─── Freight on a priced document ───
+// Ocean freight moves faster than a sales contract, so a CFR/CIF price agreed
+// today can be under water by the time the vessel sails. The freight figure now
+// lives on the order (migration 302) and prints one of two ways:
+//
+//   in_price  the real term (CFR/CIF) is stated and the price is broken into
+//             FOB + freight (+ insurance) INSIDE it — the split customs wants,
+//             and the one a bank will accept against a freight-prepaid B/L;
+//   separate  the table keeps the FOB price and freight is added underneath,
+//             which is how it was typed by hand before this existed.
+//
+// Either way the escalation clause is what actually protects the margin: an
+// increase between the rate date and the Bill of Lading date is the buyer's.
+// Orders with no freight figure render nothing and are byte-for-byte unchanged.
+
+// Rows to append to an invoice-style totals table. `colspan` is the number of
+// columns preceding the amount column in that document's item table.
+function freightRows(frt, { colspan, cellL, cellR }) {
+  // `invalid` means the freight and the price disagree — a per-container rate
+  // typed into a per-MT field, or a total that has not been computed yet. The
+  // breakdown would be nonsense, so print none of it.
+  if (!frt || !frt.active || frt.invalid) return '';
+  const row = (label, amount, bold) => `
+          <tr${bold ? ' style="font-weight:bold;"' : ''}>
+            <td colspan="${colspan}" style="${cellL}">${label}</td>
+            <td class="agri-num" style="${cellR}">${fmtMoney(amount)}</td>
+          </tr>`;
+  if (frt.display === 'in_price') {
+    // The total is unchanged — these rows only show what is already inside it.
+    return `${row(`&nbsp;&nbsp;&nbsp;of which goods (FOB)`, frt.goodsAmount)}`
+      + `${row('&nbsp;&nbsp;&nbsp;of which ocean freight', frt.freightAmount)}`
+      + (frt.insuranceAmount > 0 ? row('&nbsp;&nbsp;&nbsp;of which insurance', frt.insuranceAmount) : '');
+  }
+  // separate — freight is NOT in the item total, so it adds to what is payable.
+  return `${row('ADD: Ocean freight', frt.freightAmount)}`
+    + (frt.insuranceAmount > 0 ? row('ADD: Marine insurance', frt.insuranceAmount) : '')
+    + row('TOTAL PAYABLE', frt.totalPayable, true);
+}
+
+// The escalation clause, as a paragraph under the document body.
+function freightClauseBlock(frt, { heading = 'Freight Escalation', marginTop = 8 } = {}) {
+  if (!frt || !frt.active || !frt.clause) return '';
+  return `
+      <div style="margin-top:${marginTop}px; font-size:12px; border:1px solid #333; padding:6px 8px;">
+        <strong>${heading}:</strong> ${frt.clause}
+      </div>`;
+}
+
+// A one-line unit-price make-up for a document that states its price in prose
+// rather than in a table ("US$ 822.50 CFR Hamburg — being US$ 760.00 FOB …").
+function freightPriceMakeup(frt) {
+  if (!frt || !frt.active || frt.invalid || frt.display !== 'in_price') return '';
+  const cur = frt.currency === 'USD' ? 'US$' : frt.currency;
+  const parts = [`${cur} ${fmtMoney(frt.basePerMt)} FOB`, `${cur} ${fmtMoney(frt.freightPerMt)} freight`];
+  if (frt.insurancePerMt > 0) parts.push(`${cur} ${fmtMoney(frt.insurancePerMt)} insurance`);
+  return ` (being ${parts.join(' + ')} per metric ton)`;
+}
 const fmtMt = (n) => (parseFloat(n) || 0).toFixed(3);
 
 // Amount-in-words for the Commercial Invoice / Statement of Origin
@@ -194,7 +278,7 @@ function validateExportDoc(doc) {
 
   // Rule 1: gross weight must be ≥ net weight (applies to any doc carrying both).
   if (net > 0 && gross > 0 && gross + 0.001 < net) {
-    errors.push(`Gross weight (${gross.toLocaleString()} kg) is less than net weight (${net.toLocaleString()} kg).`);
+    errors.push(`Gross weight (${wt(gross, doc)}) is less than net weight (${wt(net, doc)}).`);
   }
   if (!isInvoice) return { errors, warnings };
 
@@ -302,7 +386,7 @@ function docSummaryBlock(doc, opts = {}) {
   }
   const packLabel = opts.packLabel || order.packagesLabel || 'Bags';
   const packagesText = masterCount > 0
-    ? `${masterCount.toLocaleString()} Master Bags of ${masterSize} KG (${pkgs.toLocaleString()} retail ${packLabel.toLowerCase()})`
+    ? `${masterCount.toLocaleString()} Master Bags of ${packSize(masterSize, doc)} (${pkgs.toLocaleString()} retail ${packLabel.toLowerCase()})`
     : `${pkgs.toLocaleString()} ${packLabel}`;
   const L = 'border:1px solid #333;padding:3px 7px;font-weight:bold;white-space:nowrap;background:#f7f7f7;';
   const V = 'border:1px solid #333;padding:3px 7px;';
@@ -354,6 +438,15 @@ function renderProformaInvoice(doc) {
   const totalBags = lines.reduce((s, l) => s + (l.bagCount || 0), 0);
   const totalQty = lines.reduce((s, l) => s + (l.qtyMT || 0), 0);
   const totalAmt = lines.reduce((s, l) => s + (l.amount || 0), 0);
+  // Freight. `in_price` states the real CFR/CIF term with the price broken down
+  // inside it; `separate` keeps the FOB price and adds freight below the total.
+  // No freight figure on the order → renders nothing, exactly as before.
+  const frt = freightBreakdown(order, { qtyMT: totalQty, goodsTotal: totalAmt });
+  // The price column used to be hardcoded "FOB" whatever the order's term said —
+  // true only while every Proforma was issued FOB by hand. It now follows.
+  const priceBasis = frt.active && frt.display === 'in_price'
+    ? (order.incoterm || 'CFR')
+    : (frt.active ? 'FOB' : (order.incoterm || 'FOB'));
   return `
     <div style="font-family: Arial, sans-serif; font-size:12px; width:100%; max-width:1040px; margin:0 auto; padding:20px; color:#111;">
       ${renderExportDocumentHeader(company)}
@@ -393,10 +486,10 @@ function renderProformaInvoice(doc) {
             <th style="${CELL}">Brand</th>
             <th style="${CELL}">Description</th>
             <th style="${CELL}">Packing</th>
-            <th style="${CELL}">Bag Size<br/>(Kgs)</th>
+            <th style="${CELL}">Bag Size<br/>(${wtUnitPl(doc)})</th>
             <th style="${CELL}">Bag (Qty)</th>
             <th style="${CELL}">Weight in MT<br/>(Approx.)</th>
-            <th style="${CELL}">FOB<br/>Price Per MT<br/>(${order.currency})</th>
+            <th style="${CELL}">${priceBasis}<br/>Price Per MT<br/>(${order.currency})</th>
             <th style="${CELL}">Total Amount<br/>(${order.currency})</th>
           </tr>
         </thead>
@@ -407,7 +500,7 @@ function renderProformaInvoice(doc) {
               <td style="border:1px solid #333; padding:6px; text-align:center; font-weight:bold; color:#d4a017;">${l.brand}</td>
               <td style="${CELL}">${l.description}</td>
               <td style="${CELL_C}">${l.packing || '—'}</td>
-              <td style="${CELL_C}">${l.bagSizeKg}</td>
+              <td style="${CELL_C}">${packSizeNum(l.bagSizeKg, doc)}</td>
               <td style="${CELL_C}">${(l.bagCount || 0).toLocaleString()}</td>
               <td style="${CELL_C}">${fmtMt(l.qtyMT)}</td>
               <td style="${CELL_C}">${fmtMoney(l.pricePerMT)}</td>
@@ -421,6 +514,7 @@ function renderProformaInvoice(doc) {
             <td style="${CELL_C}">${order.currency}</td>
             <td style="${CELL_R}">${fmtMoney(totalAmt)}</td>
           </tr>
+          ${freightRows(frt, { colspan: 8, cellL: CELL_R, cellR: CELL_R })}
         </tbody>
       </table>
 
@@ -438,17 +532,18 @@ function renderProformaInvoice(doc) {
       <div style="margin-top:16px; font-size:12px;">
         <div style="font-weight:bold; text-decoration:underline; margin-bottom:6px;">Terms &amp; Conditions</div>
         <ol>
-          <li><b>Price Basis:</b> All prices are in ${order.currency} per Metric Ton on <b>${inc.incoterm || order.incoterm || 'FOB'}</b> ${inc.sellerPaysFreight ? pod : pol} basis.</li>
+          <li><b>Price Basis:</b> All prices are in ${order.currency} per Metric Ton on <b>${frt.active && frt.display === 'separate' ? 'FOB' : (inc.incoterm || order.incoterm || 'FOB')}</b> ${inc.sellerPaysFreight && !(frt.active && frt.display === 'separate') ? pod : pol} basis${freightPriceMakeup(frt)}.${frt.active && frt.display === 'separate' ? ` Ocean freight to ${pod} is charged separately as shown above.` : ''}</li>
           <li><b>Delivery / Incoterms:</b> ${inc.text || `As per the agreed Incoterms® rule ${order.incoterm || 'FOB'}.`}</li>
           <li><b>Payment:</b> ${order.paymentTerms || 'As mutually agreed.'}</li>
           <li><b>Shipment:</b> From ${pol} to ${pod}. Partial shipment and transhipment permitted unless otherwise agreed in writing.</li>
-          <li><b>Packing:</b> ${bagSize} KG ${bagType} bags — new, food-grade and suitable for export by sea.</li>
+          <li><b>Packing:</b> ${packSize(bagSize, doc)} ${bagType} bags — new, food-grade and suitable for export by sea.</li>
           <li><b>Quality &amp; Weight:</b> As per the agreed specification. Quality and weight as ascertained at the port of loading shall be final; independent inspection (e.g. SGS) at buyer's cost, if required.</li>
           <li><b>Documents:</b> Commercial Invoice, Packing List, Certificate of Origin, Bill of Lading and any other documents required under the L/C / contract.</li>
           <li><b>Origin:</b> Pakistan.</li>
           <li><b>Validity:</b> This Proforma Invoice is valid for 15 days from the date of issue unless extended in writing.</li>
           <li><b>Force Majeure:</b> The Seller shall not be liable for any delay or failure to perform arising from events beyond its reasonable control.</li>
           <li><b>Governing Law:</b> This transaction is governed by the laws of Islamic Republic of Pakistan; any dispute shall be settled amicably or through arbitration.</li>
+          ${frt.active && frt.clause ? `<li><b>Freight Escalation:</b> ${frt.clause}</li>` : ''}
         </ol>
       </div>`;
       })()}
@@ -469,28 +564,45 @@ function commercialInvoiceHtml(doc, opts = {}) {
   const totalAmt = lines.reduce((s, l) => s + (l.amount || 0), 0);
   const totalQtyMT = lines.reduce((s, l) => s + (parseFloat(l.qtyMT) || 0), 0);
 
+  // Freight. Customs valuation is exactly where the split matters — the EU adds
+  // freight to reach CIF, US CBP deducts it from CIF — so the invoice states the
+  // FOB / freight / insurance make-up inside the CFR price. No escalation clause
+  // here: an invoice is raised after the vessel is booked, when the freight is
+  // known and there is nothing left to escalate.
+  const frt = freightBreakdown(order, { qtyMT: totalQtyMT, goodsTotal: totalAmt });
+  // What the buyer owes. Identical to the item total unless freight is charged
+  // on top of an FOB price, which is the 'separate' presentation.
+  const invoiceTotal = frt.active ? frt.totalPayable : totalAmt;
+
   // Advance is conditional — the "ADVANCE PAID / SUB TOTAL" rows only appear
   // when the order actually carries an advance (per the in-house template note).
+  // It is a percentage of the CONTRACT value, so it follows the goods total, not
+  // the freight added beside it.
   const advancePct = parseFloat(order.advancePct) || 0;
   const advanceAmt = parseFloat(order.advanceAmount) || (advancePct > 0 ? (totalAmt * advancePct) / 100 : 0);
   const showAdvance = advancePct > 0 || advanceAmt > 0;
-  const subTotal = showAdvance ? Math.max(0, totalAmt - advanceAmt) : totalAmt;
+  const subTotal = showAdvance ? Math.max(0, invoiceTotal - advanceAmt) : invoiceTotal;
 
   // Unit-price basis follows the incoterm: FOB → port of loading (Karachi),
   // CFR/CIF/etc. → port of discharge. Header reads e.g. "FOB KARACHI".
   const inc = doc.incotermInfo || {};
-  const term = inc.incoterm || order.incoterm || 'FOB';
+  // 'separate' prices the goods FOB and charges freight beside them, so the
+  // price column has to say FOB — matching the Proforma and the contract — even
+  // though the order's own term is CFR/CIF.
+  const term = (frt.active && frt.display === 'separate')
+    ? 'FOB'
+    : (inc.incoterm || order.incoterm || 'FOB');
   const dischargePort = order.destinationPort
     || (inc.portOfDischarge && !/port of discharge/i.test(inc.portOfDischarge) ? inc.portOfDischarge : '')
     || buyer.country || '';
-  const basisPort = inc.sellerPaysFreight
+  const basisPort = (inc.sellerPaysFreight && !(frt.active && frt.display === 'separate'))
     ? dischargePort
     : (inc.portOfLoading || order.portOfLoading || 'KARACHI');
   const basisLabel = `${term} ${String(basisPort).replace(/,\s*pakistan/i, '')}`.trim().toUpperCase();
   const cur = order.currency || 'USD';
   const curShort = cur === 'USD' ? 'US$' : cur;
 
-  // Weights (engine stores KG). Show KG with the MT equivalent for clarity.
+  // Weights. The payload is KG; the document prints them in the order's unit.
   const netKg = (totals && totals.netWeightKg) || (parseFloat(order.qtyMT) || 0) * 1000;
   const grossKg = (totals && totals.grossWeightKg) || netKg;
   const totalPackages = (totals && totals.totalPackages) || totalBags || 0;
@@ -501,14 +613,15 @@ function commercialInvoiceHtml(doc, opts = {}) {
   const masterBagCount = (totals && parseInt(totals.masterBagCount, 10)) || 0;
   const masterBagSizeKg = parseFloat(order.masterBagSizeKg) || 0;
   const packagesText = masterBagCount > 0
-    ? `${masterBagCount.toLocaleString()} Master Bags of ${masterBagSizeKg} KG (${(totalPackages || 0).toLocaleString()} retail bags)`
+    ? `${masterBagCount.toLocaleString()} Master Bags of ${packSize(masterBagSizeKg, doc)} (${(totalPackages || 0).toLocaleString()} retail bags)`
     : `${(totalPackages || 0).toLocaleString()} Bags`;
   // Ordered quantity vs packed net: equal on a normal shipment, so only worth
   // printing separately when they actually differ (tolerance = 1 kg).
   const quantityDiffersFromNet = Math.abs((totalQtyMT * 1000) - netKg) > 1;
   // Named fmtWeight, not fmtKg: renderPackingList has its own fmtKg with a
-  // different output format ("486,750.00" vs "486,750 KG (486.750 MT)").
-  const fmtWeight = (kg) => `${(parseFloat(kg) || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })} KG (${((parseFloat(kg) || 0) / 1000).toFixed(3)} MT)`;
+  // different output format ("486,750.00" vs "486,750 KG (486.750 MT)"). The MT
+  // equivalent stays metric whatever the weight unit — it is the trade quantity.
+  const fmtWeight = (kg) => `${wt(kg, doc)} (${((parseFloat(kg) || 0) / 1000).toFixed(3)} MT)`;
 
   // HS codes — the per-line HS CODE column is the only place these print, so the
   // single-code fallback below is all the item table needs.
@@ -617,6 +730,7 @@ function commercialInvoiceHtml(doc, opts = {}) {
             <td colspan="6" style="${CELL_R}">Total</td>
             <td class="agri-num" style="${CELL_R}">${fmtMoney(totalAmt)}</td>
           </tr>
+          ${freightRows(frt, { colspan: 6, cellL: CELL_R, cellR: CELL_R })}
           ${showAdvance ? `
           <tr style="font-weight:bold;">
             <td colspan="6" style="${CELL_R}">ADVANCE PAID${advancePct ? ` ${advancePct}%` : ''}</td>
@@ -672,7 +786,8 @@ function renderPackingList(doc) {
   const { company, buyer, order, shipment, containers, totals, items } = doc;
 
   // Format helpers
-  const fmtKg = (n) => (parseFloat(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  // The WEIGHT columns carry their unit in the header, so the cells are numbers.
+  const fmtKg = (n) => wtNum(n, doc);
 
   // ONE row builder for both sources. Multi-line P.I.s use items[]; legacy
   // single-product orders synthesize a single row from the order summary. The
@@ -705,7 +820,7 @@ function renderPackingList(doc) {
     const netKg = netKgOverride != null ? netKgOverride : qtyMT * 1000;
     const grossKg = grossKgOverride != null ? grossKgOverride : netKg + bagCount * tarePerBagKg(bagSize);
     const packing = masterBagSize > 0
-      ? `${packingBase}<br/><span style="color:#92400e">Master pack: ${masterBagCount.toLocaleString()} × ${masterBagSize} KG outer (${Math.floor(masterBagSize / bagSize)} retail bags per master)</span>`
+      ? `${packingBase}<br/><span style="color:#92400e">Master pack: ${masterBagCount.toLocaleString()} × ${packSize(masterBagSize, doc)} outer (${Math.floor(masterBagSize / bagSize)} retail bags per master)</span>`
       : packingBase;
     const quantity = masterBagSize > 0
       ? `${bagCount.toLocaleString()} retail bags<br/>${masterBagCount.toLocaleString()} master bags`
@@ -728,7 +843,7 @@ function renderPackingList(doc) {
           masterBagSize: parseFloat(it.masterBagSizeKg) || parseFloat(order.masterBagSizeKg) || 0,
           bagCount: it.bagCount || (it.qtyMT && bagSize ? Math.round((it.qtyMT * 1000) / bagSize) : 0),
           qtyMT: parseFloat(it.qtyMT) || 0,
-          packingBase: it.packing || `PACKED IN ${bagSize} KGS ${bagType} BAG`,
+          packingBase: it.packing || `PACKED IN ${packSize(bagSize, doc)} ${bagType} BAG`,
         });
       })
     : [(() => {
@@ -742,7 +857,7 @@ function renderPackingList(doc) {
           masterBagSize: parseFloat(order.masterBagSizeKg) || 0,
           bagCount: order.totalBags || (bagSize ? Math.round((qtyMT * 1000) / bagSize) : 0),
           qtyMT,
-          packingBase: `PACKED IN ${bagSize} KGS ${bagType} BAG`,
+          packingBase: `PACKED IN ${packSize(bagSize, doc)} ${bagType} BAG`,
           netKgOverride: (totals && totals.netWeightMT) ? totals.netWeightMT * 1000 : null,
           grossKgOverride: (totals && totals.grossWeightMT) ? totals.grossWeightMT * 1000 : null,
         });
@@ -845,7 +960,7 @@ function renderPackingList(doc) {
             <th style="${CELL}">DESCRIPTION</th>
             <th style="${CELL}">PACKING</th>
             <th style="${CELL}">QUANTITY</th>
-            <th style="${CELL}" colspan="2">WEIGHT (IN KGS)<br/><span style="font-weight:normal; font-size:12px;">Gross &nbsp;|&nbsp; Net</span></th>
+            <th style="${CELL}" colspan="2">WEIGHT (IN ${wtUnitPl(doc)})<br/><span style="font-weight:normal; font-size:12px;">Gross &nbsp;|&nbsp; Net</span></th>
           </tr>
         </thead>
         <tbody>
@@ -865,7 +980,7 @@ function renderPackingList(doc) {
                    on this very row already print them, and the old recap
                    restated both in MT alongside. Bags stay - no column has them. -->
               <div style="font-weight:bold;">TOTAL BAGS &nbsp;:&nbsp; ${totalBags.toLocaleString()} Bags</div>
-              <div style="margin-top:4px;">${masterBagTotal > 0 ? `MASTER BAGS &nbsp;:&nbsp; ${masterBagTotal.toLocaleString()} × ${order.masterBagSizeKg} KG` : ''}</div>
+              <div style="margin-top:4px;">${masterBagTotal > 0 ? `MASTER BAGS &nbsp;:&nbsp; ${masterBagTotal.toLocaleString()} × ${packSize(order.masterBagSizeKg, doc)}` : ''}</div>
             </td>
             <td style="border:1px solid #333; padding:8px; text-align:center; font-weight:bold;" rowspan="3">Total</td>
             <td class="agri-num" style="border:1px solid #333; padding:8px; text-align:right; font-weight:bold;" rowspan="3">${fmtKg(totalGrossKg)}</td>
@@ -925,8 +1040,8 @@ function renderGenericDocument(doc) {
             <th style="border:1px solid #ccc; padding:4px;">Container No</th>
             <th style="border:1px solid #ccc; padding:4px;">Lot No</th>
             <th style="border:1px solid #ccc; padding:4px;">Bags</th>
-            <th style="border:1px solid #ccc; padding:4px;">Net (kg)</th>
-            <th style="border:1px solid #ccc; padding:4px;">Gross (kg)</th>
+            <th style="border:1px solid #ccc; padding:4px;">Net (${wtUnit(doc)})</th>
+            <th style="border:1px solid #ccc; padding:4px;">Gross (${wtUnit(doc)})</th>
           </tr></thead>
           <tbody>
             ${containers.map(c => `<tr>
@@ -934,8 +1049,8 @@ function renderGenericDocument(doc) {
               <td style="border:1px solid #ccc; padding:4px;">${c.containerNo || '—'}</td>
               <td style="border:1px solid #ccc; padding:4px; font-size:12px;">${c.lotNumber || '—'}</td>
               <td style="border:1px solid #ccc; padding:4px; text-align:center;">${c.bagsCount || '—'}</td>
-              <td style="border:1px solid #ccc; padding:4px; text-align:right;">${c.netWeightKg || '—'}</td>
-              <td style="border:1px solid #ccc; padding:4px; text-align:right;">${c.grossWeightKg || '—'}</td>
+              <td style="border:1px solid #ccc; padding:4px; text-align:right;">${c.netWeightKg ? wtNum(c.netWeightKg, doc) : '—'}</td>
+              <td style="border:1px solid #ccc; padding:4px; text-align:right;">${c.grossWeightKg ? wtNum(c.grossWeightKg, doc) : '—'}</td>
             </tr>`).join('')}
           </tbody>
         </table>
@@ -962,6 +1077,12 @@ function renderSalesContract(doc) {
   const totalQty = lines.reduce((s, l) => s + (l.qtyMT || 0), 0);
   const totalAmt = lines.reduce((s, l) => s + (l.amount || 0), 0);
   const isMulti = lines.length > 1;
+  // Freight — see freightRows above. A contract states its price in prose, so
+  // `in_price` appends the FOB + freight make-up to the Price line and the
+  // escalation clause becomes a term of the contract; `separate` keeps the FOB
+  // price and states the freight as a separately payable charge.
+  const frt = freightBreakdown(order, { qtyMT: totalQty, goodsTotal: totalAmt });
+  const curShortSc = order.currency === 'USD' ? 'US$' : order.currency;
   // The stored port of loading is already fully qualified ("Karachi, Pakistan"),
   // so only append the country when it isn't there — the Price line used to read
   // "CFR Karachi, Pakistan, Pakistan".
@@ -996,9 +1117,11 @@ function renderSalesContract(doc) {
         <tr><td style="font-weight:bold; vertical-align:top;">Product${isMulti ? 's' : ''}:</td><td>${productHtml}</td></tr>
         <tr><td style="font-weight:bold;">Quality:</td><td>Aflatoxins, Ochratoxins, Heavy metal and Pesticide residues are in line with EU law.</td></tr>
         <tr><td style="font-weight:bold; vertical-align:top;">Price:</td><td>${isMulti
-          ? `Per-line rates as above. Incoterm ${order.incoterm} ${loadingPortFull}.`
-          : `@ ${order.currency} ${fmtMoney(lines[0]?.pricePerMT || order.pricePerMT)} per metric ton ${order.incoterm} ${loadingPortFull}`}</td></tr>
-        <tr><td style="font-weight:bold;">Total Amount:</td><td>${order.currency} ${fmtMoney(totalAmt)}</td></tr>
+          ? `Per-line rates as above. Incoterm ${frt.active && frt.display === 'separate' ? 'FOB' : order.incoterm} ${loadingPortFull}.`
+          : `@ ${order.currency} ${fmtMoney(lines[0]?.pricePerMT || order.pricePerMT)} per metric ton ${frt.active && frt.display === 'separate' ? 'FOB' : order.incoterm} ${loadingPortFull}`}${freightPriceMakeup(frt)}</td></tr>
+        ${frt.active && frt.display === 'separate' ? `
+        <tr><td style="font-weight:bold; vertical-align:top;">Freight:</td><td>${curShortSc} ${fmtMoney(frt.freightPerMt)} per metric ton ocean freight${frt.insurancePerMt > 0 ? `, plus ${curShortSc} ${fmtMoney(frt.insurancePerMt)} per metric ton marine insurance,` : ''} payable by the Buyer in addition to the goods value.</td></tr>` : ''}
+        <tr><td style="font-weight:bold;">Total Amount:</td><td>${order.currency} ${fmtMoney(frt.active ? frt.totalPayable : totalAmt)}${frt.active && frt.display === 'separate' ? ` (goods ${curShortSc} ${fmtMoney(frt.goodsAmount)} + freight${frt.insuranceAmount > 0 ? ' &amp; insurance' : ''} ${curShortSc} ${fmtMoney(frt.freightAmount + frt.insuranceAmount)})` : ''}</td></tr>
         <tr><td style="font-weight:bold;">Shipment:</td><td>${packing?.shipmentWindowStart || '—'} - ${packing?.shipmentWindowEnd || '—'}</td></tr>
         <tr><td style="font-weight:bold;">Payment:</td><td>${order.paymentTerms}</td></tr>
       </table>
@@ -1016,6 +1139,8 @@ function renderSalesContract(doc) {
           <li>Non-GMO certificate, issued by the Department of Plant Protection, Govt. of Pakistan</li>
         </ul>
       </div>
+
+      ${freightClauseBlock(frt, { marginTop: 14 })}
 
       <p style="margin-top:15px; font-size:12px;">This contract shall be signed by the buyer and returned. Failure to do so and buyer's retention of the contract shall constitute in acceptance of terms and conditions hereof.</p>
 
@@ -1453,7 +1578,9 @@ function renderInvoice(doc) {
           `).join('')}
           <tr style="font-weight:bold; background:#fafafa;">
             <td style="border:1px solid #333; padding:8px; text-align:right;" colspan="2">TOTAL</td>
-            <td style="border:1px solid #333; padding:8px;">${totalBags.toLocaleString()} Bags · GROSS ${((totals?.grossWeightMT) || totalQty + 0.1).toFixed(2)} MT · NET ${totalQty.toFixed(2)} MT</td>
+            <td style="border:1px solid #333; padding:8px;">${totalBags.toLocaleString()} Bags · ${unitOf(doc) === 'lb'
+              ? `GROSS ${wt((totals?.grossWeightKg) || (totalQty + 0.1) * 1000, doc)} · NET ${wt((totals?.netWeightKg) || totalQty * 1000, doc)}`
+              : `GROSS ${((totals?.grossWeightMT) || totalQty + 0.1).toFixed(2)} MT · NET ${totalQty.toFixed(2)} MT`}</td>
           </tr>
         </tbody>
       </table>
@@ -1490,7 +1617,7 @@ function renderBillOfLading(doc) {
         const bagType = it.bagType || order.bagType || 'PP';
         const bagCount = it.bagCount || (it.qtyMT && bagSize ? Math.round((it.qtyMT * 1000) / bagSize) : 0);
         const qualityText = it.qualityDescription
-          || `Pakistani ${it.productName || 'Rice'} - ${it.brokenPctTarget != null ? it.brokenPctTarget : (order.brokenPctTarget || 2)}% Broken - Double (silky) polished & color sorted, Latest Crop - PACKED IN ${bagSize} KGS ${bagType} BAG${masterOf(it) > 0 ? ` IN ${masterOf(it)} KG MASTER BAG` : ''}${it.hsCode ? ` - HS CODE: ${it.hsCode}` : ''} - GMO FREE, FIT FOR HUMAN CONSUMPTION AT ANY STAGE, FREE FROM ALIVE AND DEAD WEEVILS/INSECTS`;
+          || `Pakistani ${it.productName || 'Rice'} - ${it.brokenPctTarget != null ? it.brokenPctTarget : (order.brokenPctTarget || 2)}% Broken - Double (silky) polished & color sorted, Latest Crop - PACKED IN ${packSize(bagSize, doc)} ${bagType} BAG${masterOf(it) > 0 ? ` IN ${packSize(masterOf(it), doc)} MASTER BAG` : ''}${it.hsCode ? ` - HS CODE: ${it.hsCode}` : ''} - GMO FREE, FIT FOR HUMAN CONSUMPTION AT ANY STAGE, FREE FROM ALIVE AND DEAD WEEVILS/INSECTS`;
         // withHsCode, not a blind append: the default quality text above already
         // carries "- HS CODE: x -" mid-sentence, so appending unconditionally
         // printed the same code twice on adjacent lines.
@@ -1568,8 +1695,12 @@ function renderBillOfLading(doc) {
             ${containerCount} x ${containerType} Container containing ${totalBags.toLocaleString()} bags<br/>
             ${descriptionItemsHtml}
             <div style="margin-top:6px;">Sales contract # ${order.contractNumber || ''}${order.date ? ` Dated ${order.date}` : ''}</div>
-            <div>Net Weight ${(((totals && totals.netWeightMT) || order.qtyMT) || 0).toFixed(2)} MT</div>
-            <div>Gross Weight ${(((totals && totals.grossWeightMT) || order.qtyMT) || 0).toFixed(2)} MT</div>
+            <div>Net Weight ${unitOf(doc) === 'lb'
+              ? wt(((totals && totals.netWeightKg) || (order.qtyMT || 0) * 1000), doc)
+              : `${(((totals && totals.netWeightMT) || order.qtyMT) || 0).toFixed(2)} MT`}</div>
+            <div>Gross Weight ${unitOf(doc) === 'lb'
+              ? wt(((totals && totals.grossWeightKg) || (order.qtyMT || 0) * 1000), doc)
+              : `${(((totals && totals.grossWeightMT) || order.qtyMT) || 0).toFixed(2)} MT`}</div>
           </td>
         </tr>
       </table>
@@ -1609,14 +1740,19 @@ function renderPackingCertificate(doc) {
   // where none were, these shipment figures print instead. The old text said
   // "PER CONTAINER" either way while showing containers[0] — or the whole
   // shipment divided by a container count of one.
-  const mtOf = (kg) => (kg / 1000).toFixed(3);
+  // This certificate states weights in metric tons. A pounds order has no use
+  // for M/TONS, so it prints the figures in LBS instead and the column headings
+  // follow. A kilogram order is unchanged — still M/TONS, as it has always been.
+  const inLb = unitOf(doc) === 'lb';
+  const wtCell = (kg) => (inLb ? wtNum(kg, doc) : (kg / 1000).toFixed(3));
+  const wtLabel = inLb ? wtUnitPl(doc) : 'M/TONS';
 
   // Master (outer) bag, when the retail bags ship inside one. Stated here
   // because the certificate is what the buyer reads for how the pallet arrives.
   const masterKg = parseFloat(order.masterBagSizeKg) || 0;
   const retailPerMaster = (masterKg > 0 && order.bagSizeKg) ? Math.floor(masterKg / order.bagSizeKg) : 0;
   const masterBagLine = masterKg > 0
-    ? `, PACKED INTO ${(totals?.masterBagCount || 0).toLocaleString()} MASTER BAGS OF ${masterKg} KG${retailPerMaster > 0 ? ` (${retailPerMaster} RETAIL BAGS PER MASTER)` : ''}`
+    ? `, PACKED INTO ${(totals?.masterBagCount || 0).toLocaleString()} MASTER BAGS OF ${packSize(masterKg, doc)}${retailPerMaster > 0 ? ` (${retailPerMaster} RETAIL BAGS PER MASTER)` : ''}`
     : '';
 
   return `
@@ -1630,14 +1766,16 @@ function renderPackingCertificate(doc) {
         <tr><td style="font-weight:bold;">SHIPPER:</td><td>${company.name}</td></tr>
         <tr><td style="font-weight:bold;">SHIPPER ADD:</td><td>${company.address}</td></tr>
         <tr><td style="font-weight:bold;">INVOICE #</td><td>${order.invoiceNumber} DATED: ${order.date}</td></tr>
-        <tr><td style="font-weight:bold;">QUANTITY:</td><td>${totalBags} BAGS - ${(netKg / 1000).toFixed(2)} MT NET WEIGHT AND ${(grossKg / 1000).toFixed(2)} MT GROSS WEIGHT</td></tr>
+        <tr><td style="font-weight:bold;">QUANTITY:</td><td>${totalBags} BAGS - ${inLb
+          ? `${wt(netKg, doc)} NET WEIGHT AND ${wt(grossKg, doc)} GROSS WEIGHT`
+          : `${(netKg / 1000).toFixed(2)} MT NET WEIGHT AND ${(grossKg / 1000).toFixed(2)} MT GROSS WEIGHT`}</td></tr>
         <tr><td style="font-weight:bold; vertical-align:top;">QUALITY:</td><td>${order.qualityDescription} - HS CODE: ${order.hsCode}</td></tr>
       </table>
 
       <table style="width:100%; font-size:12px; line-height:1.8;">
         ${containers.map(c => `<tr><td style="width:130px;"></td><td>${c.lotNumber || '—'},</td></tr>`).join('')}
         <tr><td style="font-weight:bold;">BUYER</td><td>${buyer.name}<br/>${buyer.address}, ${buyer.country}</td></tr>
-        <tr><td style="font-weight:bold;">PACKING:</td><td>PACKED IN ${order.bagSizeKg || 50} KG IN NEW DOUBLE WOVEN (OUTER) POLYPROPYLENE BAGS OF ${order.bagSizeKg || 50} KG NET EACH${masterBagLine}</td></tr>
+        <tr><td style="font-weight:bold;">PACKING:</td><td>PACKED IN ${packSize(order.bagSizeKg || 50, doc)} IN NEW DOUBLE WOVEN (OUTER) POLYPROPYLENE BAGS OF ${packSize(order.bagSizeKg || 50, doc)} NET EACH${masterBagLine}</td></tr>
         <tr><td style="font-weight:bold;">PRODUCT ORIGIN:</td><td>PAKISTAN</td></tr>
         ${shipment.blNumber ? `<tr><td style="font-weight:bold;">BL #</td><td>${shipment.blNumber} DATED: ${shipment.blDate || '—'}</td></tr>` : ''}
         ${shipment.vesselName ? `<tr><td style="font-weight:bold;">VESSEL NAME:</td><td>${shipment.vesselName}</td></tr>` : ''}
@@ -1654,26 +1792,26 @@ function renderPackingCertificate(doc) {
             <th style="${CELL_SM}">S.NO</th>
             <th style="${CELL_SM}">CONTAINER #</th>
             <th style="${CELL_SM}">NO OF BAGS</th>
-            <th style="${CELL_SM}">TARE WT IN M/TONS</th>
-            <th style="${CELL_SM}">NET WT IN M/TONS</th>
-            <th style="${CELL_SM}">GROSS WT IN M/TONS</th>
+            <th style="${CELL_SM}">TARE WT IN ${wtLabel}</th>
+            <th style="${CELL_SM}">NET WT IN ${wtLabel}</th>
+            <th style="${CELL_SM}">GROSS WT IN ${wtLabel}</th>
           </tr></thead>
           <tbody>
             ${containers.map((c, i) => `<tr>
               <td style="border:1px solid #333; padding:4px; text-align:center;">${i + 1}</td>
               <td style="${CELL_SM}">${c.containerNo}</td>
               <td style="border:1px solid #333; padding:4px; text-align:center;">${c.bagsCount}</td>
-              <td style="border:1px solid #333; padding:4px; text-align:right;">${mtOf(Math.max((c.grossWeightKg || 0) - (c.netWeightKg || 0), 0))}</td>
-              <td style="border:1px solid #333; padding:4px; text-align:right;">${mtOf(c.netWeightKg || 0)}</td>
-              <td style="border:1px solid #333; padding:4px; text-align:right;">${mtOf(c.grossWeightKg || 0)}</td>
+              <td style="border:1px solid #333; padding:4px; text-align:right;">${wtCell(Math.max((c.grossWeightKg || 0) - (c.netWeightKg || 0), 0))}</td>
+              <td style="border:1px solid #333; padding:4px; text-align:right;">${wtCell(c.netWeightKg || 0)}</td>
+              <td style="border:1px solid #333; padding:4px; text-align:right;">${wtCell(c.grossWeightKg || 0)}</td>
             </tr>`).join('')}
           </tbody>
         </table>
       ` : `
         <p style="margin-top:10px; font-size:12px;">
-          TARE WEIGHT OF BAGS FOR THIS SHIPMENT: ${mtOf(tareKg)} M/TONS<br/>
-          NET WEIGHT FOR THIS SHIPMENT: ${mtOf(netKg)} M/TONS<br/>
-          GROSS WEIGHT FOR THIS SHIPMENT: ${mtOf(grossKg)} M/TONS
+          TARE WEIGHT OF BAGS FOR THIS SHIPMENT: ${wtCell(tareKg)} ${wtLabel}<br/>
+          NET WEIGHT FOR THIS SHIPMENT: ${wtCell(netKg)} ${wtLabel}<br/>
+          GROSS WEIGHT FOR THIS SHIPMENT: ${wtCell(grossKg)} ${wtLabel}
         </p>
       `}
 

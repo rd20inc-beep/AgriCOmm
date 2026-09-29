@@ -242,6 +242,17 @@ const exportDocumentController = {
       const masterBagTareKg = masterTarePerUnitKg * masterBagCount;
       const packagingTareKg = bagTareKg + masterBagTareKg;
 
+      // Bag sizes are stored in KG; the generated description prints them in the
+      // unit this order's DOCUMENTS use, so a US shipment reads "PACKED IN 8 LBS
+      // PP BAG" rather than the kilogram equivalent. Mirrors formatPackSize in
+      // src/shared/constants/weightUnits.js — 1 lb = 0.45359237 kg exactly.
+      const docUnit = order.doc_weight_unit === 'lb' ? 'lb' : 'kg';
+      const packLabel = (kg) => {
+        const v = (parseFloat(kg) || 50) / (docUnit === 'lb' ? 0.45359237 : 1);
+        const n = Math.abs(v - Math.round(v)) < 0.005 ? String(Math.round(v)) : v.toFixed(2);
+        return `${n} ${docUnit === 'lb' ? 'LBS' : 'KGS'}`;
+      };
+
       const grossWeightKg = containerGrossKg
         || (packingWeight && parseFloat(packingWeight.gross_weight_kg))
         || (netWeightKg + packagingTareKg);
@@ -296,7 +307,7 @@ const exportDocumentController = {
           vatNumber: order.customer_vat || '',
         },
 
-        // Order
+          // Order
         order: {
           orderNo: order.order_no,
           contractNumber: order.contract_number || order.order_no,
@@ -328,6 +339,23 @@ const exportDocumentController = {
           advancePct: parseFloat(order.advance_pct) || 0,
           advanceAmount: parseFloat(order.advance_expected) || 0,
           incoterm: order.incoterm || 'FOB',
+          // Unit the DOCUMENTS print weights in — 'kg', or 'lb' for the USA and
+          // Canada. The payload itself stays in KG: the renderers convert at the
+          // last moment via src/shared/constants/weightUnits.js, so nothing
+          // stored, costed or reported changes with this setting.
+          docWeightUnit: order.doc_weight_unit || 'kg',
+          // Freight, held as data instead of typed into the document by hand.
+          // Volatile ocean freight was being covered by stating FOB and adding a
+          // freight line — which contradicts the term, since under FOB the buyer
+          // pays the freight. These fields let the real CFR/CIF term print with
+          // the price broken down inside it, with an escalation clause doing the
+          // protecting. See src/shared/constants/exportFreight.js.
+          freightPerMT: order.freight_per_mt == null ? 0 : parseFloat(order.freight_per_mt),
+          insurancePerMT: order.insurance_per_mt == null ? 0 : parseFloat(order.insurance_per_mt),
+          freightBasisDate: order.freight_basis_date || null,
+          freightValidUntil: order.freight_valid_until || null,
+          freightDisplay: order.freight_display || 'in_price',
+          freightClause: order.freight_clause || '',
           // Precedence: per-order override → customer default → auto-generated.
           paymentTerms: order.payment_terms
             || order.customer_payment_terms
@@ -341,8 +369,8 @@ const exportDocumentController = {
           hsCodes: hsCodes,
           brokenPctTarget: order.broken_pct_target || 2,
           qualityDescription: orderQualityDescription || (orderHsCode
-            ? `Pakistani ${order.product_name || 'Rice'} - ${order.broken_pct_target || 2}% Broken - Double (silky) polished & color sorted, Latest Crop - PACKED IN ${parseFloat(order.bag_size_kg) || 50} KGS ${order.bag_type || 'PP'} BAG - HS CODE: ${orderHsCode} - GMO FREE, FIT FOR HUMAN CONSUMPTION AT ANY STAGE, FREE FROM ALIVE AND DEAD WEEVILS/INSECTS`
-            : `Pakistani ${order.product_name || 'Rice'} - ${order.broken_pct_target || 2}% Broken - Double (silky) polished & color sorted, Latest Crop - PACKED IN ${parseFloat(order.bag_size_kg) || 50} KGS ${order.bag_type || 'PP'} BAG - GMO FREE, FIT FOR HUMAN CONSUMPTION AT ANY STAGE, FREE FROM ALIVE AND DEAD WEEVILS/INSECTS`),
+            ? `Pakistani ${order.product_name || 'Rice'} - ${order.broken_pct_target || 2}% Broken - Double (silky) polished & color sorted, Latest Crop - PACKED IN ${packLabel(order.bag_size_kg)} ${order.bag_type || 'PP'} BAG - HS CODE: ${orderHsCode} - GMO FREE, FIT FOR HUMAN CONSUMPTION AT ANY STAGE, FREE FROM ALIVE AND DEAD WEEVILS/INSECTS`
+            : `Pakistani ${order.product_name || 'Rice'} - ${order.broken_pct_target || 2}% Broken - Double (silky) polished & color sorted, Latest Crop - PACKED IN ${packLabel(order.bag_size_kg)} ${order.bag_type || 'PP'} BAG - GMO FREE, FIT FOR HUMAN CONSUMPTION AT ANY STAGE, FREE FROM ALIVE AND DEAD WEEVILS/INSECTS`),
         },
 
         // Incoterm-aware delivery/freight terms — available to every document

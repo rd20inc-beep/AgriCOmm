@@ -664,6 +664,7 @@ COL export_orders.customer_id:integer:NOT NULL
 COL export_orders.destination_port:character varying:NULL
 COL export_orders.device_uuid:text:NULL
 COL export_orders.doc_address_mode:character varying:NOT NULL
+COL export_orders.doc_weight_unit:character varying:NOT NULL
 COL export_orders.eta:date:NULL
 COL export_orders.etd:date:NULL
 COL export_orders.expiry_date:date:NULL
@@ -672,7 +673,12 @@ COL export_orders.fi_number:character varying:NULL
 COL export_orders.fi_number_2:character varying:NULL
 COL export_orders.fi_number_3:character varying:NULL
 COL export_orders.financial_status:character varying:NOT NULL
+COL export_orders.freight_basis_date:date:NULL
+COL export_orders.freight_clause:text:NULL
+COL export_orders.freight_display:character varying:NOT NULL
+COL export_orders.freight_per_mt:numeric:NULL
 COL export_orders.freight_terms:character varying:NULL
+COL export_orders.freight_valid_until:date:NULL
 COL export_orders.fx_gain_loss_pkr:numeric:NOT NULL
 COL export_orders.fx_rate_locked_at:timestamp with time zone:NULL
 COL export_orders.fx_rate_source:character varying:NULL
@@ -684,6 +690,7 @@ COL export_orders.gross_profit_usd:numeric:NULL
 COL export_orders.hs_code:character varying:NULL
 COL export_orders.id:integer:NOT NULL
 COL export_orders.incoterm:character varying:NULL
+COL export_orders.insurance_per_mt:numeric:NULL
 COL export_orders.inventory_cogs_per_mt_pkr:numeric:NULL
 COL export_orders.inventory_cogs_total_pkr:numeric:NULL
 COL export_orders.invoice_number:character varying:NULL
@@ -2948,7 +2955,9 @@ CON export_orders.chk_export_orders_balance_received_nonneg(c)
 CON export_orders.chk_export_orders_broken_pct_target_range(c)
 CON export_orders.chk_export_orders_currency_valid(c)
 CON export_orders.chk_export_orders_daterange(c)
+CON export_orders.chk_export_orders_doc_weight_unit_valid(c)
 CON export_orders.chk_export_orders_financial_status_valid(c)
+CON export_orders.chk_export_orders_freight_display_valid(c)
 CON export_orders.chk_export_orders_inventory_cogs_per_mt_pkr_nn(c)
 CON export_orders.chk_export_orders_inventory_cogs_total_pkr_nonneg(c)
 CON export_orders.chk_export_orders_master_bag_size_kg_nn(c)

@@ -39,6 +39,19 @@ const createExportOrder = Joi.object({
   consignee_type: Joi.string().max(20).allow('', null),
   shipment_window_start: Joi.date().iso().allow(null, ''),
   shipment_window_end: Joi.date().iso().allow(null, ''),
+  // Export documents print in KG, or LBS for the USA and Canada. A presentation
+  // choice only — the engine stores KG throughout. varchar(3) + CHECK, mig 302.
+  doc_weight_unit: Joi.string().valid('kg', 'lb').allow('', null),
+  // Freight, structured rather than typed into the document by hand. freight_display
+  // picks how it prints: 'in_price' states the real CFR/CIF term and breaks the unit
+  // price into FOB + freight inside it; 'separate' keeps the FOB-price-plus-a-freight
+  // -line presentation. freight_clause overrides the generated escalation wording.
+  freight_per_mt: Joi.number().min(0).allow(null, ''),
+  insurance_per_mt: Joi.number().min(0).allow(null, ''),
+  freight_basis_date: Joi.date().iso().allow(null, ''),
+  freight_valid_until: Joi.date().iso().allow(null, ''),
+  freight_display: Joi.string().valid('in_price', 'separate').allow('', null),
+  freight_clause: Joi.string().allow('', null),        // text column, unbounded
   qty_mt: Joi.number().positive().required().messages({
     'number.positive': 'Quantity must be greater than zero',
   }),

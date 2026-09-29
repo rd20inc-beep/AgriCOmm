@@ -318,6 +318,13 @@ const ALLOWED_UPDATE_FIELDS = [
   'notify_party_name', 'notify_party_address', 'notify_party_phone', 'notify_party_email',
   'shipment_remarks',
   'payment_terms',
+  // Export documents print in KG or LBS (USA/Canada) — a presentation choice
+  // per order; the engine still stores KG. Freight is structured rather than
+  // typed into the document by hand: see migration 302 and
+  // src/shared/constants/exportFreight.js for why the Incoterm now stays true.
+  'doc_weight_unit',
+  'freight_per_mt', 'insurance_per_mt', 'freight_basis_date',
+  'freight_valid_until', 'freight_display', 'freight_clause',
 ];
 
 // Batch 7 — container-capacity rule. The 25,000 KG (loose) / 20,000 KG (palletized)
@@ -339,11 +346,13 @@ const NUMERIC_UPDATE_FIELDS = new Set([
   'qty_mt', 'price_per_mt', 'advance_pct',
   'bag_size_kg', 'bag_weight_gm', 'broken_pct_target',
   'master_bag_size_kg', 'master_bag_weight_gm',
+  'freight_per_mt', 'insurance_per_mt',
 ]);
 const DATE_UPDATE_FIELDS = new Set([
   'shipment_eta', 'production_date', 'expiry_date',
   'fi_date', 'bl_date', 'gd_date',
   'shipment_window_start', 'shipment_window_end',
+  'freight_basis_date', 'freight_valid_until',
 ]);
 
 const exportOrderController = {
@@ -747,6 +756,17 @@ const exportOrderController = {
         consignee_type,
         shipment_window_start,
         shipment_window_end,
+        // Documents print in KG or (USA/Canada) LBS; the engine still stores KG.
+        doc_weight_unit,
+        // Freight as data instead of typed into the document by hand — see
+        // src/shared/constants/exportFreight.js for why the Incoterm can now
+        // stay true while the escalation clause carries the protection.
+        freight_per_mt,
+        insurance_per_mt,
+        freight_basis_date,
+        freight_valid_until,
+        freight_display,
+        freight_clause,
         advance_pct,
         shipment_eta,
         source,
@@ -853,6 +873,15 @@ const exportOrderController = {
             country: country || null,
             destination_port: destination_port || null,
             contract_number: contract_number || null,
+            // Both columns are NOT NULL with a default, so a blank from the form
+            // has to fall back to the default rather than be written as null.
+            doc_weight_unit: doc_weight_unit || 'kg',
+            freight_display: freight_display || 'in_price',
+            freight_per_mt: freight_per_mt === '' || freight_per_mt == null ? null : parseFloat(freight_per_mt),
+            insurance_per_mt: insurance_per_mt === '' || insurance_per_mt == null ? null : parseFloat(insurance_per_mt),
+            freight_basis_date: freight_basis_date || null,
+            freight_valid_until: freight_valid_until || null,
+            freight_clause: freight_clause || null,
             // NOT NULL with a default of 'to_order_of_bank' — a blank from the
             // form must fall back to the default, not be written as null.
             consignee_type: consignee_type || 'to_order_of_bank',

@@ -5,6 +5,8 @@ import PartyLink from '../../../shared/components/PartyLink';
 import { useUpdateOrder } from '../../../api/queries';
 import { useApp } from '../../../context/AppContext';
 import { INCOTERMS, incotermHint } from '../../../shared/constants/incoterms';
+import { WEIGHT_UNITS, weightUnit } from '../../../shared/constants/weightUnits';
+import { FREIGHT_DISPLAYS, incotermCarriesFreight } from '../../../shared/constants/exportFreight';
 import { PAYMENT_TERMS } from '../../../shared/constants/paymentTerms';
 
 // Statuses where ANY contract field is fully editable.
@@ -86,6 +88,13 @@ export default function OverviewTab({ order, formatCurrency, formatPKR, totalCos
       destination_port: order.destinationPort || '',
       shipment_eta: order.shipmentETA || '',
       doc_address_mode: order.docAddressMode || 'country',
+      doc_weight_unit: order.docWeightUnit || 'kg',
+      freight_per_mt: order.freightPerMT ?? '',
+      insurance_per_mt: order.insurancePerMT ?? '',
+      freight_basis_date: (order.freightBasisDate || '').slice(0, 10),
+      freight_valid_until: (order.freightValidUntil || '').slice(0, 10),
+      freight_display: order.freightDisplay || 'in_price',
+      freight_clause: order.freightClause || '',
     });
     setContractEditing(true);
   };
@@ -99,6 +108,16 @@ export default function OverviewTab({ order, formatCurrency, formatPKR, totalCos
       destination_port: contract.destination_port || null,
       shipment_eta: contract.shipment_eta || null,
       doc_address_mode: contract.doc_address_mode || 'country',
+      // Documents only — the engine stores KG whatever this says.
+      doc_weight_unit: contract.doc_weight_unit || 'kg',
+      // Freight. Blank clears the figure rather than writing a zero, so an order
+      // that stops charging freight stops printing the freight rows entirely.
+      freight_per_mt: contract.freight_per_mt === '' ? null : parseFloat(contract.freight_per_mt),
+      insurance_per_mt: contract.insurance_per_mt === '' ? null : parseFloat(contract.insurance_per_mt),
+      freight_basis_date: contract.freight_basis_date || null,
+      freight_valid_until: contract.freight_valid_until || null,
+      freight_display: contract.freight_display || 'in_price',
+      freight_clause: contract.freight_clause || null,
     };
     // Only send qty/price when they're actually editable, so the server's
     // recompute path doesn't fire for an order that's locked them out.
@@ -183,6 +202,24 @@ export default function OverviewTab({ order, formatCurrency, formatPKR, totalCos
               <span className="font-medium text-gray-900">{({ country: 'Country only', port: 'Port only', country_port: 'Country + port', full: 'Full address + country' }[order.docAddressMode] || 'Country only')}</span>
             </div>
             <div className="flex justify-between text-sm">
+              <span className="text-gray-500">Weights on Documents</span>
+              <span className="font-medium text-gray-900">{weightUnit(order.docWeightUnit).short}</span>
+            </div>
+            {(order.freightPerMT > 0 || order.insurancePerMT > 0) && (
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-500">Freight on Documents</span>
+                <span className="font-medium text-gray-900 text-right">
+                  {formatCurrency(order.freightPerMT || 0)}/MT
+                  {order.insurancePerMT > 0 ? ` + ${formatCurrency(order.insurancePerMT)}/MT ins.` : ''}
+                  <span className="block text-[11px] font-normal text-gray-500">
+                    {order.freightDisplay === 'separate'
+                      ? 'charged separately, FOB price shown'
+                      : `inside the ${order.incoterm || 'CFR'} price`}
+                  </span>
+                </span>
+              </div>
+            )}
+            <div className="flex justify-between text-sm">
               <span className="text-gray-500">Created</span>
               <span className="font-medium text-gray-900">{order.createdAt}</span>
             </div>
@@ -246,9 +283,81 @@ export default function OverviewTab({ order, formatCurrency, formatPKR, totalCos
                   <option value="full">Full address + country</option>
                 </select>
               </div>
+              <div className="col-span-2">
+                <label className="block text-xs font-medium text-gray-600 mb-1">Weights on Export Documents</label>
+                <select value={contract.doc_weight_unit} onChange={e => setContract(c => ({ ...c, doc_weight_unit: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
+                  {WEIGHT_UNITS.map(u => <option key={u.code} value={u.code}>{u.label}</option>)}
+                </select>
+                <p className="text-[11px] text-gray-500 mt-1 leading-snug">
+                  {weightUnit(contract.doc_weight_unit).description} Documents only — stock, costing
+                  and every report stay in kilograms.
+                </p>
+              </div>
+            </div>
+
+            {/* ── Freight ──
+                Ocean freight moves faster than a contract, so the figure lives
+                here rather than being typed into the document by hand, and the
+                escalation clause below carries the protection that stating FOB
+                on a CFR shipment used to carry. */}
+            <div className="border-t border-gray-200 pt-3">
+              <div className="flex items-baseline justify-between mb-2">
+                <h4 className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Freight on Documents</h4>
+                <span className="text-[11px] text-gray-400">optional</span>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Ocean freight per MT</label>
+                  <input type="number" min="0" step="0.01" placeholder="—" value={contract.freight_per_mt} onChange={e => setContract(c => ({ ...c, freight_per_mt: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Insurance per MT</label>
+                  <input type="number" min="0" step="0.01" placeholder="—" value={contract.insurance_per_mt} onChange={e => setContract(c => ({ ...c, insurance_per_mt: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Rate quoted on</label>
+                  <input type="date" value={contract.freight_basis_date} onChange={e => setContract(c => ({ ...c, freight_basis_date: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Holds until</label>
+                  <input type="date" value={contract.freight_valid_until} onChange={e => setContract(c => ({ ...c, freight_valid_until: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-xs font-medium text-gray-600 mb-1">How it prints</label>
+                  <select value={contract.freight_display} onChange={e => setContract(c => ({ ...c, freight_display: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
+                    {FREIGHT_DISPLAYS.map(d => <option key={d.code} value={d.code}>{d.label}</option>)}
+                  </select>
+                  <p className="text-[11px] text-gray-500 mt-1 leading-snug">
+                    {(FREIGHT_DISPLAYS.find(d => d.code === contract.freight_display) || FREIGHT_DISPLAYS[0]).description}
+                  </p>
+                  {/* Under FOB the BUYER nominates the vessel and pays the freight,
+                      so charging it back needs saying out loud rather than being
+                      implied by a line at the bottom of the page. */}
+                  {parseFloat(contract.freight_per_mt) > 0 && !incotermCarriesFreight(contract.incoterm) && contract.freight_display === 'in_price' && (
+                    <p className="text-[11px] text-amber-700 mt-1 leading-snug">
+                      {contract.incoterm} does not put the freight on the seller, so there is no
+                      delivered price to break down. Either set the Incoterm to CFR/CIF, or print
+                      the freight as a separate line.
+                    </p>
+                  )}
+                  {parseFloat(contract.freight_per_mt) > 0 && contract.freight_display === 'in_price'
+                    && parseFloat(contract.price_per_mt) > 0
+                    && parseFloat(contract.price_per_mt) <= (parseFloat(contract.freight_per_mt) + (parseFloat(contract.insurance_per_mt) || 0)) && (
+                    <p className="text-[11px] text-red-600 mt-1 leading-snug">
+                      Freight is not smaller than the price per MT, so the FOB value would come out
+                      at zero or below. Check whether a per-container rate was entered per MT.
+                    </p>
+                  )}
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Escalation clause <span className="font-normal text-gray-400">(leave blank for the standard wording)</span></label>
+                  <textarea rows={3} value={contract.freight_clause} onChange={e => setContract(c => ({ ...c, freight_clause: e.target.value }))} placeholder="Any increase in ocean freight, BAF, war-risk or congestion surcharge between the rate date and the Bill of Lading date is for the Buyer's account…" className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                </div>
+              </div>
             </div>
             <p className="text-xs text-gray-500">
               Contract value, advance and balance amounts are recalculated automatically on save.
+              Freight is a document figure — it does not change the contract value or the ledger.
             </p>
           </div>
         )}
