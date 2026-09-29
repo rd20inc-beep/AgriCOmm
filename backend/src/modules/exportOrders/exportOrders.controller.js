@@ -8,6 +8,7 @@ const { publishExportOrderUpdate } = require('../../services/exportOrderEventBus
 const workflowService = require('../../services/exportOrderWorkflowService');
 const { resolveShipmentField, resolveRequiredField } = require('./shipmentField');
 const { billableFreight, balanceExpectedFor, freightChanges } = require('./billableFreight');
+const debitNoteService = require('./debitNote.service');
 const notificationService = require('../../services/notificationService');
 // #9-scoping: per-user warehouse restriction, applied to stock READ paths only
 // (the dispatch/reservation engine is never scoped).
@@ -356,7 +357,46 @@ const DATE_UPDATE_FIELDS = new Set([
   'freight_basis_date', 'freight_valid_until',
 ]);
 
+// Routes accept either the numeric id or the order number, so a debit-note
+// handler has to resolve the same way its neighbours do.
+async function resolveOrderId(raw) {
+  if (/^\d+$/.test(String(raw))) return parseInt(raw, 10);
+  const row = await db('export_orders').where({ order_no: raw }).first('id');
+  return row ? row.id : null;
+}
+
 const exportOrderController = {
+  // ── Freight escalation debit notes (mig 304) ──
+  // The clause on the Proforma and the Sales Contract promises the buyer that a
+  // freight rise between the rate date and the Bill of Lading is invoiced by
+  // debit note. These are the endpoints that keep that promise. See
+  // debitNote.service.js for why the claim lands on the balance.
+  async listDebitNotes(req, res, next) {
+    try {
+      const orderId = await resolveOrderId(req.params.id);
+      if (!orderId) return res.status(404).json({ success: false, message: 'Export order not found.' });
+      return res.json({ success: true, data: await debitNoteService.list(orderId) });
+    } catch (err) { return next(err); }
+  },
+
+  async issueDebitNote(req, res, next) {
+    try {
+      const orderId = await resolveOrderId(req.params.id);
+      if (!orderId) return res.status(404).json({ success: false, message: 'Export order not found.' });
+      const note = await debitNoteService.issue(orderId, req.body, req.user?.id);
+      return res.status(201).json({ success: true, data: note });
+    } catch (err) { return next(err); }
+  },
+
+  async cancelDebitNote(req, res, next) {
+    try {
+      const orderId = await resolveOrderId(req.params.id);
+      if (!orderId) return res.status(404).json({ success: false, message: 'Export order not found.' });
+      const note = await debitNoteService.cancel(orderId, parseInt(req.params.noteId, 10), req.body, req.user?.id);
+      return res.json({ success: true, data: note });
+    } catch (err) { return next(err); }
+  },
+
   async list(req, res) {
     try {
       const {

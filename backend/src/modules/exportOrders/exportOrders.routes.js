@@ -140,6 +140,34 @@ router.post(
   controller.confirmBalance
 );
 
+// ── Freight escalation debit notes ──
+// Raised AFTER shipment, when the carrier's actual charge is known — which is
+// why this is not an order edit: quantity, price and freight are locked by then.
+// Issuing moves money the buyer owes, so it sits behind the same permission as
+// confirming a balance rather than plain order edit.
+router.get(
+  '/:id/debit-notes',
+  authorize('export_orders', 'view'),
+  controller.listDebitNotes
+);
+router.post(
+  '/:id/debit-notes',
+  authorizeAny(['export_orders', 'confirm_balance'], ['finance', 'confirm_payment']),
+  validate(schemas.issueExportDebitNote),
+  auditAction('issue_debit_note', 'export_order', (req) => req.params.id),
+  controller.issueDebitNote
+);
+// Cancelling withdraws a claim already sent to the buyer and already in the GL,
+// so it is owner-approved like the other reversals.
+router.post(
+  '/:id/debit-notes/:noteId/cancel',
+  authorizeAny(['export_orders', 'confirm_balance'], ['finance', 'confirm_payment']),
+  ownerApproval('export_balance'),
+  validate(schemas.cancelExportDebitNote),
+  auditAction('cancel_debit_note', 'export_order', (req) => req.params.id),
+  controller.cancelDebitNote
+);
+
 // ── Export receipt: record (pending) → Finance confirms with FX (item 14) ──
 // Export/any records a PENDING receipt (no posting). Finance confirms → posts.
 // (GET /pending-receipts is registered above, before /:id.)

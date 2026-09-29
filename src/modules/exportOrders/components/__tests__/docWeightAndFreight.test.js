@@ -211,6 +211,59 @@ describe('the two settings are independent', () => {
   });
 });
 
+describe('the freight debit note', () => {
+  const NOTES = [{
+    debitNoteNo: 'DN-0001', issueDate: '2026-10-10', currency: 'USD', amount: 432,
+    basis: 'freight_escalation', oldRatePerMT: 58, newRatePerMT: 76, qtyMT: 24,
+    reason: 'Carrier GRI and congestion surcharge, Karachi\u2013Hamburg',
+  }];
+  const renderNote = (notes, orderOverrides) => renderDocument({
+    ...payload(orderOverrides), debitNotes: notes, _docType: 'freight-debit-note', type: 'Freight Debit Note',
+  }, {});
+
+  it('prints the working the buyer will check', () => {
+    const html = renderNote(NOTES);
+    expect(html).toContain('DN-0001');
+    expect(html).toContain('58.00');        // rate contracted
+    expect(html).toContain('76.00');        // rate charged
+    expect(html).toContain('18.00');        // the rise per MT
+    expect(html).toContain('24 MT');
+    expect(html).toContain('432.00');
+    expect(html).toContain('FOUR HUNDRED THIRTY TWO');
+  });
+
+  it('says what it is and why the buyer owes it', () => {
+    const html = renderNote(NOTES);
+    expect(html).toContain('DEBIT NOTE');
+    expect(html).toContain('freight escalation clause');
+    expect(html).toContain("Buyer's account");
+    expect(html).toContain('payable together with the balance of the contract value');
+    expect(html).toContain('Carrier GRI');
+  });
+
+  it('a lump-sum surcharge prints without a per-MT working it does not have', () => {
+    const html = renderNote([{ debitNoteNo: 'DN-0002', issueDate: '2026-10-11', currency: 'USD', amount: 150, basis: 'surcharge', reason: 'War-risk surcharge' }]);
+    expect(html).toContain('150.00');
+    expect(html).toContain('War-risk');
+    expect(html).not.toContain('per MT.');
+  });
+
+  it('several notes each keep their own number, and are totalled', () => {
+    const html = renderNote([...NOTES, { debitNoteNo: 'DN-0002', issueDate: '2026-10-11', currency: 'USD', amount: 150, basis: 'surcharge' }]);
+    expect(html).toContain('DN-0001');
+    expect(html).toContain('DN-0002');
+    expect(html).toContain('under 2 notes');
+    expect(html).toContain('582.00');
+    expect(html).toContain('page-break-before:always');
+  });
+
+  it('with nothing raised it says so rather than printing a blank claim', () => {
+    const html = renderNote([]);
+    expect(html).toContain('No debit note has been raised');
+    expect(html).not.toContain('TOTAL DEBITED');
+  });
+});
+
 describe('the unit conversion itself', () => {
   it.each([
     [0, '0.00 LBS'],

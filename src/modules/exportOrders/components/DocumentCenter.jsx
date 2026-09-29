@@ -2072,7 +2072,128 @@ function renderLabTestRequest(doc) {
     </div>`;
 }
 
+// ─── Freight Debit Note ───
+// The claim the escalation clause promised. It is raised after shipment, when
+// the carrier's actual charge is known, and it prints the WORKING — the rate
+// contracted, the rate charged and the tonnage — because that is what the buyer
+// will check before paying it. Every issued note on the order prints, each with
+// its own number; a cancelled one is a withdrawn claim and the payload leaves it
+// out entirely.
+function renderFreightDebitNote(doc) {
+  const { company, buyer, order, shipment } = doc;
+  const notes = Array.isArray(doc.debitNotes) ? doc.debitNotes : [];
+  const cur = order.currency || 'USD';
+  const curShort = cur === 'USD' ? 'US$' : cur;
+  const BASIS_LABEL = {
+    freight_escalation: 'Ocean freight escalation',
+    surcharge: 'Carrier surcharge (BAF / war-risk / congestion)',
+    insurance: 'Marine insurance',
+    other: 'Additional charge',
+  };
+  const total = notes.reduce((t, n) => t + (parseFloat(n.amount) || 0), 0);
+
+  if (notes.length === 0) {
+    return `
+    <div style="${DOC_PAGE}">
+      ${renderExportDocumentHeader(company)}
+      <h2 style="text-align:center; font-size:16px; margin:12px 0; text-decoration:underline;">FREIGHT DEBIT NOTE</h2>
+      <p style="font-size:12px;">No debit note has been raised against order ${order.orderNo || ''}.</p>
+      ${renderExportDocumentFooter(company)}
+    </div>`;
+  }
+
+  const L = 'border:1px solid #333; padding:4px 8px; font-weight:bold; background:#f7f7f7; white-space:nowrap;';
+  const V = 'border:1px solid #333; padding:4px 8px;';
+
+  const noteBlock = (n, idx) => {
+    const rise = (parseFloat(n.newRatePerMT) || 0) - (parseFloat(n.oldRatePerMT) || 0);
+    const showWorking = n.oldRatePerMT != null && n.newRatePerMT != null && n.qtyMT;
+    return `
+      <div style="${idx > 0 ? 'page-break-before:always; padding-top:16px;' : ''}">
+        <h2 style="text-align:center; font-size:16px; margin:12px 0 4px; text-decoration:underline;">DEBIT NOTE</h2>
+        <table style="width:100%; margin:8px 0; border-collapse:collapse;">
+          <tr>
+            <td style="vertical-align:top; width:56%; padding-right:12px;">
+              <div style="font-weight:bold; font-size:13px; margin-bottom:2px;">To (Buyer):</div>
+              <div style="border:1px solid #333; padding:7px; min-height:48px; font-size:13px; line-height:1.35;">
+                <div style="font-weight:bold; font-size:14px;">${buyer.name || ''}</div>
+                ${[buyer.address, buyer.country, buyer.vatNumber ? `VAT NO: ${buyer.vatNumber}` : ''].filter(Boolean).join('<br/>')}
+              </div>
+            </td>
+            <td style="vertical-align:top; width:44%;">
+              <table style="border-collapse:collapse; width:100%; font-size:13px;">
+                <tr><td style="${L} width:46%;">DEBIT NOTE No.</td><td style="${V} font-weight:bold;">${n.debitNoteNo}</td></tr>
+                <tr><td style="${L}">DATE</td><td style="${V}">${n.issueDate || ''}</td></tr>
+                <tr><td style="${L}">CONTRACT No.</td><td style="${V}">${order.contractNumber || ''}</td></tr>
+                <tr><td style="${L}">INVOICE No.</td><td style="${V}">${order.invoiceNumber || ''}</td></tr>
+                <tr><td style="${L}">B/L No.</td><td style="${V}">${shipment.blNumber || ''}</td></tr>
+              </table>
+            </td>
+          </tr>
+        </table>
+
+        <p style="font-size:12px; margin:8px 0;">
+          We hereby debit your account with the amount below, being the increase in the freight
+          element of the above contract arising after the date on which our freight rate was
+          quoted. This is charged under the freight escalation clause of the contract, which
+          provides that any such increase arising before the date of the Bill of Lading is for
+          the Buyer's account.
+        </p>
+
+        <table style="width:100%; border-collapse:collapse; font-size:12px; margin-top:8px;">
+          <thead>
+            <tr style="background:#f0f0f0;">
+              <th style="${CELL}">PARTICULARS</th>
+              <th style="${CELL}" width="22%">BASIS</th>
+              <th style="${CELL}" width="20%">AMOUNT (${curShort})</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style="${CELL}">
+                ${BASIS_LABEL[n.basis] || 'Additional charge'} — ${order.productName || order.product || 'rice'},
+                ${order.portOfLoading || 'Karachi'} to ${order.destinationPort || buyer.country || 'destination'}.
+                ${showWorking ? `<br/><span style="color:#555;">Freight contracted at ${curShort} ${fmtMoney(n.oldRatePerMT)} per MT; actually charged ${curShort} ${fmtMoney(n.newRatePerMT)} per MT. Increase ${curShort} ${fmtMoney(rise)} per MT &times; ${Number(n.qtyMT)} MT.</span>` : ''}
+                ${n.reason ? `<br/><span style="color:#555;">${n.reason}</span>` : ''}
+              </td>
+              <td class="agri-num" style="${CELL_C}">${showWorking ? `${curShort} ${fmtMoney(rise)} / MT` : '—'}</td>
+              <td class="agri-num" style="${CELL_R}">${fmtMoney(n.amount)}</td>
+            </tr>
+            <tr style="font-weight:bold; background:#fafafa;">
+              <td colspan="2" style="${CELL_R}">TOTAL DEBITED</td>
+              <td class="agri-num" style="${CELL_R}">${fmtMoney(n.amount)}</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div style="margin-top:6px; font-weight:bold; font-style:italic;">Amount in ${curShort}: <span style="font-weight:bold; font-style:normal;">${amountInWords(n.amount, cur)}</span></div>
+
+        <p style="font-size:12px; margin-top:8px;">
+          This amount is payable together with the balance of the contract value, against the
+          shipping documents, to the account nominated in the contract.
+        </p>
+
+        <div style="margin-top:20px;">
+          <p style="margin:0;">Name of Signing authority:</p>
+          <div style="margin-top:14px; font-weight:bold;">${doc._signatory || company.proprietor}<br/>Proprietor<br/>${company.name}</div>
+        </div>
+      </div>`;
+  };
+
+  return `
+    <div style="${DOC_PAGE}">
+      ${renderExportDocumentHeader(company)}
+      ${notes.map(noteBlock).join('')}
+      ${notes.length > 1 ? `
+        <div style="margin-top:14px; border:1px solid #333; padding:6px 8px; font-size:12px;">
+          <strong>Total debited against order ${order.orderNo || ''} under ${notes.length} notes: ${curShort} ${fmtMoney(total)}</strong>
+        </div>` : ''}
+      ${renderExportDocumentFooter(company)}
+    </div>`;
+}
+
 const RENDERERS = {
+  'freight-debit-note': renderFreightDebitNote,
   'proforma-invoice': renderProformaInvoice,
   'commercial-invoice': renderCommercialInvoice,
   'packing-list': renderPackingList,

@@ -876,6 +876,7 @@ export default function ExportOrderDetail() {
             canConfirmAdvance={canConfirmAdvance}
             canRequestBalance={canRequestBalance}
             exportCostCategories={exportCostCategories}
+            addToast={addToast}
           />
         )}
         {activeTab === 'procurement' && (

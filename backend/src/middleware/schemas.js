@@ -211,6 +211,27 @@ const exportOrderAction = Joi.object({
   notes: Joi.string().allow('', null),
 });
 
+// ── Freight escalation debit note (mig 304) ──
+// Raised after shipment, when the carrier's actual charge is known. Either give
+// the amount outright, or the old and new freight rates and let the service work
+// it out — the arithmetic the escalation clause describes.
+const issueExportDebitNote = Joi.object({
+  amount: Joi.number().positive().allow(null, ''),
+  old_rate_per_mt: Joi.number().min(0).allow(null, ''),
+  new_rate_per_mt: Joi.number().min(0).allow(null, ''),
+  qty_mt: Joi.number().positive().allow(null, ''),
+  issue_date: Joi.date().iso().allow(null, ''),
+  fx_rate: Joi.number().positive().allow(null, ''),
+  basis: Joi.string().valid('freight_escalation', 'insurance', 'surcharge', 'other').allow('', null),
+  reason: Joi.string().allow('', null),          // text column, unbounded
+}).or('amount', 'new_rate_per_mt').messages({
+  'object.missing': 'Enter the amount to claim, or the new freight rate to work it out from.',
+});
+
+const cancelExportDebitNote = Joi.object({
+  reason: Joi.string().allow('', null),
+});
+
 const exportOrderDocumentAction = Joi.object({
   doc_type: Joi.string().required(),
   file_path: Joi.string().allow('', null),
@@ -706,6 +727,8 @@ module.exports = {
   updateExportShipment,
   exportPackingWeight,
   exportOrderAction,
+  issueExportDebitNote,
+  cancelExportDebitNote,
   exportOrderDocumentAction,
   confirmAdvance,
   confirmBalance,

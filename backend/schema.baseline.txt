@@ -559,6 +559,29 @@ COL expense_vendors.is_active:boolean:NOT NULL
 COL expense_vendors.name:character varying:NOT NULL
 COL expense_vendors.sort_order:integer:NOT NULL
 COL expense_vendors.updated_at:timestamp with time zone:NOT NULL
+COL export_debit_notes.amount:numeric:NOT NULL
+COL export_debit_notes.amount_pkr:numeric:NOT NULL
+COL export_debit_notes.basis:character varying:NOT NULL
+COL export_debit_notes.cancel_journal_id:integer:NULL
+COL export_debit_notes.cancel_reason:text:NULL
+COL export_debit_notes.cancelled_at:timestamp with time zone:NULL
+COL export_debit_notes.cancelled_by:integer:NULL
+COL export_debit_notes.created_at:timestamp with time zone:NOT NULL
+COL export_debit_notes.created_by:integer:NULL
+COL export_debit_notes.currency:character varying:NOT NULL
+COL export_debit_notes.customer_id:integer:NULL
+COL export_debit_notes.debit_note_no:character varying:NOT NULL
+COL export_debit_notes.fx_rate:numeric:NULL
+COL export_debit_notes.id:integer:NOT NULL
+COL export_debit_notes.issue_date:date:NOT NULL
+COL export_debit_notes.journal_id:integer:NULL
+COL export_debit_notes.new_rate_per_mt:numeric:NULL
+COL export_debit_notes.old_rate_per_mt:numeric:NULL
+COL export_debit_notes.order_id:integer:NOT NULL
+COL export_debit_notes.qty_mt:numeric:NULL
+COL export_debit_notes.reason:text:NULL
+COL export_debit_notes.status:character varying:NOT NULL
+COL export_debit_notes.updated_at:timestamp with time zone:NOT NULL
 COL export_order_costs.amount:numeric:NOT NULL
 COL export_order_costs.bank_account_id:integer:NULL
 COL export_order_costs.base_amount_pkr:numeric:NOT NULL
@@ -2918,6 +2941,15 @@ CON exception_inbox.exception_inbox_resolved_by_foreign(f)
 CON exception_inbox.exception_inbox_status_check(c)
 CON expense_vendors.expense_vendors_category_name_unique(u)
 CON expense_vendors.expense_vendors_pkey(p)
+CON export_debit_notes.chk_export_debit_notes_amount_positive(c)
+CON export_debit_notes.chk_export_debit_notes_basis_valid(c)
+CON export_debit_notes.chk_export_debit_notes_status_valid(c)
+CON export_debit_notes.export_debit_notes_cancelled_by_foreign(f)
+CON export_debit_notes.export_debit_notes_created_by_foreign(f)
+CON export_debit_notes.export_debit_notes_customer_id_foreign(f)
+CON export_debit_notes.export_debit_notes_debit_note_no_unique(u)
+CON export_debit_notes.export_debit_notes_order_id_foreign(f)
+CON export_debit_notes.export_debit_notes_pkey(p)
 CON export_order_costs.chk_export_order_costs_amount_nonneg(c)
 CON export_order_costs.chk_export_order_costs_base_amount_pkr_nn(c)
 CON export_order_costs.chk_export_order_costs_paid_amount_nn(c)
