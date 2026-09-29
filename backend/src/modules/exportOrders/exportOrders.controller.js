@@ -7,6 +7,7 @@ const emailService = require('../../services/emailService');
 const { publishExportOrderUpdate } = require('../../services/exportOrderEventBus');
 const workflowService = require('../../services/exportOrderWorkflowService');
 const { resolveShipmentField, resolveRequiredField } = require('./shipmentField');
+const { billableFreight, balanceExpectedFor, freightChanges } = require('./billableFreight');
 const notificationService = require('../../services/notificationService');
 // #9-scoping: per-user warehouse restriction, applied to stock READ paths only
 // (the dispatch/reservation engine is never scoped).
@@ -841,7 +842,18 @@ const exportOrderController = {
       const contractValue = parseFloat(effectiveQtyMt) * parseFloat(effectivePricePerMt);
       const advancePct = parseFloat(advance_pct) || 0;
       const advanceExpected = contractValue * (advancePct / 100);
-      const balanceExpected = contractValue - advanceExpected;
+      // Freight charged BESIDE an FOB price is money the buyer owes, so it rides
+      // on the balance — see billableFreight.js. A CFR/CIF order priced
+      // 'in_price' already has its freight inside contract_value and adds zero.
+      const freightReceivable = billableFreight({
+        freight_display: freight_display || 'in_price',
+        freight_per_mt, insurance_per_mt, qty_mt: effectiveQtyMt,
+      });
+      const balanceExpected = balanceExpectedFor({
+        contractValue,
+        advanceExpected,
+        order: { freight_display: freight_display || 'in_price', freight_per_mt, insurance_per_mt, qty_mt: effectiveQtyMt },
+      });
 
       // If no advance is required, skip the "Awaiting Advance" gate entirely so
       // the order can proceed to procurement / docs preparation immediately.
@@ -1015,7 +1027,7 @@ const exportOrderController = {
             status: 'Pending',
             currency: order.currency || 'USD',
             aging: 0,
-            notes: `Balance payment for order ${orderNo} (against BL)`,
+            notes: `Balance payment for order ${orderNo} (against BL)${freightReceivable > 0 ? ` — includes ${order.currency || 'USD'} ${freightReceivable.toLocaleString()} freight` : ''}`,
             fx_rate: order.booked_fx_rate,
             base_amount_pkr: order.balance_expected * (order.booked_fx_rate || 280),
           });
@@ -1149,7 +1161,12 @@ const exportOrderController = {
         const changesContract =
           (safeUpdates.qty_mt != null && parseFloat(safeUpdates.qty_mt) !== parseFloat(existing.qty_mt)) ||
           (safeUpdates.price_per_mt != null && parseFloat(safeUpdates.price_per_mt) !== parseFloat(existing.price_per_mt)) ||
-          (safeUpdates.advance_pct != null && parseFloat(safeUpdates.advance_pct) !== (parseFloat(existing.advance_pct) || 0));
+          (safeUpdates.advance_pct != null && parseFloat(safeUpdates.advance_pct) !== (parseFloat(existing.advance_pct) || 0)) ||
+          // Freight charged separately is part of what the buyer owes, so
+          // changing it after a receipt would desync AR exactly as a price
+          // change would. Freight shown INSIDE the price moves nothing, but the
+          // display flag can flip between the two, so it is checked as well.
+          freightChanges(safeUpdates, existing);
         const committed =
           settledAmount(existing.advance_received) > MONEY_EPSILON ||
           settledAmount(existing.balance_received) > MONEY_EPSILON ||
@@ -1166,9 +1183,20 @@ const exportOrderController = {
         const price = parseFloat(safeUpdates.price_per_mt != null ? safeUpdates.price_per_mt : existing.price_per_mt);
         const advPct = parseFloat(safeUpdates.advance_pct != null ? safeUpdates.advance_pct : existing.advance_pct) || 0;
         const contractValue = qty * price;
+        // The freight terms this recompute should use: whatever the edit sets,
+        // falling back to what is stored. qty comes from the same merge, so a
+        // quantity change re-rates the freight too.
+        const freightState = {
+          freight_display: safeUpdates.freight_display !== undefined ? safeUpdates.freight_display : existing.freight_display,
+          freight_per_mt: safeUpdates.freight_per_mt !== undefined ? safeUpdates.freight_per_mt : existing.freight_per_mt,
+          insurance_per_mt: safeUpdates.insurance_per_mt !== undefined ? safeUpdates.insurance_per_mt : existing.insurance_per_mt,
+          qty_mt: qty,
+        };
         safeUpdates.contract_value = contractValue;
         safeUpdates.advance_expected = contractValue * (advPct / 100);
-        safeUpdates.balance_expected = contractValue - safeUpdates.advance_expected;
+        safeUpdates.balance_expected = balanceExpectedFor({
+          contractValue, advanceExpected: safeUpdates.advance_expected, order: freightState,
+        });
 
         // Keep the locked PKR revenue basis in step with the new contract value,
         // valued at the order's booked FX rate (fall back to the prior locked
@@ -2976,7 +3004,11 @@ const exportOrderController = {
           const advPct = parseFloat(order.advance_pct) || 0;
           const contractValue = newQtyMt * price;
           const advanceExpected = contractValue * (advPct / 100);
-          const balanceExpected = contractValue - advanceExpected;
+          // Re-pricing to the packed quantity re-rates the freight with it —
+          // freight is quoted per MT, so fewer tons is less freight.
+          const balanceExpected = balanceExpectedFor({
+            contractValue, advanceExpected, order: { ...order, qty_mt: newQtyMt },
+          });
           const bookedRate = parseFloat(order.booked_fx_rate)
             || (parseFloat(order.contract_value) > 0 ? (parseFloat(order.contract_value_pkr_locked) || 0) / parseFloat(order.contract_value) : 0) || 280;
           await trx('export_orders').where({ id }).update({
