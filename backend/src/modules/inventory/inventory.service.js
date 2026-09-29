@@ -908,6 +908,28 @@ const inventoryService = {
     // all carry processing_type for rollups that group by product.
     const isBlend = batchRow?.processing_type === 'blended';
     const blendNo = isBlend ? (batchRow.batch_no || `batch-${batchId}`) : null;
+    // A by-product of a blend is still rice, and "Blend M-003" tells the store
+    // nothing about WHICH rice — the bran or sweeping in the bag is mostly the
+    // variety that dominated the recipe. So a blend's by-products are named
+    // after the source variety with the largest share of the input weight.
+    // The blend itself is not lost: blend_batch_no, processing_type and
+    // batch_ref still tie the lot back to the recipe it came out of.
+    let dominantVariety = null;
+    if (isBlend) {
+      // Variety only — never item_name. A source lot's name is free text
+      // ("C9 199K AVG49.80 SRB"), and naming a by-product after it would put
+      // that whole string in the variety column of every stock report.
+      const NAME = "COALESCE(NULLIF(bsl.variety, ''), NULLIF(sl.variety, ''))";
+      const mix = await trx('batch_source_lots as bsl')
+        .leftJoin('inventory_lots as sl', 'bsl.lot_id', 'sl.id')
+        .where('bsl.batch_id', batchId)
+        .whereRaw(`${NAME} IS NOT NULL`)
+        .select(trx.raw(`${NAME} as variety`), trx.raw('SUM(COALESCE(bsl.qty_kg, 0))::numeric as kg'))
+        .groupByRaw(NAME)
+        .orderByRaw('kg DESC');
+      dominantVariety = mix.length ? mix[0].variety : null;
+    }
+    const blendLabel = dominantVariety || (isBlend ? `Blend ${blendNo}` : null);
     // Service-milling output belongs to the CLIENT: every output lot is stamped
     // client-owned (tracked physically, excluded from company stock/valuation/
     // availability) and correctly zero-cost (cost_incomplete=false so it is not
@@ -1157,7 +1179,7 @@ const inventoryService = {
           // (`grade IN ('B1','B2','B3','CSR','Short Grain')`, `g === 'B1'`), so a
           // blended lot fell through to the catch-all bucket AND missed its
           // per-grade by-product price. The grade is the grade.
-          item_name: isBlend ? `Blend ${blendNo} — ${bp.name}` : bp.name,
+          item_name: isBlend ? `${blendLabel} — ${bp.name}` : bp.name,
           type: 'byproduct',
           entity: 'mill',
           warehouse_id: bpWarehouse.id,
@@ -1183,7 +1205,7 @@ const inventoryService = {
           // in item_name + grade (→ the "Subtype" column) — never tagged "Broken".
           // variety carries the SOURCE RICE TYPE NAME so the "Item / Variety"
           // column shows the rice it came from (the blend marker for blends).
-          variety: isBlend ? `Blend ${blendNo}` : (qualityInfo?.variety || productName || null),
+          variety: isBlend ? blendLabel : (qualityInfo?.variety || productName || null),
           status: 'Available',
           created_by: userId || null,
           ...svcOwnership,

@@ -31,7 +31,11 @@ describe('a by-product lot carries its bare grade', () => {
   });
 
   test('the item name still distinguishes a blend', () => {
-    expect(src).toMatch(/item_name: isBlend \? `Blend \$\{blendNo\} — \$\{bp\.name\}` : bp\.name/);
+    // A blend's by-product is named after the source variety that dominated the
+    // recipe ("D98 — Sweeping"), falling back to `Blend M-001` only when no
+    // source carries a variety at all. Either way it is not the bare bp.name.
+    expect(src).toMatch(/item_name: isBlend \? `\$\{blendLabel\} — \$\{bp\.name\}` : bp\.name/);
+    expect(src).toContain('const blendLabel = dominantVariety || (isBlend ? `Blend ${blendNo}` : null);');
   });
 });
 

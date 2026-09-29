@@ -38,9 +38,11 @@ const packingService = {
     };
   },
 
-  // Pack `bagsCount` bags of `bagItemId` against a batch. When the small bags are
-  // ≤15 kg they're collected into an outer "master" bag and lined with a polythene
-  // sheet — both optional, stocked packaging items whose cost folds into the run.
+  // Pack `bagsCount` bags of `bagItemId` against a batch. Bags may be collected
+  // into an outer "master" bag (e.g. 5 x 3.5 kg into a 20 kg master) and lined
+  // with a polythene sheet — both optional, stocked packaging items whose cost
+  // folds into the run. The caller sends the master COUNT; a master holds whole
+  // bags, so that count is bags / floor(master capacity / bag capacity).
   async pack(batchId, {
     bag_item_id, bags_count, warehouse_id = null, notes,
     master_bag_item_id = null, master_bags_count = null,

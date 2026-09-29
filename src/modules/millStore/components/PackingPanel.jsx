@@ -18,7 +18,7 @@ export default function PackingPanel({ batchId, batchStatus, addToast, exportOrd
 
   const [bagItemId, setBagItemId] = useState('');
   const [bags, setBags] = useState('');
-  // Optional outer master bag + polythene sheet (shown for small bags ≤15 kg).
+  // Optional outer master bag + polythene sheet.
   const [addMP, setAddMP] = useState(false);
   const [masterId, setMasterId] = useState('');
   const [masterQtyManual, setMasterQtyManual] = useState('');
@@ -38,14 +38,22 @@ export default function PackingPanel({ batchId, batchStatus, addToast, exportOrd
   const projPacked = bagsN * capacity;
   const projTare = bagsN * tare;
 
-  // Master bag + polythene: only relevant when the small bag is ≤15 kg. Master
-  // qty auto = packed weight ÷ master capacity (rounded up, editable); polythene
-  // auto = one per small bag (editable). Both are stocked packaging items.
-  const needsMP = capacity > 0 && capacity <= 15;
+  // Master bag + polythene. A master is offered for ANY bag a larger packaging
+  // item can hold — it used to appear only at ≤15 kg, so 3.5 kg retail bags
+  // going into a 20 kg master could be packed but the master never recorded.
+  // Polythene auto = one sheet per small bag (editable). All stocked items.
+  const needsMP = capacity > 0;
   const masterSel = useMemo(() => bagItems.find((b) => String(b.id) === String(masterId)), [bagItems, masterId]);
   const masterCap = num(masterSel?.capacity_kg);
   const masterAvail = num(masterSel?.quantity_available);
-  const masterAuto = masterCap > 0 ? Math.ceil(projPacked / masterCap) : 0;
+  // A master holds WHOLE bags, not loose weight: a 20 kg master takes 5 × 3.5 kg
+  // (17.5 kg) because you cannot cut a bag to fill the last 2.5 kg. Driving the
+  // count off packed weight ÷ master capacity gave 5.71 bags to a master and so
+  // came out one master short of what the floor actually has to fill.
+  const bagsPerMaster = capacity > 0 && masterCap > 0 ? Math.floor(masterCap / capacity) : 0;
+  const masterAuto = bagsPerMaster > 0
+    ? Math.ceil(bagsN / bagsPerMaster)
+    : (masterCap > 0 ? Math.ceil(projPacked / masterCap) : 0);
   const masterQty = masterQtyManual !== '' ? num(masterQtyManual) : masterAuto;
   const masterCost = masterQty * num(masterSel?.avg_cost_per_unit);
 
@@ -266,15 +274,15 @@ export default function PackingPanel({ batchId, batchStatus, addToast, exportOrd
             </div>
           )}
 
-          {/* Master (outer) bag + polythene — small bags ≤15 kg are collected into
-              a larger sack lined with a polythene sheet; their cost folds in. */}
+          {/* Master (outer) bag + polythene — bags are collected into a larger
+              sack lined with a polythene sheet; their cost folds into the run. */}
           {needsMP && (
             <div className="mt-4 pt-4 border-t border-gray-200">
               <label className="inline-flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer">
                 <input type="checkbox" checked={addMP} onChange={(e) => setAddMP(e.target.checked)}
                   className="rounded border-gray-300 text-blue-600" />
                 Add master bag &amp; polythene sheet
-                <span className="text-xs font-normal text-gray-400">(bag is {capacity} kg ≤ 15)</span>
+                <span className="text-xs font-normal text-gray-400">(packing {capacity} kg bags)</span>
               </label>
 
               {addMP && (
@@ -285,7 +293,7 @@ export default function PackingPanel({ batchId, batchStatus, addToast, exportOrd
                     <select value={masterId} onChange={(e) => { setMasterId(e.target.value); setMasterQtyManual(''); }}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white mb-2">
                       <option value="">Select master bag…</option>
-                      {bagItems.filter((b) => String(b.id) !== String(bagItemId)).map((b) => (
+                      {bagItems.filter((b) => String(b.id) !== String(bagItemId) && (!num(b.capacity_kg) || num(b.capacity_kg) >= capacity)).map((b) => (
                         <option key={b.id} value={b.id}>{b.name} {b.capacity_kg ? `(${Number(b.capacity_kg)}kg)` : ''}</option>
                       ))}
                     </select>
@@ -296,7 +304,11 @@ export default function PackingPanel({ batchId, batchStatus, addToast, exportOrd
                             value={masterQtyManual !== '' ? masterQtyManual : String(masterAuto)}
                             onChange={(e) => setMasterQtyManual(e.target.value)}
                             className="w-24 px-2 py-1.5 border border-gray-300 rounded-lg text-sm" />
-                          <span className="text-xs text-gray-500">bags{masterCap > 0 ? ` · auto ${masterAuto} (${fmtKg(projPacked)} ÷ ${masterCap}kg)` : ''}</span>
+                          <span className="text-xs text-gray-500">
+                            masters{bagsPerMaster > 0
+                              ? ` · auto ${masterAuto} (${bagsPerMaster} × ${capacity}kg per ${masterCap}kg master)`
+                              : (masterCap > 0 ? ` · auto ${masterAuto} (${fmtKg(projPacked)} ÷ ${masterCap}kg)` : '')}
+                          </span>
                         </div>
                         <div className="mt-1.5 text-xs text-gray-500 flex flex-wrap gap-x-3">
                           <span>In stock: <b className={masterQty > masterAvail ? 'text-red-600' : ''}>{masterAvail}</b></span>
