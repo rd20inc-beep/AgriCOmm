@@ -702,6 +702,10 @@ export function StockDetailView({ data, companyName }) {
   const shownMt = shown.reduce((s, r) => s + (r.onHandMt || 0), 0);
   const shownValue = shown.reduce((s, r) => s + (r.valuePkr || 0), 0);
   const shownBags = shown.reduce((s, r) => s + (parseFloat(r.bags) || 0), 0);
+  // Lots whose bag count disagrees with how they were actually packed. Three
+  // separate bugs have produced a wrong figure here, each found by someone
+  // reading it, so the report now says so rather than printing it quietly.
+  const disagreeing = shown.filter((r) => r.specDisagrees);
   // Bags are the sub-50 kg packs (25 kg, 10 kg, 5 kg ...). They are counted and
   // reported separately from katta because a 25 kg bag is not a sack, and
   // adding the two together gives a sack count nobody can reconcile.
@@ -765,6 +769,25 @@ export function StockDetailView({ data, companyName }) {
         { label: 'Share of stock', value: totals.mt > 0 ? `${(100 * shownMt / totals.mt).toFixed(1)}%` : '—' },
       ]} />
 
+      {disagreeing.length > 0 && (
+        <div className="border border-amber-300 bg-amber-50 rounded-lg p-3 text-sm">
+          <b>{disagreeing.length} lot{disagreeing.length === 1 ? '' : 's'} show a bag count that disagrees with how it was packed.</b>
+          <div className="mt-1 text-amber-900">
+            {disagreeing.slice(0, 4).map((r) => (
+              <div key={r.lotId}>
+                {r.lotNo} — counted as {fmtKg(r.bags || r.bagUnits)} {r.isKatta ? 'katta' : `\u00d7 ${r.bagSizeKg} kg`},
+                but packed as {fmtKg(r.packedUnits)} \u00d7 {r.packedSizeKg} kg.
+              </div>
+            ))}
+            {disagreeing.length > 4 && <div>…and {disagreeing.length - 4} more.</div>}
+          </div>
+          <div className="mt-1.5 text-xs text-amber-700 no-print">
+            The packed figure is the right one. Admin ▸ Inventory ▸ Data Problems will re-stamp
+            these from their packing runs; until then read the packed figure.
+          </div>
+        </div>
+      )}
+
       {/* Inventory tags — click to filter the detail to that subtype. */}
       <div className="flex flex-wrap gap-2 no-print">
         <TagChip label="All" count={rows.length} active={tag === 'all'} onClick={() => setTag('all')} />
@@ -786,7 +809,11 @@ export function StockDetailView({ data, companyName }) {
               <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-medium bg-gray-100 text-gray-700 print:bg-transparent print:px-0">{r.subtype}</span>,
               r.item || '—', r.variety || r.grade || '—',
               fmtMt(r.onHandMt), fmtKg(r.onHandMt * 1000), fmtPkr(r.costPerKg), fmtKg(r.bags),
-              (parseFloat(r.bagUnits) || 0) > 0 ? `${fmtKg(r.bagUnits)} \u00d7 ${Number(r.bagSizeKg)} kg` : '—',
+              r.specDisagrees
+                ? <span className="text-amber-700" title={`Stamped at ${r.bagSizeKg || 'no'} kg but packed at ${r.packedSizeKg} kg`}>
+                    {fmtKg(r.packedUnits)} &times; {r.packedSizeKg} kg <span className="text-[10px]">(packed)</span>
+                  </span>
+                : ((parseFloat(r.bagUnits) || 0) > 0 ? `${fmtKg(r.bagUnits)} \u00d7 ${Number(r.bagSizeKg)} kg` : '—'),
               fmtMt(r.availableMt),
               r.supplier
                 ? (r.supplierId ? <RefLink to={`/finance/statements?type=supplier&id=${r.supplierId}`}>{r.supplier}</RefLink> : r.supplier)
@@ -1083,6 +1110,134 @@ export function AuditReportView({ data, companyName, range }) {
           ])}
           empty="No audit entries match these filters."
         />
+      </Section>
+
+      <Footer />
+    </div>
+  );
+}
+
+// ─── Freight recovery ──────────────────────────────────────────────────
+// What was charged to buyers against what was paid to carriers, per order.
+// While ocean freight is volatile this is the number that says whether the
+// freight terms are working — and the aggregate can look covered while half the
+// shipments lose money, so the per-order rows carry the report and the ones that
+// came up short are called out rather than averaged away.
+export function FreightRecoveryView({ data, companyName }) {
+  const { rows = [], totals = {}, gl = {} } = data || {};
+  const pct = (v) => (v == null ? '—' : `${v.toFixed(1)}%`);
+  // Recovery reads as a percentage OF what was paid: 100% is break-even, under
+  // is money lost on freight, over is margin made on it.
+  const gapTone = (v) => (v < -0.01 ? 'text-red-600' : v > 0.01 ? 'text-emerald-700' : 'text-gray-900');
+  const shown = rows.filter((r) => r.measurable);
+  const short = shown.filter((r) => r.gapPkr < -0.01).sort((a, b) => a.gapPkr - b.gapPkr);
+
+  return (
+    <div className="print-report space-y-6 text-sm text-gray-900">
+      <Header companyName={companyName} title="Freight Recovery" subtitle="Charged to buyers vs paid to carriers" />
+
+      <SummaryRow items={[
+        { label: 'Charged to buyers', value: fmtPkr(totals.chargedPkr) },
+        { label: 'Paid to carriers', value: fmtPkr(totals.paidPkr) },
+        { label: totals.gapPkr >= 0 ? 'Covered by' : 'Short by', value: fmtPkr(Math.abs(totals.gapPkr || 0)) },
+        { label: 'Recovery', value: pct(totals.recoveryPct) },
+        { label: 'Orders short', value: `${totals.shortOrders || 0} of ${totals.withFreight || 0}` },
+      ]} />
+
+      {/* The one-line answer, in words, because a table of PKR does not say
+          whether the freight terms are working. */}
+      <div className={`border rounded-lg p-3 text-sm ${(totals.gapPkr || 0) < -0.01 ? 'border-red-200 bg-red-50' : 'border-emerald-200 bg-emerald-50'}`}>
+        {totals.withFreight === 0
+          ? 'No order in this period both charged and paid freight, so there is nothing to recover against yet.'
+          : (totals.gapPkr || 0) < -0.01
+            ? <>Freight is costing <b>{fmtPkr(Math.abs(totals.gapPkr))}</b> more than it is recovering — {pct(totals.recoveryPct)} of what was paid out. {totals.shortOrders > 0 && <>{totals.shortOrders} order{totals.shortOrders === 1 ? '' : 's'} came up short; they are listed below.</>}</>
+            : <>Freight is fully recovered, with <b>{fmtPkr(totals.gapPkr)}</b> to spare across {totals.withFreight} order{totals.withFreight === 1 ? '' : 's'} — {pct(totals.recoveryPct)} of what was paid out.</>}
+        {totals.unbilledOrders > 0 && (
+          <div className="mt-1 text-red-700">
+            {totals.unbilledOrders} order{totals.unbilledOrders === 1 ? '' : 's'} paid freight and charged the buyer nothing for it.
+          </div>
+        )}
+        {totals.debitNotes > 0 && (
+          <div className="mt-1 text-gray-600">
+            Includes {fmtPkr(totals.debitNotePkr)} claimed back on {totals.debitNotes} escalation debit note{totals.debitNotes === 1 ? '' : 's'}.
+          </div>
+        )}
+      </div>
+
+      {short.length > 0 && (
+        <Section title={`Short recovery — ${short.length} order${short.length === 1 ? '' : 's'}`}>
+          <Table
+            head={['Order', 'Customer', 'Incoterm', 'Charged (PKR)', 'Paid (PKR)', 'Short by', 'Recovery']}
+            align={['left', 'left', 'left', 'right', 'right', 'right', 'right']}
+            rows={short.map((r) => [
+              <RefLink to={`/export/${r.orderNo}`}>{r.orderNo}</RefLink>,
+              r.customerId ? <RefLink to={`/finance/statements?type=customer&id=${r.customerId}`}>{r.customer}</RefLink> : r.customer,
+              r.incoterm,
+              fmtPkr(r.chargedPkr), fmtPkr(r.paidPkr),
+              <span className="text-red-600">{fmtPkr(Math.abs(r.gapPkr))}</span>,
+              pct(r.recoveryPct),
+            ])}
+            empty="None."
+          />
+        </Section>
+      )}
+
+      <Section title="Every order">
+        <Table
+          head={['Order', 'Customer', 'Qty (MT)', 'Incoterm', 'Freight terms', 'Charged (PKR)', 'Paid (PKR)', 'Gap', 'Recovery']}
+          align={['left', 'left', 'right', 'left', 'left', 'right', 'right', 'right', 'right']}
+          rows={rows.map((r) => [
+            <RefLink to={`/export/${r.orderNo}`}>{r.orderNo}</RefLink>,
+            r.customerId ? <RefLink to={`/finance/statements?type=customer&id=${r.customerId}`}>{r.customer}</RefLink> : r.customer,
+            fmtMt(r.qtyMT),
+            r.incoterm,
+            r.freightPerMT > 0 || r.insurancePerMT > 0
+              ? <span>
+                  {r.currency} {r.freightPerMT.toFixed(2)}/MT{r.insurancePerMT > 0 ? ` + ${r.insurancePerMT.toFixed(2)} ins.` : ''}
+                  <span className="block text-[11px] text-gray-500">
+                    {r.freightDisplay === 'separate' ? 'charged separately' : 'inside the price'}
+                    {r.debitNoteCount > 0 && ` · ${r.debitNoteCount} debit note${r.debitNoteCount === 1 ? '' : 's'}`}
+                  </span>
+                </span>
+              : <span className="text-gray-400">none{r.unbilled ? ' — but freight was paid' : ''}</span>,
+            r.chargedPkr > 0 ? fmtPkr(r.chargedPkr) : '—',
+            r.paidPkr > 0 ? fmtPkr(r.paidPkr) : '—',
+            r.measurable ? <span className={gapTone(r.gapPkr)}>{fmtPkr(r.gapPkr)}</span> : '—',
+            r.measurable ? pct(r.recoveryPct) : '—',
+          ])}
+          empty="No export orders in this period."
+          totalRow={['', '', '', '', 'TOTAL', fmtPkr(totals.chargedPkr), fmtPkr(totals.paidPkr), fmtPkr(totals.gapPkr), pct(totals.recoveryPct)]}
+        />
+      </Section>
+
+      {/* The ledger's own answer, side by side with the operational one. They
+          should agree; where they do not, that gap is the finding — a report
+          that quietly reads only one of them would hide it. */}
+      <Section title="Against the ledger">
+        <Table
+          head={['', 'Account', 'This report', 'General ledger', 'Difference']}
+          align={['left', 'left', 'right', 'right', 'right']}
+          rows={[
+            ['Charged separately', gl.accounts?.revenue || '4070', fmtPkr(totals.in4070Pkr), '', ''],
+            ['less: not yet shipped', 'recognised at shipment', <span className="text-gray-500">({fmtPkr(totals.awaitingShipmentPkr)})</span>, '', ''],
+            ['Should be in the ledger', gl.accounts?.revenue || '4070',
+              fmtPkr((totals.in4070Pkr || 0) - (totals.awaitingShipmentPkr || 0)),
+              fmtPkr(gl.recoveredPkr),
+              fmtPkr((totals.in4070Pkr || 0) - (totals.awaitingShipmentPkr || 0) - (gl.recoveredPkr || 0))],
+            ['Paid to carriers', gl.accounts?.cost || '6010 + 6050', fmtPkr(totals.paidPkr), fmtPkr(gl.paidPkr), fmtPkr((totals.paidPkr || 0) - (gl.paidPkr || 0))],
+          ]}
+          empty="Nothing to compare."
+        />
+        <p className="mt-2 text-xs text-gray-500 leading-snug">
+          Only freight charged <b>separately</b> is compared against 4070: freight quoted
+          inside a CFR/CIF price is invoiced as part of the goods and is recognised in Export
+          Sales instead — {fmtPkr(totals.inSalesPkr)} of what is charged above sits there,
+          and is right to. Escalation debit notes always post to 4070, whichever way the
+          freight itself was presented. Freight revenue reaches the ledger at shipment, so an
+          order still in flight is charged on paper and not yet posted; that is the line
+          subtracted above. Anything left in the Difference column is the orders and the
+          ledger genuinely disagreeing, and is worth chasing.
+        </p>
       </Section>
 
       <Footer />

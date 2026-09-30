@@ -243,6 +243,28 @@ const packingService = {
         }
       }
 
+      // ── Tell the output lot what it was actually packed into ─────────────
+      // The bag spec is stamped onto the finished lot by reconcileBatchKatta,
+      // which runs at YIELD. Pack after the yield — which is the normal order of
+      // work, since you mill first and bag afterwards — and there was no packing
+      // run to read at the time, so the lot was left with no spec at all and
+      // every report fell back to dividing the weight by 50. Batch M-005 packed
+      // 873 x 25 kg and its 21,825 kg lot read as 437 katta; M-006 packed
+      // 7,435 x 3.63 kg (8 lb retail) and read as 540.
+      //
+      // reconcileBatchKatta is idempotent — it reverses its own prior movements
+      // before recomputing — so running it again here is safe, and it is the
+      // single source of truth for the spec AND for the katta accounting. That
+      // second part matters: bags drawn from mill store are not freed katta, so
+      // re-running also releases the katta the yield had assumed would be used.
+      //
+      // Non-blocking, like the GL and cost steps above: the packing run itself is
+      // recorded either way.
+      if ((Number(batch.actual_finished_kg) || 0) > 0) {
+        try { await inventoryService.reconcileBatchKatta(trx, batchId, userId); }
+        catch (e) { console.error('Packing katta/bag-spec reconcile failed (packing still recorded):', e.message); }
+      }
+
       // Flag any packing-material shortage on the log (Purchase Required) so the UI
       // and reports surface it; the depleted items also auto-appear in low-stock
       // alerts. Non-blocking — packing still completed above.
