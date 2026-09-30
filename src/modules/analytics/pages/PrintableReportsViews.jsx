@@ -702,6 +702,10 @@ export function StockDetailView({ data, companyName }) {
   const shownMt = shown.reduce((s, r) => s + (r.onHandMt || 0), 0);
   const shownValue = shown.reduce((s, r) => s + (r.valuePkr || 0), 0);
   const shownBags = shown.reduce((s, r) => s + (parseFloat(r.bags) || 0), 0);
+  // Lots whose bag count disagrees with how they were actually packed. Three
+  // separate bugs have produced a wrong figure here, each found by someone
+  // reading it, so the report now says so rather than printing it quietly.
+  const disagreeing = shown.filter((r) => r.specDisagrees);
   // Bags are the sub-50 kg packs (25 kg, 10 kg, 5 kg ...). They are counted and
   // reported separately from katta because a 25 kg bag is not a sack, and
   // adding the two together gives a sack count nobody can reconcile.
@@ -765,6 +769,25 @@ export function StockDetailView({ data, companyName }) {
         { label: 'Share of stock', value: totals.mt > 0 ? `${(100 * shownMt / totals.mt).toFixed(1)}%` : '—' },
       ]} />
 
+      {disagreeing.length > 0 && (
+        <div className="border border-amber-300 bg-amber-50 rounded-lg p-3 text-sm">
+          <b>{disagreeing.length} lot{disagreeing.length === 1 ? '' : 's'} show a bag count that disagrees with how it was packed.</b>
+          <div className="mt-1 text-amber-900">
+            {disagreeing.slice(0, 4).map((r) => (
+              <div key={r.lotId}>
+                {r.lotNo} — counted as {fmtKg(r.bags || r.bagUnits)} {r.isKatta ? 'katta' : `\u00d7 ${r.bagSizeKg} kg`},
+                but packed as {fmtKg(r.packedUnits)} \u00d7 {r.packedSizeKg} kg.
+              </div>
+            ))}
+            {disagreeing.length > 4 && <div>…and {disagreeing.length - 4} more.</div>}
+          </div>
+          <div className="mt-1.5 text-xs text-amber-700 no-print">
+            The packed figure is the right one. Admin ▸ Inventory ▸ Data Problems will re-stamp
+            these from their packing runs; until then read the packed figure.
+          </div>
+        </div>
+      )}
+
       {/* Inventory tags — click to filter the detail to that subtype. */}
       <div className="flex flex-wrap gap-2 no-print">
         <TagChip label="All" count={rows.length} active={tag === 'all'} onClick={() => setTag('all')} />
@@ -786,7 +809,11 @@ export function StockDetailView({ data, companyName }) {
               <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-medium bg-gray-100 text-gray-700 print:bg-transparent print:px-0">{r.subtype}</span>,
               r.item || '—', r.variety || r.grade || '—',
               fmtMt(r.onHandMt), fmtKg(r.onHandMt * 1000), fmtPkr(r.costPerKg), fmtKg(r.bags),
-              (parseFloat(r.bagUnits) || 0) > 0 ? `${fmtKg(r.bagUnits)} \u00d7 ${Number(r.bagSizeKg)} kg` : '—',
+              r.specDisagrees
+                ? <span className="text-amber-700" title={`Stamped at ${r.bagSizeKg || 'no'} kg but packed at ${r.packedSizeKg} kg`}>
+                    {fmtKg(r.packedUnits)} &times; {r.packedSizeKg} kg <span className="text-[10px]">(packed)</span>
+                  </span>
+                : ((parseFloat(r.bagUnits) || 0) > 0 ? `${fmtKg(r.bagUnits)} \u00d7 ${Number(r.bagSizeKg)} kg` : '—'),
               fmtMt(r.availableMt),
               r.supplier
                 ? (r.supplierId ? <RefLink to={`/finance/statements?type=supplier&id=${r.supplierId}`}>{r.supplier}</RefLink> : r.supplier)

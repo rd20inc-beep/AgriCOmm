@@ -2306,18 +2306,109 @@ const inventoryService = {
     const noLineage = await db.raw("SELECT l.id, l.lot_no, l.type, l.qty FROM inventory_lots l WHERE l.type IN ('finished','byproduct') AND l.ownership = 'company' AND l.id NOT IN (SELECT child_lot_id FROM lot_source_mapping) AND l.qty > 0");
     const missingCOGSOrders = await db('export_orders').where('status', 'Shipped').where(function () { this.whereNull('inventory_cogs_total_pkr').orWhere('inventory_cogs_total_pkr', 0); }).select('id', 'order_no', 'contract_value');
 
+    // ── Lots whose bag spec disagrees with how they were actually packed ──
+    // bag_weight_kg is the divisor for EVERY kg <-> bag conversion, so a lot
+    // that lost it (or never got it) reports a bag count nobody packed: batch
+    // M-005 packed 873 x 25 kg and its 21,825 kg lot read as 437 katta, because
+    // with no spec the readers fall back to 50.
+    //
+    // This deliberately does not look for one cause. Any path that produces or
+    // repacks bagged output and fails to stamp the lot shows up here, including
+    // paths written later — which is the point, since the last three of these
+    // were each found by a person noticing a wrong number on a report.
+    const bagSpecMismatch = await db.raw(`
+      WITH packed AS (
+        SELECT pl.batch_id,
+               SUM(pl.bags_count)                                   AS runs_bags,
+               (ARRAY_AGG(pl.capacity_kg_per_bag ORDER BY pl.bags_count DESC))[1] AS packed_size_kg
+          FROM mill_packing_logs pl
+         WHERE pl.capacity_kg_per_bag > 0 AND pl.bags_count > 0
+      GROUP BY pl.batch_id
+      )
+      SELECT l.id, l.lot_no, l.type, l.batch_ref,
+             COALESCE(NULLIF(l.net_weight_kg, 0), l.qty, 0)::numeric AS on_hand_kg,
+             l.total_bags, l.bag_weight_kg, l.bag_size_kg,
+             p.packed_size_kg, p.runs_bags,
+             CEIL(COALESCE(NULLIF(l.net_weight_kg, 0), l.qty, 0) / p.packed_size_kg)::int AS should_be_bags,
+             CASE WHEN COALESCE(l.bag_weight_kg, l.bag_size_kg) IS NULL THEN 'never stamped'
+                  ELSE 'stamped at a size it was not packed in' END AS reason
+        FROM inventory_lots l
+        JOIN packed p ON p.batch_id = CAST(REPLACE(l.batch_ref, 'batch-', '') AS INTEGER)
+       WHERE l.batch_ref ~ '^batch-[0-9]+$'
+         AND l.type = 'finished'
+         AND l.status <> 'Retired'
+         AND COALESCE(NULLIF(l.net_weight_kg, 0), l.qty, 0) > 0
+         -- Either no spec at all, or one that is not what the packing run used.
+         AND (COALESCE(l.bag_weight_kg, l.bag_size_kg) IS NULL
+              OR ABS(COALESCE(l.bag_weight_kg, l.bag_size_kg) - p.packed_size_kg) > 0.001)
+       ORDER BY l.id DESC
+    `);
+
     return {
       zeroCostLots: zeroCost,
       incompleteLots: incomplete,
       noLineageLots: noLineage.rows,
       missingCOGSOrders: missingCOGSOrders,
+      bagSpecMismatchLots: bagSpecMismatch.rows,
       summary: {
         zeroCost: zeroCost.length,
         incomplete: incomplete.length,
         noLineage: noLineage.rows.length,
         missingCOGS: missingCOGSOrders.length,
+        bagSpecMismatch: bagSpecMismatch.rows.length,
       },
     };
+  },
+
+  /**
+   * Re-stamp the bag spec on every lot whose spec disagrees with how it was
+   * actually packed — the repair for what findProblematicLots reports as
+   * bagSpecMismatchLots.
+   *
+   * It does not write the spec itself. It re-runs reconcileBatchKatta for each
+   * affected batch, which is the one owner of that field and is idempotent (it
+   * reverses its own prior movements before recomputing). So the repair produces
+   * exactly what a correctly-ordered yield would have produced, including the
+   * katta accounting — bags drawn from mill store are not freed katta.
+   *
+   * Exists so nobody has to write SQL against production to fix this again.
+   */
+  async repairBagSpecs(trx, { lotId = null, userId = null } = {}) {
+    const conn = trx || db;
+    const problems = await inventoryService.findProblematicLots();
+    let lots = problems.bagSpecMismatchLots || [];
+    if (lotId) lots = lots.filter((l) => l.id === Number(lotId));
+    if (lots.length === 0) return { repaired: [], batches: 0 };
+
+    // One reconcile per batch, however many of its lots are affected.
+    const batchIds = [...new Set(lots
+      .map((l) => parseInt(String(l.batch_ref).replace('batch-', ''), 10))
+      .filter((n) => Number.isInteger(n) && n > 0))];
+
+    const repaired = [];
+    for (const batchId of batchIds) {
+      // One batch failing must not block the rest — a partial repair is strictly
+      // better than none, and what failed stays on the report to be seen.
+      try {
+        await inventoryService.reconcileBatchKatta(conn, batchId, userId);
+      } catch (e) {
+        repaired.push({ batchId, ok: false, error: e.message });
+        continue;
+      }
+      const after = await conn('inventory_lots')
+        .where({ batch_ref: `batch-${batchId}` }).andWhere('type', 'finished')
+        .select('id', 'lot_no', 'total_bags', 'bag_weight_kg');
+      for (const a of after) {
+        const was = lots.find((l) => l.id === a.id);
+        if (!was) continue;
+        repaired.push({
+          batchId, lotId: a.id, lotNo: a.lot_no, ok: true,
+          before: { totalBags: was.total_bags, bagWeightKg: was.bag_weight_kg },
+          after: { totalBags: a.total_bags, bagWeightKg: a.bag_weight_kg },
+        });
+      }
+    }
+    return { repaired, batches: batchIds.length };
   },
 
   /**

@@ -124,3 +124,88 @@ describe('the report rule this feeds', () => {
     expect(isKatta(0)).toBe(true);
   });
 });
+
+/**
+ * ── The part that stops this happening a fourth time ──
+ *
+ * Three separate bugs have now produced a wrong bag count on a stock report —
+ * an intake count that was never decremented, a 25 kg pack reported as katta,
+ * and a spec that was never stamped because the packing came after the yield.
+ * Every one of them was found by a person reading the number, and every one was
+ * fixed by hand against production.
+ *
+ * Tests only cover the paths someone thought of, so the safeguard is not another
+ * test: it is that a lot whose bag count disagrees with its packing runs is
+ * DETECTED wherever it appears, SHOWN on the report that carries the number, and
+ * REPAIRABLE without anyone writing SQL. These pin that arrangement in place.
+ */
+describe('a wrong bag count cannot stay quiet', () => {
+  const SVC = read('modules/inventory/inventory.service.js');
+  const ROUTES = read('modules/inventory/lotInventory.routes.js');
+  const REPORT = read('modules/analytics/reporting.controller.js');
+
+  it('the detector looks for the SYMPTOM, not a known cause', () => {
+    // Any path that produces or repacks bagged output and fails to stamp shows
+    // up, including paths written later. That is the whole point.
+    expect(SVC).toContain('bagSpecMismatchLots');
+    expect(SVC).toContain('bagSpecMismatch: bagSpecMismatch.rows.length');
+  });
+
+  it('it catches BOTH shapes: never stamped, and stamped at the wrong size', () => {
+    const q = SVC.slice(SVC.indexOf('WITH packed AS'), SVC.indexOf('bagSpecMismatchLots'));
+    expect(q).toContain('IS NULL');
+    expect(q).toContain('> 0.001');
+    expect(q).toContain("'never stamped'");
+    expect(q).toContain("'stamped at a size it was not packed in'");
+  });
+
+  it('it ignores a retired or empty lot, which cannot be wrong about anything', () => {
+    const q = SVC.slice(SVC.indexOf('WITH packed AS'), SVC.indexOf('bagSpecMismatchLots'));
+    expect(q).toContain("l.status <> 'Retired'");
+    expect(q).toContain('> 0');
+  });
+
+  it('the repair goes through the one owner of the field, not its own UPDATE', () => {
+    // Writing the spec here would be a second implementation to drift from.
+    const repair = methodBody(SVC, 'repairBagSpecs');
+    expect(repair).toContain('reconcileBatchKatta');
+    expect(repair).not.toContain("update({ bag_weight_kg");
+    expect(repair).not.toContain('bag_size_kg:');
+  });
+
+  it('one batch failing does not abandon the rest', () => {
+    const repair = methodBody(SVC, 'repairBagSpecs');
+    expect(repair).toContain('continue;');
+    expect(repair).toContain('ok: false');
+  });
+
+  it('it is a route anyone with inventory edit can press, and it is audited', () => {
+    expect(ROUTES).toContain("router.post('/repair-bag-specs', authorize('inventory', 'edit')");
+    expect(ROUTES).toContain("auditAction('repair_bag_specs'");
+  });
+
+  it('the stock report states the disagreement where the number is read', () => {
+    // Not on a separate page nobody opens — the last three were each noticed on
+    // this report, so this is where it has to say so.
+    const fn = methodBody(REPORT, 'printableStockDetail');
+    expect(fn).toContain('packedByBatch');
+    expect(fn).toContain('specDisagrees');
+    expect(fn).toContain('packedSizeKg');
+    expect(fn).toContain('packedUnits');
+  });
+
+  it('the report and the stamping agree on which size wins', () => {
+    // Both take the predominant run by bag count. Two different rules here would
+    // make the report flag lots that are correctly stamped.
+    const fn = methodBody(REPORT, 'printableStockDetail');
+    expect(fn).toContain('if (!cur || bags > cur.bags)');
+    expect(methodBody(SVC, 'reconcileBatchKatta')).toContain('if (!packedSpec || bags > packedSpec.bags)');
+  });
+
+  it('only finished output is judged against a packing run', () => {
+    // A raw lot's sacks are what it ARRIVED in; there is no packing run for it
+    // to disagree with, and flagging it would be noise.
+    const fn = methodBody(REPORT, 'printableStockDetail');
+    expect(fn).toContain("l.type === 'finished'");
+  });
+});

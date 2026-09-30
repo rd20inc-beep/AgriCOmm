@@ -1993,6 +1993,36 @@ const reportingController = {
         const per = parseFloat(l.bag_weight_kg) || parseFloat(l.bag_size_kg) || 50;
         return per > 0 ? Math.round(onHandKg / per) : 0;
       };
+      // What each batch was ACTUALLY packed into, so a lot whose spec went
+      // missing is caught here — where the number is read — instead of being
+      // reported by a customer. bag_weight_kg is the divisor for every
+      // kg <-> bag conversion, and with no spec the fallback below divides by
+      // 50: batch M-005 packed 873 x 25 kg and its 21,825 kg lot read as 437
+      // katta. Three separate bugs have now produced a wrong bag count, so the
+      // report states the disagreement rather than trusting the stamp.
+      const packedByBatch = {};
+      {
+        const batchIds = [...new Set(lots
+          .map((l) => parseInt(String(l.batch_ref || '').replace('batch-', ''), 10))
+          .filter((v) => Number.isInteger(v) && v > 0))];
+        if (batchIds.length) {
+          const runs = await db('mill_packing_logs')
+            .whereIn('batch_id', batchIds)
+            .where('capacity_kg_per_bag', '>', 0).where('bags_count', '>', 0)
+            .select('batch_id', 'capacity_kg_per_bag')
+            .sum({ bags: 'bags_count' })
+            .groupBy('batch_id', 'capacity_kg_per_bag');
+          // The predominant size is what the output is packed in, same rule the
+          // stamping uses — so the two cannot disagree about which size wins.
+          for (const r of runs) {
+            const size = parseFloat(r.capacity_kg_per_bag) || 0;
+            const bags = Math.round(parseFloat(r.bags) || 0);
+            const cur = packedByBatch[r.batch_id];
+            if (!cur || bags > cur.bags) packedByBatch[r.batch_id] = { sizeKg: size, bags };
+          }
+        }
+      }
+
       // A KATTA is the standard 50 kg sack. Anything packed smaller is a retail
       // bag and belongs under its own heading with its size — counting a
       // 960 x 25 kg pack as 960 katta overstates the sacks and mixes two units.
@@ -2003,6 +2033,12 @@ const reportingController = {
         const onHand = parseFloat(l.on_hand_kg) || 0; const cpk = parseFloat(l.cost_per_kg) || 0; const src = batchSrc[l.batch_ref];
         const units = kattaOnHand(l, onHand);
         const packKg = packSizeOf(l);
+        // Only FINISHED output is packed in store bags; a raw lot's sacks are
+        // what it arrived in and have no packing run to disagree with.
+        const run = l.type === 'finished'
+          ? packedByBatch[parseInt(String(l.batch_ref || '').replace('batch-', ''), 10)]
+          : null;
+        const specDisagrees = !!run && Math.abs((packKg || 0) - run.sizeKg) > 0.001;
         // An unknown pack size is a sack: that is what loose intake is counted in.
         const isKatta = packKg === 0 || packKg >= KATTA_MIN_KG;
         return { lotId: l.id, lotNo: l.lot_no, type: l.type, item: l.product_name || l.item_name, variety: l.variety, grade: l.grade,
@@ -2020,6 +2056,12 @@ const reportingController = {
           bagUnits: isKatta ? 0 : units,
           bagSizeKg: packKg || null,
           isKatta,
+          // What the packing run says, when it disagrees with the lot. The row
+          // then prints both, so the figure is never silently wrong — and
+          // Admin > Inventory Data Problems has a one-click repair for it.
+          packedSizeKg: specDisagrees ? run.sizeKg : null,
+          packedUnits: specDisagrees && run.sizeKg > 0 ? Math.ceil(onHand / run.sizeKg) : null,
+          specDisagrees,
           intakeBags: l.total_bags,
           onHandMt: onHand / 1000, availableMt: (parseFloat(l.available_kg) || 0) / 1000, reservedMt: (parseFloat(l.reserved_kg) || 0) / 1000,
           costPerKg: cpk, valuePkr: onHand * cpk };

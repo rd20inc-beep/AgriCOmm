@@ -328,6 +328,22 @@ router.get('/data-problems', authorize('inventory', 'view'), async (req, res) =>
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 
+// Re-stamp the bag spec on lots whose spec disagrees with how they were packed
+// (what /data-problems reports as bagSpecMismatchLots). Body may carry
+// { lot_id } to repair one; otherwise every affected lot is repaired. Exists so
+// this is a button rather than SQL against production.
+router.post('/repair-bag-specs', authorize('inventory', 'edit'),
+  auditAction('repair_bag_specs', 'inventory_lot', (req) => req.body?.lot_id || 'all'),
+  async (req, res) => {
+    try {
+      const result = await db.transaction(async (trx) => inventoryService.repairBagSpecs(trx, {
+        lotId: req.body?.lot_id || null,
+        userId: req.user?.id,
+      }));
+      return res.json({ success: true, data: result });
+    } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+  });
+
 router.post('/repair-lot-cost/:lotId', authorize('inventory', 'edit'),
   auditAction('repair_lot_cost', 'inventory_lot', (req) => req.params.lotId),
   async (req, res) => {
