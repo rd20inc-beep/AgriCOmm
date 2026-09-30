@@ -126,3 +126,60 @@ describe('freeing a sack can no longer mint a fake katta', () => {
     expect(fn).toContain("pack_type: 'katta'");
   });
 });
+
+describe('the 1,826 mis-filed bags move to the right item', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const MIG = fs.readFileSync(path.join(__dirname, '../../migrations/20260930_306_reclass_katta25_to_pp_bag.js'), 'utf8');
+  // Comments stripped for the "must not mention" assertions — the file explains
+  // WHY the branded bags are not the target, so their names are in the prose.
+  const CODE = MIG.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+
+  it('they go to the GENERIC 25 kg P.P. bag, not a branded one', () => {
+    // 25KG AENOS and PP25KG WHITE HORSE are printed bags at Rs 43.92 — four
+    // times the price. Folding unbranded stock into one would misstate both the
+    // count and the value of the stock.
+    expect(MIG).toContain("const TARGET = 'BAG-25KG-PP'");
+    expect(CODE).not.toContain('AENOS');
+    expect(CODE).not.toContain('WHITE HORSE');
+  });
+
+  it('the move is a stock LEDGER entry on both sides, not a silent update', () => {
+    const outs = MIG.match(/mill_stock_movements'\)\.insert/g) || [];
+    expect(outs.length).toBe(2);
+    expect(MIG).toContain('quantity: -qty');
+    expect(MIG).toContain('quantity: qty');
+  });
+
+  it('it is idempotent, keyed on its own reference', () => {
+    expect(MIG).toContain("const REF = 'reclass_katta25_to_pp25'");
+    expect(MIG).toContain("where({ reference_type: REF }).first('id')");
+    expect(MIG).toContain('if (already) return;');
+  });
+
+  it('it creates the target rather than skipping when it is missing', () => {
+    // BAG-25KG-PP is user-created on production and is not seeded elsewhere. A
+    // migration that silently does nothing because a row is missing is how a
+    // correction gets lost.
+    expect(MIG).toContain('if (!target) {');
+    expect(MIG).toContain("code: TARGET, name: 'PP Bag 25kg (Empty)'");
+  });
+
+  it('the target gets the capacity and price it was missing', () => {
+    // It was seeded with neither — unusable for packing, which needs a capacity,
+    // and invisible to the katta/bag split, which divides by it.
+    expect(MIG).toContain('capacity_kg: parseFloat(target.capacity_kg) > 0 ? target.capacity_kg : 25');
+    expect(MIG).toContain("pack_type: 'pp_bag'");
+  });
+
+  it('KATTA-25 survives at zero — a 25 kg katta is a real thing', () => {
+    expect(MIG).not.toMatch(/where\(\{ code: SOURCE \}\)[\s\S]{0,60}\.del\(\)/);
+    expect(MIG).not.toContain('is_active: false');
+  });
+
+  it('down() puts the stock back', () => {
+    expect(MIG).toContain('exports.down');
+    expect(MIG).toContain('GREATEST(quantity_available - ?, 0)');
+    expect(MIG).toContain("where({ reference_type: REF }).del()");
+  });
+});
