@@ -2764,4 +2764,24 @@ router.get(
 );
 router.get('/batches/:id/katta', authorize('milling', 'view'), controller.getBatchKatta);
 
+// ── Packaging recorded on a batch, line by line (mig 307) ──
+// A batch could only ever state one bag size, so "300 katta and 500 P.P. bags"
+// could not be said at all. Each line names a real packaging item, so its type
+// decides which stock it moves and its own price decides what it costs.
+const batchPackagingCtrl = require('./batchPackaging.controller');
+router.get(
+  '/batches/:id/packaging',
+  authorize('milling', 'view'),
+  batchPackagingCtrl.list
+);
+// Saving moves store stock, so it sits behind the same permission as recording
+// any other store consumption rather than plain milling edit.
+router.put(
+  '/batches/:id/packaging',
+  authorize('mill_store', 'record_consumption'),
+  validate(schemas.saveBatchPackaging),
+  auditAction('save_batch_packaging', 'milling_batch', (req) => req.params.id),
+  batchPackagingCtrl.save
+);
+
 module.exports = router;

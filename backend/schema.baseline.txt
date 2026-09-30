@@ -1710,6 +1710,18 @@ COL mill_workers.portal_enabled:boolean:NOT NULL
 COL mill_workers.portal_pin_hash:character varying:NULL
 COL mill_workers.role:character varying:NULL
 COL mill_workers.updated_at:timestamp with time zone:NOT NULL
+COL milling_batch_packaging.batch_id:integer:NOT NULL
+COL milling_batch_packaging.created_at:timestamp with time zone:NOT NULL
+COL milling_batch_packaging.created_by:integer:NULL
+COL milling_batch_packaging.direction:character varying:NOT NULL
+COL milling_batch_packaging.id:integer:NOT NULL
+COL milling_batch_packaging.mill_item_id:integer:NOT NULL
+COL milling_batch_packaging.notes:text:NULL
+COL milling_batch_packaging.output_type:character varying:NULL
+COL milling_batch_packaging.quantity:numeric:NOT NULL
+COL milling_batch_packaging.total_cost_pkr:numeric:NULL
+COL milling_batch_packaging.unit_cost_pkr:numeric:NULL
+COL milling_batch_packaging.updated_at:timestamp with time zone:NOT NULL
 COL milling_batches.actual_finished_kg:numeric:NOT NULL
 COL milling_batches.approved_at:timestamp with time zone:NULL
 COL milling_batches.approved_by:integer:NULL
@@ -3349,6 +3361,14 @@ CON mill_worker_requests.mill_worker_requests_pkey(p)
 CON mill_worker_requests.mill_worker_requests_worker_id_foreign(f)
 CON mill_workers.mill_workers_mill_id_foreign(f)
 CON mill_workers.mill_workers_pkey(p)
+CON milling_batch_packaging.chk_batch_packaging_direction_valid(c)
+CON milling_batch_packaging.chk_batch_packaging_output_type_valid(c)
+CON milling_batch_packaging.chk_batch_packaging_quantity_positive(c)
+CON milling_batch_packaging.milling_batch_packaging_batch_id_foreign(f)
+CON milling_batch_packaging.milling_batch_packaging_created_by_foreign(f)
+CON milling_batch_packaging.milling_batch_packaging_mill_item_id_foreign(f)
+CON milling_batch_packaging.milling_batch_packaging_pkey(p)
+CON milling_batch_packaging.uq_batch_packaging_line(u)
 CON milling_batches.chk_mb_b1_nonneg(c)
 CON milling_batches.chk_mb_b1_price_per_mt_nonneg(c)
 CON milling_batches.chk_mb_b2_nonneg(c)

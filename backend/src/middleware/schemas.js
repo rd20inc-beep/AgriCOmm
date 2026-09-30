@@ -207,6 +207,23 @@ const updateExportShipment = Joi.object({
   notes: Joi.string().allow('', null),
 });
 
+// ── Packaging lines on a milling batch (mig 307) ──
+// A line names a real packaging item; its pack_type decides which stock it moves
+// and its own price decides what it costs. unit_cost_pkr may be sent to override
+// the item's current price (the line snapshots whatever it is given).
+const saveBatchPackaging = Joi.object({
+  lines: Joi.array().items(Joi.object({
+    mill_item_id: Joi.number().integer().positive().required(),
+    direction: Joi.string().valid('received', 'consumed').required(),
+    quantity: Joi.number().positive().required(),
+    // Only meaningful on a consumed line — the costing formula needs the katta
+    // spent on by-products specifically, and nothing else records it.
+    output_type: Joi.string().valid('finished', 'byproduct').allow(null, ''),
+    unit_cost_pkr: Joi.number().min(0).allow(null, ''),
+    notes: Joi.string().allow('', null),
+  })).required(),
+});
+
 const exportOrderAction = Joi.object({
   notes: Joi.string().allow('', null),
 });
@@ -727,6 +744,7 @@ module.exports = {
   updateExportShipment,
   exportPackingWeight,
   exportOrderAction,
+  saveBatchPackaging,
   issueExportDebitNote,
   cancelExportDebitNote,
   exportOrderDocumentAction,
