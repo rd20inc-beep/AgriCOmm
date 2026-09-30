@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { Printer, RefreshCw, Calendar, Factory, Boxes, TrendingUp, Wallet, ArrowDownLeft, ArrowUpRight, ShoppingCart, FileText, Package, Sparkles, Shield } from 'lucide-react';
+import { Printer, RefreshCw, Calendar, Factory, Boxes, TrendingUp, Wallet, ArrowDownLeft, ArrowUpRight, ShoppingCart, FileText, Package, Sparkles, Shield, Ship } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import api from '../../../api/client';
 import { useApp } from '../../../context/AppContext';
@@ -9,7 +9,7 @@ import {
   ProductionReportView, StockReportView,
   PnlReportView, CashflowReportView, AgingReportView,
   PurchaseLedgerView, SalesLedgerView, StockDetailView, PnlAccrualView, PnlCompareView,
-  AuditReportView,
+  AuditReportView, FreightRecoveryView,
 } from './PrintableReportsViews';
 
 // ─── Period helpers ────────────────────────────────────────────────────
@@ -118,7 +118,7 @@ export default function PrintableReports() {
   const canAudit = hasPermission?.('admin', 'view');
   const REPORT_TYPES = millScoped
     ? ['production', 'stock', 'stock_detail', 'purchase_ledger']
-    : ['production', 'stock', 'stock_detail', 'purchase_ledger', 'sales_ledger', 'pnl_accrual', 'pnl', 'pnl_compare', 'cashflow', 'ar_aging', 'ap_aging', ...(canAudit ? ['audit_trail'] : [])];
+    : ['production', 'stock', 'stock_detail', 'purchase_ledger', 'sales_ledger', 'freight_recovery', 'pnl_accrual', 'pnl', 'pnl_compare', 'cashflow', 'ar_aging', 'ap_aging', ...(canAudit ? ['audit_trail'] : [])];
 
   // Preselect via ?type= (e.g. the Audit Trail page links here with type=audit_trail).
   const initialType = REPORT_TYPES.includes(searchParams.get('type')) ? searchParams.get('type') : 'production';
@@ -177,6 +177,8 @@ export default function PrintableReports() {
         res = await api.get('/api/reporting/printable/purchase-ledger', periodParams);
       } else if (reportType === 'sales_ledger') {
         res = await api.get('/api/reporting/printable/sales-ledger', periodParams);
+      } else if (reportType === 'freight_recovery') {
+        res = await api.get('/api/reporting/printable/freight-recovery', periodParams);
       } else if (reportType === 'stock_detail') {
         res = await api.get('/api/reporting/printable/stock-detail', {});
       } else if (reportType === 'audit_trail') {
@@ -232,6 +234,7 @@ export default function PrintableReports() {
               { k: 'production',     l: 'Production',     i: Factory },
               { k: 'stock',          l: 'Stock',          i: Boxes },
               { k: 'stock_detail',   l: 'Stock (detail)', i: Package },
+              { k: 'freight_recovery', l: 'Freight Recovery', i: Ship },
               { k: 'purchase_ledger', l: 'Purchases',     i: ShoppingCart },
               { k: 'sales_ledger',   l: 'Sales',          i: FileText },
               { k: 'pnl_accrual', l: 'P&L (accrual)', i: TrendingUp },
@@ -346,6 +349,8 @@ export default function PrintableReports() {
           <PurchaseLedgerView data={data} companyName={companyName} range={range} />
         ) : reportType === 'sales_ledger' && data.local !== undefined ? (
           <SalesLedgerView data={data} companyName={companyName} range={range} />
+        ) : reportType === 'freight_recovery' && data.totals ? (
+          <FreightRecoveryView data={data} companyName={companyName} />
         ) : reportType === 'stock_detail' && data.rows && data.millStore !== undefined ? (
           <StockDetailView data={data} companyName={companyName} />
         ) : reportType === 'audit_trail' && data.byCategory ? (

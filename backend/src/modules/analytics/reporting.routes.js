@@ -99,6 +99,9 @@ router.get('/printable/ap-aging',   authorize('reports', 'view'), noFinanceForOp
 router.get('/printable/purchase-ledger', authorize('reports', 'view'), noFinanceForOperator, controller.printablePurchaseLedger);
 router.get('/printable/sales-ledger',     authorize('reports', 'view'), noFinanceForOperator, controller.printableSalesLedger);
 router.get('/printable/stock-detail',     authorize('reports', 'view'), controller.printableStockDetail);
+// Freight charged to buyers against freight paid to carriers, per order — the
+// number that says whether the freight terms are working while rates are moving.
+router.get('/printable/freight-recovery', authorize('reports', 'view'), controller.printableFreightRecovery);
 router.get('/printable/sweeping',         authorize('reports', 'view'), controller.printableSweeping);
 router.get('/printable/pnl-accrual',      authorize('reports', 'view'), noFinanceForOperator, controller.printablePnlAccrual);
 // Audit trail is sensitive — gate on admin.view (not reports.view).

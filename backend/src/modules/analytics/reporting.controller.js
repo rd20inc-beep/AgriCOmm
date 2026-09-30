@@ -65,6 +65,38 @@ function redactReport(req, data) {
   return data;
 }
 
+
+// ── Freight recovery helpers ──
+// The GL side of the freight report. Posted journals only — a Draft journal is
+// not in the trial balance and must not appear in a report either.
+async function freightGlTotals(db, { from, to } = {}) {
+  const sum = async (code) => {
+    let q = db('journal_lines as jl')
+      .join('journal_entries as je', 'je.id', 'jl.journal_id')
+      .join('chart_of_accounts as a', 'a.id', 'jl.account_id')
+      .where('a.code', code).andWhere('je.status', 'Posted');
+    if (from) q = q.where('je.date', '>=', from);
+    if (to) q = q.where('je.date', '<=', to);
+    const r = await q.sum({ d: 'jl.debit', c: 'jl.credit' }).first();
+    return { debit: parseFloat(r?.d) || 0, credit: parseFloat(r?.c) || 0 };
+  };
+  const [recovered, freight, insurance] = await Promise.all([sum('4070'), sum('6010'), sum('6050')]);
+  // Revenue is a credit balance, expense a debit one.
+  const recoveredPkr = recovered.credit - recovered.debit;
+  const paidPkr = (freight.debit - freight.credit) + (insurance.debit - insurance.credit);
+  return {
+    recoveredPkr, paidPkr, gapPkr: recoveredPkr - paidPkr,
+    accounts: { revenue: '4070 Freight & Insurance Recovered', cost: '6010 Freight & Shipping + 6050 Insurance' },
+  };
+}
+
+function emptyFreightTotals() {
+  return {
+    orders: 0, withFreight: 0, chargedPkr: 0, paidPkr: 0, gapPkr: 0,
+    recoveryPct: null, shortOrders: 0, unbilledOrders: 0, debitNotes: 0, debitNotePkr: 0,
+  };
+}
+
 const reportingController = {
   // ═══════════════════════════════════════════════════════════════════
   // EXECUTIVE DASHBOARDS
@@ -1998,6 +2030,167 @@ const reportingController = {
       const millStore = ms.map((m) => ({ name: m.name, category: m.category, unit: m.unit, qty: parseFloat(m.quantity_available) || 0, costPerUnit: parseFloat(m.avg_cost_per_unit) || 0, supplier: m.supplier }));
       return res.json({ success: true, data: { rows, millStore, totals: { lots: rows.length, mt: rows.reduce((s, r) => s + r.onHandMt, 0), valuePkr: rows.reduce((s, r) => s + r.valuePkr, 0), millStoreValue: millStore.reduce((s, m) => s + m.qty * m.costPerUnit, 0) } } });
     } catch (err) { console.error('Stock detail error:', err); return res.status(500).json({ success: false, message: 'Internal server error.' }); }
+  },
+
+  /**
+   * Freight recovery — what was charged to buyers against what was paid to
+   * carriers, per order.
+   *
+   * While ocean freight is volatile this is the number that decides whether the
+   * freight terms are working. It is easy to look covered in aggregate and be
+   * losing money on half the shipments, so the report is per order and the
+   * under-recovering ones are flagged.
+   *
+   * CHARGED comes from the order's own freight terms plus any escalation debit
+   * notes raised against it (mig 304). PAID comes from the costs actually
+   * recorded against the order. Both are stated in PKR at the order's booked
+   * rate, because a USD freight charge and a PKR carrier invoice cannot be
+   * subtracted from one another.
+   *
+   * The GL totals are carried alongside rather than used: an operational figure
+   * and a ledger figure that disagree is the thing worth seeing, and a report
+   * that quietly reads only one of them hides it.
+   */
+  async printableFreightRecovery(req, res) {
+    try {
+      const db = require('../../config/database');
+      const { from, to } = req.query;
+
+      let q = db('export_orders as o')
+        .leftJoin('customers as c', 'o.customer_id', 'c.id');
+      if (from) q = q.where('o.created_at', '>=', from);
+      if (to) q = q.where('o.created_at', '<=', to);
+      const orders = await q
+        .whereNotIn('o.status', ['Cancelled'])
+        .select(
+          'o.id', 'o.order_no', 'o.status', 'o.currency', 'o.qty_mt', 'o.incoterm',
+          'o.freight_per_mt', 'o.insurance_per_mt', 'o.freight_display',
+          'o.freight_basis_date', 'o.freight_valid_until',
+          'o.booked_fx_rate', 'o.contract_value', 'o.contract_value_pkr_locked', 'o.revenue_posted',
+          'o.created_at', 'o.customer_id', 'c.name as customer_name',
+        )
+        .orderBy('o.id', 'desc');
+
+      if (orders.length === 0) {
+        return res.json({ success: true, data: { rows: [], totals: emptyFreightTotals(), gl: await freightGlTotals(db, { from, to }) } });
+      }
+      const ids = orders.map((o) => o.id);
+
+      // Escalation debit notes — the claims raised when freight rose after the
+      // rate was quoted. Cancelled ones are withdrawn and must not count.
+      const noteRows = await db('export_debit_notes')
+        .whereIn('order_id', ids).andWhere('status', 'Issued')
+        .select('order_id')
+        .sum({ amt: 'amount' }).sum({ pkr: 'amount_pkr' }).count({ n: 'id' })
+        .groupBy('order_id');
+      const notesBy = {};
+      for (const r of noteRows) notesBy[r.order_id] = { amount: parseFloat(r.amt) || 0, pkr: parseFloat(r.pkr) || 0, count: parseInt(r.n, 10) || 0 };
+
+      // What was actually paid out. export_order_costs is stored in PKR.
+      const costRows = await db('export_order_costs')
+        .whereIn('order_id', ids).whereIn('category', ['freight', 'insurance'])
+        .select('order_id', 'category')
+        .sum({ pkr: 'base_amount_pkr' }).sum({ amt: 'amount' })
+        .groupBy('order_id', 'category');
+      const paidBy = {};
+      for (const r of costRows) {
+        const v = parseFloat(r.pkr) || parseFloat(r.amt) || 0;
+        paidBy[r.order_id] = (paidBy[r.order_id] || 0) + v;
+      }
+
+      const rows = orders.map((o) => {
+        const qty = parseFloat(o.qty_mt) || 0;
+        const perMt = (parseFloat(o.freight_per_mt) || 0) + (parseFloat(o.insurance_per_mt) || 0);
+        // The booked rate is what the revenue was recognised at, so it is the
+        // rate the recovery has to be measured at too. 280 is the same last-ditch
+        // fallback the order controller uses when an order has no rate at all.
+        const rate = parseFloat(o.booked_fx_rate)
+          || (parseFloat(o.contract_value) > 0
+            ? (parseFloat(o.contract_value_pkr_locked) || 0) / parseFloat(o.contract_value)
+            : 0)
+          || 280;
+        const notes = notesBy[o.id] || { amount: 0, pkr: 0, count: 0 };
+        const baseCharged = perMt * qty;
+        const basePkr = baseCharged * rate;
+        const chargedPkr = basePkr + notes.pkr;
+        // WHERE the revenue for it is recognised. Freight charged beside an FOB
+        // price is its own line and posts to 4070; freight quoted inside a
+        // CFR/CIF price is invoiced as part of the goods and is in Export Sales.
+        // Escalation debit notes always post to 4070, whichever way the original
+        // freight was presented. Splitting it here is what lets the ledger
+        // comparison below hold like against like instead of always looking off.
+        const separate = (o.freight_display || 'in_price') === 'separate';
+        // The order's OWN freight reaches 4070 at shipment, with the goods
+        // revenue. A debit note posts the moment it is raised — it is a claim
+        // made after the fact, not part of the shipment's revenue recognition —
+        // so the two parts age differently and are tracked apart.
+        const baseIn4070Pkr = separate ? basePkr : 0;
+        const in4070Pkr = baseIn4070Pkr + notes.pkr;
+        const paidPkr = paidBy[o.id] || 0;
+        // Only an order that charges freight AND paid some can be judged; the
+        // rest are listed so nothing is silently dropped, but they are not scored.
+        const measurable = chargedPkr > 0 || paidPkr > 0;
+        return {
+          orderId: o.id, orderNo: o.order_no, status: o.status,
+          customer: o.customer_name || '—', customerId: o.customer_id,
+          incoterm: o.incoterm || '—',
+          freightDisplay: o.freight_display || 'in_price',
+          qtyMT: qty, currency: o.currency || 'USD', fxRate: rate,
+          freightPerMT: parseFloat(o.freight_per_mt) || 0,
+          insurancePerMT: parseFloat(o.insurance_per_mt) || 0,
+          basisDate: o.freight_basis_date, validUntil: o.freight_valid_until,
+          baseCharged, debitNoteAmount: notes.amount, debitNoteCount: notes.count,
+          chargedPkr, paidPkr,
+          in4070Pkr,
+          baseIn4070Pkr,
+          debitNotePkr: notes.pkr,
+          inSalesPkr: chargedPkr - in4070Pkr,
+          // Freight revenue is recognised at SHIPMENT, with the goods revenue.
+          // Until then an order's freight is charged on paper but is not in the
+          // ledger yet — a real and temporary difference, not a discrepancy.
+          revenuePosted: o.revenue_posted === true,
+          recognisedIn: separate ? '4070' : (notes.pkr > 0 ? '4010 + 4070' : '4010'),
+          gapPkr: chargedPkr - paidPkr,
+          recoveryPct: paidPkr > 0 ? (chargedPkr / paidPkr) * 100 : null,
+          measurable,
+          // An order that paid freight and charged none is the worst case: the
+          // cost is real and nothing was billed for it.
+          unbilled: paidPkr > 0 && chargedPkr <= 0,
+        };
+      });
+
+      const scored = rows.filter((r) => r.measurable);
+      const chargedPkr = scored.reduce((s2, r) => s2 + r.chargedPkr, 0);
+      const paidPkr = scored.reduce((s2, r) => s2 + r.paidPkr, 0);
+      const totals = {
+        orders: rows.length,
+        withFreight: scored.length,
+        chargedPkr,
+        paidPkr,
+        gapPkr: chargedPkr - paidPkr,
+        recoveryPct: paidPkr > 0 ? (chargedPkr / paidPkr) * 100 : null,
+        shortOrders: scored.filter((r) => r.gapPkr < -0.01).length,
+        unbilledOrders: rows.filter((r) => r.unbilled).length,
+        debitNotes: rows.reduce((s2, r) => s2 + r.debitNoteCount, 0),
+        debitNotePkr: rows.reduce((s2, r) => s2 + (notesBy[r.orderId]?.pkr || 0), 0),
+        // The two halves of what was charged, split by the account it lands in,
+        // so the ledger section can compare each against the right one.
+        in4070Pkr: scored.reduce((s2, r) => s2 + r.in4070Pkr, 0),
+        inSalesPkr: scored.reduce((s2, r) => s2 + r.inSalesPkr, 0),
+        // The part of that which has not reached the ledger yet because the
+        // order has not shipped. Subtracting it is what turns the comparison
+        // below into a reconciliation that should come out at zero.
+        // Only the order's own freight waits for shipment; a debit note is in
+        // the ledger from the day it was raised, so deducting it here would
+        // leave the reconciliation short by exactly the notes outstanding.
+        awaitingShipmentPkr: scored.filter((r) => !r.revenuePosted).reduce((s2, r) => s2 + r.baseIn4070Pkr, 0),
+      };
+
+      return res.json({ success: true, data: { rows, totals, gl: await freightGlTotals(db, { from, to }) } });
+    } catch (err) {
+      console.error('Freight recovery report error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
   },
 
   // ── Sweeping report — every sweeping output lot traced to the milling batch it

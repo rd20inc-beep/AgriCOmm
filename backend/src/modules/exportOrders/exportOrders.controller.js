@@ -365,6 +365,26 @@ async function resolveOrderId(raw) {
   return row ? row.id : null;
 }
 
+// Export-order costs have had purpose-built accounts in the chart since it was
+// seeded — 6010 Freight & Shipping, 6020 Clearing & Forwarding, 6030 Loading
+// Charges, 6050 Insurance, 6060 Commission & Brokerage — and every one of them
+// was being posted to 6000 Operating Expenses instead. So the P&L could say what
+// an order cost in total but never what it was spent ON, and 6010 stayed empty
+// while freight was being paid. That matters most for freight: it is the one
+// cost with a matching revenue account (4070 Freight & Insurance Recovered), and
+// with the two in different halves of the chart there was no way to see whether
+// what is charged to buyers covers what is paid to carriers.
+//
+// A category with no account of its own still goes to 6000, which is what that
+// account is for.
+const COST_CATEGORY_ACCOUNT = {
+  freight: '6010',
+  clearing: '6020',
+  loading: '6030',
+  insurance: '6050',
+  commission: '6060',
+};
+
 const exportOrderController = {
   // ── Freight escalation debit notes (mig 304) ──
   // The clause on the Proforma and the Sales Contract promises the buyer that a
@@ -1904,7 +1924,14 @@ const exportOrderController = {
         try {
           const delta = amtPkr - priorAmtPkr;
           if (Math.abs(delta) > 0.01) {
-            const opExp = await trx('chart_of_accounts').where({ code: '6000' }).first();
+            // The account built for this category, falling back to 6000 when the
+            // chart has none for it — or when the seeded account is missing, so
+            // an incomplete chart still records the cost rather than dropping it.
+            const wantCode = COST_CATEGORY_ACCOUNT[category] || '6000';
+            const opExp = (wantCode !== '6000'
+              ? await trx('chart_of_accounts').where({ code: wantCode }).first()
+              : null)
+              || await trx('chart_of_accounts').where({ code: '6000' }).first();
             const supplierPayable = await trx('chart_of_accounts').where({ code: '2010' }).first();
             if (opExp && supplierPayable) {
               const sign = delta > 0 ? 1 : -1;
