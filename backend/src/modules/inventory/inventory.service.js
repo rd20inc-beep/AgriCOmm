@@ -3093,14 +3093,30 @@ const inventoryService = {
       }
     }
 
-    // find/create a Katta packaging item + stock row for a given size.
+    // find/create the KATTA packaging item + stock row for a given size.
+    //
+    // It must be a katta, not merely something of that size. This used to key on
+    // the size alone — `KATTA-${size}` — and so minted "Katta 25kg" the first
+    // time a 25 kg sack was freed, which is why KATTA-25 is holding 1,826 units
+    // on production that are really P.P. bags. Now it prefers an EXISTING item
+    // already typed pack_type='katta' at that size, and anything it does create
+    // is typed katta explicitly rather than by implication.
     const itemForSize = async (size) => {
       const code = `KATTA-${size}`;
-      let it = await trx('mill_items').where('code', code).first();
+      // An item of this size that is genuinely a katta — under whatever code the
+      // mill uses for it (KATTA-50, BAG-50KG-PP/JUTE, BARDANA PENTRADE …).
+      let it = await trx('mill_items')
+        .where('pack_type', 'katta')
+        .andWhere('capacity_kg', size)
+        .andWhere('is_active', true)
+        .orderByRaw(`CASE WHEN code = ? THEN 0 ELSE 1 END`, [code])
+        .first();
+      if (!it) it = await trx('mill_items').where('code', code).first();
       if (!it) {
         [it] = await trx('mill_items').insert({
           code, name: `Katta ${size}kg`, category: 'packaging', unit: 'pcs',
-          capacity_kg: size, reorder_level: 0, is_active: true,
+          capacity_kg: size, pack_type: 'katta', size_value: size, size_unit: 'kg',
+          reorder_level: 0, is_active: true,
           notes: 'Auto-managed: empty bags freed from milled raw, consumed to pack output.',
           created_by: userId || null,
         }).returning('*');
