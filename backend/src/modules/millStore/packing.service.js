@@ -46,7 +46,11 @@ const packingService = {
   async pack(batchId, {
     bag_item_id, bags_count, warehouse_id = null, notes,
     master_bag_item_id = null, master_bags_count = null,
-    poly_item_id = null, poly_count = null,
+    // Where the polythene goes: lining each retail bag, lining the master, or
+    // both. The quantity used to be assumed as one sheet per retail bag, which
+    // is only one of the three real cases — and at Rs 12 a sheet the difference
+    // between 400, 80 and 480 is real money.
+    poly_item_id = null, poly_count = null, poly_applies_to = 'bag',
   }, userId, { allowOverPack = false } = {}) {
     const bagsCount = Number(bags_count);
     if (!bagsCount || bagsCount <= 0) throw new ValidationError('Bag count must be greater than zero.');
@@ -172,26 +176,42 @@ const packingService = {
       };
 
       const master = await consumePackaging(master_bag_item_id, master_bags_count, 'Master bag');
-      const poly = await consumePackaging(poly_item_id, poly_count, 'Polythene sheet');
+
+      // Polythene quantity follows where it is applied, unless the caller gave a
+      // count outright. 'both' is bags PLUS masters — a sheet inside each retail
+      // bag and one lining each master — not one or the other.
+      const polyScope = ['bag', 'master', 'both'].includes(poly_applies_to) ? poly_applies_to : 'bag';
+      const masterQty = Number(master.qty) || 0;
+      const derivedPoly = polyScope === 'master' ? masterQty
+        : polyScope === 'both' ? bagsCount + masterQty
+          : bagsCount;
+      const polyQty = poly_count == null || poly_count === '' ? derivedPoly : Number(poly_count);
+      const poly = await consumePackaging(poly_item_id, polyQty, `Polythene sheet (${polyScope})`);
       const grandTotal = Number((totalCost + master.cost + poly.cost).toFixed(2));
 
       // Stamp the master/poly breakdown + the full run cost onto the log.
+      // The stamped values are read back onto `log` afterwards: this returns the
+      // row from the original insert, so without that every master and polythene
+      // field came back null to the caller even though the database held them.
       if (master.qty || poly.qty || grandTotal !== totalCost) {
-        await trx('mill_packing_logs').where('id', log.id).update({
+        const stamped = {
           master_bag_item_id: master.item ? master_bag_item_id : null,
           master_bags_count: master.qty || null,
           master_cost: master.cost || null,
           poly_item_id: poly.item ? poly_item_id : null,
           poly_count: poly.qty || null,
           poly_cost: poly.cost || null,
+          poly_applies_to: poly.qty > 0 ? polyScope : null,
           total_cost: grandTotal,
-        });
+        };
+        await trx('mill_packing_logs').where('id', log.id).update(stamped);
+        Object.assign(log, stamped);
       }
 
       // Human-readable breakdown of everything consumed in this run.
       const breakdown = [`${bagsCount} × ${item.name}`]
         .concat(master.qty ? [`${master.qty} × ${master.item.name} (master)`] : [])
-        .concat(poly.qty ? [`${poly.qty} × ${poly.item.name} (polythene)`] : [])
+        .concat(poly.qty ? [`${poly.qty} × ${poly.item.name} (polythene, ${polyScope === 'both' ? 'bags + masters' : polyScope === 'master' ? 'masters' : 'bags'})`] : [])
         .join(' + ');
 
       // GL: recognise the full packing cost (bag + master + polythene) — DR 6000

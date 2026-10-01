@@ -24,6 +24,10 @@ export default function PackingPanel({ batchId, batchStatus, addToast, exportOrd
   const [masterQtyManual, setMasterQtyManual] = useState('');
   const [polyId, setPolyId] = useState('');
   const [polyQtyManual, setPolyQtyManual] = useState('');
+  // Where the polythene goes. A sheet can line each retail bag, line the master,
+  // or both — the code used to assume one per bag, which is only one of the three
+  // real cases, and at Rs 12 a sheet the difference is real money.
+  const [polyScope, setPolyScope] = useState('bag');
 
   const logs = data.logs || [];
   const finishedKg = num(data.finishedKg);
@@ -59,8 +63,17 @@ export default function PackingPanel({ batchId, batchStatus, addToast, exportOrd
 
   const polySel = useMemo(() => bagItems.find((b) => String(b.id) === String(polyId)), [bagItems, polyId]);
   const polyAvail = num(polySel?.quantity_available);
-  const polyAuto = bagsN; // one sheet per small bag
+  // 'both' is bags PLUS masters — a sheet inside each retail bag and one lining
+  // each master — not one or the other.
+  const polyAuto = polyScope === 'master' ? masterQty
+    : polyScope === 'both' ? bagsN + masterQty
+      : bagsN;
   const polyQty = polyQtyManual !== '' ? num(polyQtyManual) : polyAuto;
+  const POLY_SCOPES = [
+    { code: 'bag', label: 'Each bag', hint: `1 per bag — ${bagsN || 0} sheets` },
+    { code: 'master', label: 'Each master', hint: `1 per master — ${masterQty || 0} sheets` },
+    { code: 'both', label: 'Both', hint: `bags + masters — ${(bagsN || 0) + (masterQty || 0)} sheets` },
+  ];
   const polyCost = polyQty * num(polySel?.avg_cost_per_unit);
 
   const mpActive = needsMP && addMP;
@@ -80,7 +93,11 @@ export default function PackingPanel({ batchId, batchStatus, addToast, exportOrd
     try {
       const payload = { bag_item_id: Number(bagItemId), bags_count: bagsN };
       if (mpActive && masterId && masterQty > 0) { payload.master_bag_item_id = Number(masterId); payload.master_bags_count = masterQty; }
-      if (mpActive && polyId && polyQty > 0) { payload.poly_item_id = Number(polyId); payload.poly_count = polyQty; }
+      if (mpActive && polyId && polyQty > 0) {
+        payload.poly_item_id = Number(polyId);
+        payload.poly_count = polyQty;
+        payload.poly_applies_to = polyScope;
+      }
       const res = await pack.mutateAsync({ batchId, data: payload });
       const shortages = res?.data?.shortages || res?.shortages || [];
       if (shortages.length) {
@@ -88,7 +105,7 @@ export default function PackingPanel({ batchId, batchStatus, addToast, exportOrd
       } else {
         addToast?.('Packed — stock deducted, weight & cost recorded', 'success');
       }
-      setBags(''); setMasterQtyManual(''); setPolyQtyManual('');
+      setBags(''); setMasterQtyManual(''); setPolyQtyManual(''); setPolyScope('bag');
     } catch (err) {
       addToast?.(err?.data?.errors?.[0]?.message || err?.data?.message || err.message || 'Failed to pack', 'error');
     }
@@ -331,12 +348,26 @@ export default function PackingPanel({ batchId, batchStatus, addToast, exportOrd
                     </select>
                     {polyId && (
                       <>
+                        {/* Where it goes drives the quantity. */}
+                        <div className="flex flex-wrap gap-1.5 mb-2">
+                          {POLY_SCOPES.map((sc) => (
+                            <button key={sc.code} type="button"
+                              onClick={() => { setPolyScope(sc.code); setPolyQtyManual(''); }}
+                              disabled={sc.code !== 'bag' && masterQty <= 0}
+                              title={sc.code !== 'bag' && masterQty <= 0 ? 'Add a master bag first' : sc.hint}
+                              className={`px-2 py-1 rounded-md text-[11px] font-medium border ${polyScope === sc.code
+                                ? 'bg-blue-600 text-white border-blue-600'
+                                : 'bg-white text-gray-600 border-gray-300 hover:border-blue-400'} disabled:opacity-40 disabled:hover:border-gray-300`}>
+                              {sc.label}
+                            </button>
+                          ))}
+                        </div>
                         <div className="flex items-center gap-2">
                           <input type="number" min="0" step="1"
                             value={polyQtyManual !== '' ? polyQtyManual : String(polyAuto)}
                             onChange={(e) => setPolyQtyManual(e.target.value)}
                             className="w-24 px-2 py-1.5 border border-gray-300 rounded-lg text-sm" />
-                          <span className="text-xs text-gray-500">sheets · auto {polyAuto} (1 per bag)</span>
+                          <span className="text-xs text-gray-500">sheets · auto {polyAuto} ({(POLY_SCOPES.find((x) => x.code === polyScope) || POLY_SCOPES[0]).hint})</span>
                         </div>
                         <div className="mt-1.5 text-xs text-gray-500 flex flex-wrap gap-x-3">
                           <span>In stock: <b className={polyQty > polyAvail ? 'text-red-600' : ''}>{polyAvail}</b></span>
@@ -382,7 +413,9 @@ export default function PackingPanel({ batchId, batchStatus, addToast, exportOrd
                         <div className="text-[11px] text-gray-400 mt-0.5">
                           {num(l.master_bags_count) > 0 ? `+${num(l.master_bags_count)} ${l.master_bag_name || 'master'}` : ''}
                           {num(l.master_bags_count) > 0 && num(l.poly_count) > 0 ? ', ' : ''}
-                          {num(l.poly_count) > 0 ? `${num(l.poly_count)} ${l.poly_name || 'poly'}` : ''}
+                          {num(l.poly_count) > 0
+                            ? `${num(l.poly_count)} ${l.poly_name || 'poly'}${l.poly_applies_to ? ` (${l.poly_applies_to === 'both' ? 'bags + masters' : l.poly_applies_to === 'master' ? 'masters' : 'bags'})` : ''}`
+                            : ''}
                         </div>
                       )}
                     </td>

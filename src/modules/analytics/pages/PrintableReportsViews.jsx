@@ -682,8 +682,21 @@ export function SalesLedgerView({ data, companyName, range }) {
 }
 
 // ─── Detailed stock (traceable) ────────────────────────────────────────
+// Packaging stock is reported PER TYPE and never combined: a 50 kg katta and a
+// 25 kg retail bag are different things with different prices.
+const PACK_TYPE_LABEL = {
+  katta: 'Katta / Bardana',
+  pp_bag: 'P.P. / Retail Bags',
+  master_bag: 'Master (Outer) Bags',
+  polythene: 'Polythene / Liners',
+  other: 'Other consumables',
+};
+
 export function StockDetailView({ data, companyName }) {
   const { rows, millStore, totals } = data;
+  const packGroups = data.packGroups || [];
+  // Everything in the store that is not a bag — fuel, spares, consumables.
+  const nonPackaging = (millStore || []).filter(m => m.category !== 'packaging');
   const [tag, setTag] = useState('all');
 
   // Build the tag chips from the lots' subtypes, ordered by a sensible priority.
@@ -741,6 +754,7 @@ export function StockDetailView({ data, companyName }) {
         bags: rws.reduce((s2, r) => s2 + (parseFloat(r.bags) || 0), 0),
         bagUnits: rws.reduce((s2, r) => s2 + (parseFloat(r.bagUnits) || 0), 0),
         bagLabel: bagLabel(rws),
+        masters: rws.reduce((s2, r) => s2 + (parseFloat(r.masterBags) || 0), 0),
       };
     });
 
@@ -802,8 +816,8 @@ export function StockDetailView({ data, companyName }) {
         <Section key={sec.name}
           title={`${sec.name} — ${sec.rows.length} lot${sec.rows.length === 1 ? '' : 's'} · ${fmtMt(sec.mt)} MT · ${fmtPkr(sec.value)}`}>
           <Table
-            head={['Lot', 'Tag', 'Item', 'Variety/Grade', 'On hand (MT)', 'kg', 'Per kg', 'Katta', 'Bags', 'Available', 'Source / Supplier', 'Warehouse', 'Value (PKR)']}
-            align={['left', 'left', 'left', 'left', 'right', 'right', 'right', 'right', 'right', 'right', 'left', 'left', 'right']}
+            head={['Lot', 'Tag', 'Item', 'Variety/Grade', 'On hand (MT)', 'kg', 'Per kg', 'Katta', 'Bags', 'Masters', 'Available', 'Source / Supplier', 'Warehouse', 'Value (PKR)']}
+            align={['left', 'left', 'left', 'left', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'left', 'left', 'right']}
             rows={sec.rows.map(r => [
               <RefLink to={`/lot-inventory/${r.lotId}`}>{r.lotNo}</RefLink>,
               <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-medium bg-gray-100 text-gray-700 print:bg-transparent print:px-0">{r.subtype}</span>,
@@ -814,6 +828,11 @@ export function StockDetailView({ data, companyName }) {
                     {fmtKg(r.packedUnits)} &times; {r.packedSizeKg} kg <span className="text-[10px]">(packed)</span>
                   </span>
                 : ((parseFloat(r.bagUnits) || 0) > 0 ? `${fmtKg(r.bagUnits)} \u00d7 ${Number(r.bagSizeKg)} kg` : '—'),
+              /* Masters are OUTER packaging — a lot in retail bags inside masters
+                 has both, and the store needs both to know how a pallet is made. */
+              (parseFloat(r.masterBags) || 0) > 0
+                ? `${fmtKg(r.masterBags)}${r.masterLabel ? ` \u00d7 ${r.masterLabel}` : ''}`
+                : '—',
               fmtMt(r.availableMt),
               r.supplier
                 ? (r.supplierId ? <RefLink to={`/finance/statements?type=supplier&id=${r.supplierId}`}>{r.supplier}</RefLink> : r.supplier)
@@ -821,7 +840,7 @@ export function StockDetailView({ data, companyName }) {
               r.warehouse || '—', fmtPkr(r.valuePkr),
             ])}
             empty="No stock in this category."
-            totalRow={['', '', '', `${sec.name} TOTAL`, fmtMt(sec.mt), fmtKg(sec.mt * 1000), '', fmtKg(sec.bags), sec.bagLabel, '', '', '', fmtPkr(sec.value)]}
+            totalRow={['', '', '', `${sec.name} TOTAL`, fmtMt(sec.mt), fmtKg(sec.mt * 1000), '', fmtKg(sec.bags), sec.bagLabel, sec.masters ? fmtKg(sec.masters) : '—', '', '', '', fmtPkr(sec.value)]}
           />
         </Section>
       ))}
@@ -837,13 +856,35 @@ export function StockDetailView({ data, companyName }) {
           />
         </Section>
       )}
-      {tag === 'all' && millStore.length > 0 && (
-        <Section title="Mill Store — packaging & consumables">
+      {/* Mill Store packaging, ONE SECTION PER TYPE with its own subtotal, so
+          katta, P.P. bags and master bags are never read as one figure. They were
+          listed flat under a single "packaging" category, which put a 50 kg sack
+          and a 25 kg retail bag on adjacent lines with no subtotal for either. */}
+      {tag === 'all' && packGroups.map(g => (
+        <Section key={g.packType}
+          title={`Mill Store — ${PACK_TYPE_LABEL[g.packType] || 'Packaging'} · ${fmtKg(g.units)} units · ${fmtPkr(g.valuePkr)}`}>
+          <Table
+            head={['Item', 'Size', 'Qty', 'Unit', 'Cost/unit', 'Supplier', 'Value (PKR)']}
+            align={['left', 'left', 'right', 'left', 'right', 'left', 'right']}
+            rows={g.items.map(m => [
+              m.name, m.sizeLabel || '—', fmtKg(m.qty), m.unit || '—',
+              m.costPerUnit > 0 ? fmtPkr(m.costPerUnit) : <span className="text-amber-700">no price set</span>,
+              m.supplier || '—', fmtPkr(m.qty * m.costPerUnit),
+            ])}
+            empty="None in stock."
+            totalRow={['', `${PACK_TYPE_LABEL[g.packType]} TOTAL`, fmtKg(g.units), '', '', '', fmtPkr(g.valuePkr)]}
+          />
+        </Section>
+      ))}
+
+      {/* Anything in the store that is not packaging — fuel, spares and the like. */}
+      {tag === 'all' && nonPackaging.length > 0 && (
+        <Section title="Mill Store — other consumables">
           <Table
             head={['Item', 'Category', 'Qty', 'Unit', 'Cost/unit', 'Supplier', 'Value (PKR)']}
             align={['left', 'left', 'right', 'left', 'right', 'left', 'right']}
-            rows={millStore.map(m => [m.name, m.category || '—', fmtKg(m.qty), m.unit || '—', fmtPkr(m.costPerUnit), m.supplier || '—', fmtPkr(m.qty * m.costPerUnit)])}
-            empty="Mill store empty."
+            rows={nonPackaging.map(m => [m.name, m.category || '—', fmtKg(m.qty), m.unit || '—', fmtPkr(m.costPerUnit), m.supplier || '—', fmtPkr(m.qty * m.costPerUnit)])}
+            empty="None."
           />
         </Section>
       )}

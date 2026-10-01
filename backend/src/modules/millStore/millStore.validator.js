@@ -57,7 +57,10 @@ const packSchema = Joi.object({
   master_bag_item_id: Joi.number().integer().allow(null).optional(),
   master_bags_count: Joi.number().min(0).allow(null).optional(),
   poly_item_id: Joi.number().integer().allow(null).optional(),
+  // Omit the count and it follows poly_applies_to: one sheet per retail bag, per
+  // master, or both. A count sent explicitly always wins.
   poly_count: Joi.number().min(0).allow(null).optional(),
+  poly_applies_to: Joi.string().valid('bag', 'master', 'both').allow(null, '').optional(),
 });
 
 const createRatioSchema = Joi.object({
