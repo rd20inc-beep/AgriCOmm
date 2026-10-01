@@ -396,3 +396,78 @@ describe('a capacity of zero is a blank, not a measurement', () => {
     expect(SVC).toContain('isMissingSize(item.size_value)');
   });
 });
+
+describe('retiring the seeded duplicates nobody uses', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const MIG = fs.readFileSync(path.join(__dirname, '../../migrations/20261002_312_retire_unused_seeded_bags.js'), 'utf8');
+  const CODE = MIG.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+
+  // Migration 057 seeded a bag item per bag_types row, which left duplicates of
+  // the same sack at the same size — three "Katta 50kg", three 100 kg katta.
+  // Confirmed with the user: prices are maintained by hand and are not fixed, so
+  // pricing the duplicates is not the answer; retiring them is.
+  it('retires, never deletes', () => {
+    // Pickers and the katta reconciler already filter on is_active, and the stock
+    // report only lists what holds stock, so a retired item just stops being
+    // offered. Deleting rows that movements or ratios may reference would be the
+    // irreversible version of the same tidy-up.
+    expect(CODE).toContain('is_active: false');
+    expect(CODE).not.toMatch(/mill_items[\s\S]{0,80}\.del\(\)/);
+  });
+
+  it('the criteria are computed, not a hardcoded list of codes', () => {
+    // So it cannot retire something that is in use on another database.
+    expect(CODE).not.toContain('BAG-100KG-JUTE');
+    expect(CODE).not.toContain('BAG-50KG-PP WOVEN');
+    expect(CODE).toContain("andWhere('mi.code', 'like', 'BAG-%')");
+  });
+
+  it('anything with stock, history, a price or a ratio is spared', () => {
+    for (const guard of [
+      "whereNull('mi.avg_cost_per_unit').orWhere('mi.avg_cost_per_unit', 0)",
+      "from('mill_stock')",
+      "from('mill_stock_movements')",
+      "from('mill_consumption_ratios')",
+      "from('mill_purchase_items')",
+      "from('mill_packing_logs')",
+      "from('milling_batch_packaging')",
+    ]) {
+      expect(CODE).toContain(guard);
+    }
+    // Every usage test is a NOT EXISTS, so one hit is enough to keep an item.
+    expect((CODE.match(/whereNotExists/g) || []).length).toBe(6);
+  });
+
+  it('a packing run counts whichever slot the item filled', () => {
+    // A bag used as a master or as polythene is still a bag in use.
+    expect(CODE).toContain('mill_packing_logs.bag_item_id = mi.id');
+    expect(CODE).toContain('mill_packing_logs.master_bag_item_id = mi.id');
+    expect(CODE).toContain('mill_packing_logs.poly_item_id = mi.id');
+  });
+
+  it('only bags and liners — thread and labels are left alone', () => {
+    // Consumables the mill may well still buy, and never part of what was being
+    // tidied. THREAD-WHITE also carries a ratio.
+    expect(CODE).toContain("whereIn('mi.pack_type', ['katta', 'pp_bag', 'master_bag', 'polythene'])");
+  });
+
+  it('a user-created item is not caught by the seeded-code pattern', () => {
+    // The seeded family is hyphenated (BAG-25KG-PP). BAG25KGPENTRADE is not, and
+    // must survive even though it has no price and no usage.
+    const like = (code) => /^BAG-/.test(code);
+    expect(like('BAG-50KG-PP WOVEN')).toBe(true);
+    expect(like('BAG25KGPENTRADE')).toBe(false);
+    expect(like('KATTA-50')).toBe(false);
+    expect(like('10KG FIZZA')).toBe(false);
+  });
+
+  it('it says what it did, because it changes what the pickers offer', () => {
+    expect(CODE).toContain('console.log(`[312] Retired');
+  });
+
+  it('down() reactivates exactly what it retired', () => {
+    expect(MIG).toContain("where('notes', 'like', '%Retired: seeded duplicate%')");
+    expect(MIG).toContain('is_active: true');
+  });
+});
