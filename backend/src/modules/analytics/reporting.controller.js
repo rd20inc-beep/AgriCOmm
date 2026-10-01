@@ -66,6 +66,16 @@ function redactReport(req, data) {
 }
 
 
+// A packaging size as the mill says it — "25 KG", "8 LBS". Mirrors
+// formatPackSize in src/shared/packagingTypes.js; kept local so the reporting
+// module does not reach across into the inventory module for one label.
+function packLabelOf(value, unit) {
+  const v = parseFloat(value);
+  if (!Number.isFinite(v) || v <= 0) return '';
+  const n = Math.abs(v - Math.round(v)) < 0.005 ? String(Math.round(v)) : String(Math.round(v * 100) / 100);
+  return `${n} ${unit === 'lb' ? 'LBS' : 'KG'}`;
+}
+
 // ── Freight recovery helpers ──
 // The GL side of the freight report. Posted journals only — a Draft journal is
 // not in the trial balance and must not appear in a report either.
@@ -2001,6 +2011,7 @@ const reportingController = {
       // katta. Three separate bugs have now produced a wrong bag count, so the
       // report states the disagreement rather than trusting the stamp.
       const packedByBatch = {};
+      const masterByBatch = {};
       {
         const batchIds = [...new Set(lots
           .map((l) => parseInt(String(l.batch_ref || '').replace('batch-', ''), 10))
@@ -2012,6 +2023,27 @@ const reportingController = {
             .select('batch_id', 'capacity_kg_per_bag')
             .sum({ bags: 'bags_count' })
             .groupBy('batch_id', 'capacity_kg_per_bag');
+          // Master bags are OUTER packaging — a lot in 3.63 kg retail bags
+          // inside 20 kg masters has both, and the report has to state both or
+          // the store cannot tell how the pallet is made up.
+          const masterRuns = await db('mill_packing_logs as pl')
+            .join('mill_items as mi', 'mi.id', 'pl.master_bag_item_id')
+            .whereIn('pl.batch_id', batchIds)
+            .where('pl.master_bags_count', '>', 0)
+            .select('pl.batch_id', 'mi.name as master_name', 'mi.size_value', 'mi.size_unit', 'mi.capacity_kg')
+            .sum({ masters: 'pl.master_bags_count' })
+            .groupBy('pl.batch_id', 'mi.name', 'mi.size_value', 'mi.size_unit', 'mi.capacity_kg');
+          for (const r of masterRuns) {
+            const masters = Math.round(parseFloat(r.masters) || 0);
+            if (masters <= 0) continue;
+            const cur = masterByBatch[r.batch_id];
+            if (!cur || masters > cur.masters) {
+              masterByBatch[r.batch_id] = {
+                masters, name: r.master_name,
+                label: packLabelOf(r.size_value, r.size_unit) || packLabelOf(r.capacity_kg, 'kg'),
+              };
+            }
+          }
           // The predominant size is what the output is packed in, same rule the
           // stamping uses — so the two cannot disagree about which size wins.
           for (const r of runs) {
@@ -2039,6 +2071,9 @@ const reportingController = {
           ? packedByBatch[parseInt(String(l.batch_ref || '').replace('batch-', ''), 10)]
           : null;
         const specDisagrees = !!run && Math.abs((packKg || 0) - run.sizeKg) > 0.001;
+        const master = l.type === 'finished'
+          ? masterByBatch[parseInt(String(l.batch_ref || '').replace('batch-', ''), 10)]
+          : null;
         // An unknown pack size is a sack: that is what loose intake is counted in.
         const isKatta = packKg === 0 || packKg >= KATTA_MIN_KG;
         return { lotId: l.id, lotNo: l.lot_no, type: l.type, item: l.product_name || l.item_name, variety: l.variety, grade: l.grade,
@@ -2059,6 +2094,10 @@ const reportingController = {
           // What the packing run says, when it disagrees with the lot. The row
           // then prints both, so the figure is never silently wrong — and
           // Admin > Inventory Data Problems has a one-click repair for it.
+          // Master (outer) bags on this lot, when its batch recorded any.
+          masterBags: master ? master.masters : 0,
+          masterLabel: master ? master.label : null,
+          masterName: master ? master.name : null,
           packedSizeKg: specDisagrees ? run.sizeKg : null,
           packedUnits: specDisagrees && run.sizeKg > 0 ? Math.ceil(onHand / run.sizeKg) : null,
           specDisagrees,
@@ -2066,11 +2105,43 @@ const reportingController = {
           onHandMt: onHand / 1000, availableMt: (parseFloat(l.available_kg) || 0) / 1000, reservedMt: (parseFloat(l.reserved_kg) || 0) / 1000,
           costPerKg: cpk, valuePkr: onHand * cpk };
       });
+      // Mill-store stock, carrying each item's TYPE and SIZE so the report can
+      // keep katta, P.P. bags and master bags apart. They were listed flat under
+      // one "packaging" category, which put a 50 kg sack and a 25 kg retail bag
+      // on adjacent lines with nothing to say they are different things — and no
+      // subtotal for any of them.
       const ms = await db('mill_stock as ms').join('mill_items as mi', 'ms.item_id', 'mi.id').leftJoin('suppliers as s', 'mi.preferred_supplier_id', 's.id')
         .where('ms.quantity_available', '>', 0)
-        .select('mi.name', 'mi.category', 'mi.unit', 'ms.quantity_available', 'mi.avg_cost_per_unit', 's.name as supplier').orderBy('mi.category');
-      const millStore = ms.map((m) => ({ name: m.name, category: m.category, unit: m.unit, qty: parseFloat(m.quantity_available) || 0, costPerUnit: parseFloat(m.avg_cost_per_unit) || 0, supplier: m.supplier }));
-      return res.json({ success: true, data: { rows, millStore, totals: { lots: rows.length, mt: rows.reduce((s, r) => s + r.onHandMt, 0), valuePkr: rows.reduce((s, r) => s + r.valuePkr, 0), millStoreValue: millStore.reduce((s, m) => s + m.qty * m.costPerUnit, 0) } } });
+        .select('mi.name', 'mi.code', 'mi.category', 'mi.unit', 'ms.quantity_available',
+          'mi.avg_cost_per_unit', 'mi.pack_type', 'mi.size_value', 'mi.size_unit', 's.name as supplier')
+        .orderBy('mi.category');
+      const millStore = ms.map((m) => ({
+        name: m.name, code: m.code, category: m.category, unit: m.unit,
+        qty: parseFloat(m.quantity_available) || 0,
+        costPerUnit: parseFloat(m.avg_cost_per_unit) || 0,
+        supplier: m.supplier,
+        // Typed in migration 305. A packaging item with no type is an item that
+        // predates it; it groups under 'other' rather than vanishing.
+        packType: m.pack_type || null,
+        sizeValue: m.size_value == null ? null : Number(m.size_value),
+        sizeUnit: m.size_unit || 'kg',
+        sizeLabel: packLabelOf(m.size_value, m.size_unit),
+      }));
+
+      // Subtotals per packaging type — quantity AND value — so each kind can be
+      // read on its own and is never combined with another.
+      const PACK_ORDER = ['katta', 'pp_bag', 'master_bag', 'polythene', 'other'];
+      const packGroups = PACK_ORDER.map((t) => {
+        const of = millStore.filter((m) => (m.packType || 'other') === t && m.category === 'packaging');
+        return {
+          packType: t,
+          items: of,
+          units: of.reduce((a, m) => a + m.qty, 0),
+          valuePkr: of.reduce((a, m) => a + m.qty * m.costPerUnit, 0),
+        };
+      }).filter((g) => g.items.length > 0);
+
+      return res.json({ success: true, data: { rows, millStore, packGroups, totals: { lots: rows.length, mt: rows.reduce((s, r) => s + r.onHandMt, 0), valuePkr: rows.reduce((s, r) => s + r.valuePkr, 0), millStoreValue: millStore.reduce((s, m) => s + m.qty * m.costPerUnit, 0) } } });
     } catch (err) { console.error('Stock detail error:', err); return res.status(500).json({ success: false, message: 'Internal server error.' }); }
   },
 
