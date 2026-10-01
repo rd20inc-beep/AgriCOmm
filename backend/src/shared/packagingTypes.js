@@ -156,6 +156,21 @@ function formatPackSize(value, unit) {
   return `${n} ${unit === 'lb' ? 'LBS' : 'KG'}`;
 }
 
+/**
+ * Is a size or capacity figure actually missing?
+ *
+ * NULL and ZERO mean the same thing here, and treating them differently is what
+ * let BAG-25KG-PP WOVEN sit at capacity 0 after a backfill that only filled
+ * nulls. A zero is not a measurement — no bag holds nothing — it is a blank that
+ * got saved as a number. pack() already treats them alike: it refuses on
+ * `capacity <= 0`, so a zero blocks packing exactly as a null does.
+ */
+function isMissingSize(value) {
+  if (value == null) return true;
+  const v = parseFloat(value);
+  return !Number.isFinite(v) || v <= 0;
+}
+
 // Does a capacity mean anything for this kind of item? It is "kg of rice this
 // holds", so it belongs on a sack, a retail bag or a master — not on a sheet, a
 // label or a roll of thread. A liner's size describes the bag it lines, which is
@@ -168,5 +183,5 @@ function hasCapacity(packType) {
 module.exports = {
   PACK_TYPES, PACK_TYPE_CODES, KG_PER_LB, CAPACITY_TYPES,
   classifyPackaging, resolveSize, sizeToKg, formatPackSize,
-  deriveSizeFromLabel, hasCapacity,
+  deriveSizeFromLabel, hasCapacity, isMissingSize,
 };

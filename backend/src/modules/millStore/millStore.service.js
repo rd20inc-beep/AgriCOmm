@@ -1,7 +1,7 @@
 const db = require('../../config/database');
 const { nextDocNo } = require('../../utils/docNumber');
 const repo = require('./millStore.repository');
-const { classifyPackaging, deriveSizeFromLabel, sizeToKg, hasCapacity } = require('../../shared/packagingTypes');
+const { classifyPackaging, deriveSizeFromLabel, sizeToKg, hasCapacity, isMissingSize } = require('../../shared/packagingTypes');
 
 /**
  * Fill in what a packaging item states about itself but was not asked for.
@@ -23,10 +23,12 @@ function packagingDefaults(item) {
 
   const size = deriveSizeFromLabel(item);
   if (size) {
-    if (item.size_value == null) { out.size_value = size.value; out.size_unit = size.unit; }
+    // ZERO counts as missing, not as a measurement — no bag holds nothing, and
+    // pack() refuses on `capacity <= 0` exactly as it does on null.
+    if (isMissingSize(item.size_value)) { out.size_value = size.value; out.size_unit = size.unit; }
     // A capacity is kg of rice held, so it belongs on a sack, a retail bag or a
     // master — never on a sheet, a label or a roll of thread.
-    if (item.capacity_kg == null && hasCapacity(packType)) {
+    if (isMissingSize(item.capacity_kg) && hasCapacity(packType)) {
       out.capacity_kg = sizeToKg(size.value, size.unit);
     }
   }

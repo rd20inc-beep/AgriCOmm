@@ -330,3 +330,69 @@ describe('a bag that states its size gets it stored', () => {
     expect(SVC).toContain("item.category !== 'packaging'");
   });
 });
+
+describe('a capacity of zero is a blank, not a measurement', () => {
+  const { isMissingSize } = require('../shared/packagingTypes');
+  const fs = require('fs');
+  const path = require('path');
+  const MIG = fs.readFileSync(path.join(__dirname, '../../migrations/20261001_311_repair_zero_capacity.js'), 'utf8');
+  const SVC = fs.readFileSync(path.join(__dirname, '../modules/millStore/millStore.service.js'), 'utf8');
+  const PACK = fs.readFileSync(path.join(__dirname, '../modules/millStore/packing.service.js'), 'utf8');
+  // Comments stripped for the "must not mention" assertion — the migration's
+  // header names the item that prompted it, which is the comment doing its job.
+  const MIG_CODE = MIG.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+
+  // Migration 310 filled every NULL size and correctly left anything holding a
+  // figure alone — but BAG-25KG-PP WOVEN held capacity 0, which is not a figure.
+  // No bag holds nothing.
+  it.each([
+    [null, true], [undefined, true], [0, true], ['0', true], ['0.000', true],
+    [-5, true], ['', true], ['abc', true],
+    [25, false], ['25.000', false], [3.63, false], [0.5, false],
+  ])('%s is missing: %s', (value, expected) => {
+    expect(isMissingSize(value)).toBe(expected);
+  });
+
+  it('it matters because pack() already treats them alike', () => {
+    // "Set a bag capacity (kg per bag) for X before packing" — a zero blocks
+    // packing exactly as a null does, which is why one had to be repaired too.
+    expect(PACK).toContain('if (capacity <= 0)');
+  });
+
+  it('the repair covers the class, not the one row', () => {
+    expect(MIG_CODE).toContain("where({ category: 'packaging' })");
+    expect(MIG_CODE).not.toContain('BAG-25KG-PP WOVEN');
+  });
+
+  it('a real figure is never replaced — a 49.3 kg sack stays 49.3', () => {
+    expect(MIG).toContain('if (!isMissingSize(it.capacity_kg)) continue;');
+  });
+
+  it('it prefers the size already on the row, then the label', () => {
+    expect(MIG).toContain('!isMissingSize(it.size_value)');
+    expect(MIG).toContain('deriveSizeFromLabel(it)');
+  });
+
+  it('an item that states no size anywhere is left alone', () => {
+    // Nothing is invented for it; it stays visible as needing attention.
+    expect(MIG).toContain('if (!kg) continue;');
+  });
+
+  it('only a kind of item that HAS a capacity is touched', () => {
+    expect(MIG).toContain('if (!hasCapacity(packType)) continue;');
+  });
+
+  it('a tare or a price of zero is deliberately NOT invented', () => {
+    // Those are figures somebody may have meant. The stock report already prints
+    // "no price set" where a price is zero, so it is visible rather than guessed.
+    expect(MIG).not.toContain('tare_weight_kg:');
+    expect(MIG).not.toContain('avg_cost_per_unit:');
+  });
+
+  it('and a zero cannot be saved as a size again', () => {
+    // createItem/updateItem fill it the same way, so the next item entered with a
+    // zero capacity gets the real one from its label.
+    expect(SVC).toContain('isMissingSize(item.capacity_kg) && hasCapacity(packType)');
+    expect(SVC).toContain('isMissingSize(item.size_value)');
+  });
+});
