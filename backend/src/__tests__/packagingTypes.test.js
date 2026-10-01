@@ -241,3 +241,92 @@ describe('the 50 kg P.P. bag gets its code back', () => {
     expect(SEED).toContain("code: 'THREAD-GREEN'");
   });
 });
+
+describe('a bag that states its size gets it stored', () => {
+  const { deriveSizeFromLabel, hasCapacity, sizeToKg } = require('../shared/packagingTypes');
+  const fs = require('fs');
+  const path = require('path');
+  const MIG = fs.readFileSync(path.join(__dirname, '../../migrations/20261001_310_backfill_packaging_sizes.js'), 'utf8');
+  const SVC = fs.readFileSync(path.join(__dirname, '../modules/millStore/millStore.service.js'), 'utf8');
+
+  // Migration 057 seeded eleven bags whose size is written in their own name and
+  // stored NONE of it, because capacity_kg was never set. That field is what
+  // pack() requires before it will pack and what the stock report divides by to
+  // count bags, so every one was unusable and invisible to the katta/bag split.
+  it.each([
+    ['BAG-100KG-PP', 'PP Bag 100kg (Empty)', 100, 'kg'],
+    ['BAG-50KG-PP WOVEN', 'Katta 50kg', 50, 'kg'],
+    ['BAG-100KG-PP/JUTE', 'Bardana 100kg', 100, 'kg'],
+    ['PP25KG INNER', 'INNER BAG 25KG', 25, 'kg'],
+    ['BAG-25KG-WOVEN PP', 'Export Bag 25kg', 25, 'kg'],
+    ['8LBS NOORI', 'NOORI 8LBS', 8, 'lb'],
+  ])('%s reads as %s %s', (code, name, value, unit) => {
+    expect(deriveSizeFromLabel({ code, name })).toEqual({ value, unit });
+  });
+
+  it('pounds win over kilograms when a label says both', () => {
+    // A bag named in LB is a pound bag whatever else is in the text.
+    expect(deriveSizeFromLabel({ code: 'X', name: '8 LBS (3.63 KG) BAG' })).toEqual({ value: 8, unit: 'lb' });
+  });
+
+  it('a label that states no size gets none invented', () => {
+    for (const [code, name] of [
+      ['POLY-SHEET', 'Polythene Sheet'],
+      ['LABEL-BRAND', 'Branded rice label (printed)'],
+      // "250g roll" must not read as a size — the rule requires KG or LB, never
+      // a bare number.
+      ['THREAD-GREEN', 'Stitching thread (green, 250g roll)'],
+    ]) {
+      const got = deriveSizeFromLabel({ code, name });
+      if (got !== null) throw new Error(`${code} ("${name}") should state no size, got ${JSON.stringify(got)}`);
+    }
+  });
+
+  it('a capacity only goes where it means kg of rice held', () => {
+    expect(hasCapacity('katta')).toBe(true);
+    expect(hasCapacity('pp_bag')).toBe(true);
+    expect(hasCapacity('master_bag')).toBe(true);
+    // A liner's size describes the bag it lines; a sheet, a label and a roll of
+    // thread hold no rice at all.
+    expect(hasCapacity('polythene')).toBe(false);
+    expect(hasCapacity('other')).toBe(false);
+  });
+
+  it('a pound size is stored in kg, exactly', () => {
+    expect(sizeToKg(8, 'lb')).toBe(3.629);
+  });
+
+  it('the backfill only fills blanks — nothing measured is overwritten', () => {
+    // A 50 kg sack weighed at 49.3 is the real figure and must survive.
+    expect(MIG).toContain('if (it.size_value == null)');
+    expect(MIG).toContain('if (it.capacity_kg == null && hasCapacity(packType))');
+  });
+
+  it('it fills a missing type too rather than leaving another gap', () => {
+    expect(MIG).toContain('if (!it.pack_type) patch.pack_type = packType;');
+  });
+
+  it('an item with no size still gets its type saved', () => {
+    // The early return used to skip the whole row, type included.
+    const block = MIG.slice(MIG.indexOf('if (!size) {'), MIG.indexOf('continue;', MIG.indexOf('if (!size) {')));
+    expect(block).toContain('Object.keys(patch).length > 0');
+  });
+
+  it('and the next item created cannot arrive in the same state', () => {
+    // Migration 310 repaired the rows; this is what stops the gap recurring.
+    expect(SVC).toContain('function packagingDefaults(item)');
+    expect(SVC).toContain('...packagingDefaults(data), ...data');
+    // The caller always wins, so a deliberate value is never replaced by a guess
+    // read off a name.
+    expect(SVC).toContain('{ ...derived, ...data }');
+  });
+
+  it('a rename that reveals a size fills it in', () => {
+    // updateItem derives from the MERGED row, not just the patch.
+    expect(SVC).toContain('packagingDefaults({ ...existing, ...data })');
+  });
+
+  it('only packaging gets any of this', () => {
+    expect(SVC).toContain("item.category !== 'packaging'");
+  });
+});
