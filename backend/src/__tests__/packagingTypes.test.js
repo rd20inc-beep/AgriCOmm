@@ -70,10 +70,17 @@ describe('masters, liners and things that are not bags', () => {
   it('thread and labels are not bags, whatever their code says', () => {
     expect(classifyPackaging(item('THREAD-WHITE', 'Stitching thread (white, 250g roll)'))).toBe('other');
     expect(classifyPackaging(item('LABEL-BRAND', 'Branded rice label (printed)'))).toBe('other');
-    // BAG-50KG-PP is named "Thread Roll" in the live master — its code and name
-    // disagree and only a person can say which is right, so it is listed
-    // explicitly rather than forced through a cleverer rule.
+    // BAG-50KG-PP was seeded as "Thread Roll" — a size-less "Thread Roll" row in
+    // bag_types fell through migration 057's `|| 50` / `|| 'PP'` defaults and
+    // claimed the code. The name still decides while a database has not yet run
+    // migration 309, which is why no explicit override was ever needed for it.
     expect(classifyPackaging(item('BAG-50KG-PP', 'Thread Roll'))).toBe('other');
+  });
+
+  it('and once 309 gives that code back to the bag, it types as a bag', () => {
+    // The override that used to force this to 'other' had to go with the rename:
+    // left in place it would have classified the corrected item as 'other'.
+    expect(classifyPackaging(item('BAG-50KG-PP', 'PP Bag 50kg (Empty)', 50))).toBe('pp_bag');
   });
 
   it('a non-packaging item is never typed as a bag', () => {
@@ -181,5 +188,56 @@ describe('the 1,826 mis-filed bags move to the right item', () => {
     expect(MIG).toContain('exports.down');
     expect(MIG).toContain('GREATEST(quantity_available - ?, 0)');
     expect(MIG).toContain("where({ reference_type: REF }).del()");
+  });
+});
+
+describe('the 50 kg P.P. bag gets its code back', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const MIG = fs.readFileSync(path.join(__dirname, '../../migrations/20261001_309_fix_thread_roll_bag_item.js'), 'utf8');
+  const SEED = fs.readFileSync(path.join(__dirname, '../../migrations/20260422_057_seed_mill_store_items_ratios.js'), 'utf8');
+
+  it('the seed really did derive the code from bag_types with those defaults', () => {
+    // This is the mechanism, not a guess: a size-less, material-less "Thread
+    // Roll" row became BAG-50KG-PP and claimed the code before the real
+    // "PP Bag 50kg (Empty)" row, which `if (!exists)` then skipped.
+    expect(SEED).toContain("const sizeKg = Number(bt.size_kg) || 50;");
+    expect(SEED).toContain("const material = (bt.material || 'PP').toUpperCase();");
+    expect(SEED).toContain('const code = `BAG-${sizeKg}KG-${material}`;');
+    expect(SEED).toContain('if (!exists)');
+  });
+
+  it('it renames the item and types it as a bag', () => {
+    expect(MIG).toContain("name: 'PP Bag 50kg (Empty)'");
+    expect(MIG).toContain("pack_type: 'pp_bag'");
+    expect(MIG).toContain('capacity_kg: 50');
+  });
+
+  it('it only acts while the name is still wrong', () => {
+    // So a re-run, or a database where someone already fixed it by hand, is left
+    // alone rather than overwritten.
+    expect(MIG).toContain("String(item.name).trim().toLowerCase() === 'thread roll'");
+  });
+
+  it('it repoints the item at the bag type it should have had', () => {
+    expect(MIG).toContain("['pp bag 50kg (empty)']");
+  });
+
+  it('a thread roll stops being offered as a BAG TYPE', () => {
+    // It had no size, so it appeared in every bag picker as a sizeless bag.
+    expect(MIG).toContain("whereRaw('LOWER(name) = ?', ['thread roll'])");
+    expect(MIG).toContain('whereNull(\'size_kg\')');
+    expect(MIG).toContain('update({ is_active: false })');
+  });
+
+  it('the bad bag type is deactivated, not deleted', () => {
+    // mill_items points at it until the repoint above, and deleting a row
+    // something has referenced loses the trail of why that link existed.
+    expect(MIG).not.toMatch(/bag_types[\s\S]{0,120}\.del\(\)/);
+  });
+
+  it('nothing is lost: thread has its own items already', () => {
+    expect(SEED).toContain("code: 'THREAD-WHITE'");
+    expect(SEED).toContain("code: 'THREAD-GREEN'");
   });
 });

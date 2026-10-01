@@ -38,12 +38,16 @@ const PACK_TYPES = [
 
 const PACK_TYPE_CODES = PACK_TYPES.map((t) => t.code);
 
-// Items whose type cannot be read from their name or code. Kept explicit rather
-// than forced through a cleverer rule: BAG-50KG-PP is named "Thread Roll" in the
-// live master, so its code and its name disagree and only a human can say which
-// is right. The name wins here, and the item is worth correcting in Mill Store.
+// Items whose type cannot be read from their name or code.
+//
+// BAG-50KG-PP used to be listed here: it was seeded as "Thread Roll" because a
+// size-less "Thread Roll" row in bag_types fell through migration 057's
+// `|| 50` / `|| 'PP'` defaults and claimed the code. Migration 309 gives the code
+// back to the bag it names, and the override had to GO with it — left in place it
+// would have classified the corrected "PP Bag 50kg (Empty)" as 'other'. Nothing
+// is lost either way: the THREAD rule below already catches the old name, so a
+// database that has not run 309 yet still types it correctly.
 const EXPLICIT_BY_CODE = {
-  'BAG-50KG-PP': 'other',          // named "Thread Roll" — code looks like a bag
   'BAG-50KG-PLASTIC': 'polythene', // "Liner Bag 50kg"
 };
 
