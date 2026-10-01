@@ -112,6 +112,34 @@ function resolveSize(item) {
   return { value: null, unit: 'kg' };
 }
 
+/**
+ * Read a pack size out of an item's own code or name — "BAG-50KG-PP" → 50 kg,
+ * "INNER BAG 25KG" → 25 kg, "NOORI 8LBS" → 8 lb.
+ *
+ * Migration 057 seeded eleven bags whose size is stated in their name and stored
+ * NONE of it, because the seed never set capacity_kg at all. That field is what
+ * pack() requires before it will pack, and what the stock report divides by to
+ * count bags — so every one of them was unusable for packing and invisible to the
+ * katta/bag split. The size was there to be read the whole time.
+ *
+ * Returns { value, unit } or null when the label states no size, which is the
+ * right answer for a thread roll, a label or a polythene sheet.
+ */
+function deriveSizeFromLabel(item) {
+  const text = `${item?.code || ''} ${item?.name || ''}`.toUpperCase();
+  // Pounds first: a bag named in LB is a pound bag whatever else the text says.
+  const lb = text.match(/(\d+(?:\.\d+)?)\s*LBS?\b/);
+  if (lb) return { value: parseFloat(lb[1]), unit: 'lb' };
+  // "50KG", "25 kg", "PP25KG". Deliberately not a bare number: "250g roll" and
+  // "Appendix V-10A" must not read as sizes.
+  const kg = text.match(/(\d+(?:\.\d+)?)\s*KGS?\b/);
+  if (kg) {
+    const v = parseFloat(kg[1]);
+    if (v > 0) return { value: v, unit: 'kg' };
+  }
+  return null;
+}
+
 // The size in KG, whatever unit it is spoken in — what every weight calculation
 // needs, and what capacity_kg must hold.
 function sizeToKg(value, unit) {
@@ -128,7 +156,17 @@ function formatPackSize(value, unit) {
   return `${n} ${unit === 'lb' ? 'LBS' : 'KG'}`;
 }
 
+// Does a capacity mean anything for this kind of item? It is "kg of rice this
+// holds", so it belongs on a sack, a retail bag or a master — not on a sheet, a
+// label or a roll of thread. A liner's size describes the bag it lines, which is
+// worth showing but is not a capacity.
+const CAPACITY_TYPES = ['katta', 'pp_bag', 'master_bag'];
+function hasCapacity(packType) {
+  return CAPACITY_TYPES.includes(packType);
+}
+
 module.exports = {
-  PACK_TYPES, PACK_TYPE_CODES, KG_PER_LB,
+  PACK_TYPES, PACK_TYPE_CODES, KG_PER_LB, CAPACITY_TYPES,
   classifyPackaging, resolveSize, sizeToKg, formatPackSize,
+  deriveSizeFromLabel, hasCapacity,
 };

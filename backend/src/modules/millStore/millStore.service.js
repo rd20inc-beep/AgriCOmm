@@ -1,6 +1,37 @@
 const db = require('../../config/database');
 const { nextDocNo } = require('../../utils/docNumber');
 const repo = require('./millStore.repository');
+const { classifyPackaging, deriveSizeFromLabel, sizeToKg, hasCapacity } = require('../../shared/packagingTypes');
+
+/**
+ * Fill in what a packaging item states about itself but was not asked for.
+ *
+ * Migration 057 seeded eleven bags whose size is written in their own name and
+ * stored none of it, because capacity_kg was never set — and capacity_kg is what
+ * pack() requires before it will pack and what the stock report divides by to
+ * count bags. Migration 310 repaired those rows; this is what stops the next one
+ * arriving in the same state.
+ *
+ * Only ever fills BLANKS. Anything the caller sends wins, so a measured capacity
+ * or a deliberate type is never overwritten by a guess from a name.
+ */
+function packagingDefaults(item) {
+  if (!item || item.category !== 'packaging') return {};
+  const out = {};
+  const packType = item.pack_type || classifyPackaging(item);
+  if (!item.pack_type && packType) out.pack_type = packType;
+
+  const size = deriveSizeFromLabel(item);
+  if (size) {
+    if (item.size_value == null) { out.size_value = size.value; out.size_unit = size.unit; }
+    // A capacity is kg of rice held, so it belongs on a sack, a retail bag or a
+    // master — never on a sheet, a label or a roll of thread.
+    if (item.capacity_kg == null && hasCapacity(packType)) {
+      out.capacity_kg = sizeToKg(size.value, size.unit);
+    }
+  }
+  return out;
+}
 const { NotFoundError, ValidationError, ConflictError } = require('../../shared/errors');
 
 const millStoreService = {
@@ -18,13 +49,16 @@ const millStoreService = {
   async createItem(data, userId) {
     const existing = await repo.getItemByCode(data.code);
     if (existing) throw new ConflictError(`Item with code ${data.code} already exists.`);
-    return repo.createItem({ ...data, created_by: userId });
+    return repo.createItem({ ...packagingDefaults(data), ...data, created_by: userId });
   },
 
   async updateItem(id, data) {
     const existing = await repo.getItemById(id);
     if (!existing) throw new NotFoundError('Item not found.');
-    return repo.updateItem(id, data);
+    // Derive from the MERGED row: a rename can reveal a size, and a type that was
+    // never set should be filled in rather than left for a later migration.
+    const derived = packagingDefaults({ ...existing, ...data });
+    return repo.updateItem(id, { ...derived, ...data });
   },
 
   async deleteItem(id) {
