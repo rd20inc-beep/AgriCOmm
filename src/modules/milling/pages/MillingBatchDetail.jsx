@@ -47,6 +47,7 @@ import MillingCostSheet from '../components/MillingCostSheet';
 import HaulerPicker from '../../../components/HaulerPicker';
 import ConsumptionPanel from '../../millStore/components/ConsumptionPanel';
 import PackingPanel from '../../millStore/components/PackingPanel';
+import BatchPackagingPanel from '../components/BatchPackagingPanel';
 
 import { qualityParams } from '../qualityParams';
 import { favStar } from '../../../shared/utils/favorites';
@@ -1605,13 +1606,26 @@ export default function MillingBatchDetail() {
         )}
 
         {activeTab === 'packing' && (
-          <div className="bg-white rounded-xl shadow-sm p-5">
-            <PackingPanel
-              batchId={batch.dbId || batch.id}
-              batchStatus={batch.status}
-              addToast={addToast}
-              exportOrderId={batch.linkedExportOrder}
-            />
+          <div className="space-y-5">
+            {/* Packaging RECEIVED with the batch and USED on its outputs, per
+                item — katta, P.P. bags and master bags each to their own stock.
+                Above the packing run itself, because it is the stock that run
+                draws from. */}
+            <div className="bg-white rounded-xl shadow-sm p-5">
+              <BatchPackagingPanel
+                batchId={batch.dbId || batch.id}
+                batchStatus={batch.status}
+                addToast={addToast}
+              />
+            </div>
+            <div className="bg-white rounded-xl shadow-sm p-5">
+              <PackingPanel
+                batchId={batch.dbId || batch.id}
+                batchStatus={batch.status}
+                addToast={addToast}
+                exportOrderId={batch.linkedExportOrder}
+              />
+            </div>
           </div>
         )}
 
