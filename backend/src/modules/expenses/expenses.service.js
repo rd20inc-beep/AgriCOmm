@@ -362,6 +362,96 @@ const expensesService = {
     return row;
   },
 
+  /**
+   * Attach a supplier to an expense that was recorded without one.
+   *
+   * Both supplier-kind categories were mapped to expense_vendors presets, and
+   * the preset list overrode the supplier picker — so every expense ever written
+   * carries supplier_id NULL and none of them appear on a supplier's statement.
+   * The form is fixed; this is how the ones already recorded get attached.
+   *
+   * It writes the link everywhere the ledger reads: the expense row, its payable,
+   * AND the party stamp on its posted journals — so a linked expense is identical
+   * to one created with a supplier from the start.
+   *
+   * Stamping the journals is NOT optional. Leaving them unstamped makes the
+   * statement take the bill from the synthesized payable, which carries the
+   * payment too — while the PAYMENT journal is stamped at pay time and
+   * contributes the same payment again. A paid expense then read as a CREDIT
+   * balance (Rs -221,000 on a settled Rs 221,000 bill). With the journals
+   * stamped the payable is recognised as already represented and synthesizes
+   * nothing, so each figure appears exactly once.
+   *
+   * Only the party columns are touched — no amount, account or date moves, so
+   * the trial balance is untouched.
+   *
+   * Reversible: passing null unlinks it and clears the stamps.
+   */
+  async linkSupplier(id, supplierId, userId) {
+    const expense = await db('business_expenses').where('id', id).first();
+    if (!expense) throw new NotFoundError('Expense not found.');
+
+    let supplier = null;
+    if (supplierId) {
+      supplier = await db('suppliers').where('id', supplierId).first('id', 'name');
+      if (!supplier) throw new ValidationError('Supplier not found.');
+    }
+
+    return db.transaction(async (trx) => {
+      await trx('business_expenses').where('id', id).update({
+        supplier_id: supplier ? supplier.id : null,
+        // The typed payee is kept when there was one — it is what was written on
+        // the bill — and only filled from the supplier when it was blank.
+        vendor_name: expense.vendor_name || (supplier ? supplier.name : null),
+        updated_at: trx.fn.now(),
+      });
+
+      // The payable is what the statement falls back to when there is no
+      // party-stamped journal.
+      const updated = await trx('payables')
+        .where({ source_table: 'business_expenses', source_id: id })
+        .update({
+          supplier_id: supplier ? supplier.id : null,
+          linked_ref: expense.vendor_name || (supplier ? supplier.name : 'Vendor'),
+          updated_at: trx.fn.now(),
+        });
+
+      // The journals: this expense's own, plus every payment settled against it.
+      // A payment journal is posted under its payment_no, so collect those too or
+      // a payment made before the link stays invisible.
+      const payable = await trx('payables')
+        .where({ source_table: 'business_expenses', source_id: id }).first('id');
+      const paymentNos = payable
+        ? await trx('payments').where('linked_payable_id', payable.id).pluck('payment_no')
+        : [];
+      const refs = [expense.expense_no, ...paymentNos].filter(Boolean);
+      const stamped = refs.length
+        ? await trx('journal_entries').whereIn('ref_no', refs).update({
+          party_type: supplier ? 'supplier' : null,
+          party_id: supplier ? supplier.id : null,
+          updated_at: trx.fn.now(),
+        })
+        : 0;
+
+      await trx('audit_logs').insert({
+        user_id: userId || null,
+        action: supplier ? 'link_supplier' : 'unlink_supplier',
+        entity_type: 'business_expense',
+        entity_id: String(id),
+        details: JSON.stringify({
+          expense_no: expense.expense_no,
+          supplier_id: supplier ? supplier.id : null,
+          supplier_name: supplier ? supplier.name : null,
+          payables_updated: updated,
+          journals_stamped: stamped,
+          journal_refs: refs,
+        }),
+      }).catch(() => { /* audit is best-effort; the link still stands */ });
+
+      return trx('business_expenses').where('id', id).first();
+    });
+  },
+
   async markPaid(id, { amount, bank_account_id, payment_method, payment_reference, paid_date, due_date, notes }, userId) {
     const expense = await db('business_expenses').where('id', id).first();
     if (!expense) throw new NotFoundError('Expense not found.');
