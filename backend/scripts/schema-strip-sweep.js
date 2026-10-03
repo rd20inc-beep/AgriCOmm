@@ -19,7 +19,7 @@
  */
 const fs = require('fs');
 const path = require('path');
-const ROOT = '/home/aly/Downloads/AgriCOmm/backend/src';
+const ROOT = path.resolve(__dirname, '..', 'src');
 const schemaSrc = fs.readFileSync(process.env.SCHEMAS || path.join(ROOT, 'middleware/schemas.js'), 'utf8');
 
 const balanced = (src, i) => {
