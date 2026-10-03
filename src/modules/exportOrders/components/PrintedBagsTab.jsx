@@ -7,8 +7,9 @@ import SlideDrawer from '../../../components/SlideDrawer';
 import BagTypePicker from '../../../components/BagTypePicker';
 import SupplierPicker from '../../../components/SupplierPicker';
 import { printedBagsApi } from '../api/services';
-import { favStar } from '../../../shared/utils/favorites';
 import useConfirm from '../../../hooks/useConfirm';
+import PaymentDrawer from '../../../components/payments/PaymentDrawer';
+import { purchasePayPayload } from '../../../components/payments/paymentPayload';
 
 const PRINTING_OPTIONS = ['Plain', 'Buyer Logo', 'Buyer Logo + Text', 'Custom Design'];
 const rs = (n) => `Rs ${(parseFloat(n) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -271,79 +272,32 @@ export default function PrintedBagsTab({ order, onUpdated }) {
 }
 
 function PayDrawer({ target, bankAccounts = [], onClose, onPaid, addToast }) {
-  const [amount, setAmount] = useState('');
-  const [bankId, setBankId] = useState('');
-  const [method, setMethod] = useState('cash');
-  const [ref, setRef] = useState('');
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    if (target) { setAmount(String(Math.round(parseFloat(target.outstanding) || 0))); setBankId(''); setMethod('cash'); setRef(''); }
-  }, [target]);
-
   if (!target) return null;
-
-  async function pay() {
-    const amt = parseFloat(amount);
-    if (!amt || amt <= 0) { addToast?.('Enter an amount', 'error'); return; }
-    setSaving(true);
-    try {
-      await printedBagsApi.pay({
-        source: 'printed_bag',
-        source_id: target.id,
-        amount: amt,
-        bank_account_id: bankId || null,
-        payment_method: method,
-        payment_reference: ref || null,
-      });
-      addToast?.(`Paid ${rs(amt)} to ${target.vendor_name || 'vendor'}`, 'success');
-      onPaid?.();
-    } catch (err) {
-      addToast?.(err?.message || 'Payment failed', 'error');
-    } finally { setSaving(false); }
-  }
-
+  // POST /finance/purchases/pay, not recordPayment: this settles the printed-bag
+  // ORDER document, and the server clamps the amount to the outstanding and
+  // holds a post-dated cheque until it clears. The hand-written drawer this
+  // replaces never sent the cheque date, so a post-dated cheque settled the
+  // order on the spot.
   return (
-    <SlideDrawer open={!!target} onClose={onClose} title={`Pay — ${target.pbo_no}`} icon={Wallet} size="md"
-      footer={(
-        <div className="flex justify-end gap-2">
-          <button onClick={onClose} className="px-3 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
-          <button onClick={pay} disabled={saving} className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">
-            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wallet className="w-4 h-4" />} Record Payment
-          </button>
-        </div>
-      )}>
-      <div className="space-y-4">
-        <div className="bg-gray-50 rounded-lg p-3 text-sm">
-          <div className="flex justify-between"><span className="text-gray-500">Vendor</span><span className="font-medium text-gray-900">{target.vendor_name || '—'}</span></div>
-          <div className="flex justify-between mt-1"><span className="text-gray-500">Outstanding</span><span className="font-semibold text-red-600">{rs(target.outstanding)}</span></div>
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Amount (Rs)</label>
-          <input type="number" value={amount} onChange={e => setAmount(e.target.value)} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Method</label>
-          <select value={method} onChange={e => setMethod(e.target.value)} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500">
-            <option value="cash">Cash</option>
-            <option value="bank_transfer">Bank Transfer</option>
-            <option value="cheque">Cheque</option>
-          </select>
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Pay from account</label>
-          <select value={bankId} onChange={e => setBankId(e.target.value)} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500">
-            <option value="">— none —</option>
-            {bankAccounts.map(a => <option key={a.id} value={a.id}>{favStar(a)}{a.name}{a.bank_name ? ` (${a.bank_name})` : ''}</option>)}
-          </select>
-        </div>
-        {method === 'cheque' && (
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Cheque #</label>
-            <input value={ref} onChange={e => setRef(e.target.value)} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
-          </div>
-        )}
-      </div>
-    </SlideDrawer>
+    <PaymentDrawer
+      title={`Pay \u2014 ${target.pbo_no}`}
+      subtitle={`${rs(target.outstanding)} due`}
+      icon={Wallet}
+      summary={[
+        ['Vendor', target.vendor_name || '\u2014'],
+        ['Outstanding', rs(target.outstanding)],
+      ]}
+      outstanding={target.outstanding}
+      accounts={bankAccounts}
+      defaultMethod="cash"
+      defaultAmount={String(Math.round(parseFloat(target.outstanding) || 0))}
+      extras={false}
+      onSubmit={(_body, form) => printedBagsApi.pay(purchasePayPayload(form, { source: 'printed_bag', sourceId: target.id }))}
+      onDone={(form) => {
+        addToast?.(`Paid ${rs(form.amount)} to ${target.vendor_name || 'vendor'}`, 'success');
+        onPaid?.();
+      }}
+      onClose={onClose} addToast={addToast}
+    />
   );
 }
