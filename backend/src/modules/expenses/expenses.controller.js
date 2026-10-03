@@ -78,6 +78,16 @@ const expensesController = {
     } catch (err) { next(err); }
   },
 
+  // Attach (or clear) the supplier on an expense recorded without one, so it
+  // reaches that supplier's ledger. See expenses.service.linkSupplier.
+  async linkSupplier(req, res, next) {
+    try {
+      const raw = req.body?.supplier_id;
+      const supplierId = raw === null || raw === '' || raw === undefined ? null : Number(raw);
+      const row = await service.linkSupplier(parseInt(req.params.id, 10), supplierId, req.user?.id);
+      return res.json({ success: true, data: row });
+    } catch (err) { return next(err); }
+  },
   async markPaid(req, res, next) {
     try {
       const data = validate(paySchema, req.body);

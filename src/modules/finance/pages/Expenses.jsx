@@ -52,6 +52,22 @@ function useCreateExpense() {
     },
   });
 }
+// Attach an expense recorded without a supplier to one, so it reaches their
+// ledger. Both supplier-kind categories were mapped to preset provider lists and
+// the presets overrode the supplier picker, so everything recorded so far has no
+// supplier — this is how those get fixed without re-entering them.
+function useLinkExpenseSupplier() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, supplier_id }) => api.put(`/api/expenses/${id}/supplier`, { supplier_id }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['expenses'] });
+      // The supplier's ledger and every AP view change with it.
+      qc.invalidateQueries({ queryKey: ['payables'] });
+      qc.invalidateQueries({ queryKey: ['statement'] });
+    },
+  });
+}
 function usePayExpense() {
   const qc = useQueryClient();
   return useMutation({
@@ -174,6 +190,7 @@ export default function Expenses() {
   const [statusFilter, setStatusFilter] = useState('');
   const [search, setSearch] = useState('');
   const [detailExpense, setDetailExpense] = useState(null);
+  const linkSupplier = useLinkExpenseSupplier();
   const { data: expenses = [], isLoading } = useExpenses({
     ...(typeFilter ? { expense_type: typeFilter } : {}),
     ...(statusFilter ? { payment_status: statusFilter } : {}),
@@ -474,6 +491,40 @@ export default function Expenses() {
                 <Row label="Category" value={<span className="capitalize">{(e.category || '').replace(/_/g, ' ')}</span>} />
                 <Row label="Date" value={e.expense_date ? new Date(e.expense_date).toLocaleDateString('en-GB') : '—'} />
                 <Row label="Vendor" value={e.vendor_name || e.supplier_name_joined} />
+                {/* Whose ledger this sits on. An expense with no supplier is
+                    recorded but appears on nobody's statement, which is easy to
+                    miss — so it says so, and can be fixed here. */}
+                <div className="py-1.5 border-b border-gray-50">
+                  <div className="flex justify-between gap-3 items-center">
+                    <span className="text-xs text-gray-500">Supplier ledger</span>
+                    <span className="text-sm font-medium text-gray-900 text-right">
+                      {e.supplier_id ? (e.supplier_name_joined || 'Linked') : <span className="text-amber-700">not on any ledger</span>}
+                    </span>
+                  </div>
+                  <select
+                    value={e.supplier_id || ''}
+                    disabled={linkSupplier.isPending}
+                    onChange={async (ev) => {
+                      const supplier_id = ev.target.value || null;
+                      try {
+                        const res = await linkSupplier.mutateAsync({ id: e.id, supplier_id });
+                        setDetailExpense((cur) => (cur && cur.id === e.id ? { ...cur, ...(res?.data || {}) } : cur));
+                        addToast(supplier_id
+                          ? 'Linked — this expense now shows on that supplier\u2019s ledger'
+                          : 'Unlinked from the supplier', 'success');
+                      } catch (err) {
+                        addToast(err?.data?.errors?.[0]?.message || err?.data?.message || err.message || 'Failed to link the supplier', 'error');
+                      }
+                    }}
+                    className="mt-1.5 w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm bg-white disabled:opacity-50">
+                    <option value="">— No supplier (one-off payee) —</option>
+                    {(suppliersList || []).map(s => <option key={s.id} value={s.id}>{favStar(s)}{s.name}</option>)}
+                  </select>
+                  <p className="text-[11px] text-gray-500 mt-1 leading-snug">
+                    Linking shows the bill and its payment on that supplier&rsquo;s statement. It does
+                    not change the amount, the accounts or the trial balance.
+                  </p>
+                </div>
                 <Row label="Description" value={e.description} />
                 <Row label="Linked to" value={e.batch_no || e.order_no} />
                 <Row label="Payment status" value={e.payment_status} />
@@ -840,6 +891,24 @@ function VendorSection({ vendorKind, apiVendors, apiCategory, form, setF, suppli
 
   // Build the suggestion list and helper text per vendorKind.
   const config = useMemo(() => {
+    // A SUPPLIER-kind category must offer the supplier master, not only a list of
+    // provider names — a typed name cannot reach a ledger, and this check used to
+    // sit BELOW the useApi branch. Both supplier-kind categories (transport and
+    // bags) are mapped to expense_vendors presets, so useApi always won and the
+    // supplier picker never rendered anywhere in the app: every expense was
+    // written with supplier_id NULL and none of them appeared on any supplier's
+    // statement. The presets are still offered, as suggestions on the one-off
+    // payee field below the picker.
+    if (vendorKind === 'supplier') {
+      return {
+        title: 'Supplier',
+        help: 'Pick a supplier and this expense appears on their ledger. Leave it blank and type a one-off payee instead.',
+        options: useApi ? apiVendors : [],
+        listId: useApi ? `expense-api-${apiCategory}` : null,
+        placeholder: 'One-off payee (not on a ledger)',
+        supplierDropdown: true,
+      };
+    }
     if (useApi) {
       return {
         title: 'Provider',
@@ -890,15 +959,6 @@ function VendorSection({ vendorKind, apiVendors, apiCategory, form, setF, suppli
           options: [],
           placeholder: 'e.g. Shift A — 12 workers',
         };
-      case 'supplier':
-        return {
-          title: 'Supplier',
-          help: 'Pick a supplier from your master list, or type a one-off vendor.',
-          options: [],
-          listId: null,
-          placeholder: 'e.g. Custom supplier name',
-          supplierDropdown: true,
-        };
       case 'free':
       default:
         return {
@@ -926,9 +986,23 @@ function VendorSection({ vendorKind, apiVendors, apiCategory, form, setF, suppli
             {suppliersList.map(s => <option key={s.id} value={s.id}>{favStar(s)}{s.name}{s.country ? ` · ${s.country}` : ''}</option>)}
           </select>
           {!form.supplier_id && (
-            <input type="text" value={form.vendor_name} onChange={e => setF('vendor_name', e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder={config.placeholder} />
+            <>
+              <input type="text" value={form.vendor_name} onChange={e => setF('vendor_name', e.target.value)}
+                list={config.listId || undefined}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder={config.placeholder} />
+              {config.listId && config.options.length > 0 && (
+                <datalist id={config.listId}>
+                  {config.options.map(o => <option key={o} value={o} />)}
+                </datalist>
+              )}
+              {/* Said plainly, because it is the difference between an expense
+                  that shows on a ledger and one that does not. */}
+              <p className="text-[11px] text-amber-700 leading-snug">
+                A one-off payee is recorded on the expense only — it will not appear on any
+                supplier&rsquo;s ledger or statement.
+              </p>
+            </>
           )}
         </div>
       ) : (
