@@ -1342,7 +1342,7 @@ const accountingService = {
     const payables = await db('payables')
       .where({ supplier_id: sid })
       .select('id', 'pay_no', 'linked_ref', 'original_amount', 'paid_amount',
-        'currency', 'due_date', 'created_at', 'category', 'source_table', 'notes');
+        'currency', 'due_date', 'created_at', 'category', 'source_table', 'source_id', 'notes');
 
     // Paid status per payable, keyed by both its refs, so each bill row in the
     // ledger can be tinted Paid / Partial / Unpaid.
@@ -1509,10 +1509,41 @@ const accountingService = {
     // supplier whose payables are all properly posted is unchanged.
     const glRefRows = await lineBase().distinct('je.ref_no');
     const glRefs = new Set(glRefRows.map((r) => r.ref_no).filter(Boolean));
+
+    // A payable's own refs are not always what its journal was posted under. A
+    // business expense posts its GL under the EXPENSE number (EXP-2026-0001)
+    // while its payable is PAY-EXP0001 with the VENDOR NAME as linked_ref — so
+    // neither of the two tests below matched, the payable synthesized a second
+    // line, and the bill counted TWICE. A Rs 221,000 expense read as Rs 442,000
+    // on the supplier's statement the moment a supplier was named.
+    //
+    // So the source document's own reference counts as a match too. This can
+    // only ever mark MORE payables as covered — it removes duplicate lines and
+    // can never add one — and a ref only lands in glRefs if a journal matched to
+    // THIS supplier carries it, which is that payable's journal.
+    const SOURCE_REF_COL = {
+      business_expenses: 'expense_no',
+      mill_purchases: 'purchase_no',
+      inventory_lots: 'lot_no',
+    };
+    const sourceRefByPayable = {};
+    for (const [table, refCol] of Object.entries(SOURCE_REF_COL)) {
+      const ids = payables.filter((p) => p.source_table === table && p.source_id).map((p) => p.source_id);
+      if (!ids.length) continue;
+      const rows = await db(table).whereIn('id', [...new Set(ids)]).select('id', refCol);
+      const byId = Object.fromEntries(rows.map((r) => [r.id, r[refCol]]));
+      for (const p of payables) {
+        if (p.source_table === table && byId[p.source_id]) sourceRefByPayable[p.id] = byId[p.source_id];
+      }
+    }
+
     const dayOf = (d) => (d ? new Date(d).toISOString().slice(0, 10) : null);
     const synthetic = [];
     for (const p of payables) {
-      const covered = (p.pay_no && glRefs.has(p.pay_no)) || (p.linked_ref && glRefs.has(p.linked_ref));
+      const sourceRef = sourceRefByPayable[p.id];
+      const covered = (p.pay_no && glRefs.has(p.pay_no))
+        || (p.linked_ref && glRefs.has(p.linked_ref))
+        || (sourceRef && glRefs.has(sourceRef));
       if (covered) continue;
       const cur = p.currency || 'PKR';
       const billed = parseFloat(p.original_amount) || 0;
