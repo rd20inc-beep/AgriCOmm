@@ -1,6 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+// ESM: HERE does not exist, and these tests read files relative to themselves.
+const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 /**
  * Structural guards for the shared ConfirmDialog.
@@ -16,7 +20,7 @@ import path from 'node:path';
  *
  * Neither is caught by a type checker or by the build, so they are caught here.
  */
-const SRC = path.resolve(__dirname, '../..');
+const SRC = path.resolve(HERE, '../..');
 
 function jsxFiles(dir, out = []) {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
