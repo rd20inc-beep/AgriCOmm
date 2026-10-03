@@ -33,6 +33,7 @@ import {
   useAddBatchCost, useAddVehicle, useUpdateMillingBatch,
   useUpdateVehicle, useDeleteVehicle, useDeleteBatch, useBatchSourceLots,
 } from '../../../api/queries';
+import useConfirm from '../../../hooks/useConfirm';
 import { millingApi } from '../../../api/services';
 import { millingApi as millingModApi } from '../api/services';
 import { useCommodityPrices } from '../hooks/useCommodityPrices';
@@ -82,6 +83,7 @@ export default function MillingBatchDetail() {
   const { requestOwnerApproval } = useOwnerAuth();
   const isOwnerOrAdmin = user?.role === 'Owner' || user?.role === 'Super Admin' || user?.role === 'Mill Manager';
   const commodityPrices = useCommodityPrices();
+  const [confirm, confirmDialog] = useConfirm();
 
   // Fetch batch detail via TanStack Query
   const { data: batch, isLoading: batchLoading } = useMillingBatch(id);
@@ -854,7 +856,11 @@ export default function MillingBatchDetail() {
             {isOwnerOrAdmin && batch.status !== 'Completed' && (
               <button
                 onClick={async () => {
-                  if (!window.confirm(`Delete batch ${batch.id}? This will also remove its raw rice receipts. This cannot be undone.`)) return;
+                  if (!await confirm({
+                    title: `Delete batch ${batch.id}?`,
+                    consequence: 'Its raw rice receipts are removed and the stock they brought in is reversed. This cannot be undone.',
+                    confirmLabel: 'Delete batch',
+                  })) return;
                   try {
                     await deleteBatchMut.mutateAsync(batch.dbId || batch.id);
                     addToast('Batch deleted', 'success');
@@ -1132,7 +1138,12 @@ export default function MillingBatchDetail() {
                                 </button>
                                 <button
                                   onClick={async () => {
-                                    if (!window.confirm(`Delete vehicle ${v.vehicleNo} arrival? This will reverse the inventory receipt.`)) return;
+                                    if (!await confirm({
+                                      title: `Delete vehicle ${v.vehicleNo} arrival?`,
+                                      consequence: 'The inventory receipt this arrival created is reversed.',
+                                      amount: `${Math.round(parseFloat(v.weight_kg) || 0).toLocaleString()} kg`,
+                                      confirmLabel: 'Delete arrival',
+                                    })) return;
                                     try {
                                       await deleteVehicleMut.mutateAsync({ id: batchId, vehicleId: v.id });
                                       addToast('Vehicle arrival deleted', 'success');
@@ -2298,6 +2309,8 @@ export default function MillingBatchDetail() {
           <button onClick={() => setShowSupplierModal(true)} className="mt-2 px-3 py-1.5 bg-amber-600 text-white rounded-lg text-xs font-medium hover:bg-amber-700">Assign Supplier</button>
         </div>
       )}
+
+      {confirmDialog}
     </div>
   );
 }

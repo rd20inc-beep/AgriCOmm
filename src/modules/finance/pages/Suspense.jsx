@@ -2,6 +2,7 @@
 // Suspense control account, then resolve (reclassify) each entry to the true
 // account(s). Original entry + journals are never deleted; reverse flips them.
 import { useMemo, useState } from 'react';
+import useConfirm from '../../../hooks/useConfirm';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { HelpCircle, Plus, CheckCircle, Search } from 'lucide-react';
 import SlideDrawer from '../../../components/SlideDrawer';
@@ -43,6 +44,7 @@ export default function Suspense() {
   const [search, setSearch] = useState('');
   const [showRecord, setShowRecord] = useState(false);
   const [resolveFor, setResolveFor] = useState(null);
+  const [confirm, confirmDialog] = useConfirm();
 
   const { data: summary } = useQuery({ queryKey: ['suspense', 'summary'], queryFn: async () => (await financeApi.suspenseSummary())?.data || {} });
   const { data: entries = [], isLoading } = useQuery({
@@ -138,7 +140,15 @@ export default function Suspense() {
                       <td data-label="Actions" className="px-3 py-2 text-right whitespace-nowrap">
                         {canResolve && <button onClick={() => setResolveFor(e)} className="text-xs font-medium text-emerald-700 hover:underline mr-2">Resolve</button>}
                         {e.status === 'Open' && <button onClick={() => reviewMut.mutate(e.id)} className="text-xs text-amber-600 hover:underline mr-2">Review</button>}
-                        {canReverse && <button onClick={() => { if (window.confirm(`Reverse ${e.entry_no}? This unwinds the money movement and all reclassifications.`)) reverseMut.mutate(e.id); }} className="text-xs text-red-600 hover:underline">Reverse</button>}
+                        {canReverse && <button onClick={async () => {
+                          if (!await confirm({
+                            title: `Reverse ${e.entry_no}?`,
+                            consequence: 'The money movement is unwound and every reclassification made against this entry is reversed.',
+                            amount: PKR(e.amount),
+                            confirmLabel: 'Reverse entry',
+                          })) return;
+                          reverseMut.mutate(e.id);
+                        }} className="text-xs text-red-600 hover:underline">Reverse</button>}
                       </td>
                     </tr>
                   );
@@ -150,6 +160,7 @@ export default function Suspense() {
 
       {showRecord && <RecordDrawer bankAccounts={bankAccountsList} onClose={() => setShowRecord(false)} onDone={() => { setShowRecord(false); invalidate(); }} addToast={addToast} />}
       {resolveFor && <ResolveDrawer entry={resolveFor} onClose={() => setResolveFor(null)} onDone={() => { setResolveFor(null); invalidate(); }} addToast={addToast} />}
+      {confirmDialog}
     </div>
   );
 }

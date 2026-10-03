@@ -20,6 +20,7 @@ import VehicleArrivalDrawer from '../components/VehicleArrivalDrawer';
 import ServiceDispatchTab from '../components/ServiceDispatchTab';
 import ServiceBillingTab from '../components/ServiceBillingTab';
 import { qualityParams, aggregateVehicleQuality } from '../qualityParams';
+import useConfirm from '../../../hooks/useConfirm';
 
 const num = (v) => parseFloat(v) || 0;
 const kg = (v) => `${Math.round(num(v)).toLocaleString()} kg`;
@@ -59,6 +60,7 @@ export default function ServiceMillingBatchDetail() {
   // Editing/deleting a truck reverses the linked inventory receipt, so it is a
   // manager/owner correction — mill operators see trucks read-only.
   const canEditVehicles = ['Owner', 'Super Admin', 'Mill Manager'].includes(user?.role);
+  const [confirm, confirmDialog] = useConfirm();
 
   const { data: batch, isLoading: batchLoading } = useMillingBatch(id);
   const { data: blend } = useBatchSourceLots(batch?.dbId || batch?.id);
@@ -319,7 +321,12 @@ export default function ServiceMillingBatchDetail() {
   }
 
   async function deleteVehicle(v) {
-    if (!window.confirm(`Delete vehicle ${v.vehicleNo} arrival? This reverses the linked stock receipt.`)) return;
+    if (!await confirm({
+      title: `Delete vehicle ${v.vehicleNo} arrival?`,
+      consequence: 'The linked stock receipt is reversed, so the client\u2019s received quantity drops by this truck.',
+      amount: v.weightKg != null ? `${Math.round(parseFloat(v.weightKg) || 0).toLocaleString()} kg` : undefined,
+      confirmLabel: 'Delete arrival',
+    })) return;
     try {
       await deleteVehicleMut.mutateAsync({ id: batchId, vehicleId: v.id });
       addToast('Vehicle arrival deleted', 'success');
@@ -337,16 +344,26 @@ export default function ServiceMillingBatchDetail() {
     } catch (err) { addToast(err.message || 'Failed to approve', 'error'); }
   }
   async function reject() {
-    const reason = window.prompt('Reason for rejecting this service lot?');
-    if (!reason || !reason.trim()) return;
+    const ok = await confirm({
+      title: `Reject service lot ${batch.id}?`,
+      consequence: 'The client is told the lot was not accepted. The reason is recorded against it.',
+      reason: 'required',
+      confirmLabel: 'Reject lot',
+      cancelLabel: 'Go back',
+    });
+    if (!ok) return;
     try {
-      await millingModApi.rejectBatch(batchId, { reason: reason.trim() });
+      await millingModApi.rejectBatch(batchId, { reason: ok.reason });
       addToast('Service lot rejected', 'success');
       invalidateBatch();
     } catch (err) { addToast(err.message || 'Failed to reject', 'error'); }
   }
   async function del() {
-    if (!window.confirm(`Delete service lot ${batch.id}? This cannot be undone.`)) return;
+    if (!await confirm({
+      title: `Delete service lot ${batch.id}?`,
+      consequence: 'Its vehicle arrivals and the client stock they received are removed with it. This cannot be undone.',
+      confirmLabel: 'Delete lot',
+    })) return;
     try {
       await deleteBatchMut.mutateAsync(batchId);
       addToast('Service lot deleted', 'success');
@@ -602,6 +619,7 @@ export default function ServiceMillingBatchDetail() {
         title={editingVehicleId ? 'Edit Vehicle Arrival' : 'Add Vehicle Arrival'}
         submitLabel={editingVehicleId ? 'Save Changes' : 'Add Vehicle'}
       />
+      {confirmDialog}
     </div>
   );
 }
