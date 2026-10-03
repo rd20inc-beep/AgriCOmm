@@ -29,6 +29,15 @@ jobs:
       - name: Run tests
         run: npm test
 
+      # Joi validate() runs with stripUnknown, so a body field a controller reads
+      # but its schema does not declare is DELETED before the handler sees it —
+      # the feature ships inert, nothing fails, and it surfaces weeks later as
+      # "that setting doesn't save". This sweep compares every validated write
+      # route's handler against its schema. It has caught real ones (the document
+      # bundle order, the shipment contract number, the export freight fields).
+      - name: Assert no request field is silently stripped
+        run: node scripts/schema-strip-sweep.js
+
   schema-drift:
     name: Schema Drift Guard
     runs-on: ubuntu-latest

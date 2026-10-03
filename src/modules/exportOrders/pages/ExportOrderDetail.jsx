@@ -27,6 +27,7 @@ import {
 } from '../../../api/queries';
 import { useCreateMillingBatch } from '../../../api/queries';
 import { exportOrdersApi } from '../api/services';
+import useConfirm from '../../../hooks/useConfirm';
 import {
   OrderHeader,
   WorkflowTimeline,
@@ -58,6 +59,7 @@ export default function ExportOrderDetail() {
   const qc = useQueryClient();
   const { token } = useAuth();
   const { requestOwnerApproval } = useOwnerAuth();
+  const [confirm, confirmDialog] = useConfirm();
   const { millingBatches, addToast, exportCostCategories, companyProfileData, bankAccountsList, customersList, suppliersList } = useApp();
 
   // Fetch order detail via TanStack Query
@@ -632,16 +634,23 @@ export default function ExportOrderDetail() {
 
   const handleCancelOrder = async () => {
     setShowActions(false);
-    // eslint-disable-next-line no-alert
-    const reason = window.prompt(
-      `Cancel export order ${order.orderNo || order.id}?\n\nThis frees any reserved stock, reverses receipt journals, refunds banked advance/balance cash, and writes off the receivables. Incurred vendor costs remain payable.\n\nReason (optional):`,
-      '',
-    );
-    if (reason === null) return; // user dismissed
+    const ok = await confirm({
+      title: `Cancel export order ${order.orderNo || order.id}?`,
+      consequence: 'Reserved stock is freed, receipt journals are reversed, banked advance and balance cash is refunded, and the receivables are written off. Costs already incurred with vendors stay payable.',
+      // The contract value is the exposure being unwound — the figure the person
+      // cancelling should see before an owner is asked to authorise it.
+      amount: order.contractValue != null
+        ? `${order.currency || 'USD'} ${(parseFloat(order.contractValue) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+        : undefined,
+      reason: 'optional',
+      confirmLabel: 'Cancel order',
+      cancelLabel: 'Keep the order',
+    });
+    if (!ok) return;
     try {
       await requestOwnerApproval((ownerId) => cancelOrderMut.mutateAsync({
         id: orderId,
-        data: { reason: reason || undefined, authorized_by_owner_id: ownerId },
+        data: { reason: ok.reason || undefined, authorized_by_owner_id: ownerId },
       }));
       addToast(`Order ${order.orderNo || order.id} cancelled`);
     } catch (err) {
@@ -1063,6 +1072,7 @@ export default function ExportOrderDetail() {
         defaultBody={`Dear Customer,\n\nPlease find attached the Proforma Invoice for Order ${order.id}.\n\nProduct: ${order.productName}\nQuantity: ${order.qtyMT} MT\nContract Value: $${order.contractValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n\nBest regards,\nAGRI COMMODITIES`}
         attachmentLabel={`PI-${order.id.replace('EX-','')}.pdf`}
       />
+      {confirmDialog}
     </div>
   );
 }

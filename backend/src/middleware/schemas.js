@@ -214,6 +214,9 @@ const updateExportShipment = Joi.object({
 const saveBatchPackaging = Joi.object({
   lines: Joi.array().items(Joi.object({
     mill_item_id: Joi.number().integer().positive().required(),
+    // 'received' is only valid for a katta or a P.P. bag — the service refuses a
+    // master or a polythene sheet, because nothing frees those. Not expressible
+    // here: the pack type lives on the item, not in the request.
     direction: Joi.string().valid('received', 'consumed').required(),
     quantity: Joi.number().positive().required(),
     // Only meaningful on a consumed line — the costing formula needs the katta

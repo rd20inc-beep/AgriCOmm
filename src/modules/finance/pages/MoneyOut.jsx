@@ -1,4 +1,6 @@
 import { useState, useMemo } from 'react';
+import useConfirm from '../../../hooks/useConfirm';
+import { PaymentExtras } from '../../../components/payments/PaymentFields';
 import OrderRefLink from '../../../shared/components/OrderRefLink';
 import { ArrowUpRight, AlertTriangle, CheckCircle, Clock, Eye, X, DollarSign, Landmark, Printer } from 'lucide-react';
 import { FinanceKPI, FinanceTable, FinanceFilterBar } from '../../../components/finance';
@@ -52,15 +54,25 @@ export default function MoneyOut() {
   const { data: receivables = [] } = useReceivables();
   const recordPaymentMut = useRecordPayment();
   const reversePaymentMut = useReversePayment();
+  // Was window.prompt, which could show neither the amount being reversed nor
+  // what the reversal unwinds — on an action that restores a bank balance and
+  // reverses GL entries.
+  const [confirm, confirmDialog] = useConfirm();
 
   // #14 — reverse an incorrect payment (finance): confirm, capture a reason,
   // then restore the payable / bank / GL and stamp the payment Reversed.
   async function handleReversePayment(p) {
     if (!p?.id) { addToast('This payment cannot be reversed (no id captured).', 'error'); return; }
-    const reason = window.prompt('Reverse this payment? Enter a reason (optional):', '');
-    if (reason === null) return; // cancelled
+    const ok = await confirm({
+      title: `Reverse payment ${p.paymentNo || p.payment_no || ''}?`.trim(),
+      consequence: 'The payable goes back to outstanding, the bank balance is restored, and the ledger entries are reversed.',
+      amount: p.amount != null ? fmtPKR(p.amount) : undefined,
+      reason: 'optional',
+      confirmLabel: 'Reverse payment',
+    });
+    if (!ok) return;
     try {
-      await reversePaymentMut.mutateAsync({ id: p.id, reason: reason || null });
+      await reversePaymentMut.mutateAsync({ id: p.id, reason: ok.reason || null });
       addToast('Payment reversed — payable, bank and ledger restored.', 'success');
     } catch (err) {
       addToast(err?.data?.message || err?.message || 'Reversal failed', 'error');
@@ -84,8 +96,15 @@ export default function MoneyOut() {
     window.print();
   }
 
-  // Payment form state
-  const [payForm, setPayForm] = useState({ amount: '', bankAccountId: '', paymentMethod: 'bank_transfer', paymentDate: new Date().toISOString().split('T')[0], chequeNo: '', dueDate: '', notes: '', fundSource: 'bank' });
+  // Payment form state. The wht/discount/attachment keys are the ones
+  // PaymentExtras reads and writes; they only reach the server on a PKR payable
+  // (see the Tax & discount block below).
+  const [payForm, setPayForm] = useState({
+    amount: '', bankAccountId: '', paymentMethod: 'bank_transfer', paymentDate: new Date().toISOString().split('T')[0],
+    chequeNo: '', dueDate: '', notes: '', fundSource: 'bank',
+    whtRate: '', whtAmount: '', discountAmount: '', attachmentUrl: '', attachmentName: '',
+  });
+  const setPay = (k, v) => setPayForm((f) => ({ ...f, [k]: v }));
 
   function openDrawer(row) {
     setDrawer(row);
@@ -97,6 +116,7 @@ export default function MoneyOut() {
       chequeNo: '', dueDate: '',
       notes: '',
       fundSource: 'bank',
+      whtRate: '', whtAmount: '', discountAmount: '', attachmentUrl: '', attachmentName: '',
     });
   }
 
@@ -195,6 +215,13 @@ export default function MoneyOut() {
     const pay = drawer;
     const amount = parseFloat(payForm.amount);
     if (!amount || amount <= 0) { addToast('Enter a valid amount', 'error'); return; }
+    // Withholding tax is a PKR obligation remitted to FBR; the server's WHT
+    // arithmetic is in PKR, so the block is only offered on a PKR payable and
+    // the figures are only sent for one.
+    const whtApplies = (pay.currency || 'PKR') === 'PKR';
+    const wht = whtApplies ? parseFloat(payForm.whtAmount) || 0 : 0;
+    const disc = whtApplies ? parseFloat(payForm.discountAmount) || 0 : 0;
+    if (wht + disc - amount > 0.01) { addToast('WHT + discount cannot exceed the amount.', 'error'); return; }
 
     try {
       await recordPaymentMut.mutateAsync({
@@ -208,6 +235,14 @@ export default function MoneyOut() {
         due_date: payForm.dueDate || null,
         linked_payable_id: pay.dbId || pay.id,
         notes: payForm.notes || `Payment for ${pay.payNo} - ${pay.supplierName || pay.haulerName || pay.category}`,
+        // WHT and the discount reduce the CASH that leaves the account but not
+        // the amount cleared against the payable: the supplier's claim settles
+        // in full, the tax goes to FBR and the discount is income.
+        wht_amount: wht,
+        wht_rate: whtApplies && payForm.whtRate ? parseFloat(payForm.whtRate) : null,
+        discount_amount: disc,
+        attachment_url: whtApplies ? (payForm.attachmentUrl || null) : null,
+        attachment_name: whtApplies ? (payForm.attachmentName || null) : null,
       });
       addToast(`Payment of ${fmtAmount(amount, pay.currency)} recorded for ${pay.payNo}`, 'success');
       setDrawer(null);
@@ -464,6 +499,15 @@ export default function MoneyOut() {
                   </div>
                 </div>
 
+                {/* Tax, discount & supporting document — the same block the Mill
+                    Finance drawers have had since #14 1e, which Money Out never
+                    did, so a payable with withholding could only be settled
+                    properly from one screen. PKR only: the server's WHT
+                    arithmetic is in PKR. */}
+                {(drawer.currency || 'PKR') === 'PKR' && (
+                  <PaymentExtras form={payForm} set={setPay} gross={parseFloat(payForm.amount) || 0} addToast={addToast} />
+                )}
+
                 {/* Notes */}
                 <div>
                   <label className="text-xs text-gray-500 block mb-1">Notes (optional)</label>
@@ -494,6 +538,8 @@ export default function MoneyOut() {
           </div>
         </div>
       )}
+
+      {confirmDialog}
     </div>
   );
 }

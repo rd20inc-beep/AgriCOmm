@@ -1,8 +1,10 @@
 import { useState, useMemo, useEffect } from 'react';
+import PaymentDrawer from '../../../components/payments/PaymentDrawer';
+import { purchasePayPayload, money } from '../../../components/payments/paymentPayload';
 import { Link } from 'react-router-dom';
 import {
   Package, AlertTriangle, ShoppingCart, TrendingDown,
-  Search, Pencil, Save, Loader2, Boxes, Wallet, DollarSign, CheckCircle,
+  Search, Pencil, Save, Loader2, Boxes, Wallet, DollarSign,
 } from 'lucide-react';
 import { useMillStoreItems, useMillStoreSummary, useSetMillStock, useUpdateMillStoreItem, useKattaSummary, useMillStorePurchases, usePayMillPurchase } from '../api/queries';
 import { useBankAccounts } from '../../../api/queries';
@@ -10,7 +12,6 @@ import NewPurchaseDrawer from '../../../components/NewPurchaseDrawer';
 import SlideDrawer from '../../../components/SlideDrawer';
 import SupplierPicker from '../../../components/SupplierPicker';
 import { useApp } from '../../../context/AppContext';
-import { favStar } from '../../../shared/utils/favorites';
 
 function formatPKR(v) {
   const n = Number(v) || 0;
@@ -259,33 +260,12 @@ function PurchasePaymentsCard() {
   const { data: bankAccounts = [] } = useBankAccounts();
   const pay = usePayMillPurchase();
   const [target, setTarget] = useState(null);
-  const [form, setForm] = useState({ amount: '', method: 'cash', bankAccountId: '', reference: '', dueDate: '' });
 
   const purchases = Array.isArray(purchasesRaw) ? purchasesRaw : (purchasesRaw.purchases || purchasesRaw.data || []);
   const unpaid = purchases.filter(p => String(p.payment_status || '').toLowerCase() !== 'paid');
   if (unpaid.length === 0) return null;
 
   const due = (p) => Math.max(0, (Number(p.total_amount) || 0) - (Number(p.paid_amount) || 0));
-  function open(p) {
-    setTarget(p);
-    setForm({ amount: String(due(p)), method: 'cash', bankAccountId: '', reference: '', dueDate: '' });
-  }
-  async function submit() {
-    const amount = parseFloat(form.amount);
-    if (!amount || amount <= 0) { addToast('Enter a valid amount', 'error'); return; }
-    try {
-      await pay.mutateAsync({ id: target.id, data: {
-        amount, payment_method: form.method,
-        bank_account_id: form.method === 'cash' ? (form.bankAccountId || null) : (form.bankAccountId || null),
-        payment_reference: form.reference || null,
-        due_date: form.dueDate || null,
-      } });
-      addToast(`Payment of Rs ${(amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} recorded for ${target.purchase_no}`, 'success');
-      setTarget(null);
-    } catch (err) {
-      addToast(err?.data?.errors?.[0]?.message || err?.data?.message || err.message || 'Failed to record payment', 'error');
-    }
-  }
 
   return (
     <div className="bg-white border border-gray-200 rounded-xl p-5">
@@ -310,7 +290,7 @@ function PurchasePaymentsCard() {
                 <td data-label="Due" className="py-2 px-2 text-right tabular-nums text-red-600 font-medium">{formatPKR(due(p))}</td>
                 <td data-label="Status" className="mob-hide py-2 px-2"><span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">{p.payment_status || 'Pending'}</span></td>
                 <td className="py-2 px-2 text-right">
-                  <button onClick={() => open(p)} className="px-2.5 py-1 bg-emerald-50 text-emerald-700 text-xs font-medium rounded hover:bg-emerald-100 inline-flex items-center gap-1">
+                  <button onClick={() => setTarget(p)} className="px-2.5 py-1 bg-emerald-50 text-emerald-700 text-xs font-medium rounded hover:bg-emerald-100 inline-flex items-center gap-1">
                     <DollarSign size={12} /> Pay
                   </button>
                 </td>
@@ -320,53 +300,28 @@ function PurchasePaymentsCard() {
         </table>
       </div>
 
-      <SlideDrawer open={!!target} onClose={() => setTarget(null)} title={target ? `Pay — ${target.purchase_no}` : ''}
-        subtitle={target ? `Due ${formatPKR(due(target))}` : undefined} icon={Wallet} size="md"
-        footer={target && (
-          <button onClick={submit} disabled={pay.isPending}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-50">
-            <CheckCircle size={16} /> {pay.isPending ? 'Recording…' : `Record Payment — Rs ${(parseFloat(form.amount) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-          </button>
-        )}>
-        {target && (
-          <div className="space-y-3">
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Amount</label>
-              <input type="number" min="0" step="0.01" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Method</label>
-              <select value={form.method} onChange={e => setForm({ ...form, method: e.target.value, bankAccountId: '' })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white">
-                <option value="cash">Cash</option><option value="bank_transfer">Bank Transfer</option><option value="cheque">Cheque</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">{form.method === 'cash' ? 'Cash account' : 'Bank account'}</label>
-              <select value={form.bankAccountId} onChange={e => setForm({ ...form, bankAccountId: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white">
-                <option value="">Select account…</option>
-                {bankAccounts.filter(a => form.method === 'cash' ? a.type === 'cash' : a.type !== 'cash').map(a => (
-                  <option key={a.id} value={a.id}>{favStar(a)}{a.name}{a.bankName ? ` — ${a.bankName}` : ''}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Reference / Cheque #</label>
-              <input type="text" value={form.reference} onChange={e => setForm({ ...form, reference: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" placeholder="optional" />
-            </div>
-            {form.method === 'cheque' && (
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Cheque date <span className="text-gray-400 font-normal">(when it clears)</span></label>
-                <input type="date" value={form.dueDate} onChange={e => setForm({ ...form, dueDate: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
-              </div>
-            )}
-          </div>
-        )}
-      </SlideDrawer>
+      {/* Settles the purchase DOCUMENT via /finance/purchases/pay. Cash comes
+          from a cash account and a transfer from a bank one, as before; the
+          server holds a post-dated cheque until it clears. */}
+      {target && (
+        <PaymentDrawer
+          title={`Pay \u2014 ${target.purchase_no}`}
+          subtitle={`Due ${formatPKR(due(target))}`}
+          icon={Wallet}
+          summary={[['Due', money(due(target))]]}
+          outstanding={due(target)}
+          accounts={bankAccounts}
+          defaultMethod="cash"
+          filterAccountsByMethod
+          extras={false}
+          onSubmit={(_body, form) => pay.mutateAsync({ id: target.id, data: purchasePayPayload(form, { source: 'mill_store', sourceId: target.id }) })}
+          onDone={(form) => {
+            addToast(`Payment of ${money(form.amount)} recorded for ${target.purchase_no}`, 'success');
+            setTarget(null);
+          }}
+          onClose={() => setTarget(null)} addToast={addToast}
+        />
+      )}
     </div>
   );
 }

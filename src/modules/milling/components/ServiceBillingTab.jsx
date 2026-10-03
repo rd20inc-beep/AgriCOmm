@@ -6,6 +6,7 @@ import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import { CreateInvoiceDrawer, RecordPaymentDrawer } from './ServiceInvoiceDrawers';
 import { printServiceInvoice } from '../utils/serviceInvoicePrint';
+import useConfirm from '../../../hooks/useConfirm';
 
 const num = (v) => parseFloat(v) || 0;
 const pkr = (v) => `PKR ${(num(v)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -28,6 +29,7 @@ export default function ServiceBillingTab({ routeId, batchDbId, onChanged }) {
   const canInvoice = hasPermission('service_milling', 'create_invoice');
   const canPay = hasPermission('service_milling', 'record_payment');
   const canViewInvoice = hasPermission('service_milling', 'view_invoice');
+  const [confirm, confirmDialog] = useConfirm();
 
   function viewInvoice() {
     if (!invoice) return;
@@ -39,10 +41,17 @@ export default function ServiceBillingTab({ routeId, batchDbId, onChanged }) {
   async function voidInvoice() {
     if (!invoiceId) return;
     const paid = invoice && num(invoice.received_amount) > 0;
-    const msg = paid
-      ? `Void ${row?.invoice_no}? It has PKR ${(num(invoice.received_amount)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} received — the payment(s) will be reversed (account balance + receipt undone) and the invoice removed so you can re-issue. Continue?`
-      : `Void ${row?.invoice_no}? The invoice and its revenue posting are reversed and removed so you can create a fresh one. Continue?`;
-    if (!window.confirm(msg)) return;
+    if (!await confirm({
+      title: `Void ${row?.invoice_no}?`,
+      consequence: paid
+        ? 'The receipts against it are reversed (account balance and receipt undone), its revenue posting is reversed, and the invoice is removed so you can re-issue.'
+        : 'The invoice and its revenue posting are reversed and removed, so you can create a fresh one.',
+      // The figure that matters here is the money already taken in, not the
+      // invoice total — that is what a void gives back.
+      amount: paid ? `PKR ${num(invoice.received_amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} received` : undefined,
+      confirmLabel: 'Void invoice',
+      cancelLabel: 'Keep it',
+    })) return;
     try {
       await serviceMillingApi.voidInvoice(invoiceId);
       addToast?.('Invoice voided — you can now create a new one', 'success');
@@ -192,6 +201,7 @@ export default function ServiceBillingTab({ routeId, batchDbId, onChanged }) {
         onClose={() => setShowInvoice(false)} onCreated={afterChange} />
       <RecordPaymentDrawer open={showPay} invoice={invoice} addToast={addToast}
         onClose={() => setShowPay(false)} onPaid={afterChange} />
+      {confirmDialog}
     </div>
   );
 }

@@ -6,6 +6,7 @@ import Modal from '../../../components/Modal';
 import ProformaInvoice from '../../../components/ProformaInvoice';
 import QuotationDrawer from './QuotationDrawer';
 import { quotationsApi } from '../api/services';
+import useConfirm from '../../../hooks/useConfirm';
 
 const num = (v) => parseFloat(v) || 0;
 const STATUS_TABS = ['All', 'Draft', 'Sent', 'Accepted', 'Rejected', 'Expired'];
@@ -87,6 +88,7 @@ export default function QuotationsPanel() {
   const [editing, setEditing] = useState(null);
   const [pdfOrder, setPdfOrder] = useState(null);
   const [busyId, setBusyId] = useState(null);
+  const [confirm, confirmDialog] = useConfirm();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -124,7 +126,13 @@ export default function QuotationsPanel() {
     finally { setBusyId(null); }
   }
   async function convert(row) {
-    if (!window.confirm(`Convert ${row.quotation_no} into an export order? This creates the order (with receivables & document checklist) from this quote.`)) return;
+    if (!await confirm({
+      title: `Convert ${row.quotation_no} into an export order?`,
+      consequence: 'A real export order is created from this quote, with its receivables and document checklist. The quote itself stays on record.',
+      amount: `${row.currency || ''} ${num(row.total_amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`.trim(),
+      danger: false,
+      confirmLabel: 'Create the order',
+    })) return;
     setBusyId(row.id);
     try {
       const res = await quotationsApi.convert(row.id);
@@ -137,7 +145,12 @@ export default function QuotationsPanel() {
     } finally { setBusyId(null); }
   }
   async function remove(row) {
-    if (!window.confirm(`Delete quotation ${row.quotation_no}? This cannot be undone.`)) return;
+    if (!await confirm({
+      title: `Delete quotation ${row.quotation_no}?`,
+      consequence: 'The quote and its lines go. This cannot be undone.',
+      amount: `${row.currency || ''} ${num(row.total_amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`.trim(),
+      confirmLabel: 'Delete quotation',
+    })) return;
     setBusyId(row.id);
     try { await quotationsApi.remove(row.id); await load(); addToast('Quotation deleted', 'success'); }
     catch (err) { addToast(err?.response?.data?.message || 'Failed to delete', 'error'); }
@@ -241,6 +254,7 @@ export default function QuotationsPanel() {
       <Modal isOpen={!!pdfOrder} onClose={() => setPdfOrder(null)} title={pdfOrder ? `Quotation — ${pdfOrder.id}` : ''} size="full">
         {pdfOrder && <div className="overflow-x-auto"><ProformaInvoice order={pdfOrder} companyProfile={companyProfileData} title="Quotation" docNo={pdfOrder.id} charges={pdfOrder.charges} /></div>}
       </Modal>
+      {confirmDialog}
     </div>
   );
 }

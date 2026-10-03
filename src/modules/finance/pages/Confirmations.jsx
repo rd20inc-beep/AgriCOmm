@@ -24,6 +24,7 @@ import Modal from '../../../components/Modal';
 import StatusBadge from '../../../components/StatusBadge';
 import EmailComposer from '../../../components/EmailComposer';
 import { favStar } from '../../../shared/utils/favorites';
+import useConfirm from '../../../hooks/useConfirm';
 
 function formatCurrency(value) {
   return '$' + value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -46,6 +47,7 @@ export default function FinanceConfirmations() {
   // Finance (payments-only) can't open export order pages — render order numbers
   // as plain text for them instead of an /export link that lands on Access Denied.
   const canViewExport = hasPermission('export_orders', 'view');
+  const [confirm, confirmDialog] = useConfirm();
   const orderRef = (id, cls = 'font-semibold text-blue-600 hover:text-blue-800') =>
     (canViewExport
       ? <Link to={`/export/${id}`} className={cls}>{id}</Link>
@@ -224,10 +226,17 @@ export default function FinanceConfirmations() {
     }
   }
   async function rejectPending(p) {
-    const reason = window.prompt(`Reject the ${p.receiptType} receipt for ${p.orderNo}? Enter a reason:`);
-    if (reason === null) return;
+    const ok = await confirm({
+      title: `Reject the ${p.receiptType} receipt for ${p.orderNo}?`,
+      consequence: 'The receipt is marked as not received. Nothing is posted to the bank or the ledger, and the reason is recorded for whoever entered it.',
+      amount: `${p.currency || ''} ${Number(p.amount || 0).toLocaleString()}`.trim(),
+      reason: 'required',
+      confirmLabel: 'Mark not received',
+      cancelLabel: 'Go back',
+    });
+    if (!ok) return;
     try {
-      await rejectReceiptMut.mutateAsync({ paymentId: p.id, data: { reason } });
+      await rejectReceiptMut.mutateAsync({ paymentId: p.id, data: { reason: ok.reason } });
       addToast('Receipt marked as not received', 'warning');
     } catch (err) {
       addToast(err?.data?.message || err?.message || 'Reject failed', 'error');
@@ -877,6 +886,8 @@ export default function FinanceConfirmations() {
           }
         />
       )}
+
+      {confirmDialog}
     </div>
   );
 }
