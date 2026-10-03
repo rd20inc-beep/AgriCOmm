@@ -2,6 +2,7 @@ const service = require('./expenses.service');
 const Joi = require('joi');
 const { ValidationError } = require('../../shared/errors');
 const { parsePagination, paginationMeta } = require('../../shared/utils/pagination');
+const { ACCEPTED_METHODS } = require('../../shared/constants/paymentMethods');
 
 const createSchema = Joi.object({
   expense_type: Joi.string().valid('general', 'mill', 'export').default('general'),
@@ -21,7 +22,10 @@ const createSchema = Joi.object({
   order_id: Joi.number().integer().allow(null).optional(),
   pay_now: Joi.boolean().default(false),
   bank_account_id: Joi.number().integer().allow(null).optional(),
-  payment_method: Joi.string().max(30).allow(null, '').optional(),
+  // The canonical set plus the legacy 'bank', which payroll still sends and the
+  // service normalises. max(30) accepted anything and let a typo through to the
+  // CHECK constraint on payments.payment_method, as a 500.
+  payment_method: Joi.string().valid(...ACCEPTED_METHODS).allow(null, '').optional(),
   payment_reference: Joi.string().max(100).allow(null, '').optional(),
 });
 
@@ -34,7 +38,7 @@ const paySchema = Joi.object({
     then: Joi.optional(),
     otherwise: Joi.required(),
   }),
-  payment_method: Joi.string().max(30).default('bank'),
+  payment_method: Joi.string().valid(...ACCEPTED_METHODS).default('bank_transfer'),
   payment_reference: Joi.string().max(100).allow(null, '').optional(),
   paid_date: Joi.date().optional(),
   due_date: Joi.date().allow(null, '').optional(),

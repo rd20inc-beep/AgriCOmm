@@ -35,12 +35,13 @@ const CANONICAL = new Set(
     .matchAll(/'([a-z_]+)'/g)].map((m) => m[1]),
 );
 
-// 'bank' is a legacy shorthand the expenses module still stores on
-// business_expenses.payment_method; expenses.service.js maps it to
-// 'bank_transfer' before it reaches payments.payment_method, which is
-// CHECK-constrained. It is listed so it stays deliberate rather than looking
-// correct, and so a NEW screen cannot quietly adopt it.
-const LEGACY = { bank: 'modules/finance/pages/Expenses.jsx' };
+// Empty on purpose. 'bank' used to live here: the expense form sent it and
+// business_expenses stored it while the payments row for the same settlement
+// stored 'bank_transfer'. Migration 313 normalised the rows,
+// shared/constants/paymentMethods.js normalises on write, and the form now
+// sends the canonical value — so nothing needs an exemption. Adding one back
+// means a screen has started disagreeing with the schema again.
+const LEGACY = {};
 
 describe('payment method values', () => {
   it('only uses values the server accepts', () => {
@@ -149,6 +150,10 @@ describe('the shared drawer', () => {
       expect(hit, f).toBeTruthy();
       expect(hit[1], f).toContain('PaymentDrawer');
     }
+  });
+
+  it('needs no exemption for a non-canonical method value', () => {
+    expect(LEGACY).toEqual({});
   });
 
   it('owns the payment arithmetic — no screen reimplements the overpayment check', () => {
