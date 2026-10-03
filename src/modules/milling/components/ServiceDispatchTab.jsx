@@ -5,6 +5,7 @@ import { serviceMillingApi } from '../api/services';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import SlideDrawer from '../../../components/SlideDrawer';
+import useConfirm from '../../../hooks/useConfirm';
 
 const num = (v) => parseFloat(v) || 0;
 const kg = (v) => `${Math.round(num(v)).toLocaleString()} kg`;
@@ -17,6 +18,7 @@ export default function ServiceDispatchTab({ routeId, onChanged }) {
   const { addToast } = useApp();
   const { hasPermission } = useAuth();
   const canDispatch = hasPermission('service_milling', 'record_dispatch');
+  const [confirm, confirmDialog] = useConfirm();
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['service-dispatch', routeId],
@@ -151,7 +153,15 @@ export default function ServiceDispatchTab({ routeId, onChanged }) {
                   <td data-label="Qty" className="px-4 py-2.5 text-right text-gray-700">{kg(d.qty_kg)}{d.bag_count ? <span className="text-gray-400"> · {d.bag_count} bags</span> : null}</td>
                   <td data-label="Actions" className="px-4 py-2.5 text-right">
                     {canDispatch && (
-                      <button onClick={() => { if (window.confirm(`Reverse dispatch ${d.dispatch_no}? Stock returns to service inventory.`)) deleteMut.mutate(d.id); }}
+                      <button onClick={async () => {
+                        if (!await confirm({
+                          title: `Reverse dispatch ${d.dispatch_no}?`,
+                          consequence: 'The stock returns to the client\u2019s service inventory. No GL entries are involved.',
+                          amount: kg(d.qty_kg),
+                          confirmLabel: 'Reverse dispatch',
+                        })) return;
+                        deleteMut.mutate(d.id);
+                      }}
                         className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg">
                         <Trash2 size={12} /> Reverse
                       </button>
@@ -221,6 +231,7 @@ export default function ServiceDispatchTab({ routeId, onChanged }) {
           </form>
         )}
       </SlideDrawer>
+      {confirmDialog}
     </div>
   );
 }

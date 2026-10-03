@@ -10,6 +10,7 @@ import { incotermLabel } from '../../../shared/constants/incoterms';
 import { formatWeight, formatPackSize, weightUnit } from '../../../shared/constants/weightUnits';
 import { freightBreakdown } from '../../../shared/constants/exportFreight';
 import { useDocumentTemplates } from '../../../api/queries';
+import useConfirm from '../../../hooks/useConfirm';
 
 // ─── Weights on export documents ───
 // Shipments to the USA and Canada state their weights in POUNDS; everywhere
@@ -2433,6 +2434,7 @@ export default function DocumentCenter({ order }) {
   // #13 — per-doc-type orientation (admin-configured; defaults to portrait).
   const { data: docTemplates = [] } = useDocumentTemplates();
   const [availableDocs, setAvailableDocs] = useState([]);
+  const [confirm, confirmDialog] = useConfirm();
   const [loading, setLoading] = useState(true);
   const [previewDoc, setPreviewDoc] = useState(null);
   const [previewHtml, setPreviewHtml] = useState('');
@@ -2976,11 +2978,29 @@ export default function DocumentCenter({ order }) {
                     </>
                   )}
                   {locked && version.is_latest !== false && (
-                    <button onClick={() => { const r = window.prompt('Reason for revision?'); if (r) runWorkflow('revise', { reason: r }); }} disabled={wfBusy}
+                    <button onClick={async () => {
+                      const ok = await confirm({
+                        title: `Revise ${previewDoc?.type || 'this document'}?`,
+                        consequence: 'The approved version is kept and superseded by a new one, re-pulled from the order. The reason prints on the version history.',
+                        reason: 'required',
+                        danger: false,
+                        confirmLabel: 'Create new version',
+                      });
+                      if (!ok) return;
+                      runWorkflow('revise', { reason: ok.reason });
+                    }} disabled={wfBusy}
                       className={`${wfBtn} border-amber-300 text-amber-700`}>Revise (new version)</button>
                   )}
                   {!['Cancelled', 'Revised'].includes(version.status) && (
-                    <button onClick={() => { if (window.confirm('Cancel this document?')) runWorkflow('status', { status: 'Cancelled' }); }} disabled={wfBusy}
+                    <button onClick={async () => {
+                      if (!await confirm({
+                        title: `Cancel ${previewDoc?.type || 'this document'}?`,
+                        consequence: 'The version is marked Cancelled. It stays on the history but can no longer be issued or sent.',
+                        confirmLabel: 'Cancel document',
+                        cancelLabel: 'Keep it',
+                      })) return;
+                      runWorkflow('status', { status: 'Cancelled' });
+                    }} disabled={wfBusy}
                       className={`${wfBtn} border-red-200 text-red-600`}>Cancel</button>
                   )}
                   {versions.length > 1 && (
@@ -3049,6 +3069,7 @@ export default function DocumentCenter({ order }) {
         defaultEmail={emailModal?.defaultEmail || ''}
         defaultSubject={previewDoc ? `${previewDoc.type} — ${order.orderNo || order.id}` : ''}
       />
+      {confirmDialog}
     </div>
   );
 }

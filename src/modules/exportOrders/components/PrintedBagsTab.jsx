@@ -8,6 +8,7 @@ import BagTypePicker from '../../../components/BagTypePicker';
 import SupplierPicker from '../../../components/SupplierPicker';
 import { printedBagsApi } from '../api/services';
 import { favStar } from '../../../shared/utils/favorites';
+import useConfirm from '../../../hooks/useConfirm';
 
 const PRINTING_OPTIONS = ['Plain', 'Buyer Logo', 'Buyer Logo + Text', 'Custom Design'];
 const rs = (n) => `Rs ${(parseFloat(n) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -35,6 +36,7 @@ export default function PrintedBagsTab({ order, onUpdated }) {
   const [showAdd, setShowAdd] = useState(false);
   const [saving, setSaving] = useState(false);
   const [payTarget, setPayTarget] = useState(null);
+  const [confirm, confirmDialog] = useConfirm();
 
   const blank = { bagType: '', bagTypeId: null, bagSizeKg: '', vendorId: '', quantity: '', unitCost: '', printing: order?.bag_printing || '', brand: order?.bag_brand || '', notes: '' };
   const [draft, setDraft] = useState(blank);
@@ -96,7 +98,12 @@ export default function PrintedBagsTab({ order, onUpdated }) {
   }
 
   async function remove(row) {
-    if (!window.confirm(`Delete printed bag order ${row.pbo_no}? This reverses its cost and payable.`)) return;
+    if (!await confirm({
+      title: `Delete printed bag order ${row.pbo_no}?`,
+      consequence: `The GL cost on this export order is reversed and the payable to ${row.vendor_name || 'the vendor'} is removed. Anything already paid against it has to be sorted out on the vendor's statement.`,
+      amount: rs(row.total_amount),
+      confirmLabel: 'Delete order',
+    })) return;
     setBusyId(row.id);
     try {
       await printedBagsApi.remove(row.id);
@@ -258,6 +265,7 @@ export default function PrintedBagsTab({ order, onUpdated }) {
       {/* Pay drawer */}
       <PayDrawer target={payTarget} bankAccounts={bankAccountsList} onClose={() => setPayTarget(null)}
         onPaid={async () => { setPayTarget(null); await load(); onUpdated?.(); }} addToast={addToast} />
+      {confirmDialog}
     </div>
   );
 }

@@ -30,6 +30,16 @@ const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 const MOVEMENT_FOR = { received: 'return', consumed: 'consumption' };
 const REF = 'batch_packaging';
 
+// Only a KATTA or a P.P. BAG can be RECEIVED on a batch. Confirmed with the
+// client: a master bag and a polythene sheet are bought into store and only ever
+// used — nothing frees them, because no rice arrives in them. Katta and P.P.
+// bags do come free as the rice is milled out of them.
+//
+// This is a validation, not just a costing rule. A "received 80 masters" line
+// would add 80 masters to store stock that nobody bought, and then credit their
+// cost against the batch — inventing both the stock and the saving.
+const RECEIVABLE_PACK_TYPES = ['katta', 'pp_bag'];
+
 async function itemsById(conn, ids) {
   if (!ids.length) return {};
   const rows = await conn('mill_items').whereIn('id', ids)
@@ -101,6 +111,12 @@ const batchPackagingService = {
         // "for a by-product".
         if (l.direction === 'received' && l.output_type) {
           throw new ValidationError('A received line is not against an output — leave the output blank.');
+        }
+        if (l.direction === 'received' && !RECEIVABLE_PACK_TYPES.includes(item.pack_type)) {
+          throw new ValidationError(
+            `${item.name} cannot be received on a batch — nothing frees a ${item.pack_type === 'master_bag' ? 'master bag' : item.pack_type === 'polythene' ? 'polythene sheet' : 'item of this kind'}.`
+            + ' Record it as used, and buy it into store through Mill Store.',
+          );
         }
       }
 
@@ -233,8 +249,6 @@ const batchPackagingService = {
     const bucket = {
       receivedKatta: { qty: 0, cost: 0 },
       receivedBags: { qty: 0, cost: 0 },
-      receivedMasters: { qty: 0, cost: 0 },
-      receivedOther: { qty: 0, cost: 0 },
       byproductKatta: { qty: 0, cost: 0 },
       consumedOther: { qty: 0, cost: 0 },
     };
@@ -242,10 +256,9 @@ const batchPackagingService = {
 
     for (const r of rows) {
       if (r.direction === 'received') {
+        // Only katta and P.P. bags can be here — save() refuses anything else.
         if (r.pack_type === 'katta') add(bucket.receivedKatta, r);
         else if (r.pack_type === 'pp_bag') add(bucket.receivedBags, r);
-        else if (r.pack_type === 'master_bag') add(bucket.receivedMasters, r);
-        else add(bucket.receivedOther, r);
       } else if (r.pack_type === 'katta' && r.output_type === 'byproduct') {
         add(bucket.byproductKatta, r);
       } else {
@@ -253,9 +266,11 @@ const batchPackagingService = {
       }
     }
 
-    // Everything received is stock the mill holds, whatever kind of bag it is.
-    const receivedCost = bucket.receivedKatta.cost + bucket.receivedBags.cost
-      + bucket.receivedMasters.cost + bucket.receivedOther.cost;
+    // Katta and P.P. bags freed into store are stock the mill now holds, so
+    // their cost leaves this batch. Nothing else can be received, so nothing
+    // else is credited — which is exactly the client's formula:
+    //   Final = Total − katta received − P.P. bags received + by-product katta
+    const receivedCost = bucket.receivedKatta.cost + bucket.receivedBags.cost;
     return {
       ...bucket,
       receivedCost: round2(receivedCost),

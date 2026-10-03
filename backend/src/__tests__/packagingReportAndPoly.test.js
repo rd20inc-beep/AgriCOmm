@@ -66,7 +66,19 @@ describe('packaging stock is reported per type, never combined', () => {
 
   it('a size is shown as the mill says it — 25 KG, 8 LBS', () => {
     expect(fn).toContain('sizeLabel: packLabelOf(m.size_value, m.size_unit)');
-    expect(REPORT).toContain('function packLabelOf');
+    // It used to declare its own byte-identical copy of the rule. It now takes
+    // the shared one, so a change to how a pack size reads cannot leave the
+    // stock report formatting it the old way.
+    expect(REPORT).toContain("const { formatPackSize: packLabelOf } = require('../../shared/packagingTypes')");
+    expect(REPORT).not.toContain('function packLabelOf');
+  });
+
+  it('and the rule itself is the one the rest of the system uses', () => {
+    const { formatPackSize } = require('../shared/packagingTypes');
+    expect(formatPackSize(25, 'kg')).toBe('25 KG');
+    expect(formatPackSize(8, 'lb')).toBe('8 LBS');
+    expect(formatPackSize(18.15, 'kg')).toBe('18.15 KG');
+    expect(formatPackSize(0, 'kg')).toBe('');
   });
 });
 

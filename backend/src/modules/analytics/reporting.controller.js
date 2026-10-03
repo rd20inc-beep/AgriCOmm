@@ -66,15 +66,14 @@ function redactReport(req, data) {
 }
 
 
-// A packaging size as the mill says it — "25 KG", "8 LBS". Mirrors
-// formatPackSize in src/shared/packagingTypes.js; kept local so the reporting
-// module does not reach across into the inventory module for one label.
-function packLabelOf(value, unit) {
-  const v = parseFloat(value);
-  if (!Number.isFinite(v) || v <= 0) return '';
-  const n = Math.abs(v - Math.round(v)) < 0.005 ? String(Math.round(v)) : String(Math.round(v * 100) / 100);
-  return `${n} ${unit === 'lb' ? 'LBS' : 'KG'}`;
-}
+// A packaging size as the mill says it — "25 KG", "8 LBS".
+//
+// This was a byte-identical copy of formatPackSize, kept local on the reasoning
+// that reporting should not reach into the inventory module for one label. That
+// reasoning was wrong: packagingTypes lives in src/shared, which is exactly
+// where a rule used by more than one module belongs. Two copies of a formatting
+// rule agree until one is changed.
+const { formatPackSize: packLabelOf } = require('../../shared/packagingTypes');
 
 // ── Freight recovery helpers ──
 // The GL side of the freight report. Posted journals only — a Draft journal is

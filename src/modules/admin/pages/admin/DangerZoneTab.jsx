@@ -4,6 +4,7 @@ import { useApp } from '../../../../context/AppContext';
 import { useLotInventory } from '../../../../api/queries';
 import { adminApi } from '../../api/services';
 import { favStar } from '../../../../shared/utils/favorites';
+import useConfirm from '../../../../hooks/useConfirm';
 
 const TXN_TYPES = [
   { value: 'local_sale',     label: 'Local Sale',     hint: 'restocks the lot, deletes its payment/receivable/journal' },
@@ -41,13 +42,19 @@ const LABEL = 'block text-[11px] font-semibold text-gray-600 uppercase mb-1';
 export default function DangerZoneTab() {
   const { addToast, bankAccountsList = [] } = useApp();
   const { data: lots = [] } = useLotInventory({ limit: 200 });
+  const [confirm, confirmDialog] = useConfirm();
 
   // ── Full reset ──
   const [resetConfirm, setResetConfirm] = useState('');
   const [resetBusy, setResetBusy] = useState(false);
   async function resetSystem() {
     if (resetConfirm !== 'RESET') { addToast('Type RESET to confirm', 'error'); return; }
-    if (!window.confirm('PERMANENTLY wipe ALL transactional data (lots, orders, batches, sales, finance)?\n\nMasters are kept and a backup schema is created, but this cannot be undone from the UI.\n\nProceed?')) return;
+    if (!await confirm({
+      title: 'Permanently wipe ALL transactional data?',
+      consequence: 'Lots, orders, batches, sales and the whole of finance go. Master data is kept and a backup schema is written, but this cannot be undone from the UI.',
+      confirmLabel: 'Wipe everything',
+      cancelLabel: 'Stop',
+    })) return;
     setResetBusy(true);
     try {
       const r = await adminApi.dangerReset({ confirm: 'RESET' });
@@ -72,7 +79,13 @@ export default function DangerZoneTab() {
   async function deleteLot() {
     const blocked = lotImpact?.blockers?.length > 0;
     const lot = lots.find(l => String(l.id) === String(lotId));
-    if (!window.confirm(`Permanently delete lot ${lot?.lotNo || lotId}?${blocked ? '\n\nThis lot is in use:\n• ' + lotImpact.blockers.join('\n• ') + '\n\nForce delete anyway?' : ''}\n\nThis cannot be undone.`)) return;
+    if (!await confirm({
+      title: `Permanently delete lot ${lot?.lotNo || lotId}?`,
+      consequence: blocked
+        ? `This lot is in use: ${lotImpact.blockers.join('; ')}. Deleting it forces past those references. This cannot be undone.`
+        : 'Its inventory ledger rows go with it. This cannot be undone.',
+      confirmLabel: blocked ? 'Force delete' : 'Delete lot',
+    })) return;
     setLotBusy(true);
     try {
       await adminApi.dangerDeleteLot(lotId, blocked);
@@ -96,7 +109,11 @@ export default function DangerZoneTab() {
   }
   async function deleteTxn() {
     const tt = TXN_TYPES.find(t => t.value === txnType);
-    if (!window.confirm(`Permanently delete ${tt.label} #${txnId}?\n\n${tt.hint}.\n\nThis cannot be undone.`)) return;
+    if (!await confirm({
+      title: `Permanently delete ${tt.label} #${txnId}?`,
+      consequence: `This ${tt.hint}. It cannot be undone.`,
+      confirmLabel: 'Delete',
+    })) return;
     setTxnBusy(true);
     try {
       const r = await adminApi.dangerDeleteTxn(txnType, txnId);
@@ -116,7 +133,14 @@ export default function DangerZoneTab() {
   async function submitBalance() {
     if (!bankId || amount === '') { addToast('Pick an account and enter an amount', 'error'); return; }
     const acct = bankAccountsList.find(b => String(b.id) === String(bankId));
-    if (!window.confirm(`${mode === 'set' ? 'Set' : 'Add to'} ${acct?.name} balance: ${amount}?`)) return;
+    if (!await confirm({
+      title: `${mode === 'set' ? 'Set' : 'Adjust'} the balance on ${acct?.name || 'this account'}?`,
+      consequence: mode === 'set'
+        ? 'The account balance is overwritten with this figure and the difference is posted as an adjustment. Nothing reconciles it back to a bank statement.'
+        : 'This amount is posted to the account as a manual adjustment, outside any payment or receipt.',
+      amount: `Rs ${(Number(amount) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      confirmLabel: mode === 'set' ? 'Set balance' : 'Post adjustment',
+    })) return;
     setBankBusy(true);
     try {
       const r = await adminApi.dangerAdjustBalance(bankId, { mode, amount: Number(amount), reason });
@@ -246,6 +270,7 @@ export default function DangerZoneTab() {
           </button>
         </div>
       </div>
+      {confirmDialog}
     </div>
   );
 }
