@@ -81,7 +81,7 @@ function usePayExpense() {
 const remainingOf = (e) => Math.round(parseFloat(e?.outstanding_pkr ?? e?.amount_pkr ?? e?.amount) || 0);
 const mkPayForm = (e) => ({
   amount: e ? String(remainingOf(e)) : '',
-  bank_account_id: '', payment_method: 'bank', payment_reference: '',
+  bank_account_id: '', payment_method: 'bank_transfer', payment_reference: '',
   due_date: '', paid_date: new Date().toISOString().split('T')[0], notes: '',
 });
 
@@ -248,7 +248,7 @@ export default function Expenses() {
     expense_date: new Date().toISOString().split('T')[0], due_date: '',
     invoice_reference: '', description: '',
     batch_id: '', order_id: '', owner_name: '',
-    pay_now: false, bank_account_id: '', payment_method: 'bank',
+    pay_now: false, bank_account_id: '', payment_method: 'bank_transfer',
   };
   const [form, setForm] = useState(initForm);
 
@@ -529,6 +529,7 @@ export default function Expenses() {
                 <Row label="Linked to" value={e.batch_no || e.order_no} />
                 <Row label="Payment status" value={e.payment_status} />
                 {e.payment_status === 'Paid' && (() => {
+                  // 'bank' is kept for rows written before migration 313 normalised them.
                   const method = { cash: 'Cash', bank: 'Bank Transfer', bank_transfer: 'Bank Transfer', cheque: 'Cheque', online: 'Online' }[e.payment_method] || e.payment_method;
                   const where = e.bank_type === 'cash' ? (e.bank_name || 'Cash') : (e.bank_name || (e.payment_method === 'cash' ? 'Cash (in hand)' : '—'));
                   return (
@@ -601,7 +602,7 @@ export default function Expenses() {
                 <select value={payForm.payment_method}
                   onChange={e => { const m = e.target.value; setPayForm(p => ({ ...p, payment_method: m, bank_account_id: (m === 'cash' || m === 'cheque') ? '' : p.bank_account_id })); }}
                   className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                  <option value="bank">Bank Transfer</option>
+                  <option value="bank_transfer">Bank Transfer</option>
                   <option value="cheque">Cheque</option>
                   <option value="cash">Cash</option>
                   <option value="online">Online</option>
@@ -860,7 +861,7 @@ function ExpenseForm({
               <label className="block text-[11px] text-gray-500 mb-1">Method</label>
               <select value={form.payment_method} onChange={e => setF('payment_method', e.target.value)}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none bg-white">
-                <option value="bank">Bank Transfer</option>
+                <option value="bank_transfer">Bank Transfer</option>
                 <option value="cash">Cash</option>
                 <option value="cheque">Cheque</option>
                 <option value="online">Online</option>

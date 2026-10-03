@@ -3,6 +3,7 @@ const { NotFoundError, ValidationError } = require('../../shared/errors');
 const { nextDocNo } = require('../../utils/docNumber');
 const accountingService = require('../accounting/accounting.service');
 const { resolveCashAccountId } = require('../../shared/cashAccounts');
+const { normalizePaymentMethod } = require('../../shared/constants/paymentMethods');
 
 // Settlement journal posted when an expense is PAID: DR Supplier Payable (2010)
 // CR Cash & Bank (1000). The obligation was booked at create (CR 2010 via the
@@ -150,7 +151,7 @@ const expensesService = {
         payment_status: pay_now ? 'Paid' : 'Pending',
         bank_account_id: pay_now ? resolvedAccountId : null,
         paid_date: pay_now ? expense_date : null,
-        payment_method: pay_now ? (payment_method || 'bank') : null,
+        payment_method: pay_now ? normalizePaymentMethod(payment_method) : null,
         payment_reference: pay_now ? (payment_reference || null) : null,
         created_by: userId,
       }).returning('*');
@@ -230,10 +231,11 @@ const expensesService = {
       if (pay_now) {
         const payDate = (expense_date instanceof Date ? expense_date.toISOString().slice(0, 10) : expense_date) || new Date().toISOString().split('T')[0];
         const paymentNo = await nextDocNo(trx, { table: 'payments', column: 'payment_no', prefix: 'EXP-PAY-', pad: 0 });
-        // payments.payment_method is constrained to the canonical set
+        // Canonical on BOTH columns. This used to normalise only the payments
+        // row, leaving business_expenses holding 'bank' for the same payment.
         // (cash/bank_transfer/cheque/...); the UI shorthand 'bank' maps to
         // 'bank_transfer' so a bank-paid expense doesn't violate the CHECK.
-        const payMethod = (payment_method === 'bank' || !payment_method) ? 'bank_transfer' : payment_method;
+        const payMethod = normalizePaymentMethod(payment_method);
         await trx('payments').insert({
           payment_no: paymentNo,
           type: 'payment', amount: amountPkr, currency: 'PKR', fx_rate: 1, base_amount_pkr: amountPkr,
@@ -488,7 +490,8 @@ const expensesService = {
         await trx('payments').insert({
           payment_no: await nextDocNo(trx, { table: 'payments', column: 'payment_no', prefix: 'EXP-PAY-', pad: 0 }),
           type: 'payment', amount: payAmt, currency: 'PKR', fx_rate: 1, base_amount_pkr: payAmt,
-          payment_method, bank_account_id: bank_account_id || null, bank_reference: payment_reference || null,
+          payment_method: normalizePaymentMethod(payment_method), bank_account_id: bank_account_id || null,
+          bank_reference: payment_reference || null,
           due_date: due_date || null, cleared: false,
           linked_payable_id: payable ? payable.id : null,
           source_table: 'business_expenses', source_id: parseInt(id, 10), payment_date: payDate,
@@ -501,13 +504,11 @@ const expensesService = {
       // Cash with no explicit account → the paying entity's cash float (Mill Cash
       // for mill expenses, Office Petty Cash for Head Office / general).
       const acctId = bank_account_id || (payment_method === 'cash' ? await resolveCashAccountId(trx, { entity: expense.expense_type || 'general' }) : null);
-      // payments.payment_method is constrained to the canonical set; map the UI
-      // shorthand 'bank' → 'bank_transfer' so a bank settlement doesn't 500.
-      const payMethod = (payment_method === 'bank' || !payment_method) ? 'bank_transfer' : payment_method;
+      const payMethod = normalizePaymentMethod(payment_method);
       const [updated] = await trx('business_expenses').where('id', id).update({
         payment_status: fullyPaid ? 'Paid' : 'Partial',
         bank_account_id: acctId,
-        payment_method: payment_method || 'bank',
+        payment_method: payMethod,
         payment_reference: payment_reference || null,
         paid_date: payDate,
         updated_at: trx.fn.now(),
