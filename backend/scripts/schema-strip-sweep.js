@@ -189,3 +189,33 @@ for (const f of findings) {
 }
 console.log(`\n=== still blind (handler body not located): ${blind.length} ===`);
 blind.forEach((b) => console.log('  ' + b));
+
+// ── Exit code, so CI can gate on this ──
+// A finding means a controller reads a body field its Joi schema does not
+// declare, and validate() runs with stripUnknown — so the field is deleted
+// before the handler sees it and the feature ships INERT. Nothing fails, no test
+// breaks, and it surfaces weeks later as "that setting doesn't save".
+//
+// `blind` is NOT a failure: those are routes whose handler body this script
+// cannot locate (an inline handler, or a name defined twice). It reports them so
+// the gap is visible rather than silently counted as clean.
+//
+// ALLOWED is for a field a reviewer has confirmed is a false positive — the
+// handler-name index matches by function name, so an unrelated `create()` in
+// another module can be attributed to the wrong schema. Each entry needs the
+// reason it is safe, or it is just a way of hiding a real bug.
+const ALLOWED = new Set([
+  // printedBags.controller create() reads order_id; the sweep attributes it to
+  // createExportOrder because both handlers are named `create`. The printed-bag
+  // route has its own schema and takes order_id from the URL.
+  'createExportOrder:order_id',
+]);
+const real = findings.flatMap((f) => f.missing
+  .filter((m) => !ALLOWED.has(`${f.schema}:${m}`))
+  .map((m) => `${f.schema}:${m}`));
+if (real.length) {
+  console.error(`\nFAIL: ${real.length} field(s) a controller reads but Joi strips: ${real.join(', ')}`);
+  console.error('Declare each in backend/src/middleware/schemas.js, or add it to ALLOWED in this script with the reason it is safe.');
+  process.exit(1);
+}
+console.log('\nOK: every field a validated handler reads is declared in its schema.');

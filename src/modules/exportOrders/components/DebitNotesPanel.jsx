@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { FileWarning, Plus, Loader2, Ban } from 'lucide-react';
 import SlideDrawer from '../../../components/SlideDrawer';
+import useConfirm from '../../../hooks/useConfirm';
 import { useDebitNotes, useIssueDebitNote, useCancelDebitNote } from '../../../api/queries';
 
 // Freight escalation debit notes.
@@ -31,6 +32,7 @@ export default function DebitNotesPanel({ order, addToast, canIssue = true }) {
   const issue = useIssueDebitNote();
   const cancel = useCancelDebitNote();
   const [open, setOpen] = useState(false);
+  const [confirm, confirmDialog] = useConfirm();
 
   const currency = order?.currency || 'USD';
   const blank = {
@@ -82,10 +84,17 @@ export default function DebitNotesPanel({ order, addToast, canIssue = true }) {
   }
 
   async function doCancel(note) {
-    const reason = window.prompt(`Cancel ${note.debit_note_no}? This withdraws the claim and reverses it in the ledger.\n\nReason (optional):`);
-    if (reason === null) return;      // dismissed, not confirmed
+    const ok = await confirm({
+      title: `Cancel ${note.debit_note_no}?`,
+      consequence: 'The claim is withdrawn, taken off the order balance, and reversed in the ledger by a signed delta journal.',
+      amount: money(note.amount, note.currency),
+      reason: 'optional',
+      confirmLabel: 'Cancel debit note',
+      cancelLabel: 'Keep it',
+    });
+    if (!ok) return;
     try {
-      await cancel.mutateAsync({ id: orderId, noteId: note.id, data: { reason } });
+      await cancel.mutateAsync({ id: orderId, noteId: note.id, data: { reason: ok.reason || null } });
       addToast?.(`${note.debit_note_no} cancelled`, 'success');
     } catch (err) {
       addToast?.(err?.data?.errors?.[0]?.message || err?.data?.message || err.message || 'Failed to cancel', 'error');
@@ -245,6 +254,7 @@ export default function DebitNotesPanel({ order, addToast, canIssue = true }) {
           </div>
         </div>
       </SlideDrawer>
+      {confirmDialog}
     </div>
   );
 }

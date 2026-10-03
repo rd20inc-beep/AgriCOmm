@@ -46,6 +46,7 @@ import TransferFundsDrawer from '../../finance/components/TransferFundsDrawer';
 import AnomalyWatchCard from '../../ai/components/AnomalyWatchCard';
 import { favStar } from '../../../shared/utils/favorites';
 import { valueInventory } from '../utils/inventoryValue';
+import useConfirm from '../../../hooks/useConfirm';
 
 const PKR = (v) => 'Rs ' + (v || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtDate = (d) => {
@@ -450,6 +451,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
   const DEFAULT_PRICES = { finished: cp.finished, broken: cp.broken, bran: cp.bran, husk: cp.husk };
   const batchPrice = (b, product) => b[`${product}PricePerMT`] || DEFAULT_PRICES[product];
   const { data: directInventory = [] } = useInventory({});
+  const [confirm, confirmDialog] = useConfirm();
   // THE BOOKS. The cards below this row are derived from milling batches, which
   // only count once a batch is Completed — so with a batch still pending, they
   // reported Revenue 0 and a loss equal to the month's expenses while real sales
@@ -681,9 +683,16 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
     } catch (e) { if (e?.message !== 'Owner authorization cancelled') addToast(e?.response?.data?.message || e?.message || 'Could not approve the advance.', 'error'); }
   }
   async function handleRejectAdvance(a) {
-    const reason = window.prompt(`Reject the advance request for ${a.workerName}? Optional reason:`);
-    if (reason === null) return;
-    try { await rejectAdvanceMut.mutateAsync({ id: a.id, data: { reason } }); addToast('Advance request rejected', 'success'); }
+    const ok = await confirm({
+      title: `Reject the advance request for ${a.workerName}?`,
+      consequence: 'The request is closed as rejected. Nothing is paid and no recovery schedule is created.',
+      amount: PKR(a.amount),
+      reason: 'optional',
+      confirmLabel: 'Reject request',
+      cancelLabel: 'Go back',
+    });
+    if (!ok) return;
+    try { await rejectAdvanceMut.mutateAsync({ id: a.id, data: { reason: ok.reason || null } }); addToast('Advance request rejected', 'success'); }
     catch (e) { addToast(e?.response?.data?.message || e?.message || 'Could not reject the advance.', 'error'); }
   }
   async function handlePayAdvance(a) {
@@ -3139,6 +3148,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
 
       {/* Record a mill-store / consumables purchase (bags, fuel, …). */}
       <NewPurchaseDrawer open={showNewPurchase} onClose={() => setShowNewPurchase(false)} />
+      {confirmDialog}
     </div>
   );
 }
@@ -4912,6 +4922,7 @@ function FinalSettlementDrawer({ worker, bankAccounts = [], company, onClose, ad
   const { data: calc, isLoading } = useFinalSettlement(worker.id);
   const finalizeMut = useFinalizeSettlement();
   const payBanks = (bankAccounts || []).filter((a) => a.type !== 'cash');
+  const [confirm, confirmDialog] = useConfirm();
   const [form, setForm] = useState(null);
   useEffect(() => {
     if (calc) setForm({
@@ -4926,7 +4937,12 @@ function FinalSettlementDrawer({ worker, bankAccounts = [], company, onClose, ad
 
   async function finalize() {
     if (form.pay_method === 'bank' && !form.bank_account_id) { addToast('Select a bank account', 'error'); return; }
-    if (!window.confirm(`Pay ${PKR(net)} and deactivate ${worker.name}? This closes their employment.`)) return;
+    if (!await confirm({
+      title: `Pay the final settlement and deactivate ${worker.name}?`,
+      consequence: 'The net is paid out (DR 6135 / CR Cash & Bank), the outstanding advances are recovered, the last working day is set and the employee is deactivated.',
+      amount: PKR(net),
+      confirmLabel: 'Pay & close employment',
+    })) return;
     try {
       const res = await finalizeMut.mutateAsync({ workerId: worker.id, data: { ...form, bank_account_id: form.pay_method === 'bank' ? Number(form.bank_account_id) : null, breakdown: { leaveLines: calc.leaveLines } } });
       const s = res?.data || res;
@@ -4937,6 +4953,7 @@ function FinalSettlementDrawer({ worker, bankAccounts = [], company, onClose, ad
   }
 
   return (
+    <>
     <SlideDrawer open onClose={onClose} title="Final settlement" subtitle={`End-of-service payout for ${worker.name}`} icon={LogOut} size="lg"
       footer={form && (
         <div className="flex items-center justify-between gap-2">
@@ -4984,6 +5001,8 @@ function FinalSettlementDrawer({ worker, bankAccounts = [], company, onClose, ad
         </div>
       )}
     </SlideDrawer>
+    {confirmDialog}
+    </>
   );
 }
 function Field({ label, value, onChange, hint }) {

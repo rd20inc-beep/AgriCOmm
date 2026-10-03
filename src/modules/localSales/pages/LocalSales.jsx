@@ -21,6 +21,7 @@ import { toKg, fromKg, rateToPerKg, allEquivalents, allRateEquivalents, UNITS } 
 import { downloadCSV } from '../../../utils/csvExport';
 import { lotCategory, CAT_ORDER, CAT_COLOR } from '../../../utils/lotCategory';
 import { favStar } from '../../../shared/utils/favorites';
+import useConfirm from '../../../hooks/useConfirm';
 
 function fmtPKR(v) { return 'Rs ' + (parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 
@@ -65,14 +66,22 @@ export default function LocalSales() {
   const { data: pendingSales = [] } = usePendingLocalSales(canConfirm);
   const confirmSaleMut = useConfirmLocalSale();
   const rejectSaleMut = useRejectLocalSale();
+  const [confirm, confirmDialog] = useConfirm();
   async function handleConfirmSale(g) {
     try { await confirmSaleMut.mutateAsync({ id: g.id }); addToast(`Sale ${g.saleGroupNo || ''} confirmed — stock & revenue posted`, 'success'); refetch(); }
     catch (e) { addToast(e?.response?.data?.message || e?.message || 'Could not confirm the sale.', 'error'); }
   }
   async function handleRejectSale(g) {
-    const reason = window.prompt(`Reject sale ${g.saleGroupNo || ''}? Optional reason:`);
-    if (reason === null) return;
-    try { await rejectSaleMut.mutateAsync({ id: g.id, data: { reason } }); addToast('Sale rejected', 'success'); refetch(); }
+    const ok = await confirm({
+      title: `Reject sale ${g.saleGroupNo || ''}?`.trim(),
+      consequence: 'The sale is closed as rejected. No stock is deducted and no revenue is posted.',
+      amount: g.totalAmount != null ? fmtPKR(g.totalAmount) : undefined,
+      reason: 'optional',
+      confirmLabel: 'Reject sale',
+      cancelLabel: 'Go back',
+    });
+    if (!ok) return;
+    try { await rejectSaleMut.mutateAsync({ id: g.id, data: { reason: ok.reason || null } }); addToast('Sale rejected', 'success'); refetch(); }
     catch (e) { addToast(e?.response?.data?.message || e?.message || 'Could not reject the sale.', 'error'); }
   }
   const [expandedGroups, setExpandedGroups] = useState(() => new Set());
@@ -511,6 +520,7 @@ export default function LocalSales() {
           <p className="text-[11px] text-gray-400">Cash and bank receipts update the account balance.</p>
         </div>
       </SlideDrawer>
+      {confirmDialog}
     </div>
   );
 }

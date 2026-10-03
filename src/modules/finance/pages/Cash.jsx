@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import useConfirm from '../../../hooks/useConfirm';
 import { Landmark, Wallet, TrendingUp, TrendingDown, Activity, Printer, ArrowLeftRight, Trash2, Check } from 'lucide-react';
 import { FinanceKPI, FinanceTable, FinanceChart } from '../../../components/finance';
 import { useBankAccounts, useBankTransactions, useFundTransfers, useDeleteFundTransfer, useAcceptFundTransfer } from '../../../api/queries';
@@ -28,8 +29,16 @@ export default function Cash() {
   const delTransfer = useDeleteFundTransfer();
   const acceptTransfer = useAcceptFundTransfer();
   const { requestOwnerApproval } = useOwnerAuth();
+  const [confirm, confirmDialog] = useConfirm();
   async function handleDeleteTransfer(t) {
-    if (!window.confirm(`Reverse transfer ${t.transferNo}? This restores account balances and removes its GL entries.`)) return;
+    // A reversal that restores two account balances should state the figure it
+    // moves back, which window.confirm could not.
+    if (!await confirm({
+      title: `Reverse transfer ${t.transferNo}?`,
+      consequence: 'Both account balances are restored and the transfer\u2019s GL entries are removed.',
+      amount: t.amount != null ? `Rs ${Math.round(parseFloat(t.amount) || 0).toLocaleString()}` : undefined,
+      confirmLabel: 'Reverse transfer',
+    })) return;
     try { await delTransfer.mutateAsync(t.id); } catch (e) { window.alert(e?.response?.data?.message || e?.message || 'Could not reverse the transfer.'); }
   }
   async function handleAcceptTransfer(t) {
@@ -289,6 +298,7 @@ export default function Cash() {
       )}
       </div>{/* /.print-report */}
       <TransferFundsDrawer open={showTransfer} onClose={() => setShowTransfer(false)} defaultDirection="ho_to_mill" />
+      {confirmDialog}
     </div>
   );
 }

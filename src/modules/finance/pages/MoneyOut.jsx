@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import useConfirm from '../../../hooks/useConfirm';
 import OrderRefLink from '../../../shared/components/OrderRefLink';
 import { ArrowUpRight, AlertTriangle, CheckCircle, Clock, Eye, X, DollarSign, Landmark, Printer } from 'lucide-react';
 import { FinanceKPI, FinanceTable, FinanceFilterBar } from '../../../components/finance';
@@ -52,15 +53,25 @@ export default function MoneyOut() {
   const { data: receivables = [] } = useReceivables();
   const recordPaymentMut = useRecordPayment();
   const reversePaymentMut = useReversePayment();
+  // Was window.prompt, which could show neither the amount being reversed nor
+  // what the reversal unwinds — on an action that restores a bank balance and
+  // reverses GL entries.
+  const [confirm, confirmDialog] = useConfirm();
 
   // #14 — reverse an incorrect payment (finance): confirm, capture a reason,
   // then restore the payable / bank / GL and stamp the payment Reversed.
   async function handleReversePayment(p) {
     if (!p?.id) { addToast('This payment cannot be reversed (no id captured).', 'error'); return; }
-    const reason = window.prompt('Reverse this payment? Enter a reason (optional):', '');
-    if (reason === null) return; // cancelled
+    const ok = await confirm({
+      title: `Reverse payment ${p.paymentNo || p.payment_no || ''}?`.trim(),
+      consequence: 'The payable goes back to outstanding, the bank balance is restored, and the ledger entries are reversed.',
+      amount: p.amount != null ? fmtPKR(p.amount) : undefined,
+      reason: 'optional',
+      confirmLabel: 'Reverse payment',
+    });
+    if (!ok) return;
     try {
-      await reversePaymentMut.mutateAsync({ id: p.id, reason: reason || null });
+      await reversePaymentMut.mutateAsync({ id: p.id, reason: ok.reason || null });
       addToast('Payment reversed — payable, bank and ledger restored.', 'success');
     } catch (err) {
       addToast(err?.data?.message || err?.message || 'Reversal failed', 'error');
@@ -494,6 +505,8 @@ export default function MoneyOut() {
           </div>
         </div>
       )}
+
+      {confirmDialog}
     </div>
   );
 }

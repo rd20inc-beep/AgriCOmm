@@ -24,6 +24,11 @@ const TYPE_LABEL = {
 };
 // The order the mill thinks in: what the rice arrived in, then what it leaves in.
 const TYPE_ORDER = ['katta', 'pp_bag', 'master_bag', 'polythene', 'other'];
+// Only a katta or a P.P. bag can be RECEIVED. A master bag and a polythene sheet
+// are bought into store and only ever used — nothing frees them, because no rice
+// arrives in them. Offering them under Received would add stock nobody bought
+// and credit its cost against the batch, inventing both.
+const RECEIVABLE_TYPES = ['katta', 'pp_bag'];
 
 const inputCls = 'w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none';
 
@@ -113,6 +118,9 @@ export default function BatchPackagingPanel({ batchId, batchStatus, addToast }) 
       if (!r.mill_item_id) return `Line ${i + 1}: choose a packaging item.`;
       if (!(num(r.quantity) > 0)) return `Line ${i + 1}: enter how many.`;
       if (r.direction === 'received' && r.output_type) return `Line ${i + 1}: a received line is not against an output.`;
+      if (r.direction === 'received' && !RECEIVABLE_TYPES.includes(itemById[r.mill_item_id]?.pack_type)) {
+        return `Line ${i + 1}: ${itemById[r.mill_item_id]?.name || 'that item'} cannot be received — nothing frees it. Record it as used instead.`;
+      }
       return null;
     })
     .filter(Boolean);
@@ -139,7 +147,9 @@ export default function BatchPackagingPanel({ batchId, batchStatus, addToast }) 
   const picker = (idx, r) => (
     <select value={r.mill_item_id} onChange={(e) => set(idx, { mill_item_id: e.target.value, unit_cost_pkr: '' })} className={inputCls}>
       <option value="">Select packaging…</option>
-      {TYPE_ORDER.filter((t) => grouped[t]?.length).map((t) => (
+      {TYPE_ORDER
+        .filter((t) => (r.direction === 'received' ? RECEIVABLE_TYPES.includes(t) : true))
+        .filter((t) => grouped[t]?.length).map((t) => (
         <optgroup key={t} label={TYPE_LABEL[t]}>
           {grouped[t].map((it) => (
             <option key={it.id} value={it.id}>
@@ -169,8 +179,8 @@ export default function BatchPackagingPanel({ batchId, batchStatus, addToast }) 
           {list.length === 0 && (
             <tr><td colSpan={direction === 'consumed' ? 7 : 6} className="colspan-empty py-2 text-xs text-gray-400">
               {direction === 'received'
-                ? 'Nothing recorded. Add the empty bags this batch freed — they go into store stock.'
-                : 'Nothing recorded. Add the bags drawn from store to pack this batch.'}
+                ? 'Nothing recorded. Add the katta and P.P. bags this batch freed — they go into store stock.'
+                : 'Nothing recorded. Add the bags, masters and polythene drawn from store to pack this batch.'}
             </td></tr>
           )}
           {list.map((r) => {
@@ -240,7 +250,7 @@ export default function BatchPackagingPanel({ batchId, batchStatus, addToast }) 
 
       <div className="border border-gray-200 rounded-xl p-4">
         <div className="flex items-center justify-between mb-2">
-          <h4 className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Received — freed into store</h4>
+          <h4 className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Received — katta &amp; P.P. bags freed into store</h4>
           <button onClick={() => addRow('received')} disabled={locked} className="text-xs font-medium text-blue-600 hover:text-blue-700 inline-flex items-center gap-1 disabled:opacity-40">
             <Plus className="w-3.5 h-3.5" /> Add
           </button>
@@ -263,7 +273,7 @@ export default function BatchPackagingPanel({ batchId, batchStatus, addToast }) 
       <div className="bg-gray-50 border border-gray-200 rounded-xl p-4">
         <h4 className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Effect on this batch&rsquo;s cost</h4>
         <div className="space-y-1 text-sm">
-          <div className="flex justify-between"><span className="text-gray-600">Less: packaging received into store</span><span className="font-medium text-emerald-700">− {rs(receivedCost)}</span></div>
+          <div className="flex justify-between"><span className="text-gray-600">Less: katta &amp; P.P. bags freed into store</span><span className="font-medium text-emerald-700">− {rs(receivedCost)}</span></div>
           <div className="flex justify-between"><span className="text-gray-600">Add: katta used on by-products</span><span className="font-medium text-red-600">+ {rs(byproductKattaCost)}</span></div>
           <div className="flex justify-between border-t border-gray-200 pt-1 font-semibold">
             <span className="text-gray-700">Net adjustment</span>
@@ -271,9 +281,10 @@ export default function BatchPackagingPanel({ batchId, batchStatus, addToast }) 
           </div>
         </div>
         <p className="text-[11px] text-gray-500 mt-2 leading-snug">
-          Bags received are stock the mill now holds, so their cost leaves this batch. Katta spent
-          bagging by-products is gone, so it stays in. Bags used on the finished rice are part of
-          what was packed and are already in the packing cost.
+          Katta and P.P. bags freed are stock the mill now holds, so their cost leaves this batch.
+          Katta spent bagging by-products is gone, so it stays in. Bags used on the finished rice
+          are part of what was packed and are already in the packing cost. Masters and polythene are
+          only ever used, never freed, so they are not credited here.
         </p>
       </div>
     </div>
