@@ -15,12 +15,24 @@ const db = require('../../config/database');
 const config = require('../../config');
 const ai = require('./ai.service');
 const accountingService = require('../accounting/accounting.service');
-const { denyRoles } = require('../../middleware/rbac');
+const { denyRoles, authorizeAny, userHasPermission } = require('../../middleware/rbac');
+const { allowedTables, referencesBlocked } = require('./ai.access');
 
 // The free-form NL→SQL query (and the ledger/anomaly endpoints) can surface
 // finance data, so the finance-free Mill Operator is blocked. Additive — only
 // this role is affected; /status stays open so the UI can show its state.
 const noFinanceForOperator = denyRoles('Mill Operator');
+// The query, ledger-draft and anomaly endpoints read costs and money, so they
+// need a permission that already shows those figures elsewhere.
+const canUseAi = authorizeAny(['reports', 'view_cost'], ['finance', 'view']);
+
+// Which permission-gated table groups this user may see (see ai.access.js).
+async function tableAccess(req) {
+  return {
+    payroll: await userHasPermission(req, 'payroll', 'view'),
+    finance: await userHasPermission(req, 'finance', 'view'),
+  };
+}
 
 const OFF = { success: true, data: { aiEnabled: false, message: 'AI is off. Set OPENAI_API_KEY in the server environment to enable AI features.' } };
 
@@ -88,19 +100,20 @@ const CONVENTIONS = [
   "- Text/status values are Capitalized (e.g. 'Completed', 'Posted', 'Available'); match names with ILIKE '%term%'.",
 ].join('\n');
 
-let _schema = null;
-async function schemaContext() {
-  if (_schema) return _schema;
-  const names = Object.keys(CURATED);
-  const rows = await db.raw(
-    `SELECT table_name, column_name FROM information_schema.columns
-     WHERE table_schema = 'public' AND table_name = ANY(?)
-     ORDER BY table_name, ordinal_position`, [names]);
-  const byTable = {};
-  for (const r of rows.rows) (byTable[r.table_name] = byTable[r.table_name] || []).push(r.column_name);
-  const lines = names.filter((t) => byTable[t]).map((t) => `${t}(${byTable[t].join(', ')})  -- ${CURATED[t]}`);
-  _schema = `${CONVENTIONS}\n\nTABLES (table(columns) -- purpose):\n${lines.join('\n')}`;
-  return _schema;
+// Columns are read once and cached; the table list is filtered per user.
+let _columns = null;
+async function schemaContext(access) {
+  if (!_columns) {
+    const rows = await db.raw(
+      `SELECT table_name, column_name FROM information_schema.columns
+       WHERE table_schema = 'public' AND table_name = ANY(?)
+       ORDER BY table_name, ordinal_position`, [Object.keys(CURATED)]);
+    _columns = {};
+    for (const r of rows.rows) (_columns[r.table_name] = _columns[r.table_name] || []).push(r.column_name);
+  }
+  const names = allowedTables(Object.keys(CURATED), access);
+  const lines = names.filter((t) => _columns[t]).map((t) => `${t}(${_columns[t].join(', ')})  -- ${CURATED[t]}`);
+  return `${CONVENTIONS}\n\nTABLES (table(columns) -- purpose):\n${lines.join('\n')}`;
 }
 
 const WRITE_RE = /\b(insert|update|delete|drop|alter|truncate|create|grant|revoke|comment|copy|merge|call|do)\b/i;
@@ -113,13 +126,14 @@ const SENSITIVE_TABLES = ['users', 'password_reset_tokens', 'user_preferences', 
 const SENSITIVE_RE = new RegExp(`\\b(${SENSITIVE_TABLES.join('|')})\\b`, 'i');
 
 // ── 1) Natural-language report query ──
-router.post('/query', noFinanceForOperator, async (req, res) => {
+router.post('/query', noFinanceForOperator, canUseAi, async (req, res) => {
   try {
     if (!ai.enabled()) return res.json(OFF);
     const question = String(req.body.question || '').trim();
     if (!question) return res.status(400).json({ success: false, message: 'A question is required.' });
 
-    const schema = await schemaContext();
+    const access = await tableAccess(req);
+    const schema = await schemaContext(access);
     const out = await ai.complete({
       system: 'You write PostgreSQL for a rice-mill ERP. Use ONLY the tables and columns given, and follow the stated CONVENTIONS exactly (units, PKR vs USD, the Posted-journal rule). Output JSON only — no prose, no markdown.',
       prompt: `${schema}\n\nUser question: "${question}"\n\n`
@@ -138,6 +152,8 @@ router.post('/query', noFinanceForOperator, async (req, res) => {
     if (sql.includes(';')) return res.status(400).json({ success: false, message: 'Only a single read-only statement is allowed.', data: { sql } });
     if (WRITE_RE.test(sql) || DANGER_RE.test(sql)) return res.status(400).json({ success: false, message: 'Only plain read-only queries are allowed (no writes, system functions, or catalog access).', data: { sql } });
     if (SENSITIVE_RE.test(sql)) return res.status(400).json({ success: false, message: 'That query touches restricted data (users, roles, or credentials) and was blocked.', data: { sql } });
+    const blocked = referencesBlocked(sql, access);
+    if (blocked) return res.status(403).json({ success: false, message: `That query reads ${blocked}, which your role cannot view.`, data: { sql } });
     // Enforce a sane row cap: add LIMIT when missing, clamp an over-large one.
     const limitMatch = sql.match(/\blimit\s+(\d+)/i);
     if (!limitMatch) sql += ' LIMIT 200';
@@ -162,7 +178,7 @@ router.post('/query', noFinanceForOperator, async (req, res) => {
 });
 
 // ── 2) Draft a customer / supplier email from their ledger ──
-router.post('/draft', noFinanceForOperator, async (req, res) => {
+router.post('/draft', noFinanceForOperator, canUseAi, async (req, res) => {
   try {
     if (!ai.enabled()) return res.json(OFF);
     const { party_type, party_id, kind = 'statement', instructions } = req.body;
@@ -195,18 +211,20 @@ router.post('/draft', noFinanceForOperator, async (req, res) => {
 });
 
 // ── 3) Anomaly detection — gather signals, let AI flag genuine issues ──
-async function gatherSignals() {
+// Signals from a table group the user cannot view are left out (same rule as /query).
+async function gatherSignals(access) {
   const safe = async (fn, dflt) => { try { return await fn(); } catch { return dflt; } };
+  const ifAllowed = (ok, fn, dflt) => (ok ? safe(fn, dflt) : dflt);
   const todayIso = new Date().toISOString().slice(0, 10);
 
-  const tb = await safe(async () => {
+  const tb = await ifAllowed(access.finance, async () => {
     const r = await db('journal_lines as l').join('journal_entries as j', 'l.journal_id', 'j.id')
       .where('j.status', 'Posted').sum('l.debit as dr').sum('l.credit as cr').first();
     const dr = parseFloat(r.dr) || 0, cr = parseFloat(r.cr) || 0;
     return { total_debit: dr, total_credit: cr, difference: Math.round((dr - cr) * 100) / 100 };
   }, null);
 
-  const unbalancedJournals = await safe(async () => {
+  const unbalancedJournals = await ifAllowed(access.finance, async () => {
     const rows = await db('journal_lines as l').join('journal_entries as j', 'l.journal_id', 'j.id')
       .where('j.status', 'Posted').groupBy('j.journal_no')
       .havingRaw('ROUND(SUM(l.debit) - SUM(l.credit), 2) <> 0').select('j.journal_no');
@@ -217,9 +235,9 @@ async function gatherSignals() {
     .where((q) => q.where('qty', '<', 0).orWhere('net_weight_kg', '<', 0))
     .select('lot_no', 'qty', 'net_weight_kg').limit(15), []);
 
-  const negativeBanks = await safe(() => db('bank_accounts').where('current_balance', '<', 0).select('name', 'current_balance'), []);
+  const negativeBanks = await ifAllowed(access.finance, () => db('bank_accounts').where('current_balance', '<', 0).select('name', 'current_balance'), []);
 
-  const recentPayrollRuns = await safe(() => db('mill_payroll_runs').orderBy('pay_date', 'desc').limit(6)
+  const recentPayrollRuns = await ifAllowed(access.payroll, () => db('mill_payroll_runs').orderBy('pay_date', 'desc').limit(6)
     .select('period', 'pay_date', 'net_total', 'employee_count'), []);
 
   const topRecentExpenses = await safe(() => db('business_expenses')
@@ -227,7 +245,7 @@ async function gatherSignals() {
     .orderBy('amount_pkr', 'desc').limit(10)
     .select('expense_no', 'category', 'amount_pkr', 'expense_date', 'description', 'vendor_name'), []);
 
-  const overduePayables = await safe(async () => {
+  const overduePayables = await ifAllowed(access.finance, async () => {
     const r = await db('payables').whereNotNull('due_date').where('due_date', '<', todayIso)
       .where('outstanding', '>', 0).count('id as n').sum('outstanding as total').first();
     return { count: parseInt(r.n) || 0, total: parseFloat(r.total) || 0 };
@@ -236,10 +254,10 @@ async function gatherSignals() {
   return { as_of: todayIso, trial_balance: tb, unbalanced_journals: unbalancedJournals, negative_stock: negativeStock, negative_bank_balances: negativeBanks, recent_payroll_runs: recentPayrollRuns, top_recent_expenses: topRecentExpenses, overdue_payables: overduePayables };
 }
 
-router.get('/anomalies', noFinanceForOperator, async (req, res) => {
+router.get('/anomalies', noFinanceForOperator, canUseAi, async (req, res) => {
   try {
     if (!ai.enabled()) return res.json(OFF);
-    const signals = await gatherSignals();
+    const signals = await gatherSignals(await tableAccess(req));
     const out = await ai.complete({
       system: 'You are a financial controller auditing a rice-mill ERP. Be precise and avoid false alarms. Output JSON only.',
       prompt: 'Review these signals and list only GENUINE anomalies that warrant a manager\'s attention '
