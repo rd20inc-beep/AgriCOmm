@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const authorize = require('../../middleware/rbac');
+const { authorizeRole } = require('../../middleware/rbac');
 const auditAction = require('../../middleware/audit');
 const ownerApproval = require('../../middleware/ownerApproval');
 const ctrl = require('./millStore.controller');
@@ -26,10 +27,15 @@ router.delete(
   auditAction('delete', 'mill_item', (req) => req.params.id),
   ctrl.deleteItem
 );
-// Direct, audit-logged stock set (no approval gate).
+// Stock write-offs and adjustments are approved by the Owner only (owner
+// decision 2026-10-05). authorizeRole has no bypass, so Super Admin is listed.
+const WRITE_OFF_APPROVERS = ['Owner', 'Super Admin'];
+
+// Direct, audit-logged stock set. It skips the approval queue, so it is an
+// Owner action — everyone else requests an adjustment instead.
 router.put(
   '/items/:id/stock',
-  authorize('mill_store', 'request_adjustment'),
+  authorizeRole(...WRITE_OFF_APPROVERS),
   auditAction('set_stock', 'mill_item', (req) => req.params.id),
   ctrl.setStock
 );
@@ -95,13 +101,13 @@ router.post(
 );
 router.put(
   '/adjustments/:id/approve',
-  authorize('mill_store', 'approve_adjustment'),
+  authorizeRole(...WRITE_OFF_APPROVERS),
   auditAction('approve', 'mill_stock_adjustment', (req) => req.params.id),
   ctrl.approveAdjustment
 );
 router.put(
   '/adjustments/:id/reject',
-  authorize('mill_store', 'approve_adjustment'),
+  authorizeRole(...WRITE_OFF_APPROVERS),
   auditAction('reject', 'mill_stock_adjustment', (req) => req.params.id),
   ctrl.rejectAdjustment
 );

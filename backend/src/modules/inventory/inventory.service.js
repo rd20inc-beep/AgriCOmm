@@ -4,6 +4,13 @@ const uc = require('../../services/unitConversion');
 // movement/posting function in this file — scoping a write would corrupt stock.
 const { applyWarehouseScope } = require('../../utils/warehouseScope');
 
+// An Error carrying the HTTP status the route should answer with.
+function httpError(status, message) {
+  const err = new Error(message);
+  err.status = status;
+  return err;
+}
+
 // =============================================================================
 // CANONICAL MOVEMENT TAXONOMY — Single source of truth for all stock movements
 // =============================================================================
@@ -347,8 +354,11 @@ const inventoryService = {
     const movementQtyKg = parsedQty;
     const direction = getMovementDirection(movementType);
 
-    // 1. Validate lot exists
-    const lot = await trx('inventory_lots').where('id', lotId).first();
+    // 1. Validate lot exists — and LOCK it. The lot row is rewritten below with
+    //    absolute qty values computed from this read, so two concurrent
+    //    movements on one lot must not both read the same starting qty (lost
+    //    update / oversell). postMovement always runs inside a transaction.
+    const lot = await trx('inventory_lots').where('id', lotId).forUpdate().first();
     if (!lot) {
       throw new Error(`Lot ${lotId} not found`);
     }
@@ -2151,11 +2161,24 @@ const inventoryService = {
   async approveStockAdjustment(trx, { adjustmentId, approverId }) {
     if (!trx) throw new Error('approveStockAdjustment requires a transaction');
 
-    const adj = await trx('stock_adjustments').where('id', adjustmentId).first();
-    if (!adj) throw new Error('Adjustment not found');
-    if (adj.approval_status !== 'pending_approval') throw new Error(`Cannot approve adjustment in status: ${adj.approval_status}`);
+    // Claim the row atomically: only a still-pending adjustment flips to
+    // approved, so a double click or two approvers cannot post it twice (the
+    // second finds nothing to claim). Rolled back with the movement on failure.
+    const [adj] = await trx('stock_adjustments')
+      .where({ id: adjustmentId, approval_status: 'pending_approval' })
+      .update({
+        approval_status: 'approved',
+        approved_by: approverId,
+        approved_at: trx.fn.now(),
+      })
+      .returning('*');
+    if (!adj) {
+      const existing = await trx('stock_adjustments').where('id', adjustmentId).first();
+      if (!existing) throw httpError(404, 'Adjustment not found');
+      throw httpError(409, `Cannot approve adjustment in status: ${existing.approval_status}`);
+    }
 
-    const lot = await trx('inventory_lots').where('id', adj.lot_id).first();
+    const lot = await trx('inventory_lots').where('id', adj.lot_id).forUpdate().first();
     if (!lot) throw new Error('Lot not found');
 
     const qtyKg = parseFloat(adj.quantity_kg);
@@ -2185,13 +2208,6 @@ const inventoryService = {
       });
     }
 
-    // Mark adjustment as approved
-    await trx('stock_adjustments').where('id', adjustmentId).update({
-      approval_status: 'approved',
-      approved_by: approverId,
-      approved_at: trx.fn.now(),
-    });
-
     return trx('stock_adjustments').where('id', adjustmentId).first();
   },
 
@@ -2200,13 +2216,23 @@ const inventoryService = {
    */
   async rejectStockAdjustment(trx, { adjustmentId, approverId, reason }) {
     const conn = trx || db;
-    await conn('stock_adjustments').where('id', adjustmentId).update({
-      approval_status: 'rejected',
-      approved_by: approverId,
-      approved_at: conn.fn ? conn.fn.now() : new Date(),
-      reason: reason || undefined,
-    });
-    return conn('stock_adjustments').where('id', adjustmentId).first();
+    // Only a pending adjustment can be rejected — an approved one has already
+    // moved stock, and rejecting it would only relabel a posted write-off.
+    const [row] = await conn('stock_adjustments')
+      .where({ id: adjustmentId, approval_status: 'pending_approval' })
+      .update({
+        approval_status: 'rejected',
+        approved_by: approverId,
+        approved_at: conn.fn ? conn.fn.now() : new Date(),
+        reason: reason || undefined,
+      })
+      .returning('*');
+    if (!row) {
+      const existing = await conn('stock_adjustments').where('id', adjustmentId).first();
+      if (!existing) throw httpError(404, 'Adjustment not found');
+      throw httpError(409, `Cannot reject adjustment in status: ${existing.approval_status}`);
+    }
+    return row;
   },
 
   /**

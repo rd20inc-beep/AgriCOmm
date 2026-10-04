@@ -229,18 +229,14 @@ const millStoreService = {
   },
 
   async approveAdjustment(id, userId) {
-    const adj = await repo.getAdjustmentById(id);
-    if (!adj) throw new NotFoundError('Adjustment not found.');
-    if (adj.status !== 'Pending') throw new ValidationError(`Cannot approve — status is ${adj.status}.`);
+    // The status check lives inside the transaction, on a locked row (see
+    // repo.approveAdjustment), so two approvals cannot both apply the delta.
     return db.transaction(async (trx) => {
       return repo.approveAdjustment(trx, id, userId);
     });
   },
 
   async rejectAdjustment(id, userId, rejectionReason) {
-    const adj = await repo.getAdjustmentById(id);
-    if (!adj) throw new NotFoundError('Adjustment not found.');
-    if (adj.status !== 'Pending') throw new ValidationError(`Cannot reject — status is ${adj.status}.`);
     if (!rejectionReason) throw new ValidationError('Rejection reason is required.');
     return repo.rejectAdjustment(id, userId, rejectionReason);
   },

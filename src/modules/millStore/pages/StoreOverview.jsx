@@ -339,6 +339,10 @@ function StockEditDrawer({ item, onClose }) {
   const setStock = useSetMillStock();
   const updateItem = useUpdateMillStoreItem();
   const [form, setForm] = useState(null);
+  // Setting on-hand directly skips the approval queue, so it is an Owner
+  // action (owner decision 2026-10-05); others request an adjustment.
+  const { user } = useAuth();
+  const canSetStock = ['Owner', 'Super Admin'].includes(user?.role);
 
   useEffect(() => {
     if (!item) { setForm(null); return; }
@@ -401,7 +405,7 @@ function StockEditDrawer({ item, onClose }) {
 
       if (Object.keys(patch).length) await updateItem.mutateAsync({ id: item.id, data: patch });
 
-      if (newQty !== Number(item.quantity_available)) {
+      if (canSetStock && newQty !== Number(item.quantity_available)) {
         await setStock.mutateAsync({ id: item.id, data: { quantity_available: newQty, reason: form.reason || null } });
       }
       addToast('Stock updated', 'success');
@@ -441,16 +445,22 @@ function StockEditDrawer({ item, onClose }) {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className={lbl}>On-hand ({form.unit})</label>
-              <input type="number" min="0" step="0.01" value={form.quantity} onChange={(e) => set('quantity', e.target.value)} className={inp} />
+              <input type="number" min="0" step="0.01" value={form.quantity} onChange={(e) => set('quantity', e.target.value)} disabled={!canSetStock} className={`${inp} disabled:bg-gray-50 disabled:text-gray-500`} />
             </div>
             <div>
               <label className={lbl}>Reorder level</label>
               <input type="number" min="0" step="0.01" value={form.reorder_level} onChange={(e) => set('reorder_level', e.target.value)} className={inp} />
             </div>
           </div>
-          <label className={`${lbl} mt-3`}>Reason for change (optional)</label>
-          <input value={form.reason} onChange={(e) => set('reason', e.target.value)} className={inp} placeholder="e.g. physical count correction" />
-          <p className="text-[11px] text-gray-400 mt-1">Sets stock directly — change is logged to the movement ledger.</p>
+          {canSetStock ? (
+            <>
+              <label className={`${lbl} mt-3`}>Reason for change (optional)</label>
+              <input value={form.reason} onChange={(e) => set('reason', e.target.value)} className={inp} placeholder="e.g. physical count correction" />
+              <p className="text-[11px] text-gray-400 mt-1">Sets stock directly — change is logged to the movement ledger.</p>
+            </>
+          ) : (
+            <p className="text-[11px] text-gray-400 mt-2">Only the Owner can set stock directly. To correct it, request a stock adjustment — the Owner approves it.</p>
+          )}
         </div>
 
         {/* Costing — what values this stock and what prices the purchase
