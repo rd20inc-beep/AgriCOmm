@@ -9,6 +9,7 @@ const workflowService = require('../../services/exportOrderWorkflowService');
 const { resolveShipmentField, resolveRequiredField } = require('./shipmentField');
 const { billableFreight, balanceExpectedFor, freightChanges } = require('./billableFreight');
 const debitNoteService = require('./debitNote.service');
+const { unwindOrderReceipts } = require('./unwindReceipts');
 const notificationService = require('../../services/notificationService');
 // #9-scoping: per-user warehouse restriction, applied to stock READ paths only
 // (the dispatch/reservation engine is never scoped).
@@ -1464,29 +1465,15 @@ const exportOrderController = {
           });
         }
 
-        // 3) Refund the cash actually banked for advance/balance receipts (mirror
-        //    the currency-aware credit used at receipt time), drop the bank trail,
-        //    then void the payment rows — the receipt is undone.
+        // 3) Refund the cash actually banked for CONFIRMED receipts (mirror the
+        //    currency-aware credit used at confirm time) and drop them; receipts
+        //    still pending Finance never touched a bank, so they are only marked
+        //    Rejected — see unwindReceipts.js.
         const recvIds = (await trx('receivables').where({ order_id: id }).select('id')).map((r) => r.id);
-        let payments = [];
+        let unwound = { refunded: 0, voided: 0 };
         if (recvIds.length) {
-          payments = await trx('payments').whereIn('linked_receivable_id', recvIds);
-          for (const p of payments) {
-            if (p.bank_account_id) {
-              const bank = await trx('bank_accounts').where({ id: p.bank_account_id }).first();
-              const debit = bank && bank.currency === p.currency
-                ? (parseFloat(p.amount) || 0)
-                : (parseFloat(p.base_amount_pkr) || 0);
-              if (debit > 0) {
-                await trx('bank_accounts').where({ id: p.bank_account_id }).decrement('current_balance', debit);
-              }
-            }
-          }
-          const payIds = payments.map((p) => p.id);
-          if (payIds.length) {
-            await trx('bank_transactions').whereIn('linked_payment_id', payIds).del();
-            await trx('payments').whereIn('id', payIds).del();
-          }
+          const payments = await trx('payments').whereIn('linked_receivable_id', recvIds);
+          unwound = await unwindOrderReceipts(trx, payments, { orderNo: order.order_no, userId: req.user.id });
         }
 
         // 4) Write off the receivables (constraint has no 'Cancelled' status).
@@ -1511,7 +1498,8 @@ const exportOrderController = {
           orderNo: order.order_no,
           freedReservations: reservations.length,
           reversedJournals: journals.length,
-          refundedPayments: payments.length,
+          refundedPayments: unwound.refunded,
+          voidedPendingReceipts: unwound.voided,
         };
       });
 
@@ -1519,7 +1507,7 @@ const exportOrderController = {
       return res.json({
         success: true,
         data: result,
-        message: `Export order ${result.orderNo} cancelled — ${result.freedReservations} reservation(s) freed, ${result.reversedJournals} journal(s) reversed, ${result.refundedPayments} payment(s) refunded.`,
+        message: `Export order ${result.orderNo} cancelled — ${result.freedReservations} reservation(s) freed, ${result.reversedJournals} journal(s) reversed, ${result.refundedPayments} payment(s) refunded${result.voidedPendingReceipts ? `, ${result.voidedPendingReceipts} unconfirmed receipt(s) voided` : ''}.`,
       });
     } catch (err) {
       const code = err.statusCode || 500;
