@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { authorize } = require('../../middleware/rbac');
+const { authorize, authorizeRole } = require('../../middleware/rbac');
 const auditAction = require('../../middleware/audit');
 const inventoryController = require('./inventory.controller');
 
@@ -53,9 +53,11 @@ router.post(
 );
 
 // --- Stock adjustment ---
+// A direct lot write-off with no approval step, so it is Owner-only (owner
+// decision 2026-10-05). authorizeRole has no bypass, so Super Admin is listed.
 router.post(
   '/adjust',
-  authorize('inventory', 'adjust'),
+  authorizeRole('Owner', 'Super Admin'),
   auditAction('adjust_stock', 'inventory_lot', (req) => req.body.lot_id),
   inventoryController.adjustStock
 );
