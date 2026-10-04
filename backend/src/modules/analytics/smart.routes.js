@@ -6,10 +6,11 @@ const controller = require('../../controllers/smartController');
 const authorize = require('../../middleware/rbac');
 const auditAction = require('../../middleware/audit');
 
-// Running an analysis, score or simulation needs the same permission that reads
-// its result; changing workflow state (approve, resolve, dismiss) needs
-// admin.manage_settings. (These used admin.create/update and finance.create,
-// which were never seeded — so only Super Admin and Owner could call them.)
+// Each admin.manage_settings route here writes a row (scores, risk scores,
+// RCAs, scenarios, snapshots, predictions, exceptions, approvals). It stays
+// Owner/Super Admin, as before: these checked admin.create/update and
+// finance.create, which were never seeded, so no other role could reach them.
+// This names a real permission without widening access.
 
 // Multer configuration for mobile uploads
 const storage = multer.diskStorage({
@@ -52,35 +53,35 @@ router.post(
 // ═══════════════════════════════════════════════════════════════════════════
 router.post(
   '/scenario/fob-vs-cif',
-  authorize('admin', 'view'),
+  authorize('admin', 'manage_settings'),
   auditAction('simulate_fob_vs_cif', 'scenario'),
   controller.fobVsCif
 );
 
 router.post(
   '/scenario/supplier-comparison',
-  authorize('admin', 'view'),
+  authorize('admin', 'manage_settings'),
   auditAction('simulate_supplier_comparison', 'scenario'),
   controller.supplierComparison
 );
 
 router.post(
   '/scenario/yield',
-  authorize('admin', 'view'),
+  authorize('admin', 'manage_settings'),
   auditAction('simulate_yield', 'scenario'),
   controller.yieldScenario
 );
 
 router.post(
   '/scenario/fx',
-  authorize('admin', 'view'),
+  authorize('admin', 'manage_settings'),
   auditAction('simulate_fx', 'scenario'),
   controller.fxScenario
 );
 
 router.post(
   '/scenario/full-order',
-  authorize('admin', 'view'),
+  authorize('admin', 'manage_settings'),
   auditAction('simulate_full_order', 'scenario'),
   controller.fullOrder
 );
@@ -142,7 +143,7 @@ router.get(
 // ═══════════════════════════════════════════════════════════════════════════
 router.post(
   '/predict/run',
-  authorize('admin', 'view'),
+  authorize('admin', 'manage_settings'),
   auditAction('run_predictive_analysis', 'predictive_alerts'),
   controller.runPredictiveAnalysis
 );
