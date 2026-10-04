@@ -23,6 +23,10 @@ export const millingApi = {
   cashFlow: (params) => api.get('/api/milling/cash-flow', params),
   createBatch: (data) => api.post('/api/milling/batches', data),
   updateBatch: (id, data) => api.put(`/api/milling/batches/${id}`, data),
+  // Status moves — the generic PUT no longer accepts status.
+  holdBatch: (id, data = {}) => api.post(`/api/milling/batches/${id}/hold`, data),
+  resumeBatch: (id, data = {}) => api.post(`/api/milling/batches/${id}/resume`, data),
+  cancelBatch: (id, data = {}) => api.post(`/api/milling/batches/${id}/cancel`, data),
   saveQuality: (id, data) => api.post(`/api/milling/batches/${id}/quality`, data),
   recordYield: (id, data) => api.post(`/api/milling/batches/${id}/yield`, data),
   setMilledQty: (id, data) => api.put(`/api/milling/batches/${id}/milled-qty`, data),

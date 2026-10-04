@@ -3088,16 +3088,9 @@ module.exports = {
           }
         }
 
-        // Generate batch number — match the M-NNN convention used in
-        // milling.controller.js. Done locally to avoid pulling in the
-        // whole milling controller just for this helper.
-        const last = await trx('milling_batches').select('batch_no').orderBy('created_at', 'desc').first();
-        let nextNum = 1;
-        if (last && last.batch_no) {
-          const n = parseInt(String(last.batch_no).replace('M-', ''), 10);
-          if (!Number.isNaN(n)) nextNum = n + 1;
-        }
-        const batchNo = `M-${String(nextNum).padStart(3, '0')}`;
+        // Batch number — the same M-NNN generator milling.controller.js uses
+        // (MAX+1, so a deleted or same-timestamp batch can't hand out a used no).
+        const batchNo = await nextDocNo(trx, { table: 'milling_batches', column: 'batch_no', prefix: 'M-', pad: 3 });
 
         // Partial milling: the operator can mill less than the whole lot. The
         // committed qty (batch_source_lots.qty_kg) is what consumeForMilling

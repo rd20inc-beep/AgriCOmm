@@ -411,6 +411,21 @@ export function useUpdateMillingBatch() {
   });
 }
 
+// Hold / resume / cancel a batch. action: 'hold' | 'resume' | 'cancel'.
+// Cancel releases the source lots, so stock views are refreshed too.
+export function useBatchStatusAction() {
+  const qc = useQueryClient();
+  const call = { hold: millingApi.holdBatch, resume: millingApi.resumeBatch, cancel: millingApi.cancelBatch };
+  return useMutation({
+    mutationFn: ({ id, action, data }) => call[action](id, data || {}),
+    onSuccess: (_, { id }) => {
+      qc.invalidateQueries({ queryKey: queryKeys.batches.all });
+      qc.invalidateQueries({ queryKey: queryKeys.batches.detail(id) });
+      qc.invalidateQueries({ queryKey: queryKeys.inventory.all });
+    },
+  });
+}
+
 export function useSaveQuality() {
   const qc = useQueryClient();
   return useMutation({

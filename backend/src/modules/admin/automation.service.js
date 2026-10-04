@@ -663,19 +663,28 @@ const automationService = {
     // Notify export manager if linked order
     if (batch.linked_export_order_id) {
       const order = await trx('export_orders').where({ id: batch.linked_export_order_id }).first();
-      const exportManagers = await trx('users').where({ role_id: 2, is_active: true });
+      // Recipients by role NAME — role ids differ between installs (e.g. Owner
+      // is 9 on prod, 10 locally), so hard-coded ids reach the wrong people.
+      const usersInRole = (name) => trx('users as u')
+        .join('roles as r', 'u.role_id', 'r.id')
+        .where('r.name', name)
+        .where('u.is_active', true)
+        .select('u.id')
+        .orderBy('u.id');
+      const exportManagers = await usersInRole('Export Manager');
+      const finishedKg = parseFloat(batch.actual_finished_kg) || 0;
       for (const manager of exportManagers) {
         await trx('notifications').insert({
           user_id: manager.id,
           title: 'Milling Batch Completed',
-          message: `Batch ${batch.batch_no} completed. ${batch.finished_qty_mt} MT finished rice produced${order ? ` for order ${order.order_no}` : ''}.`,
+          message: `Batch ${batch.batch_no} completed. ${finishedKg.toLocaleString('en-US', { maximumFractionDigits: 2 })} kg finished rice produced${order ? ` for order ${order.order_no}` : ''}.`,
           type: 'milling',
           linked_ref: batch.batch_no,
         });
       }
 
       // Create task: arrange internal transfer
-      const invOfficers = await trx('users').where({ role_id: 6, is_active: true }).first();
+      const invOfficers = (await usersInRole('Inventory Officer'))[0];
       const taskNo = `TSK-${Date.now().toString(36).toUpperCase()}`;
       await trx('tasks_assignments').insert({
         task_no: taskNo,

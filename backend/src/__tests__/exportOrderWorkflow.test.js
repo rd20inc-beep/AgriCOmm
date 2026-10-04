@@ -259,6 +259,11 @@ mockDb.fn = {
 };
 
 jest.mock('../config/database', () => mockDb);
+// The in-memory db has no max()/raw(); number documents from its row count.
+jest.mock('../utils/docNumber', () => ({
+  nextDocNo: async (_trx, { table, prefix, pad = 4 }) =>
+    `${prefix}${String(((mockState.tables[table] || []).length) + 1).padStart(pad, '0')}`,
+}));
 
 // Mock services at both old (re-export) and new (module) paths
 // Jest requires mock variable names to be prefixed with "mock"
