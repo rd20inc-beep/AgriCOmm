@@ -73,9 +73,9 @@ const sidebarNav = [
     label: 'AI & Insights',
     icon: Sparkles,
     children: [
-      { label: 'AI Assistant', to: '/ai', icon: Sparkles },
-      { label: 'Analytics', to: '/intelligence', icon: Brain },
-      { label: 'Simulator', to: '/simulator', icon: Beaker },
+      { label: 'AI Assistant', to: '/ai', icon: Sparkles, anyOf: [{ module: 'reports', action: 'view_cost' }, { module: 'finance', action: 'view' }] },
+      { label: 'Analytics', to: '/intelligence', icon: Brain, anyOf: [{ module: 'finance', action: 'view' }, { module: 'admin', action: 'view' }] },
+      { label: 'Simulator', to: '/simulator', icon: Beaker, anyOf: [{ module: 'finance', action: 'view' }, { module: 'admin', action: 'view' }] },
       { label: 'Exceptions', to: '/exceptions', icon: Zap, permission: { module: 'admin', action: 'view' } },
     ],
   },
