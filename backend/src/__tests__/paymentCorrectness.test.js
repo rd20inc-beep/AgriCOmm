@@ -293,10 +293,17 @@ describe('resolvePaymentAccountId', () => {
 
 // Tag each authorize() guard with the permission it checks, so the router's
 // real middleware chain can be inspected.
-jest.mock('../middleware/rbac', () => (module, action) => {
-  const guard = (req, res, next) => next();
-  guard.permission = `${module}.${action}`;
-  return guard;
+jest.mock('../middleware/rbac', () => {
+  const authorize = (module, action) => {
+    const guard = (req, res, next) => next();
+    guard.permission = `${module}.${action}`;
+    return guard;
+  };
+  // The routers also use the other guard factories; they carry no permission tag.
+  const passThrough = () => (req, res, next) => next();
+  return Object.assign(authorize, {
+    authorize, authorizeAny: passThrough, authorizeRole: passThrough, denyRoles: passThrough,
+  });
 });
 
 describe('mill-store pay route', () => {
