@@ -22,7 +22,7 @@ const BLANK = {
   labor_cost: '', unloading_cost: '', packing_cost: '', other_cost: '',
   bag_cost_per_bag: '', bag_cost_included: true,
   purchase_date: new Date().toISOString().slice(0, 10),
-  payment_status: 'Pending', paid_amount: '', notes: '',
+  notes: '',
 };
 
 /**
@@ -76,8 +76,6 @@ export default function AddPurchaseModal({ isOpen, lot, onClose, onSuccess }) {
       bag_cost_per_bag: num(form.bag_cost_per_bag),
       bag_cost_included: !!form.bag_cost_included,
       purchase_date: form.purchase_date || null,
-      payment_status: form.payment_status,
-      paid_amount: form.payment_status === 'Partial' ? num(form.paid_amount) : null,
       notes: form.notes || null,
     };
     try {
@@ -159,21 +157,15 @@ export default function AddPurchaseModal({ isOpen, lot, onClose, onSuccess }) {
           <p className="mt-2 text-[11px] text-indigo-500 flex items-center gap-1"><Truck size={11} /> Transport? Add it with a hauler in the Costing tab → Additional Costs.</p>
         </div>
 
-        {/* Date + payment */}
+        {/* Date + notes. No payment here: the supplier payable starts Pending and
+            is settled through Money Out, which moves the bank and posts the GL. */}
         <div className="grid grid-cols-2 gap-2.5">
           <div><label className={lbl}>Purchase date</label><input type="date" value={form.purchase_date} onChange={(e) => set('purchase_date', e.target.value)} className={inp} /></div>
-          <div><label className={lbl}>Payment</label>
-            <select value={form.payment_status} onChange={(e) => set('payment_status', e.target.value)} className={inp}>
-              <option>Pending</option><option>Partial</option><option>Paid</option>
-            </select>
-          </div>
-          {form.payment_status === 'Partial' && (
-            <div><label className={lbl}>Paid now</label><input type="number" min="0" value={form.paid_amount} onChange={(e) => set('paid_amount', e.target.value)} className={inp} placeholder="0" /></div>
-          )}
-          <div className={form.payment_status === 'Partial' ? '' : 'col-span-2'}>
+          <div>
             <label className={lbl}>Notes</label>
             <input type="text" value={form.notes} onChange={(e) => set('notes', e.target.value)} className={inp} placeholder="Optional" />
           </div>
+          <p className="col-span-2 text-[11px] text-gray-500">The supplier payable is raised as Pending — record the payment from Money Out.</p>
         </div>
 
         {/* Blended-cost preview */}

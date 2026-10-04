@@ -380,8 +380,8 @@ const createPurchaseLot = Joi.object({
   other_cost: Joi.number().min(0).default(0),
   total_bags: Joi.number().integer().min(0).allow(null),
   notes: Joi.string().allow(null, ''),
-  payment_status: Joi.string().valid('Pending', 'Partial', 'Paid').default('Pending'),
-  paid_amount: Joi.number().min(0).allow(null),
+  // No payment_status / paid_amount: the lot's payables start Pending and are
+  // settled through the payment flow (bank + journal), never stamped paid here.
   // Optional vehicle arrivals captured on the New Purchase Lot form — each
   // truck that delivered this lot. Only rows with a vehicle_no are recorded.
   vehicles: Joi.array().items(Joi.object({
@@ -425,8 +425,7 @@ const addPurchaseToLot = Joi.object({
   bag_cost_per_bag: Joi.number().min(0).allow(null),
   bag_cost_included: Joi.boolean().default(false),
   total_bags: Joi.number().integer().min(0).allow(null),
-  payment_status: Joi.string().valid('Pending', 'Partial', 'Paid').default('Pending'),
-  paid_amount: Joi.number().min(0).allow(null),
+  // No payment_status / paid_amount — see createPurchaseLot.
   notes: Joi.string().allow(null, ''),
 });
 

@@ -10,7 +10,7 @@ const accountingService = require('../../services/accountingService');
 // Shared lot-number generators — keeps the Purchase Lot drawer and the
 // Add Vehicle flow on the same SUP-VARIETY-YYMMDD-SEQ format.
 const inventoryService = require('./inventory.service');
-const { blendPurchaseIntoLot } = require('./lotCosting');
+const { blendPurchaseIntoLot, computeLotLanded, repriceLotPurchase, normalizeTransportPaidBy } = require('./lotCosting');
 const { nextDocNo } = require('../../utils/docNumber');
 // #9-scoping: per-user warehouse restriction, applied to READ paths only.
 const whScope = require('../../utils/warehouseScope');
@@ -304,6 +304,92 @@ function lotRowQuery() {
       's.name as supplier_name',
       db.raw('COALESCE(h.name, tv.name) as transport_vendor_name'),
       'h.name as hauler_name');
+}
+
+// ─── Purchase-lot cost edit helpers ───
+
+// The lot's RICE payable — the 'Raw Material' line createPurchaseLot raised for
+// the purchase amount. Prefer the row keyed to this lot (source_id) over any
+// later "added purchase" row that only shares the lot number.
+function findRicePayable(trx, lot) {
+  const q = trx('payables')
+    .where({ linked_ref: lot.lot_no, category: 'Raw Material' })
+    .orderByRaw('CASE WHEN source_id = ? THEN 0 ELSE 1 END, id', [lot.id]);
+  if (lot.supplier_id) q.where({ supplier_id: lot.supplier_id });
+  return q.first();
+}
+
+// The lot's inbound freight record (transport_costs), keyed on lot_id so a
+// rename can't break the link. paid_by on it is what create decided about who
+// bears the freight; no row means company-paid (the create default).
+function findLotTransportRecord(trx, lotId) {
+  return trx('transport_costs')
+    .where({ lot_id: lotId })
+    .orderByRaw("CASE WHEN transport_type = 'inbound' THEN 0 ELSE 1 END, id")
+    .first();
+}
+
+// A signed DELTA on the purchase-invoice accounts (Dr 1210 Raw Inventory /
+// Cr 2010 AP; swapped when it drops) — never reverse+repost: the trial balance
+// sums status='Posted' only, and reverseJournal marks the original 'Reversed'
+// AND posts a 'Posted' contra, so reverse+repost moves it by -2x. The same rule
+// create uses for the supplier, hauler and broker payables, so a correction
+// lands on exactly the accounts the original posting hit.
+async function postPurchaseDelta(trx, { delta, refType, refNo, description, narration, partyType, partyId, userId }) {
+  const d = uc.round2(delta);
+  if (Math.abs(d) <= 0.01) return null;
+  const rule = await trx('posting_rules')
+    .where({ trigger_event: 'purchase_invoice', is_active: true })
+    .where(function () { this.where({ entity: 'mill' }).orWhereNull('entity'); })
+    .first();
+  if (!rule) return null;
+  const [stockAcc, apAcc] = await Promise.all([
+    trx('chart_of_accounts').where({ id: rule.debit_account_id }).first(),
+    trx('chart_of_accounts').where({ id: rule.credit_account_id }).first(),
+  ]);
+  const amt = Math.abs(d);
+  const up = d > 0; // more stock + more payable
+  const lines = [
+    { account_id: rule.debit_account_id, account: stockAcc?.name || '',
+      debit: up ? amt : 0, credit: up ? 0 : amt,
+      narration: `${up ? 'DR' : 'CR'} ${stockAcc ? stockAcc.code + ' ' + stockAcc.name : ''} — ${narration}` },
+    { account_id: rule.credit_account_id, account: apAcc?.name || '',
+      debit: up ? 0 : amt, credit: up ? amt : 0,
+      narration: `${up ? 'CR' : 'DR'} ${apAcc ? apAcc.code + ' ' + apAcc.name : ''} — ${narration}` },
+  ];
+  const adj = await accountingService.createJournal(trx, {
+    date: new Date().toISOString().slice(0, 10), entity: 'mill',
+    refType, refNo, description, lines, currency: 'PKR', isAuto: true,
+    postingRuleId: rule.id, userId, partyType: partyType || null, partyId: partyId || null,
+  });
+  if (adj?.id) await accountingService.postJournal(trx, adj.id);
+  return adj;
+}
+
+// Re-price the RICE on a lot (purchase-rate or received-qty edit). Only the
+// purchase amount changes: landed cost, the rice payable and the GL each move by
+// exactly that change. Freight, commission, extras and bags — and their own
+// payables — are untouched (repriceLotPurchase).
+async function applyRicePurchaseChange(trx, lot, { newPurchaseAmount, kg, lotFields = {}, description, narration, userId }) {
+  const pay = await findRicePayable(trx, lot);
+  const r = repriceLotPurchase(lot, newPurchaseAmount, kg, pay);
+  await trx('inventory_lots').where({ id: lot.id }).update({
+    ...lotFields,
+    purchase_amount: uc.round2(newPurchaseAmount),
+    landed_cost_total: r.landedTotal, landed_cost_per_kg: r.perKg,
+    total_value: r.landedTotal, cost_per_unit: r.perKg, updated_at: trx.fn.now(),
+  });
+  if (pay) {
+    await trx('payables').where({ id: pay.id }).update({ ...r.payable, updated_at: trx.fn.now() });
+  }
+  if (lot.supplier_id && Math.abs(r.glDelta) > 0.01) {
+    await postPurchaseDelta(trx, {
+      delta: r.glDelta, refType: 'Purchase Lot', refNo: lot.lot_no,
+      description: description(r.glDelta), narration,
+      partyType: 'supplier', partyId: lot.supplier_id, userId,
+    });
+  }
+  return { payableUpdated: !!pay, ...r };
 }
 
 module.exports = {
@@ -680,7 +766,7 @@ module.exports = {
         transport_cost = 0, labor_cost = 0, unloading_cost = 0,
         packing_cost = 0, other_cost = 0,
         total_bags: inputTotalBags,
-        notes, payment_status = 'Pending',
+        notes,
       } = req.body;
 
       // Whitelist + coerce extended quality keys so callers can't shove
@@ -737,33 +823,37 @@ module.exports = {
       // #14 — who bears the transport charge. Only 'company' creates a company
       // payable AND capitalises the cost into the lot; other responsibilities are
       // recorded (transport_costs) but not charged to the company here.
-      const transportPaidBy = ['company', 'supplier', 'customer', 'service_client', 'included_in_supplier_rate', 'deduct_from_supplier', 'other']
-        .includes(transport_paid_by) ? transport_paid_by : 'company';
-      const transportCapitalised = transportPaidBy === 'company';
-      // Supplier-owed direct costs (transport + commission are NOT here — they go
-      // to the hauler/broker payables).
-      const supplierDirect = [labor_cost, unloading_cost, packing_cost, other_cost].reduce((s, c) => s + (parseFloat(c) || 0), 0);
+      const transportPaidBy = normalizeTransportPaidBy(transport_paid_by);
+
+      // A capitalised cost needs someone to owe it to. Company-paid freight with
+      // no hauler (or freight deducted from the supplier with no hauler to pay)
+      // and commission with no broker used to fold into landed cost with NO
+      // payable and NO journal — inventory valued above the books.
+      if (transportCost > 0 && ['company', 'deduct_from_supplier'].includes(transportPaidBy) && !haulerId) {
+        return res.status(400).json({ success: false, message: 'Pick a transporter (hauler) for the transport cost, or set who pays the transport.' });
+      }
+      if (commissionTotal > 0 && !brokerIdNum) {
+        return res.status(400).json({ success: false, message: 'Pick who the commission is paid to (broker), or clear the commission.' });
+      }
+
       const totalBagCost = (bag_cost_included ? 0 : (parseFloat(bag_cost_per_bag) || 0) * totalBags);
-      // Full landed cost → drives landed_cost_per_kg + costing sheet. Transport is
-      // capitalised only when the company bears it (#14).
-      const landedCostTotal = uc.round2(purchaseAmount + supplierDirect + totalBagCost + (transportCapitalised ? transportCost : 0) + commissionTotal);
-      const landedCostPerKg = netWeightKg > 0 ? uc.round4(landedCostTotal / netWeightKg) : 0;
-      // The SUPPLIER payable covers only the supplier-owed portion.
-      const supplierPortion = uc.round2(purchaseAmount + supplierDirect + totalBagCost);
-      // Post round 35 (migration 120) every payment_status column uses
-      // title case — drop the previous lowercase normalisation.
-      const normalizedPaymentStatus = String(payment_status || 'Pending');
-      const landedPayableAmount = supplierPortion;
-      const paidAmount = normalizedPaymentStatus === 'Paid'
-        ? landedPayableAmount
-        : normalizedPaymentStatus === 'Partial'
-          ? Math.max(0, Math.min(landedPayableAmount, parseFloat(req.body.paid_amount) || 0))
-          : Math.max(0, parseFloat(req.body.paid_amount) || 0);
-      const payableStatus = paidAmount >= landedPayableAmount - 0.01
-        ? 'Paid'
-        : paidAmount > 0
-          ? 'Partial'
-          : 'Pending';
+      // Full landed cost → drives landed_cost_per_kg + costing sheet. The SAME
+      // helper is used by every cost edit, so create and edit can't diverge.
+      // Transport is capitalised only when the company bears it (#14).
+      const landed = computeLotLanded({
+        purchaseAmount,
+        labor: labor_cost, unloading: unloading_cost, packing: packing_cost, other: other_cost,
+        bagCost: totalBagCost,
+        transportCost, transportPaidBy, commissionTotal,
+        receivedKg: netWeightKg,
+      });
+      const transportCapitalised = landed.transportCapitalised;
+      const landedCostTotal = landed.landedTotal;
+      const landedCostPerKg = landed.perKg;
+      // The SUPPLIER payable covers only the supplier-owed portion (rice +
+      // extras + bags). It always starts unpaid — settling it goes through the
+      // normal payment flow, which moves the bank and posts the journal.
+      const landedPayableAmount = landed.supplierGross;
 
       const result = await db.transaction(async (trx) => {
         // Generate lot number. Rice lots received at the mill get the
@@ -916,10 +1006,10 @@ module.exports = {
           damaged_weight_kg: 0,
           cost_per_unit: landedCostPerKg, // per MT for legacy
           total_value: landedCostTotal,
-          // Payment — title case across the board post migration 120.
-          payment_status: payableStatus,
-          paid_amount: paidAmount,
-          due_amount: Math.max(0, landedPayableAmount - paidAmount),
+          // Payment — always starts unpaid; the payment flow settles it.
+          payment_status: 'Pending',
+          paid_amount: 0,
+          due_amount: Math.max(0, landedPayableAmount),
           notes: notes || null,
           created_by: req.user?.id || null,
         }).returning('*');
@@ -967,13 +1057,11 @@ module.exports = {
             { amount: parseFloat(other_cost) || 0, category: 'Other Cost', sourceTable: 'lot_other', label: 'Other cost' },
             { amount: totalBagCost, category: 'Bags', sourceTable: 'lot_bag', label: 'Bags' },
           ].filter((c) => c.amount > 0.01);
-          // Any up-front payment settles the lines in order (rice first).
-          let remainingPaid = paidAmount;
+          // Every line starts Pending: a payment is recorded through the payment
+          // flow (bank + journal), never stamped onto the payable here.
           for (const c of supplierComponents) {
             const compPayNo = await generatePayNo(trx);
             const amt = uc.round2(c.amount);
-            const cPaid = uc.round2(Math.min(remainingPaid, amt));
-            remainingPaid = uc.round2(remainingPaid - cPaid);
             await trx('payables').insert({
               pay_no: compPayNo,
               entity: 'mill',
@@ -984,10 +1072,10 @@ module.exports = {
               source_table: c.sourceTable,
               source_id: lot.id,
               original_amount: amt,
-              paid_amount: cPaid,
-              outstanding: Math.max(0, uc.round2(amt - cPaid)),
+              paid_amount: 0,
+              outstanding: amt,
               due_date: addDays(purchase_date, 30),
-              status: cPaid >= amt - 0.01 ? 'Paid' : cPaid > 0 ? 'Partial' : 'Pending',
+              status: 'Pending',
               currency: 'PKR',
               notes: `${c.label} — purchase lot ${lotNo}`,
             });
@@ -1222,7 +1310,7 @@ module.exports = {
         packing_cost = 0, other_cost = 0,
         bag_cost_per_bag = 0, bag_cost_included = false,
         total_bags: inputTotalBags,
-        purchase_date, payment_status = 'Pending', paid_amount,
+        purchase_date,
         notes, supplier_id: bodySupplierId,
       } = req.body;
 
@@ -1287,12 +1375,11 @@ module.exports = {
         const addLandedTotal = uc.round2(addPurchaseAmount + addDirectCosts + addBagCost);
 
         // ── Payment for the added purchase ──
-        const status = String(payment_status || 'Pending');
-        const addPaid = status === 'Paid'
-          ? addLandedTotal
-          : status === 'Partial'
-            ? Math.max(0, Math.min(addLandedTotal, parseFloat(paid_amount) || 0))
-            : Math.max(0, parseFloat(paid_amount) || 0);
+        // Always starts unpaid. Writing a "Paid"/"Partial" figure straight into
+        // payables.paid_amount moved no bank and posted no journal — the supplier
+        // looked settled while AP and the bank never changed. Payment is recorded
+        // through the normal payment flow.
+        const addPaid = 0;
 
         // ── If the lot has rice committed to a milling batch (started but not yet
         //    yielded — nothing consumed), SPLIT instead of blending in place: freeze
@@ -1358,7 +1445,7 @@ module.exports = {
           const newBags = Math.max(0, Math.round(remainderKg / bagWt) + addBags);
           const newPurchaseAmt = uc.round2(scale(oldPurchaseAmt, rf) + addPurchaseAmount);
           const newLotNo = await inventoryService.generateRiceLotNo(trx, { supplierId: lot.supplier_id, productId: lot.product_id, date: purchase_date });
-          const newPaid = status === 'Paid' ? addLandedTotal : status === 'Partial' ? Math.max(0, Math.min(addLandedTotal, parseFloat(paid_amount) || 0)) : Math.max(0, parseFloat(paid_amount) || 0);
+          const newPaid = addPaid;
           // eslint-disable-next-line no-unused-vars
           const { id: _oid, created_at: _oc, updated_at: _ou, ...clone } = lot;
           const [newLot] = await trx('inventory_lots').insert({
@@ -1803,6 +1890,7 @@ module.exports = {
         const lot = await trx('inventory_lots').where({ id }).first();
         if (!lot) { const e = new Error('Lot not found.'); e.status = 404; throw e; }
         await assertLotEditableByOperator(req, lot, trx);
+        const lotId = lot.id;
 
         const netKg = parseFloat(lot.net_weight_kg) || 0;
         // purchase_amount + additional costs are for the ORIGINAL received intake,
@@ -1825,12 +1913,6 @@ module.exports = {
         const oc = pick(other_cost, lot.other_cost);
         const bcpb = pick(bag_cost_per_bag, lot.bag_cost_per_bag);
         const totalBagCost = lot.bag_cost_included ? 0 : bcpb * totalBags;
-        // Transport (freight) is owed to a separate hauler and is NOT part of the
-        // rice's landed cost / finished COGS — it is tracked as its own payable
-        // below. So it is EXCLUDED from directCosts here.
-        const directCosts = lc + ulc + pc + oc;
-        const landedTotal = uc.round2(purchaseAmount + directCosts + totalBagCost);
-        const landedPerKg = receivedKg > 0 ? uc.round4(landedTotal / receivedKg) : 0;
         // Transport now points at the dedicated haulers registry (item #5).
         // Prefer hauler_id; fall back to legacy transport_vendor_id / stored value.
         const rawHauler = (hauler_id != null && hauler_id !== '')
@@ -1838,7 +1920,34 @@ module.exports = {
           : (transport_vendor_id != null && transport_vendor_id !== '' ? transport_vendor_id : null);
         const haulerId = rawHauler != null ? parseInt(rawHauler, 10) : (lot.hauler_id || null);
 
-        await trx('inventory_lots').where({ id }).update({
+        // Who bears the freight is what create recorded on the lot's
+        // transport_costs row (no row → company, the create default). The edit
+        // follows the SAME rule as create: company-paid freight is capitalised
+        // into the rice (Dr 1210 / Cr 2010 hauler); any other responsibility is
+        // recorded only — no company payable, not in landed cost.
+        const tRec = await findLotTransportRecord(trx, lotId);
+        const paidBy = normalizeTransportPaidBy(tRec?.paid_by);
+        const freightChanged = Math.abs(tc - (parseFloat(lot.transport_cost) || 0)) > 0.01;
+        if (paidBy === 'deduct_from_supplier' && freightChanged) {
+          const e = new Error('This lot\'s freight is deducted from the supplier\'s bill, so it can\'t be changed here — correct it from the transporter payable.');
+          e.status = 409; throw e;
+        }
+        if (paidBy === 'company' && tc > 0 && !haulerId) {
+          const e = new Error('Pick a transporter (hauler) for the transport cost.');
+          e.status = 400; throw e;
+        }
+
+        // ONE landed-cost formula shared with createPurchaseLot — freight (when
+        // company-paid) and commission stay in.
+        const landed = computeLotLanded({
+          purchaseAmount, labor: lc, unloading: ulc, packing: pc, other: oc,
+          bagCost: totalBagCost, transportCost: tc, transportPaidBy: paidBy,
+          commissionTotal: lot.commission_total, receivedKg,
+        });
+        const landedTotal = landed.landedTotal;
+        const landedPerKg = landed.perKg;
+
+        await trx('inventory_lots').where({ id: lotId }).update({
           transport_cost: tc, labor_cost: lc, unloading_cost: ulc,
           packing_cost: pc, other_cost: oc, bag_cost_per_bag: bcpb,
           hauler_id: haulerId,
@@ -1849,117 +1958,110 @@ module.exports = {
           cost_per_unit: landedPerKg,
         });
 
-        // Transport → a stored 'Transport' payable owed to the hauler PLUS a GL bill
-        // (Dr Operating Expenses / Cr Supplier Payable, stamped to the hauler) so it
-        // books the expense, shows on the hauler's statement, and settles via the
-        // normal Record Payment flow. Keyed on the lot so re-edits reconcile.
-        const lotId = parseInt(id, 10);
-        const existingTp = await trx('payables').where({ source_table: 'lot_transport', source_id: lotId }).first();
-        const paidSoFar = existingTp ? (parseFloat(existingTp.paid_amount) || 0) : 0;
-        const wantBill = tc > 0 && haulerId;
-        // Upsert the stored hauler payable (settles via the Record Payment flow).
-        if (wantBill) {
-          if (existingTp) {
-            await trx('payables').where({ id: existingTp.id }).update({
-              supplier_id: null, hauler_id: haulerId, category: 'Transport', original_amount: tc,
-              outstanding: Math.max(0, uc.round2(tc - paidSoFar)),
-              status: (tc - paidSoFar) <= 0.01 ? 'Paid' : (paidSoFar > 0 ? 'Partial' : 'Pending'),
-              linked_ref: lot.lot_no, updated_at: trx.fn.now(),
-            });
-          } else {
-            const payNo = await generatePayNo(trx);
-            await trx('payables').insert({
-              pay_no: payNo, entity: 'mill', payable_type: 'vendor', category: 'Transport',
-              supplier_id: null, hauler_id: haulerId, linked_ref: lot.lot_no,
-              source_table: 'lot_transport', source_id: lotId,
-              original_amount: tc, paid_amount: 0, outstanding: tc, status: 'Pending',
-              currency: 'PKR', notes: `Transport (hauler) for lot ${lot.lot_no}`,
-            });
+        if (paidBy === 'company') {
+          // Company-paid freight → the hauler payable create raised, found by its
+          // stable key (source_table + lot id — a rename can't break it). Its
+          // original_amount IS what has been billed to the GL, so the correction
+          // is newBilled − original_amount as a signed delta on the SAME accounts
+          // create used (purchase_invoice: Dr 1210 Raw Inventory / Cr 2010 AP,
+          // stamped to the hauler) — capitalised, never Opex.
+          const existingTp = await trx('payables').where({ source_table: 'lot_transport', source_id: lotId }).first();
+          const paidSoFar = existingTp ? (parseFloat(existingTp.paid_amount) || 0) : 0;
+          const oldBilled = existingTp ? (parseFloat(existingTp.original_amount) || 0) : 0;
+          const oldHauler = existingTp ? (existingTp.hauler_id || null) : null;
+          const newBilled = tc > 0 ? uc.round2(tc) : 0;
+          if (paidSoFar > newBilled + 0.01) {
+            const e = new Error(`Rs ${paidSoFar.toLocaleString()} has already been paid to the transporter for this lot — the transport cost can't go below that. Reverse the payment first.`);
+            e.status = 409; throw e;
           }
-        } else if (existingTp && paidSoFar <= 0.01) {
-          await trx('payables').where({ id: existingTp.id }).del(); // cleared/unpaid → drop
-        }
+          if (paidSoFar > 0.01 && oldHauler && haulerId !== oldHauler) {
+            const e = new Error('The transporter has already been paid for this lot, so the hauler can\'t be changed.');
+            e.status = 409; throw e;
+          }
 
-        // Re-accrue the GL with a single signed DELTA against the transport accrual
-        // (Dr Operating Expenses / Cr Supplier Payable, swapped when it drops) — NOT
-        // reverse+repost. The trial balance sums status='Posted' only while
-        // reverseJournal marks the original 'Reversed' AND posts a 'Posted' contra,
-        // so reverse+repost moves a Posted-only sum by -2x and piles up rows each
-        // edit (see setLotPurchaseRate). Only while nothing is paid, so a settled
-        // payment is never orphaned.
-        if (paidSoFar <= 0.01) {
-          const prevAp = await trx('journal_lines as jl')
-            .join('journal_entries as je', 'je.id', 'jl.journal_id')
-            .join('chart_of_accounts as coa', 'coa.id', 'jl.account_id')
-            .where({ 'je.ref_type': 'Lot Transport', 'je.ref_no': lot.lot_no, 'je.status': 'Posted' })
-            .whereRaw("coa.code like '2%'")
-            .select(trx.raw('coalesce(sum(jl.credit - jl.debit), 0) as net'));
-          const oldBilled = parseFloat(prevAp?.[0]?.net) || 0;
-          const newBilled = wantBill ? tc : 0;
-          const tDelta = uc.round2(newBilled - oldBilled);
-          const tHauler = haulerId || lot.hauler_id || null;
-          if (Math.abs(tDelta) > 0.01 && tHauler) {
-            const rule = await trx('posting_rules')
-              .where({ trigger_event: 'expense_recorded', is_active: true })
-              .where(function () { this.where({ entity: 'mill' }).orWhereNull('entity'); })
-              .first();
-            if (rule) {
-              const [expAcc, apAcc] = await Promise.all([
-                trx('chart_of_accounts').where({ id: rule.debit_account_id }).first(),
-                trx('chart_of_accounts').where({ id: rule.credit_account_id }).first(),
-              ]);
-              const amt = Math.abs(tDelta);
-              const up = tDelta > 0; // more expense + more payable
-              const lines = [
-                { account_id: rule.debit_account_id, account: expAcc?.name || '',
-                  debit: up ? amt : 0, credit: up ? 0 : amt,
-                  narration: `${up ? 'DR' : 'CR'} ${expAcc ? expAcc.code + ' ' + expAcc.name : ''} — transport adj` },
-                { account_id: rule.credit_account_id, account: apAcc?.name || '',
-                  debit: up ? 0 : amt, credit: up ? amt : 0,
-                  narration: `${up ? 'CR' : 'DR'} ${apAcc ? apAcc.code + ' ' + apAcc.name : ''} — transport adj` },
-              ];
-              const adj = await accountingService.createJournal(trx, {
-                date: new Date().toISOString().slice(0, 10), entity: 'mill',
-                refType: 'Lot Transport', refNo: lot.lot_no,
-                description: `Lot ${lot.lot_no} transport adjustment (Rs ${tDelta >= 0 ? '+' : ''}${tDelta})`,
-                lines, currency: 'PKR', isAuto: true, postingRuleId: rule.id,
-                userId: req.user?.id, partyType: 'hauler', partyId: tHauler,
+          let tPayable = existingTp || null;
+          if (newBilled > 0) {
+            const outstanding = Math.max(0, uc.round2(newBilled - paidSoFar));
+            const status = outstanding <= 0.01 ? 'Paid' : (paidSoFar > 0 ? 'Partial' : 'Pending');
+            if (existingTp) {
+              await trx('payables').where({ id: existingTp.id }).update({
+                supplier_id: null, hauler_id: haulerId, category: 'Transport', original_amount: newBilled,
+                outstanding, status, linked_ref: lot.lot_no, updated_at: trx.fn.now(),
               });
-              await accountingService.postJournal(trx, adj.id);
+              tPayable = { ...existingTp, original_amount: newBilled, paid_amount: paidSoFar };
+            } else {
+              const payNo = await generatePayNo(trx);
+              [tPayable] = await trx('payables').insert({
+                pay_no: payNo, entity: 'mill', payable_type: 'vendor', category: 'Transport',
+                supplier_id: null, hauler_id: haulerId, linked_ref: lot.lot_no,
+                source_table: 'lot_transport', source_id: lotId,
+                original_amount: newBilled, paid_amount: 0, outstanding: newBilled, status: 'Pending',
+                due_date: addDays(lot.purchase_date, 30),
+                currency: 'PKR', notes: `Transport (hauler) for purchase lot ${lot.lot_no}`,
+              }).returning('*');
             }
+          } else if (existingTp) {
+            // Freight cleared and nothing paid (guarded above) → drop the payable.
+            await trx('payables').where({ id: existingTp.id }).del();
+            tPayable = null;
           }
+
+          const freightJournal = (delta, partyId) => postPurchaseDelta(trx, {
+            delta, refType: 'Lot Transport', refNo: lot.lot_no,
+            description: `Lot ${lot.lot_no} transport adjustment (Rs ${delta >= 0 ? '+' : ''}${uc.round2(delta)})`,
+            narration: 'transport adj', partyType: 'hauler', partyId, userId: req.user?.id,
+          });
+          if (oldHauler && haulerId && oldHauler !== haulerId && oldBilled > 0.01) {
+            // Hauler swapped: take the bill off the old hauler, put it on the new.
+            await freightJournal(-oldBilled, oldHauler);
+            await freightJournal(newBilled, haulerId);
+          } else {
+            await freightJournal(newBilled - oldBilled, haulerId || oldHauler);
+          }
+
+          // Keep the transport_costs backbone (AP → Transporters, ledger) in step.
+          const tcStatus = !tPayable
+            ? (newBilled > 0 ? 'approved' : 'cancelled')
+            : paidSoFar >= newBilled - 0.01 ? 'paid' : paidSoFar > 0.01 ? 'partially_paid' : 'unpaid';
+          if (tRec) {
+            await trx('transport_costs').where({ id: tRec.id }).update({
+              amount: newBilled, hauler_id: haulerId || null,
+              payable_id: tPayable ? tPayable.id : null, status: tcStatus, updated_at: trx.fn.now(),
+            });
+          } else if (newBilled > 0) {
+            await trx('transport_costs').insert({
+              hauler_id: haulerId || null, lot_id: lotId, warehouse_id: lot.warehouse_id || null,
+              transport_type: 'inbound', amount: newBilled, paid_by: 'company', status: tcStatus,
+              expense_date: new Date().toISOString().slice(0, 10), entity: 'mill',
+              payable_id: tPayable ? tPayable.id : null, created_by: req.user?.id || null,
+            });
+          }
+        } else if (tRec && (freightChanged || (haulerId || null) !== (tRec.hauler_id || null))) {
+          // Supplier-/client-borne freight: recorded for tracking only — no
+          // company payable, no journal, not in landed cost.
+          await trx('transport_costs').where({ id: tRec.id }).update({
+            amount: tc, hauler_id: haulerId || null, updated_at: trx.fn.now(),
+          });
         }
 
         // #14 — the supplier-owed portion (rice + labor + unloading + packing +
-        // other + bag = landedTotal here, transport excluded) is carried on the
-        // lot's supplier payables. Each additional cost is ITEMISED as its own
-        // separately-payable line (matching createPurchaseLot), so Money Out shows
-        // and settles them individually. Editing costs must keep these in step,
-        // else an added cost never reaches Accounts Payable / Money Out.
+        // other + bag; freight and commission are the hauler's / broker's) is
+        // carried on the lot's supplier payables. Each additional cost is
+        // ITEMISED as its own separately-payable line (matching
+        // createPurchaseLot), so Money Out shows and settles them individually.
+        // Editing costs must keep these in step, else an added cost never
+        // reaches Accounts Payable / Money Out.
         //
         // A signed-delta GL keeps the books balanced without reverse+repost
         // (Dr 1210 Raw Inventory / Cr 2010 Supplier Payable), only for the UNPAID
         // change so a settled payment is never orphaned.
-        const postSupplierDelta = async (delta) => {
-          const d = uc.round2(delta);
-          if (Math.abs(d) <= 0.01) return;
-          const raw = await trx('chart_of_accounts').where({ code: '1210' }).first();
-          const ap = await trx('chart_of_accounts').where({ code: '2010' }).first();
-          if (!raw || !ap) return;
-          const up = d > 0; const a = Math.abs(d);
-          const j = await accountingService.createJournal(trx, {
-            date: new Date().toISOString().slice(0, 10), entity: 'mill',
-            refType: 'Purchase Lot', refNo: lot.lot_no,
-            description: `Lot ${lot.lot_no} cost adjustment (Rs ${d >= 0 ? '+' : ''}${d})`,
-            currency: 'PKR', fxRate: 1, isAuto: true, userId: req.user?.id,
-            partyType: lot.supplier_id ? 'supplier' : null, partyId: lot.supplier_id || null,
-            lines: [
-              { account_id: raw.id, account: raw.name, debit: up ? a : 0, credit: up ? 0 : a, narration: `${up ? 'DR' : 'CR'} ${raw.code} ${raw.name} — lot cost adj` },
-              { account_id: ap.id, account: ap.name, debit: up ? 0 : a, credit: up ? a : 0, narration: `${up ? 'CR' : 'DR'} ${ap.code} ${ap.name} — lot cost adj` },
-            ],
-          });
-          if (j?.id) await accountingService.postJournal(trx, j.id);
-        };
+        const postSupplierDelta = (delta) => postPurchaseDelta(trx, {
+          delta, refType: 'Purchase Lot', refNo: lot.lot_no,
+          description: `Lot ${lot.lot_no} cost adjustment (Rs ${delta >= 0 ? '+' : ''}${uc.round2(delta)})`,
+          narration: 'lot cost adj',
+          partyType: lot.supplier_id ? 'supplier' : null, partyId: lot.supplier_id || null,
+          userId: req.user?.id,
+        });
 
         if (lot.supplier_id) {
           const SUP_CATS = ['Raw Material', 'Labor', 'Unloading', 'Packing', 'Other Cost', 'Bags'];
@@ -1972,14 +2074,16 @@ module.exports = {
 
           if (!hasItemised && bundled && isPaid(bundled)) {
             // LEGACY paid bundled lot — do NOT re-split a settled payable. Keep the
-            // single 'Raw Material' payable and update it to the whole landed total.
+            // single 'Raw Material' payable and update it to the supplier-owed
+            // total (NOT landed: freight + commission belong to hauler/broker).
+            const supTotal = uc.round2(landed.supplierRicePayable + landed.supplierDirect + totalBagCost);
             const oldSup = parseFloat(bundled.original_amount) || 0;
             const paid = parseFloat(bundled.paid_amount) || 0;
-            if (Math.abs(landedTotal - oldSup) > 0.01) {
+            if (Math.abs(supTotal - oldSup) > 0.01) {
               await trx('payables').where({ id: bundled.id }).update({
-                original_amount: landedTotal,
-                outstanding: Math.max(0, uc.round2(landedTotal - paid)),
-                status: (landedTotal - paid) <= 0.01 ? 'Paid' : (paid > 0 ? 'Partial' : 'Pending'),
+                original_amount: supTotal,
+                outstanding: Math.max(0, uc.round2(supTotal - paid)),
+                status: (supTotal - paid) <= 0.01 ? 'Paid' : (paid > 0 ? 'Partial' : 'Pending'),
                 updated_at: trx.fn.now(),
               });
               // paid → no GL delta (would orphan the settlement).
@@ -1993,7 +2097,7 @@ module.exports = {
             for (const r of unpaidRows) await trx('payables').where({ id: r.id }).del();
 
             const components = [
-              { amount: purchaseAmount, category: 'Raw Material', sourceTable: null, label: 'Rice purchase' },
+              { amount: landed.supplierRicePayable, category: 'Raw Material', sourceTable: null, label: 'Rice purchase' },
               { amount: lc, category: 'Labor', sourceTable: 'lot_labor', label: 'Labor' },
               { amount: ulc, category: 'Unloading', sourceTable: 'lot_unloading', label: 'Unloading' },
               { amount: pc, category: 'Packing', sourceTable: 'lot_packing', label: 'Packing' },
@@ -2060,73 +2164,19 @@ module.exports = {
         const receivedKg = parseFloat(lot.received_net_weight_kg) || parseFloat(lot.net_weight_kg) || 0;
         if (receivedKg <= 0) { const e = new Error('Lot has no recorded weight to price.'); e.status = 400; throw e; }
 
+        // Only the rice is re-priced. Landed cost keeps its freight, commission,
+        // extras and bags; the rice payable and the GL move by the change in the
+        // purchase amount alone (Dr/Cr 1210 vs 2010 supplier). The old code
+        // rebuilt landed WITHOUT freight + commission, then billed the whole
+        // landed total onto the rice payable while the extras' own payables
+        // still stood — the supplier was owed the extras twice.
         const newPurchaseAmount = uc.round2(receivedKg * newRate);
-        const directCosts = (parseFloat(lot.labor_cost) || 0) + (parseFloat(lot.unloading_cost) || 0) + (parseFloat(lot.packing_cost) || 0) + (parseFloat(lot.other_cost) || 0);
-        const totalBagCost = parseFloat(lot.total_bag_cost) || 0;
-        const landedTotal = uc.round2(newPurchaseAmount + directCosts + totalBagCost);
-        const landedPerKg = uc.round4(landedTotal / receivedKg);
-
-        await trx('inventory_lots').where({ id }).update({
-          rate_per_kg: newRate, purchase_amount: newPurchaseAmount,
-          landed_cost_total: landedTotal, landed_cost_per_kg: landedPerKg,
-          total_value: landedTotal, cost_per_unit: landedPerKg, updated_at: trx.fn.now(),
+        const { payableUpdated } = await applyRicePurchaseChange(trx, lot, {
+          newPurchaseAmount, kg: receivedKg,
+          lotFields: { rate_per_kg: newRate },
+          description: (d) => `Lot ${lot.lot_no} price adjustment to Rs ${Math.round(newRate)}/kg (Rs ${d >= 0 ? '+' : ''}${d})`,
+          narration: 'price adj', userId: req.user?.id,
         });
-
-        // Update the rice (Raw Material) payable for this lot — transport is its
-        // own lot_transport payable and is left alone.
-        let payableUpdated = false;
-        const pay = await trx('payables').where({ linked_ref: lot.lot_no, category: 'Raw Material' })
-          .where(function () { this.whereNull('source_table').orWhereNot('source_table', 'lot_transport'); }).first();
-        if (pay) {
-          const paid = parseFloat(pay.paid_amount) || 0;
-          const outstanding = Math.max(0, uc.round2(landedTotal - paid));
-          await trx('payables').where({ id: pay.id }).update({
-            original_amount: landedTotal, outstanding,
-            status: outstanding <= 0.01 ? 'Paid' : (paid > 0 ? 'Partial' : 'Pending'), updated_at: trx.fn.now(),
-          });
-          payableUpdated = true;
-          // Re-accrue the GL by posting a single DELTA adjustment journal for the
-          // change in landed cost — NOT reverse+repost. The trial balance sums
-          // status='Posted' only, while reverseJournal marks the original
-          // 'Reversed' AND posts a 'Posted' contra; that nets to -2× the accrual
-          // in a Posted-only sum (double reversal) and accumulates rows on every
-          // edit. A signed delta against the same purchase accounts leaves the
-          // original accrual intact and moves the GL by exactly the change.
-          const oldLanded = parseFloat(lot.landed_cost_total) || 0;
-          const delta = uc.round2(landedTotal - oldLanded);
-          if (Math.abs(delta) > 0.01 && lot.supplier_id) {
-            const rule = await trx('posting_rules')
-              .where({ trigger_event: 'purchase_invoice', is_active: true })
-              .where(function () { this.where({ entity: 'mill' }).orWhereNull('entity'); })
-              .first();
-            if (rule) {
-              const [stockAcc, apAcc] = await Promise.all([
-                trx('chart_of_accounts').where({ id: rule.debit_account_id }).first(),
-                trx('chart_of_accounts').where({ id: rule.credit_account_id }).first(),
-              ]);
-              const amt = Math.abs(delta);
-              // delta > 0 → more stock + more payable (Dr stock / Cr AP);
-              // delta < 0 → reverse direction (Dr AP / Cr stock).
-              const up = delta > 0;
-              const lines = [
-                { account_id: rule.debit_account_id, account: stockAcc?.name || '',
-                  debit: up ? amt : 0, credit: up ? 0 : amt,
-                  narration: `${up ? 'DR' : 'CR'} ${stockAcc ? stockAcc.code + ' ' + stockAcc.name : ''} — price adj` },
-                { account_id: rule.credit_account_id, account: apAcc?.name || '',
-                  debit: up ? 0 : amt, credit: up ? amt : 0,
-                  narration: `${up ? 'CR' : 'DR'} ${apAcc ? apAcc.code + ' ' + apAcc.name : ''} — price adj` },
-              ];
-              const adj = await accountingService.createJournal(trx, {
-                date: new Date().toISOString().slice(0, 10), entity: 'mill',
-                refType: 'Purchase Lot', refNo: lot.lot_no,
-                description: `Lot ${lot.lot_no} price adjustment to Rs ${Math.round(newRate)}/kg (Rs ${delta >= 0 ? '+' : ''}${delta})`,
-                lines, currency: 'PKR', isAuto: true, postingRuleId: rule.id,
-                userId: req.user?.id, partyType: 'supplier', partyId: lot.supplier_id,
-              });
-              await accountingService.postJournal(trx, adj.id);
-            }
-          }
-        }
 
         // Cascade into any batch that consumed this lot (batch_source_lots, raw
         // cost pool, output-lot costs, non-locked COGS / derived payables).
@@ -2207,10 +2257,6 @@ module.exports = {
 
         const rate = parseFloat(lot.rate_per_kg) || 0;
         const newPurchaseAmount = uc.round2(newReceivedKg * rate);
-        const directCosts = (parseFloat(lot.labor_cost) || 0) + (parseFloat(lot.unloading_cost) || 0) + (parseFloat(lot.packing_cost) || 0) + (parseFloat(lot.other_cost) || 0);
-        const totalBagCost = parseFloat(lot.total_bag_cost) || 0;
-        const landedTotal = uc.round2(newPurchaseAmount + directCosts + totalBagCost);
-        const landedPerKg = newReceivedKg > 0 ? uc.round4(landedTotal / newReceivedKg) : 0;
 
         const orderedInput = req.body.ordered_net_weight_kg;
         const orderedKg = (orderedInput != null && orderedInput !== '')
@@ -2222,58 +2268,21 @@ module.exports = {
         // available and allow it to be over-allocated.
         const millingReservedKg = parseFloat(lot.milling_reserved_qty) || 0;
         const newAvailable = Math.max(0, uc.round2(newNet - reservedKg - millingReservedKg));
-        await trx('inventory_lots').where({ id }).update({
-          received_net_weight_kg: newReceivedKg,
-          ordered_net_weight_kg: orderedKg,
-          net_weight_kg: newNet, gross_weight_kg: newNet,
-          qty: newNet, available_qty: newAvailable,
-          purchase_amount: newPurchaseAmount,
-          landed_cost_total: landedTotal, landed_cost_per_kg: landedPerKg,
-          total_value: landedTotal, cost_per_unit: landedPerKg,
-          updated_at: trx.fn.now(),
-        });
 
-        // Re-bill the Raw Material payable + re-accrue the GL with a signed delta
-        // (same as setLotPurchaseRate — never reverse+repost).
-        let payableUpdated = false;
-        const pay = await trx('payables').where({ linked_ref: lot.lot_no, category: 'Raw Material' })
-          .where(function () { this.whereNull('source_table').orWhereNot('source_table', 'lot_transport'); }).first();
-        if (pay) {
-          const paid = parseFloat(pay.paid_amount) || 0;
-          const outstanding = Math.max(0, uc.round2(landedTotal - paid));
-          await trx('payables').where({ id: pay.id }).update({
-            original_amount: landedTotal, outstanding,
-            status: outstanding <= 0.01 ? 'Paid' : (paid > 0 ? 'Partial' : 'Pending'), updated_at: trx.fn.now(),
-          });
-          payableUpdated = true;
-        }
-        const oldLanded = parseFloat(lot.landed_cost_total) || 0;
-        const delta = uc.round2(landedTotal - oldLanded);
-        if (Math.abs(delta) > 0.01 && lot.supplier_id) {
-          const rule = await trx('posting_rules')
-            .where({ trigger_event: 'purchase_invoice', is_active: true })
-            .where(function () { this.where({ entity: 'mill' }).orWhereNull('entity'); }).first();
-          if (rule) {
-            const [stockAcc, apAcc] = await Promise.all([
-              trx('chart_of_accounts').where({ id: rule.debit_account_id }).first(),
-              trx('chart_of_accounts').where({ id: rule.credit_account_id }).first(),
-            ]);
-            const amt = Math.abs(delta);
-            const up = delta > 0;
-            const lines = [
-              { account_id: rule.debit_account_id, account: stockAcc?.name || '', debit: up ? amt : 0, credit: up ? 0 : amt, narration: `${up ? 'DR' : 'CR'} ${stockAcc ? stockAcc.code + ' ' + stockAcc.name : ''} — received qty adj` },
-              { account_id: rule.credit_account_id, account: apAcc?.name || '', debit: up ? 0 : amt, credit: up ? amt : 0, narration: `${up ? 'CR' : 'DR'} ${apAcc ? apAcc.code + ' ' + apAcc.name : ''} — received qty adj` },
-            ];
-            const adj = await accountingService.createJournal(trx, {
-              date: new Date().toISOString().slice(0, 10), entity: 'mill',
-              refType: 'Purchase Lot', refNo: lot.lot_no,
-              description: `Lot ${lot.lot_no} received qty set to ${Math.round(newReceivedKg).toLocaleString()} kg (bill Rs ${delta >= 0 ? '+' : ''}${delta})`,
-              lines, currency: 'PKR', isAuto: true, postingRuleId: rule.id,
-              userId: req.user?.id, partyType: 'supplier', partyId: lot.supplier_id,
-            });
-            await accountingService.postJournal(trx, adj.id);
-          }
-        }
+        // Re-bill the rice only (same as setLotPurchaseRate): landed cost keeps
+        // freight + commission + extras; the rice payable and the GL move by the
+        // change in purchase amount — signed delta, never reverse+repost.
+        const { payableUpdated } = await applyRicePurchaseChange(trx, lot, {
+          newPurchaseAmount, kg: newReceivedKg,
+          lotFields: {
+            received_net_weight_kg: newReceivedKg,
+            ordered_net_weight_kg: orderedKg,
+            net_weight_kg: newNet, gross_weight_kg: newNet,
+            qty: newNet, available_qty: newAvailable,
+          },
+          description: (d) => `Lot ${lot.lot_no} received qty set to ${Math.round(newReceivedKg).toLocaleString()} kg (bill Rs ${d >= 0 ? '+' : ''}${d})`,
+          narration: 'received qty adj', userId: req.user?.id,
+        });
 
         const propagation = await inventoryService.propagateLotCostToBatches(trx, parseInt(id, 10), { userId: req.user?.id });
         const updated = await trx('inventory_lots').where({ id }).first();
