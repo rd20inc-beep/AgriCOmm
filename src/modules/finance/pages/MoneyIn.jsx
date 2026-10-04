@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { ArrowDownLeft, DollarSign, AlertTriangle, CheckCircle, Clock, Eye, X, Printer } from 'lucide-react';
 import { FinanceKPI, FinanceTable, FinanceChart, FinanceFilterBar } from '../../../components/finance';
 import { useReceivables, useRecordPayment, useBankAccounts, useReceivableReceipts, useAcceptLocalSalePayment } from '../../../api/queries';
+import { isPostDatedCheque } from '../../../components/payments/paymentPayload';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { useApp } from '../../../context/AppContext';
 import TransactionDocument from '../../../components/TransactionDocument';
@@ -180,7 +181,7 @@ export default function MoneyIn() {
             amount,
             payment_method: recvForm.paymentMethod,
             payment_date: recvForm.paymentDate,
-            bank_account_id: recvForm.bankAccountId || null,
+            bank_account_id: isPostDatedCheque(recvForm) ? null : (recvForm.bankAccountId || null),
             reference: recvForm.chequeNo || null,
             due_date: recvForm.dueDate || null,
           },
@@ -191,7 +192,7 @@ export default function MoneyIn() {
           currency: recv.currency || 'USD',
           payment_method: recvForm.paymentMethod,
           payment_date: recvForm.paymentDate,
-          bank_account_id: recvForm.bankAccountId || null,
+          bank_account_id: isPostDatedCheque(recvForm) ? null : (recvForm.bankAccountId || null),
           bank_reference: recvForm.chequeNo || null,
           due_date: recvForm.dueDate || null,
           linked_receivable_id: recv.dbId || recv.id,
@@ -365,7 +366,7 @@ export default function MoneyIn() {
                 <div>
                   <label className="text-xs text-gray-500 block mb-1">Payment Method</label>
                   <select value={recvForm.paymentMethod}
-                    onChange={e => { const m = e.target.value; setRecvForm({ ...recvForm, paymentMethod: m, bankAccountId: (m === 'cash' || m === 'cheque') ? '' : recvForm.bankAccountId }); }}
+                    onChange={e => { const m = e.target.value; setRecvForm({ ...recvForm, paymentMethod: m, bankAccountId: (m === 'cash') !== (recvForm.paymentMethod === 'cash') ? '' : recvForm.bankAccountId }); }}
                     className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
                     <option value="bank_transfer">Bank Transfer / TT</option>
                     <option value="lc">Letter of Credit</option>
@@ -376,7 +377,8 @@ export default function MoneyIn() {
                 </div>
 
                 {/* Cheque details — number (optional) + the date it clears, so
-                    Due Dates knows when to expect the money. No account picked. */}
+                    Due Dates knows when to expect the money. A post-dated cheque
+                    needs no account until it clears. */}
                 {recvForm.paymentMethod === 'cheque' && (
                   <div className="grid grid-cols-2 gap-3">
                     <div>
@@ -392,15 +394,16 @@ export default function MoneyIn() {
                   </div>
                 )}
 
-                {/* Receive Into Account — only for account-based methods; Cash &
-                    Cheque don't need one. */}
-                {recvForm.paymentMethod !== 'cash' && recvForm.paymentMethod !== 'cheque' && (
+                {/* Receive Into Account — every receipt lands in one: a cash
+                    account for cash, a bank account otherwise. Only a post-dated
+                    cheque waits; it moves money when it clears. */}
+                {!isPostDatedCheque(recvForm) && (
                   <div>
                     <label className="text-xs text-gray-500 block mb-1">Receive Into Account</label>
-                    <select value={recvForm.bankAccountId} onChange={e => setRecvForm({ ...recvForm, bankAccountId: e.target.value })}
+                    <select required value={recvForm.bankAccountId} onChange={e => setRecvForm({ ...recvForm, bankAccountId: e.target.value })}
                       className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                      <option value="">Select bank account...</option>
-                      {bankAccounts.map(a => (
+                      <option value="">{recvForm.paymentMethod === 'cash' ? 'Select cash account...' : 'Select bank account...'}</option>
+                      {bankAccounts.filter(a => (a.type === 'cash') === (recvForm.paymentMethod === 'cash')).map(a => (
                         <option key={a.id} value={a.id}>
                           {favStar(a)}{a.name} — {a.bankName || ''} ({a.currency || 'PKR'} {(parseFloat(a.currentBalance) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
                         </option>

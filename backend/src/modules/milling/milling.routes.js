@@ -2616,7 +2616,7 @@ router.post('/payroll/runs/:id/settle', authorize('payroll', 'pay'),
     const [updated] = await db('mill_payroll_runs').where('id', run.id)
       .update({ status: 'paid', paid_by: req.user?.id || null, paid_at: db.fn.now(), updated_at: db.fn.now() }).returning('*');
     return res.json({ success: true, data: { run: updated } });
-  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+  } catch (err) { return res.status(err.statusCode || 500).json({ success: false, message: err.message }); }
 });
 
 // VOID a Prepared/Approved run (before payment). Nothing posted yet, so just

@@ -4,13 +4,17 @@ const { nextDocNo } = require('../../utils/docNumber');
 const accountingService = require('../accounting/accounting.service');
 const { resolveCashAccountId } = require('../../shared/cashAccounts');
 const { normalizePaymentMethod } = require('../../shared/constants/paymentMethods');
+const { ledgerFailure, missingAccounts } = require('../../shared/ledgerFailure');
 
 // Settlement journal posted when an expense is PAID: DR Supplier Payable (2010)
 // CR Cash & Bank (1000). The obligation was booked at create (CR 2010 via the
 // expense_recorded rule); this clears it and lands the cash/bank outflow on the
 // GL — mirroring finance recordPayment for Money In/Out. Cash payments (no bank
-// account) still credit the 1000 control account. Best-effort: a journal failure
-// never blocks the payment. Returns nothing.
+// account) still credit the 1000 control account. A journal failure (closed
+// period, unbalanced, missing account) is rethrown so the caller's transaction
+// rolls the payment back with it: a payment with no journal is a gap in the
+// books, and a database error here has already aborted the transaction anyway.
+// Returns nothing.
 async function postExpenseSettlement(trx, { expense, paymentNo, payDate, userId }) {
   try {
     // Settle against the SAME payable the accrual credited: salaries credit
@@ -23,7 +27,7 @@ async function postExpenseSettlement(trx, { expense, paymentNo, payDate, userId 
     ]);
     // Fall back to Supplier Payable if the dedicated account is missing (older DB).
     if (!ap && payableCode !== '2010') ap = await trx('chart_of_accounts').where({ code: '2010' }).first();
-    if (!ap || !cash) { console.warn(`Expense settlement journal skipped (missing ${payableCode}/1000) for ${paymentNo}`); return; }
+    if (!ap || !cash) throw missingAccounts([payableCode, '1000']);
     const amt = parseFloat(expense.amount_pkr) || 0;
     if (amt <= 0) return;
     const entity = expense.expense_type === 'mill' ? 'mill' : expense.expense_type === 'export' ? 'export' : 'general';
@@ -46,7 +50,7 @@ async function postExpenseSettlement(trx, { expense, paymentNo, payDate, userId 
     });
     if (journal?.id) await accountingService.postJournal(trx, journal.id);
   } catch (e) {
-    console.warn(`Expense settlement journal failed for ${paymentNo}:`, e.message);
+    throw ledgerFailure(e);
   }
 }
 
@@ -251,31 +255,29 @@ const expensesService = {
           });
           // Record the cash/bank outflow on the account's transaction ledger so
           // the Bank/Cash statement shows the payout (mirrors the receipt side
-          // in localSales.postReceiptToAccount). Best-effort.
-          try {
-            const acct = await trx('bank_accounts').where('id', resolvedAccountId).first();
-            const btNo = await nextDocNo(trx, { table: 'bank_transactions', column: 'transaction_no', prefix: 'BT-' });
-            const paymentRow = await trx('payments').where('payment_no', paymentNo).first();
-            await trx('bank_transactions').insert({
-              transaction_no: btNo,
-              bank_account_id: resolvedAccountId,
-              type: 'debit',
-              amount: amountPkr,
-              currency: 'PKR',
-              status: 'posted',
-              transaction_date: payDate,
-              reference: paymentNo,
-              notes: `Payment for ${expenseNo}`,
-              source: category === 'salaries' ? 'salaries' : 'expense',
-              linked_payment_id: paymentRow?.id || null,
-              running_balance: acct ? acct.current_balance : null,
-              category: category || 'expense',
-              counterparty: vendorLabel,
-              created_by: userId || null,
-            });
-          } catch (e) {
-            console.warn('Expense bank_transaction write failed:', e.message);
-          }
+          // in localSales.postReceiptToAccount).
+          // A failed insert aborts the transaction, so it is not swallowed:
+          // carrying on would report success for a payment COMMIT discards.
+          const acct = await trx('bank_accounts').where('id', resolvedAccountId).first();
+          const btNo = await nextDocNo(trx, { table: 'bank_transactions', column: 'transaction_no', prefix: 'BT-' });
+          const paymentRow = await trx('payments').where('payment_no', paymentNo).first();
+          await trx('bank_transactions').insert({
+            transaction_no: btNo,
+            bank_account_id: resolvedAccountId,
+            type: 'debit',
+            amount: amountPkr,
+            currency: 'PKR',
+            status: 'posted',
+            transaction_date: payDate,
+            reference: paymentNo,
+            notes: `Payment for ${expenseNo}`,
+            source: category === 'salaries' ? 'salaries' : 'expense',
+            linked_payment_id: paymentRow?.id || null,
+            running_balance: acct ? acct.current_balance : null,
+            category: category || 'expense',
+            counterparty: vendorLabel,
+            created_by: userId || null,
+          });
         }
         await postExpenseSettlement(trx, {
           expense: { amount_pkr: amountPkr, supplier_id, expense_type, expense_no: expenseNo, category },
@@ -542,29 +544,27 @@ const expensesService = {
           current_balance: trx.raw('current_balance - ?', [payAmt]),
           updated_at: trx.fn.now(),
         });
-        try {
-          const acct = await trx('bank_accounts').where('id', acctId).first();
-          const btNo = await nextDocNo(trx, { table: 'bank_transactions', column: 'transaction_no', prefix: 'BT-' });
-          await trx('bank_transactions').insert({
-            transaction_no: btNo,
-            bank_account_id: acctId,
-            type: 'debit',
-            amount: payAmt,
-            currency: 'PKR',
-            status: 'posted',
-            transaction_date: payDate,
-            reference: paymentNo,
-            notes: notes || `Payment for ${expense.expense_no}`,
-            source: expense.category === 'salaries' ? 'salaries' : 'expense',
-            linked_payment_id: payRow?.id || null,
-            running_balance: acct ? acct.current_balance : null,
-            category: expense.category || 'expense',
-            counterparty: expense.vendor_name || null,
-            created_by: userId || null,
-          });
-        } catch (e) {
-          console.warn('Expense settlement bank_transaction write failed:', e.message);
-        }
+        // A failed insert aborts the transaction, so it is not swallowed:
+        // carrying on would report success for a payment COMMIT discards.
+        const acct = await trx('bank_accounts').where('id', acctId).first();
+        const btNo = await nextDocNo(trx, { table: 'bank_transactions', column: 'transaction_no', prefix: 'BT-' });
+        await trx('bank_transactions').insert({
+          transaction_no: btNo,
+          bank_account_id: acctId,
+          type: 'debit',
+          amount: payAmt,
+          currency: 'PKR',
+          status: 'posted',
+          transaction_date: payDate,
+          reference: paymentNo,
+          notes: notes || `Payment for ${expense.expense_no}`,
+          source: expense.category === 'salaries' ? 'salaries' : 'expense',
+          linked_payment_id: payRow?.id || null,
+          running_balance: acct ? acct.current_balance : null,
+          category: expense.category || 'expense',
+          counterparty: expense.vendor_name || null,
+          created_by: userId || null,
+        });
       }
 
       // GL settlement for this installment: DR Supplier Payable / CR Cash & Bank.

@@ -12,6 +12,7 @@ const {
   rejectAdjustmentSchema,
 } = require('./millStore.validator');
 const { ValidationError } = require('../../shared/errors');
+const financeController = require('../finance/finance.controller');
 
 function validate(schema, body) {
   const { value, error } = schema.validate(body, { abortEarly: false, stripUnknown: true });
@@ -152,11 +153,24 @@ const millStoreController = {
     } catch (err) { next(err); }
   },
 
+  // An alias of POST /api/finance/purchases/pay for a mill-store purchase. This
+  // route used to settle the purchase itself — moving the account and the
+  // payable but posting no journal — so the same payment made here and from
+  // Finance left different books. It now hands over to the one settlement path.
   async updatePurchasePayment(req, res, next) {
     try {
       const data = validate(updatePaymentSchema, req.body);
-      const purchase = await service.recordPurchasePayment(req.params.id, data, req.user?.id);
-      res.json({ success: true, data: { purchase } });
+      req.body = {
+        source: 'mill_store',
+        source_id: req.params.id,
+        amount: data.amount,
+        bank_account_id: data.bank_account_id ?? null,
+        payment_method: data.payment_method,
+        payment_date: data.payment_date,
+        payment_reference: data.payment_reference || null,
+        due_date: data.due_date || null,
+      };
+      return await financeController.payPurchase(req, res);
     } catch (err) { next(err); }
   },
 

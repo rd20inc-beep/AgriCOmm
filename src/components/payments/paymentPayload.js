@@ -44,6 +44,17 @@ export function blankPaymentForm({ amount = '', method = 'bank_transfer', date }
 }
 
 /**
+ * A cheque dated after today. It is recorded but moves no money (and settles
+ * nothing) until it is cleared, so it is the one payment that needs no account
+ * yet. Every other payment must name the cash or bank account it moves through.
+ * `form` carries `method`/`paymentMethod` and `dueDate`.
+ */
+export function isPostDatedCheque(form, today = new Date().toISOString().slice(0, 10)) {
+  const method = form.method ?? form.paymentMethod;
+  return method === 'cheque' && !!form.dueDate && String(form.dueDate).slice(0, 10) > today;
+}
+
+/**
  * The cash that actually leaves the account. WHT and the early-payment discount
  * reduce the cash but NOT the amount settled against the payable: the vendor's
  * claim is cleared in full, the withheld tax is remitted to FBR and the discount

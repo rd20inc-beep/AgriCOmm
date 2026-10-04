@@ -64,9 +64,11 @@ router.post(
   auditAction('create', 'mill_purchase'),
   ctrl.createPurchase
 );
+// Paying is a finance action, not a store one: Mill Operators hold
+// create_purchase and could settle purchases through here.
 router.put(
   '/purchases/:id/pay',
-  authorize('mill_store', 'create_purchase'),
+  authorize('finance', 'confirm_payment'),
   auditAction('update', 'mill_purchase', (req) => req.params.id),
   ctrl.updatePurchasePayment
 );

@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import useConfirm from '../../../hooks/useConfirm';
 import { PaymentExtras } from '../../../components/payments/PaymentFields';
+import { isPostDatedCheque } from '../../../components/payments/paymentPayload';
 import OrderRefLink from '../../../shared/components/OrderRefLink';
 import { ArrowUpRight, AlertTriangle, CheckCircle, Clock, Eye, X, DollarSign, Landmark, Printer } from 'lucide-react';
 import { FinanceKPI, FinanceTable, FinanceFilterBar } from '../../../components/finance';
@@ -230,7 +231,7 @@ export default function MoneyOut() {
         currency: pay.currency || 'PKR',
         payment_method: payForm.paymentMethod,
         payment_date: payForm.paymentDate,
-        bank_account_id: payForm.bankAccountId || null,
+        bank_account_id: isPostDatedCheque(payForm) ? null : (payForm.bankAccountId || null),
         bank_reference: payForm.chequeNo || null,
         due_date: payForm.dueDate || null,
         linked_payable_id: pay.dbId || pay.id,
@@ -438,7 +439,7 @@ export default function MoneyOut() {
                 <div>
                   <label className="text-xs text-gray-500 block mb-1">Payment Method</label>
                   <select value={payForm.paymentMethod}
-                    onChange={e => { const m = e.target.value; setPayForm({ ...payForm, paymentMethod: m, bankAccountId: (m === 'cash' || m === 'cheque') ? '' : payForm.bankAccountId }); }}
+                    onChange={e => { const m = e.target.value; setPayForm({ ...payForm, paymentMethod: m, bankAccountId: (m === 'cash') !== (payForm.paymentMethod === 'cash') ? '' : payForm.bankAccountId }); }}
                     className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
                     <option value="bank_transfer">Bank Transfer</option>
                     <option value="cheque">Cheque</option>
@@ -449,7 +450,7 @@ export default function MoneyOut() {
                 </div>
 
                 {/* Cheque details — number (optional) + clearing date for Due Dates.
-                    No account picked. */}
+                    A post-dated cheque needs no account until it clears. */}
                 {payForm.paymentMethod === 'cheque' && (
                   <div className="grid grid-cols-2 gap-3">
                     <div>
@@ -465,15 +466,16 @@ export default function MoneyOut() {
                   </div>
                 )}
 
-                {/* Pay From Account — only account-based methods; Cash & Cheque
-                    don't need one. */}
-                {payForm.paymentMethod !== 'cash' && payForm.paymentMethod !== 'cheque' && (
+                {/* Pay From Account — every payment moves money through one: a
+                    cash account for cash, a bank account otherwise. Only a
+                    post-dated cheque waits; it moves money when it clears. */}
+                {!isPostDatedCheque(payForm) && (
                   <div>
                     <label className="text-xs text-gray-500 block mb-1">Pay From Account</label>
                     <select required value={payForm.bankAccountId} onChange={e => setPayForm({ ...payForm, bankAccountId: e.target.value })}
                       className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                      <option value="">Select account...</option>
-                      {bankOnlyAccounts.map(a => (
+                      <option value="">{payForm.paymentMethod === 'cash' ? 'Select cash account...' : 'Select account...'}</option>
+                      {(payForm.paymentMethod === 'cash' ? cashAccounts : bankOnlyAccounts).map(a => (
                         <option key={a.id} value={a.id}>
                           {favStar(a)}{a.name} — {a.bankName || ''} ({a.currency || 'PKR'} {(parseFloat(a.currentBalance) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
                         </option>

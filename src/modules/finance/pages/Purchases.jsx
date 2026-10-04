@@ -585,15 +585,16 @@ export default function Purchases() {
 }
 
 function PayPurchaseDrawer({ purchase, bankAccounts, isPending, onClose, onSubmit }) {
-  const outstanding = useMemo(() => {
-    // Best-effort outstanding — the listPurchases endpoint doesn't yet
-    // return paid_amount, so default to the full amount and let the user
-    // adjust. Partial payments are clamped server-side.
-    return parseFloat(purchase.amountPkr) || 0;
-  }, [purchase]);
+  const total = parseFloat(purchase.amountPkr) || 0;
+  // What is still owed, to the paisa. The server refuses more than this, so
+  // prefilling the full total on a part-paid purchase would just fail.
+  const outstanding = useMemo(
+    () => Math.max(0, Number((total - (parseFloat(purchase.paidAmount) || 0)).toFixed(2))),
+    [total, purchase.paidAmount],
+  );
 
-  const [amount, setAmount] = useState(String(Math.round(outstanding)));
-  const [paymentMethod, setPaymentMethod] = useState('bank');
+  const [amount, setAmount] = useState(outstanding.toFixed(2));
+  const [paymentMethod, setPaymentMethod] = useState('bank_transfer');
   const [bankAccountId, setBankAccountId] = useState(bankAccounts.find(a => (a.currency || 'PKR') === 'PKR')?.id || '');
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().slice(0, 10));
   const [reference, setReference] = useState('');
@@ -640,7 +641,11 @@ function PayPurchaseDrawer({ purchase, bankAccounts, isPending, onClose, onSubmi
             </div>
             <div className="flex justify-between">
               <span className="text-gray-500">Total</span>
-              <span className="font-medium text-gray-900">Rs {(outstanding).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              <span className="font-medium text-gray-900">Rs {total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-500">Outstanding</span>
+              <span className="font-medium text-red-600">Rs {outstanding.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-gray-500">Current status</span>
@@ -653,20 +658,20 @@ function PayPurchaseDrawer({ purchase, bankAccounts, isPending, onClose, onSubmi
           <div>
             <label className="text-xs font-medium text-gray-600 block mb-1">Amount paying (PKR)</label>
             <input
-              type="number" min="0" step="0.01" required
+              type="number" min="0" step="0.01" max={outstanding} required
               value={amount} onChange={e => setAmount(e.target.value)}
               className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900"
             />
-            <p className="text-[11px] text-gray-400 mt-1">Defaults to full amount. Lower it for partial payment.</p>
+            <p className="text-[11px] text-gray-400 mt-1">Defaults to the outstanding balance. Lower it for a partial payment.</p>
           </div>
 
           <div>
             <label className="text-xs font-medium text-gray-600 block mb-1">Paid from</label>
             <div className="inline-flex bg-gray-100 rounded-lg p-0.5 mb-2">
-              {['bank', 'cash', 'cheque'].map(m => (
+              {[['bank_transfer', 'Bank'], ['cash', 'Cash'], ['cheque', 'Cheque']].map(([m, label]) => (
                 <button key={m} type="button" onClick={() => setPaymentMethod(m)}
                   className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${paymentMethod === m ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}>
-                  {m.charAt(0).toUpperCase() + m.slice(1)}
+                  {label}
                 </button>
               ))}
             </div>
