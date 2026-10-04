@@ -14,6 +14,7 @@ describe('milling_status stays within what the constraint allows', () => {
     'modules/inventory/inventory.service.js',
     'modules/inventory/lotInventory.controller.js',
     'modules/milling/milling.controller.js',
+    'modules/milling/batchLifecycle.js',
   ].map((f) => ({ f, src: fs.readFileSync(path.join(__dirname, '..', f), 'utf8') }));
 
   test('no code writes a value the CHECK would reject', () => {

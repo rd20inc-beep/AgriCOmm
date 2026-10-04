@@ -6,7 +6,7 @@ import {
   Filter, FlaskConical, Search, ExternalLink, RefreshCw,
 } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
-import { useUpdateMillingBatch } from '../../../api/queries';
+import { useUpdateMillingBatch, useBatchStatusAction } from '../../../api/queries';
 import api from '../../../api/client';
 import Modal from '../../../components/Modal';
 import StatusBadge from '../../../components/StatusBadge';
@@ -34,6 +34,7 @@ const pf = (v) => v != null ? parseFloat(v) || null : null;
 export default function QualityComparison() {
   const { millingBatches: rawBatches, addToast } = useApp();
   const updateBatchMut = useUpdateMillingBatch();
+  const statusMut = useBatchStatusAction();
   const millingBatches = Array.isArray(rawBatches) ? rawBatches : [];
 
   const [filter, setFilter] = useState('all');
@@ -141,7 +142,12 @@ export default function QualityComparison() {
 
   async function handleApprove(batch) {
     try {
-      await updateBatchMut.mutateAsync({ id: batch.dbId || batch.id, data: { variance_status: 'Approved' } });
+      if (batch.status === 'On Hold') {
+        // Approving the variance on a held batch puts it back in the queue.
+        await statusMut.mutateAsync({ id: batch.dbId || batch.id, action: 'resume', data: { variance_status: 'Approved' } });
+      } else {
+        await updateBatchMut.mutateAsync({ id: batch.dbId || batch.id, data: { variance_status: 'Approved' } });
+      }
       addToast(`Quality variance approved for ${batch.id}`);
     } catch (err) { addToast(err.message || 'Failed', 'error'); }
     closeModal();
@@ -149,7 +155,7 @@ export default function QualityComparison() {
 
   async function handleHold(batch) {
     try {
-      await updateBatchMut.mutateAsync({ id: batch.dbId || batch.id, data: { variance_status: 'On Hold', status: 'On Hold' } });
+      await statusMut.mutateAsync({ id: batch.dbId || batch.id, action: 'hold', data: { variance_status: 'On Hold' } });
       addToast(`Batch ${batch.id} placed on hold`, 'warning');
     } catch (err) { addToast(err.message || 'Failed', 'error'); }
     closeModal();
@@ -157,7 +163,8 @@ export default function QualityComparison() {
 
   async function handleReject(batch) {
     try {
-      await updateBatchMut.mutateAsync({ id: batch.dbId || batch.id, data: { variance_status: 'Rejected', status: 'Cancelled' } });
+      // Cancels the batch and releases its source lots (refused once yield exists).
+      await statusMut.mutateAsync({ id: batch.dbId || batch.id, action: 'cancel', data: { variance_status: 'Rejected' } });
       addToast(`Batch ${batch.id} rejected`, 'error');
     } catch (err) { addToast(err.message || 'Failed', 'error'); }
     closeModal();

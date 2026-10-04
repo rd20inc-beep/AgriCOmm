@@ -7,7 +7,7 @@ import SlideDrawer from '../../../components/SlideDrawer';
  * The yield form itself carries no costing/pricing UI (costs are derived on the
  * backend), so it is shared verbatim by regular and service-milling batches.
  */
-export default function YieldOutputDrawer({ open, onClose, form, setForm, onSubmit, batch, finishedLabel, basisKg }) {
+export default function YieldOutputDrawer({ open, onClose, form, setForm, onSubmit, batch, finishedLabel, basisKg, saving = false }) {
   // The yield basis is what's actually being milled. For a partial (service)
   // mill the operator declares a milling quantity (basisKg) that is less than
   // the received quantity — yield %, "accounted for" and the header all measure
@@ -257,11 +257,13 @@ export default function YieldOutputDrawer({ open, onClose, form, setForm, onSubm
           >
             Cancel
           </button>
+          {/* Disabled while saving: a double-click posted the yield twice. */}
           <button
             type="submit"
-            className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 transition-colors"
+            disabled={saving}
+            className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-50"
           >
-            Save Yield Output
+            {saving ? 'Saving…' : 'Save Yield Output'}
           </button>
         </div>
       </form>

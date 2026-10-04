@@ -56,7 +56,7 @@ export default function ServiceMillingBatchDetail() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { addToast } = useApp();
-  const { hasPermission, user } = useAuth();
+  const { user } = useAuth();
   // Editing/deleting a truck reverses the linked inventory receipt, so it is a
   // manager/owner correction — mill operators see trucks read-only.
   const canEditVehicles = ['Owner', 'Super Admin', 'Mill Manager'].includes(user?.role);
@@ -148,7 +148,11 @@ export default function ServiceMillingBatchDetail() {
   const sampleForDisplay = safeSample || vehicleQualityAgg;
   const unit = num(batch.kattaCount) > 0 ? 'kattas' : num(batch.bagCount) > 0 ? 'bags' : null;
   const unitCount = num(batch.kattaCount) || num(batch.bagCount);
-  const canApprove = hasPermission('service_milling', 'create_batch');
+  // Match the routes: approve/reject are Owner / Super Admin only (shown just
+  // for legacy 'Pending Approval' lots — new lots start Queued); delete is
+  // Super Admin / Mill Manager.
+  const canApprove = ['Owner', 'Super Admin'].includes(user?.role);
+  const canDeleteBatch = ['Super Admin', 'Mill Manager'].includes(user?.role);
 
   // ---- handlers ----
   function openNameEditor() {
@@ -447,9 +451,11 @@ export default function ServiceMillingBatchDetail() {
                 </button>
               </>
             )}
+            {canDeleteBatch && (
             <button onClick={del} className="inline-flex items-center gap-1.5 px-3 py-2 bg-gray-100 text-gray-600 text-sm font-medium rounded-lg hover:bg-red-50 hover:text-red-600">
               <Trash2 size={16} /> Delete
             </button>
+            )}
           </div>
         </div>
       </div>
@@ -553,9 +559,12 @@ export default function ServiceMillingBatchDetail() {
         <div className="space-y-4">
         <MillingQtyCard receivedKg={num(batch.rawQtyKg)} milledQtyKg={batch.milledQtyKg} milledKg={milledKg} onSave={saveMilledQty} />
         <Card title="Yield Output (client-owned)" icon={Boxes} action={
+          // The backend refuses yield on held / cancelled / rejected batches.
+          ['On Hold', 'Cancelled', 'Rejected'].includes(batch.status) ? null : (
           <button onClick={openYieldModal} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 text-white text-xs font-medium rounded-lg hover:bg-emerald-700">
             <Boxes size={14} /> {producedKg > 0 ? 'Update Yield' : 'Record Yield Output'}
           </button>
+          )
         }>
           {producedKg <= 0 ? (
             <p className="text-sm text-gray-400 py-2">No yield recorded yet. The output belongs to the client and is tracked as Service Milling stock.</p>
@@ -606,6 +615,7 @@ export default function ServiceMillingBatchDetail() {
         batch={batch}
         finishedLabel={finishedLabel}
         basisKg={yieldBasisKg}
+        saving={recordYieldMut.isPending}
       />
       <VehicleArrivalDrawer
         open={showVehicleModal}

@@ -1126,7 +1126,7 @@ export default function MillingDashboard() {
         footer={(
           <div className="flex justify-end gap-2">
             <button onClick={() => setShowNewBatch(false)} className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
-            <button onClick={handleCreateBatch} className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700">Create Batch</button>
+            <button onClick={handleCreateBatch} disabled={createBatchMut.isPending} className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">{createBatchMut.isPending ? 'Creating…' : 'Create Batch'}</button>
           </div>
         )}
       >

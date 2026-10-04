@@ -32,6 +32,7 @@ import {
   useMillingBatch, useSaveQuality, useRecordYield,
   useAddBatchCost, useAddVehicle, useUpdateMillingBatch,
   useUpdateVehicle, useDeleteVehicle, useDeleteBatch, useBatchSourceLots,
+  useBatchStatusAction,
 } from '../../../api/queries';
 import useConfirm from '../../../hooks/useConfirm';
 import { millingApi } from '../../../api/services';
@@ -82,6 +83,13 @@ export default function MillingBatchDetail() {
   const canReports = hasPermission('reports', 'view');
   const { requestOwnerApproval } = useOwnerAuth();
   const isOwnerOrAdmin = user?.role === 'Owner' || user?.role === 'Super Admin' || user?.role === 'Mill Manager';
+  // Each button shown only to the roles its route allows:
+  //   approve/reject  PUT /batches/:id/approve|reject  → Owner, Super Admin
+  //   delete          DELETE /batches/:id              → Super Admin, Mill Manager
+  //   hold/resume/cancel                               → milling.edit
+  const canApproveBatch = user?.role === 'Owner' || user?.role === 'Super Admin';
+  const canDeleteBatch = user?.role === 'Super Admin' || user?.role === 'Mill Manager';
+  const canEditBatch = hasPermission('milling', 'edit');
   const commodityPrices = useCommodityPrices();
   const [confirm, confirmDialog] = useConfirm();
 
@@ -121,6 +129,7 @@ export default function MillingBatchDetail() {
   const updateBatchMut = useUpdateMillingBatch();
   const deleteVehicleMut = useDeleteVehicle();
   const deleteBatchMut = useDeleteBatch();
+  const statusMut = useBatchStatusAction();
 
   const invalidateBatch = () => {
     qc.invalidateQueries({ queryKey: queryKeys.batches.detail(id) });
@@ -684,7 +693,12 @@ export default function MillingBatchDetail() {
 
   async function handleApproveAnyway() {
     try {
-      await updateBatchMut.mutateAsync({ id: batchId, data: { variance_status: 'Approved' } });
+      // A batch held over this variance goes back to the queue once approved.
+      if (batch.status === 'On Hold') {
+        await statusMut.mutateAsync({ id: batchId, action: 'resume', data: { variance_status: 'Approved' } });
+      } else {
+        await updateBatchMut.mutateAsync({ id: batchId, data: { variance_status: 'Approved' } });
+      }
       addToast(`Quality variance approved for ${batch.id}`);
     } catch (err) {
       addToast(`Failed to approve variance: ${err.message}`, 'error');
@@ -693,10 +707,10 @@ export default function MillingBatchDetail() {
 
   async function handleHoldLot() {
     try {
-      await updateBatchMut.mutateAsync({ id: batchId, data: { variance_status: 'On Hold', status: 'On Hold' } });
+      await statusMut.mutateAsync({ id: batchId, action: 'hold', data: { variance_status: 'On Hold' } });
       addToast(`Batch ${batch.id} placed on hold`, 'warning');
     } catch (err) {
-      addToast(`Failed to hold batch: ${err.message}`, 'error');
+      addToast(`Failed to hold batch: ${err?.response?.data?.message || err.message}`, 'error');
     }
   }
 
@@ -710,11 +724,57 @@ export default function MillingBatchDetail() {
   }
 
   async function handleReject() {
+    if (!await confirm({
+      title: `Reject the lot and cancel batch ${batch.id}?`,
+      consequence: 'The batch is cancelled and its source lots are released back to stock.',
+      confirmLabel: 'Cancel batch',
+    })) return;
     try {
-      await updateBatchMut.mutateAsync({ id: batchId, data: { variance_status: 'Rejected', status: 'Cancelled' } });
+      await statusMut.mutateAsync({ id: batchId, action: 'cancel', data: { variance_status: 'Rejected' } });
       addToast(`Batch ${batch.id} rejected`, 'error');
     } catch (err) {
-      addToast(`Failed to reject batch: ${err.message}`, 'error');
+      addToast(`Failed to reject batch: ${err?.response?.data?.message || err.message}`, 'error');
+    }
+  }
+
+  async function handleResume() {
+    try {
+      await statusMut.mutateAsync({ id: batchId, action: 'resume' });
+      addToast(`Batch ${batch.id} resumed`, 'success');
+    } catch (err) {
+      addToast(`Failed to resume batch: ${err?.response?.data?.message || err.message}`, 'error');
+    }
+  }
+
+  async function handleCancelBatch() {
+    if (!await confirm({
+      title: `Cancel batch ${batch.id}?`,
+      consequence: 'The batch stops here and its source lots are released back to stock. A cancelled batch cannot record yield.',
+      confirmLabel: 'Cancel batch',
+      cancelLabel: 'Keep batch',
+    })) return;
+    try {
+      await statusMut.mutateAsync({ id: batchId, action: 'cancel' });
+      addToast(`Batch ${batch.id} cancelled`, 'warning');
+    } catch (err) {
+      addToast(`Failed to cancel batch: ${err?.response?.data?.message || err.message}`, 'error');
+    }
+  }
+
+  async function handleRejectBatch() {
+    const ok = await confirm({
+      title: `Reject batch ${batch.id}?`,
+      consequence: 'The batch is rejected and its source lots are released back to stock.',
+      reason: 'required',
+      confirmLabel: 'Reject',
+    });
+    if (!ok) return;
+    try {
+      await millingModApi.rejectBatch(batch.dbId || batch.id, { reason: ok.reason });
+      addToast('Batch rejected', 'success');
+      invalidateBatch();
+    } catch (err) {
+      addToast(`Failed: ${err?.response?.data?.message || err.message}`, 'error');
     }
   }
 
@@ -804,7 +864,7 @@ export default function MillingBatchDetail() {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-4">
-            {batch.status === 'Pending Approval' && isOwnerOrAdmin && (
+            {batch.status === 'Pending Approval' && canApproveBatch && (
               <>
                 <button
                   onClick={async () => {
@@ -819,20 +879,14 @@ export default function MillingBatchDetail() {
                   <CheckCircle size={16} /> Approve
                 </button>
                 <button
-                  onClick={() => {
-                    const reason = prompt('Rejection reason:');
-                    if (!reason?.trim()) return;
-                    millingModApi.rejectBatch(batch.dbId || batch.id, { reason: reason.trim() })
-                      .then(() => { addToast('Batch rejected', 'success'); invalidateBatch(); })
-                      .catch(err => addToast(`Failed: ${err?.response?.data?.message || err.message}`, 'error'));
-                  }}
+                  onClick={handleRejectBatch}
                   className="inline-flex items-center gap-2 px-4 py-2.5 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 transition-colors"
                 >
                   <XCircle size={16} /> Reject
                 </button>
               </>
             )}
-            {batch.status === 'Pending Approval' && !isOwnerOrAdmin && (
+            {batch.status === 'Pending Approval' && !canApproveBatch && (
               <span className="inline-flex items-center gap-2 px-4 py-2.5 bg-amber-50 text-amber-800 border border-amber-200 rounded-lg text-sm font-medium">
                 <PauseCircle size={16} /> Awaiting Owner approval
               </span>
@@ -853,7 +907,26 @@ export default function MillingBatchDetail() {
               <DollarSign size={16} />
               Costing Sheet
             </button>
-            {isOwnerOrAdmin && batch.status !== 'Completed' && (
+            {canEditBatch && batch.status === 'On Hold' && (
+              <button
+                onClick={handleResume}
+                disabled={statusMut.isPending}
+                className="inline-flex items-center gap-2 px-3 py-2 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg text-sm font-medium hover:bg-emerald-100 transition-colors disabled:opacity-50"
+              >
+                <CheckCircle size={14} /> Resume
+              </button>
+            )}
+            {canEditBatch && ['Queued', 'In Progress', 'Pending Approval', 'On Hold'].includes(batch.status) && !(batch.actualFinishedMT > 0) && (
+              <button
+                onClick={handleCancelBatch}
+                disabled={statusMut.isPending}
+                className="inline-flex items-center gap-2 px-3 py-2 bg-white text-gray-700 border border-gray-300 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors disabled:opacity-50"
+                title="Cancel the batch and release its source lots"
+              >
+                <XCircle size={14} /> Cancel Batch
+              </button>
+            )}
+            {canDeleteBatch && batch.status !== 'Completed' && (
               <button
                 onClick={async () => {
                   if (!await confirm({
@@ -870,7 +943,7 @@ export default function MillingBatchDetail() {
                   }
                 }}
                 className="inline-flex items-center gap-2 px-3 py-2 bg-red-50 text-red-700 border border-red-200 rounded-lg text-sm font-medium hover:bg-red-100 transition-colors"
-                title="Delete batch (admin/manager only)"
+                title="Delete batch (Super Admin / Mill Manager only)"
               >
                 <Trash2 size={14} /> Delete
               </button>
@@ -1528,6 +1601,8 @@ export default function MillingBatchDetail() {
                 <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">
                   Yield Breakdown
                 </h3>
+                {/* The backend refuses yield on held / cancelled / rejected batches. */}
+                {!['On Hold', 'Cancelled', 'Rejected'].includes(batch.status) && (
                 <button
                   onClick={openYieldModal}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 text-white text-xs font-medium rounded-lg hover:bg-emerald-700 transition-colors"
@@ -1535,6 +1610,7 @@ export default function MillingBatchDetail() {
                   <Edit3 size={14} />
                   {batch.actualFinishedMT > 0 ? 'Update Yield' : 'Record Yield Output'}
                 </button>
+                )}
               </div>
               <div className="space-y-4">
                 {yieldBreakdown.map((item) => (
@@ -1976,6 +2052,7 @@ export default function MillingBatchDetail() {
         onSubmit={handleYieldSubmit}
         batch={batch}
         finishedLabel={finishedLabel}
+        saving={recordYieldMut.isPending}
       />
 
       {/* Cost Entry — right slide-over */}

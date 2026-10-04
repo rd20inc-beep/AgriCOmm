@@ -18,6 +18,7 @@ const validate = require('../../middleware/validate');
 const schemas = require('../../middleware/schemas');
 const ownerApproval = require('../../middleware/ownerApproval');
 const aiService = require('../ai/ai.service');
+const { pickBatchEdits } = require('./batchLifecycle');
 
 // =============================================================================
 // Existing Batch Routes
@@ -36,12 +37,10 @@ router.put('/batches/:id', authorize('milling', 'edit'),
         : (await db('milling_batches').where('batch_no', req.params.id).select('id').first())?.id;
       if (!id) return res.status(404).json({ success: false, message: 'Batch not found' });
 
-      const allowed = ['supplier_id', 'raw_qty_kg', 'planned_finished_kg', 'milling_fee_per_kg',
-        'mill_id', 'machine_line', 'shift', 'notes', 'variance_status', 'status', 'batch_name'];
-      const updates = {};
-      for (const key of allowed) {
-        if (req.body[key] !== undefined) updates[key] = req.body[key];
-      }
+      // 'status' is NOT editable here — milling.edit (which Mill Operator
+      // holds) could otherwise complete a batch without yield or reopen one.
+      // Status moves through /hold, /resume, /cancel, /approve, /reject, /yield.
+      const updates = pickBatchEdits(req.body);
       if (updates.batch_name != null) updates.batch_name = String(updates.batch_name).trim().slice(0, 200) || null;
       // Tags: accept an array or comma string → normalised jsonb array.
       if (req.body.custom_tags !== undefined) {
@@ -70,11 +69,24 @@ router.post(
   auditAction('create', 'milling_batch', (req, data) => data.data && data.data.batch ? data.data.batch.id : null),
   controller.create
 );
-router.put(
-  '/batches/:id',
+router.post(
+  '/batches/:id/hold',
   authorize('milling', 'edit'),
-  auditAction('update', 'milling_batch', (req) => req.params.id),
-  controller.update
+  auditAction('hold_batch', 'milling_batch', (req) => req.params.id),
+  controller.holdBatch
+);
+router.post(
+  '/batches/:id/resume',
+  authorize('milling', 'edit'),
+  auditAction('resume_batch', 'milling_batch', (req) => req.params.id),
+  controller.resumeBatch
+);
+// Cancel releases the source-lot holds; refused (409) once yield exists.
+router.post(
+  '/batches/:id/cancel',
+  authorize('milling', 'edit'),
+  auditAction('cancel_batch', 'milling_batch', (req) => req.params.id),
+  controller.cancelBatch
 );
 router.post(
   '/batches/:id/quality',

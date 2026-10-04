@@ -6,6 +6,10 @@ const automationService = require('../../services/automationService');
 const workflowService = require('../../services/exportOrderWorkflowService');
 const notificationService = require('../../services/notificationService');
 const { publishExportOrderUpdate } = require('../../services/exportOrderEventBus');
+const { nextDocNo } = require('../../utils/docNumber');
+const {
+  yieldMode, batchHasOutputLots, checkTransition, releaseBatchSources, TRANSITIONS,
+} = require('./batchLifecycle');
 
 // Can this inventory lot be fed into a milling/blend batch? Mirrors the
 // frontend NON_MILLABLE_CATEGORIES (src/utils/lotCategory.js): any rice form is
@@ -46,18 +50,11 @@ async function syncServiceKattaCount(trx, batchId) {
   }
 }
 
+// M-001, M-002, … — MAX+1 over existing numbers, not "the newest row + 1":
+// ordering by created_at hands out a used number when two batches share a
+// timestamp or the newest row is deleted.
 async function generateBatchNo(trx) {
-  const last = await (trx || db)('milling_batches')
-    .select('batch_no')
-    .orderBy('created_at', 'desc')
-    .first();
-
-  if (!last || !last.batch_no) {
-    return 'M-001';
-  }
-
-  const num = parseInt(last.batch_no.replace('M-', ''), 10) || 0;
-  return `M-${String(num + 1).padStart(3, '0')}`;
+  return nextDocNo(trx || db, { table: 'milling_batches', column: 'batch_no', prefix: 'M-', pad: 3 });
 }
 
 // Whitelist + coerce the per-vehicle quality payload so we don't store
@@ -598,7 +595,11 @@ const millingController = {
             notes: notes || null,
             batch_name: cleanName,
             custom_tags: JSON.stringify(cleanTags),
-            status: 'Pending Approval',
+            // Owner decision 2026-10-05: no approval step for milling batches.
+            // A drawer batch starts Queued, like the lot-first (Start Milling)
+            // and truck-receipt paths. approve/reject still serve any batch
+            // left in 'Pending Approval' from before.
+            status: 'Queued',
             created_by: req.user.id,
             // Service milling
             is_service_milling: isService,
@@ -825,54 +826,68 @@ const millingController = {
         return res.status(400).json({ success: false, message: 'Rejection reason is required.' });
       }
 
-      const batch = await db('milling_batches').where('id', id).first();
-      if (!batch) return res.status(404).json({ success: false, message: 'Batch not found.' });
-      if (batch.status !== 'Pending Approval') {
-        return res.status(400).json({ success: false, message: `Cannot reject — batch status is "${batch.status}".` });
-      }
-
-      const [updated] = await db('milling_batches').where('id', id).update({
-        status: 'Rejected',
-        rejected_by: req.user.id,
-        rejection_reason: reason.trim(),
-        updated_at: db.fn.now(),
-      }).returning('*');
+      const updated = await db.transaction(async (trx) => {
+        const batch = await trx('milling_batches').where('id', id).forUpdate().first();
+        if (!batch) { const e = new Error('Batch not found.'); e.status = 404; throw e; }
+        if (batch.status !== 'Pending Approval') {
+          const e = new Error(`Cannot reject — batch status is "${batch.status}".`); e.status = 400; throw e;
+        }
+        const [row] = await trx('milling_batches').where('id', id).update({
+          status: 'Rejected',
+          rejected_by: req.user.id,
+          rejection_reason: reason.trim(),
+          updated_at: trx.fn.now(),
+        }).returning('*');
+        // A rejected batch will never mill — give its source lots back.
+        await releaseBatchSources(trx, id);
+        return row;
+      });
 
       return res.json({ success: true, data: { batch: updated } });
     } catch (err) {
+      if (err.status) return res.status(err.status).json({ success: false, message: err.message });
       console.error('Batch reject error:', err);
       return res.status(500).json({ success: false, message: err.message });
     }
   },
 
-  async update(req, res) {
+  // Explicit status moves (replace the old "PUT any status" path):
+  //   hold   Queued/In Progress → On Hold   (source-lot holds stay in place)
+  //   resume On Hold → Queued
+  //   cancel Queued/In Progress/Pending Approval/On Hold → Cancelled, and the
+  //          source lots are released. A batch with yield is refused (409) —
+  //          its outputs and journals exist; the Danger Zone is the path.
+  // Optional body.variance_status records the quality decision that caused it.
+  holdBatch(req, res) { return millingController._moveStatus(req, res, 'hold'); },
+  resumeBatch(req, res) { return millingController._moveStatus(req, res, 'resume'); },
+  cancelBatch(req, res) { return millingController._moveStatus(req, res, 'cancel'); },
+
+  async _moveStatus(req, res, action) {
     try {
       const id = await resolveBatchId(req.params.id);
       if (!id) return res.status(404).json({ success: false, message: 'Batch not found.' });
-      const updates = req.body;
+      const varianceByAction = { hold: ['On Hold'], cancel: ['Rejected'], resume: ['Approved'] };
+      const variance = req.body && req.body.variance_status;
 
-      delete updates.id;
-      delete updates.batch_no;
-      delete updates.created_at;
-      delete updates.created_by;
+      const result = await db.transaction(async (trx) => {
+        const batch = await trx('milling_batches').where({ id }).forUpdate().first();
+        if (!batch) { const e = new Error('Batch not found.'); e.status = 404; throw e; }
+        const hasYield = action === 'cancel'
+          ? (await batchHasOutputLots(trx, id)) || (parseFloat(batch.actual_finished_kg) || 0) > 0
+          : false;
+        const refusal = checkTransition(action, batch, { hasYield });
+        if (refusal) { const e = new Error(refusal.message); e.status = refusal.status; throw e; }
 
-      updates.updated_at = db.fn.now();
-
-      const [batch] = await db('milling_batches')
-        .where({ id })
-        .update(updates)
-        .returning('*');
-
-      if (!batch) {
-        return res.status(404).json({ success: false, message: 'Milling batch not found.' });
-      }
-
-      return res.json({
-        success: true,
-        data: { batch },
+        const updates = { status: TRANSITIONS[action].to, updated_at: trx.fn.now() };
+        if (variance && varianceByAction[action].includes(variance)) updates.variance_status = variance;
+        const [row] = await trx('milling_batches').where({ id }).update(updates).returning('*');
+        const released = action === 'cancel' ? await releaseBatchSources(trx, id) : [];
+        return { batch: row, releasedLotIds: released };
       });
+      return res.json({ success: true, data: result });
     } catch (err) {
-      console.error('Milling batch update error:', err);
+      if (err.status) return res.status(err.status).json({ success: false, message: err.message });
+      console.error(`Milling batch ${action} error:`, err);
       return res.status(500).json({ success: false, message: 'Internal server error.' });
     }
   },
@@ -1045,6 +1060,28 @@ const millingController = {
       if (!batch) {
         return res.status(404).json({ success: false, message: 'Milling batch not found.' });
       }
+      // Status guard + first-yield vs re-yield. Decided here for a fast answer
+      // and decided AGAIN inside each transaction on a locked row (lockForYield)
+      // so two saves can't both take the first-yield path.
+      const mode = yieldMode({ status: batch.status, hasOutputs: await batchHasOutputLots(db, batch.id) });
+      if (mode === 'refuse') {
+        return res.status(409).json({
+          success: false,
+          message: `Cannot record yield — batch ${batch.batch_no} is ${batch.status}.${batch.status === 'On Hold' ? ' Resume it first.' : ''}`,
+        });
+      }
+      const lockForYield = async (trx) => {
+        const locked = await trx('milling_batches').where({ id }).forUpdate().first();
+        const lockedMode = locked
+          ? yieldMode({ status: locked.status, hasOutputs: await batchHasOutputLots(trx, id) })
+          : 'refuse';
+        if (lockedMode !== mode) {
+          const e = new Error('The batch changed while the yield was being saved — reload and try again.');
+          e.status = 409;
+          throw e;
+        }
+        return locked;
+      };
 
       // All yield quantities are KG (Phase 5c).
       const finished = parseFloat(actual_finished_kg) || 0;
@@ -1099,12 +1136,10 @@ const millingController = {
         });
       }
 
-      // Prevent duplicate yield recording — if batch already has output lots, skip
-      const existingOutputLots = await db('inventory_lots')
-        .where({ batch_ref: `batch-${batch.id}` })
-        .whereIn('type', ['finished', 'byproduct'])
-        .count('id as c').first();
-      if (parseInt(existingOutputLots.c) > 0 && batch.status === 'Completed') {
+      // Output lots already exist → re-record the yield (never a second
+      // first-yield: that would re-post production output and the
+      // milling_completion journal).
+      if (mode === 'reyield') {
         // Already recorded — re-record the yield. Persist EVERY output field (incl.
         // powder/sweeping, so the stored totals match what the over-yield guard
         // validated) AND re-sync the output LOTS to the new quantities. Previously
@@ -1115,6 +1150,7 @@ const millingController = {
         // untouched); it refuses if any output was already reserved/sold/re-milled.
         try {
           const resync = await db.transaction(async (trx) => {
+            await lockForYield(trx);
             await trx('milling_batches').where({ id }).update({
               actual_finished_kg: finished,
               broken_kg: broken, b1_kg: b1, b2_kg: b2, b3_kg: b3, csr_kg: csr, short_grain_kg: shortGrain,
@@ -1171,8 +1207,13 @@ const millingController = {
         updateData.completed_at = db.fn.now();
       }
 
+      // Captured before the update so the completion trigger fires on the
+      // transition (batch is overwritten with the updated row below).
+      const wasCompleted = batch.status === 'Completed';
+
       let kattaInfo = null;
       const updated = await db.transaction(async (trx) => {
+        await lockForYield(trx);
         const [result] = await trx('milling_batches')
           .where({ id })
           .update(updateData)
@@ -1530,12 +1571,19 @@ const millingController = {
           }
         }
 
-        // Trigger automation if batch completed
-        if (totalOutput > 0 && ['Pending', 'In Progress'].includes(batch.status)) {
-          await automationService.onBatchCompleted(trx, {
-            batchId: parseInt(id),
-            userId: req.user.id,
-          });
+        // Trigger automation when this save moved the batch to Completed. (It
+        // used to test the pre-yield statuses against `batch` AFTER
+        // Object.assign had set it Completed, so it never fired.) Run in a
+        // savepoint: a notification/task failure must not roll back the yield.
+        if (!wasCompleted && result.status === 'Completed') {
+          try {
+            await trx.transaction((sp) => automationService.onBatchCompleted(sp, {
+              batchId: parseInt(id, 10),
+              userId: req.user.id,
+            }));
+          } catch (autoErr) {
+            console.error('onBatchCompleted automation failed (yield kept):', autoErr.message);
+          }
         }
 
         return result;
@@ -2331,25 +2379,10 @@ const millingController = {
         }
 
         // Release blend/byproduct source lots: they were flagged 'In Milling'
-        // when the batch was created but (for a non-Completed batch) never
-        // consumed — so reset them to Available, otherwise they'd stay reserved
-        // and vanish from the New-Batch picker forever. The status check above
-        // already blocks Completed batches, so nothing here was drawn down.
-        const sourceLots = await trx('batch_source_lots').where({ batch_id: batchId });
-        for (const s of sourceLots) {
-          const srcLot = await trx('inventory_lots').where({ id: s.lot_id }).first();
-          if (srcLot && srcLot.milling_status === 'In Milling') {
-            // Release the milling hold placed at batch start (P6a) so the qty
-            // returns to available_qty for sale / another batch.
-            const heldQty = parseFloat(s.qty_kg) || 0;
-            await trx('inventory_lots').where({ id: s.lot_id }).update({
-              milling_status: null, status: 'Available',
-              milling_reserved_qty: trx.raw('GREATEST(COALESCE(milling_reserved_qty, 0) - ?, 0)', [heldQty]),
-              available_qty: trx.raw('COALESCE(qty, 0) - COALESCE(reserved_qty, 0) - GREATEST(COALESCE(milling_reserved_qty, 0) - ?, 0)', [heldQty]),
-              updated_at: trx.fn.now(),
-            });
-          }
-        }
+        // and hard-reserved when the batch was created but (for a non-Completed
+        // batch) never consumed — otherwise they'd stay reserved and vanish
+        // from the New-Batch picker forever.
+        await releaseBatchSources(trx, batchId);
         await trx('batch_source_lots').where({ batch_id: batchId }).del();
 
         await trx('milling_vehicle_arrivals').where({ batch_id: batchId }).del();
