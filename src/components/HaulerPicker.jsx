@@ -1,6 +1,10 @@
 import { useState, useMemo, useEffect } from 'react';
 import { Search, Plus, X, Truck } from 'lucide-react';
 import { haulersApi } from '../modules/inventory/api/services';
+import { useAuth } from '../context/AuthContext';
+
+// The permissions POST /api/haulers accepts (haulers.routes.js canWrite).
+const CAN_ADD_HAULER = [['admin', 'manage_master_data'], ['inventory', 'create'], ['milling', 'add_vehicle']];
 
 /**
  * Searchable transport/hauler picker with an inline "+ Add new" that creates a
@@ -19,6 +23,8 @@ export default function HaulerPicker({ label, value, onChange, haulers = [], pla
   const [adding, setAdding] = useState(false);
   const [saving, setSaving] = useState(false);
   const [draft, setDraft] = useState({ name: '', contact_person: '', phone: '' });
+  const { hasPermission } = useAuth();
+  const canAdd = CAN_ADD_HAULER.some(([m, a]) => hasPermission(m, a));
 
   // Self-load the active haulers once so the picker works even when the parent
   // did not pass a list.
@@ -91,10 +97,12 @@ export default function HaulerPicker({ label, value, onChange, haulers = [], pla
     <div data-hauler-picker>
       <div className="flex items-center justify-between mb-1">
         {label && <label className="block text-sm font-medium text-gray-700">{label}</label>}
-        <button type="button" onClick={() => { setAdding(v => !v); setOpen(false); }}
-          className="text-xs text-blue-600 hover:text-blue-700 font-medium inline-flex items-center gap-1">
-          <Plus size={12} /> {adding ? 'Cancel' : 'Add new'}
-        </button>
+        {canAdd && (
+          <button type="button" onClick={() => { setAdding(v => !v); setOpen(false); }}
+            className="text-xs text-blue-600 hover:text-blue-700 font-medium inline-flex items-center gap-1">
+            <Plus size={12} /> {adding ? 'Cancel' : 'Add new'}
+          </button>
+        )}
       </div>
 
       <div className="relative">
@@ -117,7 +125,7 @@ export default function HaulerPicker({ label, value, onChange, haulers = [], pla
             {open && (
               <div className="absolute z-20 mt-1 w-full max-h-56 overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-lg">
                 {filtered.length === 0 ? (
-                  <div className="px-3 py-4 text-sm text-gray-500 text-center">No matches. Use “+ Add new”.</div>
+                  <div className="px-3 py-4 text-sm text-gray-500 text-center">{canAdd ? 'No matches. Use “+ Add new”.' : 'No matches.'}</div>
                 ) : filtered.map(h => (
                   <button key={h.id} type="button"
                     onClick={() => { onChange(String(h.id)); setSearch(''); setOpen(false); }}
@@ -132,7 +140,7 @@ export default function HaulerPicker({ label, value, onChange, haulers = [], pla
         )}
       </div>
 
-      {adding && (
+      {adding && canAdd && (
         <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-lg space-y-3">
           <p className="text-xs font-semibold text-blue-800 uppercase tracking-wide">Add new hauler</p>
           <input value={draft.name} autoFocus onChange={e => setDraft(d => ({ ...d, name: e.target.value }))}

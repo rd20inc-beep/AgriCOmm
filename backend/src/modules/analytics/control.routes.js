@@ -6,6 +6,11 @@ const auditAction = require('../../middleware/audit');
 const validate = require('../../middleware/validate');
 const schemas = require('../../middleware/schemas');
 
+// Running an analysis, score or simulation needs the same permission that reads
+// its result; changing workflow state (approve, resolve, dismiss) needs
+// admin.manage_settings. (These used admin.create/update and finance.create,
+// which were never seeded — so only Super Admin and Owner could call them.)
+
 // ═══════════════════════════════════════════════════════════════════
 // APPROVALS (Maker-Checker)
 // ═══════════════════════════════════════════════════════════════════
@@ -13,20 +18,20 @@ router.get('/approvals/pending', authorize('admin', 'view'), controller.getPendi
 router.get('/approvals/requests', authorize('admin', 'view'), controller.getMyRequests);
 router.post(
   '/approvals/submit',
-  authorize('admin', 'create'),
+  authorize('admin', 'manage_settings'),
   validate(schemas.submitApproval),
   auditAction('submit_approval', 'approval_queue'),
   controller.submitForApproval
 );
 router.put(
   '/approvals/:id/approve',
-  authorize('admin', 'update'),
+  authorize('admin', 'manage_settings'),
   auditAction('approve_request', 'approval_queue'),
   controller.approveRequest
 );
 router.put(
   '/approvals/:id/reject',
-  authorize('admin', 'update'),
+  authorize('admin', 'manage_settings'),
   validate(schemas.rejectApproval),
   auditAction('reject_request', 'approval_queue'),
   controller.rejectRequest
@@ -39,7 +44,7 @@ router.get('/margin/order/:id', authorize('finance', 'view'), controller.calcula
 router.get('/margin/comparison', authorize('finance', 'view'), controller.getMarginComparison);
 router.post(
   '/margin/simulate',
-  authorize('finance', 'create'),
+  authorize('finance', 'view'),
   auditAction('pricing_simulation', 'pricing_simulations'),
   controller.simulatePricing
 );
@@ -49,7 +54,7 @@ router.post(
 // ═══════════════════════════════════════════════════════════════════
 router.post(
   '/supplier-score/:id',
-  authorize('admin', 'create'),
+  authorize('admin', 'view'),
   auditAction('calculate_supplier_score', 'supplier_scores'),
   controller.calculateSupplierScore
 );
@@ -60,7 +65,7 @@ router.get('/supplier-scoreboard', authorize('admin', 'view'), controller.getSup
 // ═══════════════════════════════════════════════════════════════════
 router.post(
   '/customer-score/:id',
-  authorize('admin', 'create'),
+  authorize('admin', 'view'),
   auditAction('calculate_customer_score', 'customer_scores'),
   controller.calculateCustomerScore
 );
@@ -72,7 +77,7 @@ router.get('/customer-trends/:id', authorize('admin', 'view'), controller.getCus
 // ═══════════════════════════════════════════════════════════════════
 router.post(
   '/mill-performance/:id',
-  authorize('admin', 'create'),
+  authorize('admin', 'view'),
   auditAction('calculate_mill_performance', 'mill_performance'),
   controller.calculateMillPerformance
 );

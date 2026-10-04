@@ -55,7 +55,7 @@ router.post(
 // --- Stock adjustment ---
 router.post(
   '/adjust',
-  authorize('inventory', 'update'),
+  authorize('inventory', 'adjust'),
   auditAction('adjust_stock', 'inventory_lot', (req) => req.body.lot_id),
   inventoryController.adjustStock
 );
@@ -70,7 +70,7 @@ router.post(
 
 router.post(
   '/release/:id',
-  authorize('inventory', 'update'),
+  authorize('inventory', 'create'), // the undo of /reserve, same permission
   auditAction('release_reservation', 'inventory_reservation'),
   inventoryController.releaseReservation
 );

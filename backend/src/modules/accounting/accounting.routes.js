@@ -10,13 +10,13 @@ const auditAction = require('../../middleware/audit');
 router.get('/accounts', authorize('finance', 'view'), controller.listAccounts);
 router.post(
   '/accounts',
-  authorize('finance', 'create'),
+  authorize('finance', 'post_journal'),
   auditAction('create_account', 'chart_of_accounts'),
   controller.createAccount
 );
 router.put(
   '/accounts/:id',
-  authorize('finance', 'update'),
+  authorize('finance', 'post_journal'),
   auditAction('update_account', 'chart_of_accounts'),
   controller.updateAccount
 );
@@ -27,19 +27,19 @@ router.put(
 router.get('/journals', authorize('finance', 'view'), controller.listJournals);
 router.post(
   '/journals',
-  authorize('finance', 'create'),
+  authorize('finance', 'post_journal'),
   auditAction('create_journal', 'journal_entries'),
   controller.createJournal
 );
 router.put(
   '/journals/:id/post',
-  authorize('finance', 'update'),
+  authorize('finance', 'post_journal'),
   auditAction('post_journal', 'journal_entries'),
   controller.postJournal
 );
 router.post(
   '/journals/:id/reverse',
-  authorize('finance', 'update'),
+  authorize('finance', 'post_journal'),
   auditAction('reverse_journal', 'journal_entries'),
   controller.reverseJournal
 );
@@ -49,7 +49,7 @@ router.post(
 // ═══════════════════════════════════════════════════════════════════
 router.post(
   '/auto-post',
-  authorize('finance', 'create'),
+  authorize('finance', 'post_journal'),
   auditAction('auto_post', 'journal_entries'),
   controller.triggerAutoPost
 );
@@ -60,13 +60,13 @@ router.post(
 router.get('/posting-rules', authorize('finance', 'view'), controller.listPostingRules);
 router.post(
   '/posting-rules',
-  authorize('finance', 'create'),
+  authorize('finance', 'post_journal'),
   auditAction('create_posting_rule', 'posting_rules'),
   controller.createPostingRule
 );
 router.put(
   '/posting-rules/:id',
-  authorize('finance', 'update'),
+  authorize('finance', 'post_journal'),
   auditAction('update_posting_rule', 'posting_rules'),
   controller.updatePostingRule
 );
@@ -77,13 +77,13 @@ router.put(
 router.get('/periods', authorize('finance', 'view'), controller.listPeriods);
 router.put(
   '/periods/:id/close',
-  authorize('finance', 'update'),
+  authorize('finance', 'post_journal'),
   auditAction('close_period', 'accounting_periods'),
   controller.closePeriod
 );
 router.put(
   '/periods/:id/reopen',
-  authorize('finance', 'update'),
+  authorize('finance', 'post_journal'),
   auditAction('reopen_period', 'accounting_periods'),
   controller.reopenPeriod
 );
@@ -94,26 +94,26 @@ router.put(
 router.get('/reconciliations', authorize('finance', 'view'), controller.listReconciliations);
 router.post(
   '/reconciliations',
-  authorize('finance', 'create'),
+  authorize('finance', 'post_journal'),
   auditAction('create_reconciliation', 'bank_reconciliation'),
   controller.createReconciliation
 );
 router.get('/reconciliations/:id', authorize('finance', 'view'), controller.getReconciliation);
 router.post(
   '/reconciliations/:id/items',
-  authorize('finance', 'create'),
+  authorize('finance', 'post_journal'),
   auditAction('add_reconciliation_items', 'bank_reconciliation'),
   controller.addReconciliationItems
 );
 router.put(
   '/reconciliations/:id/match',
-  authorize('finance', 'update'),
+  authorize('finance', 'post_journal'),
   auditAction('match_reconciliation', 'bank_reconciliation'),
   controller.matchReconciliationItems
 );
 router.put(
   '/reconciliations/:id/complete',
-  authorize('finance', 'update'),
+  authorize('finance', 'post_journal'),
   auditAction('complete_reconciliation', 'bank_reconciliation'),
   controller.completeReconciliation
 );
@@ -124,7 +124,7 @@ router.put(
 router.get('/fx-rates', authorize('finance', 'view'), controller.listFxRates);
 router.post(
   '/fx-rates',
-  authorize('finance', 'create'),
+  authorize('finance', 'post_journal'),
   auditAction('set_fx_rate', 'fx_rates'),
   controller.setFxRate
 );

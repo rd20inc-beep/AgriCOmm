@@ -17,22 +17,22 @@ router.use(authenticate);
 // ─── Background Jobs ─────────────────────────────────────────────
 router.get('/jobs', authorize('admin', 'view'), controller.listJobs);
 router.get('/jobs/:id', authorize('admin', 'view'), controller.getJob);
-router.put('/jobs/:id/cancel', authorize('admin', 'manage'), controller.cancelJob);
+router.put('/jobs/:id/cancel', authorize('admin', 'manage_settings'), controller.cancelJob);
 
 // ─── Data Import ─────────────────────────────────────────────────
 router.get('/imports', authorize('admin', 'view'), controller.listImports);
-router.post('/imports', authorize('admin', 'manage'), controller.createImport);
+router.post('/imports', authorize('admin', 'manage_settings'), controller.createImport);
 router.get('/imports/:id', authorize('admin', 'view'), controller.getImport);
 
 // ─── API Integrations ────────────────────────────────────────────
 router.get('/integrations', authorize('admin', 'view'), controller.listIntegrations);
-router.post('/integrations', authorize('admin', 'manage'), controller.createIntegration);
-router.put('/integrations/:id', authorize('admin', 'manage'), controller.updateIntegration);
-router.post('/integrations/:id/sync', authorize('admin', 'manage'), controller.triggerSync);
+router.post('/integrations', authorize('admin', 'manage_settings'), controller.createIntegration);
+router.put('/integrations/:id', authorize('admin', 'manage_settings'), controller.updateIntegration);
+router.post('/integrations/:id/sync', authorize('admin', 'manage_settings'), controller.triggerSync);
 router.get('/integrations/:id/history', authorize('admin', 'view'), controller.syncHistory);
 
 // ─── CRM Sync Shortcut ──────────────────────────────────────────
-router.post('/sync/crm', authorize('admin', 'manage'), controller.fullCRMSync);
+router.post('/sync/crm', authorize('admin', 'manage_settings'), controller.fullCRMSync);
 
 // ─── System Health (authenticated / detailed) ────────────────────
 router.get('/health/detailed', authorize('admin', 'view'), controller.healthDetailed);
@@ -43,8 +43,8 @@ router.get('/preferences', controller.getPreferences);
 router.put('/preferences', controller.updatePreferences);
 
 // ─── Bulk Operations ─────────────────────────────────────────────
-router.post('/bulk/status-update', authorize('admin', 'manage'), controller.bulkStatusUpdate);
-router.post('/bulk/archive', authorize('admin', 'manage'), controller.bulkArchive);
-router.post('/bulk/export', authorize('admin', 'manage'), controller.bulkExport);
+router.post('/bulk/status-update', authorize('admin', 'manage_settings'), controller.bulkStatusUpdate);
+router.post('/bulk/archive', authorize('admin', 'manage_settings'), controller.bulkArchive);
+router.post('/bulk/export', authorize('admin', 'manage_settings'), controller.bulkExport);
 
 module.exports = router;
