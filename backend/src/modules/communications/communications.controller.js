@@ -90,6 +90,16 @@ const communicationController = {
         userId: req.user.id,
       });
 
+      // emailService logs a failed SMTP hand-off instead of throwing, so the
+      // log's status is the only signal the mail didn't go. Answering 200 for
+      // it told the composer "Email sent" for mail that never left.
+      if (!log || log.status !== 'Sent') {
+        return res.status(502).json({
+          success: false,
+          message: (log && log.error_message) || 'Email send failed.',
+          data: { emailLog: log || null },
+        });
+      }
       return res.json({ success: true, data: { emailLog: log } });
     } catch (err) {
       console.error('Send email error:', err);

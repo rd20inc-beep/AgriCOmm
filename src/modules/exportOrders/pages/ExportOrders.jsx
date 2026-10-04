@@ -7,7 +7,6 @@ import { Plus, Search, Eye, ArrowUpDown, Ship, FileText, DollarSign, Package, Cl
 import { downloadCSV } from '../../../utils/csvExport';
 import Modal from '../../../components/Modal';
 import ProformaInvoice from '../../../components/ProformaInvoice';
-import EmailComposer from '../../../components/EmailComposer';
 import QuotationsPanel from '../components/QuotationsPanel';
 
 const tabs = [
@@ -33,7 +32,7 @@ function matchesTab(order, tab) {
 }
 
 export default function ExportOrders() {
-  const { exportOrders, companyProfileData, customersList, dataLoading } = useApp();
+  const { exportOrders, companyProfileData, dataLoading } = useApp();
   const navigate = useNavigate();
   // Read status filter from URL (from dashboard pipeline click)
   const urlParams = new URLSearchParams(window.location.search);
@@ -51,7 +50,6 @@ export default function ExportOrders() {
   const [searchTerm, setSearchTerm] = useState('');
   const [sortBy, setSortBy] = useState('Created Date');
   const [piOrder, setPiOrder] = useState(null);
-  const [emailOrder, setEmailOrder] = useState(null);
 
   const filteredOrders = exportOrders
     .filter(order => matchesTab(order, activeTab))
@@ -282,10 +280,12 @@ export default function ExportOrders() {
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            setEmailOrder(order);
+                            // The Proforma is rendered, attached and sent from the
+                            // order's Document Center (server-side, real send).
+                            navigate(`/export/${order.id}?send=proforma`);
                           }}
                           className="inline-flex items-center text-gray-500 hover:text-blue-600 text-xs font-medium"
-                          title="Send Email"
+                          title="Email Proforma Invoice"
                         >
                           <Mail className="w-3.5 h-3.5" />
                         </button>
@@ -313,17 +313,6 @@ export default function ExportOrders() {
         {piOrder && <div className="overflow-x-auto"><ProformaInvoice order={piOrder} companyProfile={companyProfileData} /></div>}
       </Modal>
 
-      {/* Email Composer */}
-      {emailOrder && (
-        <EmailComposer
-          isOpen={!!emailOrder}
-          onClose={() => setEmailOrder(null)}
-          defaultTo={(customersList.find(c => c.id === emailOrder.customerId) || {}).email || ''}
-          defaultSubject={`Proforma Invoice - PI-${emailOrder.id.replace('EX-','')}`}
-          defaultBody={`Dear Customer,\n\nPlease find attached the Proforma Invoice for Order ${emailOrder.id}.\n\nProduct: ${emailOrder.productName}\nQuantity: ${emailOrder.qtyMT} MT\nContract Value: $${emailOrder.contractValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n\nBest regards,\nAGRI COMMODITIES`}
-          attachmentLabel={`PI-${emailOrder.id.replace('EX-','')}.pdf`}
-        />
-      )}
     </div>
   );
 }
