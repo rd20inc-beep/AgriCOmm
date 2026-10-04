@@ -11,6 +11,8 @@ const { resolveCashAccountId } = require('../../shared/cashAccounts');
 const { nextDocNo } = require('../../utils/docNumber');
 const { isPartyMasked } = require('../../shared/partyMask');
 const { inventoryAccountForLot } = require('./inventoryAccount');
+const { postLocalReceiptJournal } = require('./receiptJournal');
+const { resolveLineCost, priceSaleLine, salePaymentStatus } = require('./salePricing');
 
 async function generateSaleNo(trx) {
   return nextDocNo(trx || db, { table: 'local_sales', column: 'sale_no', prefix: 'LS-' });
@@ -161,8 +163,9 @@ async function postSaleSideEffects(trx, saleRows, { userId } = {}) {
 
     if (paid > 0) {
       const payMethod = (sale.payment_mode && sale.payment_mode !== 'credit') ? sale.payment_mode : 'cash';
+      const paymentNo = await nextDocNo(trx, { table: 'payments', column: 'payment_no', prefix: 'PL-', pad: 0 });
       const [payRow] = await trx('payments').insert({
-        payment_no: await nextDocNo(trx, { table: 'payments', column: 'payment_no', prefix: 'PL-', pad: 0 }), type: 'receipt',
+        payment_no: paymentNo, type: 'receipt',
         amount: paid, currency: 'PKR', fx_rate: 1, base_amount_pkr: paid,
         payment_method: payMethod, bank_reference: sale.payment_reference || null,
         bank_account_id: receiptAccountId || sale.bank_account_id || null, due_date: sale.due_date || null,
@@ -174,6 +177,8 @@ async function postSaleSideEffects(trx, saleRows, { userId } = {}) {
         reference: sale.payment_reference || sale.sale_no, notes: `Local sale ${sale.sale_no} receipt — ${sale.item_name}`,
         date: sale.sale_date, userId,
       });
+      // Clear the receivable this sale just raised: Dr 1000 / Cr 1120.
+      await postLocalReceiptJournal(trx, { paymentNo, amount: paid, sale, date: sale.sale_date, userId });
     }
 
     if (dueAmt > 0) {
@@ -720,35 +725,13 @@ module.exports = {
 
           // Cost basis is a READ here — availability is enforced and stock is
           // drawn down only when the sale is confirmed (postSaleSideEffects).
-          let costPerKg = 0, landedCostTotal = 0, lotNo = null;
-          if (l.isMillItem) {
-            const mi = await trx('mill_items').where({ id: l.mill_item_id }).first();
-            if (!mi) throw new Error('Packaging item not found');
-            costPerKg = parseFloat(mi.avg_cost_per_unit) || 0; // per piece
-            landedCostTotal = uc.round2(l.count * costPerKg);
-          } else if (l.lot_id) {
-            const lot = await trx('inventory_lots').where({ id: l.lot_id }).first();
-            if (!lot) throw new Error('Inventory lot not found');
-            const availKg = parseFloat(lot.available_qty) || 0;
-            if (l.qtyKg > availKg + 0.01) {
-              const e = new Error(`Insufficient stock: ${l.item_name} needs ${Math.round(l.qtyKg)} kg but only ${availKg.toFixed(0)} kg available in ${lot.lot_no}`);
-              e.status = 400; throw e;
-            }
-            costPerKg = parseFloat(lot.landed_cost_per_kg) || (parseFloat(lot.cost_per_unit) || 0) || (parseFloat(lot.rate_per_kg) || 0);
-            // Guard: a lot with no recorded cost can't be sold — the sale would book
-            // Rs 0 COGS → 100% "profit" and no real margin. Price the lot first
-            // (set its purchase price / repair its cost), then sell.
-            if (costPerKg <= 0) {
-              const e = new Error(`${lot.lot_no} has no recorded cost (Rs 0/kg). Set the lot's purchase price before selling — a sale needs a cost basis to compute profit.`);
-              e.status = 400; throw e;
-            }
-            landedCostTotal = uc.round2(l.qtyKg * costPerKg);
-            lotNo = lot.lot_no;
-          }
+          const { costPerKg, lotNo } = await resolveLineCost(trx, {
+            lotId: l.lot_id, millItemId: l.isMillItem ? l.mill_item_id : null, qtyKg: l.qtyKg, itemName: l.item_name,
+          });
+          const priced = priceSaleLine({ qtyKg: l.qtyKg, total: l.total, costPerKg, bagWt: l.bagWt, isMillItem: l.isMillItem });
 
           const dueAmt = Math.max(0, uc.round2(l.total - l.paid));
-          const paymentStatus = dueAmt <= 0 ? 'Paid' : l.paid > 0 ? 'Partial' : (payment_mode === 'credit' ? 'Credit' : 'Unpaid');
-          const grossProfit = uc.round2(l.total - landedCostTotal);
+          const paymentStatus = salePaymentStatus({ due: dueAmt, paid: l.paid, paymentMode: payment_mode });
 
           const [sale] = await trx('local_sales').insert({
             sale_no: saleNo, sale_group_no: groupNo,
@@ -758,7 +741,7 @@ module.exports = {
             lot_id: l.lot_id, lot_no: lotNo, mill_item_id: l.mill_item_id || null,
             item_name: l.item_name, item_type: l.item_type,
             quantity_unit: l.quantity_unit, quantity_input: l.quantity_input, quantity_kg: l.qtyKg,
-            quantity_bags: l.isMillItem ? l.count : (l.bagWt > 0 ? Math.round(l.qtyKg / l.bagWt) : 0), bag_weight_kg: l.isMillItem ? null : l.bagWt,
+            quantity_bags: priced.quantity_bags, bag_weight_kg: l.isMillItem ? null : l.bagWt,
             rate_unit: l.rate_unit, rate_input: l.rate_input, rate_per_kg: l.ratePerKg,
             total_amount: l.total, currency: 'PKR',
             payment_mode: payment_mode || 'cash', payment_status: paymentStatus,
@@ -773,9 +756,8 @@ module.exports = {
             confirmed_by: autoConfirm ? (req.user?.id || null) : null,
             confirmed_at: autoConfirm ? trx.fn.now() : null,
             created_by: req.user?.id || null,
-            cost_per_kg: costPerKg, landed_cost_total: landedCostTotal, gross_profit: grossProfit,
-            profit_per_kg: l.qtyKg > 0 ? uc.round4(grossProfit / l.qtyKg) : 0,
-            margin_pct: l.total > 0 ? uc.round2((grossProfit / l.total) * 100) : 0,
+            cost_per_kg: priced.cost_per_kg, landed_cost_total: priced.landed_cost_total, gross_profit: priced.gross_profit,
+            profit_per_kg: priced.profit_per_kg, margin_pct: priced.margin_pct,
           }).returning('*');
 
           created.push(sale);
@@ -931,31 +913,37 @@ module.exports = {
         if (!(qtyInput > 0)) return res.status(400).json({ success: false, message: 'Quantity must be greater than zero.' });
         if (!(rateInput >= 0)) return res.status(400).json({ success: false, message: 'Rate cannot be negative.' });
 
+        const isMillItem = !!sale.mill_item_id;
         const qtyKg = uc.toKg(qtyInput, patch.quantity_unit ?? sale.quantity_unit ?? 'kg', bagWt);
         const ratePerKg = uc.rateToPerKg(rateInput, patch.rate_unit ?? sale.rate_unit ?? 'kg', bagWt);
         const total = uc.round2(qtyKg * ratePerKg);
 
-        // Never sell more than the lot holds. The check has to happen here too:
-        // create enforces it, and without this an edit could walk straight past it.
-        if (sale.lot_id) {
-          const lot = await db('inventory_lots').where({ id: sale.lot_id }).first();
-          const available = parseFloat(lot?.available_qty) || 0;
-          if (qtyKg > available + 0.001) {
-            return res.status(400).json({ success: false, message: `Only ${Math.round(available).toLocaleString()} kg is left on ${lot?.lot_no || 'this lot'}.` });
-          }
-        }
-
         const paid = parseFloat(sale.paid_amount) || 0;
-        patch.bag_weight_kg = bagWt;
-        patch.quantity_kg = qtyKg;
-        patch.rate_per_kg = ratePerKg;
-        patch.total_amount = total;
-        patch.due_amount = uc.round2(Math.max(0, total - paid));
         // A tendered amount now exceeding the total would leave a phantom credit.
         if (paid > total + 0.01) {
           return res.status(400).json({ success: false, message: `Rs ${paid.toLocaleString()} has already been taken against this sale — the new total of Rs ${total.toLocaleString()} is lower. Refund or cancel instead.` });
         }
-        patch.payment_status = patch.due_amount <= 0.01 ? 'Paid' : (paid > 0 ? 'Partial' : (sale.payment_mode === 'credit' ? 'Credit' : 'Pending'));
+
+        // Re-read the cost basis the way create does — it also refuses to sell
+        // more than the lot holds (create enforces it; an edit must not walk
+        // past it) and refuses an uncosted lot. Then recompute every derived
+        // figure, because confirm posts COGS from landed_cost_total.
+        let cost;
+        try {
+          cost = await resolveLineCost(db, { lotId: sale.lot_id, millItemId: sale.mill_item_id, qtyKg, itemName: patch.item_name ?? sale.item_name });
+        } catch (e) {
+          if (e.status === 400) return res.status(400).json({ success: false, message: e.message });
+          throw e;
+        }
+        const priced = priceSaleLine({ qtyKg, total, costPerKg: cost.costPerKg, bagWt, isMillItem });
+
+        patch.bag_weight_kg = isMillItem ? null : bagWt;
+        patch.quantity_kg = qtyKg;
+        patch.rate_per_kg = ratePerKg;
+        patch.total_amount = total;
+        patch.due_amount = uc.round2(Math.max(0, total - paid));
+        Object.assign(patch, priced);
+        patch.payment_status = salePaymentStatus({ due: patch.due_amount, paid, paymentMode: sale.payment_mode });
       }
 
       if (!Object.keys(patch).length) {
@@ -1011,6 +999,9 @@ module.exports = {
         for (const r of rows) {
           await trx('local_sales').where('id', r.id).update({
             status: 'Cancelled',
+            // Nothing is owed on a sale that never happened — leaving due_amount
+            // standing kept a Pay button (and a receivable-looking balance) on it.
+            due_amount: 0,
             notes: reason ? `${r.notes ? `${r.notes} · ` : ''}Rejected: ${reason}` : r.notes,
             updated_at: trx.fn.now(),
           });
@@ -1037,26 +1028,39 @@ module.exports = {
         return res.status(400).json({ success: false, message: 'A bank account is required for a bank-transfer receipt.' });
       }
 
-      const sale = await db('local_sales').where({ id }).first();
-      if (!sale) return res.status(404).json({ success: false, message: 'Sale not found.' });
-
       const payAmount = parseFloat(amount);
-      const currentDue = parseFloat(sale.due_amount) || 0;
-
-      if (payAmount > currentDue + 0.01) {
-        return res.status(400).json({ success: false, message: `Cannot pay Rs ${payAmount} — only Rs ${currentDue.toFixed(2)} remaining.` });
-      }
 
       // A post-dated cheque (cheque with a future due_date) is recorded but does
       // NOT settle the sale until it clears — the sale stays Partial/Unpaid.
       const today = new Date(new Date().toDateString());
       const isPostDated = payment_method === 'cheque' && due_date && new Date(due_date) > today;
 
-      const newPaid = (parseFloat(sale.paid_amount) || 0) + payAmount;
-      const newDue = Math.max(0, (parseFloat(sale.total_amount) || 0) - newPaid);
-      const newStatus = newDue <= 0 ? 'Paid' : 'Partial';
-
       await db.transaction(async (trx) => {
+        // Read (and lock) the sale INSIDE the transaction: two receipts racing
+        // on the same sale would otherwise both read the old paid/due and the
+        // second would overwrite the first (lost update + over-collection).
+        const sale = await trx('local_sales').where({ id }).forUpdate().first();
+        if (!sale) { const e = new Error('Sale not found.'); e.status = 404; throw e; }
+        // Only a confirmed sale is owed anything. A Pending sale's paid_amount is
+        // taken as a receipt again when it is confirmed (postSaleSideEffects), so
+        // paying it here would record the money twice; a Cancelled one never
+        // happened.
+        if (sale.status !== 'Completed') {
+          const e = new Error(sale.status === 'Pending'
+            ? `${sale.sale_no} has not been confirmed yet — confirm it before taking a payment.`
+            : `${sale.sale_no} is ${String(sale.status || '').toLowerCase()} — nothing is owed on it.`);
+          e.status = 409; throw e;
+        }
+
+        const currentDue = parseFloat(sale.due_amount) || 0;
+        if (payAmount > currentDue + 0.01) {
+          const e = new Error(`Cannot pay Rs ${payAmount} — only Rs ${currentDue.toFixed(2)} remaining.`); e.status = 400; throw e;
+        }
+
+        const newPaid = (parseFloat(sale.paid_amount) || 0) + payAmount;
+        const newDue = Math.max(0, (parseFloat(sale.total_amount) || 0) - newPaid);
+        const newStatus = newDue <= 0 ? 'Paid' : 'Partial';
+
         if (!isPostDated) {
           await trx('local_sales').where({ id }).update({
             paid_amount: uc.round2(newPaid),
@@ -1070,8 +1074,9 @@ module.exports = {
 
         // Create payment record (cleared=false for an uncleared post-dated cheque).
         const receiptAccountId = isPostDated ? null : await resolveReceiptAccountId(trx, { paymentMode: payment_method, bankAccountId: bank_account_id, amount: payAmount, collectionLocation: collection_location });
+        const paymentNo = await nextDocNo(trx, { table: 'payments', column: 'payment_no', prefix: 'PL-', pad: 0 });
         const [payRow] = await trx('payments').insert({
-          payment_no: await nextDocNo(trx, { table: 'payments', column: 'payment_no', prefix: 'PL-', pad: 0 }),
+          payment_no: paymentNo,
           type: 'receipt',
           amount: payAmount,
           currency: 'PKR',
@@ -1095,6 +1100,9 @@ module.exports = {
             reference: reference || sale.sale_no, notes: `Payment for local sale ${sale.sale_no}`,
             date: payment_date, userId: req.user?.id,
           });
+          // …and into the GL: Dr 1000 Cash & Bank / Cr 1120 Local AR. A
+          // post-dated cheque journals when it clears (finance clearCheque).
+          await postLocalReceiptJournal(trx, { paymentNo, amount: payAmount, sale, date: payment_date, userId: req.user?.id });
 
           // Update linked receivable — prefer FK, fall back to notes search
           const receivable = await trx('receivables')
@@ -1119,8 +1127,8 @@ module.exports = {
       const updated = await db('local_sales').where({ id }).first();
       return res.json({ success: true, data: { sale: updated } });
     } catch (err) {
-      console.error('Accept payment error:', err);
-      return res.status(500).json({ success: false, message: err.message });
+      if (!err.status) console.error('Accept payment error:', err);
+      return res.status(err.status || 500).json({ success: false, message: err.message });
     }
   },
 
