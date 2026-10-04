@@ -72,11 +72,11 @@ const createExportOrder = Joi.object({
   shipment_eta: Joi.date().iso().allow(null, ''),
   source: Joi.string().allow('', null),
   notes: Joi.string().allow('', null),
-  status: Joi.string().valid(
-    'Draft', 'Awaiting Advance', 'Advance Received', 'Procurement Pending',
-    'In Milling', 'Docs In Preparation', 'Awaiting Balance', 'Ready to Ship',
-    'Shipped', 'Arrived', 'Closed', 'Cancelled'
-  ).default('Draft'),
+  // A new order may only START in one of the pre-advance states. Later states
+  // (Shipped, Closed, Cancelled, ...) are reached through the workflow, which
+  // enforces the advance/stock/document gates; creating straight into them
+  // skipped every one.
+  status: Joi.string().valid('Draft', 'Awaiting Advance', 'Advance Received').default('Draft'),
   // Bag specification
   bag_type: Joi.string().max(100).allow('', null),
   bag_quality: Joi.string().max(100).allow('', null),

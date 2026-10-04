@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { useApp } from '../../../context/AppContext';
@@ -71,6 +71,12 @@ const masterOptionsFor = (retailKg) => {
 export default function CreateExportOrder() {
   const { addToast, customersList: customers, productsList: products, exportCostCategories, bagTypesList, suppliersList, bankAccountsList } = useApp();
   const createOrderMut = useCreateExportOrder();
+  // One submit at a time. The ref blocks a second click in the same tick (state
+  // hasn't re-rendered yet); the state drives the disabled buttons. It stays set
+  // through the follow-up printed-bag/pallet calls and the navigate, so a click
+  // while those run can't create a second order either.
+  const submittingRef = useRef(false);
+  const [submitting, setSubmitting] = useState(false);
   const navigate = useNavigate();
   const qc = useQueryClient();
 
@@ -403,7 +409,10 @@ export default function CreateExportOrder() {
 
   // ─── Submit handlers ───
   async function handleSubmit(status) {
+    if (submittingRef.current) return;
     if (!validate(status === 'Draft')) return;
+    submittingRef.current = true;
+    setSubmitting(true);
     try {
       const res = await createOrderMut.mutateAsync(buildPayload(status));
       const newOrderId = res.data?.order?.id;
@@ -442,6 +451,9 @@ export default function CreateExportOrder() {
       navigate(`/export/${res.data?.order?.order_no || res.data?.order?.id || ''}`);
     } catch (err) {
       addToast(err.message || 'Failed to create order', 'error');
+      // Only a failure re-opens the form; a success has navigated away.
+      submittingRef.current = false;
+      setSubmitting(false);
     }
   }
 
@@ -1310,10 +1322,10 @@ export default function CreateExportOrder() {
         const createStatus = advPct === 0 ? 'Advance Received' : 'Awaiting Advance';
         return (
           <div className="flex flex-wrap items-center justify-end gap-3">
-            <button onClick={() => handleSubmit('Draft')} className="btn btn-secondary mobile-full-btn"><Save className="w-4 h-4" /> Save Draft</button>
-            <button onClick={() => handleSubmit(createStatus)} disabled={!isValid} className="btn btn-primary mobile-full-btn disabled:opacity-50"><Send className="w-4 h-4" /> Create Order</button>
+            <button onClick={() => handleSubmit('Draft')} disabled={submitting} className="btn btn-secondary mobile-full-btn disabled:opacity-50"><Save className="w-4 h-4" /> Save Draft</button>
+            <button onClick={() => handleSubmit(createStatus)} disabled={!isValid || submitting} className="btn btn-primary mobile-full-btn disabled:opacity-50"><Send className="w-4 h-4" /> Create Order</button>
             {advPct > 0 && (
-              <button onClick={() => handleSubmit('Awaiting Advance')} disabled={!isValid} className="btn mobile-full-btn disabled:opacity-50 bg-emerald-600 text-white hover:bg-emerald-700 border-emerald-600"><DollarSign className="w-4 h-4" /> Create & Request Advance</button>
+              <button onClick={() => handleSubmit('Awaiting Advance')} disabled={!isValid || submitting} className="btn mobile-full-btn disabled:opacity-50 bg-emerald-600 text-white hover:bg-emerald-700 border-emerald-600"><DollarSign className="w-4 h-4" /> Create & Request Advance</button>
             )}
           </div>
         );
