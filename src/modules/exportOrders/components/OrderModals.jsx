@@ -1,7 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import Modal from '../../../components/Modal';
 import ProformaInvoice from '../../../components/ProformaInvoice';
-import EmailComposer from '../../../components/EmailComposer';
 import SearchSelect from '../../../components/SearchSelect';
 import { AlertTriangle, Boxes, Factory, CheckCircle } from 'lucide-react';
 import StockAllocationPicker from './StockAllocationPicker';
@@ -933,18 +932,5 @@ export function InvoicePreviewModal({ isOpen, onClose, order, companyProfile }) 
         <ProformaInvoice order={order} companyProfile={companyProfile} />
       </div>
     </Modal>
-  );
-}
-
-export function OrderEmailComposer({ isOpen, onClose, defaultTo, defaultSubject, defaultBody, attachmentLabel }) {
-  return (
-    <EmailComposer
-      isOpen={isOpen}
-      onClose={onClose}
-      defaultTo={defaultTo}
-      defaultSubject={defaultSubject}
-      defaultBody={defaultBody}
-      attachmentLabel={attachmentLabel}
-    />
   );
 }

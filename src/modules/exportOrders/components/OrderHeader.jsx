@@ -70,6 +70,7 @@ export default function OrderHeader({
         </button>
         <button
           onClick={onShowEmailComposer}
+          title="Open the Proforma Invoice in the Document Center and email it as a PDF"
           className="inline-flex items-center gap-2 px-4 py-2.5 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition-colors"
         >
           <Mail className="w-4 h-4" />

@@ -30,6 +30,12 @@ function formatCurrency(value) {
   return '$' + value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+// Amount in the order's own currency, for text that leaves the system (the
+// reminder email) — an EUR order must not be dunned in dollars.
+function fmtOrderMoney(value, currency) {
+  return `${currency || 'USD'} ${(parseFloat(value) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
 function fmtPKR(value) {
   return 'Rs ' + (parseFloat(value) || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
@@ -41,7 +47,7 @@ function daysSince(dateStr) {
 }
 
 export default function FinanceConfirmations() {
-  const { exportOrders, addToast, settings, bankAccountsList } = useApp();
+  const { exportOrders, addToast, settings, bankAccountsList, customersList = [] } = useApp();
   const { requestOwnerApproval } = useOwnerAuth();
   const { hasPermission } = useAuth();
   // Finance (payments-only) can't open export order pages — render order numbers
@@ -875,14 +881,16 @@ export default function FinanceConfirmations() {
         <EmailComposer
           isOpen={!!emailOrder}
           onClose={() => setEmailOrder(null)}
-          defaultTo=""
+          defaultTo={(customersList.find(c => c.id === emailOrder.customerId) || {}).email || ''}
+          linkedType="export_order"
+          linkedId={emailOrder.dbId || null}
           defaultSubject={emailType === 'advance'
             ? `Advance Payment Required - Order ${emailOrder.id}`
             : `Balance Payment Due - Order ${emailOrder.id}`
           }
           defaultBody={emailType === 'advance'
-            ? `Dear Customer,\n\nThis is a reminder regarding the advance payment for Order ${emailOrder.id}.\n\nAdvance Expected: ${formatCurrency(emailOrder.advanceExpected)}\nAdvance Received: ${formatCurrency(emailOrder.advanceReceived)}\nRemaining: ${formatCurrency(emailOrder.advanceExpected - emailOrder.advanceReceived)}\n\nPlease arrange the payment at your earliest convenience.\n\nBest regards,\nAGRI COMMODITIES`
-            : `Dear Customer,\n\nThis is a reminder regarding the balance payment for Order ${emailOrder.id}.\n\nBalance Expected: ${formatCurrency(emailOrder.balanceExpected)}\nBalance Received: ${formatCurrency(emailOrder.balanceReceived)}\nRemaining: ${formatCurrency(emailOrder.balanceExpected - emailOrder.balanceReceived)}\n\nPlease arrange the payment at your earliest convenience.\n\nBest regards,\nAGRI COMMODITIES`
+            ? `Dear Customer,\n\nThis is a reminder regarding the advance payment for Order ${emailOrder.id}.\n\nAdvance Expected: ${fmtOrderMoney(emailOrder.advanceExpected, emailOrder.currency)}\nAdvance Received: ${fmtOrderMoney(emailOrder.advanceReceived, emailOrder.currency)}\nRemaining: ${fmtOrderMoney(emailOrder.advanceExpected - emailOrder.advanceReceived, emailOrder.currency)}\n\nPlease arrange the payment at your earliest convenience.\n\nBest regards,\nAGRI COMMODITIES`
+            : `Dear Customer,\n\nThis is a reminder regarding the balance payment for Order ${emailOrder.id}.\n\nBalance Expected: ${fmtOrderMoney(emailOrder.balanceExpected, emailOrder.currency)}\nBalance Received: ${fmtOrderMoney(emailOrder.balanceReceived, emailOrder.currency)}\nRemaining: ${fmtOrderMoney(emailOrder.balanceExpected - emailOrder.balanceReceived, emailOrder.currency)}\n\nPlease arrange the payment at your earliest convenience.\n\nBest regards,\nAGRI COMMODITIES`
           }
         />
       )}

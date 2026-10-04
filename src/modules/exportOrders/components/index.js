@@ -17,6 +17,5 @@ export {
   HoldModal,
   ExpenseModal,
   InvoicePreviewModal,
-  OrderEmailComposer,
 } from './OrderModals';
 export { workflowSteps, documentLabels, tabList, getVisibleTabs, today, allDocsApproved, allDocsFinal } from './constants';

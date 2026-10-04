@@ -2428,7 +2428,11 @@ const STATUS_BADGE = {
 // one, which means one renderer, not a second implementation.
 export { renderDocument, buildDocHtml, resolveOrientation };
 
-export default function DocumentCenter({ order }) {
+// `request` ({ docType, action: 'email', nonce }) lets the order header ask for
+// a document to be opened and its email dialog shown — the real, server-side
+// send with the PDF attached. `onRequestHandled` clears it so a later remount
+// of this tab doesn't reopen the dialog.
+export default function DocumentCenter({ order, request = null, onRequestHandled }) {
   const { addToast } = useApp();
   const { hasPermission } = useAuth();
   // #13 — per-doc-type orientation (admin-configured; defaults to portrait).
@@ -2703,6 +2707,27 @@ export default function DocumentCenter({ order }) {
     const who = previewDoc?.buyer?.name || order.customerName || null;
     setEmailModal({ defaultEmail, who });
   }
+
+  // Header "Send Email": open the requested document, then its email dialog
+  // once the preview has rendered. A generation failure already toasts, and
+  // simply drops the request.
+  const [pendingEmailDoc, setPendingEmailDoc] = useState(null);
+  useEffect(() => {
+    if (!request?.docType) return;
+    onRequestHandled?.();
+    if (request.action === 'email') setPendingEmailDoc(request.docType);
+    handleGenerate(request.docType);
+    document.getElementById('export-document-center')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [request?.nonce]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!pendingEmailDoc || generating) return;
+    if (previewKey === pendingEmailDoc && previewDoc?._docType === pendingEmailDoc) {
+      setPendingEmailDoc(null);
+      openEmail();
+    } else {
+      setPendingEmailDoc(null);
+    }
+  }, [pendingEmailDoc, generating, previewKey, previewDoc]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Email the current document: the server renders the same print HTML to a PDF
   // and emails it to the customer as an attachment.

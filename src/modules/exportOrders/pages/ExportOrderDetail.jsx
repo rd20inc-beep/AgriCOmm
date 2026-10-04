@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { ChevronDown } from 'lucide-react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 
 // Grouped tab bar: primary stages stay top-level; Packing/Printed Bags and
 // Shipment/Timeline fold into dropdowns. Keys reference tabList; only tabs
@@ -47,7 +47,6 @@ import {
   HoldModal,
   ExpenseModal,
   InvoicePreviewModal,
-  OrderEmailComposer,
   getVisibleTabs,
   today,
   documentLabels,
@@ -60,7 +59,7 @@ export default function ExportOrderDetail() {
   const { token } = useAuth();
   const { requestOwnerApproval } = useOwnerAuth();
   const [confirm, confirmDialog] = useConfirm();
-  const { millingBatches, addToast, exportCostCategories, companyProfileData, bankAccountsList, customersList, suppliersList } = useApp();
+  const { millingBatches, addToast, exportCostCategories, companyProfileData, bankAccountsList, suppliersList } = useApp();
 
   // Fetch order detail via TanStack Query
   const { data: order, isLoading: orderLoading } = useExportOrder(id);
@@ -90,7 +89,23 @@ export default function ExportOrderDetail() {
   const [showShipmentModal, setShowShipmentModal] = useState(false);
   const [showHoldModal, setShowHoldModal] = useState(false);
   const [showExpenseModal, setShowExpenseModal] = useState(false);
-  const [showEmailComposer, setShowEmailComposer] = useState(false);
+  // "Send Email" in the header hands off to the Document Center, which renders
+  // the Proforma, attaches it as a PDF and sends it from the server. The header
+  // used to open a composer that toasted "Email sent" and sent nothing.
+  // `?send=proforma` (from the orders list) asks for the same thing on arrival.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [docRequest, setDocRequest] = useState(null);
+  const requestProformaEmail = React.useCallback(() => {
+    setActiveTab('documents');
+    setDocRequest({ docType: 'proforma-invoice', action: 'email', nonce: Date.now() });
+  }, []);
+  React.useEffect(() => {
+    if (searchParams.get('send') !== 'proforma') return;
+    requestProformaEmail();
+    const next = new URLSearchParams(searchParams);
+    next.delete('send');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams, requestProformaEmail]);
 
   // Advance Payment form state
   const [advanceAmount, setAdvanceAmount] = useState('');
@@ -681,7 +696,7 @@ export default function ExportOrderDetail() {
         setShowActions={setShowActions}
         onNavigateBack={() => navigate('/export')}
         onShowInvoicePreview={() => setShowInvoicePreview(true)}
-        onShowEmailComposer={() => setShowEmailComposer(true)}
+        onShowEmailComposer={requestProformaEmail}
         onDuplicate={() => {
           const params = new URLSearchParams({
             dup: '1',
@@ -918,7 +933,7 @@ export default function ExportOrderDetail() {
                 document.getElementById('export-document-center')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
               }}
             />
-            <DocumentCenter order={order} />
+            <DocumentCenter order={order} request={docRequest} onRequestHandled={() => setDocRequest(null)} />
           </>
         )}
         {activeTab === 'shipment' && <ShipmentTab order={order} onUpdateShipment={openShipmentModal} canUpdateShipment={canUpdateShipment} />}
@@ -1064,14 +1079,6 @@ export default function ExportOrderDetail() {
         companyProfile={companyProfileData}
       />
 
-      <OrderEmailComposer
-        isOpen={showEmailComposer}
-        onClose={() => setShowEmailComposer(false)}
-        defaultTo={(customersList.find(c => c.id === order.customerId) || {}).email || ''}
-        defaultSubject={`Proforma Invoice - PI-${order.id.replace('EX-','')}`}
-        defaultBody={`Dear Customer,\n\nPlease find attached the Proforma Invoice for Order ${order.id}.\n\nProduct: ${order.productName}\nQuantity: ${order.qtyMT} MT\nContract Value: $${order.contractValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n\nBest regards,\nAGRI COMMODITIES`}
-        attachmentLabel={`PI-${order.id.replace('EX-','')}.pdf`}
-      />
       {confirmDialog}
     </div>
   );
