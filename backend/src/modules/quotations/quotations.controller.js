@@ -274,97 +274,121 @@ const quotationsController = {
   // export-order create handler (via a synthetic req/res) so the order gets the
   // full treatment — FX lock, receivables, document checklists — identically to
   // a directly-created order. Then links the quote to the produced order.
+  //
+  // The quotation row is locked FOR UPDATE for the whole conversion, so a
+  // double-click (or two users at once) can't produce two orders: the second
+  // request waits on the lock, then sees converted_order_id and is refused.
+  // create() runs its own transaction on another connection and never touches
+  // export_quotations, so holding the lock across it cannot deadlock; if create
+  // fails, this transaction rolls back and the lock is released untouched.
   async convert(req, res) {
     try {
       const id = await resolveId(req.params.id);
       if (!id) return res.status(404).json({ success: false, message: 'Quotation not found.' });
-      const quote = await db('export_quotations').where({ id }).first();
-      if (!quote) return res.status(404).json({ success: false, message: 'Quotation not found.' });
-      if (quote.converted_order_id) {
-        return res.status(409).json({ success: false, message: `Quotation already converted to order #${quote.converted_order_id}.` });
-      }
-      if (quote.status !== 'Accepted') {
-        return res.status(409).json({ success: false, message: 'Only an Accepted quotation can be converted to an order. Mark it Accepted first.' });
-      }
-      const items = await db('export_quotation_items').where({ quotation_id: id }).orderBy('line_no');
-      if (!items.length) return res.status(400).json({ success: false, message: 'Quotation has no line items to convert.' });
-
-      // Fold packing/freight/other charges into the order value so the produced
-      // order's contract value = the quoted grand total (receivables match what
-      // the client agreed). Distribute the charge total evenly per MT across the
-      // rice lines; any rounding remainder lands on the first line so the sum is
-      // exact to the cent.
-      const chargesTotal = round2(num(quote.packing_cost) + num(quote.freight_cost) + num(quote.other_charges));
-      const totalQty = items.reduce((s, it) => s + num(it.qty_mt), 0);
-      const perMtBump = chargesTotal > 0 && totalQty > 0 ? chargesTotal / totalQty : 0;
-      const orderItems = items.map((it) => {
-        const price = round2(num(it.price_per_mt) + perMtBump);
-        return {
-          product_id: it.product_id,
-          product_name: it.product_name,
-          qty_mt: num(it.qty_mt),
-          price_per_mt: price,
-          hs_code: it.hs_code,
-          packing: it.packing,
-          bag_size_kg: it.bag_size_kg,
-          bag_count: it.bag_count,
-          bag_type: it.bag_type,
-          quality_description: it.quality_description,
-          broken_pct_target: it.broken_pct_target,
-          notes: it.notes,
-        };
-      });
-      // Correct any per-line rounding drift so the order total is exactly the quote total.
-      if (chargesTotal > 0 && orderItems.length) {
-        const built = round2(orderItems.reduce((s, it) => s + num(it.qty_mt) * num(it.price_per_mt), 0));
-        const target = num(quote.total_amount);
-        const drift = round2(target - built);
-        if (Math.abs(drift) >= 0.01 && num(orderItems[0].qty_mt) > 0) {
-          orderItems[0].price_per_mt = round2(num(orderItems[0].price_per_mt) + drift / num(orderItems[0].qty_mt));
+      const out = await db.transaction(async (trx) => {
+        const fail = (code, message) => ({ code, payload: { success: false, message } });
+        const quote = await trx('export_quotations').where({ id }).forUpdate().first();
+        if (!quote) return fail(404, 'Quotation not found.');
+        if (quote.converted_order_id) {
+          return fail(409, `Quotation already converted to order #${quote.converted_order_id}.`);
         }
-      }
-      const chargeNote = chargesTotal > 0
-        ? `Includes charges folded into price — packing ${round2(num(quote.packing_cost))}, freight ${round2(num(quote.freight_cost))}, other ${round2(num(quote.other_charges))} (${quote.currency}).`
-        : '';
+        if (quote.status !== 'Accepted') {
+          return fail(409, 'Only an Accepted quotation can be converted to an order. Mark it Accepted first.');
+        }
+        const items = await trx('export_quotation_items').where({ quotation_id: id }).orderBy('line_no');
+        if (!items.length) return fail(400, 'Quotation has no line items to convert.');
 
-      const body = {
-        customer_id: quote.customer_id,
-        country: quote.country,
-        currency: quote.currency || 'USD',
-        incoterm: quote.incoterm,
-        destination_port: quote.destination_port,
-        advance_pct: num(quote.advance_pct),
-        payment_terms: quote.payment_terms,
-        notes: [quote.notes, chargeNote].filter(Boolean).join(' ') || null,
-        source: 'Quotation',
-        status: 'Awaiting Advance',
-        items: orderItems,
-      };
+        // An export order cannot be created without a receiving bank account.
+        // Quotations don't carry one, so the order takes the export-default
+        // account — the same one its documents would fall back to.
+        let bankAccountId = quote.bank_account_id || null;
+        if (!bankAccountId) {
+          const bank = await trx('bank_accounts').where({ is_export_default: true }).first();
+          bankAccountId = bank ? bank.id : null;
+        }
+        if (!bankAccountId) {
+          return fail(400, 'No export-default bank account is set. Mark one in Admin ▸ Bank Accounts as the export default, then convert again.');
+        }
 
-      // Synthetic invocation of the export-order create handler.
-      let created = null; let errStatus = null; let errBody = null;
-      const fakeRes = {
-        _code: 200,
-        status(code) { this._code = code; return this; },
-        json(obj) {
-          if (this._code >= 400) { errStatus = this._code; errBody = obj; }
-          else created = obj;
-          return this;
-        },
-      };
-      await exportOrderController.create({ body, user: req.user }, fakeRes);
-      const order = created && created.data && created.data.order;
-      if (!order) {
-        return res.status(errStatus || 500).json(errBody || { success: false, message: 'Failed to create order from quotation.' });
-      }
+        // Fold packing/freight/other charges into the order value so the produced
+        // order's contract value = the quoted grand total (receivables match what
+        // the client agreed). Distribute the charge total evenly per MT across the
+        // rice lines; any rounding remainder lands on the first line so the sum is
+        // exact to the cent.
+        const chargesTotal = round2(num(quote.packing_cost) + num(quote.freight_cost) + num(quote.other_charges));
+        const totalQty = items.reduce((s, it) => s + num(it.qty_mt), 0);
+        const perMtBump = chargesTotal > 0 && totalQty > 0 ? chargesTotal / totalQty : 0;
+        const orderItems = items.map((it) => {
+          const price = round2(num(it.price_per_mt) + perMtBump);
+          return {
+            product_id: it.product_id,
+            product_name: it.product_name,
+            qty_mt: num(it.qty_mt),
+            price_per_mt: price,
+            hs_code: it.hs_code,
+            packing: it.packing,
+            bag_size_kg: it.bag_size_kg,
+            bag_count: it.bag_count,
+            bag_type: it.bag_type,
+            quality_description: it.quality_description,
+            broken_pct_target: it.broken_pct_target,
+            notes: it.notes,
+          };
+        });
+        // Correct any per-line rounding drift so the order total is exactly the quote total.
+        if (chargesTotal > 0 && orderItems.length) {
+          const built = round2(orderItems.reduce((s, it) => s + num(it.qty_mt) * num(it.price_per_mt), 0));
+          const target = num(quote.total_amount);
+          const drift = round2(target - built);
+          if (Math.abs(drift) >= 0.01 && num(orderItems[0].qty_mt) > 0) {
+            orderItems[0].price_per_mt = round2(num(orderItems[0].price_per_mt) + drift / num(orderItems[0].qty_mt));
+          }
+        }
+        const chargeNote = chargesTotal > 0
+          ? `Includes charges folded into price — packing ${round2(num(quote.packing_cost))}, freight ${round2(num(quote.freight_cost))}, other ${round2(num(quote.other_charges))} (${quote.currency}).`
+          : '';
 
-      await db('export_quotations').where({ id }).update({
-        converted_order_id: order.id,
-        status: 'Accepted',
-        updated_at: db.fn.now(),
+        const body = {
+          customer_id: quote.customer_id,
+          country: quote.country,
+          currency: quote.currency || 'USD',
+          incoterm: quote.incoterm,
+          destination_port: quote.destination_port,
+          advance_pct: num(quote.advance_pct),
+          payment_terms: quote.payment_terms,
+          notes: [quote.notes, chargeNote].filter(Boolean).join(' ') || null,
+          source: 'Quotation',
+          status: 'Awaiting Advance',
+          bank_account_id: bankAccountId,
+          items: orderItems,
+        };
+
+        // Synthetic invocation of the export-order create handler.
+        let created = null; let errStatus = null; let errBody = null;
+        const fakeRes = {
+          _code: 200,
+          status(code) { this._code = code; return this; },
+          json(obj) {
+            if (this._code >= 400) { errStatus = this._code; errBody = obj; }
+            else created = obj;
+            return this;
+          },
+        };
+        await exportOrderController.create({ body, user: req.user }, fakeRes);
+        const order = created && created.data && created.data.order;
+        if (!order) {
+          return { code: errStatus || 500, payload: errBody || { success: false, message: 'Failed to create order from quotation.' } };
+        }
+
+        await trx('export_quotations').where({ id }).update({
+          converted_order_id: order.id,
+          status: 'Accepted',
+          updated_at: db.fn.now(),
+        });
+
+        return { code: 201, payload: { success: true, data: { order, quotation_id: id, order_no: order.order_no } } };
       });
-
-      return res.status(201).json({ success: true, data: { order, quotation_id: id, order_no: order.order_no } });
+      return res.status(out.code).json(out.payload);
     } catch (err) {
       console.error('Quotation convert error:', err);
       return res.status(500).json({ success: false, message: 'Internal server error.' });
