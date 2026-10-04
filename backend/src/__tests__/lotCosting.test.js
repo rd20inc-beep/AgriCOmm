@@ -61,3 +61,92 @@ describe('blendPurchaseIntoLot', () => {
     expect(out.newNetKg).toBe(7500); // 5 MT -> 5000 kg + 2500
   });
 });
+
+const { computeLotLanded, repriceLotPurchase, isTransportCapitalised } = require('../modules/inventory/lotCosting');
+
+describe('computeLotLanded — one formula for create and every edit', () => {
+  const base = {
+    purchaseAmount: 1000000, labor: 5000, unloading: 3000, packing: 0, other: 0,
+    bagCost: 2000, transportCost: 40000, commissionTotal: 5000, receivedKg: 10000,
+  };
+
+  test('company-paid freight is capitalised; commission always is', () => {
+    const r = computeLotLanded({ ...base, transportPaidBy: 'company' });
+    expect(r.transportCapitalised).toBe(true);
+    expect(r.landedTotal).toBe(1055000);
+    expect(r.perKg).toBe(105.5);
+    expect(r.supplierGross).toBe(1010000); // rice + extras + bags — no freight, no commission
+    expect(r.supplierRicePayable).toBe(1000000);
+  });
+
+  test('blank / unknown responsibility defaults to company (the create default)', () => {
+    expect(computeLotLanded({ ...base }).landedTotal).toBe(1055000);
+    expect(computeLotLanded({ ...base, transportPaidBy: '' }).landedTotal).toBe(1055000);
+    expect(isTransportCapitalised(undefined)).toBe(true);
+  });
+
+  test.each(['supplier', 'included_in_supplier_rate', 'customer', 'service_client', 'other'])(
+    '%s-paid freight stays out of landed cost', (paidBy) => {
+      const r = computeLotLanded({ ...base, transportPaidBy: paidBy });
+      expect(r.transportCapitalised).toBe(false);
+      expect(r.landedTotal).toBe(1015000); // commission still in
+      expect(r.supplierRicePayable).toBe(1000000);
+    },
+  );
+
+  test('freight deducted from the supplier: not capitalised, nets off the rice payable', () => {
+    const r = computeLotLanded({ ...base, transportPaidBy: 'deduct_from_supplier' });
+    expect(r.landedTotal).toBe(1015000);
+    expect(r.supplierGross).toBe(1010000);
+    expect(r.supplierRicePayable).toBe(960000);
+  });
+
+  test('no commission, no freight → rice + extras + bags', () => {
+    const r = computeLotLanded({ ...base, transportCost: 0, commissionTotal: 0 });
+    expect(r.landedTotal).toBe(1010000);
+  });
+});
+
+describe('repriceLotPurchase — a price/qty edit moves the rice only', () => {
+  // A lot exactly as createPurchaseLot leaves it.
+  const created = computeLotLanded({
+    purchaseAmount: 1000000, labor: 5000, unloading: 3000, bagCost: 2000,
+    transportCost: 40000, transportPaidBy: 'company', commissionTotal: 5000, receivedKg: 10000,
+  });
+  const lot = { purchase_amount: 1000000, landed_cost_total: created.landedTotal };
+  const ricePayable = { original_amount: created.supplierRicePayable, paid_amount: 0 };
+
+  test('landed keeps freight + commission and equals the full formula at the new price', () => {
+    const r = repriceLotPurchase(lot, 1100000, 10000, ricePayable);
+    const fresh = computeLotLanded({
+      purchaseAmount: 1100000, labor: 5000, unloading: 3000, bagCost: 2000,
+      transportCost: 40000, transportPaidBy: 'company', commissionTotal: 5000, receivedKg: 10000,
+    });
+    expect(r.landedTotal).toBe(fresh.landedTotal);
+    expect(r.landedTotal).toBe(1155000);
+    expect(r.perKg).toBe(115.5);
+  });
+
+  test('rice payable = the new purchase amount; GL delta = the purchase change only', () => {
+    const r = repriceLotPurchase(lot, 1100000, 10000, ricePayable);
+    expect(r.payable).toEqual({ original_amount: 1100000, outstanding: 1100000, status: 'Pending' });
+    expect(r.glDelta).toBe(100000);
+  });
+
+  test('a partly paid rice payable keeps its payment', () => {
+    const r = repriceLotPurchase(lot, 900000, 9000, { original_amount: 1000000, paid_amount: 400000 });
+    expect(r.payable).toEqual({ original_amount: 900000, outstanding: 500000, status: 'Partial' });
+    expect(r.glDelta).toBe(-100000);
+  });
+
+  test('freight deducted from the supplier stays deducted after a re-price', () => {
+    const r = repriceLotPurchase({ purchase_amount: 1000000, landed_cost_total: 1015000 }, 1100000, 10000,
+      { original_amount: 960000, paid_amount: 0 });
+    expect(r.payable.original_amount).toBe(1060000);
+    expect(r.landedTotal).toBe(1115000);
+  });
+
+  test('no rice payable → no GL movement', () => {
+    expect(repriceLotPurchase(lot, 1100000, 10000, null).glDelta).toBe(0);
+  });
+});

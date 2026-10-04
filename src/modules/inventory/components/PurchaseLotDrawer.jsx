@@ -267,7 +267,16 @@ export default function PurchaseLotDrawer({
   const commissionPerBag = parseFloat(form.commission_per_bag) || 0;
   const totalCommission = commissionPerBag > 0 ? commissionPerBag * bags : 0;
   const transportCost = parseFloat(form.transport_cost) || 0;
-  const finalCostPerKg = weightKg > 0 ? (totalValue + totalCommission + transportCost) / weightKg : 0;
+  // Same rule as the server (computeLotLanded): freight is a cost of the rice
+  // only when the company pays the hauler; supplier-/client-borne freight is
+  // recorded but not in the lot's cost.
+  const transportPaidBy = form.transport_paid_by || 'company';
+  const freightCapitalised = transportPaidBy === 'company';
+  const capitalisedTransport = freightCapitalised ? transportCost : 0;
+  const finalCostPerKg = weightKg > 0 ? (totalValue + totalCommission + capitalisedTransport) / weightKg : 0;
+  // A capitalised cost needs someone to owe it to — the server rejects these too.
+  const transportNeedsHauler = transportCost > 0 && ['company', 'deduct_from_supplier'].includes(transportPaidBy) && !form.hauler_id;
+  const commissionNeedsBroker = totalCommission > 0 && !form.broker_id;
   // Ordered vs received (optional). Bill follows RECEIVED (weightKg).
   const orderedKg = parseFloat(form.ordered_weight_kg) || 0;
   const orderedVariance = orderedKg > 0 ? weightKg - orderedKg : 0; // <0 short, >0 over
@@ -288,6 +297,14 @@ export default function PurchaseLotDrawer({
     }
     if (!ratePerKg || ratePerKg <= 0) {
       addToast?.('Please enter a price per KG', 'error');
+      return;
+    }
+    if (transportNeedsHauler) {
+      addToast?.('Pick a transporter (hauler) for the transport cost, or set who pays the transport', 'error');
+      return;
+    }
+    if (commissionNeedsBroker) {
+      addToast?.('Pick who the commission is paid to (broker), or clear the commission', 'error');
       return;
     }
     try {
@@ -815,6 +832,7 @@ export default function PurchaseLotDrawer({
                 clearable
                 placeholder="Search broker…"
               />
+              {commissionNeedsBroker && <p className="text-[11px] text-amber-600 mt-0.5">Pick a broker so the commission payable can be raised.</p>}
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Transport cost (PKR)</label>
@@ -831,6 +849,7 @@ export default function PurchaseLotDrawer({
                 clearable
                 placeholder="Search transporter…"
               />
+              {transportNeedsHauler && <p className="text-[11px] text-amber-600 mt-0.5">Pick a hauler so the transport payable can be raised.</p>}
             </div>
             {/* #14 — who bears the freight. 'Company' creates a transporter
                 payable (Finance → Accounts Payable); other options record the
@@ -864,7 +883,7 @@ export default function PurchaseLotDrawer({
           </div>
           {finalCostPerKg > 0 && (
             <p className="text-xs text-gray-700">Final Cost per KG: <b>Rs {finalCostPerKg.toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b>
-              <span className="text-gray-400"> (raw {ratePerKg.toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{totalCommission > 0 ? ' + commission' : ''}{transportCost > 0 ? ' + transport' : ''})</span></p>
+              <span className="text-gray-400"> (raw {ratePerKg.toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{totalCommission > 0 ? ' + commission' : ''}{capitalisedTransport > 0 ? ' + transport' : ''})</span></p>
           )}
         </div>
 

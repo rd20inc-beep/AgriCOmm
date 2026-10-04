@@ -1726,13 +1726,13 @@ function CostEditModal({ isOpen, onClose, lot, milled, addToast, refetch }) {
           </div>
         )}
 
-        {/* Transport — owed to a hauler, NOT part of rice cost */}
+        {/* Transport — owed to a hauler; capitalised into the rice when company-paid */}
         <div className="rounded-xl border border-indigo-100 bg-indigo-50/40 p-3 space-y-2.5">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-lg bg-indigo-100 flex items-center justify-center shrink-0"><Truck size={15} className="text-indigo-600" /></div>
             <div className="flex-1 min-w-0">
               <span className="text-sm font-medium text-gray-800">Transport</span>
-              <span className="block text-[11px] text-indigo-500">Freight — billed to a hauler, not in rice cost</span>
+              <span className="block text-[11px] text-indigo-500">Freight — billed to the hauler; in rice cost when the company pays it</span>
             </div>
             <div className="relative w-32 shrink-0">
               <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-gray-400">Rs</span>
