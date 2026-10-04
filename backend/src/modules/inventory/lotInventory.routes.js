@@ -3,7 +3,7 @@ const router = express.Router();
 const db = require('../../config/database');
 const controller = require('./lotInventory.controller');
 const inventoryService = require('./inventory.service');
-const { authorize } = require('../../middleware/rbac');
+const { authorize, authorizeRole } = require('../../middleware/rbac');
 const auditAction = require('../../middleware/audit');
 const validate = require('../../middleware/validate');
 const ownerApproval = require('../../middleware/ownerApproval');
@@ -254,7 +254,12 @@ router.post('/adjustments', authorize('inventory', 'create'),
   }
 );
 
-router.put('/adjustments/:id/approve', authorize('inventory', 'edit'),
+// Write-offs and stock adjustments are approved by the Owner only (owner
+// decision 2026-10-05) — inventory.edit is held by Mill Operator, so it cannot
+// be the gate. authorizeRole has no bypass, so Super Admin is listed too.
+const WRITE_OFF_APPROVERS = ['Owner', 'Super Admin'];
+
+router.put('/adjustments/:id/approve', authorizeRole(...WRITE_OFF_APPROVERS),
   auditAction('approve_stock_adjustment', 'stock_adjustment', (req) => req.params.id),
   async (req, res) => {
     try {
@@ -265,11 +270,11 @@ router.put('/adjustments/:id/approve', authorize('inventory', 'edit'),
         });
       });
       return res.json({ success: true, data: { adjustment: result } });
-    } catch (err) { return res.status(400).json({ success: false, message: err.message }); }
+    } catch (err) { return res.status(err.status || 400).json({ success: false, message: err.message }); }
   }
 );
 
-router.put('/adjustments/:id/reject', authorize('inventory', 'edit'),
+router.put('/adjustments/:id/reject', authorizeRole(...WRITE_OFF_APPROVERS),
   auditAction('reject_stock_adjustment', 'stock_adjustment', (req) => req.params.id),
   async (req, res) => {
     try {
@@ -279,7 +284,7 @@ router.put('/adjustments/:id/reject', authorize('inventory', 'edit'),
         reason: req.body.reason,
       });
       return res.json({ success: true, data: { adjustment: result } });
-    } catch (err) { return res.status(400).json({ success: false, message: err.message }); }
+    } catch (err) { return res.status(err.status || 400).json({ success: false, message: err.message }); }
   }
 );
 

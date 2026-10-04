@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { Plus, CheckCircle, XCircle, Shield, RefreshCw, Info } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
 import { useOwnerAuth } from '../../../context/OwnerAuthContext';
+import { useAuth } from '../../../context/AuthContext';
 import { lotInventoryApi } from '../../../api/services';
 import { useLotInventory } from '../../../api/queries';
 import Modal from '../../../components/Modal';
@@ -16,6 +17,10 @@ import {
   themeFor,
 } from '../../../shared/components/adjustments';
 
+// Stock write-offs and adjustments are approved by the Owner only (owner
+// decision 2026-10-05); the server enforces the same list.
+const WRITE_OFF_APPROVERS = ['Owner', 'Super Admin'];
+
 const PKR = (v) => 'Rs ' + (parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 // Period for KPI calc — last 30 days, computed once per render.
@@ -29,6 +34,11 @@ function periodStart() {
 export default function StockAdjustments() {
   const { addToast } = useApp();
   const { requestOwnerApproval } = useOwnerAuth();
+  const { user } = useAuth();
+  const canApprove = WRITE_OFF_APPROVERS.includes(user?.role);
+  // The adjustment being approved/rejected right now — its buttons are
+  // disabled so a double click cannot fire a second request.
+  const [decidingId, setDecidingId] = useState(null);
   const { data: lots = [] } = useLotInventory({});
   const [adjustments, setAdjustments] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -118,19 +128,25 @@ export default function StockAdjustments() {
   }
 
   async function handleApprove(id) {
+    if (decidingId) return;
+    setDecidingId(id);
     try {
       await lotInventoryApi.approveAdjustment(id);
       addToast('Adjustment approved — stock updated');
       loadAdjustments();
     } catch (err) { addToast(err.message || 'Failed', 'error'); }
+    finally { setDecidingId(null); }
   }
 
   async function handleReject(id) {
+    if (decidingId) return;
+    setDecidingId(id);
     try {
-      await lotInventoryApi.rejectAdjustment(id, { reason: 'Rejected by manager' });
+      await lotInventoryApi.rejectAdjustment(id, { reason: 'Rejected by owner' });
       addToast('Adjustment rejected');
       loadAdjustments();
     } catch (err) { addToast(err.message || 'Failed', 'error'); }
+    finally { setDecidingId(null); }
   }
 
   async function runReconciliation() {
@@ -283,12 +299,15 @@ export default function StockAdjustments() {
                     <StatusBadge status={a.approval_status?.replace('_', ' ')} />
                   </td>
                   <td data-label="Actions" className="px-4 py-3 text-center align-top">
-                    {isPending && (
+                    {isPending && !canApprove && (
+                      <span className="text-[11px] text-gray-400" title="Stock write-offs are approved by the Owner">Awaiting Owner</span>
+                    )}
+                    {isPending && canApprove && (
                       <div className="flex gap-1 justify-center">
-                        <button onClick={() => handleApprove(a.id)} className="p-1.5 text-emerald-600 bg-emerald-50 rounded hover:bg-emerald-100" title="Approve">
+                        <button onClick={() => handleApprove(a.id)} disabled={decidingId != null} className="p-1.5 text-emerald-600 bg-emerald-50 rounded hover:bg-emerald-100 disabled:opacity-40" title="Approve">
                           <CheckCircle className="w-4 h-4" />
                         </button>
-                        <button onClick={() => handleReject(a.id)} className="p-1.5 text-red-600 bg-red-50 rounded hover:bg-red-100" title="Reject">
+                        <button onClick={() => handleReject(a.id)} disabled={decidingId != null} className="p-1.5 text-red-600 bg-red-50 rounded hover:bg-red-100 disabled:opacity-40" title="Reject">
                           <XCircle className="w-4 h-4" />
                         </button>
                       </div>

@@ -35,8 +35,10 @@ function periodStart() {
 export default function StoreAdjustments() {
   const { addToast } = useApp();
   const { requestOwnerApproval } = useOwnerAuth();
-  const { hasPermission } = useAuth();
-  const canApprove = hasPermission('mill_store', 'approve_adjustment');
+  const { user } = useAuth();
+  // Stock write-offs and adjustments are approved by the Owner only (owner
+  // decision 2026-10-05); the server enforces the same list.
+  const canApprove = ['Owner', 'Super Admin'].includes(user?.role);
 
   // Single source-of-truth filter object — matches StockAdjustments shape.
   const [filters, setFilters] = useState({ status: 'Pending', types: [], fromDate: '', toDate: '' });
@@ -122,7 +124,7 @@ export default function StoreAdjustments() {
         quantity_delta: Number(form.quantity_delta),
         reason: form.reason,
       });
-      addToast('Adjustment requested — pending admin approval', 'success');
+      addToast('Adjustment requested — pending Owner approval', 'success');
       setShowForm(false);
       setForm({ item_id: '', adjustment_type: 'damage', quantity_delta: '', reason: '' });
     } catch (err) {
@@ -160,7 +162,7 @@ export default function StoreAdjustments() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Store Adjustments</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Damage, wastage and corrections — requires admin approval</p>
+          <p className="text-sm text-gray-500 mt-0.5">Damage, wastage and corrections — requires Owner approval</p>
         </div>
         <div className="flex gap-2">
           <button onClick={() => refetch && refetch()} className="btn btn-sm btn-secondary" title="Refresh">

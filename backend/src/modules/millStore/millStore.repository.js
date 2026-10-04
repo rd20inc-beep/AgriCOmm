@@ -1,5 +1,14 @@
 const db = require('../../config/database');
 const accountingService = require('../accounting/accounting.service');
+const { NotFoundError, ValidationError, ConflictError } = require('../../shared/errors');
+
+// On-hand after applying a signed adjustment delta, or null when it would go
+// below zero (a 0.0001 tolerance absorbs float dust).
+function adjustedBalance(onHand, delta) {
+  const next = Number((Number(onHand || 0) + Number(delta || 0)).toFixed(4));
+  if (next < -0.0001) return null;
+  return Math.max(0, next);
+}
 
 const millStoreRepo = {
   // ─── Items ───
@@ -504,26 +513,36 @@ const millStoreRepo = {
   },
 
   async approveAdjustment(trx, id, approvedBy) {
-    const adj = await trx('mill_stock_adjustments').where('id', id).first();
-    if (!adj) return null;
+    const adj = await trx('mill_stock_adjustments').where('id', id).forUpdate().first();
+    if (!adj) throw new NotFoundError('Adjustment not found.');
+    if (adj.status !== 'Pending') throw new ConflictError(`Cannot approve — status is ${adj.status}.`);
 
-    // Update adjustment status
+    const delta = Number(adj.quantity_delta);
+    const warehouseId = adj.warehouse_id || null;
+
+    // Apply stock change. The balance and the movement ledger must move by the
+    // SAME delta: an adjustment that would take stock below zero is refused,
+    // not clamped (clamping wrote the full delta to the ledger while stock only
+    // fell to 0, so the ledger stopped adding up to on-hand).
+    const stockRow = await trx('mill_stock')
+      .where({ item_id: adj.item_id, warehouse_id: warehouseId })
+      .forUpdate()
+      .first();
+    const onHand = Number(stockRow?.quantity_available || 0);
+    const newQty = adjustedBalance(onHand, delta);
+    if (newQty === null) {
+      throw new ValidationError(
+        `Adjustment of ${delta} would take stock below zero (on hand ${onHand}). Count the item and request a smaller adjustment.`
+      );
+    }
+
     await trx('mill_stock_adjustments').where('id', id).update({
       status: 'Approved',
       approved_by: approvedBy,
       approved_at: trx.fn.now(),
     });
 
-    const delta = Number(adj.quantity_delta);
-    const warehouseId = adj.warehouse_id || null;
-
-    // Apply stock change
-    const stockRow = await trx('mill_stock')
-      .where({ item_id: adj.item_id, warehouse_id: warehouseId })
-      .first();
-
     if (stockRow) {
-      const newQty = Math.max(0, Number(stockRow.quantity_available) + delta);
       await trx('mill_stock').where('id', stockRow.id).update({
         quantity_available: newQty,
         updated_at: trx.fn.now(),
@@ -562,12 +581,19 @@ const millStoreRepo = {
   },
 
   async rejectAdjustment(id, approvedBy, rejectionReason) {
-    const [row] = await db('mill_stock_adjustments').where('id', id).update({
+    // Only a pending adjustment can be rejected; the guard is in the UPDATE
+    // itself so it cannot race an approval.
+    const [row] = await db('mill_stock_adjustments').where({ id, status: 'Pending' }).update({
       status: 'Rejected',
       approved_by: approvedBy,
       approved_at: db.fn.now(),
       rejection_reason: rejectionReason,
     }).returning('*');
+    if (!row) {
+      const existing = await db('mill_stock_adjustments').where('id', id).first();
+      if (!existing) throw new NotFoundError('Adjustment not found.');
+      throw new ConflictError(`Cannot reject — status is ${existing.status}.`);
+    }
     return row;
   },
 
@@ -582,6 +608,7 @@ const millStoreRepo = {
 
       const stockRow = await trx('mill_stock')
         .where({ item_id: itemId, warehouse_id: warehouseId })
+        .forUpdate()
         .first();
       const prev = Number(stockRow?.quantity_available || 0);
       const delta = Number((target - prev).toFixed(4));
@@ -617,3 +644,4 @@ const millStoreRepo = {
 };
 
 module.exports = millStoreRepo;
+module.exports.adjustedBalance = adjustedBalance;
