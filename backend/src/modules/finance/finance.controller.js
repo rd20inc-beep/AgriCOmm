@@ -3,6 +3,7 @@ const inventoryService = require('../../services/inventoryService');
 const accountingService = require('../../services/accountingService');
 const fxRateService = require('./fxRate.service');
 const { nextDocNo } = require('../../utils/docNumber');
+const { postLocalReceiptJournal } = require('../localSales/receiptJournal');
 
 // Finance-dashboard confidentiality: every role EXCEPT Super Admin / Owner sees
 // reference NUMBERS (export order, mill batch, lot) but NOT the trading-party
@@ -96,8 +97,11 @@ const financeController = {
       // advances + balances.
       let localQ = db('local_sales as ls')
         .leftJoin('customers as c', 'ls.customer_id', 'c.id')
-        .whereNotIn('ls.status', ['Pending', 'Cancelled'])
-        .whereIn('ls.payment_status', ['Pending', 'Partial', 'Credit'])
+        // Only a CONFIRMED sale is receivable: a Pending one has posted nothing
+        // (its receipt is taken on confirmation) and a Cancelled one never
+        // happened. 'Unpaid' is what create writes for an unpaid non-credit sale.
+        .where('ls.status', 'Completed')
+        .whereIn('ls.payment_status', ['Pending', 'Unpaid', 'Partial', 'Credit'])
         .where('ls.due_amount', '>', 0)
         .select(
           'ls.id',
@@ -373,6 +377,12 @@ const financeController = {
             await trx('local_sales').where({ id: s.id }).update({ paid_amount: np, due_amount: nd, payment_status: nd <= 0 ? 'Paid' : 'Partial', updated_at: trx.fn.now() });
             const r = await trx('receivables').where('local_sale_id', s.id).first();
             if (r) { const rp = (parseFloat(r.received_amount) || 0) + amount; const ro = Math.max(0, (parseFloat(r.expected_amount) || 0) - rp); await trx('receivables').where({ id: r.id }).update({ received_amount: rp, outstanding: ro, status: ro <= 0 ? 'Paid' : 'Partial', updated_at: trx.fn.now() }); }
+            // The cheque settles the sale today, so it reaches the GL today:
+            // Dr 1000 / Cr 1120. Idempotent — a receipt already journaled when it
+            // was recorded (the Finance path) is left alone.
+            if (p.type === 'receipt') {
+              await postLocalReceiptJournal(trx, { paymentNo: p.payment_no, amount, sale: s, date: new Date(), userId: req.user?.id });
+            }
           }
         } else if (p.linked_receivable_id) {
           const r = await trx('receivables').where({ id: p.linked_receivable_id }).first();

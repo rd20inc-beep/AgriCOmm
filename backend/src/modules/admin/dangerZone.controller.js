@@ -403,7 +403,12 @@ async function deleteLocalSale(trx, req, id) {
   // Delete the sale's stock ledger rows.
   await trx('lot_transactions').where('reference_no', sale.sale_no).whereIn('transaction_type', ['local_sale_out', 'export_dispatch_out']).del();
   // Payments (+ their bank_transactions) and receivables tied to the sale.
-  const payIds = (await trx('payments').where('local_sale_id', id).select('id')).map(r => r.id);
+  const payRows = await trx('payments').where('local_sale_id', id).select('id', 'payment_no');
+  const payIds = payRows.map(r => r.id);
+  // Each receipt carries its own GL journal (ref_no = payment_no) — drop it with
+  // the payment, as deletePayment does, or the cash would stay in 1000.
+  const payNos = payRows.map(r => r.payment_no).filter(Boolean);
+  if (payNos.length) await trx('journal_entries').whereIn('ref_no', payNos).del();
   if (payIds.length) {
     // Reverse any account-balance movement these receipts posted before removing
     // the ledger rows (a credit added cash → debit it back on delete).

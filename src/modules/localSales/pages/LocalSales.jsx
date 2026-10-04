@@ -291,7 +291,7 @@ export default function LocalSales() {
                       <td data-label="Payment" className="py-2.5 px-4 text-center"><StatusBadge status={s.paymentStatus} /></td>
                       <td className="py-2.5 px-4 text-center">
                         <div className="inline-flex items-center gap-1.5">
-                          {parseFloat(s.dueAmount) > 0 && (
+                          {s.status === 'Completed' && parseFloat(s.dueAmount) > 0 && (
                             <button onClick={(e) => { e.stopPropagation(); setSelectedSale(s); setPayForm(p => ({ ...p, amount: String(parseFloat(s.dueAmount) || 0), collection_location: s.collectionLocation || s.collection_location || 'Mill' })); setShowPaymentModal(true); }}
                               className="px-2.5 py-1 bg-emerald-50 text-emerald-700 text-xs font-medium rounded hover:bg-emerald-100 inline-flex items-center gap-1">
                               <CreditCard size={12} /> Pay
@@ -404,7 +404,9 @@ export default function LocalSales() {
               <TransactionDocument kind="invoice" data={selectedSale} companyProfile={companyProfileData} />
             </div>
 
-            {parseFloat(selectedSale.dueAmount) > 0 && (
+            {/* Only a confirmed sale takes payments — a Pending one takes its
+                receipt on confirmation; a Cancelled one is owed nothing. */}
+            {selectedSale.status === 'Completed' && parseFloat(selectedSale.dueAmount) > 0 && (
               <button onClick={() => { setPayForm(p => ({ ...p, amount: String(parseFloat(selectedSale.dueAmount) || 0), collection_location: selectedSale.collectionLocation || selectedSale.collection_location || 'Mill' })); setShowPaymentModal(true); }}
                 className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700">
                 <CreditCard size={16} /> Accept Payment ({fmtPKR(selectedSale.dueAmount)})
@@ -675,9 +677,23 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
 
   const grandTotal = cart.reduce((s, c) => s + c.total, 0) + rpPackagingCharge + rpLabourTotal;
 
+  // Amount received follows the mode until the user types in it: a cash / bank /
+  // cheque sale is taken in full (and keeps tracking the cart total as lines are
+  // added), a credit sale starts empty. Once edited, the typed figure stands.
+  // Changing the mode re-syncs. (Previously an untouched cash field was saved as
+  // a CREDIT sale while the placeholder promised "full".)
+  const [paidTouched, setPaidTouched] = useState(false);
+  const paidAmount = paidTouched
+    ? form.paid_amount
+    : (form.payment_mode === 'credit' || !(grandTotal > 0) ? '' : String(Math.round(grandTotal * 100) / 100));
+  const paidNum = paidAmount === '' ? null : (parseFloat(paidAmount) || 0);
+  const owesBalance = form.payment_mode === 'credit'
+    ? (paidNum == null || paidNum < grandTotal - 0.01)
+    : (paidNum != null && paidNum < grandTotal - 0.01);
+
   function reset() {
     setForm({ customer_id: '', buyer_name: '', buyer_phone: '', payment_mode: 'cash', paid_amount: '', collection_location: 'Mill', bank_account_id: '', cheque_no: '', due_date: '', vehicle_no: '', driver_name: '', notes: '', gate_pass_no: '' });
-    setCart([]); setLine(EMPTY_LINE); setTag('All'); setStep(1);
+    setCart([]); setLine(EMPTY_LINE); setTag('All'); setStep(1); setPaidTouched(false);
     setRepack({ enabled: false, bag_source: 'none', packaging_item_id: '', freed_katta_to_store: true, original_bag_size_kg: '', original_bag_count: '', new_bag_size_kg: '', new_bag_count: '', bag_rate: '', labour_enabled: false, labour_mode: 'per_bag', labour_rate: '', packing_loss_kg: '', final_dispatched_kg: '', notes: '' });
   }
 
@@ -686,15 +702,15 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
     if (cart.length === 0) { addToast('Add at least one item to the sale', 'error'); return; }
     if (form.payment_mode === 'bank_transfer' && !form.bank_account_id) { addToast('Select the bank account that received the payment', 'error'); return; }
     if (form.payment_mode === 'cheque' && !form.cheque_no.trim()) { addToast('Enter the cheque number', 'error'); return; }
-    // A cash sale submitted with no amount entered is an unpaid sale → record it
-    // as Credit (Udhaar) automatically (so the user doesn't have to switch mode).
-    const noAmount = form.paid_amount === '' || parseFloat(form.paid_amount) === 0;
-    const effectiveMode = (form.payment_mode === 'cash' && noAmount) ? 'credit' : form.payment_mode;
+    // The mode saved is the mode chosen. An empty amount means "in full" for
+    // cash / bank / cheque (the server reads it the same way) and "nothing yet"
+    // for credit.
+    const effectiveMode = form.payment_mode;
     const isCashy = effectiveMode === 'cash' || effectiveMode === 'credit';
     try {
       const payload = {
         customer_id: form.customer_id || null, buyer_name: form.buyer_name || null, buyer_phone: form.buyer_phone || null,
-        payment_mode: effectiveMode, paid_amount: form.paid_amount === '' ? undefined : (parseFloat(form.paid_amount) || 0),
+        payment_mode: effectiveMode, paid_amount: paidNum == null ? undefined : paidNum,
         collection_location: isCashy ? (form.collection_location || 'Mill') : null,
         bank_account_id: effectiveMode === 'bank_transfer' && form.bank_account_id ? Number(form.bank_account_id) : null,
         payment_reference: effectiveMode === 'cheque' ? (form.cheque_no.trim() || null) : null,
@@ -752,7 +768,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
       // Hand the freshly-created sale back so the parent can offer a printable /
       // downloadable invoice immediately — but only once it's confirmed (a Pending
       // sale hasn't posted revenue, so there's no invoice to issue yet).
-      const paid = form.paid_amount === '' ? (isCashy && effectiveMode !== 'credit' ? grandTotal : 0) : (parseFloat(form.paid_amount) || 0);
+      const paid = paidNum == null ? (effectiveMode !== 'credit' ? grandTotal : 0) : paidNum;
       const due = Math.max(0, grandTotal - paid);
       !pending && onCreated && onCreated({
         saleNo: res?.data?.group_no || res?.data?.sale_no || '',
@@ -1149,19 +1165,19 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className={LABEL}>Payment Mode</label>
-              <select value={form.payment_mode} onChange={e => set('payment_mode', e.target.value)} className={SELECT}>
+              <select value={form.payment_mode} onChange={e => { set('payment_mode', e.target.value); setPaidTouched(false); }} className={SELECT}>
                 <option value="cash">Cash</option><option value="cheque">Cheque</option><option value="bank_transfer">Bank Transfer</option><option value="credit">Credit (Udhaar)</option>
               </select>
             </div>
             <div>
               <label className={LABEL}>Amount Received</label>
-              <input type="number" value={form.paid_amount} onChange={e => set('paid_amount', e.target.value)} className={INPUT}
+              <input type="number" value={paidAmount} onChange={e => { setPaidTouched(true); set('paid_amount', e.target.value); }} className={INPUT}
                 placeholder={grandTotal > 0 ? `Rs ${grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (full)` : 'Rs'} />
               {form.payment_mode === 'credit' && <p className="text-xs text-amber-600 mt-1">Leave empty or partial for credit sale</p>}
-              {form.payment_mode === 'cash' && (form.paid_amount === '' || parseFloat(form.paid_amount) === 0) && <p className="text-xs text-amber-600 mt-1">Left empty → recorded as Credit (Udhaar)</p>}
+              {form.payment_mode !== 'credit' && owesBalance && <p className="text-xs text-amber-600 mt-1">Rs {(grandTotal - (paidNum || 0)).toLocaleString(undefined, { maximumFractionDigits: 2 })} will be owed on this sale</p>}
             </div>
           </div>
-          {(form.payment_mode === 'credit' || (form.payment_mode === 'cash' && (form.paid_amount === '' || parseFloat(form.paid_amount) === 0)) || (form.paid_amount !== '' && parseFloat(form.paid_amount) < grandTotal)) && isWalkIn && (
+          {owesBalance && isWalkIn && (
             <p className="text-[11px] text-violet-600 mt-2">A balance is owed, so “{form.buyer_name || 'this buyer'}” will be saved as a customer to track the receivable.</p>
           )}
 

@@ -72,6 +72,14 @@ const classifyVch = (party, ref, debit, credit) => {
  * Accounting Engine — Core double-entry bookkeeping service
  * All monetary operations produce balanced journal entries.
  */
+// Local-sale receipts that the customer statement must take from the payments
+// table — i.e. those with no journal already in the statement's journal scan.
+// Pure; exported for tests.
+function receiptsWithoutJournal(payments, journaledPaymentNos) {
+  const covered = new Set((journaledPaymentNos || []).filter(Boolean));
+  return (payments || []).filter((p) => !covered.has(p.payment_no));
+}
+
 const accountingService = {
   // ═══════════════════════════════════════════════════════════════════
   // Journal Posting
@@ -1079,12 +1087,27 @@ const accountingService = {
       .select('id', 'sale_no', 'total_amount', 'due_amount', 'paid_amount', 'created_at', 'item_name', 'item_type',
         'quantity_kg', 'quantity_bags', 'bag_weight_kg', 'lot_no', 'notes', 'collection_location');
     const lsIds = localSalesRows.map((s) => s.id);
-    const lsPays = lsIds.length
+    // Only cleared receipts: an uncleared post-dated cheque hasn't settled
+    // anything yet (it settles — and journals — when it clears).
+    const lsPaysAll = lsIds.length
       ? await db('payments as p')
         .leftJoin('bank_accounts as ba', 'ba.id', 'p.bank_account_id')
         .whereIn('p.local_sale_id', lsIds)
+        .where('p.cleared', true)
         .select('p.amount', 'p.payment_date', 'p.payment_no', 'p.payment_method', 'p.bank_reference', 'p.local_sale_id', 'ba.name as account_name')
       : [];
+    // A receipt that has its own journal (ref_no = payment_no: local-sale
+    // receipts since they started posting to the GL, and every Finance-path
+    // receipt) already reaches this statement as a journal line. Drop it here
+    // or it shows twice. "Already reaches" is decided by the SAME lineBase
+    // filter the journal scan uses — so a walk-in receipt whose journal is
+    // unstamped, and every historic receipt that has no journal, still shows
+    // from the payments row.
+    const lsPayNos = lsPaysAll.map((p) => p.payment_no).filter(Boolean);
+    const journaledPayNos = lsPayNos.length
+      ? (await lineBase().whereIn('je.ref_no', lsPayNos).distinct('je.ref_no')).map((r) => r.ref_no)
+      : [];
+    const lsPays = receiptsWithoutJournal(lsPaysAll, journaledPayNos);
     const saleById = Object.fromEntries(localSalesRows.map((s) => [s.id, s]));
     const methodLbl = { cash: 'Cash', cheque: 'Cheque', bank_transfer: 'Bank transfer', online: 'Online', mobile: 'Mobile' };
     const localRaw = [
@@ -1919,3 +1942,4 @@ const accountingService = {
 };
 
 module.exports = accountingService;
+module.exports.receiptsWithoutJournal = receiptsWithoutJournal;

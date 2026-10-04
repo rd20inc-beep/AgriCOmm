@@ -277,7 +277,9 @@ export default function LocalSalesFinance() {
           <SlideDrawer open={!!detailSale} onClose={() => setDetailSale(null)}
             title={s.saleNo || 'Sale'} subtitle={s.createdByName ? `Created by ${s.createdByName}` : undefined}
             icon={ShoppingCart} size="md"
-            footer={due > 0 ? (
+            // Only a confirmed sale is owed anything — a Pending one takes its
+            // receipt when confirmed, a Cancelled one never happened.
+            footer={due > 0 && s.status === 'Completed' ? (
               <div className="space-y-2">
                 <div className="flex gap-2">
                   <input type="number" min="0" step="0.01" value={payForm.amount}
