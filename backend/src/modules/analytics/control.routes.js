@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const controller = require('../../controllers/controlController');
 const authorize = require('../../middleware/rbac');
+const { authorizeRole } = require('../../middleware/rbac');
 const auditAction = require('../../middleware/audit');
 const validate = require('../../middleware/validate');
 const schemas = require('../../middleware/schemas');
@@ -95,21 +96,26 @@ router.post(
   controller.createStockCount
 );
 router.get('/stock-counts/:id', authorize('inventory', 'view'), controller.getStockCountDetail);
+// Counting and per-line review are floor work (Mill Manager / Inventory
+// Officer hold inventory.adjust). inventory.update was never a permission, so
+// before this only the Owner/Super Admin bypass could save a count.
 router.put(
   '/stock-counts/:id/record',
-  authorize('inventory', 'update'),
+  authorize('inventory', 'adjust'),
   auditAction('record_stock_count', 'stock_count_items'),
   controller.recordCountItem
 );
 router.put(
   '/stock-counts/:id/items/:itemId/review',
-  authorize('inventory', 'update'),
+  authorize('inventory', 'adjust'),
   auditAction('review_stock_count_line', 'stock_count_items'),
   controller.reviewCountItem
 );
+// Completing a count writes stock off / on — the Owner approves write-offs
+// (owner decision 2026-10-05). authorizeRole has no bypass, so both are listed.
 router.put(
   '/stock-counts/:id/approve',
-  authorize('inventory', 'update'),
+  authorizeRole('Owner', 'Super Admin'),
   auditAction('approve_stock_count', 'stock_counts'),
   controller.approveStockCount
 );
