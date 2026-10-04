@@ -112,7 +112,7 @@ async function gatherOrderData(orderId) {
     bankAccount = await db('bank_accounts').where({ is_export_default: true }).first();
   }
 
-  return { order, containers, settings, costs, items, packingWeight, bankAccount };
+  return { order, containers, debitNotes, settings, costs, items, packingWeight, bankAccount };
 }
 
 function formatDate(d) {
@@ -186,7 +186,7 @@ const exportDocumentController = {
         return res.status(404).json({ success: false, message: 'Order not found.' });
       }
 
-      const { order, containers, settings, items, packingWeight, bankAccount } = data;
+      const { order, containers, debitNotes, settings, items, packingWeight, bankAccount } = data;
 
       // Single source of truth for HS code: first item → order (legacy) →
       // settings default. Item-level wins because that's where the user
