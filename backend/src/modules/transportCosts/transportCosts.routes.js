@@ -4,9 +4,10 @@ const { authorize, authorizeAny } = require('../../middleware/rbac');
 const auditAction = require('../../middleware/audit');
 const ctrl = require('./transportCosts.controller');
 
-// Read: finance or milling viewers. Mutations: finance.create / milling.edit.
+// Read: finance or milling viewers. Mutations: finance.confirm_payment
+// (recording/reconciling a freight cost) / milling.edit.
 const canRead = authorizeAny(['finance', 'view'], ['milling', 'view'], ['inventory', 'view']);
-const canWrite = authorizeAny(['finance', 'create'], ['milling', 'edit']);
+const canWrite = authorizeAny(['finance', 'confirm_payment'], ['milling', 'edit']);
 
 router.get('/unreconciled', canRead, ctrl.listUnreconciled);
 router.post('/reconcile', canWrite, auditAction('reconcile', 'transport_cost', (req) => req.body?.source_id), ctrl.reconcile);

@@ -10,7 +10,7 @@ const controller = require('../../controllers/procurementController');
 
 router.get(
   '/requisitions',
-  authorize('inventory', 'read'),
+  authorize('inventory', 'view'),
   controller.listRequisitions
 );
 
@@ -43,7 +43,7 @@ router.put(
 
 router.get(
   '/purchase-orders',
-  authorize('inventory', 'read'),
+  authorize('inventory', 'view'),
   controller.listPurchaseOrders
 );
 
@@ -58,7 +58,7 @@ router.post(
 
 router.get(
   '/purchase-orders/:id',
-  authorize('inventory', 'read'),
+  authorize('inventory', 'view'),
   controller.getPurchaseOrder
 );
 
@@ -75,7 +75,7 @@ router.put(
 
 router.get(
   '/grns',
-  authorize('inventory', 'read'),
+  authorize('inventory', 'view'),
   controller.listGRNs
 );
 
@@ -90,7 +90,7 @@ router.post(
 
 router.get(
   '/grns/:id',
-  authorize('inventory', 'read'),
+  authorize('inventory', 'view'),
   controller.getGRN
 );
 
@@ -153,7 +153,7 @@ router.post(
 
 router.get(
   '/suppliers/:id/performance',
-  authorize('inventory', 'read'),
+  authorize('inventory', 'view'),
   controller.getSupplierPerformance
 );
 

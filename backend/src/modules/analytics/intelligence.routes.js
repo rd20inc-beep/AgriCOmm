@@ -4,12 +4,17 @@ const controller = require('../../controllers/intelligenceController');
 const authorize = require('../../middleware/rbac');
 const auditAction = require('../../middleware/audit');
 
+// Running an analysis, score or simulation needs the same permission that reads
+// its result; changing workflow state (approve, resolve, dismiss) needs
+// admin.manage_settings. (These used admin.create/update and finance.create,
+// which were never seeded — so only Super Admin and Owner could call them.)
+
 // ═══════════════════════════════════════════════════════════════════
 // EXCEPTION INBOX
 // ═══════════════════════════════════════════════════════════════════
 router.post(
   '/exceptions/scan',
-  authorize('admin', 'create'),
+  authorize('admin', 'view'),
   auditAction('scan_exceptions', 'exception_inbox'),
   controller.scanExceptions
 );
@@ -17,31 +22,31 @@ router.get('/exceptions/stats', authorize('admin', 'view'), controller.getExcept
 router.get('/exceptions', authorize('admin', 'view'), controller.listExceptions);
 router.put(
   '/exceptions/:id/acknowledge',
-  authorize('admin', 'update'),
+  authorize('admin', 'manage_settings'),
   auditAction('acknowledge_exception', 'exception_inbox'),
   controller.acknowledgeException
 );
 router.put(
   '/exceptions/:id/assign',
-  authorize('admin', 'update'),
+  authorize('admin', 'manage_settings'),
   auditAction('assign_exception', 'exception_inbox'),
   controller.assignException
 );
 router.put(
   '/exceptions/:id/resolve',
-  authorize('admin', 'update'),
+  authorize('admin', 'manage_settings'),
   auditAction('resolve_exception', 'exception_inbox'),
   controller.resolveException
 );
 router.put(
   '/exceptions/:id/snooze',
-  authorize('admin', 'update'),
+  authorize('admin', 'manage_settings'),
   auditAction('snooze_exception', 'exception_inbox'),
   controller.snoozeException
 );
 router.put(
   '/exceptions/:id/escalate',
-  authorize('admin', 'update'),
+  authorize('admin', 'manage_settings'),
   auditAction('escalate_exception', 'exception_inbox'),
   controller.escalateException
 );
@@ -51,13 +56,13 @@ router.put(
 // ═══════════════════════════════════════════════════════════════════
 router.post(
   '/risk/order/:id',
-  authorize('finance', 'create'),
+  authorize('finance', 'view'),
   auditAction('calculate_order_risk', 'risk_scores'),
   controller.calculateOrderRisk
 );
 router.post(
   '/risk/customer/:id',
-  authorize('finance', 'create'),
+  authorize('finance', 'view'),
   auditAction('calculate_customer_risk', 'risk_scores'),
   controller.calculateCustomerRisk
 );
@@ -70,25 +75,25 @@ router.get('/risk/dashboard', authorize('finance', 'view'), controller.getRiskDa
 // ═══════════════════════════════════════════════════════════════════
 router.post(
   '/rca/margin/:orderId',
-  authorize('finance', 'create'),
+  authorize('finance', 'view'),
   auditAction('analyze_margin_drop', 'root_cause_analyses'),
   controller.analyzeMarginDrop
 );
 router.post(
   '/rca/cost/:orderId',
-  authorize('finance', 'create'),
+  authorize('finance', 'view'),
   auditAction('analyze_cost_overrun', 'root_cause_analyses'),
   controller.analyzeCostOverrun
 );
 router.post(
   '/rca/yield/:batchId',
-  authorize('admin', 'create'),
+  authorize('admin', 'view'),
   auditAction('analyze_yield_loss', 'root_cause_analyses'),
   controller.analyzeYieldLoss
 );
 router.post(
   '/rca/payment/:orderId',
-  authorize('finance', 'create'),
+  authorize('finance', 'view'),
   auditAction('analyze_payment_delay', 'root_cause_analyses'),
   controller.analyzePaymentDelay
 );
@@ -101,7 +106,7 @@ router.get('/dashboard', authorize('admin', 'view'), controller.getDashboardData
 router.get('/dashboard/drilldown/:kpi', authorize('admin', 'view'), controller.getKPIDrilldown);
 router.post(
   '/dashboard/snapshot',
-  authorize('admin', 'create'),
+  authorize('admin', 'view'),
   auditAction('save_dashboard_snapshot', 'dashboard_snapshots'),
   controller.saveSnapshot
 );

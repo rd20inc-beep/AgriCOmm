@@ -6,6 +6,11 @@ const controller = require('../../controllers/smartController');
 const authorize = require('../../middleware/rbac');
 const auditAction = require('../../middleware/audit');
 
+// Running an analysis, score or simulation needs the same permission that reads
+// its result; changing workflow state (approve, resolve, dismiss) needs
+// admin.manage_settings. (These used admin.create/update and finance.create,
+// which were never seeded — so only Super Admin and Owner could call them.)
+
 // Multer configuration for mobile uploads
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
@@ -47,35 +52,35 @@ router.post(
 // ═══════════════════════════════════════════════════════════════════════════
 router.post(
   '/scenario/fob-vs-cif',
-  authorize('admin', 'create'),
+  authorize('admin', 'view'),
   auditAction('simulate_fob_vs_cif', 'scenario'),
   controller.fobVsCif
 );
 
 router.post(
   '/scenario/supplier-comparison',
-  authorize('admin', 'create'),
+  authorize('admin', 'view'),
   auditAction('simulate_supplier_comparison', 'scenario'),
   controller.supplierComparison
 );
 
 router.post(
   '/scenario/yield',
-  authorize('admin', 'create'),
+  authorize('admin', 'view'),
   auditAction('simulate_yield', 'scenario'),
   controller.yieldScenario
 );
 
 router.post(
   '/scenario/fx',
-  authorize('admin', 'create'),
+  authorize('admin', 'view'),
   auditAction('simulate_fx', 'scenario'),
   controller.fxScenario
 );
 
 router.post(
   '/scenario/full-order',
-  authorize('admin', 'create'),
+  authorize('admin', 'view'),
   auditAction('simulate_full_order', 'scenario'),
   controller.fullOrder
 );
@@ -137,7 +142,7 @@ router.get(
 // ═══════════════════════════════════════════════════════════════════════════
 router.post(
   '/predict/run',
-  authorize('admin', 'create'),
+  authorize('admin', 'view'),
   auditAction('run_predictive_analysis', 'predictive_alerts'),
   controller.runPredictiveAnalysis
 );
@@ -150,14 +155,14 @@ router.get(
 
 router.put(
   '/predict/alerts/:id/acknowledge',
-  authorize('admin', 'update'),
+  authorize('admin', 'manage_settings'),
   auditAction('acknowledge_predictive_alert', 'predictive_alerts'),
   controller.acknowledgeAlert
 );
 
 router.put(
   '/predict/alerts/:id/dismiss',
-  authorize('admin', 'update'),
+  authorize('admin', 'manage_settings'),
   auditAction('dismiss_predictive_alert', 'predictive_alerts'),
   controller.dismissAlert
 );
