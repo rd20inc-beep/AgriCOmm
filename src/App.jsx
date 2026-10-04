@@ -336,8 +336,8 @@ function StandardRoutes() {
         <Route path="/reports/stock-ledger" element={<ProtectedRoute module="reports" action="view"><StockLedger /></ProtectedRoute>} />
         <Route path="/exceptions" element={<ProtectedRoute module="admin" action="view"><ExceptionDashboard /></ProtectedRoute>} />
         <Route path="/ai" element={<ProtectedRoute anyOf={[{ module: 'reports', action: 'view_cost' }, { module: 'finance', action: 'view' }]}><AiAssistant /></ProtectedRoute>} />
-        <Route path="/intelligence" element={<ProtectedRoute anyOf={[{ module: 'finance', action: 'view' }, { module: 'admin', action: 'view' }]}><Intelligence /></ProtectedRoute>} />
-        <Route path="/simulator" element={<ProtectedRoute anyOf={[{ module: 'finance', action: 'view' }, { module: 'admin', action: 'view' }]}><ScenarioSimulator /></ProtectedRoute>} />
+        <Route path="/intelligence" element={<ProtectedRoute module="admin" action="view"><Intelligence /></ProtectedRoute>} />
+        <Route path="/simulator" element={<ProtectedRoute module="admin" action="view"><ScenarioSimulator /></ProtectedRoute>} />
         <Route path="/approvals" element={<ProtectedRoute module="admin" action="view"><Approvals /></ProtectedRoute>} />
         <Route path="/audit" element={<ProtectedRoute module="admin" action="view"><AuditLog /></ProtectedRoute>} />
         <Route path="/admin" element={<ProtectedRoute module="admin" action="view"><Admin /></ProtectedRoute>} />

@@ -6,10 +6,11 @@ const auditAction = require('../../middleware/audit');
 const validate = require('../../middleware/validate');
 const schemas = require('../../middleware/schemas');
 
-// Running an analysis, score or simulation needs the same permission that reads
-// its result; changing workflow state (approve, resolve, dismiss) needs
-// admin.manage_settings. (These used admin.create/update and finance.create,
-// which were never seeded — so only Super Admin and Owner could call them.)
+// Each admin.manage_settings route here writes a row (scores, risk scores,
+// RCAs, scenarios, snapshots, predictions, exceptions, approvals). It stays
+// Owner/Super Admin, as before: these checked admin.create/update and
+// finance.create, which were never seeded, so no other role could reach them.
+// This names a real permission without widening access.
 
 // ═══════════════════════════════════════════════════════════════════
 // APPROVALS (Maker-Checker)
@@ -44,7 +45,7 @@ router.get('/margin/order/:id', authorize('finance', 'view'), controller.calcula
 router.get('/margin/comparison', authorize('finance', 'view'), controller.getMarginComparison);
 router.post(
   '/margin/simulate',
-  authorize('finance', 'view'),
+  authorize('admin', 'manage_settings'),
   auditAction('pricing_simulation', 'pricing_simulations'),
   controller.simulatePricing
 );
@@ -54,7 +55,7 @@ router.post(
 // ═══════════════════════════════════════════════════════════════════
 router.post(
   '/supplier-score/:id',
-  authorize('admin', 'view'),
+  authorize('admin', 'manage_settings'),
   auditAction('calculate_supplier_score', 'supplier_scores'),
   controller.calculateSupplierScore
 );
@@ -65,7 +66,7 @@ router.get('/supplier-scoreboard', authorize('admin', 'view'), controller.getSup
 // ═══════════════════════════════════════════════════════════════════
 router.post(
   '/customer-score/:id',
-  authorize('admin', 'view'),
+  authorize('admin', 'manage_settings'),
   auditAction('calculate_customer_score', 'customer_scores'),
   controller.calculateCustomerScore
 );
@@ -77,7 +78,7 @@ router.get('/customer-trends/:id', authorize('admin', 'view'), controller.getCus
 // ═══════════════════════════════════════════════════════════════════
 router.post(
   '/mill-performance/:id',
-  authorize('admin', 'view'),
+  authorize('admin', 'manage_settings'),
   auditAction('calculate_mill_performance', 'mill_performance'),
   controller.calculateMillPerformance
 );
