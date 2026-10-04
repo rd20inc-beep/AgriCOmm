@@ -14,6 +14,9 @@ const { nextDocNo } = require('../../utils/docNumber');
 // actually masks payables carried on with the old list — so the policy now has a
 // single home in shared/partyMask.js.
 const { isPartyMasked } = require('../../shared/partyMask');
+const { resolvePaymentAccountId } = require('../../shared/cashAccounts');
+const { normalizePaymentMethod } = require('../../shared/constants/paymentMethods');
+const { ledgerFailure, missingAccounts } = require('../../shared/ledgerFailure');
 
 // Resolve a payment row to its PKR equivalent using the strongest
 // signal we have: stored base_amount_pkr first, then amount × fx_rate
@@ -1167,6 +1170,18 @@ const financeController = {
           }
         }
 
+        // The account the money moves through. Cash with none picked lands in
+        // the owning entity's cash float (Mill Cash / Office Petty Cash); any
+        // other method must name one, except a post-dated cheque, which moves
+        // money only when it clears.
+        const linkedRow = await trx(type === 'receipt' ? 'receivables' : 'payables').where({ id: entity_id }).first();
+        const accountId = await resolvePaymentAccountId(trx, {
+          bankAccountId: bank_account_id,
+          method: payment_method,
+          entity: linkedRow?.local_sale_id ? 'mill' : (linkedRow?.entity || 'general'),
+          isPostDated,
+        });
+
         const paymentNo = await generatePaymentNo(trx);
 
         // Resolve fx_rate + base_amount_pkr at write time so the
@@ -1202,7 +1217,7 @@ const financeController = {
             fx_rate: stampedFxRate,
             base_amount_pkr: Number(stampedPkr.toFixed(2)),
             payment_method: payment_method || null,
-            bank_account_id: bank_account_id || null,
+            bank_account_id: accountId || null,
             bank_reference: bank_reference || null,
             due_date: due_date || null,
             cleared: !isPostDated,
@@ -1250,17 +1265,17 @@ const financeController = {
               }
             }
           }
-          if (bank_account_id) {
+          if (accountId) {
             // Move the balance in the ACCOUNT's own currency: a PKR account
             // banks the PKR equivalent, a foreign account matching the payment
             // currency banks the native amount. Writing the SAME figure to
             // bank_transactions keeps the Cash tab's balance = Σ(transactions)
             // (previously the balance moved by the raw amount while the txn row
             // stored PKR — they never reconciled for a foreign receipt).
-            const acct = await trx('bank_accounts').where({ id: bank_account_id }).first();
+            const acct = await trx('bank_accounts').where({ id: accountId }).first();
             const bankMove = acct && acct.currency === cur ? amtNum : stampedPkr;
             await trx('bank_accounts')
-              .where({ id: bank_account_id })
+              .where({ id: accountId })
               .increment('current_balance', bankMove);
             // Audit-trail row in the Cash & Bank sub-ledger so the Cash
             // tab can attribute the inflow. Pattern mirrors payPurchase.
@@ -1274,7 +1289,7 @@ const financeController = {
                 : 1;
               await trx('bank_transactions').insert({
                 transaction_no: `BT-${String(seq).padStart(4, '0')}`,
-                bank_account_id,
+                bank_account_id: accountId,
                 type: 'credit',
                 amount: bankMove,
                 currency: acct?.currency || 'PKR',
@@ -1318,7 +1333,7 @@ const financeController = {
                   paid_amount: srcPaid,
                   payment_status: fullyPaid ? 'Paid' : 'Partial',
                   paid_date: fullyPaid ? new Date() : null,
-                  bank_account_id: bank_account_id || null,
+                  bank_account_id: accountId || null,
                   payment_method: payment_method || null,
                   payment_reference: bank_reference || null,
                   updated_at: trx.fn.now(),
@@ -1343,15 +1358,15 @@ const financeController = {
                 .update({ status: fullyPaid ? 'paid' : 'partially_paid', updated_at: trx.fn.now() });
             }
           }
-          if (bank_account_id) {
+          if (accountId) {
             // Currency-aware bank move (see the receipt block): a foreign account
             // matching the payment currency moves natively, else PKR — and the
             // bank_transactions row carries the same figure so it reconciles.
             // #14 1e — only the NET cash (after WHT + discount) leaves the bank.
-            const acct = await trx('bank_accounts').where({ id: bank_account_id }).first();
+            const acct = await trx('bank_accounts').where({ id: accountId }).first();
             const bankMove = (acct && acct.currency === cur ? amtNum : stampedPkr) - whtNum - discNum;
             await trx('bank_accounts')
-              .where({ id: bank_account_id })
+              .where({ id: accountId })
               .increment('current_balance', bankMove * -1);
             const tableExists = await trx.schema.hasTable('bank_transactions');
             if (tableExists) {
@@ -1363,7 +1378,7 @@ const financeController = {
                 : 1;
               await trx('bank_transactions').insert({
                 transaction_no: `BT-${String(seq).padStart(4, '0')}`,
-                bank_account_id,
+                bank_account_id: accountId,
                 type: 'debit',
                 amount: bankMove,
                 currency: acct?.currency || 'PKR',
@@ -1467,10 +1482,11 @@ const financeController = {
             });
             if (journal?.id) await accountingService.postJournal(trx, journal.id);
           } else {
-            console.warn(`recordPayment: chart_of_accounts missing codes 1000/${counterCode} — journal skipped for ${paymentNo}`);
+            throw missingAccounts(['1000', counterCode]);
           }
         } catch (jeErr) {
-          console.error('recordPayment journal error (payment still recorded):', jeErr.message);
+          // The payment and its journal commit together or not at all.
+          throw ledgerFailure(jeErr);
         }
 
         return payment;
@@ -1603,9 +1619,13 @@ const financeController = {
                 lines: revLines,
               });
               if (j?.id) await accountingService.postJournal(trx, j.id);
+            } else {
+              throw missingAccounts(['1000', '2010'], 'The reversal');
             }
           } catch (jeErr) {
-            console.error('reversePayment journal error (reversal still applied):', jeErr.message);
+            // A reversal without its inverse journal leaves the GL showing a
+            // payment the books no longer have — roll the whole reversal back.
+            throw ledgerFailure(jeErr, 'The reversal');
           }
         }
 
@@ -2195,6 +2215,7 @@ financeController.listPurchases = async (req, res) => {
           's.name as supplier_name',
           db.raw("INITCAP(il.type) || ' ' || COALESCE(il.item_name, '') as category"),
           'il.payment_status',
+          db.raw('COALESCE(il.paid_amount, 0) as paid_amount'),
           // Per-lot detail for the expandable row (qty, per-kg, katta/bags).
           'il.received_net_weight_kg as qty_kg',
           'il.landed_cost_per_kg as rate_per_kg',
@@ -2228,6 +2249,7 @@ financeController.listPurchases = async (req, res) => {
           's.name as supplier_name',
           db.raw("'Mill Store' as category"),
           'mp.payment_status',
+          db.raw('COALESCE(mp.paid_amount, 0) as paid_amount'),
           'creator.full_name as created_by_name',
           db.raw('NULL::text as approved_by_name'),
           db.raw('NULL::text as approved_at'),
@@ -2259,6 +2281,7 @@ financeController.listPurchases = async (req, res) => {
           db.raw('NULL::text as supplier_name'),
           'eoc.category',
           db.raw("COALESCE(eoc.payment_status, 'Pending') as payment_status"),
+          db.raw('COALESCE(eoc.paid_amount, 0) as paid_amount'),
           'creator.full_name as created_by_name',
           db.raw('NULL::text as approved_by_name'),
           db.raw('NULL::text as approved_at'),
@@ -2288,6 +2311,7 @@ financeController.listPurchases = async (req, res) => {
           db.raw("COALESCE(s.name, be.vendor_name) as supplier_name"),
           'be.category',
           'be.payment_status',
+          db.raw('COALESCE(be.paid_amount, 0) as paid_amount'),
           'creator.full_name as created_by_name',
           'approver.full_name as approved_by_name',
           db.raw('be.paid_date as approved_at'),
@@ -2385,6 +2409,10 @@ financeController.payPurchase = async (req, res) => {
     }
     const id = parseInt(source_id, 10);
     if (!id) return res.status(400).json({ success: false, message: 'source_id must be numeric.' });
+    // payments.payment_method is CHECK-constrained to the canonical set; the
+    // Purchases drawer used to send 'bank', which died on that constraint.
+    // Throws on an unknown value, which the catch below turns into a 400.
+    const payMethod = normalizePaymentMethod(payment_method);
 
     const result = await db.transaction(async (trx) => {
       let row;
@@ -2426,11 +2454,16 @@ financeController.payPurchase = async (req, res) => {
       }
 
       // Default to settling the whole outstanding amount when the caller
-      // didn't specify; clamp to outstanding so the column never goes
-      // negative (an "over-payment" would mean refund territory, not pay).
+      // didn't specify. An amount over the outstanding is refused, not
+      // clamped: clamping recorded less than the user typed while the screen
+      // reported the typed figure as paid.
       const payNum = amount == null ? outstanding : parseFloat(amount);
       if (!payNum || payNum <= 0) throw new Error('Amount must be greater than zero.');
-      amountPkr = Math.min(payNum, outstanding);
+      if (outstanding <= 0.01) throw new Error('This purchase is already fully paid.');
+      if (payNum - outstanding > 0.01) {
+        throw new Error(`Amount ${payNum.toFixed(2)} exceeds the outstanding balance of ${outstanding.toFixed(2)}.`);
+      }
+      amountPkr = Math.min(payNum, outstanding); // only trims sub-cent float slop
       const newPaid = (parseFloat(row.paid_amount) || 0) + amountPkr;
       const fullyPaid = outstanding - amountPkr <= 0.01;
       const paidAt = payment_date ? new Date(payment_date) : new Date();
@@ -2446,7 +2479,7 @@ financeController.payPurchase = async (req, res) => {
       // A post-dated cheque records but does NOT settle the purchase (source row,
       // payable, bank, journal) until it clears — insert the uncleared payment
       // and stop. Cleared later via POST /payments/:id/clear.
-      const isPostDated = payment_method === 'cheque' && due_date && new Date(due_date) > new Date(new Date().toDateString());
+      const isPostDated = payMethod === 'cheque' && due_date && new Date(due_date) > new Date(new Date().toDateString());
       if (isPostDated) {
         const natRef = row.lot_no || row.purchase_no || row.expense_no || null;
         const payable = await trx('payables').where(function () {
@@ -2456,7 +2489,7 @@ financeController.payPurchase = async (req, res) => {
         await trx('payments').insert({
           payment_no: await nextDocNo(trx, { table: 'payments', column: 'payment_no', prefix: 'PP-', pad: 0 }),
           type: 'payment', amount: amountPkr, currency: 'PKR', fx_rate: 1, base_amount_pkr: amountPkr,
-          payment_method, bank_account_id: bank_account_id || null,
+          payment_method: payMethod, bank_account_id: bank_account_id || null,
           bank_reference: payment_reference || null, due_date, cleared: false,
           linked_payable_id: payable ? payable.id : null,
           source_table: sourceTable, source_id: id, payment_date: paidAt,
@@ -2465,6 +2498,18 @@ financeController.payPurchase = async (req, res) => {
         });
         return { postDated: true, source, source_id: id, amount: amountPkr };
       }
+
+      // The account the money leaves. Cash with none picked comes out of the
+      // paying entity's cash float (Mill Cash for mill purchases, Office Petty
+      // Cash for head office), as expenses do; any other method must name one.
+      const accountId = await resolvePaymentAccountId(trx, {
+        bankAccountId: bank_account_id,
+        method: payMethod,
+        entity: source === 'lot' ? row.entity
+          : source === 'mill_store' ? 'mill'
+          : source === 'expense' ? row.expense_type
+          : 'general',
+      });
 
       const commonUpdate = {
         payment_status: status,
@@ -2479,21 +2524,29 @@ financeController.payPurchase = async (req, res) => {
           due_amount: Math.max(0, total - newPaid),
         });
       } else if (source === 'mill_store') {
-        await trx('mill_purchases').where({ id }).update(commonUpdate);
+        // Stamp where/how it was paid, as the mill-store pay route did before
+        // Store Overview was pointed here.
+        await trx('mill_purchases').where({ id }).update({
+          ...commonUpdate,
+          paid_date: fullyPaid ? paidAt : null,
+          bank_account_id: accountId,
+          payment_method: payMethod,
+          payment_reference: payment_reference || null,
+        });
       } else if (source === 'export_cost') {
         await trx('export_order_costs').where({ id }).update({
           ...commonUpdate,
           paid_at: fullyPaid ? paidAt : null,
-          bank_account_id: bank_account_id || null,
-          payment_method: payment_method || null,
+          bank_account_id: accountId,
+          payment_method: payMethod,
           payment_reference: payment_reference || null,
         });
       } else if (source === 'expense') {
         await trx('business_expenses').where({ id }).update({
           ...commonUpdate,
           paid_date: fullyPaid ? paidAt : null,
-          bank_account_id: bank_account_id || null,
-          payment_method: payment_method || null,
+          bank_account_id: accountId,
+          payment_method: payMethod,
           payment_reference: payment_reference || null,
         });
       } else if (source === 'printed_bag') {
@@ -2524,7 +2577,7 @@ financeController.payPurchase = async (req, res) => {
         [payRowForBank] = await trx('payments').insert({
           payment_no: await nextDocNo(trx, { table: 'payments', column: 'payment_no', prefix: 'PP-', pad: 0 }),
           type: 'payment', amount: amountPkr, currency: 'PKR', fx_rate: 1, base_amount_pkr: amountPkr,
-          payment_method: payment_method || null, bank_account_id: bank_account_id || null,
+          payment_method: payMethod, bank_account_id: accountId,
           bank_reference: payment_reference || null, due_date: due_date || null,
           linked_payable_id: linkedPayable.id, payment_date: paidAt,
           notes: `Payment for ${source} ${row.lot_no || row.purchase_no || row.expense_no || `#${id}`}`,
@@ -2532,9 +2585,9 @@ financeController.payPurchase = async (req, res) => {
         }).returning('id');
       }
 
-      // Decrement the bank account when the user specified one.
-      if (bank_account_id) {
-        await trx('bank_accounts').where({ id: bank_account_id }).decrement('current_balance', amountPkr);
+      // Decrement the cash/bank account the money left.
+      if (accountId) {
+        await trx('bank_accounts').where({ id: accountId }).decrement('current_balance', amountPkr);
         const tableExists = await trx.schema.hasTable('bank_transactions');
         if (tableExists) {
           // transaction_no is NOT NULL + unique. Generate as BT-NNNN.
@@ -2547,7 +2600,7 @@ financeController.payPurchase = async (req, res) => {
           const txnNo = `BT-${String(seq).padStart(4, '0')}`;
           await trx('bank_transactions').insert({
             transaction_no: txnNo,
-            bank_account_id,
+            bank_account_id: accountId,
             type: 'debit',
             amount: amountPkr,
             transaction_date: paidAt,
@@ -2617,10 +2670,11 @@ financeController.payPurchase = async (req, res) => {
             if (journal?.id) await accountingService.postJournal(trx, journal.id);
           });
         } else {
-          console.warn(`Pay purchase: chart_of_accounts missing required codes (1000/2010/2110) — journal skipped for ${refType} ${refLabel}`);
+          throw missingAccounts(['1000', '2010']);
         }
       } catch (jeErr) {
-        console.error('Pay purchase journal error (payment still recorded):', jeErr.message);
+        // The payment and its journal commit together or not at all.
+        throw ledgerFailure(jeErr);
       }
 
       return { source, source_id: id, amount_paid_pkr: amountPkr, status, fully_paid: fullyPaid };

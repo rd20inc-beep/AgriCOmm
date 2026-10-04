@@ -17,7 +17,6 @@ export const millStoreApi = {
   listPurchases: (params) => api.get('/api/mill-store/purchases', params),
   getPurchase: (id) => api.get(`/api/mill-store/purchases/${id}`),
   createPurchase: (data) => api.post('/api/mill-store/purchases', data),
-  updatePayment: (id, data) => api.put(`/api/mill-store/purchases/${id}/pay`, data),
 
   // Stock
   getStock: (params) => api.get('/api/mill-store/stock', params),

@@ -281,14 +281,6 @@ const millStoreRepo = {
     return { ...purchase, lines };
   },
 
-  async updatePurchasePayment(id, paymentStatus) {
-    const [row] = await db('mill_purchases')
-      .where('id', id)
-      .update({ payment_status: paymentStatus, updated_at: db.fn.now() })
-      .returning('*');
-    return row;
-  },
-
   // ─── Stock ───
   async getStockLevels({ category, warehouseId, onlyLowStock } = {}) {
     const q = db('mill_stock as ms')

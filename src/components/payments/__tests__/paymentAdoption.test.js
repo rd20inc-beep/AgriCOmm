@@ -72,6 +72,35 @@ describe('payment method values', () => {
     }
     expect(bad).toEqual([]);
   });
+
+  // Finance > Purchases held useState('bank') and rendered ['bank', 'cash',
+  // 'cheque'] as its method buttons. Neither is a `payment_method: '...'`
+  // literal or an <option>, so the two checks above missed it, and every bank
+  // payment from that drawer died on the payments CHECK constraint.
+  const legacyMethodState = /useState\(\s*['"]bank['"]\s*\)/g;
+  const legacyMethodList = (src) => [...new Set([
+    // A list of methods: holds cash or cheque, and also 'bank'.
+    ...[...src.matchAll(/\[[^\]\n]*['"](?:cash|cheque)['"][^\]\n]*\]/g)]
+      .map((m) => m[0]).filter((s) => /['"]bank['"]/.test(s)),
+    // A [value, label] pair, or a list, that starts with 'bank'.
+    ...[...src.matchAll(/\[\s*['"]bank['"]\s*,[^\]\n]*\]/g)].map((m) => m[0]),
+  ])];
+
+  it('the legacy-method patterns catch what they are meant to', () => {
+    expect("const [m, setM] = useState('bank');".match(legacyMethodState)).toHaveLength(1);
+    expect(legacyMethodList("{['bank', 'cash', 'cheque'].map(m => (")).toHaveLength(1);
+    expect(legacyMethodList("[['bank', 'Bank'], ['cash', 'Cash']]")).toHaveLength(1);
+    expect(legacyMethodList("[['bank_transfer', 'Bank'], ['cash', 'Cash']]")).toHaveLength(0);
+  });
+
+  it('never defaults a method to, or lists, the legacy spelling', () => {
+    const bad = [];
+    for (const [file, src] of FILES) {
+      for (const m of src.matchAll(legacyMethodState)) bad.push(`${file}: ${m[0]}`);
+      for (const s of legacyMethodList(src)) bad.push(`${file}: ${s}`);
+    }
+    expect(bad).toEqual([]);
+  });
 });
 
 describe('recordPayment bodies', () => {

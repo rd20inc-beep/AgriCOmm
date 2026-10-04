@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { millStoreApi } from './services';
+import { financeApi } from '../../finance/api/services';
 
 function unwrap(res, key) {
   const d = res?.data?.data || res?.data || res;
@@ -163,14 +164,19 @@ export function useCreatePurchase() {
   });
 }
 
+// Settles through POST /api/finance/purchases/pay — the one path that moves the
+// account, the payable AND posts the journal. The body is purchasePayPayload,
+// which already names source 'mill_store' and the purchase id.
 export function usePayMillPurchase() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, data }) => millStoreApi.updatePayment(id, data),
+    mutationFn: ({ data }) => financeApi.payPurchase(data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['mill-store'] });
       qc.invalidateQueries({ queryKey: ['purchases'] });
+      qc.invalidateQueries({ queryKey: ['purchases-feed'] });
       qc.invalidateQueries({ queryKey: ['payables'] });
+      qc.invalidateQueries({ queryKey: ['bank-accounts'] });
     },
   });
 }

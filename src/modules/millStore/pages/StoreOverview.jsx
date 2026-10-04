@@ -12,6 +12,7 @@ import NewPurchaseDrawer from '../../../components/NewPurchaseDrawer';
 import SlideDrawer from '../../../components/SlideDrawer';
 import SupplierPicker from '../../../components/SupplierPicker';
 import { useApp } from '../../../context/AppContext';
+import { useAuth } from '../../../context/AuthContext';
 
 function formatPKR(v) {
   const n = Number(v) || 0;
@@ -256,6 +257,10 @@ export default function StoreOverview() {
 // so the Finance payment-trail shows where/how each was paid.
 function PurchasePaymentsCard() {
   const { addToast } = useApp();
+  // Paying is a finance action: the endpoint needs finance.confirm_payment,
+  // which a Mill Operator (who can raise purchases) does not hold.
+  const { hasPermission } = useAuth();
+  const canPay = hasPermission('finance', 'confirm_payment');
   const { data: purchasesRaw = [] } = useMillStorePurchases({ limit: 200 });
   const { data: bankAccounts = [] } = useBankAccounts();
   const pay = usePayMillPurchase();
@@ -290,9 +295,11 @@ function PurchasePaymentsCard() {
                 <td data-label="Due" className="py-2 px-2 text-right tabular-nums text-red-600 font-medium">{formatPKR(due(p))}</td>
                 <td data-label="Status" className="mob-hide py-2 px-2"><span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">{p.payment_status || 'Pending'}</span></td>
                 <td className="py-2 px-2 text-right">
-                  <button onClick={() => setTarget(p)} className="px-2.5 py-1 bg-emerald-50 text-emerald-700 text-xs font-medium rounded hover:bg-emerald-100 inline-flex items-center gap-1">
-                    <DollarSign size={12} /> Pay
-                  </button>
+                  {canPay && (
+                    <button onClick={() => setTarget(p)} className="px-2.5 py-1 bg-emerald-50 text-emerald-700 text-xs font-medium rounded hover:bg-emerald-100 inline-flex items-center gap-1">
+                      <DollarSign size={12} /> Pay
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}
@@ -300,7 +307,8 @@ function PurchasePaymentsCard() {
         </table>
       </div>
 
-      {/* Settles the purchase DOCUMENT via /finance/purchases/pay. Cash comes
+      {/* Settles the purchase DOCUMENT via POST /finance/purchases/pay (see
+          usePayMillPurchase), which posts the journal too. Cash comes
           from a cash account and a transfer from a bank one, as before; the
           server holds a post-dated cheque until it clears. */}
       {target && (
