@@ -309,7 +309,9 @@ const controlController = {
       return res.json({ success: true, data: result, message: 'Count recorded.' });
     } catch (err) {
       console.error('Record count item error:', err);
-      const status = err.message.includes('not found') ? 404 : 500;
+      const status = err.message.includes('not found') ? 404
+        : /already|cancelled|must be/.test(err.message) ? 400
+        : 500;
       return res.status(status).json({ success: false, message: err.message || 'Internal server error.' });
     }
   },
@@ -354,6 +356,7 @@ const controlController = {
         : err.message.includes('already') ? 400
         : err.message.includes('not been counted') ? 400
         : err.message.includes('need review') ? 400
+        : /negative stock|Insufficient stock|cancelled/.test(err.message) ? 400
         : 500;
       return res.status(status).json({ success: false, message: err.message || 'Internal server error.' });
     }

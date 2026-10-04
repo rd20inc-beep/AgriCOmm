@@ -3,9 +3,24 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ClipboardCheck, Plus, X, CheckCircle2, AlertTriangle, Loader2, Check, XCircle } from 'lucide-react';
 import { stockCountApi } from '../api/services';
 import { useWarehouses } from '../../../api/queries';
+import { useAuth } from '../../../context/AuthContext';
+import useConfirm from '../../../hooks/useConfirm';
 
 const n = (v) => Number(v) || 0;
-const fmtMT = (v) => `${n(v).toLocaleString(undefined, { maximumFractionDigits: 3 })} MT`;
+// Lot quantities are KG (Phase 5c).
+const fmtKg = (v) => `${n(v).toLocaleString(undefined, { maximumFractionDigits: 2 })} kg`;
+// Pack equivalent for a KG figure: 50 kg+ sacks are katta, smaller packs are
+// bags (a lot with no pack size counts in 50 kg katta).
+function packEquivalent(kg, it) {
+  const size = n(it.bag_weight_kg) || n(it.bag_size_kg);
+  const packKg = size > 0 ? size : 50;
+  const units = Math.round(n(kg) / packKg);
+  return packKg >= 50 ? `≈ ${units.toLocaleString()} katta` : `≈ ${units.toLocaleString()} bags × ${packKg} kg`;
+}
+// Stock write-offs are approved by the Owner only (owner decision 2026-10-05).
+const WRITE_OFF_APPROVERS = ['Owner', 'Super Admin'];
+// A count this far off the record is more likely a typo than a loss.
+const BIG_VARIANCE_SHARE = 0.5;
 
 const STATUS_STYLES = {
   Planned: 'bg-gray-100 text-gray-600',
@@ -151,6 +166,9 @@ function NewCountDrawer({ onClose, onCreated }) {
 
 function CountDetailDrawer({ countId, onClose, onChanged }) {
   const qc = useQueryClient();
+  const { user } = useAuth();
+  const canApprove = WRITE_OFF_APPROVERS.includes(user?.role);
+  const [confirm, confirmDialog] = useConfirm();
   const [drafts, setDrafts] = useState({});
 
   const { data: count, isLoading } = useQuery({
@@ -193,6 +211,7 @@ function CountDetailDrawer({ countId, onClose, onChanged }) {
 
   return (
     <Drawer title={count?.count_no || 'Stock count'} subtitle={count ? `${TYPE_LABEL[count.count_type] || count.count_type} · ${count.warehouse_name || 'All warehouses'}` : ''} onClose={onClose} wide>
+      {confirmDialog}
       {isLoading || !count ? (
         <p className="text-sm text-gray-400 py-10 text-center">Loading…</p>
       ) : (
@@ -212,9 +231,9 @@ function CountDetailDrawer({ countId, onClose, onChanged }) {
               <thead>
                 <tr className="border-b border-gray-200 text-left text-xs uppercase text-gray-500 bg-gray-50">
                   <th className="px-3 py-2">Item</th>
-                  <th className="px-3 py-2 text-right" title="What our records currently show">On record</th>
-                  <th className="px-3 py-2 text-right" title="What you physically counted">You counted</th>
-                  <th className="px-3 py-2 text-right" title="Counted minus on record">Difference</th>
+                  <th className="px-3 py-2 text-right" title="What our records show (refreshed when the line is saved)">On record (kg)</th>
+                  <th className="px-3 py-2 text-right" title="What you physically counted, in kg">Counted (kg)</th>
+                  <th className="px-3 py-2 text-right" title="Counted minus on record">Difference (kg)</th>
                   <th className="px-3 py-2"></th>
                 </tr>
               </thead>
@@ -230,14 +249,18 @@ function CountDetailDrawer({ countId, onClose, onChanged }) {
                         <div className="font-medium text-gray-800">{it.item_name || it.lot_no || `Lot ${it.lot_id}`}</div>
                         {it.lot_no && it.item_name && <div className="text-[11px] text-gray-400">{it.lot_no}</div>}
                       </td>
-                      <td data-label="On record" className="px-3 py-2 text-right tabular-nums text-gray-600">{fmtMT(it.system_qty)}</td>
-                      <td data-label="You counted" className="px-3 py-2 text-right">
-                        <input type="number" step="0.001" disabled={completed} value={counted}
+                      <td data-label="On record (kg)" className="px-3 py-2 text-right tabular-nums text-gray-600">
+                        <div>{fmtKg(it.system_qty)}</div>
+                        <div className="text-[10px] text-gray-400">{packEquivalent(it.system_qty, it)}</div>
+                      </td>
+                      <td data-label="Counted (kg)" className="px-3 py-2 text-right">
+                        <input type="number" step="0.01" min="0" disabled={completed} value={counted} placeholder="kg"
+                          aria-label={`Counted kg for ${it.item_name || it.lot_no || `lot ${it.lot_id}`}`}
                           onChange={(e) => setDrafts((d) => ({ ...d, [it.id]: e.target.value }))}
                           className="w-24 border border-gray-300 rounded-md px-2 py-1 text-right text-sm disabled:bg-gray-50 disabled:text-gray-500" />
                       </td>
-                      <td data-label="Difference" className={`px-3 py-2 text-right tabular-nums font-medium ${variance == null ? 'text-gray-300' : variance === 0 ? 'text-gray-400' : variance > 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                        {variance == null ? '—' : `${variance > 0 ? '+' : ''}${variance.toFixed(3)}`}
+                      <td data-label="Difference (kg)" className={`px-3 py-2 text-right tabular-nums font-medium ${variance == null ? 'text-gray-300' : variance === 0 ? 'text-gray-400' : variance > 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                        {variance == null ? '—' : `${variance > 0 ? '+' : ''}${variance.toLocaleString(undefined, { maximumFractionDigits: 2 })} kg`}
                       </td>
                       <td data-label="" className="px-3 py-2">
                         {(() => {
@@ -249,7 +272,21 @@ function CountDetailDrawer({ countId, onClose, onChanged }) {
                             <div className="flex flex-col items-end gap-1.5">
                               {!completed && (
                                 <button disabled={counted === '' || busy}
-                                  onClick={() => record.mutate({ itemId: it.id, countedQty: n(counted) })}
+                                  onClick={async () => {
+                                    // Safety net: a difference over half the record is usually a
+                                    // typo (an extra zero, a count in katta instead of kg).
+                                    const sys = n(it.system_qty);
+                                    if (variance != null && Math.abs(variance) > sys * BIG_VARIANCE_SHARE) {
+                                      const ok = await confirm({
+                                        title: 'Save a count this far off?',
+                                        consequence: `${it.item_name || it.lot_no || 'This line'}: you counted ${fmtKg(counted)} against ${fmtKg(sys)} on record — a difference of ${fmtKg(Math.abs(variance))}${sys > 0 ? ` (${Math.round((Math.abs(variance) / sys) * 100)}%)` : ''}. The count is in kg, not katta or MT.`,
+                                        confirmLabel: 'Save count',
+                                        cancelLabel: 'Go back',
+                                      });
+                                      if (!ok) return;
+                                    }
+                                    record.mutate({ itemId: it.id, countedQty: n(counted) });
+                                  }}
                                   className="text-xs font-medium text-blue-600 hover:text-blue-800 disabled:text-gray-300 inline-flex items-center gap-1">
                                   {busy ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={13} />}
                                   {it.status === 'Pending' ? 'Save' : 'Update'}
@@ -306,15 +343,22 @@ function CountDetailDrawer({ countId, onClose, onChanged }) {
 
           {!completed && (
             <div className="space-y-2">
+              {record.isError && <p className="text-xs text-red-600 flex items-center gap-1"><AlertTriangle size={13} /> {record.error?.message || 'Could not save the count.'}</p>}
               {review.isError && <p className="text-xs text-red-600 flex items-center gap-1"><AlertTriangle size={13} /> {review.error?.message || 'Review failed.'}</p>}
               {approve.isError && <p className="text-xs text-red-600 flex items-center gap-1"><AlertTriangle size={13} /> {approve.error?.message || 'Approval failed.'}</p>}
               {pendingCount > 0 && <p className="text-[11px] text-amber-600">Count all {pendingCount} remaining line(s) before approving.</p>}
               {pendingCount === 0 && unreviewedCount > 0 && <p className="text-[11px] text-amber-600">Approve or reject {unreviewedCount} difference(s) before finishing.</p>}
-              <button onClick={() => approve.mutate()} disabled={pendingCount > 0 || unreviewedCount > 0 || approve.isPending}
-                className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-sm font-medium py-2.5 rounded-lg inline-flex items-center justify-center gap-2">
-                {approve.isPending ? <Loader2 size={15} className="animate-spin" /> : <CheckCircle2 size={16} />}
-                Approve &amp; update stock
-              </button>
+              {canApprove ? (
+                <button onClick={() => approve.mutate()} disabled={pendingCount > 0 || unreviewedCount > 0 || approve.isPending}
+                  className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-sm font-medium py-2.5 rounded-lg inline-flex items-center justify-center gap-2">
+                  {approve.isPending ? <Loader2 size={15} className="animate-spin" /> : <CheckCircle2 size={16} />}
+                  Approve &amp; update stock
+                </button>
+              ) : (
+                <p className="text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-center">
+                  Only the Owner can approve a stock take and update stock.
+                </p>
+              )}
               <p className="text-[11px] text-gray-400 text-center">Approved differences are written off or added so your stock matches the count. Rejected differences leave the records unchanged.</p>
             </div>
           )}

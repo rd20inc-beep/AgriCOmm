@@ -3,6 +3,25 @@ const db = require('../../config/database');
 const { applyWarehouseScope } = require('../../utils/warehouseScope');
 const auditService = require('../admin/audit.service');
 const inventoryService = require('../inventory/inventory.service');
+const { nextDocNo } = require('../../utils/docNumber');
+
+const round2 = (v) => Math.round(v * 100) / 100;
+
+// Counted vs system for one stock-count line, in KG.
+function countVariance(counted, systemQty) {
+  const varianceQty = round2(counted - systemQty);
+  const variancePct = systemQty > 0 ? round2((varianceQty / systemQty) * 100) : (counted > 0 ? 100 : 0);
+  return { varianceQty, variancePct };
+}
+
+// The signed KG adjustment an approved line posts: counted − the system figure
+// snapshotted when it was counted.
+function countAdjustment(item) {
+  const counted = parseFloat(item.counted_qty);
+  const system = parseFloat(item.system_qty || 0);
+  if (!Number.isFinite(counted)) return 0;
+  return round2(counted - system);
+}
 
 const controlService = {
   // ═══════════════════════════════════════════════════════════════════
@@ -1014,19 +1033,9 @@ const controlService = {
   async createStockCount(trx, { countType, warehouseId, plannedDate, userId }) {
     const knex = trx || db;
 
-    // Generate count number: SC-001
-    const last = await knex('stock_counts')
-      .orderBy('id', 'desc')
-      .select('count_no')
-      .first();
-
-    let seq = 1;
-    if (last && last.count_no) {
-      const parts = last.count_no.split('-');
-      const lastSeq = parseInt(parts[parts.length - 1], 10);
-      if (!isNaN(lastSeq)) seq = lastSeq + 1;
-    }
-    const countNo = `SC-${String(seq).padStart(3, '0')}`;
+    // Count number SC-001… — MAX(suffix)+1, so a deleted count never makes the
+    // next number collide (the old "last row by id" read did not survive gaps).
+    const countNo = await nextDocNo(knex, { table: 'stock_counts', column: 'count_no', prefix: 'SC-', pad: 3 });
 
     // Create the stock count
     const [stockCount] = await knex('stock_counts')
@@ -1075,33 +1084,44 @@ const controlService = {
   async recordCountItem(trx, { stockCountId, itemId, countedQty, notes, userId }) {
     const knex = trx || db;
 
+    const stockCount = await knex('stock_counts').where({ id: stockCountId }).first();
+    if (!stockCount) throw new Error('Stock count not found.');
+    if (stockCount.status === 'Completed') throw new Error('Stock count already completed.');
+    if (stockCount.status === 'Cancelled') throw new Error('Stock count is cancelled.');
+
     const item = await knex('stock_count_items').where({ id: itemId, stock_count_id: stockCountId }).first();
     if (!item) throw new Error('Stock count item not found.');
 
-    const systemQty = parseFloat(item.system_qty || 0);
     const counted = parseFloat(countedQty);
-    const varianceQty = counted - systemQty;
-    const variancePct = systemQty > 0 ? (varianceQty / systemQty) * 100 : (counted > 0 ? 100 : 0);
+    if (!Number.isFinite(counted) || counted < 0) throw new Error('Counted quantity must be a number of kg, 0 or more.');
 
-    // Estimate variance value based on lot's average value
-    let varianceValue = 0;
+    // Re-snapshot the system figure NOW. system_qty was frozen when the count
+    // was created; a sale or milling draw between then and this count is already
+    // off the lot, and measuring the physical count against the stale figure
+    // would book that same quantity again as a shortage. The variance is the
+    // difference at the moment the stock was counted (all KG — Phase 5c).
+    let systemQty = parseFloat(item.system_qty || 0);
+    let lot = null;
     if (item.lot_id) {
-      // Get cost from recent movements or milling costs
-      const lot = await knex('inventory_lots').where({ id: item.lot_id }).first();
-      if (lot) {
-        // Rough estimate: use a default price per MT for rice products
-        const pricePerMT = 500; // USD default
-        varianceValue = varianceQty * pricePerMT;
-      }
+      lot = await knex('inventory_lots').where({ id: item.lot_id }).first();
+      if (lot) systemQty = parseFloat(lot.qty) || 0;
     }
+    const { varianceQty, variancePct } = countVariance(counted, systemQty);
+
+    // Value the variance at the lot's landed cost (PKR per kg). The old figure
+    // was variance × 500 "USD per MT" applied to KG — a made-up price on the
+    // wrong unit. Left null when the lot carries no cost.
+    const costPerKg = lot ? (parseFloat(lot.landed_cost_per_kg) || parseFloat(lot.cost_per_unit) || 0) : 0;
+    const varianceValue = costPerKg > 0 ? Math.round(varianceQty * costPerKg * 100) / 100 : null;
 
     const [updated] = await knex('stock_count_items')
       .where({ id: itemId })
       .update({
+        system_qty: systemQty,
         counted_qty: counted,
-        variance_qty: Math.round(varianceQty * 100) / 100,
-        variance_pct: Math.round(variancePct * 100) / 100,
-        variance_value: Math.round(varianceValue * 100) / 100,
+        variance_qty: varianceQty,
+        variance_pct: variancePct,
+        variance_value: varianceValue,
         status: 'Counted',
         notes: notes || null,
         counted_at: new Date(),
@@ -1174,7 +1194,8 @@ const controlService = {
   async approveStockCount(trx, { stockCountId, userId }) {
     const knex = trx || db;
 
-    const stockCount = await knex('stock_counts').where({ id: stockCountId }).first();
+    // Lock the count so a double click / two approvers cannot both post it.
+    const stockCount = await knex('stock_counts').where({ id: stockCountId }).forUpdate().first();
     if (!stockCount) throw new Error('Stock count not found.');
     if (stockCount.status === 'Completed') throw new Error('Stock count already completed.');
     if (stockCount.status === 'Cancelled') throw new Error('Stock count is cancelled.');
@@ -1201,14 +1222,22 @@ const controlService = {
     );
 
     for (const item of itemsWithVariance) {
-      const varianceQty = parseFloat(item.variance_qty);
+      // The adjustment is the difference measured WHEN THE STOCK WAS COUNTED:
+      // counted − system_qty, where system_qty was re-snapshotted from the lot
+      // as the line was recorded. Sales or milling between recording and this
+      // approval have moved the lot AND the physical stock alike, so they must
+      // not change the adjustment — "counted − lot.qty now" would add a sale
+      // made after the count straight back. It is posted as a delta against
+      // the lot as it stands now (locked below), never as an absolute set.
+      const varianceQty = countAdjustment(item);
+      if (varianceQty === 0) continue;
 
       if (item.lot_id) {
-        const lot = await knex('inventory_lots').where({ id: item.lot_id }).first();
+        const lot = await knex('inventory_lots').where({ id: item.lot_id }).forUpdate().first();
+        if (!lot) throw new Error(`Lot for ${item.item_name || `line ${item.id}`} not found.`);
         // Apply the count correction as a canonical stock adjustment. postMovement
         // updates qty / available_qty / net_weight_kg and writes the lot_transactions
-        // ledger row — replacing the retired inventory_movements mirror (P6c-B) and
-        // also fixing a prior gap where net_weight_kg wasn't moved by a count.
+        // ledger row, and refuses anything that would take the lot below zero.
         const movementType = varianceQty > 0
           ? inventoryService.MOVEMENT_TYPES.ADJUSTMENT_PLUS
           : inventoryService.MOVEMENT_TYPES.ADJUSTMENT_MINUS;
@@ -1218,7 +1247,7 @@ const controlService = {
           qty: Math.abs(varianceQty),
           toWarehouseId: varianceQty > 0 ? stockCount.warehouse_id : null,
           fromWarehouseId: varianceQty < 0 ? stockCount.warehouse_id : null,
-          sourceEntity: lot ? (lot.entity || 'mill') : 'mill',
+          sourceEntity: lot.entity || 'mill',
           linkedRef: stockCount.count_no,
           notes: `Stock count ${stockCount.count_no}: ${item.item_name} variance ${varianceQty > 0 ? '+' : ''}${varianceQty} kg`,
           currency: 'PKR',
@@ -1334,7 +1363,10 @@ const controlService = {
         'sci.*',
         'il.lot_no',
         'il.type as lot_type',
-        'il.unit'
+        'il.unit',
+        'il.qty as current_qty',
+        'il.bag_weight_kg',
+        'il.bag_size_kg'
       )
       .orderBy('sci.id', 'asc');
 
@@ -1351,3 +1383,5 @@ const controlService = {
 };
 
 module.exports = controlService;
+module.exports.countVariance = countVariance;
+module.exports.countAdjustment = countAdjustment;
