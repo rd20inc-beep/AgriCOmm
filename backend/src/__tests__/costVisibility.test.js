@@ -213,7 +213,8 @@ describe('lot endpoints redact for cost-blind roles', () => {
   const txns = () => [{ id: 1, lot_id: 3, quantity_kg: -100, balance_kg: 900, rate_per_kg: 120, total_cost: 12000, unit_cost: 120, cost_impact: 12000 }];
 
   test('lot transactions: Mill Operator gets quantities, no rates or cost', async () => {
-    db.__set({ lot_transactions: txns() });
+    // getLotTransactions now checks the lot (and its warehouse scope) first.
+    db.__set({ lot_transactions: txns(), inventory_lots: [{ id: 3, warehouse_id: null }], user_scopes: [] });
     const r = res();
     await controller.getLotTransactions(reqAs('millOperator', { params: { id: '3' } }), r);
     const t = r.body.data.transactions[0];
@@ -221,7 +222,8 @@ describe('lot endpoints redact for cost-blind roles', () => {
   });
 
   test('lot transactions: Mill Manager keeps the money', async () => {
-    db.__set({ lot_transactions: txns() });
+    // getLotTransactions now checks the lot (and its warehouse scope) first.
+    db.__set({ lot_transactions: txns(), inventory_lots: [{ id: 3, warehouse_id: null }], user_scopes: [] });
     const r = res();
     await controller.getLotTransactions(reqAs('millManager', { params: { id: '3' } }), r);
     expect(r.body.data.transactions[0]).toMatchObject({ rate_per_kg: 120, total_cost: 12000, cost_impact: 12000 });
