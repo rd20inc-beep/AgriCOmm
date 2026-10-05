@@ -10,7 +10,8 @@ import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { downloadCSV } from '../../../utils/csvExport';
 import { useApp } from '../../../context/AppContext';
 import SlideDrawer from '../../../components/SlideDrawer';
-import { favStar } from '../../../shared/utils/favorites';
+import { favStar, isFavorite } from '../../../shared/utils/favorites';
+import { paymentWord, defaultBankAccountId } from '../../localSales/utils/saleStatus';
 
 function fmtPKR(n) {
   const v = parseFloat(n) || 0;
@@ -29,6 +30,7 @@ const STATUS_TONE = {
   Pending:  'bg-gray-50 text-gray-600 border-gray-200',
   Credit:   'bg-blue-50 text-blue-700 border-blue-200',
   Refunded: 'bg-red-50 text-red-700 border-red-200',
+  Rejected: 'bg-red-50 text-red-700 border-red-200',
 };
 
 export default function LocalSalesFinance() {
@@ -41,13 +43,18 @@ export default function LocalSalesFinance() {
   const [statusFilter, setStatusFilter] = useState('All');
   const [searchTerm, setSearchTerm] = useState('');
   const [detailSale, setDetailSale] = useState(null);
-  const [payForm, setPayForm] = useState({ amount: '', method: 'cash', bankAccountId: '', reference: '', dueDate: '' });
+  const [payForm, setPayForm] = useState({ amount: '', method: 'cash', bankAccountId: '', reference: '', dueDate: '', collectionLocation: 'Mill' });
+  const nonCashAccounts = bankAccounts.filter(a => a.type !== 'cash');
   // Where each payment was received (account/cash) + type, for the open sale.
   const { data: receiptData, isLoading: receiptsLoading } = useReceivableReceipts(detailSale?.id, 'local_sale', !!detailSale);
 
   function openDetail(s) {
     setDetailSale(s);
-    setPayForm({ amount: String(parseFloat(s.dueAmount) || 0), method: 'cash', bankAccountId: '', reference: '', dueDate: '' });
+    setPayForm({
+      amount: String(parseFloat(s.dueAmount) || 0), method: 'cash',
+      bankAccountId: defaultBankAccountId(nonCashAccounts, isFavorite), reference: '', dueDate: '',
+      collectionLocation: s.collectionLocation || 'Mill',
+    });
   }
   async function recordPayment() {
     const amount = parseFloat(payForm.amount);
@@ -59,6 +66,8 @@ export default function LocalSalesFinance() {
           amount,
           payment_method: payForm.method,
           bank_account_id: payForm.method === 'cash' ? null : (payForm.bankAccountId || null),
+          // Cash lands in Mill Cash or Office Petty Cash by where it was collected.
+          collection_location: payForm.method === 'cash' ? (payForm.collectionLocation || 'Mill') : null,
           reference: payForm.reference || null,
           due_date: payForm.dueDate || null,
         },
@@ -72,7 +81,10 @@ export default function LocalSalesFinance() {
 
   const filtered = useMemo(() => {
     return sales.filter(s => {
-      if (statusFilter !== 'All' && String(s.paymentStatus || '').toLowerCase() !== statusFilter.toLowerCase()) return false;
+      // Rejected (Cancelled) sales never happened — hidden unless asked for.
+      if (statusFilter === 'Rejected') { if (s.status !== 'Cancelled') return false; }
+      else if (s.status === 'Cancelled') return false;
+      else if (statusFilter !== 'All' && paymentWord(s) !== statusFilter) return false;
       if (searchTerm) {
         const t = searchTerm.toLowerCase();
         if (!(
@@ -118,7 +130,7 @@ export default function LocalSalesFinance() {
       Total_PKR: Math.round(parseFloat(s.totalAmount) || 0),
       Paid_PKR: Math.round(parseFloat(s.paidAmount) || 0),
       Due_PKR: Math.round(parseFloat(s.dueAmount) || 0),
-      Status: s.paymentStatus || '',
+      Status: paymentWord(s),
       Profit_PKR: Math.round(parseFloat(s.grossProfit || s.grossProfitPkr) || 0),
     }));
     downloadCSV(rows, `local-sales-${new Date().toISOString().slice(0, 10)}.csv`);
@@ -161,7 +173,7 @@ export default function LocalSalesFinance() {
           subtitle={filteredTotals.revenue > 0 ? `${Math.round(filteredTotals.collected / filteredTotals.revenue * 100)}% of revenue` : '—'}
           status="good" loading={isLoading} />
         <FinanceKPI icon={Clock} title="Outstanding" value={fmtPKR(filteredTotals.outstanding)}
-          subtitle={filteredTotals.outstanding > 0 ? 'Pending / Partial / Credit' : 'Fully collected'}
+          subtitle={filteredTotals.outstanding > 0 ? 'Partial / Credit' : 'Fully collected'}
           status={filteredTotals.outstanding > 0 ? 'warning' : 'good'} loading={isLoading} />
         <FinanceKPI icon={TrendingUp} title="Gross Profit" value={fmtPKR(filteredTotals.profit)}
           subtitle={marginPct == null ? '—' : `${marginPct.toFixed(1)}% margin`}
@@ -179,7 +191,7 @@ export default function LocalSalesFinance() {
           />
         </div>
         <div className="inline-flex bg-gray-100 rounded-lg p-0.5">
-          {['All', 'Paid', 'Partial', 'Pending', 'Credit', 'Refunded'].map(s => (
+          {['All', 'Paid', 'Partial', 'Credit', 'Rejected'].map(s => (
             <button key={s} onClick={() => setStatusFilter(s)}
               className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${statusFilter === s ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}>
               {s}
@@ -225,7 +237,8 @@ export default function LocalSalesFinance() {
                   {sales.length === 0 ? 'No local sales recorded yet.' : 'No sales match the current filters.'}
                 </td></tr>
               ) : filtered.map(s => {
-                const tone = STATUS_TONE[s.paymentStatus] || STATUS_TONE.Pending;
+                const word = paymentWord(s);
+                const tone = STATUS_TONE[word] || STATUS_TONE.Pending;
                 return (
                   <tr key={s.id} className="hover:bg-gray-50">
                     <td data-label="Sale" className="px-4 py-2.5 font-medium text-gray-900">
@@ -247,7 +260,7 @@ export default function LocalSalesFinance() {
                     </td>
                     <td data-label="Status" className="px-4 py-2.5">
                       <span className={`inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full border ${tone}`}>
-                        {s.paymentStatus || 'Pending'}
+                        {word}
                       </span>
                     </td>
                     <td data-label="Actions" className="px-4 py-2.5 text-center">
@@ -292,6 +305,16 @@ export default function LocalSalesFinance() {
                     <option value="cheque">Cheque</option>
                   </select>
                 </div>
+                {payForm.method === 'cash' && (
+                  <div className="grid grid-cols-2 gap-2">
+                    {['Mill', 'Head Office'].map(loc => (
+                      <button key={loc} type="button" onClick={() => setPayForm({ ...payForm, collectionLocation: loc })}
+                        className={`px-3 py-2 text-sm font-medium rounded-lg border ${payForm.collectionLocation === loc ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600 hover:border-gray-300'}`}>
+                        Collected at {loc}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 {payForm.method !== 'cash' && (
                   <select value={payForm.bankAccountId} onChange={(e) => setPayForm({ ...payForm, bankAccountId: e.target.value })}
                     className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white">
@@ -329,7 +352,7 @@ export default function LocalSalesFinance() {
                 <Row label="Qty" value={`${Math.round(parseFloat(s.quantityKg) || 0).toLocaleString()} kg`} />
                 <Row label="Rate" value={s.ratePerKg ? `${fmtFull(s.ratePerKg)}/kg` : '—'} />
                 <Row label="Profit" value={fmtFull(s.grossProfit || s.grossProfitPkr)} />
-                <Row label="Status" value={s.paymentStatus || 'Pending'} />
+                <Row label="Status" value={paymentWord(s)} />
                 <Row label="Created by" value={<span className="inline-flex items-center gap-1.5"><User size={13} className="text-gray-400" />{s.createdByName || '—'}</span>} />
                 <Row label="Created at" value={s.createdAt ? new Date(s.createdAt).toLocaleString('en-GB') : '—'} />
               </div>

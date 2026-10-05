@@ -6,6 +6,10 @@ export const localSalesApi = {
   update: (id, data) => api.put(`/api/local-sales/${id}`, data),
   summary: () => api.get('/api/local-sales/summary'),
   acceptPayment: (id, data) => api.post(`/api/local-sales/${id}/payments`, data),
+  // One receipt for a whole multi-item sale, split across its lines server-side.
+  acceptGroupPayment: (groupNo, data) => api.post(`/api/local-sales/group/${encodeURIComponent(groupNo)}/payments`, data),
+  // Rates Center selling rate (per kg) for a lot — { rate: { per_kg, effective_date } | null }.
+  rateSuggestion: (lotId) => api.get('/api/local-sales/rate-suggestion', { lot_id: lotId }),
   pending: () => api.get('/api/local-sales/pending'),
   confirm: (id, data) => api.post(`/api/local-sales/${id}/confirm`, data || {}),
   reject: (id, data) => api.post(`/api/local-sales/${id}/reject`, data || {}),

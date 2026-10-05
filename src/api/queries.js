@@ -2937,3 +2937,17 @@ export function useAcceptLocalSalePayment() {
     },
   });
 }
+
+// One receipt for a whole multi-item sale (sale_group_no) — the server splits
+// it across the lines, oldest first, all or nothing.
+export function useAcceptLocalSaleGroupPayment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ groupNo, data }) => localSalesApi.acceptGroupPayment(groupNo, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['local-sales'] });
+      qc.invalidateQueries({ queryKey: queryKeys.receivables.all });
+      qc.invalidateQueries({ queryKey: queryKeys.financeOverview });
+    },
+  });
+}

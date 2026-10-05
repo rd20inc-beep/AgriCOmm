@@ -9,6 +9,8 @@ import { useMutation } from '@tanstack/react-query';
 import { useLocalSale, useLocalSalePayments } from '../../../api/queries';
 import { localSalesApi } from '../api/services';
 import { useApp } from '../../../context/AppContext';
+import { useAuth } from '../../../context/AuthContext';
+import { paymentWord } from '../utils/saleStatus';
 import { LoadingSpinner, ErrorState } from '../../../components/LoadingState';
 
 function fmtPkr(n) {
@@ -25,6 +27,7 @@ const STATUS_TONE = {
   Pending:  'bg-gray-50 text-gray-600 border-gray-200',
   Credit:   'bg-blue-50 text-blue-700 border-blue-200',
   Refunded: 'bg-red-50 text-red-700 border-red-200',
+  Rejected: 'bg-red-50 text-red-700 border-red-200',
 };
 
 export default function LocalSaleDetail() {
@@ -33,6 +36,10 @@ export default function LocalSaleDetail() {
   const { data: sale, isLoading, error, refetch } = useLocalSale(id);
   const { data: payments = [] } = useLocalSalePayments(id);
   const { addToast } = useApp();
+  // PUT /api/local-sales/:id is gated on inventory.create — same check here so
+  // a read-only viewer (e.g. Finance) is not offered an edit that would 403.
+  const { hasPermission } = useAuth();
+  const canEdit = hasPermission('inventory', 'create');
   // A confirmed sale has already moved stock and posted its journals, so only
   // the presentation fields can change. While it is still Pending nothing
   // downstream exists, so quantity and rate are editable too.
@@ -52,7 +59,8 @@ export default function LocalSaleDetail() {
   const heroGradient = profitPkr >= 0
     ? 'from-purple-700 via-fuchsia-600 to-pink-500'
     : 'from-red-700 via-red-600 to-red-500';
-  const statusTone = STATUS_TONE[sale.paymentStatus] || STATUS_TONE.Pending;
+  const payWord = paymentWord(sale);
+  const statusTone = STATUS_TONE[payWord] || STATUS_TONE.Pending;
 
   return (
     <div className="space-y-5 pb-4">
@@ -87,15 +95,14 @@ export default function LocalSaleDetail() {
           </div>
           <div className="flex flex-col items-start sm:items-end gap-1.5 text-[11px]">
             <span className="inline-flex items-center gap-1.5 font-semibold uppercase tracking-wider px-3 py-1.5 rounded-full bg-white/15 ring-1 ring-white/30">
-              {sale.paymentStatus === 'Paid' && <CheckCircle size={12} />}
-              {sale.paymentStatus === 'Pending' && <Clock size={12} />}
-              {(sale.paymentStatus === 'Partial' || sale.paymentStatus === 'Credit') && <AlertCircle size={12} />}
-              {sale.paymentStatus || 'Pending'}
+              {payWord === 'Paid' && <CheckCircle size={12} />}
+              {payWord !== 'Paid' && <AlertCircle size={12} />}
+              {payWord}
             </span>
             <div className="opacity-80 text-right">
               {profitPkr !== 0 && <>Profit {fmtPkr(profitPkr)} ({marginPct.toFixed(1)}%)</>}
             </div>
-            <button onClick={() => setEdit({
+            {canEdit && sale.status !== 'Cancelled' && <button onClick={() => setEdit({
               buyer_name: sale.buyerName || '', buyer_phone: sale.buyerPhone || '',
               buyer_address: sale.buyerAddress || '', vehicle_no: sale.vehicleNo || '',
               driver_name: sale.driverName || '', gate_pass_no: sale.gatePassNo || '',
@@ -104,7 +111,7 @@ export default function LocalSaleDetail() {
             })}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/15 ring-1 ring-white/30 hover:bg-white/25 font-medium">
               Edit invoice
-            </button>
+            </button>}
           </div>
         </div>
       </div>
@@ -119,6 +126,9 @@ export default function LocalSaleDetail() {
               {sale.status === 'Pending' ? 'Pending — quantity and rate can still change' : 'Confirmed — details only'}
             </span>
           </div>
+          {sale.saleGroupNo && (
+            <p className="text-[11px] text-gray-500">Buyer, vehicle, gate pass and notes apply to the whole sale {sale.saleGroupNo}; quantity and rate to this line only.</p>
+          )}
           <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
             {[['buyer_name', 'Buyer'], ['buyer_phone', 'Phone'], ['buyer_address', 'Address'],
               ['vehicle_no', 'Vehicle'], ['driver_name', 'Driver'], ['gate_pass_no', 'Gate pass']].map(([k, label]) => (
@@ -218,11 +228,11 @@ export default function LocalSaleDetail() {
       <div className="bg-white rounded-xl border border-gray-200 p-5">
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">Payments</h3>
-          <span className={`text-xs px-2 py-0.5 rounded-full border ${statusTone}`}>{sale.paymentStatus || 'Pending'}</span>
+          <span className={`text-xs px-2 py-0.5 rounded-full border ${statusTone}`}>{payWord}</span>
         </div>
         {payments.length === 0 ? (
           <p className="text-sm text-gray-400 text-center py-6">
-            {sale.paymentStatus === 'Paid' && parseFloat(sale.paidAmount) > 0
+            {payWord === 'Paid' && parseFloat(sale.paidAmount) > 0
               ? 'Paid in full at sale time — no separate payment receipts recorded.'
               : 'No payments recorded against this sale yet.'}
           </p>
