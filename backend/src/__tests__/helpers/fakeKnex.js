@@ -32,17 +32,43 @@ function fakeKnex(seed = {}) {
         } else if (c === undefined) {
           filters.push((r) => String(r[colOf(a)]) === String(op));
         } else {
-          const cmp = { '>': (x, y) => x > y, '<': (x, y) => x < y, '=': (x, y) => x === y }[op];
-          filters.push((r) => cmp(Number(r[a]), Number(c)));
+          if (op === 'like') {
+            const pre = String(c).replace(/%$/, ''); // prefix LIKE only
+            filters.push((r) => String(r[colOf(a)] ?? '').startsWith(pre));
+          } else {
+            const cmp = { '>': (x, y) => x > y, '<': (x, y) => x < y, '>=': (x, y) => x >= y, '<=': (x, y) => x <= y, '=': (x, y) => x === y }[op];
+            filters.push((r) => cmp(Number(r[colOf(a)]), Number(c)));
+          }
         }
         return b;
       },
-      whereIn(col, vals) { filters.push((r) => vals.map(String).includes(String(r[col]))); return b; },
+      andWhere(...args) { return b.where(...args); },
+      whereNot(a, v) {
+        if (a && typeof a === 'object') {
+          for (const [k, val] of Object.entries(a)) filters.push((r) => String(r[colOf(k)]) !== String(val));
+        } else filters.push((r) => String(r[colOf(a)]) !== String(v));
+        return b;
+      },
+      whereNull(col) { filters.push((r) => r[colOf(col)] == null); return b; },
+      whereNotNull(col) { filters.push((r) => r[colOf(col)] != null); return b; },
+      whereNotIn(col, vals) { filters.push((r) => !vals.map(String).includes(String(r[colOf(col)]))); return b; },
+      leftJoin() { return b; }, // joined columns are not resolved
+      limit() { return b; },
+      increment(col, by) {
+        rows().forEach((r) => { r[col] = Number(r[col] || 0) + Number(by); });
+        return Promise.resolve(1);
+      },
+      decrement(col, by) {
+        rows().forEach((r) => { r[col] = Number(r[col] || 0) - Number(by); });
+        return Promise.resolve(1);
+      },
+      whereIn(col, vals) { filters.push((r) => vals.map(String).includes(String(r[colOf(col)]))); return b; },
       join() { return b; }, // joined columns are not resolved
       whereRaw() { return b; }, // raw SQL is not evaluated — matches every row
       forUpdate() { locked = true; return b; },
       select() { return b; },
       orderBy() { return b; },
+      orderByRaw() { return b; },
       async first() {
         if (locked) locks.push({ table });
         const r = rows()[0];
@@ -73,6 +99,7 @@ function fakeKnex(seed = {}) {
   knex.fn = { now: () => 'now()' };
   knex.raw = (sql) => sql;
   knex.transaction = async (cb) => cb(knex);
+  knex.schema = { hasTable: async (t) => !!tables[t] || true };
   return knex;
 }
 

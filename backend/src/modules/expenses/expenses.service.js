@@ -5,6 +5,7 @@ const accountingService = require('../accounting/accounting.service');
 const { resolveCashAccountId } = require('../../shared/cashAccounts');
 const { normalizePaymentMethod } = require('../../shared/constants/paymentMethods');
 const { ledgerFailure, missingAccounts } = require('../../shared/ledgerFailure');
+const { pendingChequeTotal, round2 } = require('../finance/paymentSettlement');
 
 // Settlement journal posted when an expense is PAID: DR Supplier Payable (2010)
 // CR Cash & Bank (1000). The obligation was booked at create (CR 2010 via the
@@ -153,6 +154,8 @@ const expensesService = {
         is_recurring: !!is_recurring,
         recurrence: is_recurring ? (recurrence || 'monthly') : null,
         payment_status: pay_now ? 'Paid' : 'Pending',
+        // Same figure the payable records, so the two never disagree.
+        paid_amount: pay_now ? amountPkr : 0,
         bank_account_id: pay_now ? resolvedAccountId : null,
         paid_date: pay_now ? expense_date : null,
         payment_method: pay_now ? normalizePaymentMethod(payment_method) : null,
@@ -457,38 +460,43 @@ const expensesService = {
   },
 
   async markPaid(id, { amount, bank_account_id, payment_method, payment_reference, paid_date, due_date, notes }, userId) {
-    const expense = await db('business_expenses').where('id', id).first();
-    if (!expense) throw new NotFoundError('Expense not found.');
-    if (expense.payment_status === 'Paid') throw new ValidationError('Already paid.');
-
     // Joi parses paid_date into a Date; normalize to a YYYY-MM-DD string so the
     // GL journal's date math (createJournal does string ops) doesn't choke.
     const rawPayDate = paid_date || new Date().toISOString().split('T')[0];
     const payDate = rawPayDate instanceof Date ? rawPayDate.toISOString().slice(0, 10) : rawPayDate;
-
-    // Partial payments: the payable (source_table=business_expenses) tracks
-    // paid_amount/outstanding. `amount` (PKR) is this installment; if omitted it
-    // settles the full remaining. Cap at the outstanding so it never overpays.
-    const totalPkr = parseFloat(expense.amount_pkr) || 0;
-    const payableRow = await db('payables').where({ source_table: 'business_expenses', source_id: id }).first();
-    const alreadyPaid = payableRow ? (parseFloat(payableRow.paid_amount) || 0) : 0;
-    const remaining = payableRow ? (parseFloat(payableRow.outstanding) || 0) : totalPkr;
-    const payAmt = (amount !== undefined && amount !== null && amount !== '')
-      ? parseFloat(amount)
-      : remaining;
-    if (!(payAmt > 0)) throw new ValidationError('Payment amount must be greater than zero.');
-    if (payAmt > remaining + 0.01) {
-      throw new ValidationError(`Payment (Rs ${Math.round(payAmt).toLocaleString()}) exceeds the outstanding balance (Rs ${Math.round(remaining).toLocaleString()}).`);
-    }
-    const newPaid = alreadyPaid + payAmt;
-    const fullyPaid = newPaid >= totalPkr - 0.01;
-
-    // A post-dated cheque records but does NOT settle until it clears — insert
-    // the uncleared payment (for this installment) and stop.
     const isPostDated = payment_method === 'cheque' && due_date && new Date(due_date) > new Date(new Date().toDateString());
-    if (isPostDated) {
-      return db.transaction(async (trx) => {
-        const payable = await trx('payables').where({ source_table: 'business_expenses', source_id: id }).first();
+
+    return db.transaction(async (trx) => {
+      // The expense and its payable are read UNDER A LOCK inside the same
+      // transaction that writes them. They used to be read before it opened,
+      // so two installments submitted together both saw the same remaining
+      // balance, both passed the cap, and together paid more than was owed.
+      const expense = await trx('business_expenses').where('id', id).forUpdate().first();
+      if (!expense) throw new NotFoundError('Expense not found.');
+      if (expense.payment_status === 'Paid') throw new ValidationError('Already paid.');
+      const payable = await trx('payables').where({ source_table: 'business_expenses', source_id: id }).forUpdate().first();
+
+      // Partial payments: the payable (source_table=business_expenses) tracks
+      // paid_amount/outstanding. `amount` (PKR) is this installment; if omitted it
+      // settles the full remaining. Capped at the outstanding — less any cheque
+      // already written against it and not yet cleared — so it never overpays.
+      const totalPkr = parseFloat(expense.amount_pkr) || 0;
+      const alreadyPaid = payable ? (parseFloat(payable.paid_amount) || 0) : (parseFloat(expense.paid_amount) || 0);
+      const pending = await pendingChequeTotal(trx, payable ? { payableId: payable.id } : { sourceTable: 'business_expenses', sourceId: expense.id });
+      const remaining = Math.max(0, round2(totalPkr - alreadyPaid - pending));
+      const payAmt = (amount !== undefined && amount !== null && amount !== '')
+        ? parseFloat(amount)
+        : remaining;
+      if (!(payAmt > 0)) throw new ValidationError('Payment amount must be greater than zero.');
+      if (payAmt > remaining + 0.01) {
+        throw new ValidationError(`Payment (Rs ${payAmt.toFixed(2)}) exceeds the outstanding balance (Rs ${remaining.toFixed(2)}).`);
+      }
+      const newPaid = round2(alreadyPaid + payAmt);
+      const fullyPaid = newPaid >= totalPkr - 0.01;
+
+      // A post-dated cheque records but does NOT settle until it clears — insert
+      // the uncleared payment (for this installment) and stop.
+      if (isPostDated) {
         await trx('payments').insert({
           payment_no: await nextDocNo(trx, { table: 'payments', column: 'payment_no', prefix: 'EXP-PAY-', pad: 0 }),
           type: 'payment', amount: payAmt, currency: 'PKR', fx_rate: 1, base_amount_pkr: payAmt,
@@ -500,14 +508,17 @@ const expensesService = {
           notes: notes || `Pending cheque for ${expense.expense_no}`, created_by: userId || null,
         });
         return expense;
-      });
-    }
-    return db.transaction(async (trx) => {
+      }
+
       // Cash with no explicit account → the paying entity's cash float (Mill Cash
       // for mill expenses, Office Petty Cash for Head Office / general).
       const acctId = bank_account_id || (payment_method === 'cash' ? await resolveCashAccountId(trx, { entity: expense.expense_type || 'general' }) : null);
       const payMethod = normalizePaymentMethod(payment_method);
+      // paid_amount moves with the payable: the Expenses tab and the Purchases
+      // tab both read it, and it used to stay at 0 here while the payable said
+      // the expense was part-paid.
       const [updated] = await trx('business_expenses').where('id', id).update({
+        paid_amount: newPaid,
         payment_status: fullyPaid ? 'Paid' : 'Partial',
         bank_account_id: acctId,
         payment_method: payMethod,
@@ -517,11 +528,10 @@ const expensesService = {
       }).returning('*');
 
       // Update payable — running paid/outstanding (Partial until fully settled).
-      const payable = await trx('payables').where({ source_table: 'business_expenses', source_id: id }).first();
       if (payable) {
         await trx('payables').where({ id: payable.id }).update({
           paid_amount: newPaid,
-          outstanding: Math.max(0, totalPkr - newPaid),
+          outstanding: Math.max(0, round2(totalPkr - newPaid)),
           status: fullyPaid ? 'Paid' : 'Partial',
         });
       }

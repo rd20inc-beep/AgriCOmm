@@ -19,6 +19,10 @@ const { isPartyMasked } = require('../../shared/partyMask');
 const { resolvePaymentAccountId } = require('../../shared/cashAccounts');
 const { normalizePaymentMethod } = require('../../shared/constants/paymentMethods');
 const { ledgerFailure, missingAccounts } = require('../../shared/ledgerFailure');
+const {
+  resolveSource, mirrorSourcePaid, applyPayableDelta, applyReceivableDelta,
+  pendingChequeTotal, nextBtNo, postDeltaOf, round2,
+} = require('./paymentSettlement');
 
 // Resolve a payment row to its PKR equivalent using the strongest
 // signal we have: stored base_amount_pkr first, then amount × fx_rate
@@ -35,18 +39,11 @@ function paymentToPkr(p) {
   return amount * 280;
 }
 
-async function generateTransferNo(trx) {
-  const last = await (trx || db)('internal_transfers')
-    .select('transfer_no')
-    .orderBy('created_at', 'desc')
-    .first();
-
-  if (!last || !last.transfer_no) {
-    return 'IT-001';
-  }
-
-  const num = parseInt(last.transfer_no.replace('IT-', ''), 10) || 0;
-  return `IT-${String(num + 1).padStart(3, '0')}`;
+// IT-NNN. MAX(suffix)+1, not "the newest row + 1": the newest row is not the
+// highest number once rows are deleted or two transfers race, and the next
+// insert then collides on the unique transfer_no.
+function generateTransferNo(trx) {
+  return nextDocNo(trx || db, { table: 'internal_transfers', column: 'transfer_no', prefix: 'IT-', pad: 3 });
 }
 
 async function generatePaymentNo(trx) {
@@ -284,6 +281,8 @@ const financeController = {
         .leftJoin('customers as c', 'c.id', 'r.customer_id')
         .leftJoin('suppliers as s', 's.id', 'pa.supplier_id')
         .where('p.payment_method', 'cheque').whereNotNull('p.due_date').where('p.cleared', false)
+        // A reversed (or rejected) cheque is not coming — don't count it down.
+        .whereNotIn('p.status', ['Reversed', 'Rejected'])
         .select('p.id', 'p.type', 'p.amount', 'p.currency', 'p.fx_rate', 'p.base_amount_pkr', 'p.due_date', 'p.bank_reference',
           'r.customer_id as recv_customer_id', 'pa.supplier_id as pay_supplier_id', 'ls.customer_id as ls_customer_id',
           db.raw("COALESCE(c.name, s.name, ls.buyer_name, 'Counterparty') as party"));
@@ -341,27 +340,34 @@ const financeController = {
 
   // Clear a post-dated cheque — applies the (until-now deferred) payment to its
   // linked sale/receivable/payable and (optionally) moves the bank account it
-  // cleared into/out of. Idempotent: a cleared cheque is a no-op.
+  // cleared into/out of. Idempotent: a cleared cheque is a no-op; a reversed one
+  // is refused. When a cheque reaches the GL is deliberately left as it was.
   async clearCheque(req, res) {
     try {
       const { id } = req.params;
       const { bank_account_id } = req.body || {};
+      const fail = (msg, status) => { const e = new Error(msg); e.status = status; return e; };
       const result = await db.transaction(async (trx) => {
-        const p = await trx('payments').where({ id }).first();
-        if (!p) { const e = new Error('Payment not found.'); e.status = 404; throw e; }
+        // Locked so a clear cannot race a reversal of the same cheque.
+        const p = await trx('payments').where({ id }).forUpdate().first();
+        if (!p) throw fail('Payment not found.', 404);
+        if (p.status === 'Reversed' || p.status === 'Rejected') {
+          throw fail(`Cheque ${p.payment_no} was ${String(p.status).toLowerCase()} — it cannot be cleared.`, 400);
+        }
         if (p.cleared) return { alreadyCleared: true };
         const amount = parseFloat(p.amount) || 0;
+        const amountPkr = paymentToPkr(p);
         const acctId = bank_account_id || p.bank_account_id || null;
         await trx('payments').where({ id }).update({ cleared: true, bank_account_id: acctId, updated_at: trx.fn.now() });
 
         if (p.local_sale_id) {
-          const s = await trx('local_sales').where({ id: p.local_sale_id }).first();
+          const s = await trx('local_sales').where({ id: p.local_sale_id }).forUpdate().first();
           if (s) {
             const np = (parseFloat(s.paid_amount) || 0) + amount;
             const nd = Math.max(0, (parseFloat(s.total_amount) || 0) - np);
             await trx('local_sales').where({ id: s.id }).update({ paid_amount: np, due_amount: nd, payment_status: nd <= 0 ? 'Paid' : 'Partial', updated_at: trx.fn.now() });
-            const r = await trx('receivables').where('local_sale_id', s.id).first();
-            if (r) { const rp = (parseFloat(r.received_amount) || 0) + amount; const ro = Math.max(0, (parseFloat(r.expected_amount) || 0) - rp); await trx('receivables').where({ id: r.id }).update({ received_amount: rp, outstanding: ro, status: ro <= 0 ? 'Paid' : 'Partial', updated_at: trx.fn.now() }); }
+            const r = await trx('receivables').where('local_sale_id', s.id).forUpdate().first();
+            if (r) await applyReceivableDelta(trx, r, amount);
             // The cheque settles the sale today, so it reaches the GL today:
             // Dr 1000 / Cr 1120. Idempotent — a receipt already journaled when it
             // was recorded (the Finance path) is left alone.
@@ -370,53 +376,33 @@ const financeController = {
             }
           }
         } else if (p.linked_receivable_id) {
-          const r = await trx('receivables').where({ id: p.linked_receivable_id }).first();
-          if (r) { const rp = (parseFloat(r.received_amount) || 0) + amount; const ro = Math.max(0, (parseFloat(r.expected_amount) || 0) - rp); await trx('receivables').where({ id: r.id }).update({ received_amount: rp, outstanding: ro, status: ro <= 0 ? 'Paid' : 'Partial', updated_at: trx.fn.now() }); }
+          const r = await trx('receivables').where({ id: p.linked_receivable_id }).forUpdate().first();
+          if (r) await applyReceivableDelta(trx, r, amount);
         } else if (p.linked_payable_id || (p.source_table && p.source_id)) {
-          // Settle the payable balance (if linked).
-          const pa = p.linked_payable_id ? await trx('payables').where({ id: p.linked_payable_id }).first() : null;
-          if (pa) {
-            const pp = (parseFloat(pa.paid_amount) || 0) + amount;
-            const orig = parseFloat(pa.original_amount) || 0;
-            await trx('payables').where({ id: pa.id }).update({ paid_amount: pp, outstanding: Math.max(0, orig - pp), status: pp >= orig - 0.01 ? 'Paid' : 'Partial', updated_at: trx.fn.now() });
-          }
-          // Settle the source row (Purchases / Mill Store / Expenses tabs) —
-          // prefer the payment's own source ref, else resolve from the payable
-          // (source_table+source_id, or linked_ref against each natural key).
-          const SRC = ['inventory_lots', 'mill_purchases', 'export_order_costs', 'business_expenses'];
-          let srcTable = null; let src = null;
-          if (SRC.includes(p.source_table) && p.source_id) {
-            srcTable = p.source_table; src = await trx(srcTable).where({ id: p.source_id }).first();
-          } else if (pa && SRC.includes(pa.source_table) && pa.source_id) {
-            srcTable = pa.source_table; src = await trx(srcTable).where({ id: pa.source_id }).first();
-          } else if (pa && pa.linked_ref) {
-            for (const [t, col] of [['inventory_lots', 'lot_no'], ['mill_purchases', 'purchase_no'], ['business_expenses', 'expense_no']]) {
-              const r = await trx(t).where(col, pa.linked_ref).first();
-              if (r) { srcTable = t; src = r; break; }
-            }
-          }
-          if (srcTable && src) {
-            const srcPaid = (parseFloat(src.paid_amount) || 0) + amount;
-            const srcTotal = srcTable === 'inventory_lots' ? (parseFloat(src.landed_cost_total) || 0)
-              : srcTable === 'mill_purchases' ? (parseFloat(src.total_amount) || 0)
-              : srcTable === 'business_expenses' ? (parseFloat(src.amount_pkr) || 0)
-              : (parseFloat(src.base_amount_pkr) || (parseFloat(src.amount) || 0) * (parseFloat(src.fx_rate) || 1));
-            const srcFully = srcTotal - srcPaid <= 0.01;
-            const upd = { payment_status: srcFully ? 'Paid' : 'Partial', paid_amount: srcPaid, updated_at: trx.fn.now() };
-            if (srcTable === 'inventory_lots') upd.due_amount = Math.max(0, srcTotal - srcPaid);
-            if (srcTable === 'business_expenses') upd.paid_date = srcFully ? new Date() : null;
-            await trx(srcTable).where({ id: src.id }).update(upd);
-          }
+          // Settle the payable (and its transport_costs record), then the
+          // source row (Purchases / Mill Store / Expenses / export cost /
+          // printed bags) — the same helpers recordPayment uses.
+          const pa = p.linked_payable_id ? await trx('payables').where({ id: p.linked_payable_id }).forUpdate().first() : null;
+          if (pa) await applyPayableDelta(trx, pa, amount);
+          const source = await resolveSource(trx, { payment: p, payable: pa });
+          await mirrorSourcePaid(trx, source, amountPkr);
         }
 
         if (acctId) {
+          // Exactly what recordPayment moves for a cleared payment: the amount
+          // in the account's own currency (native when it matches the cheque,
+          // else the PKR equivalent), less any WHT and discount — those never
+          // leave the bank. This used to move the gross and stamp it PKR even
+          // for a USD cheque into a USD account.
+          const acct = await trx('bank_accounts').where({ id: acctId }).first();
+          const wht = p.type === 'payment' ? (parseFloat(p.wht_amount) || 0) : 0;
+          const disc = p.type === 'payment' ? (parseFloat(p.discount_amount) || 0) : 0;
+          const bankMove = round2((acct && acct.currency === (p.currency || 'PKR') ? amount : amountPkr) - wht - disc);
           const dir = p.type === 'receipt' ? 'increment' : 'decrement';
-          await trx('bank_accounts').where({ id: acctId })[dir]('current_balance', amount);
-          const lastBt = await trx('bank_transactions').where('transaction_no', 'like', 'BT-%').orderBy('id', 'desc').first('transaction_no');
-          const seq = lastBt ? (parseInt(String(lastBt.transaction_no).replace(/^BT-/, ''), 10) || 0) + 1 : 1;
+          await trx('bank_accounts').where({ id: acctId })[dir]('current_balance', bankMove);
           await trx('bank_transactions').insert({
-            transaction_no: `BT-${String(seq).padStart(4, '0')}`, bank_account_id: acctId,
-            type: p.type === 'receipt' ? 'credit' : 'debit', amount, currency: 'PKR', status: 'posted',
+            transaction_no: await nextBtNo(trx), bank_account_id: acctId,
+            type: p.type === 'receipt' ? 'credit' : 'debit', amount: bankMove, currency: acct?.currency || 'PKR', status: 'posted',
             transaction_date: new Date(), reference: p.bank_reference || null,
             notes: `Cheque cleared (${p.payment_no})`, source: 'cheque_clear', linked_payment_id: p.id, created_by: req.user?.id || null,
           });
@@ -425,7 +411,7 @@ const financeController = {
       });
       return res.json({ success: true, data: result });
     } catch (err) {
-      const s = err.status || 500;
+      const s = err.status || err.statusCode || 500;
       if (s === 500) console.error('clearCheque error:', err);
       return res.status(s).json({ success: false, message: err.message });
     }
@@ -1145,20 +1131,29 @@ const financeController = {
         // it must also draw down the parent local_sales row (else the sale stays
         // "unpaid" and keeps surfacing in Money-In). Captured here so it's stamped
         // on the payment (for clearCheque + receipt history) and mirrored below.
-        let localSaleId = null;
-        if (type === 'receipt' && linked_receivable_id) {
-          const rec = await trx('receivables').where({ id: linked_receivable_id }).first();
-          if (rec) {
-            localSaleId = rec.local_sale_id || null;
-            const outstanding = Math.max(0, (parseFloat(rec.expected_amount) || 0) - (parseFloat(rec.received_amount) || 0));
-            if (outstanding <= 0.01) {
-              const e = new Error('This receivable is already fully settled — no payment is due.');
-              e.statusCode = 400; throw e;
-            }
-            if (parseFloat(amount) - outstanding > 0.01) {
-              const e = new Error(`Amount exceeds the outstanding balance of ${outstanding.toFixed(2)}.`);
-              e.statusCode = 400; throw e;
-            }
+        //
+        // The row is read UNDER A LOCK and the same row is what gets written
+        // below: two payments racing on one payable used to both pass the check
+        // and each write its own absolute paid_amount, so one was lost. A
+        // payable now gets the same over-payment guard a receivable always had,
+        // and both count cheques already written against the row but not yet
+        // cleared — they have not touched paid_amount, yet the money is spoken for.
+        const isReceipt = type === 'receipt';
+        const linkedRow = await trx(isReceipt ? 'receivables' : 'payables').where({ id: entity_id }).forUpdate().first();
+        const localSaleId = isReceipt ? (linkedRow?.local_sale_id || null) : null;
+        if (linkedRow) {
+          const pendingCheques = await pendingChequeTotal(trx, isReceipt ? { receivableId: linkedRow.id } : { payableId: linkedRow.id });
+          const total = parseFloat(isReceipt ? linkedRow.expected_amount : linkedRow.original_amount) || 0;
+          const settled = parseFloat(isReceipt ? linkedRow.received_amount : linkedRow.paid_amount) || 0;
+          const outstanding = Math.max(0, total - settled - pendingCheques);
+          const chequeNote = pendingCheques > 0.01 ? ` (after ${pendingCheques.toFixed(2)} in uncleared cheques)` : '';
+          if (outstanding <= 0.01) {
+            const e = new Error(`This ${isReceipt ? 'receivable' : 'payable'} is already fully settled — no payment is due${chequeNote}.`);
+            e.statusCode = 400; throw e;
+          }
+          if (parseFloat(amount) - outstanding > 0.01) {
+            const e = new Error(`Amount exceeds the outstanding balance of ${outstanding.toFixed(2)}${chequeNote}.`);
+            e.statusCode = 400; throw e;
           }
         }
 
@@ -1166,7 +1161,6 @@ const financeController = {
         // the owning entity's cash float (Mill Cash / Office Petty Cash); any
         // other method must name one, except a post-dated cheque, which moves
         // money only when it clears.
-        const linkedRow = await trx(type === 'receipt' ? 'receivables' : 'payables').where({ id: entity_id }).first();
         const accountId = await resolvePaymentAccountId(trx, {
           bankAccountId: bank_account_id,
           method: payment_method,
@@ -1193,7 +1187,8 @@ const financeController = {
               orderRate = parseFloat(eo?.advance_fx_rate) || parseFloat(eo?.booked_fx_rate) || null;
             }
           }
-          stampedFxRate = orderRate || 280;
+          // No order rate → today's rate for that currency, not a flat 280.
+          stampedFxRate = orderRate || (await fxRateService.getLatestRate(cur)).rate;
         }
         const stampedPkr = cur === 'PKR' ? amtNum : amtNum * stampedFxRate;
 
@@ -1225,28 +1220,18 @@ const financeController = {
           })
           .returning('*');
 
-        // Update receivable or payable (skipped for an uncleared post-dated cheque)
+        // Update receivable or payable (skipped for an uncleared post-dated
+        // cheque, which settles when it clears). Both are signed deltas on the
+        // row locked above.
         if (!isPostDated && type === 'receipt' && linked_receivable_id) {
-          const receivable = await trx('receivables').where({ id: linked_receivable_id }).first();
-          if (receivable) {
-            const newPaid = parseFloat(receivable.received_amount || 0) + parseFloat(amount);
-            const newOutstanding = parseFloat(receivable.expected_amount) - newPaid;
-            const fullyPaid = newOutstanding <= 0;
-            await trx('receivables').where({ id: linked_receivable_id }).update({
-              received_amount: newPaid,
-              outstanding: Math.max(0, newOutstanding),
-              // CHECK constraints on receivables.status / payables.status
-              // require capitalised values { Pending, Partial, Paid,
-              // Overdue, Written Off }. Lowercase silently 23514s.
-              status: fullyPaid ? 'Paid' : 'Partial',
-              updated_at: trx.fn.now(),
-            });
+          if (linkedRow) {
+            await applyReceivableDelta(trx, linkedRow, amtNum);
             // Mirror the receipt onto the parent local sale so it stops showing
             // as due in Money-In / Local Sales (matches clearCheque's behaviour).
-            if (receivable.local_sale_id) {
-              const sale = await trx('local_sales').where({ id: receivable.local_sale_id }).first();
+            if (linkedRow.local_sale_id) {
+              const sale = await trx('local_sales').where({ id: linkedRow.local_sale_id }).forUpdate().first();
               if (sale) {
-                const salePaid = (parseFloat(sale.paid_amount) || 0) + parseFloat(amount);
+                const salePaid = (parseFloat(sale.paid_amount) || 0) + amtNum;
                 const saleDue = Math.max(0, (parseFloat(sale.total_amount) || 0) - salePaid);
                 await trx('local_sales').where({ id: sale.id }).update({
                   paid_amount: salePaid,
@@ -1273,14 +1258,8 @@ const financeController = {
             // tab can attribute the inflow. Pattern mirrors payPurchase.
             const tableExists = await trx.schema.hasTable('bank_transactions');
             if (tableExists) {
-              const lastBt = await trx('bank_transactions')
-                .where('transaction_no', 'like', 'BT-%')
-                .orderBy('id', 'desc').first('transaction_no');
-              const seq = lastBt
-                ? (parseInt(String(lastBt.transaction_no).replace(/^BT-/, ''), 10) || 0) + 1
-                : 1;
               await trx('bank_transactions').insert({
-                transaction_no: `BT-${String(seq).padStart(4, '0')}`,
+                transaction_no: await nextBtNo(trx),
                 bank_account_id: accountId,
                 type: 'credit',
                 amount: bankMove,
@@ -1296,59 +1275,19 @@ const financeController = {
             }
           }
         } else if (!isPostDated && type === 'payment' && linked_payable_id) {
-          const payable = await trx('payables').where({ id: linked_payable_id }).first();
-          if (payable) {
-            const newPaid = parseFloat(payable.paid_amount || 0) + parseFloat(amount);
-            const newOutstanding = parseFloat(payable.original_amount) - newPaid;
-            const fullyPaid = newOutstanding <= 0;
-            await trx('payables').where({ id: linked_payable_id }).update({
-              paid_amount: newPaid,
-              outstanding: Math.max(0, newOutstanding),
-              // CHECK constraints on receivables.status / payables.status
-              // require capitalised values { Pending, Partial, Paid,
-              // Overdue, Written Off }. Lowercase silently 23514s.
-              status: fullyPaid ? 'Paid' : 'Partial',
-              updated_at: trx.fn.now(),
-            });
-
-            // Mirror BOTH the status AND paid_amount back to the source row so
-            // the Expenses / Mill Purchases tabs (which compute outstanding off
-            // the source's own paid_amount) reflect the same payment state —
-            // previously only the status moved, so a partial payment still showed
-            // the full amount outstanding on those tabs.
-            if (payable.source_table === 'business_expenses' && payable.source_id) {
-              const src = await trx('business_expenses').where({ id: payable.source_id }).first();
-              const srcPaid = (parseFloat(src?.paid_amount) || 0) + stampedPkr;
-              await trx('business_expenses')
-                .where({ id: payable.source_id })
-                .update({
-                  paid_amount: srcPaid,
-                  payment_status: fullyPaid ? 'Paid' : 'Partial',
-                  paid_date: fullyPaid ? new Date() : null,
-                  bank_account_id: accountId || null,
-                  payment_method: payment_method || null,
-                  payment_reference: bank_reference || null,
-                  updated_at: trx.fn.now(),
-                });
-            } else if (payable.source_table === 'mill_purchases' && payable.source_id) {
-              const src = await trx('mill_purchases').where({ id: payable.source_id }).first();
-              const srcPaid = (parseFloat(src?.paid_amount) || 0) + stampedPkr;
-              await trx('mill_purchases')
-                .where({ id: payable.source_id })
-                .update({
-                  paid_amount: srcPaid,
-                  payment_status: fullyPaid ? 'Paid' : 'Partial',
-                  updated_at: trx.fn.now(),
-                });
-            }
-            // #14 — mirror the payment onto the transport_costs record so the
-            // transporter ledger / AP show the correct paid state (lowercase
-            // lifecycle: paid | partially_paid).
-            if (payable.hauler_id || payable.source_table === 'lot_transport') {
-              await trx('transport_costs')
-                .where({ payable_id: payable.id })
-                .update({ status: fullyPaid ? 'paid' : 'partially_paid', updated_at: trx.fn.now() });
-            }
+          if (linkedRow) {
+            await applyPayableDelta(trx, linkedRow, amtNum);
+            // Mirror the PKR paid onto the source row (expense, mill purchase,
+            // export cost, printed-bag order, lot) so the tab that reads the
+            // source's own paid_amount agrees with the payable. Only expenses
+            // and mill purchases were mirrored before, so a Money-Out payment
+            // on a printed-bag or export-cost payable left the Purchases tab
+            // offering to pay it again.
+            const source = await resolveSource(trx, { payable: linkedRow });
+            const stamp = source && ['business_expenses', 'export_order_costs'].includes(source.table)
+              ? { bank_account_id: accountId || null, payment_method: payment_method || null, payment_reference: bank_reference || null }
+              : {};
+            await mirrorSourcePaid(trx, source, stampedPkr, stamp);
           }
           if (accountId) {
             // Currency-aware bank move (see the receipt block): a foreign account
@@ -1362,14 +1301,8 @@ const financeController = {
               .increment('current_balance', bankMove * -1);
             const tableExists = await trx.schema.hasTable('bank_transactions');
             if (tableExists) {
-              const lastBt = await trx('bank_transactions')
-                .where('transaction_no', 'like', 'BT-%')
-                .orderBy('id', 'desc').first('transaction_no');
-              const seq = lastBt
-                ? (parseInt(String(lastBt.transaction_no).replace(/^BT-/, ''), 10) || 0) + 1
-                : 1;
               await trx('bank_transactions').insert({
-                transaction_no: `BT-${String(seq).padStart(4, '0')}`,
+                transaction_no: await nextBtNo(trx),
                 bank_account_id: accountId,
                 type: 'debit',
                 amount: bankMove,
@@ -1495,130 +1428,154 @@ const financeController = {
     }
   },
 
-  // #14 Phase 1d — reverse an incorrect payment against a payable (transporter,
-  // supplier, expense). Undoes the payable settlement, restores the bank balance
-  // with a reversing bank_transaction, posts an inverse GL entry (Dr Cash /
-  // Cr Payable — a fresh Posted journal, NOT reverseJournal, so the Posted-only
-  // trial balance nets to zero, per the GL reversal rules), reverts any linked
-  // transport_costs status, and stamps the payment 'Reversed'. Receipts are not
-  // reversed here.
+  // Reverse an incorrect payment or receipt. Each step undoes only what the
+  // original actually did:
+  //  - the payable / receivable / local sale / source row are restored only
+  //    when the money moved (a post-dated cheque that never cleared never
+  //    touched them, so subtracting it would under-state what is owed);
+  //  - the bank is restored by the NET that moved, in the account's currency;
+  //  - the GL gets the signed delta of the journal the payment posted (found
+  //    by ref_no = payment_no), as a fresh Posted journal — never reverseJournal,
+  //    so the Posted-only trial balance nets to zero. A Purchases-tab payment
+  //    journals under its lot / purchase label instead, so for a cleared one
+  //    with no payment_no journal the inverse is built from the payment.
+  // The payment is stamped 'Reversed' and kept for audit. Export receipts
+  // confirmed on the order (confirmAdvance / confirmExportReceipt) also moved
+  // the order's advance/balance and journal under the order number, so they
+  // are refused here and undone from the order.
   async reversePayment(req, res) {
     try {
       const paymentId = parseInt(req.params.id, 10);
       const reason = (req.body && req.body.reason) || null;
       if (!paymentId) return res.status(400).json({ success: false, message: 'Invalid payment id.' });
+      const fail = (msg, code = 400) => { const e = new Error(msg); e.statusCode = code; return e; };
 
       const out = await db.transaction(async (trx) => {
-        const pay = await trx('payments').where({ id: paymentId }).first();
-        if (!pay) { const e = new Error('Payment not found.'); e.statusCode = 404; throw e; }
-        if (pay.status === 'Reversed') { const e = new Error('This payment has already been reversed.'); e.statusCode = 400; throw e; }
-        if (pay.type !== 'payment' || !pay.linked_payable_id) {
-          const e = new Error('Only payments made against a payable can be reversed here.'); e.statusCode = 400; throw e;
+        // Locked: two reversals of the same payment must not both pass the
+        // 'Reversed' check and both restore the money.
+        const pay = await trx('payments').where({ id: paymentId }).forUpdate().first();
+        if (!pay) throw fail('Payment not found.', 404);
+        if (pay.status === 'Reversed') throw fail('This payment has already been reversed.');
+        if (pay.status === 'Rejected' || pay.status === 'Pending Finance Confirmation') {
+          throw fail('Only a confirmed payment can be reversed — this one never moved any money.');
         }
+        const isPayment = pay.type === 'payment' && (pay.linked_payable_id || (pay.source_table && pay.source_id));
+        const isReceipt = pay.type === 'receipt' && (pay.linked_receivable_id || pay.local_sale_id) && !pay.service_invoice_id;
+        if (!isPayment && !isReceipt) {
+          throw fail('Only a payment against a payable, or a receipt against a receivable or local sale, can be reversed here.');
+        }
+
         const amt = parseFloat(pay.amount) || 0;
         const amtPkr = parseFloat(pay.base_amount_pkr) || amt;
-        // #14 1e — the original payment split its credit into net cash + WHT +
-        // discount. Reversing must unwind each: restore the bank by the NET cash
-        // only, and debit back the WHT payable / discount income.
         const whtR = parseFloat(pay.wht_amount) || 0;
         const discR = parseFloat(pay.discount_amount) || 0;
-        const wasCleared = pay.cleared !== false; // uncleared post-dated cheque never moved money
+        const wasCleared = pay.cleared !== false; // an uncleared post-dated cheque never moved money
+        const today = new Date().toISOString().slice(0, 10);
+        const label = `Reversal of ${pay.type === 'receipt' ? 'receipt' : 'payment'} ${pay.payment_no}${reason ? ` — ${reason}` : ''}`;
+        // The journal(s) this payment posted under its own number: recordPayment
+        // and expense payments ('Payment'), local-sale receipts ('Local Sale Receipt').
+        const ownJournalTypes = isReceipt ? ['Payment', 'Local Sale Receipt'] : ['Payment'];
 
-        // 1) Restore the payable.
-        const payable = await trx('payables').where({ id: pay.linked_payable_id }).first();
-        if (payable) {
-          const newPaid = Math.max(0, (parseFloat(payable.paid_amount) || 0) - amt);
-          const orig = parseFloat(payable.original_amount) || 0;
-          const newStatus = newPaid <= 0.01 ? 'Pending' : (newPaid < orig - 0.01 ? 'Partial' : 'Paid');
-          await trx('payables').where({ id: payable.id }).update({
-            paid_amount: newPaid,
-            outstanding: Math.max(0, orig - newPaid),
-            status: newStatus,
-            updated_at: trx.fn.now(),
-          });
-          // Mirror to source rows (same tables recordPayment mirrors to).
-          if (payable.source_table === 'business_expenses' && payable.source_id) {
-            const src = await trx('business_expenses').where({ id: payable.source_id }).first();
-            const srcPaid = Math.max(0, (parseFloat(src?.paid_amount) || 0) - amtPkr);
-            await trx('business_expenses').where({ id: payable.source_id }).update({
-              paid_amount: srcPaid, payment_status: srcPaid <= 0.01 ? 'Pending' : 'Partial', updated_at: trx.fn.now(),
-            });
-          } else if (payable.source_table === 'mill_purchases' && payable.source_id) {
-            const src = await trx('mill_purchases').where({ id: payable.source_id }).first();
-            const srcPaid = Math.max(0, (parseFloat(src?.paid_amount) || 0) - amtPkr);
-            await trx('mill_purchases').where({ id: payable.source_id }).update({
-              paid_amount: srcPaid, payment_status: srcPaid <= 0.01 ? 'Pending' : 'Partial', updated_at: trx.fn.now(),
-            });
-          }
-          // #14 — revert the transport_costs status from the payable's new state.
-          if (payable.hauler_id || payable.source_table === 'lot_transport') {
-            const tcStatus = newPaid <= 0.01 ? 'unpaid' : (newPaid < orig - 0.01 ? 'partially_paid' : 'paid');
-            await trx('transport_costs').where({ payable_id: payable.id })
-              .update({ status: tcStatus, updated_at: trx.fn.now() });
+        let receivable = null;
+        if (isReceipt) {
+          receivable = pay.linked_receivable_id
+            ? await trx('receivables').where({ id: pay.linked_receivable_id }).forUpdate().first()
+            : await trx('receivables').where({ local_sale_id: pay.local_sale_id }).forUpdate().first();
+          if (receivable?.order_id) {
+            const own = await trx('journal_entries')
+              .where({ ref_no: pay.payment_no, ref_type: 'Payment', status: 'Posted' }).first('id');
+            if (!own) {
+              throw fail('This receipt was confirmed on its export order, which also recorded it against the order\'s advance/balance. Reverse it from the export order instead.');
+            }
           }
         }
 
-        // 2) Restore the bank balance + a reversing sub-ledger row (only if the
-        //    original payment actually moved money).
+        // 1) Restore what the payment settled (only if it moved money).
+        let payable = null;
+        if (isPayment) {
+          payable = pay.linked_payable_id
+            ? await trx('payables').where({ id: pay.linked_payable_id }).forUpdate().first()
+            : null;
+          if (wasCleared) {
+            if (payable) await applyPayableDelta(trx, payable, -amt);
+            const source = await resolveSource(trx, { payment: pay, payable });
+            await mirrorSourcePaid(trx, source, -amtPkr);
+          }
+        } else if (wasCleared) {
+          if (receivable) await applyReceivableDelta(trx, receivable, -amt);
+          const saleId = pay.local_sale_id || receivable?.local_sale_id;
+          if (saleId) {
+            const sale = await trx('local_sales').where({ id: saleId }).forUpdate().first();
+            if (sale) {
+              const paid = Math.max(0, round2((parseFloat(sale.paid_amount) || 0) - amt));
+              const due = Math.max(0, round2((parseFloat(sale.total_amount) || 0) - paid));
+              const status = due <= 0.01 ? 'Paid' : paid > 0.01 ? 'Partial' : (sale.payment_mode === 'credit' ? 'Credit' : 'Pending');
+              await trx('local_sales').where({ id: sale.id }).update({
+                paid_amount: paid, due_amount: due, payment_status: status, updated_at: trx.fn.now(),
+              });
+            }
+          }
+        }
+
+        // 2) Restore the bank by the NET that moved, plus a reversing sub-ledger row.
         if (wasCleared && pay.bank_account_id) {
           const acct = await trx('bank_accounts').where({ id: pay.bank_account_id }).first();
-          // Restore only the NET cash the original payment actually took out.
-          const bankMove = (acct && acct.currency === pay.currency ? amt : amtPkr) - whtR - discR;
-          await trx('bank_accounts').where({ id: pay.bank_account_id }).increment('current_balance', bankMove);
+          const bankMove = round2((acct && acct.currency === pay.currency ? amt : amtPkr) - whtR - discR);
+          await trx('bank_accounts').where({ id: pay.bank_account_id })
+            .increment('current_balance', isReceipt ? -bankMove : bankMove);
           if (await trx.schema.hasTable('bank_transactions')) {
-            const lastBt = await trx('bank_transactions').where('transaction_no', 'like', 'BT-%').orderBy('id', 'desc').first('transaction_no');
-            const seq = lastBt ? (parseInt(String(lastBt.transaction_no).replace(/^BT-/, ''), 10) || 0) + 1 : 1;
             await trx('bank_transactions').insert({
-              transaction_no: `BT-${String(seq).padStart(4, '0')}`,
-              bank_account_id: pay.bank_account_id, type: 'credit', amount: bankMove,
-              currency: acct?.currency || 'PKR', transaction_date: new Date(),
+              transaction_no: await nextBtNo(trx),
+              bank_account_id: pay.bank_account_id, type: isReceipt ? 'debit' : 'credit', amount: bankMove,
+              currency: acct?.currency || 'PKR', status: 'posted', transaction_date: new Date(),
               reference: pay.payment_no, counterparty: null,
-              notes: `Reversal of payment ${pay.payment_no}`, source: 'payment_reversal',
+              notes: label, source: 'payment_reversal',
               linked_payment_id: pay.id, created_by: req.user?.id || null,
             });
           }
         }
 
-        // 3) Inverse GL entry (Dr Cash / Cr Payable) — a fresh Posted journal.
-        if (wasCleared) {
-          try {
+        // 3) The GL: the signed delta of whatever this payment posted.
+        try {
+          const mirrored = await postDeltaOf(trx, {
+            refNo: pay.payment_no, refTypes: ownJournalTypes,
+            refType: 'Payment Reversal', description: label, userId: req.user?.id, date: today,
+          });
+          if (!mirrored && wasCleared && isPayment) {
+            // A Purchases-tab payment (journalled under the lot / purchase
+            // label): Dr net Cash (+ Dr WHT + Dr Discount) / Cr Payable (gross).
             const cashAndBank = await trx('chart_of_accounts').where({ code: '1000' }).first();
             const counterAcc = await trx('chart_of_accounts').where({ code: '2010' }).first();
-            if (cashAndBank && counterAcc) {
-              let partyType = null, partyId = null;
-              if (payable?.supplier_id) { partyType = 'supplier'; partyId = payable.supplier_id; }
-              else if (payable?.hauler_id) { partyType = 'hauler'; partyId = payable.hauler_id; }
-              // Inverse of the original split: Dr net Cash (+ Dr WHT + Dr Discount)
-              // / Cr Payable (gross). Balances because netCash + wht + disc = gross.
-              const netCashPkr = Number((amtPkr - whtR - discR).toFixed(2));
-              const revLines = [
-                { account_id: cashAndBank.id, account: cashAndBank.name, debit: netCashPkr, credit: 0, narration: `DR ${cashAndBank.code} ${cashAndBank.name} — reversal ${pay.payment_no}` },
-              ];
-              if (whtR > 0) {
-                const whtAcc = await trx('chart_of_accounts').where({ code: '2060' }).first();
-                if (whtAcc) revLines.push({ account_id: whtAcc.id, account: whtAcc.name, debit: Number(whtR.toFixed(2)), credit: 0, narration: `DR ${whtAcc.code} ${whtAcc.name} — WHT reversal ${pay.payment_no}` });
-              }
-              if (discR > 0) {
-                const discAcc = await trx('chart_of_accounts').where({ code: '4060' }).first();
-                if (discAcc) revLines.push({ account_id: discAcc.id, account: discAcc.name, debit: Number(discR.toFixed(2)), credit: 0, narration: `DR ${discAcc.code} ${discAcc.name} — discount reversal ${pay.payment_no}` });
-              }
-              revLines.push({ account_id: counterAcc.id, account: counterAcc.name, debit: 0, credit: amtPkr, narration: `CR ${counterAcc.code} ${counterAcc.name} — reversal ${pay.payment_no}` });
-              const j = await accountingService.createJournal(trx, {
-                date: new Date().toISOString().slice(0, 10), entity: 'mill',
-                refType: 'Payment Reversal', refNo: pay.payment_no,
-                description: `Reversal of payment ${pay.payment_no}${reason ? ` — ${reason}` : ''}`,
-                currency: 'PKR', fxRate: 1, isAuto: true, userId: req.user?.id, partyType, partyId,
-                lines: revLines,
-              });
-              if (j?.id) await accountingService.postJournal(trx, j.id);
-            } else {
-              throw missingAccounts(['1000', '2010'], 'The reversal');
+            if (!cashAndBank || !counterAcc) throw missingAccounts(['1000', '2010'], 'The reversal');
+            let partyType = null, partyId = null;
+            if (payable?.supplier_id) { partyType = 'supplier'; partyId = payable.supplier_id; }
+            else if (payable?.hauler_id) { partyType = 'hauler'; partyId = payable.hauler_id; }
+            const netCashPkr = Number((amtPkr - whtR - discR).toFixed(2));
+            const revLines = [
+              { account_id: cashAndBank.id, account: cashAndBank.name, debit: netCashPkr, credit: 0, narration: `DR ${cashAndBank.code} ${cashAndBank.name} — reversal ${pay.payment_no}` },
+            ];
+            if (whtR > 0) {
+              const whtAcc = await trx('chart_of_accounts').where({ code: '2060' }).first();
+              if (whtAcc) revLines.push({ account_id: whtAcc.id, account: whtAcc.name, debit: Number(whtR.toFixed(2)), credit: 0, narration: `DR ${whtAcc.code} ${whtAcc.name} — WHT reversal ${pay.payment_no}` });
             }
-          } catch (jeErr) {
-            // A reversal without its inverse journal leaves the GL showing a
-            // payment the books no longer have — roll the whole reversal back.
-            throw ledgerFailure(jeErr, 'The reversal');
+            if (discR > 0) {
+              const discAcc = await trx('chart_of_accounts').where({ code: '4060' }).first();
+              if (discAcc) revLines.push({ account_id: discAcc.id, account: discAcc.name, debit: Number(discR.toFixed(2)), credit: 0, narration: `DR ${discAcc.code} ${discAcc.name} — discount reversal ${pay.payment_no}` });
+            }
+            revLines.push({ account_id: counterAcc.id, account: counterAcc.name, debit: 0, credit: amtPkr, narration: `CR ${counterAcc.code} ${counterAcc.name} — reversal ${pay.payment_no}` });
+            const j = await accountingService.createJournal(trx, {
+              date: today, entity: 'mill',
+              refType: 'Payment Reversal', refNo: pay.payment_no,
+              description: label,
+              currency: 'PKR', fxRate: 1, isAuto: true, userId: req.user?.id, partyType, partyId,
+              lines: revLines,
+            });
+            if (j?.id) await accountingService.postJournal(trx, j.id);
           }
+        } catch (jeErr) {
+          // A reversal without its inverse journal leaves the GL showing a
+          // payment the books no longer have — roll the whole reversal back.
+          throw ledgerFailure(jeErr, 'The reversal');
         }
 
         // 4) Stamp the payment Reversed (kept for audit).
@@ -2407,42 +2364,41 @@ financeController.payPurchase = async (req, res) => {
     const payMethod = normalizePaymentMethod(payment_method);
 
     const result = await db.transaction(async (trx) => {
-      let row;
-      let outstanding;
-      let amountPkr;
+      const SOURCE_TABLE = {
+        lot: 'inventory_lots', mill_store: 'mill_purchases', export_cost: 'export_order_costs',
+        expense: 'business_expenses', printed_bag: 'printed_bag_orders',
+      };
+      const NOT_FOUND = {
+        lot: 'Inventory lot not found.', mill_store: 'Mill store purchase not found.',
+        export_cost: 'Export-order cost not found.', expense: 'Business expense not found.',
+        printed_bag: 'Printed bag order not found.',
+      };
+      const sourceTable = SOURCE_TABLE[source];
+      if (!sourceTable) throw new Error(`Unknown source "${source}". Use lot | mill_store | export_cost | expense | printed_bag.`);
 
-      if (source === 'lot') {
-        row = await trx('inventory_lots').where({ id }).first();
-        if (!row) throw new Error('Inventory lot not found.');
-        const total = parseFloat(row.landed_cost_total) || 0;
-        const alreadyPaid = parseFloat(row.paid_amount) || 0;
-        outstanding = Math.max(0, total - alreadyPaid);
-      } else if (source === 'mill_store') {
-        row = await trx('mill_purchases').where({ id }).first();
-        if (!row) throw new Error('Mill store purchase not found.');
-        const total = parseFloat(row.total_amount) || 0;
-        const alreadyPaid = parseFloat(row.paid_amount) || 0;
-        outstanding = Math.max(0, total - alreadyPaid);
-      } else if (source === 'export_cost') {
-        row = await trx('export_order_costs').where({ id }).first();
-        if (!row) throw new Error('Export-order cost not found.');
-        const total = parseFloat(row.base_amount_pkr) || (parseFloat(row.amount) || 0) * (parseFloat(row.fx_rate) || 1);
-        const alreadyPaid = parseFloat(row.paid_amount) || 0;
-        outstanding = Math.max(0, total - alreadyPaid);
-      } else if (source === 'expense') {
-        row = await trx('business_expenses').where({ id }).first();
-        if (!row) throw new Error('Business expense not found.');
-        const total = parseFloat(row.amount_pkr) || 0;
-        const alreadyPaid = parseFloat(row.paid_amount) || 0;
-        outstanding = Math.max(0, total - alreadyPaid);
-      } else if (source === 'printed_bag') {
-        row = await trx('printed_bag_orders').where({ id }).first();
-        if (!row) throw new Error('Printed bag order not found.');
-        const total = parseFloat(row.total_amount) || 0;
-        const alreadyPaid = parseFloat(row.paid_amount) || 0;
-        outstanding = Math.max(0, total - alreadyPaid);
+      // The source row and its payable are read under a lock, and the payable
+      // — when there is one — is the truth for what is still owed. Reading the
+      // source row's own paid_amount let a payment already booked against the
+      // payable on Money Out (which the source row did not always hear about)
+      // be paid a second time here. Cheques already written and not yet
+      // cleared count as spoken for.
+      const row = await trx(sourceTable).where({ id }).forUpdate().first();
+      if (!row) throw new Error(NOT_FOUND[source]);
+      const linkedPayable = await trx('payables')
+        .where({ source_table: sourceTable, source_id: id })
+        .forUpdate()
+        .first();
+      let outstanding;
+      if (linkedPayable) {
+        const pending = await pendingChequeTotal(trx, { payableId: linkedPayable.id });
+        outstanding = Math.max(0, round2((parseFloat(linkedPayable.original_amount) || 0) - (parseFloat(linkedPayable.paid_amount) || 0) - pending));
       } else {
-        throw new Error(`Unknown source "${source}". Use lot | mill_store | export_cost | expense | printed_bag.`);
+        const total = sourceTable === 'inventory_lots' ? (parseFloat(row.landed_cost_total) || 0)
+          : sourceTable === 'export_order_costs' ? (parseFloat(row.base_amount_pkr) || (parseFloat(row.amount) || 0) * (parseFloat(row.fx_rate) || 1))
+          : sourceTable === 'business_expenses' ? (parseFloat(row.amount_pkr) || 0)
+          : (parseFloat(row.total_amount) || 0);
+        const pending = await pendingChequeTotal(trx, { sourceTable, sourceId: id });
+        outstanding = Math.max(0, round2(total - (parseFloat(row.paid_amount) || 0) - pending));
       }
 
       // Default to settling the whole outstanding amount when the caller
@@ -2455,18 +2411,11 @@ financeController.payPurchase = async (req, res) => {
       if (payNum - outstanding > 0.01) {
         throw new Error(`Amount ${payNum.toFixed(2)} exceeds the outstanding balance of ${outstanding.toFixed(2)}.`);
       }
-      amountPkr = Math.min(payNum, outstanding); // only trims sub-cent float slop
+      const amountPkr = Math.min(payNum, outstanding); // only trims sub-cent float slop
       const newPaid = (parseFloat(row.paid_amount) || 0) + amountPkr;
       const fullyPaid = outstanding - amountPkr <= 0.01;
       const paidAt = payment_date ? new Date(payment_date) : new Date();
       const status = fullyPaid ? 'Paid' : 'Partial';
-
-      const sourceTable =
-        source === 'lot'         ? 'inventory_lots' :
-        source === 'mill_store'  ? 'mill_purchases' :
-        source === 'export_cost' ? 'export_order_costs' :
-        source === 'printed_bag' ? 'printed_bag_orders' :
-                                   'business_expenses';
 
       // A post-dated cheque records but does NOT settle the purchase (source row,
       // payable, bank, journal) until it clears — insert the uncleared payment
@@ -2551,9 +2500,7 @@ financeController.payPurchase = async (req, res) => {
       // controllers that create them. Resolved per source because the table
       // names map differently (lots / mill_purchases / export_order_costs /
       // business_expenses).
-      const linkedPayable = await trx('payables')
-        .where({ source_table: sourceTable, source_id: id })
-        .first();
+      // (linkedPayable was read under lock at the top.)
       let payRowForBank = null; // the canonical PP- payment row, linked to the bank txn below
       if (linkedPayable) {
         const newPayablePaid = (parseFloat(linkedPayable.paid_amount) || 0) + amountPkr;
@@ -2583,13 +2530,7 @@ financeController.payPurchase = async (req, res) => {
         const tableExists = await trx.schema.hasTable('bank_transactions');
         if (tableExists) {
           // transaction_no is NOT NULL + unique. Generate as BT-NNNN.
-          const lastBt = await trx('bank_transactions')
-            .where('transaction_no', 'like', 'BT-%')
-            .orderBy('id', 'desc').first('transaction_no');
-          const seq = lastBt
-            ? (parseInt(String(lastBt.transaction_no).replace(/^BT-/, ''), 10) || 0) + 1
-            : 1;
-          const txnNo = `BT-${String(seq).padStart(4, '0')}`;
+          const txnNo = await nextBtNo(trx);
           await trx('bank_transactions').insert({
             transaction_no: txnNo,
             bank_account_id: accountId,
