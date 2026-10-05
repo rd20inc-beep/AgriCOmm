@@ -35,7 +35,7 @@ export const financeApi = {
   fundTransfers: (params) => api.get('/api/finance/fund-transfers', params),
   createFundTransfer: (data) => api.post('/api/finance/fund-transfers', data),
   acceptFundTransfer: (id, body = {}) => api.post(`/api/finance/fund-transfers/${id}/accept`, body),
-  deleteFundTransfer: (id) => api.delete(`/api/finance/fund-transfers/${id}`),
+  reverseFundTransfer: (id, body = {}) => api.post(`/api/finance/fund-transfers/${id}/reverse`, body),
   costAllocations: (params) => api.get('/api/finance/cost-allocations', params),
   createCostAllocation: (data) => api.post('/api/finance/cost-allocations', data),
   addAllocationLine: (id, data) => api.post(`/api/finance/cost-allocations/${id}/lines`, data),

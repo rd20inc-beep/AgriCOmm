@@ -8,6 +8,8 @@ const { nextDocNo } = require('../../utils/docNumber');
 //               the sender entity's inter-company journal). status = 'pending'.
 //   accept()  : the RECEIVER confirms; their account is credited (balance up +
 //               bank_txn + the receiver entity's journal). status = 'completed'.
+//   reverse() : undo either state with equal-and-opposite bank moves and
+//               signed-delta journals. status = 'reversed' (the row is kept).
 // Each entity's journal balances on its own and is linked by 1130 Inter-Company
 // Receivable — Mill, with cash on 1000. So between send and accept the funds sit
 // "in transit" (the sender's 1130 advance), and the receiver only sees the cash
@@ -46,11 +48,11 @@ async function postEntityBook(trx, { transferNo, entity, cashIn, amount, date, u
   if (j?.id) await accountingService.postJournal(trx, j.id);
 }
 
-async function writeBankTxn(trx, { account, type, amount, date, transferNo, counterpartyName, noteLine, userId }) {
+async function writeBankTxn(trx, { account, type, amount, date, transferNo, counterpartyName, noteLine, userId, category = 'Fund Transfer' }) {
   await trx('bank_transactions').insert({
     transaction_no: await nextBtNo(trx), bank_account_id: account.id, type,
     amount, currency: 'PKR', status: 'posted', transaction_date: date,
-    reference: transferNo, counterparty: counterpartyName, category: 'Fund Transfer',
+    reference: transferNo, counterparty: counterpartyName, category,
     notes: noteLine, source: 'fund_transfer', created_by: userId || null,
   });
 }
@@ -121,26 +123,89 @@ async function accept(id, userId) {
   });
 }
 
-// Unwind a transfer (pending or completed): restore whatever balances/journals
-// were posted, drop its bank_transactions + GL journals. TB stays balanced.
-async function remove(id, userId) {
+// Reverse a transfer (pending or completed). Nothing is deleted: the transfer
+// row stays, marked 'reversed', and every move it made is undone by an
+// equal-and-opposite one, so the history reads send -> (accept) -> reverse.
+//   GL   : each POSTED journal it made (the sender's at create, the receiver's
+//          at accept) gets a signed-delta journal with debit and credit swapped,
+//          same entity, ref_type 'Fund Transfer Reversal', ref_no = transfer_no.
+//          The originals stay Posted: the TB is Posted-only, so original +
+//          delta nets to zero. (Never reverse+repost, and never also flip the
+//          original to 'Reversed': that would move the books by -2x.)
+//   Bank : the sender gets the money back (balance up + a 'credit'
+//          bank_transactions row); if the receiver had accepted, theirs goes
+//          down (balance down + a 'debit' row). Rows are BT-numbered like the
+//          rest and tagged source 'fund_transfer', category 'Fund Transfer
+//          Reversal', reference = transfer_no.
+// A pending transfer has already moved the sender's money and posted the
+// sender's journal (see create), so it is reversed the same way, just without
+// a receiver side. Reversing twice is refused (409).
+async function reverse(id, userId, { reason } = {}) {
   return db.transaction(async (trx) => {
-    const t = await trx('fund_transfers').where({ id }).first();
+    const t = await trx('fund_transfers').where({ id }).forUpdate().first();
     if (!t) throw new NotFoundError('Fund transfer not found.');
-    const amt = parseFloat(t.amount) || 0;
-    // Sender side was always posted at create → restore.
-    if (t.from_account_id) await trx('bank_accounts').where({ id: t.from_account_id }).increment('current_balance', amt);
-    // Receiver side only posted once accepted → restore only then.
-    if (t.status === 'completed' && t.to_account_id) await trx('bank_accounts').where({ id: t.to_account_id }).decrement('current_balance', amt);
-    await trx('bank_transactions').where({ source: 'fund_transfer', reference: t.transfer_no }).del();
-    const journals = await trx('journal_entries').where({ ref_no: t.transfer_no, ref_type: 'Fund Transfer' }).select('id');
-    const jids = journals.map((j) => j.id);
-    if (jids.length) {
-      await trx('journal_lines').whereIn('journal_id', jids).del();
-      await trx('journal_entries').whereIn('id', jids).del();
+    if (t.status === 'reversed') {
+      const err = new Error(`Transfer ${t.transfer_no} is already reversed.`);
+      err.statusCode = 409;
+      throw err;
     }
-    await trx('fund_transfers').where({ id }).del();
-    return { deleted: true, transfer_no: t.transfer_no };
+    const amt = parseFloat(t.amount) || 0;
+    const date = new Date().toISOString().slice(0, 10);
+    const why = reason ? ` - ${String(reason).slice(0, 200)}` : '';
+    const desc = `Reversal of fund transfer ${t.transfer_no}${why}`;
+
+    const fromAcc = t.from_account_id ? await trx('bank_accounts').where({ id: t.from_account_id }).first() : null;
+    const toAcc = t.to_account_id ? await trx('bank_accounts').where({ id: t.to_account_id }).first() : null;
+
+    // Bank: the sender's money always left at create, so give it back.
+    if (fromAcc) {
+      await trx('bank_accounts').where({ id: fromAcc.id }).increment('current_balance', amt);
+      await writeBankTxn(trx, {
+        account: fromAcc, type: 'credit', amount: amt, date, transferNo: t.transfer_no,
+        counterpartyName: toAcc ? toAcc.name : ENTITY_LABEL[t.to_entity], noteLine: desc, userId,
+        category: 'Fund Transfer Reversal',
+      });
+    }
+    // The receiver was only credited once it accepted, so take it back only then.
+    if (t.status === 'completed' && toAcc) {
+      await trx('bank_accounts').where({ id: toAcc.id }).decrement('current_balance', amt);
+      await writeBankTxn(trx, {
+        account: toAcc, type: 'debit', amount: amt, date, transferNo: t.transfer_no,
+        counterpartyName: fromAcc ? fromAcc.name : ENTITY_LABEL[t.from_entity], noteLine: desc, userId,
+        category: 'Fund Transfer Reversal',
+      });
+    }
+
+    // GL: a signed delta for every journal this transfer POSTED.
+    const posted = await trx('journal_entries')
+      .where({ ref_type: 'Fund Transfer', ref_no: t.transfer_no, status: 'Posted' })
+      .orderBy('id', 'asc')
+      .select('id', 'journal_no', 'entity');
+    const reversalJournalIds = [];
+    for (const j of posted) {
+      const lines = await trx('journal_lines').where({ journal_id: j.id }).orderBy('id', 'asc')
+        .select('account_id', 'account', 'debit', 'credit');
+      if (!lines.length) continue;
+      const delta = await accountingService.createJournal(trx, {
+        date, entity: j.entity, refType: 'Fund Transfer Reversal', refNo: t.transfer_no,
+        description: `${desc} (reverses ${j.journal_no || `journal #${j.id}`})`,
+        currency: 'PKR', fxRate: 1, isAuto: true, userId,
+        lines: lines.map((l) => ({
+          account_id: l.account_id, account: l.account,
+          debit: parseFloat(l.credit) || 0, credit: parseFloat(l.debit) || 0,
+          narration: `Reversal - ${t.transfer_no}`,
+        })),
+      });
+      if (delta?.id) await accountingService.postJournal(trx, delta.id);
+      reversalJournalIds.push(delta?.id || null);
+    }
+
+    const [row] = await trx('fund_transfers').where({ id }).update({
+      status: 'reversed',
+      notes: [t.notes, `Reversed ${date}${userId ? ` by user #${userId}` : ''}${why}`].filter(Boolean).join(' · '),
+      updated_at: trx.fn.now(),
+    }).returning('*');
+    return { transfer: row, reversed: true, transfer_no: t.transfer_no, reversal_journal_ids: reversalJournalIds };
   });
 }
 
@@ -161,4 +226,4 @@ async function list({ entity, to_entity, from_entity, status, from, to, limit = 
   return q.limit(Math.min(parseInt(limit, 10) || 100, 500));
 }
 
-module.exports = { create, accept, remove, list, ENTITY_LABEL };
+module.exports = { create, accept, reverse, list, ENTITY_LABEL };

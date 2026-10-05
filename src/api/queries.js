@@ -890,21 +890,19 @@ export function useCreateFundTransfer() {
 export function useAcceptFundTransfer() {
   const qc = useQueryClient();
   return useMutation({
-    // Accepts either a bare id (owner self-approves) or { id, ownerId } where
-    // ownerId is the authorizing owner (required for non-owner approvers).
-    mutationFn: (arg) => {
-      const id = (arg && typeof arg === 'object') ? arg.id : arg;
-      const ownerId = (arg && typeof arg === 'object') ? arg.ownerId : undefined;
-      return financeApi.acceptFundTransfer(id, ownerId ? { authorized_by_owner_id: ownerId } : {});
-    },
+    // No Owner authorisation: the receiving side's permission is the check.
+    // Takes the transfer id (or { id } from older callers).
+    mutationFn: (arg) => financeApi.acceptFundTransfer((arg && typeof arg === 'object') ? arg.id : arg),
     onSuccess: () => { invalidateMoneyCaches(qc); qc.invalidateQueries({ queryKey: ['chat-approvals'] }); },
   });
 }
-export function useDeleteFundTransfer() {
+// Reverse a transfer (Owner / Super Admin): equal-and-opposite bank moves and
+// journals; the transfer stays, marked 'reversed'.
+export function useReverseFundTransfer() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id) => financeApi.deleteFundTransfer(id),
-    onSuccess: () => invalidateMoneyCaches(qc),
+    mutationFn: ({ id, reason } = {}) => financeApi.reverseFundTransfer(id, reason ? { reason } : {}),
+    onSuccess: () => { invalidateMoneyCaches(qc); qc.invalidateQueries({ queryKey: queryKeys.journals.all }); },
   });
 }
 

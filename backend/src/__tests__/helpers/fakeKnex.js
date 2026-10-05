@@ -20,6 +20,7 @@ function fakeKnex(seed = {}) {
     if (!tables[table]) tables[table] = [];
     const filters = [];
     let locked = false;
+    let counted = null;
     const rows = () => tables[table].filter((row) => filters.every((f) => f(row)));
 
     const b = {
@@ -65,12 +66,21 @@ function fakeKnex(seed = {}) {
       whereIn(col, vals) { filters.push((r) => vals.map(String).includes(String(r[colOf(col)]))); return b; },
       join() { return b; }, // joined columns are not resolved
       whereRaw() { return b; }, // raw SQL is not evaluated — matches every row
+      orWhere() { return b; }, // OR branches are not evaluated — they add no filter
       forUpdate() { locked = true; return b; },
       select() { return b; },
       orderBy() { return b; },
       orderByRaw() { return b; },
+      // count('id as n') → first() gives { n: <rows> }; awaited directly, [{ n }].
+      count(expr = 'count') {
+        const alias = String(expr).split(/\s+as\s+/i)[1] || 'count';
+        counted = alias.trim();
+        return b;
+      },
+      pluck(col) { return Promise.resolve(rows().map((r) => r[colOf(col)])); },
       async first() {
         if (locked) locks.push({ table });
+        if (counted) return { [counted]: String(rows().length) };
         const r = rows()[0];
         return r ? { ...r } : undefined;
       },
@@ -88,7 +98,10 @@ function fakeKnex(seed = {}) {
         const out = list.map((r) => ({ ...r }));
         return { returning: async () => out, then: (res, rej) => Promise.resolve(out).then(res, rej) };
       },
-      then(res, rej) { return Promise.resolve(rows().map((r) => ({ ...r }))).then(res, rej); },
+      then(res, rej) {
+        if (counted) return Promise.resolve([{ [counted]: String(rows().length) }]).then(res, rej);
+        return Promise.resolve(rows().map((r) => ({ ...r }))).then(res, rej);
+      },
     };
     return b;
   }

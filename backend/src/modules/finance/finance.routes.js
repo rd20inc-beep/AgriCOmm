@@ -5,12 +5,12 @@ const fs = require('fs');
 const multer = require('multer');
 const controller = require('../../controllers/financeController');
 const authorize = require('../../middleware/rbac');
-const { authorizeAny } = require('../../middleware/rbac');
+const { authorizeAny, authorizeRole } = require('../../middleware/rbac');
+const db = require('../../config/database');
 const auditAction = require('../../middleware/audit');
 const validate = require('../../middleware/validate');
 const schemas = require('../../middleware/schemas');
 const fundTransfers = require('../finance/fundTransfers.service');
-const ownerApproval = require('../../middleware/ownerApproval');
 
 // #14 Phase 1e — supporting-document upload for payments (WHT certificate,
 // vendor invoice, receipt). Disk storage under uploads/payments, mirroring the
@@ -44,8 +44,27 @@ router.post('/fund-transfers', authorize('finance', 'confirm_payment'),
       return res.json({ success: true, data: { transfer } });
     } catch (e) { return res.status(e.statusCode || 400).json({ success: false, message: e.message }); }
   });
-router.post('/fund-transfers/:id/accept', authorize('milling', 'edit'),
-  ownerApproval('fund_transfer'),
+// Accepting is authorised by the RECEIVING side, with no Owner step (owner
+// decision 2026-10-06): Head Office (to_entity 'general') accepts with
+// finance.confirm_payment, the Mill with milling.edit. It used to be
+// milling.edit for every transfer, so a Head-Office finance user could not
+// accept money sent to Head Office without a mill permission.
+const ACCEPT_PERMISSION = {
+  general: ['finance', 'confirm_payment'],
+  mill: ['milling', 'edit'],
+};
+async function authorizeTransferAccept(req, res, next) {
+  try {
+    const t = await db('fund_transfers').where({ id: req.params.id }).first('id', 'to_entity');
+    if (!t) return res.status(404).json({ success: false, message: 'Fund transfer not found.' });
+    const perm = ACCEPT_PERMISSION[t.to_entity];
+    if (!perm) return res.status(403).json({ success: false, message: `No accept permission is defined for ${t.to_entity} transfers.` });
+    return authorize(perm[0], perm[1])(req, res, next);
+  } catch (e) {
+    return res.status(500).json({ success: false, message: 'Authorization check failed.' });
+  }
+}
+router.post('/fund-transfers/:id/accept', authorizeTransferAccept,
   auditAction('accept_fund_transfer', 'finance', (req) => req.params.id),
   async (req, res) => {
     try {
@@ -53,14 +72,21 @@ router.post('/fund-transfers/:id/accept', authorize('milling', 'edit'),
       return res.json({ success: true, data: { transfer } });
     } catch (e) { return res.status(e.statusCode || 400).json({ success: false, message: e.message }); }
   });
-router.delete('/fund-transfers/:id', authorize('finance', 'confirm_payment'),
-  auditAction('delete_fund_transfer', 'finance', (req) => req.params.id),
-  async (req, res) => {
+// Reversal: equal-and-opposite bank moves + signed-delta journals, transfer
+// marked 'reversed' (fundTransfers.reverse). Owner / Super Admin only. DELETE is
+// kept as an alias so older clients still work — it no longer deletes anything.
+async function reverseTransferHandler(req, res) {
   try {
-    const result = await fundTransfers.remove(req.params.id, req.user?.id);
+    const result = await fundTransfers.reverse(req.params.id, req.user?.id, { reason: req.body?.reason });
     return res.json({ success: true, data: result });
   } catch (e) { return res.status(e.statusCode || 400).json({ success: false, message: e.message }); }
-});
+}
+router.post('/fund-transfers/:id/reverse', authorizeRole('Owner', 'Super Admin'),
+  auditAction('reverse_fund_transfer', 'finance', (req) => req.params.id),
+  reverseTransferHandler);
+router.delete('/fund-transfers/:id', authorizeRole('Owner', 'Super Admin'),
+  auditAction('reverse_fund_transfer', 'finance', (req) => req.params.id),
+  reverseTransferHandler);
 
 router.get('/receivables', authorize('finance', 'view'), controller.getReceivables);
 router.get('/receivables/:id/receipts', authorize('finance', 'view'), controller.getReceivableReceipts);
