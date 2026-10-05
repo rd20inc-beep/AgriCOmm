@@ -53,7 +53,9 @@ router.post('/fund-transfers/:id/accept', authorize('milling', 'edit'),
       return res.json({ success: true, data: { transfer } });
     } catch (e) { return res.status(e.statusCode || 400).json({ success: false, message: e.message }); }
   });
-router.delete('/fund-transfers/:id', authorize('finance', 'confirm_payment'), async (req, res) => {
+router.delete('/fund-transfers/:id', authorize('finance', 'confirm_payment'),
+  auditAction('delete_fund_transfer', 'finance', (req) => req.params.id),
+  async (req, res) => {
   try {
     const result = await fundTransfers.remove(req.params.id, req.user?.id);
     return res.json({ success: true, data: result });

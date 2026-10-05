@@ -1,6 +1,7 @@
 const db = require('../../config/database');
 const accountingService = require('../accounting/accounting.service');
 const { NotFoundError, ValidationError } = require('../../shared/errors');
+const { nextDocNo } = require('../../utils/docNumber');
 
 // Head Office ⇄ Mill fund transfers — a two-phase send → accept flow.
 //   create()  : the SENDER's money leaves immediately (balance down + bank_txn +
@@ -18,15 +19,14 @@ const DIRECTIONS = {
   mill_to_ho: { from: 'mill', to: 'general' },
 };
 
-async function generateTransferNo(trx) {
-  const last = await trx('fund_transfers').where('transfer_no', 'like', 'FT-%').orderBy('id', 'desc').first('transfer_no');
-  const n = last ? (parseInt(String(last.transfer_no).replace('FT-', ''), 10) || 0) + 1 : 1;
-  return `FT-${String(n).padStart(4, '0')}`;
+// FT- and BT- numbers are MAX(suffix)+1 (utils/docNumber), not "the last row
+// by id + 1", which repeats a number after a delete or under two concurrent
+// transfers and then fails on the unique index. Same FT-NNNN / BT-NNNN shape.
+function generateTransferNo(trx) {
+  return nextDocNo(trx, { table: 'fund_transfers', column: 'transfer_no', prefix: 'FT-', pad: 4 });
 }
-async function nextBtNo(trx) {
-  const last = await trx('bank_transactions').where('transaction_no', 'like', 'BT-%').orderBy('id', 'desc').first('transaction_no');
-  const seq = last ? (parseInt(String(last.transaction_no).replace(/^BT-/, ''), 10) || 0) + 1 : 1;
-  return `BT-${String(seq).padStart(4, '0')}`;
+function nextBtNo(trx) {
+  return nextDocNo(trx, { table: 'bank_transactions', column: 'transaction_no', prefix: 'BT-', pad: 4 });
 }
 
 // Post ONE entity's half of the transfer. cashIn ⇒ DR cash / CR inter-company;
@@ -98,7 +98,9 @@ async function create(payload, userId) {
 // The receiver confirms receipt: credit their account + post their journal.
 async function accept(id, userId) {
   return db.transaction(async (trx) => {
-    const t = await trx('fund_transfers').where({ id }).first();
+    // Locked: two accepts of the same transfer must not both see 'pending'
+    // and both credit the receiver.
+    const t = await trx('fund_transfers').where({ id }).forUpdate().first();
     if (!t) throw new NotFoundError('Fund transfer not found.');
     if (t.status !== 'pending') throw new ValidationError(`Transfer ${t.transfer_no} is already ${t.status}.`);
     const toAcc = await trx('bank_accounts').where({ id: t.to_account_id }).first();

@@ -1,6 +1,7 @@
 const db = require('../../config/database');
 const accountingService = require('../accounting/accounting.service');
 const { NotFoundError, ValidationError, ConflictError } = require('../../shared/errors');
+const { nextDocNo } = require('../../utils/docNumber');
 
 // On-hand after applying a signed adjustment delta, or null when it would go
 // below zero (a 0.0001 tolerance absorbs float dust).
@@ -118,17 +119,8 @@ const millStoreRepo = {
   async generatePurchaseNo(trx) {
     const year = new Date().getFullYear();
     const prefix = `MP-${year}-`;
-    const last = await trx('mill_purchases')
-      .where('purchase_no', 'like', `${prefix}%`)
-      .orderBy('id', 'desc')
-      .select('purchase_no')
-      .first();
-    let seq = 1;
-    if (last && last.purchase_no) {
-      const n = parseInt(last.purchase_no.replace(prefix, ''), 10);
-      if (!isNaN(n)) seq = n + 1;
-    }
-    return `${prefix}${String(seq).padStart(4, '0')}`;
+    // MAX(suffix)+1 — "last row by id + 1" repeats a number after a delete.
+    return nextDocNo(trx, { table: 'mill_purchases', column: 'purchase_no', prefix, pad: 4 });
   },
 
   async createPurchase(trx, header, lines) {
@@ -203,14 +195,7 @@ const millStoreRepo = {
     // otherwise the purchase is invisible to finance. (Previously gated on
     // supplier_id, so supplier-less purchases never appeared anywhere.)
     if (totalRounded > 0) {
-      const last = await trx('payables')
-        .where('pay_no', 'like', 'PAY-MS%')
-        .orderBy('id', 'desc')
-        .first();
-      const nextSeq = last
-        ? (parseInt(String(last.pay_no).replace(/^PAY-MS/, ''), 10) || 0) + 1
-        : 1;
-      const payNo = `PAY-MS${String(nextSeq).padStart(4, '0')}`;
+      const payNo = await nextDocNo(trx, { table: 'payables', column: 'pay_no', prefix: 'PAY-MS', pad: 4 });
       await trx('payables').insert({
         pay_no: payNo,
         entity: 'mill',
