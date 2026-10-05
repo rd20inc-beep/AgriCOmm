@@ -10,6 +10,9 @@ const { authorizeRole, denyRoles } = require('../../middleware/rbac');
 // milling endpoints expose cost/profit/cash, so they carry this guard (the same
 // one the reporting + ai modules use) even though the rest of milling is fine.
 const noFinanceForOperator = denyRoles('Mill Operator');
+// Mill expenses and the rice-purchase (rate) ledger are money: reports.view_cost
+// or finance.view, so the Mill Operator / QC Analyst never see them.
+const { requireCostVisibility } = require('../../utils/costVisibility');
 // Payroll routes are gated by the dedicated `payroll.*` permission module
 // (migration 203). Mill Operator holds no payroll permissions, so the old
 // denyRoles('Mill Operator') guard is no longer needed.
@@ -141,7 +144,7 @@ router.post(
 // Rice Purchases ledger — one row per vehicle arrival, joined to
 // supplier, batch, variety, lot. Filters: from_date, to_date,
 // supplier_id, product_id.
-router.get('/rice-purchases', authorize('milling', 'view'), async (req, res) => {
+router.get('/rice-purchases', authorize('milling', 'view'), requireCostVisibility, async (req, res) => {
   try {
     const { from_date, to_date, supplier_id, product_id, limit = 500 } = req.query;
     let q = db('milling_vehicle_arrivals as va')
@@ -550,7 +553,7 @@ const { resolveCashAccountId } = require('../../shared/cashAccounts');
 const payrollService = require('./payroll.service');
 const { computePayrollSummary, committedWorkerStatus, preparePayrollRun, nextPrepareDate, computeLeaveBalances } = payrollService;
 
-router.get('/expenses', authorize('milling', 'view'), async (req, res) => {
+router.get('/expenses', authorize('milling', 'view'), requireCostVisibility, async (req, res) => {
   try {
     const { limit = 100, period } = req.query;
     let query = db('business_expenses as e')
@@ -773,7 +776,7 @@ function addInterval(dateStr, recurrence) {
 }
 const seriesKey = (e) => `${e.category}|${e.employee_id || e.vendor_name || ''}|${e.recurrence || 'monthly'}`;
 
-router.get('/expenses/recurring', authorize('milling', 'view'), async (req, res) => {
+router.get('/expenses/recurring', authorize('milling', 'view'), requireCostVisibility, async (req, res) => {
   try {
     const rows = await db('business_expenses as e')
       .leftJoin('mill_workers as w', 'w.id', 'e.employee_id')
