@@ -1523,8 +1523,9 @@ export function useDeleteUser() {
 
 // ===================== MILLS =====================
 
-export function useMillExpenses(params = {}) {
+export function useMillExpenses(params = {}, opts = {}) {
   return useQuery({
+    ...opts,
     queryKey: ['mill-expenses', params],
     queryFn: async () => {
       const res = await millingApi.listExpenses(params);

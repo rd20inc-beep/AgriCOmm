@@ -20,6 +20,7 @@ import YieldDistributionChart from './dashboard/YieldDistributionChart';
 import RecentActivity from './dashboard/RecentActivity';
 import PendingApprovalsCard from '../components/PendingApprovalsCard';
 import { useOwnerAuth } from '../../../context/OwnerAuthContext';
+import { canSeeCost } from '../../../hooks/useCanSeeCost';
 
 // ─── Formatting ────────────────────────────────────────────────────────
 const fmt = (v) => '$' + (Number(v) || 0).toLocaleString('en-US', { maximumFractionDigits: 0 });
@@ -58,6 +59,9 @@ export default function Dashboard() {
   const canMill = hasPermission('milling', 'view');
   const canFinance = hasPermission('finance', 'view');
   const canReports = hasPermission('reports', 'view');
+  // Order book / receipts / profit tiles are money — hidden from roles without
+  // reports.view_cost or finance.view (Mill Operator, QC Analyst).
+  const showMoney = canSeeCost(hasPermission);
   // Pending master-data quick-add approvals (Admin → Approvals). Hook must run
   // before the early return below to keep hook order stable.
   const { data: pendingMasterApprovals = 0 } = useMasterDataApprovalsCount();
@@ -314,6 +318,7 @@ export default function Dashboard() {
       </div>
 
       {/* ─── PRIMARY KPI ROW ──────────────────────────────────────── */}
+      {showMoney && (
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <KpiTile
           icon={Ship}
@@ -355,13 +360,14 @@ export default function Dashboard() {
           onClick={canFinance ? () => navigate('/finance/profit') : undefined}
         />
       </div>
+      )}
 
       {/* ─── ORDER PIPELINE ───────────────────────────────────────── */}
       <div className="bg-white rounded-xl border border-gray-200 p-5">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
             <Activity size={14} className="text-blue-500" /> Order Pipeline
-            <span className="text-xs text-gray-400 font-normal">({totalPipelineOrders} orders · {fmt(phaseCounts.reduce((s, p) => s + p.value, 0))})</span>
+            <span className="text-xs text-gray-400 font-normal">({totalPipelineOrders} orders{showMoney ? ` · ${fmt(phaseCounts.reduce((s, p) => s + p.value, 0))}` : ''})</span>
           </h2>
           {canExport && <Link to="/export" className="text-xs text-blue-600 hover:underline">All orders →</Link>}
         </div>
@@ -390,7 +396,7 @@ export default function Dashboard() {
                     <p className="text-[11px] font-semibold text-gray-600 uppercase tracking-wider">{phase.label}</p>
                   </div>
                   <p className="text-2xl font-bold text-gray-900 leading-none">{phase.count}</p>
-                  <p className="text-[11px] text-gray-500 mt-1">{fmt(phase.value)}</p>
+                  {showMoney && <p className="text-[11px] text-gray-500 mt-1">{fmt(phase.value)}</p>}
                 </button>
               ))}
             </div>

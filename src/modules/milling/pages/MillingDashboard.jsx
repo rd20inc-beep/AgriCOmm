@@ -31,6 +31,7 @@ import {
 } from 'recharts';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
+import { canSeeCost } from '../../../hooks/useCanSeeCost';
 import OrderRefLink from '../../../shared/components/OrderRefLink';
 import { useCreateMillingBatch, useMillExpenses, useCreateMillExpense, useInventory, useProducts } from '../../../api/queries';
 import { useCommodityPrices } from '../hooks/useCommodityPrices';
@@ -58,6 +59,9 @@ export default function MillingDashboard() {
   const { millingBatches, suppliersList, addToast } = useApp();
   const { hasPermission } = useAuth();
   const canSellLocally = hasPermission('inventory', 'view');
+  // Mill P&L, expenses, cost trend and sales value are money — hidden from the
+  // Mill Operator / QC Analyst (no reports.view_cost). Production stays.
+  const showMoney = canSeeCost(hasPermission);
   const { data: directInv = [] } = useInventory({});
   const inventory = Array.isArray(directInv) ? directInv : [];
   const commodityPrices = useCommodityPrices();
@@ -69,7 +73,7 @@ export default function MillingDashboard() {
     [millSummary],
   );
   const createBatchMut = useCreateMillingBatch();
-  const { data: expenseData } = useMillExpenses();
+  const { data: expenseData } = useMillExpenses({}, { enabled: showMoney });
   const millExpenses = expenseData?.expenses || [];
   const expenseSummary = expenseData?.summary || [];
   const totalOverhead = expenseSummary.reduce((s, e) => s + (parseFloat(e.total) || 0), 0);
@@ -625,6 +629,7 @@ export default function MillingDashboard() {
       )}
 
       {/* Mill P&L Summary */}
+      {showMoney && (
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">Mill Profit & Loss</h2>
@@ -757,6 +762,7 @@ export default function MillingDashboard() {
           );
         })()}
       </div>
+      )}
 
       {/* Stock Location Breakdown */}
       {finishedAll.length > 0 && (
@@ -1018,6 +1024,7 @@ export default function MillingDashboard() {
         </div>
 
         {/* Cost Trend */}
+        {showMoney && (
         <div className="bg-white rounded-xl shadow-sm p-5">
           <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-4">
             Mill Cost Trend
@@ -1063,10 +1070,11 @@ export default function MillingDashboard() {
             </ResponsiveContainer>
           </div>
         </div>
+        )}
       </div>
 
       {/* By-product Sales Trend */}
-      {byproductSalesData.length > 0 && (
+      {showMoney && byproductSalesData.length > 0 && (
         <div className="bg-white rounded-xl shadow-sm p-5">
           <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-4">
             By-product Sales Trend
@@ -1423,7 +1431,7 @@ export default function MillingDashboard() {
               {blendTotals.mt > 0 && (
                 <div className="flex justify-between text-sm border-t border-blue-200 pt-2">
                   <span className="text-gray-600">Combined total</span>
-                  <span className="font-semibold">{(blendTotals.kg).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg · Rs {(blendTotals.cost).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} <span className="text-gray-400 font-normal">(≈Rs {Math.round(blendTotals.cost / (blendTotals.mt * 1000))}/kg)</span></span>
+                  <span className="font-semibold">{(blendTotals.kg).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg{showMoney && <> · Rs {(blendTotals.cost).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} <span className="text-gray-400 font-normal">(≈Rs {Math.round(blendTotals.cost / (blendTotals.mt * 1000))}/kg)</span></>}</span>
                 </div>
               )}
               {/* Live recipe + processing type — yield is computed against the combined total above */}

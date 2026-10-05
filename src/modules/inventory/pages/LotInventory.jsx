@@ -18,6 +18,7 @@ import Modal from '../../../components/Modal';
 import PurchaseLotDrawer from '../components/PurchaseLotDrawer';
 import { fromKg, rateFromPerKg, allEquivalents, allRateEquivalents, toKg, rateToPerKg, UNITS, formatQty, formatRate } from '../../../utils/unitConversion';
 import { favStar } from '../../../shared/utils/favorites';
+import useCanSeeCost from '../../../hooks/useCanSeeCost';
 
 const STATUS_TABS = ['All', 'Available', 'Reserved', 'Closed'];
 const TYPE_TABS = ['All', 'raw', 'finished', 'byproduct'];
@@ -120,7 +121,7 @@ function riceTypeName(lot) {
  * Single-lot row renderer — used by both flat view and the expanded
  * children inside grouped view (with a slight indent in the latter).
  */
-function renderLotRow(lot, displayUnit, navigate, indented) {
+function renderLotRow(lot, displayUnit, navigate, indented, showCost = true) {
   const netKg = parseFloat(lot.netWeightKg) || parseFloat(lot.qty) || 0;
   const availKg = (parseFloat(lot.availableQty) || 0);
   const bw = parseFloat(lot.bagWeightKg) || 50;
@@ -181,8 +182,8 @@ function renderLotRow(lot, displayUnit, navigate, indented) {
       <td data-label="Warehouse" className="mob-hide text-gray-600 text-xs max-w-[8rem] truncate" title={lot.warehouseName || ''}>{lot.warehouseName || '—'}</td>
       <td data-label="Stock" className="text-right font-medium tabular-nums">{fromKg(netKg, displayUnit, bw).toLocaleString()}</td>
       <td data-label="Available" className="text-right tabular-nums text-emerald-600 font-medium">{fromKg(availKg, displayUnit, bw).toLocaleString()}</td>
-      <td data-label="Landed/KG" className="mob-hide text-right tabular-nums text-xs font-medium">{fmtPKR(lot.landedCostPerKg)}</td>
-      <td data-label="Value" className="text-right tabular-nums font-medium">{fmtPKR(lot.landedCostTotal)}</td>
+      {showCost && <td data-label="Landed/KG" className="mob-hide text-right tabular-nums text-xs font-medium">{fmtPKR(lot.landedCostPerKg)}</td>}
+      {showCost && <td data-label="Value" className="text-right tabular-nums font-medium">{fmtPKR(lot.landedCostTotal)}</td>}
       <td data-label="Quality" className="mob-hide text-center">
         <div className="flex items-center justify-center gap-1 text-xs whitespace-nowrap">
           {lot.moisturePct && <span className="text-blue-600" title="Moisture">{lot.moisturePct}%M</span>}
@@ -202,6 +203,9 @@ function renderLotRow(lot, displayUnit, navigate, indented) {
 export default function LotInventory() {
   const { addToast, suppliersList, warehousesList, productsList } = useApp();
   const navigate = useNavigate();
+  // Landed cost / value / "capital locked" are hidden from roles without
+  // reports.view_cost (Mill Operator, QC Analyst); the API nulls them too.
+  const showCost = useCanSeeCost();
   const [statusFilter, setStatusFilter] = useState('Available');
   const [typeFilter, setTypeFilter] = useState('All');
   const [subtypeFilter, setSubtypeFilter] = useState('All');
@@ -371,10 +375,10 @@ export default function LotInventory() {
         <div className="relative flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
           <div className="min-w-0">
             <div className="flex items-center gap-2 text-xs uppercase tracking-wider opacity-80 mb-1">
-              <Package size={14} /> Lot inventory · Capital locked
+              <Package size={14} /> Lot inventory{showCost ? ' · Capital locked' : ''}
             </div>
             <div className="text-2xl sm:text-4xl font-bold leading-tight tabular-nums break-words">
-              {fmtPKR(kpis.totalValue)}
+              {showCost ? fmtPKR(kpis.totalValue) : `${Math.round(kpis.totalKg).toLocaleString()} kg`}
             </div>
             <div className="text-xs opacity-90 mt-1">
               {kpis.totalLots} lots · {Math.round(kpis.totalKg).toLocaleString()} kg total
@@ -420,10 +424,12 @@ export default function LotInventory() {
           <p className="text-xs font-medium text-blue-600 uppercase">Sold / Dispatched</p>
           <p className="text-xl font-bold text-blue-700 mt-1">{getDisplayQty(kpis.soldKg).toLocaleString()} <span className="text-sm font-normal text-blue-500">{getUnitLabel()}</span></p>
         </div>
-        <div className="bg-white rounded-xl border border-gray-100 p-4">
-          <p className="text-xs font-medium text-gray-500 uppercase">Total Value</p>
-          <p className="text-xl font-bold text-gray-900 mt-1">{fmtPKR(kpis.totalValue)}</p>
-        </div>
+        {showCost && (
+          <div className="bg-white rounded-xl border border-gray-100 p-4">
+            <p className="text-xs font-medium text-gray-500 uppercase">Total Value</p>
+            <p className="text-xl font-bold text-gray-900 mt-1">{fmtPKR(kpis.totalValue)}</p>
+          </div>
+        )}
       </div>
 
       {/* Filters */}
@@ -540,8 +546,8 @@ export default function LotInventory() {
                   <th className="text-left">Warehouse</th>
                   <th className="text-right">Stock ({getUnitLabel()})</th>
                   <th className="text-right">Available</th>
-                  <th className="text-right">Landed/KG</th>
-                  <th className="text-right">Value</th>
+                  {showCost && <th className="text-right">Landed/KG</th>}
+                  {showCost && <th className="text-right">Value</th>}
                   <th className="text-center">Quality</th>
                   <th className="text-center">Status</th>
                   {/* Actions sticks to the right edge so the Eye icon
@@ -551,12 +557,12 @@ export default function LotInventory() {
               </thead>
               <tbody>
                 {viewMode === 'flat'
-                  ? filtered.map((lot) => renderLotRow(lot, displayUnit, navigate, false))
+                  ? filtered.map((lot) => renderLotRow(lot, displayUnit, navigate, false, showCost))
                   : (
                     <>
                       {/* Standalone lots (raw rice purchases) — each one
                           is a distinct receipt, never grouped. */}
-                      {visualGroups.standalone.map((lot) => renderLotRow(lot, displayUnit, navigate, false))}
+                      {visualGroups.standalone.map((lot) => renderLotRow(lot, displayUnit, navigate, false, showCost))}
                       {/* One summary row per (subtype, variety) group;
                           click to expand the individual lots beneath. */}
                       {visualGroups.groups.map((g) => {
@@ -604,15 +610,15 @@ export default function LotInventory() {
                               <td className="mob-hide text-gray-400 text-xs">—</td>
                               <td data-label="Stock" className="text-right font-semibold tabular-nums">{fromKg(g.totalKg, displayUnit, bw).toLocaleString()}</td>
                               <td data-label="Available" className="text-right tabular-nums text-emerald-700 font-semibold">{fromKg(g.availKg, displayUnit, bw).toLocaleString()}</td>
-                              <td className="mob-hide text-right tabular-nums text-xs">{g.weightedLanded ? fmtPKR(g.weightedLanded) : '—'}</td>
-                              <td data-label="Value" className="text-right tabular-nums font-semibold">{fmtPKR(g.totalValue)}</td>
+                              {showCost && <td className="mob-hide text-right tabular-nums text-xs">{g.weightedLanded ? fmtPKR(g.weightedLanded) : '—'}</td>}
+                              {showCost && <td data-label="Value" className="text-right tabular-nums font-semibold">{fmtPKR(g.totalValue)}</td>}
                               <td className="mob-hide text-center text-xs text-gray-400">—</td>
                               <td className="mob-hide text-center text-[11px] text-gray-500">{open ? 'expanded' : 'click to expand'}</td>
                               <td className="mob-hide text-center sticky right-0 bg-gradient-to-r from-slate-50 to-white group-hover:bg-blue-50 shadow-[inset_1px_0_0_rgba(0,0,0,0.06)] z-10">
                                 <span className="text-gray-400 text-xs">{open ? '▾' : '▸'}</span>
                               </td>
                             </tr>
-                            {open && g.lots.map((lot) => renderLotRow(lot, displayUnit, navigate, true))}
+                            {open && g.lots.map((lot) => renderLotRow(lot, displayUnit, navigate, true, showCost))}
                           </React.Fragment>
                         );
                       })}

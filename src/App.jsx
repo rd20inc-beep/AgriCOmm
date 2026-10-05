@@ -205,6 +205,10 @@ function ExportRoutes() {
   );
 }
 
+// Who may open the money pages (purchase rates, stock value, mill finance) —
+// the same rule as useCanSeeCost / backend utils/costVisibility.
+const COST_VIEWERS = [{ module: 'reports', action: 'view_cost' }, { module: 'finance', action: 'view' }];
+
 function MillRoutes() {
   return (
     <MillLayout>
@@ -286,8 +290,9 @@ function StandardRoutes() {
         <Route path="/milling/service" element={<ProtectedRoute module="service_milling" action="view"><ServiceMilling /></ProtectedRoute>} />
         <Route path="/service-milling/invoices" element={<ProtectedRoute module="service_milling" action="view_invoice"><ServiceInvoices /></ProtectedRoute>} />
         <Route path="/service-milling/:id" element={<ProtectedRoute module="service_milling" action="view"><ServiceMillingBatchDetail /></ProtectedRoute>} />
-        <Route path="/milling/finance" element={<ProtectedRoute module="milling" action="view"><MillFinanceDashboard /></ProtectedRoute>} />
-        <Route path="/milling/rice-purchases" element={<ProtectedRoute module="milling" action="view"><RicePurchasesLedger /></ProtectedRoute>} />
+        {/* Mill money pages also need cost visibility (reports.view_cost or finance.view). */}
+        <Route path="/milling/finance" element={<ProtectedRoute module="milling" action="view" anyOf={COST_VIEWERS}><MillFinanceDashboard /></ProtectedRoute>} />
+        <Route path="/milling/rice-purchases" element={<ProtectedRoute module="milling" action="view" anyOf={COST_VIEWERS}><RicePurchasesLedger /></ProtectedRoute>} />
         <Route path="/stock-adjustments" element={<ProtectedRoute module="inventory" action="view"><StockAdjustments /></ProtectedRoute>} />
         <Route path="/milling/:id" element={<ProtectedRoute module="milling" action="view"><MillingBatchDetail /></ProtectedRoute>} />
         <Route path="/quality" element={<ProtectedRoute module="milling" action="view"><QualityComparison /></ProtectedRoute>} />
@@ -301,7 +306,7 @@ function StandardRoutes() {
         <Route path="/local-sales/:id/invoice" element={<ProtectedRoute anyOf={[{ module: 'inventory', action: 'view' }, { module: 'finance', action: 'view' }]}><InvoiceView /></ProtectedRoute>} />
         <Route path="/local-sales/:id/print" element={<ProtectedRoute anyOf={[{ module: 'inventory', action: 'view' }, { module: 'finance', action: 'view' }]}><InvoiceView /></ProtectedRoute>} />
         <Route path="/local-sales/:id" element={<ProtectedRoute anyOf={[{ module: 'inventory', action: 'view' }, { module: 'finance', action: 'view' }]}><LocalSaleDetail /></ProtectedRoute>} />
-        <Route path="/lot-inventory/:id/purchase-invoice" element={<ProtectedRoute module="inventory" action="view"><PurchaseInvoiceView /></ProtectedRoute>} />
+        <Route path="/lot-inventory/:id/purchase-invoice" element={<ProtectedRoute module="inventory" action="view" anyOf={COST_VIEWERS}><PurchaseInvoiceView /></ProtectedRoute>} />
         <Route path="/lot-inventory/:id" element={<ProtectedRoute module="inventory" action="view"><LotDetail /></ProtectedRoute>} />
         <Route path="/documents" element={<ProtectedRoute module="documents" action="view"><Documents /></ProtectedRoute>} />
         {/* Mill Store — was previously only in MillRoutes, so non-Mill-Manager

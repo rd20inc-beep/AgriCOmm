@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { useMillingBatches, useMillExpenses, useCommodityRates } from '../../../api/queries';
+import useCanSeeCost from '../../../hooks/useCanSeeCost';
 
 /**
  * Canonical mill financial summary — single source of truth for all mill P&L metrics.
@@ -24,7 +25,10 @@ function getRateValue(rates, rateType, fallback) {
 export function useMillSummary(opts = {}) {
   const { data: batches = [], isLoading: batchesLoading } = useMillingBatches({}, opts);
   const { data: rates = [] } = useCommodityRates();
-  const { data: expenseData } = useMillExpenses();
+  // Mill expenses are cost-gated on the API (reports.view_cost) — don't ask
+  // for them on behalf of a viewer who can't see them.
+  const showCost = useCanSeeCost();
+  const { data: expenseData } = useMillExpenses({}, { enabled: showCost });
 
   const summary = useMemo(() => {
     // Prices from commodity_rate_master (live, not hardcoded)

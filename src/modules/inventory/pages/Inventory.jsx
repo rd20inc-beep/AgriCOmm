@@ -6,6 +6,7 @@ import { LoadingSpinner, ErrorState } from '../../../components/LoadingState';
 import StatusBadge from '../../../components/StatusBadge';
 import PartyLink from '../../../shared/components/PartyLink';
 import { fromKg, UNITS } from '../../../utils/unitConversion';
+import useCanSeeCost from '../../../hooks/useCanSeeCost';
 
 const tabs = [
   { key: 'all', label: 'All Stock', icon: Package },
@@ -23,6 +24,8 @@ export default function Inventory() {
   const [searchTerm, setSearchTerm] = useState('');
   const [displayUnit, setDisplayUnit] = useState('kg');
   const [groupByCategory, setGroupByCategory] = useState(true);
+  // Stock value is hidden from roles without reports.view_cost.
+  const showCost = useCanSeeCost();
 
   const params = {};
   if (activeTab !== 'all') params.type = activeTab;
@@ -97,7 +100,7 @@ export default function Inventory() {
               <Package size={14} /> Stock on hand
             </div>
             <div className="text-3xl sm:text-4xl font-bold leading-tight tabular-nums">
-              {fmtPKR(kpis.totalValue)}
+              {showCost ? fmtPKR(kpis.totalValue) : `${(totalKgAll / 1000).toFixed(1)} MT`}
             </div>
             <div className="text-xs opacity-90 mt-1">
               {kpis.totalLots} lots · {(totalKgAll / 1000).toFixed(1)} MT
@@ -118,7 +121,7 @@ export default function Inventory() {
       </div>
 
       {/* Summary */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+      <div className={`grid grid-cols-2 ${showCost ? 'sm:grid-cols-5' : 'sm:grid-cols-4'} gap-3`}>
         <div className="bg-white rounded-xl border border-gray-100 p-4">
           <p className="text-xs font-medium text-gray-500 uppercase">Total Lots</p>
           <p className="text-2xl font-bold text-gray-900 mt-1">{kpis.totalLots}</p>
@@ -138,10 +141,12 @@ export default function Inventory() {
           <p className="text-xs font-medium text-emerald-600 uppercase">By-products</p>
           <p className="text-xl font-bold text-gray-900 mt-1">{dv(kpis.byproductKg)} <span className="text-sm font-normal text-gray-400">{ul()}</span></p>
         </div>
-        <div className="bg-white rounded-xl border border-gray-100 p-4">
-          <p className="text-xs font-medium text-gray-500 uppercase">Total Value</p>
-          <p className="text-xl font-bold text-gray-900 mt-1">{fmtPKR(kpis.totalValue)}</p>
-        </div>
+        {showCost && (
+          <div className="bg-white rounded-xl border border-gray-100 p-4">
+            <p className="text-xs font-medium text-gray-500 uppercase">Total Value</p>
+            <p className="text-xl font-bold text-gray-900 mt-1">{fmtPKR(kpis.totalValue)}</p>
+          </div>
+        )}
       </div>
 
       {/* Tabs + Filters */}
@@ -199,7 +204,7 @@ export default function Inventory() {
                 <th className="text-center">Entity</th>
                 <th className="text-right">Stock ({ul()})</th>
                 <th className="text-right">Available</th>
-                <th className="text-right">Value</th>
+                {showCost && <th className="text-right">Value</th>}
                 <th className="text-center">Quality</th>
                 <th className="text-center">Status</th>
                 <th className="text-center">Detail</th>
@@ -217,7 +222,7 @@ export default function Inventory() {
                         {g.label} <span className="text-gray-500 font-normal ml-2">· {g.lots.length} lot(s)</span>
                       </td>
                       <td data-label="Group stock" className="text-right tabular-nums font-bold text-emerald-800">{(fromKg(groupNetKg, displayUnit, 50) || 0).toLocaleString()}</td>
-                      <td data-label="Group value" colSpan={2} className="text-right tabular-nums text-emerald-800 font-semibold text-xs">{fmtPKR(groupValue)}</td>
+                      <td data-label="Group value" colSpan={showCost ? 2 : 1} className="text-right tabular-nums text-emerald-800 font-semibold text-xs">{showCost ? fmtPKR(groupValue) : ''}</td>
                       <td colSpan={3}></td>
                     </tr>
                   );
@@ -243,7 +248,7 @@ export default function Inventory() {
                     </td>
                     <td data-label="Stock" className="text-right tabular-nums font-medium">{(fromKg(netKg, displayUnit, bw) || 0).toLocaleString()}</td>
                     <td data-label="Available" className="text-right tabular-nums text-emerald-600 font-medium">{(fromKg(availKg, displayUnit, bw) || 0).toLocaleString()}</td>
-                    <td data-label="Value" className="text-right tabular-nums text-xs">{fmtPKR(lot.landedCostTotal || lot.totalValue)}</td>
+                    {showCost && <td data-label="Value" className="text-right tabular-nums text-xs">{fmtPKR(lot.landedCostTotal || lot.totalValue)}</td>}
                     <td data-label="Quality" className="mob-hide text-center">
                       <div className="flex items-center justify-center gap-1 text-xs">
                         {lot.moisturePct && <span className="text-blue-600" title="Moisture">{lot.moisturePct}%M</span>}
@@ -258,7 +263,7 @@ export default function Inventory() {
                 );
               })}
               {filtered.length === 0 && (
-                <tr><td colSpan={11} className="text-center py-12 text-gray-400">No inventory lots found. <Link to="/lot-inventory" className="text-blue-600 hover:underline">Go to Lot Manager</Link></td></tr>
+                <tr><td colSpan={showCost ? 11 : 10} className="text-center py-12 text-gray-400">No inventory lots found. <Link to="/lot-inventory" className="text-blue-600 hover:underline">Go to Lot Manager</Link></td></tr>
               )}
             </tbody>
           </table>

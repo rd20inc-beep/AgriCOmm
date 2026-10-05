@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Boxes, Package, Wallet, ArrowRight, Layers, AlertTriangle, Check, X, Pencil } from 'lucide-react';
 import { lotInventoryApi } from '../api/services';
 import { useHeldStockProfit } from '../../../api/queries';
+import useCanSeeCost from '../../../hooks/useCanSeeCost';
 
 const n = (v) => Number(v) || 0;
 const toMT = (kg) => n(kg) / 1000;
@@ -25,6 +26,9 @@ export default function StockSummary() {
   const [editId, setEditId] = useState(null);
   const [editVal, setEditVal] = useState('');
   const [detailRow, setDetailRow] = useState(null);
+  // Stock value / selling value / profit are hidden from roles without
+  // reports.view_cost (Mill Operator, QC Analyst) — quantities only.
+  const showCost = useCanSeeCost();
 
   const queryKey = ['stock-summary', entity, status];
   const { data = [], isLoading } = useQuery({
@@ -39,7 +43,7 @@ export default function StockSummary() {
   // Selling price per grade / variety, so each product row can show what its
   // stock is worth to sell and the profit sitting in it. Lots with no rate are
   // counted separately rather than valued at cost.
-  const { data: valuation } = useHeldStockProfit(entity ? { entity } : {});
+  const { data: valuation } = useHeldStockProfit(entity ? { entity } : {}, { enabled: showCost });
   const valueByProduct = useMemo(() => {
     const m = new Map();
     for (const lot of valuation?.lots || []) {
@@ -105,7 +109,7 @@ export default function StockSummary() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold text-gray-900 flex items-center gap-2"><Boxes className="w-5 h-5 text-blue-600" /> Stock Summary</h1>
-          <p className="text-sm text-gray-500">How much of each product you have, how much is free to sell, and what it's worth.</p>
+          <p className="text-sm text-gray-500">How much of each product you have, how much is free to sell{showCost ? ", and what it's worth" : ''}.</p>
         </div>
         <div className="flex items-center gap-2">
           <div className="flex bg-gray-100 rounded-lg p-0.5">
@@ -124,14 +128,14 @@ export default function StockSummary() {
       </div>
 
       {/* KPI cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className={`grid grid-cols-2 ${showCost ? 'lg:grid-cols-4' : 'lg:grid-cols-3'} gap-3`}>
         <Kpi icon={Package} tone="blue" label="Products in stock" value={allRows.length.toLocaleString()} />
         <button onClick={() => setLowOnly((v) => !v)} className="text-left">
           <Kpi icon={AlertTriangle} tone={lowCount ? 'red' : 'emerald'} label="Running low"
             value={lowCount.toLocaleString()} sub={lowOnly ? 'Showing low only — click to clear' : lowCount ? 'Click to see them' : 'All well stocked'} active={lowOnly} />
         </button>
         <Kpi icon={Boxes} tone="emerald" label="On hand" value={fmtMT(totals.onHand)} sub={`${fmtMT(totals.available)} available`} />
-        <Kpi icon={Wallet} tone="amber" label="Stock value" value={fmtPKR(totals.value)} />
+        {showCost && <Kpi icon={Wallet} tone="amber" label="Stock value" value={fmtPKR(totals.value)} />}
       </div>
 
       {/* Item table */}
@@ -151,9 +155,11 @@ export default function StockSummary() {
                   <th className="px-4 py-2.5 text-right" title="Free to sell — on hand minus what's committed to orders">Free to sell</th>
                   <th className="px-4 py-2.5 text-right" title="Reserved against export orders">Committed</th>
                   <th className="px-4 py-2.5 text-right" title="Warn me when on-hand drops below this">Reorder at</th>
-                  <th className="px-4 py-2.5 text-right" title="What this stock cost (landed)">Stock value</th>
-                  <th className="px-4 py-2.5 text-right" title="What the stock on hand is worth at its selling price (Finance ▸ Rates)">At selling price</th>
-                  <th className="px-4 py-2.5 text-right" title="Selling price minus cost, on the stock still held">Profit if sold</th>
+                  {showCost && <>
+                    <th className="px-4 py-2.5 text-right" title="What this stock cost (landed)">Stock value</th>
+                    <th className="px-4 py-2.5 text-right" title="What the stock on hand is worth at its selling price (Finance ▸ Rates)">At selling price</th>
+                    <th className="px-4 py-2.5 text-right" title="Selling price minus cost, on the stock still held">Profit if sold</th>
+                  </>}
                   <th className="px-4 py-2.5"></th>
                 </tr>
               </thead>
@@ -194,8 +200,8 @@ export default function StockSummary() {
                           </button>
                         )}
                       </td>
-                      <td data-label="Stock value" className="px-4 py-2.5 text-right font-semibold text-gray-900 tabular-nums">{fmtPKR(r.total_value)}</td>
-                      {(() => {
+                      {showCost && <td data-label="Stock value" className="px-4 py-2.5 text-right font-semibold text-gray-900 tabular-nums">{fmtPKR(r.total_value)}</td>}
+                      {showCost && (() => {
                         const v = valueByProduct.get(r.group_id);
                         const none = !v || v.pricedLots === 0;
                         return (
@@ -229,13 +235,15 @@ export default function StockSummary() {
                   <td data-label="Free to sell" className="px-4 py-2.5 text-right tabular-nums">{fmtMT(totals.available)}</td>
                   <td data-label="Committed" className="mob-hide px-4 py-2.5 text-right tabular-nums">{totals.reserved > 0 ? fmtMT(totals.reserved) : '—'}</td>
                   <td className="px-4 py-2.5"></td>
-                  <td data-label="Stock value" className="px-4 py-2.5 text-right tabular-nums">{fmtPKR(totals.value)}</td>
-                  <td data-label="At selling price" className="px-4 py-2.5 text-right tabular-nums">
-                    {heldTotals.pricedLots === 0 ? <span className="text-gray-300">—</span> : fmtPKR(heldTotals.marketValue)}
-                  </td>
-                  <td data-label="Profit if sold" className={`px-4 py-2.5 text-right tabular-nums ${heldTotals.pricedLots === 0 ? '' : (heldTotals.profit >= 0 ? 'text-emerald-600' : 'text-red-600')}`}>
-                    {heldTotals.pricedLots === 0 ? <span className="text-gray-300">—</span> : fmtPKR(heldTotals.profit)}
-                  </td>
+                  {showCost && <>
+                    <td data-label="Stock value" className="px-4 py-2.5 text-right tabular-nums">{fmtPKR(totals.value)}</td>
+                    <td data-label="At selling price" className="px-4 py-2.5 text-right tabular-nums">
+                      {heldTotals.pricedLots === 0 ? <span className="text-gray-300">—</span> : fmtPKR(heldTotals.marketValue)}
+                    </td>
+                    <td data-label="Profit if sold" className={`px-4 py-2.5 text-right tabular-nums ${heldTotals.pricedLots === 0 ? '' : (heldTotals.profit >= 0 ? 'text-emerald-600' : 'text-red-600')}`}>
+                      {heldTotals.pricedLots === 0 ? <span className="text-gray-300">—</span> : fmtPKR(heldTotals.profit)}
+                    </td>
+                  </>}
                   <td></td>
                 </tr>
               </tfoot>
@@ -252,7 +260,7 @@ export default function StockSummary() {
       )}
 
       {detailRow && (
-        <ProductStockDrawer row={detailRow} entity={entity} status={status} onClose={() => setDetailRow(null)} onOpenLot={(id) => navigate(`/lot-inventory/${id}`)} />
+        <ProductStockDrawer row={detailRow} showCost={showCost} entity={entity} status={status} onClose={() => setDetailRow(null)} onOpenLot={(id) => navigate(`/lot-inventory/${id}`)} />
       )}
     </div>
   );
@@ -267,7 +275,7 @@ const LOT_STATUS_STYLE = {
 
 // Drill-down: every stock batch (lot) sitting behind a product, so "what's in
 // stock of this heading" is one click away — without leaving the summary.
-function ProductStockDrawer({ row, entity, status, onClose, onOpenLot }) {
+function ProductStockDrawer({ row, showCost, entity, status, onClose, onOpenLot }) {
   const { data: lots = [], isLoading } = useQuery({
     queryKey: ['product-lots', row.group_id, entity, status],
     queryFn: async () => {
@@ -297,7 +305,7 @@ function ProductStockDrawer({ row, entity, status, onClose, onOpenLot }) {
               <Boxes size={17} className="text-blue-600" /> {row.group_name || 'Unspecified'}
             </h2>
             <p className="text-xs text-gray-500 mt-0.5">
-              {fmtMT(row.total_kg)} on hand · {fmtMT(row.available_kg)} free to sell · {fmtPKR(row.total_value)}
+              {fmtMT(row.total_kg)} on hand · {fmtMT(row.available_kg)} free to sell{showCost ? ` · ${fmtPKR(row.total_value)}` : ''}
             </p>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
@@ -328,14 +336,14 @@ function ProductStockDrawer({ row, entity, status, onClose, onOpenLot }) {
                     <span className="capitalize">{l.entity || 'mill'}{l.warehouse_name ? ` · ${l.warehouse_name}` : ''}</span>
                     {l.supplier_name && <span>· {l.supplier_name}</span>}
                   </div>
-                  <div className="grid grid-cols-4 gap-2 mt-2 text-xs">
+                  <div className={`grid ${showCost ? 'grid-cols-4' : 'grid-cols-3'} gap-2 mt-2 text-xs`}>
                     <Stat label="On hand" value={fmtMT(onHand)} sub={bags > 0 ? `${bags.toLocaleString()} bags` : null} />
                     <Stat label="Free" value={fmtMT(n(l.available_qty))} tone="emerald" />
                     <Stat label="Committed" value={n(l.reserved_qty) > 0 ? fmtMT(n(l.reserved_qty)) : '—'} tone={n(l.reserved_qty) > 0 ? 'amber' : null} />
-                    <Stat label="Value" value={fmtPKR(value)} align="right" />
+                    {showCost && <Stat label="Value" value={fmtPKR(value)} align="right" />}
                   </div>
                   <div className="mt-2 pt-2 border-t border-gray-100 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-gray-500">
-                    <span>Cost <span className="font-medium text-gray-700">Rs {(perKg).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/kg</span></span>
+                    {showCost && <span>Cost <span className="font-medium text-gray-700">Rs {(perKg).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/kg</span></span>}
                     {receivedKg > 0 && <span>Intake {fmtMTnum(receivedKg / 1000)} <span className="text-gray-400">({fmtMTnum(usedKg / 1000)} used)</span></span>}
                     {l.batch_ref && <span>Batch {l.batch_ref}</span>}
                     {l.created_at && <span>Added {String(l.created_at).slice(0, 10)}</span>}
@@ -349,7 +357,7 @@ function ProductStockDrawer({ row, entity, status, onClose, onOpenLot }) {
         <div className="border-t border-gray-200 px-5 py-2.5 text-[11px] text-gray-400 leading-relaxed">
           <span className="font-medium text-gray-500">Free</span> = ready to sell ·
           <span className="font-medium text-gray-500"> Committed</span> = reserved for an export order ·
-          <span className="font-medium text-gray-500"> Value</span> = on-hand × cost/kg. Tap any batch for its full lot detail.
+          {showCost && <><span className="font-medium text-gray-500"> Value</span> = on-hand × cost/kg.</>} Tap any batch for its full lot detail.
         </div>
       </div>
     </div>
