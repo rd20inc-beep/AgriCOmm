@@ -68,7 +68,12 @@ describe('katta are 50 kg sacks; smaller packs are bags', () => {
     const fn = methodBody(reporting, 'printableStock');
     // SUM(l.total_bags) is the intake and is never decremented.
     expect(fn).not.toContain('SUM(l.total_bags)');
-    expect(fn).toContain('UNITS_ON_HAND');
+    // The on-hand expressions now live in ONE place (inventory/stockSql.js),
+    // shared with the Stock Summary so the two cannot disagree.
+    expect(fn).toContain('KATTA_ON_HAND');
+    expect(fn).toContain('} = stockSql;');
+    expect(require('../modules/inventory/stockSql').KATTA_ON_HAND)
+      .toContain(require('../modules/inventory/stockSql').UNITS_ON_HAND);
   });
 
   // The rule itself, exercised rather than grepped.

@@ -1,5 +1,6 @@
 const db = require('../../config/database');
 const auditService = require('../admin/audit.service');
+const { companyStock } = require('../inventory/stockSql');
 
 /**
  * Intelligence Service — Decision Intelligence Engine (Phase 12)
@@ -1450,12 +1451,13 @@ const intelligenceService = {
       ? { count: 0 }
       : await activeBatchesQ.count('id as count').first();
 
-    const rawStockQ = db('inventory_lots').where('type', 'raw').where('entity', 'mill').where('status', 'Available');
+    // Company stock only — client-owned service-milling lots are not ours.
+    const rawStockQ = companyStock(db('inventory_lots'), null).where('type', 'raw').where('entity', 'mill').where('status', 'Available');
     const rawStock = entity === 'export'
       ? { total: 0 }
       : await rawStockQ.sum('qty as total').first();
 
-    const finishedStockQ = db('inventory_lots').where('type', 'finished').where('status', 'Available');
+    const finishedStockQ = companyStock(db('inventory_lots'), null).where('type', 'finished').where('status', 'Available');
     const finishedStock = entity === 'export'
       ? { total: 0 }
       : await finishedStockQ.sum('qty as total').first();

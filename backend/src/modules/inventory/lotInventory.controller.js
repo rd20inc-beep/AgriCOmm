@@ -19,6 +19,25 @@ const stockValuation = require('./stockValuation');
 // Purchase rates, landed cost and stock value are hidden from roles without
 // reports.view_cost (Mill Operator, QC Analyst) — same rule as the reports.
 const { redactForUser, canSeeCost } = require('../../utils/costVisibility');
+const stockSql = require('./stockSql');
+const movementConstants = require('./inventory.constants');
+
+// Lot screen "Record Transaction" → canonical movement type. Every type goes
+// through inventoryService.postMovement so qty, net weight and availability
+// move together under a row lock.
+const MANUAL_TXN_MOVEMENTS = {
+  warehouse_transfer_in: movementConstants.MOVEMENT_TYPES.TRANSFER_IN,
+  milling_issue: movementConstants.MOVEMENT_TYPES.PRODUCTION_ISSUE,
+  milling_receipt: movementConstants.MOVEMENT_TYPES.PRODUCTION_OUTPUT,
+  sales_allocation: movementConstants.MOVEMENT_TYPES.LOCAL_SALE,
+  dispatch_out: movementConstants.MOVEMENT_TYPES.EXPORT_DISPATCH,
+  return_in: movementConstants.MOVEMENT_TYPES.RETURN,
+};
+const SOLD_TXN_TYPES = new Set(['sales_allocation', 'dispatch_out']);
+// Book-changing write-offs/adjustments: Stock Adjustments only (Owner approval).
+const ADJUSTMENT_ONLY_TXN_TYPES = new Set([
+  'stock_adjustment_plus', 'stock_adjustment_minus', 'wastage', 'damage', 'shortage',
+]);
 
 async function generateTxnNo(trx) {
   const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
@@ -415,6 +434,9 @@ module.exports = {
   async listLots(req, res) {
     try {
       const { page = 1, limit = 50, type, entity, warehouse_id, status, supplier_id, product_id, variety, search, ownership, sort_by = 'created_at', sort_dir = 'desc' } = req.query;
+      // in_stock=true drops lots that hold nothing — a milled/sold lot stays
+      // 'Available', so a status filter alone lists empty rows as stock.
+      const inStock = String(req.query.in_stock || '') === 'true';
       const offset = (page - 1) * limit;
 
       let query = db('inventory_lots as l')
@@ -435,11 +457,13 @@ module.exports = {
       // (service-milling) stock never appears as sellable/available company
       // inventory. The Service inventory view passes ?ownership=client; ?ownership=all
       // is for admin/debug only.
-      if (ownership === 'client') query = query.where('l.ownership', 'client');
-      else if (ownership !== 'all') query = query.where('l.ownership', 'company');
+      query = stockSql.companyStock(query, 'l', ownership);
+      if (inStock) query = stockSql.hasStock(query, 'l');
 
       if (type) query = query.where('l.type', type);
       if (entity) query = query.where('l.entity', entity);
+      if (req.query.processing_type) query = query.where('l.processing_type', req.query.processing_type);
+      if (req.query.subtype) query = stockSql.whereSubtype(query, req.query.subtype, 'l');
       if (warehouse_id) query = query.where('l.warehouse_id', warehouse_id);
       // #9-scoping: restrict a warehouse-scoped user to their allowed warehouses.
       query = whScope.applyWarehouseScope(query, await whScope.resolveWarehouseScope(req), 'l.warehouse_id');
@@ -456,6 +480,9 @@ module.exports = {
             .orWhere('p.code', 'ilike', `%${search}%`)
             .orWhere('p.name', 'ilike', `%${search}%`)
             .orWhere('s.name', 'ilike', `%${search}%`)
+            .orWhere('l.brand', 'ilike', `%${search}%`)
+            .orWhere('l.batch_ref', 'ilike', `%${search}%`)
+            .orWhere('w.name', 'ilike', `%${search}%`)
             // #4 — a lot is findable by any of its vehicles' gate pass numbers.
             .orWhereExists(function () {
               this.select(db.raw('1')).from('milling_vehicle_arrivals as mva')
@@ -1705,101 +1732,76 @@ module.exports = {
       if (!transaction_type || !quantity_input) {
         return res.status(400).json({ success: false, message: 'transaction_type and quantity_input required.' });
       }
+      // Write-offs and adjustments change the books and need Owner approval —
+      // they live in Stock Adjustments, never here.
+      if (ADJUSTMENT_ONLY_TXN_TYPES.has(transaction_type)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Adjustments, wastage, damage and shortage are recorded in Inventory ▸ Stock Adjustments (Owner approval).',
+        });
+      }
+      const movementType = MANUAL_TXN_MOVEMENTS[transaction_type];
+      if (!movementType) {
+        return res.status(400).json({ success: false, message: `"${transaction_type}" cannot be recorded from the lot screen.` });
+      }
 
       const bagWt = parseFloat(bag_weight_kg) || 50;
       const qtyKg = uc.toKg(quantity_input, quantity_unit, bagWt);
-      const bags = Math.round(qtyKg / bagWt);
 
       const result = await db.transaction(async (trx) => {
         const lot = await trx('inventory_lots').where({ id: lot_id }).first();
-        if (!lot) throw new Error('Lot not found');
-
-        const currentKg = parseFloat(lot.net_weight_kg) || 0;
-        const currentAvail = parseFloat(lot.available_qty) || 0; // KG (Phase 5c)
-
-        // Determine direction
-        const outbound = ['milling_issue', 'export_allocation', 'sales_allocation', 'dispatch_out', 'wastage', 'damage', 'shortage', 'lot_split'].includes(transaction_type);
-        const inbound = ['purchase_in', 'milling_receipt', 'warehouse_transfer_in', 'return_in', 'lot_merge', 'stock_adjustment_plus'].includes(transaction_type);
-
-        if (outbound) {
-          const availKg = currentAvail; // KG
-          if (qtyKg > availKg + 0.001) {
-            throw new Error(`Insufficient stock: need ${qtyKg} kg but only ${availKg.toFixed(3)} kg available`);
-          }
+        if (!lot) { const e = new Error('Lot not found'); e.status = 404; throw e; }
+        const scope = await whScope.resolveWarehouseScope(req);
+        if (!whScope.isWarehouseInScope(scope, lot.warehouse_id)) {
+          const e = new Error('This lot is outside your warehouses.'); e.status = 403; throw e;
         }
 
-        // Compute new balances (all KG)
-        let newNetKg = currentKg;
-        let newAvailKg = currentAvail;
-        let soldDelta = 0, damagedDelta = 0;
-
-        if (outbound) {
-          newNetKg = currentKg; // net doesn't change for allocation, only avail
-          newAvailKg = currentAvail - qtyKg;
-          if (['dispatch_out', 'sales_allocation'].includes(transaction_type)) soldDelta = qtyKg;
-          if (['wastage', 'damage', 'shortage'].includes(transaction_type)) damagedDelta = qtyKg;
-        } else if (inbound) {
-          newNetKg = currentKg + qtyKg;
-          newAvailKg = currentAvail + qtyKg;
-        }
-
-        // Update lot
-        const updates = {
-          net_weight_kg: newNetKg,
-          available_qty: Math.max(0, newAvailKg),
-          qty: Math.max(0, newAvailKg + (parseFloat(lot.reserved_qty) || 0)),
-        };
-        if (inbound) updates.received_net_weight_kg = trx.raw('COALESCE(received_net_weight_kg, 0) + ?', [qtyKg]);
-        if (soldDelta > 0) updates.sold_weight_kg = (parseFloat(lot.sold_weight_kg) || 0) + soldDelta;
-        if (damagedDelta > 0) updates.damaged_weight_kg = (parseFloat(lot.damaged_weight_kg) || 0) + damagedDelta;
-        if (newAvailKg <= 0.001 && (parseFloat(lot.reserved_qty) || 0) <= 0.001) updates.status = 'Closed';
-
-        await trx('inventory_lots').where({ id: lot_id }).update(updates);
-
-        // Insert transaction
-        const txnNo = await generateTxnNo(trx);
-        // Cost basis: use the manually-entered rate if given, otherwise fall back
-        // to the lot's own landed cost (per kg) so a consumption/sale still records
-        // a cost impact instead of a blank.
+        // Cost basis: the entered rate, else the lot's own cost (as local sales
+        // do), so a consumption still records a cost impact.
         const lotRateKg = parseFloat(lot.landed_cost_per_kg) || parseFloat(lot.rate_per_kg) || 0;
-        const rateKg = rate_input ? uc.rateToPerKg(rate_input, rate_unit || 'kg', bagWt) : (lotRateKg || null);
-        const defaultRemark = `${transaction_type.replace(/_/g, ' ')} — ${parseFloat(quantity_input)} ${quantity_unit}`;
+        const rateKg = rate_input
+          ? uc.rateToPerKg(rate_input, rate_unit || 'kg', bagWt)
+          : (parseFloat(lot.cost_per_unit) || lotRateKg || 0);
 
-        const [txn] = await trx('lot_transactions').insert({
-          transaction_no: txnNo,
-          transaction_date: transaction_date || new Date().toISOString().slice(0, 10),
-          lot_id: +lot_id,
-          transaction_type,
-          reference_module: reference_module || null,
-          reference_id: reference_id || null,
-          reference_no: reference_no || null,
-          warehouse_from_id: warehouse_from_id || null,
-          warehouse_to_id: warehouse_to_id || null,
-          input_unit: quantity_unit,
-          input_qty: parseFloat(quantity_input),
-          quantity_kg: outbound ? -qtyKg : qtyKg,
-          quantity_bags: outbound ? -bags : bags,
-          rate_input_unit: rate_input ? (rate_unit || null) : (rateKg ? 'kg' : null),
-          rate_input_value: rate_input ? parseFloat(rate_input) : (rateKg || null),
-          rate_per_kg: rateKg,
-          cost_impact: rateKg ? uc.round2(qtyKg * rateKg) : null,
+        // ONE path for every stock movement: locks the lot, refuses to oversell
+        // (available = qty − committed − held for milling), moves qty AND
+        // net_weight_kg together and writes the lot_transactions row.
+        await inventoryService.postMovement(trx, {
+          movementType,
+          lotId: lot.id,
+          qty: qtyKg,
+          fromWarehouseId: warehouse_from_id || null,
+          toWarehouseId: warehouse_to_id || null,
+          linkedRef: reference_no || null,
+          notes: remarks || `${transaction_type.replace(/_/g, ' ')} — ${parseFloat(quantity_input)} ${quantity_unit}`,
+          costPerUnit: rateKg,
           currency: 'PKR',
-          balance_kg: newNetKg,
-          balance_bags: Math.round(newNetKg / bagWt),
-          remarks: remarks || defaultRemark,
-          created_by: req.user?.id || null,
-          performed_by: req.user?.id || null, // NOT NULL column
-          performed_at: new Date(),
-        }).returning('*');
+          userId: (req.user && req.user.id) || null,
+        });
+        if (SOLD_TXN_TYPES.has(transaction_type)) {
+          await trx('inventory_lots').where({ id: lot.id })
+            .update({ sold_weight_kg: (parseFloat(lot.sold_weight_kg) || 0) + qtyKg });
+        }
 
-        return txn;
+        // Carry what the user entered (date, unit, reference) onto the ledger row
+        // postMovement just wrote. Quantities are left exactly as posted.
+        const txn = await trx('lot_transactions').where({ lot_id: lot.id }).orderBy('id', 'desc').first();
+        if (!txn) return null;
+        const meta = { input_unit: quantity_unit, input_qty: parseFloat(quantity_input) };
+        if (transaction_date) meta.transaction_date = transaction_date;
+        if (reference_module) meta.reference_module = reference_module;
+        if (reference_id) meta.reference_id = reference_id;
+        if (rate_input) { meta.rate_input_unit = rate_unit || 'kg'; meta.rate_input_value = parseFloat(rate_input); }
+        const [updated] = await trx('lot_transactions').where({ id: txn.id }).update(meta).returning('*');
+        return updated || txn;
       });
 
       return res.json({ success: true, data: { transaction: result } });
     } catch (err) {
       console.error('recordTransaction error:', err);
-      const status = err.message.includes('Insufficient') ? 400 : 500;
-      return res.status(status).json({ success: false, message: err.message });
+      const msg = err.message || '';
+      const status = err.status || (/Insufficient|negative stock/.test(msg) ? 400 : 500);
+      return res.status(status).json({ success: false, message: msg });
     }
   },
 
@@ -1807,6 +1809,12 @@ module.exports = {
   async getLotTransactions(req, res) {
     try {
       const { id } = req.params;
+      // #9-scoping: same rule as getLotDetail — a lot outside the caller's
+      // warehouses must not have its ledger readable by direct id.
+      const lot = await db('inventory_lots').where({ id }).select('id', 'warehouse_id').first();
+      if (!lot) return res.status(404).json({ success: false, message: 'Lot not found.' });
+      const scope = await whScope.resolveWarehouseScope(req);
+      if (whScope.denyOutOfScope(res, scope, lot.warehouse_id)) return undefined;
       const txns = await db('lot_transactions')
         .where({ lot_id: id })
         .orderBy('transaction_date', 'desc')
@@ -1846,9 +1854,11 @@ module.exports = {
       // Company-owned only by default — client-owned service-milling stock is
       // excluded from the stock summary / valuation (?ownership=client for the
       // Service view; ?ownership=all for admin).
-      if (ownership === 'client') query = query.where('l.ownership', 'client');
-      else if (ownership !== 'all') query = query.where('l.ownership', 'company');
+      query = stockSql.companyStock(query, 'l', ownership);
       if (status && status !== 'all') query = query.where('l.status', status);
+      // A lot holding nothing is not stock: its row stays 'Available' after it
+      // is milled or sold, so it inflated Batches. include_empty=true for history.
+      if (String(req.query.include_empty || '') !== 'true') query = stockSql.hasStock(query, 'l');
       if (entity) query = query.where('l.entity', entity);
       if (type) query = query.where('l.type', type);
       // #9-scoping: the Stock Summary must only total the caller's warehouses.
@@ -1872,18 +1882,25 @@ module.exports = {
           // reorder_level only meaningful when grouping by product (the SKU view)
           ...(isProduct ? [db.raw('MAX(COALESCE(p.reorder_level, 0)) as reorder_level')] : []),
           db.raw('COUNT(l.id) as lot_count'),
-          db.raw('COALESCE(SUM(CASE WHEN l.net_weight_kg > 0 THEN l.net_weight_kg ELSE CAST(l.qty AS DECIMAL) END), 0) as total_kg'),
+          db.raw(`COALESCE(SUM(${stockSql.ON_HAND_KG}), 0) as total_kg`),
           db.raw('COALESCE(SUM(CAST(l.available_qty AS DECIMAL)), 0) as available_kg'),
           db.raw('COALESCE(SUM(CAST(l.reserved_qty AS DECIMAL)), 0) as reserved_kg'),
+          // Held for a milling batch that has started but not yet yielded —
+          // available_qty = qty − reserved_qty − milling_reserved_qty, so without
+          // this column Free + Committed never added up to On hand.
+          db.raw('COALESCE(SUM(CAST(COALESCE(l.milling_reserved_qty, 0) AS DECIMAL)), 0) as milling_reserved_kg'),
           db.raw('COALESCE(SUM(l.sold_weight_kg), 0) as sold_kg'),
           db.raw('COALESCE(SUM(l.damaged_weight_kg), 0) as damaged_kg'),
-          db.raw('COALESCE(SUM(l.total_bags), 0) as total_bags'),
+          // Sacks STILL on hand (total_bags is the intake count and is never
+          // decremented): 50 kg katta and sub-50 kg retail bags, kept apart.
+          db.raw(`COALESCE(SUM(${stockSql.KATTA_ON_HAND}), 0)::int as total_bags`),
+          db.raw(`COALESCE(SUM(${stockSql.BAGS_ON_HAND}), 0)::int as total_bag_units`),
           // Value of what's ACTUALLY on hand = on-hand kg × cost/kg. Using the
           // stored landed_cost_total would carry the original received value even
           // after a lot is milled/sold down (e.g. 3 MT left still showing the full
           // 33 MT cost). Compute it so value always tracks current quantity.
           db.raw(`COALESCE(SUM(
-            (CASE WHEN l.net_weight_kg > 0 THEN l.net_weight_kg ELSE CAST(l.qty AS DECIMAL) END)
+            ${stockSql.ON_HAND_KG}
             * COALESCE(NULLIF(l.landed_cost_per_kg, 0), NULLIF(l.rate_per_kg, 0), CAST(l.cost_per_unit AS DECIMAL), 0)
           ), 0) as total_value`),
         )
@@ -3326,8 +3343,7 @@ module.exports = {
                 'l.available_qty', 'l.cost_per_unit', 'l.entity', 'l.warehouse_id',
                 'p.name as product_name');
 
-      if (ownership === 'client') query = query.where('l.ownership', 'client');
-      else if (ownership !== 'all') query = query.where('l.ownership', 'company');
+      query = stockSql.companyStock(query, 'l', ownership);
       if (status && status !== 'all') query = query.where('l.status', status);
       if (entity) query = query.where('l.entity', entity);
       if (type) query = query.where('l.type', type);

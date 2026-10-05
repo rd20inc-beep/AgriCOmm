@@ -4,6 +4,7 @@ const db = require('../../config/database');
 // controller resolves it once per request and passes it down; the service never
 // touches req/rbac itself.
 const { applyWarehouseScope, isWarehouseInScope } = require('../../utils/warehouseScope');
+const { companyStock } = require('../inventory/stockSql');
 
 // Parse a milling_batches.custom_tags jsonb value into a plain array. The pg
 // driver usually returns jsonb already parsed (array/object), but a string may
@@ -183,7 +184,8 @@ const reportingService = {
       .first();
 
     // Working capital: total outstanding receivables + inventory value
-    const inventoryValue = await db('inventory_lots')
+    // Company stock only — client-owned service-milling lots are not ours.
+    const inventoryValue = await companyStock(db('inventory_lots'), null)
       .where('qty', '>', 0)
       .select(db.raw('COALESCE(SUM(total_value), 0) as total'))
       .first();
@@ -3292,10 +3294,10 @@ const reportingService = {
   /**
    * Stock aging: per lot, days since created, flag dead stock (>90 days).
    */
-  async getStockAgingReport(warehouseScope = null) {
-    const lots = await applyWarehouseScope(db('inventory_lots as il')
+  async getStockAgingReport(warehouseScope = null, { ownership = 'company' } = {}) {
+    const lots = await applyWarehouseScope(companyStock(db('inventory_lots as il')
       .leftJoin('warehouses as w', 'il.warehouse_id', 'w.id')
-      .where('il.qty', '>', 0), warehouseScope, 'il.warehouse_id')
+      .where('il.qty', '>', 0), 'il', ownership), warehouseScope, 'il.warehouse_id')
       .select(
         'il.id',
         'il.lot_no',
@@ -3353,9 +3355,9 @@ const reportingService = {
   /**
    * Avg days inventory sits before being consumed/sold. By product type.
    */
-  async getStockTurnoverDays({ entity, warehouseScope = null }) {
-    const query = applyWarehouseScope(db('inventory_lots')
-      .where('qty', '>', 0), warehouseScope, 'warehouse_id')
+  async getStockTurnoverDays({ entity, warehouseScope = null, ownership = 'company' }) {
+    const query = applyWarehouseScope(companyStock(db('inventory_lots')
+      .where('qty', '>', 0), null, ownership), warehouseScope, 'warehouse_id')
       .select(
         'type',
         db.raw("AVG(EXTRACT(DAY FROM NOW() - created_at))::numeric(10,1) as avg_days"),
@@ -3370,7 +3372,7 @@ const reportingService = {
     const rows = await query;
 
     // Overall average
-    const overall = await db('inventory_lots')
+    const overall = await companyStock(db('inventory_lots'), null, ownership)
       .where('qty', '>', 0)
       .modify((qb) => { if (entity) qb.where('entity', entity); })
       .modify((qb) => applyWarehouseScope(qb, warehouseScope, 'warehouse_id'))
@@ -3391,10 +3393,10 @@ const reportingService = {
   /**
    * Total value of all inventory by type and warehouse.
    */
-  async getStockValuation({ entity, asOfDate, warehouseScope = null }) {
-    const query = db('inventory_lots as il')
+  async getStockValuation({ entity, asOfDate, warehouseScope = null, ownership = 'company' }) {
+    const query = companyStock(db('inventory_lots as il')
       .leftJoin('warehouses as w', 'il.warehouse_id', 'w.id')
-      .where('il.qty', '>', 0);
+      .where('il.qty', '>', 0), 'il', ownership);
 
     if (entity) query.where('il.entity', entity);
     if (asOfDate) query.where('il.created_at', '<=', asOfDate);
