@@ -173,16 +173,9 @@ const DOC_TYPE_TO_CHECKLIST = {
   'fumigation': 'fumigation',
 };
 
-// Map short frontend keys to all possible DB doc_type values
-const DOC_TYPE_ALIASES = {
-  'phyto': ['phyto', 'Phytosanitary Certificate'],
-  'blDraft': ['blDraft', 'bl_draft', 'BL Draft'],
-  'blFinal': ['blFinal', 'bl_final', 'BL Final'],
-  'invoice': ['invoice', 'commercial_invoice', 'Commercial Invoice'],
-  'packingList': ['packingList', 'packing_list', 'Packing List'],
-  'coo': ['coo', 'Certificate of Origin'],
-  'fumigation': ['fumigation', 'Fumigation Certificate'],
-};
+// Map short frontend keys to all possible DB doc_type values. Shared with the
+// workflow, which uses the same table to decide when the required set is done.
+const { DOC_TYPE_ALIASES } = workflowService;
 
 async function applyDocumentAction({ orderRef, userId, docType, targetStatus, filePath, version, notes }) {
   const isNumeric = /^\d+$/.test(String(orderRef));
@@ -321,6 +314,9 @@ const ALLOWED_UPDATE_FIELDS = [
   'notify_party_name', 'notify_party_address', 'notify_party_phone', 'notify_party_email',
   'shipment_remarks',
   'payment_terms',
+  // The receiving bank (prints on the documents, preselected on receipts) and
+  // retail bags per master bag were settable at create but never on edit.
+  'bank_account_id', 'units_per_bag',
   // Export documents print in KG or LBS (USA/Canada) — a presentation choice
   // per order; the engine still stores KG. Freight is structured rather than
   // typed into the document by hand: see migration 302 and
@@ -344,12 +340,53 @@ function packingCapacityError(qtyMt, palletized, packingType) {
   return null;
 }
 
+// create() only writes an Advance/Balance receivable for a non-zero amount, and
+// update() only resyncs rows that exist, so a draft saved before it had a price
+// has none. Submit fills in whichever is missing; existing rows are left alone.
+async function ensureOrderReceivables(trx, order) {
+  const currency = order.currency || 'USD';
+  const rate = parseFloat(order.booked_fx_rate) || 280;
+  const wanted = [
+    { type: 'Advance', prefix: 'RCV-ADV', amount: parseFloat(order.advance_expected) || 0, days: 14,
+      notes: `Advance ${order.advance_pct}% for order ${order.order_no}` },
+    { type: 'Balance', prefix: 'RCV-BAL', amount: parseFloat(order.balance_expected) || 0, days: 60,
+      notes: `Balance payment for order ${order.order_no} (against BL)` },
+  ];
+  for (const w of wanted) {
+    if (!(w.amount > 0)) continue;
+    // eslint-disable-next-line no-await-in-loop
+    const existing = await trx('receivables').where({ order_id: order.id, type: w.type }).first();
+    if (existing) continue;
+    const due = new Date();
+    due.setDate(due.getDate() + w.days);
+    // eslint-disable-next-line no-await-in-loop
+    await trx('receivables').insert({
+      recv_no: `${w.prefix}-${order.order_no}`,
+      entity: 'export',
+      order_id: order.id,
+      customer_id: order.customer_id,
+      type: w.type,
+      expected_amount: w.amount,
+      received_amount: 0,
+      outstanding: w.amount,
+      due_date: due.toISOString().split('T')[0],
+      status: 'Pending',
+      currency,
+      aging: 0,
+      notes: w.notes,
+      fx_rate: order.booked_fx_rate,
+      base_amount_pkr: w.amount * rate,
+    });
+  }
+}
+
 // Columns where Postgres rejects '' — coerce empty strings to null on update.
 const NUMERIC_UPDATE_FIELDS = new Set([
   'qty_mt', 'price_per_mt', 'advance_pct',
   'bag_size_kg', 'bag_weight_gm', 'broken_pct_target',
   'master_bag_size_kg', 'master_bag_weight_gm',
   'freight_per_mt', 'insurance_per_mt',
+  'bank_account_id', 'units_per_bag',
 ]);
 const DATE_UPDATE_FIELDS = new Set([
   'shipment_eta', 'production_date', 'expiry_date',
@@ -880,16 +917,31 @@ const exportOrderController = {
         effectivePricePerMt = summary.price_per_mt;
       }
 
-      if (!effectiveCustomerId || !effectiveProductId || !effectiveQtyMt || !effectivePricePerMt) {
+      // A draft is a work in progress: quantities, prices and the bank can be
+      // filled in later, and Submit (ensureTransitionAllowed) checks all of it
+      // before the order enters the workflow. The customer is always needed,
+      // and so is a product (export_orders.product_id is NOT NULL).
+      const isDraft = !requestedStatus || requestedStatus === 'Draft';
+      if (isDraft) {
+        if (!effectiveCustomerId || !effectiveProductId) {
+          return res.status(400).json({
+            success: false,
+            message: 'A draft needs a customer and a product (on the first line).',
+          });
+        }
+      } else if (!effectiveCustomerId || !effectiveProductId || !effectiveQtyMt || !effectivePricePerMt) {
         return res.status(400).json({
           success: false,
           message: 'customer_id, product_id, qty_mt, and price_per_mt are required (or provide items[]).',
         });
       }
+      effectiveQtyMt = parseFloat(effectiveQtyMt) || 0;
+      effectivePricePerMt = parseFloat(effectivePricePerMt) || 0;
 
       // #6 — the receiving bank account is mandatory at creation so every export
       // order (and its payment documents) has a settlement account from the start.
-      if (!req.body.bank_account_id) {
+      // A draft may pick it later; it is checked again on submit.
+      if (!isDraft && !req.body.bank_account_id) {
         return res.status(400).json({
           success: false,
           message: 'A bank account is required to create an export order.',
@@ -1155,11 +1207,15 @@ const exportOrderController = {
       // Owner and Mill Manager see them on Purchase Requirements with the most
       // lead time to buy. Deliberately OUTSIDE the transaction and non-fatal: a
       // requisition problem must never roll back or fail an accepted order.
+      // A draft may still change or be abandoned, so nothing is bought for it
+      // yet; submitDraft raises the requirements when it enters the workflow.
       let materialRequests = [];
-      try {
-        materialRequests = await exportOrderController._raiseMaterialsFor(result, req.user?.id);
-      } catch (mrErr) {
-        console.error('Auto material requirements failed for', result.order_no, mrErr.message);
+      if (result.status !== 'Draft') {
+        try {
+          materialRequests = await exportOrderController._raiseMaterialsFor(result, req.user?.id);
+        } catch (mrErr) {
+          console.error('Auto material requirements failed for', result.order_no, mrErr.message);
+        }
       }
 
       return res.status(201).json({
@@ -1208,20 +1264,32 @@ const exportOrderController = {
       }
 
       let resyncReceivables = false;
-      if (safeUpdates.qty_mt != null || safeUpdates.price_per_mt != null || safeUpdates.advance_pct != null) {
+      // The one P.I. line to rescale when qty/price are edited without items[].
+      let rescaleItem = null;
+      if (safeUpdates.qty_mt != null || safeUpdates.price_per_mt != null || safeUpdates.advance_pct != null
+          || safeUpdates.currency != null || safeUpdates.customer_id != null) {
         const existing = await db('export_orders').where({ id }).first();
         if (!existing) {
           return res.status(404).json({ success: false, message: 'Export order not found.' });
         }
 
+        const differs = (a, b) => Math.abs((parseFloat(a) || 0) - (parseFloat(b) || 0)) > 1e-9;
+        const qtyChanges = safeUpdates.qty_mt != null && differs(safeUpdates.qty_mt, existing.qty_mt);
+        const priceChanges = safeUpdates.price_per_mt != null && differs(safeUpdates.price_per_mt, existing.price_per_mt);
+        const currencyChanges = safeUpdates.currency != null
+          && String(safeUpdates.currency) !== String(existing.currency || 'USD');
+        const customerChanges = safeUpdates.customer_id != null
+          && parseInt(safeUpdates.customer_id, 10) !== parseInt(existing.customer_id, 10);
+
         // Guard: once money has been received against this order, revenue has
-        // been posted, or it has shipped/closed, the contract value is locked.
+        // been posted, or it has shipped/closed, the contract is locked.
         // Editing qty/price/advance% now would desync the receivables, the
-        // locked-PKR revenue basis, and any posted GL — with no reversal. Only
+        // locked-PKR revenue basis, and any posted GL — with no reversal. The
+        // currency and the buyer are part of the same contract: a receipt booked
+        // in USD against customer A can't become EUR or customer B's. Only
         // block when the value actually changes so pure metadata edits still work.
         const changesContract =
-          (safeUpdates.qty_mt != null && parseFloat(safeUpdates.qty_mt) !== parseFloat(existing.qty_mt)) ||
-          (safeUpdates.price_per_mt != null && parseFloat(safeUpdates.price_per_mt) !== parseFloat(existing.price_per_mt)) ||
+          qtyChanges || priceChanges || currencyChanges || customerChanges ||
           (safeUpdates.advance_pct != null && parseFloat(safeUpdates.advance_pct) !== (parseFloat(existing.advance_pct) || 0)) ||
           // Freight charged separately is part of what the buyer owes, so
           // changing it after a receipt would desync AR exactly as a price
@@ -1236,8 +1304,26 @@ const exportOrderController = {
         if (changesContract && committed) {
           return res.status(400).json({
             success: false,
-            message: 'Cannot change quantity, price, or advance % after a payment has been received or the order has shipped/closed. Reverse the receipts first.',
+            message: 'Cannot change the customer, currency, quantity, price, or advance % after a payment has been received or the order has shipped/closed. Reverse the receipts first.',
           });
+        }
+
+        // qty/price edited on the order without its lines: the documents print
+        // export_order_items, so leaving the lines alone printed the old figures.
+        // One line follows the order; several can't be split by guesswork.
+        if (!itemRowsForUpdate && (qtyChanges || priceChanges)) {
+          const lines = await db('export_order_items').where({ order_id: id }).orderBy('line_no');
+          if (lines.length > 1) {
+            return res.status(400).json({
+              success: false,
+              message: `This order has ${lines.length} line items. Edit the line items instead, so each line's quantity and price stay right on the documents.`,
+            });
+          }
+          if (lines.length === 1) {
+            const newQty = parseFloat(safeUpdates.qty_mt != null ? safeUpdates.qty_mt : existing.qty_mt) || 0;
+            const newPrice = parseFloat(safeUpdates.price_per_mt != null ? safeUpdates.price_per_mt : existing.price_per_mt) || 0;
+            rescaleItem = { id: lines[0].id, qty_mt: newQty, price_per_mt: newPrice, line_total: newQty * newPrice };
+          }
         }
 
         const qty = parseFloat(safeUpdates.qty_mt != null ? safeUpdates.qty_mt : existing.qty_mt);
@@ -1296,14 +1382,43 @@ const exportOrderController = {
 
         if (!order) return null;
 
-        // Replace P.I. line items if items[] was provided.
-        if (itemRowsForUpdate) {
+        // Replace P.I. line items if items[] was provided. When the payload is
+        // the SAME lines (each carries the id of one of this order's lines, all
+        // of them present) they're updated in place: stock reservations point at
+        // export_order_items.id, so delete-and-reinsert would orphan them.
+        const sentIds = Array.isArray(updates.items) ? updates.items.map((it) => parseInt(it && it.id, 10) || null) : [];
+        const currentLines = itemRowsForUpdate
+          ? await trx('export_order_items').where({ order_id: id })
+          : [];
+        const sameLines = itemRowsForUpdate
+          && sentIds.length === currentLines.length
+          && sentIds.every((lineId) => lineId && currentLines.some((l) => l.id === lineId))
+          && new Set(sentIds).size === sentIds.length;
+        if (sameLines) {
+          for (let i = 0; i < itemRowsForUpdate.length; i += 1) {
+            // line_no is left as stored: (order_id, line_no) is unique, and a
+            // reordered payload would collide halfway through the loop.
+            const { line_no: _ignored, ...row } = itemRowsForUpdate[i];
+            // eslint-disable-next-line no-await-in-loop
+            await trx('export_order_items').where({ id: sentIds[i], order_id: id }).update({
+              ...row,
+              updated_at: trx.fn.now(),
+            });
+          }
+        } else if (itemRowsForUpdate) {
           await trx('export_order_items').where({ order_id: id }).del();
           if (itemRowsForUpdate.length > 0) {
             await trx('export_order_items').insert(
               itemRowsForUpdate.map((r) => ({ ...r, order_id: parseInt(id) }))
             );
           }
+        } else if (rescaleItem) {
+          await trx('export_order_items').where({ id: rescaleItem.id }).update({
+            qty_mt: rescaleItem.qty_mt,
+            price_per_mt: rescaleItem.price_per_mt,
+            line_total: rescaleItem.line_total,
+            updated_at: trx.fn.now(),
+          });
         }
 
         // Resync the advance/balance receivables to the new contract value.
@@ -1315,6 +1430,12 @@ const exportOrderController = {
                 ? (parseFloat(order.contract_value_pkr_locked) || 0) / parseFloat(order.contract_value)
                 : 0)
             || 280;
+          // The receivables carry the buyer and currency too; the guard above
+          // only lets those change while nothing has been received.
+          const partyFields = {
+            customer_id: order.customer_id,
+            currency: order.currency || 'USD',
+          };
           await trx('receivables')
             .where({ order_id: id, type: 'Advance' })
             .update({
@@ -1322,6 +1443,7 @@ const exportOrderController = {
               outstanding: order.advance_expected,
               base_amount_pkr: order.advance_expected * bookedRate,
               fx_rate: order.booked_fx_rate,
+              ...partyFields,
               updated_at: trx.fn.now(),
             });
           await trx('receivables')
@@ -1331,6 +1453,7 @@ const exportOrderController = {
               outstanding: order.balance_expected,
               base_amount_pkr: order.balance_expected * bookedRate,
               fx_rate: order.booked_fx_rate,
+              ...partyFields,
               updated_at: trx.fn.now(),
             });
         }
@@ -1729,6 +1852,55 @@ const exportOrderController = {
         return res.status(err.statusCode).json({ success: false, message: err.message });
       }
       console.error('Export order updateShipment error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
+  // Submit a Draft into the workflow: Draft → Awaiting Advance (or straight to
+  // Advance Received when no advance is due). transitionOrder runs the full
+  // validation a live order is created under (see draftSubmitProblems), so a
+  // draft saved with blanks can't slip through. A draft saved at zero value
+  // never got its receivables, and nothing was bought for it; both happen here.
+  async submitDraft(req, res) {
+    try {
+      const id = await resolveExportOrderId(req.params.id);
+      if (!id) return res.status(404).json({ success: false, message: 'Export order not found.' });
+
+      const updated = await db.transaction(async (trx) => {
+        const order = await lockRow(trx('export_orders').where({ id })).first();
+        if (!order) { const e = new Error('Export order not found.'); e.statusCode = 404; throw e; }
+        if (order.status !== 'Draft') {
+          const e = new Error(`Only a Draft can be submitted; this order is '${order.status}'.`);
+          e.statusCode = 400; throw e;
+        }
+        const capErr = packingCapacityError(order.qty_mt, order.palletized, order.packing_type);
+        if (capErr) { const e = new Error(capErr); e.statusCode = 400; throw e; }
+
+        const toStatus = workflowService.submitTargetFor(order);
+        const moved = await workflowService.transitionOrder(trx, {
+          order,
+          toStatus,
+          userId: req.user.id,
+          reason: req.body?.notes || (toStatus === 'Advance Received'
+            ? 'Draft submitted (0% advance — advance stage skipped)'
+            : 'Draft submitted'),
+        });
+        await ensureOrderReceivables(trx, order);
+        return moved;
+      });
+
+      let materialRequests = [];
+      try {
+        materialRequests = await exportOrderController._raiseMaterialsFor(updated, req.user?.id);
+      } catch (mrErr) {
+        console.error('Auto material requirements failed for', updated.order_no, mrErr.message);
+      }
+
+      emitExportOrderUpdate(updated.id, 'status_updated', { status: updated.status });
+      return res.json({ success: true, data: { order: updated, materialRequests } });
+    } catch (err) {
+      if (err.statusCode) return res.status(err.statusCode).json({ success: false, message: err.message });
+      console.error('Export order submitDraft error:', err);
       return res.status(500).json({ success: false, message: 'Internal server error.' });
     }
   },
@@ -2739,6 +2911,35 @@ const exportOrderController = {
         if (!order) {
           const err = new Error('Export order not found.');
           err.statusCode = 404;
+          throw err;
+        }
+
+        // Stock reserved against an order that has already shipped (or is
+        // closed/cancelled) is never dispatched: the Shipped side effect has run
+        // and won't run again, so the lot would sit held forever.
+        if (['Shipped', 'Arrived', 'Closed', 'Cancelled'].includes(order.status)) {
+          const err = new Error(`Cannot allocate stock to an order in '${order.status}' status.`);
+          err.statusCode = 400;
+          throw err;
+        }
+
+        // Never hold more than the order is for: everything reserved is
+        // deducted at dispatch, so an over-allocation ships (and costs) rice the
+        // buyer didn't buy. 1 kg of slack absorbs MT↔KG rounding.
+        const reservedRow = await trx('inventory_reservations')
+          .where({ order_id: order.id, status: 'Active' })
+          .sum('reserved_qty as s')
+          .first();
+        const alreadyKg = parseFloat(reservedRow && reservedRow.s) || 0;
+        const orderKg = (parseFloat(order.qty_mt) || 0) * 1000;
+        const requestKg = qtyMT * 1000;
+        if (alreadyKg + requestKg > orderKg + 1) {
+          const roomMt = Math.max(0, orderKg - alreadyKg) / 1000;
+          const err = new Error(
+            `That would allocate ${((alreadyKg + requestKg) / 1000).toFixed(3)} MT to an order for ${(orderKg / 1000).toFixed(3)} MT. ` +
+            `${(alreadyKg / 1000).toFixed(3)} MT is already allocated; at most ${roomMt.toFixed(3)} MT more can be.`
+          );
+          err.statusCode = 400;
           throw err;
         }
 

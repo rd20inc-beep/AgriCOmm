@@ -52,7 +52,11 @@ router.get('/:id', authorize('export_orders', 'view'), controller.getById);
 router.post(
   '/',
   authorize('export_orders', 'create'),
-  validate(schemas.createExportOrder),
+  // A Draft may leave quantities, prices, Incoterm and bank blank; anything
+  // else gets the full schema. Submit re-validates the draft in full.
+  (req, res, next) => validate(
+    req.body && req.body.status === 'Draft' ? schemas.createExportOrderDraft : schemas.createExportOrder
+  )(req, res, next),
   auditAction('create', 'export_order', (req, data) => data.data && data.data.id ? data.data.id : null),
   controller.create
 );
@@ -74,6 +78,15 @@ router.put(
   validate(schemas.updateExportShipment),
   auditAction('update_shipment', 'export_order', (req) => req.params.id),
   controller.updateShipment
+);
+// Submitting a draft is what creating a live order would have been, so it needs
+// the create permission; the workflow re-validates everything at this point.
+router.post(
+  '/:id/submit',
+  authorize('export_orders', 'create'),
+  validate(schemas.exportOrderAction),
+  auditAction('submit_draft', 'export_order', (req) => req.params.id),
+  controller.submitDraft
 );
 router.post(
   '/:id/start-docs',

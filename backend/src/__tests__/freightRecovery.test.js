@@ -8,14 +8,24 @@
  *
  * Verified against a real Postgres with four orders (freight charged separately,
  * freight inside a CIF price, freight paid and never billed, and plain FOB) plus
- * an escalation debit note; both ledger rows reconciled to zero. What is pinned
- * here is the arithmetic and the two things that make the reconciliation
- * meaningful rather than permanently noisy.
+ * an escalation debit note; both ledger rows reconciled to zero.
+ *
+ * The export-order side (which account a cost posts to) is RUN here: addCost
+ * against an in-memory database. The report's own queries are joins and raw SQL
+ * the in-memory database can't run, so those checks still read the controller.
  */
+jest.mock('../config/database', () => require('./helpers/memoryDb').db);
+const mockJournals = [];
+const mockAccounting = {
+  createJournal: jest.fn(async (_trx, j) => { mockJournals.push(j); return { id: mockJournals.length }; }),
+  postJournal: jest.fn(async () => {}),
+};
+jest.mock('../services/accountingService', () => mockAccounting);
+jest.mock('../modules/accounting/accounting.service', () => mockAccounting);
+
 const fs = require('fs');
 const path = require('path');
 const CTRL = fs.readFileSync(path.join(__dirname, '../modules/analytics/reporting.controller.js'), 'utf8');
-const ORDERS = fs.readFileSync(path.join(__dirname, '../modules/exportOrders/exportOrders.controller.js'), 'utf8');
 
 // The report's own rules, restated so they can be exercised.
 const RATE = 280;
@@ -92,26 +102,45 @@ describe('the ledger comparison holds like against like', () => {
 });
 
 describe('a cost reaches the account built for it', () => {
-  it('freight and insurance no longer land in 6000 with everything else', () => {
-    // The chart has had 6010/6020/6030/6050/6060 since it was seeded and addCost
-    // posted every category to 6000, so the P&L could say what an order cost in
-    // total but never what it was spent ON — and 6010 stayed empty while freight
-    // was being paid, which is what made this report impossible.
-    expect(ORDERS).toContain('const COST_CATEGORY_ACCOUNT');
-    expect(ORDERS).toMatch(/freight: '6010'/);
-    expect(ORDERS).toMatch(/insurance: '6050'/);
-    expect(ORDERS).toMatch(/clearing: '6020'/);
-    expect(ORDERS).toMatch(/loading: '6030'/);
-    expect(ORDERS).toMatch(/commission: '6060'/);
+  const { reset } = require('./helpers/memoryDb');
+  const controller = require('../modules/exportOrders/exportOrders.controller');
+  const CHART = [
+    ['6000', 'Operating Expenses'], ['6010', 'Freight & Shipping'], ['6020', 'Clearing & Forwarding'],
+    ['6030', 'Loading Charges'], ['6050', 'Insurance'], ['6060', 'Commission & Brokerage'],
+    ['2010', 'Supplier Payable'],
+  ].map(([code, name], i) => ({ id: i + 1, code, name }));
+
+  // Records a cost and returns the account code its journal debited.
+  async function debitedFor(category, chart = CHART) {
+    mockJournals.length = 0;
+    reset({
+      export_orders: [{ id: 1, order_no: 'EX-001', booked_fx_rate: 280 }],
+      export_order_costs: [], payables: [], chart_of_accounts: chart,
+    });
+    const res = { status() { return this; }, json(b) { this.body = b; return this; } };
+    await controller.addCost({ params: { id: '1' }, body: { category, amount: 10000 }, user: { id: 1 } }, res);
+    expect(res.body && res.body.success).toBe(true);
+    const debit = mockJournals[0].lines.find((l) => l.debit > 0);
+    return chart.find((a) => a.id === debit.account_id).code;
+  }
+
+  // The chart has had 6010/6020/6030/6050/6060 since it was seeded and addCost
+  // used to post every category to 6000, so the P&L could say what an order
+  // cost in total but never what it was spent ON — and 6010 stayed empty while
+  // freight was being paid, which is what made this report impossible.
+  it.each([
+    ['freight', '6010'], ['insurance', '6050'], ['clearing', '6020'],
+    ['loading', '6030'], ['commission', '6060'],
+  ])('%s posts to %s', async (category, code) => {
+    expect(await debitedFor(category)).toBe(code);
   });
 
-  it('a category with no account of its own still goes to 6000', () => {
-    expect(ORDERS).toContain("COST_CATEGORY_ACCOUNT[category] || '6000'");
+  it('a category with no account of its own still goes to 6000', async () => {
+    expect(await debitedFor('pallet')).toBe('6000');
   });
 
-  it('a missing seeded account falls back rather than dropping the cost', () => {
-    const block = ORDERS.slice(ORDERS.indexOf('const wantCode ='), ORDERS.indexOf('const supplierPayable'));
-    expect(block).toContain("|| await trx('chart_of_accounts').where({ code: '6000' }).first()");
+  it('a missing seeded account falls back rather than dropping the cost', async () => {
+    expect(await debitedFor('freight', CHART.filter((a) => a.code !== '6010'))).toBe('6000');
   });
 });
 

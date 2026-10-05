@@ -7,6 +7,28 @@ const Joi = require('joi');
 
 // ===================== EXPORT ORDERS =====================
 
+// One P.I. line — each carries its own product/qty/price/HS code/packing.
+const exportOrderItem = Joi.object({
+  product_id: Joi.number().integer().positive().allow(null),
+  product_name: Joi.string().max(255).allow('', null),
+  qty_mt: Joi.number().positive().required(),
+  price_per_mt: Joi.number().positive().required(),
+  hs_code: Joi.string().max(20).allow('', null),
+  packing: Joi.string().max(100).allow('', null),
+  bag_size_kg: Joi.number().positive().allow(null, ''),
+  master_bag_size_kg: Joi.number().positive().allow(null, ''),
+  master_bag_type: Joi.string().max(100).allow('', null),
+  bag_count: Joi.number().integer().min(0).allow(null, ''),
+  bag_type: Joi.string().max(100).allow('', null),
+  bag_quality: Joi.string().max(100).allow('', null),
+  bag_brand: Joi.string().max(255).allow('', null),
+  bag_color: Joi.string().max(100).allow('', null),
+  bag_printing: Joi.string().max(255).allow('', null),
+  quality_description: Joi.string().allow('', null),
+  broken_pct_target: Joi.number().min(0).max(100).allow(null, ''),
+  notes: Joi.string().allow('', null),
+});
+
 const createExportOrder = Joi.object({
   customer_id: Joi.number().integer().positive().required(),
   product_id: Joi.number().integer().positive().required(),
@@ -123,26 +145,27 @@ const createExportOrder = Joi.object({
     notes: Joi.string().allow('', null),
   })).allow(null),
   // Multi-line P.I. items — each line carries its own product/qty/price/HS code/packing
-  items: Joi.array().items(Joi.object({
-    product_id: Joi.number().integer().positive().allow(null),
-    product_name: Joi.string().max(255).allow('', null),
-    qty_mt: Joi.number().positive().required(),
-    price_per_mt: Joi.number().positive().required(),
-    hs_code: Joi.string().max(20).allow('', null),
-    packing: Joi.string().max(100).allow('', null),
-    bag_size_kg: Joi.number().positive().allow(null, ''),
-    master_bag_size_kg: Joi.number().positive().allow(null, ''),
-    master_bag_type: Joi.string().max(100).allow('', null),
-    bag_count: Joi.number().integer().min(0).allow(null, ''),
-    bag_type: Joi.string().max(100).allow('', null),
-    bag_quality: Joi.string().max(100).allow('', null),
-    bag_brand: Joi.string().max(255).allow('', null),
-    bag_color: Joi.string().max(100).allow('', null),
-    bag_printing: Joi.string().max(255).allow('', null),
-    quality_description: Joi.string().allow('', null),
-    broken_pct_target: Joi.number().min(0).max(100).allow(null, ''),
-    notes: Joi.string().allow('', null),
-  })).allow(null),
+  items: Joi.array().items(exportOrderItem).allow(null),
+});
+
+// A Draft is a work in progress: the order is saved so it can be finished later,
+// so quantities, prices, the Incoterm and the bank may still be blank or zero.
+// The customer stays required, and so does the product (export_orders.product_id
+// is NOT NULL). Submitting the draft runs the full check (draftSubmitProblems).
+const DRAFT_BLANK = [null, '', 0];
+const exportOrderItemDraft = exportOrderItem.keys({
+  qty_mt: Joi.number().min(0).allow(...DRAFT_BLANK),
+  price_per_mt: Joi.number().min(0).allow(...DRAFT_BLANK),
+});
+const createExportOrderDraft = createExportOrder.keys({
+  qty_mt: Joi.number().min(0).allow(...DRAFT_BLANK),
+  price_per_mt: Joi.number().min(0).allow(...DRAFT_BLANK),
+  contract_value: Joi.number().min(0).allow(...DRAFT_BLANK),
+  incoterm: Joi.string().valid(
+    'EXW', 'FCA', 'FAS', 'FOB', 'CFR', 'CNF', 'CIF', 'CPT', 'CIP', 'DAP', 'DPU', 'DDP'
+  ).allow('', null),
+  bank_account_id: Joi.number().integer().positive().allow(null, ''),
+  items: Joi.array().items(exportOrderItemDraft).allow(null),
 });
 
 const updateExportShipment = Joi.object({
@@ -743,6 +766,7 @@ const downloadDocumentPdf = Joi.object({
 module.exports = {
   bundleDocuments,
   createExportOrder,
+  createExportOrderDraft,
   updateExportShipment,
   exportPackingWeight,
   exportOrderAction,

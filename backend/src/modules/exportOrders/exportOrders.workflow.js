@@ -55,30 +55,85 @@ function canTransition(fromStatus, toStatus) {
   return getAllowedTransitions(fromStatus).includes(toStatus);
 }
 
+// Statuses where shipment details (vessel, booking, containers, BL, GD, FI...)
+// can be entered. A vessel is booked while the rice is still milling, so the
+// editor opens from In Milling; only the ATD/ATA dates, which DRIVE the
+// Shipped/Arrived transitions, wait for Ready to Ship (updateShipment refuses
+// them earlier with a clear message).
+const SHIPMENT_EDITABLE_STATUSES = [
+  'In Milling', 'Docs In Preparation', 'Awaiting Balance', 'Ready to Ship', 'Shipped',
+];
+const SHIPMENT_DEPARTURE_STATUSES = ['Ready to Ship', 'Shipped'];
+
 function getAllowedActions(order) {
   const advanceReceived = settledAmount(order.advance_received || 0);
   const advanceExpected = settledAmount(order.advance_expected || 0);
   const balanceReceived = settledAmount(order.balance_received || 0);
   const balanceExpected = settledAmount(order.balance_expected || 0);
   const isTerminal = ['Closed', 'Cancelled'].includes(order.status);
+  const departed = ['Shipped', 'Arrived'].includes(order.status);
 
   return {
-    canConfirmAdvance: ['Draft', 'Awaiting Advance'].includes(order.status) && advanceReceived < advanceExpected,
+    // Money-based, not stage-based. An order may go on to milling while its
+    // advance is still pending (#2 decouple) and Shipped is gated on that
+    // advance, so tying this to Draft/Awaiting Advance left an In Milling order
+    // with an advance it had no way to record and a shipment it could never
+    // make. recordExportReceipt accepts any non-terminal status. Once the goods
+    // have left, whatever is still owed is collected as the balance.
+    canConfirmAdvance: !isTerminal && !departed && advanceReceived < advanceExpected,
     canStartDocs: order.status === 'In Milling',
-    canRequestBalance: order.status === 'Awaiting Balance' && balanceReceived < balanceExpected,
+    // Likewise: a balance can arrive before the documents are done, and a freight
+    // debit note raised after shipment re-opens a balance that has to be
+    // recordable on a Shipped/Arrived order.
+    canRequestBalance: !isTerminal && balanceReceived < balanceExpected,
     // #2 decouple: milling no longer waits for the advance to be fully received.
     // Once the order is out of Draft (i.e. confirmed) and not terminal / already
     // milling, operational milling can start. The advance is tracked separately on
     // financial_status and only blocks final dispatch.
     canCreateMilling: !isTerminal && !order.milling_order_id && order.status !== 'Draft',
-    canUpdateShipment: ['Ready to Ship', 'Shipped'].includes(order.status),
-    canPutOnHold: !isTerminal,
-    canCloseOrder: order.status === 'Arrived' || (order.status === 'Shipped' && balanceReceived >= balanceExpected),
+    canUpdateShipment: SHIPMENT_EDITABLE_STATUSES.includes(order.status),
+    // ATD/ATA move the order to Shipped/Arrived; only offered where that move exists.
+    canRecordDeparture: SHIPMENT_DEPARTURE_STATUSES.includes(order.status),
+    // Must agree with STATUS_TRANSITIONS: offering Close on a Shipped order only
+    // ever produced a "Cannot transition" error.
+    canCloseOrder: canTransition(order.status, 'Closed'),
+    // A draft is submitted into the workflow; full validation runs at that point.
+    canSubmitDraft: order.status === 'Draft',
     // Cancel is an out-of-band action (not part of the linear STATUS_TRANSITIONS
     // map). Allowed any time before dispatch; once Shipped/Arrived the goods have
     // moved and it must be handled via returns / Danger Zone.
     canCancel: !['Shipped', 'Arrived', 'Closed', 'Cancelled'].includes(order.status),
   };
+}
+
+// Everything a Draft may leave blank but a live order may not. Checked whenever
+// an order leaves Draft (ensureTransitionAllowed), so every way out of Draft,
+// Submit or a direct status change, is held to the rules a live order is
+// created under.
+function draftSubmitProblems(order, items = []) {
+  const problems = [];
+  if (!order.customer_id) problems.push('a customer');
+  if (!order.product_id) problems.push('a product');
+  if (!order.incoterm) problems.push('an Incoterm');
+  if (!order.bank_account_id) problems.push('a company bank account');
+  const lines = Array.isArray(items) ? items : [];
+  if (lines.length > 0) {
+    lines.forEach((it, idx) => {
+      const n = it.line_no || idx + 1;
+      if (!it.product_id && !it.product_name) problems.push(`a product on line ${n}`);
+      if (!(parseFloat(it.qty_mt) > 0)) problems.push(`a quantity on line ${n}`);
+      if (!(parseFloat(it.price_per_mt) > 0)) problems.push(`a price on line ${n}`);
+    });
+  } else {
+    if (!(parseFloat(order.qty_mt) > 0)) problems.push('a quantity');
+    if (!(parseFloat(order.price_per_mt) > 0)) problems.push('a price per MT');
+  }
+  return problems;
+}
+
+// Where a submitted draft lands: with no advance due there is nothing to await.
+function submitTargetFor(order) {
+  return settledAmount(order.advance_expected) > 0 ? 'Awaiting Advance' : 'Advance Received';
 }
 
 function buildTransitionError(fromStatus, toStatus) {
@@ -92,6 +147,16 @@ function buildTransitionError(fromStatus, toStatus) {
 async function ensureTransitionAllowed(trx, order, toStatus) {
   if (!canTransition(order.status, toStatus)) {
     throw buildTransitionError(order.status, toStatus);
+  }
+
+  if (order.status === 'Draft') {
+    const items = await trx('export_order_items').where({ order_id: order.id });
+    const problems = draftSubmitProblems(order, items);
+    if (problems.length) {
+      const err = new Error(`This draft can't be submitted yet. It still needs ${problems.join(', ')}.`);
+      err.statusCode = 400;
+      throw err;
+    }
   }
 
   if (toStatus === 'Shipped') {
@@ -355,20 +420,36 @@ async function transitionOrder(trx, {
   };
 }
 
+// The seven checklist documents an export order needs before it can ask for the
+// balance, each with every doc_type spelling that has been stored for it.
+const DOC_TYPE_ALIASES = {
+  'phyto': ['phyto', 'Phytosanitary Certificate'],
+  'blDraft': ['blDraft', 'bl_draft', 'BL Draft'],
+  'blFinal': ['blFinal', 'bl_final', 'BL Final'],
+  'invoice': ['invoice', 'commercial_invoice', 'Commercial Invoice'],
+  'packingList': ['packingList', 'packing_list', 'Packing List'],
+  'coo': ['coo', 'Certificate of Origin'],
+  'fumigation': ['fumigation', 'Fumigation Certificate'],
+};
+const REQUIRED_DOCS = Object.keys(DOC_TYPE_ALIASES);
+const DOC_APPROVED_STATUSES = new Set(['Approved', 'Final']);
+
+// True only when EACH required document has an Approved/Final row. Counting any
+// seven rows let a draft upload, or seven optional documents, promote the order.
+function requiredDocsApproved(orderDocs) {
+  const docs = Array.isArray(orderDocs) ? orderDocs : [];
+  return REQUIRED_DOCS.every((key) => docs.some(
+    (d) => DOC_TYPE_ALIASES[key].includes(d.doc_type) && DOC_APPROVED_STATUSES.has(d.status)
+  ));
+}
+
 async function maybePromoteAfterDocuments(trx, { order, userId, reason }) {
   if (order.status !== 'Docs In Preparation') {
     return { changed: false, order };
   }
 
-  // Check export_order_documents — all 7 must be Approved or Final
-  const REQUIRED_DOCS = ['phyto', 'blDraft', 'blFinal', 'invoice', 'packingList', 'coo', 'fumigation',
-    'Phytosanitary Certificate', 'BL Draft', 'BL Final', 'Commercial Invoice', 'Packing List', 'Certificate of Origin', 'Fumigation Certificate'];
   const orderDocs = await trx('export_order_documents').where({ order_id: order.id });
-  const approvedStatuses = new Set(['Approved', 'Final', 'Draft Uploaded']);
-  const approvedCount = orderDocs.filter(d => approvedStatuses.has(d.status)).length;
-  // Need at least 7 docs confirmed (the 7 required export docs)
-  const docsComplete = approvedCount >= 7;
-  if (!docsComplete) {
+  if (!requiredDocsApproved(orderDocs)) {
     return { changed: false, order };
   }
 
@@ -444,6 +525,11 @@ module.exports = {
   canTransition,
   transitionOrder,
   deriveFinancialStatus,
+  draftSubmitProblems,
+  submitTargetFor,
+  DOC_TYPE_ALIASES,
+  REQUIRED_DOCS,
+  requiredDocsApproved,
   maybePromoteAfterDocuments,
   maybePromoteAfterAdvance,
   maybePromoteAfterBalance,

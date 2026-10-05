@@ -6,111 +6,183 @@
  * Bill of Lading is invoiced by debit note, "payable together with the balance
  * of the contract value". These hold that promise to its wording.
  *
- * The end-to-end behaviour (balance, receivable and GL moving together, and the
- * trial balance staying at zero through issue and cancel) was verified against a
- * real Postgres; what is pinned here is the arithmetic and the wiring, which is
- * what a later refactor can quietly break.
+ * The service is RUN here against an in-memory database with the accounting
+ * service recording what it is asked to post: the arithmetic, the balance and
+ * receivable moving together, and the journals. What is still read from source
+ * is source structure: the route guards, a migration CHECK, and the document
+ * controller's wiring.
  */
 const fs = require('fs');
 const path = require('path');
 
+jest.mock('../config/database', () => require('./helpers/memoryDb').db);
+const mockJournals = [];
+const mockPosted = [];
+const mockAccounting = {
+  createJournal: jest.fn(async (_trx, j) => { mockJournals.push(j); return { id: mockJournals.length }; }),
+  postJournal: jest.fn(async (_trx, id) => { mockPosted.push(id); }),
+  reverseJournal: jest.fn(),
+};
+jest.mock('../modules/accounting/accounting.service', () => mockAccounting);
+jest.mock('../utils/docNumber', () => ({
+  nextDocNo: async (_trx, { prefix }) => `${prefix}${String(require('./helpers/memoryDb').state.tables.export_debit_notes.length + 1).padStart(4, '0')}`,
+}));
+
+const { state, reset } = require('./helpers/memoryDb');
+const debitNotes = require('../modules/exportOrders/debitNote.service');
+
 const read = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
-const SVC = read('modules/exportOrders/debitNote.service.js');
 const ROUTES = read('modules/exportOrders/exportOrders.routes.js');
 
-describe('what the note claims', () => {
-  // The working the buyer will check: the rise per ton times the tons shipped.
-  const derive = (oldR, newR, qty) => Math.round((newR - oldR) * qty * 100) / 100;
+function seed(over = {}, recvOver = {}) {
+  mockJournals.length = 0;
+  mockPosted.length = 0;
+  reset({
+    export_orders: [{
+      id: 1, order_no: 'EX-001', customer_id: 10, status: 'Shipped', currency: 'USD',
+      qty_mt: 24, contract_value: 12000, contract_value_pkr_locked: 3360000, booked_fx_rate: 280,
+      balance_expected: 9600, balance_received: 0, ...over,
+    }],
+    receivables: [{
+      id: 5, order_id: 1, type: 'Balance', expected_amount: 9600, received_amount: 0,
+      outstanding: 9600, status: 'Pending', base_amount_pkr: 2688000, notes: null, ...recvOver,
+    }],
+    export_debit_notes: [],
+    chart_of_accounts: [
+      { id: 110, code: '1110', name: 'Export AR' },
+      { id: 470, code: '4070', name: 'Freight & Insurance Recovered' },
+      { id: 401, code: '4010', name: 'Export Sales' },
+    ],
+  });
+}
+const order = () => state.tables.export_orders[0];
+const recv = () => state.tables.receivables[0];
 
+describe('what the note claims', () => {
   it.each([
     [58, 76, 24, 432],
     [58, 76.5, 24, 444],
     [0, 12.5, 100, 1250],
     [58.33, 61.11, 24.375, 67.76],   // rounded to the paisa, not left as dust
-  ])('%s → %s per MT over %s MT is %s', (o, n, q, expected) => {
-    expect(derive(o, n, q)).toBe(expected);
+  ])('%s → %s per MT over %s MT is %s', async (o, n, q, expected) => {
+    seed();
+    const note = await debitNotes.issue(1, { old_rate_per_mt: o, new_rate_per_mt: n, qty_mt: q }, 1);
+    expect(note.amount).toBe(expected);
   });
 
-  it('a rate that did not rise is not a claim', () => {
+  it('a rate that did not rise is not a claim', async () => {
     // A debit note DEBITS. Letting a fall through would quietly credit the buyer
-    // through a document nobody reads as a credit note, so the CHECK constraint
-    // and the service both refuse it.
-    expect(derive(76, 58, 24)).toBeLessThan(0);
-    expect(SVC).toContain('if (!(amount > 0))');
+    // through a document nobody reads as a credit note.
+    seed();
+    await expect(debitNotes.issue(1, { old_rate_per_mt: 76, new_rate_per_mt: 58 }, 1))
+      .rejects.toThrow(/Enter the amount to claim/);
+    expect(state.tables.export_debit_notes).toHaveLength(0);
+    expect(mockJournals).toHaveLength(0);
+    // The table refuses one too (structure — the migration's CHECK).
     const mig = fs.readFileSync(path.join(__dirname, '../../migrations/20260929_304_export_debit_notes.js'), 'utf8');
     expect(mig).toContain('CHECK (amount > 0)');
   });
 
-  it('an amount typed by hand wins over the working', () => {
+  it('an amount typed by hand wins over the working', async () => {
     // A congestion surcharge is a lump sum with no per-MT story.
-    expect(SVC).toMatch(/if \(amount == null && oldRate != null && newRate != null\)/);
+    seed();
+    const note = await debitNotes.issue(1, { amount: 300, old_rate_per_mt: 58, new_rate_per_mt: 76 }, 1);
+    expect(note.amount).toBe(300);
+  });
+
+  it('a cancelled order takes no note', async () => {
+    seed({ status: 'Cancelled' });
+    await expect(debitNotes.issue(1, { amount: 100 }, 1)).rejects.toThrow(/cancelled order/);
   });
 });
 
 describe('the claim lands on the balance, as the clause says', () => {
-  it('it raises balance_expected and the Balance receivable together', () => {
-    expect(SVC).toContain("balance_expected: newBalanceExpected");
-    expect(SVC).toContain("trx('receivables').where({ order_id: order.id, type: 'Balance' })");
+  it('it raises balance_expected and the Balance receivable together', async () => {
+    seed();
+    const note = await debitNotes.issue(1, { old_rate_per_mt: 58, new_rate_per_mt: 76 }, 1);
+    expect(note.debit_note_no).toBe('DN-0001');
+    expect(order().balance_expected).toBe(10032);
+    expect(recv()).toMatchObject({ expected_amount: 10032, outstanding: 10032, status: 'Pending', base_amount_pkr: 2688000 + 432 * 280 });
+    // It rides the existing Balance row: no new receivable type is invented
+    // (receivables.type is CHECK-constrained), so the ordinary balance
+    // confirmation settles it.
+    expect(state.tables.receivables).toHaveLength(1);
   });
 
-  it('a note against a fully paid balance makes it owing again', () => {
-    expect(SVC).toMatch(/status: outstanding <= MONEY_EPSILON \? 'Paid' : \(received > 0 \? 'Partial' : 'Pending'\)/);
+  it('a note against a fully paid balance makes it owing again', async () => {
+    seed({ balance_received: 9600 }, { received_amount: 9600, outstanding: 0, status: 'Paid' });
+    await debitNotes.issue(1, { amount: 432 }, 1);
+    expect(recv()).toMatchObject({ outstanding: 432, status: 'Partial' });
   });
 
-  it('it does NOT invent a receivable type the schema forbids', () => {
-    // receivables.type is CHECK-constrained to Advance/Balance/Local Sale/
-    // Service Milling. Routing the claim through the existing Balance row is
-    // what lets the ordinary balance confirmation settle it, with no second
-    // receipt path to reconcile.
-    expect(SVC).not.toContain("type: 'Debit Note'");
-    expect(SVC).not.toContain("insert({ recv_no");
+  it('cancelling takes it back off the balance', async () => {
+    seed();
+    const note = await debitNotes.issue(1, { amount: 432 }, 1);
+    const cancelled = await debitNotes.cancel(1, note.id, { reason: 'carrier waived it' }, 1);
+    expect(cancelled.status).toBe('Cancelled');
+    expect(order().balance_expected).toBe(9600);
+    expect(recv()).toMatchObject({ expected_amount: 9600, outstanding: 9600 });
   });
 
-  it('cancelling a note the buyer already paid is refused', () => {
-    expect(SVC).toContain('already exceeds what would remain owing');
-    // And it is checked BEFORE anything is posted, so a refusal leaves nothing
-    // half-done to unwind.
-    const cancelBody = SVC.slice(SVC.indexOf('async cancel('));
-    expect(cancelBody.indexOf('applyToBalance')).toBeLessThan(cancelBody.indexOf('postDebitNoteJournal'));
+  it('cancelling a note the buyer already paid is refused, before anything is posted', async () => {
+    seed();
+    const note = await debitNotes.issue(1, { amount: 432 }, 1);
+    order().balance_received = 10032;
+    const journalsBefore = mockJournals.length;
+    await expect(debitNotes.cancel(1, note.id, {}, 1)).rejects.toThrow(/already exceeds what would remain owing/);
+    expect(mockJournals).toHaveLength(journalsBefore);
+    expect(state.tables.export_debit_notes[0].status).toBe('Issued');
   });
 });
 
 describe('the ledger', () => {
-  it('debits Export AR and credits freight recovered, never export sales', () => {
-    expect(SVC).toContain("where({ code: '1110' })");
-    expect(SVC).toContain("where({ code: '4070' })");
-    expect(SVC).not.toContain("'4010'");
+  const lineSum = (j, acct) => j.lines.filter((l) => l.account_id === acct)
+    .reduce((s, l) => s + (l.debit || 0) - (l.credit || 0), 0);
+
+  it('debits Export AR and credits freight recovered, never export sales', async () => {
+    seed();
+    await debitNotes.issue(1, { amount: 432 }, 1);
+    const [j] = mockJournals;
+    expect(lineSum(j, 110)).toBe(432 * 280);
+    expect(lineSum(j, 470)).toBe(-432 * 280);
+    expect(j.lines.some((l) => l.account_id === 401)).toBe(false);
+    expect(j).toMatchObject({ partyType: 'customer', partyId: 10, origCurrency: 'USD', origFxRate: 280 });
   });
 
-  it('cancelling posts a SIGNED DELTA, it never reverses and reposts', () => {
+  it('cancelling posts a SIGNED DELTA, it never reverses and reposts', async () => {
     // The trial balance and every ledger count Posted journals only, so a
     // reverse-and-repost would subtract the amount twice.
-    expect(SVC).toContain('cancel_journal_id');
-    expect(SVC).not.toContain('reverseJournal');
-    // The reversing entry is the opposite pair, posted as its own journal.
-    const rev = SVC.slice(SVC.indexOf('const lines = reversing'), SVC.indexOf('const journal = await'));
-    expect(rev).toMatch(/freightRev\.id, account: freightRev\.name, debit: amt/);
-    expect(rev).toMatch(/exportAR\.id, account: exportAR\.name, debit: 0, credit: amt/);
+    seed();
+    const note = await debitNotes.issue(1, { amount: 432 }, 1);
+    await debitNotes.cancel(1, note.id, {}, 1);
+    expect(mockAccounting.reverseJournal).not.toHaveBeenCalled();
+    expect(mockJournals).toHaveLength(2);
+    const [issued, undone] = mockJournals;
+    expect(lineSum(undone, 110)).toBe(-lineSum(issued, 110));
+    expect(lineSum(undone, 470)).toBe(-lineSum(issued, 470));
+    expect(state.tables.export_debit_notes[0].cancel_journal_id).toBe(2);
   });
 
-  it('every journal it writes is actually posted, not left Draft', () => {
-    // createJournal writes a DRAFT; the trial balance counts Posted only, so an
-    // unposted journal is a claim that never reaches the books.
-    const creates = (SVC.match(/createJournal\(/g) || []).length;
-    const posts = (SVC.match(/postJournal\(/g) || []).length;
-    expect(posts).toBe(creates);
+  it('every journal it writes is actually posted, not left Draft', async () => {
+    seed();
+    const note = await debitNotes.issue(1, { amount: 432 }, 1);
+    await debitNotes.cancel(1, note.id, {}, 1);
+    expect(mockPosted).toEqual([1, 2]);
   });
 
-  it('it values the claim at the order’s booked rate, not today’s', () => {
-    expect(SVC).toContain('parseFloat(order.booked_fx_rate)');
-    expect(SVC).toContain('contract_value_pkr_locked');
+  it('it values the claim at the order’s booked rate, not today’s', async () => {
+    seed({ booked_fx_rate: null }); // falls back to the locked PKR/contract ratio: 3,360,000 / 12,000 = 280
+    const note = await debitNotes.issue(1, { amount: 100 }, 1);
+    expect(note.fx_rate).toBe(280);
+    expect(note.amount_pkr).toBe(28000);
   });
 
-  it('a Postgres date never reaches the period lookup as "Tue Sep 29"', () => {
+  it('a Postgres date never reaches the period lookup as "Tue Sep 29"', async () => {
     // Date#toString sliced to ten characters produced exactly that, and the
     // accounting-period lookup rejected it as a date.
-    expect(SVC).toContain('const isoDate =');
-    expect(SVC).not.toMatch(/issue_date\)\.toString\(\)\.slice/);
+    seed();
+    await debitNotes.issue(1, { amount: 100, issue_date: new Date('2026-09-29T00:00:00Z') }, 1);
+    expect(mockJournals[0].date).toBe('2026-09-29');
   });
 });
 
