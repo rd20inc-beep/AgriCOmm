@@ -3,7 +3,7 @@
  * All data fetching and mutations via useQuery / useMutation.
  */
 
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import api from './client';
 import { queryKeys } from './queryClient';
 import {
@@ -2714,6 +2714,50 @@ export function useLotInventory(params = {}) {
     queryFn: async () => {
       const res = await lotInventoryApi.listLots({ limit: 100, ...params });
       return transformKeys(unwrap(res, 'lots') || []);
+    },
+    staleTime: 10 * 1000,
+    refetchOnMount: 'always',
+  });
+}
+
+// One server-filtered page of lots plus its pagination. Lot Inventory used to
+// load the 100 newest lots and filter/search them in the browser, so any lot
+// past the first 100 could not be found and the KPIs undercounted.
+export function useLotInventoryPage(params = {}) {
+  return useQuery({
+    queryKey: ['lot-inventory', 'page', params],
+    queryFn: async () => {
+      const res = await lotInventoryApi.listLots({ limit: 100, ...params });
+      const data = res?.data || {};
+      return {
+        lots: transformKeys(data.lots || []),
+        pagination: data.pagination || { page: 1, limit: 100, total: (data.lots || []).length, totalPages: 1 },
+      };
+    },
+    placeholderData: keepPreviousData,
+    staleTime: 10 * 1000,
+    refetchOnMount: 'always',
+  });
+}
+
+// Lot Inventory KPI totals, summed on the server over every lot in scope
+// (Stock Summary endpoint, grouped by lot type, empty lots included so the lot
+// count still counts closed/sold lots on the "All" tab).
+export function useLotInventoryTotals(params = {}) {
+  return useQuery({
+    queryKey: ['lot-inventory', 'totals', params],
+    queryFn: async () => {
+      const res = await lotInventoryApi.stockReport({ group_by: 'type', include_empty: 'true', ...params });
+      const rows = res?.data?.report || res?.report || [];
+      const n = (v) => Number(v) || 0;
+      return rows.reduce((a, r) => ({
+        totalLots: a.totalLots + n(r.lot_count),
+        totalKg: a.totalKg + n(r.total_kg),
+        availKg: a.availKg + n(r.available_kg),
+        reservedKg: a.reservedKg + n(r.reserved_kg),
+        soldKg: a.soldKg + n(r.sold_kg),
+        totalValue: a.totalValue + n(r.total_value),
+      }), { totalLots: 0, totalKg: 0, availKg: 0, reservedKg: 0, soldKg: 0, totalValue: 0 });
     },
     staleTime: 10 * 1000,
     refetchOnMount: 'always',
