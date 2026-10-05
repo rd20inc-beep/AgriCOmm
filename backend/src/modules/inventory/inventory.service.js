@@ -189,6 +189,23 @@ async function deriveProductCode(q, productId) {
   return 'RAW';
 }
 
+// System qty vs the sum of the lot's ledger (both KG since Phase 5c).
+function reconcileRow(lot, ledgerTotalKg) {
+  const ledgerBalanceKg = parseFloat(ledgerTotalKg) || 0;
+  const systemBalanceKg = parseFloat(lot.qty) || 0;
+  const discrepancyKg = systemBalanceKg - ledgerBalanceKg;
+  return {
+    lotId: lot.id,
+    lotNo: lot.lot_no,
+    systemQtyMT: systemBalanceKg / 1000,
+    systemQtyKg: systemBalanceKg,
+    ledgerQtyKg: ledgerBalanceKg,
+    discrepancyKg,
+    discrepancyMT: discrepancyKg / 1000,
+    isReconciled: Math.abs(discrepancyKg) < 1, // within 1 KG tolerance
+  };
+}
+
 const inventoryService = {
   MOVEMENT_TYPES,
 
@@ -2248,32 +2265,26 @@ const inventoryService = {
       .sum('quantity_kg as total_kg')
       .first();
 
-    const ledgerBalanceKg = parseFloat(txnSum?.total_kg) || 0;
-    const systemBalanceKg = parseFloat(lot.qty) || 0; // qty is KG (Phase 5c)
-    const discrepancyKg = systemBalanceKg - ledgerBalanceKg;
-
-    return {
-      lotId,
-      lotNo: lot.lot_no,
-      systemQtyMT: systemBalanceKg / 1000,
-      systemQtyKg: systemBalanceKg,
-      ledgerQtyKg: ledgerBalanceKg,
-      discrepancyKg,
-      discrepancyMT: discrepancyKg / 1000,
-      isReconciled: Math.abs(discrepancyKg) < 1, // within 1 KG tolerance
-    };
+    return reconcileRow(lot, txnSum && txnSum.total_kg);
   },
 
   /**
-   * Reconcile all lots — returns discrepancy report
+   * Reconcile all lots — returns discrepancy report. ONE query (the ledger is
+   * summed per lot in a join, not one round-trip per lot), and it includes
+   * lots at qty 0: a lot the system says is empty while its ledger still holds
+   * stock is exactly the discrepancy this report exists to find.
    */
   async reconcileAllLots() {
-    const lots = await db('inventory_lots').where('qty', '>', 0).select('id');
-    const results = [];
-    for (const lot of lots) {
-      const r = await inventoryService.reconcileLotBalance(lot.id);
-      results.push(r);
-    }
+    const ledger = db('lot_transactions')
+      .select('lot_id')
+      .sum({ total_kg: 'quantity_kg' })
+      .groupBy('lot_id')
+      .as('t');
+    const rows = await db('inventory_lots as l')
+      .leftJoin(ledger, 't.lot_id', 'l.id')
+      .select('l.id', 'l.lot_no', 'l.qty', 't.total_kg')
+      .orderBy('l.id');
+    const results = rows.map((r) => reconcileRow(r, r.total_kg));
     return {
       total: results.length,
       reconciled: results.filter(r => r.isReconciled).length,
@@ -3377,5 +3388,7 @@ const inventoryService = {
 // the supplier / variety codes identically.
 inventoryService.deriveSupplierCode = deriveSupplierCode;
 inventoryService.deriveProductCode = deriveProductCode;
+
+inventoryService.reconcileRow = reconcileRow;
 
 module.exports = inventoryService;

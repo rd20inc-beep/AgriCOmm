@@ -11,6 +11,7 @@ const reportingService = require('../../services/reportingService');
 // their inventory legs would produce numbers that don't foot. They stay gated
 // by role (noFinanceForOperator) instead.
 const whScope = require('../../utils/warehouseScope');
+const stockSql = require('../inventory/stockSql');
 
 // Parse a milling_batches.custom_tags jsonb value into a plain array. The pg
 // driver usually returns jsonb already parsed (array/object), but a string may
@@ -587,7 +588,7 @@ const reportingController = {
 
   async stockAging(req, res) {
     try {
-      const data = await redactReport(req, await reportingService.getStockAgingReport(await whScope.resolveWarehouseScope(req)));
+      const data = await redactReport(req, await reportingService.getStockAgingReport(await whScope.resolveWarehouseScope(req), { ownership: req.query.ownership }));
       return res.json({ success: true, ...data });
     } catch (err) {
       console.error('Stock aging error:', err);
@@ -598,7 +599,7 @@ const reportingController = {
   async stockTurnover(req, res) {
     try {
       const { entity } = req.query;
-      const data = await reportingService.getStockTurnoverDays({ entity, warehouseScope: await whScope.resolveWarehouseScope(req) });
+      const data = await reportingService.getStockTurnoverDays({ entity, ownership: req.query.ownership, warehouseScope: await whScope.resolveWarehouseScope(req) });
       return res.json({ success: true, data });
     } catch (err) {
       console.error('Stock turnover error:', err);
@@ -611,7 +612,7 @@ const reportingController = {
       const { entity, asOfDate } = req.query;
       // Every figure here is money except the quantities — grandTotal included.
       const data = await redactReport(req,
-        await reportingService.getStockValuation({ entity, asOfDate, warehouseScope: await whScope.resolveWarehouseScope(req) }),
+        await reportingService.getStockValuation({ entity, asOfDate, ownership: req.query.ownership, warehouseScope: await whScope.resolveWarehouseScope(req) }),
         { extraCostKeys: ['grandTotal'] });
       return res.json({ success: true, data });
     } catch (err) {
@@ -1336,23 +1337,12 @@ const reportingController = {
       // A lot holding nothing is not stock. Its row stays 'Available' after the
       // rice is milled or sold, so it was reported at 0 kg — and, worse, still
       // carrying its full intake sack count. Hidden unless include_empty=true.
-      const ON_HAND = '(CASE WHEN l.net_weight_kg > 0 THEN l.net_weight_kg ELSE CAST(l.qty AS DECIMAL) END)';
-      // Sacks/bags STILL ON HAND. total_bags is the intake count and is never
-      // decremented — milling consumes the rice, not the row — so it has to be
-      // scaled by the weight remaining. Lots with no intake count to scale fall
-      // back to dividing the weight by the pack size.
-      const PACK_KG = 'COALESCE(NULLIF(l.bag_weight_kg, 0), NULLIF(l.bag_size_kg, 0), 0)';
-      const UNITS_ON_HAND = `(CASE
-        WHEN COALESCE(l.total_bags, 0) > 0 AND COALESCE(l.received_net_weight_kg, 0) > 0
-          THEN LEAST(l.total_bags::numeric, ROUND(l.total_bags * (${ON_HAND} / l.received_net_weight_kg)))
-        ELSE ROUND(${ON_HAND} / COALESCE(NULLIF(${PACK_KG}, 0), 50))
-      END)`;
-      // A KATTA is the standard 50 kg sack; anything packed smaller is a retail
-      // bag and is counted under its own heading, never added to the katta.
-      // An unknown pack size is a sack — that is what loose intake is counted in.
-      const IS_KATTA = `(${PACK_KG} = 0 OR ${PACK_KG} >= 50)`;
-      const KATTA_ON_HAND = `(CASE WHEN ${IS_KATTA} THEN ${UNITS_ON_HAND} ELSE 0 END)`;
-      const BAGS_ON_HAND  = `(CASE WHEN ${IS_KATTA} THEN 0 ELSE ${UNITS_ON_HAND} END)`;
+      // Sacks/bags STILL ON HAND (total_bags is intake, scaled by weight left),
+      // katta (>= 50 kg or unknown) vs sub-50 kg Bags — one shared definition
+      // with the Stock Summary (inventory/stockSql.js).
+      const {
+        ON_HAND_KG: ON_HAND, PACK_KG, IS_KATTA, KATTA_ON_HAND, BAGS_ON_HAND,
+      } = stockSql;
 
       let groupCol, nameCol;
       // "Subtype" mirrors the UI's lotSubtype() classification — splits
@@ -1418,6 +1408,8 @@ const reportingController = {
         .leftJoin('warehouses as w', 'l.warehouse_id', 'w.id')
         .leftJoin('products as p',   'l.product_id',   'p.id');
       if (status && status !== 'all') q = q.where('l.status', status);
+      // Client-owned service-milling stock is not ours (?ownership=client|all).
+      q = stockSql.companyStock(q, 'l', req.query.ownership);
       if (group_by === 'byproduct') q = q.where('l.type', 'byproduct');
       if (!includeEmpty) q = q.whereRaw(`${ON_HAND} > 0`);
       q = whScope.applyWarehouseScope(q, scope, 'l.warehouse_id');
@@ -1430,7 +1422,7 @@ const reportingController = {
           // like a product spans many suppliers, so no single id applies).
           db.raw(group_by === 'supplier' ? 'l.supplier_id as group_id' : 'NULL::integer as group_id'),
           db.raw('COUNT(l.id)::int as lot_count'),
-          db.raw('COALESCE(SUM(CASE WHEN l.net_weight_kg > 0 THEN l.net_weight_kg ELSE CAST(l.qty AS DECIMAL) END), 0)::numeric as total_kg'),
+          db.raw(`COALESCE(SUM(${ON_HAND}), 0)::numeric as total_kg`),
           db.raw('COALESCE(SUM(CAST(l.available_qty AS DECIMAL)), 0)::numeric as available_kg'),
           db.raw('COALESCE(SUM(CAST(l.reserved_qty AS DECIMAL)), 0)::numeric as reserved_kg'),
           db.raw(`COALESCE(SUM(${KATTA_ON_HAND}), 0)::int as total_bags`),
@@ -1461,6 +1453,7 @@ const reportingController = {
         .leftJoin('warehouses as w', 'l.warehouse_id', 'w.id')
         .leftJoin('products as p',   'l.product_id',   'p.id');
       if (status && status !== 'all') lotsQ = lotsQ.where('l.status', status);
+      lotsQ = stockSql.companyStock(lotsQ, 'l', req.query.ownership);
       if (group_by === 'byproduct') lotsQ = lotsQ.where('l.type', 'byproduct');
       if (!includeEmpty) lotsQ = lotsQ.whereRaw(`${ON_HAND} > 0`);
       lotsQ = whScope.applyWarehouseScope(lotsQ, scope, 'l.warehouse_id');
@@ -1469,7 +1462,7 @@ const reportingController = {
         'l.id as lot_id', 'l.lot_no',
         db.raw("COALESCE(p.name, l.item_name, '—') as item"),
         'l.variety', 'l.grade',
-        db.raw('(CASE WHEN l.net_weight_kg > 0 THEN l.net_weight_kg ELSE CAST(l.qty AS DECIMAL) END)::numeric as on_hand_kg'),
+        db.raw(`${ON_HAND}::numeric as on_hand_kg`),
         db.raw('(CAST(l.available_qty AS DECIMAL))::numeric as available_kg'),
         db.raw(`COALESCE(${KATTA_ON_HAND}, 0)::int as bags`),
         db.raw(`COALESCE(${BAGS_ON_HAND}, 0)::int as bag_units`),
@@ -1920,11 +1913,13 @@ const reportingController = {
         .leftJoin('products as p', 'l.product_id', 'p.id')
         .leftJoin('warehouses as w', 'l.warehouse_id', 'w.id');
       if (status && status !== 'all') q = q.where('l.status', status);
+      // Client-owned service-milling stock is not ours (?ownership=client|all).
+      q = stockSql.companyStock(q, 'l', req.query.ownership);
       // A fully milled or sold lot holds nothing and is not stock, but its row
       // stays 'Available', so it was listed at 0 MT / 0 katta / Rs 0. Drop it.
       // include_empty=true brings them back for anyone reconciling history.
       if (String(req.query.include_empty || '') !== 'true') {
-        q = q.whereRaw('COALESCE(NULLIF(l.net_weight_kg, 0), l.qty, 0) > 0');
+        q = stockSql.hasStock(q, 'l');
       }
       // #9-scoping: printable stock detail lists only the caller's warehouses.
       q = whScope.applyWarehouseScope(q, await whScope.resolveWarehouseScope(req), 'l.warehouse_id');

@@ -4,6 +4,7 @@ const { applyWarehouseScope } = require('../../utils/warehouseScope');
 const auditService = require('../admin/audit.service');
 const inventoryService = require('../inventory/inventory.service');
 const { nextDocNo } = require('../../utils/docNumber');
+const { companyStock } = require('../inventory/stockSql');
 
 const round2 = (v) => Math.round(v * 100) / 100;
 
@@ -1030,7 +1031,7 @@ const controlService = {
   // STOCK COUNT / INVENTORY AUDIT
   // ═══════════════════════════════════════════════════════════════════
 
-  async createStockCount(trx, { countType, warehouseId, plannedDate, userId }) {
+  async createStockCount(trx, { countType, warehouseId, plannedDate, userId, ownership = 'company' }) {
     const knex = trx || db;
 
     // Count number SC-001… — MAX(suffix)+1, so a deleted count never makes the
@@ -1050,7 +1051,9 @@ const controlService = {
       .returning('*');
 
     // Get all lots in the warehouse (or all if no warehouse specified)
-    const lotQuery = knex('inventory_lots').where('qty', '>', 0);
+    // Company stock only by default: client-owned service-milling lots are not
+    // ours to adjust (ownership='client'|'all' to count them too).
+    const lotQuery = companyStock(knex('inventory_lots'), null, ownership).where('qty', '>', 0);
     if (warehouseId) lotQuery.where('warehouse_id', warehouseId);
     const lots = await lotQuery;
 

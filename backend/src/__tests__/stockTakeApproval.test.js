@@ -27,7 +27,7 @@ const inventoryService = require('../modules/inventory/inventory.service');
 const controlService = require('../modules/analytics/control.service');
 const { nextDocNo } = require('../utils/docNumber');
 
-const lot = (id, qty, extra = {}) => ({ id, lot_no: `L-${id}`, item_name: `Rice ${id}`, qty, entity: 'mill', landed_cost_per_kg: 200, ...extra });
+const lot = (id, qty, extra = {}) => ({ id, lot_no: `L-${id}`, item_name: `Rice ${id}`, qty, entity: 'mill', ownership: 'company', landed_cost_per_kg: 200, ...extra });
 
 // Sell from the fake lot outside the count (what a local sale would do).
 const sell = (lotId, kg) => { db.tables.inventory_lots.find((l) => l.id === lotId).qty -= kg; };

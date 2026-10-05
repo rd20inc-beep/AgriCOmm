@@ -285,6 +285,7 @@ const controlController = {
           countType: req.body.count_type,
           warehouseId: req.body.warehouse_id,
           plannedDate: req.body.planned_date,
+          ownership: req.body.ownership || req.query.ownership,
           userId: req.user.id,
         });
       });
