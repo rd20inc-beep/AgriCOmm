@@ -54,7 +54,6 @@ const PurchaseRequirements = lazyWithReload(() => import('./modules/purchaseRequ
 const SampleAnalysis = lazyWithReload(() => import('./modules/sampleAnalysis/pages/SampleAnalysis'));
 const MillHomeDashboard = lazyWithReload(() => import('./modules/milling/pages/MillHomeDashboard'));
 const StoreOverview = lazyWithReload(() => import('./modules/millStore/pages/StoreOverview'));
-const NewPurchase = lazyWithReload(() => import('./modules/millStore/pages/NewPurchase'));
 const LocalSaleDetail = lazyWithReload(() => import('./modules/localSales/pages/LocalSaleDetail'));
 const InvoiceView = lazyWithReload(() => import('./modules/localSales/pages/InvoiceView'));
 const StoreAlerts = lazyWithReload(() => import('./modules/millStore/pages/StoreAlerts'));
@@ -222,7 +221,7 @@ function MillRoutes() {
         <Route path="/milling/:id" element={<MillingBatchDetail />} />
         <Route path="/quality" element={<QualityComparison />} />
         <Route path="/mill-store" element={<StoreOverview />} />
-        <Route path="/mill-store/purchases/new" element={<NewPurchase />} />
+        <Route path="/mill-store/purchases/new" element={<Navigate to="/mill-store?action=purchase" replace />} />
         <Route path="/mill-store/alerts" element={<StoreAlerts />} />
         <Route path="/mill-store/adjustments" element={<StoreAdjustments />} />
         <Route path="/mill-store/ratios" element={<StoreRatios />} />
@@ -308,7 +307,7 @@ function StandardRoutes() {
             roles (Super Admin / Owner) couldn't reach the New Purchase form
             and got bounced to the dashboard by the catch-all. */}
         <Route path="/mill-store"               element={<ProtectedRoute module="mill_store" action="view"><StoreOverview /></ProtectedRoute>} />
-        <Route path="/mill-store/purchases/new" element={<ProtectedRoute module="mill_store" action="create_purchase"><NewPurchase /></ProtectedRoute>} />
+        <Route path="/mill-store/purchases/new" element={<Navigate to="/mill-store?action=purchase" replace />} />
         <Route path="/mill-store/alerts"        element={<ProtectedRoute module="mill_store" action="view"><StoreAlerts /></ProtectedRoute>} />
         <Route path="/mill-store/adjustments"   element={<ProtectedRoute module="mill_store" action="view"><StoreAdjustments /></ProtectedRoute>} />
         <Route path="/mill-store/ratios"        element={<ProtectedRoute module="mill_store" action="view"><StoreRatios /></ProtectedRoute>} />

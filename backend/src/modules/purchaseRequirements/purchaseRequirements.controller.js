@@ -85,13 +85,19 @@ module.exports = {
     } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
   },
 
-  // Finance/store marks an approved PR as purchased (material bought).
+  // Finance/store marks an APPROVED PR as purchased (material bought). A pending
+  // requirement has not been signed off by the Mill Manager / Owner yet, so it
+  // cannot skip straight to purchased.
   async markPurchased(req, res) {
     try {
       const pr = await db('purchase_requirements').where('id', req.params.id).first();
       if (!pr) return res.status(404).json({ success: false, message: 'Purchase requirement not found.' });
-      if (!['approved', 'pending'].includes(pr.status)) return res.status(409).json({ success: false, message: `Cannot mark ${pr.status} as purchased.` });
-      const [row] = await db('purchase_requirements').where('id', pr.id).update({ status: 'purchased', updated_at: db.fn.now() }).returning('*');
+      if (pr.status !== 'approved') {
+        const why = pr.status === 'pending' ? ' — it has to be approved first' : '';
+        return res.status(409).json({ success: false, message: `Cannot mark a ${pr.status} requirement as purchased${why}.` });
+      }
+      const [row] = await db('purchase_requirements').where({ id: pr.id, status: 'approved' }).update({ status: 'purchased', updated_at: db.fn.now() }).returning('*');
+      if (!row) return res.status(409).json({ success: false, message: 'This requirement changed meanwhile — refresh and try again.' });
       return res.json({ success: true, data: { requirement: row } });
     } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
   },

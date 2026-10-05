@@ -88,7 +88,7 @@ const millStoreService = {
   },
 
   // ─── Purchases ───
-  async createPurchase({ supplier_id, vendor_name, invoice_number, purchase_date, notes, lines }, userId) {
+  async createPurchase({ supplier_id, vendor_name, invoice_number, purchase_date, notes, lines, close_requirement_ids }, userId) {
     if (!lines || lines.length === 0) throw new ValidationError('At least one line item is required.');
 
     // Validate all item_ids exist
@@ -96,6 +96,17 @@ const millStoreService = {
       const item = await repo.getItemById(line.item_id);
       if (!item) throw new NotFoundError(`Item id ${line.item_id} not found.`);
     }
+
+    // Bag Kg / Tare Kg ride on the line but are not purchase-line columns: split
+    // them off so the line rows insert cleanly, and apply them to the item master
+    // inside the transaction below.
+    const bagSpecs = [];
+    const purchaseLines = lines.map((l) => {
+      const { bag_kg, tare_kg, ...line } = l;
+      bagSpecs.push({ item_id: line.item_id, bag_kg, tare_kg });
+      return line;
+    });
+    const requirementIds = [...new Set((close_requirement_ids || []).map(Number).filter(Boolean))];
 
     // Duplicate invoice check
     if (invoice_number && supplier_id) {
@@ -135,7 +146,48 @@ const millStoreService = {
         notes: notes || null,
         created_by: userId,
       };
-      return repo.createPurchase(trx, header, lines);
+      const purchase = await repo.createPurchase(trx, header, purchaseLines);
+
+      // A bag's capacity / tare from this delivery fills the item master ONLY
+      // where it has none yet. Overwriting an existing figure changes how every
+      // later pack and stock report reads that bag, so it stays an items.manage
+      // action (Mill Store -> Items), not a side effect of buying more bags.
+      for (const spec of bagSpecs) {
+        const item = await trx('mill_items').where('id', spec.item_id).first();
+        if (!item || item.category !== 'packaging') continue;
+        const patch = {};
+        const bag = parseFloat(spec.bag_kg);
+        const tare = parseFloat(spec.tare_kg);
+        if (bag > 0 && isMissingSize(item.capacity_kg)) patch.capacity_kg = bag;
+        if (tare > 0 && isMissingSize(item.tare_weight_kg)) patch.tare_weight_kg = tare;
+        if (Object.keys(patch).length) {
+          await trx('mill_items').where('id', item.id).update({ ...patch, updated_at: trx.fn.now() });
+        }
+      }
+
+      // Close the approved purchase requirements this purchase fulfils. Only
+      // APPROVED ones (a pending requirement has not been signed off yet).
+      if (requirementIds.length) {
+        const reqs = await trx('purchase_requirements').whereIn('id', requirementIds).forUpdate();
+        const notApproved = reqs.filter((r) => r.status !== 'approved');
+        if (reqs.length !== requirementIds.length || notApproved.length) {
+          const which = notApproved.map((r) => `${r.pr_no} (${r.status})`).join(', ');
+          throw new ConflictError(which
+            ? `Only approved purchase requirements can be closed by a purchase: ${which}.`
+            : 'A selected purchase requirement no longer exists.');
+        }
+        for (const r of reqs) {
+          // No mill_purchase_id column on purchase_requirements — record the
+          // purchase number in the notes instead.
+          const note = `Purchased on ${purchase.purchase_no}`;
+          await trx('purchase_requirements').where('id', r.id).update({
+            status: 'purchased',
+            notes: r.notes ? `${r.notes}\n${note}` : note,
+            updated_at: trx.fn.now(),
+          });
+        }
+      }
+      return purchase;
     });
   },
 

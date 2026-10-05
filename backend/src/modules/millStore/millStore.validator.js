@@ -81,6 +81,12 @@ const purchaseLineSchema = Joi.object({
   quantity: Joi.number().greater(0).required(),
   cost_per_unit: Joi.number().min(0).required(),
   warehouse_id: Joi.number().integer().allow(null).optional(),
+  // Packaging lines: the bag's rice capacity / empty weight as read off this
+  // delivery. Applied to the item master inside the purchase transaction, and
+  // ONLY where the master has none yet — changing an existing figure stays an
+  // items.manage action (see millStore.service createPurchase).
+  bag_kg: Joi.number().min(0).allow(null, '').optional(),
+  tare_kg: Joi.number().min(0).allow(null, '').optional(),
 });
 
 const createPurchaseSchema = Joi.object({
@@ -91,6 +97,9 @@ const createPurchaseSchema = Joi.object({
   purchase_date: Joi.date().required(),
   notes: Joi.string().allow(null, '').optional(),
   lines: Joi.array().items(purchaseLineSchema).min(1).required(),
+  // Approved purchase requirements this purchase fulfils — closed (purchased)
+  // in the same transaction.
+  close_requirement_ids: Joi.array().items(Joi.number().integer().positive()).optional(),
 }).custom((value, helpers) => {
   if (!value.supplier_id && !(value.vendor_name && String(value.vendor_name).trim())) {
     return helpers.message('Select a supplier, or enter a cash / walk-in vendor name.');

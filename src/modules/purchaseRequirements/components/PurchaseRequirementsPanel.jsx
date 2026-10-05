@@ -3,6 +3,7 @@ import { ShoppingCart, Check, X, CheckCircle2, RefreshCw } from 'lucide-react';
 import { purchaseRequirementsApi } from '../api/services';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
+import NewPurchaseDrawer from '../../../components/NewPurchaseDrawer';
 
 const STATUS_TONE = {
   pending: 'bg-amber-100 text-amber-700',
@@ -19,8 +20,13 @@ const TABS = ['pending', 'approved', 'purchased', 'all'];
 // just renders whatever it's given.
 export default function PurchaseRequirementsPanel({ embedded = false, defaultTab = 'pending' }) {
   const { addToast } = useApp();
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
   const role = user?.role;
+  // A requirement for a store item is fulfilled by recording the store purchase
+  // (stock + payable + the requirement closed together). Without the store
+  // permission, or for a masked row with no item, it is just marked purchased.
+  const canRecordStorePurchase = hasPermission?.('mill_store', 'create_purchase');
+  const [purchaseFor, setPurchaseFor] = useState(null); // requirement row
   const canApprove = ['Super Admin', 'Owner', 'Mill Manager'].includes(role);
   const canPurchase = ['Super Admin', 'Owner', 'Mill Manager', 'Finance Manager'].includes(role);
 
@@ -111,7 +117,11 @@ export default function PurchaseRequirementsPanel({ embedded = false, defaultTab
                     </>
                   )}
                   {r.status === 'approved' && canPurchase && (
-                    <button onClick={() => act(purchaseRequirementsApi.markPurchased, r.id, 'Marked purchased')} className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-blue-700 bg-blue-50 rounded hover:bg-blue-100"><CheckCircle2 size={13} /> Mark Purchased</button>
+                    r.item_id && canRecordStorePurchase ? (
+                      <button onClick={() => setPurchaseFor(r)} title="Record the store purchase — closes this requirement" className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-blue-700 bg-blue-50 rounded hover:bg-blue-100"><CheckCircle2 size={13} /> Mark Purchased</button>
+                    ) : (
+                      <button onClick={() => act(purchaseRequirementsApi.markPurchased, r.id, 'Marked purchased')} className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-blue-700 bg-blue-50 rounded hover:bg-blue-100"><CheckCircle2 size={13} /> Mark Purchased</button>
+                    )
                   )}
                 </div>
                 {rejecting === r.id && (
@@ -154,12 +164,27 @@ export default function PurchaseRequirementsPanel({ embedded = false, defaultTab
     </div>
   );
 
+  const purchaseDrawer = (
+    <NewPurchaseDrawer
+      open={!!purchaseFor}
+      onClose={() => setPurchaseFor(null)}
+      onSaved={() => load()}
+      prefill={purchaseFor ? {
+        item_id: purchaseFor.item_id,
+        quantity: purchaseFor.shortage_qty,
+        cost_per_unit: purchaseFor.est_unit_cost,
+        requirement_id: purchaseFor.id,
+      } : null}
+    />
+  );
+
   if (embedded) {
     return (
       <div className="bg-white rounded-xl border border-gray-200 p-5">
         {header}
         {tabsRow && <div className="mb-3">{tabsRow}</div>}
         {table}
+        {purchaseDrawer}
       </div>
     );
   }
@@ -169,6 +194,7 @@ export default function PurchaseRequirementsPanel({ embedded = false, defaultTab
       {header}
       {tabsRow}
       {table}
+      {purchaseDrawer}
     </div>
   );
 }

@@ -1,10 +1,11 @@
-import { useState, useMemo, useEffect } from 'react';
-import { Plus, Trash2, ShoppingCart } from 'lucide-react';
+import { useState, useMemo, useEffect, useRef } from 'react';
+import { Plus, Trash2, ShoppingCart, ClipboardCheck } from 'lucide-react';
 import SlideDrawer from './SlideDrawer';
 import SupplierPicker from './SupplierPicker';
 import ItemPicker from './ItemPicker';
 import { useApp } from '../context/AppContext';
-import { useMillStoreItems, useCreatePurchase, useUpdateMillStoreItem } from '../modules/millStore/api/queries';
+import { useMillStoreItems, useCreatePurchase } from '../modules/millStore/api/queries';
+import { purchaseRequirementsApi } from '../modules/purchaseRequirements/api/services';
 
 const CATEGORIES = [
   { value: 'packaging',   label: 'Packaging' },
@@ -15,17 +16,28 @@ const CATEGORIES = [
 
 const newLine = () => ({ category: 'packaging', item_id: '', quantity: '', cost_per_unit: '', bag_kg: '', tare_kg: '' });
 
+const hasSize = (v) => v != null && v !== '' && Number(v) > 0;
+
 /**
- * Mill-store "New Purchase" as a right slide-over (same form as the full
- * /mill-store/purchases/new page). Records a consumable-materials purchase
- * (bags/packaging/etc.) with multiple line items. Props: open, onClose, onSaved.
+ * Mill-store "Store Purchase" as a right slide-over — the ONE store purchase
+ * form (the old full-page /mill-store/purchases/new is gone). Records a
+ * consumable-materials purchase (bags/packaging/etc.) with multiple line items.
+ *
+ * Bag Kg / Tare Kg travel with each packaging line and are written to the item
+ * master inside the purchase transaction ONLY where the master has none —
+ * changing an existing figure is a Manage-items action (Mill Store → Items).
+ *
+ * Approved purchase requirements for the items on the lines are offered with a
+ * checkbox and closed in the same transaction.
+ *
+ * Props: open, onClose, onSaved, prefill ({ item_id, quantity, cost_per_unit,
+ * requirement_id }) — e.g. from a requirement's "Record Purchase".
  */
-export default function NewPurchaseDrawer({ open, onClose, onSaved }) {
+export default function NewPurchaseDrawer({ open, onClose, onSaved, prefill = null }) {
   const { suppliersList, addToast } = useApp();
   const { data: items = [] } = useMillStoreItems({ limit: 500 });
   const safeItems = Array.isArray(items) ? items : [];
   const createMut = useCreatePurchase();
-  const updateItemMut = useUpdateMillStoreItem();
 
   // Items added inline via the picker — merged on top so every line sees them.
   const [localItems, setLocalItems] = useState([]);
@@ -41,14 +53,64 @@ export default function NewPurchaseDrawer({ open, onClose, onSaved }) {
   const [purchaseDate, setPurchaseDate] = useState(new Date().toISOString().split('T')[0]);
   const [notes, setNotes] = useState('');
   const [lines, setLines] = useState([newLine()]);
+  // Approved purchase requirements (any item) + which ones this purchase closes.
+  const [approvedReqs, setApprovedReqs] = useState([]);
+  const [closeReqIds, setCloseReqIds] = useState(() => new Set());
+  const prefillFixed = useRef(false);
 
-  // Reset the form each time it opens.
+  // Reset the form each time it opens (applying any prefill).
   useEffect(() => {
     if (!open) return;
     setSupplierId(''); setWalkIn(false); setVendorName(''); setInvoiceNumber(''); setNotes('');
     setPurchaseDate(new Date().toISOString().split('T')[0]);
-    setLines([newLine()]);
+    prefillFixed.current = false;
+    if (prefill?.item_id) {
+      setLines([{
+        ...newLine(),
+        item_id: String(prefill.item_id),
+        quantity: prefill.quantity != null ? String(Math.round(Number(prefill.quantity) * 1000) / 1000) : '',
+        cost_per_unit: prefill.cost_per_unit != null ? String(prefill.cost_per_unit) : '',
+      }]);
+    } else {
+      setLines([newLine()]);
+    }
+    setCloseReqIds(new Set(prefill?.requirement_id ? [Number(prefill.requirement_id)] : []));
+    setApprovedReqs([]);
+    let cancelled = false;
+    purchaseRequirementsApi.list({ status: 'approved' })
+      .then((res) => { if (!cancelled) setApprovedReqs((res?.data || res)?.requirements || []); })
+      .catch(() => { /* optional — the purchase still records without it */ });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+
+  // A prefilled item's category / bag figures come from the item master, which
+  // may load after the drawer opens — fill them in once it does.
+  useEffect(() => {
+    if (!open || !prefill?.item_id || prefillFixed.current) return;
+    const item = safeItems.find(i => String(i.id) === String(prefill.item_id));
+    if (!item) return;
+    prefillFixed.current = true;
+    setLines(prev => prev.map((l, i) => (i === 0 && String(l.item_id) === String(prefill.item_id) ? {
+      ...l,
+      category: item.category || l.category,
+      cost_per_unit: l.cost_per_unit !== '' ? l.cost_per_unit : (item.last_purchase_cost ?? ''),
+      bag_kg: item.category === 'packaging' ? (item.capacity_kg ?? '') : '',
+      tare_kg: item.category === 'packaging' ? (item.tare_weight_kg ?? '') : '',
+    } : l)));
+  }, [open, prefill, safeItems]);
+
+  // Requirements relevant to this purchase = approved ones for an item on a line.
+  const lineItemIds = useMemo(() => new Set(lines.filter(l => l.item_id).map(l => String(l.item_id))), [lines]);
+  const matchingReqs = useMemo(
+    () => approvedReqs.filter(r => r.item_id != null && lineItemIds.has(String(r.item_id))),
+    [approvedReqs, lineItemIds],
+  );
+  const toggleReq = (id) => setCloseReqIds(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
 
   const addLine = () => setLines(prev => [...prev, newLine()]);
   const removeLine = (idx) => setLines(prev => prev.filter((_, i) => i !== idx));
@@ -68,32 +130,31 @@ export default function NewPurchaseDrawer({ open, onClose, onSaved }) {
     // Packaging lines need a Bag Kg so we know how much rice each bag holds.
     const badBag = validLines.find(l => l.category === 'packaging' && !(Number(l.bag_kg) > 0));
     if (badBag) { addToast('Enter Bag Kg for each packaging item', 'error'); return; }
+    // Only close requirements whose item is still on the purchase.
+    const closeIds = matchingReqs.filter(r => closeReqIds.has(Number(r.id))).map(r => Number(r.id));
     try {
-      // Persist any bag-weight edits onto the underlying packaging item first
-      // (Bag Kg / Tare Kg are attributes of the bag, not of this purchase).
-      const weightUpdates = validLines
-        .filter(l => l.category === 'packaging')
-        .map(l => {
-          const item = mergedItems.find(i => String(i.id) === String(l.item_id));
-          const bag = Number(l.bag_kg) || null;
-          const tare = l.tare_kg === '' ? null : Number(l.tare_kg);
-          const changed = !item
-            || Number(item.capacity_kg) !== Number(bag)
-            || Number(item.tare_weight_kg || 0) !== Number(tare || 0);
-          return changed ? { id: Number(l.item_id), data: { capacity_kg: bag, tare_weight_kg: tare } } : null;
-        })
-        .filter(Boolean);
-      await Promise.all(weightUpdates.map(u => updateItemMut.mutateAsync(u)));
-
+      // Bag Kg / Tare Kg go WITH the purchase: the server fills them into the
+      // item master inside the purchase transaction, only where it has none.
       await createMut.mutateAsync({
         supplier_id: walkIn ? null : (supplierId ? Number(supplierId) : null),
         vendor_name: walkIn ? vendorName.trim() : null,
         invoice_number: invoiceNumber || null,
         purchase_date: purchaseDate,
         notes: notes || null,
-        lines: validLines.map(l => ({ item_id: Number(l.item_id), quantity: Number(l.quantity), cost_per_unit: Number(l.cost_per_unit) })),
+        lines: validLines.map(l => ({
+          item_id: Number(l.item_id),
+          quantity: Number(l.quantity),
+          cost_per_unit: Number(l.cost_per_unit),
+          ...(l.category === 'packaging' ? {
+            bag_kg: Number(l.bag_kg) || null,
+            tare_kg: l.tare_kg === '' || l.tare_kg == null ? null : Number(l.tare_kg),
+          } : {}),
+        })),
+        ...(closeIds.length ? { close_requirement_ids: closeIds } : {}),
       });
-      addToast('Purchase recorded — stock updated', 'success');
+      addToast(closeIds.length
+        ? `Purchase recorded — stock updated, ${closeIds.length} requirement${closeIds.length > 1 ? 's' : ''} closed`
+        : 'Purchase recorded — stock updated', 'success');
       onSaved?.();
       onClose?.();
     } catch (err) {
@@ -108,8 +169,8 @@ export default function NewPurchaseDrawer({ open, onClose, onSaved }) {
     <SlideDrawer
       open={open}
       onClose={onClose}
-      title="New Purchase"
-      subtitle="Record a consumable materials purchase"
+      title="Store Purchase"
+      subtitle="Record a consumable materials purchase (bags, packaging, fuel…)"
       icon={ShoppingCart}
       size="lg"
       footer={
@@ -222,6 +283,18 @@ export default function NewPurchaseDrawer({ open, onClose, onSaved }) {
                     }}
                     addToast={addToast}
                   />
+                  {line.category === 'packaging' && line.item_id && (() => {
+                    const master = mergedItems.find(i => String(i.id) === String(line.item_id));
+                    const capDiffers = master && hasSize(master.capacity_kg) && line.bag_kg !== '' && Number(line.bag_kg) !== Number(master.capacity_kg);
+                    const tareDiffers = master && hasSize(master.tare_weight_kg) && line.tare_kg !== '' && line.tare_kg != null && Number(line.tare_kg) !== Number(master.tare_weight_kg);
+                    if (!capDiffers && !tareDiffers) return null;
+                    return (
+                      <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                        This bag is set to {capDiffers ? `${Number(master.capacity_kg)} kg` : ''}{capDiffers && tareDiffers ? ' / ' : ''}{tareDiffers ? `${Number(master.tare_weight_kg)} kg tare` : ''} in Mill Store → Items.
+                        A purchase only fills a blank figure — to change it, edit the item there (needs Manage items).
+                      </p>
+                    );
+                  })()}
                   {line.category === 'packaging' && line.item_id && (
                     <div className="grid grid-cols-2 gap-2">
                       <div>
@@ -263,6 +336,24 @@ export default function NewPurchaseDrawer({ open, onClose, onSaved }) {
               );
             })}
           </div>
+          {matchingReqs.length > 0 && (
+            <div className="mt-3 rounded-lg border border-blue-200 bg-blue-50/50 p-3">
+              <p className="text-xs font-semibold text-blue-800 flex items-center gap-1.5 mb-2">
+                <ClipboardCheck size={14} /> Approved purchase requirements for these items
+              </p>
+              <div className="space-y-1.5">
+                {matchingReqs.map(r => (
+                  <label key={r.id} className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                    <input type="checkbox" checked={closeReqIds.has(Number(r.id))} onChange={() => toggleReq(Number(r.id))}
+                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                    <span className="font-medium">{r.pr_no}</span>
+                    <span className="text-gray-500">— {r.item_name}, {Math.round(parseFloat(r.shortage_qty) || 0).toLocaleString()} {r.unit}</span>
+                  </label>
+                ))}
+              </div>
+              <p className="text-[11px] text-gray-500 mt-1.5">Ticked requirements are marked Purchased with this purchase.</p>
+            </div>
+          )}
           <div className="mt-3 pt-3 border-t border-gray-200 flex justify-between items-center">
             <p className="text-sm text-gray-500">{lines.filter(l => l.item_id).length} item(s)</p>
             <p className="text-base font-bold text-gray-900">Total: Rs {totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
