@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { useApp } from '../../../context/AppContext';
 import { useCreateExportOrder } from '../../../api/queries';
@@ -23,6 +23,11 @@ import { PAYMENT_TERMS } from '../../../shared/constants/paymentTerms';
 import { COUNTRY_OPTIONS } from '../../../shared/constants/countries';
 import { PORTS } from '../../../shared/constants/ports';
 import { favStar } from '../../../shared/utils/favorites';
+import {
+  EMPTY_ITEM, requiresMasterBag, masterOptionsFor, orderTotals, needsBagWidgetFor,
+  mixedPackingTotals, singleBagCountFor, estimateCosting, buildCreateOrderPayload,
+  customerPrefill, lastOrderPrefill,
+} from '../utils/createOrderForm';
 
 const RECEIVING_MODES = [
   { value: 'bags', label: 'In Bags', desc: 'Standard packed bags', icon: ShoppingBag },
@@ -33,18 +38,6 @@ const RECEIVING_MODES = [
 
 const EMPTY_PACKING_LINE = { bagType: '', bagQuality: '', fillWeightKg: '25', bagCount: '', bagPrinting: '', notes: '' };
 
-const EMPTY_ITEM = {
-  productId: '', productName: '',
-  qtyMT: '', pricePerMT: '',
-  hsCode: '', packing: '',
-  // Packing / bag type / bag size are captured on the next step ("how the buyer
-  // receives this order") — left blank here so the per-item payload sends null.
-  bagType: '',
-  bagSizeKg: '', bagCount: '',
-  masterBagSizeKg: '',
-  bagBrand: '',
-};
-
 // Batch 7 — packing type + material options.
 const PACKING_TYPES = [
   { value: 'retail', label: 'Retail Bag', desc: '0.5–50 KG bags' },
@@ -52,21 +45,6 @@ const PACKING_TYPES = [
   { value: 'container', label: 'Container Bulk', desc: 'Loose, max 25,000 KG' },
 ];
 const BAG_MATERIALS = ['Polythene', 'Woven', 'Non-Woven', 'Cotton'];
-
-// Retail bag sizes that need to be packed inside an outer "master bag"
-// (carton / sack) for shipping. Larger bags ship as-is.
-const RETAIL_BAG_SIZES_KG = [0.5, 1, 2, 5, 10];
-const MASTER_BAG_SIZES_KG = [10, 20, 40];
-const requiresMasterBag = (sizeKg) => {
-  const v = parseFloat(sizeKg);
-  return RETAIL_BAG_SIZES_KG.includes(v);
-};
-// Master bag must hold at least one whole retail bag (e.g. a 2kg retail bag
-// fits a 10/20/40kg master; a 5kg fits 10/20/40 but a 10kg retail needs ≥20).
-const masterOptionsFor = (retailKg) => {
-  const r = parseFloat(retailKg) || 0;
-  return MASTER_BAG_SIZES_KG.filter((m) => r > 0 && m >= r && m % r === 0);
-};
 
 export default function CreateExportOrder() {
   const { addToast, customersList: customers, productsList: products, exportCostCategories, bagTypesList, suppliersList, bankAccountsList } = useApp();
@@ -80,24 +58,19 @@ export default function CreateExportOrder() {
   const navigate = useNavigate();
   const qc = useQueryClient();
 
-  // Pre-fill from duplicate
-  const [searchParams] = useSearchParams();
-  useEffect(() => {
-    if (searchParams.get('dup') === '1') {
-      const fields = ['customerId', 'productId', 'country', 'currency', 'incoterm', 'consigneeType', 'qualityDescription'];
-      const updates = {};
-      fields.forEach(f => { const v = searchParams.get(f); if (v) updates[f] = v; });
-      if (Object.keys(updates).length > 0) setForm(prev => ({ ...prev, ...updates }));
-    }
-  }, []);
+  // "Duplicate Order" hands the source order over in router state (see
+  // duplicateStateFromOrder): items, qty, price, packing, bank, incoterm,
+  // freight and payment terms. Read once, as the initial form state.
+  const location = useLocation();
+  const duplicate = location.state?.duplicate || null;
 
   // Quick-add customer
   const [showAddCustomer, setShowAddCustomer] = useState(false);
   const [newCust, setNewCust] = useState({ name: '', country: '', port: '', address: '', email: '', phone: '', contact_person: '' });
 
-  const [form, setForm] = useState({
+  const [form, setForm] = useState(() => ({
     // Section 1: Buyer
-    customerId: '', country: '',
+    customerId: '', country: '', destinationPort: '',
     // Section 2: Product
     productId: '',
     // Section 3: Quantity
@@ -127,10 +100,13 @@ export default function CreateExportOrder() {
     qualityDescription: '', shipmentWindowStart: '', shipmentWindowEnd: '',
     // Section 8: Notes
     notes: '', packingNotes: '',
-  });
+    ...(duplicate?.form || {}),
+  }));
 
   // Mixed packing lines
-  const [packingLines, setPackingLines] = useState([{ ...EMPTY_PACKING_LINE }]);
+  const [packingLines, setPackingLines] = useState(() => (
+    duplicate?.packingLines?.length ? duplicate.packingLines : [{ ...EMPTY_PACKING_LINE }]
+  ));
   const [specsOpen, setSpecsOpen] = useState(false);
 
   // Optional printed-bag orders arranged at creation. Each becomes a vendor
@@ -141,7 +117,9 @@ export default function CreateExportOrder() {
   const updatePrintedBag = (idx, patch) => setPrintedBags(prev => prev.map((b, i) => i === idx ? { ...b, ...patch } : b));
 
   // Multi-line P.I. items — one or more products per order
-  const [items, setItems] = useState([{ ...EMPTY_ITEM }]);
+  const [items, setItems] = useState(() => (
+    duplicate?.items?.length ? duplicate.items : [{ ...EMPTY_ITEM }]
+  ));
   const addItem = () => setItems(prev => [...prev, { ...EMPTY_ITEM }]);
   const removeItem = (idx) => setItems(prev => prev.length > 1 ? prev.filter((_, i) => i !== idx) : prev);
   const updateItem = (idx, field, value) => setItems(prev => prev.map((it, i) => {
@@ -157,24 +135,44 @@ export default function CreateExportOrder() {
   const set = (k, v) => setForm(p => {
     const u = { ...p, [k]: v };
     if (k === 'customerId') {
-      const c = customers.find(c => c.id === Number(v));
-      u.country = c ? c.country : '';
+      // Country always follows the buyer; port and usual payment terms too
+      // when the buyer master has them.
+      Object.assign(u, customerPrefill(customers.find(c => c.id === Number(v))));
     }
     return u;
   });
+
+  // Picking a buyer also carries over the Incoterm, currency and bank from that
+  // buyer's most recent order — one small GET. Skipped for a duplicate's own
+  // buyer, whose terms came with the source order.
+  const lastOrderFor = useRef(null);
+  useEffect(() => {
+    const customerId = form.customerId;
+    if (!customerId) return undefined;
+    if (duplicate && String(duplicate.form?.customerId) === String(customerId)) return undefined;
+    lastOrderFor.current = customerId;
+    let cancelled = false;
+    exportOrdersApi.list({ customer_id: customerId, limit: 1 })
+      .then((res) => {
+        if (cancelled || lastOrderFor.current !== customerId) return;
+        const prefill = lastOrderPrefill(res?.data?.orders?.[0]);
+        if (Object.keys(prefill).length) {
+          setForm(p => (String(p.customerId) === String(customerId) ? { ...p, ...prefill } : p));
+        }
+      })
+      .catch(() => {}); // a convenience — the form works without it
+    return () => { cancelled = true; };
+  }, [form.customerId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── Computed values (derived from line items) ───
   const itemQtyMT = (it) => parseFloat(it.qtyMT) || 0;
   const itemPrice = (it) => parseFloat(it.pricePerMT) || 0;
   const itemTotal = (it) => itemQtyMT(it) * itemPrice(it);
-  const qtyMT = items.reduce((s, it) => s + itemQtyMT(it), 0);
-  const totalKg = qtyMT * 1000;
-  const contractValue = items.reduce((s, it) => s + itemTotal(it), 0);
-  const pricePerMT = qtyMT > 0 ? contractValue / qtyMT : 0;
+  const { qtyMT, totalKg, contractValue, pricePerMT } = orderTotals(items);
   const equivalents = allEquivalents(totalKg, parseFloat(form.bagSizeKg) || 25);
   const showReceivingMode = qtyMT > 0;
   const isMultiItem = items.length > 1;
-  const needsBagWidget = form.receivingMode === 'bags' || form.receivingMode === 'mixed' || form.receivingMode === 'custom';
+  const needsBagWidget = needsBagWidgetFor(form.receivingMode);
   const isMixed = form.receivingMode === 'mixed';
   // Batch 7 — per-container capacity: 25,000 KG loose / 20,000 KG palletized. A
   // bagged order can span several containers, so only an explicit single "container"
@@ -188,43 +186,16 @@ export default function CreateExportOrder() {
     : '';
 
   // Mixed packing totals
-  const mixedTotals = useMemo(() => {
-    if (!isMixed) return { packedKg: 0, packedBags: 0, looseKg: 0 };
-    const packedKg = packingLines.reduce((s, l) => s + (parseFloat(l.fillWeightKg) || 0) * (parseInt(l.bagCount) || 0), 0);
-    const packedBags = packingLines.reduce((s, l) => s + (parseInt(l.bagCount) || 0), 0);
-    return { packedKg, packedBags, looseKg: Math.max(0, totalKg - packedKg) };
-  }, [isMixed, packingLines, totalKg]);
+  const mixedTotals = useMemo(
+    () => (isMixed ? mixedPackingTotals(packingLines, totalKg) : { packedKg: 0, packedBags: 0, looseKg: 0 }),
+    [isMixed, packingLines, totalKg],
+  );
 
   // Single bag mode totals
-  const singleBagCount = form.receivingMode === 'bags' && form.bagSizeKg
-    ? Math.round(totalKg / (parseFloat(form.bagSizeKg) || 25))
-    : 0;
+  const singleBagCount = singleBagCountFor(form, totalKg);
 
-  // ─── Costing ───
-  const costing = useMemo(() => {
-    const estimatedRawQty = qtyMT > 0 ? Math.round(qtyMT / 0.75) : 0;
-    const bagsCost = form.receivingMode === 'loose' ? 0 : qtyMT * 25;
-    const riceCost = estimatedRawQty * pricePerMT * 0.5;
-    const loadingCost = qtyMT * 15;
-    const clearingCost = qtyMT * 12;
-    // Freight actually entered on this order wins over the old flat $65/MT
-    // guess, which was only ever a placeholder for CIF/CNF. With a real rate the
-    // margin below is the real margin.
-    const freightPerMt = parseFloat(form.freightPerMT) || 0;
-    const insurancePerMt = parseFloat(form.insurancePerMT) || 0;
-    const freightCost = (freightPerMt + insurancePerMt) > 0
-      ? qtyMT * (freightPerMt + insurancePerMt)
-      : ((form.incoterm === 'CIF' || form.incoterm === 'CNF') ? qtyMT * 65 : 0);
-    const totalEstimatedCost = riceCost + bagsCost + loadingCost + clearingCost + freightCost;
-    const estimatedGrossProfit = contractValue - totalEstimatedCost;
-    const marginPct = contractValue > 0 ? ((estimatedGrossProfit / contractValue) * 100) : 0;
-    // Advance / balance split — driven by the (incoterm-derived) advance %.
-    const advPct = parseFloat(form.advancePct) || 0;
-    const advanceExpected = contractValue * (advPct / 100);
-    const balanceExpected = contractValue - advanceExpected;
-    return { estimatedRawQty, bagsCost, riceCost, loadingCost, clearingCost, freightCost, totalEstimatedCost, contractValue, estimatedGrossProfit, marginPct, advPct, advanceExpected, balanceExpected };
-  }, [qtyMT, pricePerMT, form.incoterm, form.receivingMode, form.advancePct, contractValue,
-    form.freightPerMT, form.insurancePerMT]);
+  // ─── Costing ─── (see estimateCosting: entered freight beats the $65/MT guess)
+  const costing = useMemo(() => estimateCosting(form, items), [form, items]);
 
   const fmtUSD = (v) => '$' + (v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -239,8 +210,16 @@ export default function CreateExportOrder() {
     const { valid, errors } = validateForm(form, rules);
     setFormErrors(errors);
 
-    // #6 — a bank account is mandatory to create an export order (draft or not).
-    if (!form.bankAccountId) {
+    // A draft can be saved half-done (quantities, prices, bank still blank) and
+    // is checked in full when it is submitted. It still needs the buyer and a
+    // product on the first line — the order row can't exist without one.
+    if (isDraft) {
+      if (!items[0]?.productId) {
+        addToast('Pick at least the product on the first line to save a draft', 'error');
+        return false;
+      }
+    } else if (!form.bankAccountId) {
+      // #6 — a bank account is mandatory to create a live export order.
       addToast('Select a company bank account for this order', 'error');
       return false;
     }
@@ -273,139 +252,8 @@ export default function CreateExportOrder() {
     return valid;
   }
 
-  // ─── Build API payload ───
-  function buildPayload(status) {
-    const advPct = parseFloat(form.advancePct) || 0;
-    const advExpected = contractValue * (advPct / 100);
-    const head = items[0] || {};
-    const headProduct = products.find(p => p.id === Number(head.productId));
-
-    const payload = {
-      customer_id: Number(form.customerId),
-      country: form.country,
-      // Legacy/summary fields — kept in sync with the first line for code paths
-      // that still read order-level product/qty/price (milling, document renderers).
-      product_id: Number(head.productId) || null,
-      product_name: headProduct?.name || head.productName || '',
-      qty_mt: qtyMT,
-      price_per_mt: pricePerMT,
-      currency: form.currency,
-      contract_value: contractValue,
-      incoterm: form.incoterm,
-      doc_address_mode: form.docAddressMode || 'country',
-      doc_weight_unit: form.docWeightUnit || 'kg',
-      // Blank stays blank — an order with no freight figure prints and bills
-      // exactly as it always did.
-      freight_per_mt: form.freightPerMT === '' ? null : parseFloat(form.freightPerMT),
-      insurance_per_mt: form.insurancePerMT === '' ? null : parseFloat(form.insurancePerMT),
-      freight_basis_date: form.freightPerMT === '' ? null : (form.freightBasisDate || null),
-      freight_valid_until: form.freightValidUntil || null,
-      freight_display: form.freightDisplay || 'in_price',
-      freight_clause: form.freightClause || null,
-      advance_pct: advPct,
-      advance_expected: advExpected,
-      balance_expected: contractValue - advExpected,
-      payment_terms: form.paymentTerms || null,
-      bank_account_id: form.bankAccountId ? Number(form.bankAccountId) : null,
-      shipment_eta: form.shipmentWindowEnd || form.shipmentWindowStart || null,
-      source: form.source,
-      notes: form.notes || null,
-      status,
-      // Multi-line items — backend persists these to export_order_items.
-      items: items.map(it => {
-        const p = products.find(pp => pp.id === Number(it.productId));
-        return {
-          product_id: Number(it.productId) || null,
-          product_name: p?.name || it.productName || '',
-          qty_mt: itemQtyMT(it),
-          price_per_mt: itemPrice(it),
-          hs_code: it.hsCode || null,
-          packing: it.packing || null,
-          bag_type: it.bagType || form.bagType || null,
-          bag_size_kg: it.bagSizeKg ? parseFloat(it.bagSizeKg) : null,
-          bag_count: it.bagCount ? parseInt(it.bagCount) : null,
-          master_bag_size_kg: it.masterBagSizeKg ? parseFloat(it.masterBagSizeKg) : null,
-          bag_brand: it.bagBrand || null,
-        };
-      }),
-      // Contract & product specs (HS code mirrors first item for legacy renderers)
-      // HS code is per-item; the order-level value is set from the first line
-      // for backwards compat with legacy renderers / single-line readers.
-      hs_code: head.hsCode || null,
-      contract_number: form.contractNumber || null,
-      consignee_type: form.consigneeType || null,
-      broken_pct_target: form.brokenPctTarget ? parseFloat(form.brokenPctTarget) : null,
-      quality_description: form.qualityDescription || null,
-      shipment_window_start: form.shipmentWindowStart || null,
-      shipment_window_end: form.shipmentWindowEnd || null,
-      // Receiving mode
-      receiving_mode: form.receivingMode || null,
-      quantity_unit: form.quantityUnit || null,
-      quantity_input_value: qtyMT,
-      packing_notes: form.packingNotes || null,
-      // Batch 7 — structured packing spec
-      packing_type: form.packingType || 'retail',
-      bag_material: form.packingType === 'container' ? null : (form.bagMaterial || null),
-      palletized: form.packingType === 'container' ? false : !!form.palletized,
-    };
-
-    // Bag fields — only when receiving mode requires them
-    if (needsBagWidget) {
-      payload.bag_type = form.bagType || null;
-      payload.bag_quality = form.bagQuality || null;
-      payload.bag_size_kg = form.bagSizeKg ? parseFloat(form.bagSizeKg) : null;
-      payload.bag_weight_gm = form.bagWeightGm ? parseFloat(form.bagWeightGm) : null;
-      payload.bag_printing = form.bagPrinting || null;
-      payload.bag_color = form.bagColor || null;
-      payload.bag_brand = form.bagBrand || null;
-      payload.total_bags = singleBagCount || null;
-      payload.master_bag_size_kg = form.masterBagSizeKg ? parseFloat(form.masterBagSizeKg) : null;
-      // Empty-master-bag tare; entered on the order's Packing tab, carried here
-      // so a value set before save is not dropped. Feeds the documents' gross.
-      payload.master_bag_weight_gm = form.masterBagWeightGm ? parseFloat(form.masterBagWeightGm) : null;
-      // Retail bags packed per master bag (e.g. 20kg master ÷ 2kg retail = 10).
-      payload.units_per_bag = (requiresMasterBag(form.bagSizeKg) && form.masterBagSizeKg && form.bagSizeKg)
-        ? Math.floor(parseFloat(form.masterBagSizeKg) / (parseFloat(form.bagSizeKg) || 1)) : null;
-    }
-
-    // Packing-type cascade: null the retail "kg-bag" info that jumbo/container
-    // don't use, regardless of receiving mode, so the stored row stays clean.
-    if (form.packingType === 'container') {
-      Object.assign(payload, {
-        bag_type: null, bag_quality: null, bag_size_kg: null, bag_weight_gm: null,
-        bag_printing: null, bag_color: null, bag_brand: null,
-        master_bag_size_kg: null, units_per_bag: null, total_bags: null,
-        bag_material: null, palletized: false,
-      });
-    } else if (form.packingType === 'jumbo') {
-      Object.assign(payload, {
-        bag_quality: null, bag_printing: null, bag_color: null,
-        master_bag_size_kg: null, units_per_bag: null, bag_size_kg: 1200,
-      });
-    }
-
-    // Mixed packing lines
-    if (isMixed && packingLines.length > 0) {
-      payload.packing_lines = packingLines
-        .filter(l => l.bagCount && l.fillWeightKg)
-        .map(l => ({
-          bag_type: l.bagType || null,
-          bag_quality: l.bagQuality || null,
-          fill_weight_kg: parseFloat(l.fillWeightKg),
-          bag_count: parseInt(l.bagCount),
-          bag_printing: l.bagPrinting || null,
-          notes: l.notes || null,
-        }));
-      payload.total_bags = mixedTotals.packedBags;
-      payload.total_loose_weight_kg = mixedTotals.looseKg > 0 ? mixedTotals.looseKg : null;
-    }
-
-    if (form.receivingMode === 'loose') {
-      payload.total_loose_weight_kg = totalKg;
-    }
-
-    return payload;
-  }
+  // ─── Build API payload ─── (pure; see utils/createOrderForm.js)
+  const buildPayload = (status) => buildCreateOrderPayload({ form, items, products, packingLines, status });
 
   // ─── Submit handlers ───
   async function handleSubmit(status) {
@@ -564,6 +412,21 @@ export default function CreateExportOrder() {
             <label className="form-label">Destination Country</label>
             <input value={form.country} readOnly className="form-input bg-gray-50 text-gray-500" placeholder="Auto-filled" />
           </div>
+          <div className="form-group">
+            <label className="form-label">Destination Port</label>
+            {/* Pick a suggestion or type a new port. Prefilled from the buyer. */}
+            <input
+              value={form.destinationPort || ''}
+              onChange={e => set('destinationPort', e.target.value)}
+              list="create-order-ports"
+              maxLength={255}
+              className="form-input"
+              placeholder="e.g. Jebel Ali (Dubai)"
+            />
+            <datalist id="create-order-ports">
+              {PORTS.map(p => <option key={p} value={p} />)}
+            </datalist>
+          </div>
         </div>
       </div>
 
@@ -662,6 +525,11 @@ export default function CreateExportOrder() {
             <label className="form-label">Payment Terms</label>
             <select value={form.paymentTerms} onChange={e => set('paymentTerms', e.target.value)} className="form-input">
               <option value="">Select…</option>
+              {/* The buyer's own terms (prefilled from the buyer master or a
+                  duplicated order) may not be one of the presets. */}
+              {form.paymentTerms && !PAYMENT_TERMS.includes(form.paymentTerms) && (
+                <option value={form.paymentTerms}>{form.paymentTerms}</option>
+              )}
               {PAYMENT_TERMS.map(t => <option key={t} value={t}>{t}</option>)}
             </select>
           </div>

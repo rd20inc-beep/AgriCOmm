@@ -22,6 +22,8 @@ export const exportOrdersApi = {
   rejectExportReceipt: (paymentId, data) => api.post(`/api/export-orders/receipts/${paymentId}/reject`, data),
   addCost: (id, data) => api.post(`/api/export-orders/${id}/costs`, data),
   updateShipment: (id, data) => api.put(`/api/export-orders/${id}/shipment`, data),
+  // Draft → workflow; the server runs the full order validation here.
+  submit: (id, data) => api.post(`/api/export-orders/${id}/submit`, data || {}),
   startDocs: (id, data) => api.post(`/api/export-orders/${id}/start-docs`, data),
   uploadDocument: (id, data) => api.post(`/api/export-orders/${id}/documents/upload`, data),
   approveDocument: (id, data) => api.post(`/api/export-orders/${id}/documents/approve`, data),

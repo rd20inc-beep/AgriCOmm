@@ -407,6 +407,8 @@ export function transformCustomer(db) {
     country: db.country || '',
     address: db.address || '',
     port: db.port || '',
+    // The buyer's usual terms — prefilled on a new export order.
+    paymentTerms: db.payment_terms || '',
     customerType: db.customer_type || 'local',
     isFavorite: !!db.is_favorite,
   };

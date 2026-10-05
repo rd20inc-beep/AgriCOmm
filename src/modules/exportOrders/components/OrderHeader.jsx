@@ -21,7 +21,6 @@ export default function OrderHeader({
   canRequestBalance,
   canCreateMilling,
   canUpdateShipment,
-  canPutOnHold,
   canCloseOrder,
   canCancel,
   onCancelOrder,
@@ -29,7 +28,6 @@ export default function OrderHeader({
   onOpenBalanceModal,
   onOpenMillingModal,
   onOpenShipmentModal,
-  onOpenHoldModal,
   onCloseOrder,
   onStartDocsPreparation,
 }) {
@@ -92,7 +90,6 @@ export default function OrderHeader({
               <button disabled={!canRequestBalance} className={`w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 ${!canRequestBalance ? 'opacity-50 cursor-not-allowed' : ''}`} onClick={() => { if (!canRequestBalance) return; onOpenBalanceModal(); setShowActions(false); }}>Confirm Balance Received</button>
               <button disabled={!canCreateMilling} className={`w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 ${!canCreateMilling ? 'opacity-50 cursor-not-allowed' : ''}`} onClick={() => { if (!canCreateMilling) return; onOpenMillingModal(); setShowActions(false); }}>Create Milling Demand</button>
               <button disabled={!canUpdateShipment} className={`w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 ${!canUpdateShipment ? 'opacity-50 cursor-not-allowed' : ''}`} onClick={() => { if (!canUpdateShipment) return; onOpenShipmentModal(); setShowActions(false); }}>Update Shipment</button>
-              <button disabled={!canPutOnHold} className={`w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 ${!canPutOnHold ? 'opacity-50 cursor-not-allowed' : ''}`} onClick={() => { if (!canPutOnHold) return; onOpenHoldModal(); setShowActions(false); }}>Put On Hold</button>
               <button disabled={!canCloseOrder} className={`w-full text-left px-4 py-2 text-sm text-emerald-700 hover:bg-emerald-50 ${!canCloseOrder ? 'opacity-50 cursor-not-allowed' : ''}`} onClick={() => { if (!canCloseOrder) return; onCloseOrder(); }}>Close Order</button>
               <button disabled={!canCancel} className={`w-full text-left px-4 py-2 text-sm text-red-700 hover:bg-red-50 ${!canCancel ? 'opacity-50 cursor-not-allowed' : ''}`} onClick={() => { if (!canCancel) return; onCancelOrder(); }}>Cancel Order</button>
               <div className="border-t border-gray-100 my-1" />

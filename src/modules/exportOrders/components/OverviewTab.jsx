@@ -8,6 +8,7 @@ import { INCOTERMS, incotermHint } from '../../../shared/constants/incoterms';
 import { WEIGHT_UNITS, weightUnit } from '../../../shared/constants/weightUnits';
 import { FREIGHT_DISPLAYS, incotermCarriesFreight, receivableFreight } from '../../../shared/constants/exportFreight';
 import { PAYMENT_TERMS } from '../../../shared/constants/paymentTerms';
+import { contractEditPayload, lineItemsPayload, orderHasReceipts, isMultiLine } from '../utils/orderEdits';
 
 // Statuses where ANY contract field is fully editable.
 // After milling starts, qty/price changes can desync downstream artifacts —
@@ -37,6 +38,38 @@ export default function OverviewTab({ order, formatCurrency, formatPKR, totalCos
   // Soft edit is allowed pre-shipment; hard edit (qty/price) only pre-milling.
   const contractEditable = CONTRACT_SOFT_EDITABLE.has(order?.status);
   const qtyPriceEditable = CONTRACT_FULLY_EDITABLE.has(order?.status);
+  // Money in → the server locks currency (and qty/price/advance); say so here
+  // rather than let the save bounce.
+  const hasReceipts = orderHasReceipts(order);
+  // A multi-line order's qty/price are the sum of its lines: edit the lines.
+  const multiLine = isMultiLine(order);
+  const linesEditable = qtyPriceEditable && !hasReceipts;
+  const qtyPriceInputEditable = qtyPriceEditable && !multiLine && !hasReceipts;
+  const qtyPriceLockNote = !qtyPriceEditable ? 'locked — past Procurement'
+    : hasReceipts ? 'locked — payment received'
+    : multiLine ? 'edit the line items below'
+    : '';
+  const [linesEditing, setLinesEditing] = useState(false);
+  const [lineEdits, setLineEdits] = useState({});
+  const startLinesEditing = () => {
+    setLineEdits(Object.fromEntries((order.items || []).map(it => [it.id, { qtyMT: it.qtyMT, pricePerMT: it.pricePerMT }])));
+    setLinesEditing(true);
+  };
+  const setLineEdit = (lineId, field, value) => setLineEdits(e => ({ ...e, [lineId]: { ...e[lineId], [field]: value } }));
+  const saveLines = async () => {
+    const items = lineItemsPayload(order.items, lineEdits);
+    if (items.some(it => !(it.qty_mt > 0) || !(it.price_per_mt > 0))) {
+      addToast('Every line needs a quantity and price above zero', 'error');
+      return;
+    }
+    try {
+      await updateOrderMut.mutateAsync({ id: orderId, data: { items } });
+      addToast('Line items updated');
+      setLinesEditing(false);
+    } catch (err) {
+      addToast(err.message || 'Failed to update line items', 'error');
+    }
+  };
 
   const startEditing = () => {
     setSpecs({
@@ -100,34 +133,13 @@ export default function OverviewTab({ order, formatCurrency, formatPKR, totalCos
   };
 
   const saveContract = async () => {
-    // Always-editable soft fields
-    const payload = {
-      currency: contract.currency,
-      incoterm: contract.incoterm,
-      advance_pct: parseFloat(contract.advance_pct) || 0,
-      destination_port: contract.destination_port || null,
-      shipment_eta: contract.shipment_eta || null,
-      doc_address_mode: contract.doc_address_mode || 'country',
-      // Documents only — the engine stores KG whatever this says.
-      doc_weight_unit: contract.doc_weight_unit || 'kg',
-      // Freight. Blank clears the figure rather than writing a zero, so an order
-      // that stops charging freight stops printing the freight rows entirely.
-      freight_per_mt: contract.freight_per_mt === '' ? null : parseFloat(contract.freight_per_mt),
-      insurance_per_mt: contract.insurance_per_mt === '' ? null : parseFloat(contract.insurance_per_mt),
-      freight_basis_date: contract.freight_basis_date || null,
-      freight_valid_until: contract.freight_valid_until || null,
-      freight_display: contract.freight_display || 'in_price',
-      freight_clause: contract.freight_clause || null,
-    };
-    // Only send qty/price when they're actually editable, so the server's
-    // recompute path doesn't fire for an order that's locked them out.
-    if (qtyPriceEditable) {
-      payload.qty_mt = parseFloat(contract.qty_mt) || 0;
-      payload.price_per_mt = parseFloat(contract.price_per_mt) || 0;
-      if (payload.qty_mt <= 0 || payload.price_per_mt <= 0) {
-        addToast('Quantity and price must be positive', 'error');
-        return;
-      }
+    // qty/price go only when editable, single-line and actually changed (see
+    // contractEditPayload); currency only when changed.
+    const payload = contractEditPayload(order, contract, { qtyPriceEditable: qtyPriceInputEditable });
+    if (qtyPriceInputEditable
+        && ((parseFloat(contract.qty_mt) || 0) <= 0 || (parseFloat(contract.price_per_mt) || 0) <= 0)) {
+      addToast('Quantity and price must be positive', 'error');
+      return;
     }
     if (payload.advance_pct < 0 || payload.advance_pct > 100) {
       addToast('Advance % must be between 0 and 100', 'error');
@@ -234,20 +246,23 @@ export default function OverviewTab({ order, formatCurrency, formatPKR, totalCos
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">
                   Quantity (MT)
-                  {!qtyPriceEditable && <span className="ml-1 text-amber-600 text-[10px]">(locked — past Procurement)</span>}
+                  {qtyPriceLockNote && <span className="ml-1 text-amber-600 text-[10px]">({qtyPriceLockNote})</span>}
                 </label>
-                <input type="number" min="0" step="0.01" value={contract.qty_mt} disabled={!qtyPriceEditable} onChange={e => setContract(c => ({ ...c, qty_mt: e.target.value }))} className={`w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none ${!qtyPriceEditable ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : ''}`} />
+                <input type="number" min="0" step="0.01" value={contract.qty_mt} disabled={!qtyPriceInputEditable} onChange={e => setContract(c => ({ ...c, qty_mt: e.target.value }))} className={`w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none ${!qtyPriceInputEditable ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : ''}`} />
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">
                   Price per MT
-                  {!qtyPriceEditable && <span className="ml-1 text-amber-600 text-[10px]">(locked)</span>}
+                  {qtyPriceLockNote && <span className="ml-1 text-amber-600 text-[10px]">(locked)</span>}
                 </label>
-                <input type="number" min="0" step="0.01" value={contract.price_per_mt} disabled={!qtyPriceEditable} onChange={e => setContract(c => ({ ...c, price_per_mt: e.target.value }))} className={`w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none ${!qtyPriceEditable ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : ''}`} />
+                <input type="number" min="0" step="0.01" value={contract.price_per_mt} disabled={!qtyPriceInputEditable} onChange={e => setContract(c => ({ ...c, price_per_mt: e.target.value }))} className={`w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none ${!qtyPriceInputEditable ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : ''}`} />
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Currency</label>
-                <select value={contract.currency} onChange={e => setContract(c => ({ ...c, currency: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Currency
+                  {hasReceipts && <span className="ml-1 text-amber-600 text-[10px]">(locked — payment received)</span>}
+                </label>
+                <select value={contract.currency} disabled={hasReceipts} onChange={e => setContract(c => ({ ...c, currency: e.target.value }))} className={`w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none ${hasReceipts ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : ''}`}>
                   <option value="USD">USD</option><option value="EUR">EUR</option><option value="GBP">GBP</option>
                 </select>
               </div>
@@ -424,6 +439,23 @@ export default function OverviewTab({ order, formatCurrency, formatPKR, totalCos
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 lg:col-span-2">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">Line Items ({order.items.length})</h3>
+            {!linesEditing ? (
+              <button
+                onClick={startLinesEditing}
+                disabled={!linesEditable}
+                title={linesEditable
+                  ? 'Edit each line’s quantity and rate — the documents print these lines'
+                  : (hasReceipts ? 'Locked: a payment has been received' : `Locked: order is ${order.status}`)}
+                className={`text-xs font-medium flex items-center gap-1 ${linesEditable ? 'text-blue-600 hover:text-blue-700' : 'text-gray-400 cursor-not-allowed'}`}
+              >
+                <Pencil className="w-3.5 h-3.5" /> Edit
+              </button>
+            ) : (
+              <div className="flex items-center gap-2">
+                <button onClick={() => setLinesEditing(false)} className="text-gray-500 hover:text-gray-700 text-xs font-medium flex items-center gap-1"><X className="w-3.5 h-3.5" /> Cancel</button>
+                <button onClick={saveLines} disabled={updateOrderMut.isPending} className="text-white bg-blue-600 hover:bg-blue-700 text-xs font-medium flex items-center gap-1 px-2 py-1 rounded-lg"><Save className="w-3.5 h-3.5" /> Save</button>
+              </div>
+            )}
           </div>
           <div className="overflow-x-auto mobile-cards">
             <table className="w-full text-sm">
@@ -460,9 +492,25 @@ export default function OverviewTab({ order, formatCurrency, formatPKR, totalCos
                         </td>
                       );
                     })()}
-                    <td data-label="Qty (MT)" className="py-2 pr-3 text-right text-gray-900">{it.qtyMT.toLocaleString(undefined, { maximumFractionDigits: 3 })}</td>
-                    <td data-label="Rate / MT" className="py-2 pr-3 text-right text-gray-900">{formatCurrency(it.pricePerMT)}</td>
-                    <td data-label="Line Total" className="py-2 pl-3 text-right font-semibold text-gray-900">{formatCurrency(it.lineTotal)}</td>
+                    {linesEditing ? (
+                      <>
+                        <td data-label="Qty (MT)" className="py-2 pr-3 text-right">
+                          <input type="number" min="0" step="0.001" value={lineEdits[it.id]?.qtyMT ?? ''} onChange={e => setLineEdit(it.id, 'qtyMT', e.target.value)} className="w-24 border border-gray-300 rounded-lg px-2 py-1 text-sm text-right focus:ring-2 focus:ring-blue-500 outline-none" />
+                        </td>
+                        <td data-label="Rate / MT" className="py-2 pr-3 text-right">
+                          <input type="number" min="0" step="0.01" value={lineEdits[it.id]?.pricePerMT ?? ''} onChange={e => setLineEdit(it.id, 'pricePerMT', e.target.value)} className="w-24 border border-gray-300 rounded-lg px-2 py-1 text-sm text-right focus:ring-2 focus:ring-blue-500 outline-none" />
+                        </td>
+                        <td data-label="Line Total" className="py-2 pl-3 text-right font-semibold text-gray-900">
+                          {formatCurrency((parseFloat(lineEdits[it.id]?.qtyMT) || 0) * (parseFloat(lineEdits[it.id]?.pricePerMT) || 0))}
+                        </td>
+                      </>
+                    ) : (
+                      <>
+                        <td data-label="Qty (MT)" className="py-2 pr-3 text-right text-gray-900">{it.qtyMT.toLocaleString(undefined, { maximumFractionDigits: 3 })}</td>
+                        <td data-label="Rate / MT" className="py-2 pr-3 text-right text-gray-900">{formatCurrency(it.pricePerMT)}</td>
+                        <td data-label="Line Total" className="py-2 pl-3 text-right font-semibold text-gray-900">{formatCurrency(it.lineTotal)}</td>
+                      </>
+                    )}
                   </tr>
                 ))}
               </tbody>

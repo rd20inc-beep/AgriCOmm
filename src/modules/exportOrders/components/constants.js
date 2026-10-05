@@ -73,8 +73,11 @@ export function getVisibleTabs(status) {
     'Docs In Preparation', 'Awaiting Balance', 'Ready to Ship', 'Shipped', 'Arrived', 'Closed'];
   if (procurementFrom.includes(status)) visible.push('procurement');
 
-  // Shipment: visible from Ready to Ship onwards
-  const shipmentFrom = ['Ready to Ship', 'Shipped', 'Arrived', 'Closed'];
+  // Shipment: visible from In Milling onwards. Vessel, booking and containers
+  // are arranged while the rice is still milling; only the ATD/ATA dates (which
+  // ship/arrive the order) wait for Ready to Ship — see canRecordDeparture.
+  const shipmentFrom = ['In Milling', 'Docs In Preparation', 'Awaiting Balance',
+    'Ready to Ship', 'Shipped', 'Arrived', 'Closed'];
   if (shipmentFrom.includes(status)) visible.push('shipment');
 
   return tabList.filter(t => visible.includes(t.key));
