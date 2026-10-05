@@ -101,7 +101,7 @@ export default function MaterialRequirementsCard({ order }) {
                   <td data-label="Unit Cost" className="py-2 text-right tabular-nums text-gray-500">
                     {l.est_unit_cost != null
                       ? `Rs ${Number(l.est_unit_cost).toLocaleString(undefined, { maximumFractionDigits: 2 })}`
-                      : <span className="text-amber-600" title="No cost recorded on this item — set it in Mill Store ▸ Stock Overview">no cost set</span>}
+                      : <span className="text-amber-600" title="No cost recorded on this item — set it in Mill Store">no cost set</span>}
                   </td>
                   {/* Value of what has to be BOUGHT (the shortage), not of the
                       whole requirement - nothing to buy reads as a dash rather

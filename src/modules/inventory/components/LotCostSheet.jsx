@@ -1,6 +1,6 @@
 import { useRef } from 'react';
 import { Printer } from 'lucide-react';
-import { allEquivalents, allRateEquivalents } from '../../../utils/unitConversion';
+import { allEquivalents, allRateEquivalents } from '../../../shared/utils/unitConversion';
 import PartyLink from '../../../shared/components/PartyLink';
 
 function fmtPKR(v) { return 'Rs ' + (parseFloat(v) || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }

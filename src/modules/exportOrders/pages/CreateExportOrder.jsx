@@ -8,8 +8,8 @@ import {
   Save, Send, DollarSign, Calculator, ArrowLeft, Package, Truck,
   User, ShoppingBag, ChevronRight, ChevronDown, ChevronLeft, Plus, Trash2, Info, FileText, Check, Edit3,
 } from 'lucide-react';
-import { validateForm, required, positiveNonZero } from '../../../utils/validation';
-import { toKg, fromKg, allEquivalents, UNITS } from '../../../utils/unitConversion';
+import { validateForm, required, positiveNonZero } from '../../../shared/utils/validation';
+import { toKg, fromKg, allEquivalents, UNITS } from '../../../shared/utils/unitConversion';
 import SearchSelect from '../../../components/SearchSelect';
 import RiceTypePicker from '../../../components/RiceTypePicker';
 import BagTypePicker from '../../../components/BagTypePicker';

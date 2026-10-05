@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, Suspense } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Ship, Factory, Package, DollarSign, FileText, BarChart3, Settings, Search, Bell, ChevronDown, ChevronRight, User, Users, Plus, X, LogOut, KeyRound, AlertTriangle, AlertCircle, Info, CreditCard, ArrowRightLeft, FlaskConical, Menu, ShieldCheck, Shield, ChevronsLeft, ChevronsRight, Sun, Moon, Zap, Brain, Beaker, Printer, Boxes, ClipboardCheck, Sparkles, ShoppingCart, ScanLine, MessageCircle, MessageCircleOff } from 'lucide-react';
+import { LayoutDashboard, Ship, Factory, Package, DollarSign, FileText, BarChart3, Settings, Search, Bell, ChevronDown, ChevronRight, User, Users, Plus, X, LogOut, KeyRound, AlertTriangle, AlertCircle, Info, CreditCard, ArrowRightLeft, FlaskConical, Menu, ShieldCheck, Shield, ChevronsLeft, ChevronsRight, Sun, Moon, Zap, Brain, Beaker, Printer, Boxes, Truck, ClipboardCheck, Sparkles, ShoppingCart, ScanLine, MessageCircle, MessageCircleOff } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import { useMasterDataApprovalsCount } from '../modules/admin/api/queries';
@@ -39,6 +39,7 @@ const sidebarNav = [
     children: [
       { label: 'All Orders', to: '/export', permission: { module: 'export_orders', action: 'view' } },
       { label: 'Create Order', to: '/export/create', icon: Plus, permission: { module: 'export_orders', action: 'create' } },
+      { label: 'Buyers', to: '/buyers', icon: Users, permission: { module: 'export_orders', action: 'view' } },
     ],
   },
   {
@@ -48,17 +49,19 @@ const sidebarNav = [
       { label: 'Operations', to: '/milling', permission: { module: 'milling', action: 'view' } },
       { label: 'Service Milling', to: '/milling/service', icon: Package, permission: { module: 'service_milling', action: 'view' } },
       { label: 'Service Invoices', to: '/service-milling/invoices', icon: FileText, permission: { module: 'service_milling', action: 'view_invoice' } },
-      // Mill money (expenses, payables, stock value, profit) — not for the
-      // money-blind Mill Operator / QC Analyst: also needs reports.view_cost.
-      { label: 'Finance', to: '/milling/finance', icon: DollarSign, permission: { module: 'milling', action: 'view' }, anyOf: [{ module: 'reports', action: 'view_cost' }, { module: 'finance', action: 'view' }] },
-      { label: 'Stock Overview', to: '/mill-store', icon: ShoppingCart, permission: { module: 'mill_store', action: 'view' } },
+      // Mill money (expenses, payables, stock value, profit, purchase rates) —
+      // not for the money-blind Mill Operator / QC Analyst: also needs reports.view_cost.
+      { label: 'Mill Finance', to: '/milling/finance', icon: DollarSign, permission: { module: 'milling', action: 'view' }, anyOf: [{ module: 'reports', action: 'view_cost' }, { module: 'finance', action: 'view' }] },
+      { label: 'Rice Purchases', to: '/milling/rice-purchases', icon: Truck, permission: { module: 'milling', action: 'view' }, anyOf: [{ module: 'reports', action: 'view_cost' }, { module: 'finance', action: 'view' }] },
+      { label: 'Sample Analysis', to: '/sample-analysis', icon: FlaskConical, anyOf: [{ module: 'inventory', action: 'view' }, { module: 'milling', action: 'view' }] },
+      { label: 'Mill Store', to: '/mill-store', icon: ShoppingCart, permission: { module: 'mill_store', action: 'view' } },
       { label: 'Stock Summary', to: '/stock-summary', icon: Boxes, permission: { module: 'inventory', action: 'view' } },
       { label: 'Stock Take', to: '/stock-count', icon: ClipboardCheck, permission: { module: 'inventory', action: 'view' } },
-      { label: 'Inventory', to: '/lot-inventory', icon: Package, permission: { module: 'inventory', action: 'view' } },
-      { label: 'Quality', to: '/quality', icon: FlaskConical, permission: { module: 'milling', action: 'view' } },
-      { label: 'Purchase Requirements', to: '/purchase-requirements', icon: ShoppingCart, permission: { module: 'inventory', action: 'view' } },
-      { label: 'Adjustments', to: '/stock-adjustments', icon: AlertTriangle, permission: { module: 'inventory', action: 'view' } },
-      { label: 'Transfers', to: '/transfer', icon: ArrowRightLeft, permission: { module: 'inventory', action: 'view' } },
+      { label: 'Lot Inventory', to: '/lot-inventory', icon: Package, permission: { module: 'inventory', action: 'view' } },
+      { label: 'Quality Comparison', to: '/quality', icon: FlaskConical, permission: { module: 'milling', action: 'view' } },
+      { label: 'Purchase Requirements', to: '/purchase-requirements', icon: ShoppingCart, anyOf: [{ module: 'milling', action: 'view' }, { module: 'inventory', action: 'view' }, { module: 'finance', action: 'view' }] },
+      { label: 'Stock Adjustments', to: '/stock-adjustments', icon: AlertTriangle, permission: { module: 'inventory', action: 'view' } },
+      { label: 'Internal Transfer', to: '/transfer', icon: ArrowRightLeft, permission: { module: 'inventory', action: 'view' } },
       { label: 'Local Sales', to: '/local-sales', permission: { module: 'inventory', action: 'view' } },
     ],
   },
@@ -67,7 +70,7 @@ const sidebarNav = [
     label: 'Reports',
     icon: BarChart3,
     children: [
-      { label: 'Business Reports', to: '/reports', icon: BarChart3, permission: { module: 'reports', action: 'view' } },
+      { label: 'Reports', to: '/reports', icon: BarChart3, permission: { module: 'reports', action: 'view' } },
       { label: 'Print Reports', to: '/reports/print', icon: Printer, permission: { module: 'reports', action: 'view' } },
     ],
   },

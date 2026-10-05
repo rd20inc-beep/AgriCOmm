@@ -34,7 +34,7 @@ export default function RecentActivity({ activities }) {
         <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">
           Recent Activity
         </h2>
-        <Link to="/finance/ledger" className="text-xs text-blue-600 hover:text-blue-800 font-medium">View All &rarr;</Link>
+        <Link to="/finance/accounting" className="text-xs text-blue-600 hover:text-blue-800 font-medium">View All &rarr;</Link>
       </div>
       <div className="space-y-4 max-h-[420px] overflow-y-auto pr-1">
         {activities.map((item) => {

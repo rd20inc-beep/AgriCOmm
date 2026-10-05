@@ -706,7 +706,7 @@ export default function Reports() {
             <div className="flex items-center gap-2 text-xs uppercase tracking-wider opacity-80 mb-1">
               <BarChart3 size={14} /> Reports & Analytics
             </div>
-            <h1 className="text-3xl font-bold leading-tight">Business Reports</h1>
+            <h1 className="text-3xl font-bold leading-tight">Reports</h1>
             <p className="text-sm opacity-80 mt-1">
               Real-time view of every order, customer and shipment — sourced directly from production data.
             </p>

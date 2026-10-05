@@ -94,7 +94,7 @@ export default function LotReport() {
     <div className="space-y-6">
       {/* Toolbar — hidden when printing */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 print:hidden">
-        <Link to="/reports" className="text-blue-600 hover:underline inline-flex items-center gap-1 text-sm mb-2 print:hidden"><ArrowLeft size={14} /> Business Reports</Link>
+        <Link to="/reports" className="text-blue-600 hover:underline inline-flex items-center gap-1 text-sm mb-2 print:hidden"><ArrowLeft size={14} /> Reports</Link>
         <div className="flex items-center gap-2 mb-3">
           <FileText className="w-5 h-5 text-blue-600" />
           <h1 className="text-lg font-semibold text-gray-900">Lot Reports</h1>

@@ -356,7 +356,7 @@ export default function PackingTab({ order, onUpdated }) {
                 <input type="number" value={form.master_bag_size_kg} onChange={e => setForm({ ...form, master_bag_size_kg: e.target.value })}
                   placeholder="20" className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
               </div>
-              {/* Tare normally comes from the mill-store item (Stock Overview ▸
+              {/* Tare normally comes from the mill-store item (Mill Store ▸
                   Tare kg/bag), which is where the mill records bag weights and
                   where the packing flow already reads them. These two only
                   OVERRIDE it for this one order, so they stay blank by default. */}
@@ -372,7 +372,7 @@ export default function PackingTab({ order, onUpdated }) {
               </div>
               <div className="col-span-2">
                 <p className="text-[11px] text-gray-400">
-                  Empty-bag weights come from Mill Store ▸ Stock Overview (Tare kg/bag) and are added to net to give the gross weight on the export documents. Fill these only to override them for this order.
+                  Empty-bag weights come from Mill Store (Tare kg/bag) and are added to net to give the gross weight on the export documents. Fill these only to override them for this order.
                 </p>
               </div>
               <div>
