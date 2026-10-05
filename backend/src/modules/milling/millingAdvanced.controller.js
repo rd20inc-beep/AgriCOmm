@@ -420,35 +420,6 @@ const millingAdvancedController = {
     }
   },
 
-  async addSourceLot(req, res) {
-    try {
-      const { id } = req.params;
-      const { lot_id, qty_kg } = req.body;
-
-      if (!lot_id || !qty_kg) {
-        return res.status(400).json({ success: false, message: 'lot_id and qty_kg are required.' });
-      }
-
-      const batch = await db('milling_batches').where({ id }).first();
-      if (!batch) {
-        return res.status(404).json({ success: false, message: 'Milling batch not found.' });
-      }
-
-      const record = await db.transaction(async (trx) => {
-        return millingService.addSourceLot(trx, {
-          batchId: id,
-          lotId: lot_id,
-          qtyKg: qty_kg,
-        });
-      });
-
-      return res.status(201).json({ success: true, data: { source_lot: record } });
-    } catch (err) {
-      console.error('addSourceLot error:', err);
-      const status = err.message.includes('not found') ? 404 : 400;
-      return res.status(status).json({ success: false, message: err.message });
-    }
-  },
 
   // =========================================================================
   // Reprocessing

@@ -680,6 +680,10 @@ const createBatch = Joi.object({
     bag_size_kg: Joi.number().min(0).allow(null, ''),
     arrival_date: Joi.date().allow(null, ''),
     notes: Joi.string().allow('', null),
+    // Per-truck quality / price — the direct supplier+qty create sends the
+    // Rs/kg here as price_per_mt (per MT, like addVehicle). The controller
+    // whitelists the keys (sanitizeVehicleQuality).
+    quality: Joi.object().unknown(true).allow(null),
   })).allow(null),
 }).or('raw_qty_kg', 'source_lots');
 
