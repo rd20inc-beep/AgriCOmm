@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, Suspense } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Factory, Package, DollarSign, BarChart3, Search, Bell, ChevronDown, User, Settings, X, LogOut, AlertTriangle, AlertCircle, Info, FlaskConical, Menu, ArrowRightLeft, ShoppingCart, ClipboardEdit, Gauge, ChevronsLeft, ChevronsRight, Sun, Moon, Truck, Printer, Users, FileText, MessageCircle, MessageCircleOff } from 'lucide-react';
+import { LayoutDashboard, Factory, Package, DollarSign, BarChart3, Search, Bell, ChevronDown, User, Settings, X, LogOut, AlertTriangle, AlertCircle, Info, FlaskConical, Menu, ArrowRightLeft, ShoppingCart, ClipboardEdit, Gauge, ChevronsLeft, ChevronsRight, Sun, Moon, Truck, Printer, Users, FileText, MessageCircle, MessageCircleOff, Boxes, ClipboardCheck } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import { RouteErrorBoundary } from './ErrorBoundary';
@@ -22,17 +22,17 @@ const millNav = [
       { label: 'Service Invoices', to: '/service-milling/invoices', icon: FileText },
       { label: 'Rice Purchases', to: '/milling/rice-purchases', icon: Truck },
       { label: 'Sample Analysis', to: '/sample-analysis', icon: FlaskConical },
-      { label: 'Quality Control', to: '/quality', icon: FlaskConical },
+      { label: 'Quality Comparison', to: '/quality', icon: FlaskConical },
     ],
   },
   {
     label: 'Store',
     icon: ShoppingCart,
     children: [
-      { label: 'Stock Overview', to: '/mill-store', icon: ShoppingCart },
-      { label: 'Alerts', to: '/mill-store/alerts', icon: AlertTriangle },
-      { label: 'Adjustments', to: '/mill-store/adjustments', icon: ClipboardEdit },
-      { label: 'Ratios', to: '/mill-store/ratios', icon: Gauge },
+      { label: 'Mill Store', to: '/mill-store', icon: ShoppingCart },
+      { label: 'Stock Alerts', to: '/mill-store/alerts', icon: AlertTriangle },
+      { label: 'Store Adjustments', to: '/mill-store/adjustments', icon: ClipboardEdit },
+      { label: 'Consumption Ratios', to: '/mill-store/ratios', icon: Gauge },
     ],
   },
   {
@@ -40,8 +40,11 @@ const millNav = [
     icon: Package,
     children: [
       { label: 'Lot Inventory', to: '/lot-inventory', icon: Package },
+      { label: 'Stock Summary', to: '/stock-summary', icon: Boxes },
+      { label: 'Stock Take', to: '/stock-count', icon: ClipboardCheck },
+      { label: 'Purchase Requirements', to: '/purchase-requirements', icon: ShoppingCart },
       { label: 'Stock Adjustments', to: '/stock-adjustments', icon: AlertTriangle },
-      { label: 'Transfers', to: '/transfer', icon: ArrowRightLeft },
+      { label: 'Internal Transfer', to: '/transfer', icon: ArrowRightLeft },
     ],
   },
   {
@@ -59,7 +62,7 @@ const millNav = [
     label: 'Reports',
     icon: BarChart3,
     children: [
-      { label: 'Dashboards', to: '/reports', icon: BarChart3 },
+      { label: 'Reports', to: '/reports', icon: BarChart3 },
       { label: 'Print Reports', to: '/reports/print', icon: Printer },
     ],
   },

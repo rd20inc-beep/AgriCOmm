@@ -107,7 +107,7 @@ export default function InvoiceLedger() {
     <div className="max-w-7xl mx-auto p-4 sm:p-6 space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <Link to="/reports" className="text-blue-600 hover:underline inline-flex items-center gap-1 text-sm mb-1"><ArrowLeft size={14} /> Business Reports</Link>
+          <Link to="/reports" className="text-blue-600 hover:underline inline-flex items-center gap-1 text-sm mb-1"><ArrowLeft size={14} /> Reports</Link>
           <h1 className="text-2xl font-bold text-gray-900 inline-flex items-center gap-2"><FileText size={22} /> Invoice Ledger</h1>
           <p className="text-sm text-gray-500">Search and trace every sales & purchase invoice.</p>
         </div>

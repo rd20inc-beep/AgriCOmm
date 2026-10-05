@@ -5,7 +5,7 @@ import { useLotInventory, useStockReport } from '../../../api/queries';
 import { LoadingSpinner, ErrorState } from '../../../components/LoadingState';
 import StatusBadge from '../../../components/StatusBadge';
 import PartyLink from '../../../shared/components/PartyLink';
-import { fromKg, UNITS } from '../../../utils/unitConversion';
+import { fromKg, UNITS } from '../../../shared/utils/unitConversion';
 import useCanSeeCost from '../../../hooks/useCanSeeCost';
 
 const tabs = [

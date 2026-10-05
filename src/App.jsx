@@ -147,13 +147,13 @@ function FinanceRoutes() {
         <Route path="payroll" element={<ProtectedRoute module="payroll" action="view"><FinancePayroll /></ProtectedRoute>} />
         <Route path="alerts" element={<FinanceAlerts />} />
         {/* Legacy routes — redirect-compatible */}
-        <Route path="receivables" element={<MoneyIn />} />
-        <Route path="payables" element={<MoneyOut />} />
+        <Route path="receivables" element={<Navigate to="/finance/money-in" replace />} />
+        <Route path="payables" element={<Navigate to="/finance/money-out" replace />} />
         <Route path="confirmations" element={<FinanceConfirmations />} />
         <Route path="costs" element={<CostAllocation />} />
         <Route path="transfers" element={<FinanceTransfers />} />
-        <Route path="profitability" element={<Profit />} />
-        <Route path="ledger" element={<Accounting />} />
+        <Route path="profitability" element={<Navigate to="/finance/profit" replace />} />
+        <Route path="ledger" element={<Navigate to="/finance/accounting" replace />} />
         <Route path="reconciliation" element={<Reconciliation />} />
         <Route path="suspense" element={<FinanceSuspense />} />
       </Routes>
@@ -292,6 +292,12 @@ function StandardRoutes() {
         {/* Mill money pages also need cost visibility (reports.view_cost or finance.view). */}
         <Route path="/milling/finance" element={<ProtectedRoute module="milling" action="view" anyOf={COST_VIEWERS}><MillFinanceDashboard /></ProtectedRoute>} />
         <Route path="/milling/rice-purchases" element={<ProtectedRoute module="milling" action="view" anyOf={COST_VIEWERS}><RicePurchasesLedger /></ProtectedRoute>} />
+        {/* Static /milling/* pages must be declared here, or a Standard-shell user
+            following a link to them lands on /milling/:id with id="customers". */}
+        <Route path="/milling/customers" element={<ProtectedRoute module="export_orders" action="view"><MillCustomers /></ProtectedRoute>} />
+        <Route path="/milling/suppliers" element={<ProtectedRoute module="milling" action="view"><MillSuppliers /></ProtectedRoute>} />
+        <Route path="/milling/statements" element={<ProtectedRoute module="finance" action="view"><PartyLedger /></ProtectedRoute>} />
+        <Route path="/purchase-requirements" element={<ProtectedRoute anyOf={[{ module: 'milling', action: 'view' }, { module: 'inventory', action: 'view' }, { module: 'finance', action: 'view' }]}><PurchaseRequirements /></ProtectedRoute>} />
         <Route path="/stock-adjustments" element={<ProtectedRoute module="inventory" action="view"><StockAdjustments /></ProtectedRoute>} />
         <Route path="/milling/:id" element={<ProtectedRoute module="milling" action="view"><MillingBatchDetail /></ProtectedRoute>} />
         <Route path="/quality" element={<ProtectedRoute module="milling" action="view"><QualityComparison /></ProtectedRoute>} />

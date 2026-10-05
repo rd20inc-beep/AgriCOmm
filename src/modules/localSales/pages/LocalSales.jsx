@@ -18,7 +18,7 @@ import SlideDrawer from '../../../components/SlideDrawer';
 import { adminApi, customersApi } from '../../admin/api/services';
 import CustomerPicker from '../../../components/CustomerPicker';
 import { localSalesApi } from '../../../api/services';
-import { toKg, fromKg, rateToPerKg, rateFromPerKg, allEquivalents, allRateEquivalents, UNITS } from '../../../utils/unitConversion';
+import { toKg, fromKg, rateToPerKg, rateFromPerKg, allEquivalents, allRateEquivalents, UNITS } from '../../../shared/utils/unitConversion';
 import { downloadCSV } from '../../../utils/csvExport';
 import { lotCategory, CAT_ORDER, CAT_COLOR } from '../../../utils/lotCategory';
 import { favStar, isFavorite } from '../../../shared/utils/favorites';
