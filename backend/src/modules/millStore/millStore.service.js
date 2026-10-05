@@ -235,10 +235,12 @@ const millStoreService = {
   // Per-size katta breakdown: where each KATTA-<kg> item's stock came from /
   // went — purchased, freed from milling, used to pack outputs, sold.
   async getKattaSummary() {
-    const items = await db('mill_items as i')
-      .leftJoin('mill_stock as s', function () { this.on('s.item_id', 'i.id').andOnNull('s.warehouse_id'); })
+    // On hand = the item's stock across EVERY bucket (not only the unassigned
+    // warehouse_id IS NULL row), same as alerts / summary / forecast.
+    const items = await repo.withItemOnHand(db('mill_items as i'), 'i')
       .where('i.code', 'like', 'KATTA-%')
-      .select('i.id', 'i.code', 'i.name', 'i.capacity_kg', 'i.avg_cost_per_unit', 'i.reorder_level', 's.quantity_available')
+      .select('i.id', 'i.code', 'i.name', 'i.capacity_kg', 'i.avg_cost_per_unit', 'i.reorder_level',
+        db.raw(`${repo.ITEM_ON_HAND} as quantity_available`))
       .orderBy('i.capacity_kg');
     const n = (v) => parseFloat(v) || 0;
     const out = [];
