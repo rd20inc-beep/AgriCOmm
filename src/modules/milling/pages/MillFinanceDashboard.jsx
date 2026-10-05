@@ -153,7 +153,8 @@ function Stat({ label, value, sub, tone = 'slate', icon: Icon }) {
 // recordPayment with a cash/bank account is mandatory and a partial payment is
 // allowed: settling any payable posts the GL and moves the account.
 function PayTransporterDrawer({ payTransport, onClose, addToast }) {
-  const { data: bankAccounts = [] } = useBankAccounts();
+  const { hasPermission } = useAuth();
+  const { data: bankAccounts = [] } = useBankAccounts({ millOnly: !hasPermission('finance', 'view') });
   const recordMut = useRecordPayment();
   return (
     <PaymentDrawer
@@ -173,7 +174,8 @@ function PayTransporterDrawer({ payTransport, onClose, addToast }) {
 }
 
 function PayPayableDrawer({ payTarget, onClose, addToast }) {
-  const { data: bankAccounts = [] } = useBankAccounts();
+  const { hasPermission } = useAuth();
+  const { data: bankAccounts = [] } = useBankAccounts({ millOnly: !hasPermission('finance', 'view') });
   const recordMut = useRecordPayment();
   const { data: payHistory, isLoading: payHistLoading } = usePayablePayments(payTarget.payableId, !!payTarget.payableId);
   return (
@@ -384,7 +386,11 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
   const [payCustomer, setPayCustomer] = useState(null);
   // Pay a supplier with the same drawer the Finance dashboard uses.
   const { hasPermission, user } = useAuth();
-  const canPay = hasPermission('finance', 'confirm_payment');
+  // Paying: Finance (finance.confirm_payment), or — for the mill's own rows,
+  // which is every row on this page — a mill role holding milling.edit (the
+  // Mill Operator, full mill access 2026-10-05). The server refuses it anything
+  // that is not the mill's, or any account that is not the mill's.
+  const canPay = hasPermission('finance', 'confirm_payment') || hasPermission('milling', 'edit');
   // Approval workflow: only Owner / Super Admin / Finance Manager approve & pay
   // payroll runs (Mill Manager only prepares).
   // Payroll permission module (Phase 5) — replaces the old role-name checks.

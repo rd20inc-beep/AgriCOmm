@@ -303,6 +303,9 @@ jest.mock('../middleware/rbac', () => {
   const passThrough = () => (req, res, next) => next();
   return Object.assign(authorize, {
     authorize, authorizeAny: passThrough, authorizeRole: passThrough, denyRoles: passThrough,
+    // The callers here are finance (finance.confirm_payment): never mill-only.
+    // shared/millPayer is covered by millOperatorPayments.test.js.
+    userHasPermission: async (req, module, action) => module === 'finance' && action === 'confirm_payment',
   });
 });
 

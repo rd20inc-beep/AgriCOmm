@@ -94,13 +94,21 @@ describe('GET /milling/payables — the mill\'s payables only', () => {
     expect(Object.keys(mill.body.data).sort()).toEqual(['pagination', 'payables', 'source']);
   });
 
-  test('the Mill Operator stays party-masked (supplier name hidden, transporter kept)', async () => {
+  test('the Mill Operator sees the mill\'s party names (on the visible list since full mill access)', async () => {
     db.__set(payableRows());
     const r = res();
     await finance.getMillPayables(asRole('Mill Operator'), r);
     const byId = Object.fromEntries(r.body.data.payables.map((p) => [p.id, p]));
-    expect(byId[1]).toMatchObject({ supplier_name: 'Supplier', supplier_id: null, outstanding: 100000 });
+    expect(byId[1]).toMatchObject({ supplier_name: 'Rice Supplier', supplier_id: 5, outstanding: 100000 });
     expect(byId[3].hauler_name).toBe('Truck Co');
+  });
+
+  test('a still-masked role gets the generic label', async () => {
+    db.__set(payableRows());
+    const r = res();
+    await finance.getMillPayables(asRole('QC Analyst'), r);
+    const byId = Object.fromEntries(r.body.data.payables.map((p) => [p.id, p]));
+    expect(byId[1]).toMatchObject({ supplier_name: 'Supplier', supplier_id: null });
   });
 });
 

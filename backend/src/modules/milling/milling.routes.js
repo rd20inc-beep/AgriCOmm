@@ -307,6 +307,9 @@ router.get('/cost-trend', authorize('milling', 'view'), requireCostVisibility, c
 const financeController = require('../finance/finance.controller');
 router.get('/payables', authorize('milling', 'view'), requireCostVisibility, financeController.getMillPayables);
 router.get('/receivables', authorize('milling', 'view'), requireCostVisibility, financeController.getMillReceivables);
+// The mill's own cash / bank accounts for the payment pickers (a mill-only payer
+// can pay only through these). Balances only with reports.view_cost.
+router.get('/bank-accounts', authorize('milling', 'view'), financeController.getMillBankAccounts);
 router.get('/batches/:id/source-lots', authorize('milling', 'view'), advancedController.listSourceLots);
 // No POST: source lots join a batch only at creation (commitLotToBatch). The old
 // add-source-lot route had no caller and linked a lot without reserving it.
