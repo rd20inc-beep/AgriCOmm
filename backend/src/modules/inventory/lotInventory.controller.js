@@ -17,7 +17,7 @@ const whScope = require('../../utils/warehouseScope');
 const stockValuation = require('./stockValuation');
 // Purchase rates, landed cost and stock value are hidden from roles without
 // reports.view_cost (Mill Operator, QC Analyst) — same rule as the reports.
-const { redactForUser } = require('../../utils/costVisibility');
+const { redactForUser, canSeeCost } = require('../../utils/costVisibility');
 
 async function generateTxnNo(trx) {
   const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
@@ -1278,7 +1278,7 @@ module.exports = {
 
       return res.status(201).json({
         success: true,
-        data: { lot: enrichLot(result) },
+        data: { lot: await redactForUser(req, enrichLot(result)) },
       });
     } catch (err) {
       // Duplicate custom lot number (unique index on inventory_lots.lot_no).
@@ -1640,10 +1640,10 @@ module.exports = {
       if (result && result.__split) {
         return res.status(200).json({
           success: true,
-          data: { split: true, lot: result.newLot, newLotNo: result.newLotNo, remainderMt: result.remainderMt, committedMt: result.committedMt },
+          data: { split: true, lot: await redactForUser(req, result.newLot), newLotNo: result.newLotNo, remainderMt: result.remainderMt, committedMt: result.committedMt },
         });
       }
-      return res.status(200).json({ success: true, data: { lot: enrichLot(result) } });
+      return res.status(200).json({ success: true, data: { lot: await redactForUser(req, enrichLot(result)) } });
     } catch (err) {
       const status = err.status || 500;
       if (status === 500) console.error('addPurchaseToLot error:', err);
@@ -2137,7 +2137,7 @@ module.exports = {
         return { updated, propagation };
       });
 
-      return res.json({ success: true, data: { lot: enrichLot(result.updated), propagation: result.propagation } });
+      return res.json({ success: true, data: { lot: await redactForUser(req, enrichLot(result.updated)), propagation: result.propagation } });
     } catch (err) {
       const status = err.status || 500;
       if (status === 500) console.error('updateLotCosts error:', err);
@@ -2188,7 +2188,7 @@ module.exports = {
         return { updated, payableUpdated, propagation };
       });
 
-      return res.json({ success: true, data: { lot: enrichLot(result.updated), payableUpdated: result.payableUpdated, propagation: result.propagation } });
+      return res.json({ success: true, data: { lot: await redactForUser(req, enrichLot(result.updated)), payableUpdated: result.payableUpdated, propagation: result.propagation } });
     } catch (err) {
       const status = err.status || 500;
       if (status === 500) console.error('setLotPurchaseRate error:', err);
@@ -2291,7 +2291,7 @@ module.exports = {
         const updated = await trx('inventory_lots').where({ id }).first();
         return { updated, payableUpdated, propagation };
       });
-      return res.json({ success: true, data: { lot: enrichLot(result.updated), payableUpdated: result.payableUpdated, propagation: result.propagation } });
+      return res.json({ success: true, data: { lot: await redactForUser(req, enrichLot(result.updated)), payableUpdated: result.payableUpdated, propagation: result.propagation } });
     } catch (err) {
       const status = err.status || 500;
       if (status === 500) console.error('setLotReceivedQty error:', err);
@@ -2344,7 +2344,17 @@ module.exports = {
           ? null : parseFloat(b.whiteness);
       }
       if ('quality_json' in b || 'quality' in b) {
-        const qj = sanitizeLotQuality(b.quality_json || b.quality);
+        let qj = sanitizeLotQuality(b.quality_json || b.quality);
+        // The lot's quality price is hidden from a cost-blind editor (the API
+        // nulls it), so their re-save must not wipe the stored price.
+        const oldQ = lot.quality_json && typeof lot.quality_json === 'object' ? lot.quality_json : null;
+        if (oldQ && (oldQ.price_per_mt != null || oldQ.price_per_kg != null)
+          && !(qj && (qj.price_per_mt != null || qj.price_per_kg != null))
+          && !(await canSeeCost(req))) {
+          qj = { ...(qj || {}),
+            ...(oldQ.price_per_mt != null ? { price_per_mt: oldQ.price_per_mt } : {}),
+            ...(oldQ.price_per_kg != null ? { price_per_kg: oldQ.price_per_kg } : {}) };
+        }
         update.quality_json = qj;
         // keep the dedicated shortlist columns in step with the jsonb
         update.moisture_pct = qj && qj.moisture != null ? qj.moisture : null;
@@ -2369,7 +2379,7 @@ module.exports = {
 
       await db('inventory_lots').where({ id }).update(update);
       const updated = await db('inventory_lots').where({ id }).first();
-      return res.json({ success: true, data: { lot: enrichLot(updated) } });
+      return res.json({ success: true, data: { lot: await redactForUser(req, enrichLot(updated)) } });
     } catch (err) {
       const status = err.status || 500;
       if (status === 500) console.error('updateLotQuality error:', err);
@@ -2678,7 +2688,7 @@ module.exports = {
         update.export_display_name = (n && String(n).trim()) ? String(n).trim() : null;
       }
       const [updated] = await db('inventory_lots').where('id', lot.id).update(update).returning('*');
-      return res.json({ success: true, data: { lot: enrichLot(updated) } });
+      return res.json({ success: true, data: { lot: await redactForUser(req, enrichLot(updated)) } });
     } catch (err) {
       console.error('setLotExportReady error:', err);
       return res.status(500).json({ success: false, message: err.message });

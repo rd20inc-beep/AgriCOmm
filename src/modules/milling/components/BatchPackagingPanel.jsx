@@ -3,6 +3,7 @@ import { Boxes, Plus, Trash2, Loader2, Save } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../../../api/client';
 import { useMillStoreItems } from '../../millStore/api/queries';
+import useCanSeeCost from '../../../hooks/useCanSeeCost';
 
 // Packaging recorded ON the batch, line by line.
 //
@@ -40,6 +41,10 @@ const sizeOf = (it) => {
 };
 
 export default function BatchPackagingPanel({ batchId, batchStatus, addToast }) {
+  // Packaging cost (Rs / unit, line cost, effect on batch cost) is hidden from
+  // roles without reports.view_cost; a blank unit cost falls back to the store
+  // average on the server, as it always has.
+  const showCost = useCanSeeCost();
   const qc = useQueryClient();
   const { data, isLoading } = useQuery({
     queryKey: ['batch-packaging', batchId],
@@ -153,7 +158,7 @@ export default function BatchPackagingPanel({ batchId, batchStatus, addToast }) 
         <optgroup key={t} label={TYPE_LABEL[t]}>
           {grouped[t].map((it) => (
             <option key={it.id} value={it.id}>
-              {it.name}{sizeOf(it) ? ` — ${sizeOf(it)}` : ''}{num(it.avg_cost_per_unit) > 0 ? ` (${rs(it.avg_cost_per_unit)})` : ' (no price set)'}
+              {it.name}{sizeOf(it) ? ` — ${sizeOf(it)}` : ''}{!showCost ? '' : num(it.avg_cost_per_unit) > 0 ? ` (${rs(it.avg_cost_per_unit)})` : ' (no price set)'}
             </option>
           ))}
         </optgroup>
@@ -170,14 +175,14 @@ export default function BatchPackagingPanel({ batchId, batchStatus, addToast }) 
             <th className="py-1 pr-2">Type</th>
             {direction === 'consumed' && <th className="py-1 pr-2">Used on</th>}
             <th className="py-1 pr-2 text-right">Qty</th>
-            <th className="py-1 pr-2 text-right">Rs / unit</th>
-            <th className="py-1 pr-2 text-right">Cost</th>
+            {showCost && <th className="py-1 pr-2 text-right">Rs / unit</th>}
+            {showCost && <th className="py-1 pr-2 text-right">Cost</th>}
             <th className="py-1"></th>
           </tr>
         </thead>
         <tbody>
           {list.length === 0 && (
-            <tr><td colSpan={direction === 'consumed' ? 7 : 6} className="colspan-empty py-2 text-xs text-gray-400">
+            <tr><td colSpan={(direction === 'consumed' ? 7 : 6) - (showCost ? 0 : 2)} className="colspan-empty py-2 text-xs text-gray-400">
               {direction === 'received'
                 ? 'Nothing recorded. Add the katta and P.P. bags this batch freed — they go into store stock.'
                 : 'Nothing recorded. Add the bags, masters and polythene drawn from store to pack this batch.'}
@@ -204,12 +209,12 @@ export default function BatchPackagingPanel({ batchId, batchStatus, addToast }) 
                 <td data-label="Qty" className="py-1.5 pr-2">
                   <input type="number" min="0" step="1" value={r.quantity} onChange={(e) => set(idx, { quantity: e.target.value })} className={`${inputCls} text-right`} />
                 </td>
-                <td data-label="Rs / unit" className="py-1.5 pr-2">
+                {showCost && <td data-label="Rs / unit" className="py-1.5 pr-2">
                   <input type="number" min="0" step="0.01" value={r.unit_cost_pkr}
                     placeholder={it ? String(num(it.avg_cost_per_unit)) : ''}
                     onChange={(e) => set(idx, { unit_cost_pkr: e.target.value })} className={`${inputCls} text-right`} />
-                </td>
-                <td data-label="Cost" className="py-1.5 pr-2 text-right font-medium text-gray-900">{rs(lineCost(r))}</td>
+                </td>}
+                {showCost && <td data-label="Cost" className="py-1.5 pr-2 text-right font-medium text-gray-900">{rs(lineCost(r))}</td>}
                 <td className="py-1.5 text-right">
                   <button onClick={() => removeRow(idx)} disabled={locked} className="text-gray-400 hover:text-red-600 disabled:opacity-40" title="Remove this line">
                     <Trash2 className="w-3.5 h-3.5" />
@@ -270,6 +275,7 @@ export default function BatchPackagingPanel({ batchId, batchStatus, addToast }) 
 
       {/* What this does to the batch's expenses, spelled out — the formula is
           easy to get backwards, so the arithmetic is shown rather than implied. */}
+      {showCost && (
       <div className="bg-gray-50 border border-gray-200 rounded-xl p-4">
         <h4 className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Effect on this batch&rsquo;s cost</h4>
         <div className="space-y-1 text-sm">
@@ -287,6 +293,7 @@ export default function BatchPackagingPanel({ batchId, batchStatus, addToast }) 
           only ever used, never freed, so they are not credited here.
         </p>
       </div>
+      )}
     </div>
   );
 }

@@ -5,6 +5,7 @@ import { Package, Factory, Boxes, Wallet, RefreshCw, Users, FileText } from 'luc
 import { millingApi, serviceMillingApi } from '../api/services';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
+import { canSeeCost } from '../../../hooks/useCanSeeCost';
 import { CreateInvoiceDrawer, RecordPaymentDrawer } from '../components/ServiceInvoiceDrawers';
 
 const num = (v) => parseFloat(v) || 0;
@@ -50,6 +51,8 @@ export default function ServiceMilling() {
   const { hasPermission } = useAuth();
   const canInvoice = hasPermission('service_milling', 'create_invoice');
   const canPay = hasPermission('service_milling', 'record_payment');
+  // Service billing is revenue — hidden from roles without reports.view_cost.
+  const showCost = canSeeCost(hasPermission);
   const [invoiceBatch, setInvoiceBatch] = useState(null);
   const [payInvoice, setPayInvoice] = useState(null);
 
@@ -102,7 +105,7 @@ export default function ServiceMilling() {
         <Kpi icon={Boxes} tone="text-amber-500" label="Active Lots" value={totals.active} sub={`${totals.lots} total`} />
         <Kpi icon={Factory} tone="text-indigo-500" label="Produced (client)" value={kg(totals.produced)} />
         <Kpi icon={Package} tone="text-blue-500" label="In Service Stock" value={kg(totals.remaining)} sub="awaiting dispatch to client" />
-        <Kpi icon={Wallet} tone="text-emerald-500" label="Service Billable" value={pkr(totals.billable)} sub="milling + rental + labour" />
+        {showCost && <Kpi icon={Wallet} tone="text-emerald-500" label="Service Billable" value={pkr(totals.billable)} sub="milling + rental + labour" />}
       </div>
 
       {/* Table */}
@@ -123,16 +126,16 @@ export default function ServiceMilling() {
                 <th className="px-4 py-2.5 font-semibold text-right">By-product</th>
                 <th className="px-4 py-2.5 font-semibold text-right">In Stock</th>
                 <th className="px-4 py-2.5 font-semibold">Lot Status</th>
-                <th className="px-4 py-2.5 font-semibold text-right">Service Amt</th>
+                {showCost && <th className="px-4 py-2.5 font-semibold text-right">Service Amt</th>}
                 <th className="px-4 py-2.5 font-semibold">Billing</th>
                 <th className="px-4 py-2.5 font-semibold text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
               {isLoading ? (
-                <tr><td colSpan={11} className="px-4 py-10 text-center text-gray-400">Loading…</td></tr>
+                <tr><td colSpan={showCost ? 11 : 10} className="px-4 py-10 text-center text-gray-400">Loading…</td></tr>
               ) : rows.length === 0 ? (
-                <tr><td colSpan={11} className="px-4 py-10 text-center text-gray-400">No service-milling lots yet. Create one from Mill → New Batch → Service Milling.</td></tr>
+                <tr><td colSpan={showCost ? 11 : 10} className="px-4 py-10 text-center text-gray-400">No service-milling lots yet. Create one from Mill → New Batch → Service Milling.</td></tr>
               ) : rows.map((b) => {
                 const received = num(b.raw_qty_kg) || num(b.quantities?.receivedKg);
                 // "Raw Rice" = the raw still UNMILLED (received − milled), NOT the
@@ -168,7 +171,7 @@ export default function ServiceMilling() {
                   <td data-label="By-product" className="mob-hide px-4 py-2.5 text-right text-gray-600">{byproduct > 0 ? kg(byproduct) : '—'}</td>
                   <td data-label="In Stock" className="px-4 py-2.5 text-right font-medium text-emerald-700">{kg(inStock)}</td>
                   <td data-label="Lot Status" className="px-4 py-2.5"><Chip text={b.service_lot_status} map={LOT_STATUS_STYLE} /></td>
-                  <td data-label="Service Amt" className="px-4 py-2.5 text-right font-medium text-gray-900">{pkr(b.service_total_amount)}</td>
+                  {showCost && <td data-label="Service Amt" className="px-4 py-2.5 text-right font-medium text-gray-900">{pkr(b.service_total_amount)}</td>}
                   <td data-label="Billing" className="px-4 py-2.5"><Chip text={b.billing_status} map={BILLING_STYLE} /></td>
                   <td data-label="Actions" className="px-4 py-2.5 text-right whitespace-nowrap">
                     {b.billing_status === 'Not Invoiced' ? (

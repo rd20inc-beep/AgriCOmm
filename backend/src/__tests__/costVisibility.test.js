@@ -11,11 +11,13 @@
 // ── Fake database: every query resolves to the rows registered for its table.
 jest.mock('../config/database', () => {
   let rows = {};
+  const updates = [];
   const builder = (table) => {
     const b = new Proxy({}, {
       get(_, prop) {
         if (prop === 'then') return (res, rej) => Promise.resolve(rows[table] || []).then(res, rej);
         if (prop === 'first') return async () => (rows[table] || [])[0];
+        if (prop === 'update') return (data) => { updates.push({ table, data }); return b; };
         return () => b;
       },
     });
@@ -23,8 +25,10 @@ jest.mock('../config/database', () => {
   };
   const db = (table) => builder(String(table).split(' ')[0]);
   db.raw = (x) => x;
+  db.fn = { now: () => 'now()' };
   db.schema = { hasTable: async () => false };
-  db.__set = (r) => { rows = r; };
+  db.__set = (r) => { rows = r; updates.length = 0; };
+  db.__updates = updates;
   return db;
 });
 
@@ -244,5 +248,85 @@ describe('lot endpoints redact for cost-blind roles', () => {
     const own = res();
     await controller.getStockReport(reqAs('owner', { query: {} }), own);
     expect(own.body.data.report[0].total_value).toBe(125000);
+  });
+});
+
+describe('milling batch detail redacts for cost-blind roles', () => {
+  const millingController = require('../modules/milling/milling.controller');
+
+  const batchRows = () => ({
+    milling_batches: [{
+      id: 9, batch_no: 'M-009', status: 'Completed', raw_qty_kg: 10000, actual_finished_kg: 6500, yield_pct: 65,
+      purchase_price_per_kg: 110, finished_price_per_kg: 190, b1_price_per_kg: 90, prices_confirmed: true,
+      raw_cost_total: 1100000, raw_cost_per_kg_finished: 169.2, milling_cost_per_kg_finished: 12,
+      total_cost_per_kg_finished: 181.2, manual_milling_cost_pkr: 78000, milling_fee_per_kg: 5,
+      service_milling_rate_per_kg: 4, service_rental_rate_per_katta: 20,
+    }],
+    milling_quality_samples: [{ id: 1, analysis_type: 'arrival', moisture: 12, broken: 4, price_per_kg: 110, price_per_mt: 110000 }],
+    milling_costs: [{ id: 1, category: 'raw_rice', amount: 1100000 }],
+    milling_vehicle_arrivals: [{ id: 2, vehicle_no: 'LES-1', weight_kg: 10000, quality_json: { moisture: 12, price_per_kg: 110, price_per_mt: 110000 } }],
+    mill_packing_logs: [{ bag_item_id: 4, bag_name: 'PP 25kg', bags_count: 260, total_cost: 5200, master_cost: 0, poly_cost: 0 }],
+  });
+
+  test('Mill Operator: quantities and quality stay, every cost, price and rate is nulled', async () => {
+    db.__set(batchRows());
+    const r = res();
+    await millingController.getById(reqAs('millOperator', { params: { id: '9' } }), r);
+    expect(r.statusCode).toBe(200);
+    const d = r.body.data;
+    expect(d.batch).toMatchObject({
+      batch_no: 'M-009', raw_qty_kg: 10000, actual_finished_kg: 6500, yield_pct: 65, prices_confirmed: true,
+      purchase_price_per_kg: null, finished_price_per_kg: null, b1_price_per_kg: null,
+      raw_cost_total: null, total_cost_per_kg_finished: null, manual_milling_cost_pkr: null,
+      milling_fee_per_kg: null, service_milling_rate_per_kg: null, service_rental_rate_per_katta: null,
+    });
+    expect(d.costs).toBeNull();
+    expect(d.quality.arrival[0]).toMatchObject({ moisture: 12, broken: 4, price_per_kg: null, price_per_mt: null });
+    expect(d.vehicles[0].quality_json).toEqual({ moisture: 12, price_per_kg: null, price_per_mt: null });
+    expect(d.vehicles[0].weight_kg).toBe(10000);
+  });
+
+  test('Mill Manager: the same batch comes back with its money', async () => {
+    db.__set(batchRows());
+    const r = res();
+    await millingController.getById(reqAs('millManager', { params: { id: '9' } }), r);
+    const d = r.body.data;
+    expect(d.batch).toMatchObject({ purchase_price_per_kg: 110, raw_cost_total: 1100000, total_cost_per_kg_finished: 181.2, service_milling_rate_per_kg: 4 });
+    expect(d.costs).toEqual([{ id: 1, category: 'raw_rice', amount: 1100000 }]);
+    expect(d.quality.arrival[0].price_per_mt).toBe(110000);
+    expect(d.vehicles[0].quality_json.price_per_kg).toBe(110);
+  });
+
+  test('QC Analyst gets the batch list without costs or prices', async () => {
+    db.__set(batchRows());
+    const r = res();
+    await millingController.list(reqAs('qcAnalyst', { query: {} }), r);
+    if (r.statusCode !== 200) throw new Error(JSON.stringify(r.body));
+    const b = r.body.data.batches[0];
+    expect(b).toMatchObject({ batch_no: 'M-009', raw_qty_kg: 10000, purchase_price_per_kg: null, raw_cost_total: null });
+  });
+});
+
+describe('a cost-blind re-save keeps the hidden price', () => {
+  const controller = require('../modules/inventory/lotInventory.controller');
+  const lot = () => ({ inventory_lots: [{ id: 3, lot_no: 'LOT-3', type: 'raw', quality_json: { moisture: 12, price_per_mt: 120000 } }] });
+
+  test('lot quality saved by the QC Analyst without a price keeps the stored price', async () => {
+    db.__set(lot());
+    const r = res();
+    await controller.updateLotQuality(reqAs('qcAnalyst', { params: { id: '3' }, body: { quality_json: { moisture: 13 } } }), r);
+    expect(r.statusCode).toBe(200);
+    const upd = db.__updates.find((u) => u.table === 'inventory_lots');
+    expect(upd.data.quality_json).toEqual({ moisture: 13, price_per_mt: 120000 });
+    // ...and the response still does not show it.
+    expect(r.body.data.lot.quality_json.price_per_mt).toBeNull();
+  });
+
+  test('a Mill Manager clearing the price is honoured', async () => {
+    db.__set(lot());
+    const r = res();
+    await controller.updateLotQuality(reqAs('millManager', { params: { id: '3' }, body: { quality_json: { moisture: 13 } } }), r);
+    const upd = db.__updates.find((u) => u.table === 'inventory_lots');
+    expect(upd.data.quality_json).toEqual({ moisture: 13 });
   });
 });

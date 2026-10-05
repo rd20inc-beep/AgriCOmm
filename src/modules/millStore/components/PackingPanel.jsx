@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Boxes, Package, Plus, Loader2, ClipboardList } from 'lucide-react';
 import { usePackingHistory, usePackBatch, useMillStoreItems, useBatchKatta } from '../api/queries';
 import { useExportOrder } from '../../../api/queries';
+import useCanSeeCost from '../../../hooks/useCanSeeCost';
 
 const num = (v) => Number(v) || 0;
 const fmtKg = (v) => `${num(v).toLocaleString(undefined, { maximumFractionDigits: 1 })} kg`;
@@ -9,6 +10,8 @@ const fmtKg = (v) => `${num(v).toLocaleString(undefined, { maximumFractionDigits
 // Bag the finished rice of a milling batch. Consuming N bags of a packaging item
 // deducts store stock and records the packed (net), tare and gross weight.
 export default function PackingPanel({ batchId, batchStatus, addToast, exportOrderId }) {
+  // Packing material cost is hidden from roles without reports.view_cost.
+  const showCost = useCanSeeCost();
   const { data = {}, isLoading } = usePackingHistory(batchId);
   const { data: katta } = useBatchKatta(batchId);
   const { data: bagItems = [] } = useMillStoreItems({ category: 'packaging', limit: 200 });
@@ -329,7 +332,7 @@ export default function PackingPanel({ batchId, batchStatus, addToast, exportOrd
                         </div>
                         <div className="mt-1.5 text-xs text-gray-500 flex flex-wrap gap-x-3">
                           <span>In stock: <b className={masterQty > masterAvail ? 'text-red-600' : ''}>{masterAvail}</b></span>
-                          {num(masterSel?.avg_cost_per_unit) > 0 && <span>Cost: <b>Rs {(masterCost).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></span>}
+                          {showCost && num(masterSel?.avg_cost_per_unit) > 0 && <span>Cost: <b>Rs {(masterCost).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></span>}
                         </div>
                         {masterShort && <p className="text-xs text-amber-600 mt-1">Short {masterQty - masterAvail} — packing allowed, purchase required.</p>}
                       </>
@@ -371,7 +374,7 @@ export default function PackingPanel({ batchId, batchStatus, addToast, exportOrd
                         </div>
                         <div className="mt-1.5 text-xs text-gray-500 flex flex-wrap gap-x-3">
                           <span>In stock: <b className={polyQty > polyAvail ? 'text-red-600' : ''}>{polyAvail}</b></span>
-                          {num(polySel?.avg_cost_per_unit) > 0 && <span>Cost: <b>Rs {(polyCost).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></span>}
+                          {showCost && num(polySel?.avg_cost_per_unit) > 0 && <span>Cost: <b>Rs {(polyCost).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></span>}
                         </div>
                         {polyShort && <p className="text-xs text-amber-600 mt-1">Short {polyQty - polyAvail} — packing allowed, purchase required.</p>}
                       </>

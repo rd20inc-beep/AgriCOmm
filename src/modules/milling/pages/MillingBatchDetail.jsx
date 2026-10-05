@@ -53,6 +53,7 @@ import BatchPackagingPanel from '../components/BatchPackagingPanel';
 
 import { qualityParams } from '../qualityParams';
 import { favStar } from '../../../shared/utils/favorites';
+import useCanSeeCost from '../../../hooks/useCanSeeCost';
 
 const tabs = [
   { key: 'overview', label: 'Overview', icon: Package },
@@ -60,7 +61,7 @@ const tabs = [
   { key: 'yield', label: 'Yield', icon: BarChart3 },
   { key: 'consumption', label: 'Consumption', icon: Wheat },
   { key: 'packing', label: 'Packing', icon: Boxes },
-  { key: 'costs', label: 'Costs', icon: DollarSign },
+  { key: 'costs', label: 'Costs', icon: DollarSign, cost: true },
   { key: 'transfers', label: 'Transfers', icon: ArrowRightLeft },
   { key: 'activity', label: 'Activity', icon: Activity },
 ];
@@ -90,6 +91,11 @@ export default function MillingBatchDetail() {
   const canApproveBatch = user?.role === 'Owner' || user?.role === 'Super Admin';
   const canDeleteBatch = user?.role === 'Super Admin' || user?.role === 'Mill Manager';
   const canEditBatch = hasPermission('milling', 'edit');
+  // Batch costs, purchase / sample / sale prices and the costing sheet are
+  // hidden from roles without reports.view_cost (Mill Operator, QC Analyst).
+  // The API nulls the same fields; this keeps the page from showing "Rs 0".
+  const showCost = useCanSeeCost();
+  const visibleTabs = tabs.filter((t) => showCost || !t.cost);
   const commodityPrices = useCommodityPrices();
   const [confirm, confirmDialog] = useConfirm();
 
@@ -462,7 +468,8 @@ export default function MillingBatchDetail() {
         return;
       }
       const hasArrivalPrice = batch.arrivalAnalysis?.pricePerMT || batch.arrivalAnalysis?.pricePerKg;
-      if (!hasArrivalPrice) {
+      // The price is hidden from a cost-blind operator — they can't check it.
+      if (showCost && !hasArrivalPrice) {
         addToast('Please record the arrival analysis with the agreed price per kg before recording yield. This sets the raw material cost.', 'error');
         return;
       }
@@ -523,8 +530,9 @@ export default function MillingBatchDetail() {
       if (totalOutput > 0 && batch.status === 'In Progress') {
         addToast(`Batch ${batch.id} marked as Completed`, 'info');
       }
-      // Show price confirmation modal after yield is recorded
-      if (totalOutput > 0) {
+      // Show price confirmation modal after yield is recorded (costing — only
+      // for viewers who can see cost).
+      if (totalOutput > 0 && showCost) {
         setPriceLoading(true);
         try {
           const res = await millingApi.getLastPrices();
@@ -900,6 +908,7 @@ export default function MillingBatchDetail() {
                 Assign Supplier
               </button>
             )}
+            {showCost && (
             <button
               onClick={() => setShowCostSheet(true)}
               className="inline-flex items-center gap-2 px-4 py-2.5 bg-[#1e3a5f] text-white rounded-lg text-sm font-medium hover:bg-[#2d5a87] transition-colors"
@@ -907,6 +916,7 @@ export default function MillingBatchDetail() {
               <DollarSign size={16} />
               Costing Sheet
             </button>
+            )}
             {canEditBatch && batch.status === 'On Hold' && (
               <button
                 onClick={handleResume}
@@ -967,7 +977,7 @@ export default function MillingBatchDetail() {
       {/* Tabs */}
       <div className="border-b border-gray-200 overflow-x-auto">
         <nav className="flex gap-1 whitespace-nowrap">
-          {tabs.map((tab) => {
+          {visibleTabs.map((tab) => {
             const TabIcon = tab.icon;
             return (
               <button
@@ -1065,7 +1075,7 @@ export default function MillingBatchDetail() {
                           </div>
                           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-gray-500">
                             <span>Supplier: <span className="text-gray-700">{l.supplier_name || '—'}</span></span>
-                            {costKg > 0 && <span>Rs {costKg}/kg</span>}
+                            {showCost && costKg > 0 && <span>Rs {costKg}/kg</span>}
                             {moisture != null && <span>Moisture {moisture}%</span>}
                             {broken != null && <span>Broken {broken}%</span>}
                             {l.grade && <span>Grade {l.grade}</span>}
@@ -1280,10 +1290,12 @@ export default function MillingBatchDetail() {
                       {batch.yieldPct > 0 ? `${batch.yieldPct}%` : '—'}
                     </span>
                   </div>
+                  {showCost && (
                   <div className="flex justify-between">
                     <span className="text-gray-500">Total Costs</span>
                     <span className="font-medium text-gray-900">{fmtPKR2(totalCosts)}</span>
                   </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -1331,7 +1343,7 @@ export default function MillingBatchDetail() {
                         <th className="py-2 pr-3">Vehicle</th>
                         <th className="py-2 pr-3 text-right">Weight</th>
                         {qualityParams.slice(0, 5).map(p => <th key={p.key} className="py-2 pr-3 text-right whitespace-nowrap">{p.label}</th>)}
-                        <th className="py-2 pl-3 text-right">Price /kg</th>
+                        {showCost && <th className="py-2 pl-3 text-right">Price /kg</th>}
                       </tr>
                     </thead>
                     <tbody>
@@ -1343,7 +1355,7 @@ export default function MillingBatchDetail() {
                             <td data-label="Vehicle" className="py-2 pr-3 font-mono font-medium text-gray-900 whitespace-nowrap">{v.vehicleNo}{v.driverName && <span className="text-gray-400 font-sans ml-1.5">({v.driverName})</span>}</td>
                             <td data-label="Weight" className="py-2 pr-3 text-right tabular-nums">{Math.round(parseFloat(v.weight_kg) || 0).toLocaleString()} kg</td>
                             {qualityParams.slice(0, 5).map(p => { const val = qGet(q, p); return <td data-label={p.label} key={p.key} className="py-2 pr-3 text-right tabular-nums">{val == null ? '—' : `${val}%`}</td>; })}
-                            <td data-label="Price /kg" className="py-2 pl-3 text-right tabular-nums">{price ? `Rs ${(Number(price) / 1000).toFixed(2)}` : '—'}</td>
+                            {showCost && <td data-label="Price /kg" className="py-2 pl-3 text-right tabular-nums">{price ? `Rs ${(Number(price) / 1000).toFixed(2)}` : '—'}</td>}
                           </tr>
                         );
                       })}
@@ -1352,7 +1364,7 @@ export default function MillingBatchDetail() {
                           <td className="mob-full py-2 pr-3 text-xs uppercase text-gray-500">Weighted avg</td>
                           <td className="py-2 pr-3"></td>
                           {qualityParams.slice(0, 5).map(p => <td data-label={p.label} key={p.key} className="py-2 pr-3 text-right tabular-nums">{vehicleQualityAgg[p.key] === '' ? '—' : `${vehicleQualityAgg[p.key]}%`}</td>)}
-                          <td data-label="Price /kg" className="py-2 pl-3 text-right tabular-nums">{vehicleQualityAgg.pricePerMT ? `Rs ${(Number(vehicleQualityAgg.pricePerMT) / 1000).toFixed(2)}` : '—'}</td>
+                          {showCost && <td data-label="Price /kg" className="py-2 pl-3 text-right tabular-nums">{vehicleQualityAgg.pricePerMT ? `Rs ${(Number(vehicleQualityAgg.pricePerMT) / 1000).toFixed(2)}` : '—'}</td>}
                         </tr>
                       )}
                     </tbody>
@@ -1448,7 +1460,7 @@ export default function MillingBatchDetail() {
                   </table>
 
                   {/* Price comparison */}
-                  {(sampleForDisplay?.pricePerMT || safeArrival?.pricePerMT) && (
+                  {showCost && (sampleForDisplay?.pricePerMT || safeArrival?.pricePerMT) && (
                     <div className="mt-4 border-t border-gray-200 pt-4">
                       <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Price Comparison (PKR)</h4>
                       <div className="grid grid-cols-2 gap-4">
@@ -1585,7 +1597,7 @@ export default function MillingBatchDetail() {
                     </div>
                   </div>
                 )}
-                {!batch.arrivalAnalysis?.pricePerMT && !batch.arrivalAnalysis?.pricePerKg && (
+                {showCost && !batch.arrivalAnalysis?.pricePerMT && !batch.arrivalAnalysis?.pricePerKg && (
                   <div className="bg-amber-50 border border-amber-300 rounded-xl p-4 flex items-start gap-3">
                     <AlertTriangle className="w-5 h-5 text-amber-500 mt-0.5 flex-shrink-0" />
                     <div>
@@ -1717,7 +1729,7 @@ export default function MillingBatchDetail() {
         )}
 
         {/* COSTS TAB */}
-        {activeTab === 'costs' && (() => {
+        {activeTab === 'costs' && showCost && (() => {
           // Auto-populate raw material cost from quality sheet
           const inputPriceMT = parseFloat(safeArrival?.pricePerMT || safeSample?.pricePerMT) || 0;
           // A blend's raw cost comes from the source lots (milling_costs raw_rice),
@@ -2040,7 +2052,7 @@ export default function MillingBatchDetail() {
         onSubmit={handleAnalysisSubmit}
         qualityParams={qualityParams}
         batch={batch}
-        hidePricing={batch.isServiceMilling}
+        hidePricing={batch.isServiceMilling || !showCost}
       />
 
       {/* Yield Output — right slide-over */}
@@ -2056,7 +2068,7 @@ export default function MillingBatchDetail() {
       />
 
       {/* Cost Entry — right slide-over */}
-      <SlideDrawer open={showCostModal} onClose={() => setShowCostModal(false)} title="Milling Costs (PKR)" subtitle={batch.id} icon={Edit3} size="lg">
+      <SlideDrawer open={showCost && showCostModal} onClose={() => setShowCostModal(false)} title="Milling Costs (PKR)" subtitle={batch.id} icon={Edit3} size="lg">
         <form onSubmit={handleCostSubmit} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             {millingCostCategories.map(item => (
@@ -2154,7 +2166,7 @@ export default function MillingBatchDetail() {
       </SlideDrawer>
 
       {/* Costing Sheet Modal */}
-      <Modal isOpen={showCostSheet} onClose={() => setShowCostSheet(false)} title={`Costing Sheet — ${batch.id}`} size="lg">
+      <Modal isOpen={showCost && showCostSheet} onClose={() => setShowCostSheet(false)} title={`Costing Sheet — ${batch.id}`} size="lg">
         <MillingCostSheet batch={batch} companyProfile={companyProfileData} millingCostCategories={millingCostCategories} vehicles={safeVehicles} sourceLots={sourceLots} byproductRates={{ broken: commodityPrices.broken, sortex: commodityPrices.sortex, bran: commodityPrices.bran, husk: commodityPrices.husk }} />
       </Modal>
 
@@ -2167,13 +2179,13 @@ export default function MillingBatchDetail() {
         onSubmit={handleAddVehicle}
         showQuality={showVehicleQuality}
         setShowQuality={setShowVehicleQuality}
-        hidePricing={batch.isServiceMilling}
+        hidePricing={batch.isServiceMilling || !showCost}
         title={editingVehicleId ? 'Edit Vehicle Arrival' : 'Add Vehicle Arrival'}
         submitLabel={editingVehicleId ? 'Save Changes' : 'Add Vehicle'}
       />
 
       {/* Confirm Product Prices Modal */}
-      <Modal isOpen={showPriceModal} onClose={() => setShowPriceModal(false)} title="Costing — by-product prices & finished cost" size="md">
+      <Modal isOpen={showCost && showPriceModal} onClose={() => setShowPriceModal(false)} title="Costing — by-product prices & finished cost" size="md">
         {(() => {
           const sortexMT = parseFloat(batch?.sortexRejectsMT || batch?.sortex_rejects_mt) || 0;
           const branMT  = parseFloat(batch?.branMT) || 0;
@@ -2319,7 +2331,7 @@ export default function MillingBatchDetail() {
       </Modal>
 
       {/* Price Confirmation Banner — show if batch completed but prices not confirmed */}
-      {batch && batch.status === 'Completed' && !batch.pricesConfirmed && batch.actualFinishedMT > 0 && (
+      {showCost && batch && batch.status === 'Completed' && !batch.pricesConfirmed && batch.actualFinishedMT > 0 && (
         <div className="fixed bottom-4 right-4 z-50 bg-amber-50 border-2 border-amber-400 rounded-xl p-4 shadow-lg max-w-sm">
           <p className="text-sm font-semibold text-amber-800">Prices Not Confirmed</p>
           <p className="text-xs text-amber-600 mt-1">Confirm today's market prices for the costing sheet.</p>
