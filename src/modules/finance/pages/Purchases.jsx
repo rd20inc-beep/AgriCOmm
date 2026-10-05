@@ -6,6 +6,7 @@ import {
   Search, Download, RefreshCw, CheckCircle, Clock, X, Plus, ChevronDown, Printer, Eye, User, DollarSign,
 } from 'lucide-react';
 import SlideDrawer from '../../../components/SlideDrawer';
+import NewPurchaseDrawer from '../../../components/NewPurchaseDrawer';
 import { usePurchases, usePayPurchase, useBankAccounts, usePurchasePaymentTrail } from '../../../api/queries';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { LoadingSpinner, ErrorState } from '../../../components/LoadingState';
@@ -48,7 +49,7 @@ function statusTone(s) {
 
 const ADD_OPTIONS = [
   { label: 'Raw / Stock Lot',     description: 'Raw rice, finished rice, byproduct lots', icon: Package, to: '/lot-inventory?action=new' },
-  { label: 'Mill Store Purchase', description: 'Spare parts, packaging, fuel',          icon: Factory,  to: '/mill-store/purchases/new' },
+  { label: 'Mill Store Purchase', description: 'Spare parts, packaging, fuel',          icon: Factory,  drawer: 'store' },
   { label: 'Export Cost',         description: 'Freight, commission, certificates — pick an order', icon: Ship, to: '/export' },
   { label: 'Business Expense',    description: 'Utilities, salaries, admin',            icon: Receipt,  to: '/finance/expenses?action=new' },
 ];
@@ -69,6 +70,7 @@ export default function Purchases() {
   const [statusFilter, setStatusFilter] = useState('All');
   const [searchTerm, setSearchTerm] = useState('');
   const [addOpen, setAddOpen] = useState(false);
+  const [showStorePurchase, setShowStorePurchase] = useState(false);
   const addRef = useRef(null);
   const [, setUrlParams] = useSearchParams();
 
@@ -205,7 +207,11 @@ export default function Purchases() {
                     return (
                       <li key={opt.label}>
                         <button
-                          onClick={() => { setAddOpen(false); navigate(opt.to); }}
+                          onClick={() => {
+                            setAddOpen(false);
+                            if (opt.drawer === 'store') setShowStorePurchase(true);
+                            else navigate(opt.to);
+                          }}
                           className="w-full text-left flex items-start gap-3 px-3 py-2.5 hover:bg-gray-50 transition-colors"
                         >
                           <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-gray-100 text-gray-700 flex-shrink-0 mt-0.5">
@@ -580,6 +586,7 @@ export default function Purchases() {
           </SlideDrawer>
         );
       })()}
+      <NewPurchaseDrawer open={showStorePurchase} onClose={() => setShowStorePurchase(false)} onSaved={() => refetch()} />
     </div>
   );
 }

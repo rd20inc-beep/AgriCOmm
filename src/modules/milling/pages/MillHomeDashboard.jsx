@@ -1,6 +1,9 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import NewPurchaseDrawer from '../../../components/NewPurchaseDrawer';
+import PurchaseLotDrawer from '../../inventory/components/PurchaseLotDrawer';
+import { useApp } from '../../../context/AppContext';
+import { useAuth } from '../../../context/AuthContext';
 import PendingApprovalsCard from '../../dashboard/components/PendingApprovalsCard';
 import {
   Factory, Wheat, FlaskConical, Gauge, Clock, AlertTriangle,
@@ -134,6 +137,10 @@ function BatchColumn({ title, batches, accent, onBatchClick }) {
 export default function MillHomeDashboard() {
   const navigate = useNavigate();
   const [showNewPurchase, setShowNewPurchase] = useState(false);
+  const [showRicePurchase, setShowRicePurchase] = useState(false);
+  const { addToast, suppliersList, warehousesList, productsList } = useApp();
+  const { hasPermission } = useAuth();
+  const canBuyRice = hasPermission('inventory', 'create');
   const { summary, isLoading, batches: rawBatches } = useMillSummary();
   const { data: rawInventory } = useInventory({});
   const { data: storeSummary } = useMillStoreSummary();
@@ -275,16 +282,26 @@ export default function MillHomeDashboard() {
         <div className="flex items-center gap-2">
           <button
             onClick={() => setShowNewPurchase(true)}
+            title="Bags, packaging, fuel and other mill-store materials"
             className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors"
           >
-            <ShoppingCart size={16} /> Add Purchase
+            <ShoppingCart size={16} /> Store Purchase
           </button>
           <button
             onClick={() => navigate('/milling?new=1')}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
+            className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors"
           >
             <Plus size={16} /> New Batch
           </button>
+          {canBuyRice && (
+            <button
+              onClick={() => setShowRicePurchase(true)}
+              title="Record a rice lot received from a supplier"
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              <Truck size={16} /> Rice Purchase
+            </button>
+          )}
         </div>
       </div>
 
@@ -407,7 +424,7 @@ export default function MillHomeDashboard() {
           </div>
           <div className="flex items-center gap-2">
             <button onClick={() => setShowNewPurchase(true)} className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg bg-gray-900 text-white hover:bg-gray-700">
-              <Plus size={12} /> New Purchase
+              <Plus size={12} /> Store Purchase
             </button>
             <Link to="/mill-store" className="text-xs text-blue-600 hover:underline">Open Mill Store →</Link>
           </div>
@@ -559,6 +576,14 @@ export default function MillHomeDashboard() {
 
       {/* New Purchase — right slide-over */}
       <NewPurchaseDrawer open={showNewPurchase} onClose={() => setShowNewPurchase(false)} />
+      <PurchaseLotDrawer
+        isOpen={showRicePurchase}
+        onClose={() => setShowRicePurchase(false)}
+        suppliers={suppliersList}
+        warehouses={warehousesList}
+        products={productsList}
+        addToast={addToast}
+      />
     </div>
   );
 }

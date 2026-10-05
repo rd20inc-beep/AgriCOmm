@@ -83,7 +83,7 @@ export default function StoreAlerts() {
 
           <div className="flex justify-end">
             <Link
-              to="/mill-store/purchases/new"
+              to="/mill-store?action=purchase"
               className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700"
             >
               <ShoppingCart size={16} /> Create Purchase to Replenish

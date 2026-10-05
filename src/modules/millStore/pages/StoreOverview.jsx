@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import PaymentDrawer from '../../../components/payments/PaymentDrawer';
 import { purchasePayPayload, money } from '../../../components/payments/paymentPayload';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
   Package, AlertTriangle, ShoppingCart, TrendingDown,
   Search, Pencil, Save, Loader2, Boxes, Wallet, DollarSign,
@@ -50,6 +50,19 @@ export default function StoreOverview() {
   const [search, setSearch] = useState('');
   const [showNewPurchase, setShowNewPurchase] = useState(false);
   const [editItem, setEditItem] = useState(null);
+  // /mill-store?action=purchase (and the retired /mill-store/purchases/new URL,
+  // which redirects here) opens the Store Purchase drawer.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const purchaseFromUrl = searchParams.get('action') === 'purchase';
+  const purchaseOpen = showNewPurchase || purchaseFromUrl;
+  const closePurchase = () => {
+    setShowNewPurchase(false);
+    if (purchaseFromUrl) {
+      const next = new URLSearchParams(searchParams);
+      next.delete('action');
+      setSearchParams(next, { replace: true });
+    }
+  };
   const { data: items = [], isLoading } = useMillStoreItems({
     ...(category !== 'all' ? { category } : {}),
     ...(search ? { search } : {}),
@@ -245,7 +258,7 @@ export default function StoreOverview() {
       </div>
 
       {/* New Purchase — right slide-over */}
-      <NewPurchaseDrawer open={showNewPurchase} onClose={() => setShowNewPurchase(false)} />
+      <NewPurchaseDrawer open={purchaseOpen} onClose={closePurchase} />
 
       {/* Edit stock + bag weights — right slide-over */}
       <StockEditDrawer item={editItem} onClose={() => setEditItem(null)} />
