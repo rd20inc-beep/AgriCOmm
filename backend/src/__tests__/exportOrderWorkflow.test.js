@@ -596,8 +596,9 @@ describe('Export order workflow', () => {
       canStartDocs: false,
       canRequestBalance: true,
       canCreateMilling: false,
-      canUpdateShipment: false,
-      canPutOnHold: true,
+      // Shipment details can be entered from In Milling onwards (EXP-F13).
+      canUpdateShipment: true,
+      canRecordDeparture: false,
       canCloseOrder: false,
     }));
   });

@@ -105,9 +105,11 @@ describe('Workflow State Machine', () => {
       });
       expect(actions.canConfirmAdvance).toBe(true);
       expect(actions.canStartDocs).toBe(false);
-      expect(actions.canRequestBalance).toBe(false);
+      // Money-based: the balance is owed and the order isn't terminal.
+      expect(actions.canRequestBalance).toBe(true);
       expect(actions.canUpdateShipment).toBe(false);
       expect(actions.canCloseOrder).toBe(false);
+      expect(actions.canSubmitDraft).toBe(true);
     });
 
     it('Awaiting Balance can request balance', () => {
@@ -148,7 +150,6 @@ describe('Workflow State Machine', () => {
       expect(actions.canRequestBalance).toBe(false);
       expect(actions.canCreateMilling).toBe(false);
       expect(actions.canUpdateShipment).toBe(false);
-      expect(actions.canPutOnHold).toBe(false);
       expect(actions.canCloseOrder).toBe(false);
     });
 
@@ -171,12 +172,9 @@ describe('Workflow State Machine', () => {
       expect(actions.canCreateMilling).toBe(true);
     });
 
-    it('any non-terminal order can be put on hold', () => {
-      const activeStatuses = ['Draft', 'Awaiting Advance', 'Advance Received', 'In Milling', 'Ready to Ship'];
-      activeStatuses.forEach(status => {
-        const actions = getAllowedActions({ status, advance_received: 0, advance_expected: 10000 });
-        expect(actions.canPutOnHold).toBe(true);
-      });
+    it('there is no hold action — there is no hold state to put an order in', () => {
+      const actions = getAllowedActions({ status: 'In Milling', advance_received: 0, advance_expected: 10000 });
+      expect(actions).not.toHaveProperty('canPutOnHold');
     });
 
     // #2 decouple: operational milling no longer waits for the advance.
