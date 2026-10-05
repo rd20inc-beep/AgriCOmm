@@ -1339,7 +1339,13 @@ const millingController = {
           // yield — otherwise the finished/by-product lots inherit Rs 0 cost and any
           // later sale books 100% "profit". The cost comes from the source lot's
           // purchase price, so this means: price the raw lot before milling it.
-          if (finished + broken + bran + husk + sortex + powder + sweeping + choba > 0 && rawCostTotal <= 0.01) {
+          // A cost-blind operator (Mill Operator / QC Analyst) can't see or set
+          // the price, so they are not blocked: the outputs start at Rs 0 and are
+          // re-costed when someone with cost access sets the price (the arrival
+          // analysis price cascades into yielded outputs), and a Rs 0 lot can't
+          // be sold meanwhile (a sale requires a cost).
+          if (finished + broken + bran + husk + sortex + powder + sweeping + choba > 0 && rawCostTotal <= 0.01
+            && await canSeeCost(req)) {
             const e = new Error('This batch has no recorded raw-material cost. Set the source lot\'s purchase price before recording yield — otherwise the finished rice would be costed at Rs 0.');
             e.status = 400; throw e;
           }
