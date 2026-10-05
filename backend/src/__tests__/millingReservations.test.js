@@ -105,6 +105,11 @@ jest.mock('../services/automationService', () => ({ onBatchCompleted: jest.fn() 
 jest.mock('../services/exportOrderWorkflowService', () => ({}));
 jest.mock('../services/notificationService', () => ({}));
 jest.mock('../services/exportOrderEventBus', () => ({ publishExportOrderUpdate: jest.fn() }));
+jest.mock('../utils/costVisibility', () => {
+  const actual = jest.requireActual('../utils/costVisibility');
+  return { ...actual, canSeeCost: jest.fn(async () => true) };
+});
+const costVisibility = require('../utils/costVisibility');
 
 const lifecycle = require('../modules/milling/batchLifecycle');
 const millingController = require('../modules/milling/milling.controller');
@@ -325,7 +330,43 @@ describe('deleteBatch', () => {
   });
 });
 
-describe('dead route', () => {
+describe('direct create with a priced first truck', () => {
+  const body = {
+    supplier_id: 4, product_id: 2, raw_qty_kg: 30000, mill_id: 1,
+    vehicles: [{ vehicle_no: 'LES-1', weight_kg: 30000, total_bags: 600, quality: { price_per_mt: 145000 } }],
+  };
+  const inv = require('../services/inventoryService');
+
+  test('a cost-visible user prices the truck and the receipt', async () => {
+    seed({ milling_batches: [] });
+    costVisibility.canSeeCost.mockResolvedValue(true);
+    const res = resMock();
+    await millingController.create({ body: JSON.parse(JSON.stringify(body)), user: { id: 1 } }, res);
+    expect(res.statusCode).toBe(201);
+    expect(state.tables.milling_vehicle_arrivals[0].quality_json).toEqual({ price_per_mt: 145000 });
+    expect(inv.receiveRice).toHaveBeenCalledWith(mockDb, expect.objectContaining({ weightKg: 30000, costPerKg: 145 }));
+    expect(inv.recomputeRawRiceCostFromVehicles).toHaveBeenCalled();
+  });
+
+  test('a cost-blind user’s price is ignored — the truck goes in unpriced', async () => {
+    seed({ milling_batches: [] });
+    costVisibility.canSeeCost.mockResolvedValue(false);
+    const res = resMock();
+    await millingController.create({ body: JSON.parse(JSON.stringify(body)), user: { id: 1 } }, res);
+    expect(res.statusCode).toBe(201);
+    expect(state.tables.milling_vehicle_arrivals[0].quality_json).toBeNull();
+    expect(inv.receiveRice).toHaveBeenCalledWith(mockDb, expect.objectContaining({ weightKg: 30000, costPerKg: 0 }));
+    costVisibility.canSeeCost.mockResolvedValue(true);
+  });
+});
+
+describe('routes', () => {
+  test('GET /cost-trend is behind the cost-visibility gate', () => {
+    const router = require('../modules/milling/milling.routes');
+    const layer = router.stack.find((l) => l.route && l.route.path === '/cost-trend' && l.route.methods.get);
+    expect(layer.route.stack.map((s) => s.handle)).toContain(costVisibility.requireCostVisibility);
+  });
+
   test('POST /batches/:id/source-lots is gone (GET stays)', () => {
     const router = require('../modules/milling/milling.routes');
     const layers = router.stack.filter((l) => l.route && l.route.path === '/batches/:id/source-lots');
