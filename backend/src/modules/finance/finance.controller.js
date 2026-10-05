@@ -4,6 +4,7 @@ const accountingService = require('../../services/accountingService');
 const fxRateService = require('./fxRate.service');
 const { nextDocNo } = require('../../utils/docNumber');
 const { postLocalReceiptJournal } = require('../localSales/receiptJournal');
+const { buildLocalReceivablesQuery } = require('./localReceivablesQuery');
 
 // Finance-dashboard confidentiality: every role EXCEPT Super Admin / Owner sees
 // reference NUMBERS (export order, mill batch, lot) but NOT the trading-party
@@ -94,41 +95,11 @@ const financeController = {
       // (midnight) would drop receivables created later on the to_date day.
       if (to_date)       exportQ = exportQ.where('r.created_at', '<', db.raw("(?::date + interval '1 day')", [to_date]));
 
-      // ── Local sales with outstanding balance (UNIONed in) ─────────
-      // Surfaces credit / partial / pending local sales in Money In so
-      // the user's true AR includes domestic sales, not just export
-      // advances + balances.
-      let localQ = db('local_sales as ls')
-        .leftJoin('customers as c', 'ls.customer_id', 'c.id')
-        // Only a CONFIRMED sale is receivable: a Pending one has posted nothing
-        // (its receipt is taken on confirmation) and a Cancelled one never
-        // happened. 'Unpaid' is what create writes for an unpaid non-credit sale.
-        .where('ls.status', 'Completed')
-        .whereIn('ls.payment_status', ['Pending', 'Unpaid', 'Partial', 'Credit'])
-        .where('ls.due_amount', '>', 0)
-        .select(
-          'ls.id',
-          'ls.sale_no as recv_no',
-          db.raw(`'Local Sale'::text as type`),
-          'ls.total_amount as expected_amount',
-          'ls.paid_amount as received_amount',
-          'ls.due_amount as outstanding',
-          db.raw(`'PKR'::text as currency`),
-          db.raw(`1::numeric as fx_rate`),
-          'ls.total_amount as base_amount_pkr',
-          db.raw(`ls.sale_date::timestamptz as due_date`),
-          'ls.payment_status as status',
-          db.raw(`GREATEST(0, EXTRACT(DAY FROM (NOW() - ls.sale_date::timestamptz)))::int as aging`),
-          db.raw(`NULL::int as order_id`),
-          'ls.customer_id',
-          db.raw(`ls.sale_date::timestamptz as created_at`),
-          db.raw(`'local_sale'::text as kind`),
-          db.raw(`COALESCE(c.name, ls.buyer_name, 'Walk-in') as customer_name`)
-        );
-      if (status)       localQ = localQ.where('ls.payment_status', status);
-      if (customer_id)  localQ = localQ.where('ls.customer_id', customer_id);
-      if (from_date)    localQ = localQ.where('ls.sale_date', '>=', from_date);
-      if (to_date)      localQ = localQ.where('ls.sale_date', '<=', to_date);
+      // ── Local sales with outstanding balance (merged in) ──────────
+      // One row per sale (sale_group_no), selected by what is still owed on a
+      // confirmed sale, due = COALESCE(due_date, sale_date) for the Due column,
+      // aging and the overdue filter alike. See localReceivablesQuery.js.
+      const localQ = buildLocalReceivablesQuery(db, { status, customer_id, from_date, to_date, overdue });
 
       // Knex UNION with ORDER BY + LIMIT works by wrapping the union
       // as a derived table.
@@ -178,7 +149,7 @@ const financeController = {
   async getReceivableReceipts(req, res) {
     try {
       const { id } = req.params;
-      const source = req.query.source === 'local_sale' ? 'local_sale' : 'export';
+      const source = ['local_sale', 'local_sale_group'].includes(req.query.source) ? req.query.source : 'export';
 
       const base = () => db('payments as p')
         .leftJoin('bank_accounts as ba', 'ba.id', 'p.bank_account_id')
@@ -195,7 +166,18 @@ const financeController = {
       let payments = [];
       let collectionLocation = null;
 
-      if (source === 'local_sale') {
+      if (source === 'local_sale_group') {
+        // A Money-In row is a whole sale (sale_group_no): its receipts are
+        // every payment against any of its lines.
+        const sale = await db('local_sales').where({ id }).first();
+        if (sale) {
+          collectionLocation = sale.collection_location || null;
+          const lineIds = sale.sale_group_no
+            ? (await db('local_sales').where({ sale_group_no: sale.sale_group_no }).select('id')).map((r) => r.id)
+            : [sale.id];
+          payments = await base().whereIn('p.local_sale_id', lineIds);
+        }
+      } else if (source === 'local_sale') {
         const sale = await db('local_sales').where({ id }).first();
         if (sale) {
           collectionLocation = sale.collection_location || null;
