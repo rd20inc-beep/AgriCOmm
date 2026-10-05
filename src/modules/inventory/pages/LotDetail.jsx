@@ -25,14 +25,15 @@ import AddPurchaseModal from '../components/AddPurchaseModal';
 import QualityEditModal from '../components/QualityEditModal';
 import api from '../../../api/client';
 import { lotInventoryApi } from '../../../api/services';
+import useCanSeeCost from '../../../hooks/useCanSeeCost';
 
 function fmtPKR(v) { return 'Rs ' + (parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 function fmtDate(d) { return d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'; }
 
 const TABS = [
   { key: 'overview', label: 'Overview', icon: Package },
-  { key: 'costing', label: 'Costing', icon: DollarSign },
-  { key: 'sales', label: 'Sales & Profit', icon: TrendingUp },
+  { key: 'costing', label: 'Costing', icon: DollarSign, cost: true },
+  { key: 'sales', label: 'Sales & Profit', icon: TrendingUp, cost: true },
   { key: 'stock', label: 'Stock Flow', icon: Scale },
   { key: 'transactions', label: 'Ledger', icon: Activity },
   { key: 'documents', label: 'Documents', icon: FileText },
@@ -61,6 +62,11 @@ export default function LotDetail() {
   const { user, hasPermission } = useAuth();
   const canReports = hasPermission('reports', 'view');
   const canExport = hasPermission('export_orders', 'view');
+  // Purchase rate, landed cost, lot value, cost sheet and sale profit are
+  // hidden from roles without reports.view_cost (Mill Operator, QC Analyst).
+  // The API nulls the same fields; this keeps empty "Rs 0.00" off the page.
+  const showCost = useCanSeeCost();
+  const tabs = TABS.filter((t) => showCost || !t.cost);
   const [activeTab, setActiveTab] = useState('overview');
   const [displayUnit, setDisplayUnit] = useState('katta');
   const [showTxnModal, setShowTxnModal] = useState(false);
@@ -276,9 +282,11 @@ export default function LotDetail() {
           </div>
           <p className="text-sm text-gray-500 mt-0.5">{lot.itemName}{lot.variety && lot.variety !== lot.itemName ? ` — ${lot.variety}` : ''}{lot.grade && lot.grade !== lot.itemName ? ` (${lot.grade})` : ''}{lot.brand ? ` · ${lot.brand}` : ''}</p>
         </div>
-        <button onClick={() => setShowCostSheet(true)} className="btn btn-primary btn-sm">
-          <FileText className="w-4 h-4" /> Costing Sheet
-        </button>
+        {showCost && (
+          <button onClick={() => setShowCostSheet(true)} className="btn btn-primary btn-sm">
+            <FileText className="w-4 h-4" /> Costing Sheet
+          </button>
+        )}
         <a
           href={`/print-report?type=lot&ids=${lot.id}`}
           target="_blank"
@@ -351,7 +359,7 @@ export default function LotDetail() {
           </button>
         )}
         {/* Purchase Invoice / GRN — for purchased rice lots. */}
-        {lot.type === 'raw' && (
+        {lot.type === 'raw' && showCost && (
           <Link to={`/lot-inventory/${lot.id}/purchase-invoice`} className="btn btn-sm btn-secondary">
             <FileText className="w-4 h-4" /> Purchase Invoice
           </Link>
@@ -398,7 +406,7 @@ export default function LotDetail() {
       </div>
 
       {/* KPI Cards */}
-      <div className={`grid grid-cols-2 sm:grid-cols-3 gap-3 ${milledKg > 0 ? 'xl:grid-cols-7' : 'xl:grid-cols-6'}`}>
+      <div className={`grid grid-cols-2 sm:grid-cols-3 gap-3 ${(milledKg > 0) === showCost ? 'xl:grid-cols-7' : (milledKg > 0 || showCost) ? 'xl:grid-cols-6' : 'xl:grid-cols-5'}`}>
         <div className="bg-white rounded-xl border border-gray-100 p-4">
           <p className="text-xs font-medium text-gray-500 uppercase">{milledKg > 0 ? 'Total Received' : 'Total Stock'}</p>
           <p className="text-xl font-bold text-gray-900 mt-1">{dv(receivedKg).toLocaleString()}</p>
@@ -431,11 +439,13 @@ export default function LotDetail() {
           <p className="text-xl font-bold text-red-700 mt-1">{dv(damagedKg).toLocaleString()}</p>
           <p className="text-xs text-red-500">{ul()}</p>
         </div>
-        <div className="bg-white rounded-xl border border-gray-100 p-4">
-          <p className="text-xs font-medium text-gray-500 uppercase">Lot Value</p>
-          <p className="text-xl font-bold text-gray-900 mt-1">{fmtPKR(landedTotal || purchaseAmount)}</p>
-          <p className="text-xs text-gray-400">{usedPct}% utilized</p>
-        </div>
+        {showCost && (
+          <div className="bg-white rounded-xl border border-gray-100 p-4">
+            <p className="text-xs font-medium text-gray-500 uppercase">Lot Value</p>
+            <p className="text-xl font-bold text-gray-900 mt-1">{fmtPKR(landedTotal || purchaseAmount)}</p>
+            <p className="text-xs text-gray-400">{usedPct}% utilized</p>
+          </div>
+        )}
       </div>
 
       {/* Ordered vs received — only when they differ (short or over shipment).
@@ -457,7 +467,7 @@ export default function LotDetail() {
 
       {/* Tabs */}
       <div className="flex items-center gap-1 border-b border-gray-200 overflow-x-auto">
-        {TABS.map(tab => {
+        {tabs.map(tab => {
           const Icon = tab.icon;
           return (
             <button key={tab.key} onClick={() => setActiveTab(tab.key)}
@@ -524,8 +534,8 @@ export default function LotDetail() {
                 ['Entity', lot.entity === 'mill' ? 'Milling Division' : 'Export Division'],
                 ['Type', typeLabel],
                 ['Payment Status', lot.paymentStatus],
-                ['Due Amount', lot.dueAmount ? fmtPKR(lot.dueAmount) : null],
-                ['Paid Amount', lot.paidAmount ? fmtPKR(lot.paidAmount) : null],
+                ['Due Amount', showCost && lot.dueAmount ? fmtPKR(lot.dueAmount) : null],
+                ['Paid Amount', showCost && lot.paidAmount ? fmtPKR(lot.paidAmount) : null],
               ].map(([l, v]) => v ? <div key={l} className="flex justify-between text-sm"><span className="text-gray-500">{l}</span><span className="font-medium text-gray-900">{v}</span></div> : null)}
             </div>
           </div>
@@ -683,8 +693,8 @@ export default function LotDetail() {
                 ['Bag Size', lot.bagSizeKg ? `${lot.bagSizeKg} KG` : null],
                 ['Bag Weight (empty)', lot.bagWeightGm ? `${lot.bagWeightGm} gm` : null],
                 ['Bag Color', lot.bagColor],
-                ['Bag Cost/Bag', lot.bagCostPerBag ? fmtPKR(lot.bagCostPerBag) : null],
-                ['Bag Cost Included', lot.bagCostIncluded ? 'Yes' : 'No'],
+                ['Bag Cost/Bag', showCost && lot.bagCostPerBag ? fmtPKR(lot.bagCostPerBag) : null],
+                ['Bag Cost Included', showCost ? (lot.bagCostIncluded ? 'Yes' : 'No') : null],
                 ['Total Bags', lot.totalBags],
                 ['Bag Weight (per bag)', `${bw} KG`],
               ].map(([l, v]) => v != null ? <div key={l} className="flex justify-between text-sm"><span className="text-gray-500">{l}</span><span className="font-medium text-gray-900">{v}</span></div> : null)}
@@ -709,17 +719,18 @@ export default function LotDetail() {
           {/* Pricing Summary */}
           <div className="bg-blue-50 rounded-xl border border-blue-100 p-5 lg:col-span-2">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-semibold text-blue-700 uppercase tracking-wider">Purchase Pricing</h3>
+              <h3 className="text-sm font-semibold text-blue-700 uppercase tracking-wider">{showCost ? 'Purchase Pricing' : 'Received Quantity'}</h3>
               {lot.type === 'raw' && canEditLot && (
                 <div className="flex items-center gap-2">
                   <button onClick={() => setShowReceivedModal(true)} className="btn btn-sm btn-secondary"><Scale className="w-3.5 h-3.5" /> Edit Received</button>
-                  <button onClick={() => setShowPriceModal(true)} className="btn btn-sm btn-secondary"><Edit3 className="w-3.5 h-3.5" /> Edit Price</button>
+                  {showCost && <button onClick={() => setShowPriceModal(true)} className="btn btn-sm btn-secondary"><Edit3 className="w-3.5 h-3.5" /> Edit Price</button>}
                 </div>
               )}
               {lot.type === 'raw' && !canEditLot && editLockMsg && (
                 <span className="text-xs text-amber-600 flex items-center gap-1"><Lock className="w-3.5 h-3.5" /> {editLockMsg}</span>
               )}
             </div>
+            {showCost ? (
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               <div>
                 <p className="text-xs text-blue-600">{isMilled ? 'Purchase Rate (raw rice)' : 'Original Rate'}</p>
@@ -742,6 +753,9 @@ export default function LotDetail() {
                 <p className="text-lg font-bold text-gray-900">{fmtPKR(purchaseAmount)}</p>
               </div>
             </div>
+            ) : (
+              <p className="text-sm text-gray-700">{Math.round(receivedKg).toLocaleString()} kg received</p>
+            )}
           </div>
 
           {/* Linked Milling Batch */}
@@ -754,7 +768,7 @@ export default function LotDetail() {
                 <div><p className="text-xs text-gray-500">Batch No</p><Link to={`/milling/${linkedBatch.batchNo}`} className="text-sm font-bold text-blue-600 hover:text-blue-800">{linkedBatch.batchNo}</Link>{linkedBatch.batchName && <p className="text-xs text-gray-500 mt-0.5">{linkedBatch.batchName}</p>}</div>
                 <div><p className="text-xs text-gray-500">Status</p><StatusBadge status={linkedBatch.status} /></div>
                 <div><p className="text-xs text-gray-500">Supplier</p><p className="text-sm font-medium"><PartyLink type="supplier" id={linkedBatch.supplierId} name={linkedBatch.supplierName} /></p></div>
-                {linkedBatch.arrivalAnalysis?.pricePerMT && (
+                {showCost && linkedBatch.arrivalAnalysis?.pricePerMT && (
                   <div><p className="text-xs text-gray-500">Agreed Price</p><p className="text-sm font-bold text-gray-900">Rs {(Math.round((linkedBatch.arrivalAnalysis.pricePerMT / 1000) * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} /kg</p></div>
                 )}
               </div>
@@ -1202,13 +1216,13 @@ export default function LotDetail() {
                     <th className="text-right">Qty (input)</th>
                     <th className="text-right">Qty KG</th>
                     <th className="text-right">Balance KG</th>
-                    <th className="text-right">Cost Impact</th>
+                    {showCost && <th className="text-right">Cost Impact</th>}
                     <th className="text-left">Remarks</th>
                   </tr>
                 </thead>
                 <tbody>
                   {transactions.length === 0 ? (
-                    <tr><td colSpan={9} className="text-center py-8 text-gray-400">No transactions recorded</td></tr>
+                    <tr><td colSpan={showCost ? 9 : 8} className="text-center py-8 text-gray-400">No transactions recorded</td></tr>
                   ) : transactions.map(t => (
                     <tr key={t.id}>
                       <td data-label="Date" className="text-gray-600 text-xs">{fmtDate(t.transactionDate)}</td>
@@ -1218,7 +1232,7 @@ export default function LotDetail() {
                       <td data-label="Qty (input)" className="mob-hide text-right text-xs tabular-nums">{t.inputQty} {t.inputUnit}</td>
                       <td data-label="Qty KG" className={`text-right font-medium tabular-nums ${parseFloat(t.quantityKg) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{parseFloat(t.quantityKg || 0).toLocaleString()}</td>
                       <td data-label="Balance KG" className="text-right tabular-nums">{parseFloat(t.balanceKg || 0).toLocaleString()}</td>
-                      <td data-label="Cost Impact" className="mob-hide text-right tabular-nums text-xs">{t.costImpact ? fmtPKR(t.costImpact) : '—'}</td>
+                      {showCost && <td data-label="Cost Impact" className="mob-hide text-right tabular-nums text-xs">{t.costImpact ? fmtPKR(t.costImpact) : '—'}</td>}
                       <td data-label="Remarks" className="mob-hide text-xs text-gray-500 max-w-[200px] truncate">{t.remarks || '—'}</td>
                     </tr>
                   ))}
@@ -1258,7 +1272,7 @@ export default function LotDetail() {
       <TransactionModal isOpen={showTxnModal} onClose={() => setShowTxnModal(false)} lotId={lot.id} lotNo={lot.lotNo} availableKg={availKg} bagWeightKg={bw} defaultRateKg={landedKg || rateKg} warehouses={warehousesList} addToast={addToast} refetch={refetch} mutation={txnMutation} />
       <CostEditModal isOpen={showCostModal} onClose={() => setShowCostModal(false)} lot={lot} milled={millingBatches.length > 0 || outboundTxns.length > 0} addToast={addToast} refetch={refetch} />
       <PriceEditModal isOpen={showPriceModal} onClose={() => setShowPriceModal(false)} lot={lot} addToast={addToast} refetch={refetch} />
-      <ReceivedQtyModal isOpen={showReceivedModal} onClose={() => setShowReceivedModal(false)} lot={lot} addToast={addToast} refetch={refetch} />
+      <ReceivedQtyModal isOpen={showReceivedModal} onClose={() => setShowReceivedModal(false)} lot={lot} showCost={showCost} addToast={addToast} refetch={refetch} />
       <AllocateToBatchModal isOpen={showAllocateModal} onClose={() => setShowAllocateModal(false)} lot={lot} addToast={addToast} refetch={refetch} />
       <LotVehicleDrawer
         isOpen={showAddVehicle || !!editVehicle}
@@ -1597,7 +1611,7 @@ function PriceEditModal({ isOpen, onClose, lot, addToast, refetch }) {
 
 // Edit a raw lot's RECEIVED quantity (ordered vs received). Stock drops/rises to
 // the received amount and the supplier bill re-bills to received × rate + add-ons.
-function ReceivedQtyModal({ isOpen, onClose, lot, addToast, refetch }) {
+function ReceivedQtyModal({ isOpen, onClose, lot, showCost = true, addToast, refetch }) {
   const curReceivedKg = parseFloat(lot.receivedNetWeightKg) || parseFloat(lot.netWeightKg) || 0;
   const orderedKg = parseFloat(lot.orderedNetWeightKg) || curReceivedKg;
   const rate = parseFloat(lot.ratePerKg) || 0;
@@ -1627,7 +1641,7 @@ function ReceivedQtyModal({ isOpen, onClose, lot, addToast, refetch }) {
 
   const footer = (
     <div className="flex items-center justify-between gap-3">
-      <div className="text-xs text-gray-500">New bill <span className="font-bold text-gray-900 ml-1">{fmtPKR(newBill)}</span></div>
+      <div className="text-xs text-gray-500">{showCost && <>New bill <span className="font-bold text-gray-900 ml-1">{fmtPKR(newBill)}</span></>}</div>
       <div className="flex gap-2">
         <button onClick={onClose} className="btn btn-secondary btn-sm">Cancel</button>
         <button onClick={handleSave} disabled={saving || !(newReceived > 0)} className="btn btn-primary btn-sm"><Save className="w-4 h-4" /> {saving ? 'Saving…' : 'Save'}</button>
@@ -1658,11 +1672,11 @@ function ReceivedQtyModal({ isOpen, onClose, lot, addToast, refetch }) {
             {variance < 0 ? `Short ${Math.round(Math.abs(variance)).toLocaleString()} kg vs order` : `Over ${Math.round(variance).toLocaleString()} kg vs order`}
           </div>
         )}
-        <div className="bg-gray-50 rounded-lg p-3 space-y-1.5 text-sm">
+        {showCost && <div className="bg-gray-50 rounded-lg p-3 space-y-1.5 text-sm">
           <div className="flex justify-between"><span className="text-gray-500">Rate</span><span className="font-medium">Rs {rate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/kg</span></div>
           <div className="flex justify-between"><span className="text-gray-500">Add-on costs</span><span className="font-medium">{fmtPKR(addOns)}</span></div>
           <div className="flex justify-between border-t pt-1.5"><span className="text-gray-600 font-semibold">New bill</span><span className="font-bold text-gray-900">{fmtPKR(newBill)}</span></div>
-        </div>
+        </div>}
       </div>
     </SlideDrawer>
   );

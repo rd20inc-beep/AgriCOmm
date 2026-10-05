@@ -5,6 +5,7 @@ import api from '../../../api/client';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import { useSummarizeReport } from '../../../api/queries';
+import { canSeeCost } from '../../../hooks/useCanSeeCost';
 import {
   ProductionReportView, StockReportView,
   PnlReportView, CashflowReportView, AgingReportView,
@@ -116,7 +117,13 @@ export default function PrintableReports() {
   const millScoped = user?.role === 'Mill Manager';
   // The audit trail is admin-only (gated admin.view on the endpoint too).
   const canAudit = hasPermission?.('admin', 'view');
-  const REPORT_TYPES = millScoped
+  // Without reports.view_cost (Mill Operator, QC Analyst) the stock and
+  // production reports print quantities only, and the money-only reports
+  // (purchase ledger and the financials) are not offered at all.
+  const showCost = canSeeCost(hasPermission);
+  const REPORT_TYPES = !showCost
+    ? ['production', 'stock', 'stock_detail']
+    : millScoped
     ? ['production', 'stock', 'stock_detail', 'purchase_ledger']
     : ['production', 'stock', 'stock_detail', 'purchase_ledger', 'sales_ledger', 'freight_recovery', 'pnl_accrual', 'pnl', 'pnl_compare', 'cashflow', 'ar_aging', 'ap_aging', ...(canAudit ? ['audit_trail'] : [])];
 
@@ -330,9 +337,9 @@ export default function PrintableReports() {
         ) : (<>
           <ReportSummaryCard reportType={reportType} data={data} range={range} />
           {reportType === 'production' && data.summary && data.batches ? (
-          <ProductionReportView data={data} companyName={companyName} range={range} preset={preset} />
+          <ProductionReportView data={data} companyName={companyName} range={range} preset={preset} showCost={showCost} />
         ) : reportType === 'stock' && data.grand && data.rows ? (
-          <StockReportView data={data} companyName={companyName} groupLabel={STOCK_GROUP_OPTIONS.find(o => o.key === stockGroupBy)?.label} />
+          <StockReportView data={data} companyName={companyName} groupLabel={STOCK_GROUP_OPTIONS.find(o => o.key === stockGroupBy)?.label} showCost={showCost} />
         ) : reportType === 'pnl_compare' && data.cash && data.accrual ? (
           <PnlCompareView data={data} companyName={companyName} range={range} preset={preset} />
         ) : reportType === 'pnl_accrual' && data.revenue && data.cogs ? (
@@ -352,7 +359,7 @@ export default function PrintableReports() {
         ) : reportType === 'freight_recovery' && data.totals ? (
           <FreightRecoveryView data={data} companyName={companyName} />
         ) : reportType === 'stock_detail' && data.rows && data.millStore !== undefined ? (
-          <StockDetailView data={data} companyName={companyName} />
+          <StockDetailView data={data} companyName={companyName} showCost={showCost} />
         ) : reportType === 'audit_trail' && data.byCategory ? (
           <AuditReportView data={data} companyName={companyName} range={range} />
           ) : (
