@@ -17,7 +17,9 @@ export default function MillSuppliers() {
   const { data: suppliers = [], isLoading } = useSuppliers();
   const { addToast } = useApp();
   const { hasPermission } = useAuth();
-  const canPay = hasPermission('finance', 'confirm_payment');
+  // Finance, or the Mill Operator (milling.edit) for the mill's own rows — the
+  // server keeps it to mill payables / sales and mill accounts.
+  const canPay = hasPermission('finance', 'confirm_payment') || hasPermission('milling', 'edit');
   const qc = useQueryClient();
   const [search, setSearch] = useState('');
   const [paySupplier, setPaySupplier] = useState(null);

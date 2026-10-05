@@ -16,6 +16,8 @@ const { buildLocalReceivablesQuery } = require('./localReceivablesQuery');
 // actually masks payables carried on with the old list — so the policy now has a
 // single home in shared/partyMask.js.
 const { isPartyMasked } = require('../../shared/partyMask');
+const { isMillOnlyPayer, assertMillEntity, assertMillAccount } = require('../../shared/millPayer');
+const { canSeeCost } = require('../../utils/costVisibility');
 const { resolvePaymentAccountId } = require('../../shared/cashAccounts');
 const { normalizePaymentMethod } = require('../../shared/constants/paymentMethods');
 const { ledgerFailure, missingAccounts } = require('../../shared/ledgerFailure');
@@ -1170,6 +1172,9 @@ const financeController = {
       // (or move the bank) until it clears — it stays Pending/Partial.
       const _today = new Date(new Date().toDateString());
       const isPostDated = payment_method === 'cheque' && due_date && new Date(due_date) > _today;
+      // Without finance.confirm_payment (the Mill Operator, via milling.edit)
+      // only mill payables / receivables, through a mill account.
+      const millOnly = await isMillOnlyPayer(req);
 
       const result = await db.transaction(async (trx) => {
         // Guard: don't let a receipt over-apply or double-settle a receivable.
@@ -1192,6 +1197,11 @@ const financeController = {
         const isReceipt = type === 'receipt';
         const linkedRow = await trx(isReceipt ? 'receivables' : 'payables').where({ id: entity_id }).forUpdate().first();
         const localSaleId = isReceipt ? (linkedRow?.local_sale_id || null) : null;
+        if (millOnly) {
+          if (!linkedRow) { const e = new Error(`${isReceipt ? 'Receivable' : 'Payable'} not found.`); e.statusCode = 404; throw e; }
+          // A receivable raised from a local sale is the mill's (it posts to 1120).
+          assertMillEntity(linkedRow.local_sale_id ? 'mill' : linkedRow.entity, isReceipt ? 'receivables' : 'payables');
+        }
         if (linkedRow) {
           const pendingCheques = await pendingChequeTotal(trx, isReceipt ? { receivableId: linkedRow.id } : { payableId: linkedRow.id });
           const total = parseFloat(isReceipt ? linkedRow.expected_amount : linkedRow.original_amount) || 0;
@@ -1218,6 +1228,7 @@ const financeController = {
           entity: linkedRow?.local_sale_id ? 'mill' : (linkedRow?.entity || 'general'),
           isPostDated,
         });
+        if (millOnly) await assertMillAccount(trx, accountId || bank_account_id);
 
         const paymentNo = await generatePaymentNo(trx);
 
@@ -1675,6 +1686,31 @@ const financeController = {
       });
     } catch (err) {
       console.error('Get bank accounts error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
+  // The mill's own accounts for the payment pickers of mill roles without
+  // finance.view (the Mill Operator). A mill-only payer may move money only
+  // through these (see shared/millPayer). Identity fields only; the balance
+  // rides along for holders of reports.view_cost.
+  async getMillBankAccounts(req, res) {
+    try {
+      const rows = await db('bank_accounts')
+        .where({ entity: 'mill', is_active: true })
+        .orderBy('is_favorite', 'desc')
+        .orderBy('name', 'asc');
+      const showBalance = await canSeeCost(req);
+      const accounts = rows
+        .filter((a) => String(a.entity || '').toLowerCase() === 'mill' && a.is_active !== false)
+        .map((a) => ({
+          id: a.id, name: a.name, type: a.type, currency: a.currency, bank_name: a.bank_name || null,
+          entity: a.entity, is_active: a.is_active, is_favorite: !!a.is_favorite,
+          current_balance: showBalance ? a.current_balance : null,
+        }));
+      return res.json({ success: true, data: { accounts } });
+    } catch (err) {
+      console.error('Get mill bank accounts error:', err);
       return res.status(500).json({ success: false, message: 'Internal server error.' });
     }
   },
@@ -2413,6 +2449,9 @@ financeController.payPurchase = async (req, res) => {
     // Purchases drawer used to send 'bank', which died on that constraint.
     // Throws on an unknown value, which the catch below turns into a 400.
     const payMethod = normalizePaymentMethod(payment_method);
+    // Without finance.confirm_payment (the Mill Operator, via milling.edit)
+    // only mill purchases, through a mill account.
+    const millOnly = await isMillOnlyPayer(req);
 
     const result = await db.transaction(async (trx) => {
       const SOURCE_TABLE = {
@@ -2439,6 +2478,16 @@ financeController.payPurchase = async (req, res) => {
         .where({ source_table: sourceTable, source_id: id })
         .forUpdate()
         .first();
+      if (millOnly) {
+        // The payable's entity when there is one; otherwise the source's own:
+        // a lot carries its entity, a mill-store purchase is the mill's, an
+        // expense its expense_type; export costs and printed bags never are.
+        const ownEntity = source === 'lot' ? row.entity
+          : source === 'mill_store' ? 'mill'
+          : source === 'expense' ? row.expense_type
+          : 'export';
+        assertMillEntity(linkedPayable?.entity || ownEntity, 'purchases');
+      }
       let outstanding;
       if (linkedPayable) {
         const pending = await pendingChequeTotal(trx, { payableId: linkedPayable.id });
@@ -2473,6 +2522,7 @@ financeController.payPurchase = async (req, res) => {
       // and stop. Cleared later via POST /payments/:id/clear.
       const isPostDated = payMethod === 'cheque' && due_date && new Date(due_date) > new Date(new Date().toDateString());
       if (isPostDated) {
+        if (millOnly) await assertMillAccount(trx, bank_account_id);
         const natRef = row.lot_no || row.purchase_no || row.expense_no || null;
         const payable = await trx('payables').where(function () {
           this.where({ source_table: sourceTable, source_id: id });
@@ -2502,6 +2552,7 @@ financeController.payPurchase = async (req, res) => {
           : source === 'expense' ? row.expense_type
           : 'general',
       });
+      if (millOnly) await assertMillAccount(trx, accountId || bank_account_id);
 
       const commonUpdate = {
         payment_status: status,
@@ -2667,7 +2718,7 @@ financeController.payPurchase = async (req, res) => {
     return res.json({ success: true, data: result });
   } catch (err) {
     console.error('Pay purchase error:', err);
-    return res.status(400).json({ success: false, message: err.message || 'Failed to record purchase payment.' });
+    return res.status(err.statusCode || 400).json({ success: false, message: err.message || 'Failed to record purchase payment.' });
   }
 };
 

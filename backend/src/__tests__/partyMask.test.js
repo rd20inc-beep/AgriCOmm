@@ -12,6 +12,10 @@ describe('party visibility', () => {
     await expect(masked('Mill Manager')).resolves.toBe(false);
   });
 
+  test('the Mill Operator sees mill party names (owner decision 2026-10-05: full mill access)', async () => {
+    await expect(masked('Mill Operator')).resolves.toBe(false);
+  });
+
   test('owners and admins keep full visibility', async () => {
     await expect(masked('Super Admin')).resolves.toBe(false);
     await expect(masked('Owner')).resolves.toBe(false);
@@ -20,7 +24,7 @@ describe('party visibility', () => {
 
   test('everyone else stays masked', async () => {
     for (const r of ['Export Manager', 'QC Analyst', 'Inventory Officer',
-      'Documentation Officer', 'Read-Only Auditor', 'Mill Operator']) {
+      'Documentation Officer', 'Read-Only Auditor']) {
       await expect(masked(r)).resolves.toBe(true);
     }
   });
@@ -31,9 +35,9 @@ describe('party visibility', () => {
     await expect(isPartyMasked({})).resolves.toBe(true);
   });
 
-  test('the list is exactly the five agreed roles', () => {
+  test('the list is exactly the six agreed roles', () => {
     expect([...PARTY_VISIBLE_ROLES].sort()).toEqual(
-      ['Admin', 'Finance Manager', 'Mill Manager', 'Owner', 'Super Admin'],
+      ['Admin', 'Finance Manager', 'Mill Manager', 'Mill Operator', 'Owner', 'Super Admin'],
     );
   });
 });

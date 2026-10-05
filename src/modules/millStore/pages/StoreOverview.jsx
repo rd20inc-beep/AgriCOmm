@@ -270,12 +270,13 @@ export default function StoreOverview() {
 // so the Finance payment-trail shows where/how each was paid.
 function PurchasePaymentsCard() {
   const { addToast } = useApp();
-  // Paying is a finance action: the endpoint needs finance.confirm_payment,
-  // which a Mill Operator (who can raise purchases) does not hold.
+  // Paying needs finance.confirm_payment — or milling.edit, which lets the Mill
+  // Operator pay these (mill-store purchases are always the mill's) through the
+  // mill's own accounts (full mill access, owner decision 2026-10-05).
   const { hasPermission } = useAuth();
-  const canPay = hasPermission('finance', 'confirm_payment');
+  const canPay = hasPermission('finance', 'confirm_payment') || hasPermission('milling', 'edit');
   const { data: purchasesRaw = [] } = useMillStorePurchases({ limit: 200 });
-  const { data: bankAccounts = [] } = useBankAccounts();
+  const { data: bankAccounts = [] } = useBankAccounts({ millOnly: !hasPermission('finance', 'view') });
   const pay = usePayMillPurchase();
   const [target, setTarget] = useState(null);
 

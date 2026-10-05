@@ -39,8 +39,10 @@ router.post(
   '/:id/payments',
   // Recording a receipt against a local-sale receivable is a FINANCE action, so a
   // payments-only Finance Manager (finance.confirm_payment) must be able to do it
-  // from Money In — not only inventory/mill roles (inventory.create).
-  authorizeAny(['inventory', 'create'], ['finance', 'confirm_payment']),
+  // from Money In — not only inventory/mill roles (inventory.create). The Mill
+  // Operator (milling.edit) takes receipts on MILL sales only, through a mill
+  // account — enforced in the handler (shared/millPayer).
+  authorizeAny(['inventory', 'create'], ['finance', 'confirm_payment'], ['milling', 'edit']),
   auditAction('accept_local_sale_payment', 'local_sale'),
   controller.acceptPayment
 );
@@ -48,7 +50,7 @@ router.post(
 // Same permission as the per-line receipt above.
 router.post(
   '/group/:groupNo/payments',
-  authorizeAny(['inventory', 'create'], ['finance', 'confirm_payment']),
+  authorizeAny(['inventory', 'create'], ['finance', 'confirm_payment'], ['milling', 'edit']),
   auditAction('accept_local_sale_group_payment', 'local_sale', (req) => req.params.groupNo),
   controller.acceptGroupPayment
 );

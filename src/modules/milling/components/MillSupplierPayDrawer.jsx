@@ -2,7 +2,8 @@ import { useMemo, useState, useEffect } from 'react';
 import { Landmark, FileText } from 'lucide-react';
 import SlideDrawer from '../../../components/SlideDrawer';
 import { useApp } from '../../../context/AppContext';
-import { usePayables, useRecordPayment } from '../../../api/queries';
+import { useAuth } from '../../../context/AuthContext';
+import { usePayables, useMillPayables, useRecordPayment } from '../../../api/queries';
 import { payablesForRow } from '../utils/payableBuckets';
 
 const PKR = (v) => `Rs ${(parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -13,7 +14,13 @@ const fmtDate = (d) => { if (!d) return ''; const dt = new Date(d); return Numbe
 // linked_payable_id (updates the payable + bank + posts a party-stamped journal).
 export default function MillSupplierPayDrawer({ supplier, onClose }) {
   const { addToast, bankAccountsList = [] } = useApp();
-  const { data: payables = [] } = usePayables();
+  // Finance reads the company feed; a mill role without finance.view (the Mill
+  // Operator) reads the mill's own payables — the only ones it may pay.
+  const { hasPermission } = useAuth();
+  const canFinance = hasPermission('finance', 'view');
+  const { data: financePayables } = usePayables({}, { enabled: canFinance });
+  const { data: millPayables } = useMillPayables({}, { enabled: !canFinance });
+  const payables = (canFinance ? financePayables : millPayables) || [];
   const payMut = useRecordPayment();
   const [saving, setSaving] = useState(false);
 

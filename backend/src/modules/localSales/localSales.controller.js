@@ -10,6 +10,7 @@ const accountingService = require('../accounting/accounting.service');
 const { resolveCashAccountId } = require('../../shared/cashAccounts');
 const { nextDocNo } = require('../../utils/docNumber');
 const { isPartyMasked } = require('../../shared/partyMask');
+const { isMillOnlyPayer, assertMillEntity, assertMillReceipt } = require('../../shared/millPayer');
 const { inventoryAccountForLot } = require('./inventoryAccount');
 const { postLocalReceiptJournal } = require('./receiptJournal');
 const { resolveLineCost, priceSaleLine, salePaymentStatus } = require('./salePricing');
@@ -1238,6 +1239,8 @@ module.exports = {
       const { id } = req.params;
       const input = readReceiptInput(req.body);
       if (input.error) return res.status(400).json({ success: false, message: input.error });
+      // Came in on milling.edit alone (the Mill Operator): mill sales only.
+      const millOnly = await isMillOnlyPayer(req, [['inventory', 'create']]);
 
       await db.transaction(async (trx) => {
         // Read (and lock) the sale INSIDE the transaction: two receipts racing
@@ -1250,6 +1253,10 @@ module.exports = {
         // paying it here would record the money twice; a Cancelled one never
         // happened.
         assertSaleTakesPayment(sale);
+        if (millOnly) {
+          assertMillEntity(sale.entity, 'sales');
+          await assertMillReceipt(trx, input);
+        }
 
         const currentDue = parseFloat(sale.due_amount) || 0;
         if (input.amount > currentDue + 0.01) {
@@ -1282,6 +1289,7 @@ module.exports = {
       if (!groupNo) return res.status(400).json({ success: false, message: 'A sale number is required.' });
       const input = readReceiptInput(req.body);
       if (input.error) return res.status(400).json({ success: false, message: input.error });
+      const millOnly = await isMillOnlyPayer(req, [['inventory', 'create']]);
 
       const result = await db.transaction(async (trx) => {
         const lines = await trx('local_sales')
@@ -1291,6 +1299,10 @@ module.exports = {
           .forUpdate();
         if (!lines || !lines.length) {
           const e = new Error(`${groupNo} has no confirmed lines to take a payment against.`); e.status = 409; throw e;
+        }
+        if (millOnly) {
+          for (const l of lines) assertMillEntity(l.entity, 'sales');
+          await assertMillReceipt(trx, input);
         }
         const totalDue = uc.round2(lines.reduce((s, l) => s + (parseFloat(l.due_amount) || 0), 0));
         if (input.amount > totalDue + 0.01) {

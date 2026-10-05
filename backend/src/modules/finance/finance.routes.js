@@ -73,9 +73,14 @@ router.get('/alerts', authorize('finance', 'view'), controller.getAlerts);
 router.get('/overview', authorize('finance', 'view'), controller.getOverview);
 router.get('/upcoming', authorize('finance', 'view'), controller.getUpcoming);
 router.post('/payments/:id/clear', authorize('finance', 'confirm_payment'), controller.clearCheque);
+// Paying is finance.confirm_payment — or, for the MILL's own payables and
+// receivables only, milling.edit (the Mill Operator, owner decision
+// 2026-10-05). The handler refuses a mill-only payer anything whose entity is
+// not 'mill' or any non-mill account (shared/millPayer). Reversal stays finance.
+const canPayFinanceOrMill = authorizeAny(['finance', 'confirm_payment'], ['milling', 'edit']);
 router.post(
   '/payments',
-  authorize('finance', 'confirm_payment'),
+  canPayFinanceOrMill,
   validate(schemas.recordPayment),
   auditAction('record_payment', 'finance', (req, data) => data.data && data.data.id ? data.data.id : null),
   controller.recordPayment
@@ -108,7 +113,7 @@ router.get('/purchases', authorize('finance', 'view'), controller.listPurchases)
 router.get('/expense-link-options', authorize('finance', 'view'), controller.getExpenseLinkOptions);
 router.post(
   '/purchases/pay',
-  authorize('finance', 'confirm_payment'),
+  canPayFinanceOrMill,
   auditAction('pay_purchase', 'finance', (req, data) => data?.data?.source_id || null),
   controller.payPurchase
 );

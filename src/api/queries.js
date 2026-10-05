@@ -908,11 +908,13 @@ export function useDeleteFundTransfer() {
   });
 }
 
-export function useBankAccounts(opts = {}) {
+// millOnly: a mill role without finance.view (the Mill Operator) reads the
+// mill's own accounts — the only ones it may pay through — from /milling.
+export function useBankAccounts({ millOnly = false, ...opts } = {}) {
   return useQuery({
-    queryKey: queryKeys.bankAccounts.all,
+    queryKey: millOnly ? [...queryKeys.bankAccounts.all, 'mill'] : queryKeys.bankAccounts.all,
     queryFn: async () => {
-      const res = await financeApi.bankAccounts();
+      const res = await (millOnly ? millingApi.bankAccounts() : financeApi.bankAccounts());
       const raw = res?.data || res || {};
       const accounts = raw.bank_accounts || raw.accounts || [];
       // Favorites first, then alphabetical. The cloud list arrives in this

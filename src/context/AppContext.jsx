@@ -36,7 +36,7 @@ const defaultEmailSettings = {
 
 export function AppProvider({ children }) {
   const qc = useQueryClient();
-  const { token } = useAuth();
+  const { token, hasPermission } = useAuth();
   const isLoggedIn = !!token && token !== 'mock-prototype-token';
 
   // === TanStack Query data (only fetch when authenticated) ===
@@ -48,7 +48,9 @@ export function AppProvider({ children }) {
   const { data: productsList = [], isLoading: productsLoading } = useProducts({}, queryOpts);
   const { data: warehousesList = [] } = useWarehouses(queryOpts);
   const { data: bagTypesList = [] } = useBagTypes(queryOpts);
-  const { data: bankAccountsList = [] } = useBankAccounts(queryOpts);
+  // Without finance.view (the Mill Operator) the payment pickers list the mill's
+  // own accounts, the only ones it may pay through.
+  const { data: bankAccountsList = [] } = useBankAccounts({ ...queryOpts, millOnly: isLoggedIn && !hasPermission('finance', 'view') });
   const { data: rawInventoryData } = useInventory({}, queryOpts);
   const inventoryData = Array.isArray(rawInventoryData) ? rawInventoryData : [];
   const { data: apiSettings } = useSettingsQuery(queryOpts);
