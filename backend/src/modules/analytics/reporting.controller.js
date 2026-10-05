@@ -23,46 +23,13 @@ function parseCustomTags(v) {
 
 // ── Report money redaction (P6b) ──────────────────────────────────────────
 // A role with reports.view but not reports.view_cost / view_profit sees stock
-// quantities but not the money. Recursively null cost/value keys (view_cost)
-// and profit/margin/revenue keys (view_profit) in the response. The reports
-// routes already run authorize('reports','view'), which loads
-// req.user.permissions, so the Set is populated by the time we get here.
-const COST_KEYS = new Set([
-  'costPerKg', 'costPerUnit', 'costPkr', 'stockValue', 'value', 'valuePkr',
-  'landedCostPerKg', 'purchaseValue', 'totalCostOfSold', 'cogs', 'cogsOfSold',
-  'totalInputCost', 'rawCost', 'processingCost', 'onHandValue', 'remainingStockValue',
-  'avgCost', 'totalCost', 'unitCostPkr', 'costTotalPkr', 'outputValue',
-  'byproductRecovery', 'processingCostAllocated', 'recoveryValue', 'ratePerKg', 'purchaseCost',
-]);
-const PROFIT_KEYS = new Set([
-  'realizedProfit', 'realizedProfitPct', 'expectedProfitRemaining', 'revenue',
-  'totalRevenue', 'directRevenue', 'processedRevenue', 'avgSaleRate', 'salePricePerKg',
-  'paymentReceived', 'outstanding', 'outstandingSales', 'profit', 'margin', 'marginPct',
-]);
-
-function userReportPerms(req) {
-  const perms = (req.user && req.user.permissions) || null;
-  // No loaded set (shouldn't happen on gated routes) → don't redact.
-  if (!perms) return { cost: true, profit: true };
-  return { cost: perms.has('reports.view_cost'), profit: perms.has('reports.view_profit') };
-}
-
-function redactMoney(node, cost, profit) {
-  if (Array.isArray(node)) { for (const x of node) redactMoney(x, cost, profit); return; }
-  if (node && typeof node === 'object') {
-    for (const k of Object.keys(node)) {
-      if ((!cost && COST_KEYS.has(k)) || (!profit && PROFIT_KEYS.has(k))) { node[k] = null; continue; }
-      redactMoney(node[k], cost, profit);
-    }
-  }
-}
+// quantities but not the money. The key lists and the permission rule live in
+// utils/costVisibility so the lot/inventory endpoints redact the same fields.
+const { redactForUser } = require('../../utils/costVisibility');
 
 // Mutates + returns the data object, redacting per the caller's permissions.
-function redactReport(req, data) {
-  const { cost, profit } = userReportPerms(req);
-  if (cost && profit) return data;
-  redactMoney(data, cost, profit);
-  return data;
+function redactReport(req, data, opts) {
+  return redactForUser(req, data, opts);
 }
 
 
@@ -169,7 +136,7 @@ const reportingController = {
 
   async lotLedger(req, res) {
     try {
-      const data = redactReport(req, await reportingService.getLotLedger(req.params.id, await whScope.resolveWarehouseScope(req)));
+      const data = await redactReport(req, await reportingService.getLotLedger(req.params.id, await whScope.resolveWarehouseScope(req)));
       if (!data) return res.status(404).json({ success: false, message: 'Lot not found.' });
       return res.json({ success: true, ...data });
     } catch (err) {
@@ -180,7 +147,7 @@ const reportingController = {
 
   async batchLedger(req, res) {
     try {
-      const data = redactReport(req, await reportingService.getBatchLedger(req.params.id));
+      const data = await redactReport(req, await reportingService.getBatchLedger(req.params.id));
       if (!data) return res.status(404).json({ success: false, message: 'Batch not found.' });
       return res.json({ success: true, ...data });
     } catch (err) {
@@ -252,7 +219,7 @@ const reportingController = {
 
   async inventoryLedger(req, res) {
     try {
-      const data = redactReport(req, await reportingService.getInventoryLedger({ ...(req.query || {}), warehouseScope: await whScope.resolveWarehouseScope(req) }));
+      const data = await redactReport(req, await reportingService.getInventoryLedger({ ...(req.query || {}), warehouseScope: await whScope.resolveWarehouseScope(req) }));
       return res.json({ success: true, ...data });
     } catch (err) {
       console.error('Inventory ledger error:', err);
@@ -262,7 +229,7 @@ const reportingController = {
 
   async stockLedger(req, res) {
     try {
-      const data = redactReport(req, await reportingService.getStockLedger({ ...(req.query || {}), warehouseScope: await whScope.resolveWarehouseScope(req) }));
+      const data = await redactReport(req, await reportingService.getStockLedger({ ...(req.query || {}), warehouseScope: await whScope.resolveWarehouseScope(req) }));
       return res.json({ success: true, data });
     } catch (err) {
       console.error('Stock ledger error:', err);
@@ -272,7 +239,7 @@ const reportingController = {
 
   async finishedGoodsLedger(req, res) {
     try {
-      const data = redactReport(req, await reportingService.getFinishedGoodsLedger({ ...(req.query || {}), warehouseScope: await whScope.resolveWarehouseScope(req) }));
+      const data = await redactReport(req, await reportingService.getFinishedGoodsLedger({ ...(req.query || {}), warehouseScope: await whScope.resolveWarehouseScope(req) }));
       return res.json({ success: true, ...data });
     } catch (err) {
       console.error('Finished goods ledger error:', err);
@@ -322,7 +289,7 @@ const reportingController = {
 
   async supplierInventoryIndex(req, res) {
     try {
-      const data = redactReport(req, await reportingService.getSupplierInventoryIndex(await whScope.resolveWarehouseScope(req)));
+      const data = await redactReport(req, await reportingService.getSupplierInventoryIndex(await whScope.resolveWarehouseScope(req)));
       return res.json({ success: true, ...data });
     } catch (err) {
       console.error('Supplier inventory index error:', err);
@@ -332,7 +299,7 @@ const reportingController = {
 
   async supplierInventoryLedger(req, res) {
     try {
-      const data = redactReport(req, await reportingService.getSupplierInventoryLedger(req.params.id, await whScope.resolveWarehouseScope(req)));
+      const data = await redactReport(req, await reportingService.getSupplierInventoryLedger(req.params.id, await whScope.resolveWarehouseScope(req)));
       if (!data) return res.status(404).json({ success: false, message: 'Supplier not found.' });
       return res.json({ success: true, ...data });
     } catch (err) {
@@ -343,7 +310,7 @@ const reportingController = {
 
   async riceTypeIndex(req, res) {
     try {
-      const data = redactReport(req, await reportingService.getRiceTypeIndex(await whScope.resolveWarehouseScope(req)));
+      const data = await redactReport(req, await reportingService.getRiceTypeIndex(await whScope.resolveWarehouseScope(req)));
       return res.json({ success: true, ...data });
     } catch (err) {
       console.error('Rice type index error:', err);
@@ -353,7 +320,7 @@ const reportingController = {
 
   async riceTypeLedger(req, res) {
     try {
-      const data = redactReport(req, await reportingService.getRiceTypeLedger(req.params.id, await whScope.resolveWarehouseScope(req)));
+      const data = await redactReport(req, await reportingService.getRiceTypeLedger(req.params.id, await whScope.resolveWarehouseScope(req)));
       if (!data) return res.status(404).json({ success: false, message: 'Rice type not found.' });
       return res.json({ success: true, ...data });
     } catch (err) {
@@ -364,7 +331,7 @@ const reportingController = {
 
   async warehouseIndex(req, res) {
     try {
-      const data = redactReport(req, await reportingService.getWarehouseIndex(await whScope.resolveWarehouseScope(req)));
+      const data = await redactReport(req, await reportingService.getWarehouseIndex(await whScope.resolveWarehouseScope(req)));
       return res.json({ success: true, ...data });
     } catch (err) {
       console.error('Warehouse index error:', err);
@@ -374,7 +341,7 @@ const reportingController = {
 
   async warehouseLedger(req, res) {
     try {
-      const data = redactReport(req, await reportingService.getWarehouseLedger(req.params.id, await whScope.resolveWarehouseScope(req)));
+      const data = await redactReport(req, await reportingService.getWarehouseLedger(req.params.id, await whScope.resolveWarehouseScope(req)));
       if (!data) return res.status(404).json({ success: false, message: 'Warehouse not found.' });
       return res.json({ success: true, ...data });
     } catch (err) {
@@ -385,7 +352,7 @@ const reportingController = {
 
   async processingLossLedger(req, res) {
     try {
-      const data = redactReport(req, await reportingService.getProcessingLossLedger(req.query || {}));
+      const data = await redactReport(req, await reportingService.getProcessingLossLedger(req.query || {}));
       return res.json({ success: true, ...data });
     } catch (err) {
       console.error('Processing loss ledger error:', err);
@@ -466,7 +433,7 @@ const reportingController = {
   async batchMargin(req, res) {
     try {
       const { from_date, to_date, limit } = req.query;
-      const data = redactReport(req, await reportingService.getBatchMargin({
+      const data = await redactReport(req, await reportingService.getBatchMargin({
         from_date, to_date, limit: parseInt(limit, 10) || 200,
       }));
       return res.json({ success: true, ...data });
@@ -620,7 +587,7 @@ const reportingController = {
 
   async stockAging(req, res) {
     try {
-      const data = await reportingService.getStockAgingReport(await whScope.resolveWarehouseScope(req));
+      const data = await redactReport(req, await reportingService.getStockAgingReport(await whScope.resolveWarehouseScope(req)));
       return res.json({ success: true, ...data });
     } catch (err) {
       console.error('Stock aging error:', err);
@@ -642,7 +609,10 @@ const reportingController = {
   async stockValuation(req, res) {
     try {
       const { entity, asOfDate } = req.query;
-      const data = await reportingService.getStockValuation({ entity, asOfDate, warehouseScope: await whScope.resolveWarehouseScope(req) });
+      // Every figure here is money except the quantities — grandTotal included.
+      const data = await redactReport(req,
+        await reportingService.getStockValuation({ entity, asOfDate, warehouseScope: await whScope.resolveWarehouseScope(req) }),
+        { extraCostKeys: ['grandTotal'] });
       return res.json({ success: true, data });
     } catch (err) {
       console.error('Stock valuation error:', err);
@@ -826,7 +796,9 @@ const reportingController = {
         return res.status(400).json({ success: false, message: `Unknown report type: ${reportType}` });
       }
 
-      const rawData = await fn();
+      // Export runs the same report bodies — redact the same money.
+      const rawData = await redactReport(req, await fn(),
+        reportType === 'stock_valuation' ? { extraCostKeys: ['grandTotal'] } : undefined);
 
       // Normalize to array for export
       let exportData;
@@ -973,7 +945,8 @@ const reportingController = {
 
       return res.json({
         success: true,
-        data: {
+        // perKgFinished is the finished cost per kg — money, hidden without view_cost.
+        data: await redactReport(req, {
           range: { from: fromDate.toISOString(), to: toDate.toISOString() },
           summary,
           byMill:    groupBy('mill_name'),
@@ -996,7 +969,7 @@ const reportingController = {
             createdAt: b.created_at,
             completedAt: b.completed_at,
           })),
-        },
+        }, { extraCostKeys: ['perKgFinished'] }),
       });
     } catch (err) {
       console.error('Printable production report error:', err);
@@ -1535,7 +1508,7 @@ const reportingController = {
 
       return res.json({
         success: true,
-        data: {
+        data: await redactReport(req, {
           asOf: new Date().toISOString(),
           groupBy: group_by,
           rows: rows.map(r => ({
@@ -1553,7 +1526,7 @@ const reportingController = {
             lots:        lotsByGroup[r.group_name] || [],
           })),
           grand,
-        },
+        }),
       });
     } catch (err) {
       console.error('Printable stock report error:', err);
@@ -2140,7 +2113,9 @@ const reportingController = {
         };
       }).filter((g) => g.items.length > 0);
 
-      return res.json({ success: true, data: { rows, millStore, packGroups, totals: { lots: rows.length, mt: rows.reduce((s, r) => s + r.onHandMt, 0), valuePkr: rows.reduce((s, r) => s + r.valuePkr, 0), millStoreValue: millStore.reduce((s, m) => s + m.qty * m.costPerUnit, 0) } } });
+      const totals = { lots: rows.length, mt: rows.reduce((s, r) => s + r.onHandMt, 0), valuePkr: rows.reduce((s, r) => s + r.valuePkr, 0), millStoreValue: millStore.reduce((s, m) => s + m.qty * m.costPerUnit, 0) };
+      const data = await redactReport(req, { rows, millStore, packGroups, totals }, { extraCostKeys: ['millStoreValue'] });
+      return res.json({ success: true, data });
     } catch (err) { console.error('Stock detail error:', err); return res.status(500).json({ success: false, message: 'Internal server error.' }); }
   },
 

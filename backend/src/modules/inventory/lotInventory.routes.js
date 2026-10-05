@@ -8,6 +8,9 @@ const auditAction = require('../../middleware/audit');
 const validate = require('../../middleware/validate');
 const ownerApproval = require('../../middleware/ownerApproval');
 const schemas = require('../../middleware/schemas');
+// Money-only endpoints need reports.view_cost (or finance.view): the Mill
+// Operator and QC Analyst see stock quantities, never rates or values.
+const { requireCostVisibility } = require('../../utils/costVisibility');
 
 // Lot sources (dropdown for purchase lot creation)
 router.get('/sources', authorize('inventory', 'view'), controller.getLotSources);
@@ -39,12 +42,12 @@ router.get('/lots', authorize('inventory', 'view'), controller.listLots);
 // path wins over the param route.
 router.get('/lots-report', authorize('inventory', 'view'), controller.getLotsReport);
 // Held-stock profit: cost vs selling price from commodity_rate_master.
-router.get('/valuation', authorize('inventory', 'view'), controller.getStockValuation);
+router.get('/valuation', authorize('inventory', 'view'), requireCostVisibility, controller.getStockValuation);
 // Preview next lot number — literal path before /lots/:id so it isn't captured.
 router.get('/lots/next-lot-no', authorize('inventory', 'view'), controller.previewLotNo);
 router.get('/lots/:id', authorize('inventory', 'view'), controller.getLotDetail);
 router.get('/lots/:id/transactions', authorize('inventory', 'view'), controller.getLotTransactions);
-router.get('/lots/:id/purchase-invoice', authorize('inventory', 'view'), controller.getPurchaseInvoice);
+router.get('/lots/:id/purchase-invoice', authorize('inventory', 'view'), requireCostVisibility, controller.getPurchaseInvoice);
 
 // Create lot from purchase
 router.post(
@@ -312,14 +315,14 @@ router.get('/order-cogs/:orderId', authorize('finance', 'view'), async (req, res
 
 // Phase 7: Valuation snapshots & repair tools
 
-router.post('/valuation-snapshot', authorize('inventory', 'view'), async (req, res) => {
+router.post('/valuation-snapshot', authorize('inventory', 'view'), requireCostVisibility, async (req, res) => {
   try {
     const result = await inventoryService.takeValuationSnapshot();
     return res.json({ success: true, data: result });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 
-router.get('/valuation-history', authorize('inventory', 'view'), async (req, res) => {
+router.get('/valuation-history', authorize('inventory', 'view'), requireCostVisibility, async (req, res) => {
   try {
     const snapshots = await db('inventory_valuation_snapshots').orderBy('snapshot_date', 'desc').limit(100);
     return res.json({ success: true, data: { snapshots } });

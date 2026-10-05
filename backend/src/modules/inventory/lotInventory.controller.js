@@ -15,6 +15,9 @@ const { nextDocNo } = require('../../utils/docNumber');
 // #9-scoping: per-user warehouse restriction, applied to READ paths only.
 const whScope = require('../../utils/warehouseScope');
 const stockValuation = require('./stockValuation');
+// Purchase rates, landed cost and stock value are hidden from roles without
+// reports.view_cost (Mill Operator, QC Analyst) — same rule as the reports.
+const { redactForUser } = require('../../utils/costVisibility');
 
 async function generateTxnNo(trx) {
   const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
@@ -454,7 +457,7 @@ module.exports = {
       return res.json({
         success: true,
         data: {
-          lots: lots.map(enrichLot),
+          lots: await redactForUser(req, lots.map(enrichLot)),
           pagination: { page: +page, limit: +limit, total: +total, totalPages: Math.ceil(total / limit) },
         },
       });
@@ -477,7 +480,7 @@ module.exports = {
       const scope = await whScope.resolveWarehouseScope(req);
       if (whScope.denyOutOfScope(res, scope, lot.warehouse_id)) return undefined;
 
-      return res.json({ success: true, data: await buildLotDetail(lot) });
+      return res.json({ success: true, data: await redactForUser(req, await buildLotDetail(lot)) });
     } catch (err) {
       console.error('getLotDetail error:', err);
       return res.status(500).json({ success: false, message: err.message });
@@ -714,7 +717,7 @@ module.exports = {
       const lots = [];
       for (const row of rows) lots.push(await buildLotDetail(row));
 
-      return res.json({ success: true, data: { lots, generatedAt: new Date().toISOString() } });
+      return res.json({ success: true, data: { lots: await redactForUser(req, lots), generatedAt: new Date().toISOString() } });
     } catch (err) {
       console.error('getLotsReport error:', err);
       return res.status(500).json({ success: false, message: err.message });
@@ -1785,7 +1788,7 @@ module.exports = {
         };
       });
 
-      return res.json({ success: true, data: { transactions: enriched } });
+      return res.json({ success: true, data: { transactions: await redactForUser(req, enriched) } });
     } catch (err) {
       return res.status(500).json({ success: false, message: err.message });
     }
@@ -1858,7 +1861,7 @@ module.exports = {
         available_maund: uc.kgToMaund(r.available_kg),
       }));
 
-      return res.json({ success: true, data: { report: enriched, group_by } });
+      return res.json({ success: true, data: { report: await redactForUser(req, enriched), group_by } });
     } catch (err) {
       return res.status(500).json({ success: false, message: err.message });
     }
