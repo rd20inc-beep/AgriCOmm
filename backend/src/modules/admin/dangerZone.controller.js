@@ -463,7 +463,9 @@ async function unmirrorLocalSale(trx, saleId, amt) {
   if (!sale) return;
   const paid = Math.max(0, num(sale.paid_amount) - amt);
   const due = Math.max(0, num(sale.total_amount) - paid);
-  const status = paid > 0.01 ? 'Partial' : (sale.payment_mode === 'credit' ? 'Credit' : 'Unpaid');
+  // Paid / Partial / Credit only — 'Unpaid' is not allowed by
+  // chk_local_sales_payment_status_valid.
+  const status = due <= 0.01 ? 'Paid' : (paid > 0.01 ? 'Partial' : 'Credit');
   await trx('local_sales').where('id', sale.id).update({ paid_amount: paid, due_amount: due, payment_status: status, updated_at: trx.fn.now() });
 }
 

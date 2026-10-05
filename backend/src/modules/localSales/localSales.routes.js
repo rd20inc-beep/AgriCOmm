@@ -18,6 +18,8 @@ const canReadSales = authorizeAny(['inventory', 'view'], ['finance', 'view']);
 router.get('/', canReadSales, controller.list);
 router.get('/summary', canReadSales, controller.summary);
 router.get('/pending', canReadSales, controller.listPending);
+// Selling-rate suggestion for a lot from the Rates Center (LS-10). Read-only.
+router.get('/rate-suggestion', canReadSales, controller.rateSuggestion);
 router.get('/:id', canReadSales, controller.getById);
 router.post(
   '/',
@@ -41,6 +43,14 @@ router.post(
   authorizeAny(['inventory', 'create'], ['finance', 'confirm_payment']),
   auditAction('accept_local_sale_payment', 'local_sale'),
   controller.acceptPayment
+);
+// One receipt for a whole multi-item sale, split across its lines (LS-08).
+// Same permission as the per-line receipt above.
+router.post(
+  '/group/:groupNo/payments',
+  authorizeAny(['inventory', 'create'], ['finance', 'confirm_payment']),
+  auditAction('accept_local_sale_group_payment', 'local_sale', (req) => req.params.groupNo),
+  controller.acceptGroupPayment
 );
 router.get('/:id/payments', canReadSales, controller.getPayments);
 router.get('/:id/invoice', canReadSales, controller.getInvoice);

@@ -57,10 +57,17 @@ function priceSaleLine({ qtyKg, total, costPerKg, bagWt, isMillItem }) {
 }
 
 // Pure. The payment_status a line carries for a given paid/due split.
+//
+// One vocabulary for local_sales.payment_status: Paid / Partial / Credit.
+// Nothing paid yet is 'Credit' whatever the mode — the balance is owed either
+// way. ('Unpaid' was written here for a cash/bank sale with nothing tendered,
+// but chk_local_sales_payment_status_valid only allows Pending / Partial / Paid
+// / Credit / Refunded, so that insert failed outright.)
+// eslint-disable-next-line no-unused-vars
 function salePaymentStatus({ due, paid, paymentMode }) {
   if (due <= 0.01) return 'Paid';
   if (paid > 0) return 'Partial';
-  return paymentMode === 'credit' ? 'Credit' : 'Unpaid';
+  return 'Credit';
 }
 
 module.exports = { resolveLineCost, priceSaleLine, salePaymentStatus };

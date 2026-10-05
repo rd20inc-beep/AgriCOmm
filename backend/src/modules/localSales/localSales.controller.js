@@ -13,6 +13,7 @@ const { isPartyMasked } = require('../../shared/partyMask');
 const { inventoryAccountForLot } = require('./inventoryAccount');
 const { postLocalReceiptJournal } = require('./receiptJournal');
 const { resolveLineCost, priceSaleLine, salePaymentStatus } = require('./salePricing');
+const { buildRateIndex, rateForLot } = require('../inventory/stockValuation');
 
 async function generateSaleNo(trx) {
   return nextDocNo(trx || db, { table: 'local_sales', column: 'sale_no', prefix: 'LS-' });
@@ -522,6 +523,200 @@ function renderInvoiceEmailHtml(data, company = {}) {
   </div>`;
 }
 
+// ── Receipts ────────────────────────────────────────────────────────────────
+
+// Validate + normalise a receipt body (single-line and group payments share it).
+function readReceiptInput(body = {}) {
+  const { amount, payment_method = 'cash', payment_date, reference, notes, bank_account_id, due_date, collection_location } = body || {};
+  if (!amount || parseFloat(amount) <= 0) return { error: 'A positive amount is required.' };
+  // Same guard as create: a bank-transfer receipt must name its account, else
+  // the payment records but no bank balance moves.
+  if (payment_method === 'bank_transfer' && !bank_account_id) return { error: 'A bank account is required for a bank-transfer receipt.' };
+  // A post-dated cheque (cheque with a future due_date) is recorded but does
+  // NOT settle the sale until it clears — the sale stays Partial/Credit.
+  const today = new Date(new Date().toDateString());
+  const isPostDated = payment_method === 'cheque' && !!due_date && new Date(due_date) > today;
+  return {
+    amount: parseFloat(amount), paymentMethod: payment_method, paymentDate: payment_date || null,
+    reference: reference || null, notes: notes || null, bankAccountId: bank_account_id || null,
+    dueDate: due_date || null, collectionLocation: collection_location || null, isPostDated,
+  };
+}
+
+function assertSaleTakesPayment(sale) {
+  if (sale.status === 'Completed') return;
+  const e = new Error(sale.status === 'Pending'
+    ? `${sale.sale_no} has not been confirmed yet — confirm it before taking a payment.`
+    : `${sale.sale_no} is ${String(sale.status || '').toLowerCase()} — nothing is owed on it.`);
+  e.status = 409; throw e;
+}
+
+// Pure. Split one tendered amount across a sale's lines, oldest line (lowest
+// id) first: each line is settled in full before the next takes anything.
+// Lines with nothing due are skipped. Any sub-paisa remainder within the 0.01
+// tolerance the callers allow lands on the last line paid.
+function allocateOldestFirst(amount, lines) {
+  let left = uc.round2(parseFloat(amount) || 0);
+  const out = [];
+  for (const sale of [...(lines || [])].sort((a, b) => a.id - b.id)) {
+    if (left <= 0.005) break;
+    const due = uc.round2(parseFloat(sale.due_amount) || 0);
+    if (due <= 0) continue;
+    const take = uc.round2(Math.min(due, left));
+    out.push({ sale, amount: take });
+    left = uc.round2(left - take);
+  }
+  if (left > 0 && out.length) out[out.length - 1].amount = uc.round2(out[out.length - 1].amount + left);
+  return out;
+}
+
+// Apply ONE receipt to ONE locked, confirmed sale line inside the caller's
+// transaction: the line's paid/due/status, the payments row, the receiving
+// account's balance + Cash & Bank sub-ledger row, the Dr 1000 / Cr 1120
+// journal and the linked receivable. The single-line Pay and the group Pay
+// both come through here, so a receipt is recorded the same way either way.
+async function applyReceiptToSale(trx, sale, {
+  amount, paymentMethod = 'cash', paymentDate, reference, notes, bankAccountId, dueDate, collectionLocation, isPostDated = false, userId,
+}) {
+  const payAmount = uc.round2(parseFloat(amount) || 0);
+  const newPaid = (parseFloat(sale.paid_amount) || 0) + payAmount;
+  const newDue = Math.max(0, (parseFloat(sale.total_amount) || 0) - newPaid);
+
+  if (!isPostDated) {
+    await trx('local_sales').where({ id: sale.id }).update({
+      paid_amount: uc.round2(newPaid),
+      due_amount: uc.round2(newDue),
+      payment_status: newDue <= 0.01 ? 'Paid' : 'Partial',
+      // Record WHERE this cash/udhaar was collected (Mill / Head Office).
+      ...(collectionLocation ? { collection_location: collectionLocation } : {}),
+      updated_at: trx.fn.now(),
+    });
+  }
+
+  // Create payment record (cleared=false for an uncleared post-dated cheque).
+  const receiptAccountId = isPostDated ? null : await resolveReceiptAccountId(trx, { paymentMode: paymentMethod, bankAccountId, amount: payAmount, collectionLocation });
+  const paymentNo = await nextDocNo(trx, { table: 'payments', column: 'payment_no', prefix: 'PL-', pad: 0 });
+  const [payRow] = await trx('payments').insert({
+    payment_no: paymentNo,
+    type: 'receipt',
+    amount: payAmount,
+    currency: 'PKR',
+    fx_rate: 1,
+    base_amount_pkr: payAmount,
+    payment_method: paymentMethod,
+    due_date: dueDate || null,
+    cleared: !isPostDated,
+    bank_reference: reference || null,
+    bank_account_id: receiptAccountId || bankAccountId || null,
+    payment_date: paymentDate || trx.fn.now(),
+    notes: notes || `Payment for local sale ${sale.sale_no}${collectionLocation && paymentMethod === 'cash' ? ` (collected at ${collectionLocation})` : ''}`,
+    local_sale_id: sale.id,
+    created_by: userId || null,
+  }).returning('id');
+
+  if (!isPostDated) {
+    // Cash / bank receipt → move the receiving account's balance.
+    await postReceiptToAccount(trx, {
+      accountId: receiptAccountId, amount: payAmount, paymentId: payRow.id,
+      reference: reference || sale.sale_no, notes: `Payment for local sale ${sale.sale_no}`,
+      date: paymentDate, userId,
+    });
+    // …and into the GL: Dr 1000 Cash & Bank / Cr 1120 Local AR. A
+    // post-dated cheque journals when it clears (finance clearCheque).
+    await postLocalReceiptJournal(trx, { paymentNo, amount: payAmount, sale, date: paymentDate, userId });
+
+    // Update linked receivable — prefer FK, fall back to notes search
+    const receivable = await trx('receivables')
+      .where('local_sale_id', sale.id)
+      .first()
+      || await trx('receivables')
+        .where('notes', 'ilike', `%${sale.sale_no}%`)
+        .first();
+    if (receivable) {
+      const rcvNewReceived = (parseFloat(receivable.received_amount) || 0) + payAmount;
+      const rcvNewOutstanding = Math.max(0, (parseFloat(receivable.expected_amount) || 0) - rcvNewReceived);
+      await trx('receivables').where({ id: receivable.id }).update({
+        received_amount: uc.round2(rcvNewReceived),
+        outstanding: uc.round2(rcvNewOutstanding),
+        status: rcvNewOutstanding <= 0 ? 'Paid' : 'Partial',
+        updated_at: trx.fn.now(),
+      });
+    }
+  }
+  return { paymentNo, paymentId: payRow.id };
+}
+
+// ── Sale form inputs ────────────────────────────────────────────────────────
+
+function ymd(d, utc) {
+  const y = utc ? d.getUTCFullYear() : d.getFullYear();
+  const m = (utc ? d.getUTCMonth() : d.getMonth()) + 1;
+  const day = utc ? d.getUTCDate() : d.getDate();
+  return `${y}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+// Pure. LS-10: the sale date typed on the form. Absent → { date: null } (the
+// caller keeps its old default). Must be a real YYYY-MM-DD and not in the
+// future. "Future" carries one day of slack: the form builds the date in the
+// user's local time (PKT, UTC+5) and the server may run on UTC, so just after
+// midnight the user's today is the server's tomorrow.
+function validateSaleDate(input, now = new Date()) {
+  if (input == null || String(input).trim() === '') return { date: null };
+  const s = String(input).trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return { error: 'Sale date must be a date (YYYY-MM-DD).' };
+  const d = new Date(`${s}T00:00:00Z`);
+  if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== s) return { error: `${s} is not a real date.` };
+  const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+  const latest = [ymd(tomorrow, false), ymd(tomorrow, true)].sort().pop();
+  if (s > latest) return { error: 'Sale date cannot be in the future.' };
+  return { date: s };
+}
+
+// LS-11b: the customer a walk-in CREDIT buyer's balance is tracked against.
+// Only a LOCAL customer can be reused, and only when the name AND the phone
+// match (phone compared on digits only). With no phone there is nothing to
+// tell two same-named buyers apart, so a new local customer is created rather
+// than attaching the debt to whoever already has that name. (Interim rule —
+// CNIC vs phone as the identity is an open owner decision.)
+async function resolveWalkInCustomer(trx, { name, phone, userId }) {
+  const nm = String(name || '').trim();
+  const digits = String(phone || '').replace(/\D/g, '');
+  if (digits) {
+    const existing = await trx('customers')
+      .where('customer_type', 'local')
+      .whereRaw('LOWER(name) = LOWER(?)', [nm])
+      .whereRaw("regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = ?", [digits])
+      .first();
+    if (existing) return existing;
+  }
+  const [cust] = await trx('customers').insert({
+    name: nm, phone: phone ? String(phone).trim() : null, payment_terms: 'Credit', currency: 'PKR',
+    customer_type: 'local', is_active: true, approval_status: 'pending',
+    submitted_by: userId || null, submitted_at: trx.fn.now(),
+  }).returning('*');
+  return cust;
+}
+
+// LS-12: the gate pass number already on another (non-rejected) sale, if any.
+async function findGatePassConflict(trx, gatePassNo, excludeGroupNo = null) {
+  if (!gatePassNo) return null;
+  let q = trx('local_sales')
+    .where('gate_pass_no', gatePassNo)
+    .whereNot('status', 'Cancelled');
+  if (excludeGroupNo) q = q.whereNot('sale_group_no', excludeGroupNo);
+  return q.orderBy('id', 'asc').first('id', 'sale_no', 'sale_group_no', 'buyer_name', 'sale_date');
+}
+
+function gatePassConflictBody(gatePassNo, conflict) {
+  const ref = conflict.sale_group_no || conflict.sale_no;
+  return {
+    success: false,
+    code: 'GATE_PASS_DUPLICATE',
+    message: `Gate Pass ${gatePassNo} is already on sale ${ref}${conflict.buyer_name ? ` (${conflict.buyer_name})` : ''}.`,
+    conflict: { id: conflict.id, sale_no: conflict.sale_no, sale_group_no: ref, buyer_name: conflict.buyer_name || null, sale_date: conflict.sale_date || null },
+  };
+}
+
 module.exports = {
 
   // List all local sales
@@ -616,6 +811,19 @@ module.exports = {
       } = req.body;
       const gatePassNo = gate_pass_no != null && String(gate_pass_no).trim() ? String(gate_pass_no).trim() : null;
 
+      // LS-10: a typed sale date must be a real date and not in the future.
+      // Absent → today, as before.
+      const saleDateCheck = validateSaleDate(sale_date);
+      if (saleDateCheck.error) return res.status(400).json({ success: false, message: saleDateCheck.error });
+      const saleDate = saleDateCheck.date || new Date().toISOString().split('T')[0];
+
+      // LS-12: a gate pass number belongs to one sale. Checked BEFORE anything
+      // is written (it used to be a warning after the sale was saved).
+      if (gatePassNo) {
+        const conflict = await findGatePassConflict(db, gatePassNo);
+        if (conflict) return res.status(409).json(gatePassConflictBody(gatePassNo, conflict));
+      }
+
       // One sale can carry several inventory items (multi-item). Accept items[]
       // or fall back to the legacy single top-level item fields (backward compat).
       const rawItems = (Array.isArray(req.body.items) && req.body.items.length)
@@ -699,20 +907,14 @@ module.exports = {
 
       const result = await db.transaction(async (trx) => {
         // Resolve the customer for any owed balance: use the selected one, else
-        // auto-register the walk-in buyer (dedupe by name) so credit sales work
-        // without a manual registration step. A fully-paid walk-in stays anonymous.
+        // register the walk-in buyer (a LOCAL customer matched on name + phone,
+        // see resolveWalkInCustomer) so credit sales work without a manual
+        // registration step. A fully-paid walk-in stays anonymous.
         let resolvedCustomerId = customer_id || null;
         if (hasDue && !resolvedCustomerId) {
           const nm = (buyer_name || '').trim();
           if (!nm) { const e = new Error('A credit or partial sale needs a buyer name (or a registered customer) so the balance can be tracked.'); e.status = 400; throw e; }
-          let cust = await trx('customers').whereRaw('LOWER(name) = LOWER(?)', [nm]).first();
-          if (!cust) {
-            [cust] = await trx('customers').insert({
-              name: nm, phone: buyer_phone || null, payment_terms: 'Credit', currency: 'PKR',
-              customer_type: 'local', is_active: true, approval_status: 'pending',
-              submitted_by: req.user?.id || null, submitted_at: trx.fn.now(),
-            }).returning('*');
-          }
+          const cust = await resolveWalkInCustomer(trx, { name: nm, phone: buyer_phone, userId: req.user?.id });
           resolvedCustomerId = cust.id;
         }
 
@@ -735,7 +937,7 @@ module.exports = {
 
           const [sale] = await trx('local_sales').insert({
             sale_no: saleNo, sale_group_no: groupNo,
-            sale_date: sale_date || new Date().toISOString().split('T')[0],
+            sale_date: saleDate,
             entity: 'mill', customer_id: resolvedCustomerId,
             buyer_name: buyer_name || null, buyer_phone: buyer_phone || null, buyer_address: buyer_address || null,
             lot_id: l.lot_id, lot_no: lotNo, mill_item_id: l.mill_item_id || null,
@@ -749,7 +951,7 @@ module.exports = {
             collection_location: collection_location || null, due_date: due_date || null,
             bank_account_id: bank_account_id || null,
             vehicle_no: vehicle_no || null, driver_name: driver_name || null,
-            dispatched: !!dispatched, dispatch_date: dispatched ? (sale_date || new Date().toISOString().split('T')[0]) : null,
+            dispatched: !!dispatched, dispatch_date: dispatched ? saleDate : null,
             notes: notes || null,
             gate_pass_no: gatePassNo,
             status: autoConfirm ? 'Completed' : 'Pending',
@@ -806,16 +1008,10 @@ module.exports = {
         return { groupNo, sales: created, autoConfirm };
       });
 
-      // #6 Duplicate gate-pass warning (non-blocking): flag if this number is
-      // already on another sale group so the caller can surface a warning.
-      let gatePassDuplicate = false;
-      if (gatePassNo) {
-        const dup = await db('local_sales')
-          .where('gate_pass_no', gatePassNo)
-          .whereNot('sale_group_no', result.groupNo)
-          .first('id');
-        gatePassDuplicate = !!dup;
-      }
+      // A duplicate gate pass is refused before the save (above), so a saved
+      // sale never carries one. The flag stays in the response for callers
+      // that still read it.
+      const gatePassDuplicate = false;
 
       return res.status(201).json({
         success: true,
@@ -890,8 +1086,18 @@ module.exports = {
 
       const body = req.body || {};
       const isPending = sale.status === 'Pending';
+      const groupKey = sale.sale_group_no || null;
+      // LS-12: presentation fields describe the whole SALE (one buyer, one
+      // truck, one gate pass, one invoice) — they are written to every line of
+      // the sale_group_no below, not just the line that was opened.
+      const presentation = {};
+      for (const f of PRESENTATION) if (body[f] !== undefined) presentation[f] = body[f] === '' ? null : body[f];
+      if (typeof presentation.gate_pass_no === 'string') presentation.gate_pass_no = presentation.gate_pass_no.trim() || null;
+      if (presentation.gate_pass_no && presentation.gate_pass_no !== sale.gate_pass_no) {
+        const conflict = await findGatePassConflict(db, presentation.gate_pass_no, groupKey);
+        if (conflict && conflict.id !== sale.id) return res.status(409).json(gatePassConflictBody(presentation.gate_pass_no, conflict));
+      }
       const patch = {};
-      for (const f of PRESENTATION) if (body[f] !== undefined) patch[f] = body[f] === '' ? null : body[f];
 
       const moneyFields = PENDING_ONLY.filter((f) => body[f] !== undefined);
       if (moneyFields.length && !isPending) {
@@ -904,6 +1110,11 @@ module.exports = {
 
       if (isPending && moneyFields.length) {
         for (const f of PENDING_ONLY) if (body[f] !== undefined) patch[f] = body[f] === '' ? null : body[f];
+        if (patch.sale_date != null) {
+          const chk = validateSaleDate(patch.sale_date);
+          if (chk.error) return res.status(400).json({ success: false, message: chk.error });
+          patch.sale_date = chk.date;
+        }
 
         // Recompute with the SAME helpers the sale was created with, so an
         // edited line cannot disagree with a created one.
@@ -946,11 +1157,19 @@ module.exports = {
         patch.payment_status = salePaymentStatus({ due: patch.due_amount, paid, paymentMode: sale.payment_mode });
       }
 
-      if (!Object.keys(patch).length) {
+      if (!Object.keys(patch).length && !Object.keys(presentation).length) {
         return res.status(400).json({ success: false, message: 'Nothing to change.' });
       }
-      patch.updated_at = db.fn.now();
-      await db('local_sales').where({ id: sale.id }).update(patch);
+      await db.transaction(async (trx) => {
+        if (Object.keys(presentation).length) {
+          await trx('local_sales')
+            .where(groupKey ? { sale_group_no: groupKey } : { id: sale.id })
+            .update({ ...presentation, updated_at: trx.fn.now() });
+        }
+        if (Object.keys(patch).length) {
+          await trx('local_sales').where({ id: sale.id }).update({ ...patch, updated_at: trx.fn.now() });
+        }
+      });
       const updated = await db('local_sales').where({ id: sale.id }).first();
       return res.json({ success: true, data: { sale: updated, editable: isPending ? 'all' : 'presentation' } });
     } catch (err) {
@@ -1017,23 +1236,8 @@ module.exports = {
   async acceptPayment(req, res) {
     try {
       const { id } = req.params;
-      const { amount, payment_method = 'cash', payment_date, reference, notes, bank_account_id, due_date, collection_location } = req.body;
-
-      if (!amount || parseFloat(amount) <= 0) {
-        return res.status(400).json({ success: false, message: 'A positive amount is required.' });
-      }
-      // Same guard as create: a bank-transfer receipt must name its account, else
-      // the payment records but no bank balance moves.
-      if (payment_method === 'bank_transfer' && !bank_account_id) {
-        return res.status(400).json({ success: false, message: 'A bank account is required for a bank-transfer receipt.' });
-      }
-
-      const payAmount = parseFloat(amount);
-
-      // A post-dated cheque (cheque with a future due_date) is recorded but does
-      // NOT settle the sale until it clears — the sale stays Partial/Unpaid.
-      const today = new Date(new Date().toDateString());
-      const isPostDated = payment_method === 'cheque' && due_date && new Date(due_date) > today;
+      const input = readReceiptInput(req.body);
+      if (input.error) return res.status(400).json({ success: false, message: input.error });
 
       await db.transaction(async (trx) => {
         // Read (and lock) the sale INSIDE the transaction: two receipts racing
@@ -1045,83 +1249,14 @@ module.exports = {
         // taken as a receipt again when it is confirmed (postSaleSideEffects), so
         // paying it here would record the money twice; a Cancelled one never
         // happened.
-        if (sale.status !== 'Completed') {
-          const e = new Error(sale.status === 'Pending'
-            ? `${sale.sale_no} has not been confirmed yet — confirm it before taking a payment.`
-            : `${sale.sale_no} is ${String(sale.status || '').toLowerCase()} — nothing is owed on it.`);
-          e.status = 409; throw e;
-        }
+        assertSaleTakesPayment(sale);
 
         const currentDue = parseFloat(sale.due_amount) || 0;
-        if (payAmount > currentDue + 0.01) {
-          const e = new Error(`Cannot pay Rs ${payAmount} — only Rs ${currentDue.toFixed(2)} remaining.`); e.status = 400; throw e;
+        if (input.amount > currentDue + 0.01) {
+          const e = new Error(`Cannot pay Rs ${input.amount} — only Rs ${currentDue.toFixed(2)} remaining.`); e.status = 400; throw e;
         }
 
-        const newPaid = (parseFloat(sale.paid_amount) || 0) + payAmount;
-        const newDue = Math.max(0, (parseFloat(sale.total_amount) || 0) - newPaid);
-        const newStatus = newDue <= 0 ? 'Paid' : 'Partial';
-
-        if (!isPostDated) {
-          await trx('local_sales').where({ id }).update({
-            paid_amount: uc.round2(newPaid),
-            due_amount: uc.round2(newDue),
-            payment_status: newStatus,
-            // Record WHERE this cash/udhaar was collected (Mill / Head Office).
-            ...(collection_location ? { collection_location } : {}),
-            updated_at: trx.fn.now(),
-          });
-        }
-
-        // Create payment record (cleared=false for an uncleared post-dated cheque).
-        const receiptAccountId = isPostDated ? null : await resolveReceiptAccountId(trx, { paymentMode: payment_method, bankAccountId: bank_account_id, amount: payAmount, collectionLocation: collection_location });
-        const paymentNo = await nextDocNo(trx, { table: 'payments', column: 'payment_no', prefix: 'PL-', pad: 0 });
-        const [payRow] = await trx('payments').insert({
-          payment_no: paymentNo,
-          type: 'receipt',
-          amount: payAmount,
-          currency: 'PKR',
-          fx_rate: 1,
-          base_amount_pkr: payAmount,
-          payment_method: payment_method,
-          due_date: due_date || null,
-          cleared: !isPostDated,
-          bank_reference: reference || null,
-          bank_account_id: receiptAccountId || bank_account_id || null,
-          payment_date: payment_date || trx.fn.now(),
-          notes: notes || `Payment for local sale ${sale.sale_no}${collection_location && payment_method === 'cash' ? ` (collected at ${collection_location})` : ''}`,
-          local_sale_id: parseInt(id),
-          created_by: req.user?.id || null,
-        }).returning('id');
-
-        if (!isPostDated) {
-          // Cash / bank receipt → move the receiving account's balance.
-          await postReceiptToAccount(trx, {
-            accountId: receiptAccountId, amount: payAmount, paymentId: payRow.id,
-            reference: reference || sale.sale_no, notes: `Payment for local sale ${sale.sale_no}`,
-            date: payment_date, userId: req.user?.id,
-          });
-          // …and into the GL: Dr 1000 Cash & Bank / Cr 1120 Local AR. A
-          // post-dated cheque journals when it clears (finance clearCheque).
-          await postLocalReceiptJournal(trx, { paymentNo, amount: payAmount, sale, date: payment_date, userId: req.user?.id });
-
-          // Update linked receivable — prefer FK, fall back to notes search
-          const receivable = await trx('receivables')
-            .where('local_sale_id', id)
-            .first()
-            || await trx('receivables')
-              .where('notes', 'ilike', `%${sale.sale_no}%`)
-              .first();
-          if (receivable) {
-            const rcvNewReceived = (parseFloat(receivable.received_amount) || 0) + payAmount;
-            const rcvNewOutstanding = Math.max(0, (parseFloat(receivable.expected_amount) || 0) - rcvNewReceived);
-            await trx('receivables').where({ id: receivable.id }).update({
-              received_amount: uc.round2(rcvNewReceived),
-              outstanding: uc.round2(rcvNewOutstanding),
-              status: rcvNewOutstanding <= 0 ? 'Paid' : 'Partial',
-              updated_at: trx.fn.now(),
-            });
-          }
-        }
+        await applyReceiptToSale(trx, sale, { ...input, userId: req.user?.id });
       });
 
       const updated = await db('local_sales').where({ id }).first();
@@ -1129,6 +1264,73 @@ module.exports = {
     } catch (err) {
       if (!err.status) console.error('Accept payment error:', err);
       return res.status(err.status || 500).json({ success: false, message: err.message });
+    }
+  },
+
+  // One receipt for a whole multi-item sale (LS-08). Every Completed line of
+  // the sale_group_no is locked, the amount is checked against the group's
+  // total due, then split OLDEST LINE FIRST (lowest id — the order the lines
+  // were entered and the order the invoice prints them): each line is settled
+  // in full before the next one takes anything, so a part-payment closes whole
+  // lines instead of leaving every line a little short. Each line's share goes
+  // through applyReceiptToSale — the exact path a single-line receipt takes —
+  // so the bank move, receivable and Dr 1000 / Cr 1120 journal are identical.
+  // All lines or none: any failure rolls the whole receipt back.
+  async acceptGroupPayment(req, res) {
+    try {
+      const groupNo = String(req.params.groupNo || '').trim();
+      if (!groupNo) return res.status(400).json({ success: false, message: 'A sale number is required.' });
+      const input = readReceiptInput(req.body);
+      if (input.error) return res.status(400).json({ success: false, message: input.error });
+
+      const result = await db.transaction(async (trx) => {
+        const lines = await trx('local_sales')
+          .where((q) => q.where('sale_group_no', groupNo).orWhere((q2) => q2.whereNull('sale_group_no').where('sale_no', groupNo)))
+          .where('status', 'Completed')
+          .orderBy('id', 'asc')
+          .forUpdate();
+        if (!lines || !lines.length) {
+          const e = new Error(`${groupNo} has no confirmed lines to take a payment against.`); e.status = 409; throw e;
+        }
+        const totalDue = uc.round2(lines.reduce((s, l) => s + (parseFloat(l.due_amount) || 0), 0));
+        if (input.amount > totalDue + 0.01) {
+          const e = new Error(`Cannot pay Rs ${input.amount} — only Rs ${totalDue.toFixed(2)} remaining on ${groupNo}.`); e.status = 400; throw e;
+        }
+        const allocations = allocateOldestFirst(input.amount, lines);
+        const applied = [];
+        for (const { sale, amount } of allocations) {
+          const r = await applyReceiptToSale(trx, sale, {
+            ...input, amount, userId: req.user?.id,
+            notes: input.notes || `Payment for local sale ${sale.sale_no} (sale ${groupNo})`,
+          });
+          applied.push({ sale_id: sale.id, sale_no: sale.sale_no, amount, payment_no: r.paymentNo });
+        }
+        return { group_no: groupNo, total_due: totalDue, applied };
+      });
+
+      return res.json({ success: true, data: result });
+    } catch (err) {
+      if (!err.status) console.error('Accept group payment error:', err);
+      return res.status(err.status || 500).json({ success: false, message: err.message });
+    }
+  },
+
+  // Selling rate suggestion for a lot from the Rates Center
+  // (commodity_rate_master), looked up the same way stock valuation does:
+  // product + grade first, then the product on its own. Per KG; the form
+  // converts it to the line's unit. A lot with no rate returns null.
+  async rateSuggestion(req, res) {
+    try {
+      const lotId = parseInt(req.query.lot_id, 10);
+      if (!lotId) return res.status(400).json({ success: false, message: 'lot_id is required.' });
+      const lot = await db('inventory_lots').where({ id: lotId }).first('id', 'product_id', 'grade');
+      if (!lot) return res.status(404).json({ success: false, message: 'Lot not found.' });
+      const hasRates = await db.schema.hasTable('commodity_rate_master');
+      const rows = hasRates && lot.product_id ? await db('commodity_rate_master').where('product_id', lot.product_id).select('*') : [];
+      const rate = rateForLot(lot, buildRateIndex(rows));
+      return res.json({ success: true, data: { rate: rate ? { per_kg: rate.perKg, effective_date: rate.effectiveDate, unit: rate.unit } : null } });
+    } catch (err) {
+      return res.status(500).json({ success: false, message: err.message });
     }
   },
 
@@ -1242,3 +1444,11 @@ module.exports = {
     }
   },
 };
+
+// Exported for tests (and for any other receipt path that must settle a local
+// sale the same way).
+module.exports.applyReceiptToSale = applyReceiptToSale;
+module.exports.allocateOldestFirst = allocateOldestFirst;
+module.exports.validateSaleDate = validateSaleDate;
+module.exports.resolveWalkInCustomer = resolveWalkInCustomer;
+module.exports.readReceiptInput = readReceiptInput;

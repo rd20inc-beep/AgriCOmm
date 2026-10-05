@@ -180,7 +180,7 @@ describe('editing a Pending sale recomputes cost and profit', () => {
     expect(patch).toMatchObject({
       quantity_kg: 500, total_amount: 75000, due_amount: 75000,
       landed_cost_total: 50000, gross_profit: 25000, profit_per_kg: 50, margin_pct: 33.33, quantity_bags: 10,
-      payment_status: 'Unpaid',
+      payment_status: 'Credit',
     });
   });
 });
