@@ -91,19 +91,8 @@ export default function LotDetail() {
   const batchYield = data?.batchYield || null;
   const { data: lotSales = [] } = useLocalSalesByLot(lot.id);
 
-  async function handleRenameLot() {
-    const next = window.prompt('Rename this lot — enter a new lot number/name:', lot.lotNo || '');
-    if (next == null) return;
-    const trimmed = next.trim();
-    if (!trimmed || trimmed === lot.lotNo) return;
-    try {
-      await lotInventoryApi.renameLot(lot.id, { lot_no: trimmed });
-      addToast?.('Lot renamed', 'success');
-      refetch?.();
-    } catch (err) {
-      addToast?.(err?.response?.data?.message || err.message || 'Failed to rename lot', 'error');
-    }
-  }
+  const [showRename, setShowRename] = useState(false);
+  function handleRenameLot() { setShowRename(true); }
 
   // Fetch linked milling batch for vehicles and quality
   useEffect(() => {
@@ -1260,6 +1249,13 @@ export default function LotDetail() {
       <PriceEditModal isOpen={showPriceModal} onClose={() => setShowPriceModal(false)} lot={lot} addToast={addToast} refetch={refetch} />
       <ReceivedQtyModal isOpen={showReceivedModal} onClose={() => setShowReceivedModal(false)} lot={lot} addToast={addToast} refetch={refetch} />
       <AllocateToBatchModal isOpen={showAllocateModal} onClose={() => setShowAllocateModal(false)} lot={lot} addToast={addToast} refetch={refetch} />
+      <RenameLotDrawer
+        isOpen={showRename}
+        onClose={() => setShowRename(false)}
+        lot={lot}
+        addToast={addToast}
+        onSaved={() => refetch?.()}
+      />
       <LotVehicleDrawer
         isOpen={showAddVehicle || !!editVehicle}
         vehicle={editVehicle}
@@ -1983,6 +1979,103 @@ function AllocateToBatchModal({ isOpen, onClose, lot, addToast, refetch }) {
   );
 }
 
+// ─── Rename Lot Drawer (replaces the old window.prompt) ───
+function RenameLotDrawer({ isOpen, onClose, lot, addToast, onSaved }) {
+  const [value, setValue] = useState('');
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { if (isOpen) setValue(lot?.lotNo || ''); }, [isOpen, lot?.lotNo]);
+  const trimmed = value.trim();
+  const unchanged = trimmed === (lot?.lotNo || '');
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (!trimmed) { addToast?.('Enter a lot number / name', 'error'); return; }
+    if (unchanged) { onClose(); return; }
+    setSaving(true);
+    try {
+      await lotInventoryApi.renameLot(lot.id, { lot_no: trimmed });
+      addToast?.(`Lot renamed to ${trimmed}`, 'success');
+      onSaved?.();
+      onClose();
+    } catch (err) {
+      addToast?.(err?.response?.data?.message || err.message || 'Failed to rename lot', 'error');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <SlideDrawer
+      open={isOpen}
+      onClose={onClose}
+      title="Rename lot"
+      subtitle={lot?.lotNo}
+      icon={Edit3}
+      size="md"
+      footer={
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={onClose} className="btn btn-secondary">Cancel</button>
+          <button type="submit" form="rename-lot-form" disabled={saving || !trimmed || unchanged} className="btn btn-primary disabled:opacity-50">
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+            Rename
+          </button>
+        </div>
+      }
+    >
+      <form id="rename-lot-form" onSubmit={handleSubmit} className="space-y-3">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">New lot number / name</label>
+          <input type="text" autoFocus maxLength={50} value={value}
+            onChange={(e) => setValue(e.target.value)}
+            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
+          <p className="text-[11px] text-gray-400 mt-1">Must be unique (max 50 characters). Supplier payables linked to this lot follow the new number.</p>
+        </div>
+      </form>
+    </SlideDrawer>
+  );
+}
+
+// Per-truck intake quality captured on the purchase / vehicle forms (quality_json).
+// Price is entered per KG like the lot price, and stored as price_per_mt — the
+// key every report reads.
+const VEHICLE_QUALITY_FIELDS = [
+  { key: 'moisture', label: 'Moisture %' },
+  { key: 'broken', label: 'Broken %' },
+  { key: 'foreign_matter', label: 'Foreign %' },
+  { key: 'chalky', label: 'Chalky %' },
+  { key: 'purity', label: 'Purity %' },
+  { key: 'grain_size', label: 'Grain size (mm)' },
+  { key: 'price_per_kg', label: 'Price / kg' },
+];
+function vehicleQualityToForm(q) {
+  const src = q && typeof q === 'object' ? q : {};
+  const out = {};
+  for (const f of VEHICLE_QUALITY_FIELDS) {
+    let v = src[f.key];
+    if (f.key === 'price_per_kg' && (v == null || v === '') && src.price_per_mt != null) v = parseFloat(src.price_per_mt) / 1000;
+    out[f.key] = v != null && v !== '' ? String(v) : '';
+  }
+  return out;
+}
+function vehicleQualityFromForm(fq) {
+  const out = {};
+  for (const f of VEHICLE_QUALITY_FIELDS) {
+    const v = parseFloat(fq?.[f.key]);
+    if (Number.isNaN(v)) continue;
+    if (f.key === 'price_per_kg') out.price_per_mt = Math.round(v * 1000 * 100) / 100;
+    else out[f.key] = v;
+  }
+  return Object.keys(out).length ? out : null;
+}
+function vehicleQualitySummary(q) {
+  if (!q || typeof q !== 'object') return null;
+  const bits = [];
+  if (q.moisture != null) bits.push(`M ${q.moisture}%`);
+  if (q.broken != null) bits.push(`Br ${q.broken}%`);
+  if (q.price_per_mt != null) bits.push(`Rs ${(parseFloat(q.price_per_mt) / 1000).toLocaleString(undefined, { maximumFractionDigits: 2 })}/kg`);
+  return bits.length ? bits.join(' · ') : null;
+}
+
 // ─── Lot Vehicles Panel ───
 function LotVehiclesPanel({ lot, vehicles, onAdd, onEdit, onRefresh, addToast }) {
   const safe = Array.isArray(vehicles) ? vehicles : [];
@@ -1997,6 +2090,13 @@ function LotVehiclesPanel({ lot, vehicles, onAdd, onEdit, onRefresh, addToast })
     }
   }
   const totalMT = safe.reduce((s, v) => s + ((parseFloat(v.weight_kg) || 0) / 1000), 0);
+  // Accepted (kg) across the trucks vs the lot's received weight — a note only;
+  // which figure bills the supplier is a separate decision.
+  const withAccepted = safe.filter(v => v.accepted_kg != null && v.accepted_kg !== '');
+  const acceptedTotal = withAccepted.reduce((s, v) => s + (parseFloat(v.accepted_kg) || 0), 0);
+  const receivedKg = parseFloat(lot?.receivedNetWeightKg) || parseFloat(lot?.netWeightKg) || 0;
+  const acceptedGap = withAccepted.length > 0 && lot?.type === 'raw' && receivedKg > 0
+    ? Math.round((acceptedTotal - receivedKg) * 100) / 100 : 0;
   return (
     <div className="bg-white rounded-xl border border-gray-100 p-5">
       <div className="flex items-center justify-between mb-4">
@@ -2023,7 +2123,10 @@ function LotVehiclesPanel({ lot, vehicles, onAdd, onEdit, onRefresh, addToast })
                 <th className="py-2">Driver</th>
                 <th className="py-2">Hauler</th>
                 <th className="py-2 text-right">Weight (kg)</th>
+                <th className="py-2 text-right">Weighbridge (kg)</th>
+                <th className="py-2 text-right">Accepted (kg)</th>
                 <th className="py-2 text-right">Bags</th>
+                <th className="py-2">Quality</th>
                 <th className="py-2">Date</th>
                 <th className="py-2 text-center">Status</th>
                 <th className="py-2 text-right">Actions</th>
@@ -2040,7 +2143,10 @@ function LotVehiclesPanel({ lot, vehicles, onAdd, onEdit, onRefresh, addToast })
                   </td>
                   <td data-label="Hauler" className="mob-hide py-2 text-gray-700">{v.hauler_name || '—'}</td>
                   <td data-label="Weight (kg)" className="py-2 text-right tabular-nums font-medium">{Math.round(parseFloat(v.weight_kg) || 0).toLocaleString()}</td>
+                  <td data-label="Weighbridge (kg)" className="py-2 text-right tabular-nums">{v.weighbridge_kg != null ? Math.round(parseFloat(v.weighbridge_kg)).toLocaleString() : '—'}</td>
+                  <td data-label="Accepted (kg)" className="py-2 text-right tabular-nums">{v.accepted_kg != null ? Math.round(parseFloat(v.accepted_kg)).toLocaleString() : '—'}</td>
                   <td data-label="Bags" className="py-2 text-right tabular-nums">{v.total_bags || '—'}</td>
+                  <td data-label="Quality" className="mob-hide py-2 text-xs text-gray-600">{vehicleQualitySummary(v.quality_json) || '—'}</td>
                   <td data-label="Date" className="mob-hide py-2 text-gray-600">{fmtDate(v.arrival_date)}</td>
                   <td data-label="Status" className="py-2 text-center">
                     {v.batch_id ? (
@@ -2067,6 +2173,12 @@ function LotVehiclesPanel({ lot, vehicles, onAdd, onEdit, onRefresh, addToast })
           </table>
         </div>
       )}
+      {Math.abs(acceptedGap) >= 0.5 && (
+        <p className="mt-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+          Accepted across {withAccepted.length === safe.length ? 'the' : `${withAccepted.length} of ${safe.length}`} vehicle(s): <b>{Math.round(acceptedTotal).toLocaleString()} kg</b> vs lot received <b>{Math.round(receivedKg).toLocaleString()} kg</b>
+          {' '}({acceptedGap > 0 ? '+' : ''}{Math.round(acceptedGap).toLocaleString()} kg). The lot stays at its received weight — correct it with Received Qty if needed.
+        </p>
+      )}
     </div>
   );
 }
@@ -2077,6 +2189,7 @@ function LotVehicleDrawer({ isOpen, onClose, lot, vehicle, addToast, onSaved }) 
   const blankForm = () => ({
     vehicle_no: '', driver_name: '', driver_phone: '',
     weight_kg: '', total_bags: '', bag_size_kg: '',
+    weighbridge_kg: '', accepted_kg: '', quality: vehicleQualityToForm(null),
     hauler_id: '', gate_pass_no: '',
     arrival_date: new Date().toISOString().slice(0, 10), departure_date: '',
   });
@@ -2095,6 +2208,9 @@ function LotVehicleDrawer({ isOpen, onClose, lot, vehicle, addToast, onSaved }) 
         weight_kg: vehicle.weight_kg != null ? String(Math.round(parseFloat(vehicle.weight_kg))) : '',
         total_bags: vehicle.total_bags != null ? String(vehicle.total_bags) : '',
         bag_size_kg: vehicle.bag_size_kg != null ? String(vehicle.bag_size_kg) : '',
+        weighbridge_kg: vehicle.weighbridge_kg != null ? String(parseFloat(vehicle.weighbridge_kg)) : '',
+        accepted_kg: vehicle.accepted_kg != null ? String(parseFloat(vehicle.accepted_kg)) : '',
+        quality: vehicleQualityToForm(vehicle.quality_json),
         hauler_id: vehicle.hauler_id ? String(vehicle.hauler_id) : '',
         gate_pass_no: vehicle.gate_pass_no || '',
         arrival_date: iso(vehicle.arrival_date) || new Date().toISOString().slice(0, 10),
@@ -2126,6 +2242,9 @@ function LotVehicleDrawer({ isOpen, onClose, lot, vehicle, addToast, onSaved }) 
       weight_kg: form.weight_kg ? parseFloat(form.weight_kg) : null,
       total_bags: form.total_bags ? parseInt(form.total_bags, 10) : null,
       bag_size_kg: form.bag_size_kg ? parseFloat(form.bag_size_kg) : null,
+      weighbridge_kg: form.weighbridge_kg !== '' ? parseFloat(form.weighbridge_kg) : null,
+      accepted_kg: form.accepted_kg !== '' ? parseFloat(form.accepted_kg) : null,
+      quality_json: vehicleQualityFromForm(form.quality),
       hauler_id: form.hauler_id ? parseInt(form.hauler_id, 10) : null,
       gate_pass_no: form.gate_pass_no.trim() || null,
       arrival_date: form.arrival_date || null,
@@ -2255,6 +2374,18 @@ function LotVehicleDrawer({ isOpen, onClose, lot, vehicle, addToast, onSaved }) 
           </div>
           <div />
           <div>
+            <label className={lbl}>Weighbridge (kg)</label>
+            <input type="number" step="any" min="0" value={form.weighbridge_kg}
+              onChange={(e) => setForm(p => ({ ...p, weighbridge_kg: e.target.value }))}
+              placeholder="Actual weighed" className={inp} />
+          </div>
+          <div>
+            <label className={lbl}>Accepted (kg)</label>
+            <input type="number" step="any" min="0" value={form.accepted_kg}
+              onChange={(e) => setForm(p => ({ ...p, accepted_kg: e.target.value }))}
+              placeholder="Final accepted" className={inp} />
+          </div>
+          <div>
             <label className={lbl}>Arrival Date</label>
             <input type="date" value={form.arrival_date}
               onChange={(e) => setForm(p => ({ ...p, arrival_date: e.target.value }))}
@@ -2265,6 +2396,19 @@ function LotVehicleDrawer({ isOpen, onClose, lot, vehicle, addToast, onSaved }) 
             <input type="date" value={form.departure_date}
               onChange={(e) => setForm(p => ({ ...p, departure_date: e.target.value }))}
               className={inp} />
+          </div>
+        </div>
+        <div>
+          <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-2">Quality for this truck (optional)</p>
+          <div className="grid grid-cols-3 gap-2">
+            {VEHICLE_QUALITY_FIELDS.map(f => (
+              <div key={f.key}>
+                <label className="block text-[11px] font-medium text-gray-600 mb-0.5">{f.label}</label>
+                <input type="number" step="any" min="0" value={form.quality?.[f.key] ?? ''}
+                  onChange={(e) => setForm(p => ({ ...p, quality: { ...(p.quality || {}), [f.key]: e.target.value } }))}
+                  placeholder="—" className={inp} />
+              </div>
+            ))}
           </div>
         </div>
       </form>

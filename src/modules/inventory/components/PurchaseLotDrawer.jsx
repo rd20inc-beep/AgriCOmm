@@ -16,10 +16,15 @@ import { STANDARD_BAG_SIZES, snapBagSizeKg, isStandardBagSize, DEFAULT_BAG_SIZE_
  *   2. Rice type       — products list, searchable, with "+ Add new"
  *   3. Weight (kg)
  *   4. Number of bags
- *   5. Price per MT
+ *   5. Price per KG
+ * plus the purchase date beside the weight.
  *
- * Optional "More" section: warehouse, moisture/broken/foreign-matter,
- * notes, purchase date.
+ * Optional "More" section: warehouse, moisture/broken/foreign-matter, notes.
+ *
+ * The lot number shown is a PREVIEW. Until the operator types their own, it
+ * follows supplier / rice type / date and is sent as null, so the server
+ * assigns the real number inside its transaction (two operators saving at once
+ * can't both take the previewed number).
  *
  * New suppliers/products added on-the-go are flagged 'pending' (unless
  * the user has master_data.approve) and remain usable immediately.
@@ -78,7 +83,18 @@ const VEHICLE_QUALITY_FIELDS = [
   { key: 'chalky', label: 'Chalky %' },
   { key: 'purity', label: 'Purity %' },
   { key: 'grain_size', label: 'Grain size (mm)' },
-  { key: 'price_per_mt', label: 'Price / MT' },
+  // Entered per KG like the lot price; stored as price_per_mt (the key the
+  // ledgers / reports read) — converted in handleSubmit.
+  { key: 'price_per_kg', label: 'Price / kg' },
+];
+
+// Who bears the freight on a SUPPLIER purchase. Customer / service-client
+// responsibilities belong to sales and toll milling, not a rice purchase.
+const SUPPLIER_TRANSPORT_PAID_BY = [
+  { value: 'company', label: 'Company (creates payable)' },
+  { value: 'supplier', label: 'Supplier' },
+  { value: 'included_in_supplier_rate', label: 'Included in Supplier Rate' },
+  { value: 'deduct_from_supplier', label: 'Deduct from Supplier Payment' },
 ];
 
 export default function PurchaseLotDrawer({
@@ -111,6 +127,8 @@ export default function PurchaseLotDrawer({
   const [localSuppliers, setLocalSuppliers] = useState([]);
   const [localProducts, setLocalProducts] = useState([]);
   const [lotNoTouched, setLotNoTouched] = useState(false); // user edited the lot no
+  const [previewNonce, setPreviewNonce] = useState(0); // bump to re-preview after "Save & add another"
+  const [savingMode, setSavingMode] = useState(null); // 'close' | 'another' while saving
   // Item 1: default the commission recipient (broker) to the selected supplier
   // until the user picks a different broker. Item 2: auto-fill bags from
   // received weight ÷ bag size until the user hand-adjusts the bag count.
@@ -151,29 +169,32 @@ export default function PurchaseLotDrawer({
     }
   }, [isOpen]);
 
-  // Preview the auto lot number once supplier + rice type are chosen (unless the
-  // operator already typed a custom one). They can still edit or regenerate it.
+  // Preview the auto lot number from supplier + rice type + date, and keep it
+  // following them while the operator hasn't typed their own. The preview is
+  // display only — an untouched number is sent as null and the server assigns
+  // it inside the save transaction.
   useEffect(() => {
     if (!isOpen || lotNoTouched) return;
-    if (!form.supplier_id || !form.product_id) return;
+    if (!form.supplier_id || !form.product_id) {
+      setForm(prev => (prev.lot_no ? { ...prev, lot_no: '' } : prev));
+      return;
+    }
     let cancelled = false;
     (async () => {
       try {
         const res = await lotInventoryApi.previewLotNo({ supplier_id: form.supplier_id, product_id: form.product_id, date: form.purchase_date });
         const next = res?.data?.lot_no || res?.lot_no;
-        if (!cancelled && next) setForm(prev => (prev.lot_no ? prev : { ...prev, lot_no: next }));
-      } catch { /* preview is best-effort; backend still auto-generates if left blank */ }
+        if (!cancelled && next) setForm(prev => (prev.lot_no === next ? prev : { ...prev, lot_no: next }));
+      } catch { /* preview is best-effort; the server generates the number anyway */ }
     })();
     return () => { cancelled = true; };
-  }, [isOpen, lotNoTouched, form.supplier_id, form.product_id, form.purchase_date]);
+  }, [isOpen, lotNoTouched, form.supplier_id, form.product_id, form.purchase_date, previewNonce]);
 
-  async function regenerateLotNo() {
-    if (!form.supplier_id || !form.product_id) return;
-    try {
-      const res = await lotInventoryApi.previewLotNo({ supplier_id: form.supplier_id, product_id: form.product_id, date: form.purchase_date });
-      const next = res?.data?.lot_no || res?.lot_no;
-      if (next) { setForm(prev => ({ ...prev, lot_no: next })); setLotNoTouched(false); }
-    } catch { /* ignore */ }
+  // Drop a typed number and go back to the generated one (the effect above
+  // re-previews it).
+  function regenerateLotNo() {
+    setLotNoTouched(false);
+    setPreviewNonce(n => n + 1);
   }
 
   const mergedSuppliers = useMemo(() => {
@@ -282,7 +303,9 @@ export default function PurchaseLotDrawer({
   const orderedVariance = orderedKg > 0 ? weightKg - orderedKg : 0; // <0 short, >0 over
 
   // ─────────── Submit ───────────
-  async function handleSubmit() {
+  // keepOpen = "Save & add another": keep supplier + rice type (and the date),
+  // reset everything else for the next truck/lot.
+  async function handleSubmit(keepOpen = false) {
     if (!form.supplier_id) {
       addToast?.('Please select a supplier', 'error');
       return;
@@ -307,6 +330,7 @@ export default function PurchaseLotDrawer({
       addToast?.('Pick who the commission is paid to (broker), or clear the commission', 'error');
       return;
     }
+    setSavingMode(keepOpen ? 'another' : 'close');
     try {
       const product = selectedProduct;
       const itemName = product?.name || 'Rice';
@@ -329,15 +353,16 @@ export default function PurchaseLotDrawer({
       const brokenPct = quality.broken ?? null;
       // Backend createPurchaseLot expects quantity_input + quantity_unit
       // and rate_input + rate_unit. We work in kg + per-kg internally.
-      await createMut.mutateAsync({
+      const created = await createMut.mutateAsync({
         item_name: itemName,
         type: 'raw',
         entity: 'mill',
         warehouse_id: form.warehouse_id ? parseInt(form.warehouse_id, 10) : null,
         product_id: parseInt(form.product_id, 10),
         supplier_id: parseInt(form.supplier_id, 10),
-        // Custom lot number (blank → backend auto-generates).
-        lot_no: form.lot_no?.trim() || null,
+        // Only a number the operator typed is sent; the previewed auto number
+        // goes as null so the server generates it inside its transaction.
+        lot_no: lotNoTouched ? (form.lot_no?.trim() || null) : null,
         // Commission (broker payable) + transport (hauler payable) — both fold
         // into the landed cost per KG server-side.
         commission_per_bag: commissionPerBag > 0 ? commissionPerBag : null,
@@ -378,7 +403,10 @@ export default function PurchaseLotDrawer({
             const q = {};
             for (const f of VEHICLE_QUALITY_FIELDS) {
               const val = v.quality?.[f.key];
-              if (val !== '' && val != null && !Number.isNaN(parseFloat(val))) q[f.key] = parseFloat(val);
+              if (val === '' || val == null || Number.isNaN(parseFloat(val))) continue;
+              // Price is typed per kg; stored per MT (price_per_mt).
+              if (f.key === 'price_per_kg') q.price_per_mt = Math.round(parseFloat(val) * 1000 * 100) / 100;
+              else q[f.key] = parseFloat(val);
             }
             return {
               vehicle_no: v.vehicle_no.trim(),
@@ -398,11 +426,32 @@ export default function PurchaseLotDrawer({
             };
           }),
       });
-      addToast?.(`Rice purchase lot recorded — ${weightMT.toFixed(2)} MT`, 'success');
+      const savedLotNo = created?.data?.lot?.lot_no || created?.lot?.lot_no || created?.data?.lot?.lotNo || created?.lot?.lotNo;
+      addToast?.(`Rice purchase lot ${savedLotNo ? `${savedLotNo} ` : ''}recorded — ${Math.round(weightKg).toLocaleString('en-PK')} kg`, 'success');
       onSuccess?.();
-      onClose?.();
+      if (keepOpen) {
+        // Same supplier + rice type + date; everything else fresh. The broker
+        // re-defaults to the supplier and the lot number re-previews.
+        setForm(prev => ({
+          ...defaultForm(),
+          supplier_id: prev.supplier_id,
+          product_id: prev.product_id,
+          broker_id: prev.supplier_id,
+          purchase_date: prev.purchase_date,
+        }));
+        setLotNoTouched(false);
+        setPreviewNonce(n => n + 1);
+        brokerTouched.current = false;
+        bagsTouched.current = false;
+        setShowVehicles(false);
+        setVehQualityOpen({});
+      } else {
+        onClose?.();
+      }
     } catch (err) {
       addToast?.(err?.response?.data?.message || err.message || 'Failed to record lot', 'error');
+    } finally {
+      setSavingMode(null);
     }
   }
 
@@ -514,11 +563,20 @@ export default function PurchaseLotDrawer({
               Cancel
             </button>
             <button
-              onClick={handleSubmit}
+              onClick={() => handleSubmit(true)}
+              disabled={createMut.isPending}
+              title="Save, then start another purchase from the same supplier and rice type"
+              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {savingMode === 'another' ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
+              Save &amp; add another
+            </button>
+            <button
+              onClick={() => handleSubmit(false)}
               disabled={createMut.isPending}
               className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {createMut.isPending ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
+              {savingMode === 'close' ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
               Save Lot
             </button>
           </div>
@@ -675,7 +733,7 @@ export default function PurchaseLotDrawer({
           )}
         </div>
 
-        {/* ─────────── Quantity ─────────── */}
+        {/* ─────────── Quantity + date ─────────── */}
         <div className="grid grid-cols-2 gap-3">
           <Input
             label="Received Weight (KG) *"
@@ -685,6 +743,9 @@ export default function PurchaseLotDrawer({
             placeholder="e.g. 30000"
             hint={weightMT > 0 ? `${weightMT.toFixed(2)} MT — drives stock & bill` : null}
           />
+          <Input label="Purchase date *" type="date"
+            value={form.purchase_date}
+            onChange={(v) => setForm(prev => ({ ...prev, purchase_date: v }))} />
           <Input
             label="Bags"
             type="number" step="1" min="0"
@@ -692,6 +753,18 @@ export default function PurchaseLotDrawer({
             onChange={(v) => { bagsTouched.current = true; setForm(prev => ({ ...prev, total_bags: v })); }}
             placeholder="auto from weight ÷ bag size"
             hint={bagsHint}
+          />
+          <Input
+            label="Ordered Weight (KG)"
+            type="number" step="1" min="0"
+            value={form.ordered_weight_kg}
+            onChange={(v) => setForm(prev => ({ ...prev, ordered_weight_kg: v }))}
+            placeholder="Blank if fully received"
+            hint={orderedKg > 0 && Math.abs(orderedVariance) > 0.5
+              ? (orderedVariance < 0
+                  ? `Short ${Math.round(Math.abs(orderedVariance)).toLocaleString('en-PK')} kg vs order`
+                  : `Over ${Math.round(orderedVariance).toLocaleString('en-PK')} kg vs order`)
+              : 'For the short/over variance'}
           />
         </div>
 
@@ -760,18 +833,6 @@ export default function PurchaseLotDrawer({
             </div>
           )}
         </div>
-        <Input
-          label="Ordered Weight (KG)"
-          type="number" step="1" min="0"
-          value={form.ordered_weight_kg}
-          onChange={(v) => setForm(prev => ({ ...prev, ordered_weight_kg: v }))}
-          placeholder="Leave blank if fully received"
-          hint={orderedKg > 0 && Math.abs(orderedVariance) > 0.5
-            ? (orderedVariance < 0
-                ? `Short ${(Math.abs(orderedVariance) / 1000).toFixed(2)} MT vs order`
-                : `Over ${(orderedVariance / 1000).toFixed(2)} MT vs order`)
-            : 'Ordered amount (for the short/over variance)'}
-        />
 
         {/* ─────────── Price ─────────── */}
         <div>
@@ -799,15 +860,19 @@ export default function PurchaseLotDrawer({
               type="text"
               value={form.lot_no}
               onChange={(e) => { setForm(prev => ({ ...prev, lot_no: e.target.value })); setLotNoTouched(true); }}
-              placeholder="Auto-generated — edit if needed"
+              placeholder="Auto-generated on save — type to use your own"
               className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
-            <button type="button" onClick={regenerateLotNo} disabled={!form.supplier_id || !form.product_id}
+            <button type="button" onClick={regenerateLotNo} disabled={!form.supplier_id || !form.product_id || !lotNoTouched}
               className="px-3 py-2 text-xs font-medium text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50" title="Regenerate the auto number">
               Auto
             </button>
           </div>
-          <p className="text-[11px] text-gray-400 mt-1">Must be unique. Leave as-is to use the auto number, or type your own.</p>
+          <p className="text-[11px] text-gray-400 mt-1">
+            {lotNoTouched
+              ? 'Your own number — must be unique. "Auto" goes back to the generated one.'
+              : 'Preview of the next number — the final one is assigned when you save. Type to use your own.'}
+          </p>
         </div>
 
         {/* ─────────── Purchase costs: commission + transport ─────────── */}
@@ -859,25 +924,13 @@ export default function PurchaseLotDrawer({
               <select value={form.transport_paid_by}
                 onChange={(e) => setForm(prev => ({ ...prev, transport_paid_by: e.target.value }))}
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 bg-white">
-                <option value="company">Company (creates payable)</option>
-                <option value="supplier">Supplier</option>
-                <option value="customer">Customer</option>
-                <option value="service_client">Service Milling Client</option>
-                <option value="included_in_supplier_rate">Included in Supplier Rate</option>
-                <option value="deduct_from_supplier">Deduct from Supplier Payment</option>
-                <option value="other">Other</option>
+                {SUPPLIER_TRANSPORT_PAID_BY.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
               {form.transport_paid_by === 'deduct_from_supplier' && (
                 <p className="text-[11px] text-amber-600 mt-0.5">Freight is paid to the hauler (a transporter payable) and deducted from the supplier’s bill — it shows as a deduction on their statement.</p>
               )}
               {['supplier', 'included_in_supplier_rate'].includes(form.transport_paid_by) && (
                 <p className="text-[11px] text-amber-600 mt-0.5">The supplier bears this freight — no company payable; recorded for tracking.</p>
-              )}
-              {['customer', 'service_client'].includes(form.transport_paid_by) && (
-                <p className="text-[11px] text-amber-600 mt-0.5">Client-borne freight — recovered from the client; no company payable.</p>
-              )}
-              {form.transport_paid_by === 'other' && (
-                <p className="text-[11px] text-amber-600 mt-0.5">No company payable will be created; charge is recorded for tracking.</p>
               )}
             </div>
           </div>
@@ -906,7 +959,7 @@ export default function PurchaseLotDrawer({
                   setForm(prev => ({ ...prev, quality: { ...prev.quality, [key]: value } }))
                 }
               />
-              <div className="grid grid-cols-2 gap-3">
+              <div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Warehouse</label>
                   <select
@@ -920,9 +973,6 @@ export default function PurchaseLotDrawer({
                       .map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
                   </select>
                 </div>
-                <Input label="Purchase date" type="date"
-                  value={form.purchase_date}
-                  onChange={(v) => setForm(prev => ({ ...prev, purchase_date: v }))} />
               </div>
               <Input label="Notes" value={form.notes}
                 onChange={(v) => setForm(prev => ({ ...prev, notes: v }))}

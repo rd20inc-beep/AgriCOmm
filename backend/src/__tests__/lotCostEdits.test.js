@@ -69,6 +69,12 @@ function mockBuilder(name) {
     insert(row) {
       const list = Array.isArray(row) ? row : [row];
       for (const r of list) {
+        // Mirror the real unique index on inventory_lots.lot_no.
+        if (name === 'inventory_lots' && (mockTables[name] || []).some((x) => x.lot_no === r.lot_no)) {
+          const e = new Error('duplicate key value violates unique constraint "inventory_lots_lot_no_unique"');
+          e.code = '23505'; e.constraint = 'inventory_lots_lot_no_unique';
+          throw e;
+        }
         mockIds[name] = (mockIds[name] || 0) + 1;
         const rec = { id: mockIds[name], ...r };
         (mockTables[name] = mockTables[name] || []).push(rec);
@@ -332,5 +338,71 @@ describe('Joi schemas (P5)', () => {
     const { value: b } = run(schemas.addPurchaseToLot, { quantity_input: 1, rate_input: 1, payment_status: 'Paid', paid_amount: 5 });
     expect(b.payment_status).toBeUndefined();
     expect(b.paid_amount).toBeUndefined();
+  });
+});
+
+describe('lot number generated server-side (PRC-P7)', () => {
+  const inventoryService = require('../modules/inventory/inventory.service');
+
+  test('lot_no: null → the server generates it inside the transaction', async () => {
+    inventoryService.generateRiceLotNo.mockClear();
+    const res = await createLot({ ...BASE, lot_no: null });
+    expect(res.statusCode).toBe(201);
+    expect(inventoryService.generateRiceLotNo).toHaveBeenCalledTimes(1);
+    expect(inventoryService.generateRiceLotNo.mock.calls[0][1]).toEqual({ supplierId: SUPPLIER, productId: 3, date: '2026-10-01' });
+    expect(lotRow().lot_no).toBe('SUP-RICE-261005-01');
+  });
+
+  test('an auto number that collides (concurrent save) is retried with the next number', async () => {
+    mockTables.inventory_lots = [{ id: 99, lot_no: 'SUP-RICE-261005-01' }];
+    inventoryService.generateRiceLotNo.mockClear();
+    inventoryService.generateRiceLotNo
+      .mockImplementationOnce(async () => 'SUP-RICE-261005-01') // stale MAX — the other save won
+      .mockImplementationOnce(async () => 'SUP-RICE-261005-02');
+    const res = await createLot({ ...BASE, lot_no: null });
+    expect(res.statusCode).toBe(201);
+    expect(inventoryService.generateRiceLotNo).toHaveBeenCalledTimes(2);
+    expect(res.body.data.lot.lot_no).toBe('SUP-RICE-261005-02');
+  });
+
+  test('a typed lot number that is taken is a 409 naming it (no silent renumber)', async () => {
+    mockTables.inventory_lots = [{ id: 99, lot_no: 'MY-LOT' }];
+    inventoryService.generateRiceLotNo.mockClear();
+    const res = await createLot({ ...BASE, lot_no: 'MY-LOT' });
+    expect(res.statusCode).toBe(409);
+    expect(res.body.message).toMatch(/MY-LOT/);
+    expect(inventoryService.generateRiceLotNo).not.toHaveBeenCalled();
+  });
+});
+
+describe('renameLot honours the Mill Operator scope (PRC-P6)', () => {
+  beforeEach(() => {
+    mockTables.roles = [{ id: 5, name: 'Mill Operator' }, { id: 2, name: 'Mill Manager' }];
+    mockTables.inventory_lots = [{ id: 50, lot_no: 'OLD-1', created_by: 1 }];
+  });
+  const rename = async (user, lotNo = 'NEW-1') => {
+    const res = mockRes();
+    await controller.renameLot({ params: { id: '50' }, body: { lot_no: lotNo }, user }, res);
+    return res;
+  };
+
+  test("a Mill Operator cannot rename someone else's lot", async () => {
+    const res = await rename({ id: 2, role_id: 5 });
+    expect(res.statusCode).toBe(403);
+    expect(mockTables.inventory_lots[0].lot_no).toBe('OLD-1');
+  });
+
+  test('a Mill Operator cannot rename a lot already in milling', async () => {
+    mockTables.batch_source_lots = [{ lot_id: 50, batch_id: 1 }];
+    const res = await rename({ id: 1, role_id: 5 });
+    expect(res.statusCode).toBe(403);
+    expect(res.body.message).toMatch(/milling/i);
+  });
+
+  test('the creator renames their own unmilled lot; other roles are unaffected', async () => {
+    expect((await rename({ id: 1, role_id: 5 })).statusCode).toBe(200);
+    expect(mockTables.inventory_lots[0].lot_no).toBe('NEW-1');
+    expect((await rename({ id: 9, role_id: 2 }, 'NEW-2')).statusCode).toBe(200);
+    expect(mockTables.inventory_lots[0].lot_no).toBe('NEW-2');
   });
 });

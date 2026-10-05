@@ -52,6 +52,19 @@ function sanitizeLotQuality(raw) {
   return Object.keys(out).length ? out : null;
 }
 
+// Unique-index violation on inventory_lots.lot_no.
+function isLotNoCollision(err) {
+  return !!err && (err.code === '23505' || /unique/i.test(err.message || ''))
+    && /lot_no/i.test(`${err.message || ''} ${err.constraint || ''} ${err.detail || ''}`);
+}
+
+// Optional kg figure from a form: blank → null, otherwise a non-negative number.
+function optKg(v) {
+  if (v == null || v === '') return null;
+  const n = parseFloat(v);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
 async function generatePayNo(trx) {
   // Only consider the bare PAY-NNN namespace used by lot payables.
   // Other sequences (PAY-EXP*, PAY-MS*, PAY-EOC*) live in payables too
@@ -855,7 +868,14 @@ module.exports = {
       // normal payment flow, which moves the bank and posts the journal.
       const landedPayableAmount = landed.supplierGross;
 
-      const result = await db.transaction(async (trx) => {
+      // A blank lot_no is generated INSIDE the transaction (MAX+1 per prefix).
+      // Two purchases saved at the same moment can still both read the same
+      // MAX and collide on the unique index; when the number was ours to pick,
+      // that is not the operator's mistake — re-run the whole transaction (it
+      // rolled back, so nothing is half-written) and the retry sees the other
+      // lot and takes the next number.
+      const autoLotNo = !(customLotNo && String(customLotNo).trim());
+      const createInTrx = async (trx) => {
         // Generate lot number. Rice lots received at the mill get the
         // SUP-VARIETY-YYMMDD-SEQ format (matches receiveRice); everything
         // else falls back to the legacy LOT-YYYYMMDD-XXXX so old
@@ -1271,7 +1291,18 @@ module.exports = {
         }
 
         return lot;
-      });
+      };
+
+      let result;
+      for (let attempt = 1; ; attempt += 1) {
+        try {
+          result = await db.transaction(createInTrx);
+          break;
+        } catch (err) {
+          if (autoLotNo && attempt < 4 && isLotNoCollision(err)) continue;
+          throw err;
+        }
+      }
 
       return res.status(201).json({
         success: true,
@@ -1279,8 +1310,14 @@ module.exports = {
       });
     } catch (err) {
       // Duplicate custom lot number (unique index on inventory_lots.lot_no).
-      if (err && (err.code === '23505' || /unique/i.test(err.message || '')) && /lot_no/i.test(err.message || err.constraint || '')) {
-        return res.status(409).json({ success: false, message: `Lot number "${String(req.body?.lot_no || '').trim()}" already exists — choose another.` });
+      if (isLotNoCollision(err)) {
+        const typed = String(req.body?.lot_no || '').trim();
+        return res.status(409).json({
+          success: false,
+          message: typed
+            ? `Lot number "${typed}" already exists — choose another.`
+            : 'Could not allocate a lot number (other purchases were being saved at the same time) — please save again.',
+        });
       }
       console.error('createPurchaseLot error:', err);
       return res.status(500).json({ success: false, message: err.message });
@@ -2208,6 +2245,8 @@ module.exports = {
       const isNumeric = /^\d+$/.test(id);
       const lot = await db('inventory_lots').where(isNumeric ? { id: +id } : { lot_no: id }).first();
       if (!lot) return res.status(404).json({ success: false, message: 'Lot not found.' });
+      // Same Mill Operator scope as every other lot edit: own lots, before milling.
+      await assertLotEditableByOperator(req, lot, db);
       if (raw === lot.lot_no) return res.json({ success: true, data: { lot_no: raw } });
 
       const clash = await db('inventory_lots').where({ lot_no: raw }).whereNot('id', lot.id).first('id');
@@ -2221,6 +2260,7 @@ module.exports = {
       });
       return res.json({ success: true, data: { id: lot.id, lot_no: raw, previous: oldLotNo } });
     } catch (err) {
+      if (err.status) return res.status(err.status).json({ success: false, message: err.message });
       console.error('renameLot error:', err);
       return res.status(500).json({ success: false, message: err.message });
     }
@@ -2920,6 +2960,7 @@ module.exports = {
       const {
         vehicle_no, driver_name, driver_phone,
         weight_kg, weight_mt, total_bags, bag_size_kg,
+        weighbridge_kg, accepted_kg, quality_json, quality,
         arrival_date, departure_date, gate_pass_no, hauler_id, notes,
       } = req.body || {};
 
@@ -2951,6 +2992,11 @@ module.exports = {
         weight_kg: weightKg,
         bag_size_kg: parsedBagSize,
         total_bags: parsedTotalBags,
+        // Intake checkpoints (declared → weighbridge → accepted) + per-truck
+        // quality — same fields the New Purchase form captures per vehicle.
+        weighbridge_kg: optKg(weighbridge_kg),
+        accepted_kg: optKg(accepted_kg),
+        quality_json: sanitizeLotQuality(quality_json || quality),
         arrival_date: arrival_date || db.fn.now(),
         departure_date: departure_date || null,
         gate_pass_no: gate_pass_no || null,
@@ -2981,6 +3027,7 @@ module.exports = {
       const {
         vehicle_no, driver_name, driver_phone,
         weight_kg, weight_mt, total_bags, bag_size_kg,
+        weighbridge_kg, accepted_kg, quality_json, quality,
         arrival_date, departure_date, gate_pass_no, hauler_id, notes,
       } = req.body || {};
 
@@ -3001,6 +3048,9 @@ module.exports = {
       }
       if (arrival_date !== undefined) patch.arrival_date = arrival_date || null;
       if (departure_date !== undefined) patch.departure_date = departure_date || null;
+      if (weighbridge_kg !== undefined) patch.weighbridge_kg = optKg(weighbridge_kg);
+      if (accepted_kg !== undefined) patch.accepted_kg = optKg(accepted_kg);
+      if (quality_json !== undefined || quality !== undefined) patch.quality_json = sanitizeLotQuality(quality_json || quality);
       if (gate_pass_no !== undefined) patch.gate_pass_no = gate_pass_no || null;
       if (hauler_id !== undefined) patch.hauler_id = (hauler_id != null && hauler_id !== '') ? parseInt(hauler_id, 10) : null;
       if (notes !== undefined) patch.notes = notes || null;
