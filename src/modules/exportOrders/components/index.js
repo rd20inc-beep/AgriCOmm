@@ -14,7 +14,6 @@ export {
   BalancePaymentModal,
   MillingDemandModal,
   ShipmentModal,
-  HoldModal,
   ExpenseModal,
   InvoicePreviewModal,
 } from './OrderModals';

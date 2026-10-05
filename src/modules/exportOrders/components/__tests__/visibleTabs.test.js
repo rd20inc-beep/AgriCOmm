@@ -28,8 +28,14 @@ describe('getVisibleTabs — Documents before the advance', () => {
     expect(keys('Draft')).not.toContain('financials');
     expect(keys('Draft')).not.toContain('shipment');
     expect(keys('Awaiting Advance')).toContain('financials');
-    expect(keys('In Milling')).not.toContain('shipment');
+    expect(keys('Advance Received')).not.toContain('shipment');
     expect(keys('Ready to Ship')).toContain('shipment');
+  });
+
+  it('opens Shipment from In Milling, so the vessel can be booked while milling', () => {
+    for (const s of ['In Milling', 'Docs In Preparation', 'Awaiting Balance']) {
+      expect(keys(s), s).toContain('shipment');
+    }
   });
 
   it('keeps the tab order from tabList', () => {

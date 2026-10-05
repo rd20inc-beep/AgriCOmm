@@ -27,6 +27,7 @@ import {
 } from '../../../api/queries';
 import { useCreateMillingBatch } from '../../../api/queries';
 import { exportOrdersApi } from '../api/services';
+import { duplicateStateFromOrder } from '../utils/createOrderForm';
 import useConfirm from '../../../hooks/useConfirm';
 import {
   OrderHeader,
@@ -44,7 +45,6 @@ import {
   BalancePaymentModal,
   MillingDemandModal,
   ShipmentModal,
-  HoldModal,
   ExpenseModal,
   InvoicePreviewModal,
   getVisibleTabs,
@@ -87,8 +87,8 @@ export default function ExportOrderDetail() {
   const [showBalanceModal, setShowBalanceModal] = useState(false);
   const [showMillingModal, setShowMillingModal] = useState(false);
   const [showShipmentModal, setShowShipmentModal] = useState(false);
-  const [showHoldModal, setShowHoldModal] = useState(false);
   const [showExpenseModal, setShowExpenseModal] = useState(false);
+  const [submittingDraft, setSubmittingDraft] = useState(false);
   // "Send Email" in the header hands off to the Document Center, which renders
   // the Proforma, attaches it as a PDF and sends it from the server. The header
   // used to open a composer that toasted "Email sent" and sent nothing.
@@ -355,10 +355,6 @@ export default function ExportOrderDetail() {
     setShowShipmentModal(true);
   };
 
-  const openHoldModal = () => {
-    setShowHoldModal(true);
-  };
-
   const openExpenseModal = () => {
     setExpenseCategory('rice');
     setExpenseAmount('');
@@ -542,23 +538,11 @@ export default function ExportOrderDetail() {
         },
       });
       addToast(res?.data?.transitioned_to ? `Shipment updated: ${res.data.transitioned_to}` : 'Shipment details updated');
+      setShowShipmentModal(false);
     } catch (err) {
-      addToast(`Failed to update shipment: ${err.message || 'Server error'}`, 'error');
+      // Keep the form open so what was typed isn't lost; fix and save again.
+      addToast(`Failed to update shipment: ${err?.data?.message || err.message || 'Server error'}`, 'error');
     }
-    setShowShipmentModal(false);
-  };
-
-  const handlePutOnHold = async () => {
-    try {
-      await updateStatusMut.mutateAsync({
-        id: orderId,
-        data: { status: 'Cancelled', notes: 'Order cancelled / put on hold' },
-      });
-      addToast('Order has been cancelled');
-    } catch (err) {
-      addToast(`Failed to cancel order: ${err.message || 'Server error'}`, 'error');
-    }
-    setShowHoldModal(false);
   };
 
   const handleAddExpense = async () => {
@@ -593,7 +577,9 @@ export default function ExportOrderDetail() {
       try {
         await api.upload('/api/documents/upload', formData);
       } catch (uploadErr) {
-        addToast(`File upload failed: ${uploadErr.message}. Marking document status anyway.`, 'warning');
+        // Marking it uploaded anyway left a checklist tick with no file behind it.
+        addToast(`File upload failed: ${uploadErr.message}. ${label} was not marked as uploaded.`, 'error');
+        return;
       }
     }
     try {
@@ -629,12 +615,18 @@ export default function ExportOrderDetail() {
     : null;
 
   // Workflow gating - determine which actions are allowed
-  const canConfirmAdvance = backendActions.canConfirmAdvance ?? (order.advanceReceived < order.advanceExpected && ['Awaiting Advance', 'Draft'].includes(order.status));
+  // Money-based (mirrors getAllowedActions in exportOrders.workflow.js): the
+  // advance is recordable whenever it is owed and the goods haven't left; the
+  // balance whenever it is owed and the order isn't closed/cancelled.
+  const isTerminalStatus = ['Closed', 'Cancelled'].includes(order.status);
+  const canConfirmAdvance = backendActions.canConfirmAdvance ?? (order.advanceReceived < order.advanceExpected && !isTerminalStatus && !['Shipped', 'Arrived'].includes(order.status));
   const canStartDocs = backendActions.canStartDocs ?? (order.status === 'In Milling');
-  const canRequestBalance = backendActions.canRequestBalance ?? (order.status === 'Awaiting Balance' && order.balanceReceived < order.balanceExpected);
+  const canRequestBalance = backendActions.canRequestBalance ?? (!isTerminalStatus && order.balanceReceived < order.balanceExpected);
   // #2 decouple: milling no longer waits for the advance (tracked on financialStatus); allowed once the order is confirmed (out of Draft).
   const canCreateMilling = backendActions.canCreateMilling ?? (!order.millingOrderId && !['Draft', 'Closed', 'Cancelled'].includes(order.status));
-  const canUpdateShipment = backendActions.canUpdateShipment ?? ['Ready to Ship', 'Shipped'].includes(order.status);
+  // Shipment details from In Milling; ATD/ATA (which ship/arrive the order) only from Ready to Ship.
+  const canUpdateShipment = backendActions.canUpdateShipment ?? ['In Milling', 'Docs In Preparation', 'Awaiting Balance', 'Ready to Ship', 'Shipped'].includes(order.status);
+  const canRecordDeparture = backendActions.canRecordDeparture ?? ['Ready to Ship', 'Shipped'].includes(order.status);
   // Lots reserved/allocated to this order — offered as the container lot picker
   // in the shipment editor (P4c). Deduped by lot id.
   const reservedLots = (() => {
@@ -643,9 +635,27 @@ export default function ExportOrderDetail() {
       .map((l) => ({ lotId: l.id || l.lot_id, lotNo: l.lot_no || l.lotNo }))
       .filter((l) => l.lotId && l.lotNo && !seen.has(l.lotId) && seen.add(l.lotId));
   })();
-  const canPutOnHold = backendActions.canPutOnHold ?? !['Closed', 'Cancelled'].includes(order.status);
-  const canCloseOrder = backendActions.canCloseOrder ?? (order.status === 'Arrived' || (order.balanceReceived >= order.balanceExpected && order.status === 'Shipped'));
+  // Arrived → Closed is the only way to Closed (STATUS_TRANSITIONS).
+  const canCloseOrder = backendActions.canCloseOrder ?? (order.status === 'Arrived');
+  const canSubmitDraft = backendActions.canSubmitDraft ?? (order.status === 'Draft');
   const canCancel = backendActions.canCancel ?? !['Shipped', 'Arrived', 'Closed', 'Cancelled'].includes(order.status);
+
+  // Draft → Awaiting Advance (or Advance Received at 0% advance). The server
+  // validates the whole order at this point and says what is missing.
+  const handleSubmitDraft = async () => {
+    if (submittingDraft) return;
+    setSubmittingDraft(true);
+    try {
+      const res = await exportOrdersApi.submit(orderId);
+      const prs = res?.data?.materialRequests || [];
+      addToast(`Order submitted — now ${res?.data?.order?.status || 'in the workflow'}${prs.length ? ` (${prs.length} purchase request${prs.length > 1 ? 's' : ''} raised)` : ''}`);
+      invalidateOrder();
+    } catch (err) {
+      addToast(err?.data?.message || err?.message || 'Could not submit the draft', 'error');
+    } finally {
+      setSubmittingDraft(false);
+    }
+  };
 
   const handleCancelOrder = async () => {
     setShowActions(false);
@@ -698,25 +708,15 @@ export default function ExportOrderDetail() {
         onShowInvoicePreview={() => setShowInvoicePreview(true)}
         onShowEmailComposer={requestProformaEmail}
         onDuplicate={() => {
-          const params = new URLSearchParams({
-            dup: '1',
-            customerId: order.customerId || '',
-            productId: order.productId || '',
-            country: order.country || '',
-            currency: order.currency || 'USD',
-            incoterm: order.incoterm || 'FOB',
-            hsCode: order.hsCode || '',
-            consigneeType: order.consigneeType || '',
-            qualityDescription: order.qualityDescription || '',
-          });
-          navigate(`/export/create?${params.toString()}`);
+          // Items, qty, price, packing, bank, incoterm, freight and payment terms
+          // travel in router state (see duplicateStateFromOrder).
+          navigate('/export/create', { state: { duplicate: duplicateStateFromOrder(order) } });
         }}
         canConfirmAdvance={canConfirmAdvance}
         canStartDocs={canStartDocs}
         canRequestBalance={canRequestBalance}
         canCreateMilling={canCreateMilling}
         canUpdateShipment={canUpdateShipment}
-        canPutOnHold={canPutOnHold}
         canCloseOrder={canCloseOrder}
         canCancel={canCancel}
         onCancelOrder={handleCancelOrder}
@@ -725,7 +725,6 @@ export default function ExportOrderDetail() {
         onOpenBalanceModal={openBalanceModal}
         onOpenMillingModal={openMillingModal}
         onOpenShipmentModal={openShipmentModal}
-        onOpenHoldModal={openHoldModal}
         onCloseOrder={handleCloseOrder}
       />
 
@@ -734,14 +733,19 @@ export default function ExportOrderDetail() {
 
       {/* ═══ "What's Next?" Action Banner ═══ */}
       {order.status === 'Draft' && (
-        <div className="bg-gray-50 border border-gray-300 rounded-xl p-4 flex items-center justify-between">
+        <div className="bg-gray-50 border border-gray-300 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <p className="text-sm font-semibold text-gray-800">Draft Order</p>
-            <p className="text-xs text-gray-600">Complete the order details and submit to begin the workflow.</p>
+            <p className="text-xs text-gray-600">Complete the order details and submit to begin the workflow. Submitting checks every line has a product, quantity and price, and that an Incoterm and bank account are set.</p>
           </div>
+          {canSubmitDraft && (
+            <button onClick={handleSubmitDraft} disabled={submittingDraft} className="shrink-0 px-4 py-2 bg-gray-900 text-white rounded-lg text-sm font-medium hover:bg-gray-800 disabled:opacity-50">
+              {submittingDraft ? 'Submitting…' : 'Submit order'}
+            </button>
+          )}
         </div>
       )}
-      {canConfirmAdvance && order.status === 'Awaiting Advance' && (
+      {canConfirmAdvance && order.status !== 'Draft' && (
         <div className="bg-amber-50 border border-amber-300 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <p className="text-sm font-semibold text-amber-800">Advance Pending — operational work can proceed</p>
@@ -783,10 +787,10 @@ export default function ExportOrderDetail() {
           <button onClick={() => setActiveTab('documents')} className="px-4 py-2 bg-violet-600 text-white rounded-lg text-sm font-medium hover:bg-violet-700">Go to Documents</button>
         </div>
       )}
-      {canRequestBalance && order.status === 'Awaiting Balance' && (
+      {canRequestBalance && ['Awaiting Balance', 'Shipped', 'Arrived'].includes(order.status) && (
         <div className="bg-blue-50 border border-blue-300 rounded-xl p-4 flex items-center justify-between">
           <div>
-            <p className="text-sm font-semibold text-blue-800">Waiting for Balance Payment</p>
+            <p className="text-sm font-semibold text-blue-800">{order.status === 'Awaiting Balance' ? 'Waiting for Balance Payment' : 'Balance Still Owed'}</p>
             <p className="text-xs text-blue-600">Expected: {formatCurrency(order.balanceExpected)} | Received: {formatCurrency(order.balanceReceived)} | Outstanding: {formatCurrency(order.balanceExpected - order.balanceReceived)}</p>
           </div>
           <button onClick={openBalanceModal} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">Confirm Balance Received</button>
@@ -1049,14 +1053,8 @@ export default function ExportOrderDetail() {
         bankAccountsList={bankAccountsList}
         shipmentContainers={shipContainers}
         setShipmentContainers={setShipContainers}
+        canRecordDeparture={canRecordDeparture}
         onConfirm={handleUpdateShipment}
-      />
-
-      <HoldModal
-        isOpen={showHoldModal}
-        onClose={() => setShowHoldModal(false)}
-        order={order}
-        onConfirm={handlePutOnHold}
       />
 
       <ExpenseModal

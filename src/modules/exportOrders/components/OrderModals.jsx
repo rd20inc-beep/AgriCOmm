@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import Modal from '../../../components/Modal';
 import ProformaInvoice from '../../../components/ProformaInvoice';
 import SearchSelect from '../../../components/SearchSelect';
-import { AlertTriangle, Boxes, Factory, CheckCircle } from 'lucide-react';
+import { Boxes, Factory, CheckCircle } from 'lucide-react';
 import StockAllocationPicker from './StockAllocationPicker';
 import { favStar } from '../../../shared/utils/favorites';
 
@@ -418,6 +418,9 @@ export function MillingDemandModal({
 
 export function ShipmentModal({
   isOpen, onClose,
+  // ATD/ATA move the order to Shipped/Arrived, which only exists from Ready to
+  // Ship. Before that, every other shipment field can be filled in already.
+  canRecordDeparture = true,
   shipVessel, setShipVessel,
   shipBooking, setShipBooking,
   shipBL, setShipBL,
@@ -689,7 +692,8 @@ export function ShipmentModal({
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">ATD (Actual Departure)</label>
-            <input type="date" value={shipATD} onChange={e => setShipATD(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+            <input type="date" value={shipATD} disabled={!canRecordDeparture} onChange={e => setShipATD(e.target.value)} className={`w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none ${!canRecordDeparture ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : ''}`} />
+            {!canRecordDeparture && <p className="text-xs text-gray-400 mt-1">Available once the order is Ready to Ship.</p>}
           </div>
         </div>
         <div>
@@ -713,7 +717,7 @@ export function ShipmentModal({
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">ATA (Actual Arrival)</label>
-            <input type="date" value={shipATA} onChange={e => setShipATA(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+            <input type="date" value={shipATA} disabled={!canRecordDeparture} onChange={e => setShipATA(e.target.value)} className={`w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none ${!canRecordDeparture ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : ''}`} />
           </div>
         </div>
 
@@ -820,38 +824,6 @@ export function ShipmentModal({
         <div className="flex items-center justify-end gap-3 pt-2 border-t border-gray-200">
           <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">Cancel</button>
           <button onClick={onConfirm} className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors">Save Shipment</button>
-        </div>
-      </div>
-    </Modal>
-  );
-}
-
-export function HoldModal({ isOpen, onClose, order, onConfirm }) {
-  return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Put Order On Hold" size="sm">
-      <div className="space-y-4">
-        <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-lg p-4">
-          <AlertTriangle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
-          <div>
-            <p className="text-sm font-medium text-amber-800">Are you sure you want to put this order on hold?</p>
-            <p className="text-xs text-amber-600 mt-1">
-              Order <span className="font-medium">{order.id}</span> for {order.customerName} will be marked as On Hold. This can be reversed later.
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center justify-end gap-3 pt-2">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={onConfirm}
-            className="px-4 py-2 text-sm font-medium text-white bg-amber-600 rounded-lg hover:bg-amber-700 transition-colors"
-          >
-            Put On Hold
-          </button>
         </div>
       </div>
     </Modal>
