@@ -33,7 +33,7 @@ import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import { canSeeCost } from '../../../hooks/useCanSeeCost';
 import OrderRefLink from '../../../shared/components/OrderRefLink';
-import { useCreateMillingBatch, useMillExpenses, useCreateMillExpense, useInventory, useProducts } from '../../../api/queries';
+import { useCreateMillingBatch, useMillExpenses, useCreateMillExpense, useInventory, useProducts, useMillCostTrend } from '../../../api/queries';
 import { useCommodityPrices } from '../hooks/useCommodityPrices';
 import { useMillSummary } from '../hooks/useMillSummary';
 import KPICard from '../../../components/KPICard';
@@ -56,7 +56,7 @@ function formatPKR(value) {
 
 export default function MillingDashboard() {
   const navigate = useNavigate();
-  const { millingBatches, suppliersList, addToast } = useApp();
+  const { millingBatches, suppliersList, addToast, millingCostCategories = [] } = useApp();
   const { hasPermission } = useAuth();
   const canSellLocally = hasPermission('inventory', 'view');
   // Mill P&L, expenses, cost trend and sales value are money — hidden from the
@@ -204,8 +204,14 @@ export default function MillingDashboard() {
   // or back-nav doesn't reopen it.
   const [searchParams, setSearchParams] = useSearchParams();
   useEffect(() => {
-    if (searchParams.get('new') === '1') {
+    const mode = searchParams.get('new');
+    if (mode === '1' || mode === 'service') {
       resetBatchForm();
+      // ?new=service (Service Milling → "New service lot") opens in Service mode.
+      if (mode === 'service') {
+        setBF('millingType', 'service_milling');
+        setUseBlend(false);
+      }
       setShowNewBatch(true);
       searchParams.delete('new');
       setSearchParams(searchParams, { replace: true });
@@ -245,8 +251,13 @@ export default function MillingDashboard() {
       const vehicleKg = (batchForm.serviceVehicles || []).reduce((s, v) => s + (parseFloat(v.weight_kg) || 0), 0);
       if (!batchForm.clientCustomerId) { addToast('Select the client we are milling for (service milling)', 'error'); return; }
       if (!batchForm.rawQtyKg && vehicleKg <= 0) { addToast('Enter the quantity received, or add the incoming vehicle(s)', 'error'); return; }
-    } else if (!batchForm.supplierId || !batchForm.rawQtyKg) {
-      addToast('Supplier and raw quantity are required', 'error');
+    } else if (!batchForm.supplierId || !(parseFloat(batchForm.rawQtyKg) > 0)) {
+      addToast('Supplier and the first vehicle\'s weight are required', 'error');
+      return;
+    } else if (showMoney && !(parseFloat(batchForm.directPricePerKg) > 0)) {
+      // Cost-blind roles never see or enter the price — the truck goes in
+      // unpriced and someone with cost access prices it later.
+      addToast('Enter the rice price (Rs/kg) so the raw lot is costed', 'error');
       return;
     }
     const isService = batchForm.millingType === 'service_milling';
@@ -288,6 +299,17 @@ export default function MillingDashboard() {
           // Service milling has no company supplier — the raw lot is stamped
           // client-owned (owner = the selected client) on the backend.
           : { supplier_id: isService ? null : parseInt(batchForm.supplierId), raw_qty_kg: rawKg, product_id: parseInt(batchForm.productId) }),
+        // Direct supplier intake: the first truck, priced (per-truck price is
+        // per MT on the wire, same as Add Vehicle), creates the priced raw lot.
+        ...(!useBlend && !isService ? {
+          ...(showMoney ? { purchase_price_per_kg: parseFloat(batchForm.directPricePerKg) } : {}),
+          vehicles: [{
+            vehicle_no: batchForm.directTruckNo?.trim() || null,
+            weight_kg: rawKg,
+            total_bags: parseInt(batchForm.totalBags, 10) > 0 ? parseInt(batchForm.totalBags, 10) : null,
+            ...(showMoney ? { quality: { price_per_mt: Math.round(parseFloat(batchForm.directPricePerKg) * 1000 * 100) / 100 } } : {}),
+          }],
+        } : {}),
       };
       const res = await createBatchMut.mutateAsync(payload);
       const batchNo = res?.data?.batch?.batch_no || res?.data?.batch?.id;
@@ -300,29 +322,42 @@ export default function MillingDashboard() {
     }
   }
 
-  // Compute mill cost trend from real batch data
+  // Mill cost trend — real milling_costs per month and category (last 6 months),
+  // one stacked bar series per category that actually has cost. The endpoint is
+  // finance data (hidden from Mill Operator); on any error the chart is hidden.
+  const { data: costTrendRows, isError: costTrendError } = useMillCostTrend({ months: 6 }, { enabled: showMoney });
   const millCostTrend = useMemo(() => {
-    const months = ['Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar'];
-    const completed = millingBatches.filter(b => b.status === 'Completed');
-    if (completed.length === 0) return months.map(month => ({ month, rawRice: 0, transport: 0, electricity: 0, labor: 0, rent: 0 }));
-    const avgCosts = completed.reduce((acc, b) => {
-      acc.rawRice += (parseFloat(b.costs?.rawRice) || parseFloat(b.costs?.raw_rice) || 0);
-      acc.transport += (b.costs?.transport || 0);
-      acc.electricity += (b.costs?.electricity || 0);
-      acc.labor += (b.costs?.labor || 0);
-      acc.rent += (b.costs?.rent || 0);
-      return acc;
-    }, { rawRice: 0, transport: 0, electricity: 0, labor: 0, rent: 0 });
-    const n = completed.length;
-    return months.map((month, i) => ({
-      month,
-      rawRice: Math.round((avgCosts.rawRice / n) * (0.9 + i * 0.04)),
-      transport: Math.round((avgCosts.transport / n) * (0.95 + i * 0.02)),
-      electricity: Math.round((avgCosts.electricity / n) * (0.92 + i * 0.03)),
-      labor: Math.round((avgCosts.labor / n) * (0.98 + i * 0.01)),
-      rent: Math.round((avgCosts.rent / n)),
-    }));
-  }, [millingBatches]);
+    const rows = Array.isArray(costTrendRows) ? costTrendRows : [];
+    const norm = (s) => String(s || 'other').replace(/[_\s]/g, '').toLowerCase();
+    const labelOf = (cat) => (millingCostCategories.find((c) => norm(c.key) === norm(cat))?.label)
+      || String(cat || 'Other').replace(/_/g, ' ').replace(/\b\w/g, (ch) => ch.toUpperCase());
+    // Last 6 calendar months, oldest first, so empty months still show.
+    const now = new Date();
+    const months = Array.from({ length: 6 }, (_, i) => {
+      const d = new Date(now.getFullYear(), now.getMonth() - 5 + i, 1);
+      return {
+        key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`,
+        label: d.toLocaleString('en-US', { month: 'short', year: '2-digit' }),
+      };
+    });
+    const series = [];
+    const seen = new Map();
+    for (const r of rows) {
+      const k = norm(r.category);
+      if (!seen.has(k)) { seen.set(k, `c_${k}`); series.push({ key: `c_${k}`, label: labelOf(r.category) }); }
+    }
+    const data = months.map((m) => {
+      const point = { month: m.label };
+      for (const s of series) point[s.key] = 0;
+      for (const r of rows.filter((x) => x.month === m.key)) {
+        const key = seen.get(norm(r.category));
+        point[key] = Math.round((point[key] + (parseFloat(r.total) || 0)) * 100) / 100;
+      }
+      return point;
+    });
+    return { data, series };
+  }, [costTrendRows, millingCostCategories]);
+  const COST_TREND_COLORS = ['#3b82f6', '#f59e0b', '#10b981', '#8b5cf6', '#ef4444', '#06b6d4', '#ec4899', '#84cc16', '#64748b'];
 
   // KPI Calculations
   const pf = (v) => parseFloat(v) || 0;
@@ -455,6 +490,13 @@ export default function MillingDashboard() {
   const incomingLots = useMemo(() => {
     return millingBatches.filter((b) => b.arrivalAnalysis);
   }, [millingBatches]);
+  // The batch's real truck numbers (list rows carry the raw arrival rows).
+  const truckNos = (batch) => {
+    const nos = [...new Set((batch.vehicleArrivals || [])
+      .map((v) => v.vehicleNo || v.vehicle_no)
+      .filter(Boolean))];
+    return nos.length ? nos.join(', ') : '—';
+  };
 
   // All batches for production table — filterable by name/no/supplier/tags.
   const [batchSearch, setBatchSearch] = useState('');
@@ -879,7 +921,6 @@ export default function MillingDashboard() {
                   <th className="text-left py-2 px-2 text-xs font-medium text-gray-500 uppercase">Lot</th>
                   <th className="text-left py-2 px-2 text-xs font-medium text-gray-500 uppercase">Truck No</th>
                   <th className="text-left py-2 px-2 text-xs font-medium text-gray-500 uppercase">Supplier</th>
-                  <th className="text-left py-2 px-2 text-xs font-medium text-gray-500 uppercase">Sample</th>
                   <th className="text-left py-2 px-2 text-xs font-medium text-gray-500 uppercase">Arrival</th>
                   <th className="text-right py-2 px-2 text-xs font-medium text-gray-500 uppercase">Var%</th>
                   <th className="text-left py-2 px-2 text-xs font-medium text-gray-500 uppercase">Status</th>
@@ -890,13 +931,8 @@ export default function MillingDashboard() {
                 {incomingLots.map((batch) => (
                   <tr key={batch.id} className="border-b border-gray-50 hover:bg-gray-50">
                     <td data-label="Lot" className="py-2.5 px-2 font-medium text-gray-900">{batch.id}</td>
-                    <td data-label="Truck No" className="mob-hide py-2.5 px-2 text-gray-600 font-mono text-xs">{`TRK-${batch.id.replace('M-','')}`}</td>
+                    <td data-label="Truck No" className="mob-hide py-2.5 px-2 text-gray-600 font-mono text-xs">{truckNos(batch)}</td>
                     <td data-label="Supplier" className="py-2.5 px-2 text-gray-600"><PartyLink type="supplier" id={batch.supplierId} name={batch.supplierName} /></td>
-                    <td data-label="Sample" className="mob-hide py-2.5 px-2">
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">
-                        Approved
-                      </span>
-                    </td>
                     <td data-label="Arrival" className="mob-hide py-2.5 px-2">
                       <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
                         batch.arrivalAnalysis ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'
@@ -1023,15 +1059,21 @@ export default function MillingDashboard() {
           </div>
         </div>
 
-        {/* Cost Trend */}
-        {showMoney && (
+        {/* Cost Trend — real milling costs by month; hidden from cost-blind roles
+            (and on any error from the cost-gated endpoint). */}
+        {showMoney && !costTrendError && (
         <div className="bg-white rounded-xl shadow-sm p-5">
           <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-4">
             Mill Cost Trend
           </h2>
           <div className="h-48 sm:h-64 lg:h-72">
+            {millCostTrend.series.length === 0 ? (
+              <div className="h-full flex items-center justify-center text-sm text-gray-400">
+                No milling costs recorded in the last 6 months.
+              </div>
+            ) : (
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={millCostTrend} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+              <BarChart data={millCostTrend.data} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
                 <XAxis
                   dataKey="month"
@@ -1061,13 +1103,19 @@ export default function MillingDashboard() {
                   iconSize={8}
                   wrapperStyle={{ fontSize: '12px', paddingBottom: '8px' }}
                 />
-                <Bar dataKey="rawRice" name="Raw Rice" stackId="costs" fill="#3b82f6" />
-                <Bar dataKey="transport" name="Transport" stackId="costs" fill="#f59e0b" />
-                <Bar dataKey="electricity" name="Electricity" stackId="costs" fill="#10b981" />
-                <Bar dataKey="labor" name="Labor" stackId="costs" fill="#8b5cf6" />
-                <Bar dataKey="rent" name="Rent" stackId="costs" fill="#ef4444" radius={[4, 4, 0, 0]} />
+                {millCostTrend.series.map((s, i) => (
+                  <Bar
+                    key={s.key}
+                    dataKey={s.key}
+                    name={s.label}
+                    stackId="costs"
+                    fill={COST_TREND_COLORS[i % COST_TREND_COLORS.length]}
+                    radius={i === millCostTrend.series.length - 1 ? [4, 4, 0, 0] : undefined}
+                  />
+                ))}
               </BarChart>
             </ResponsiveContainer>
+            )}
           </div>
         </div>
         )}
@@ -1230,11 +1278,11 @@ export default function MillingDashboard() {
                     <input type="number" step="0.01" min="0" value={batchForm.serviceMillingRatePerKg} onChange={e => setBF('serviceMillingRatePerKg', e.target.value)} placeholder="e.g. 3.5" className="w-full border border-amber-300 rounded-lg px-3 py-2 text-sm outline-none bg-white" />
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-gray-700 mb-1">Rental (PKR / katta)</label>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Rental (PKR / {isBagUnit ? 'bag' : 'katta'})</label>
                     <input type="number" step="0.01" min="0" value={batchForm.serviceRentalRatePerKatta} onChange={e => setBF('serviceRentalRatePerKatta', e.target.value)} placeholder="e.g. 10" className="w-full border border-amber-300 rounded-lg px-3 py-2 text-sm outline-none bg-white" />
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-gray-700 mb-1">Labour (PKR / katta)</label>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Labour (PKR / {isBagUnit ? 'bag' : 'katta'})</label>
                     <input type="number" step="0.01" min="0" value={batchForm.serviceLabourRatePerKatta} onChange={e => setBF('serviceLabourRatePerKatta', e.target.value)} placeholder="e.g. 5" className="w-full border border-amber-300 rounded-lg px-3 py-2 text-sm outline-none bg-white" />
                   </div>
                 </div>
@@ -1496,8 +1544,47 @@ export default function MillingDashboard() {
           </div>
           )}
 
-          {/* Quantities */}
-          {!useBlend && (
+          {/* Direct supplier intake: the first truck — its weight is the raw qty,
+              its bags and the Rs/kg price go in with it, so the batch has a
+              priced raw lot and is ready to yield as soon as it's created. */}
+          {!useBlend && batchForm.millingType !== 'service_milling' && (
+          <div className="space-y-3 rounded-lg border border-gray-200 p-3">
+            <p className="text-xs font-semibold text-gray-600 uppercase tracking-wider">First Vehicle</p>
+            <div className={`grid grid-cols-2 ${showMoney ? 'sm:grid-cols-4' : 'sm:grid-cols-3'} gap-3`}>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Truck No</label>
+                <input type="text" value={batchForm.directTruckNo || ''} onChange={e => setBF('directTruckNo', e.target.value)}
+                  placeholder="e.g. LES-1234" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Weight (KG) *</label>
+                <input type="number" min="0" value={batchForm.rawQtyKg} onChange={e => setBF('rawQtyKg', e.target.value)}
+                  placeholder="e.g. 30000" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Bags</label>
+                <input type="number" min="0" value={batchForm.totalBags} onChange={e => setBF('totalBags', e.target.value)}
+                  placeholder="e.g. 600" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none" />
+              </div>
+              {showMoney && (
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Price (Rs/kg) *</label>
+                <input type="number" min="0" step="0.01" value={batchForm.directPricePerKg || ''} onChange={e => setBF('directPricePerKg', e.target.value)}
+                  placeholder="e.g. 145" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none" />
+              </div>
+              )}
+            </div>
+            {batchForm.rawQtyKg && batchForm.totalBags && parseInt(batchForm.totalBags, 10) > 0 && (
+              <p className="text-xs text-emerald-600 font-medium">Avg: {(parseFloat(batchForm.rawQtyKg) / parseInt(batchForm.totalBags, 10)).toFixed(2)} kg/bag</p>
+            )}
+            {showMoney && parseFloat(batchForm.rawQtyKg) > 0 && parseFloat(batchForm.directPricePerKg) > 0 && (
+              <p className="text-xs text-gray-500">Raw rice cost: Rs {(parseFloat(batchForm.rawQtyKg) * parseFloat(batchForm.directPricePerKg)).toLocaleString(undefined, { maximumFractionDigits: 2 })}. More trucks can be added on the batch page.</p>
+            )}
+          </div>
+          )}
+
+          {/* Quantities (service milling) */}
+          {!useBlend && batchForm.millingType === 'service_milling' && (
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">{batchForm.millingType === 'service_milling' ? 'Quantity Received (KG)' : 'Raw Qty (KG)'} *</label>

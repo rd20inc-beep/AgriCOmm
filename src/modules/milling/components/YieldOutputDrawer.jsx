@@ -23,8 +23,11 @@ export default function YieldOutputDrawer({ open, onClose, form, setForm, onSubm
       <form onSubmit={onSubmit} className="space-y-4">
         <div className="bg-blue-50 rounded-lg p-3 text-sm text-blue-800">
           <span className="font-semibold">{isPartial ? 'Milling Qty' : 'Raw Input'}:</span> {Math.round(basis).toLocaleString()} kg
-          {isPartial && <span className="text-blue-600"> (of {Math.round(receivedKg).toLocaleString()} kg received)</span>} &nbsp;|&nbsp;
-          <span className="font-semibold">Planned Finished:</span> {Math.round(batch.plannedFinishedKg).toLocaleString()} kg
+          {isPartial && <span className="text-blue-600"> (of {Math.round(receivedKg).toLocaleString()} kg received)</span>}
+          {/* No planned target is captured on new batches — show it only when one exists. */}
+          {Number(batch.plannedFinishedKg) > 0 && (
+            <> &nbsp;|&nbsp; <span className="font-semibold">Planned Finished:</span> {Math.round(batch.plannedFinishedKg).toLocaleString()} kg</>
+          )}
         </div>
 
         {/* Finished rice */}
@@ -32,7 +35,7 @@ export default function YieldOutputDrawer({ open, onClose, form, setForm, onSubm
           <label className="block text-sm font-medium text-gray-700 mb-1">Finished Rice (KG) *</label>
           <input type="number" step="0.01" min="0" required value={form.actualFinishedMT}
             onChange={(e) => setForm(prev => ({ ...prev, actualFinishedMT: e.target.value }))}
-            placeholder="e.g. 49.2"
+            placeholder="e.g. 32000"
             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
         </div>
 
@@ -108,7 +111,7 @@ export default function YieldOutputDrawer({ open, onClose, form, setForm, onSubm
             <label className="block text-sm font-medium text-gray-700 mb-1">Sortex Rejects (KG)</label>
             <input type="number" step="0.01" min="0" value={form.sortexMT}
               onChange={(e) => setForm(prev => ({ ...prev, sortexMT: e.target.value }))}
-              placeholder="e.g. 2.1"
+              placeholder="e.g. 2100"
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
             <p className="text-[11px] text-gray-400 mt-0.5">Color-sorter rejected kernels (yellow/damaged)</p>
           </div>
@@ -116,7 +119,7 @@ export default function YieldOutputDrawer({ open, onClose, form, setForm, onSubm
             <label className="block text-sm font-medium text-gray-700 mb-1">Powder (KG)</label>
             <input type="number" step="0.01" min="0" value={form.powderMT}
               onChange={(e) => setForm(prev => ({ ...prev, powderMT: e.target.value }))}
-              placeholder="e.g. 0.5"
+              placeholder="e.g. 500"
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
             <p className="text-[11px] text-gray-400 mt-0.5">Rice powder — sellable, goes to inventory</p>
           </div>
@@ -124,7 +127,7 @@ export default function YieldOutputDrawer({ open, onClose, form, setForm, onSubm
             <label className="block text-sm font-medium text-gray-700 mb-1">S.W (KG)</label>
             <input type="number" step="0.01" min="0" value={form.sweepingMT}
               onChange={(e) => setForm(prev => ({ ...prev, sweepingMT: e.target.value }))}
-              placeholder="e.g. 0.3"
+              placeholder="e.g. 300"
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
             <p className="text-[11px] text-gray-400 mt-0.5">Sweeping — sellable, goes to inventory</p>
           </div>
@@ -132,7 +135,7 @@ export default function YieldOutputDrawer({ open, onClose, form, setForm, onSubm
             <label className="block text-sm font-medium text-gray-700 mb-1">Choba (KG)</label>
             <input type="number" step="0.01" min="0" value={form.chobaMT}
               onChange={(e) => setForm(prev => ({ ...prev, chobaMT: e.target.value }))}
-              placeholder="e.g. 0.4"
+              placeholder="e.g. 400"
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
             <p className="text-[11px] text-gray-400 mt-0.5">Choba — sellable, goes to inventory</p>
           </div>
@@ -140,7 +143,7 @@ export default function YieldOutputDrawer({ open, onClose, form, setForm, onSubm
             <label className="block text-sm font-medium text-gray-700 mb-1">O.V (KG)</label>
             <input type="number" step="0.01" min="0" value={form.ovMT}
               onChange={(e) => setForm(prev => ({ ...prev, ovMT: e.target.value }))}
-              placeholder="e.g. 0.2"
+              placeholder="e.g. 200"
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
             <p className="text-[11px] text-gray-400 mt-0.5">Record-only — not priced or stocked</p>
           </div>
@@ -148,7 +151,7 @@ export default function YieldOutputDrawer({ open, onClose, form, setForm, onSubm
             <label className="block text-sm font-medium text-gray-700 mb-1">Stone (KG)</label>
             <input type="number" step="0.01" min="0" value={form.stoneMT}
               onChange={(e) => setForm(prev => ({ ...prev, stoneMT: e.target.value }))}
-              placeholder="e.g. 0.1"
+              placeholder="e.g. 100"
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
             <p className="text-[11px] text-gray-400 mt-0.5">Record-only — not priced or stocked</p>
           </div>
@@ -156,7 +159,7 @@ export default function YieldOutputDrawer({ open, onClose, form, setForm, onSubm
             <label className="block text-sm font-medium text-gray-700 mb-1">Wastage (KG)</label>
             <input type="number" step="0.01" min="0" value={form.wastageMT}
               onChange={(e) => setForm(prev => ({ ...prev, wastageMT: e.target.value }))}
-              placeholder="e.g. 1.3"
+              placeholder="e.g. 1300"
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
             <p className="text-[11px] text-gray-400 mt-0.5">Dust / fines / unaccounted — no value</p>
           </div>

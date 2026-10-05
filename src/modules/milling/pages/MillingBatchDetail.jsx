@@ -331,26 +331,33 @@ export default function MillingBatchDetail() {
       : []),
   ];
 
-  // Activity log derived from batch lifecycle
+  // Once milled & yielded the raw trucks are locked server-side (add / edit /
+  // delete all answer 409), so the controls are hidden.
+  const trucksLocked = batch.status === 'Completed' || (parseFloat(batch.actualFinishedKg) || 0) > 0;
+
+  // Activity log — only steps the batch row (and its truck arrivals) actually
+  // timestamp. No invented actors and no step dated with createdAt it didn't
+  // happen at.
+  const fmtWhen = (d) => {
+    if (!d) return '';
+    const t = new Date(d);
+    return Number.isNaN(t.getTime()) ? String(d) : t.toLocaleString();
+  };
   const activityLog = [
-    { date: batch.createdAt, action: `Batch ${batch.id} created`, by: 'Mill Manager' },
-    { date: batch.createdAt, action: `Raw material (${Math.round(batch.rawQtyKg).toLocaleString()} kg) received from ${batch.supplierName}`, by: 'Inventory Officer' },
-    ...(safeArrival
-      ? [{ date: batch.createdAt, action: `Arrival quality analysis completed. Variance: ${batch.variancePct}%`, by: 'QC Analyst' }]
+    ...(batch.createdAt ? [{ ts: batch.createdAt, action: `Batch ${batch.id} created` }] : []),
+    ...(Array.isArray(batch.vehicleArrivals) ? batch.vehicleArrivals : [])
+      .filter((v) => v.arrivalDate)
+      .map((v) => ({
+        ts: v.arrivalDate,
+        action: `${v.vehicleNo ? `Truck ${v.vehicleNo}` : 'Truck'} arrived${v.weightKg ? ` — ${Math.round(v.weightKg).toLocaleString()} kg` : ''}`,
+      })),
+    ...(batch.approvedAt ? [{ ts: batch.approvedAt, action: 'Batch approved' }] : []),
+    ...(batch.completedAt
+      ? [{ ts: batch.completedAt, action: `Milling completed. Finished: ${Math.round(batch.actualFinishedKg).toLocaleString()} kg, Yield: ${batch.yieldPct}%` }]
       : []),
-    ...(batch.varianceStatus === 'Approved'
-      ? [{ date: batch.createdAt, action: 'Quality variance approved — batch cleared for milling', by: 'QC Manager' }]
-      : []),
-    ...(batch.status === 'In Progress'
-      ? [{ date: batch.createdAt, action: 'Milling in progress', by: 'Mill Operator' }]
-      : []),
-    ...(batch.status === 'Completed' && batch.completedAt
-      ? [
-          { date: batch.completedAt, action: `Milling completed. Finished: ${Math.round(batch.actualFinishedKg).toLocaleString()} kg, Yield: ${batch.yieldPct}%`, by: 'Mill Manager' },
-          { date: batch.completedAt, action: 'Stock transferred to finished goods warehouse', by: 'Inventory Officer' },
-        ]
-      : []),
-  ];
+  ]
+    .sort((a, b) => new Date(a.ts) - new Date(b.ts))
+    .map((e) => ({ ...e, date: fmtWhen(e.ts) }));
 
   function openAnalysisModal(type = 'arrival') {
     setAnalysisModalType(type);
@@ -962,10 +969,12 @@ export default function MillingBatchDetail() {
               <div className="text-xs text-gray-500">Raw Qty</div>
               <div className="text-lg font-bold text-gray-900">{Math.round(batch.rawQtyKg).toLocaleString()} kg</div>
             </div>
+            {batch.plannedFinishedKg > 0 && (
             <div>
               <div className="text-xs text-gray-500">Planned</div>
               <div className="text-lg font-bold text-gray-900">{Math.round(batch.plannedFinishedKg).toLocaleString()} kg</div>
             </div>
+            )}
             <div>
               <div className="text-xs text-gray-500">Actual</div>
               <div className="text-lg font-bold text-blue-600">{Math.round(batch.actualFinishedKg).toLocaleString()} kg</div>
@@ -1132,6 +1141,8 @@ export default function MillingBatchDetail() {
                   <h3 className="text-sm font-medium text-gray-500">Vehicle Arrivals</h3>
                   {isFromLots ? (
                     <span className="text-[11px] text-gray-400">Inherited from source lots</span>
+                  ) : trucksLocked ? (
+                    <span className="text-[11px] text-gray-400">Locked after yield</span>
                   ) : (
                     <button
                       onClick={() => {
@@ -1195,7 +1206,7 @@ export default function MillingBatchDetail() {
                 ) : (safeVehicles && safeVehicles.length > 0) ? (
                   <div className="space-y-2">
                     {safeVehicles.map((v, idx) => {
-                      const kg = parseFloat(v.weight_kg) || 0;
+                      const kg = parseFloat(v.weightKg) || 0;
                       const bags = parseInt(v.totalBags, 10) || 0;
                       const avg = kg > 0 && bags > 0 ? (kg / bags).toFixed(2) : null;
                       return (
@@ -1210,7 +1221,7 @@ export default function MillingBatchDetail() {
                               {bags > 0 && <span className="text-gray-500 text-xs ml-2">{bags} bags{avg ? ` · ${avg} kg/bag` : ''}</span>}
                               <span className="text-gray-400 text-xs ml-2">{v.arrivalDate}</span>
                             </div>
-                            {isOwnerOrAdmin && v.id && (
+                            {isOwnerOrAdmin && v.id && !trucksLocked && (
                               <>
                                 <button
                                   onClick={() => openEditVehicle(v)}
@@ -1224,7 +1235,7 @@ export default function MillingBatchDetail() {
                                     if (!await confirm({
                                       title: `Delete vehicle ${v.vehicleNo} arrival?`,
                                       consequence: 'The inventory receipt this arrival created is reversed.',
-                                      amount: `${Math.round(parseFloat(v.weight_kg) || 0).toLocaleString()} kg`,
+                                      amount: `${Math.round(parseFloat(v.weightKg) || 0).toLocaleString()} kg`,
                                       confirmLabel: 'Delete arrival',
                                     })) return;
                                     try {
@@ -1247,7 +1258,7 @@ export default function MillingBatchDetail() {
                     })}
                     <div className="text-xs text-gray-500 pt-1 border-t border-gray-100 flex justify-between">
                       <span>{safeVehicles.length} vehicle(s)</span>
-                      <span>Total: {Math.round(safeVehicles.reduce((s, v) => s + (parseFloat(v.weight_kg) || 0), 0)).toLocaleString()} kg</span>
+                      <span>Total: {Math.round(safeVehicles.reduce((s, v) => s + (parseFloat(v.weightKg) || 0), 0)).toLocaleString()} kg</span>
                     </div>
                   </div>
                 ) : (
@@ -1260,6 +1271,8 @@ export default function MillingBatchDetail() {
               <div className="bg-white rounded-xl shadow-sm p-5">
                 <h3 className="text-sm font-medium text-gray-500 mb-3">Planned vs Actual</h3>
                 <div className="space-y-3 text-sm">
+                  {/* No planned target is captured on new batches — only show one that exists. */}
+                  {batch.plannedFinishedKg > 0 && (
                   <div>
                     <div className="flex justify-between mb-1">
                       <span className="text-gray-500">Planned Finished</span>
@@ -1272,6 +1285,7 @@ export default function MillingBatchDetail() {
                       />
                     </div>
                   </div>
+                  )}
                   <div>
                     <div className="flex justify-between mb-1">
                       <span className="text-gray-500">Actual Finished</span>
@@ -1280,7 +1294,7 @@ export default function MillingBatchDetail() {
                     <div className="w-full bg-gray-200 rounded-full h-2">
                       <div
                         className="bg-emerald-500 h-2 rounded-full"
-                        style={{ width: `${batch.plannedFinishedMT > 0 ? Math.min((batch.actualFinishedMT / batch.plannedFinishedMT) * 100, 100) : 0}%` }}
+                        style={{ width: `${batch.plannedFinishedMT > 0 ? Math.min((batch.actualFinishedMT / batch.plannedFinishedMT) * 100, 100) : (batch.actualFinishedKg > 0 ? 100 : 0)}%` }}
                       />
                     </div>
                   </div>
@@ -1353,7 +1367,7 @@ export default function MillingBatchDetail() {
                         return (
                           <tr key={v.id || i} className="border-b border-gray-100 last:border-0">
                             <td data-label="Vehicle" className="py-2 pr-3 font-mono font-medium text-gray-900 whitespace-nowrap">{v.vehicleNo}{v.driverName && <span className="text-gray-400 font-sans ml-1.5">({v.driverName})</span>}</td>
-                            <td data-label="Weight" className="py-2 pr-3 text-right tabular-nums">{Math.round(parseFloat(v.weight_kg) || 0).toLocaleString()} kg</td>
+                            <td data-label="Weight" className="py-2 pr-3 text-right tabular-nums">{Math.round(parseFloat(v.weightKg ?? v.weight_kg) || 0).toLocaleString()} kg</td>
                             {qualityParams.slice(0, 5).map(p => { const val = qGet(q, p); return <td data-label={p.label} key={p.key} className="py-2 pr-3 text-right tabular-nums">{val == null ? '—' : `${val}%`}</td>; })}
                             {showCost && <td data-label="Price /kg" className="py-2 pl-3 text-right tabular-nums">{price ? `Rs ${(Number(price) / 1000).toFixed(2)}` : '—'}</td>}
                           </tr>
@@ -1657,6 +1671,8 @@ export default function MillingBatchDetail() {
                       <span className="text-gray-500">Raw Input</span>
                       <span className="font-medium">{Math.round(batch.rawQtyKg).toLocaleString()} kg</span>
                     </div>
+                    {batch.plannedFinishedKg > 0 && (
+                    <>
                     <div className="flex justify-between">
                       <span className="text-gray-500">Target Finished</span>
                       <span className="font-medium">{Math.round(batch.plannedFinishedKg).toLocaleString()} kg</span>
@@ -1667,6 +1683,8 @@ export default function MillingBatchDetail() {
                         {batch.rawQtyMT > 0 ? ((batch.plannedFinishedMT / batch.rawQtyMT) * 100).toFixed(1) : 0}%
                       </span>
                     </div>
+                    </>
+                    )}
                   </div>
                 </div>
                 <div>
@@ -2029,9 +2047,7 @@ export default function MillingBatchDetail() {
                   {/* Content */}
                   <div className="pb-6 min-w-0">
                     <div className="text-sm text-gray-900">{entry.action}</div>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <span className="text-xs text-gray-500">{entry.by}</span>
-                      <span className="text-gray-300">·</span>
+                    <div className="mt-0.5">
                       <span className="text-xs text-gray-400">{entry.date}</span>
                     </div>
                   </div>
