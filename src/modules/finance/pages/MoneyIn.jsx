@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { ArrowDownLeft, DollarSign, AlertTriangle, CheckCircle, Clock, Eye, X, Printer } from 'lucide-react';
 import { FinanceKPI, FinanceTable, FinanceChart, FinanceFilterBar } from '../../../components/finance';
-import { useReceivables, useRecordPayment, useBankAccounts, useReceivableReceipts, useAcceptLocalSalePayment } from '../../../api/queries';
+import { useReceivables, useRecordPayment, useBankAccounts, useReceivableReceipts, useAcceptLocalSaleGroupPayment } from '../../../api/queries';
 import { isPostDatedCheque } from '../../../components/payments/paymentPayload';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { useApp } from '../../../context/AppContext';
@@ -13,7 +13,8 @@ import PartyLink from '../../../shared/components/PartyLink';
 import { toPkr } from '../utils/fx';
 import { bucketize, BUCKET_KEYS } from '../utils/aging';
 import { shortenRef } from '../utils/refs';
-import { favStar } from '../../../shared/utils/favorites';
+import { favStar, isFavorite } from '../../../shared/utils/favorites';
+import { localToday, defaultBankAccountId } from '../../localSales/utils/saleStatus';
 
 // Currency-aware formatter — picks $ / Rs / € / £ from the row's currency.
 function fmtCur(n, currency = 'USD') {
@@ -55,7 +56,9 @@ export default function MoneyIn() {
   const { queryParams: rangeParams } = useFinanceDateRange();
   const { data: receivables = [], isLoading } = useReceivables(rangeParams);
   const recordPaymentMut = useRecordPayment();
-  const acceptLocalSaleMut = useAcceptLocalSalePayment();
+  // A local-sale row is a whole sale (one row per sale_group_no) — one receipt
+  // settles it, split across its lines server-side.
+  const acceptLocalSaleMut = useAcceptLocalSaleGroupPayment();
   const [statusFilter, setStatusFilter] = useState('All');
   const [typeFilter, setTypeFilter] = useState('All');
   const [drawer, setDrawer] = useState(null);
@@ -114,8 +117,10 @@ export default function MoneyIn() {
       return inner;
     }},
     { key: 'customerName', label: 'Customer', sortable: true, render: (v, row) => <PartyLink type="customer" id={row.customerId} name={v} /> },
-    { key: 'type', label: 'Type', sortable: true, render: (v) => (
-      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${v === 'Advance' ? 'bg-blue-50 text-blue-700' : 'bg-purple-50 text-purple-700'}`}>{v}</span>
+    { key: 'type', label: 'Type', sortable: true, render: (v, row) => (
+      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${v === 'Advance' ? 'bg-blue-50 text-blue-700' : 'bg-purple-50 text-purple-700'}`}>
+        {v}{row.kind === 'local_sale' && row.lineCount > 1 ? ` · ${row.lineCount} items` : ''}
+      </span>
     )},
     { key: 'expectedAmount', label: 'Amount', sortable: true, align: 'right', render: (v, row) => (
       <div className="flex flex-col items-end">
@@ -147,22 +152,28 @@ export default function MoneyIn() {
   // Receipt history for the open drawer row — where/how each partial was received.
   const { data: receiptData, isLoading: receiptsLoading } = useReceivableReceipts(
     drawer?.id,
-    drawer?.kind === 'local_sale' ? 'local_sale' : 'export',
+    drawer?.kind === 'local_sale' ? 'local_sale_group' : 'export',
     !!drawer,
   );
-  const [recvForm, setRecvForm] = useState({ amount: '', bankAccountId: '', paymentMethod: 'bank_transfer', paymentDate: new Date().toISOString().split('T')[0], chequeNo: '', dueDate: '', notes: '' });
+  const [recvForm, setRecvForm] = useState({ amount: '', bankAccountId: '', paymentMethod: 'bank_transfer', paymentDate: localToday(), chequeNo: '', dueDate: '', notes: '', collectionLocation: 'Mill' });
+  const nonCashAccounts = bankAccounts.filter(a => a.type !== 'cash');
 
   function openDrawer(row) {
     setDrawer(row);
     setRecvForm({
       amount: String(parseFloat(row.outstanding) || 0),
-      bankAccountId: '',
+      // Starts on the starred bank account (favorites.js).
+      bankAccountId: defaultBankAccountId(nonCashAccounts, isFavorite),
       paymentMethod: 'bank_transfer',
-      paymentDate: new Date().toISOString().split('T')[0],
+      paymentDate: localToday(),
       chequeNo: '', dueDate: '',
       notes: '',
+      // Local-sale cash lands in Mill Cash or Office Petty Cash by WHERE it was
+      // collected — the same Mill / Head Office choice as the Local Sales drawer.
+      collectionLocation: row.collectionLocation || 'Mill',
     });
   }
+  const isLocalCash = drawer?.kind === 'local_sale' && recvForm.paymentMethod === 'cash';
 
   async function handleRecordPayment(e) {
     e.preventDefault();
@@ -176,14 +187,18 @@ export default function MoneyIn() {
         // (A derived receivable RCV-LS-N has type 'Local Sale' but kind
         // 'receivable' + a receivables id — it goes the recordPayment route.)
         await acceptLocalSaleMut.mutateAsync({
-          saleId: recv.id,
+          groupNo: recv.saleGroupNo || recv.recvNo,
           data: {
             amount,
             payment_method: recvForm.paymentMethod,
             payment_date: recvForm.paymentDate,
-            bank_account_id: isPostDatedCheque(recvForm) ? null : (recvForm.bankAccountId || null),
+            // Cash is routed by collection_location (Mill Cash / Office Petty
+            // Cash), not by an account pick.
+            bank_account_id: (isPostDatedCheque(recvForm) || recvForm.paymentMethod === 'cash') ? null : (recvForm.bankAccountId || null),
+            collection_location: recvForm.paymentMethod === 'cash' ? (recvForm.collectionLocation || 'Mill') : null,
             reference: recvForm.chequeNo || null,
             due_date: recvForm.dueDate || null,
+            notes: recvForm.notes || null,
           },
         });
       } else {
@@ -251,7 +266,7 @@ export default function MoneyIn() {
       <FinanceFilterBar
         filters={[
           { key: 'status', label: 'Status', value: statusFilter, onChange: setStatusFilter,
-            options: [{ value: 'All', label: 'All Status' }, { value: 'Pending', label: 'Pending' }, { value: 'Partial', label: 'Partial' }, { value: 'Overdue', label: 'Overdue' }, { value: 'Paid', label: 'Paid' }] },
+            options: [{ value: 'All', label: 'All Status' }, { value: 'Pending', label: 'Pending' }, { value: 'Credit', label: 'Credit' }, { value: 'Partial', label: 'Partial' }, { value: 'Overdue', label: 'Overdue' }, { value: 'Paid', label: 'Paid' }] },
           { key: 'type', label: 'Type', value: typeFilter, onChange: setTypeFilter,
             options: [{ value: 'All', label: 'All Types' }, { value: 'Advance', label: 'Advance' }, { value: 'Balance', label: 'Balance' }] },
         ]}
@@ -366,7 +381,12 @@ export default function MoneyIn() {
                 <div>
                   <label className="text-xs text-gray-500 block mb-1">Payment Method</label>
                   <select value={recvForm.paymentMethod}
-                    onChange={e => { const m = e.target.value; setRecvForm({ ...recvForm, paymentMethod: m, bankAccountId: (m === 'cash') !== (recvForm.paymentMethod === 'cash') ? '' : recvForm.bankAccountId }); }}
+                    onChange={e => {
+                      const m = e.target.value;
+                      const switchedKind = (m === 'cash') !== (recvForm.paymentMethod === 'cash');
+                      const pool = bankAccounts.filter(a => (a.type === 'cash') === (m === 'cash'));
+                      setRecvForm({ ...recvForm, paymentMethod: m, bankAccountId: switchedKind ? defaultBankAccountId(pool, isFavorite) : recvForm.bankAccountId });
+                    }}
                     className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
                     <option value="bank_transfer">Bank Transfer / TT</option>
                     <option value="lc">Letter of Credit</option>
@@ -397,7 +417,19 @@ export default function MoneyIn() {
                 {/* Receive Into Account — every receipt lands in one: a cash
                     account for cash, a bank account otherwise. Only a post-dated
                     cheque waits; it moves money when it clears. */}
-                {!isPostDatedCheque(recvForm) && (
+                {isLocalCash && (
+                  <div>
+                    <label className="text-xs text-gray-500 block mb-1">Cash collected at</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {['Mill', 'Head Office'].map(loc => (
+                        <button key={loc} type="button" onClick={() => setRecvForm({ ...recvForm, collectionLocation: loc })}
+                          className={`px-3 py-2 text-sm font-medium rounded-lg border ${recvForm.collectionLocation === loc ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600 hover:border-gray-300'}`}>{loc}</button>
+                      ))}
+                    </div>
+                    <p className="text-[11px] text-gray-400 mt-1">{recvForm.collectionLocation === 'Head Office' ? 'Lands in Office Petty Cash.' : 'Lands in Mill Cash.'}</p>
+                  </div>
+                )}
+                {!isPostDatedCheque(recvForm) && !isLocalCash && (
                   <div>
                     <label className="text-xs text-gray-500 block mb-1">Receive Into Account</label>
                     <select required value={recvForm.bankAccountId} onChange={e => setRecvForm({ ...recvForm, bankAccountId: e.target.value })}
@@ -446,10 +478,10 @@ export default function MoneyIn() {
                     className="text-xs px-3 py-1 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">Custom</button>
                 </div>
 
-                <button type="submit" disabled={recordPaymentMut.isPending}
+                <button type="submit" disabled={recordPaymentMut.isPending || acceptLocalSaleMut.isPending}
                   className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-medium text-sm disabled:opacity-50">
                   <CheckCircle size={16} />
-                  {recordPaymentMut.isPending ? 'Processing...' : `Record Receipt — ${fmtCur(parseFloat(recvForm.amount) || 0, drawer.currency)}`}
+                  {(recordPaymentMut.isPending || acceptLocalSaleMut.isPending) ? 'Processing...' : `Record Receipt — ${fmtCur(parseFloat(recvForm.amount) || 0, drawer.currency)}`}
                 </button>
               </form>
             )}

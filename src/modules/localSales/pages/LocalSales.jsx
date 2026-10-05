@@ -1,4 +1,4 @@
-import { useState, useMemo, Fragment } from 'react';
+import { useState, useMemo, useRef, Fragment } from 'react';
 import { Link } from 'react-router-dom';
 import PartyLink from '../../../shared/components/PartyLink';
 import {
@@ -6,7 +6,7 @@ import {
   CreditCard, X, Clock, CheckCircle, RefreshCw, Download,
   Check, ChevronLeft, ChevronRight, UserPlus, Eye, User, Inbox,
 } from 'lucide-react';
-import { useLocalSales, useLocalSalesSummary, useCreateLocalSale, useAcceptLocalSalePayment, useLotInventory,
+import { useLocalSales, useLocalSalesSummary, useCreateLocalSale, useAcceptLocalSalePayment, useAcceptLocalSaleGroupPayment, useLotInventory,
   usePendingLocalSales, useConfirmLocalSale, useRejectLocalSale } from '../../../api/queries';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
@@ -15,13 +15,15 @@ import { useMillStoreItems } from '../../millStore/api/queries';
 import { LoadingSpinner, ErrorState, EmptyState } from '../../../components/LoadingState';
 import StatusBadge from '../../../components/StatusBadge';
 import SlideDrawer from '../../../components/SlideDrawer';
-import { adminApi } from '../../admin/api/services';
+import { adminApi, customersApi } from '../../admin/api/services';
+import CustomerPicker from '../../../components/CustomerPicker';
 import { localSalesApi } from '../../../api/services';
-import { toKg, fromKg, rateToPerKg, allEquivalents, allRateEquivalents, UNITS } from '../../../utils/unitConversion';
+import { toKg, fromKg, rateToPerKg, rateFromPerKg, allEquivalents, allRateEquivalents, UNITS } from '../../../utils/unitConversion';
 import { downloadCSV } from '../../../utils/csvExport';
 import { lotCategory, CAT_ORDER, CAT_COLOR } from '../../../utils/lotCategory';
-import { favStar } from '../../../shared/utils/favorites';
+import { favStar, isFavorite } from '../../../shared/utils/favorites';
 import useConfirm from '../../../hooks/useConfirm';
+import { paymentWord, groupPaymentWord, payableDue, localToday, readLastCustomerId, rememberLastCustomerId, defaultBankAccountId } from '../utils/saleStatus';
 
 function fmtPKR(v) { return 'Rs ' + (parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 
@@ -48,15 +50,34 @@ export default function LocalSales() {
   const [searchTerm, setSearchTerm] = useState('');
   const [displayUnit, setDisplayUnit] = useState('kg');
   const [statusFilter, setStatusFilter] = useState('');
+  // Rejected (Cancelled) sales are hidden unless asked for.
+  const [showRejected, setShowRejected] = useState(false);
   const [selectedSale, setSelectedSale] = useState(null);
   const [salePayments, setSalePayments] = useState([]);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
-  const [payForm, setPayForm] = useState({ amount: '', payment_method: 'cash', bank_account_id: '', payment_date: new Date().toISOString().split('T')[0], reference: '', notes: '', due_date: '', collection_location: 'Mill' });
+  // When set, the payment drawer settles a whole multi-item sale in one
+  // receipt: { groupNo, due, count, buyer }.
+  const [payGroup, setPayGroup] = useState(null);
+  const EMPTY_PAY = () => ({ amount: '', payment_method: 'cash', bank_account_id: '', payment_date: localToday(), reference: '', notes: '', due_date: '', collection_location: 'Mill' });
+  const [payForm, setPayForm] = useState(EMPTY_PAY);
   const [payLoading, setPayLoading] = useState(false);
 
   const { data: sales = [], isLoading, error, refetch } = useLocalSales();
   const { data: summary = {} } = useLocalSalesSummary();
   const payMutation = useAcceptLocalSalePayment();
+  const groupPayMutation = useAcceptLocalSaleGroupPayment();
+  function openGroupPay(g) {
+    const due = payableDue(g.items);
+    setPayGroup({ groupNo: g.key, due, count: g.items.length, buyer: g.items[0]?.customerName || g.items[0]?.buyerName || '' });
+    setPayForm({ ...EMPTY_PAY(), amount: String(due), collection_location: g.items[0]?.collectionLocation || 'Mill' });
+    setShowPaymentModal(true);
+  }
+  function openLinePay(s) {
+    setPayGroup(null);
+    setSelectedSale(s);
+    setPayForm({ ...EMPTY_PAY(), amount: String(parseFloat(s.dueAmount) || 0), collection_location: s.collectionLocation || s.collection_location || 'Mill' });
+    setShowPaymentModal(true);
+  }
   // Sale confirmation (Batch 6 · item 9): only a Mill Manager/Owner releases a
   // pending sale's stock + revenue.
   const { user, hasPermission } = useAuth();
@@ -97,7 +118,11 @@ export default function LocalSales() {
 
   const filtered = useMemo(() => {
     let list = safeSales;
-    if (statusFilter) list = list.filter(s => s.paymentStatus === statusFilter || s.payment_status === statusFilter);
+    if (statusFilter === 'Rejected') list = list.filter(s => s.status === 'Cancelled');
+    else {
+      if (!showRejected) list = list.filter(s => s.status !== 'Cancelled');
+      if (statusFilter) list = list.filter(s => paymentWord(s) === statusFilter);
+    }
     if (searchTerm) {
       const t = searchTerm.toLowerCase();
       list = list.filter(s =>
@@ -107,7 +132,7 @@ export default function LocalSales() {
       );
     }
     return list;
-  }, [safeSales, searchTerm, statusFilter]);
+  }, [safeSales, searchTerm, statusFilter, showRejected]);
 
   // Group the line rows of a multi-item sale (shared sale_group_no) so one sale
   // shows as a single expandable row. Single-item sales render as a plain row.
@@ -124,8 +149,8 @@ export default function LocalSales() {
       const paid = items.reduce((a, b) => a + n(b.paidAmount), 0);
       const due = items.reduce((a, b) => a + n(b.dueAmount), 0);
       const qtyKg = items.reduce((a, b) => a + n(b.quantityKg), 0);
-      const status = due <= 0.01 ? 'Paid' : paid > 0 ? 'Partial' : (items[0]?.paymentStatus || 'Unpaid');
-      return { key, items, total, paid, due, qtyKg, status };
+      const status = groupPaymentWord(items);
+      return { key, items, total, paid, due, qtyKg, status, payable: payableDue(items) };
     });
   }, [filtered]);
 
@@ -202,12 +227,18 @@ export default function LocalSales() {
             placeholder="Search buyer, item, sale#..."
             className="w-full pl-9 pr-4 py-1.5 text-sm border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500" />
         </div>
-        {['', 'Paid', 'Partial', 'Unpaid'].map(s => (
+        {['', 'Paid', 'Partial', 'Credit', 'Rejected'].map(s => (
           <button key={s || 'all'} onClick={() => setStatusFilter(s)}
             className={`px-3 py-1.5 text-xs font-medium rounded-lg ${statusFilter === s ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
             {s || 'All'}
           </button>
         ))}
+        {statusFilter !== 'Rejected' && (
+          <label className="inline-flex items-center gap-1.5 text-xs text-gray-500 cursor-pointer select-none">
+            <input type="checkbox" checked={showRejected} onChange={e => setShowRejected(e.target.checked)} className="rounded border-gray-300" />
+            Show rejected
+          </label>
+        )}
         <div className="ml-auto flex bg-gray-100 rounded-lg p-0.5">
           {UNITS.map(u => (
             <button key={u} onClick={() => setDisplayUnit(u)}
@@ -281,6 +312,7 @@ export default function LocalSales() {
                       <td data-label="Sale #" className="py-2.5 px-4 font-medium text-blue-600">
                         {s.saleNo}
                         {s.status === 'Pending' && <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-700 align-middle">Pending</span>}
+                        {s.status === 'Cancelled' && <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-red-100 text-red-700 align-middle">Rejected</span>}
                       </td>
                       <td data-label="Date" className="mob-hide py-2.5 px-4 text-gray-600 text-xs">{s.saleDate ? new Date(s.saleDate).toLocaleDateString('en-GB', { day:'2-digit', month:'short' }) : '—'}</td>
                       <td data-label="Buyer" className="py-2.5 px-4 text-gray-900"><PartyLink type="customer" id={s.customerId} name={s.customerName || s.buyerName} /></td>
@@ -288,11 +320,11 @@ export default function LocalSales() {
                       <td data-label="Qty" className="mob-hide py-2.5 px-4 text-right font-medium tabular-nums">{rowQty(s)}</td>
                       <td data-label="Rate" className="mob-hide py-2.5 px-4 text-right text-xs tabular-nums">{fmtPKR(s.ratePerKg)}/kg</td>
                       <td data-label="Total" className="py-2.5 px-4 text-right font-bold tabular-nums">{fmtPKR(s.totalAmount)}</td>
-                      <td data-label="Payment" className="py-2.5 px-4 text-center"><StatusBadge status={s.paymentStatus} /></td>
+                      <td data-label="Payment" className="py-2.5 px-4 text-center"><StatusBadge status={paymentWord(s)} /></td>
                       <td className="py-2.5 px-4 text-center">
                         <div className="inline-flex items-center gap-1.5">
                           {s.status === 'Completed' && parseFloat(s.dueAmount) > 0 && (
-                            <button onClick={(e) => { e.stopPropagation(); setSelectedSale(s); setPayForm(p => ({ ...p, amount: String(parseFloat(s.dueAmount) || 0), collection_location: s.collectionLocation || s.collection_location || 'Mill' })); setShowPaymentModal(true); }}
+                            <button onClick={(e) => { e.stopPropagation(); openLinePay(s); }}
                               className="px-2.5 py-1 bg-emerald-50 text-emerald-700 text-xs font-medium rounded hover:bg-emerald-100 inline-flex items-center gap-1">
                               <CreditCard size={12} /> Pay
                             </button>
@@ -315,6 +347,7 @@ export default function LocalSales() {
                           {g.key}
                           <span className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-blue-100 text-blue-700">{g.items.length} items</span>
                           {head.status === 'Pending' && <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-700">Pending</span>}
+                          {g.status === 'Rejected' && <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-red-100 text-red-700">Rejected</span>}
                         </span>
                       </td>
                       <td data-label="Date" className="mob-hide py-2.5 px-4 text-gray-600 text-xs">{head.saleDate ? new Date(head.saleDate).toLocaleDateString('en-GB', { day:'2-digit', month:'short' }) : '—'}</td>
@@ -324,7 +357,15 @@ export default function LocalSales() {
                       <td data-label="Rate" className="mob-hide py-2.5 px-4 text-right text-xs text-gray-400">—</td>
                       <td data-label="Total" className="py-2.5 px-4 text-right font-bold tabular-nums">{fmtPKR(g.total)}</td>
                       <td data-label="Payment" className="py-2.5 px-4 text-center"><StatusBadge status={g.status} /></td>
-                      <td className="py-2.5 px-4"></td>
+                      <td className="py-2.5 px-4 text-center">
+                        {/* One receipt for the whole sale — split across its lines server-side. */}
+                        {g.payable > 0 && (
+                          <button onClick={(e) => { e.stopPropagation(); openGroupPay(g); }}
+                            className="px-2.5 py-1 bg-emerald-50 text-emerald-700 text-xs font-medium rounded hover:bg-emerald-100 inline-flex items-center gap-1">
+                            <CreditCard size={12} /> Pay
+                          </button>
+                        )}
+                      </td>
                     </tr>
                     {open && g.items.map(s => (
                       <tr key={s.id} onClick={() => openSaleDetail(s)} className="hover:bg-blue-50/40 cursor-pointer bg-white">
@@ -335,7 +376,7 @@ export default function LocalSales() {
                         <td data-label="Qty" className="mob-hide py-2 px-4 text-right text-sm tabular-nums">{rowQty(s)}</td>
                         <td data-label="Rate" className="mob-hide py-2 px-4 text-right text-xs tabular-nums">{fmtPKR(s.ratePerKg)}/kg</td>
                         <td data-label="Total" className="py-2 px-4 text-right font-semibold text-sm tabular-nums">{fmtPKR(s.totalAmount)}</td>
-                        <td data-label="Payment" className="py-2 px-4 text-center"><StatusBadge status={s.paymentStatus} /></td>
+                        <td data-label="Payment" className="py-2 px-4 text-center"><StatusBadge status={paymentWord(s)} /></td>
                         <td className="py-2 px-4 text-center"><button onClick={(e) => { e.stopPropagation(); openSaleDetail(s); }} className="text-blue-600 hover:text-blue-800" title="View details"><Eye size={15} /></button></td>
                       </tr>
                     ))}
@@ -370,7 +411,7 @@ export default function LocalSales() {
                 <p className={`text-xs ${parseFloat(selectedSale.dueAmount) > 0 ? 'text-red-600' : 'text-gray-500'}`}>Remaining</p>
                 <p className={`text-lg font-bold ${parseFloat(selectedSale.dueAmount) > 0 ? 'text-red-700' : 'text-gray-400'}`}>{fmtPKR(selectedSale.dueAmount)}</p>
               </div>
-              <div className="bg-white rounded-lg border p-3"><p className="text-xs text-gray-500">Status</p><div className="mt-1"><StatusBadge status={selectedSale.paymentStatus} /></div></div>
+              <div className="bg-white rounded-lg border p-3"><p className="text-xs text-gray-500">Status</p><div className="mt-1"><StatusBadge status={paymentWord(selectedSale)} /></div></div>
             </div>
 
             <div className="grid grid-cols-2 gap-3 text-sm">
@@ -407,7 +448,7 @@ export default function LocalSales() {
             {/* Only a confirmed sale takes payments — a Pending one takes its
                 receipt on confirmation; a Cancelled one is owed nothing. */}
             {selectedSale.status === 'Completed' && parseFloat(selectedSale.dueAmount) > 0 && (
-              <button onClick={() => { setPayForm(p => ({ ...p, amount: String(parseFloat(selectedSale.dueAmount) || 0), collection_location: selectedSale.collectionLocation || selectedSale.collection_location || 'Mill' })); setShowPaymentModal(true); }}
+              <button onClick={() => openLinePay(selectedSale)}
                 className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700">
                 <CreditCard size={16} /> Accept Payment ({fmtPKR(selectedSale.dueAmount)})
               </button>
@@ -440,7 +481,7 @@ export default function LocalSales() {
         open={showPaymentModal}
         onClose={() => setShowPaymentModal(false)}
         title="Accept Payment"
-        subtitle={selectedSale?.saleNo ? `Sale ${selectedSale.saleNo}` : undefined}
+        subtitle={payGroup ? `Sale ${payGroup.groupNo} · ${payGroup.count} items${payGroup.buyer ? ` · ${payGroup.buyer}` : ''}` : (selectedSale?.saleNo ? `Sale ${selectedSale.saleNo}` : undefined)}
         icon={CreditCard}
         size="md"
         footer={(
@@ -451,14 +492,21 @@ export default function LocalSales() {
               if (payForm.payment_method === 'bank_transfer' && !payForm.bank_account_id) { addToast('Select the bank account that received the payment', 'error'); return; }
               setPayLoading(true);
               try {
-                await payMutation.mutateAsync({ saleId: selectedSale.id, data: payForm });
-                addToast(`Payment of ${fmtPKR(payForm.amount)} accepted`, 'success');
-                const updated = await localSalesApi.get(selectedSale.id);
-                setSelectedSale(updated?.data?.sale || selectedSale);
-                const payRes = await localSalesApi.getPayments(selectedSale.id);
-                setSalePayments(payRes?.data?.payments || []);
+                if (payGroup) {
+                  await groupPayMutation.mutateAsync({ groupNo: payGroup.groupNo, data: payForm });
+                  addToast(`Payment of ${fmtPKR(payForm.amount)} accepted on ${payGroup.groupNo}`, 'success');
+                  setPayGroup(null);
+                  refetch();
+                } else {
+                  await payMutation.mutateAsync({ saleId: selectedSale.id, data: payForm });
+                  addToast(`Payment of ${fmtPKR(payForm.amount)} accepted`, 'success');
+                  const updated = await localSalesApi.get(selectedSale.id);
+                  setSelectedSale(updated?.data?.sale || selectedSale);
+                  const payRes = await localSalesApi.getPayments(selectedSale.id);
+                  setSalePayments(payRes?.data?.payments || []);
+                }
                 setShowPaymentModal(false);
-                setPayForm({ amount: '', payment_method: 'cash', bank_account_id: '', payment_date: new Date().toISOString().split('T')[0], reference: '', notes: '', due_date: '', collection_location: 'Mill' });
+                setPayForm(EMPTY_PAY());
               } catch (err) { addToast(err.message || 'Payment failed', 'error'); }
               setPayLoading(false);
             }} disabled={payLoading}
@@ -470,7 +518,8 @@ export default function LocalSales() {
       >
         <div className="space-y-4">
           <div className="bg-blue-50 rounded-lg p-3 text-sm">
-            <span className="text-blue-600">Remaining:</span> <span className="font-bold text-blue-900">{fmtPKR(selectedSale?.dueAmount)}</span>
+            <span className="text-blue-600">Remaining:</span> <span className="font-bold text-blue-900">{fmtPKR(payGroup ? payGroup.due : selectedSale?.dueAmount)}</span>
+            {payGroup && <span className="block text-[11px] text-blue-700/80 mt-0.5">One receipt for all {payGroup.count} items, applied to the oldest line first.</span>}
           </div>
           <div>
             <label className={LABEL}>Amount (PKR) *</label>
@@ -479,7 +528,7 @@ export default function LocalSales() {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className={LABEL}>Method</label>
-              <select value={payForm.payment_method} onChange={e => setPayForm(p => ({...p, payment_method: e.target.value}))} className={SELECT}>
+              <select value={payForm.payment_method} onChange={e => { const m = e.target.value; setPayForm(p => ({ ...p, payment_method: m, bank_account_id: m === 'bank_transfer' && !p.bank_account_id ? defaultBankAccountId(bankOpts, isFavorite) : p.bank_account_id })); }} className={SELECT}>
                 <option value="cash">Cash</option><option value="cheque">Cheque</option><option value="bank_transfer">Bank Transfer</option>
               </select>
             </div>
@@ -542,18 +591,32 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
   const { data: pkgItemsRaw = [] } = useMillStoreItems({ category: 'packaging', limit: 200 });
   const pkgItems = useMemo(() => (Array.isArray(pkgItemsRaw) ? pkgItemsRaw : []).filter(i => Number(i.quantity_available) > 0), [pkgItemsRaw]);
 
-  const [form, setForm] = useState({
-    customer_id: '', buyer_name: '', buyer_phone: '',
+  // Starts on the last customer this browser sold to (LS-10) and today's
+  // LOCAL date — both editable.
+  const EMPTY_FORM = () => ({
+    customer_id: readLastCustomerId(), buyer_name: '', buyer_phone: '', sale_date: localToday(),
     payment_mode: 'cash', paid_amount: '', collection_location: 'Mill', bank_account_id: '', cheque_no: '', due_date: '',
     vehicle_no: '', driver_name: '', notes: '', gate_pass_no: '',
   });
+  const [form, setForm] = useState(EMPTY_FORM);
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
   const [step, setStep] = useState(1); // 1=Buyer & Items, 2=Payment
   const [registerCustomer, setRegisterCustomer] = useState(true);
-  const isWalkIn = !form.customer_id;
+  // A remembered customer that is no longer a local customer (archived, or
+  // re-typed export) must not be sold to invisibly — it reads as walk-in. Only
+  // the REMEMBERED id is checked; one picked or just added in the picker stands.
+  const customerId = (() => {
+    const list = Array.isArray(customers) ? customers : [];
+    if (!form.customer_id || !list.length || String(form.customer_id) !== readLastCustomerId()) return form.customer_id;
+    const c = list.find(x => String(x.id) === String(form.customer_id));
+    return (!c || (c.customerType || c.customer_type || 'local') !== 'local') ? '' : form.customer_id;
+  })();
+  const isWalkIn = !customerId;
 
   // Cart of line items + the line currently being built.
-  const EMPTY_LINE = { lot_id: '', mill_item_id: '', item_name: '', item_type: '', quantity_input: '', quantity_unit: 'katta', bag_weight_kg: '50', rate_input: '', rate_unit: 'katta' };
+  // rate_auto: the rate on the line is the Rates Center suggestion (not typed),
+  // so it follows the unit; suggested_per_kg is that suggestion per KG.
+  const EMPTY_LINE = { lot_id: '', mill_item_id: '', item_name: '', item_type: '', quantity_input: '', quantity_unit: 'katta', bag_weight_kg: '50', rate_input: '', rate_unit: 'katta', rate_auto: false, suggested_per_kg: null };
   const [cart, setCart] = useState([]);
   const [line, setLine] = useState(EMPTY_LINE);
   const setL = (k, v) => setLine(p => ({ ...p, [k]: v }));
@@ -599,9 +662,35 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
     ? (lineAvailCount != null && lineCount > lineAvailCount + 0.01)
     : (lineAvailKg != null && lineQtyKg > lineAvailKg + 0.01);
 
-  function pickLot(lotId) {
+  // Rate prefill from the Rates Center (LS-10): the selling rate for the
+  // lot's product + grade, converted to the line's rate unit. Only fills a rate
+  // the user has not typed; a typed rate always wins.
+  const lotPickRef = useRef(0);
+  const shownRate = (perKg, unit, bagWt) => String(Math.round(rateFromPerKg(perKg, unit, parseFloat(bagWt) || 50) * 100) / 100);
+  async function pickLot(lotId) {
     const lot = safeLots.find(l => String(l.id) === String(lotId));
-    setLine(p => ({ ...p, lot_id: lotId, mill_item_id: '', item_name: lot ? (lot.itemName || '') : p.item_name, item_type: lot ? (lot.type || '') : p.item_type }));
+    setLine(p => ({
+      ...p, lot_id: lotId, mill_item_id: '', item_name: lot ? (lot.itemName || '') : p.item_name, item_type: lot ? (lot.type || '') : p.item_type,
+      suggested_per_kg: null, ...(p.rate_auto ? { rate_input: '', rate_auto: false } : {}),
+    }));
+    if (!lotId) return;
+    const ticket = ++lotPickRef.current;
+    try {
+      const r = await localSalesApi.rateSuggestion(lotId);
+      const perKg = parseFloat(r?.data?.rate?.per_kg);
+      if (ticket !== lotPickRef.current || !(perKg > 0)) return;
+      setLine(p => (String(p.lot_id) !== String(lotId) ? p : {
+        ...p, suggested_per_kg: perKg,
+        ...((p.rate_input === '' || p.rate_auto) ? { rate_input: shownRate(perKg, p.rate_unit, p.bag_weight_kg), rate_auto: true } : {}),
+      }));
+    } catch { /* no rate available — the user types one */ }
+  }
+  // A unit change re-expresses an auto-filled rate in the new unit.
+  function setRateUnit(unit, alsoQty) {
+    setLine(p => ({
+      ...p, rate_unit: unit, ...(alsoQty ? { quantity_unit: unit } : {}),
+      ...(p.rate_auto && p.suggested_per_kg ? { rate_input: shownRate(p.suggested_per_kg, unit, p.bag_weight_kg) } : {}),
+    }));
   }
   function pickPkg(itemId) {
     const it = pkgItems.find(i => String(i.id) === String(itemId));
@@ -692,13 +781,13 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
     : (paidNum != null && paidNum < grandTotal - 0.01);
 
   function reset() {
-    setForm({ customer_id: '', buyer_name: '', buyer_phone: '', payment_mode: 'cash', paid_amount: '', collection_location: 'Mill', bank_account_id: '', cheque_no: '', due_date: '', vehicle_no: '', driver_name: '', notes: '', gate_pass_no: '' });
+    setForm(EMPTY_FORM());
     setCart([]); setLine(EMPTY_LINE); setTag('All'); setStep(1); setPaidTouched(false);
     setRepack({ enabled: false, bag_source: 'none', packaging_item_id: '', freed_katta_to_store: true, original_bag_size_kg: '', original_bag_count: '', new_bag_size_kg: '', new_bag_count: '', bag_rate: '', labour_enabled: false, labour_mode: 'per_bag', labour_rate: '', packing_loss_kg: '', final_dispatched_kg: '', notes: '' });
   }
 
   async function handleSubmit() {
-    if (!form.customer_id && !form.buyer_name) { addToast('Select a customer or enter buyer name', 'error'); return; }
+    if (!customerId && !form.buyer_name) { addToast('Select a customer or enter buyer name', 'error'); return; }
     if (cart.length === 0) { addToast('Add at least one item to the sale', 'error'); return; }
     if (form.payment_mode === 'bank_transfer' && !form.bank_account_id) { addToast('Select the bank account that received the payment', 'error'); return; }
     if (form.payment_mode === 'cheque' && !form.cheque_no.trim()) { addToast('Enter the cheque number', 'error'); return; }
@@ -709,7 +798,8 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
     const isCashy = effectiveMode === 'cash' || effectiveMode === 'credit';
     try {
       const payload = {
-        customer_id: form.customer_id || null, buyer_name: form.buyer_name || null, buyer_phone: form.buyer_phone || null,
+        customer_id: customerId || null, buyer_name: form.buyer_name || null, buyer_phone: form.buyer_phone || null,
+        sale_date: form.sale_date || localToday(),
         payment_mode: effectiveMode, paid_amount: paidNum == null ? undefined : paidNum,
         collection_location: isCashy ? (form.collection_location || 'Mill') : null,
         bank_account_id: effectiveMode === 'bank_transfer' && form.bank_account_id ? Number(form.bank_account_id) : null,
@@ -751,6 +841,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
         } : {}),
       };
       const res = await createMutation.mutateAsync(payload);
+      rememberLastCustomerId(customerId || '');
       const cnt = res?.data?.item_count || cart.length;
       const pending = !!res?.data?.pending;
       addToast(pending
@@ -772,11 +863,11 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
       const due = Math.max(0, grandTotal - paid);
       !pending && onCreated && onCreated({
         saleNo: res?.data?.group_no || res?.data?.sale_no || '',
-        customerName: (customers.find((c) => String(c.id) === String(form.customer_id)) || {}).name,
+        customerName: (customers.find((c) => String(c.id) === String(customerId)) || {}).name,
         buyerName: form.buyer_name, createdAt: new Date().toISOString(),
         items: cart.map((c) => ({ itemName: c.item_name, itemType: c.item_type, quantityKg: c.qtyKg, ratePerKg: c.ratePerKg, totalAmount: c.total, quantityUnit: c.quantity_unit, millItemId: c.mill_item_id })),
         totalAmount: grandTotal, paidAmount: paid, dueAmount: due,
-        paymentStatus: due <= 0.01 ? 'Paid' : (paid > 0 ? 'Partial' : 'Unpaid'),
+        paymentStatus: due <= 0.01 ? 'Paid' : (paid > 0 ? 'Partial' : 'Credit'),
         paymentMode: effectiveMode, paymentReference: payload.payment_reference,
         collectionLocation: payload.collection_location, vehicleNo: form.vehicle_no, driverName: form.driver_name,
         dispatched: true, dispatchDate: new Date().toISOString(),
@@ -786,9 +877,9 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
     } catch (err) { addToast(err.message || 'Sale failed', 'error'); }
   }
 
-  const step1Valid = cart.length > 0 && (!!form.customer_id || !!form.buyer_name);
+  const step1Valid = cart.length > 0 && (!!customerId || !!form.buyer_name);
   function tryNext() {
-    if (!form.customer_id && !form.buyer_name) { addToast('Select a customer or enter buyer name', 'error'); return; }
+    if (!customerId && !form.buyer_name) { addToast('Select a customer or enter buyer name', 'error'); return; }
     if (cart.length === 0) { addToast('Add at least one item to the sale', 'error'); return; }
     setStep(2);
   }
@@ -858,14 +949,23 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
         <div>
           <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Buyer</h3>
           <div className="grid grid-cols-2 gap-3">
-            <div className="col-span-2">
-              <label className={LABEL}>Customer</label>
-              <select value={form.customer_id}
-                onChange={e => { const v = e.target.value; setForm(p => ({ ...p, customer_id: v, ...(v ? { buyer_name: '', buyer_phone: '' } : {}) })); }}
-                className={SELECT}>
-                <option value="">Walk-in / not registered</option>
-                {(customers || []).filter(c => (c.customerType || 'local') !== 'export').map(c => <option key={c.id} value={c.id}>{favStar(c)}{c.name}</option>)}
-              </select>
+            <div className="col-span-2 sm:col-span-1">
+              {/* Local customers only (never export buyers); starred first.
+                  Empty = walk-in. Starts on the last customer used here. */}
+              <CustomerPicker
+                label={<span className={LABEL}>Customer <span className="normal-case font-normal text-gray-400">(empty = walk-in)</span></span>}
+                value={customerId}
+                onChange={(v) => setForm(p => ({ ...p, customer_id: v || '', ...(v ? { buyer_name: '', buyer_phone: '' } : {}) }))}
+                customers={(customers || []).filter(c => (c.customerType || c.customer_type || 'local') === 'local')}
+                listFn={() => customersApi.list({ type: 'local', limit: 500 })}
+                placeholder="Search local customer… (empty = walk-in)"
+                addToast={addToast}
+                clearable
+              />
+            </div>
+            <div className="col-span-2 sm:col-span-1">
+              <label className={LABEL}>Sale Date</label>
+              <input type="date" value={form.sale_date} max={localToday()} onChange={e => set('sale_date', e.target.value)} className={INPUT} />
             </div>
             {isWalkIn && (
               <>
@@ -940,7 +1040,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
                 <div className="flex gap-1.5">
                   <input type="number" value={line.quantity_input} onChange={e => setL('quantity_input', e.target.value)} className={INPUT} placeholder={isPkg ? 'No. of katta' : 'Qty'} />
                   {!isPkg && (
-                    <select value={line.quantity_unit} onChange={e => setLine(p => ({ ...p, quantity_unit: e.target.value, rate_unit: e.target.value }))} className="w-24 border border-gray-300 rounded-lg px-2 py-2.5 text-sm bg-white">
+                    <select value={line.quantity_unit} onChange={e => setRateUnit(e.target.value, true)} className="w-24 border border-gray-300 rounded-lg px-2 py-2.5 text-sm bg-white">
                       <option value="katta">Katta</option><option value="maund">Maund</option><option value="kg">KG</option><option value="ton">Ton</option>
                     </select>
                   )}
@@ -949,9 +1049,9 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
               <div>
                 <label className={LABEL}>Rate *{isPkg ? ' (Rs each)' : ''}</label>
                 <div className="flex gap-1.5">
-                  <input type="number" value={line.rate_input} onChange={e => setL('rate_input', e.target.value)} className={INPUT} placeholder="Rate" />
+                  <input type="number" value={line.rate_input} onChange={e => setLine(p => ({ ...p, rate_input: e.target.value, rate_auto: false }))} className={INPUT} placeholder="Rate" />
                   {!isPkg && (
-                    <select value={line.rate_unit} onChange={e => setL('rate_unit', e.target.value)} className="w-24 border border-gray-300 rounded-lg px-2 py-2.5 text-sm bg-white">
+                    <select value={line.rate_unit} onChange={e => setRateUnit(e.target.value, false)} className="w-24 border border-gray-300 rounded-lg px-2 py-2.5 text-sm bg-white">
                       <option value="katta">/Katta</option><option value="maund">/Maund</option><option value="kg">/KG</option><option value="ton">/Ton</option>
                     </select>
                   )}
@@ -985,6 +1085,9 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
                   const ul = u === 'katta' ? 'katta' : u === 'maund' ? 'maund' : u === 'ton' ? 'ton' : 'kg';
                   return <span className="block text-gray-500">Cost: <span className="font-semibold text-gray-700">Rs {(val).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/{ul}</span>{u !== 'kg' && <span className="text-gray-400"> (Rs {(ck).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/kg)</span>}</span>;
                 })()}
+                {!isPkg && line.suggested_per_kg > 0 && (
+                  <span className="block text-gray-500">Rates Center: <span className="font-semibold text-gray-700">Rs {(line.suggested_per_kg).toLocaleString(undefined, { maximumFractionDigits: 2 })}/kg</span>{line.rate_auto ? <span className="text-gray-400"> · prefilled, edit to override</span> : null}</span>
+                )}
                 {lineTotal > 0 && <span className="block text-emerald-700 font-semibold mt-0.5">Line total: Rs {lineTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>}
               </div>
               <button type="button" onClick={addLine} disabled={lineOverSell}
@@ -1165,7 +1268,12 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className={LABEL}>Payment Mode</label>
-              <select value={form.payment_mode} onChange={e => { set('payment_mode', e.target.value); setPaidTouched(false); }} className={SELECT}>
+              <select value={form.payment_mode} onChange={e => {
+                const m = e.target.value;
+                // Bank transfer starts on the starred account (favorites.js).
+                setForm(p => ({ ...p, payment_mode: m, bank_account_id: m === 'bank_transfer' && !p.bank_account_id ? defaultBankAccountId(bankOptions, isFavorite) : p.bank_account_id }));
+                setPaidTouched(false);
+              }} className={SELECT}>
                 <option value="cash">Cash</option><option value="cheque">Cheque</option><option value="bank_transfer">Bank Transfer</option><option value="credit">Credit (Udhaar)</option>
               </select>
             </div>
