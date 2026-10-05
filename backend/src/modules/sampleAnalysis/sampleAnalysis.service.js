@@ -168,64 +168,77 @@ async function setStatus(sampleId, status, notes, userId) {
 
 // Convert an approved sample into a purchase lot (reuses createPurchaseLot so the
 // lot gets its payable / ledger / GL exactly like a normal purchase).
+//
+// The sample is CLAIMED first: a transaction locks its row (SELECT ... FOR NO
+// KEY UPDATE — not FOR UPDATE, which would block the new lot's own
+// inventory_lots.sample_id foreign-key check and deadlock) and holds the lock while the lot is created, then marks it Converted and
+// commits. A second convert of the same sample waits on that lock and, once it
+// gets it, re-reads the status and finds Converted — so two clicks (or two
+// users) can no longer make two lots. ('Converting' would be a cleaner claim
+// marker, but the status CHECK constraint doesn't allow it.) If creating the
+// lot fails the transaction rolls back and the lock is released untouched.
 async function convertToLot(sampleId, overrides, userId) {
-  const sample = await db('rice_samples').where({ id: sampleId }).first();
-  if (!sample) throw new NotFoundError('Sample not found.');
-  if (sample.status === 'Converted' || sample.converted_lot_id) throw new ValidationError('This sample is already converted to a purchase lot.');
-  if (!['Shortlisted', 'Approved for Purchase'].includes(sample.status)) {
-    throw new ValidationError('Only a Shortlisted or Approved-for-Purchase sample can be converted.');
-  }
-  const o = overrides || {};
-  const supplierId = o.supplier_id || sample.supplier_id;
-  const productId = o.product_id || sample.product_id;
-  if (!supplierId) throw new ValidationError('A supplier is required to create the purchase lot.');
-  if (!productId) throw new ValidationError('A rice type (product) is required to create the purchase lot.');
-  const qtyKg = num(o.qty_kg) || num(sample.offered_qty_kg);
-  const rateKg = num(o.rate_per_kg) || num(sample.offered_rate_per_kg);
-  if (!(qtyKg > 0)) throw new ValidationError('A positive quantity is required.');
-  if (!(rateKg > 0)) throw new ValidationError('A positive rate is required.');
+  return db.transaction(async (trx) => {
+    const sample = await trx('rice_samples').where({ id: sampleId }).forNoKeyUpdate().first();
+    if (!sample) throw new NotFoundError('Sample not found.');
+    if (sample.status === 'Converted' || sample.converted_lot_id) throw new ValidationError('This sample is already converted to a purchase lot.');
+    if (!['Shortlisted', 'Approved for Purchase'].includes(sample.status)) {
+      throw new ValidationError('Only a Shortlisted or Approved-for-Purchase sample can be converted.');
+    }
+    const o = overrides || {};
+    const supplierId = o.supplier_id || sample.supplier_id;
+    const productId = o.product_id || sample.product_id;
+    if (!supplierId) throw new ValidationError('A supplier is required to create the purchase lot.');
+    if (!productId) throw new ValidationError('A rice type (product) is required to create the purchase lot.');
+    const qtyKg = num(o.qty_kg) || num(sample.offered_qty_kg);
+    const rateKg = num(o.rate_per_kg) || num(sample.offered_rate_per_kg);
+    if (!(qtyKg > 0)) throw new ValidationError('A positive quantity is required.');
+    if (!(rateKg > 0)) throw new ValidationError('A positive rate is required.');
 
-  // Carry the analysis forward into the lot's quality_json (pass-through subset).
-  const analysis = sample.final_analysis_json || sample.analysis_json || {};
-  const qualityJson = {};
-  for (const k of LOT_PASSTHROUGH_KEYS) if (analysis[k] != null) qualityJson[k] = analysis[k];
+    // Carry the analysis forward into the lot's quality_json (pass-through subset).
+    const analysis = sample.final_analysis_json || sample.analysis_json || {};
+    const qualityJson = {};
+    for (const k of LOT_PASSTHROUGH_KEYS) if (analysis[k] != null) qualityJson[k] = analysis[k];
 
-  const product = await db('products').where({ id: productId }).first();
-  const itemName = o.item_name || sample.variety || (product && product.name) || 'Rice';
+    const product = await trx('products').where({ id: productId }).first();
+    const itemName = o.item_name || sample.variety || (product && product.name) || 'Rice';
 
-  const payload = {
-    item_name: itemName, type: 'raw', entity: 'mill',
-    sample_id: sample.id,
-    supplier_id: supplierId, product_id: productId,
-    variety: sample.variety || null, grade: sample.claimed_grade || (product && product.grade) || null,
-    crop_year: sample.crop_year || null,
-    moisture_pct: num(analysis.moisture), broken_pct: num(analysis.broken),
-    quality_json: Object.keys(qualityJson).length ? qualityJson : null,
-    quality_notes: sample.remarks || null,
-    quantity_input: qtyKg, quantity_unit: 'kg',
-    rate_input: rateKg, rate_unit: 'kg',
-    bag_weight_kg: num(sample.bag_weight_kg) || 50,
-    total_bags: sample.bags || null,
-    purchase_date: o.purchase_date || new Date().toISOString().slice(0, 10),
-    warehouse_id: o.warehouse_id || null,
-    notes: `Converted from sample ${sample.sample_no}`,
-  };
+    const payload = {
+      item_name: itemName, type: 'raw', entity: 'mill',
+      sample_id: sample.id,
+      supplier_id: supplierId, product_id: productId,
+      variety: sample.variety || null, grade: sample.claimed_grade || (product && product.grade) || null,
+      crop_year: sample.crop_year || null,
+      moisture_pct: num(analysis.moisture), broken_pct: num(analysis.broken),
+      quality_json: Object.keys(qualityJson).length ? qualityJson : null,
+      quality_notes: sample.remarks || null,
+      quantity_input: qtyKg, quantity_unit: 'kg',
+      rate_input: rateKg, rate_unit: 'kg',
+      bag_weight_kg: num(sample.bag_weight_kg) || 50,
+      total_bags: sample.bags || null,
+      purchase_date: o.purchase_date || new Date().toISOString().slice(0, 10),
+      warehouse_id: o.warehouse_id || null,
+      notes: `Converted from sample ${sample.sample_no}`,
+    };
 
-  // Invoke the existing purchase-lot creator with a synthetic req/res.
-  const lotController = require('../inventory/lotInventory.controller');
-  const innerReq = { body: payload, user: { id: userId } };
-  const cap = { _status: 200, status(c) { this._status = c; return this; }, json(b) { this._body = b; return this; } };
-  await lotController.createPurchaseLot(innerReq, cap);
-  if (cap._status >= 400) {
-    const e = new Error(cap._body?.message || 'Failed to create the purchase lot from this sample.');
-    e.statusCode = cap._status; throw e;
-  }
-  const lot = cap._body?.data?.lot;
-  await db('rice_samples').where({ id: sample.id }).update({
-    status: 'Converted', converted_lot_id: lot?.id || null, converted_at: db.fn.now(),
-    decided_by: userId || null, updated_at: db.fn.now(),
+    // Invoke the existing purchase-lot creator with a synthetic req/res. It runs
+    // its own transaction (on another connection); this one only holds the
+    // sample's row lock until the lot exists and the sample says so.
+    const lotController = require('../inventory/lotInventory.controller');
+    const innerReq = { body: payload, user: { id: userId } };
+    const cap = { _status: 200, status(c) { this._status = c; return this; }, json(b) { this._body = b; return this; } };
+    await lotController.createPurchaseLot(innerReq, cap);
+    if (cap._status >= 400) {
+      const e = new Error(cap._body?.message || 'Failed to create the purchase lot from this sample.');
+      e.statusCode = cap._status; throw e;
+    }
+    const lot = cap._body?.data?.lot;
+    await trx('rice_samples').where({ id: sample.id }).update({
+      status: 'Converted', converted_lot_id: lot?.id || null, converted_at: trx.fn.now(),
+      decided_by: userId || null, updated_at: trx.fn.now(),
+    });
+    return { sample: await trx('rice_samples').where({ id: sample.id }).first(), lot };
   });
-  return { sample: await db('rice_samples').where({ id: sample.id }).first(), lot };
 }
 
 async function remove(sampleId) {
