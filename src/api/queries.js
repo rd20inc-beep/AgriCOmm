@@ -389,6 +389,21 @@ export function useMillCashFlow(params = {}) {
   });
 }
 
+// Mill cost trend — milling_costs summed per month and category (last N months).
+export function useMillCostTrend(params = { months: 6 }, opts = {}) {
+  return useQuery({
+    queryKey: ['mill-cost-trend', params],
+    queryFn: async () => {
+      const res = await millingApi.costTrend(params);
+      const data = res?.data || res || {};
+      return Array.isArray(data.rows) ? data.rows : [];
+    },
+    staleTime: 60 * 1000,
+    retry: false,
+    ...opts,
+  });
+}
+
 export function useCreateMillingBatch() {
   const qc = useQueryClient();
   return useMutation({

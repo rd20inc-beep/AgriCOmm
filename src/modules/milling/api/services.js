@@ -21,6 +21,8 @@ export const millingApi = {
   getBatch: (id) => api.get(`/api/milling/batches/${id}`),
   sourceLots: (id) => api.get(`/api/milling/batches/${id}/source-lots`),
   cashFlow: (params) => api.get('/api/milling/cash-flow', params),
+  // Real milling_costs by month + category (dashboard Mill Cost Trend).
+  costTrend: (params) => api.get('/api/milling/cost-trend', params),
   createBatch: (data) => api.post('/api/milling/batches', data),
   updateBatch: (id, data) => api.put(`/api/milling/batches/${id}`, data),
   // Status moves — the generic PUT no longer accepts status.

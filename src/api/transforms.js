@@ -307,6 +307,7 @@ export function transformBatch(dbBatch) {
     supplierName: dbBatch.supplier_name || '',
     createdAt: dbBatch.created_at,
     completedAt: dbBatch.completed_at,
+    approvedAt: dbBatch.approved_at || null,
     costs: dbBatch.costs || {},
     packingBreakdown: dbBatch.packingBreakdown || null,
     sampleAnalysis: dbBatch.sampleAnalysis || null,

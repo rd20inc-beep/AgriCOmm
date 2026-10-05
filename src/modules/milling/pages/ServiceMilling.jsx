@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
-import { Package, Factory, Boxes, Wallet, RefreshCw, Users, FileText } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
+import { Package, Factory, Boxes, Wallet, RefreshCw, Users, FileText, Plus } from 'lucide-react';
 import { millingApi, serviceMillingApi } from '../api/services';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
@@ -53,6 +53,10 @@ export default function ServiceMilling() {
   const canPay = hasPermission('service_milling', 'record_payment');
   // Service billing is revenue — hidden from roles without reports.view_cost.
   const showCost = canSeeCost(hasPermission);
+  // Creating a service lot needs both: the batch route (milling.create) and the
+  // service-milling gate on it (service_milling.create_batch).
+  const canCreateLot = hasPermission('service_milling', 'create_batch') && hasPermission('milling', 'create');
+  const navigate = useNavigate();
   const [invoiceBatch, setInvoiceBatch] = useState(null);
   const [payInvoice, setPayInvoice] = useState(null);
 
@@ -94,9 +98,17 @@ export default function ServiceMilling() {
             <h1 className="text-3xl font-bold leading-tight">Service Milling</h1>
             <p className="text-sm opacity-80 mt-1 max-w-2xl">Toll / job-work milling for third-party clients. This rice belongs to the client — it is tracked physically as Service Milling stock but never counted as company inventory, valuation or sales.</p>
           </div>
-          <button onClick={() => refetch()} className="bg-white/15 hover:bg-white/25 backdrop-blur-sm px-3 py-2 rounded-lg text-xs font-medium inline-flex items-center gap-1.5 self-start">
-            <RefreshCw size={13} className={isFetching ? 'animate-spin' : ''} /> Refresh
-          </button>
+          <div className="flex items-center gap-2 self-start">
+            {canCreateLot && (
+              // Opens the New Batch drawer on the milling page, already in Service mode.
+              <button onClick={() => navigate('/milling?new=service')} className="bg-white text-amber-800 hover:bg-amber-50 px-3 py-2 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5">
+                <Plus size={13} /> New service lot
+              </button>
+            )}
+            <button onClick={() => refetch()} className="bg-white/15 hover:bg-white/25 backdrop-blur-sm px-3 py-2 rounded-lg text-xs font-medium inline-flex items-center gap-1.5">
+              <RefreshCw size={13} className={isFetching ? 'animate-spin' : ''} /> Refresh
+            </button>
+          </div>
         </div>
       </div>
 
