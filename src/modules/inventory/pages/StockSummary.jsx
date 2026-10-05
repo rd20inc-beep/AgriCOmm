@@ -5,6 +5,7 @@ import { Boxes, Package, Wallet, ArrowRight, Layers, AlertTriangle, Check, X, Pe
 import { lotInventoryApi } from '../api/services';
 import { useHeldStockProfit } from '../../../api/queries';
 import useCanSeeCost from '../../../hooks/useCanSeeCost';
+import { splitOnHand, unitsOnHand, onHandKg as lotOnHandKg, formatUnits } from '../utils/stockMath';
 
 const n = (v) => Number(v) || 0;
 const toMT = (kg) => n(kg) / 1000;
@@ -68,8 +69,10 @@ export default function StockSummary() {
       .map((r) => {
         const onHandKg = n(r.total_kg);
         const reorder = n(r.reorder_level); // KG
-        const bags = Math.round(n(r.total_bags));
-        return { ...r, onHandKg, reorder, bags, isLow: reorder > 0 && onHandKg < reorder };
+        // Sacks STILL on hand (server scales the intake count by weight left):
+        // 50 kg katta and sub-50 kg retail bags, never added together.
+        const units = { katta: Math.round(n(r.total_bags)), bags: Math.round(n(r.total_bag_units)) };
+        return { ...r, onHandKg, reorder, units, split: splitOnHand(r), isLow: reorder > 0 && onHandKg < reorder };
       })
       .sort((a, b) => Number(b.isLow) - Number(a.isLow) || n(b.total_value) - n(a.total_value)),
     [data],
@@ -94,9 +97,10 @@ export default function StockSummary() {
       onHand: a.onHand + n(r.total_kg),
       available: a.available + n(r.available_kg),
       reserved: a.reserved + n(r.reserved_kg),
+      milling: a.milling + n(r.milling_reserved_kg),
       value: a.value + n(r.total_value),
       lots: a.lots + n(r.lot_count),
-    }), { onHand: 0, available: 0, reserved: 0, value: 0, lots: 0 }),
+    }), { onHand: 0, available: 0, reserved: 0, milling: 0, value: 0, lots: 0 }),
     [rows],
   );
 
@@ -152,8 +156,9 @@ export default function StockSummary() {
                   <th className="px-4 py-2.5">Product</th>
                   <th className="px-4 py-2.5 text-right" title="Number of separate stock batches (lots)">Batches</th>
                   <th className="px-4 py-2.5 text-right" title="Total quantity physically in stock">On hand</th>
-                  <th className="px-4 py-2.5 text-right" title="Free to sell — on hand minus what's committed to orders">Free to sell</th>
+                  <th className="px-4 py-2.5 text-right" title="Free to sell — on hand minus what's committed to orders and held for milling">Free to sell</th>
                   <th className="px-4 py-2.5 text-right" title="Reserved against export orders">Committed</th>
+                  <th className="px-4 py-2.5 text-right" title="Held for a milling batch that has started but not yet yielded">Reserved for milling</th>
                   <th className="px-4 py-2.5 text-right" title="Warn me when on-hand drops below this">Reorder at</th>
                   {showCost && <>
                     <th className="px-4 py-2.5 text-right" title="What this stock cost (landed)">Stock value</th>
@@ -177,10 +182,11 @@ export default function StockSummary() {
                       <td data-label="Batches" className="mob-hide px-4 py-2.5 text-right text-gray-500 tabular-nums">{n(r.lot_count)}</td>
                       <td data-label="On hand" className={`px-4 py-2.5 text-right font-medium tabular-nums ${r.isLow ? 'text-red-600' : 'text-gray-900'}`}>
                         {fmtMT(r.total_kg)}
-                        {r.bags > 0 && <div className="text-[11px] font-normal text-gray-400">{r.bags.toLocaleString()} bags</div>}
+                        {formatUnits(r.units) && <div className="text-[11px] font-normal text-gray-400">{formatUnits(r.units)}</div>}
                       </td>
                       <td data-label="Free to sell" className="px-4 py-2.5 text-right text-emerald-700 tabular-nums">{fmtMT(r.available_kg)}</td>
                       <td data-label="Committed" className="mob-hide px-4 py-2.5 text-right text-amber-700 tabular-nums">{n(r.reserved_kg) > 0 ? fmtMT(r.reserved_kg) : '—'}</td>
+                      <td data-label="Reserved for milling" className="mob-hide px-4 py-2.5 text-right text-violet-700 tabular-nums">{r.split.milling > 0 ? fmtMT(r.split.milling) : '—'}</td>
                       <td data-label="Reorder at" className="mob-hide px-4 py-2.5 text-right tabular-nums">
                         {editing ? (
                           <span className="inline-flex items-center gap-1">
@@ -234,6 +240,7 @@ export default function StockSummary() {
                   <td data-label="On hand" className="px-4 py-2.5 text-right tabular-nums">{fmtMT(totals.onHand)}</td>
                   <td data-label="Free to sell" className="px-4 py-2.5 text-right tabular-nums">{fmtMT(totals.available)}</td>
                   <td data-label="Committed" className="mob-hide px-4 py-2.5 text-right tabular-nums">{totals.reserved > 0 ? fmtMT(totals.reserved) : '—'}</td>
+                  <td data-label="Reserved for milling" className="mob-hide px-4 py-2.5 text-right tabular-nums">{totals.milling > 0 ? fmtMT(totals.milling) : '—'}</td>
                   <td className="px-4 py-2.5"></td>
                   {showCost && <>
                     <td data-label="Stock value" className="px-4 py-2.5 text-right tabular-nums">{fmtPKR(totals.value)}</td>
@@ -254,7 +261,7 @@ export default function StockSummary() {
 
       {rows.length > 0 && (
         <p className="text-[11px] text-gray-400 px-1">
-          <span className="font-medium text-gray-500">Free to sell</span> = on hand minus what's committed to orders.
+          <span className="font-medium text-gray-500">On hand</span> = Free to sell + Committed (reserved for export orders) + Reserved for milling (held by a batch that has started but not yet yielded).
           <span className="ml-2"><span className="px-1 py-0.5 rounded bg-red-100 text-red-700 font-semibold">LOW</span> means on hand has dropped below the reorder level you set.</span>
         </p>
       )}
@@ -281,6 +288,8 @@ function ProductStockDrawer({ row, showCost, entity, status, onClose, onOpenLot 
     queryFn: async () => {
       const res = await lotInventoryApi.listLots({
         product_id: row.group_id,
+        // Same scope as the summary row: a lot that holds nothing is not stock.
+        in_stock: 'true',
         limit: 200,
         sort_by: 'created_at',
         sort_dir: 'desc',
@@ -293,7 +302,7 @@ function ProductStockDrawer({ row, showCost, entity, status, onClose, onOpenLot 
     staleTime: 10 * 1000,
   });
 
-  const onHandKg = (l) => (n(l.net_weight_kg) > 0 ? n(l.net_weight_kg) : n(l.qty)); // qty is KG (Phase 5c)
+  const onHandKg = lotOnHandKg; // qty is KG (Phase 5c)
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
@@ -305,7 +314,8 @@ function ProductStockDrawer({ row, showCost, entity, status, onClose, onOpenLot 
               <Boxes size={17} className="text-blue-600" /> {row.group_name || 'Unspecified'}
             </h2>
             <p className="text-xs text-gray-500 mt-0.5">
-              {fmtMT(row.total_kg)} on hand · {fmtMT(row.available_kg)} free to sell{showCost ? ` · ${fmtPKR(row.total_value)}` : ''}
+              {fmtMT(row.total_kg)} on hand · {fmtMT(row.available_kg)} free to sell
+              {n(row.milling_reserved_kg) > 0 && <> · {fmtMT(row.milling_reserved_kg)} reserved for milling</>}{showCost ? ` · ${fmtPKR(row.total_value)}` : ''}
             </p>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
@@ -321,7 +331,8 @@ function ProductStockDrawer({ row, showCost, entity, status, onClose, onOpenLot 
               const onHand = onHandKg(l);
               const perKg = n(l.landed_cost_per_kg) || n(l.rate_per_kg) || n(l.cost_per_unit) || 0;
               const value = onHand * perKg; // value of what's on hand now, not the original intake
-              const bags = Math.round(n(l.total_bags));
+              const unitsLabel = formatUnits(unitsOnHand(l)); // intake scaled by weight left
+              const millingKg = n(l.milling_reserved_qty);
               const receivedKg = n(l.received_net_weight_kg);
               const usedKg = receivedKg > 0 ? Math.max(receivedKg - onHand, 0) : 0;
               return (
@@ -337,9 +348,10 @@ function ProductStockDrawer({ row, showCost, entity, status, onClose, onOpenLot 
                     {l.supplier_name && <span>· {l.supplier_name}</span>}
                   </div>
                   <div className={`grid ${showCost ? 'grid-cols-4' : 'grid-cols-3'} gap-2 mt-2 text-xs`}>
-                    <Stat label="On hand" value={fmtMT(onHand)} sub={bags > 0 ? `${bags.toLocaleString()} bags` : null} />
+                    <Stat label="On hand" value={fmtMT(onHand)} sub={unitsLabel || null} />
                     <Stat label="Free" value={fmtMT(n(l.available_qty))} tone="emerald" />
-                    <Stat label="Committed" value={n(l.reserved_qty) > 0 ? fmtMT(n(l.reserved_qty)) : '—'} tone={n(l.reserved_qty) > 0 ? 'amber' : null} />
+                    <Stat label="Committed" value={n(l.reserved_qty) > 0 ? fmtMT(n(l.reserved_qty)) : '—'} tone={n(l.reserved_qty) > 0 ? 'amber' : null}
+                      sub={millingKg > 0 ? `${fmtMT(millingKg)} for milling` : null} />
                     {showCost && <Stat label="Value" value={fmtPKR(value)} align="right" />}
                   </div>
                   <div className="mt-2 pt-2 border-t border-gray-100 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-gray-500">
@@ -356,7 +368,7 @@ function ProductStockDrawer({ row, showCost, entity, status, onClose, onOpenLot 
 
         <div className="border-t border-gray-200 px-5 py-2.5 text-[11px] text-gray-400 leading-relaxed">
           <span className="font-medium text-gray-500">Free</span> = ready to sell ·
-          <span className="font-medium text-gray-500"> Committed</span> = reserved for an export order ·
+          <span className="font-medium text-gray-500"> Committed</span> = reserved for an export order (plus any kg held for a started milling batch) ·
           {showCost && <><span className="font-medium text-gray-500"> Value</span> = on-hand × cost/kg.</>} Tap any batch for its full lot detail.
         </div>
       </div>

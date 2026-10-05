@@ -1,24 +1,20 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import PartyLink from '../../../shared/components/PartyLink';
 import {
-  Package, Search, Plus, Warehouse, Truck, Eye, Filter,
-  ArrowUpDown, RefreshCw, BarChart3, DollarSign, AlertTriangle,
-  Layers, Scale, Beaker, Check, ChevronLeft, ChevronRight, X, UserPlus,
-  BookmarkPlus, Trash2,
+  Package, Search, Plus, Eye, RefreshCw, ChevronLeft, ChevronRight,
 } from 'lucide-react';
-import {
-  useLotInventory, useCreatePurchaseLot, useProductCategories, useCreateSupplier,
-  useLotTemplates, useCreateLotTemplate, useDeleteLotTemplate,
-} from '../../../api/queries';
+import { useLotInventoryPage, useLotInventoryTotals } from '../../../api/queries';
 import { useApp } from '../../../context/AppContext';
 import { LoadingSpinner, ErrorState, EmptyState } from '../../../components/LoadingState';
 import StatusBadge from '../../../components/StatusBadge';
-import Modal from '../../../components/Modal';
 import PurchaseLotDrawer from '../components/PurchaseLotDrawer';
-import { fromKg, rateFromPerKg, allEquivalents, allRateEquivalents, toKg, rateToPerKg, UNITS, formatQty, formatRate } from '../../../utils/unitConversion';
-import { favStar } from '../../../shared/utils/favorites';
 import useCanSeeCost from '../../../hooks/useCanSeeCost';
+import { fromKg, UNITS } from '../../../shared/utils/unitConversion';
+
+// Lots per page. Filters, search and the KPI totals all run on the server, so
+// a page only bounds what is drawn — never what is counted.
+const PAGE_SIZE = 100;
 
 const STATUS_TABS = ['All', 'Available', 'Reserved', 'Closed'];
 const TYPE_TABS = ['All', 'raw', 'finished', 'byproduct'];
@@ -240,8 +236,38 @@ export default function LotInventory() {
     }
   }, [searchParams, setSearchParams]);
 
-  const { data: lots = [], isLoading, error, refetch } = useLotInventory({
+  // Search is sent to the server (it searches every lot, not just one page);
+  // debounce so each keystroke doesn't fire a request.
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(searchTerm.trim()), 300);
+    return () => clearTimeout(t);
+  }, [searchTerm]);
+  // Any change of filter starts again from the first page: the page number is
+  // remembered against the filters it was chosen under.
+  const filterKey = JSON.stringify([statusFilter, typeFilter, subtypeFilter, entityFilter, ownershipFilter, processingFilter, debouncedSearch]);
+  const [pageState, setPageState] = useState({ key: filterKey, page: 1 });
+  const page = pageState.key === filterKey ? pageState.page : 1;
+  const setPage = (fn) => setPageState({ key: filterKey, page: typeof fn === 'function' ? fn(page) : fn });
+
+  const { data: pageData, isLoading, isFetching, error, refetch } = useLotInventoryPage({
+    page,
+    limit: PAGE_SIZE,
     ...(statusFilter !== 'All' && { status: statusFilter }),
+    ...(ownershipFilter !== 'company' && { ownership: ownershipFilter }),
+    ...(typeFilter !== 'All' && { type: typeFilter }),
+    ...(entityFilter !== 'All' && { entity: entityFilter }),
+    ...(processingFilter !== 'All' && { processing_type: processingFilter }),
+    ...(subtypeFilter !== 'All' && { subtype: subtypeFilter }),
+    ...(debouncedSearch && { search: debouncedSearch }),
+  });
+  const filtered = useMemo(() => pageData?.lots || [], [pageData]);
+  const pagination = pageData?.pagination || { page: 1, totalPages: 1, total: filtered.length };
+
+  // Summary KPIs — totalled on the server over EVERY lot in the status /
+  // ownership scope, not over the page of lots that happens to be loaded.
+  const { data: kpis = { totalLots: 0, totalKg: 0, availKg: 0, reservedKg: 0, soldKg: 0, totalValue: 0 } } = useLotInventoryTotals({
+    status: statusFilter === 'All' ? 'all' : statusFilter,
     ...(ownershipFilter !== 'company' && { ownership: ownershipFilter }),
   });
 
@@ -252,48 +278,6 @@ export default function LotInventory() {
       return next;
     });
   }
-
-  const filtered = useMemo(() => {
-    return lots.filter(l => {
-      if (typeFilter !== 'All' && l.type !== typeFilter) return false;
-      if (entityFilter !== 'All' && l.entity !== entityFilter) return false;
-      if (processingFilter !== 'All' && (l.processingType || 'single_variety') !== processingFilter) return false;
-      if (subtypeFilter !== 'All') {
-        const s = lotSubtype(l);
-        // "broken" matches any broken-* subtype (parent rollup).
-        if (subtypeFilter === 'broken') {
-          if (!s.startsWith('broken')) return false;
-        } else if (s !== subtypeFilter) {
-          return false;
-        }
-      }
-      if (searchTerm) {
-        const t = searchTerm.toLowerCase();
-        if (!(
-          (l.lotNo || '').toLowerCase().includes(t) ||
-          (l.itemName || '').toLowerCase().includes(t) ||
-          (l.variety || '').toLowerCase().includes(t) ||
-          (l.grade || '').toLowerCase().includes(t) ||
-          (l.brand || '').toLowerCase().includes(t) ||
-          (l.supplierName || '').toLowerCase().includes(t) ||
-          (l.warehouseName || '').toLowerCase().includes(t) ||
-          (l.batchRef || '').toLowerCase().includes(t)
-        )) return false;
-      }
-      return true;
-    });
-  }, [lots, searchTerm, typeFilter, subtypeFilter, entityFilter, processingFilter]);
-
-  // Summary KPIs
-  const kpis = useMemo(() => {
-    const all = lots;
-    const totalKg = all.reduce((s, l) => s + (parseFloat(l.netWeightKg) || 0), 0);
-    const availKg = all.filter(l => l.status === 'Available').reduce((s, l) => s + (parseFloat(l.netWeightKg) || 0), 0);
-    const reservedKg = all.reduce((s, l) => s + (parseFloat(l.reservedQty) || 0), 0);
-    const soldKg = all.reduce((s, l) => s + (parseFloat(l.soldWeightKg) || 0), 0);
-    const totalValue = all.reduce((s, l) => s + (parseFloat(l.landedCostTotal) || 0), 0);
-    return { totalLots: all.length, totalKg, availKg, reservedKg, soldKg, totalValue };
-  }, [lots]);
 
   function getDisplayQty(kg) { return fromKg(kg, displayUnit); }
   function getUnitLabel() { return displayUnit === 'katta' ? 'Katta' : displayUnit === 'maund' ? 'Maund' : displayUnit === 'ton' ? 'Ton' : 'KG'; }
@@ -502,7 +486,9 @@ export default function LotInventory() {
             <input type="text" value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
               placeholder="Search lots, supplier, variety, warehouse..." className="form-input pl-9 py-1.5 text-sm w-full" />
           </div>
-          <span className="text-xs text-gray-400 whitespace-nowrap">{filtered.length} of {lots.length} lots</span>
+          <span className="text-xs text-gray-400 whitespace-nowrap">
+            {pagination.total.toLocaleString()} {pagination.total === 1 ? 'lot' : 'lots'}{isFetching ? ' · loading…' : ''}
+          </span>
           {/* Grouping dimension: By Rice Type (one row per variety) or By
               Subtype (one row per category — all B1 together, …); each group
               expands to its underlying lots. "All lots" disables grouping. */}
@@ -630,6 +616,25 @@ export default function LotInventory() {
         </div>
       )}
 
+      {pagination.totalPages > 1 && (
+        <div className="flex items-center justify-between gap-2 text-sm text-gray-600">
+          <span className="text-xs text-gray-500">
+            Showing {((pagination.page - 1) * PAGE_SIZE + 1).toLocaleString()}–{Math.min(pagination.page * PAGE_SIZE, pagination.total).toLocaleString()} of {pagination.total.toLocaleString()} lots
+          </span>
+          <div className="flex items-center gap-1">
+            <button type="button" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}
+              className="btn btn-ghost btn-sm disabled:opacity-40" aria-label="Previous page">
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+            <span className="text-xs tabular-nums px-1">Page {pagination.page} of {pagination.totalPages}</span>
+            <button type="button" onClick={() => setPage((p) => Math.min(pagination.totalPages, p + 1))} disabled={page >= pagination.totalPages}
+              className="btn btn-ghost btn-sm disabled:opacity-40" aria-label="Next page">
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Purchase Lot Drawer (modern slide-from-right UX) */}
       <PurchaseLotDrawer
         isOpen={showPurchaseModal}
@@ -641,812 +646,5 @@ export default function LotInventory() {
         onSuccess={refetch}
       />
     </div>
-  );
-}
-
-// ─── Purchase Lot Creation Modal ───
-function PurchaseLotModal({ isOpen, onClose, suppliers, warehouses, products, addToast, refetch }) {
-  const createMutation = useCreatePurchaseLot();
-  const createSupplierMut = useCreateSupplier();
-  const { data: categories = [] } = useProductCategories();
-  const { data: templates = [] } = useLotTemplates();
-  const createTemplateMut = useCreateLotTemplate();
-  const deleteTemplateMut = useDeleteLotTemplate();
-  const [showSaveTemplate, setShowSaveTemplate] = useState(false);
-  const [newTemplateName, setNewTemplateName] = useState('');
-  const [sources, setSources] = useState([]);
-  const [sourcesLoading, setSourcesLoading] = useState(false);
-  const [selectedSource, setSelectedSource] = useState(''); // 'batch-{id}' or 'vehicle-{batchId}-{vehicleId}'
-  const [step, setStep] = useState(1); // 1=Source/Item, 2=Qty/Pricing, 3=Quality/Review
-  const [showAddSupplier, setShowAddSupplier] = useState(false);
-  const [newSupplierName, setNewSupplierName] = useState('');
-  const [form, setForm] = useState({
-    item_name: '', type: 'raw', entity: 'mill', warehouse_id: '',
-    category_id: '', product_id: '', supplier_id: '',
-    purchase_date: new Date().toISOString().slice(0, 10), crop_year: '2025-26',
-    variety: '', grade: '', moisture_pct: '', broken_pct: '', sortex_status: '',
-    bag_type: '', bag_quality: '',
-    // kg-canonical: user enters kg + bag count, we compute bag_weight_kg + send as kg unit
-    weight_kg: '', total_bags: '',
-    rate_input: '', rate_unit: 'kg',
-    transport_cost: '', labor_cost: '', unloading_cost: '', packing_cost: '', other_cost: '',
-    notes: '',
-  });
-
-  // Fetch sources when modal opens
-  useEffect(() => {
-    if (isOpen && sources.length === 0) {
-      setSourcesLoading(true);
-      import('../../../api/client').then(({ default: api }) => {
-        api.get('/api/lot-inventory/sources')
-          .then(res => setSources(res?.data?.sources || []))
-          .catch(() => { /* non-critical — sources dropdown will be empty */ })
-          .finally(() => setSourcesLoading(false));
-      });
-    }
-    if (isOpen) setStep(1);
-  }, [isOpen]);
-
-  // ─── Saved templates ───
-  const safeTemplates = Array.isArray(templates) ? templates : [];
-
-  function applyTemplate(templateId) {
-    if (!templateId) return;
-    const t = safeTemplates.find(x => String(x.id) === String(templateId));
-    if (!t) return;
-    setForm(prev => ({
-      ...prev,
-      supplier_id: t.supplierId || '',
-      warehouse_id: t.warehouseId || '',
-      category_id: t.categoryId || '',
-      product_id: t.productId || '',
-      type: t.type || prev.type || 'raw',
-      entity: t.entity || prev.entity || 'mill',
-      grade: t.grade || prev.grade || '',
-      variety: t.variety || prev.variety || '',
-      crop_year: t.cropYear || prev.crop_year || '',
-      // Defaults that flow into step 2 — keep as overridable
-      rate_input: t.defaultRatePerKg ? String(t.defaultRatePerKg) : prev.rate_input,
-      rate_unit: t.defaultRateUnit || 'kg',
-      // Item name auto-fills from product if it was blank
-      item_name: prev.item_name || (t.productName || ''),
-    }));
-    addToast(`Applied template "${t.name}"`, 'success');
-  }
-
-  async function handleSaveTemplate() {
-    const name = newTemplateName.trim();
-    if (!name) return;
-    try {
-      const ratePerKg = (() => {
-        const v = parseFloat(form.rate_input);
-        if (!v) return null;
-        // Normalise rate to per-kg using current bagWt
-        return rateToPerKg(form.rate_input, form.rate_unit, bagWt);
-      })();
-      await createTemplateMut.mutateAsync({
-        name,
-        supplier_id: form.supplier_id ? parseInt(form.supplier_id, 10) : null,
-        warehouse_id: form.warehouse_id ? parseInt(form.warehouse_id, 10) : null,
-        category_id: form.category_id ? parseInt(form.category_id, 10) : null,
-        product_id: form.product_id ? parseInt(form.product_id, 10) : null,
-        type: form.type || 'raw',
-        entity: form.entity || 'mill',
-        grade: form.grade || null,
-        variety: form.variety || null,
-        default_rate_per_kg: ratePerKg,
-        default_bag_weight_kg: bagWt > 0 ? bagWt : null,
-        default_rate_unit: 'kg',
-        crop_year: form.crop_year || null,
-      });
-      addToast(`Template "${name}" saved`, 'success');
-      setNewTemplateName('');
-      setShowSaveTemplate(false);
-    } catch (err) {
-      addToast(err?.response?.data?.message || err.message || 'Failed to save template', 'error');
-    }
-  }
-
-  async function handleDeleteTemplate(t) {
-    if (!window.confirm(`Delete template "${t.name}"?`)) return;
-    try {
-      await deleteTemplateMut.mutateAsync(t.id);
-      addToast(`Template "${t.name}" deleted`, 'success');
-    } catch (err) {
-      addToast(err.message || 'Delete failed', 'error');
-    }
-  }
-
-  async function handleAddSupplier() {
-    const name = newSupplierName.trim();
-    if (!name) return;
-    try {
-      const res = await createSupplierMut.mutateAsync({ name });
-      const created = res?.data?.supplier || res?.data;
-      if (created?.id) {
-        // Optimistically add to local list and select
-        suppliers.unshift({ id: created.id, name: created.name || name });
-        set('supplier_id', created.id);
-        addToast(`Supplier "${name}" added`, 'success');
-      }
-      setNewSupplierName('');
-      setShowAddSupplier(false);
-    } catch (err) {
-      addToast(err?.response?.data?.message || err.message || 'Failed to add supplier', 'error');
-    }
-  }
-
-  const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
-  // Derive bag_weight_kg from kg ÷ bags; fall back to 50 if either is missing
-  const kgEntered = parseFloat(form.weight_kg) || 0;
-  const bagsEntered = parseInt(form.total_bags, 10) || 0;
-  const derivedBagWt = kgEntered > 0 && bagsEntered > 0 ? kgEntered / bagsEntered : 0;
-  const bagWt = derivedBagWt > 0 ? derivedBagWt : 50;
-
-  // Top-level groups + ordered list (parents first, then children indented)
-  const safeCategories = Array.isArray(categories) ? categories : [];
-  const categoryOptions = useMemo(() => {
-    const tops = safeCategories.filter(c => !c.parentId);
-    const opts = [];
-    tops.forEach(t => {
-      opts.push({ id: t.id, label: t.name, isParent: true });
-      safeCategories.filter(c => c.parentId === t.id).forEach(child => {
-        opts.push({ id: child.id, label: `   ↳ ${child.name}`, isParent: false });
-      });
-    });
-    return opts;
-  }, [safeCategories]);
-
-  // Filter products by selected category (parent OR direct child)
-  const safeProducts = Array.isArray(products) ? products : [];
-  const filteredProducts = useMemo(() => {
-    if (!form.category_id) return safeProducts;
-    const cid = parseInt(form.category_id, 10);
-    // Include products in this category OR in its child categories
-    const childIds = safeCategories.filter(c => c.parentId === cid).map(c => c.id);
-    const allowed = new Set([cid, ...childIds]);
-    return safeProducts.filter(p => allowed.has(p.categoryId));
-  }, [safeProducts, safeCategories, form.category_id]);
-
-  // When product picked, auto-fill item_name + map type/entity sensibly if user hasn't overridden
-  function handleProductSelect(productId) {
-    set('product_id', productId);
-    if (!productId) return;
-    const p = safeProducts.find(x => String(x.id) === String(productId));
-    if (!p) return;
-    setForm(prev => ({
-      ...prev,
-      product_id: productId,
-      item_name: prev.item_name && prev.item_name !== '' ? prev.item_name : p.name,
-      // Map by-product flag → type
-      type: p.isByproduct ? 'byproduct' : (prev.type || 'raw'),
-    }));
-  }
-
-  // Build dropdown options: group by batch, with vehicles as sub-items
-  const sourceOptions = useMemo(() => {
-    const options = [];
-    sources.forEach(batch => {
-      const statusLabel = batch.status === 'Completed' ? '  ' : batch.status === 'In Progress' ? '  ' : '';
-      const qtyLabel = batch.raw_qty_kg ? ` | ${Math.round(parseFloat(batch.raw_qty_kg)).toLocaleString()} kg` : '';
-      // Add the batch itself as an option
-      options.push({
-        value: `batch-${batch.id}`,
-        label: `${batch.batch_no} - ${batch.supplier_name || 'Unknown'}${qtyLabel} [${batch.status}]`,
-        batch,
-        vehicle: null,
-      });
-      // Add each vehicle as a sub-option
-      if (batch.vehicles && batch.vehicles.length > 0) {
-        batch.vehicles.forEach(v => {
-          const wtLabel = v.weight_kg ? ` (${Math.round(parseFloat(v.weight_kg)).toLocaleString()} kg)` : '';
-          options.push({
-            value: `vehicle-${batch.id}-${v.id}`,
-            label: `  \u21B3 ${v.vehicle_no}${wtLabel}${v.driver_name ? ' - ' + v.driver_name : ''} [${batch.batch_no}]`,
-            batch,
-            vehicle: v,
-          });
-        });
-      }
-    });
-    return options;
-  }, [sources]);
-
-  // Handle source selection - auto-fill form fields
-  function handleSourceSelect(sourceValue) {
-    setSelectedSource(sourceValue);
-    if (!sourceValue) return;
-
-    const option = sourceOptions.find(o => o.value === sourceValue);
-    if (!option) return;
-
-    const { batch, vehicle } = option;
-    const quality = batch.quality?.arrival || batch.quality?.sample || {};
-    // Engine is KG/per-kg since 5c; tolerate legacy per-MT just in case.
-    const pricePerKg = parseFloat(quality.price_per_kg)
-      || (parseFloat(quality.price_per_mt) || 0) / 1000;
-
-    // Determine quantity (KG): vehicle weight or batch raw quantity.
-    const qtyKg = vehicle?.weight_kg
-      ? parseFloat(vehicle.weight_kg)
-      : parseFloat(batch.raw_qty_kg) || 0;
-
-    // Determine purchase date from vehicle arrival or today
-    const purchaseDate = vehicle?.arrival_date || new Date().toISOString().slice(0, 10);
-
-    // Determine sortex status based on batch status
-    const sortex = batch.status === 'Completed' ? 'Done'
-      : batch.status === 'In Progress' ? 'Pending'
-      : 'Pending';
-
-    // Build item name from batch info
-    const itemName = vehicle
-      ? `Raw Rice (${vehicle.vehicle_no})`
-      : `Raw Rice (${batch.batch_no})`;
-
-    const kgFromSource = qtyKg > 0 ? Math.round(qtyKg) : 0;
-    const bagsFromVehicle = vehicle?.total_bags ? parseInt(vehicle.total_bags, 10) : '';
-
-    setForm(prev => ({
-      ...prev,
-      item_name: itemName,
-      type: 'raw',
-      entity: 'mill',
-      supplier_id: batch.supplier_id || '',
-      purchase_date: purchaseDate,
-      // Quality auto-fill
-      moisture_pct: quality.moisture != null ? String(quality.moisture) : '',
-      broken_pct: quality.broken != null ? String(quality.broken) : '',
-      sortex_status: sortex,
-      grade: batch.post_milling_grade || '',
-      // Quantity auto-fill (kg-first)
-      weight_kg: kgFromSource > 0 ? String(kgFromSource) : '',
-      total_bags: bagsFromVehicle ? String(bagsFromVehicle) : '',
-      // Rate auto-fill from quality price (per kg, matching the engine unit)
-      rate_input: pricePerKg > 0 ? String(pricePerKg) : '',
-      rate_unit: 'kg',
-      // Notes
-      notes: vehicle
-        ? `From ${batch.batch_no}, Vehicle: ${vehicle.vehicle_no}${vehicle.driver_name ? ', Driver: ' + vehicle.driver_name : ''}`
-        : `From milling batch ${batch.batch_no} (${batch.supplier_name || ''})`,
-    }));
-  }
-
-  // Live conversion preview — quantity is canonical kg
-  const qtyKg = kgEntered;
-  const ratePerKg = rateToPerKg(form.rate_input, form.rate_unit, bagWt);
-  const purchaseAmt = Math.round(qtyKg * ratePerKg);
-  const qtyEquiv = allEquivalents(qtyKg, bagWt);
-  const rateEquiv = allRateEquivalents(ratePerKg, bagWt);
-  const directCosts = ['transport_cost', 'labor_cost', 'unloading_cost', 'packing_cost', 'other_cost']
-    .reduce((s, k) => s + (parseFloat(form[k]) || 0), 0);
-  const landedTotal = purchaseAmt + directCosts;
-  const landedPerKg = qtyKg > 0 ? (landedTotal / qtyKg) : 0;
-
-  // Selected source info for display
-  const selectedOption = sourceOptions.find(o => o.value === selectedSource);
-  const selectedBatch = selectedOption?.batch;
-
-  // Multi-lot per arrival: track running totals so the user can see how
-  // much of the source vehicle/batch they've already split off.
-  const [createdSoFar, setCreatedSoFar] = useState({ kg: 0, count: 0 });
-
-  // `keepSource=true` ➜ "Save & Add Another": submit then reset only the
-  // qty/bags/rate/quality/notes fields, keep source+supplier+warehouse+
-  // category+product+type+entity, jump back to step 2 so the user can
-  // immediately enter the next split.
-  async function handleSubmit({ keepSource = false } = {}) {
-    if (!form.item_name) { addToast('Item name is required', 'error'); return; }
-    if (!(kgEntered > 0)) { addToast('Weight (kg) must be greater than 0', 'error'); return; }
-    if (!form.rate_input) { addToast('Rate is required', 'error'); return; }
-    try {
-      // Helpers — Joi number fields reject empty strings, so we coerce
-      // unfilled fields to either null (nullable foreign keys / quality)
-      // or 0 (cost defaults). Without this, a Mill Manager who fills
-      // only required fields hits 10+ validation errors on submit.
-      const num = (v) => {
-        const f = parseFloat(v);
-        return Number.isFinite(f) ? f : null;
-      };
-      const numOrZero = (v) => {
-        const f = parseFloat(v);
-        return Number.isFinite(f) ? f : 0;
-      };
-      const intOrNull = (v) => {
-        const i = parseInt(v, 10);
-        return Number.isFinite(i) ? i : null;
-      };
-      const strOrNull = (v) => (v && String(v).trim() ? String(v) : null);
-
-      const payload = {
-        item_name: form.item_name,
-        type: form.type || 'raw',
-        entity: form.entity || 'mill',
-        warehouse_id: intOrNull(form.warehouse_id),
-        product_id: intOrNull(form.product_id),
-        supplier_id: intOrNull(form.supplier_id),
-        purchase_date: form.purchase_date || null,
-        crop_year: strOrNull(form.crop_year),
-        variety: strOrNull(form.variety),
-        grade: strOrNull(form.grade),
-        moisture_pct: num(form.moisture_pct),
-        broken_pct: num(form.broken_pct),
-        sortex_status: strOrNull(form.sortex_status),
-        bag_type: strOrNull(form.bag_type),
-        bag_quality: strOrNull(form.bag_quality),
-        notes: strOrNull(form.notes),
-        // Quantity & rate
-        quantity_input: kgEntered,
-        quantity_unit: 'kg',
-        bag_weight_kg: bagWt,
-        total_bags: bagsEntered || null,
-        rate_input: num(form.rate_input),
-        rate_unit: form.rate_unit || 'kg',
-        // Costs default to 0 when blank
-        transport_cost: numOrZero(form.transport_cost),
-        labor_cost: numOrZero(form.labor_cost),
-        unloading_cost: numOrZero(form.unloading_cost),
-        packing_cost: numOrZero(form.packing_cost),
-        other_cost: numOrZero(form.other_cost),
-      };
-      const res = await createMutation.mutateAsync(payload);
-      const lotNo = res?.data?.lot?.lot_no || 'lot';
-      const justKg = kgEntered;
-      addToast(`Lot ${lotNo} created — ${justKg.toLocaleString()} kg`, 'success');
-      refetch();
-
-      if (keepSource) {
-        // Stay open; keep source + relationship fields, reset only what's per-lot
-        setCreatedSoFar(prev => ({ kg: prev.kg + justKg, count: prev.count + 1 }));
-        setForm(p => ({
-          ...p,
-          // Per-lot: clear
-          item_name: '', weight_kg: '', total_bags: '', rate_input: '',
-          variety: '', grade: '', moisture_pct: '', broken_pct: '',
-          product_id: '',
-          transport_cost: '', labor_cost: '', unloading_cost: '', packing_cost: '', other_cost: '',
-          notes: '',
-          // Per-source: keep
-          // (supplier_id, warehouse_id, category_id, type, entity, purchase_date, crop_year, sortex_status retained)
-        }));
-        setStep(2);
-      } else {
-        onClose();
-        setSelectedSource('');
-        setCreatedSoFar({ kg: 0, count: 0 });
-        setForm(p => ({
-          ...p, item_name: '', weight_kg: '', total_bags: '', rate_input: '',
-          variety: '', grade: '', moisture_pct: '', broken_pct: '',
-          category_id: '', product_id: '',
-        }));
-      }
-    } catch (err) {
-      addToast(err.message || 'Failed to create lot', 'error');
-    }
-  }
-  // Per-step validation
-  const step1Valid = !!(form.item_name && form.item_name.trim());
-  const step2Valid = kgEntered > 0 && parseFloat(form.rate_input) > 0;
-  const canNext = step === 1 ? step1Valid : step === 2 ? step2Valid : true;
-
-  function tryNext() {
-    if (step === 1 && !step1Valid) { addToast('Item name is required', 'error'); return; }
-    if (step === 2 && !step2Valid) { addToast('Weight and rate are required', 'error'); return; }
-    setStep(s => Math.min(3, s + 1));
-  }
-
-  const STEPS = [
-    { n: 1, label: 'Source & Item' },
-    { n: 2, label: 'Quantity & Pricing' },
-    { n: 3, label: 'Quality & Review' },
-  ];
-
-  // Reusable minimal classes
-  const inputCls = 'w-full bg-transparent border-0 border-b border-gray-200 rounded-none px-0 py-1.5 text-sm text-gray-900 placeholder-gray-300 focus:border-gray-900 focus:ring-0 outline-none transition-colors';
-  const labelCls = 'text-[11px] font-medium text-gray-500 uppercase tracking-wide';
-  const fieldCls = 'space-y-1';
-
-  return (
-    <Modal isOpen={isOpen} onClose={onClose} title="New Purchase Lot" size="xl">
-      <div className="flex flex-col -mx-6 -mt-2 -mb-2" style={{ minHeight: '64vh' }}>
-        {/* Step indicator — thin progress with dots */}
-        <div className="px-8 pt-3 pb-4 border-b border-gray-100">
-          <div className="flex items-center justify-between max-w-md mx-auto">
-            {STEPS.map((s, idx) => {
-              const isActive = step === s.n;
-              const isDone = step > s.n;
-              return (
-                <div key={s.n} className="flex items-center flex-1">
-                  <button
-                    type="button"
-                    onClick={() => setStep(s.n)}
-                    className="flex flex-col items-center group"
-                  >
-                    <span className={`inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-medium transition-all ${
-                      isActive ? 'bg-gray-900 text-white' :
-                      isDone ? 'bg-emerald-600 text-white' :
-                      'bg-white border border-gray-200 text-gray-400 group-hover:border-gray-400'
-                    }`}>
-                      {isDone ? <Check size={13} /> : s.n}
-                    </span>
-                    <span className={`mt-1.5 text-[10px] font-medium uppercase tracking-wider whitespace-nowrap ${
-                      isActive ? 'text-gray-900' : isDone ? 'text-emerald-600' : 'text-gray-400'
-                    }`}>{s.label}</span>
-                  </button>
-                  {idx < STEPS.length - 1 && (
-                    <div className={`flex-1 h-px mx-2 -mt-4 transition-colors ${step > s.n ? 'bg-emerald-500' : 'bg-gray-200'}`} />
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Scrollable content */}
-        <div className="flex-1 overflow-y-auto px-8 py-6 space-y-6" style={{ maxHeight: '58vh' }}>
-          {step === 1 && (
-            <div className="space-y-6">
-              {/* Saved templates */}
-              <div className={fieldCls}>
-                <div className="flex items-center justify-between">
-                  <label className={labelCls}>Saved Template{safeTemplates.length > 0 && ` · ${safeTemplates.length}`}</label>
-                  <button type="button" onClick={() => setShowSaveTemplate(s => !s)}
-                    className="text-[11px] text-gray-500 hover:text-gray-900 inline-flex items-center gap-1">
-                    <BookmarkPlus size={11} /> {showSaveTemplate ? 'Cancel' : 'Save current as template'}
-                  </button>
-                </div>
-                {!showSaveTemplate ? (
-                  safeTemplates.length === 0 ? (
-                    <p className="text-[11px] text-gray-400">No saved templates yet — fill the wizard once and click <span className="font-medium text-gray-500">Save current as template</span> to reuse the supplier + warehouse + product config next time.</p>
-                  ) : (
-                    <div className="flex flex-wrap gap-1.5">
-                      {safeTemplates.map(t => (
-                        <span key={t.id}
-                          className="inline-flex items-center gap-1 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded text-xs px-2 py-1 group transition-colors">
-                          <button type="button" onClick={() => applyTemplate(t.id)} className="text-gray-700 hover:text-gray-900 font-medium">
-                            {t.name}
-                          </button>
-                          <span className="text-gray-300">·</span>
-                          <span className="text-[10px] text-gray-400">{t.supplierName || 'no supplier'}</span>
-                          <button type="button" onClick={() => handleDeleteTemplate(t)}
-                            className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-500 transition-opacity ml-0.5"
-                            title="Delete template">
-                            <Trash2 size={10} />
-                          </button>
-                        </span>
-                      ))}
-                    </div>
-                  )
-                ) : (
-                  <div className="flex gap-2 items-end">
-                    <input
-                      autoFocus
-                      value={newTemplateName}
-                      onChange={e => setNewTemplateName(e.target.value)}
-                      onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleSaveTemplate(); } }}
-                      placeholder="Template name (e.g. AGR Hyderabad standard)"
-                      className={`${inputCls} flex-1`}
-                    />
-                    <button type="button" onClick={handleSaveTemplate} disabled={!newTemplateName.trim() || createTemplateMut.isPending}
-                      className="px-3 py-1.5 text-xs font-medium bg-gray-900 text-white rounded hover:bg-gray-700 disabled:bg-gray-300">
-                      {createTemplateMut.isPending ? '…' : 'Save'}
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              {/* Source — single line */}
-              <div className={fieldCls}>
-                <label className={labelCls}>Auto-fill from</label>
-                <select
-                  value={selectedSource}
-                  onChange={e => handleSourceSelect(e.target.value)}
-                  className={inputCls}
-                  disabled={sourcesLoading}
-                >
-                  <option value="">{sourcesLoading ? 'Loading…' : 'None — enter manually'}</option>
-                  {sourceOptions.map(opt => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                  ))}
-                </select>
-                {selectedBatch && (
-                  <p className="text-xs text-gray-500 pt-1">
-                    {selectedBatch.batch_no} · {selectedBatch.supplier_name || '—'} · {selectedBatch.raw_qty_kg ? Math.round(parseFloat(selectedBatch.raw_qty_kg)).toLocaleString() : '—'} kg · <span className="text-gray-400">{selectedBatch.status}</span>
-                  </p>
-                )}
-              </div>
-
-              {/* Type / Entity inline pills */}
-              <div className="grid grid-cols-2 gap-6">
-                <div className={fieldCls}>
-                  <label className={labelCls}>Stock Type</label>
-                  <div className="flex gap-1">
-                    {['raw', 'finished', 'byproduct'].map(t => (
-                      <button key={t} type="button" onClick={() => set('type', t)}
-                        className={`flex-1 px-2 py-1.5 text-xs font-medium rounded border transition-colors ${
-                          form.type === t ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
-                        }`}>
-                        {t === 'raw' ? 'Raw' : t === 'finished' ? 'Finished' : 'By-product'}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div className={fieldCls}>
-                  <label className={labelCls}>Location</label>
-                  <div className="flex gap-1">
-                    {['mill', 'export'].map(e => (
-                      <button key={e} type="button" onClick={() => set('entity', e)}
-                        className={`flex-1 px-2 py-1.5 text-xs font-medium rounded border transition-colors ${
-                          form.entity === e ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
-                        }`}>
-                        {e === 'mill' ? 'Mill' : 'Export'}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              {/* Category + Product */}
-              <div className="grid grid-cols-2 gap-6">
-                <div className={fieldCls}>
-                  <label className={labelCls}>Category</label>
-                  <select value={form.category_id} onChange={e => { set('category_id', e.target.value); set('product_id', ''); }} className={inputCls}>
-                    <option value="">Any</option>
-                    {categoryOptions.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
-                  </select>
-                </div>
-                <div className={fieldCls}>
-                  <label className={labelCls}>Product</label>
-                  <select value={form.product_id} onChange={e => handleProductSelect(e.target.value)} className={inputCls}>
-                    <option value="">{form.category_id ? `From ${filteredProducts.length}` : 'Optional'}</option>
-                    {filteredProducts.map(p => <option key={p.id} value={p.id}>{p.name}{p.code ? ` (${p.code})` : ''}</option>)}
-                  </select>
-                </div>
-              </div>
-
-              {/* Item name */}
-              <div className={fieldCls}>
-                <label className={labelCls}>Item Name <span className="text-red-400 normal-case">*</span></label>
-                <input value={form.item_name} onChange={e => set('item_name', e.target.value)} className={inputCls} placeholder="e.g. Raw Rice, 1121 Basmati" />
-              </div>
-
-              {/* Supplier with inline add */}
-              <div className={fieldCls}>
-                <div className="flex items-center justify-between">
-                  <label className={labelCls}>Supplier</label>
-                  <button type="button" onClick={() => setShowAddSupplier(s => !s)} className="text-[11px] text-gray-500 hover:text-gray-900 inline-flex items-center gap-1">
-                    <UserPlus size={11} /> {showAddSupplier ? 'Cancel' : 'New'}
-                  </button>
-                </div>
-                {!showAddSupplier ? (
-                  <select value={form.supplier_id} onChange={e => set('supplier_id', e.target.value)} className={inputCls}>
-                    <option value="">Select…</option>
-                    {suppliers.slice(0, 200).map(s => <option key={s.id} value={s.id}>{favStar(s)}{s.name}</option>)}
-                  </select>
-                ) : (
-                  <div className="flex gap-2 items-end">
-                    <input
-                      autoFocus
-                      value={newSupplierName}
-                      onChange={e => setNewSupplierName(e.target.value)}
-                      onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddSupplier(); } }}
-                      placeholder="New supplier name"
-                      className={`${inputCls} flex-1`}
-                    />
-                    <button type="button" onClick={handleAddSupplier} disabled={!newSupplierName.trim() || createSupplierMut.isPending}
-                      className="px-3 py-1.5 text-xs font-medium bg-gray-900 text-white rounded hover:bg-gray-700 disabled:bg-gray-300">
-                      {createSupplierMut.isPending ? '…' : 'Add'}
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              {/* Warehouse / Variety / Grade */}
-              <div className="grid grid-cols-3 gap-6">
-                <div className={fieldCls}>
-                  <label className={labelCls}>Warehouse</label>
-                  <select value={form.warehouse_id} onChange={e => set('warehouse_id', e.target.value)} className={inputCls}>
-                    <option value="">Select…</option>
-                    {warehouses.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
-                  </select>
-                </div>
-                <div className={fieldCls}>
-                  <label className={labelCls}>Variety</label>
-                  <input value={form.variety} onChange={e => set('variety', e.target.value)} className={inputCls} placeholder="Super Kernel" />
-                </div>
-                <div className={fieldCls}>
-                  <label className={labelCls}>Grade</label>
-                  <select value={form.grade} onChange={e => set('grade', e.target.value)} className={inputCls}>
-                    <option value="">—</option>
-                    <option>A</option><option>B</option><option>C</option><option>Sella</option><option>Steam</option><option>Raw</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Date / Crop year */}
-              <div className="grid grid-cols-2 gap-6">
-                <div className={fieldCls}>
-                  <label className={labelCls}>Purchase Date</label>
-                  <input type="date" value={form.purchase_date} onChange={e => set('purchase_date', e.target.value)} className={inputCls} />
-                </div>
-                <div className={fieldCls}>
-                  <label className={labelCls}>Crop Year</label>
-                  <input value={form.crop_year} onChange={e => set('crop_year', e.target.value)} className={inputCls} placeholder="2025-26" />
-                </div>
-              </div>
-            </div>
-          )}
-
-          {step === 2 && (
-            <div className="space-y-8">
-              {/* Primary inputs row */}
-              <div className="grid grid-cols-3 gap-6">
-                <div className={fieldCls}>
-                  <label className={labelCls}>Weight (kg) <span className="text-red-400 normal-case">*</span></label>
-                  <input type="number" value={form.weight_kg} onChange={e => set('weight_kg', e.target.value)} className={`${inputCls} text-2xl font-light`} placeholder="0" />
-                  {kgEntered > 0 && <p className="text-[11px] text-gray-400">{(kgEntered / 1000).toFixed(2)} MT</p>}
-                </div>
-                <div className={fieldCls}>
-                  <label className={labelCls}>Number of Bags</label>
-                  <input type="number" value={form.total_bags} onChange={e => set('total_bags', e.target.value)} className={`${inputCls} text-2xl font-light`} placeholder="0" />
-                  {kgEntered > 0 && bagsEntered > 0 && (
-                    <p className="text-[11px] text-emerald-600">{derivedBagWt.toFixed(2)} kg/bag</p>
-                  )}
-                </div>
-                <div className={fieldCls}>
-                  <label className={labelCls}>Rate <span className="text-red-400 normal-case">*</span></label>
-                  <div className="flex items-baseline gap-2">
-                    <input type="number" value={form.rate_input} onChange={e => set('rate_input', e.target.value)} className={`${inputCls} text-2xl font-light flex-1`} placeholder="0" />
-                    <select value={form.rate_unit} onChange={e => set('rate_unit', e.target.value)} className="bg-transparent border-0 text-xs text-gray-500 focus:ring-0 outline-none cursor-pointer">
-                      <option value="kg">/kg</option><option value="katta">/bag</option><option value="maund">/maund</option><option value="ton">/ton</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
-
-              {/* Conversion preview — minimal text strip */}
-              {(kgEntered > 0 || form.rate_input > 0) && (
-                <div className="border-y border-gray-100 py-3 text-xs text-gray-600 flex flex-wrap gap-x-5 gap-y-1">
-                  <span><span className="text-gray-400">≈</span> <span className="font-medium text-gray-900">{qtyEquiv.katta.toLocaleString()}</span> bags ({bagWt.toFixed(0)} kg)</span>
-                  <span><span className="text-gray-400">·</span> <span className="font-medium text-gray-900">{qtyEquiv.maund.toLocaleString()}</span> maund</span>
-                  <span><span className="text-gray-400">·</span> <span className="font-medium text-gray-900">{qtyEquiv.ton}</span> MT</span>
-                  <span className="ml-auto"><span className="text-gray-400">Rate</span> Rs {rateEquiv.perKg}/kg <span className="text-gray-300 mx-1">·</span> Rs {rateEquiv.perKatta.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/bag</span>
-                </div>
-              )}
-
-              {/* Additional Costs */}
-              <div className="space-y-2">
-                <label className={labelCls}>Additional Costs <span className="normal-case text-gray-400">— optional</span></label>
-                <div className="grid grid-cols-5 gap-4">
-                  {['transport_cost', 'labor_cost', 'unloading_cost', 'packing_cost', 'other_cost'].map(k => (
-                    <div key={k} className="space-y-0.5">
-                      <p className="text-[10px] text-gray-400 uppercase tracking-wide">{k.replace(/_cost$/, '').replace(/_/g, ' ')}</p>
-                      <input type="number" value={form[k]} onChange={e => set(k, e.target.value)} className={inputCls} placeholder="0" />
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Landed cost — minimal numeric line */}
-              {qtyKg > 0 && (
-                <div className="bg-gray-50 rounded-lg p-4 grid grid-cols-3 gap-4">
-                  <div>
-                    <p className="text-[10px] text-gray-500 uppercase tracking-wide">Purchase</p>
-                    <p className="text-base font-medium text-gray-900">Rs {purchaseAmt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-                  </div>
-                  <div>
-                    <p className="text-[10px] text-gray-500 uppercase tracking-wide">+ Costs</p>
-                    <p className="text-base font-medium text-gray-900">Rs {directCosts.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-                  </div>
-                  <div>
-                    <p className="text-[10px] text-gray-500 uppercase tracking-wide">Landed Total</p>
-                    <p className="text-base font-medium text-emerald-700">Rs {landedTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} <span className="text-[11px] text-gray-400 font-normal">· Rs {landedPerKg.toFixed(2)}/kg</span></p>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {step === 3 && (
-            <div className="space-y-6">
-              <div className="space-y-2">
-                <div className="flex items-baseline justify-between">
-                  <label className={labelCls}>Quality</label>
-                  {selectedSource && <span className="text-[10px] text-emerald-600 uppercase tracking-wide">Auto-filled</span>}
-                </div>
-                <div className="grid grid-cols-3 gap-6">
-                  <div className={fieldCls}>
-                    <p className="text-[10px] text-gray-400 uppercase tracking-wide">Moisture %</p>
-                    <input type="number" value={form.moisture_pct} onChange={e => set('moisture_pct', e.target.value)} className={inputCls} step="0.1" placeholder="0" />
-                  </div>
-                  <div className={fieldCls}>
-                    <p className="text-[10px] text-gray-400 uppercase tracking-wide">Broken %</p>
-                    <input type="number" value={form.broken_pct} onChange={e => set('broken_pct', e.target.value)} className={inputCls} step="0.1" placeholder="0" />
-                  </div>
-                  <div className={fieldCls}>
-                    <p className="text-[10px] text-gray-400 uppercase tracking-wide">Sortex</p>
-                    <select value={form.sortex_status} onChange={e => set('sortex_status', e.target.value)} className={inputCls}>
-                      <option value="">—</option><option>Done</option><option>Pending</option><option>N/A</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
-
-              <div className={fieldCls}>
-                <label className={labelCls}>Notes</label>
-                <textarea value={form.notes} onChange={e => set('notes', e.target.value)} className={`${inputCls} resize-none`} rows={2} placeholder="Optional remarks…" />
-              </div>
-
-              {/* Review — clean key/value list */}
-              <div className="border-t border-gray-100 pt-5">
-                <p className={`${labelCls} mb-3`}>Review</p>
-                <dl className="grid grid-cols-2 gap-x-8 gap-y-3 text-sm">
-                  <div className="flex justify-between"><dt className="text-gray-500">Item</dt><dd className="font-medium text-gray-900">{form.item_name || '—'}</dd></div>
-                  <div className="flex justify-between"><dt className="text-gray-500">Type · Location</dt><dd className="font-medium text-gray-900 capitalize">{form.type} · {form.entity}</dd></div>
-                  <div className="flex justify-between"><dt className="text-gray-500">Supplier</dt><dd className="font-medium text-gray-900 truncate ml-2">{(suppliers.find(s => String(s.id) === String(form.supplier_id)))?.name || '—'}</dd></div>
-                  <div className="flex justify-between"><dt className="text-gray-500">Quantity</dt><dd className="font-medium text-gray-900">{kgEntered.toLocaleString()} kg{bagsEntered ? ` · ${bagsEntered} bags` : ''}</dd></div>
-                  <div className="flex justify-between"><dt className="text-gray-500">Rate</dt><dd className="font-medium text-gray-900">Rs {rateEquiv.perKg}/kg</dd></div>
-                  <div className="flex justify-between"><dt className="text-gray-500">Purchase</dt><dd className="font-medium text-gray-900">Rs {purchaseAmt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</dd></div>
-                  <div className="flex justify-between"><dt className="text-gray-500">Add'l Costs</dt><dd className="font-medium text-gray-900">Rs {directCosts.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</dd></div>
-                  <div className="flex justify-between border-t border-gray-100 pt-2 col-span-2 mt-1">
-                    <dt className="text-gray-900 font-medium">Landed Total</dt>
-                    <dd className="font-semibold text-emerald-700 text-base">Rs {landedTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} <span className="text-xs text-gray-400 font-normal ml-1">Rs {landedPerKg.toFixed(2)}/kg</span></dd>
-                  </div>
-                </dl>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Sticky Footer */}
-        <div className="border-t border-gray-100 px-8 py-3 bg-white flex items-center justify-between gap-3">
-          <div className="text-xs text-gray-500 flex items-center gap-4 flex-wrap">
-            {kgEntered > 0 && <span><span className="font-medium text-gray-900">{kgEntered.toLocaleString()}</span> kg</span>}
-            {bagsEntered > 0 && <span><span className="font-medium text-gray-900">{bagsEntered}</span> bags</span>}
-            {landedTotal > 0 && <span><span className="text-gray-400">Landed</span> <span className="font-medium text-emerald-700">Rs {landedTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></span>}
-            {createdSoFar.count > 0 && (
-              <span className="text-emerald-700 font-medium border-l border-gray-200 pl-3">
-                <Check size={11} className="inline mr-0.5" />
-                {createdSoFar.count} lot{createdSoFar.count > 1 ? 's' : ''} created · {createdSoFar.kg.toLocaleString()} kg total
-              </span>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            <button onClick={onClose} className="px-3 py-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors">
-              {createdSoFar.count > 0 ? 'Done' : 'Cancel'}
-            </button>
-            {step > 1 && (
-              <button onClick={() => setStep(s => Math.max(1, s - 1))} className="px-3 py-1.5 text-sm text-gray-700 hover:text-gray-900 inline-flex items-center gap-1 transition-colors">
-                <ChevronLeft size={14} /> Back
-              </button>
-            )}
-            {step < 3 ? (
-              <button onClick={tryNext} disabled={!canNext}
-                className={`px-4 py-1.5 text-sm font-medium rounded inline-flex items-center gap-1 transition-colors ${
-                  canNext ? 'bg-gray-900 text-white hover:bg-gray-700' : 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                }`}>
-                Next <ChevronRight size={14} />
-              </button>
-            ) : (
-              <>
-                {/* Multi-lot: only when source is selected, since the value of repeat-creation is splitting one arrival */}
-                {selectedSource && (
-                  <button onClick={() => handleSubmit({ keepSource: true })} disabled={createMutation.isPending || !step2Valid || !step1Valid}
-                    className="px-3 py-1.5 text-sm font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded inline-flex items-center gap-1 transition-colors disabled:opacity-50"
-                    title="Create this lot then start another from the same source — useful when one arrival splits into multiple grades or products">
-                    <Plus size={14} /> Save & Add Another
-                  </button>
-                )}
-                <button onClick={() => handleSubmit({ keepSource: false })} disabled={createMutation.isPending || !step2Valid || !step1Valid}
-                  className="px-4 py-1.5 text-sm font-medium text-white bg-emerald-600 rounded hover:bg-emerald-700 disabled:bg-gray-300 transition-colors">
-                  {createMutation.isPending ? 'Creating…' : createdSoFar.count > 0 ? 'Create Final Lot' : 'Create Lot'}
-                </button>
-              </>
-
-            )}
-          </div>
-        </div>
-      </div>
-    </Modal>
   );
 }

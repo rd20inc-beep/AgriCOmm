@@ -19,7 +19,7 @@ import { LoadingSpinner, ErrorState } from '../../../components/LoadingState';
 import StatusBadge from '../../../components/StatusBadge';
 import Modal from '../../../components/Modal';
 import SlideDrawer from '../../../components/SlideDrawer';
-import { fromKg, allEquivalents, allRateEquivalents, toKg, UNITS } from '../../../utils/unitConversion';
+import { fromKg, allEquivalents, allRateEquivalents, toKg, UNITS } from '../../../shared/utils/unitConversion';
 import LotCostSheet from '../components/LotCostSheet';
 import AddPurchaseModal from '../components/AddPurchaseModal';
 import QualityEditModal from '../components/QualityEditModal';
@@ -39,17 +39,17 @@ const TABS = [
   { key: 'documents', label: 'Documents', icon: FileText },
 ];
 
+// Each type posts through the server's single stock-movement path (qty, net
+// weight and availability move together). Adjustments and write-offs
+// (wastage / damage / shortage) are NOT here — they change the books and need
+// Owner approval, so they live in Stock Adjustments. Export allocation is made
+// from the export order, which is what actually reserves the stock.
 const TXN_TYPES = [
   { value: 'warehouse_transfer_in', label: 'Warehouse Transfer In', dir: 'in' },
   { value: 'milling_issue', label: 'Issue to Milling', dir: 'out' },
   { value: 'milling_receipt', label: 'Milling Receipt', dir: 'in' },
-  { value: 'export_allocation', label: 'Export Allocation', dir: 'out' },
   { value: 'sales_allocation', label: 'Sales Allocation', dir: 'out' },
   { value: 'dispatch_out', label: 'Dispatch Out', dir: 'out' },
-  { value: 'stock_adjustment_plus', label: 'Stock Adjustment (+)', dir: 'in' },
-  { value: 'wastage', label: 'Wastage', dir: 'out' },
-  { value: 'damage', label: 'Damage', dir: 'out' },
-  { value: 'shortage', label: 'Shortage', dir: 'out' },
   { value: 'return_in', label: 'Return In', dir: 'in' },
 ];
 
@@ -58,6 +58,12 @@ const pf = (v) => v != null ? parseFloat(v) || null : null;
 export default function LotDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
+  // Back returns to wherever the lot was opened from (Stock Summary, a report,
+  // a ledger…); a lot opened directly (no history) falls back to Lot Inventory.
+  const goBack = () => {
+    if (typeof window !== 'undefined' && window.history.state && window.history.state.idx > 0) navigate(-1);
+    else navigate('/lot-inventory');
+  };
   const { addToast, warehousesList, companyProfileData } = useApp();
   const { user, hasPermission } = useAuth();
   const canReports = hasPermission('reports', 'view');
@@ -150,7 +156,7 @@ export default function LotDetail() {
 
   if (isLoading) return <LoadingSpinner message="Loading lot details..." />;
   if (error) return <ErrorState message={error.message} onRetry={refetch} />;
-  if (!lot.id) return <ErrorState message="Lot not found" onRetry={() => navigate('/inventory')} />;
+  if (!lot.id) return <ErrorState message="Lot not found" onRetry={goBack} />;
 
   const bw = parseFloat(lot.bagWeightKg) || 50;
   const netKg = parseFloat(lot.netWeightKg) || parseFloat(lot.grossWeightKg) || 0;
@@ -239,7 +245,7 @@ export default function LotDetail() {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center gap-4">
-        <button onClick={() => navigate('/inventory')} className="p-2 hover:bg-gray-100 rounded-lg"><ArrowLeft className="w-5 h-5 text-gray-600" /></button>
+        <button onClick={goBack} title="Back" aria-label="Back" className="p-2 hover:bg-gray-100 rounded-lg"><ArrowLeft className="w-5 h-5 text-gray-600" /></button>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-3 flex-wrap">
             <h1 className="text-2xl font-bold text-gray-900">{lot.lotNo}</h1>
@@ -1447,6 +1453,11 @@ function TransactionModal({ isOpen, onClose, lotId, lotNo, availableKg, bagWeigh
               <p className="text-[10px] font-semibold uppercase tracking-wide text-red-600 mb-1 flex items-center gap-1"><ArrowUpRight size={11} /> Stock Out</p>
               <div className="grid grid-cols-2 gap-1.5">{TXN_TYPES.filter(t => t.dir === 'out').map(t => <TypePill key={t.value} t={t} />)}</div>
             </div>
+            <p className="text-[11px] text-gray-500">
+              Stock adjustments, wastage, damage and shortage are recorded in{' '}
+              <Link to="/stock-adjustments" className="text-blue-600 hover:underline">Stock Adjustments</Link>{' '}
+              — they need Owner approval.
+            </p>
           </div>
         </div>
 
