@@ -50,7 +50,8 @@ const sidebarNav = [
       { label: 'Service Milling', to: '/milling/service', icon: Package, permission: { module: 'service_milling', action: 'view' } },
       { label: 'Service Invoices', to: '/service-milling/invoices', icon: FileText, permission: { module: 'service_milling', action: 'view_invoice' } },
       // Mill money (expenses, payables, stock value, profit, purchase rates) —
-      // not for the money-blind Mill Operator / QC Analyst: also needs reports.view_cost.
+      // not for the cost-blind QC Analyst / Inventory Officer / Documentation
+      // Officer: also needs reports.view_cost (held by the Mill Operator since mig 314).
       { label: 'Mill Finance', to: '/milling/finance', icon: DollarSign, permission: { module: 'milling', action: 'view' }, anyOf: [{ module: 'reports', action: 'view_cost' }, { module: 'finance', action: 'view' }] },
       { label: 'Rice Purchases', to: '/milling/rice-purchases', icon: Truck, permission: { module: 'milling', action: 'view' }, anyOf: [{ module: 'reports', action: 'view_cost' }, { module: 'finance', action: 'view' }] },
       { label: 'Sample Analysis', to: '/sample-analysis', icon: FlaskConical, anyOf: [{ module: 'inventory', action: 'view' }, { module: 'milling', action: 'view' }] },

@@ -28,7 +28,7 @@ export default function StockSummary() {
   const [editVal, setEditVal] = useState('');
   const [detailRow, setDetailRow] = useState(null);
   // Stock value / selling value / profit are hidden from roles without
-  // reports.view_cost (Mill Operator, QC Analyst) — quantities only.
+  // reports.view_cost (QC Analyst / Inventory Officer / Documentation Officer) — quantities only.
   const showCost = useCanSeeCost();
 
   const queryKey = ['stock-summary', entity, status];

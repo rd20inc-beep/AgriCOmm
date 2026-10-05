@@ -60,7 +60,7 @@ export default function Dashboard() {
   const canFinance = hasPermission('finance', 'view');
   const canReports = hasPermission('reports', 'view');
   // Order book / receipts / profit tiles are money — hidden from roles without
-  // reports.view_cost or finance.view (Mill Operator, QC Analyst).
+  // reports.view_cost or finance.view (QC Analyst / Inventory Officer / Documentation Officer).
   const showMoney = canSeeCost(hasPermission);
   // Pending master-data quick-add approvals (Admin → Approvals). Hook must run
   // before the early return below to keep hook order stable.

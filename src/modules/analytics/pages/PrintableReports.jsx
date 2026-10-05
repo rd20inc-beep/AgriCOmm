@@ -112,14 +112,17 @@ export default function PrintableReports() {
   const { user, hasPermission } = useAuth();
   const [searchParams] = useSearchParams();
   // A Mill role only gets the mill/inventory reports — the company-wide
-  // financials (P&L, Cashflow, AR/AP aging) mix export data, which the mill
-  // must not see. Their mill financials live on the Mill Finance dashboard.
-  const millScoped = user?.role === 'Mill Manager';
+  // financials (P&L, Cashflow, AR/AP aging, the export sales ledger) mix export
+  // data, which the mill must not see. Their mill financials live on the Mill
+  // Finance dashboard. The Mill Operator sees the mill's money (owner decision
+  // 2026-10-05, mig 314) but company finance stays closed to it at the API, so
+  // it gets the same mill set as the Mill Manager.
+  const millScoped = ['Mill Manager', 'Mill Operator'].includes(user?.role);
   // The audit trail is admin-only (gated admin.view on the endpoint too).
   const canAudit = hasPermission?.('admin', 'view');
-  // Without reports.view_cost (Mill Operator, QC Analyst) the stock and
-  // production reports print quantities only, and the money-only reports
-  // (purchase ledger and the financials) are not offered at all.
+  // Without reports.view_cost (QC Analyst / Inventory Officer / Documentation
+  // Officer) the stock and production reports print quantities only, and the
+  // money-only reports (purchase ledger and the financials) are not offered.
   const showCost = canSeeCost(hasPermission);
   const REPORT_TYPES = !showCost
     ? ['production', 'stock', 'stock_detail']

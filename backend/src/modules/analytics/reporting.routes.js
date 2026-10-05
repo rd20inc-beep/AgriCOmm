@@ -3,9 +3,15 @@ const router = express.Router();
 const controller = require('../../controllers/reportingController');
 const authorize = require('../../middleware/rbac');
 const { denyRoles } = require('../../middleware/rbac');
-// The Mill Operator role holds reports.view (for production reports) but must
-// never see finance: profit, margin, receivables, payables, cashflow, FX or
-// the booked-profit executive summary. Additive blocklist on those routes only.
+// Company-wide finance is closed to the Mill Operator BY ROLE: payroll, export /
+// customer / country / product profitability, the executive summary, AR / AP,
+// cash forecast, FX, P&L, the invoice + export sales ledgers and scheduled
+// reports. Owner decision 2026-10-05: the operator sees everything regarding
+// the MILL, so the mill reports (batch profitability + margin, lot + local-sale
+// trackers, supplier / rice-type / warehouse / processing-loss ledgers, the
+// rice purchase ledger) no longer carry this guard — they fall back to the
+// reports.view_cost / view_profit redaction (#535), which the operator now
+// passes (mig 314) and the QC Analyst / Inventory Officer do not.
 const noFinanceForOperator = denyRoles('Mill Operator');
 
 // ═══════════════════════════════════════════════════════════════════
@@ -24,7 +30,9 @@ router.get('/payroll-ledger', authorize('reports', 'view'), noFinanceForOperator
 router.get('/payroll-overview', authorize('reports', 'view'), noFinanceForOperator, controller.payrollOverview);
 router.get('/payroll-pending', authorize('reports', 'view'), noFinanceForOperator, controller.payrollPending);
 router.get('/payroll-analytics', authorize('reports', 'view'), noFinanceForOperator, controller.payrollAnalytics);
-router.get('/sale-detail/:id', authorize('reports', 'view'), noFinanceForOperator, controller.saleDetail);
+// One local sale's Sale-360 (lot, provenance, payments) — opened from the mill
+// Sales tab, so it follows the sales tracker: no role deny, money redacted.
+router.get('/sale-detail/:id', authorize('reports', 'view'), controller.saleDetail);
 router.get('/inventory-ledger', authorize('reports', 'view'), controller.inventoryLedger);
 // Stock movement ledger by dimension (variety|grade|byproduct|product) — Batch 5.
 router.get('/stock-ledger', authorize('reports', 'view'), controller.stockLedger);
@@ -44,10 +52,10 @@ router.get('/executive/advance-funnel', authorize('reports', 'view'), noFinanceF
 // Profitability
 // ═══════════════════════════════════════════════════════════════════
 router.get('/profitability/orders', authorize('reports', 'view'), noFinanceForOperator, controller.orderProfitability);
-router.get('/profitability/batches', authorize('reports', 'view'), noFinanceForOperator, controller.batchProfitability);
-router.get('/profitability/batch-margin', authorize('reports', 'view'), noFinanceForOperator, controller.batchMargin);
-router.get('/lot-tracker', authorize('reports', 'view'), noFinanceForOperator, controller.lotTracker);
-router.get('/sales-tracker', authorize('reports', 'view'), noFinanceForOperator, controller.salesTracker);
+router.get('/profitability/batches', authorize('reports', 'view'), controller.batchProfitability);
+router.get('/profitability/batch-margin', authorize('reports', 'view'), controller.batchMargin);
+router.get('/lot-tracker', authorize('reports', 'view'), controller.lotTracker);
+router.get('/sales-tracker', authorize('reports', 'view'), controller.salesTracker);
 router.get('/profitability/customers', authorize('reports', 'view'), noFinanceForOperator, controller.customerProfitability);
 router.get('/profitability/countries', authorize('reports', 'view'), noFinanceForOperator, controller.countryAnalysis);
 router.get('/profitability/products', authorize('reports', 'view'), noFinanceForOperator, controller.productProfitability);
@@ -56,18 +64,18 @@ router.get('/profitability/monthly-trend', authorize('reports', 'view'), noFinan
 // ═══════════════════════════════════════════════════════════════════
 // Supplier & Quality
 // ═══════════════════════════════════════════════════════════════════
-// Supplier Inventory Ledger / Supplier 360 — shows stock value, revenue & profit,
-// so finance-free roles (Mill Operator) are excluded like other profit reports.
-router.get('/supplier-ledger', authorize('reports', 'view'), noFinanceForOperator, controller.supplierInventoryIndex);
-router.get('/supplier-ledger/:id', authorize('reports', 'view'), noFinanceForOperator, controller.supplierInventoryLedger);
-// Rice Type Ledger — per-variety stock + revenue + profit, finance-gated like above.
-router.get('/rice-type-ledger', authorize('reports', 'view'), noFinanceForOperator, controller.riceTypeIndex);
-router.get('/rice-type-ledger/:id', authorize('reports', 'view'), noFinanceForOperator, controller.riceTypeLedger);
-// Warehouse Ledger — per-warehouse stock roll-forward + value, finance-gated (shows value).
-router.get('/warehouse-ledger', authorize('reports', 'view'), noFinanceForOperator, controller.warehouseIndex);
-router.get('/warehouse-ledger/:id', authorize('reports', 'view'), noFinanceForOperator, controller.warehouseLedger);
+// Supplier Inventory Ledger / Supplier 360 — stock value, revenue & profit of the
+// mill's suppliers; money redacted for roles without view_cost / view_profit.
+router.get('/supplier-ledger', authorize('reports', 'view'), controller.supplierInventoryIndex);
+router.get('/supplier-ledger/:id', authorize('reports', 'view'), controller.supplierInventoryLedger);
+// Rice Type Ledger — per-variety stock + revenue + profit, redacted like above.
+router.get('/rice-type-ledger', authorize('reports', 'view'), controller.riceTypeIndex);
+router.get('/rice-type-ledger/:id', authorize('reports', 'view'), controller.riceTypeLedger);
+// Warehouse Ledger — per-warehouse stock roll-forward + value (value redacted like above).
+router.get('/warehouse-ledger', authorize('reports', 'view'), controller.warehouseIndex);
+router.get('/warehouse-ledger/:id', authorize('reports', 'view'), controller.warehouseLedger);
 // Processing-Loss Ledger — milling loss by batch / rice type / supplier / operator / machine / month.
-router.get('/processing-loss-ledger', authorize('reports', 'view'), noFinanceForOperator, controller.processingLossLedger);
+router.get('/processing-loss-ledger', authorize('reports', 'view'), controller.processingLossLedger);
 router.get('/quality/supplier-ranking', authorize('reports', 'view'), controller.supplierQualityRanking);
 router.get('/quality/recovery-leaderboard', authorize('reports', 'view'), controller.batchRecoveryLeaderboard);
 router.get('/quality/recovery-by-variety', authorize('reports', 'view'), controller.recoveryByVariety);
@@ -96,7 +104,7 @@ router.get('/printable/pnl',        authorize('reports', 'view'), noFinanceForOp
 router.get('/printable/cashflow',   authorize('reports', 'view'), noFinanceForOperator, controller.printableCashflow);
 router.get('/printable/ar-aging',   authorize('reports', 'view'), noFinanceForOperator, controller.printableArAging);
 router.get('/printable/ap-aging',   authorize('reports', 'view'), noFinanceForOperator, controller.printableApAging);
-router.get('/printable/purchase-ledger', authorize('reports', 'view'), noFinanceForOperator, controller.printablePurchaseLedger);
+router.get('/printable/purchase-ledger', authorize('reports', 'view'), controller.printablePurchaseLedger);
 router.get('/printable/sales-ledger',     authorize('reports', 'view'), noFinanceForOperator, controller.printableSalesLedger);
 router.get('/printable/stock-detail',     authorize('reports', 'view'), controller.printableStockDetail);
 // Freight charged to buyers against freight paid to carriers, per order — the

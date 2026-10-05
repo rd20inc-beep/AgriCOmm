@@ -8,8 +8,8 @@ const reportingService = require('../../services/reportingService');
 // Deliberately NOT applied to the financial statements (P&L, cashflow, AR/AP
 // aging, invoice + payroll ledgers): those are company-level and consolidate
 // sales, expenses and payroll that carry no warehouse at all — filtering only
-// their inventory legs would produce numbers that don't foot. They stay gated
-// by role (noFinanceForOperator) instead.
+// their inventory legs would produce numbers that don't foot. They stay closed
+// to the Mill Operator by role (noFinanceForOperator) instead.
 const whScope = require('../../utils/warehouseScope');
 const stockSql = require('../inventory/stockSql');
 
@@ -209,7 +209,8 @@ const reportingController = {
 
   async saleDetail(req, res) {
     try {
-      const data = await reportingService.getSaleDetail(req.params.id);
+      const raw = await reportingService.getSaleDetail(req.params.id);
+      const data = raw && await redactReport(req, raw);
       if (!data) return res.status(404).json({ success: false, message: 'Sale not found.' });
       return res.json({ success: true, ...data });
     } catch (err) {
@@ -417,13 +418,15 @@ const reportingController = {
   async batchProfitability(req, res) {
     try {
       const { dateFrom, dateTo, supplierId, page, limit } = req.query;
-      const data = await reportingService.getBatchProfitability({
+      // Open to the Mill Operator since mig 314 — redact for anyone without
+      // view_cost / view_profit, as every other mill report does.
+      const data = await redactReport(req, await reportingService.getBatchProfitability({
         dateFrom,
         dateTo,
         supplierId: supplierId ? parseInt(supplierId, 10) : undefined,
         page: parseInt(page, 10) || 1,
         limit: parseInt(limit, 10) || 50,
-      });
+      }));
       return res.json({ success: true, ...data });
     } catch (err) {
       console.error('Batch profitability error:', err);
@@ -1646,7 +1649,7 @@ const reportingController = {
           downstreamSales: downstreamByLot[r.id] || [],
         };
       });
-      return res.json({ success: true, data: { rows: detail, totals: { lots: detail.length, mt: detail.reduce((s, d) => s + d.mt, 0), valuePkr: detail.reduce((s, d) => s + d.valuePkr, 0) }, period: { from, to } } });
+      return res.json({ success: true, data: await redactReport(req, { rows: detail, totals: { lots: detail.length, mt: detail.reduce((s, d) => s + d.mt, 0), valuePkr: detail.reduce((s, d) => s + d.valuePkr, 0) }, period: { from, to } }) });
     } catch (err) { console.error('Purchase ledger error:', err); return res.status(500).json({ success: false, message: 'Internal server error.' }); }
   },
 
@@ -1781,7 +1784,7 @@ const reportingController = {
           downstreamSales: downstreamByLot[l.id] || [],
         };
       });
-      return res.json({ success: true, data: { rows, totals: { lots: rows.length, mt: rows.reduce((s, r) => s + r.receivedKg / 1000, 0), valuePkr: rows.reduce((s, r) => s + r.landedTotal, 0) } } });
+      return res.json({ success: true, data: await redactReport(req, { rows, totals: { lots: rows.length, mt: rows.reduce((s, r) => s + r.receivedKg / 1000, 0), valuePkr: rows.reduce((s, r) => s + r.landedTotal, 0) } }) });
     } catch (err) { console.error('Lot tracker error:', err); return res.status(500).json({ success: false, message: 'Internal server error.' }); }
   },
 
@@ -1864,7 +1867,7 @@ const reportingController = {
           provenance,
         };
       });
-      return res.json({ success: true, data: { rows, totals: { count: rows.length, valuePkr: rows.reduce((a, r) => a + r.totalAmount, 0), margin: rows.reduce((a, r) => a + r.margin, 0), due: rows.reduce((a, r) => a + r.dueAmount, 0) } } });
+      return res.json({ success: true, data: await redactReport(req, { rows, totals: { count: rows.length, valuePkr: rows.reduce((a, r) => a + r.totalAmount, 0), margin: rows.reduce((a, r) => a + r.margin, 0), due: rows.reduce((a, r) => a + r.dueAmount, 0) } }) });
     } catch (err) { console.error('Sales tracker error:', err); return res.status(500).json({ success: false, message: 'Internal server error.' }); }
   },
 

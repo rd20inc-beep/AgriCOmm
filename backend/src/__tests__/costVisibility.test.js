@@ -1,7 +1,9 @@
 /**
  * Cost visibility (owner decision 2026-10-05): purchase rates, stock value/cost
- * and profit are hidden from the Mill Operator and the QC Analyst; everyone
- * holding reports.view_cost (or finance.view) keeps them.
+ * and profit are hidden from the QC Analyst, Inventory Officer and
+ * Documentation Officer; everyone holding reports.view_cost (or finance.view)
+ * keeps them — including the Mill Operator since mig 314 ("see everything
+ * regarding the mill").
  *
  * Executes the real redaction helper, the real requireCostVisibility guard, the
  * real route chains (authorize() tagged, as paymentCorrectness.test.js does) and
@@ -55,9 +57,10 @@ jest.mock('../middleware/rbac', () => {
 const db = require('../config/database');
 const { redactMoney, redactForUser, requireCostVisibility, canSeeCost } = require('../utils/costVisibility');
 
-// What each role holds after migrations 008 / 200 / 222.
+// What each role holds after migrations 008 / 200 / 222 / 314.
 const ROLES = {
-  millOperator: { role: 'Mill Operator', permissions: new Set(['reports.view', 'milling.view', 'inventory.view', 'milling.record_yield']) },
+  millOperator: { role: 'Mill Operator', permissions: new Set(['reports.view', 'reports.view_cost', 'reports.view_profit', 'milling.view', 'inventory.view', 'milling.record_yield']) },
+  inventoryOfficer: { role: 'Inventory Officer', permissions: new Set(['inventory.view', 'inventory.edit', 'milling.view']) },
   qcAnalyst: { role: 'QC Analyst', permissions: new Set(['milling.view', 'milling.approve_quality', 'inventory.view']) },
   millManager: { role: 'Mill Manager', permissions: new Set(['milling.view', 'inventory.view', 'reports.view', 'reports.view_cost', 'reports.view_profit']) },
   financeManager: { role: 'Finance Manager', permissions: new Set(['finance.view', 'reports.view']) },
@@ -111,8 +114,9 @@ describe('redaction helper', () => {
   });
 
   test.each([
-    ['millOperator', true],
+    ['millOperator', false],
     ['qcAnalyst', true],
+    ['inventoryOfficer', true],
     ['millManager', false],
     ['financeManager', false],
     ['owner', false],
@@ -128,8 +132,9 @@ describe('redaction helper', () => {
 
 describe('requireCostVisibility guard', () => {
   test.each([
-    ['millOperator', 403],
+    ['millOperator', 'next'],
     ['qcAnalyst', 403],
+    ['inventoryOfficer', 403],
     ['millManager', 'next'],
     ['financeManager', 'next'],
     ['owner', 'next'],
@@ -186,16 +191,16 @@ describe('money-only routes are cost-gated', () => {
     expect(layer.route.stack.map((s) => s.handle)).toContain(requireCostVisibility);
   });
 
-  test('GET /valuation answers 403 to the Mill Operator and never reaches the controller', async () => {
+  test('GET /valuation answers 403 to the Inventory Officer and never reaches the controller', async () => {
     db.__set({ inventory_lots: [lotRow()] });
-    const r = await runRoute(lotRoutes, 'get', '/valuation', reqAs('millOperator'));
+    const r = await runRoute(lotRoutes, 'get', '/valuation', reqAs('inventoryOfficer'));
     expect(r.statusCode).toBe(403);
     expect(r.body.data).toBeUndefined();
   });
 
-  test('GET /valuation answers the Mill Manager with the valuation', async () => {
+  test.each(['millManager', 'millOperator'])('GET /valuation answers the %s with the valuation', async (who) => {
     db.__set({ inventory_lots: [{ id: 3, lot_no: 'LOT-3', type: 'finished', available_qty: 800, cost_per_unit: 120 }] });
-    const r = await runRoute(lotRoutes, 'get', '/valuation', reqAs('millManager'));
+    const r = await runRoute(lotRoutes, 'get', '/valuation', reqAs(who));
     expect(r.statusCode).toBe(200);
     expect(r.body.success).toBe(true);
     expect(r.body.data.lots[0].cost_per_unit).toBe(120);
@@ -212,20 +217,20 @@ describe('lot endpoints redact for cost-blind roles', () => {
 
   const txns = () => [{ id: 1, lot_id: 3, quantity_kg: -100, balance_kg: 900, rate_per_kg: 120, total_cost: 12000, unit_cost: 120, cost_impact: 12000 }];
 
-  test('lot transactions: Mill Operator gets quantities, no rates or cost', async () => {
+  test('lot transactions: Inventory Officer gets quantities, no rates or cost', async () => {
     // getLotTransactions now checks the lot (and its warehouse scope) first.
     db.__set({ lot_transactions: txns(), inventory_lots: [{ id: 3, warehouse_id: null }], user_scopes: [] });
     const r = res();
-    await controller.getLotTransactions(reqAs('millOperator', { params: { id: '3' } }), r);
+    await controller.getLotTransactions(reqAs('inventoryOfficer', { params: { id: '3' } }), r);
     const t = r.body.data.transactions[0];
     expect(t).toMatchObject({ quantity_kg: -100, balance_kg: 900, rate_per_kg: null, total_cost: null, unit_cost: null, cost_impact: null });
   });
 
-  test('lot transactions: Mill Manager keeps the money', async () => {
+  test.each(['millManager', 'millOperator'])('lot transactions: %s keeps the money', async (who) => {
     // getLotTransactions now checks the lot (and its warehouse scope) first.
     db.__set({ lot_transactions: txns(), inventory_lots: [{ id: 3, warehouse_id: null }], user_scopes: [] });
     const r = res();
-    await controller.getLotTransactions(reqAs('millManager', { params: { id: '3' } }), r);
+    await controller.getLotTransactions(reqAs(who, { params: { id: '3' } }), r);
     expect(r.body.data.transactions[0]).toMatchObject({ rate_per_kg: 120, total_cost: 12000, cost_impact: 12000 });
   });
 
@@ -239,12 +244,17 @@ describe('lot endpoints redact for cost-blind roles', () => {
     expect(lot.total_katta).toBeGreaterThan(0);
   });
 
-  test('stock report: total_value nulled for the Mill Operator, kept for the Owner', async () => {
+  test('stock report: total_value nulled for the Inventory Officer, kept for the Mill Operator and the Owner', async () => {
     const rows = () => [{ group_name: 'Super', group_id: 1, total_kg: 1000, available_kg: 800, total_value: 125000 }];
+    db.__set({ inventory_lots: rows(), user_scopes: [] });
+    const io = res();
+    await controller.getStockReport(reqAs('inventoryOfficer', { query: {} }), io);
+    expect(io.body.data.report[0]).toMatchObject({ total_kg: 1000, total_value: null });
+
     db.__set({ inventory_lots: rows(), user_scopes: [] });
     const op = res();
     await controller.getStockReport(reqAs('millOperator', { query: {} }), op);
-    expect(op.body.data.report[0]).toMatchObject({ total_kg: 1000, total_value: null });
+    expect(op.body.data.report[0].total_value).toBe(125000);
 
     db.__set({ inventory_lots: rows(), user_scopes: [] });
     const own = res();
@@ -270,10 +280,10 @@ describe('milling batch detail redacts for cost-blind roles', () => {
     mill_packing_logs: [{ bag_item_id: 4, bag_name: 'PP 25kg', bags_count: 260, total_cost: 5200, master_cost: 0, poly_cost: 0 }],
   });
 
-  test('Mill Operator: quantities and quality stay, every cost, price and rate is nulled', async () => {
+  test('QC Analyst: quantities and quality stay, every cost, price and rate is nulled', async () => {
     db.__set(batchRows());
     const r = res();
-    await millingController.getById(reqAs('millOperator', { params: { id: '9' } }), r);
+    await millingController.getById(reqAs('qcAnalyst', { params: { id: '9' } }), r);
     expect(r.statusCode).toBe(200);
     const d = r.body.data;
     expect(d.batch).toMatchObject({
@@ -288,10 +298,10 @@ describe('milling batch detail redacts for cost-blind roles', () => {
     expect(d.vehicles[0].weight_kg).toBe(10000);
   });
 
-  test('Mill Manager: the same batch comes back with its money', async () => {
+  test.each(['millManager', 'millOperator'])('%s: the same batch comes back with its money', async (who) => {
     db.__set(batchRows());
     const r = res();
-    await millingController.getById(reqAs('millManager', { params: { id: '9' } }), r);
+    await millingController.getById(reqAs(who, { params: { id: '9' } }), r);
     const d = r.body.data;
     expect(d.batch).toMatchObject({ purchase_price_per_kg: 110, raw_cost_total: 1100000, total_cost_per_kg_finished: 181.2, service_milling_rate_per_kg: 4 });
     expect(d.costs).toEqual([{ id: 1, category: 'raw_rice', amount: 1100000 }]);

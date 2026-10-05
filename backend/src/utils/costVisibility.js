@@ -5,9 +5,11 @@
  *   cost   (purchase rates, landed cost, stock value) → reports.view_cost OR finance.view
  *   profit (profit, margin, revenue, receivables)     → reports.view_profit OR finance.view
  *
- * Super Admin / Owner always pass (via rbac.userHasPermission). The Mill
- * Operator (mig 200, "money-blind") and the QC Analyst hold neither, so they
- * see quantities but never what the rice cost or what it is worth.
+ * Super Admin / Owner always pass (via rbac.userHasPermission). The QC Analyst,
+ * Inventory Officer and Documentation Officer hold neither, so they see
+ * quantities but never what the rice cost or what it is worth. The Mill
+ * Operator holds both since mig 314 (owner: "see everything regarding the
+ * mill"); company-wide finance stays closed to it by role on the routes.
  *
  * Keys are matched NORMALISED (lower-case, underscores removed), so one list
  * covers both the camelCase report payloads and the raw snake_case lot rows:
