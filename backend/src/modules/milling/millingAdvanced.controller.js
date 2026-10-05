@@ -750,6 +750,8 @@ const millingAdvancedController = {
           this.where('ft.from_entity', 'mill') // mill sent → out (any status)
             .orWhere(function () { this.where('ft.to_entity', 'mill').andWhere('ft.status', 'completed'); }); // accepted in
         })
+        // A reversed transfer undid every move it made, so it is neither in nor out.
+        .whereNot('ft.status', 'reversed')
         .select('ft.id', 'ft.transfer_no', 'ft.transfer_date', 'ft.method', 'ft.amount', 'ft.from_entity', 'ft.to_entity', 'ft.status');
       if (from_date) ftQ = ftQ.where('ft.transfer_date', '>=', from_date);
       if (to_date) ftQ = ftQ.where('ft.transfer_date', '<=', to_date);

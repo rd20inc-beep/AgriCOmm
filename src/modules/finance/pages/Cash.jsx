@@ -1,12 +1,12 @@
 import { useMemo, useState } from 'react';
 import useConfirm from '../../../hooks/useConfirm';
-import { Landmark, Wallet, TrendingUp, TrendingDown, Activity, Printer, ArrowLeftRight, Trash2, Check } from 'lucide-react';
+import { Landmark, Wallet, TrendingUp, TrendingDown, Activity, Printer, ArrowLeftRight, Undo2, Check } from 'lucide-react';
 import { FinanceKPI, FinanceTable, FinanceChart } from '../../../components/finance';
-import { useBankAccounts, useBankTransactions, useFundTransfers, useDeleteFundTransfer, useAcceptFundTransfer } from '../../../api/queries';
+import { useBankAccounts, useBankTransactions, useFundTransfers, useReverseFundTransfer, useAcceptFundTransfer } from '../../../api/queries';
 import TransferFundsDrawer from '../components/TransferFundsDrawer';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { useApp } from '../../../context/AppContext';
-import { useOwnerAuth } from '../../../context/OwnerAuthContext';
+import { useAuth } from '../../../context/AuthContext';
 import { shortenRef } from '../utils/refs';
 
 function fmtPKR(n) {
@@ -26,24 +26,32 @@ export default function Cash() {
   const [accountFilter, setAccountFilter] = useState('all');
   const [showTransfer, setShowTransfer] = useState(false);
   const { data: fundTransfers = [] } = useFundTransfers();
-  const delTransfer = useDeleteFundTransfer();
+  const reverseTransfer = useReverseFundTransfer();
   const acceptTransfer = useAcceptFundTransfer();
-  const { requestOwnerApproval } = useOwnerAuth();
+  const { user } = useAuth();
+  // Reversal is Owner / Super Admin only (the server enforces the same).
+  const canReverse = user?.role === 'Owner' || user?.role === 'Super Admin';
   const [confirm, confirmDialog] = useConfirm();
-  async function handleDeleteTransfer(t) {
-    // A reversal that restores two account balances should state the figure it
-    // moves back, which window.confirm could not.
-    if (!await confirm({
+  async function handleReverseTransfer(t) {
+    const accepted = t.status === 'completed';
+    const ok = await confirm({
       title: `Reverse transfer ${t.transferNo}?`,
-      consequence: 'Both account balances are restored and the transfer\u2019s GL entries are removed.',
+      consequence: accepted
+        ? 'The money goes back to the sending account and comes out of the receiving one. Equal-and-opposite journals are posted; the transfer stays on record as Reversed.'
+        : 'The money goes back to the sending account (the receiver never accepted it). An equal-and-opposite journal is posted; the transfer stays on record as Reversed.',
       amount: t.amount != null ? `Rs ${Math.round(parseFloat(t.amount) || 0).toLocaleString()}` : undefined,
+      reason: 'optional',
       confirmLabel: 'Reverse transfer',
-    })) return;
-    try { await delTransfer.mutateAsync(t.id); } catch (e) { window.alert(e?.response?.data?.message || e?.message || 'Could not reverse the transfer.'); }
+      cancelLabel: 'Go back',
+    });
+    if (!ok) return;
+    try { await reverseTransfer.mutateAsync({ id: t.id, reason: ok?.reason }); }
+    catch (e) { window.alert(e?.response?.data?.message || e?.data?.message || e?.message || 'Could not reverse the transfer.'); }
   }
   async function handleAcceptTransfer(t) {
-    try { await requestOwnerApproval((ownerId) => acceptTransfer.mutateAsync({ id: t.id, ownerId })); }
-    catch (e) { if (e?.message !== 'Owner authorization cancelled') window.alert(e?.response?.data?.message || e?.message || 'Could not accept the transfer.'); }
+    // No Owner step: the receiving side's permission is the whole check.
+    try { await acceptTransfer.mutateAsync(t.id); }
+    catch (e) { window.alert(e?.response?.data?.message || e?.data?.message || e?.message || 'Could not accept the transfer.'); }
   }
 
   function handlePrint() {
@@ -238,7 +246,7 @@ export default function Cash() {
                 {fundTransfers.map((t) => {
                   const hoIsReceiver = t.toEntity === 'general'; // Mill → HO awaits HO acceptance here
                   return (
-                  <tr key={t.id} className="border-t border-gray-100">
+                  <tr key={t.id} className={`border-t border-gray-100 ${t.status === 'reversed' ? 'text-gray-400' : ''}`}>
                     <td className="px-3 py-2 font-medium text-gray-700">{t.transferNo}</td>
                     <td className="px-3 py-2">{t.transferDate ? new Date(t.transferDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : '—'}</td>
                     <td className="px-3 py-2">
@@ -249,19 +257,23 @@ export default function Cash() {
                     <td className="px-3 py-2 text-gray-600">{t.fromAccountName || '—'}</td>
                     <td className="px-3 py-2 text-gray-600">{t.toAccountName || '—'}</td>
                     <td className="px-3 py-2 text-gray-500 capitalize">{(t.method || '').replace('_', ' ')}</td>
-                    <td className="px-3 py-2 text-right font-semibold tabular-nums">{fmtPKR(t.amount)}</td>
+                    <td className={`px-3 py-2 text-right font-semibold tabular-nums ${t.status === 'reversed' ? 'line-through' : ''}`}>{fmtPKR(t.amount)}</td>
                     <td className="px-3 py-2">
-                      {t.status === 'completed'
-                        ? <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-50 text-emerald-700">Received</span>
-                        : <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-50 text-amber-700">{hoIsReceiver ? 'Awaiting you' : 'Awaiting mill'}</span>}
+                      {t.status === 'reversed'
+                        ? <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-gray-100 text-gray-600">Reversed</span>
+                        : t.status === 'completed'
+                          ? <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-50 text-emerald-700">Received</span>
+                          : <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-50 text-amber-700">{hoIsReceiver ? 'Awaiting you' : 'Awaiting mill'}</span>}
                     </td>
                     <td className="px-3 py-2 text-right whitespace-nowrap">
                       {t.status === 'pending' && hoIsReceiver && (
                         <button onClick={() => handleAcceptTransfer(t)} disabled={acceptTransfer.isPending} title="Accept funds"
                           className="no-print inline-flex items-center gap-1 px-2 py-1 mr-1 text-[11px] font-medium rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"><Check size={12} /> Accept</button>
                       )}
-                      <button onClick={() => handleDeleteTransfer(t)} disabled={delTransfer.isPending} title={t.status === 'completed' ? 'Reverse transfer' : 'Cancel transfer'}
-                        className="no-print text-gray-400 hover:text-red-600 disabled:opacity-50"><Trash2 size={14} /></button>
+                      {canReverse && t.status !== 'reversed' && (
+                        <button onClick={() => handleReverseTransfer(t)} disabled={reverseTransfer.isPending} title="Reverse transfer"
+                          className="no-print inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded border border-gray-200 text-gray-600 hover:text-red-700 hover:border-red-300 disabled:opacity-50"><Undo2 size={12} /> Reverse</button>
+                      )}
                     </td>
                   </tr>
                   );
