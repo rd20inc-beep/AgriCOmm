@@ -1,6 +1,7 @@
 const db = require('../../config/database');
 const accountingService = require('../accounting/accounting.service');
 const { NotFoundError, ValidationError } = require('../../shared/errors');
+const { nextDocNo } = require('../../utils/docNumber');
 
 // Suspense Account (#8) — record unidentified money into the 1290 Suspense
 // control account (backed by a real bank/cash movement), then RESOLVE it later
@@ -24,10 +25,9 @@ async function generateEntryNo(trx) {
   const seq = last ? (parseInt(String(last.entry_no).split('-')[2], 10) || 0) + 1 : 1;
   return `SUS-${ym}-${String(seq).padStart(4, '0')}`;
 }
-async function nextBtNo(trx) {
-  const last = await trx('bank_transactions').where('transaction_no', 'like', 'BT-%').orderBy('id', 'desc').first('transaction_no');
-  const seq = last ? (parseInt(String(last.transaction_no).replace(/^BT-/, ''), 10) || 0) + 1 : 1;
-  return `BT-${String(seq).padStart(4, '0')}`;
+// MAX(suffix)+1, not "last row by id + 1" (which repeats after a delete).
+function nextBtNo(trx) {
+  return nextDocNo(trx, { table: 'bank_transactions', column: 'transaction_no', prefix: 'BT-', pad: 4 });
 }
 async function suspenseAccount(trx) {
   const acc = await trx('chart_of_accounts').where({ code: SUSPENSE_CODE }).first();
