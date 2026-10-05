@@ -355,29 +355,6 @@ const millingService = {
   // Source Lot Management
   // =========================================================================
 
-  async addSourceLot(trx, { batchId, lotId, qtyKg }) {
-    const lot = await trx('inventory_lots').where({ id: lotId }).first();
-    if (!lot) throw new Error(`Inventory lot ${lotId} not found`);
-
-    const availableQty = parseFloat(lot.available_qty) || 0;
-    const requestedQty = parseFloat(qtyKg);
-    if (availableQty < requestedQty) {
-      throw new Error(
-        `Insufficient available qty in lot ${lot.lot_no}: available ${availableQty} ${lot.unit}, requested ${requestedQty}`
-      );
-    }
-
-    const [record] = await trx('batch_source_lots')
-      .insert({
-        batch_id: batchId,
-        lot_id: lotId,
-        qty_kg: requestedQty,
-      })
-      .returning('*');
-
-    return record;
-  },
-
   async getSourceLots(batchId) {
     // Rich blend detail: each source lot carries the supplier, rice type/variety
     // and the original quality analysis recorded when the lot was first created,

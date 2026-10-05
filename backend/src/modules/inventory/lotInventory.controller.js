@@ -12,6 +12,7 @@ const accountingService = require('../../services/accountingService');
 const inventoryService = require('./inventory.service');
 const { blendPurchaseIntoLot, computeLotLanded, repriceLotPurchase, normalizeTransportPaidBy } = require('./lotCosting');
 const { nextDocNo } = require('../../utils/docNumber');
+const { commitLotToBatch } = require('../milling/batchLifecycle');
 // #9-scoping: per-user warehouse restriction, applied to READ paths only.
 const whScope = require('../../utils/warehouseScope');
 const stockValuation = require('./stockValuation');
@@ -3121,11 +3122,14 @@ module.exports = {
       const { mill_id, machine_line, shift, milling_fee_per_kg, raw_qty_kg: overrideQty, notes } = req.body || {};
 
       const result = await db.transaction(async (trx) => {
-        const lot = await trx('inventory_lots').where({ id: lotId }).first();
+        // Locked: the qty checked here is the qty reserved below (commitLotToBatch
+        // re-checks under the same lock).
+        const lot = await trx('inventory_lots').where({ id: lotId }).forUpdate().first();
         if (!lot) {
           const err = new Error('Lot not found.'); err.statusCode = 404; throw err;
         }
-        const availableMT = parseFloat(lot.available_qty) || 0;
+        const availableMT = Math.max(0,
+          (parseFloat(lot.qty) || 0) - (parseFloat(lot.reserved_qty) || 0) - (parseFloat(lot.milling_reserved_qty) || 0));
         if (availableMT <= 0) {
           const err = new Error(`Lot ${lot.lot_no} has no available stock to mill.`);
           err.statusCode = 400; throw err;
@@ -3175,7 +3179,7 @@ module.exports = {
             err.statusCode = 400; throw err;
           }
           if (q > availableMT + 1e-6) {
-            const err = new Error(`Cannot mill ${q} MT — only ${availableMT.toFixed(2)} MT available in lot ${lot.lot_no}.`);
+            const err = new Error(`Cannot mill ${q} kg — only ${availableMT.toFixed(2)} kg available in lot ${lot.lot_no}.`);
             err.statusCode = 400; throw err;
           }
           rawQtyMT = q;
@@ -3201,19 +3205,15 @@ module.exports = {
           created_by: req.user?.id || null,
         }).returning('*');
 
-        // Link the lot as a source. Existing column set per migration 011.
-        await trx('batch_source_lots').insert({
-          batch_id: batch.id,
-          lot_id: lot.id,
-          qty_kg: rawQtyMT,
-          notes: notes || null,
-        });
-
-        // Mark the source lot as "In Milling" so it doesn't get double-
-        // booked. consumeForMilling will flip it to "Consumed" on yield.
-        await trx('inventory_lots').where({ id: lot.id }).update({
-          milling_status: 'In Milling',
-          updated_at: trx.fn.now(),
+        // Link the lot as a source, mark it "In Milling" and hard-reserve the
+        // committed qty — the same helper the New Batch drawer uses. Before
+        // this the lot was only flagged, so the rice stayed available to sell
+        // or allocate while the batch would still consume it at yield.
+        await commitLotToBatch(trx, {
+          batchId: batch.id,
+          lotId: lot.id,
+          qtyKg: rawQtyMT,
+          row: { notes: notes || null },
         });
 
         // Prefill batch arrival quality from the lot. The operator

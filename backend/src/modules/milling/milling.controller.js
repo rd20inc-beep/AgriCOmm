@@ -13,8 +13,9 @@ const { nextDocNo } = require('../../utils/docNumber');
 const { redactForUser, canSeeCost } = require('../../utils/costVisibility');
 // Packing-cost subtotals carry no "cost" in their names.
 const BATCH_EXTRA_COST_KEYS = ['bagsTotal', 'mastersTotal', 'polytheneTotal'];
+const batchPackagingService = require('./batchPackaging.service');
 const {
-  yieldMode, batchHasOutputLots, checkTransition, releaseBatchSources, TRANSITIONS,
+  yieldMode, batchHasOutputLots, checkTransition, releaseBatchSources, commitLotToBatch, TRANSITIONS,
 } = require('./batchLifecycle');
 
 // Can this inventory lot be fed into a milling/blend batch? Mirrors the
@@ -634,10 +635,32 @@ const millingController = {
           ? vehicles.filter((v) => v && (numOrNull(v.weight_kg) || intOrNull(v.total_bags) || v.vehicle_no))
           : [];
         let vehicleWeightTotal = 0;
+        // A cost-blind creator (Mill Operator / QC Analyst) cannot set a price:
+        // any price they send is ignored and the truck is received unpriced
+        // (yield does not require a cost for them — #535).
+        const mayPrice = vehicleList.some((v) => v && v.quality) && !isService
+          ? await canSeeCost(req)
+          : false;
         for (const v of vehicleList) {
           const wKg = numOrNull(v.weight_kg) || 0;
           const totalBags = intOrNull(v.total_bags);
           const bagSize = numOrNull(v.bag_size_kg) || (wKg && totalBags ? wKg / totalBags : null);
+          // Per-truck quality + price (the direct supplier+qty create sends the
+          // Rs/kg as price_per_mt) — same shape and handling as addVehicle, so a
+          // directly-created batch has its raw lot priced and is yield-ready.
+          const cleanQuality = isService ? null : sanitizeVehicleQuality(v.quality);
+          if (cleanQuality && !mayPrice) {
+            delete cleanQuality.price_per_kg;
+            delete cleanQuality.price_per_mt;
+          }
+          const truckCostPerKg = cleanQuality
+            ? (cleanQuality.price_per_kg != null
+              ? cleanQuality.price_per_kg
+              : (cleanQuality.price_per_mt != null ? cleanQuality.price_per_mt / 1000 : 0))
+            : 0;
+          if (cleanQuality && cleanQuality.price_per_mt == null && cleanQuality.price_per_kg != null) {
+            cleanQuality.price_per_mt = cleanQuality.price_per_kg * 1000;
+          }
           await trx('milling_vehicle_arrivals').insert({
             batch_id: batch.id,
             vehicle_no: v.vehicle_no || null,
@@ -648,11 +671,12 @@ const millingController = {
             total_bags: totalBags,
             arrival_date: v.arrival_date || trx.fn.now(),
             notes: v.notes || null,
+            quality_json: cleanQuality && Object.keys(cleanQuality).length ? cleanQuality : null,
             created_by: req.user?.id || null,
           });
           if (wKg > 0) {
             await inventoryService.receiveRice(trx, {
-              batchId: batch.id, weightKg: wKg, costPerKg: 0, currency: 'PKR',
+              batchId: batch.id, weightKg: wKg, costPerKg: truckCostPerKg, currency: 'PKR',
               supplierId: resolvedSupplierId, productId: resolvedProductId, vehicleNo: v.vehicle_no || null, userId: req.user.id,
             });
             vehicleWeightTotal += wKg;
@@ -668,32 +692,30 @@ const millingController = {
         } else if (vehicleWeightTotal > 0) {
           // Trucks carried the rice → the summed truck weight is the raw qty.
           await trx('milling_batches').where({ id: batch.id }).update({ raw_qty_kg: vehicleWeightTotal });
+          // Priced trucks drive the raw_rice cost (Σ weight × price); a no-op
+          // when no truck carries a price (e.g. service milling).
+          if (!isService) await inventoryService.recomputeRawRiceCostFromVehicles(trx, batch.id, req.user.id);
         }
 
         // ── Persist the blend: source-lot links, raw-cost pool, reservations ──
         if (blendRows.length > 0) {
           for (const b of blendRows) {
-            await trx('batch_source_lots').insert({
-              batch_id: batch.id,
-              lot_id: b.lot.id,
-              qty_kg: b.qty,
-              lot_type: b.lot_type,
-              unit_cost_pkr: b.unit_cost_pkr,
-              cost_total_pkr: b.cost_total_pkr,
-              notes: b.lot_type === 'finished' ? 'Re-milled finished rice' : null,
-              // Immutable recipe snapshot — survives later edits to the source lot.
-              variety: b.lot.variety || null,
-              ratio_pct: resolvedRawQty > 0 ? Math.round((b.qty / resolvedRawQty) * 10000) / 100 : null,
-            });
-            // Mark In Milling AND hard-reserve the committed qty (P6a) so it
-            // can't be sold/export-allocated before yield. available_qty =
-            // qty − reserved_qty − milling_reserved_qty. Consumed/released at
-            // yield (consumeForMilling) and at batch delete/cancel.
-            await trx('inventory_lots').where({ id: b.lot.id }).update({
-              milling_status: 'In Milling',
-              milling_reserved_qty: trx.raw('COALESCE(milling_reserved_qty, 0) + ?', [b.qty]),
-              available_qty: trx.raw('GREATEST(COALESCE(qty, 0) - COALESCE(reserved_qty, 0) - (COALESCE(milling_reserved_qty, 0) + ?), 0)', [b.qty]),
-              updated_at: trx.fn.now(),
+            // Link + mark In Milling + hard-reserve the committed qty (P6a) —
+            // the same helper Start Milling on a lot uses, so both paths hold
+            // the lot identically. Consumed at yield, released on delete/cancel.
+            await commitLotToBatch(trx, {
+              batchId: batch.id,
+              lotId: b.lot.id,
+              qtyKg: b.qty,
+              row: {
+                lot_type: b.lot_type,
+                unit_cost_pkr: b.unit_cost_pkr,
+                cost_total_pkr: b.cost_total_pkr,
+                notes: b.lot_type === 'finished' ? 'Re-milled finished rice' : null,
+                // Immutable recipe snapshot — survives later edits to the source lot.
+                variety: b.lot.variety || null,
+                ratio_pct: resolvedRawQty > 0 ? Math.round((b.qty / resolvedRawQty) * 10000) / 100 : null,
+              },
             });
           }
           // Feed the weighted raw cost into the batch cost pool (category
@@ -2273,6 +2295,18 @@ const millingController = {
       const vehicleId = parseInt(req.params.vehicleId, 10);
       if (!vehicleId) return res.status(400).json({ success: false, message: 'Invalid vehicle id.' });
 
+      // Same lock as add/edit: once milled & yielded the raw trucks are what the
+      // yield was measured against — deleting one would reverse a receipt that
+      // has already been consumed into the output lots.
+      const batch = await db('milling_batches').where({ id: batchId }).first();
+      if (!batch) return res.status(404).json({ success: false, message: 'Milling batch not found.' });
+      if (batch.status === 'Completed' || await batchHasOutputLots(db, batchId)) {
+        return res.status(409).json({
+          success: false,
+          message: 'This batch is already milled & yielded — its raw trucks are locked. Reverse the yield first to change the raw input.',
+        });
+      }
+
       await db.transaction(async (trx) => {
         const v = await trx('milling_vehicle_arrivals').where({ id: vehicleId, batch_id: batchId }).first();
         if (!v) {
@@ -2364,24 +2398,86 @@ const millingController = {
     }
   },
 
-  // Delete an entire batch (admin/manager only). Reverses raw rice lot if not consumed.
+  // Mill cost trend for the dashboard: real milling_costs summed by month and
+  // category over the last N months (default 6). Service (toll) batches carry
+  // no company cost, and a blend's raw_rice re-counts rice already costed in
+  // the batch that produced it, so both are left out.
+  async costTrend(req, res) {
+    try {
+      const months = Math.min(24, Math.max(1, parseInt(req.query.months, 10) || 6));
+      const rows = await db('milling_costs as mc')
+        .join('milling_batches as mb', 'mb.id', 'mc.batch_id')
+        .where('mc.created_at', '>=', db.raw("date_trunc('month', now()) - make_interval(months => ?)", [months - 1]))
+        .where((q) => q.where('mb.is_service_milling', false).orWhereNull('mb.is_service_milling'))
+        .whereNot((q) => q.where('mb.processing_type', 'blended').andWhere('mc.category', 'raw_rice'))
+        .select(db.raw("to_char(date_trunc('month', mc.created_at), 'YYYY-MM') as month"), 'mc.category')
+        .sum('mc.amount as total')
+        .groupByRaw("date_trunc('month', mc.created_at), mc.category")
+        .orderBy('month');
+      return res.json({
+        success: true,
+        data: {
+          months,
+          rows: rows.map((r) => ({ month: r.month, category: r.category, total: Math.round((parseFloat(r.total) || 0) * 100) / 100 })),
+        },
+      });
+    } catch (err) {
+      console.error('Milling costTrend error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
+  // Delete an entire batch (admin/manager only). Everything the batch moved is
+  // put back in the same transaction — the raw lot it received, the holds on its
+  // source lots, the packaging and packing bags it drew from (or freed into)
+  // mill store, and an unpaid transporter payable with its accrual. A batch
+  // that has gone further than that (yield, a paid transporter, a service
+  // invoice or dispatch) is refused with the step to take first.
   async deleteBatch(req, res) {
     try {
       const batchId = await resolveBatchId(req.params.id);
       if (!batchId) return res.status(404).json({ success: false, message: 'Milling batch not found.' });
 
+      const refuse = (status, message) => {
+        const err = new Error(message);
+        err.statusCode = status;
+        return err;
+      };
+
       await db.transaction(async (trx) => {
-        const batch = await trx('milling_batches').where({ id: batchId }).first();
-        if (!batch) {
-          const err = new Error('Milling batch not found.');
-          err.statusCode = 404;
-          throw err;
-        }
+        const batch = await trx('milling_batches').where({ id: batchId }).forUpdate().first();
+        if (!batch) throw refuse(404, 'Milling batch not found.');
+        const label = batch.batch_no || `batch ${batchId}`;
 
         if (batch.status === 'Completed') {
-          const err = new Error('Completed batches cannot be deleted. Reverse the yield first.');
-          err.statusCode = 400;
-          throw err;
+          throw refuse(400, 'Completed batches cannot be deleted. Reverse the yield first.');
+        }
+        if (await batchHasOutputLots(trx, batchId)) {
+          throw refuse(409, `${label} already has yield output lots. Reverse the yield first.`);
+        }
+
+        // Service batches: invoices and dispatches reference the batch with a
+        // RESTRICT FK — say so instead of failing on the constraint.
+        if (batch.is_service_milling) {
+          const [inv, disp] = await Promise.all([
+            trx('service_milling_invoices').where({ service_batch_id: batchId }).count('id as c').first(),
+            trx('service_milling_dispatches').where({ service_batch_id: batchId }).count('id as c').first(),
+          ]);
+          const nInv = parseInt(inv && inv.c, 10) || 0;
+          const nDisp = parseInt(disp && disp.c, 10) || 0;
+          if (nInv || nDisp) {
+            const parts = [nInv ? `${nInv} service invoice(s)` : null, nDisp ? `${nDisp} dispatch(es)` : null].filter(Boolean);
+            throw refuse(409, `${label} has ${parts.join(' and ')}. Delete those first, then the batch.`);
+          }
+        }
+
+        // Transporter payable for the batch's freight (Costs tab, Paid By =
+        // company). Paid → the money has left; the payment must be reversed
+        // first. Unpaid → voided below with its accrual.
+        const transportPay = await trx('payables')
+          .where({ source_table: 'batch_transport', source_id: batchId }).forUpdate().first();
+        if (transportPay && (parseFloat(transportPay.paid_amount) || 0) > 0.01) {
+          throw refuse(409, `${label}'s transport payable${transportPay.pay_no ? ` ${transportPay.pay_no}` : ''} has payments recorded — reverse the transporter payment first.`);
         }
 
         // Detach raw lot if it exists and has no movements other than receipts
@@ -2395,9 +2491,7 @@ const millingController = {
             .whereIn('transaction_type', ['milling_issue', 'stock_adjustment_minus'])
             .count('* as n').first();
           if (parseInt(consumed.n, 10) > 0) {
-            const err = new Error('Raw rice from this batch has already been consumed/adjusted; cannot delete.');
-            err.statusCode = 400;
-            throw err;
+            throw refuse(400, 'Raw rice from this batch has already been consumed/adjusted; cannot delete.');
           }
           await trx('lot_transactions').where('lot_id', lot.id).del();
           await trx('inventory_lots').where('id', lot.id).del();
@@ -2430,11 +2524,71 @@ const millingController = {
         await trx('mill_stock_movements').where({ reference_type: 'batch', reference_id: batchId }).del();
         await trx('mill_consumption_logs').where({ batch_id: batchId }).del();
 
+        // Packaging lines (received / consumed bags). Their rows cascade with the
+        // batch but the store stock they moved did not: saving an empty line set
+        // reverses every line through the same service that posted it.
+        await batchPackagingService.save(batchId, [], req.user?.id, trx);
+
+        // Packing runs drew bags / masters / polythene from store and expensed
+        // them (Dr 6000 / Cr 1250). Put back exactly what each run drew, and
+        // reverse the expense by its net (signed delta).
+        const packLogs = await trx('mill_packing_logs').where({ batch_id: batchId });
+        if (packLogs.length) {
+          const drawn = await trx('mill_stock_movements')
+            .where({ reference_type: 'packing' })
+            .whereIn('reference_id', packLogs.map((l) => l.id));
+          const back = [];
+          for (const m of drawn) {
+            const q = -(parseFloat(m.quantity) || 0);
+            if (!q) continue;
+            await batchPackagingService.moveStock(trx, { itemId: m.item_id, warehouseId: m.warehouse_id ?? null, delta: q });
+            back.push({
+              item_id: m.item_id, warehouse_id: m.warehouse_id ?? null,
+              movement_type: q > 0 ? 'return' : 'consumption',
+              quantity: q,
+              cost_per_unit: m.cost_per_unit,
+              total_cost: Math.round(Math.abs(q) * (parseFloat(m.cost_per_unit) || 0) * 100) / 100,
+              reference_type: 'packing', reference_id: m.reference_id,
+              reason: `Batch ${label} deleted — packing run #${m.reference_id} reversed`,
+              performed_by: req.user?.id || null,
+            });
+          }
+          if (back.length) await trx('mill_stock_movements').insert(back);
+          await reverseNetJournal(trx, {
+            refType: 'Mill Packing', refNo: batch.batch_no || `BATCH-${batchId}`,
+            debitCode: '6000', creditCode: '1250', label,
+            description: `Packing reversed — batch ${label} deleted`, userId: req.user?.id,
+          });
+          await trx('mill_packing_logs').where({ batch_id: batchId }).del();
+        }
+
+        // Unpaid transporter payable: void it and reverse its accrual
+        // (Dr Raw 1210 / Cr 2010) by the net that was posted.
+        if (transportPay) {
+          await trx('payables').where({ id: transportPay.id }).update({
+            status: 'Written Off', outstanding: 0,
+            notes: `${transportPay.notes ? `${transportPay.notes} — ` : ''}voided: batch ${label} deleted`,
+            updated_at: trx.fn.now(),
+          });
+          await reverseNetJournal(trx, {
+            refType: 'Batch Transport', refNo: batch.batch_no,
+            debitCode: '1210', creditCode: '2010', label,
+            description: `Transport payable voided — batch ${label} deleted`, userId: req.user?.id,
+            partyType: 'hauler', partyId: transportPay.hauler_id,
+          });
+        }
+        // The freight record survives the batch (its FK is SET NULL) — mark it
+        // cancelled so it no longer shows as owed.
+        await trx('transport_costs').where({ batch_id: batchId })
+          .update({ status: 'cancelled', updated_at: trx.fn.now() });
+
         // Unlink the advanced-milling child rows that reference this batch with a
         // NO-ACTION FK (they'd otherwise block the delete with an opaque 500, same
         // class as the consumption RESTRICT above). All these batch_id columns are
         // nullable — null them so the independent plan/downtime/utility/reprocess
-        // records survive but no longer point at the deleted batch.
+        // records survive but no longer point at the deleted batch. No .catch()
+        // here: a failed statement aborts a Postgres transaction, so swallowing
+        // the error only turned it into a confusing failure further down.
         for (const [table, col] of [
           ['production_plans', 'batch_id'],
           ['machine_downtime', 'batch_id'],
@@ -2442,20 +2596,58 @@ const millingController = {
           ['reprocessing_batches', 'original_batch_id'],
         ]) {
           if (await trx.schema.hasTable(table)) {
-            await trx(table).where(col, batchId).update({ [col]: null }).catch(() => {});
+            await trx(table).where(col, batchId).update({ [col]: null });
           }
         }
 
-        try { await trx('milling_costs').where({ batch_id: batchId }).del(); } catch (_) { /* table may differ */ }
+        await trx('milling_costs').where({ batch_id: batchId }).del();
         await trx('milling_batches').where({ id: batchId }).del();
       });
 
       return res.json({ success: true, message: 'Batch deleted.' });
     } catch (err) {
-      console.error('Milling deleteBatch error:', err);
+      if (!err.statusCode) console.error('Milling deleteBatch error:', err);
       return res.status(err.statusCode || 500).json({ success: false, message: err.message || 'Internal server error.' });
     }
   },
 };
+
+// Reverse what a batch's auto journals of one kind posted, by their NET
+// (signed delta — never reverse + repost): sum the Posted lines on the debit
+// account, then post the opposite. A no-op when nothing net was posted.
+async function reverseNetJournal(trx, {
+  refType, refNo, debitCode, creditCode, description, userId, partyType = null, partyId = null,
+}) {
+  const [dr, cr] = await Promise.all([
+    trx('chart_of_accounts').where({ code: debitCode }).first(),
+    trx('chart_of_accounts').where({ code: creditCode }).first(),
+  ]);
+  if (!dr || !cr || !refNo) return null;
+  const row = await trx('journal_lines as jl')
+    .join('journal_entries as je', 'je.id', 'jl.journal_id')
+    .where({ 'je.ref_type': refType, 'je.ref_no': refNo, 'je.status': 'Posted', 'jl.account_id': dr.id })
+    .select(trx.raw('COALESCE(SUM(jl.debit), 0) - COALESCE(SUM(jl.credit), 0) as net'))
+    .first();
+  const net = Math.round((parseFloat(row && row.net) || 0) * 100) / 100;
+  if (Math.abs(net) <= 0.01) return null;
+  const amt = Math.abs(net);
+  // net > 0: the batch left a debit on debitCode → credit it back.
+  const lines = net > 0
+    ? [
+      { account_id: cr.id, account: cr.name, debit: amt, credit: 0, narration: `DR ${cr.code} ${cr.name} — ${description}` },
+      { account_id: dr.id, account: dr.name, debit: 0, credit: amt, narration: `CR ${dr.code} ${dr.name} — ${description}` },
+    ]
+    : [
+      { account_id: dr.id, account: dr.name, debit: amt, credit: 0, narration: `DR ${dr.code} ${dr.name} — ${description}` },
+      { account_id: cr.id, account: cr.name, debit: 0, credit: amt, narration: `CR ${cr.code} ${cr.name} — ${description}` },
+    ];
+  const j = await accountingService.createJournal(trx, {
+    date: new Date().toISOString().slice(0, 10), entity: 'mill',
+    refType, refNo, description, currency: 'PKR', fxRate: 1, isAuto: true,
+    userId: userId || null, partyType, partyId, lines,
+  });
+  if (j && j.id) await accountingService.postJournal(trx, j.id);
+  return j;
+}
 
 module.exports = millingController;

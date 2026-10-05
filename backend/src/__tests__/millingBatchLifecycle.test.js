@@ -220,9 +220,9 @@ describe('cancel releases the source-lot reservations', () => {
   test('releaseBatchSources returns the held qty to available', async () => {
     seed({
       batch_source_lots: [
-        { id: 1, batch_id: 3, lot_id: 30, qty_kg: '400' },
-        { id: 2, batch_id: 3, lot_id: 31, qty_kg: '100' },
-        { id: 3, batch_id: 4, lot_id: 32, qty_kg: '50' },
+        { id: 1, batch_id: 3, lot_id: 30, qty_kg: '400', lot_type: 'raw' },
+        { id: 2, batch_id: 3, lot_id: 31, qty_kg: '100', lot_type: 'raw' },
+        { id: 3, batch_id: 4, lot_id: 32, qty_kg: '50', lot_type: 'raw' },
       ],
       inventory_lots: [
         // Held only by batch 3 → fully released.
@@ -244,7 +244,7 @@ describe('cancel releases the source-lot reservations', () => {
   test('POST /cancel moves the batch to Cancelled and releases its lots', async () => {
     seed({
       milling_batches: [{ id: 3, batch_no: 'M-003', status: 'On Hold', actual_finished_kg: null }],
-      batch_source_lots: [{ id: 1, batch_id: 3, lot_id: 30, qty_kg: '400' }],
+      batch_source_lots: [{ id: 1, batch_id: 3, lot_id: 30, qty_kg: '400', lot_type: 'raw' }],
       inventory_lots: [{ id: 30, qty: '1000', reserved_qty: '0', milling_reserved_qty: '400', available_qty: '600', milling_status: 'In Milling' }],
     });
     const res = resMock();
@@ -258,7 +258,7 @@ describe('cancel releases the source-lot reservations', () => {
   test('POST /cancel on a batch with outputs is refused and releases nothing', async () => {
     seed({
       milling_batches: [{ id: 3, batch_no: 'M-003', status: 'Queued' }],
-      batch_source_lots: [{ id: 1, batch_id: 3, lot_id: 30, qty_kg: '400' }],
+      batch_source_lots: [{ id: 1, batch_id: 3, lot_id: 30, qty_kg: '400', lot_type: 'raw' }],
       inventory_lots: [
         { id: 30, qty: '1000', reserved_qty: '0', milling_reserved_qty: '400', available_qty: '600', milling_status: 'In Milling' },
         { id: 33, batch_ref: 'batch-3', type: 'finished' },
@@ -273,7 +273,7 @@ describe('cancel releases the source-lot reservations', () => {
   test('POST /hold keeps the reservations', async () => {
     seed({
       milling_batches: [{ id: 3, batch_no: 'M-003', status: 'Queued' }],
-      batch_source_lots: [{ id: 1, batch_id: 3, lot_id: 30, qty_kg: '400' }],
+      batch_source_lots: [{ id: 1, batch_id: 3, lot_id: 30, qty_kg: '400', lot_type: 'raw' }],
       inventory_lots: [{ id: 30, qty: '1000', milling_reserved_qty: '400', milling_status: 'In Milling' }],
     });
     const res = resMock();

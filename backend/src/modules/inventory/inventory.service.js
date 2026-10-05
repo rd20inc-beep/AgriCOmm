@@ -3,6 +3,18 @@ const uc = require('../../services/unitConversion');
 // #9-scoping: READ-path warehouse restriction. Deliberately NOT applied to any
 // movement/posting function in this file — scoping a write would corrupt stock.
 const { applyWarehouseScope } = require('../../utils/warehouseScope');
+const { isReservedSource } = require('../milling/batchLifecycle');
+
+// Milling consumption may fall short of what the batch committed by at most
+// this much (scale rounding) before yield is refused.
+const CONSUME_TOLERANCE_KG = 1;
+const fmtKg = (n) => Number(n).toLocaleString('en-US', { maximumFractionDigits: 2 });
+function shortfallError(message) {
+  const err = new Error(message);
+  err.status = 400;
+  err.statusCode = 400;
+  return err;
+}
 
 // An Error carrying the HTTP status the route should answer with.
 function httpError(status, message) {
@@ -751,24 +763,36 @@ const inventoryService = {
     if (sources.length > 0) {
       const movements = [];
       for (const s of sources) {
-        const lot = await trx('inventory_lots').where({ id: s.lot_id }).first();
-        if (!lot) continue;
+        const lot = await trx('inventory_lots').where({ id: s.lot_id }).forUpdate().first();
+        if (!lot) throw shortfallError(`Source lot ${s.lot_id} of milling batch ${batchId} no longer exists.`);
         const want = parseFloat(s.qty_kg) || 0;
         // P6a: release THIS batch's milling hold first so the committed qty is
         // consumable. Availability subtracts milling_reserved_qty, so without
         // releasing, a fully-reserved lot would read available 0 and consume
-        // nothing. Consume against physical-minus-export (qty − reserved_qty).
+        // nothing. Only what this batch reserved is released: a legacy
+        // lot-first row reserved nothing, and releasing `want` for it took
+        // another batch's hold on the same lot (isReservedSource).
         const heldNow = parseFloat(lot.milling_reserved_qty) || 0;
-        const heldAfter = Math.max(0, heldNow - want);
+        const release = isReservedSource(s) ? Math.min(want, heldNow) : 0;
+        const heldAfter = Math.max(0, heldNow - release);
+        const avail = Math.max(0, (parseFloat(lot.qty) || 0) - (parseFloat(lot.reserved_qty) || 0) - heldAfter);
+        const consume = Math.min(want, avail);
+        // The batch's output is recorded in full from the yield, so consuming
+        // less than was committed would leave phantom stock. Refuse instead.
+        if (consume < want - CONSUME_TOLERANCE_KG) {
+          throw shortfallError(
+            `Lot ${lot.lot_no || lot.id} is short by ${fmtKg(want - consume)} kg for milling batch ${batchId}: `
+            + `${fmtKg(want)} kg committed, ${fmtKg(consume)} kg left to consume. `
+            + 'Adjust the batch quantity or the lot before recording yield.',
+          );
+        }
         if (heldNow !== heldAfter) {
           await trx('inventory_lots').where({ id: lot.id }).update({
             milling_reserved_qty: heldAfter,
-            available_qty: (parseFloat(lot.qty) || 0) - (parseFloat(lot.reserved_qty) || 0) - heldAfter,
+            available_qty: avail,
             updated_at: trx.fn.now(),
           });
         }
-        const avail = (parseFloat(lot.qty) || 0) - (parseFloat(lot.reserved_qty) || 0) - heldAfter;
-        const consume = Math.min(want, avail);
         if (consume <= 0) continue;
         const m = await inventoryService.postMovement(trx, {
           movementType: MOVEMENT_TYPES.PRODUCTION_ISSUE,
@@ -814,16 +838,21 @@ const inventoryService = {
       throw new Error(`No rice lot found for batch ${batchId}`);
     }
 
-    // Consume available qty — may be less than declared raw_qty_mt if
-    // actual received weight (via vehicle arrivals) differs from estimate.
-    // If stock is already fully consumed (from a prior yield attempt), skip silently.
+    // Consume what was received. Yield runs this only on the FIRST yield (the
+    // re-yield path never consumes), so stock that has gone — sold, moved,
+    // adjusted — is a real shortfall: recording the full output against it
+    // would create phantom stock. Refuse beyond a 1 kg tolerance.
     const availableQty = parseFloat(lot.available_qty) || 0;
     const consumeQty = Math.min(parsedQty, availableQty);
-
-    if (consumeQty <= 0) {
-      // Already consumed — idempotent, don't fail
-      return null;
+    if (consumeQty < parsedQty - CONSUME_TOLERANCE_KG) {
+      throw shortfallError(
+        `Lot ${lot.lot_no || lot.id} is short by ${fmtKg(parsedQty - consumeQty)} kg for milling batch ${batchId}: `
+        + `${fmtKg(parsedQty)} kg to mill, ${fmtKg(consumeQty)} kg available. `
+        + 'Adjust the batch quantity or the lot before recording yield.',
+      );
     }
+
+    if (consumeQty <= 0) return null;
 
     const movement = await inventoryService.postMovement(trx, {
       movementType: MOVEMENT_TYPES.PRODUCTION_ISSUE,

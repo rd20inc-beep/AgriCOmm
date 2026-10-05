@@ -280,6 +280,10 @@ const batchPackagingService = {
       hasLines: rows.length > 0,
     };
   },
+
+  // The store-stock move every packaging line uses — exposed so deleting a
+  // batch can put back what its packing runs drew with the same clamp rules.
+  moveStock,
 };
 
 module.exports = batchPackagingService;

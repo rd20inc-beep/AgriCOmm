@@ -69,6 +69,10 @@ router.post(
   '/batches',
   authorize('milling', 'create'),
   validate(schemas.createBatch),
+  // A service (toll) lot also needs the dedicated service-milling permission.
+  (req, res, next) => (req.body && req.body.is_service_milling
+    ? authorize('service_milling', 'create_batch')(req, res, next)
+    : next()),
   auditAction('create', 'milling_batch', (req, data) => data.data && data.data.batch ? data.data.batch.id : null),
   controller.create
 );
@@ -291,13 +295,10 @@ router.put(
 // =============================================================================
 
 router.get('/cash-flow', authorize('milling', 'view'), noFinanceForOperator, advancedController.cashFlow);
+router.get('/cost-trend', authorize('milling', 'view'), noFinanceForOperator, requireCostVisibility, controller.costTrend);
 router.get('/batches/:id/source-lots', authorize('milling', 'view'), advancedController.listSourceLots);
-router.post(
-  '/batches/:id/source-lots',
-  authorize('milling', 'edit'),
-  auditAction('add_source_lot', 'milling_batch', (req) => req.params.id),
-  advancedController.addSourceLot
-);
+// No POST: source lots join a batch only at creation (commitLotToBatch). The old
+// add-source-lot route had no caller and linked a lot without reserving it.
 
 // =============================================================================
 // Post-Milling Quality (Batch-level)
