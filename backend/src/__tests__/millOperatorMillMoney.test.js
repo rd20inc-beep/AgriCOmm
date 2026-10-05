@@ -134,7 +134,7 @@ describe('reporting routes — mill reports opened, company finance still closed
 describe('milling routes — the mill cash account and batch profit', () => {
   const milling = require('../modules/milling/milling.routes');
 
-  test.each(['/cash-flow', '/analytics/batch-profitability/:id'])(
+  test.each(['/cash-flow', '/cost-trend', '/analytics/batch-profitability/:id', '/payables', '/receivables'])(
     'GET %s: no role deny; gated on cost visibility instead', (path) => {
       const stack = stackOf(milling, 'get', path);
       expect(deniesOperator(stack)).toBe(false);

@@ -299,6 +299,14 @@ router.put(
 // mill local sales, Head Office ⇄ Mill transfers and the mill cash float.
 router.get('/cash-flow', authorize('milling', 'view'), requireCostVisibility, advancedController.cashFlow);
 router.get('/cost-trend', authorize('milling', 'view'), requireCostVisibility, controller.costTrend);
+// Mill Finance ▸ Suppliers / Customers for mill roles without finance.view (the
+// Mill Operator, owner decision 2026-10-05): the mill's OWN payables and
+// receivables, read-only. Same handlers and response shape as /finance/payables
+// and /finance/receivables, restricted to entity 'mill'. Paying stays on the
+// finance routes (finance.confirm_payment).
+const financeController = require('../finance/finance.controller');
+router.get('/payables', authorize('milling', 'view'), requireCostVisibility, financeController.getMillPayables);
+router.get('/receivables', authorize('milling', 'view'), requireCostVisibility, financeController.getMillReceivables);
 router.get('/batches/:id/source-lots', authorize('milling', 'view'), advancedController.listSourceLots);
 // No POST: source lots join a batch only at creation (commitLotToBatch). The old
 // add-source-lot route had no caller and linked a lot without reserving it.

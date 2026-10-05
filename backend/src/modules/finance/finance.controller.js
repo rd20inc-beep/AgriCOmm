@@ -63,80 +63,314 @@ async function generatePaymentNo(trx) {
   return `PAY-${String(num + 1).padStart(3, '0')}`;
 }
 
+/**
+ * The merged payables feed — stored payables + cost-derived rows — filtered by
+ * the list query (status / supplier / overdue / dates) and sorted newest first.
+ * Shared by GET /finance/payables (every entity, finance.view) and
+ * GET /milling/payables (entity 'mill' only, for mill roles without finance).
+ */
+async function loadPayablesFeed(query = {}) {
+  const { status, supplier_id, overdue, from_date, to_date } = query;
+  // Stored payables (real rows that CAN be paid — they have a numeric id).
+  // We MERGE these with the cost-derived ones below rather than either/or, so
+  // a materialized payable (e.g. a mill raw-rice purchase, which recordPayment
+  // needs a real row to settle) and the still-derived costs (export/expenses)
+  // both show. Derived rows whose source is already stored are skipped to
+  // avoid double-counting.
+  const storedRows = await db('payables as p')
+    .leftJoin('suppliers as s', 'p.supplier_id', 's.id')
+    .leftJoin('haulers as h', 'p.hauler_id', 'h.id')  // #14 transporter payables
+    .select('p.*', 's.name as supplier_name', db.raw('h.name as hauler_name'))
+    .where(function() {
+      this.whereIn('p.payable_type', ['vendor', 'expense', 'purchase'])
+          .orWhereNull('p.payable_type');
+    });
+  // Source keys already materialized — suppress their derived duplicates.
+  // Mill raw-rice payables are keyed by batch (source_table 'milling_raw_rice').
+  const storedRawRiceBatchIds = new Set(
+    storedRows.filter((r) => r.source_table === 'milling_raw_rice' && r.source_id != null)
+      .map((r) => r.source_id),
+  );
+  // #14 — batch transport now materialises a real transporter payable
+  // (source_table 'batch_transport'); suppress its derived milling_costs
+  // transport duplicate so it isn't counted twice.
+  const storedBatchTransportBatchIds = new Set(
+    storedRows.filter((r) => r.source_table === 'batch_transport' && r.source_id != null)
+      .map((r) => r.source_id),
+  );
+  // A batch fed by source LOTS (lot-started or blend) gets its raw cost from
+  // those lots — whose own purchase payables already capture the supplier debt.
+  // Deriving a raw_rice payable for such a batch would double-count, so skip it.
+  const batchesFromSourceLots = new Set(
+    (await db('batch_source_lots').distinct('batch_id').select('batch_id')).map((r) => r.batch_id),
+  );
+
+  // Derive payables from cost tables. Resolve the supplier from the batch's
+  // supplier_id (the denormalized supplier_name is sometimes null) and carry
+  // processing_type so a blend's internal raw cost can be excluded below.
+  const millingCosts = await db('milling_costs as mc')
+    .join('milling_batches as mb', 'mc.batch_id', 'mb.id')
+    .leftJoin('suppliers as s', 's.id', 'mb.supplier_id')
+    .select(
+      'mc.id', 'mc.batch_id', 'mc.category', 'mc.amount', 'mc.currency',
+      'mc.created_at', 'mb.batch_no', 'mb.processing_type', 'mb.supplier_id',
+      db.raw('COALESCE(s.name, mb.supplier_name) as supplier_name'),
+    )
+    .where('mc.amount', '>', 0)
+    .orderBy('mc.created_at', 'desc');
+
+  const exportCosts = await db('export_order_costs as eoc')
+    .join('export_orders as eo', 'eoc.order_id', 'eo.id')
+    .leftJoin('customers as c', 'eo.customer_id', 'c.id')
+    .select(
+      'eoc.id', 'eoc.order_id', 'eoc.category', 'eoc.amount',
+      'eoc.created_at', 'eo.order_no', 'c.name as customer_name',
+    )
+    .where('eoc.amount', '>', 0)
+    .orderBy('eoc.created_at', 'desc');
+
+  const millExpenses = await db('mill_expenses')
+    .where('amount', '>', 0)
+    .select('*')
+    .orderBy('expense_date', 'desc');
+
+  // Map to payable-shaped rows
+  const derived = [];
+
+  const categoryLabel = (cat) => {
+    const map = { raw_rice: 'Raw Rice', transport: 'Transport', electricity: 'Electricity', rent: 'Rent', labor: 'Labor', maintenance: 'Maintenance' };
+    return map[cat] || cat.charAt(0).toUpperCase() + cat.slice(1);
+  };
+
+  millingCosts.forEach(mc => {
+    // A blend's raw_rice cost is the internal value of already-owned finished
+    // stock it re-mills — NOT a new supplier purchase. The amount owed to those
+    // suppliers is already recognized on the source batches (M-001/M-002), so
+    // counting it here would double-count what we owe (and disagree with the GL
+    // supplier statement, which has no AP journal for blends). Skip it.
+    if (mc.category === 'raw_rice' && mc.processing_type === 'blended') return;
+    // Materialized as a real stored payable already (so it can be paid) —
+    // skip the derived duplicate.
+    if (mc.category === 'raw_rice' && storedRawRiceBatchIds.has(mc.batch_id)) return;
+    // Batch fed by source lots → its raw cost is already owed via those lots'
+    // purchase payables; deriving it again would double-count the supplier.
+    if (mc.category === 'raw_rice' && batchesFromSourceLots.has(mc.batch_id)) return;
+    // #14 — transport for this batch is a real (payable) transporter payable.
+    if (mc.category === 'transport' && storedBatchTransportBatchIds.has(mc.batch_id)) return;
+    derived.push({
+      id: `MC-${mc.id}`,
+      pay_no: `MC-${mc.id}`,
+      entity: 'mill',
+      category: categoryLabel(mc.category),
+      supplier_id: mc.supplier_id || null,
+      supplier_name: mc.supplier_name || null,
+      linked_ref: mc.batch_no,
+      original_amount: parseFloat(mc.amount),
+      paid_amount: 0,
+      outstanding: parseFloat(mc.amount),
+      due_date: mc.created_at,
+      status: 'Pending',
+      currency: mc.currency || 'PKR',
+      aging: 0,
+      notes: `${categoryLabel(mc.category)} cost for batch ${mc.batch_no}`,
+      created_at: mc.created_at,
+      source: 'milling_costs',
+    });
+  });
+
+  // Domain separation: the Finance Manager settles export costs and needs the
+  // export ORDER NUMBER to identify what a payment is for, but restricted roles
+  // must NOT see the export CUSTOMER — party names are masked uniformly after
+  // paging (see below); here we carry the real values.
+  exportCosts.forEach(ec => {
+    derived.push({
+      id: `EC-${ec.id}`,
+      pay_no: `EC-${ec.id}`,
+      entity: 'export',
+      category: categoryLabel(ec.category),
+      supplier_name: ec.customer_name || null, // the export customer
+      linked_ref: ec.order_no,
+      original_amount: parseFloat(ec.amount),
+      paid_amount: 0,
+      outstanding: parseFloat(ec.amount),
+      due_date: ec.created_at,
+      status: 'Pending',
+      currency: 'USD',
+      aging: 0,
+      notes: `${categoryLabel(ec.category)} cost for order ${ec.order_no}`,
+      created_at: ec.created_at,
+      source: 'export_order_costs',
+    });
+  });
+
+  millExpenses.forEach(me => {
+    derived.push({
+      id: `ME-${me.id}`,
+      pay_no: `ME-${me.id}`,
+      entity: 'mill',
+      category: categoryLabel(me.category || 'overhead'),
+      supplier_name: null,
+      linked_ref: null,
+      original_amount: parseFloat(me.amount),
+      paid_amount: 0,
+      outstanding: parseFloat(me.amount),
+      due_date: me.expense_date || me.created_at,
+      status: 'Pending',
+      currency: 'PKR',
+      aging: 0,
+      notes: me.description || `Mill expense: ${me.category}`,
+      created_at: me.created_at,
+      source: 'mill_expenses',
+    });
+  });
+
+  // Merge stored (real, payable) + derived (synthetic) into one feed.
+  const all = [...storedRows, ...derived];
+
+  // Apply filters uniformly across the merged set.
+  let filtered = all;
+  if (status) filtered = filtered.filter(p => p.status === status);
+  if (supplier_id) filtered = filtered.filter(p => String(p.supplier_id) === String(supplier_id));
+  if (overdue === 'true') filtered = filtered.filter(p => p.due_date && new Date(p.due_date) < new Date() && p.status !== 'Paid');
+  if (from_date) filtered = filtered.filter(p => p.created_at && new Date(p.created_at) >= new Date(from_date));
+  // Exclusive next-day bound: created_at carries a time, so comparing against
+  // midnight of to_date would drop payables created later that day.
+  if (to_date) {
+    const toBound = new Date(to_date); toBound.setDate(toBound.getDate() + 1);
+    filtered = filtered.filter(p => p.created_at && new Date(p.created_at) < toBound);
+  }
+
+  // Newest first; tie-break on id (stored numeric > synthetic string sort).
+  filtered.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+  return filtered;
+}
+
+/** Page + party-mask one payables feed into the response body both endpoints return. */
+async function respondPayables(req, res, rows) {
+  const { page = 1, limit = 200 } = req.query;
+  const offset = (Math.max(1, parseInt(page)) - 1) * parseInt(limit);
+  const total = rows.length;
+  let paged = rows.slice(offset, offset + parseInt(limit));
+
+  // Confidentiality: restricted roles (everyone except Super Admin / Owner)
+  // see the reference (order / batch / lot) but NOT the trading-party name.
+  // Mask the supplier/customer name to a generic label and drop the party
+  // link; transporter (hauler) names stay visible (operational).
+  if (await isPartyMasked(req)) {
+    paged = paged.map((r) => {
+      if (r.hauler_name && !r.supplier_name) return r; // transporter payable — keep
+      if (!r.supplier_name) return r; // no party name to hide (e.g. mill expense)
+      return { ...r, supplier_name: r.entity === 'export' ? 'Customer' : 'Supplier', supplier_id: null };
+    });
+  }
+
+  return res.json({
+    success: true,
+    data: {
+      payables: paged,
+      pagination: { page: parseInt(page), limit: parseInt(limit), total, totalPages: Math.ceil(total / parseInt(limit)) },
+      source: 'merged',
+    },
+  });
+}
+
+/**
+ * The receivables list both endpoints return. `entity` restricts it to one
+ * side of the business ('mill' for GET /milling/receivables); without it every
+ * receivable shows (GET /finance/receivables).
+ */
+async function receivablesResponse(req, res, { entity } = {}) {
+  try {
+    const { page = 1, limit = 200, status, customer_id, overdue, from_date, to_date } = req.query;
+    const offset = (Math.max(1, parseInt(page)) - 1) * parseInt(limit);
+
+    // ── Export-side receivables (existing) ────────────────────────
+    let exportQ = db('receivables as r')
+      .leftJoin('customers as c', 'r.customer_id', 'c.id')
+      .select(
+        'r.id', 'r.recv_no', 'r.type', 'r.expected_amount', 'r.received_amount',
+        'r.outstanding', 'r.currency', 'r.fx_rate', 'r.base_amount_pkr',
+        'r.due_date', 'r.status', 'r.aging', 'r.order_id', 'r.customer_id',
+        'r.created_at', 'r.entity',
+        db.raw(`'receivable'::text as kind`),
+        'c.name as customer_name'
+      )
+      // Local-sale receivables (RCV-LS-, carry local_sale_id) are ALSO surfaced
+      // from local_sales below — excluding them here prevents the same balance
+      // being counted twice in the Money-In list, its total, and pagination.
+      .whereNull('r.local_sale_id');
+    if (entity)        exportQ = exportQ.where('r.entity', entity);
+    if (status)        exportQ = exportQ.where('r.status', status);
+    if (customer_id)   exportQ = exportQ.where('r.customer_id', customer_id);
+    if (overdue === 'true') exportQ = exportQ.where('r.due_date', '<', db.fn.now()).where('r.status', '!=', 'Paid');
+    if (from_date)     exportQ = exportQ.where('r.created_at', '>=', from_date);
+    // Exclusive next-day bound: r.created_at is timestamptz, so `<= to_date`
+    // (midnight) would drop receivables created later on the to_date day.
+    if (to_date)       exportQ = exportQ.where('r.created_at', '<', db.raw("(?::date + interval '1 day')", [to_date]));
+
+    // ── Local sales with outstanding balance (merged in) ──────────
+    // One row per sale (sale_group_no), selected by what is still owed on a
+    // confirmed sale, due = COALESCE(due_date, sale_date) for the Due column,
+    // aging and the overdue filter alike. See localReceivablesQuery.js.
+    const localQ = buildLocalReceivablesQuery(db, { status, customer_id, from_date, to_date, overdue, entity });
+
+    // Knex UNION with ORDER BY + LIMIT works by wrapping the union
+    // as a derived table.
+    const [exportRows, localRows] = await Promise.all([exportQ, localQ]);
+    // The SQL already filters by entity; checking the rows too means a query
+    // change can never quietly hand an export receivable to a mill-only caller.
+    const ofEntity = (row) => !entity || String(row.entity || '').toLowerCase() === entity;
+    const combined = [...exportRows, ...localRows]
+      .filter(ofEntity)
+      .sort((a, b) => (a.due_date ? new Date(a.due_date).getTime() : 0) - (b.due_date ? new Date(b.due_date).getTime() : 0));
+
+    const total = combined.length;
+    let sliced = combined.slice(offset, offset + parseInt(limit));
+
+    // Confidentiality: every role except Super Admin / Owner sees the reference
+    // (recv_no / sale_no) but NOT the trading-party name. Mask the CUSTOMER on
+    // both export receivables and local sales, drop the customer link, and null
+    // the export order link (opening it would reveal the customer). Reference
+    // numbers stay so the payment can still be identified.
+    if (await isPartyMasked(req)) {
+      sliced = sliced.map((r) => ({
+        ...r,
+        customer_name: r.kind === 'receivable' ? 'Export customer' : 'Customer',
+        customer_id: null,
+        order_id: null,
+      }));
+    }
+
+    return res.json({
+      success: true,
+      data: {
+        receivables: sliced,
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total,
+          totalPages: Math.ceil(total / parseInt(limit)),
+        },
+      },
+    });
+  } catch (err) {
+    console.error('Get receivables error:', err);
+    return res.status(500).json({ success: false, message: 'Internal server error.' });
+  }
+}
+
 const financeController = {
   async getReceivables(req, res) {
-    try {
-      const { page = 1, limit = 200, status, customer_id, overdue, from_date, to_date } = req.query;
-      const offset = (Math.max(1, parseInt(page)) - 1) * parseInt(limit);
+    return receivablesResponse(req, res, {});
+  },
 
-      // ── Export-side receivables (existing) ────────────────────────
-      let exportQ = db('receivables as r')
-        .leftJoin('customers as c', 'r.customer_id', 'c.id')
-        .select(
-          'r.id', 'r.recv_no', 'r.type', 'r.expected_amount', 'r.received_amount',
-          'r.outstanding', 'r.currency', 'r.fx_rate', 'r.base_amount_pkr',
-          'r.due_date', 'r.status', 'r.aging', 'r.order_id', 'r.customer_id',
-          'r.created_at',
-          db.raw(`'receivable'::text as kind`),
-          'c.name as customer_name'
-        )
-        // Local-sale receivables (RCV-LS-, carry local_sale_id) are ALSO surfaced
-        // from local_sales below — excluding them here prevents the same balance
-        // being counted twice in the Money-In list, its total, and pagination.
-        .whereNull('r.local_sale_id');
-      if (status)        exportQ = exportQ.where('r.status', status);
-      if (customer_id)   exportQ = exportQ.where('r.customer_id', customer_id);
-      if (overdue === 'true') exportQ = exportQ.where('r.due_date', '<', db.fn.now()).where('r.status', '!=', 'Paid');
-      if (from_date)     exportQ = exportQ.where('r.created_at', '>=', from_date);
-      // Exclusive next-day bound: r.created_at is timestamptz, so `<= to_date`
-      // (midnight) would drop receivables created later on the to_date day.
-      if (to_date)       exportQ = exportQ.where('r.created_at', '<', db.raw("(?::date + interval '1 day')", [to_date]));
-
-      // ── Local sales with outstanding balance (merged in) ──────────
-      // One row per sale (sale_group_no), selected by what is still owed on a
-      // confirmed sale, due = COALESCE(due_date, sale_date) for the Due column,
-      // aging and the overdue filter alike. See localReceivablesQuery.js.
-      const localQ = buildLocalReceivablesQuery(db, { status, customer_id, from_date, to_date, overdue });
-
-      // Knex UNION with ORDER BY + LIMIT works by wrapping the union
-      // as a derived table.
-      const [exportRows, localRows] = await Promise.all([exportQ, localQ]);
-      const combined = [...exportRows, ...localRows]
-        .sort((a, b) => (a.due_date ? new Date(a.due_date).getTime() : 0) - (b.due_date ? new Date(b.due_date).getTime() : 0));
-
-      const total = combined.length;
-      let sliced = combined.slice(offset, offset + parseInt(limit));
-
-      // Confidentiality: every role except Super Admin / Owner sees the reference
-      // (recv_no / sale_no) but NOT the trading-party name. Mask the CUSTOMER on
-      // both export receivables and local sales, drop the customer link, and null
-      // the export order link (opening it would reveal the customer). Reference
-      // numbers stay so the payment can still be identified.
-      if (await isPartyMasked(req)) {
-        sliced = sliced.map((r) => ({
-          ...r,
-          customer_name: r.kind === 'receivable' ? 'Export customer' : 'Customer',
-          customer_id: null,
-          order_id: null,
-        }));
-      }
-
-      return res.json({
-        success: true,
-        data: {
-          receivables: sliced,
-          pagination: {
-            page: parseInt(page),
-            limit: parseInt(limit),
-            total,
-            totalPages: Math.ceil(total / parseInt(limit)),
-          },
-        },
-      });
-    } catch (err) {
-      console.error('Get receivables error:', err);
-      return res.status(500).json({ success: false, message: 'Internal server error.' });
-    }
+  // Mill Finance ▸ Customers for mill roles without finance.view (the Mill
+  // Operator — owner decision 2026-10-05): receivables the MILL is owed only —
+  // rows on the receivables table with entity 'mill' (opening balances, service
+  // milling invoices) and mill local sales still owing. Export receivables
+  // never leave. Same response shape as GET /finance/receivables.
+  async getMillReceivables(req, res) {
+    return receivablesResponse(req, res, { entity: 'mill' });
   },
 
   // Receipt history for one Money-In row — shows WHERE/HOW each partial was
@@ -588,206 +822,23 @@ const financeController = {
 
   async getPayables(req, res) {
     try {
-      const { page = 1, limit = 200, status, supplier_id, overdue, from_date, to_date } = req.query;
-      const offset = (Math.max(1, parseInt(page)) - 1) * parseInt(limit);
-
-      // Stored payables (real rows that CAN be paid — they have a numeric id).
-      // We MERGE these with the cost-derived ones below rather than either/or, so
-      // a materialized payable (e.g. a mill raw-rice purchase, which recordPayment
-      // needs a real row to settle) and the still-derived costs (export/expenses)
-      // both show. Derived rows whose source is already stored are skipped to
-      // avoid double-counting.
-      const storedRows = await db('payables as p')
-        .leftJoin('suppliers as s', 'p.supplier_id', 's.id')
-        .leftJoin('haulers as h', 'p.hauler_id', 'h.id')  // #14 transporter payables
-        .select('p.*', 's.name as supplier_name', db.raw('h.name as hauler_name'))
-        .where(function() {
-          this.whereIn('p.payable_type', ['vendor', 'expense', 'purchase'])
-              .orWhereNull('p.payable_type');
-        });
-      // Source keys already materialized — suppress their derived duplicates.
-      // Mill raw-rice payables are keyed by batch (source_table 'milling_raw_rice').
-      const storedRawRiceBatchIds = new Set(
-        storedRows.filter((r) => r.source_table === 'milling_raw_rice' && r.source_id != null)
-          .map((r) => r.source_id),
-      );
-      // #14 — batch transport now materialises a real transporter payable
-      // (source_table 'batch_transport'); suppress its derived milling_costs
-      // transport duplicate so it isn't counted twice.
-      const storedBatchTransportBatchIds = new Set(
-        storedRows.filter((r) => r.source_table === 'batch_transport' && r.source_id != null)
-          .map((r) => r.source_id),
-      );
-      // A batch fed by source LOTS (lot-started or blend) gets its raw cost from
-      // those lots — whose own purchase payables already capture the supplier debt.
-      // Deriving a raw_rice payable for such a batch would double-count, so skip it.
-      const batchesFromSourceLots = new Set(
-        (await db('batch_source_lots').distinct('batch_id').select('batch_id')).map((r) => r.batch_id),
-      );
-
-      // Derive payables from cost tables. Resolve the supplier from the batch's
-      // supplier_id (the denormalized supplier_name is sometimes null) and carry
-      // processing_type so a blend's internal raw cost can be excluded below.
-      const millingCosts = await db('milling_costs as mc')
-        .join('milling_batches as mb', 'mc.batch_id', 'mb.id')
-        .leftJoin('suppliers as s', 's.id', 'mb.supplier_id')
-        .select(
-          'mc.id', 'mc.batch_id', 'mc.category', 'mc.amount', 'mc.currency',
-          'mc.created_at', 'mb.batch_no', 'mb.processing_type', 'mb.supplier_id',
-          db.raw('COALESCE(s.name, mb.supplier_name) as supplier_name'),
-        )
-        .where('mc.amount', '>', 0)
-        .orderBy('mc.created_at', 'desc');
-
-      const exportCosts = await db('export_order_costs as eoc')
-        .join('export_orders as eo', 'eoc.order_id', 'eo.id')
-        .leftJoin('customers as c', 'eo.customer_id', 'c.id')
-        .select(
-          'eoc.id', 'eoc.order_id', 'eoc.category', 'eoc.amount',
-          'eoc.created_at', 'eo.order_no', 'c.name as customer_name',
-        )
-        .where('eoc.amount', '>', 0)
-        .orderBy('eoc.created_at', 'desc');
-
-      const millExpenses = await db('mill_expenses')
-        .where('amount', '>', 0)
-        .select('*')
-        .orderBy('expense_date', 'desc');
-
-      // Map to payable-shaped rows
-      const derived = [];
-
-      const categoryLabel = (cat) => {
-        const map = { raw_rice: 'Raw Rice', transport: 'Transport', electricity: 'Electricity', rent: 'Rent', labor: 'Labor', maintenance: 'Maintenance' };
-        return map[cat] || cat.charAt(0).toUpperCase() + cat.slice(1);
-      };
-
-      millingCosts.forEach(mc => {
-        // A blend's raw_rice cost is the internal value of already-owned finished
-        // stock it re-mills — NOT a new supplier purchase. The amount owed to those
-        // suppliers is already recognized on the source batches (M-001/M-002), so
-        // counting it here would double-count what we owe (and disagree with the GL
-        // supplier statement, which has no AP journal for blends). Skip it.
-        if (mc.category === 'raw_rice' && mc.processing_type === 'blended') return;
-        // Materialized as a real stored payable already (so it can be paid) —
-        // skip the derived duplicate.
-        if (mc.category === 'raw_rice' && storedRawRiceBatchIds.has(mc.batch_id)) return;
-        // Batch fed by source lots → its raw cost is already owed via those lots'
-        // purchase payables; deriving it again would double-count the supplier.
-        if (mc.category === 'raw_rice' && batchesFromSourceLots.has(mc.batch_id)) return;
-        // #14 — transport for this batch is a real (payable) transporter payable.
-        if (mc.category === 'transport' && storedBatchTransportBatchIds.has(mc.batch_id)) return;
-        derived.push({
-          id: `MC-${mc.id}`,
-          pay_no: `MC-${mc.id}`,
-          entity: 'mill',
-          category: categoryLabel(mc.category),
-          supplier_id: mc.supplier_id || null,
-          supplier_name: mc.supplier_name || null,
-          linked_ref: mc.batch_no,
-          original_amount: parseFloat(mc.amount),
-          paid_amount: 0,
-          outstanding: parseFloat(mc.amount),
-          due_date: mc.created_at,
-          status: 'Pending',
-          currency: mc.currency || 'PKR',
-          aging: 0,
-          notes: `${categoryLabel(mc.category)} cost for batch ${mc.batch_no}`,
-          created_at: mc.created_at,
-          source: 'milling_costs',
-        });
-      });
-
-      // Domain separation: the Finance Manager settles export costs and needs the
-      // export ORDER NUMBER to identify what a payment is for, but restricted roles
-      // must NOT see the export CUSTOMER — party names are masked uniformly after
-      // paging (see below); here we carry the real values.
-      exportCosts.forEach(ec => {
-        derived.push({
-          id: `EC-${ec.id}`,
-          pay_no: `EC-${ec.id}`,
-          entity: 'export',
-          category: categoryLabel(ec.category),
-          supplier_name: ec.customer_name || null, // the export customer
-          linked_ref: ec.order_no,
-          original_amount: parseFloat(ec.amount),
-          paid_amount: 0,
-          outstanding: parseFloat(ec.amount),
-          due_date: ec.created_at,
-          status: 'Pending',
-          currency: 'USD',
-          aging: 0,
-          notes: `${categoryLabel(ec.category)} cost for order ${ec.order_no}`,
-          created_at: ec.created_at,
-          source: 'export_order_costs',
-        });
-      });
-
-      millExpenses.forEach(me => {
-        derived.push({
-          id: `ME-${me.id}`,
-          pay_no: `ME-${me.id}`,
-          entity: 'mill',
-          category: categoryLabel(me.category || 'overhead'),
-          supplier_name: null,
-          linked_ref: null,
-          original_amount: parseFloat(me.amount),
-          paid_amount: 0,
-          outstanding: parseFloat(me.amount),
-          due_date: me.expense_date || me.created_at,
-          status: 'Pending',
-          currency: 'PKR',
-          aging: 0,
-          notes: me.description || `Mill expense: ${me.category}`,
-          created_at: me.created_at,
-          source: 'mill_expenses',
-        });
-      });
-
-      // Merge stored (real, payable) + derived (synthetic) into one feed.
-      const all = [...storedRows, ...derived];
-
-      // Apply filters uniformly across the merged set.
-      let filtered = all;
-      if (status) filtered = filtered.filter(p => p.status === status);
-      if (supplier_id) filtered = filtered.filter(p => String(p.supplier_id) === String(supplier_id));
-      if (overdue === 'true') filtered = filtered.filter(p => p.due_date && new Date(p.due_date) < new Date() && p.status !== 'Paid');
-      if (from_date) filtered = filtered.filter(p => p.created_at && new Date(p.created_at) >= new Date(from_date));
-      // Exclusive next-day bound: created_at carries a time, so comparing against
-      // midnight of to_date would drop payables created later that day.
-      if (to_date) {
-        const toBound = new Date(to_date); toBound.setDate(toBound.getDate() + 1);
-        filtered = filtered.filter(p => p.created_at && new Date(p.created_at) < toBound);
-      }
-
-      // Newest first; tie-break on id (stored numeric > synthetic string sort).
-      filtered.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
-
-      const total = filtered.length;
-      let paged = filtered.slice(offset, offset + parseInt(limit));
-
-      // Confidentiality: restricted roles (everyone except Super Admin / Owner)
-      // see the reference (order / batch / lot) but NOT the trading-party name.
-      // Mask the supplier/customer name to a generic label and drop the party
-      // link; transporter (hauler) names stay visible (operational).
-      if (await isPartyMasked(req)) {
-        paged = paged.map((r) => {
-          if (r.hauler_name && !r.supplier_name) return r; // transporter payable — keep
-          if (!r.supplier_name) return r; // no party name to hide (e.g. mill expense)
-          return { ...r, supplier_name: r.entity === 'export' ? 'Customer' : 'Supplier', supplier_id: null };
-        });
-      }
-
-      return res.json({
-        success: true,
-        data: {
-          payables: paged,
-          pagination: { page: parseInt(page), limit: parseInt(limit), total, totalPages: Math.ceil(total / parseInt(limit)) },
-          source: 'merged',
-        },
-      });
+      return await respondPayables(req, res, await loadPayablesFeed(req.query));
     } catch (err) {
       console.error('Get payables error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
+  // Mill Finance ▸ Suppliers for mill roles without finance.view (the Mill
+  // Operator — owner decision 2026-10-05). The same feed, entity 'mill' only:
+  // lot / rice purchases, mill transport + brokers, mill expenses, mill-store
+  // purchases and the derived mill batch costs. Export payables never leave.
+  async getMillPayables(req, res) {
+    try {
+      const rows = (await loadPayablesFeed(req.query)).filter((p) => String(p.entity || '').toLowerCase() === 'mill');
+      return await respondPayables(req, res, rows);
+    } catch (err) {
+      console.error('Get mill payables error:', err);
       return res.status(500).json({ success: false, message: 'Internal server error.' });
     }
   },

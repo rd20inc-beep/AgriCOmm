@@ -21,6 +21,10 @@ export const millingApi = {
   getBatch: (id) => api.get(`/api/milling/batches/${id}`),
   sourceLots: (id) => api.get(`/api/milling/batches/${id}/source-lots`),
   cashFlow: (params) => api.get('/api/milling/cash-flow', params),
+  // The mill's own payables / receivables, read-only, for mill roles without
+  // finance.view (same shape as /api/finance/payables + /receivables).
+  payables: (params) => api.get('/api/milling/payables', params),
+  receivables: (params) => api.get('/api/milling/receivables', params),
   // Real milling_costs by month + category (dashboard Mill Cost Trend).
   costTrend: (params) => api.get('/api/milling/cost-trend', params),
   createBatch: (data) => api.post('/api/milling/batches', data),

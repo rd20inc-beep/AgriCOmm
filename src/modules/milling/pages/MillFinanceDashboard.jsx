@@ -25,7 +25,7 @@ import {
   useApproveLeaveRequest, useRejectLeaveRequest,
   useFinalSettlement, useFinalizeSettlement, usePayrollAudit, useSalaryRevisions, useReviseSalary,
   usePayrollSchedule, useSavePayrollSchedule, useRunPayrollNow,
-  usePayables, useReceivables, useSuppliers, useCustomers, usePurchases, useLocalSalesSummary, useMillCashFlow, useAcceptFundTransfer,
+  usePayables, useReceivables, useMillPayables, useMillReceivables, useSuppliers, useCustomers, usePurchases, useLocalSalesSummary, useMillCashFlow, useAcceptFundTransfer,
   useMillLotCosts, useLocalSales, useRecordPayment, usePayablePayments, useBankAccounts, useHeldStockProfit, useProfitLoss, useMillExpenseHeads, useCreateMillExpenseHead } from '../../../api/queries';
 import TransactionDocument from '../../../components/TransactionDocument';
 import NewPurchaseDrawer from '../../../components/NewPurchaseDrawer';
@@ -352,7 +352,15 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
   const { data: lotCosts = { categories: [], grandTotal: 0 } } = useMillLotCosts();
 
   // ── Money In/Out + Suppliers data ──
-  const { data: payablesRaw } = usePayables({});
+  // Finance holders read the company feeds (and filter to the mill below). A
+  // mill role without finance.view — the Mill Operator, who sees everything
+  // regarding the mill (owner decision 2026-10-05) — reads the mill-only,
+  // read-only feeds instead; party statements and paying stay finance-only.
+  const { hasPermission: hasPerm } = useAuth();
+  const canFinance = hasPerm('finance', 'view');
+  const { data: financePayables } = usePayables({}, { enabled: canFinance });
+  const { data: millPayables } = useMillPayables({}, { enabled: !canFinance });
+  const payablesRaw = canFinance ? financePayables : millPayables;
   const payables = useMemo(() => {
     const arr = Array.isArray(payablesRaw) ? payablesRaw : (payablesRaw?.payables || []);
     return arr.filter((p) => String(p.entity || '').toLowerCase() === 'mill');
@@ -368,7 +376,9 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
   // receivables table (kind 'receivable') and rows derived from local_sales
   // (kind 'local_sale'). The directory already counts the sales, so only the
   // former may be folded in — taking the lot double counted every sale.
-  const { data: allReceivables = [] } = useReceivables({ limit: 500 });
+  const { data: financeReceivables } = useReceivables({ limit: 500 }, { enabled: canFinance });
+  const { data: millReceivables } = useMillReceivables({ limit: 500 }, { enabled: !canFinance });
+  const allReceivables = (canFinance ? financeReceivables : millReceivables) || [];
 
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [payCustomer, setPayCustomer] = useState(null);
@@ -1345,7 +1355,9 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
             <Stat label="Outstanding" value={COMPACT_PKR(supplierTotals.outstanding)} tone={supplierTotals.outstanding > 0 ? 'amber' : 'green'} icon={Wallet} />
           </div>
 
-          {/* Pick any supplier to view their statement */}
+          {/* Pick any supplier to view their statement (finance only — the
+              statement is the GL party ledger). */}
+          {canFinance && (
           <div className="rounded-xl border border-gray-200 bg-white p-3">
             <p className="text-[11px] uppercase tracking-wide text-gray-500 mb-1.5">View any supplier statement</p>
             <SearchSelect
@@ -1358,9 +1370,10 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
               placeholder="Search suppliers…"
             />
           </div>
+          )}
 
           {/* Inline statement */}
-          {selectedSupplier?.id && (
+          {canFinance && selectedSupplier?.id && (
             <div className="space-y-2">
               {canPay && (
                 <div className="flex justify-end">
@@ -1384,7 +1397,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
           <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
             <div className="px-4 py-2.5 border-b border-gray-100">
               <h3 className="text-sm font-semibold text-gray-700">Mill supplier directory</h3>
-              <p className="text-[11px] text-gray-400">Click a supplier to see its statement of money owed & paid.</p>
+              <p className="text-[11px] text-gray-400">{canFinance ? 'Click a supplier to see its statement of money owed & paid.' : 'What the mill owes each supplier — billed, paid and outstanding.'}</p>
             </div>
             <div className="overflow-x-auto">
               {supplierRows.length === 0 ? (
@@ -1405,8 +1418,8 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
                     {supplierRows.map((r) => (
                       <tr
                         key={r.id || r.name}
-                        className={`hover:bg-blue-50/40 ${r.id && r.id !== UNASSIGNED ? 'cursor-pointer' : ''} ${selectedSupplier?.id === r.id ? 'bg-blue-50/60' : ''}`}
-                        onClick={() => r.id && r.id !== UNASSIGNED && setSelectedSupplier({ id: r.id, name: r.name })}
+                        className={`hover:bg-blue-50/40 ${canFinance && r.id && r.id !== UNASSIGNED ? 'cursor-pointer' : ''} ${selectedSupplier?.id === r.id ? 'bg-blue-50/60' : ''}`}
+                        onClick={() => canFinance && r.id && r.id !== UNASSIGNED && setSelectedSupplier({ id: r.id, name: r.name })}
                       >
                         <td data-label="Supplier" className="px-4 py-2 font-medium text-gray-800">{r.name}</td>
                         <td data-label="Invoices" className="mob-hide px-4 py-2 text-right tabular-nums text-gray-500">{r.count}</td>
@@ -1422,7 +1435,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
                               <Banknote size={12} /> Pay
                             </button>
                           )}
-                          {r.id && r.id !== UNASSIGNED && <span className="text-blue-500 text-xs">View →</span>}
+                          {canFinance && r.id && r.id !== UNASSIGNED && <span className="text-blue-500 text-xs">View →</span>}
                         </td>
                       </tr>
                     ))}
@@ -1443,7 +1456,8 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
             <Stat label="Outstanding" value={COMPACT_PKR(customerTotals.outstanding)} sub="owed to mill" tone={customerTotals.outstanding > 0 ? 'amber' : 'green'} icon={Wallet} />
           </div>
 
-          {/* Pick any customer to view their statement */}
+          {/* Pick any customer to view their statement (finance only). */}
+          {canFinance && (
           <div className="rounded-xl border border-gray-200 bg-white p-3">
             <p className="text-[11px] uppercase tracking-wide text-gray-500 mb-1.5">View any customer statement</p>
             <SearchSelect
@@ -1456,9 +1470,10 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
               placeholder="Search customers…"
             />
           </div>
+          )}
 
           {/* Inline statement */}
-          {selectedCustomer?.id && (
+          {canFinance && selectedCustomer?.id && (
             <div className="space-y-2">
               {canPay && (
                 <div className="flex justify-end">
@@ -1482,7 +1497,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
           <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
             <div className="px-4 py-2.5 border-b border-gray-100">
               <h3 className="text-sm font-semibold text-gray-700">Local customer directory</h3>
-              <p className="text-[11px] text-gray-400">Click a customer to see their statement of sales & receipts.</p>
+              <p className="text-[11px] text-gray-400">{canFinance ? 'Click a customer to see their statement of sales & receipts.' : 'What each local customer owes the mill — billed, received and outstanding.'}</p>
             </div>
             <div className="overflow-x-auto">
               {customerRows.length === 0 ? (
@@ -1502,8 +1517,8 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
                   <tbody className="divide-y divide-gray-100">
                     {customerRows.map((r) => (
                       <tr key={r.id}
-                        className={`cursor-pointer hover:bg-blue-50/40 ${selectedCustomer?.id === r.id ? 'bg-blue-50/60' : ''}`}
-                        onClick={() => setSelectedCustomer({ id: r.id, name: r.name })}>
+                        className={`${canFinance ? 'cursor-pointer ' : ''}hover:bg-blue-50/40 ${selectedCustomer?.id === r.id ? 'bg-blue-50/60' : ''}`}
+                        onClick={() => canFinance && setSelectedCustomer({ id: r.id, name: r.name })}>
                         <td data-label="Customer" className="px-4 py-2 font-medium text-gray-900">
                           {r.name}
                           {(r.contact || r.country) && (
@@ -1523,7 +1538,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
                               <Banknote size={12} /> Pay
                             </button>
                           )}
-                          <span className="text-blue-500 text-xs">View →</span>
+                          {canFinance && <span className="text-blue-500 text-xs">View →</span>}
                         </td>
                       </tr>
                     ))}
