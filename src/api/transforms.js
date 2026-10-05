@@ -310,6 +310,7 @@ export function transformBatch(dbBatch) {
     approvedAt: dbBatch.approved_at || null,
     costs: dbBatch.costs || {},
     packingBreakdown: dbBatch.packingBreakdown || null,
+    awaitingArrivalRate: !!dbBatch.awaitingArrivalRate,
     sampleAnalysis: dbBatch.sampleAnalysis || null,
     arrivalAnalysis: dbBatch.arrivalAnalysis || null,
     variancePct: dbBatch.variance_pct != null ? parseFloat(dbBatch.variance_pct) : null,

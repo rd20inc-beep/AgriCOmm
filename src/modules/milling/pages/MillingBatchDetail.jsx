@@ -75,6 +75,9 @@ function fmtPKR2(value) {
   return 'Rs ' + (parseFloat(value) || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+// Shown to a cost-blind user when yield is blocked for lack of a raw cost.
+const YIELD_WAITS_FOR_RATE = 'Waiting for the arrival price — a manager needs to enter it before yield can be recorded.';
+
 export default function MillingBatchDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -435,6 +438,12 @@ export default function MillingBatchDetail() {
   }
 
   function openYieldModal() {
+    // First yield is blocked server-side until the raw rice has a cost (#427);
+    // a cost-blind user can't supply it, so tell them now, not after submit.
+    if (!showCost && batch.awaitingArrivalRate && !(batch.actualFinishedMT > 0)) {
+      addToast(YIELD_WAITS_FOR_RATE, 'error');
+      return;
+    }
     // The yield form captures KG (Phase 5c); the transform exposes the batch in
     // MT, so ×1000 to prefill the KG inputs. State keys keep their *MT names but
     // now hold KG values.
@@ -480,6 +489,12 @@ export default function MillingBatchDetail() {
         addToast('Please record the arrival analysis with the agreed price per kg before recording yield. This sets the raw material cost.', 'error');
         return;
       }
+    }
+    // A cost-blind user can't enter the price, and the server refuses yield
+    // without a raw cost (#427) — say so before they fill the form in.
+    if (!showCost && batch.awaitingArrivalRate && !(batch.actualFinishedMT > 0)) {
+      addToast(YIELD_WAITS_FOR_RATE, 'error');
+      return;
     }
 
     const finished = parseFloat(yieldForm.actualFinishedMT) || 0;
@@ -1608,6 +1623,15 @@ export default function MillingBatchDetail() {
                     <div>
                       <p className="text-sm font-semibold text-red-800">Vehicle Arrivals Required</p>
                       <p className="text-xs text-red-600 mt-0.5">Add vehicle/truck details in the Overview tab before recording yield.</p>
+                    </div>
+                  </div>
+                )}
+                {!showCost && batch.awaitingArrivalRate && (
+                  <div className="bg-amber-50 border border-amber-300 rounded-xl p-4 flex items-start gap-3">
+                    <AlertTriangle className="w-5 h-5 text-amber-500 mt-0.5 flex-shrink-0" />
+                    <div>
+                      <p className="text-sm font-semibold text-amber-800">Waiting for the arrival price</p>
+                      <p className="text-xs text-amber-600 mt-0.5">{YIELD_WAITS_FOR_RATE}</p>
                     </div>
                   </div>
                 )}

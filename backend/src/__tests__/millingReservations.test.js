@@ -33,6 +33,7 @@ function builder(conn, table) {
     forUpdate() { conn.locks.push(table); return qb; },
     select() { return qb; },
     join() { return qb; },
+    leftJoin() { return qb; },
     orderBy() { return qb; },
     insert(row) { op = 'insert'; payload = row; return qb; },
     onConflict() { return qb; },
@@ -107,7 +108,7 @@ jest.mock('../services/notificationService', () => ({}));
 jest.mock('../services/exportOrderEventBus', () => ({ publishExportOrderUpdate: jest.fn() }));
 jest.mock('../utils/costVisibility', () => {
   const actual = jest.requireActual('../utils/costVisibility');
-  return { ...actual, canSeeCost: jest.fn(async () => true) };
+  return { ...actual, canSeeCost: jest.fn(async () => true), redactForUser: jest.fn(async (req, data) => data) };
 });
 const costVisibility = require('../utils/costVisibility');
 
@@ -357,6 +358,34 @@ describe('direct create with a priced first truck', () => {
     expect(state.tables.milling_vehicle_arrivals[0].quality_json).toBeNull();
     expect(inv.receiveRice).toHaveBeenCalledWith(mockDb, expect.objectContaining({ weightKg: 30000, costPerKg: 0 }));
     costVisibility.canSeeCost.mockResolvedValue(true);
+  });
+});
+
+describe('getById tells the page whether yield waits for the raw cost', () => {
+  test('no raw_rice cost and no priced source lot → awaiting', async () => {
+    seed({
+      milling_batches: [{ id: 20, 'mb.id': 20, batch_no: 'M-020', status: 'Queued', is_service_milling: false }],
+      milling_costs: [{ id: 1, batch_id: 20, category: 'transport', amount: '5000' }],
+    });
+    const res = resMock();
+    await millingController.getById({ params: { id: '20' }, user: { id: 1 } }, res);
+    expect(res.body.data.yieldStatus).toEqual({ awaitingArrivalRate: true });
+  });
+
+  test('a raw_rice cost clears it', async () => {
+    seed({
+      milling_batches: [{ id: 21, 'mb.id': 21, batch_no: 'M-021', status: 'Queued', is_service_milling: false }],
+      milling_costs: [{ id: 1, batch_id: 21, category: 'raw_rice', amount: '4350000' }],
+    });
+    const res = resMock();
+    await millingController.getById({ params: { id: '21' }, user: { id: 1 } }, res);
+    expect(res.body.data.yieldStatus).toEqual({ awaitingArrivalRate: false });
+  });
+
+  test('the flag survives cost redaction', () => {
+    const { redactMoney } = jest.requireActual('../utils/costVisibility');
+    const out = redactMoney({ yieldStatus: { awaitingArrivalRate: true }, costs: [{ amount: 5 }] }, { cost: false, profit: false });
+    expect(out.yieldStatus.awaitingArrivalRate).toBe(true);
   });
 });
 
