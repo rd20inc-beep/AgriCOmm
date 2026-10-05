@@ -290,7 +290,7 @@ function PayDrawer({ target, bankAccounts = [], onClose, onPaid, addToast }) {
       outstanding={target.outstanding}
       accounts={bankAccounts}
       defaultMethod="cash"
-      defaultAmount={String(Math.round(parseFloat(target.outstanding) || 0))}
+      defaultAmount={String(Math.round(((parseFloat(target.outstanding) || 0) + Number.EPSILON) * 100) / 100)}
       extras={false}
       onSubmit={(_body, form) => printedBagsApi.pay(purchasePayPayload(form, { source: 'printed_bag', sourceId: target.id }))}
       onDone={(form) => {

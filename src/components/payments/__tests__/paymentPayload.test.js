@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 import {
   PAYMENT_METHODS, blankPaymentForm, netCash, validatePayment, paymentPayload, purchasePayPayload, money,
+  pickAccountForMethod,
 } from '../paymentPayload';
 
 /**
@@ -171,5 +172,25 @@ describe('payment methods', () => {
   it('formats money the way the rest of the app does', () => {
     expect(money(1234.5)).toBe('Rs 1,234.50');
     expect(money(1234.5, 'USD')).toBe('$1,234.50');
+  });
+});
+
+describe('pickAccountForMethod', () => {
+  const ACCTS = [
+    { id: 1, name: 'HBL', type: 'bank' },
+    { id: 2, name: 'Meezan', type: 'bank', isFavorite: true },
+    { id: 3, name: 'Mill Cash', type: 'cash' },
+  ];
+  it('drops a chosen account that does not suit the new method', () => {
+    expect(pickAccountForMethod({ accounts: ACCTS, method: 'cash', current: '1' })).toBe('');
+    expect(pickAccountForMethod({ accounts: ACCTS, method: 'bank_transfer', current: '1' })).toBe('1');
+  });
+  it('picks the only matching account', () => {
+    expect(pickAccountForMethod({ accounts: ACCTS, method: 'cash', current: '' })).toBe('3');
+  });
+  it('preselects the starred account, never one of the wrong kind', () => {
+    expect(pickAccountForMethod({ accounts: ACCTS, method: 'cheque', current: '' })).toBe('2');
+    expect(pickAccountForMethod({ accounts: [...ACCTS, { id: 4, name: 'Petty', type: 'cash' }], method: 'cash', current: '' })).toBe('');
+    expect(pickAccountForMethod({ accounts: [{ id: 5, type: 'cash', is_favorite: true }, ...ACCTS], method: 'online', current: '' })).toBe('2');
   });
 });

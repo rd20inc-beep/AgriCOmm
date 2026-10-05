@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Percent, Paperclip, FileText, X } from 'lucide-react';
 import api from '../../api/client';
 import { favStar } from '../../shared/utils/favorites';
-import { PAYMENT_METHODS, money, netCash } from './paymentPayload';
+import { PAYMENT_METHODS, money, netCash, pickAccountForMethod } from './paymentPayload';
 
 /**
  * The payment form body: amount, method, date, account, reference, and the
@@ -124,6 +124,27 @@ export default function PaymentFields({
   const accountOptions = filterAccountsByMethod
     ? accounts.filter((a) => (form.method === 'cash' ? a.type === 'cash' : a.type !== 'cash'))
     : accounts;
+
+  // Changing the method drops an account that no longer suits it — a bank
+  // account left selected after switching to Cash made the "cash" payment
+  // leave the bank.
+  const onMethod = (method) => {
+    set('method', method);
+    if (hideAccount || !form.bankAccountId) return;
+    const kept = pickAccountForMethod({ accounts, method, current: form.bankAccountId });
+    if (kept !== String(form.bankAccountId)) set('bankAccountId', kept);
+  };
+
+  // Nothing chosen: take the only account that suits the method, else the
+  // starred one. Never an account of the wrong kind, and never over a choice
+  // the user has made.
+  const accountKey = accounts.map((a) => `${a.id}:${a.type}:${a.isFavorite || a.is_favorite ? 1 : 0}`).join(',');
+  useEffect(() => {
+    if (hideAccount || form.bankAccountId) return;
+    const next = pickAccountForMethod({ accounts, method: form.method, current: '' });
+    if (next) set('bankAccountId', next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hideAccount, form.method, form.bankAccountId, accountKey]);
   return (
     <>
       <div>
@@ -134,7 +155,7 @@ export default function PaymentFields({
       <div className="grid grid-cols-2 gap-3">
         <div>
           <label className={lbl} htmlFor={`${idPrefix}-method`}>Method</label>
-          <select id={`${idPrefix}-method`} value={form.method} onChange={(e) => set('method', e.target.value)} className={inp}>
+          <select id={`${idPrefix}-method`} value={form.method} onChange={(e) => onMethod(e.target.value)} className={inp}>
             {PAYMENT_METHODS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
           </select>
         </div>

@@ -78,7 +78,10 @@ function usePayExpense() {
 
 // Remaining outstanding (PKR) for an expense — the payable's outstanding, else
 // the PKR amount. Drives the default payment amount (partial payments allowed).
-const remainingOf = (e) => Math.round(parseFloat(e?.outstanding_pkr ?? e?.amount_pkr ?? e?.amount) || 0);
+// Exact to the paisa: rounding to whole rupees made 'Full' pay Rs 300 on a Rs 300.50
+// bill (leaving 50 paisa outstanding forever) or Rs 301, which the server refuses.
+const round2 = (n) => Math.round(((parseFloat(n) || 0) + Number.EPSILON) * 100) / 100;
+const remainingOf = (e) => round2(e?.outstanding_pkr ?? e?.amount_pkr ?? e?.amount);
 const mkPayForm = (e) => ({
   amount: e ? String(remainingOf(e)) : '',
   bank_account_id: '', payment_method: 'bank_transfer', payment_reference: '',
@@ -555,7 +558,7 @@ export default function Expenses() {
         const pe = filtered.find((x) => String(x.id) === String(payId));
         const amt = pe ? (pe.currency === 'PKR' ? fmtPKR(pe.amount) : `${pe.currency} ${Number(pe.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`) : '';
         const remaining = pe ? remainingOf(pe) : 0;
-        const alreadyPaid = pe ? Math.round(parseFloat(pe.paid_pkr) || 0) : 0;
+        const alreadyPaid = pe ? round2(pe.paid_pkr) : 0;
         const payNum = parseFloat(payForm.amount) || 0;
         const overPay = payNum > remaining + 0.01;
         return (
@@ -586,7 +589,7 @@ export default function Expenses() {
                 <div className="flex gap-2 mt-2">
                   <button type="button" onClick={() => setPayForm(p => ({ ...p, amount: String(remaining) }))}
                     className="text-xs px-3 py-1 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">Full</button>
-                  <button type="button" onClick={() => setPayForm(p => ({ ...p, amount: String(Math.round(remaining / 2)) }))}
+                  <button type="button" onClick={() => setPayForm(p => ({ ...p, amount: String(round2(remaining / 2)) }))}
                     className="text-xs px-3 py-1 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">Half</button>
                   <button type="button" onClick={() => setPayForm(p => ({ ...p, amount: '' }))}
                     className="text-xs px-3 py-1 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">Custom</button>
