@@ -629,14 +629,30 @@ export function useFinanceOverview() {
   });
 }
 
-export function useReceivables(params = {}) {
+export function useReceivables(params = {}, { enabled = true } = {}) {
   return useQuery({
     queryKey: queryKeys.receivables.list(params),
     queryFn: async () => {
       const res = await financeApi.receivables({ limit: 200, ...params });
       return transformKeys(unwrap(res, 'receivables') || []);
     },
+    enabled,
     staleTime: 5 * 1000, // Finance data refreshes quickly
+    refetchOnMount: 'always',
+  });
+}
+
+// The mill's own receivables (entity 'mill'), read-only, for mill roles without
+// finance.view — Mill Finance ▸ Customers for the Mill Operator.
+export function useMillReceivables(params = {}, { enabled = true } = {}) {
+  return useQuery({
+    queryKey: [...queryKeys.receivables.all, 'mill', params],
+    queryFn: async () => {
+      const res = await millingApi.receivables({ limit: 200, ...params });
+      return transformKeys(unwrap(res, 'receivables') || []);
+    },
+    enabled,
+    staleTime: 5 * 1000,
     refetchOnMount: 'always',
   });
 }
@@ -722,13 +738,30 @@ export function usePurchasePaymentTrail(source, sourceId, enabled = true) {
   });
 }
 
-export function usePayables(params = {}) {
+export function usePayables(params = {}, { enabled = true } = {}) {
   return useQuery({
     queryKey: queryKeys.payables.list(params),
     queryFn: async () => {
       const res = await financeApi.payables({ limit: 200, ...params });
       return transformKeys(unwrap(res, 'payables') || []);
     },
+    enabled,
+    staleTime: 5 * 1000,
+    refetchOnMount: 'always',
+  });
+}
+
+// The mill's own payables (entity 'mill'), read-only, for mill roles without
+// finance.view — Mill Finance ▸ Suppliers for the Mill Operator. Keyed under
+// 'payables' so every payment / payable invalidation refreshes it too.
+export function useMillPayables(params = {}, { enabled = true } = {}) {
+  return useQuery({
+    queryKey: [...queryKeys.payables.all, 'mill', params],
+    queryFn: async () => {
+      const res = await millingApi.payables({ limit: 200, ...params });
+      return transformKeys(unwrap(res, 'payables') || []);
+    },
+    enabled,
     staleTime: 5 * 1000,
     refetchOnMount: 'always',
   });

@@ -16,7 +16,7 @@
  */
 const DUE_EXPR = 'COALESCE(ls.due_date, ls.sale_date)';
 
-function buildLocalReceivablesQuery(db, { status, customer_id, from_date, to_date, overdue } = {}) {
+function buildLocalReceivablesQuery(db, { status, customer_id, from_date, to_date, overdue, entity } = {}) {
   const groupKey = 'COALESCE(ls.sale_group_no, ls.sale_no)';
   const grouped = db('local_sales as ls')
     .leftJoin('customers as c', 'ls.customer_id', 'c.id')
@@ -47,7 +47,10 @@ function buildLocalReceivablesQuery(db, { status, customer_id, from_date, to_dat
       db.raw(`'local_sale'::text as kind`),
       db.raw(`MAX(COALESCE(c.name, ls.buyer_name, 'Walk-in')) as customer_name`),
       db.raw('MAX(ls.collection_location) as collection_location'),
+      // A sale group belongs to one side of the business; MAX just picks it.
+      db.raw('MAX(ls.entity) as entity'),
     );
+  if (entity) grouped.where('ls.entity', entity);
   if (customer_id) grouped.where('ls.customer_id', customer_id);
   if (from_date) grouped.where('ls.sale_date', '>=', from_date);
   if (to_date) grouped.where('ls.sale_date', '<=', to_date);
