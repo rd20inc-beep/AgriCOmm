@@ -3,7 +3,6 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { MessageCircle, X, Send, ArrowLeft, Megaphone, Search, Paperclip, FileText, Download, Phone, Video, PhoneOff, Mic, MicOff, VideoOff, Smile, Image as ImageIcon, Camera, CheckCircle2, ShieldCheck } from 'lucide-react';
 import { chatApi } from '../modules/chat/api';
-import { useOwnerAuth } from '../context/OwnerAuthContext';
 import { useCalling } from '../modules/chat/useCalling';
 import { useAcceptFundTransfer } from '../api/queries';
 import { isChatHidden, setChatHidden, getChatPos, setChatPos, clampToViewport, onChatPrefsChange } from './chatBubblePrefs';
@@ -47,7 +46,6 @@ export default function ChatWidget() {
   const qc = useQueryClient();
   const calling = useCalling(user);
   const acceptTransfer = useAcceptFundTransfer();
-  const { requestOwnerApproval } = useOwnerAuth();
   const [open, setOpen] = useState(false);
   // The bubble floats above everything, so it covers whatever is underneath.
   // It can be dragged out of the way or hidden entirely (restored from the user
@@ -126,9 +124,9 @@ export default function ChatWidget() {
   async function acceptApproval(item) {
     if (item.kind === 'fund_transfer') {
       try {
-        await requestOwnerApproval((ownerId) => acceptTransfer.mutateAsync({ id: item.transferId, ownerId }));
+        await acceptTransfer.mutateAsync(item.transferId);
         qc.invalidateQueries({ queryKey: ['chat-approvals'] });
-      } catch (e) { if (e?.message !== 'Owner authorization cancelled') window.alert(e?.response?.data?.message || e?.message || 'Could not accept.'); }
+      } catch (e) { window.alert(e?.response?.data?.message || e?.message || 'Could not accept.'); }
     } else if (item.link) { setOpen(false); navigate(item.link); }
   }
 
