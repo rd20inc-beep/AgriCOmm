@@ -12,6 +12,8 @@
  * that gets tested.
  */
 
+import { isFavorite } from '../../shared/utils/favorites';
+
 export const PAYMENT_METHODS = [
   { value: 'bank_transfer', label: 'Bank Transfer' },
   { value: 'cash', label: 'Cash' },
@@ -52,6 +54,30 @@ export function blankPaymentForm({ amount = '', method = 'bank_transfer', date }
 export function isPostDatedCheque(form, today = new Date().toISOString().slice(0, 10)) {
   const method = form.method ?? form.paymentMethod;
   return method === 'cheque' && !!form.dueDate && String(form.dueDate).slice(0, 10) > today;
+}
+
+/** The accounts a method draws on: cash from a cash account, anything else from a bank one. */
+export function accountsForMethod(accounts = [], method) {
+  return accounts.filter((a) => (method === 'cash' ? a.type === 'cash' : a.type !== 'cash'));
+}
+
+/**
+ * The account the picker should hold for this method, or '' for none.
+ *  - a chosen account that does not suit the method is dropped (switching from
+ *    Bank Transfer to Cash used to keep the bank selected, and the "cash"
+ *    payment left the bank);
+ *  - with nothing chosen, the only matching account is picked, else the
+ *    starred one — never an account of the wrong kind.
+ * `current` is the selected id ('' for none). Pure; PaymentFields applies it.
+ */
+export function pickAccountForMethod({ accounts = [], method, current = '' }) {
+  const matching = accountsForMethod(accounts, method);
+  if (current !== '' && current != null) {
+    return matching.some((a) => String(a.id) === String(current)) ? String(current) : '';
+  }
+  if (matching.length === 1) return String(matching[0].id);
+  const fav = matching.find(isFavorite);
+  return fav ? String(fav.id) : '';
 }
 
 /**
