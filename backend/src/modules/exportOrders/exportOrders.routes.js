@@ -139,7 +139,6 @@ router.post(
 router.post(
   '/:id/confirm-advance',
   authorizeAny(['export_orders', 'confirm_advance'], ['finance', 'confirm_payment']),
-  ownerApproval('export_advance'),
   validate(schemas.confirmAdvance),
   auditAction('confirm_advance', 'export_order', (req) => req.params.id),
   controller.confirmAdvance
@@ -147,7 +146,6 @@ router.post(
 router.post(
   '/:id/confirm-balance',
   authorizeAny(['export_orders', 'confirm_balance'], ['finance', 'confirm_payment']),
-  ownerApproval('export_balance'),
   validate(schemas.confirmBalance),
   auditAction('confirm_balance', 'export_order', (req) => req.params.id),
   controller.confirmBalance
@@ -183,6 +181,10 @@ router.post(
 
 // ── Export receipt: record (pending) → Finance confirms with FX (item 14) ──
 // Export/any records a PENDING receipt (no posting). Finance confirms → posts.
+// Finance's confirmation is the whole control: an advance or balance receipt
+// posts on it alone, with no Owner authorisation step (owner decision
+// 2026-10-06). Same for confirm-advance / confirm-balance above. The permission
+// check and the audit log stay.
 // (GET /pending-receipts is registered above, before /:id.)
 router.post(
   '/:id/record-receipt',
@@ -194,7 +196,6 @@ router.post(
 router.post(
   '/receipts/:paymentId/confirm',
   authorize('finance', 'confirm_payment'),
-  ownerApproval('export_advance'),
   validate(schemas.confirmExportReceipt),
   auditAction('confirm_export_receipt', 'payment', (req) => req.params.paymentId),
   controller.confirmExportReceipt

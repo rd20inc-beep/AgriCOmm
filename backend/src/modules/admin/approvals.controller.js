@@ -1,10 +1,10 @@
 /**
  * Master-data approval workflow.
  *
- * Quick-add: lets non-admin operators register a new supplier / product
- * on the fly from the Purchase Lot drawer. The record is created
- * immediately so the lot can save, but flagged 'pending' until an
- * admin reviews it.
+ * Quick-add: lets operators register a new supplier / product / customer
+ * on the fly from the Purchase Lot drawer. The record is created live
+ * ('approved') at once — see liveOnCreate. The review queue below still
+ * serves older pending rows and customer edits (submitCustomerEdit).
  *
  * Approve / reject: admins with `master_data.approve` (Super Admin and
  * Owner by default, see migration 127) act on pending submissions.
@@ -34,6 +34,24 @@ async function callerCanAutoApprove(req) {
   return !!has;
 }
 
+// Quick-adds go LIVE immediately (owner decision 2026-10-06: fewer approvals).
+// A new supplier / customer / product is 'approved' the moment it is created —
+// it no longer waits in Admin → Approvals. Who created it stays on the row
+// (submitted_by / submitted_at) and in the audit log (auditAction 'quick_add'
+// on the route). reviewed_by stays NULL: nobody reviewed it, and the record
+// says so rather than pretending the creator approved their own entry.
+// Rows already sitting 'pending' from before this change are left alone; an
+// Owner can still approve or reject them in the queue.
+function liveOnCreate(req, now) {
+  return {
+    approval_status: 'approved',
+    submitted_by: req.user?.id || null,
+    submitted_at: now,
+    reviewed_by: null,
+    reviewed_at: null,
+  };
+}
+
 const approvalsController = {
   // ─────────────── Quick-add: supplier ───────────────
   async quickAddSupplier(req, res) {
@@ -53,7 +71,6 @@ const approvalsController = {
           data: { supplier: existing, deduped: true },
         });
       }
-      const autoApprove = await callerCanAutoApprove(req);
       const now = db.fn.now();
       const payload = {
         name: String(name).trim(),
@@ -64,11 +81,7 @@ const approvalsController = {
         country: country || null,
         type: type || 'Rice Supplier',
         is_active: true,
-        approval_status: autoApprove ? 'approved' : 'pending',
-        submitted_by: req.user?.id || null,
-        submitted_at: now,
-        reviewed_by: autoApprove ? (req.user?.id || null) : null,
-        reviewed_at: autoApprove ? now : null,
+        ...liveOnCreate(req, now),
       };
       const [supplier] = await db.transaction(async (trx) => {
         // Stable privacy code (SUP-001…) shown on export orders instead of the name.
@@ -96,7 +109,6 @@ const approvalsController = {
       if (existing) {
         return res.status(200).json({ success: true, data: { customer: existing, deduped: true } });
       }
-      const autoApprove = await callerCanAutoApprove(req);
       const now = db.fn.now();
       const [customer] = await db('customers').insert({
         name: String(name).trim(),
@@ -110,11 +122,7 @@ const approvalsController = {
         payment_terms: 'Cash',
         currency: 'PKR',
         is_active: true,
-        approval_status: autoApprove ? 'approved' : 'pending',
-        submitted_by: req.user?.id || null,
-        submitted_at: now,
-        reviewed_by: autoApprove ? (req.user?.id || null) : null,
-        reviewed_at: autoApprove ? now : null,
+        ...liveOnCreate(req, now),
       }).returning('*');
       return res.status(201).json({ success: true, data: { customer } });
     } catch (err) {
@@ -179,7 +187,6 @@ const approvalsController = {
           data: { product: existing, deduped: true },
         });
       }
-      const autoApprove = await callerCanAutoApprove(req);
       const now = db.fn.now();
       const payload = {
         name: String(name).trim(),
@@ -189,11 +196,7 @@ const approvalsController = {
         description: description || null,
         is_byproduct: false,
         is_active: true,
-        approval_status: autoApprove ? 'approved' : 'pending',
-        submitted_by: req.user?.id || null,
-        submitted_at: now,
-        reviewed_by: autoApprove ? (req.user?.id || null) : null,
-        reviewed_at: autoApprove ? now : null,
+        ...liveOnCreate(req, now),
       };
       const [product] = await db('products').insert(payload).returning('*');
       return res.status(201).json({ success: true, data: { product } });

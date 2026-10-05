@@ -82,11 +82,11 @@ const documentService = {
     const version = existingCount + 1;
     const previousVersionId = null;
 
-    // Approval protects what is already in place. Filling an EMPTY slot changes
-    // nothing and nobody has to wait for it, so the first file of a type is live
-    // at once. Anything after that alters a document the business is already
-    // relying on, so it waits for an Owner / Super Admin.
-    const status = existingCount === 0 ? 'Approved' : 'Pending Review';
+    // Every upload is live at once (owner decision 2026-10-06: fewer
+    // approvals). The first file of a type used to be the only one that skipped
+    // the Owner; a 2nd or later file now does too. Nothing is lost — each file
+    // keeps its own row, uploader and version number.
+    const status = 'Approved';
 
     const docUid = await this.generateDocUid(conn);
 
@@ -106,9 +106,6 @@ const documentService = {
         version,
         is_latest: true,
         previous_version_id: previousVersionId,
-        // First file of its type goes live immediately; a later one waits for
-        // approval, with the approved copy staying current in the meantime, so
-        // an unapproved replacement can never be the one sent to a bank.
         status,
         uploaded_by: uploadedBy,
       })
@@ -250,10 +247,10 @@ const documentService = {
         version: existing.version + 1,
         is_latest: true,
         previous_version_id: documentId,
-        // Pending, not live: a change only takes effect once an Owner or Super
-        // Admin approves it. Whatever was approved before stays current in the
-        // meantime, so an unapproved file can never be the one sent to a bank.
-        status: 'Pending Review',
+        // Live at once, no Owner step (owner decision 2026-10-06). The previous
+        // version was marked Superseded above and stays in the history
+        // (previous_version_id chain, getVersionHistory), so nothing is lost.
+        status: 'Approved',
         uploaded_by: uploadedBy,
       })
       .returning('*');
@@ -266,7 +263,7 @@ const documentService = {
         doc_type: existing.doc_type,
       })
       .whereNot({ linked_id: 0 })
-      .update({ document_id: newDoc.id, updated_at: conn.fn.now() });
+      .update({ document_id: newDoc.id, is_fulfilled: true, updated_at: conn.fn.now() });
 
     return newDoc;
   },

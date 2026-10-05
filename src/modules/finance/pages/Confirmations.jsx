@@ -17,7 +17,6 @@ import {
   Landmark,
 } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
-import { useOwnerAuth } from '../../../context/OwnerAuthContext';
 import { useAuth } from '../../../context/AuthContext';
 import { useUpdateOrderStatus, useRecordExportReceipt, usePendingExportReceipts, useConfirmExportReceipt, useRejectExportReceipt, useReceivables } from '../../../api/queries';
 import Modal from '../../../components/Modal';
@@ -48,7 +47,6 @@ function daysSince(dateStr) {
 
 export default function FinanceConfirmations() {
   const { exportOrders, addToast, settings, bankAccountsList, customersList = [] } = useApp();
-  const { requestOwnerApproval } = useOwnerAuth();
   const { hasPermission } = useAuth();
   // Finance (payments-only) can't open export order pages — render order numbers
   // as plain text for them instead of an /export link that lands on Access Denied.
@@ -223,12 +221,11 @@ export default function FinanceConfirmations() {
     const fx = parseFloat(fxByPayment[p.id]) || parseFloat(p.fxRate) || 0;
     if (isForeign && fx <= 0) { addToast('Enter the FX rate the bank applied', 'error'); return; }
     try {
-      await requestOwnerApproval((ownerId) => confirmReceiptMut.mutateAsync({
-        paymentId: p.id, data: { fx_rate: isForeign ? fx : 1, authorized_by_owner_id: ownerId },
-      }));
+      // Finance's confirmation posts it; there is no Owner authorisation step.
+      await confirmReceiptMut.mutateAsync({ paymentId: p.id, data: { fx_rate: isForeign ? fx : 1 } });
       addToast(`${p.receiptType} receipt for ${p.orderNo} confirmed & posted`);
     } catch (err) {
-      if (err?.message !== 'Owner authorization cancelled') addToast(err?.data?.message || err?.message || 'Confirmation failed', 'error');
+      addToast(err?.data?.message || err?.message || 'Confirmation failed', 'error');
     }
   }
   async function rejectPending(p) {

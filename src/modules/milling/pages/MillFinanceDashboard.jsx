@@ -424,8 +424,9 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
   const acceptTransferMut = useAcceptFundTransfer();
   const { requestOwnerApproval } = useOwnerAuth();
   async function handleAcceptTransfer(t) {
-    try { await requestOwnerApproval((ownerId) => acceptTransferMut.mutateAsync({ id: t.id, ownerId })); }
-    catch (e) { if (e?.message !== 'Owner authorization cancelled') window.alert(e?.response?.data?.message || e?.message || 'Could not accept the transfer.'); }
+    // No Owner step: the receiving side's permission is the whole check.
+    try { await acceptTransferMut.mutateAsync(t.id); }
+    catch (e) { window.alert(e?.response?.data?.message || e?.message || 'Could not accept the transfer.'); }
   }
 
   // Salary-advance approval inbox (Batch 6 · item 8): request → Owner approves →
