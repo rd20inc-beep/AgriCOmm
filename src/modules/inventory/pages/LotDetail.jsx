@@ -69,7 +69,7 @@ export default function LotDetail() {
   const canReports = hasPermission('reports', 'view');
   const canExport = hasPermission('export_orders', 'view');
   // Purchase rate, landed cost, lot value, cost sheet and sale profit are
-  // hidden from roles without reports.view_cost (Mill Operator, QC Analyst).
+  // hidden from roles without reports.view_cost (QC Analyst / Inventory Officer / Documentation Officer).
   // The API nulls the same fields; this keeps empty "Rs 0.00" off the page.
   const showCost = useCanSeeCost();
   const tabs = TABS.filter((t) => showCost || !t.cost);

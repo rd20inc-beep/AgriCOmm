@@ -3,7 +3,8 @@
 // value, average cost & sale rate, revenue and realized + expected profit, plus
 // supplier and warehouse breakdowns. With no :id it shows a searchable picker.
 // Read-only; reuses /api/reporting/rice-type-ledger. Per-lot rows drill to Lot
-// 360. Finance-gated (Mill Operator excluded at the API).
+// 360. Money redacted at the API for roles without reports.view_cost /
+// view_profit (QC Analyst / Inventory Officer / Documentation Officer).
 import { useState, useMemo } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';

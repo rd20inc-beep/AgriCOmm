@@ -200,7 +200,7 @@ export default function LotInventory() {
   const { addToast, suppliersList, warehousesList, productsList } = useApp();
   const navigate = useNavigate();
   // Landed cost / value / "capital locked" are hidden from roles without
-  // reports.view_cost (Mill Operator, QC Analyst); the API nulls them too.
+  // reports.view_cost (QC Analyst / Inventory Officer / Documentation Officer); the API nulls them too.
   const showCost = useCanSeeCost();
   const [statusFilter, setStatusFilter] = useState('Available');
   const [typeFilter, setTypeFilter] = useState('All');

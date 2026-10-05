@@ -17,7 +17,7 @@ const { commitLotToBatch } = require('../milling/batchLifecycle');
 const whScope = require('../../utils/warehouseScope');
 const stockValuation = require('./stockValuation');
 // Purchase rates, landed cost and stock value are hidden from roles without
-// reports.view_cost (Mill Operator, QC Analyst) — same rule as the reports.
+// reports.view_cost (QC Analyst / Inventory Officer / Documentation Officer) — same rule as the reports.
 const { redactForUser, canSeeCost } = require('../../utils/costVisibility');
 const stockSql = require('./stockSql');
 const movementConstants = require('./inventory.constants');

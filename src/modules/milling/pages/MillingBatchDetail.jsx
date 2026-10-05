@@ -95,7 +95,7 @@ export default function MillingBatchDetail() {
   const canDeleteBatch = user?.role === 'Super Admin' || user?.role === 'Mill Manager';
   const canEditBatch = hasPermission('milling', 'edit');
   // Batch costs, purchase / sample / sale prices and the costing sheet are
-  // hidden from roles without reports.view_cost (Mill Operator, QC Analyst).
+  // hidden from roles without reports.view_cost (QC Analyst / Inventory Officer / Documentation Officer).
   // The API nulls the same fields; this keeps the page from showing "Rs 0".
   const showCost = useCanSeeCost();
   const visibleTabs = tabs.filter((t) => showCost || !t.cost);

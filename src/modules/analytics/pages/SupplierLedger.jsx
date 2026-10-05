@@ -3,7 +3,8 @@
 // stock value, revenue, realized & expected profit, the outstanding payable +
 // payments, and yield/quality performance. With no :id it shows a searchable
 // supplier picker. Read-only; reuses /api/reporting/supplier-ledger. Per-lot
-// rows drill through to Lot 360. Finance-gated (Mill Operator excluded at API).
+// rows drill through to Lot 360. Money redacted at the API for roles without
+// reports.view_cost / view_profit (QC Analyst / Inventory Officer / Documentation Officer).
 import { useState, useMemo } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';

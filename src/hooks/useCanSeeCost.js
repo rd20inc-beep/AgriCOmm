@@ -3,9 +3,10 @@ import { useAuth } from '../context/AuthContext';
 /**
  * Who may see what rice cost and what it is worth (owner decision 2026-10-05).
  *
- * Purchase rates, landed cost, stock value and profit are hidden from the Mill
- * Operator and the QC Analyst. Everyone holding reports.view_cost — or finance
- * access — keeps them. This is the SAME rule the backend enforces in
+ * Purchase rates, landed cost, stock value and profit are hidden from the QC
+ * Analyst, Inventory Officer and Documentation Officer. Everyone holding
+ * reports.view_cost — or finance access — keeps them, including the Mill
+ * Operator since mig 314 ("see everything regarding the mill"). This is the SAME rule the backend enforces in
  * backend/src/utils/costVisibility.js; the server nulls the figures anyway, the
  * UI just doesn't leave an empty column behind.
  */

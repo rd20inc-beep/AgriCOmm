@@ -5,13 +5,14 @@ const { nextDocNo } = require('../../utils/docNumber');
 const controller = require('../../controllers/millingController');
 const advancedController = require('../../controllers/millingAdvancedController');
 const authorize = require('../../middleware/rbac');
-const { authorizeRole, denyRoles } = require('../../middleware/rbac');
-// Mill Operator is a production-only role with no finance visibility. A couple of
-// milling endpoints expose cost/profit/cash, so they carry this guard (the same
-// one the reporting + ai modules use) even though the rest of milling is fine.
-const noFinanceForOperator = denyRoles('Mill Operator');
-// Mill expenses and the rice-purchase (rate) ledger are money: reports.view_cost
-// or finance.view, so the Mill Operator / QC Analyst never see them.
+const { authorizeRole } = require('../../middleware/rbac');
+// The mill's money — expenses, the rice-purchase (rate) ledger, the mill cash
+// account and batch profitability — needs reports.view_cost or finance.view.
+// The Mill Operator holds view_cost since mig 314 (owner decision 2026-10-05:
+// "see everything regarding the mill"); the QC Analyst / Inventory Officer /
+// Documentation Officer do not, so they never see it. Company-wide finance is
+// closed to the Mill Operator by role in the reporting + ai modules, not here:
+// nothing in this router is company-wide.
 const { requireCostVisibility } = require('../../utils/costVisibility');
 // Payroll routes are gated by the dedicated `payroll.*` permission module
 // (migration 203). Mill Operator holds no payroll permissions, so the old
@@ -294,8 +295,10 @@ router.put(
 // Source Lots (Batch-level)
 // =============================================================================
 
-router.get('/cash-flow', authorize('milling', 'view'), noFinanceForOperator, advancedController.cashFlow);
-router.get('/cost-trend', authorize('milling', 'view'), noFinanceForOperator, requireCostVisibility, controller.costTrend);
+// The MILL cash account only: payments on entity='mill' payables, receipts on
+// mill local sales, Head Office ⇄ Mill transfers and the mill cash float.
+router.get('/cash-flow', authorize('milling', 'view'), requireCostVisibility, advancedController.cashFlow);
+router.get('/cost-trend', authorize('milling', 'view'), requireCostVisibility, controller.costTrend);
 router.get('/batches/:id/source-lots', authorize('milling', 'view'), advancedController.listSourceLots);
 // No POST: source lots join a batch only at creation (commitLotToBatch). The old
 // add-source-lot route had no caller and linked a lot without reserving it.
@@ -417,7 +420,7 @@ router.get('/analytics/recovery-trends', authorize('milling', 'view'), advancedC
 router.get('/analytics/supplier-comparison', authorize('milling', 'view'), advancedController.analyticsSupplierComparison);
 router.get('/analytics/operator-productivity', authorize('milling', 'view'), advancedController.analyticsOperatorProductivity);
 router.get('/analytics/moisture-analysis', authorize('milling', 'view'), advancedController.analyticsMoistureAnalysis);
-router.get('/analytics/batch-profitability/:id', authorize('milling', 'view'), noFinanceForOperator, advancedController.analyticsBatchProfitability);
+router.get('/analytics/batch-profitability/:id', authorize('milling', 'view'), requireCostVisibility, advancedController.analyticsBatchProfitability);
 
 // =============================================================================
 // Product Pricing — confirm byproduct prices per batch

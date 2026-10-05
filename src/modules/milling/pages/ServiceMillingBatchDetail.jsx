@@ -63,7 +63,7 @@ export default function ServiceMillingBatchDetail() {
   const canEditVehicles = ['Owner', 'Super Admin', 'Mill Manager'].includes(user?.role);
   const [confirm, confirmDialog] = useConfirm();
   // Service billing rates and amounts are revenue — hidden, like cost, from
-  // roles without reports.view_cost (Mill Operator, QC Analyst).
+  // roles without reports.view_cost (QC Analyst / Inventory Officer / Documentation Officer).
   const showCost = useCanSeeCost();
 
   const { data: batch, isLoading: batchLoading } = useMillingBatch(id);

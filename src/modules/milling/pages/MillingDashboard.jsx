@@ -60,7 +60,7 @@ export default function MillingDashboard() {
   const { hasPermission } = useAuth();
   const canSellLocally = hasPermission('inventory', 'view');
   // Mill P&L, expenses, cost trend and sales value are money — hidden from the
-  // Mill Operator / QC Analyst (no reports.view_cost). Production stays.
+  // QC Analyst / Inventory Officer / Documentation Officer (no reports.view_cost). Production stays.
   const showMoney = canSeeCost(hasPermission);
   const { data: directInv = [] } = useInventory({});
   const inventory = Array.isArray(directInv) ? directInv : [];

@@ -1,6 +1,7 @@
 import { useMemo, useState, useEffect, useRef, Fragment } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../../context/AuthContext';
+import useCanSeeCost, { useCanSeeProfit } from '../../../hooks/useCanSeeCost';
 import { useApp } from '../../../context/AppContext';
 import {
   BarChart3, TrendingUp, Users, Globe, Package, Award, Coins, Printer, RefreshCw,
@@ -603,18 +604,33 @@ export default function Reports() {
   // A Mill role's reports must stay mill-only — no export-order profitability,
   // customers, countries or export A/R / booked profit.
   const millScoped = user?.role === 'Mill Manager';
-  // Mill Operator = production-only, finance-free. Sees only production,
-  // quality and (quantity-only) inventory — never money, margin, sales,
-  // receivables, payables, cashflow or net profit.
+  // Mill Operator — owner decision 2026-10-05: "see everything regarding the
+  // mill". The mill's money follows the cost / profit permissions (granted to
+  // the operator by mig 314): lot + local-sale trackers and stock value need
+  // reports.view_cost, batch / sale margin needs reports.view_profit. Company
+  // finance stays closed BY ROLE, mirroring the API's denyRoles('Mill Operator'):
+  // the Money In/Out + Purchases feeds (finance.view), cash forecast, export
+  // orders / customers / countries, the KPI benchmarks, the headline A/R +
+  // booked-profit strip, the invoice ledger and the AI / scheduled-email tools.
   const operatorScoped = user?.role === 'Mill Operator';
+  const canCost = useCanSeeCost();
+  const canProfit = useCanSeeProfit();
+  // The operator's view is the mill's, so its feeds are scoped to entity=mill.
+  const millEntity = millScoped || operatorScoped;
+  const operatorTabs = [
+    ...(canCost ? ['sales', 'lots'] : []),
+    ...(canProfit ? ['margin'] : []),
+    'production', 'inventory', 'quality',
+  ];
   const visibleTabs = operatorScoped
-    ? TABS.filter(t => ['production', 'quality', 'inventory'].includes(t.key))
+    ? TABS.filter(t => operatorTabs.includes(t.key))
     : millScoped
       ? TABS.filter(t => ['moneyIn', 'moneyOut', 'sales', 'purchases', 'lots', 'margin', 'production', 'inventory', 'kpis', 'quality'].includes(t.key))
       : TABS;
 
   // Party statements live under /milling for the Mill role, /finance otherwise.
-  const statementHref = (type, id) => id
+  // The Mill Operator reaches neither (finance), so its rows link to nothing.
+  const statementHref = (type, id) => id && !operatorScoped
     ? `${millScoped ? '/milling' : '/finance'}/statements?type=${type}&id=${id}`
     : null;
 
@@ -641,8 +657,8 @@ export default function Reports() {
   const setExactMode = (on) => { const p = new URLSearchParams(searchParams); if (on) p.set('exact', '1'); else p.delete('exact'); setSearchParams(p); };
   setExactNumbers(exactMode); // applied synchronously before formatters run in JSX below
   const params = useMemo(
-    () => ({ ...rangeToParams(range), ...(millScoped ? { entity: 'mill' } : {}) }),
-    [range, millScoped],
+    () => ({ ...rangeToParams(range), ...(millEntity ? { entity: 'mill' } : {}) }),
+    [range, millEntity],
   );
 
   // Saved views — persist the current tab + date range as a named report and
@@ -655,25 +671,26 @@ export default function Reports() {
   const [toolsOpen, setToolsOpen] = useState(false);
   // Ledger reports live behind one "Ledgers" dropdown so the hero band stays tidy.
   const ledgerLinks = [
-    { to: '/reports/invoices',                 icon: Receipt, label: 'Invoice Ledger' },
+    // Company finance — closed to the Mill Operator at the API.
+    { to: '/reports/invoices',                 icon: Receipt, label: 'Invoice Ledger', companyFinance: true },
     { to: '/reports/supplier-ledger',          icon: Users,   label: 'Supplier Ledger' },
     { to: '/reports/rice-type-ledger',         icon: Package, label: 'Rice Type Ledger' },
     { to: '/reports/warehouse-ledger',         icon: Layers,  label: 'Warehouse Ledger' },
     { to: '/reports/processing-loss-ledger',   icon: Scale,   label: 'Processing Loss' },
     { to: '/reports/finished-goods-ledger',    icon: Factory, label: 'Finished Goods' },
     { to: '/reports/inventory-movement-ledger',icon: Truck,   label: 'Stock Movements' },
-    { to: '/reports/service-milling-stock',    icon: Boxes,   label: 'Service Milling Stock', always: true },
-    { to: '/reports/service-milling-ageing',   icon: Clock,   label: 'Service Stock Ageing', always: true },
-    { to: '/reports/service-milling-pending-dispatch', icon: Truck, label: 'Pending Client Dispatch', always: true },
-    { to: '/reports/service-milling-reconciliation',   icon: Scale, label: 'Service Stock Reconciliation', always: true },
-    { to: '/reports/lots',                     icon: FileText,label: 'Lot Reports', always: true },
-  ].filter(l => l.always || !operatorScoped);
+    { to: '/reports/service-milling-stock',    icon: Boxes,   label: 'Service Milling Stock' },
+    { to: '/reports/service-milling-ageing',   icon: Clock,   label: 'Service Stock Ageing' },
+    { to: '/reports/service-milling-pending-dispatch', icon: Truck, label: 'Pending Client Dispatch' },
+    { to: '/reports/service-milling-reconciliation',   icon: Scale, label: 'Service Stock Reconciliation' },
+    { to: '/reports/lots',                     icon: FileText,label: 'Lot Reports' },
+  ].filter(l => !(operatorScoped && l.companyFinance));
   const tabKeys = TABS.map(t => t.key);
   const saveCurrentView = async () => {
     const name = window.prompt('Name this view (tab + date range):', `${(TABS.find(t => t.key === tab) || {}).label || tab} — ${(RANGES.find(r => r.value === range) || {}).label || 'All Time'}`);
     if (!name) return;
     try {
-      await saveMut.mutateAsync({ name, reportType: tab, entity: millScoped ? 'mill' : 'all', filters: { range }, isShared: false });
+      await saveMut.mutateAsync({ name, reportType: tab, entity: millEntity ? 'mill' : 'all', filters: { range }, isShared: false });
     } catch { /* surfaced by the mutation */ }
   };
   const loadView = (r) => {
@@ -712,7 +729,7 @@ export default function Reports() {
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <GlobalSearchBox entity={millScoped ? 'mill' : ''} />
+            <GlobalSearchBox entity={millEntity ? 'mill' : ''} />
             <div className="bg-white/15 backdrop-blur-sm rounded-lg flex items-center gap-1.5 px-2 py-1.5">
               <Calendar size={13} className="opacity-80" />
               <select value={range} onChange={e => setRange(e.target.value)}
@@ -821,7 +838,7 @@ export default function Reports() {
       </div>
 
       {/* ─── Money KPI strip (the headline numbers across the whole system).
-          Hidden entirely for the production-only Mill Operator. */}
+          Company-wide money — hidden entirely for the Mill Operator. */}
       {!operatorScoped && (
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
         <KpiTile icon={ArrowDownLeft} tone="emerald" label="Total Money In"  primary={fmtPKR(totalIn)}  secondary={`${receiptsData?.count ?? 0} receipts`} />
@@ -837,10 +854,10 @@ export default function Reports() {
       </div>
       )}
 
-      {/* Production-only banner for the Mill Operator role. */}
+      {/* Scope banner for the Mill Operator role. */}
       {operatorScoped && (
         <div className="rounded-xl border border-blue-200 bg-blue-50/60 px-4 py-3 text-sm text-blue-800 flex items-center gap-2">
-          <Factory size={16} /> Production view — batches, yield, quality and stock quantities. Financial figures are not shown for this role.
+          <Factory size={16} /> Mill view — lots, sales, margins, production, quality and stock for the mill. Company finance (cash, receivables, payables, P&amp;L, payroll, export) is not shown for this role.
         </div>
       )}
 
@@ -909,7 +926,7 @@ export default function Reports() {
           {tab === 'orders'    && <OrdersTab params={params} />}
           {tab === 'customers' && <CustomersTab params={params} />}
           {tab === 'countries' && <CountriesTab params={params} />}
-          {tab === 'inventory' && <InventoryTab millScoped={millScoped} hideValue={operatorScoped} />}
+          {tab === 'inventory' && <InventoryTab millScoped={millEntity} hideValue={!canCost} />}
           {tab === 'quality'   && <QualityTab params={params} />}
         </div>
       </div>
@@ -2529,8 +2546,8 @@ function InventoryTab({ millScoped, hideValue }) {
       <StockBreakdown title="By Warehouse" subtitle="Where the stock is held" query={byWarehouse} groupHead="Warehouse" hideValue={hideValue} />
 
       {/* Valuation (by type & warehouse) + turnover — surfaced from the
-          stock-valuation / stock-turnover endpoints. Valuation hidden for
-          the quantity-only Mill Operator view. */}
+          stock-valuation / stock-turnover endpoints. Valuation hidden from
+          cost-blind roles (no reports.view_cost). */}
       {!hideValue && Array.isArray(valuation.byType) && valuation.byType.length > 0 && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div className="space-y-2">

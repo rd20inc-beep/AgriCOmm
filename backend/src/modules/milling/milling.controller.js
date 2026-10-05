@@ -8,8 +8,8 @@ const notificationService = require('../../services/notificationService');
 const { publishExportOrderUpdate } = require('../../services/exportOrderEventBus');
 const { nextDocNo } = require('../../utils/docNumber');
 // Batch costs, purchase/sale prices, quality-sample prices and service billing
-// rates are hidden from roles without reports.view_cost (Mill Operator, QC
-// Analyst) — same rule as the lot and report endpoints.
+// rates are hidden from roles without reports.view_cost (QC Analyst / Inventory
+// Officer / Documentation Officer) — same rule as the lot and report endpoints.
 const { redactForUser, canSeeCost } = require('../../utils/costVisibility');
 // Packing-cost subtotals carry no "cost" in their names.
 const BATCH_EXTRA_COST_KEYS = ['bagsTotal', 'mastersTotal', 'polytheneTotal'];
@@ -1001,7 +1001,7 @@ const millingController = {
         const existing = await trx('milling_quality_samples')
           .where({ batch_id: id, analysis_type })
           .first();
-        // A cost-blind editor (Mill Operator / QC Analyst) never sees the
+        // A cost-blind editor (e.g. the QC Analyst) never sees the
         // recorded price, so a re-save without one must not wipe it.
         if (existing && price_per_kg == null && price_per_mt == null && !(await canSeeCost(req))) {
           delete fields.price_per_kg;
