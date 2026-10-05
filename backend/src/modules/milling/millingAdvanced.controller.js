@@ -1,5 +1,6 @@
 const db = require('../../config/database');
 const millingService = require('../../services/millingService');
+const { redactForUser } = require('../../utils/costVisibility');
 
 const millingAdvancedController = {
   // =========================================================================
@@ -410,7 +411,8 @@ const millingAdvancedController = {
   async listSourceLots(req, res) {
     try {
       const { id } = req.params;
-      const data = await millingService.getSourceLots(id);
+      // Source-lot unit cost / cost total are hidden without reports.view_cost.
+      const data = await redactForUser(req, await millingService.getSourceLots(id));
       return res.json({ success: true, data });
     } catch (err) {
       console.error('listSourceLots error:', err);

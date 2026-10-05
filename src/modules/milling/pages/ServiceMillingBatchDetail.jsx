@@ -21,6 +21,7 @@ import ServiceDispatchTab from '../components/ServiceDispatchTab';
 import ServiceBillingTab from '../components/ServiceBillingTab';
 import { qualityParams, aggregateVehicleQuality } from '../qualityParams';
 import useConfirm from '../../../hooks/useConfirm';
+import useCanSeeCost from '../../../hooks/useCanSeeCost';
 
 const num = (v) => parseFloat(v) || 0;
 const kg = (v) => `${Math.round(num(v)).toLocaleString()} kg`;
@@ -40,7 +41,7 @@ const TABS = [
   { key: 'quality', label: 'Quality', icon: FlaskConical },
   { key: 'yield', label: 'Yield', icon: Boxes },
   { key: 'dispatch', label: 'Dispatch', icon: Send },
-  { key: 'billing', label: 'Billing', icon: Wallet },
+  { key: 'billing', label: 'Billing', icon: Wallet, cost: true },
 ];
 
 const emptyVehicleForm = () => ({
@@ -61,6 +62,9 @@ export default function ServiceMillingBatchDetail() {
   // manager/owner correction — mill operators see trucks read-only.
   const canEditVehicles = ['Owner', 'Super Admin', 'Mill Manager'].includes(user?.role);
   const [confirm, confirmDialog] = useConfirm();
+  // Service billing rates and amounts are revenue — hidden, like cost, from
+  // roles without reports.view_cost (Mill Operator, QC Analyst).
+  const showCost = useCanSeeCost();
 
   const { data: batch, isLoading: batchLoading } = useMillingBatch(id);
   const { data: blend } = useBatchSourceLots(batch?.dbId || batch?.id);
@@ -474,7 +478,7 @@ export default function ServiceMillingBatchDetail() {
       {/* Tabs */}
       <div className="border-b border-gray-200">
         <div className="flex gap-1 overflow-x-auto">
-          {TABS.map((t) => {
+          {TABS.filter((t) => showCost || !t.cost).map((t) => {
             const Icon = t.icon;
             return (
               <button key={t.key} onClick={() => setActiveTab(t.key)}
@@ -590,7 +594,7 @@ export default function ServiceMillingBatchDetail() {
       )}
 
       {/* ---- Billing ---- */}
-      {activeTab === 'billing' && (
+      {activeTab === 'billing' && showCost && (
         <ServiceBillingTab routeId={id} batchDbId={batchId} onChanged={invalidateBatch} />
       )}
 

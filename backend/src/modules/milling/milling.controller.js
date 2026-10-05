@@ -7,6 +7,12 @@ const workflowService = require('../../services/exportOrderWorkflowService');
 const notificationService = require('../../services/notificationService');
 const { publishExportOrderUpdate } = require('../../services/exportOrderEventBus');
 const { nextDocNo } = require('../../utils/docNumber');
+// Batch costs, purchase/sale prices, quality-sample prices and service billing
+// rates are hidden from roles without reports.view_cost (Mill Operator, QC
+// Analyst) — same rule as the lot and report endpoints.
+const { redactForUser, canSeeCost } = require('../../utils/costVisibility');
+// Packing-cost subtotals carry no "cost" in their names.
+const BATCH_EXTRA_COST_KEYS = ['bagsTotal', 'mastersTotal', 'polytheneTotal'];
 const {
   yieldMode, batchHasOutputLots, checkTransition, releaseBatchSources, TRANSITIONS,
 } = require('./batchLifecycle');
@@ -185,7 +191,7 @@ const millingController = {
       return res.json({
         success: true,
         data: {
-          batches: batchesEnriched,
+          batches: await redactForUser(req, batchesEnriched),
           pagination: {
             page: parseInt(page),
             limit: parseInt(limit),
@@ -306,7 +312,10 @@ const millingController = {
           billing_status: billing,
         };
       });
-      return res.json({ success: true, data });
+      // Billing amounts are revenue — hidden with the rates.
+      return res.json({ success: true, data: await redactForUser(req, data, {
+        extraCostKeys: ['service_milling_amount', 'service_rental_amount', 'service_labour_amount', 'service_total_amount', 'total_amount'],
+      }) });
     } catch (err) {
       console.error('Service milling list error:', err);
       return res.status(500).json({ success: false, message: 'Internal server error.' });
@@ -385,7 +394,7 @@ const millingController = {
 
       return res.json({
         success: true,
-        data: {
+        data: await redactForUser(req, {
           batch,
           quality: {
             sample: sampleAnalysis,
@@ -394,7 +403,7 @@ const millingController = {
           costs,
           vehicles,
           packingBreakdown,
-        },
+        }, { extraCostKeys: BATCH_EXTRA_COST_KEYS }),
       });
     } catch (err) {
       console.error('Milling batch getById error:', err);
@@ -951,6 +960,12 @@ const millingController = {
         const existing = await trx('milling_quality_samples')
           .where({ batch_id: id, analysis_type })
           .first();
+        // A cost-blind editor (Mill Operator / QC Analyst) never sees the
+        // recorded price, so a re-save without one must not wipe it.
+        if (existing && price_per_kg == null && price_per_mt == null && !(await canSeeCost(req))) {
+          delete fields.price_per_kg;
+          delete fields.price_per_mt;
+        }
         let sample;
         if (existing) {
           [sample] = await trx('milling_quality_samples')
@@ -2023,7 +2038,17 @@ const millingController = {
         const totalBags = parsedTotalBags
           || (newWeight && parsedBagSize && parsedBagSize > 0 ? Math.ceil(newWeight / parsedBagSize) : null);
 
-        const cleanQuality = quality !== undefined ? sanitizeVehicleQuality(quality) : existing.quality_json;
+        let cleanQuality = quality !== undefined ? sanitizeVehicleQuality(quality) : existing.quality_json;
+        // The truck's agreed price is hidden from a cost-blind editor; keep the
+        // stored one when their edit carries none.
+        const oldQ = existing.quality_json && typeof existing.quality_json === 'object' ? existing.quality_json : null;
+        if (quality !== undefined && oldQ && (oldQ.price_per_kg != null || oldQ.price_per_mt != null)
+          && !(cleanQuality && (cleanQuality.price_per_kg != null || cleanQuality.price_per_mt != null))
+          && !(await canSeeCost(req))) {
+          cleanQuality = { ...(cleanQuality || {}),
+            ...(oldQ.price_per_kg != null ? { price_per_kg: oldQ.price_per_kg } : {}),
+            ...(oldQ.price_per_mt != null ? { price_per_mt: oldQ.price_per_mt } : {}) };
+        }
 
         await trx('milling_vehicle_arrivals').where({ id: vehicleId }).update({
           vehicle_no: vehicle_no !== undefined ? (vehicle_no || null) : existing.vehicle_no,

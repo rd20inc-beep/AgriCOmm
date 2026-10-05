@@ -33,8 +33,8 @@ const COST_KEYS = new Set([
   'price_per_mt', 'price_per_kg', 'valuation', 'grand_total_value',
 ].map(norm));
 
-// Booleans / labels that merely mention cost — not money.
-const COST_NOT_MONEY = new Set(['costincomplete', 'costcurrency', 'bagcostincluded'].map(norm));
+// Booleans / labels that merely mention cost or price — not money.
+const COST_NOT_MONEY = new Set(['costincomplete', 'costcurrency', 'bagcostincluded', 'pricesconfirmed'].map(norm));
 
 const PROFIT_KEYS = new Set([
   'realizedProfit', 'realizedProfitPct', 'expectedProfitRemaining', 'revenue',
@@ -46,7 +46,11 @@ const PROFIT_KEYS = new Set([
 function isCostKey(k) {
   const n = norm(k);
   if (COST_NOT_MONEY.has(n)) return false;
-  return COST_KEYS.has(n) || n.includes('cost');
+  // Anything named cost / price / fee, and any rate per unit (rate_per_kg,
+  // service_milling_rate_per_kg, ratePerKatta) — purchase and sale prices and
+  // service billing rates are all money a cost-blind role must not see.
+  return COST_KEYS.has(n) || n.includes('cost') || n.includes('price')
+    || n.includes('rateper') || n.startsWith('ratein') || /fee(per|$)/.test(n);
 }
 
 function isProfitKey(k) {

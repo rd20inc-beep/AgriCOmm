@@ -1,12 +1,15 @@
 import { useState, useEffect } from 'react';
 import { Package, AlertTriangle, Check, Loader2 } from 'lucide-react';
 import { useConsumptionHistory, useSuggestConsumption, useConfirmConsumption } from '../api/queries';
+import useCanSeeCost from '../../../hooks/useCanSeeCost';
 
 function formatPKR(v) {
   return 'Rs ' + (Number(v) || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 export default function ConsumptionPanel({ batchId, batchStatus, addToast }) {
+  // Material cost is hidden from roles without reports.view_cost.
+  const showCost = useCanSeeCost();
   const { data: historyData, isLoading: histLoading } = useConsumptionHistory(batchId);
   const suggestMut = useSuggestConsumption();
   const confirmMut = useConfirmConsumption();
@@ -77,7 +80,7 @@ export default function ConsumptionPanel({ batchId, batchStatus, addToast }) {
       <div>
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">Consumption History</h3>
-          {history.total_consumption_cost > 0 && (
+          {showCost && history.total_consumption_cost > 0 && (
             <span className="text-sm font-bold text-gray-900">{formatPKR(history.total_consumption_cost)} total</span>
           )}
         </div>
@@ -93,8 +96,8 @@ export default function ConsumptionPanel({ batchId, batchStatus, addToast }) {
                   <th className="text-left py-1.5 px-2 font-semibold text-gray-600">Item</th>
                   <th className="text-left py-1.5 px-2 font-semibold text-gray-600">Category</th>
                   <th className="text-right py-1.5 px-2 font-semibold text-gray-600">Qty</th>
-                  <th className="text-right py-1.5 px-2 font-semibold text-gray-600">Cost/unit</th>
-                  <th className="text-right py-1.5 px-2 font-semibold text-gray-600">Total</th>
+                  {showCost && <th className="text-right py-1.5 px-2 font-semibold text-gray-600">Cost/unit</th>}
+                  {showCost && <th className="text-right py-1.5 px-2 font-semibold text-gray-600">Total</th>}
                   <th className="text-right py-1.5 px-2 font-semibold text-gray-600">By</th>
                 </tr>
               </thead>
@@ -107,8 +110,8 @@ export default function ConsumptionPanel({ batchId, batchStatus, addToast }) {
                     </td>
                     <td data-label="Category" className="mob-hide py-1.5 px-2 capitalize text-gray-500">{l.category}</td>
                     <td data-label="Qty" className="py-1.5 px-2 text-right">{Number(l.quantity_used)} {l.unit}</td>
-                    <td data-label="Cost/unit" className="mob-hide py-1.5 px-2 text-right">{formatPKR(l.cost_per_unit)}</td>
-                    <td data-label="Total" className="py-1.5 px-2 text-right font-medium">{formatPKR(l.total_cost)}</td>
+                    {showCost && <td data-label="Cost/unit" className="mob-hide py-1.5 px-2 text-right">{formatPKR(l.cost_per_unit)}</td>}
+                    {showCost && <td data-label="Total" className="py-1.5 px-2 text-right font-medium">{formatPKR(l.total_cost)}</td>}
                     <td data-label="By" className="mob-hide py-1.5 px-2 text-right text-gray-500">{l.used_by_name || '—'}</td>
                   </tr>
                 ))}
@@ -178,10 +181,12 @@ export default function ConsumptionPanel({ batchId, batchStatus, addToast }) {
                   </p>
                 </div>
                 <div className="col-span-3 text-right">
+                  {showCost && <>
                   <p className="text-sm font-medium text-gray-900">
                     {formatPKR(Number(line.quantity) * Number(line.cost_per_unit))}
                   </p>
                   <p className="text-[10px] text-gray-400">@ {formatPKR(line.cost_per_unit)}/{line.unit}</p>
+                  </>}
                 </div>
               </div>
             ))}
@@ -189,7 +194,7 @@ export default function ConsumptionPanel({ batchId, batchStatus, addToast }) {
 
           <div className="flex items-center justify-between pt-3 border-t border-gray-200">
             <p className="text-sm font-bold text-gray-900">
-              Total: {formatPKR(totalEstimated)}
+              {showCost ? `Total: ${formatPKR(totalEstimated)}` : ''}
             </p>
             <div className="flex gap-2">
               <button onClick={() => { setShowForm(false); setSuggestions(null); }}
