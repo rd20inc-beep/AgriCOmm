@@ -393,6 +393,24 @@ const millingController = {
       const sampleAnalysis = qualitySamples.filter((q) => q.analysis_type === 'sample');
       const arrivalAnalysis = qualitySamples.filter((q) => q.analysis_type === 'arrival');
 
+      // Will recordYield refuse for lack of a raw-material cost (#427)? Mirrors
+      // its guard: a raw_rice cost row, or source lots that carry a cost (they
+      // are turned into the raw_rice cost at yield). A plain yes/no — no money —
+      // so a cost-blind user can be told yield is waiting for the price. The
+      // key avoids cost/price words so redaction keeps it.
+      let awaitingArrivalRate = false;
+      if (!batch.is_service_milling) {
+        const rawRice = costs.filter((c) => c.category === 'raw_rice').reduce((s, c) => s + pf(c.amount), 0);
+        if (rawRice <= 0.01) {
+          const pricedSource = await db('batch_source_lots as bsl')
+            .join('inventory_lots as il', 'bsl.lot_id', 'il.id')
+            .where('bsl.batch_id', batchId)
+            .where((q) => q.where('il.landed_cost_per_kg', '>', 0).orWhere('il.rate_per_kg', '>', 0))
+            .first('bsl.id');
+          awaitingArrivalRate = !pricedSource;
+        }
+      }
+
       return res.json({
         success: true,
         data: await redactForUser(req, {
@@ -404,6 +422,7 @@ const millingController = {
           costs,
           vehicles,
           packingBreakdown,
+          yieldStatus: { awaitingArrivalRate },
         }, { extraCostKeys: BATCH_EXTRA_COST_KEYS }),
       });
     } catch (err) {
@@ -1339,13 +1358,7 @@ const millingController = {
           // yield — otherwise the finished/by-product lots inherit Rs 0 cost and any
           // later sale books 100% "profit". The cost comes from the source lot's
           // purchase price, so this means: price the raw lot before milling it.
-          // A cost-blind operator (Mill Operator / QC Analyst) can't see or set
-          // the price, so they are not blocked: the outputs start at Rs 0 and are
-          // re-costed when someone with cost access sets the price (the arrival
-          // analysis price cascades into yielded outputs), and a Rs 0 lot can't
-          // be sold meanwhile (a sale requires a cost).
-          if (finished + broken + bran + husk + sortex + powder + sweeping + choba > 0 && rawCostTotal <= 0.01
-            && await canSeeCost(req)) {
+          if (finished + broken + bran + husk + sortex + powder + sweeping + choba > 0 && rawCostTotal <= 0.01) {
             const e = new Error('This batch has no recorded raw-material cost. Set the source lot\'s purchase price before recording yield — otherwise the finished rice would be costed at Rs 0.');
             e.status = 400; throw e;
           }
