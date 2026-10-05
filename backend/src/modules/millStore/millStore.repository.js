@@ -11,6 +11,58 @@ function adjustedBalance(onHand, delta) {
   return Math.max(0, next);
 }
 
+// ─── Item-level stock ───
+// ONE definition of an item's on-hand: the SUM of every mill_stock row it has
+// (all warehouses plus the unassigned bucket), LEFT JOINed so an item with no
+// stock row reads as 0 instead of vanishing. Used by alerts, the dashboard
+// summary, the forecast and the katta summary so they always agree.
+const ITEM_ON_HAND = 'COALESCE(ms.on_hand, 0)';
+
+function itemOnHandSubquery() {
+  return db('mill_stock')
+    .select('item_id')
+    .sum({ on_hand: 'quantity_available' })
+    .groupBy('item_id')
+    .as('ms');
+}
+
+function withItemOnHand(q, itemAlias = 'mi') {
+  return q.leftJoin(itemOnHandSubquery(), 'ms.item_id', `${itemAlias}.id`);
+}
+
+// Low = on hand at or below the reorder level. An item that has never had a
+// stock row only counts when it has a reorder level set — otherwise every
+// unused catalogue item (level 0, stock 0) would be "low".
+const LOW_STOCK_SQL = `${ITEM_ON_HAND} <= mi.reorder_level AND (mi.reorder_level > 0 OR ms.item_id IS NOT NULL)`;
+
+function lowStockItemsQuery() {
+  return withItemOnHand(db('mill_items as mi'))
+    .where('mi.is_active', true)
+    .whereRaw(LOW_STOCK_SQL);
+}
+
+/** Same rule in JS (for callers holding rows already). */
+function isLowStock({ on_hand, reorder_level, has_stock_row }) {
+  const onHand = Number(on_hand) || 0;
+  const level = Number(reorder_level) || 0;
+  return onHand <= level && (level > 0 || !!has_stock_row);
+}
+
+// Consumption that drives the burn rate: the mill using an item up. Excludes
+// local sales (and their reversals) of empty katta, which are sales.
+function burnRateQuery(sinceIso) {
+  // NB: knex's .sum(raw('X as y')) renders SUM(X as y) — invalid SQL — so the
+  // aggregate is written out in full.
+  return db('mill_stock_movements')
+    .select('item_id', db.raw('SUM(ABS(quantity)) as total_consumed'))
+    .where('movement_type', 'consumption')
+    .where('created_at', '>=', sinceIso)
+    .where(function () {
+      this.whereNull('reference_type').orWhereNotIn('reference_type', ['local_sale', 'local_sale_reversal']);
+    })
+    .groupBy('item_id');
+}
+
 const millStoreRepo = {
   // ─── Items ───
   async listItems({ category, search, onlyLowStock, limit = 200, offset = 0 }) {
@@ -300,25 +352,24 @@ const millStoreRepo = {
     return q.orderBy('mi.name');
   },
 
-  async getStockAlerts() {
-    return db('mill_stock as ms')
-      .join('mill_items as mi', 'mi.id', 'ms.item_id')
-      .leftJoin('warehouses as w', 'w.id', 'ms.warehouse_id')
+  // Low stock is judged per ITEM across every warehouse/bucket it sits in:
+  // the old per-warehouse grouping flagged an item that was short in one store
+  // but plentiful overall, and the inner join never saw an item with no stock
+  // row at all (i.e. none in stock).
+  getStockAlerts() {
+    return lowStockItemsQuery()
       .select(
-        'ms.item_id',
+        'mi.id as item_id',
         'mi.code as item_code',
         'mi.name as item_name',
         'mi.category',
         'mi.unit',
         'mi.reorder_level',
         'mi.preferred_supplier_id',
-        'w.name as warehouse_name',
-        db.raw('SUM(ms.quantity_available) as total_available')
+        db.raw('NULL::text as warehouse_name'),
+        db.raw(`${ITEM_ON_HAND} as total_available`)
       )
-      .where('mi.is_active', true)
-      .groupBy('ms.item_id', 'mi.code', 'mi.name', 'mi.category', 'mi.unit', 'mi.reorder_level', 'mi.preferred_supplier_id', 'w.name')
-      .havingRaw('SUM(ms.quantity_available) <= mi.reorder_level')
-      .orderByRaw('SUM(ms.quantity_available) - mi.reorder_level ASC');
+      .orderByRaw(`${ITEM_ON_HAND} - mi.reorder_level ASC`);
   },
 
   async getItemMovements(itemId, { limit = 100, offset = 0 } = {}) {
@@ -337,26 +388,15 @@ const millStoreRepo = {
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
 
     // Get all active items with current stock
-    const items = await db('mill_items as mi')
-      .leftJoin(
-        db('mill_stock')
-          .select('item_id')
-          .sum({ qty: 'quantity_available' })
-          .groupBy('item_id')
-          .as('ms'),
-        'ms.item_id', 'mi.id'
-      )
+    const items = await withItemOnHand(db('mill_items as mi'))
       .select('mi.id', 'mi.code', 'mi.name', 'mi.category', 'mi.unit', 'mi.reorder_level',
-        db.raw('COALESCE(ms.qty, 0) as on_hand'))
+        db.raw(`${ITEM_ON_HAND} as on_hand`))
       .where('mi.is_active', true);
 
-    // Get consumption per item in last 30 days
-    const consumption = await db('mill_stock_movements')
-      .select('item_id')
-      .sum(db.raw('ABS(quantity) as total_consumed'))
-      .where('movement_type', 'consumption')
-      .where('created_at', '>=', thirtyDaysAgo)
-      .groupBy('item_id');
+    // Get consumption per item in last 30 days. Empty katta SOLD through a
+    // local sale is written as movement_type 'consumption' too, but it is a
+    // sale, not the mill using it up — counting it inflated the burn rate.
+    const consumption = await burnRateQuery(thirtyDaysAgo);
 
     const consumptionMap = Object.fromEntries(
       consumption.map(c => [c.item_id, Number(c.total_consumed) || 0])
@@ -401,11 +441,9 @@ const millStoreRepo = {
   async getSummary() {
     const [itemCount, lowStockCount, stockValue, recentPurchases, recentConsumption] = await Promise.all([
       db('mill_items').where('is_active', true).count({ c: 'id' }).first(),
-      db('mill_stock as ms')
-        .join('mill_items as mi', 'mi.id', 'ms.item_id')
-        .where('mi.is_active', true)
-        .whereRaw('ms.quantity_available <= mi.reorder_level')
-        .countDistinct({ c: 'ms.item_id' })
+      // Same item-level rule as the alerts list, so the two always agree.
+      lowStockItemsQuery()
+        .count({ c: 'mi.id' })
         .first(),
       db('mill_stock as ms')
         .join('mill_items as mi', 'mi.id', 'ms.item_id')
@@ -622,3 +660,8 @@ const millStoreRepo = {
 
 module.exports = millStoreRepo;
 module.exports.adjustedBalance = adjustedBalance;
+module.exports.ITEM_ON_HAND = ITEM_ON_HAND;
+module.exports.withItemOnHand = withItemOnHand;
+module.exports.lowStockItemsQuery = lowStockItemsQuery;
+module.exports.burnRateQuery = burnRateQuery;
+module.exports.isLowStock = isLowStock;
