@@ -25,6 +25,8 @@ const statusStyles = {
   'Partial': 'bg-amber-50 text-amber-700 ring-amber-200',
   'Overdue': 'bg-red-50 text-red-700 ring-red-200',
   'Paid': 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+  'Unpaid': 'bg-red-50 text-red-700 ring-red-200',
+  'Invoiced': 'bg-blue-50 text-blue-700 ring-blue-200',
   'Disputed': 'bg-red-50 text-red-600 ring-red-200',
   'Expired': 'bg-gray-100 text-gray-500 ring-gray-200',
   // Finance (reconciliation, suspense, transfers)
@@ -37,13 +39,22 @@ const statusStyles = {
   'Awaiting you': 'bg-amber-50 text-amber-700 ring-amber-200',
   'Awaiting mill': 'bg-amber-50 text-amber-700 ring-amber-200',
   'Posted': 'bg-emerald-50 text-emerald-700 ring-emerald-200',
-  'Unpaid': 'bg-red-50 text-red-700 ring-red-200',
   'Allocated': 'bg-emerald-50 text-emerald-700 ring-emerald-200',
   'Unallocated': 'bg-red-50 text-red-700 ring-red-200',
   'Snoozed': 'bg-yellow-50 text-yellow-700 ring-yellow-200',
   'Escalated': 'bg-red-50 text-red-700 ring-red-200',
   'Credit': 'bg-blue-50 text-blue-700 ring-blue-200',
   'Refunded': 'bg-red-50 text-red-700 ring-red-200',
+  // Inventory: lot, stock-count, purchase-requirement and sample statuses
+  'Available': 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+  'Reserved': 'bg-amber-50 text-amber-700 ring-amber-200',
+  'Depleted': 'bg-gray-100 text-gray-500 ring-gray-200',
+  'Sold': 'bg-gray-100 text-gray-500 ring-gray-200',
+  'Planned': 'bg-gray-100 text-gray-600 ring-gray-200',
+  'Counted': 'bg-amber-50 text-amber-700 ring-amber-200',
+  'Adjusted': 'bg-blue-50 text-blue-700 ring-blue-200',
+  'Purchased': 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+  'Converted': 'bg-gray-100 text-gray-500 ring-gray-200',
 };
 
 // Dot colors for compact variant
@@ -56,6 +67,8 @@ const dotColors = {
   'Arrived': 'bg-emerald-500', 'Received': 'bg-emerald-500', 'Paid': 'bg-emerald-500',
   'Rejected': 'bg-red-500', 'Cancelled': 'bg-red-500', 'Overdue': 'bg-red-500',
   'On Hold': 'bg-red-500', 'Disputed': 'bg-red-500', 'Expired': 'bg-gray-400',
+  'Unpaid': 'bg-red-500', 'Invoiced': 'bg-blue-500',
+  'Credit': 'bg-blue-500', 'Refunded': 'bg-red-500',
 };
 
 export default function StatusBadge({ status, variant = 'default' }) {
