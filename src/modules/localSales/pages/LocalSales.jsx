@@ -263,7 +263,26 @@ export default function LocalSales() {
               <div key={g.saleGroupNo || g.id} className="px-4 py-3 flex items-center gap-3 flex-wrap">
                 <div className="min-w-0 flex-1">
                   <div className="font-medium text-gray-900">{g.saleGroupNo || g.items?.[0]?.saleNo} · {g.buyerName || g.customerName || 'Walk-in'}</div>
-                  <div className="text-xs text-gray-400">{(g.items || []).length} item{(g.items || []).length > 1 ? 's' : ''} · {g.createdByName ? `by ${g.createdByName}` : ''}</div>
+                  <div className="text-xs text-gray-400">{(g.items || []).length} item{(g.items || []).length > 1 ? 's' : ''} · {g.createdByName ? `by ${g.createdByName}` : ''}
+                    <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-800">Not yet dispatched — awaiting confirmation</span>
+                  </div>
+                  {/* What will leave the gate once confirmed — product, lot, quantity, amount. */}
+                  <ul className="mt-1.5 space-y-0.5 text-xs text-gray-600">
+                    {(g.items || []).map(it => {
+                      const pcs = it.quantityUnit === 'pcs' || it.itemType === 'packaging' || !!it.millItemId;
+                      const qty = pcs
+                        ? `${Math.round(parseFloat(it.quantityKg) || 0).toLocaleString()} pcs`
+                        : `${(Math.round((parseFloat(it.quantityKg) || 0) * 100) / 100).toLocaleString()} kg`;
+                      return (
+                        <li key={it.id} className="flex items-baseline gap-2">
+                          <span className="font-medium text-gray-800">{it.itemName || '—'}</span>
+                          {it.lotNo && <span className="font-mono text-gray-400">{it.lotNo}</span>}
+                          <span className="tabular-nums">{qty}</span>
+                          <span className="ml-auto tabular-nums text-gray-700">{fmtPKR(it.totalAmount)}</span>
+                        </li>
+                      );
+                    })}
+                  </ul>
                 </div>
                 <div className="tabular-nums font-semibold text-gray-900">{fmtPKR(g.totalAmount)}</div>
                 <div className="flex items-center gap-2">
@@ -568,6 +587,7 @@ export default function LocalSales() {
               <input type="date" value={payForm.due_date} onChange={e => setPayForm(p => ({...p, due_date: e.target.value}))} className={INPUT} />
             </div>
           )}
+          {payForm.payment_method === 'cheque' && <p className="text-[11px] text-amber-700">Cheques settle when cleared in Due Dates — until then the balance stays owed.</p>}
           <p className="text-[11px] text-gray-400">Cash and bank receipts update the account balance.</p>
         </div>
       </SlideDrawer>
@@ -776,9 +796,12 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
     ? form.paid_amount
     : (form.payment_mode === 'credit' || !(grandTotal > 0) ? '' : String(Math.round(grandTotal * 100) / 100));
   const paidNum = paidAmount === '' ? null : (parseFloat(paidAmount) || 0);
-  const owesBalance = form.payment_mode === 'credit'
-    ? (paidNum == null || paidNum < grandTotal - 0.01)
-    : (paidNum != null && paidNum < grandTotal - 0.01);
+  // A cheque is not money until it clears, so a cheque sale is owed in full.
+  const owesBalance = form.payment_mode === 'cheque' ? grandTotal > 0.01
+    : form.payment_mode === 'credit' ? (paidNum == null || paidNum < grandTotal - 0.01)
+      : (paidNum != null && paidNum < grandTotal - 0.01);
+  // A walk-in credit buyer is identified by their phone number.
+  const needsPhone = isWalkIn && owesBalance;
 
   function reset() {
     setForm(EMPTY_FORM());
@@ -791,6 +814,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
     if (cart.length === 0) { addToast('Add at least one item to the sale', 'error'); return; }
     if (form.payment_mode === 'bank_transfer' && !form.bank_account_id) { addToast('Select the bank account that received the payment', 'error'); return; }
     if (form.payment_mode === 'cheque' && !form.cheque_no.trim()) { addToast('Enter the cheque number', 'error'); return; }
+    if (needsPhone && !String(form.buyer_phone || '').replace(/\D/g, '')) { addToast('A walk-in credit sale needs the buyer\'s phone number — it is how their balance is tracked.', 'error'); return; }
     // The mode saved is the mode chosen. An empty amount means "in full" for
     // cash / bank / cheque (the server reads it the same way) and "nothing yet"
     // for credit.
@@ -859,7 +883,8 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
       // Hand the freshly-created sale back so the parent can offer a printable /
       // downloadable invoice immediately — but only once it's confirmed (a Pending
       // sale hasn't posted revenue, so there's no invoice to issue yet).
-      const paid = paidNum == null ? (effectiveMode !== 'credit' ? grandTotal : 0) : paidNum;
+      // A cheque settles nothing until it is cleared in Due Dates.
+      const paid = effectiveMode === 'cheque' ? 0 : (paidNum == null ? (effectiveMode !== 'credit' ? grandTotal : 0) : paidNum);
       const due = Math.max(0, grandTotal - paid);
       !pending && onCreated && onCreated({
         saleNo: res?.data?.group_no || res?.data?.sale_no || '',
@@ -870,7 +895,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
         paymentStatus: due <= 0.01 ? 'Paid' : (paid > 0 ? 'Partial' : 'Credit'),
         paymentMode: effectiveMode, paymentReference: payload.payment_reference,
         collectionLocation: payload.collection_location, vehicleNo: form.vehicle_no, driverName: form.driver_name,
-        dispatched: true, dispatchDate: new Date().toISOString(),
+        dispatched: true, dispatchDate: new Date().toISOString(), // only reached when confirmed (not pending)
       });
       onClose();
       reset();
@@ -974,8 +999,9 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
                   <input value={form.buyer_name} onChange={e => set('buyer_name', e.target.value)} className={INPUT} placeholder="Walk-in buyer name" />
                 </div>
                 <div>
-                  <label className={LABEL}>Phone</label>
+                  <label className={LABEL}>Phone{needsPhone ? ' *' : ''}</label>
                   <input value={form.buyer_phone} onChange={e => set('buyer_phone', e.target.value)} className={INPUT} placeholder="Phone number" />
+                  {needsPhone && <p className="text-[11px] text-violet-600 mt-1">Required on credit — the phone number identifies this buyer’s account.</p>}
                 </div>
               </>
             )}
@@ -1282,11 +1308,11 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
               <input type="number" value={paidAmount} onChange={e => { setPaidTouched(true); set('paid_amount', e.target.value); }} className={INPUT}
                 placeholder={grandTotal > 0 ? `Rs ${grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (full)` : 'Rs'} />
               {form.payment_mode === 'credit' && <p className="text-xs text-amber-600 mt-1">Leave empty or partial for credit sale</p>}
-              {form.payment_mode !== 'credit' && owesBalance && <p className="text-xs text-amber-600 mt-1">Rs {(grandTotal - (paidNum || 0)).toLocaleString(undefined, { maximumFractionDigits: 2 })} will be owed on this sale</p>}
+              {form.payment_mode !== 'credit' && form.payment_mode !== 'cheque' && owesBalance && <p className="text-xs text-amber-600 mt-1">Rs {(grandTotal - (paidNum || 0)).toLocaleString(undefined, { maximumFractionDigits: 2 })} will be owed on this sale</p>}
             </div>
           </div>
           {owesBalance && isWalkIn && (
-            <p className="text-[11px] text-violet-600 mt-2">A balance is owed, so “{form.buyer_name || 'this buyer'}” will be saved as a customer to track the receivable.</p>
+            <p className="text-[11px] text-violet-600 mt-2">A balance is owed, so “{form.buyer_name || 'this buyer'}” is tracked by phone number{form.buyer_phone ? ` (${form.buyer_phone})` : ' — enter one on the Buyer step'}: an existing local customer with that phone is used, otherwise a new one is saved.</p>
           )}
 
           {/* Where collected / how — depends on the payment mode */}
@@ -1316,6 +1342,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
             <div className="mt-3">
               <label className={LABEL}>Cheque Number *</label>
               <input value={form.cheque_no} onChange={e => set('cheque_no', e.target.value)} className={INPUT} placeholder="e.g. 0012345" />
+              <p className="text-[11px] text-amber-700 mt-1">Cheques settle when cleared in Due Dates. The sale stays on credit (owed in full) until the cheque is cleared.</p>
             </div>
           )}
           {(form.payment_mode === 'cheque' || form.payment_mode === 'credit') && (
