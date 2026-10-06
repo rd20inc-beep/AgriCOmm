@@ -11,6 +11,7 @@ import StatusBadge from '../../../components/StatusBadge';
 import PurchaseLotDrawer from '../components/PurchaseLotDrawer';
 import useCanSeeCost from '../../../hooks/useCanSeeCost';
 import { fromKg, UNITS } from '../../../shared/utils/unitConversion';
+import { fmtPKR as fmtPKRBase, fmtKg, fmtNum } from '../../../shared/utils/format';
 
 // Lots per page. Filters, search and the KPI totals all run on the server, so
 // a page only bounds what is drawn — never what is counted.
@@ -86,7 +87,10 @@ function subtypeLabel(s) {
   return opt ? opt.label.trim() : s;
 }
 
-function fmtPKR(v) { return 'Rs ' + (parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+const fmtPKR = (v) => fmtPKRBase(parseFloat(v) || 0, { decimals: 2 });
+// A quantity in the chosen display unit: MT keeps 3 decimals (= whole kg),
+// the other units print up to 2.
+const fmtQty = (v, unit) => (unit === 'ton' ? fmtNum(v || 0, 3) : fmtNum(v || 0));
 
 // Heuristic mirroring the backend deriveProductCode — strings that
 // look like auto-generated SKUs (PRD-DATETIME-…, PROD-…, long-digit IDs)
@@ -176,8 +180,8 @@ function renderLotRow(lot, displayUnit, navigate, indented, showCost = true) {
       </td>
       <td data-label="Supplier" className="mob-hide text-gray-600 max-w-[10rem] truncate" title={lot.supplierName || ''}><PartyLink type="supplier" id={lot.supplierId} name={lot.supplierName} /></td>
       <td data-label="Warehouse" className="mob-hide text-gray-600 text-xs max-w-[8rem] truncate" title={lot.warehouseName || ''}>{lot.warehouseName || '—'}</td>
-      <td data-label="Stock" className="text-right font-medium tabular-nums">{fromKg(netKg, displayUnit, bw).toLocaleString()}</td>
-      <td data-label="Available" className="text-right tabular-nums text-emerald-600 font-medium">{fromKg(availKg, displayUnit, bw).toLocaleString()}</td>
+      <td data-label="Stock" className="text-right font-medium tabular-nums">{fmtQty(fromKg(netKg, displayUnit, bw), displayUnit)}</td>
+      <td data-label="Available" className="text-right tabular-nums text-emerald-600 font-medium">{fmtQty(fromKg(availKg, displayUnit, bw), displayUnit)}</td>
       {showCost && <td data-label="Landed/KG" className="mob-hide text-right tabular-nums text-xs font-medium">{fmtPKR(lot.landedCostPerKg)}</td>}
       {showCost && <td data-label="Value" className="text-right tabular-nums font-medium">{fmtPKR(lot.landedCostTotal)}</td>}
       <td data-label="Quality" className="mob-hide text-center">
@@ -188,8 +192,8 @@ function renderLotRow(lot, displayUnit, navigate, indented, showCost = true) {
       </td>
       <td data-label="Status" className="text-center"><StatusBadge status={lot.status} /></td>
       <td className={`mob-hide text-center sticky right-0 group-hover:bg-gray-50 shadow-[inset_1px_0_0_rgba(0,0,0,0.06)] z-10 ${indented ? 'bg-slate-50/40' : 'bg-white'}`}>
-        <button onClick={e => { e.stopPropagation(); navigate(`/lot-inventory/${lot.lotNo || lot.id}`); }} className="btn btn-ghost btn-sm">
-          <Eye className="w-4 h-4" />
+        <button onClick={e => { e.stopPropagation(); navigate(`/lot-inventory/${lot.lotNo || lot.id}`); }} className="btn btn-ghost btn-sm" title="View lot" aria-label={`View lot ${lot.lotNo || ''}`.trim()}>
+          <Eye className="w-4 h-4" aria-hidden="true" />
         </button>
       </td>
     </tr>
@@ -362,13 +366,13 @@ export default function LotInventory() {
               <Package size={14} /> Lot inventory{showCost ? ' · Capital locked' : ''}
             </div>
             <div className="text-2xl sm:text-4xl font-bold leading-tight tabular-nums break-words">
-              {showCost ? fmtPKR(kpis.totalValue) : `${Math.round(kpis.totalKg).toLocaleString()} kg`}
+              {showCost ? fmtPKR(kpis.totalValue) : fmtKg(Math.round(kpis.totalKg))}
             </div>
             <div className="text-xs opacity-90 mt-1">
-              {kpis.totalLots} lots · {Math.round(kpis.totalKg).toLocaleString()} kg total
-              {kpis.availKg    > 0 && <> · Available {Math.round(kpis.availKg).toLocaleString()} kg</>}
-              {kpis.reservedKg > 0 && <> · Reserved {Math.round(kpis.reservedKg).toLocaleString()} kg</>}
-              {kpis.soldKg     > 0 && <> · Sold {Math.round(kpis.soldKg).toLocaleString()} kg</>}
+              {kpis.totalLots} lots · {fmtKg(Math.round(kpis.totalKg))} total
+              {kpis.availKg    > 0 && <> · Available {fmtKg(Math.round(kpis.availKg))}</>}
+              {kpis.reservedKg > 0 && <> · Reserved {fmtKg(Math.round(kpis.reservedKg))}</>}
+              {kpis.soldKg     > 0 && <> · Sold {fmtKg(Math.round(kpis.soldKg))}</>}
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -393,20 +397,20 @@ export default function LotInventory() {
         </div>
         <div className="bg-white rounded-xl border border-gray-100 p-4">
           <p className="text-xs font-medium text-gray-500 uppercase">Total Stock</p>
-          <p className="text-xl font-bold text-gray-900 mt-1">{getDisplayQty(kpis.totalKg).toLocaleString()} <span className="text-sm font-normal text-gray-400">{getUnitLabel()}</span></p>
-          <p className="text-xs text-gray-400">{Math.round(kpis.totalKg).toLocaleString()} kg</p>
+          <p className="text-xl font-bold text-gray-900 mt-1">{fmtQty(getDisplayQty(kpis.totalKg), displayUnit)} <span className="text-sm font-normal text-gray-400">{getUnitLabel()}</span></p>
+          <p className="text-xs text-gray-400">{fmtKg(Math.round(kpis.totalKg))}</p>
         </div>
         <div className="bg-emerald-50 rounded-xl border border-emerald-100 p-4">
           <p className="text-xs font-medium text-emerald-600 uppercase">Available</p>
-          <p className="text-xl font-bold text-emerald-700 mt-1">{getDisplayQty(kpis.availKg).toLocaleString()} <span className="text-sm font-normal text-emerald-500">{getUnitLabel()}</span></p>
+          <p className="text-xl font-bold text-emerald-700 mt-1">{fmtQty(getDisplayQty(kpis.availKg), displayUnit)} <span className="text-sm font-normal text-emerald-500">{getUnitLabel()}</span></p>
         </div>
         <div className="bg-amber-50 rounded-xl border border-amber-100 p-4">
           <p className="text-xs font-medium text-amber-600 uppercase">Reserved</p>
-          <p className="text-xl font-bold text-amber-700 mt-1">{getDisplayQty(kpis.reservedKg).toLocaleString()} <span className="text-sm font-normal text-amber-500">{getUnitLabel()}</span></p>
+          <p className="text-xl font-bold text-amber-700 mt-1">{fmtQty(getDisplayQty(kpis.reservedKg), displayUnit)} <span className="text-sm font-normal text-amber-500">{getUnitLabel()}</span></p>
         </div>
         <div className="bg-blue-50 rounded-xl border border-blue-100 p-4">
           <p className="text-xs font-medium text-blue-600 uppercase">Sold / Dispatched</p>
-          <p className="text-xl font-bold text-blue-700 mt-1">{getDisplayQty(kpis.soldKg).toLocaleString()} <span className="text-sm font-normal text-blue-500">{getUnitLabel()}</span></p>
+          <p className="text-xl font-bold text-blue-700 mt-1">{fmtQty(getDisplayQty(kpis.soldKg), displayUnit)} <span className="text-sm font-normal text-blue-500">{getUnitLabel()}</span></p>
         </div>
         {showCost && (
           <div className="bg-white rounded-xl border border-gray-100 p-4">
@@ -450,6 +454,7 @@ export default function LotInventory() {
           <select
             value={subtypeFilter}
             onChange={(e) => setSubtypeFilter(e.target.value)}
+            aria-label="Subtype"
             className="px-3 py-1.5 text-sm font-medium rounded-md border border-gray-200 bg-white text-gray-700 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
           >
             {SUBTYPE_OPTIONS.map(o => (
@@ -484,10 +489,10 @@ export default function LotInventory() {
           <div className="relative w-full sm:flex-1 sm:max-w-md">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <input type="text" value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
-              placeholder="Search lots, supplier, variety, warehouse..." className="form-input pl-9 py-1.5 text-sm w-full" />
+              placeholder="Search lots, supplier, variety, warehouse..." aria-label="Search lots" className="form-input pl-9 py-1.5 text-sm w-full" />
           </div>
           <span className="text-xs text-gray-400 whitespace-nowrap">
-            {pagination.total.toLocaleString()} {pagination.total === 1 ? 'lot' : 'lots'}{isFetching ? ' · loading…' : ''}
+            {fmtNum(pagination.total)} {pagination.total === 1 ? 'lot' : 'lots'}{isFetching ? ' · loading…' : ''}
           </span>
           {/* Grouping dimension: By Rice Type (one row per variety) or By
               Subtype (one row per category — all B1 together, …); each group
@@ -594,8 +599,8 @@ export default function LotInventory() {
                               </td>
                               <td className="mob-hide text-gray-400 text-xs">—</td>
                               <td className="mob-hide text-gray-400 text-xs">—</td>
-                              <td data-label="Stock" className="text-right font-semibold tabular-nums">{fromKg(g.totalKg, displayUnit, bw).toLocaleString()}</td>
-                              <td data-label="Available" className="text-right tabular-nums text-emerald-700 font-semibold">{fromKg(g.availKg, displayUnit, bw).toLocaleString()}</td>
+                              <td data-label="Stock" className="text-right font-semibold tabular-nums">{fmtQty(fromKg(g.totalKg, displayUnit, bw), displayUnit)}</td>
+                              <td data-label="Available" className="text-right tabular-nums text-emerald-700 font-semibold">{fmtQty(fromKg(g.availKg, displayUnit, bw), displayUnit)}</td>
                               {showCost && <td className="mob-hide text-right tabular-nums text-xs">{g.weightedLanded ? fmtPKR(g.weightedLanded) : '—'}</td>}
                               {showCost && <td data-label="Value" className="text-right tabular-nums font-semibold">{fmtPKR(g.totalValue)}</td>}
                               <td className="mob-hide text-center text-xs text-gray-400">—</td>
@@ -619,7 +624,7 @@ export default function LotInventory() {
       {pagination.totalPages > 1 && (
         <div className="flex items-center justify-between gap-2 text-sm text-gray-600">
           <span className="text-xs text-gray-500">
-            Showing {((pagination.page - 1) * PAGE_SIZE + 1).toLocaleString()}–{Math.min(pagination.page * PAGE_SIZE, pagination.total).toLocaleString()} of {pagination.total.toLocaleString()} lots
+            Showing {fmtNum((pagination.page - 1) * PAGE_SIZE + 1)}–{fmtNum(Math.min(pagination.page * PAGE_SIZE, pagination.total))} of {fmtNum(pagination.total)} lots
           </span>
           <div className="flex items-center gap-1">
             <button type="button" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}

@@ -5,38 +5,29 @@ import { stockCountApi } from '../api/services';
 import { useWarehouses } from '../../../api/queries';
 import { useAuth } from '../../../context/AuthContext';
 import useConfirm from '../../../hooks/useConfirm';
+import SlideDrawer from '../../../components/SlideDrawer';
+import StatusBadge from '../../../shared/components/StatusBadge';
+import { fmtNum } from '../../../shared/utils/format';
 
 const n = (v) => Number(v) || 0;
 // Lot quantities are KG (Phase 5c).
-const fmtKg = (v) => `${n(v).toLocaleString(undefined, { maximumFractionDigits: 2 })} kg`;
+// Up to 2 decimals so a counted 12.5 kg isn't shown rounded.
+const fmtKg = (v) => `${fmtNum(n(v))} kg`;
 // Pack equivalent for a KG figure: 50 kg+ sacks are katta, smaller packs are
 // bags (a lot with no pack size counts in 50 kg katta).
 function packEquivalent(kg, it) {
   const size = n(it.bag_weight_kg) || n(it.bag_size_kg);
   const packKg = size > 0 ? size : 50;
   const units = Math.round(n(kg) / packKg);
-  return packKg >= 50 ? `≈ ${units.toLocaleString()} katta` : `≈ ${units.toLocaleString()} bags × ${packKg} kg`;
+  return packKg >= 50 ? `≈ ${fmtNum(units)} katta` : `≈ ${fmtNum(units)} bags × ${packKg} kg`;
 }
 // Stock write-offs are approved by the Owner only (owner decision 2026-10-05).
 const WRITE_OFF_APPROVERS = ['Owner', 'Super Admin'];
 // A count this far off the record is more likely a typo than a loss.
 const BIG_VARIANCE_SHARE = 0.5;
 
-const STATUS_STYLES = {
-  Planned: 'bg-gray-100 text-gray-600',
-  'In Progress': 'bg-amber-100 text-amber-700',
-  Completed: 'bg-emerald-100 text-emerald-700',
-  Cancelled: 'bg-red-100 text-red-600',
-};
 const TYPE_LABEL = { full: 'Full count', cycle: 'Cycle count', spot: 'Spot check' };
-// Per-line review state badges
-const ITEM_STATUS_STYLES = {
-  Pending: 'bg-gray-100 text-gray-500',
-  Counted: 'bg-amber-100 text-amber-700',
-  Approved: 'bg-emerald-100 text-emerald-700',
-  Adjusted: 'bg-blue-100 text-blue-700',
-  Rejected: 'bg-red-100 text-red-600',
-};
+
 
 // Stock-take (physical count) workflow — create a count, enter what you
 // physically have lot-by-lot, and approve to auto-adjust the variance.
@@ -96,7 +87,7 @@ export default function StockCount() {
                     <td data-label="Count" className="px-4 py-2.5 font-medium text-gray-900">{c.count_no}</td>
                     <td data-label="Type" className="mob-hide px-4 py-2.5 text-gray-600">{TYPE_LABEL[c.count_type] || c.count_type}</td>
                     <td data-label="Warehouse" className="px-4 py-2.5 text-gray-600">{c.warehouse_name || 'All warehouses'}</td>
-                    <td data-label="Status" className="px-4 py-2.5"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[c.status] || 'bg-gray-100 text-gray-600'}`}>{c.status}</span></td>
+                    <td data-label="Status" className="px-4 py-2.5"><StatusBadge status={c.status} /></td>
                     <td data-label="Counted by" className="mob-hide px-4 py-2.5 text-gray-500">{c.counted_by_name || '—'}</td>
                     <td data-label="" className="px-4 py-2.5 text-right text-blue-600 text-xs font-medium">Open →</td>
                   </tr>
@@ -217,7 +208,7 @@ function CountDetailDrawer({ countId, onClose, onChanged }) {
       ) : (
         <div className="space-y-4">
           <div className="flex items-center gap-2">
-            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[count.status] || 'bg-gray-100 text-gray-600'}`}>{count.status}</span>
+            <StatusBadge status={count.status} />
             <span className="text-xs text-gray-500">{items.length} items · {pendingCount} left to count · {varianceCount} with a difference{unreviewedCount > 0 ? ` · ${unreviewedCount} awaiting review` : ''}</span>
           </div>
           {!completed && (
@@ -260,7 +251,7 @@ function CountDetailDrawer({ countId, onClose, onChanged }) {
                           className="w-24 border border-gray-300 rounded-md px-2 py-1 text-right text-sm disabled:bg-gray-50 disabled:text-gray-500" />
                       </td>
                       <td data-label="Difference (kg)" className={`px-3 py-2 text-right tabular-nums font-medium ${variance == null ? 'text-gray-300' : variance === 0 ? 'text-gray-400' : variance > 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                        {variance == null ? '—' : `${variance > 0 ? '+' : ''}${variance.toLocaleString(undefined, { maximumFractionDigits: 2 })} kg`}
+                        {variance == null ? '—' : `${variance > 0 ? '+' : ''}${fmtNum(variance)} kg`}
                       </td>
                       <td data-label="" className="px-3 py-2">
                         {(() => {
@@ -321,12 +312,12 @@ function CountDetailDrawer({ countId, onClose, onChanged }) {
                                     className="px-1.5 py-0.5 rounded text-[11px] font-medium bg-red-600 text-white disabled:opacity-40">
                                     {reviewBusy ? <Loader2 size={11} className="animate-spin" /> : 'Confirm'}
                                   </button>
-                                  <button onClick={() => { setRejectId(null); setRejectReason(''); }} className="text-gray-400 hover:text-gray-600"><X size={13} /></button>
+                                  <button onClick={() => { setRejectId(null); setRejectReason(''); }} title="Cancel" aria-label="Cancel rejecting" className="text-gray-400 hover:text-gray-600"><X size={13} aria-hidden="true" /></button>
                                 </div>
                               )}
 
                               {/* Status badge + rejection reason */}
-                              <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${ITEM_STATUS_STYLES[it.status] || 'bg-gray-100 text-gray-500'}`}>{it.status}</span>
+                              <StatusBadge status={it.status} />
                               {it.status === 'Rejected' && it.review_notes && rejectId !== it.id && (
                                 <span className="text-[10px] text-gray-400 italic max-w-[140px] truncate" title={it.review_notes}>“{it.review_notes}”</span>
                               )}
@@ -371,20 +362,12 @@ function CountDetailDrawer({ countId, onClose, onChanged }) {
   );
 }
 
+// The canonical SlideDrawer (accessible dialog, Escape, focus trap). These
+// drawers always closed on a backdrop click, so that is kept.
 function Drawer({ title, subtitle, children, onClose, wide }) {
   return (
-    <div className="fixed inset-0 z-50 flex justify-end">
-      <div className="absolute inset-0 bg-black/30" onClick={onClose} />
-      <div className={`relative bg-white h-full shadow-xl flex flex-col w-full ${wide ? 'max-w-2xl' : 'max-w-md'}`}>
-        <div className="flex items-start justify-between px-5 py-4 border-b border-gray-200">
-          <div>
-            <h2 className="font-semibold text-gray-900">{title}</h2>
-            {subtitle && <p className="text-xs text-gray-500 mt-0.5">{subtitle}</p>}
-          </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
-        </div>
-        <div className="flex-1 overflow-y-auto p-5">{children}</div>
-      </div>
-    </div>
+    <SlideDrawer open onClose={onClose} title={title} subtitle={subtitle} icon={ClipboardCheck} size={wide ? '2xl' : 'md'} closeOnBackdrop>
+      {children}
+    </SlideDrawer>
   );
 }

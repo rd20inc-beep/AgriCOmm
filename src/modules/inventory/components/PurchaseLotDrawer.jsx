@@ -7,7 +7,7 @@ import HaulerPicker from '../../../components/HaulerPicker';
 import { lotInventoryApi } from '../api/services';
 import { useCreatePurchaseLot } from '../../../api/queries';
 import { STANDARD_BAG_SIZES, snapBagSizeKg, isStandardBagSize, DEFAULT_BAG_SIZE_KG } from '../../../utils/bagSize';
-import { todayLocalISO } from '../../../shared/utils/format';
+import { todayLocalISO, fmtKg, fmtNum, fmtPKR, fmtPct } from '../../../shared/utils/format';
 
 /**
  * Modern slide-from-right drawer for recording a rice purchase lot.
@@ -278,11 +278,11 @@ export default function PurchaseLotDrawer({
   const suggestedBags = calcBagsRaw > 0 ? Math.ceil(calcBagsRaw) : 0;
   const bagsHint = calcBagsRaw > 0
     ? (bagsTouched.current && bags !== suggestedBags
-        ? `Calculated ${calcBagsExact ? suggestedBags : `≈${calcBagsRaw.toFixed(2)} → ${suggestedBags}`} — you set ${bags}`
+        ? `Calculated ${calcBagsExact ? suggestedBags : `≈${fmtNum(calcBagsRaw, 2)} → ${suggestedBags}`} — you set ${bags}`
         : (calcBagsExact
             ? `${suggestedBags} bags (exact)`
-            : `≈${calcBagsRaw.toFixed(2)} → ${suggestedBags} bags (last partially filled)`))
-    : (avgBagKg > 0 ? `${avgBagKg.toFixed(2)} kg/bag avg` : null);
+            : `≈${fmtNum(calcBagsRaw, 2)} → ${suggestedBags} bags (last partially filled)`))
+    : (avgBagKg > 0 ? `${fmtNum(avgBagKg, 2)} kg/bag avg` : null);
   const totalValue = weightKg * ratePerKg;
   // Commission (per bag/katta) + transport fold into the Final Cost per KG (and
   // become separate broker/hauler payables server-side).
@@ -428,7 +428,7 @@ export default function PurchaseLotDrawer({
           }),
       });
       const savedLotNo = created?.data?.lot?.lot_no || created?.lot?.lot_no || created?.data?.lot?.lotNo || created?.lot?.lotNo;
-      addToast?.(`Rice purchase lot ${savedLotNo ? `${savedLotNo} ` : ''}recorded — ${Math.round(weightKg).toLocaleString('en-PK')} kg`, 'success');
+      addToast?.(`Rice purchase lot ${savedLotNo ? `${savedLotNo} ` : ''}recorded — ${fmtKg(Math.round(weightKg))}`, 'success');
       onSuccess?.();
       if (keepOpen) {
         // Same supplier + rice type + date; everything else fresh. The broker
@@ -548,11 +548,11 @@ export default function PurchaseLotDrawer({
           <div className="text-xs text-gray-500">
             {weightKg > 0 && ratePerKg > 0 && (
               <span>
-                <span className="font-medium text-gray-700">{Math.round(weightKg).toLocaleString('en-PK')} kg</span>
+                <span className="font-medium text-gray-700">{fmtKg(Math.round(weightKg))}</span>
                 {' × '}
-                <span className="font-medium text-gray-700">Rs {ratePerKg.toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/kg</span>
+                <span className="font-medium text-gray-700">{fmtPKR(ratePerKg, { decimals: 2 })}/kg</span>
                 {' = '}
-                <span className="font-semibold text-emerald-700">Rs {(totalValue).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                <span className="font-semibold text-emerald-700">{fmtPKR(totalValue, { decimals: 2 })}</span>
               </span>
             )}
           </div>
@@ -742,7 +742,7 @@ export default function PurchaseLotDrawer({
             value={form.weight_kg}
             onChange={(v) => setForm(prev => ({ ...prev, weight_kg: v }))}
             placeholder="e.g. 30000"
-            hint={weightMT > 0 ? `${weightMT.toFixed(2)} MT — drives stock & bill` : null}
+            hint={weightMT > 0 ? `${fmtNum(weightMT, 2)} MT — drives stock & bill` : null}
           />
           <Input label="Purchase date *" type="date"
             value={form.purchase_date}
@@ -763,8 +763,8 @@ export default function PurchaseLotDrawer({
             placeholder="Blank if fully received"
             hint={orderedKg > 0 && Math.abs(orderedVariance) > 0.5
               ? (orderedVariance < 0
-                  ? `Short ${Math.round(Math.abs(orderedVariance)).toLocaleString('en-PK')} kg vs order`
-                  : `Over ${Math.round(orderedVariance).toLocaleString('en-PK')} kg vs order`)
+                  ? `Short ${fmtKg(Math.round(Math.abs(orderedVariance)))} vs order`
+                  : `Over ${fmtKg(Math.round(orderedVariance))} vs order`)
               : 'For the short/over variance'}
           />
         </div>
@@ -806,12 +806,12 @@ export default function PurchaseLotDrawer({
             <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
               {isStandardBagSize(detectedBagSize) ? (
                 <>
-                  These bags average <b>{avgBagKg.toFixed(1)} kg</b> — that looks like{' '}
+                  These bags average <b>{fmtNum(avgBagKg, 1)} kg</b> — that looks like{' '}
                   <b>{detectedBagSize} kg</b> sacks, not {bagSize} kg.
                 </>
               ) : (
                 <>
-                  Average <b>{avgBagKg.toFixed(1)} kg/bag</b> isn’t a standard size (10 / 25 / 40 / 50 kg).
+                  Average <b>{fmtNum(avgBagKg, 1)} kg/bag</b> isn’t a standard size (10 / 25 / 40 / 50 kg).
                   Confirm the sack size.
                 </>
               )}
@@ -849,7 +849,7 @@ export default function PurchaseLotDrawer({
             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
           />
           {pricePerMT > 0 && (
-            <p className="text-[11px] text-gray-500 mt-1">≈ Rs {pricePerMT.toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/MT</p>
+            <p className="text-[11px] text-gray-500 mt-1">≈ {fmtPKR(pricePerMT, { decimals: 2 })}/MT</p>
           )}
         </div>
 
@@ -885,7 +885,7 @@ export default function PurchaseLotDrawer({
               <input type="number" step="0.01" min="0" value={form.commission_per_bag}
                 onChange={(e) => setForm(prev => ({ ...prev, commission_per_bag: e.target.value }))}
                 placeholder="0" className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
-              {totalCommission > 0 && <p className="text-[11px] text-gray-500 mt-1">Total commission: Rs {totalCommission.toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({bags} bags)</p>}
+              {totalCommission > 0 && <p className="text-[11px] text-gray-500 mt-1">Total commission: {fmtPKR(totalCommission, { decimals: 2 })} ({bags} bags)</p>}
             </div>
             <div>
               <SupplierPicker
@@ -936,8 +936,8 @@ export default function PurchaseLotDrawer({
             </div>
           </div>
           {finalCostPerKg > 0 && (
-            <p className="text-xs text-gray-700">Final Cost per KG: <b>Rs {finalCostPerKg.toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b>
-              <span className="text-gray-400"> (raw {ratePerKg.toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{totalCommission > 0 ? ' + commission' : ''}{capitalisedTransport > 0 ? ' + transport' : ''})</span></p>
+            <p className="text-xs text-gray-700">Final Cost per KG: <b>{fmtPKR(finalCostPerKg, { decimals: 2 })}</b>
+              <span className="text-gray-400"> (raw {fmtNum(ratePerKg, 2)}{totalCommission > 0 ? ' + commission' : ''}{capitalisedTransport > 0 ? ' + transport' : ''})</span></p>
           )}
         </div>
 
@@ -1044,7 +1044,7 @@ export default function PurchaseLotDrawer({
                       if (wbD == null && accD == null) return null;
                       const chip = (label, d) => d == null ? null : (
                         <span className={`px-1.5 py-0.5 rounded ${Math.abs(d) < 0.01 ? 'bg-gray-100 text-gray-500' : d < 0 ? 'bg-red-50 text-red-600' : 'bg-amber-50 text-amber-700'}`}>
-                          {label} {d > 0 ? '+' : ''}{d.toLocaleString()} kg
+                          {label} {d > 0 ? '+' : ''}{fmtNum(d)} kg
                         </span>
                       );
                       return <div className="flex flex-wrap gap-1.5 text-[11px]">{chip('vs declared', wbD)}{chip('accepted vs weighbridge', accD)}</div>;
@@ -1091,8 +1091,8 @@ export default function PurchaseLotDrawer({
                   return (
                     <div className="text-center">
                       <p className="text-[10px] uppercase tracking-wide text-gray-400">{label}</p>
-                      <p className="text-sm font-semibold text-gray-900 tabular-nums">{val ? val.toLocaleString() : '—'}</p>
-                      {d != null && Math.abs(d) >= 0.01 && <p className={`text-[10px] font-medium ${d < 0 ? 'text-red-600' : 'text-amber-700'}`}>{d > 0 ? '+' : ''}{d.toLocaleString()}</p>}
+                      <p className="text-sm font-semibold text-gray-900 tabular-nums">{val ? fmtNum(val) : '—'}</p>
+                      {d != null && Math.abs(d) >= 0.01 && <p className={`text-[10px] font-medium ${d < 0 ? 'text-red-600' : 'text-amber-700'}`}>{d > 0 ? '+' : ''}{fmtNum(d)}</p>}
                     </div>
                   );
                 };
@@ -1106,7 +1106,7 @@ export default function PurchaseLotDrawer({
                       {cell('Accepted', accepted || null, accepted ? purchaseKg : null)}
                     </div>
                     {purchaseBags > 0 && declaredBags > 0 && declaredBags !== purchaseBags && (
-                      <p className="text-[11px] text-amber-700 mt-2">Bags: purchase {purchaseBags.toLocaleString()} vs vehicles {declaredBags.toLocaleString()} ({declaredBags > purchaseBags ? '+' : ''}{(declaredBags - purchaseBags).toLocaleString()}).</p>
+                      <p className="text-[11px] text-amber-700 mt-2">Bags: purchase {fmtNum(purchaseBags)} vs vehicles {fmtNum(declaredBags)} ({declaredBags > purchaseBags ? '+' : ''}{fmtNum(declaredBags - purchaseBags)}).</p>
                     )}
                     <p className="text-[10px] text-gray-400 mt-1">The lot is recorded at the Purchase weight above; the accepted figures are kept per-vehicle on the lot ledger.</p>
                   </div>
@@ -1175,9 +1175,9 @@ function QualityPanel({ form, onChange }) {
               sumMatch === true ? 'text-emerald-700' :
               sumMatch === false ? 'text-amber-700' : 'text-gray-500'
             }`}>
-              Σ = {gradeTotal.toFixed(2)}%
+              Σ = {fmtPct(gradeTotal, { decimals: 2 })}
               {sumMatch === false && brokenPct > 0 && (
-                <span className="ml-1">(broken total: {brokenPct.toFixed(2)}%)</span>
+                <span className="ml-1">(broken total: {fmtPct(brokenPct, { decimals: 2 })})</span>
               )}
             </span>
           )}
@@ -1212,7 +1212,12 @@ function PctInput({ label, value, onChange }) {
 function Input({ label, value, onChange, hint, type = 'text', autoFocus, ...rest }) {
   return (
     <div>
-      <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
+      <label className="block text-sm font-medium text-gray-700 mb-1">
+        {/* A trailing " *" marks a required field — render it as the house red marker. */}
+        {typeof label === 'string' && label.endsWith(' *')
+          ? <>{label.slice(0, -2)} <span className="text-red-500">*</span></>
+          : label}
+      </label>
       <input
         type={type}
         value={value}

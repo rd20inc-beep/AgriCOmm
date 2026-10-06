@@ -6,12 +6,16 @@ import { lotInventoryApi } from '../api/services';
 import { useHeldStockProfit } from '../../../api/queries';
 import useCanSeeCost from '../../../hooks/useCanSeeCost';
 import { splitOnHand, unitsOnHand, onHandKg as lotOnHandKg, formatUnits } from '../utils/stockMath';
+import SlideDrawer from '../../../components/SlideDrawer';
+import StatusBadge from '../../../shared/components/StatusBadge';
+import { fmtKg, fmtNum, fmtPKR as fmtPKRBase, fmtDate } from '../../../shared/utils/format';
 
 const n = (v) => Number(v) || 0;
 const toMT = (kg) => n(kg) / 1000;
-const fmtMT = (kg) => `${Math.round(n(kg)).toLocaleString()} kg`;
-const fmtMTnum = (mt) => `${Math.round(n(mt) * 1000).toLocaleString()} kg`;
-const fmtPKR = (v) => `Rs ${(n(v)).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+// Names are historical — both print whole kg.
+const fmtMT = (kg) => fmtKg(Math.round(n(kg)));
+const fmtMTnum = (mt) => fmtKg(Math.round(n(mt) * 1000));
+const fmtPKR = (v) => fmtPKRBase(n(v), { decimals: 2 });
 
 const ENTITIES = [{ v: '', l: 'All' }, { v: 'mill', l: 'Mill' }, { v: 'export', l: 'Export' }];
 const STATUSES = [{ v: 'Available', l: 'In stock' }, { v: 'all', l: 'All statuses' }];
@@ -122,7 +126,7 @@ export default function StockSummary() {
                 className={`px-3 py-1.5 text-xs font-medium rounded-md ${entity === e.v ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}>{e.l}</button>
             ))}
           </div>
-          <select value={status} onChange={(e) => setStatus(e.target.value)}
+          <select value={status} onChange={(e) => setStatus(e.target.value)} aria-label="Stock status"
             className="text-xs border border-gray-300 rounded-lg px-2.5 py-2 bg-white text-gray-700">
             {STATUSES.map((s) => <option key={s.v} value={s.v}>{s.l}</option>)}
           </select>
@@ -133,10 +137,10 @@ export default function StockSummary() {
 
       {/* KPI cards */}
       <div className={`grid grid-cols-2 ${showCost ? 'lg:grid-cols-4' : 'lg:grid-cols-3'} gap-3`}>
-        <Kpi icon={Package} tone="blue" label="Products in stock" value={allRows.length.toLocaleString()} />
+        <Kpi icon={Package} tone="blue" label="Products in stock" value={fmtNum(allRows.length)} />
         <button onClick={() => setLowOnly((v) => !v)} className="text-left">
           <Kpi icon={AlertTriangle} tone={lowCount ? 'red' : 'emerald'} label="Running low"
-            value={lowCount.toLocaleString()} sub={lowOnly ? 'Showing low only — click to clear' : lowCount ? 'Click to see them' : 'All well stocked'} active={lowOnly} />
+            value={fmtNum(lowCount)} sub={lowOnly ? 'Showing low only — click to clear' : lowCount ? 'Click to see them' : 'All well stocked'} active={lowOnly} />
         </button>
         <Kpi icon={Boxes} tone="emerald" label="On hand" value={fmtMT(totals.onHand)} sub={`${fmtMT(totals.available)} available`} />
         {showCost && <Kpi icon={Wallet} tone="amber" label="Stock value" value={fmtPKR(totals.value)} />}
@@ -175,7 +179,7 @@ export default function StockSummary() {
                     <tr key={r.group_id || r.group_name} className="border-b border-gray-50 last:border-0 hover:bg-blue-50/30">
                       <td data-label="Product" className="px-4 py-2.5 font-medium text-gray-900">
                         <button onClick={() => setDetailRow(r)} className="inline-flex items-center gap-2 text-left hover:text-blue-600 group/name">
-                          <span className="group-hover/name:underline">{r.group_name || 'Unspecified'}</span>
+                          <span className="group-hover/name:underline max-w-[16rem] truncate" title={r.group_name || 'Unspecified'}>{r.group_name || 'Unspecified'}</span>
                           {r.isLow && <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-100 text-red-700 inline-flex items-center gap-0.5"><AlertTriangle size={10} /> LOW</span>}
                         </button>
                       </td>
@@ -193,10 +197,11 @@ export default function StockSummary() {
                             <input autoFocus type="number" step="1" min="0" value={editVal} onChange={(e) => setEditVal(e.target.value)}
                               onKeyDown={(e) => { if (e.key === 'Enter') commitEdit(r); if (e.key === 'Escape') setEditId(null); }}
                               placeholder="kg"
+                              aria-label="Reorder level (kg)"
                               className="w-24 border border-blue-400 rounded px-1.5 py-0.5 text-right text-xs" />
                             <span className="text-[11px] text-gray-400">kg</span>
-                            <button onClick={() => commitEdit(r)} className="text-emerald-600 hover:text-emerald-800"><Check size={14} /></button>
-                            <button onClick={() => setEditId(null)} className="text-gray-400 hover:text-gray-600"><X size={14} /></button>
+                            <button onClick={() => commitEdit(r)} title="Save" aria-label="Save reorder level" className="text-emerald-600 hover:text-emerald-800"><Check size={14} aria-hidden="true" /></button>
+                            <button onClick={() => setEditId(null)} title="Cancel" aria-label="Cancel editing reorder level" className="text-gray-400 hover:text-gray-600"><X size={14} aria-hidden="true" /></button>
                           </span>
                         ) : (
                           <button onClick={() => beginEdit(r)} title="Set a minimum — you'll be warned when on-hand drops below it"
@@ -227,7 +232,7 @@ export default function StockSummary() {
                         );
                       })()}
                       <td className="px-4 py-2.5 text-right">
-                        <button onClick={() => setDetailRow(r)} title="See what's in stock"><ArrowRight className="w-4 h-4 text-gray-300 hover:text-blue-500 inline" /></button>
+                        <button onClick={() => setDetailRow(r)} title="See what's in stock" aria-label={`See what's in stock of ${r.group_name || 'Unspecified'}`}><ArrowRight className="w-4 h-4 text-gray-300 hover:text-blue-500 inline" aria-hidden="true" /></button>
                       </td>
                     </tr>
                   );
@@ -273,12 +278,6 @@ export default function StockSummary() {
   );
 }
 
-const LOT_STATUS_STYLE = {
-  Available: 'bg-emerald-100 text-emerald-700',
-  Reserved: 'bg-amber-100 text-amber-700',
-  Depleted: 'bg-gray-100 text-gray-500',
-  Sold: 'bg-gray-100 text-gray-500',
-};
 
 // Drill-down: every stock batch (lot) sitting behind a product, so "what's in
 // stock of this heading" is one click away — without leaving the summary.
@@ -304,24 +303,21 @@ function ProductStockDrawer({ row, showCost, entity, status, onClose, onOpenLot 
 
   const onHandKg = lotOnHandKg; // qty is KG (Phase 5c)
 
-  return (
-    <div className="fixed inset-0 z-50 flex justify-end">
-      <div className="absolute inset-0 bg-black/30" onClick={onClose} />
-      <div className="relative bg-white h-full shadow-xl flex flex-col w-full max-w-xl">
-        <div className="flex items-start justify-between px-5 py-4 border-b border-gray-200">
-          <div>
-            <h2 className="font-semibold text-gray-900 flex items-center gap-2">
-              <Boxes size={17} className="text-blue-600" /> {row.group_name || 'Unspecified'}
-            </h2>
-            <p className="text-xs text-gray-500 mt-0.5">
-              {fmtMT(row.total_kg)} on hand · {fmtMT(row.available_kg)} free to sell
-              {n(row.milling_reserved_kg) > 0 && <> · {fmtMT(row.milling_reserved_kg)} reserved for milling</>}{showCost ? ` · ${fmtPKR(row.total_value)}` : ''}
-            </p>
-          </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
-        </div>
+  const subtitle = `${fmtMT(row.total_kg)} on hand · ${fmtMT(row.available_kg)} free to sell`
+    + (n(row.milling_reserved_kg) > 0 ? ` · ${fmtMT(row.milling_reserved_kg)} reserved for milling` : '')
+    + (showCost ? ` · ${fmtPKR(row.total_value)}` : '');
+  const footer = (
+    <div className="text-[11px] text-gray-400 leading-relaxed">
+      <span className="font-medium text-gray-500">Free</span> = ready to sell ·
+      <span className="font-medium text-gray-500"> Committed</span> = reserved for an export order (plus any kg held for a started milling batch) ·
+      {showCost && <><span className="font-medium text-gray-500"> Value</span> = on-hand × cost/kg.</>} Tap any batch for its full lot detail.
+    </div>
+  );
 
-        <div className="flex-1 overflow-y-auto p-5 space-y-2">
+  // Detail panel (no form), so a backdrop click still closes it as before.
+  return (
+    <SlideDrawer open onClose={onClose} title={row.group_name || 'Unspecified'} subtitle={subtitle} icon={Boxes} size="xl" footer={footer} closeOnBackdrop>
+        <div className="space-y-2">
           {isLoading ? (
             <p className="text-sm text-gray-400 py-12 text-center">Loading stock batches…</p>
           ) : lots.length === 0 ? (
@@ -340,12 +336,12 @@ function ProductStockDrawer({ row, showCost, entity, status, onClose, onOpenLot 
                   className="w-full text-left border border-gray-200 rounded-lg p-3 hover:border-blue-400 hover:bg-blue-50/30 transition-colors">
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-medium text-gray-900 text-sm truncate">{l.lot_no || `Lot ${l.id}`}</span>
-                    <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium shrink-0 ${LOT_STATUS_STYLE[l.status] || 'bg-gray-100 text-gray-600'}`}>{l.status || '—'}</span>
+                    <span className="shrink-0"><StatusBadge status={l.status || '—'} /></span>
                   </div>
                   <div className="text-[11px] text-gray-500 mt-0.5 flex flex-wrap gap-x-2">
                     {(l.variety || l.grade) && <span>{[l.variety, l.grade].filter(Boolean).join(' · ')}</span>}
                     <span className="capitalize">{l.entity || 'mill'}{l.warehouse_name ? ` · ${l.warehouse_name}` : ''}</span>
-                    {l.supplier_name && <span>· {l.supplier_name}</span>}
+                    {l.supplier_name && <span className="max-w-[14rem] truncate" title={l.supplier_name}>· {l.supplier_name}</span>}
                   </div>
                   <div className={`grid ${showCost ? 'grid-cols-4' : 'grid-cols-3'} gap-2 mt-2 text-xs`}>
                     <Stat label="On hand" value={fmtMT(onHand)} sub={unitsLabel || null} />
@@ -355,24 +351,17 @@ function ProductStockDrawer({ row, showCost, entity, status, onClose, onOpenLot 
                     {showCost && <Stat label="Value" value={fmtPKR(value)} align="right" />}
                   </div>
                   <div className="mt-2 pt-2 border-t border-gray-100 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-gray-500">
-                    {showCost && <span>Cost <span className="font-medium text-gray-700">Rs {(perKg).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/kg</span></span>}
+                    {showCost && <span>Cost <span className="font-medium text-gray-700">{fmtPKR(perKg)}/kg</span></span>}
                     {receivedKg > 0 && <span>Intake {fmtMTnum(receivedKg / 1000)} <span className="text-gray-400">({fmtMTnum(usedKg / 1000)} used)</span></span>}
                     {l.batch_ref && <span>Batch {l.batch_ref}</span>}
-                    {l.created_at && <span>Added {String(l.created_at).slice(0, 10)}</span>}
+                    {l.created_at && <span>Added {fmtDate(l.created_at)}</span>}
                   </div>
                 </button>
               );
             })
           )}
         </div>
-
-        <div className="border-t border-gray-200 px-5 py-2.5 text-[11px] text-gray-400 leading-relaxed">
-          <span className="font-medium text-gray-500">Free</span> = ready to sell ·
-          <span className="font-medium text-gray-500"> Committed</span> = reserved for an export order (plus any kg held for a started milling batch) ·
-          {showCost && <><span className="font-medium text-gray-500"> Value</span> = on-hand × cost/kg.</>} Tap any batch for its full lot detail.
-        </div>
-      </div>
-    </div>
+    </SlideDrawer>
   );
 }
 

@@ -9,10 +9,11 @@ import { ArrowLeft, Printer, Truck, Package, BookUser, AlertTriangle, ShoppingCa
 import { lotInventoryApi } from '../../../api/services';
 import { useApp } from '../../../context/AppContext';
 import { printPurchaseInvoice } from '../../localSales/utils/invoicePrint';
+import StatusBadge from '../../../shared/components/StatusBadge';
+import { fmtPKR, fmtDate, fmtNum, fmtPct } from '../../../shared/utils/format';
 
-const pkr = (v) => `Rs ${(parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const dt = (v) => v ? new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
-const STATUS_TONE = { Paid: 'bg-emerald-100 text-emerald-700', Partial: 'bg-amber-100 text-amber-700', Unpaid: 'bg-red-100 text-red-700', Pending: 'bg-red-100 text-red-700' };
+const pkr = (v) => fmtPKR(parseFloat(v) || 0, { decimals: 2 });
+const dt = (v) => (v ? fmtDate(v) : '—');
 
 export default function PurchaseInvoiceView() {
   const { id } = useParams();
@@ -57,7 +58,7 @@ export default function PurchaseInvoiceView() {
           <button onClick={() => navigate(-1)} className="text-blue-600 hover:underline inline-flex items-center gap-1 text-sm mb-1"><ArrowLeft size={14} /> Back</button>
           <h1 className="text-2xl font-bold text-gray-900 inline-flex items-center gap-2">
             <ShoppingCart size={20} /> Purchase {p.purchaseNo}
-            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_TONE[p.paymentStatus] || 'bg-gray-100 text-gray-600'}`}>{p.paymentStatus || '—'}</span>
+            <StatusBadge status={p.paymentStatus || '—'} />
           </h1>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -94,8 +95,8 @@ export default function PurchaseInvoiceView() {
             <tbody className="divide-y divide-gray-100">
               <tr>
                 <td className="px-4 py-2">{p.riceType}</td><td className="px-4 py-2">{p.grade || '—'}</td>
-                <td className="px-4 py-2 text-right tabular-nums">{Math.round(p.quantityKg).toLocaleString()} kg<div className="text-[11px] text-gray-400">{(p.quantityMt || 0).toFixed(2)} MT</div></td>
-                <td className="px-4 py-2 text-right tabular-nums">{p.bags != null ? p.bags.toLocaleString() : '—'}</td>
+                <td className="px-4 py-2 text-right tabular-nums">{fmtNum(Math.round(p.quantityKg))} kg<div className="text-[11px] text-gray-400">{fmtNum(p.quantityMt || 0, 2)} MT</div></td>
+                <td className="px-4 py-2 text-right tabular-nums">{p.bags != null ? fmtNum(p.bags) : '—'}</td>
                 <td className="px-4 py-2 text-right tabular-nums">{p.ratePerKg > 0 ? pkr(p.ratePerKg) : '—'}</td>
                 <td className="px-4 py-2 text-right tabular-nums">{pkr(p.amount)}</td>
               </tr>
@@ -119,7 +120,7 @@ export default function PurchaseInvoiceView() {
         <h3 className="text-sm font-semibold text-gray-700 mb-3 inline-flex items-center gap-1.5"><Truck size={15} /> Inbound (purchase) vehicles</h3>
         <div className="flex flex-wrap gap-2 text-xs">
           {intakeVehicles.length > 0
-            ? intakeVehicles.map((v, i) => <Chip key={i}>Truck {v.vehicleNo}{v.gatePassNo ? ` · GP ${v.gatePassNo}` : ''}{v.driverName ? ` · ${v.driverName}` : ''}{v.haulerName ? ` · ${v.haulerName}` : ''}{v.weightKg ? ` · ${Math.round(v.weightKg).toLocaleString()} kg` : ''}{v.totalBags ? ` · ${v.totalBags} bags` : ''}{v.arrivalDate ? ` · ${dt(v.arrivalDate)}` : ''}</Chip>)
+            ? intakeVehicles.map((v, i) => <Chip key={i}>Truck {v.vehicleNo}{v.gatePassNo ? ` · GP ${v.gatePassNo}` : ''}{v.driverName ? ` · ${v.driverName}` : ''}{v.haulerName ? ` · ${v.haulerName}` : ''}{v.weightKg ? ` · ${fmtNum(Math.round(v.weightKg))} kg` : ''}{v.totalBags ? ` · ${v.totalBags} bags` : ''}{v.arrivalDate ? ` · ${dt(v.arrivalDate)}` : ''}</Chip>)
             : <span className="text-gray-400">No intake vehicle recorded for this lot.</span>}
         </div>
       </div>
@@ -136,7 +137,7 @@ export default function PurchaseInvoiceView() {
               <div className="px-4 pt-3 flex items-center justify-between flex-wrap gap-2">
                 {/* TODO(backend): lotInventory.controller producedByproducts does not yet include batchName;
                   add batch_name so the ` (name)` suffix renders. */}
-              <Link to={bp.batchHref} className="text-sm font-medium text-blue-600 hover:underline">Batch {bp.batchNo}{bp.batchName ? ` (${bp.batchName})` : ''}{bp.sharePct < 99.5 ? ` · ${bp.sharePct.toFixed(0)}% of this lot` : ''}</Link>
+              <Link to={bp.batchHref} className="text-sm font-medium text-blue-600 hover:underline">Batch {bp.batchNo}{bp.batchName ? ` (${bp.batchName})` : ''}{bp.sharePct < 99.5 ? ` · ${fmtPct(bp.sharePct, { decimals: 0 })} of this lot` : ''}</Link>
                 {bp.byproductRecovery > 0 && <span className="text-xs text-emerald-700">By-product recovery {pkr(bp.byproductRecovery)}</span>}
               </div>
               <div className="overflow-x-auto">
@@ -157,7 +158,7 @@ export default function PurchaseInvoiceView() {
                       <tr key={o.lotId}>
                         <td className="px-4 py-2"><Link to={o.href} className="text-blue-600 hover:underline">{o.productGrade}</Link></td>
                         <td className="px-4 py-2 text-gray-600">{o.type === 'byproduct' ? 'by-product' : 'finished'}</td>
-                        <td className="px-4 py-2 text-right tabular-nums">{Math.round(o.producedKg).toLocaleString()} kg</td>
+                        <td className="px-4 py-2 text-right tabular-nums">{fmtNum(Math.round(o.producedKg))} kg</td>
                         <td className="px-4 py-2 text-right tabular-nums">{o.costPerKg ? pkr(o.costPerKg) : '—'}</td>
                         <td className="px-4 py-2 text-right tabular-nums">{o.salePricePerKg ? pkr(o.salePricePerKg) : '—'}</td>
                         <td className="px-4 py-2 text-right tabular-nums">{o.recoveryValue ? pkr(o.recoveryValue) : '—'}</td>

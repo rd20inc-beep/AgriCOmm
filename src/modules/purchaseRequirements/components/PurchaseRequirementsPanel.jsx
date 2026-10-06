@@ -4,14 +4,11 @@ import { purchaseRequirementsApi } from '../api/services';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import NewPurchaseDrawer from '../../../components/NewPurchaseDrawer';
+import StatusBadge from '../../../shared/components/StatusBadge';
+import { fmtMoney, fmtNum } from '../../../shared/utils/format';
 
-const STATUS_TONE = {
-  pending: 'bg-amber-100 text-amber-700',
-  approved: 'bg-blue-100 text-blue-700',
-  purchased: 'bg-emerald-100 text-emerald-700',
-  rejected: 'bg-gray-100 text-gray-500',
-  cancelled: 'bg-gray-100 text-gray-500',
-};
+// API statuses are lower-case; StatusBadge keys are Title Case.
+const statusLabel = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : '—');
 const TABS = ['pending', 'approved', 'purchased', 'all'];
 
 // Shared Purchase Requirements list + actions. Used both as the standalone page
@@ -40,6 +37,9 @@ export default function PurchaseRequirementsPanel({ embedded = false, defaultTab
   const [rows, setRows] = useState([]);
   const [masked, setMasked] = useState(false);
   const [loading, setLoading] = useState(true);
+  // Row id with an action in flight — its buttons are disabled so a double
+  // click can't approve / reject / mark purchased twice.
+  const [busyId, setBusyId] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -54,11 +54,14 @@ export default function PurchaseRequirementsPanel({ embedded = false, defaultTab
   useEffect(() => { load(); }, [load]);
 
   async function act(fn, id, ok) {
+    if (busyId) return;
+    setBusyId(id);
     try { await fn(id); addToast?.(ok); await load(); }
     catch (e) { addToast?.(e?.response?.data?.message || e.message || 'Action failed', 'error'); }
+    finally { setBusyId(null); }
   }
 
-  const money = (v, c) => (v != null ? `${c || 'PKR'} ${(parseFloat(v)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—');
+  const money = (v, c) => (v != null ? fmtMoney(v, c || 'PKR', { decimals: 2 }) : '—');
   const subtitle = masked ? 'Approved material purchase requests awaiting payment.' : 'Material shortages requiring purchase — approve to send to Finance.';
 
   const header = embedded ? (
@@ -102,25 +105,25 @@ export default function PurchaseRequirementsPanel({ embedded = false, defaultTab
           ) : rows.map((r) => (
             <tr key={r.id} className="hover:bg-gray-50">
               <td data-label="PR #" className="px-4 py-2.5 font-medium text-gray-800">{r.pr_no}</td>
-              <td data-label="Item" className="px-4 py-2.5 text-gray-700">{r.item_name}</td>
-              <td data-label="Shortage" className="px-4 py-2.5 text-right tabular-nums">{Math.round(parseFloat(r.shortage_qty) || 0).toLocaleString()} {r.unit}</td>
+              <td data-label="Item" className="px-4 py-2.5 text-gray-700 max-w-[16rem] truncate" title={r.item_name || undefined}>{r.item_name}</td>
+              <td data-label="Shortage" className="px-4 py-2.5 text-right tabular-nums">{fmtNum(Math.round(parseFloat(r.shortage_qty) || 0))} {r.unit}</td>
               <td data-label="Est. Amount" className="px-4 py-2.5 text-right tabular-nums">{money(r.est_amount, r.currency)}</td>
               {!masked && <td data-label="Department" className="mob-hide px-4 py-2.5 text-gray-500">{r.department}</td>}
               {!masked && <td data-label="Ref" className="mob-hide px-4 py-2.5 text-gray-500">{r.linked_ref || '—'}</td>}
-              <td data-label="Status" className="px-4 py-2.5 text-center"><span className={`px-2 py-0.5 rounded text-[11px] font-semibold capitalize ${STATUS_TONE[r.status] || 'bg-gray-100 text-gray-500'}`}>{r.status}</span></td>
+              <td data-label="Status" className="px-4 py-2.5 text-center"><StatusBadge status={statusLabel(r.status)} /></td>
               <td data-label="Actions" className="px-4 py-2.5">
                 <div className="flex items-center justify-end gap-1.5">
                   {r.status === 'pending' && canApprove && (
                     <>
-                      <button onClick={() => act(purchaseRequirementsApi.approve, r.id, 'Approved — sent to Finance')} className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-white bg-emerald-600 rounded hover:bg-emerald-700"><Check size={13} /> Approve</button>
-                      <button onClick={() => { setRejecting(r.id); setRejectReason(''); }} className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-red-600 bg-red-50 rounded hover:bg-red-100"><X size={13} /> Reject</button>
+                      <button disabled={busyId === r.id} onClick={() => act(purchaseRequirementsApi.approve, r.id, 'Approved — sent to Finance')} className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-white bg-emerald-600 rounded hover:bg-emerald-700 disabled:opacity-50"><Check size={13} /> Approve</button>
+                      <button disabled={busyId === r.id} onClick={() => { setRejecting(r.id); setRejectReason(''); }} className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-red-600 bg-red-50 rounded hover:bg-red-100 disabled:opacity-50"><X size={13} /> Reject</button>
                     </>
                   )}
                   {r.status === 'approved' && canPurchase && (
                     r.item_id && canRecordStorePurchase ? (
                       <button onClick={() => setPurchaseFor(r)} title="Record the store purchase — closes this requirement" className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-blue-700 bg-blue-50 rounded hover:bg-blue-100"><CheckCircle2 size={13} /> Mark Purchased</button>
                     ) : (
-                      <button onClick={() => act(purchaseRequirementsApi.markPurchased, r.id, 'Marked purchased')} className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-blue-700 bg-blue-50 rounded hover:bg-blue-100"><CheckCircle2 size={13} /> Mark Purchased</button>
+                      <button disabled={busyId === r.id} onClick={() => act(purchaseRequirementsApi.markPurchased, r.id, 'Marked purchased')} className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-blue-700 bg-blue-50 rounded hover:bg-blue-100 disabled:opacity-50"><CheckCircle2 size={13} /> Mark Purchased</button>
                     )
                   )}
                 </div>
@@ -132,10 +135,11 @@ export default function PurchaseRequirementsPanel({ embedded = false, defaultTab
                       onChange={(e) => setRejectReason(e.target.value)}
                       onKeyDown={(e) => { if (e.key === 'Escape') setRejecting(null); }}
                       placeholder="Reason for rejecting…"
+                      aria-label="Reason for rejecting"
                       className="w-56 px-2 py-1 text-xs border border-gray-300 rounded focus:ring-2 focus:ring-red-200 focus:border-red-400"
                     />
                     <button
-                      disabled={!rejectReason.trim()}
+                      disabled={!rejectReason.trim() || busyId === r.id}
                       onClick={async () => {
                         await act((id) => purchaseRequirementsApi.reject(id, { reason: rejectReason.trim() }), r.id, 'Rejected');
                         setRejecting(null);

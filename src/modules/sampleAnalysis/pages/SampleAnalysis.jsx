@@ -6,14 +6,16 @@ import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { FlaskConical, Plus, Search, GitCompare, Trash2, ArrowRight, X, Pencil, Check } from 'lucide-react';
 import SlideDrawer from '../../../components/SlideDrawer';
-import Modal from '../../../components/Modal';
+import StatusBadge from '../../../shared/components/StatusBadge';
+import FieldError from '../../../shared/components/FieldError';
+import useConfirm from '../../../hooks/useConfirm';
 import SupplierPicker from '../../../components/SupplierPicker';
 import RiceTypePicker from '../../../components/RiceTypePicker';
 import { useSuppliers, useProducts } from '../../../api/queries';
 import { useApp } from '../../../context/AppContext';
 import { sampleApi } from '../api/services';
 import { documentsApi } from '../../documents/api/services';
-import { todayLocalISO } from '../../../shared/utils/format';
+import { todayLocalISO, fmtKg, fmtPKR, fmtNum, fmtDate } from '../../../shared/utils/format';
 
 const ANALYSIS_FIELDS = [
   { k: 'moisture', l: 'Moisture %' }, { k: 'broken', l: 'Broken %' }, { k: 'foreign_matter', l: 'Foreign Matter %' },
@@ -34,12 +36,13 @@ const STATUS_CLS = {
   'Approved for Purchase': 'bg-emerald-50 text-emerald-700 border-emerald-200',
   'Converted': 'bg-gray-100 text-gray-500 border-gray-200',
 };
-const kg = (v) => (v == null ? '—' : `${Math.round(parseFloat(v) || 0).toLocaleString()} kg`);
-const rs = (v) => (v == null ? '—' : `Rs ${(parseFloat(v) || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}`);
+const kg = (v) => (v == null ? '—' : fmtKg(Math.round(parseFloat(v) || 0)));
+const rs = (v) => (v == null ? '—' : fmtPKR(parseFloat(v) || 0, { decimals: 2 }));
 
 export default function SampleAnalysis() {
   const { addToast } = useApp();
   const qc = useQueryClient();
+  const [confirm, confirmDialog] = useConfirm();
   const [tab, setTab] = useState('All');
   const [search, setSearch] = useState('');
   const [drawer, setDrawer] = useState(null); // { mode:'create'|'analyze'|'convert', sample }
@@ -123,7 +126,7 @@ export default function SampleAnalysis() {
         </div>
         <div className="relative flex-1 min-w-[12rem] max-w-xs">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search sample, supplier, variety…" className="w-full border border-gray-300 rounded-lg pl-8 pr-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search sample, supplier, variety…" aria-label="Search samples" className="w-full border border-gray-300 rounded-lg pl-8 pr-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
         </div>
       </div>
 
@@ -152,7 +155,7 @@ export default function SampleAnalysis() {
                   const editable = s.status !== 'Converted';
                   return (
                     <tr key={s.id} className="hover:bg-gray-50">
-                      <td data-label="" className="mob-hide px-2 py-2 text-center"><input type="checkbox" checked={selected.has(s.id)} onChange={() => toggleSel(s.id)} /></td>
+                      <td data-label="" className="mob-hide px-2 py-2 text-center"><input type="checkbox" checked={selected.has(s.id)} onChange={() => toggleSel(s.id)} aria-label={`Select ${s.sample_no} to compare`} /></td>
                       <td data-label="Sample" className="px-3 py-2">
                         {renaming?.id === s.id ? (
                           <span className="flex items-center gap-1">
@@ -162,40 +165,51 @@ export default function SampleAnalysis() {
                                 if (e.key === 'Enter') renameMut.mutate({ id: s.id, sampleNo: renaming.value });
                                 if (e.key === 'Escape') setRenaming(null);
                               }}
+                              aria-label="Sample ID"
                               className="font-mono text-xs border border-blue-300 rounded px-1.5 py-0.5 w-44" />
                             <button onClick={() => renameMut.mutate({ id: s.id, sampleNo: renaming.value })}
                               disabled={renameMut.isPending}
-                              className="text-emerald-600 hover:text-emerald-700" title="Save"><Check size={13} /></button>
-                            <button onClick={() => setRenaming(null)} className="text-gray-400 hover:text-gray-600" title="Cancel"><X size={13} /></button>
+                              className="text-emerald-600 hover:text-emerald-700" title="Save" aria-label="Save sample ID"><Check size={13} aria-hidden="true" /></button>
+                            <button onClick={() => setRenaming(null)} className="text-gray-400 hover:text-gray-600" title="Cancel" aria-label="Cancel renaming"><X size={13} aria-hidden="true" /></button>
                           </span>
                         ) : (
                           <span className="flex items-center gap-1">
                             <button onClick={() => setDrawer({ mode: 'analyze', sample: s })} className="font-mono text-blue-600 hover:underline">{s.sample_no}</button>
                             {editable && (
                               <button onClick={() => setRenaming({ id: s.id, value: s.sample_no })}
-                                className="text-gray-300 hover:text-blue-600" title="Edit this sample ID"><Pencil size={11} /></button>
+                                className="text-gray-300 hover:text-blue-600" title="Edit this sample ID" aria-label="Edit this sample ID"><Pencil size={11} aria-hidden="true" /></button>
                             )}
                           </span>
                         )}
-                        <div className="text-[11px] text-gray-400">{String(s.sample_date).slice(0, 10)}</div>
+                        <div className="text-[11px] text-gray-400">{s.sample_date ? fmtDate(String(s.sample_date).slice(0, 10)) : '—'}</div>
                       </td>
                       <td data-label="Supplier" className="mob-hide px-3 py-2 text-gray-700 max-w-[10rem] truncate" title={s.supplier_name || ''}>{s.supplier_name || '—'}</td>
-                      <td data-label="Variety / Grade" className="px-3 py-2 text-gray-700">{s.variety || s.product_name || '—'}{s.claimed_grade ? <span className="text-gray-400"> ({s.claimed_grade})</span> : ''}</td>
+                      <td data-label="Variety / Grade" className="px-3 py-2 text-gray-700 max-w-[14rem] truncate" title={`${s.variety || s.product_name || ''}${s.claimed_grade ? ` (${s.claimed_grade})` : ''}` || undefined}>{s.variety || s.product_name || '—'}{s.claimed_grade ? <span className="text-gray-400"> ({s.claimed_grade})</span> : ''}</td>
                       <td data-label="Offered" className="px-3 py-2 text-right tabular-nums">{kg(s.offered_qty_kg)}<div className="text-[11px] text-gray-400">{rs(s.offered_rate_per_kg)}/kg</div></td>
                       <td data-label="Exp. Finished" className="mob-hide px-3 py-2 text-right tabular-nums">{kg(m.expectedFinishedKg)}<div className="text-[11px] text-gray-400">{m.expectedFinishedPct ?? '—'}%</div></td>
                       <td data-label="Exp. Cost/kg" className="mob-hide px-3 py-2 text-right tabular-nums font-medium">{rs(m.expectedCostPerFinishedKg)}</td>
                       <td data-label="Status" className="px-3 py-2 text-center">
                         {editable ? (
-                          <select value={s.status} onChange={(e) => statusMut.mutate({ id: s.id, status: e.target.value })} className={`text-[11px] font-medium border rounded-full px-2 py-0.5 cursor-pointer ${STATUS_CLS[s.status] || ''}`}>
+                          <select value={s.status} disabled={statusMut.isPending} aria-label={`Status of ${s.sample_no}`} onChange={(e) => statusMut.mutate({ id: s.id, status: e.target.value })} className={`text-[11px] font-medium border rounded-full px-2 py-0.5 cursor-pointer ${STATUS_CLS[s.status] || ''}`}>
                             {SHORTLIST.map((st) => <option key={st} value={st}>{st}</option>)}
                           </select>
-                        ) : <span className={`inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium border ${STATUS_CLS[s.status]}`}>{s.status}</span>}
+                        ) : <StatusBadge status={s.status} />}
                       </td>
                       <td data-label="Actions" className="px-3 py-2 text-right whitespace-nowrap">
                         {editable && <button onClick={() => setDrawer({ mode: 'analyze', sample: s })} className="text-xs text-blue-600 hover:underline mr-2">Analyze</button>}
                         {canConvert && <button onClick={() => setDrawer({ mode: 'convert', sample: s })} className="text-xs font-medium text-emerald-700 hover:underline mr-2 inline-flex items-center gap-0.5">Convert <ArrowRight size={11} /></button>}
                         {s.converted_lot_no && <Link to={`/lot-inventory/${s.converted_lot_id}`} className="text-xs text-gray-500 hover:underline mr-2">{s.converted_lot_no}</Link>}
-                        {editable && <button onClick={() => { if (window.confirm(`Delete ${s.sample_no}?`)) deleteMut.mutate(s.id); }} className="text-gray-300 hover:text-red-500"><Trash2 size={13} /></button>}
+                        {editable && (
+                          <button
+                            disabled={deleteMut.isPending}
+                            onClick={async () => {
+                              const ok = await confirm({ title: `Delete ${s.sample_no}?`, consequence: 'The sample and its analysis are removed.', confirmLabel: 'Delete' });
+                              if (ok) deleteMut.mutate(s.id);
+                            }}
+                            title={`Delete ${s.sample_no}`}
+                            aria-label={`Delete ${s.sample_no}`}
+                            className="text-gray-300 hover:text-red-500 disabled:opacity-50"><Trash2 size={13} aria-hidden="true" /></button>
+                        )}
                       </td>
                     </tr>
                   );
@@ -209,6 +223,7 @@ export default function SampleAnalysis() {
       {drawer?.mode === 'analyze' && <AnalysisDrawer sampleId={drawer.sample.id} onClose={() => setDrawer(null)} onDone={() => { setDrawer(null); invalidate(); }} addToast={addToast} />}
       {drawer?.mode === 'convert' && <ConvertDrawer sample={drawer.sample} onClose={() => setDrawer(null)} onDone={() => { setDrawer(null); invalidate(); }} addToast={addToast} />}
       {compareOpen && <CompareModal ids={[...selected]} onClose={() => setCompareOpen(false)} />}
+      {confirmDialog}
     </div>
   );
 }
@@ -222,8 +237,14 @@ function Kpi({ label, value, tone }) {
   );
 }
 
-function Field({ label, children }) {
-  return <div><label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>{children}</div>;
+function Field({ label, required, error, children }) {
+  return (
+    <div>
+      <label className="block text-sm font-medium text-gray-700 mb-1">{label}{required && <> <span className="text-red-500">*</span></>}</label>
+      {children}
+      <FieldError error={error} />
+    </div>
+  );
 }
 function QualityGrid({ values, onChange }) {
   return (
@@ -280,8 +301,8 @@ function SampleDrawer({ onClose, onDone, addToast }) {
               placeholder="auto — supplier, variety & date" />
             <p className="text-[11px] text-gray-400 mt-0.5">Leave blank to number it like the lot it will become, e.g. SHAP-1121BASM-260926-01</p>
           </Field>
-          <Field label="Supplier"><SupplierPicker value={form.supplier_id} onChange={(v) => set('supplier_id', v)} suppliers={suppliers} addToast={addToast} /></Field>
-          <Field label="Rice Type"><RiceTypePicker value={form.product_id} onChange={(v) => set('product_id', v)} products={products} addToast={addToast} /></Field>
+          <Field label="Supplier" required><SupplierPicker value={form.supplier_id} onChange={(v) => set('supplier_id', v)} suppliers={suppliers} addToast={addToast} /></Field>
+          <Field label="Rice Type" required error={form.supplier_id && !form.variety && !form.product_id ? 'Pick a rice type or enter a variety' : null}><RiceTypePicker value={form.product_id} onChange={(v) => set('product_id', v)} products={products} addToast={addToast} /></Field>
           <Field label="Variety"><input value={form.variety} onChange={(e) => set('variety', e.target.value)} className="form-input" placeholder="e.g. 1121 Basmati" /></Field>
           <Field label="Claimed Grade"><input value={form.claimed_grade} onChange={(e) => set('claimed_grade', e.target.value)} className="form-input" /></Field>
           <Field label="Origin / Area"><input value={form.origin_area} onChange={(e) => set('origin_area', e.target.value)} className="form-input" /></Field>
@@ -349,7 +370,7 @@ function AnalysisDrawer({ sampleId, onClose, onDone, addToast }) {
                     {ANALYSIS_FIELDS.filter((f) => initial[f.k] != null || final[f.k] != null).map((f) => {
                       const i = parseFloat(initial[f.k]); const fi = parseFloat(final[f.k]);
                       const d = (Number.isFinite(fi) ? fi : 0) - (Number.isFinite(i) ? i : 0);
-                      return <tr key={f.k} className="border-t border-gray-100"><td data-label="Δ" data-label="Final" data-label="Initial" data-label="Field" className="py-1 text-gray-600">{f.l}</td><td className="text-right tabular-nums">{initial[f.k] ?? '—'}</td><td className="text-right tabular-nums">{final[f.k] ?? '—'}</td><td className={`text-right tabular-nums font-medium ${d > 0 ? 'text-red-600' : d < 0 ? 'text-emerald-600' : 'text-gray-400'}`}>{d ? (d > 0 ? '+' : '') + d.toFixed(2) : '—'}</td></tr>;
+                      return <tr key={f.k} className="border-t border-gray-100"><td data-label="Field" className="py-1 text-gray-600">{f.l}</td><td data-label="Initial" className="text-right tabular-nums">{initial[f.k] ?? '—'}</td><td data-label="Final" className="text-right tabular-nums">{final[f.k] ?? '—'}</td><td data-label="Δ" className={`text-right tabular-nums font-medium ${d > 0 ? 'text-red-600' : d < 0 ? 'text-emerald-600' : 'text-gray-400'}`}>{d ? (d > 0 ? '+' : '') + fmtNum(d, 2) : '—'}</td></tr>;
                     })}
                   </tbody>
                 </table>
@@ -381,12 +402,12 @@ function ConvertDrawer({ sample, onClose, onDone, addToast }) {
     <SlideDrawer open onClose={onClose} title={`Convert ${sample.sample_no}`} subtitle="Stage 5 — create a purchase lot from this sample" icon={ArrowRight} footer={footer} size="md">
       <div className="space-y-4">
         <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-sm space-y-1">
-          <div className="flex justify-between"><span className="text-gray-500">Supplier</span><span className="font-medium">{sample.supplier_name || '—'}</span></div>
+          <div className="flex justify-between gap-2"><span className="text-gray-500">Supplier</span><span className="font-medium truncate" title={sample.supplier_name || undefined}>{sample.supplier_name || '—'}</span></div>
           <div className="flex justify-between"><span className="text-gray-500">Variety / Grade</span><span className="font-medium">{sample.variety || sample.product_name || '—'} {sample.claimed_grade ? `(${sample.claimed_grade})` : ''}</span></div>
           <p className="text-[11px] text-gray-400 pt-1">Supplier, variety, grade and the analysis carry forward automatically. The lot links back to this sample.</p>
         </div>
-        <Field label="Quantity (kg)"><input type="number" value={form.qty_kg} onChange={(e) => set('qty_kg', e.target.value)} className="form-input" /></Field>
-        <Field label="Rate (Rs/kg)"><input type="number" value={form.rate_per_kg} onChange={(e) => set('rate_per_kg', e.target.value)} className="form-input" /></Field>
+        <Field label="Quantity (kg)" required error={form.qty_kg !== '' && !(parseFloat(form.qty_kg) > 0) ? 'Enter a quantity greater than zero' : null}><input type="number" value={form.qty_kg} onChange={(e) => set('qty_kg', e.target.value)} className="form-input" /></Field>
+        <Field label="Rate (Rs/kg)" required error={form.rate_per_kg !== '' && !(parseFloat(form.rate_per_kg) > 0) ? 'Enter a rate greater than zero' : null}><input type="number" value={form.rate_per_kg} onChange={(e) => set('rate_per_kg', e.target.value)} className="form-input" /></Field>
       </div>
     </SlideDrawer>
   );
@@ -396,7 +417,7 @@ function CompareModal({ ids, onClose }) {
   const { data } = useQuery({ queryKey: ['samples', 'compare', ids], queryFn: async () => (await sampleApi.compare(ids))?.data });
   const samples = data?.samples || [];
   return (
-    <Modal isOpen onClose={onClose} title={`Compare ${samples.length} Samples`} size="xl">
+    <SlideDrawer open onClose={onClose} title={`Compare ${samples.length} Samples`} icon={GitCompare} size="4xl">
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead><tr className="text-gray-400 text-xs"><th className="text-left py-2">Metric</th>{samples.map((s) => <th key={s.id} className="text-right px-2 py-2 font-medium text-gray-700">{s.sample_no}</th>)}</tr></thead>
@@ -416,7 +437,7 @@ function CompareModal({ ids, onClose }) {
           </tbody>
         </table>
       </div>
-    </Modal>
+    </SlideDrawer>
   );
 }
 function Row({ label, samples, f, bold }) {

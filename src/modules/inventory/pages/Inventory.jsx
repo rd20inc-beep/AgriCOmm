@@ -7,6 +7,7 @@ import StatusBadge from '../../../components/StatusBadge';
 import PartyLink from '../../../shared/components/PartyLink';
 import { fromKg, UNITS } from '../../../shared/utils/unitConversion';
 import useCanSeeCost from '../../../hooks/useCanSeeCost';
+import { fmtPKR as fmtPKRBase, fmtNum } from '../../../shared/utils/format';
 
 const tabs = [
   { key: 'all', label: 'All Stock', icon: Package },
@@ -16,7 +17,9 @@ const tabs = [
   { key: 'packaging', label: 'Bags/Packaging', icon: Box },
 ];
 
-function fmtPKR(v) { return 'Rs ' + (parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+const fmtPKR = (v) => fmtPKRBase(v, { decimals: 2 });
+// Hero/summary tonnage is a headline figure, one decimal.
+const fmtTons = (kg) => `${fmtNum(kg / 1000, 1)} MT`;
 
 export default function Inventory() {
   const [activeTab, setActiveTab] = useState('all');
@@ -82,7 +85,9 @@ export default function Inventory() {
     return { rawKg, finishedKg, byproductKg, totalValue, totalLots };
   }, [report, lots]);
 
-  function dv(kg) { return fromKg(kg, displayUnit).toLocaleString(); }
+  // MT keeps its 3 decimals (= whole kg); other units print up to 2.
+  const fmtQty = (v) => (displayUnit === 'ton' ? fmtNum(v || 0, 3) : fmtNum(v || 0));
+  function dv(kg) { return fmtQty(fromKg(kg, displayUnit)); }
   function ul() { return displayUnit === 'katta' ? 'Katta' : displayUnit === 'maund' ? 'Maund' : displayUnit === 'ton' ? 'MT' : 'KG'; }
 
   if (isLoading) return <LoadingSpinner message="Loading inventory..." />;
@@ -100,13 +105,13 @@ export default function Inventory() {
               <Package size={14} /> Stock on hand
             </div>
             <div className="text-3xl sm:text-4xl font-bold leading-tight tabular-nums">
-              {showCost ? fmtPKR(kpis.totalValue) : `${(totalKgAll / 1000).toFixed(1)} MT`}
+              {showCost ? fmtPKR(kpis.totalValue) : fmtTons(totalKgAll)}
             </div>
             <div className="text-xs opacity-90 mt-1">
-              {kpis.totalLots} lots · {(totalKgAll / 1000).toFixed(1)} MT
-              {kpis.rawKg       > 0 && <> · Raw {(kpis.rawKg       / 1000).toFixed(1)} MT</>}
-              {kpis.finishedKg  > 0 && <> · Finished {(kpis.finishedKg / 1000).toFixed(1)} MT</>}
-              {kpis.byproductKg > 0 && <> · Byproducts {(kpis.byproductKg / 1000).toFixed(1)} MT</>}
+              {kpis.totalLots} lots · {fmtTons(totalKgAll)}
+              {kpis.rawKg       > 0 && <> · Raw {fmtTons(kpis.rawKg)}</>}
+              {kpis.finishedKg  > 0 && <> · Finished {fmtTons(kpis.finishedKg)}</>}
+              {kpis.byproductKg > 0 && <> · Byproducts {fmtTons(kpis.byproductKg)}</>}
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -165,13 +170,13 @@ export default function Inventory() {
           })}
         </div>
         <div className="flex items-center gap-2 ml-auto">
-          <select value={entityFilter} onChange={e => setEntityFilter(e.target.value)} className="form-input py-1.5 text-sm w-auto">
+          <select value={entityFilter} onChange={e => setEntityFilter(e.target.value)} aria-label="Entity" className="form-input py-1.5 text-sm w-auto">
             <option value="All">All Entities</option><option value="Mill">Mill</option><option value="Export">Export</option>
           </select>
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <input type="text" value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
-              placeholder="Search..." className="form-input pl-9 py-1.5 text-sm w-48" />
+              placeholder="Search..." aria-label="Search lots" className="form-input pl-9 py-1.5 text-sm w-48" />
           </div>
           <div className="flex bg-gray-100 rounded-lg p-0.5">
             {UNITS.map(u => (
@@ -221,7 +226,7 @@ export default function Inventory() {
                       <td colSpan={5} className="mob-full px-3 py-2 font-bold text-emerald-800 text-xs uppercase tracking-wider">
                         {g.label} <span className="text-gray-500 font-normal ml-2">· {g.lots.length} lot(s)</span>
                       </td>
-                      <td data-label="Group stock" className="text-right tabular-nums font-bold text-emerald-800">{(fromKg(groupNetKg, displayUnit, 50) || 0).toLocaleString()}</td>
+                      <td data-label="Group stock" className="text-right tabular-nums font-bold text-emerald-800">{fmtQty(fromKg(groupNetKg, displayUnit, 50))}</td>
                       <td data-label="Group value" colSpan={showCost ? 2 : 1} className="text-right tabular-nums text-emerald-800 font-semibold text-xs">{showCost ? fmtPKR(groupValue) : ''}</td>
                       <td colSpan={3}></td>
                     </tr>
@@ -235,7 +240,7 @@ export default function Inventory() {
                   <tr key={lot.id || idx}>
                     <td data-label="Lot No"><Link to={`/lot-inventory/${lot.lotNo || lot.id}`} className="font-medium text-blue-600 hover:text-blue-800">{lot.lotNo}</Link></td>
                     <td data-label="Item / Variety">
-                      <div className="text-gray-900 font-medium">{lot.itemName}</div>
+                      <div className="text-gray-900 font-medium max-w-[16rem] truncate" title={lot.itemName || undefined}>{lot.itemName}</div>
                       {lot.variety && <div className="text-xs text-gray-400">{lot.variety}{lot.grade ? ` (${lot.grade})` : ''}</div>}
                       {lot.categoryName && <div className="text-[10px] text-emerald-600 font-medium uppercase tracking-wide">{lot.categoryName}</div>}
                     </td>
@@ -246,8 +251,8 @@ export default function Inventory() {
                         {lot.entity === 'mill' ? 'Mill' : 'Export'}
                       </span>
                     </td>
-                    <td data-label="Stock" className="text-right tabular-nums font-medium">{(fromKg(netKg, displayUnit, bw) || 0).toLocaleString()}</td>
-                    <td data-label="Available" className="text-right tabular-nums text-emerald-600 font-medium">{(fromKg(availKg, displayUnit, bw) || 0).toLocaleString()}</td>
+                    <td data-label="Stock" className="text-right tabular-nums font-medium">{fmtQty(fromKg(netKg, displayUnit, bw))}</td>
+                    <td data-label="Available" className="text-right tabular-nums text-emerald-600 font-medium">{fmtQty(fromKg(availKg, displayUnit, bw))}</td>
                     {showCost && <td data-label="Value" className="text-right tabular-nums text-xs">{fmtPKR(lot.landedCostTotal || lot.totalValue)}</td>}
                     <td data-label="Quality" className="mob-hide text-center">
                       <div className="flex items-center justify-center gap-1 text-xs">
@@ -257,7 +262,7 @@ export default function Inventory() {
                     </td>
                     <td data-label="Status" className="text-center"><StatusBadge status={lot.status} /></td>
                     <td data-label="Detail" className="text-center">
-                      <Link to={`/lot-inventory/${lot.lotNo || lot.id}`} className="btn btn-ghost btn-sm"><Eye className="w-4 h-4" /></Link>
+                      <Link to={`/lot-inventory/${lot.lotNo || lot.id}`} aria-label={`View lot ${lot.lotNo || ''}`.trim()} title="View lot" className="btn btn-ghost btn-sm"><Eye className="w-4 h-4" aria-hidden="true" /></Link>
                     </td>
                   </tr>
                 );
