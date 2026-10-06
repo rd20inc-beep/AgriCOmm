@@ -1,4 +1,5 @@
 const db = require('../../config/database');
+const { BALANCE_COLLECTION_STATUSES, BALANCE_OUTSTANDING_SQL } = require('../exportOrders/balanceCollection');
 const emailService = require('../communications/email.service');
 const expensesService = require('../expenses/expenses.service');
 
@@ -187,8 +188,10 @@ const automationService = {
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - thresholdDays);
 
+    // Ship on the advance: the balance is chased after sailing too.
     const overdueOrders = await db('export_orders')
-      .where('status', 'Awaiting Balance')
+      .whereIn('status', BALANCE_COLLECTION_STATUSES)
+      .whereRaw(BALANCE_OUTSTANDING_SQL)
       .where('updated_at', '<', cutoff.toISOString())
       .select('*');
 

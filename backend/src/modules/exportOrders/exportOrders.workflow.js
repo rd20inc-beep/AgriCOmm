@@ -3,6 +3,7 @@ const inventoryService = require('../inventory/inventory.service');
 const automationService = require('../admin/automation.service');
 const accountingService = require('../accounting/accounting.service');
 const { billableFreight } = require('./billableFreight');
+const { BALANCE_COLLECTION_STATUSES, BALANCE_OUTSTANDING_SQL } = require('./balanceCollection');
 
 const STATUS_TRANSITIONS = {
   'Draft': ['Awaiting Advance', 'Advance Received'],
@@ -14,10 +15,19 @@ const STATUS_TRANSITIONS = {
   'Advance Received': ['Procurement Pending', 'In Milling'],
   'Procurement Pending': ['In Milling'],
   'In Milling': ['Docs In Preparation'],
-  'Docs In Preparation': ['Awaiting Balance'],
+  // Ship on the advance (owner decision 2026-10-07): once the advance is
+  // confirmed and the PRE-shipment documents are approved the order is Ready to
+  // Ship. The balance is collected after sailing (CAD / LC style) and is tracked
+  // on the money (balance_received vs balance_expected, see deriveBalanceStatus)
+  // rather than as a stage; Close is where it must be settled.
+  'Docs In Preparation': ['Ready to Ship'],
+  // Legacy: orders parked here under the old balance-before-shipment rule still
+  // move forward, held to the same Ready to Ship gates as any other order.
   'Awaiting Balance': ['Ready to Ship'],
   'Ready to Ship': ['Shipped'],
   'Shipped': ['Arrived'],
+  // Close requires the balance fully received and the post-shipment documents
+  // (BL Final) approved; see closeProblems.
   'Arrived': ['Closed'],
   'Closed': [],
   'Cancelled': [],
@@ -72,6 +82,7 @@ function getAllowedActions(order) {
   const balanceExpected = settledAmount(order.balance_expected || 0);
   const isTerminal = ['Closed', 'Cancelled'].includes(order.status);
   const departed = ['Shipped', 'Arrived'].includes(order.status);
+  const balanceOutstanding = balanceReceived + MONEY_EPSILON < balanceExpected;
 
   return {
     // Money-based, not stage-based. An order may go on to milling while its
@@ -96,7 +107,12 @@ function getAllowedActions(order) {
     canRecordDeparture: SHIPMENT_DEPARTURE_STATUSES.includes(order.status),
     // Must agree with STATUS_TRANSITIONS: offering Close on a Shipped order only
     // ever produced a "Cannot transition" error.
-    canCloseOrder: canTransition(order.status, 'Closed'),
+    // ... and Close also needs the balance in (the documents half of the Close
+    // gate is checked server-side by closeProblems).
+    canCloseOrder: canTransition(order.status, 'Closed') && !balanceOutstanding,
+    // The goods have sailed on the advance and the buyer still owes the balance.
+    balanceDue: departed && balanceOutstanding,
+    balanceStatus: deriveBalanceStatus(order),
     // A draft is submitted into the workflow; full validation runs at that point.
     canSubmitDraft: order.status === 'Draft',
     // Cancel is an out-of-band action (not part of the linear STATUS_TRANSITIONS
@@ -159,44 +175,92 @@ async function ensureTransitionAllowed(trx, order, toStatus) {
     }
   }
 
-  if (toStatus === 'Shipped') {
-    // #2 final-dispatch financial gate: operational prep runs free while the
-    // advance is pending, but the export can't SHIP until Finance confirms the
-    // advance (or the order needs no advance). Falls back to the received-vs-
-    // expected amount for any row that predates the financial_status backfill.
-    const finOk = order.financial_status
-      ? ['Confirmed', 'Not Required'].includes(order.financial_status)
-      : settledAmount(order.advance_received) >= settledAmount(order.advance_expected);
-    if (!finOk) {
-      const err = new Error(
-        `Cannot ship: the advance payment is not yet confirmed by Finance (financial status: ${order.financial_status || 'pending'}).`
-      );
-      err.statusCode = 400;
-      throw err;
-    }
-
-    const docsComplete = await documentService.isDocumentationComplete('export_order', order.id);
-    if (!docsComplete) {
-      const err = new Error('Cannot ship: required export documents are not all approved. Check document checklist.');
-      err.statusCode = 400;
-      throw err;
-    }
-  }
-
-  // Packed-weight variance gate: if the packed net rice is over/under tolerance and
-  // hasn't been signed off, the order can't move to completion until Owner/Admin
-  // approves. Only blocks when a variance record exists AND is pending.
   if (toStatus === 'Ready to Ship' || toStatus === 'Shipped') {
-    const pw = await trx('export_packing_weights').where({ order_id: order.id }).first();
-    if (pw && pw.approval_status === 'pending') {
-      const err = new Error(
-        `Packed weight is ${pw.variance_status === 'under' ? 'under' : 'over'} tolerance ` +
-        `(${parseFloat(pw.variance_pct).toFixed(2)}%). Owner/Admin approval is required before export completion.`
-      );
+    // Ship on the advance: the advance confirmed, the pre-shipment documents
+    // approved and no packed-weight variance awaiting sign-off. The balance is
+    // NOT a condition: it is collected after sailing and gates Close instead.
+    const problems = await readyToShipProblems(trx, order, toStatus);
+    if (problems.length) {
+      const err = new Error(problems[0]);
       err.statusCode = 400;
       throw err;
     }
   }
+
+  if (toStatus === 'Closed') {
+    const problems = await closeProblems(trx, order);
+    if (problems.length) {
+      const err = new Error(problems[0]);
+      err.statusCode = 400;
+      throw err;
+    }
+  }
+}
+
+// #2 final-dispatch financial gate: operational prep runs free while the
+// advance is pending, but the export can't ship until Finance confirms the
+// advance (or the order needs no advance). Falls back to the received-vs-
+// expected amount for any row that predates the financial_status backfill.
+function advanceConfirmed(order) {
+  if (settledAmount(order.advance_expected) <= 0) return true;
+  if (order.financial_status) return ['Confirmed', 'Not Required'].includes(order.financial_status);
+  return settledAmount(order.advance_received) >= settledAmount(order.advance_expected);
+}
+
+// Required checklist rows still missing or unapproved. phase 'pre' leaves out
+// the documents only issued once the vessel has sailed.
+async function missingChecklistDocs(conn, orderId, phase = 'all') {
+  const missing = await documentService.checkMissingDocsWithConn(conn, 'export_order', orderId);
+  return (missing || []).filter((m) => phase === 'all' || !POST_SHIPMENT_DOC_TYPES.has(m.doc_type));
+}
+
+// Everything standing between this order and Ready to Ship / Shipped, as
+// messages (the first is the one thrown). Empty when it may go.
+async function readyToShipProblems(conn, order, toStatus = 'Shipped') {
+  const verb = toStatus === 'Shipped' ? 'Cannot ship' : 'Cannot mark Ready to Ship';
+  const problems = [];
+  if (!advanceConfirmed(order)) {
+    problems.push(
+      `${verb}: the advance payment is not yet confirmed by Finance (financial status: ${order.financial_status || 'pending'}).`
+    );
+  }
+  const missing = await missingChecklistDocs(conn, order.id, 'pre');
+  if (missing.length) {
+    problems.push(
+      `${verb}: required pre-shipment export documents are not all approved (${missing.map((m) => docLabel(m.doc_type)).join(', ')}). Check document checklist.`
+    );
+  }
+  // Packed-weight variance gate: if the packed net rice is over/under tolerance
+  // and hasn't been signed off, the order can't move to completion until
+  // Owner/Admin approves. Only blocks when a variance record exists AND is pending.
+  const pw = await conn('export_packing_weights').where({ order_id: order.id }).first();
+  if (pw && pw.approval_status === 'pending') {
+    problems.push(
+      `Packed weight is ${pw.variance_status === 'under' ? 'under' : 'over'} tolerance ` +
+      `(${parseFloat(pw.variance_pct).toFixed(2)}%). Owner/Admin approval is required before export completion.`
+    );
+  }
+  return problems;
+}
+
+// Close: the balance fully received and every required document, including the
+// post-shipment ones (BL Final), approved.
+async function closeProblems(conn, order) {
+  const problems = [];
+  const expected = settledAmount(order.balance_expected);
+  const received = settledAmount(order.balance_received);
+  if (received + MONEY_EPSILON < expected) {
+    problems.push(
+      `Cannot close: the balance is still outstanding (${received.toFixed(2)} of ${expected.toFixed(2)} received). Record the balance when the buyer pays.`
+    );
+  }
+  const missing = await missingChecklistDocs(conn, order.id, 'all');
+  if (missing.length) {
+    problems.push(
+      `Cannot close: required documents are not all approved (${missing.map((m) => docLabel(m.doc_type)).join(', ')}).`
+    );
+  }
+  return problems;
 }
 
 async function runTransitionSideEffects(trx, order, toStatus, userId) {
@@ -420,8 +484,8 @@ async function transitionOrder(trx, {
   };
 }
 
-// The seven checklist documents an export order needs before it can ask for the
-// balance, each with every doc_type spelling that has been stored for it.
+// The seven checklist documents an export order needs, each with every doc_type
+// spelling that has been stored for it (checklist rows use the snake_case one).
 const DOC_TYPE_ALIASES = {
   'phyto': ['phyto', 'Phytosanitary Certificate'],
   'blDraft': ['blDraft', 'bl_draft', 'BL Draft'],
@@ -432,32 +496,62 @@ const DOC_TYPE_ALIASES = {
   'fumigation': ['fumigation', 'Fumigation Certificate'],
 };
 const REQUIRED_DOCS = Object.keys(DOC_TYPE_ALIASES);
+// Issued by the carrier only once the vessel has sailed, so it can't hold up
+// the shipment it evidences. Still required, for Close.
+const POST_SHIPMENT_DOCS = ['blFinal'];
+const PRE_SHIPMENT_DOCS = REQUIRED_DOCS.filter((k) => !POST_SHIPMENT_DOCS.includes(k));
+const POST_SHIPMENT_DOC_TYPES = new Set(POST_SHIPMENT_DOCS.flatMap((k) => DOC_TYPE_ALIASES[k]));
 const DOC_APPROVED_STATUSES = new Set(['Approved', 'Final']);
 
-// True only when EACH required document has an Approved/Final row. Counting any
+const DOC_LABELS = {
+  phyto: 'Phytosanitary Certificate', blDraft: 'BL Draft', blFinal: 'BL Final',
+  invoice: 'Commercial Invoice', packingList: 'Packing List', coo: 'Certificate of Origin',
+  fumigation: 'Fumigation Certificate',
+};
+function docLabel(docType) {
+  const key = REQUIRED_DOCS.find((k) => DOC_TYPE_ALIASES[k].includes(docType));
+  return key ? DOC_LABELS[key] : docType;
+}
+
+// True only when EACH listed document has an Approved/Final row. Counting any
 // seven rows let a draft upload, or seven optional documents, promote the order.
-function requiredDocsApproved(orderDocs) {
+function docsApproved(orderDocs, keys) {
   const docs = Array.isArray(orderDocs) ? orderDocs : [];
-  return REQUIRED_DOCS.every((key) => docs.some(
+  return keys.every((key) => docs.some(
     (d) => DOC_TYPE_ALIASES[key].includes(d.doc_type) && DOC_APPROVED_STATUSES.has(d.status)
   ));
 }
+const requiredDocsApproved = (orderDocs) => docsApproved(orderDocs, REQUIRED_DOCS);
+const preShipmentDocsApproved = (orderDocs) => docsApproved(orderDocs, PRE_SHIPMENT_DOCS);
 
+// Docs In Preparation (or a legacy Awaiting Balance order) moves to Ready to
+// Ship once the PRE-shipment documents are approved and the rest of the Ready
+// to Ship gate (advance confirmed, no pending weight variance) passes. Never
+// throws for an unmet gate: the order simply stays where it is.
 async function maybePromoteAfterDocuments(trx, { order, userId, reason }) {
-  if (order.status !== 'Docs In Preparation') {
+  if (!['Docs In Preparation', 'Awaiting Balance'].includes(order.status)) {
     return { changed: false, order };
   }
 
   const orderDocs = await trx('export_order_documents').where({ order_id: order.id });
-  if (!requiredDocsApproved(orderDocs)) {
+  if (!preShipmentDocsApproved(orderDocs)) {
     return { changed: false, order };
   }
 
+  // The caller's snapshot may predate an advance confirmation made in the same
+  // transaction; the gate must see the row as it is now.
+  const fresh = { ...order, ...((await trx('export_orders').where({ id: order.id }).first()) || {}) };
+  if (fresh.status !== order.status) return { changed: false, order: fresh };
+  const blockers = await readyToShipProblems(trx, fresh, 'Ready to Ship');
+  if (blockers.length) {
+    return { changed: false, order: fresh, blockers };
+  }
+
   const updatedOrder = await transitionOrder(trx, {
-    order,
-    toStatus: 'Awaiting Balance',
+    order: fresh,
+    toStatus: 'Ready to Ship',
     userId,
-    reason: reason || 'All required documents approved',
+    reason: reason || 'Pre-shipment documents approved',
   });
 
   return { changed: true, order: updatedOrder };
@@ -466,6 +560,15 @@ async function maybePromoteAfterDocuments(trx, { order, userId, reason }) {
 async function maybePromoteAfterAdvance(trx, { order, newAdvanceReceived, userId, reason }) {
   const advanceFull = Math.abs(settledAmount(order.advance_expected) - settledAmount(newAdvanceReceived)) <= MONEY_EPSILON
     || settledAmount(newAdvanceReceived) > settledAmount(order.advance_expected);
+
+  // The advance can be the last thing an order with its documents done was
+  // waiting on: it is then Ready to Ship.
+  if (advanceFull && ['Docs In Preparation', 'Awaiting Balance'].includes(order.status)) {
+    const out = await maybePromoteAfterDocuments(trx, {
+      order, userId, reason: reason || `Advance payment of ${newAdvanceReceived} confirmed`,
+    });
+    return { ...out, advanceFull };
+  }
 
   if (!advanceFull || !['Awaiting Advance', 'Draft'].includes(order.status)) {
     return { changed: false, order, advanceFull };
@@ -482,6 +585,9 @@ async function maybePromoteAfterAdvance(trx, { order, newAdvanceReceived, userId
   return { changed: true, order: updatedOrder, advanceFull };
 }
 
+// The balance no longer gates shipment. The one stage it still touches is the
+// legacy 'Awaiting Balance', which a receipt nudges on to Ready to Ship when the
+// rest of that gate passes (it could move without the balance anyway).
 async function maybePromoteAfterBalance(trx, { order, newBalanceReceived, userId, reason }) {
   const balanceFull = Math.abs(settledAmount(order.balance_expected) - settledAmount(newBalanceReceived)) <= MONEY_EPSILON
     || settledAmount(newBalanceReceived) > settledAmount(order.balance_expected);
@@ -490,14 +596,24 @@ async function maybePromoteAfterBalance(trx, { order, newBalanceReceived, userId
     return { changed: false, order, balanceFull };
   }
 
-  const updatedOrder = await transitionOrder(trx, {
-    order,
-    toStatus: 'Ready to Ship',
-    userId,
-    reason: reason || `Balance payment of ${newBalanceReceived} confirmed`,
+  const out = await maybePromoteAfterDocuments(trx, {
+    order, userId, reason: reason || `Balance payment of ${newBalanceReceived} confirmed`,
   });
+  return { ...out, balanceFull };
+}
 
-  return { changed: true, order: updatedOrder, balanceFull };
+// Post-shipment balance track, derived from the money (financial_status is the
+// ADVANCE track and its CHECK has no balance values). 'Due After Shipment' while
+// the goods are still here, 'Balance Due' once they have sailed and it is owed.
+function deriveBalanceStatus(order) {
+  const expected = settledAmount(order.balance_expected);
+  const received = settledAmount(order.balance_received);
+  if (expected <= 0) return 'Not Required';
+  if (received + MONEY_EPSILON >= expected) return 'Received';
+  if (['Shipped', 'Arrived', 'Closed'].includes(order.status)) {
+    return received > 0 ? 'Partially Received' : 'Balance Due';
+  }
+  return 'Due After Shipment';
 }
 
 // #2 financial-status track. Resolve the advance-confirmation state of an order
@@ -518,6 +634,8 @@ module.exports = {
   STATUS_TRANSITIONS,
   STATUS_STEP,
   MONEY_EPSILON,
+  BALANCE_COLLECTION_STATUSES,
+  BALANCE_OUTSTANDING_SQL,
   settledAmount,
   getAllowedTransitions,
   getAllowedActions,
@@ -525,11 +643,18 @@ module.exports = {
   canTransition,
   transitionOrder,
   deriveFinancialStatus,
+  deriveBalanceStatus,
+  advanceConfirmed,
+  readyToShipProblems,
+  closeProblems,
   draftSubmitProblems,
   submitTargetFor,
   DOC_TYPE_ALIASES,
   REQUIRED_DOCS,
+  PRE_SHIPMENT_DOCS,
+  POST_SHIPMENT_DOCS,
   requiredDocsApproved,
+  preShipmentDocsApproved,
   maybePromoteAfterDocuments,
   maybePromoteAfterAdvance,
   maybePromoteAfterBalance,

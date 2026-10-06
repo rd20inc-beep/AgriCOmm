@@ -1,4 +1,5 @@
 const db = require('../../config/database');
+const { BALANCE_COLLECTION_STATUSES, BALANCE_OUTSTANDING_SQL } = require('../exportOrders/balanceCollection');
 
 // In-app team chat. 1:1 direct messages (recipient_id set) and broadcast
 // "Announcements" (recipient_id NULL, is_broadcast). Unread is computed against a
@@ -170,7 +171,10 @@ async function getApprovals(meId) {
 
   // Export-order confirmations (advance / balance) — finance & owner roles.
   if ([1, 3, 9].includes(roleId)) {
-    const eo = await safe(() => db('export_orders').whereIn('status', ['Awaiting Advance', 'Awaiting Balance']).count('id as c').first(), { c: 0 });
+    const eo = await safe(() => db('export_orders')
+      .where((q) => q.where('status', 'Awaiting Advance')
+        .orWhere((b) => b.whereIn('status', BALANCE_COLLECTION_STATUSES).whereRaw(BALANCE_OUTSTANDING_SQL)))
+      .count('id as c').first(), { c: 0 });
     if (cnt(eo) > 0) items.push({ id: 'export_confirmations', kind: 'confirmation', title: 'Export confirmations', message: `${cnt(eo)} order(s) awaiting advance / balance confirmation.`, link: '/finance/confirmations' });
   }
 

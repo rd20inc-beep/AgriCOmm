@@ -23,6 +23,19 @@ jest.mock('../services/inventoryService', () => mockInventory);
 jest.mock('../modules/inventory/inventory.service', () => mockInventory);
 const mockNotify = { createForRole: jest.fn().mockResolvedValue(null) };
 jest.mock('../services/notificationService', () => mockNotify);
+// The Ready to Ship gate reads the document checklist; the real query
+// left-joins document_store, which the in-memory db doesn't do.
+const mockDocs = {
+  checkMissingDocsWithConn: jest.fn(async (conn, linkedType, linkedId) => {
+    const rows = await conn('document_checklists').where({ linked_type: linkedType, linked_id: linkedId, is_required: true });
+    return rows.filter((r) => !r.is_fulfilled);
+  }),
+  createChecklist: jest.fn(async (conn, { linkedType, linkedId, items }) => conn('document_checklists').insert(
+    items.map((it) => ({ linked_type: linkedType, linked_id: linkedId, doc_type: it.doc_type, is_required: it.is_required !== false, is_fulfilled: false }))
+  ).returning('*')),
+};
+jest.mock('../services/documentService', () => mockDocs);
+jest.mock('../modules/documents/documents.service', () => mockDocs);
 
 const { state, reset } = require('./helpers/memoryDb');
 const controller = require('../modules/exportOrders/exportOrders.controller');
@@ -94,7 +107,19 @@ describe('action flags follow the money, not the stage', () => {
         .toBe(workflow.canTransition(status, 'Closed'));
     }
     expect(flags({ status: 'Shipped', balance_received: 40000 }).canCloseOrder).toBe(false);
-    expect(flags({ status: 'Arrived' }).canCloseOrder).toBe(true);
+    expect(flags({ status: 'Arrived', balance_received: 40000 }).canCloseOrder).toBe(true);
+  });
+
+  it('an Arrived order with the balance still owed is not offered Close but shows it due', () => {
+    const f = flags({ status: 'Arrived', advance_received: 10000, balance_received: 0 });
+    expect(f.canCloseOrder).toBe(false);
+    expect(f.balanceDue).toBe(true);
+    expect(f.balanceStatus).toBe('Balance Due');
+    expect(f.canRequestBalance).toBe(true);
+    // Before sailing the balance is not yet due.
+    const pre = flags({ status: 'Ready to Ship', advance_received: 10000, balance_received: 0 });
+    expect(pre.balanceDue).toBe(false);
+    expect(pre.balanceStatus).toBe('Due After Shipment');
   });
 
   it('shipment details open from In Milling; departure dates only from Ready to Ship', () => {
@@ -267,10 +292,10 @@ describe('documents promote the order only when the REQUIRED set is approved', (
     return workflow.maybePromoteAfterDocuments(require('./helpers/memoryDb').db, { order: { ...o }, userId: 1 });
   }
 
-  it('all seven required, under any stored spelling, promote to Awaiting Balance', async () => {
+  it('all seven required, under any stored spelling, promote straight to Ready to Ship', async () => {
     const out = await promote(required);
     expect(out.changed).toBe(true);
-    expect(state.tables.export_orders[0].status).toBe('Awaiting Balance');
+    expect(state.tables.export_orders[0].status).toBe('Ready to Ship');
   });
 
   it("seven 'Draft Uploaded' rows do not", async () => {

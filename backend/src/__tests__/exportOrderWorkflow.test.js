@@ -398,7 +398,7 @@ describe('Export order workflow', () => {
     );
   });
 
-  it('progresses an order from advance receipt to ready to ship, shipped, arrived, and closed', async () => {
+  it('ships on the advance, then collects the balance and BL Final before closing', async () => {
     const { order } = await createAwaitingAdvanceOrder();
 
     let req = makeReq({
@@ -427,8 +427,10 @@ describe('Export order workflow', () => {
     persistedOrder.status = 'Docs In Preparation';
     persistedOrder.current_step = 6;
 
-    const docTypes = ['phyto', 'bl_draft', 'bl_final', 'commercial_invoice', 'packing_list', 'coo', 'fumigation'];
-    for (const docType of docTypes) {
+    // Ship on the advance: the six PRE-shipment documents take the order to
+    // Ready to Ship; the BL Final only exists once the vessel has sailed.
+    const preShipmentDocs = ['phyto', 'bl_draft', 'commercial_invoice', 'packing_list', 'coo', 'fumigation'];
+    for (const docType of preShipmentDocs) {
       req = makeReq({
         params: { id: String(order.id) },
         body: {
@@ -440,28 +442,8 @@ describe('Export order workflow', () => {
       expect(res.statusCode).toBe(200);
     }
 
-    expect(mockState.tables.export_orders[0].status).toBe('Awaiting Balance');
-
-    req = makeReq({
-      params: { id: String(order.id) },
-      body: {
-        amount: 40000,
-        payment_date: '2026-04-06',
-        payment_method: 'tt',
-        bank_reference: 'BAL-001',
-      },
-    });
-    res = makeRes();
-    await controller.confirmBalance(req, res);
-
-    expect(res.statusCode).toBe(200);
-    expect(res.body.data.order.status).toBe('Ready to Ship');
-    expect(mockState.tables.payments[1]).toEqual(
-      expect.objectContaining({
-        payment_no: 'PAY-002',
-        linked_receivable_id: mockState.tables.receivables.find((row) => row.type === 'Balance').id,
-      })
-    );
+    expect(mockState.tables.export_orders[0].status).toBe('Ready to Ship');
+    expect(mockState.tables.export_orders[0].balance_received || 0).toBe(0);
 
     req = makeReq({
       params: { id: String(order.id) },
@@ -505,6 +487,51 @@ describe('Export order workflow', () => {
     expect(res.statusCode).toBe(200);
     expect(res.body.data.order.status).toBe('Arrived');
 
+    // Close waits for the balance ...
+    req = makeReq({
+      params: { id: String(order.id) },
+      body: { status: 'Closed', notes: 'Settled and closed' },
+    });
+    res = makeRes();
+    await controller.updateStatus(req, res);
+    expect(res.statusCode).toBe(400);
+    expect(res.body.message).toMatch(/balance is still outstanding/);
+
+    req = makeReq({
+      params: { id: String(order.id) },
+      body: {
+        amount: 40000,
+        payment_date: '2026-04-25',
+        payment_method: 'tt',
+        bank_reference: 'BAL-001',
+      },
+    });
+    res = makeRes();
+    await controller.confirmBalance(req, res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.data.order.status).toBe('Arrived');
+    expect(mockState.tables.payments[1]).toEqual(
+      expect.objectContaining({
+        payment_no: 'PAY-002',
+        linked_receivable_id: mockState.tables.receivables.find((row) => row.type === 'Balance').id,
+      })
+    );
+
+    // ... and for the post-shipment BL Final.
+    req = makeReq({
+      params: { id: String(order.id) },
+      body: { status: 'Closed', notes: 'Settled and closed' },
+    });
+    res = makeRes();
+    await controller.updateStatus(req, res);
+    expect(res.statusCode).toBe(400);
+    expect(res.body.message).toMatch(/BL Final/);
+
+    req = makeReq({ params: { id: String(order.id) }, body: { doc_type: 'bl_final' } });
+    res = makeRes();
+    await controller.approveDocument(req, res);
+    expect(res.statusCode).toBe(200);
+
     req = makeReq({
       params: { id: String(order.id) },
       body: { status: 'Closed', notes: 'Settled and closed' },
@@ -515,10 +542,10 @@ describe('Export order workflow', () => {
     expect(res.body.data.order.status).toBe('Closed');
 
     const transitions = mockState.tables.export_order_status_history.map((row) => row.to_status);
+    expect(transitions).not.toContain('Awaiting Balance');
     expect(transitions).toEqual(
       expect.arrayContaining([
         'Advance Received',
-        'Awaiting Balance',
         'Ready to Ship',
         'Shipped',
         'Arrived',
@@ -639,7 +666,7 @@ describe('Export order workflow', () => {
     ).toBe(true);
   });
 
-  it('starts docs preparation explicitly, then requests balance once docs are complete', async () => {
+  it('starts docs preparation explicitly; documents done → Ready to Ship, and the balance can still be requested', async () => {
     const { order } = await createAwaitingAdvanceOrder();
 
     let req = makeReq({
@@ -694,7 +721,7 @@ describe('Export order workflow', () => {
       expect(res.statusCode).toBe(200);
     }
 
-    expect(mockState.tables.export_orders[0].status).toBe('Awaiting Balance');
+    expect(mockState.tables.export_orders[0].status).toBe('Ready to Ship');
 
     req = makeReq({
       params: { id: String(order.id) },
@@ -703,7 +730,7 @@ describe('Export order workflow', () => {
     res = makeRes();
     await controller.requestBalance(req, res);
     expect(res.statusCode).toBe(200);
-    expect(res.body.data.order.status).toBe('Awaiting Balance');
+    expect(res.body.data.order.status).toBe('Ready to Ship');
     expect(res.body.data.requested_amount).toBe(40000);
     expect(
       mockState.tables.export_order_status_history.some((row) => row.reason === 'Send balance reminder')
