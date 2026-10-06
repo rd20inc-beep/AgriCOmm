@@ -146,7 +146,21 @@ describe('repriceLotPurchase — a price/qty edit moves the rice only', () => {
     expect(r.landedTotal).toBe(1115000);
   });
 
-  test('no rice payable → no GL movement', () => {
-    expect(repriceLotPurchase(lot, 1100000, 10000, null).glDelta).toBe(0);
+  test('no rice payable → no AP movement and, unless opening stock, no equity movement', () => {
+    const r = repriceLotPurchase(lot, 1100000, 10000, null);
+    expect(r.glDelta).toBe(0);
+    expect(r.equityDelta).toBe(0);
+  });
+
+  test('opening stock (no payable) → the purchase change goes to equity, signed', () => {
+    const up = repriceLotPurchase(lot, 1100000, 10000, null, { isOpeningStock: true });
+    expect(up).toMatchObject({ glDelta: 0, equityDelta: 100000, payable: null, landedTotal: 1155000 });
+    expect(repriceLotPurchase(lot, 950000, 10000, null, { isOpeningStock: true }).equityDelta).toBe(-50000);
+  });
+
+  test('a rice payable wins over the opening flag — never both', () => {
+    const r = repriceLotPurchase(lot, 1100000, 10000, ricePayable, { isOpeningStock: true });
+    expect(r.glDelta).toBe(100000);
+    expect(r.equityDelta).toBe(0);
   });
 });

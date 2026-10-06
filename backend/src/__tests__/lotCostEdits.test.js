@@ -124,6 +124,7 @@ function seed() {
     { id: 11, code: '1210', name: 'Raw Rice Stock' },
     { id: 22, code: '2010', name: 'Accounts Payable' },
     { id: 33, code: '1450', name: 'Freight Recoverable' },
+    { id: 44, code: '3000', name: "Owner's Equity" },
   ];
   mockTables.posting_rules = [
     { id: 5, trigger_event: 'purchase_invoice', is_active: true, entity: 'mill', debit_account_id: 11, credit_account_id: 22 },
@@ -265,6 +266,124 @@ describe('setLotReceivedQty after create', () => {
     expect(payable('Raw Material').original_amount).toBe(900000);
     expect(payable('Transport').original_amount).toBe(40000);
     expect(sumLines(mockJournals[0], 22, 'debit')).toBe(100000);
+  });
+});
+
+describe('opening stock price/qty edits post against 3000 equity', () => {
+  // Shaped like the go-live loader left it: direct insert, fully "paid", no
+  // supplier payable, and one ledger row TXN-OPEN-<id> typed opening_balance.
+  function seedOpeningLot(extra = {}) {
+    mockTables.inventory_lots = [{
+      id: 70, lot_no: 'LOT-OPEN-70', type: 'raw', entity: 'mill', supplier_id: null,
+      qty: 10000, net_weight_kg: 10000, received_net_weight_kg: 10000, available_qty: 10000,
+      reserved_qty: 0, milling_reserved_qty: 0,
+      rate_per_kg: 100, purchase_amount: 1000000, landed_cost_total: 1000000, landed_cost_per_kg: 100,
+      cost_per_unit: 100, total_value: 1000000, payment_status: 'Paid', paid_amount: 1000000, due_amount: 0,
+      ...extra,
+    }];
+    mockTables.lot_transactions = [{
+      id: 1, lot_id: 70, transaction_no: 'TXN-OPEN-00070',
+      transaction_type: 'opening_balance', reference_module: 'opening_balance', quantity_kg: 10000,
+    }];
+  }
+  const edit = async (fn, body) => {
+    const res = mockRes();
+    await controller[fn]({ params: { id: 70 }, body, user: { id: 1 } }, res);
+    return res;
+  };
+
+  test('price up → one Posted Dr 1210 / Cr 3000 for the purchase change; no payable touched', async () => {
+    seedOpeningLot();
+    const accounting = require('../services/accountingService');
+    accounting.postJournal.mockClear();
+    const res = await edit('setLotPurchaseRate', { rate_per_kg: 110 });
+    expect(res.statusCode).toBe(200);
+    expect(res.body.data.openingStockRestated).toBe(true);
+    expect(res.body.data.payableUpdated).toBe(false);
+
+    const lot = lotRow();
+    expect(lot.purchase_amount).toBe(1100000);
+    expect(lot.landed_cost_total).toBe(1100000);
+    expect(lot.cost_per_unit).toBe(110);
+    expect(lot).toMatchObject({ paid_amount: 1100000, due_amount: 0, payment_status: 'Paid' });
+    expect(mockTables.payables).toBeUndefined();
+
+    expect(mockJournals).toHaveLength(1);
+    const j = mockJournals[0];
+    expect(j).toMatchObject({ entity: 'mill', refType: 'Opening Stock Revaluation', refNo: 'LOT-OPEN-70' });
+    expect(j.partyType).toBeUndefined();
+    expect(j.description).toMatch(/^Opening stock revaluation LOT-OPEN-70/);
+    expect(j.lines).toHaveLength(2);
+    expect(sumLines(j, 11, 'debit')).toBe(100000);
+    expect(sumLines(j, 44, 'credit')).toBe(100000);
+    expect(sumLines(j, 22, 'credit') + sumLines(j, 22, 'debit')).toBe(0); // no AP
+    expect(accounting.postJournal).toHaveBeenCalledTimes(1);
+  });
+
+  test('price down → reversed signs: Dr 3000 / Cr 1210', async () => {
+    seedOpeningLot();
+    const res = await edit('setLotPurchaseRate', { rate_per_kg: 95 });
+    expect(res.statusCode).toBe(200);
+    expect(lotRow().landed_cost_total).toBe(950000);
+    const j = mockJournals[0];
+    expect(sumLines(j, 44, 'debit')).toBe(50000);
+    expect(sumLines(j, 11, 'credit')).toBe(50000);
+  });
+
+  test('received qty down → stock and value fall, Dr 3000 / Cr 1210 for the change', async () => {
+    seedOpeningLot();
+    const res = await edit('setLotReceivedQty', { received_net_weight_kg: 9000 });
+    expect(res.statusCode).toBe(200);
+    expect(lotRow()).toMatchObject({ net_weight_kg: 9000, purchase_amount: 900000, landed_cost_total: 900000 });
+    const j = mockJournals[0];
+    expect(j.refType).toBe('Opening Stock Revaluation');
+    expect(sumLines(j, 44, 'debit')).toBe(100000);
+    expect(sumLines(j, 11, 'credit')).toBe(100000);
+  });
+
+  test('the inventory side follows the lot type (by-product → 1240)', async () => {
+    const { inventoryAccountForLot } = require('../modules/localSales/inventoryAccount');
+    expect(inventoryAccountForLot({ type: 'raw' })).toBe('1210');
+    expect(inventoryAccountForLot({ type: 'finished', entity: 'mill' })).toBe('1220');
+    expect(inventoryAccountForLot({ type: 'byproduct' })).toBe('1240');
+  });
+
+  test('a raw lot with no payable that is NOT opening stock → 409, nothing written', async () => {
+    seedOpeningLot();
+    mockTables.lot_transactions = [{ id: 1, lot_id: 70, transaction_type: 'warehouse_transfer_in', reference_module: 'transfer' }];
+    const res = await edit('setLotPurchaseRate', { rate_per_kg: 110 });
+    expect(res.statusCode).toBe(409);
+    expect(res.body.message).toMatch(/no supplier bill and is not opening stock/);
+    expect(lotRow().purchase_amount).toBe(1000000);
+    expect(lotRow().cost_per_unit).toBe(100);
+    expect(mockJournals).toHaveLength(0);
+
+    const res2 = await edit('setLotReceivedQty', { received_net_weight_kg: 9000 });
+    expect(res2.statusCode).toBe(409);
+    expect(lotRow().net_weight_kg).toBe(10000);
+  });
+
+  test('the 2026-04 ledger backfill row (opening_balance / purchase) is not opening stock', async () => {
+    seedOpeningLot();
+    mockTables.lot_transactions = [{ id: 1, lot_id: 70, transaction_type: 'opening_balance', reference_module: 'purchase' }];
+    const res = await edit('setLotPurchaseRate', { rate_per_kg: 110 });
+    expect(res.statusCode).toBe(409);
+  });
+
+  test('a lot with a rice payable keeps the AP behaviour even if it carries an opening row', async () => {
+    await createLot();
+    const lot = lotRow();
+    mockTables.lot_transactions = [{ id: 99, lot_id: lot.id, transaction_type: 'opening_balance', reference_module: 'opening_balance' }];
+    mockJournals.length = 0;
+    const res = mockRes();
+    await controller.setLotPurchaseRate({ params: { id: lot.id }, body: { rate_per_kg: 110 }, user: { id: 1 } }, res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.data.openingStockRestated).toBe(false);
+    expect(mockJournals).toHaveLength(1);
+    expect(mockJournals[0].refType).toBe('Purchase Lot');
+    expect(sumLines(mockJournals[0], 22, 'credit')).toBe(100000);
+    expect(sumLines(mockJournals[0], 44, 'credit')).toBe(0);
+    expect(payable('Raw Material').original_amount).toBe(1100000);
   });
 });
 
