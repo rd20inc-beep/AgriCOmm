@@ -24,6 +24,10 @@ const upload = multer({
   limits: { fileSize: 50 * 1024 * 1024 }, // 50MB max
 });
 
+// One upload action = one version. `files` carries several (a multi-page scan
+// sent as separate images); `file` is the original single-file field.
+const versionFiles = upload.fields([{ name: 'file', maxCount: 1 }, { name: 'files', maxCount: 20 }]);
+
 // === Stats (must be before /:id routes) ===
 router.get(
   '/stats',
@@ -74,7 +78,7 @@ router.get(
 router.post(
   '/upload',
   authorize('documents', 'create'),
-  upload.single('file'),
+  versionFiles,
   auditAction('upload', 'document', (req, data) => data.data && data.data.document ? data.data.document.id : null),
   controller.upload
 );
@@ -108,7 +112,7 @@ router.get(
 router.post(
   '/:id/new-version',
   authorize('documents', 'create'),
-  upload.single('file'),
+  versionFiles,
   auditAction('upload_version', 'document', (req) => req.params.id),
   controller.uploadNewVersion
 );
@@ -126,8 +130,16 @@ router.put(
 router.put(
   '/:id/request-delete',
   authorize('documents', 'edit'),
-  auditAction('request_delete', 'document', (req) => req.params.id),
+  // audited inside the service (in the same transaction), not here
   controller.requestDelete
+);
+
+// Delete: Owner / Super Admin delete directly (marked Deleted, file kept,
+// audited in the service); anyone else gets a deletion request instead.
+router.delete(
+  '/:id',
+  authorize('documents', 'edit'),
+  controller.remove
 );
 
 router.put(
