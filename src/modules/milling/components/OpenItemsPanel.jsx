@@ -1,15 +1,11 @@
 import { Clock, AlertTriangle } from 'lucide-react';
+import { fmtMoney, fmtDate } from '../../../shared/utils/format';
 
 // "Open items" panel — outstanding receivables (customer) / payables (supplier)
 // from the sub-ledger, including ones not yet on the GL (e.g. export orders
 // still awaiting advance). Explains why a GL-based statement can be empty while
 // Due Dates shows money owed.
-const sym = (c) => {
-  const u = (c || 'PKR').toUpperCase();
-  return u === 'PKR' ? 'Rs ' : u === 'USD' ? '$' : u === 'EUR' ? '€' : u === 'GBP' ? '£' : `${u} `;
-};
-const fmt = (v, c) => `${sym(c)}${Math.round(parseFloat(v) || 0).toLocaleString()}`;
-const fmtDate = (d) => { if (!d) return '—'; const dt = new Date(d); return Number.isNaN(dt.getTime()) ? d : dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }); };
+const fmt = (v, c) => fmtMoney(parseFloat(v) || 0, c, { decimals: 0 });
 const isOverdue = (d) => d && new Date(d) < new Date(new Date().toDateString());
 
 export default function OpenItemsPanel({ items, partyType }) {

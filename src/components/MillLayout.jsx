@@ -254,6 +254,7 @@ export default function MillLayout({ children }) {
         }}
       >
         <button
+          aria-label="Close menu"
           className="lg:hidden absolute top-3.5 right-3 text-white/50 hover:text-white p-1 rounded-lg hover:bg-white/10 z-10"
           onClick={() => setSidebarOpen(false)}
         >
@@ -292,6 +293,7 @@ export default function MillLayout({ children }) {
         </nav>
 
         <button
+          aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           onClick={() => setSidebarCollapsed(prev => !prev)}
           className="hidden lg:flex items-center justify-center h-10 border-t border-white/[0.08] text-slate-500 hover:text-slate-300 hover:bg-white/[0.04] transition-colors"
           title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
@@ -310,6 +312,7 @@ export default function MillLayout({ children }) {
                 <p className="text-[11px] text-slate-500 truncate">{userEmail}</p>
               </div>
               <button
+                aria-label="Sign out"
                 onClick={handleSignOut}
                 className="p-1.5 text-slate-500 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
                 title="Sign out"
@@ -327,6 +330,7 @@ export default function MillLayout({ children }) {
           style={{ height: 'var(--header-height)', borderColor: 'var(--color-border)' }}
         >
           <button
+            aria-label="Open menu"
             className="lg:hidden p-2 -ml-1 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg"
             onClick={() => setSidebarOpen(true)}
           >

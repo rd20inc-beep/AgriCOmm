@@ -1,11 +1,11 @@
 import { useQuery } from '@tanstack/react-query';
 import { FileText, ArrowDownRight } from 'lucide-react';
 import { accountingApi } from '../../accounting/api/services';
+import StatusBadge from '../../../shared/components/StatusBadge';
+import { fmtPKR, fmtDate } from '../../../shared/utils/format';
 
-const PKR = (v) => `Rs ${(parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const fmtDate = (d) => { if (!d) return '—'; const dt = new Date(d); return Number.isNaN(dt.getTime()) ? d : dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }); };
+const PKR = (v) => fmtPKR(parseFloat(v) || 0, { decimals: 2 });
 const METHOD = { cash: 'Cash', cheque: 'Cheque', bank_transfer: 'Bank transfer', online: 'Online', mobile: 'Mobile' };
-const STATUS_TONE = { Paid: 'bg-emerald-100 text-emerald-700', Partial: 'bg-amber-100 text-amber-700', Unpaid: 'bg-red-100 text-red-700' };
 // Row tint per status so paid / partial / unpaid read at a glance (and print).
 const STATUS_BG = { Paid: 'bg-emerald-50', Partial: 'bg-amber-50', Unpaid: 'bg-red-50' };
 
@@ -52,7 +52,7 @@ export default function PartyAllocationLedger({ partyType, partyId }) {
                     <FileText size={14} className="text-gray-400 shrink-0" />
                     <span className="font-semibold text-gray-900">{inv.ref}</span>
                     {inv.supplier_ref && inv.supplier_ref !== inv.ref && <span className="text-[11px] text-gray-400">{inv.supplier_ref}</span>}
-                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${STATUS_TONE[inv.status] || 'bg-gray-100 text-gray-600'}`}>{inv.status}</span>
+                    <StatusBadge status={inv.status} />
                     <span className="text-[11px] text-gray-400">{fmtDate(inv.date)}</span>
                   </div>
                   {(inv.particulars || inv.notes) && (

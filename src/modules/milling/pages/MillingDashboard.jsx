@@ -38,7 +38,6 @@ import { useCommodityPrices } from '../hooks/useCommodityPrices';
 import { useMillSummary } from '../hooks/useMillSummary';
 import KPICard from '../../../components/KPICard';
 import StatusBadge from '../../../components/StatusBadge';
-import Modal from '../../../components/Modal';
 import SlideDrawer from '../../../components/SlideDrawer';
 import RiceTypePicker from '../../../components/RiceTypePicker';
 import { lotCategory, CAT_ORDER, CAT_COLOR, NON_MILLABLE_CATEGORIES } from '../../../utils/lotCategory';
@@ -46,11 +45,9 @@ import SupplierPicker from '../../../components/SupplierPicker';
 import CustomerPicker from '../../../components/CustomerPicker';
 import { serviceMillingApi } from '../api/services';
 import MillExpenseDrawer from '../../../components/MillExpenseDrawer';
+import { fmtPKR, fmtKg, fmtNum, fmtPct } from '../../../shared/utils/format';
+import FieldError from '../../../shared/components/FieldError';
 // Chart data computed from real batch data below (no mock imports)
-
-function formatPKR(value) {
-  return 'Rs ' + (value).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
 
 // REMOVED: hardcoded MILL_PRICES_PKR — now uses useCommodityPrices() hook
 
@@ -99,7 +96,12 @@ export default function MillingDashboard() {
     dateReceived: '', kattaCount: '', kattaSizeKg: '50', bagCount: '', expectedOutputKg: '', serviceRemarks: '',
     serviceVehicles: [], // [{ vehicle_no, driver_name, weight_kg, total_bags }]
   });
-  const setBF = (k, v) => setBatchForm(p => ({ ...p, [k]: v }));
+  // Inline field errors for the New Batch drawer (set alongside the toast on submit).
+  const [batchErrors, setBatchErrors] = useState({});
+  const setBF = (k, v) => {
+    setBatchForm(p => ({ ...p, [k]: v }));
+    setBatchErrors(e => (e[k] ? { ...e, [k]: undefined } : e));
+  };
   // Service milling: Kattas × Katta size → auto-fills Quantity Received (weight)
   // + Expected Finished. Weight stays editable (this only pre-fills it).
   const recomputeKattaWeight = (nextKatta, nextSize) => {
@@ -197,6 +199,7 @@ export default function MillingDashboard() {
       serviceVehicles: [],
     });
     setUseBlend(true); setBlendProductId(''); setBlendRows([]); setBlendTag('All');
+    setBatchErrors({});
   };
 
   // Deep-link: the Mill home dashboard's "New Batch" button navigates here with
@@ -227,10 +230,11 @@ export default function MillingDashboard() {
           .map(r => ({ lot_id: parseInt(r.lotId), qty_kg: parseFloat(r.qtyMt) }))
       : [];
     if (useBlend) {
-      if (blendLots.length === 0) { addToast('Add at least one stock lot with a quantity', 'error'); return; }
+      if (blendLots.length === 0) { setBatchErrors({ blendLots: 'Add at least one stock lot with a quantity' }); addToast('Add at least one stock lot with a quantity', 'error'); return; }
       // A multi-variety blend needs an explicit output product; a single-variety
       // run inherits the rice type from its lot, so it's optional there.
       if (blendRecipe.processingType === 'blended' && !blendProductId) {
+        setBatchErrors({ blendProductId: 'Pick the blended output product' });
         addToast('Pick the blended output product so the blend can be tracked', 'error');
         return;
       }
@@ -243,23 +247,30 @@ export default function MillingDashboard() {
         }
       }
     } else if (!batchForm.productId) {
+      setBatchErrors({ productId: 'Rice type is required' });
       addToast('Rice type is required so the batch can be tracked', 'error');
       return;
     } else if (batchForm.millingType === 'service_milling') {
       // Service milling: rice comes from the client (no company supplier). Require
       // the client + a received quantity (typed, or from the incoming vehicles).
       const vehicleKg = (batchForm.serviceVehicles || []).reduce((s, v) => s + (parseFloat(v.weight_kg) || 0), 0);
-      if (!batchForm.clientCustomerId) { addToast('Select the client we are milling for (service milling)', 'error'); return; }
-      if (!batchForm.rawQtyKg && vehicleKg <= 0) { addToast('Enter the quantity received, or add the incoming vehicle(s)', 'error'); return; }
+      if (!batchForm.clientCustomerId) { setBatchErrors({ clientCustomerId: 'Select the client' }); addToast('Select the client we are milling for (service milling)', 'error'); return; }
+      if (!batchForm.rawQtyKg && vehicleKg <= 0) { setBatchErrors({ rawQtyKg: 'Enter the quantity received' }); addToast('Enter the quantity received, or add the incoming vehicle(s)', 'error'); return; }
     } else if (!batchForm.supplierId || !(parseFloat(batchForm.rawQtyKg) > 0)) {
+      setBatchErrors({
+        ...(!batchForm.supplierId ? { supplierId: 'Supplier is required' } : {}),
+        ...(!(parseFloat(batchForm.rawQtyKg) > 0) ? { rawQtyKg: 'Weight is required' } : {}),
+      });
       addToast('Supplier and the first vehicle\'s weight are required', 'error');
       return;
     } else if (showMoney && !(parseFloat(batchForm.directPricePerKg) > 0)) {
       // Cost-blind roles never see or enter the price — the truck goes in
       // unpriced and someone with cost access prices it later.
+      setBatchErrors({ directPricePerKg: 'Price is required' });
       addToast('Enter the rice price (Rs/kg) so the raw lot is costed', 'error');
       return;
     }
+    setBatchErrors({});
     const isService = batchForm.millingType === 'service_milling';
     const vehicleKg = (batchForm.serviceVehicles || []).reduce((s, v) => s + (parseFloat(v.weight_kg) || 0), 0);
     // Service milling qty comes from the trucks when entered, else the typed field.
@@ -559,7 +570,7 @@ export default function MillingDashboard() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Link to="/lot-inventory?type=raw" className="bg-white rounded-xl border p-4 hover:shadow-sm transition-shadow">
           <p className="text-xs text-gray-500 font-medium uppercase">Raw Stock</p>
-          <p className="text-xl font-bold text-gray-900 mt-1">{Math.round(rawRiceStock * 1000).toLocaleString()} kg</p>
+          <p className="text-xl font-bold text-gray-900 mt-1">{fmtKg(rawRiceStock * 1000)}</p>
         </Link>
         <div className="bg-white rounded-xl border p-4">
           <p className="text-xs text-gray-500 font-medium uppercase">Pending Batches</p>
@@ -571,7 +582,7 @@ export default function MillingDashboard() {
         </Link>
         <div className="bg-white rounded-xl border p-4">
           <p className="text-xs text-gray-500 font-medium uppercase">Avg Yield</p>
-          <p className="text-xl font-bold text-gray-900 mt-1">{avgYield}%</p>
+          <p className="text-xl font-bold text-gray-900 mt-1">{fmtPct(avgYield)}</p>
         </div>
       </div>
 
@@ -622,12 +633,12 @@ export default function MillingDashboard() {
               {productionBatches.map((batch) => (
                 <tr key={batch.id} className="border-b border-gray-50 hover:bg-gray-50 cursor-pointer">
                   <td data-label="Batch" className="py-2.5 px-2">
-                    <Link to={`/milling/${batch.id}`} className="font-medium text-blue-600 hover:text-blue-800">{batch.id}</Link>{batch.batchName && <span className="text-gray-400"> · {batch.batchName}</span>}
+                    <Link to={`/milling/${batch.id}`} className="font-medium text-blue-600 hover:text-blue-800">{batch.id}</Link>{batch.batchName && <span className="text-gray-400 inline-block max-w-[12rem] truncate align-bottom" title={batch.batchName}>&nbsp;· {batch.batchName}</span>}
                     {batch.linkedExportOrder && <p className="text-[10px] text-gray-400">→ {batch.linkedExportOrder}</p>}
                   </td>
                   <td data-label="Supplier" className="mob-hide py-2.5 px-2 text-gray-600"><PartyLink type="supplier" id={batch.supplierId} name={batch.supplierName} /></td>
-                  <td data-label="Raw kg" className="mob-hide py-2.5 px-2 text-right">{Math.round(batch.rawQtyKg).toLocaleString()}</td>
-                  <td data-label="Finished" className="py-2.5 px-2 text-right">{batch.actualFinishedKg ? Math.round(batch.actualFinishedKg).toLocaleString() : '—'}</td>
+                  <td data-label="Raw kg" className="mob-hide py-2.5 px-2 text-right">{fmtNum(batch.rawQtyKg, 0)}</td>
+                  <td data-label="Finished" className="py-2.5 px-2 text-right">{batch.actualFinishedKg ? fmtNum(batch.actualFinishedKg, 0) : '—'}</td>
                   <td data-label="Yield%" className={`py-2.5 px-2 text-right font-medium ${batch.yieldPct >= 60 ? 'text-emerald-600' : batch.yieldPct > 0 ? 'text-amber-600' : 'text-gray-400'}`}>
                     {batch.yieldPct > 0 ? `${batch.yieldPct}%` : '—'}
                   </td>
@@ -648,22 +659,22 @@ export default function MillingDashboard() {
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="bg-amber-50 rounded-lg p-4">
               <p className="text-xs font-medium text-amber-600 uppercase">Raw Rice</p>
-              <p className="text-lg font-bold text-amber-900">{formatPKR(rawInventoryValue)}</p>
-              <p className="text-xs text-amber-500">{Math.round(rawRiceStock * 1000).toLocaleString()} kg in stock</p>
+              <p className="text-lg font-bold text-amber-900">{fmtPKR(rawInventoryValue, { decimals: 2 })}</p>
+              <p className="text-xs text-amber-500">{fmtKg(rawRiceStock * 1000)} in stock</p>
             </div>
             <div className="bg-emerald-50 rounded-lg p-4">
               <p className="text-xs font-medium text-emerald-600 uppercase">Finished Rice</p>
-              <p className="text-lg font-bold text-emerald-900">{formatPKR(finishedInventoryValue)}</p>
-              <p className="text-xs text-emerald-500">{Math.round(finishedRiceStock * 1000).toLocaleString()} kg in stock</p>
+              <p className="text-lg font-bold text-emerald-900">{fmtPKR(finishedInventoryValue, { decimals: 2 })}</p>
+              <p className="text-xs text-emerald-500">{fmtKg(finishedRiceStock * 1000)} in stock</p>
             </div>
             <div className="bg-purple-50 rounded-lg p-4">
               <p className="text-xs font-medium text-purple-600 uppercase">Byproducts</p>
-              <p className="text-lg font-bold text-purple-900">{formatPKR(byproductInventoryValue)}</p>
-              <p className="text-xs text-purple-500">{Math.round(byproductStock * 1000).toLocaleString()} kg in stock</p>
+              <p className="text-lg font-bold text-purple-900">{fmtPKR(byproductInventoryValue, { decimals: 2 })}</p>
+              <p className="text-xs text-purple-500">{fmtKg(byproductStock * 1000)} in stock</p>
             </div>
             <div className="bg-blue-50 rounded-lg p-4">
               <p className="text-xs font-medium text-blue-600 uppercase">Total Inventory</p>
-              <p className="text-lg font-bold text-blue-900">{formatPKR(totalInventoryValue)}</p>
+              <p className="text-lg font-bold text-blue-900">{fmtPKR(totalInventoryValue, { decimals: 2 })}</p>
               <p className="text-xs text-blue-500">Capital locked in stock</p>
             </div>
           </div>
@@ -698,37 +709,37 @@ export default function MillingDashboard() {
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
                 <div className="bg-blue-50 rounded-lg p-4">
                   <p className="text-xs font-medium text-blue-600 uppercase">Revenue</p>
-                  <p className="text-lg font-bold text-blue-900 mt-1">{formatPKR(totalRevenue)}</p>
+                  <p className="text-lg font-bold text-blue-900 mt-1">{fmtPKR(totalRevenue, { decimals: 2 })}</p>
                   <div className="mt-2 space-y-1 text-xs">
-                    <div className="flex justify-between"><span className="text-blue-500">Finished rice</span><span className="font-medium">{formatPKR(finishedRevenue)}</span></div>
-                    <div className="flex justify-between"><span className="text-blue-500">Byproducts</span><span className="font-medium">{formatPKR(byproductRevenue)}</span></div>
+                    <div className="flex justify-between"><span className="text-blue-500">Finished rice</span><span className="font-medium">{fmtPKR(finishedRevenue, { decimals: 2 })}</span></div>
+                    <div className="flex justify-between"><span className="text-blue-500">Byproducts</span><span className="font-medium">{fmtPKR(byproductRevenue, { decimals: 2 })}</span></div>
                   </div>
                 </div>
                 <div className="bg-red-50 rounded-lg p-4">
                   <p className="text-xs font-medium text-red-600 uppercase">Direct Costs</p>
-                  <p className="text-lg font-bold text-red-900 mt-1">{formatPKR(totalRawCost + totalOtherBatchCosts)}</p>
+                  <p className="text-lg font-bold text-red-900 mt-1">{fmtPKR(totalRawCost + totalOtherBatchCosts, { decimals: 2 })}</p>
                   <div className="mt-2 space-y-1 text-xs">
-                    <div className="flex justify-between"><span className="text-red-500">Raw rice purchase</span><span className="font-medium">{formatPKR(totalRawCost)}</span></div>
-                    <div className="flex justify-between"><span className="text-red-500">Processing costs</span><span className="font-medium">{formatPKR(totalOtherBatchCosts)}</span></div>
+                    <div className="flex justify-between"><span className="text-red-500">Raw rice purchase</span><span className="font-medium">{fmtPKR(totalRawCost, { decimals: 2 })}</span></div>
+                    <div className="flex justify-between"><span className="text-red-500">Processing costs</span><span className="font-medium">{fmtPKR(totalOtherBatchCosts, { decimals: 2 })}</span></div>
                   </div>
                 </div>
                 <div className="bg-amber-50 rounded-lg p-4">
                   <p className="text-xs font-medium text-amber-600 uppercase">Overheads</p>
-                  <p className="text-lg font-bold text-amber-900 mt-1">{formatPKR(totalOverhead)}</p>
+                  <p className="text-lg font-bold text-amber-900 mt-1">{fmtPKR(totalOverhead, { decimals: 2 })}</p>
                   <div className="mt-2 space-y-1 text-xs">
                     {expenseSummary.slice(0, 3).map(e => (
-                      <div key={e.category} className="flex justify-between"><span className="text-amber-500 capitalize">{e.category}</span><span className="font-medium">{formatPKR(parseFloat(e.total))}</span></div>
+                      <div key={e.category} className="flex justify-between"><span className="text-amber-500 capitalize">{e.category}</span><span className="font-medium">{fmtPKR(parseFloat(e.total), { decimals: 2 })}</span></div>
                     ))}
                     {expenseSummary.length === 0 && <p className="text-amber-400">No expenses recorded</p>}
                   </div>
                 </div>
                 <div className={`${netProfit >= 0 ? 'bg-emerald-50' : 'bg-red-50'} rounded-lg p-4`}>
                   <p className={`text-xs font-medium ${netProfit >= 0 ? 'text-emerald-600' : 'text-red-600'} uppercase`}>Net Profit</p>
-                  <p className={`text-lg font-bold ${netProfit >= 0 ? 'text-emerald-900' : 'text-red-900'} mt-1`}>{formatPKR(netProfit)}</p>
-                  <p className={`text-xs ${netProfit >= 0 ? 'text-emerald-500' : 'text-red-500'} mt-1`}>Margin: {margin}%</p>
+                  <p className={`text-lg font-bold ${netProfit >= 0 ? 'text-emerald-900' : 'text-red-900'} mt-1`}>{fmtPKR(netProfit, { decimals: 2 })}</p>
+                  <p className={`text-xs ${netProfit >= 0 ? 'text-emerald-500' : 'text-red-500'} mt-1`}>Margin: {fmtPct(margin)}</p>
                   <div className="mt-2 space-y-1 text-xs">
                     <div className="flex justify-between"><span className="text-gray-500">Batches</span><span className="font-bold">{completed.length}</span></div>
-                    <div className="flex justify-between"><span className="text-gray-500">Processed</span><span className="font-bold">{Math.round(completed.reduce((s, b) => s + b.rawQtyKg, 0)).toLocaleString()} kg</span></div>
+                    <div className="flex justify-between"><span className="text-gray-500">Processed</span><span className="font-bold">{fmtKg(completed.reduce((s, b) => s + b.rawQtyKg, 0))}</span></div>
                   </div>
                 </div>
               </div>
@@ -758,13 +769,13 @@ export default function MillingDashboard() {
                           return (
                             <tr key={b.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => navigate(`/milling/${b.id}`)}>
                               <td data-label="Batch" className="py-2 px-2 font-medium text-blue-600">{b.id}{b.batchName && <span className="text-gray-400"> · {b.batchName}</span>}</td>
-                              <td data-label="Raw kg" className="mob-hide py-2 px-2 text-right">{Math.round(b.rawQtyKg).toLocaleString()}</td>
-                              <td data-label="Finished kg" className="py-2 px-2 text-right">{Math.round(b.actualFinishedKg).toLocaleString()}</td>
+                              <td data-label="Raw kg" className="mob-hide py-2 px-2 text-right">{fmtNum(b.rawQtyKg, 0)}</td>
+                              <td data-label="Finished kg" className="py-2 px-2 text-right">{fmtNum(b.actualFinishedKg, 0)}</td>
                               <td data-label="Yield %" className="py-2 px-2 text-right">{b.yieldPct}%</td>
-                              <td data-label="Raw Cost" className="mob-hide py-2 px-2 text-right">{formatPKR(bCost)}</td>
-                              <td data-label="Cost/KG" className="mob-hide py-2 px-2 text-right">{b.totalCostPerKgFinished ? `Rs ${b.totalCostPerKgFinished.toFixed(2)}` : '—'}</td>
-                              <td data-label="Revenue" className="py-2 px-2 text-right">{formatPKR(bRevenue)}</td>
-                              <td data-label="Profit" className={`py-2 px-2 text-right font-medium ${bProfit >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{formatPKR(bProfit)}</td>
+                              <td data-label="Raw Cost" className="mob-hide py-2 px-2 text-right">{fmtPKR(bCost, { decimals: 2 })}</td>
+                              <td data-label="Cost/KG" className="mob-hide py-2 px-2 text-right">{b.totalCostPerKgFinished ? fmtPKR(b.totalCostPerKgFinished, { decimals: 2 }) : '—'}</td>
+                              <td data-label="Revenue" className="py-2 px-2 text-right">{fmtPKR(bRevenue, { decimals: 2 })}</td>
+                              <td data-label="Profit" className={`py-2 px-2 text-right font-medium ${bProfit >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{fmtPKR(bProfit, { decimals: 2 })}</td>
                             </tr>
                           );
                         })}
@@ -792,7 +803,7 @@ export default function MillingDashboard() {
                             <td data-label="Date" className="py-2 px-2">{e.expenseDate}</td>
                             <td data-label="Category" className="py-2 px-2 capitalize">{e.category}</td>
                             <td data-label="Description" className="mob-hide py-2 px-2 text-gray-600">{e.description || '—'}</td>
-                            <td data-label="Amount" className="py-2 px-2 text-right font-medium">{formatPKR(parseFloat(e.amount))}</td>
+                            <td data-label="Amount" className="py-2 px-2 text-right font-medium">{fmtPKR(parseFloat(e.amount), { decimals: 2 })}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -838,12 +849,12 @@ export default function MillingDashboard() {
                       </td>
                       <td data-label="Product" className="py-2 px-3 text-gray-700">{lot.itemName || lot.productName || '—'}</td>
                       <td data-label="Supplier" className="mob-hide py-2 px-3 text-gray-600"><PartyLink type="supplier" id={lot.supplierId} name={lot.supplierName} /></td>
-                      <td data-label="Total" className="py-2 px-3 text-right font-medium">{Math.round(parseFloat(lot.qty) || 0).toLocaleString()} kg</td>
+                      <td data-label="Total" className="py-2 px-3 text-right font-medium">{fmtKg(parseFloat(lot.qty) || 0)}</td>
                       <td data-label="In Mill" className="py-2 px-3 text-right">
-                        {!isAtExport ? <span className="text-emerald-700 font-medium">{Math.round(avail).toLocaleString()} kg</span> : <span className="text-gray-400">—</span>}
+                        {!isAtExport ? <span className="text-emerald-700 font-medium">{fmtKg(avail)}</span> : <span className="text-gray-400">—</span>}
                       </td>
                       <td data-label="Reserved" className="mob-hide py-2 px-3 text-right">
-                        {reserved > 0 ? <span className="text-amber-700 font-medium">{Math.round(reserved).toLocaleString()} kg</span> : <span className="text-gray-400">—</span>}
+                        {reserved > 0 ? <span className="text-amber-700 font-medium">{fmtKg(reserved)}</span> : <span className="text-gray-400">—</span>}
                       </td>
                       <td data-label="Reserved For" className="mob-hide py-2 px-3">
                         {lot.reservedAgainst ? (
@@ -882,7 +893,7 @@ export default function MillingDashboard() {
                 className="flex-shrink-0 w-56 rounded-lg border border-gray-200 p-4 hover:shadow-md transition-shadow bg-white"
               >
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm font-bold text-gray-900">{batch.id}{batch.batchName && <span className="font-normal text-gray-400"> · {batch.batchName}</span>}</span>
+                  <span className="text-sm font-bold text-gray-900 truncate min-w-0 mr-2" title={batch.batchName ? `${batch.id} · ${batch.batchName}` : undefined}>{batch.id}{batch.batchName && <span className="font-normal text-gray-400"> · {batch.batchName}</span>}</span>
                   <StatusBadge status={batch.status} />
                 </div>
                 {batch.linkedExportOrder && (
@@ -891,11 +902,11 @@ export default function MillingDashboard() {
                   </div>
                 )}
                 <div className="text-xs text-gray-500">
-                  Raw: {Math.round(batch.rawQtyKg).toLocaleString()} kg
+                  Raw: {fmtKg(batch.rawQtyKg)}
                 </div>
                 {batch.plannedFinishedKg > 0 && (
                   <div className="text-xs text-gray-500">
-                    Target: {Math.round(batch.plannedFinishedKg).toLocaleString()} kg
+                    Target: {fmtKg(batch.plannedFinishedKg)}
                   </div>
                 )}
                 <div className="flex items-center gap-1 mt-2 text-blue-600 text-xs font-medium">
@@ -934,11 +945,7 @@ export default function MillingDashboard() {
                     <td data-label="Truck No" className="mob-hide py-2.5 px-2 text-gray-600 font-mono text-xs">{truckNos(batch)}</td>
                     <td data-label="Supplier" className="py-2.5 px-2 text-gray-600"><PartyLink type="supplier" id={batch.supplierId} name={batch.supplierName} /></td>
                     <td data-label="Arrival" className="mob-hide py-2.5 px-2">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                        batch.arrivalAnalysis ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'
-                      }`}>
-                        {batch.arrivalAnalysis ? 'Received' : 'Pending'}
-                      </span>
+                      <StatusBadge status={batch.arrivalAnalysis ? 'Received' : 'Pending'} />
                     </td>
                     <td data-label="Var%" className={`py-2.5 px-2 text-right font-medium ${
                       batch.variancePct !== null && batch.variancePct > 1.0 ? 'text-red-600' : 'text-gray-600'
@@ -990,11 +997,11 @@ export default function MillingDashboard() {
                     <td data-label="Batch" className="py-2.5 px-2">
                       <Link to={`/milling/${batch.id}`} className="font-medium text-blue-600 hover:text-blue-800">
                         {batch.id}
-                      </Link>{batch.batchName && <span className="text-gray-400"> · {batch.batchName}</span>}
+                      </Link>{batch.batchName && <span className="text-gray-400 inline-block max-w-[12rem] truncate align-bottom" title={batch.batchName}>&nbsp;· {batch.batchName}</span>}
                     </td>
-                    <td data-label="Raw kg" className="py-2.5 px-2 text-right text-gray-600">{Math.round(batch.rawQtyKg).toLocaleString()}</td>
-                    <td data-label="Finished kg" className="py-2.5 px-2 text-right text-gray-600">{Math.round(batch.actualFinishedKg).toLocaleString()}</td>
-                    <td data-label="Broken kg" className="mob-hide py-2.5 px-2 text-right text-gray-600">{Math.round(batch.brokenKg).toLocaleString()}</td>
+                    <td data-label="Raw kg" className="py-2.5 px-2 text-right text-gray-600">{fmtNum(batch.rawQtyKg, 0)}</td>
+                    <td data-label="Finished kg" className="py-2.5 px-2 text-right text-gray-600">{fmtNum(batch.actualFinishedKg, 0)}</td>
+                    <td data-label="Broken kg" className="mob-hide py-2.5 px-2 text-right text-gray-600">{fmtNum(batch.brokenKg, 0)}</td>
                     <td data-label="Yield%" className={`py-2.5 px-2 text-right font-medium ${
                       batch.yieldPct >= 75 ? 'text-emerald-600' : batch.yieldPct > 0 ? 'text-amber-600' : 'text-gray-400'
                     }`}>
@@ -1094,7 +1101,7 @@ export default function MillingDashboard() {
                     borderRadius: '8px',
                     fontSize: '12px',
                   }}
-                  formatter={(value) => [`Rs ${(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, undefined]}
+                  formatter={(value) => [`${fmtPKR(value, { decimals: 2 })}`, undefined]}
                 />
                 <Legend
                   verticalAlign="top"
@@ -1150,7 +1157,7 @@ export default function MillingDashboard() {
                     borderRadius: '8px',
                     fontSize: '12px',
                   }}
-                  formatter={(value) => [`Rs ${(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, undefined]}
+                  formatter={(value) => [`${fmtPKR(value, { decimals: 2 })}`, undefined]}
                 />
                 <Legend
                   verticalAlign="top"
@@ -1229,7 +1236,7 @@ export default function MillingDashboard() {
               </div>
 
               <CustomerPicker
-                label={<span className="text-xs font-semibold text-amber-800 uppercase">Service Milling Client *</span>}
+                label={<span className="text-xs font-semibold text-amber-800 uppercase">Service Milling Client <span className="text-red-500">*</span></span>}
                 value={batchForm.clientCustomerId}
                 onChange={(id) => setBF('clientCustomerId', id)}
                 addToast={addToast}
@@ -1239,6 +1246,7 @@ export default function MillingDashboard() {
                 listFn={() => serviceMillingApi.listClients()}
                 createFn={(data) => serviceMillingApi.createClient(data)}
               />
+              <FieldError error={batchErrors.clientCustomerId} />
 
               {/* Received in 50kg kattas or small (2–25kg) bags — the count is the
                   billable unit (rental/labour per katta/bag). */}
@@ -1264,7 +1272,7 @@ export default function MillingDashboard() {
                   <label className="block text-xs font-medium text-gray-700 mb-1">{isBagUnit ? 'Bag Size (kg)' : 'Katta Size (kg)'}</label>
                   <input type="number" min="0" step="0.5" value={batchForm.kattaSizeKg} onChange={e => recomputeKattaWeight(batchForm.kattaCount, e.target.value)} placeholder={isBagUnit ? 'e.g. 25' : 'e.g. 50'} className="w-full border border-amber-300 rounded-lg px-3 py-2 text-sm outline-none bg-white" />
                   {batchForm.kattaCount && batchForm.kattaSizeKg && (
-                    <p className="text-[11px] text-emerald-700 mt-0.5">= {Math.round((parseFloat(batchForm.kattaCount) || 0) * (parseFloat(batchForm.kattaSizeKg) || 0)).toLocaleString()} kg</p>
+                    <p className="text-[11px] text-emerald-700 mt-0.5">= {fmtKg((parseFloat(batchForm.kattaCount) || 0) * (parseFloat(batchForm.kattaSizeKg) || 0))}</p>
                   )}
                   {isBagUnit && <p className="text-[11px] text-gray-400 mt-0.5">Mixed bag sizes? Enter total bags + type the weighed quantity below.</p>}
                 </div>
@@ -1297,10 +1305,10 @@ export default function MillingDashboard() {
                   if (total <= 0) return null;
                   return (
                     <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs bg-white rounded-lg border border-amber-200 px-3 py-2">
-                      <span className="text-gray-500">Milling <b className="text-gray-800">PKR {(mill).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></span>
-                      <span className="text-gray-500">Rental <b className="text-gray-800">PKR {(rent).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></span>
-                      <span className="text-gray-500">Labour <b className="text-gray-800">PKR {(lab).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></span>
-                      <span className="ml-auto text-emerald-700 font-bold">Est. Service Total PKR {(total).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                      <span className="text-gray-500">Milling <b className="text-gray-800">{fmtPKR(mill, { decimals: 2 })}</b></span>
+                      <span className="text-gray-500">Rental <b className="text-gray-800">{fmtPKR(rent, { decimals: 2 })}</b></span>
+                      <span className="text-gray-500">Labour <b className="text-gray-800">{fmtPKR(lab, { decimals: 2 })}</b></span>
+                      <span className="ml-auto text-emerald-700 font-bold">Est. Service Total {fmtPKR(total, { decimals: 2 })}</span>
                     </div>
                   );
                 })()}
@@ -1347,14 +1355,14 @@ export default function MillingDashboard() {
                         <input value={v.driver_name} onChange={e => { const arr = [...batchForm.serviceVehicles]; arr[i] = { ...v, driver_name: e.target.value }; setBF('serviceVehicles', arr); }} placeholder="Driver" className="col-span-3 border border-gray-200 rounded px-2 py-1.5 text-xs outline-none" />
                         <input type="number" min="0" value={v.weight_kg} onChange={e => { const arr = [...batchForm.serviceVehicles]; arr[i] = { ...v, weight_kg: e.target.value }; setBF('serviceVehicles', arr); }} placeholder="Weight KG" className="col-span-3 border border-gray-200 rounded px-2 py-1.5 text-xs outline-none" />
                         <input type="number" min="0" value={v.total_bags} onChange={e => { const arr = [...batchForm.serviceVehicles]; arr[i] = { ...v, total_bags: e.target.value }; setBF('serviceVehicles', arr); }} placeholder="Bags" className="col-span-2 border border-gray-200 rounded px-2 py-1.5 text-xs outline-none" />
-                        <button type="button" onClick={() => setBF('serviceVehicles', batchForm.serviceVehicles.filter((_, j) => j !== i))} className="col-span-1 text-gray-300 hover:text-rose-500 flex justify-center"><X size={14} /></button>
+                        <button type="button" aria-label="Remove vehicle" title="Remove vehicle" onClick={() => setBF('serviceVehicles', batchForm.serviceVehicles.filter((_, j) => j !== i))} className="col-span-1 text-gray-300 hover:text-rose-500 flex justify-center"><X size={14} /></button>
                       </div>
                     ))}
                     {(() => {
                       const sum = (batchForm.serviceVehicles || []).reduce((s, v) => s + (parseFloat(v.weight_kg) || 0), 0);
                       const bags = (batchForm.serviceVehicles || []).reduce((s, v) => s + (parseInt(v.total_bags, 10) || 0), 0);
                       if (sum <= 0 && bags <= 0) return null;
-                      return <p className="text-[11px] text-emerald-700 font-medium">Total received: {Math.round(sum).toLocaleString()} kg · {bags} bags — this becomes the batch quantity.</p>;
+                      return <p className="text-[11px] text-emerald-700 font-medium">Total received: {fmtKg(sum)} · {bags} bags — this becomes the batch quantity.</p>;
                     })()}
                   </div>
                 )}
@@ -1401,13 +1409,14 @@ export default function MillingDashboard() {
             <div className="space-y-3 rounded-lg border border-blue-200 bg-blue-50/40 p-3">
               <div>
                 <RiceTypePicker
-                  label={<>Rice Type (output product) {blendRecipe.processingType === 'blended' ? '*' : <span className="text-gray-400 font-normal">— optional</span>}</>}
+                  label={<>Rice Type (output product) {blendRecipe.processingType === 'blended' ? <span className="text-red-500">*</span> : <span className="text-gray-400 font-normal">— optional</span>}</>}
                   value={blendProductId}
-                  onChange={setBlendProductId}
+                  onChange={(id) => { setBlendProductId(id); setBatchErrors(e => ({ ...e, blendProductId: undefined })); }}
                   products={products}
                   addToast={addToast}
                   placeholder={blendRecipe.processingType === 'blended' ? 'Search blended output product…' : 'Search rice type (or leave to inherit from lot)…'}
                 />
+                <FieldError error={batchErrors.blendProductId} />
                 {!blendProductId && blendRecipe.processingType !== 'blended' && blendRecipe.rows.length > 0 && (
                   <p className="text-xs text-gray-400 mt-1">Will use the lot's variety{blendRecipe.rows[0]?.variety ? `: ${blendRecipe.rows[0].variety}` : ''}.</p>
                 )}
@@ -1456,7 +1465,7 @@ export default function MillingDashboard() {
                             <span className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold ${CAT_COLOR[cat] || 'bg-gray-100 text-gray-600'}`}>{cat}</span>
                             <span className="min-w-0 flex-1">
                               <span className="block text-sm text-gray-800 truncate">{l.lotNo || l.itemName}</span>
-                              <span className="block text-[11px] text-gray-400 truncate">{l.variety || (l.type === 'finished' ? 'Finished' : 'Raw')} · {(avail).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg{costKg > 0 ? ` · Rs${costKg.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/kg` : ''}</span>
+                              <span className="block text-[11px] text-gray-400 truncate">{l.variety || (l.type === 'finished' ? 'Finished' : 'Raw')} · {fmtKg(avail, { decimals: 2 })}{costKg > 0 ? ` · ${fmtPKR(costKg, { decimals: 2 })}/kg` : ''}</span>
                             </span>
                           </button>
                           {sel && (
@@ -1470,16 +1479,17 @@ export default function MillingDashboard() {
                             </div>
                           )}
                         </div>
-                        {over && <p className="ml-6 mt-0.5 text-[11px] text-red-600">Only {Math.round(avail).toLocaleString()} kg available</p>}
+                        {over && <p className="ml-6 mt-0.5 text-[11px] text-red-600">Only {fmtKg(avail)} available</p>}
                       </div>
                     );
                   })}
                 </div>
+                <FieldError error={batchErrors.blendLots} />
               </div>
               {blendTotals.mt > 0 && (
                 <div className="flex justify-between text-sm border-t border-blue-200 pt-2">
                   <span className="text-gray-600">Combined total</span>
-                  <span className="font-semibold">{(blendTotals.kg).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg{showMoney && <> · Rs {(blendTotals.cost).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} <span className="text-gray-400 font-normal">(≈Rs {Math.round(blendTotals.cost / (blendTotals.mt * 1000))}/kg)</span></>}</span>
+                  <span className="font-semibold">{fmtKg(blendTotals.kg, { decimals: 2 })}{showMoney && <> · {fmtPKR(blendTotals.cost, { decimals: 2 })} <span className="text-gray-400 font-normal">(≈{fmtPKR(blendTotals.cost / (blendTotals.mt * 1000))}/kg)</span></>}</span>
                 </div>
               )}
               {/* Live recipe + processing type — yield is computed against the combined total above */}
@@ -1494,7 +1504,7 @@ export default function MillingDashboard() {
                   <div className="flex flex-wrap gap-1.5">
                     {blendRecipe.rows.map((r, i) => (
                       <span key={i} className="text-xs bg-white border border-blue-200 rounded px-1.5 py-0.5 text-gray-700">
-                        {r.variety} <span className="font-semibold">{r.pct.toFixed(0)}%</span>
+                        {r.variety} <span className="font-semibold">{fmtPct(r.pct, { decimals: 0 })}</span>
                       </span>
                     ))}
                   </div>
@@ -1518,6 +1528,7 @@ export default function MillingDashboard() {
               placeholder="Search rice type, e.g. 1121 Basmati, D98…"
               clearable={false}
             />
+            <FieldError error={batchErrors.productId} />
             <p className="text-xs text-gray-400 mt-1">Required — the variety being milled, so the batch and its output lots are traceable.</p>
           </div>
           )}
@@ -1535,6 +1546,7 @@ export default function MillingDashboard() {
               addToast={addToast}
               placeholder="Search supplier…"
             />
+            <FieldError error={batchErrors.supplierId} />
           </div>
           )}
           {/* Service milling: the stock source is the client (client-owned). */}
@@ -1557,9 +1569,10 @@ export default function MillingDashboard() {
                   placeholder="e.g. LES-1234" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none" />
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Weight (KG) *</label>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Weight (KG) <span className="text-red-500">*</span></label>
                 <input type="number" min="0" value={batchForm.rawQtyKg} onChange={e => setBF('rawQtyKg', e.target.value)}
                   placeholder="e.g. 30000" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none" />
+                <FieldError error={batchErrors.rawQtyKg} />
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">Bags</label>
@@ -1568,17 +1581,18 @@ export default function MillingDashboard() {
               </div>
               {showMoney && (
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Price (Rs/kg) *</label>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Price (Rs/kg) <span className="text-red-500">*</span></label>
                 <input type="number" min="0" step="0.01" value={batchForm.directPricePerKg || ''} onChange={e => setBF('directPricePerKg', e.target.value)}
                   placeholder="e.g. 145" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none" />
+                <FieldError error={batchErrors.directPricePerKg} />
               </div>
               )}
             </div>
             {batchForm.rawQtyKg && batchForm.totalBags && parseInt(batchForm.totalBags, 10) > 0 && (
-              <p className="text-xs text-emerald-600 font-medium">Avg: {(parseFloat(batchForm.rawQtyKg) / parseInt(batchForm.totalBags, 10)).toFixed(2)} kg/bag</p>
+              <p className="text-xs text-emerald-600 font-medium">Avg: {fmtNum(parseFloat(batchForm.rawQtyKg) / parseInt(batchForm.totalBags, 10), 2)} kg/bag</p>
             )}
             {showMoney && parseFloat(batchForm.rawQtyKg) > 0 && parseFloat(batchForm.directPricePerKg) > 0 && (
-              <p className="text-xs text-gray-500">Raw rice cost: Rs {(parseFloat(batchForm.rawQtyKg) * parseFloat(batchForm.directPricePerKg)).toLocaleString(undefined, { maximumFractionDigits: 2 })}. More trucks can be added on the batch page.</p>
+              <p className="text-xs text-gray-500">Raw rice cost: {fmtPKR(parseFloat(batchForm.rawQtyKg) * parseFloat(batchForm.directPricePerKg), { decimals: 2 })}. More trucks can be added on the batch page.</p>
             )}
           </div>
           )}
@@ -1587,7 +1601,7 @@ export default function MillingDashboard() {
           {!useBlend && batchForm.millingType === 'service_milling' && (
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">{batchForm.millingType === 'service_milling' ? 'Quantity Received (KG)' : 'Raw Qty (KG)'} *</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">{batchForm.millingType === 'service_milling' ? 'Quantity Received (KG)' : 'Raw Qty (KG)'} <span className="text-red-500">*</span></label>
               <input
                 type="number"
                 value={batchForm.rawQtyKg}
@@ -1595,8 +1609,9 @@ export default function MillingDashboard() {
                 placeholder="e.g. 30000"
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none"
               />
+              <FieldError error={batchErrors.rawQtyKg} />
               {batchForm.rawQtyKg && (
-                <p className="text-xs text-gray-400 mt-0.5">{Math.round(parseFloat(batchForm.rawQtyKg) || 0).toLocaleString()} kg</p>
+                <p className="text-xs text-gray-400 mt-0.5">{fmtKg(parseFloat(batchForm.rawQtyKg) || 0)}</p>
               )}
             </div>
             <div>
@@ -1609,7 +1624,7 @@ export default function MillingDashboard() {
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none"
               />
               {batchForm.rawQtyKg && batchForm.totalBags && parseInt(batchForm.totalBags, 10) > 0 && (
-                <p className="text-xs text-emerald-600 mt-0.5 font-medium">Avg: {(parseFloat(batchForm.rawQtyKg) / parseInt(batchForm.totalBags, 10)).toFixed(2)} kg/bag</p>
+                <p className="text-xs text-emerald-600 mt-0.5 font-medium">Avg: {fmtNum(parseFloat(batchForm.rawQtyKg) / parseInt(batchForm.totalBags, 10), 2)} kg/bag</p>
               )}
             </div>
           </div>
@@ -1657,14 +1672,14 @@ export default function MillingDashboard() {
           {batchForm.rawQtyKg && (
             <div className="bg-gray-50 rounded-lg border border-gray-200 p-3 text-sm">
               <div className="flex justify-between"><span className="text-gray-500">Type</span><span className="font-medium">{batchForm.millingType === 'service_milling' ? 'Service Milling' : 'Own Stock'}</span></div>
-              <div className="flex justify-between"><span className="text-gray-500">{batchForm.millingType === 'service_milling' ? 'Received' : 'Raw Input'}</span><span className="font-medium">{parseFloat(batchForm.rawQtyKg).toLocaleString()} kg ({(parseFloat(batchForm.rawQtyKg) / 1000).toFixed(2)} MT)</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">{batchForm.millingType === 'service_milling' ? 'Received' : 'Raw Input'}</span><span className="font-medium">{fmtNum(batchForm.rawQtyKg)} kg ({fmtNum(parseFloat(batchForm.rawQtyKg) / 1000, 2)} MT)</span></div>
               {batchForm.totalBags && parseInt(batchForm.totalBags, 10) > 0 && (
-                <div className="flex justify-between"><span className="text-gray-500">Bags</span><span className="font-medium">{batchForm.totalBags} bags · {(parseFloat(batchForm.rawQtyKg) / parseInt(batchForm.totalBags, 10)).toFixed(2)} kg/bag avg</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">Bags</span><span className="font-medium">{batchForm.totalBags} bags · {fmtNum(parseFloat(batchForm.rawQtyKg) / parseInt(batchForm.totalBags, 10), 2)} kg/bag avg</span></div>
               )}
               {batchForm.millingType === 'service_milling' && batchForm.serviceMillingRatePerKg && (
                 <div className="flex justify-between border-t border-gray-200 mt-1 pt-1">
                   <span className="text-gray-500">Est. Milling Service</span>
-                  <span className="font-bold text-emerald-700">PKR {(parseFloat(batchForm.serviceMillingRatePerKg) * (parseFloat(batchForm.expectedOutputKg) || parseFloat(batchForm.rawQtyKg) || 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  <span className="font-bold text-emerald-700">{fmtPKR(parseFloat(batchForm.serviceMillingRatePerKg) * (parseFloat(batchForm.expectedOutputKg) || parseFloat(batchForm.rawQtyKg) || 0), { decimals: 2 })}</span>
                 </div>
               )}
             </div>

@@ -3,12 +3,14 @@ import { FileText, Wallet } from 'lucide-react';
 import SlideDrawer from '../../../components/SlideDrawer';
 import { serviceMillingApi } from '../api/services';
 import { useHaulers } from '../../../api/queries';
+import HaulerPicker from '../../../components/HaulerPicker';
+import { fmtPKR, fmtKg, fmtNum } from '../../../shared/utils/format';
 
 const num = (v) => parseFloat(v) || 0;
-const pkr = (v) => `PKR ${(num(v)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const pkr = (v) => fmtPKR(num(v), { decimals: 2 });
 
-const kg0 = (v) => `${Math.round(num(v)).toLocaleString()} kg`;
-const bags0 = (v) => `${Math.round(num(v)).toLocaleString()}`;
+const kg0 = (v) => fmtKg(num(v));
+const bags0 = (v) => fmtNum(num(v), 0);
 
 /**
  * Create a Service Milling invoice for a batch. `batch` is a row from the
@@ -181,10 +183,14 @@ export function CreateInvoiceDrawer({ open, batch, onClose, onCreated, addToast 
             </div>
             <div>
               <label className="block text-[11px] font-medium text-gray-600 mb-1">Hauler {freight > 0 && <span className="text-red-500">*</span>}</label>
-              <select value={form.freight_hauler_id ?? ''} onChange={e => set('freight_hauler_id', e.target.value)} className={inputCls} disabled={freight <= 0}>
-                <option value="">Select hauler…</option>
-                {(haulers || []).map(h => <option key={h.id} value={h.id}>{h.name}</option>)}
-              </select>
+              {freight > 0 ? (
+                <HaulerPicker value={form.freight_hauler_id ?? ''} onChange={id => set('freight_hauler_id', id)}
+                  haulers={haulers || []} addToast={addToast} placeholder="Select hauler…" />
+              ) : (
+                <select value="" className={inputCls} disabled aria-label="Hauler">
+                  <option value="">Enter freight first</option>
+                </select>
+              )}
             </div>
           </div>
         </div>

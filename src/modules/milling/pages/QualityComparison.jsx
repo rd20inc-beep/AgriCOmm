@@ -8,9 +8,10 @@ import {
 import { useApp } from '../../../context/AppContext';
 import { useUpdateMillingBatch, useBatchStatusAction } from '../../../api/queries';
 import api from '../../../api/client';
-import Modal from '../../../components/Modal';
+import SlideDrawer from '../../../components/SlideDrawer';
 import StatusBadge from '../../../components/StatusBadge';
 import { LoadingSpinner } from '../../../components/LoadingState';
+import { fmtPKR } from '../../../shared/utils/format';
 
 const qualityParams = [
   { key: 'moisture', label: 'Moisture %', unit: '%' },
@@ -279,8 +280,8 @@ export default function QualityComparison() {
         </div>
       )}
 
-      {/* Comparison Modal */}
-      <Modal isOpen={modalOpen} onClose={closeModal} title={`Quality Comparison — ${selectedBatch?.id || ''}`} size="lg">
+      {/* Comparison drawer */}
+      <SlideDrawer open={modalOpen} onClose={closeModal} title={`Quality Comparison — ${selectedBatch?.id || ''}`} size="xl">
         {selectedBatch && (
           <div className="space-y-4">
             <div className="bg-gray-50 rounded-lg p-3">
@@ -351,13 +352,13 @@ export default function QualityComparison() {
                   <div className="bg-amber-50 rounded-lg p-3">
                     <p className="text-xs text-amber-600 font-medium mb-1">Sample / Offered Price</p>
                     {selectedBatch.sampleAnalysis?.pricePerMT ? (
-                      <p className="text-lg font-bold text-amber-900">Rs {(selectedBatch.sampleAnalysis.pricePerMT).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} /MT</p>
+                      <p className="text-lg font-bold text-amber-900">{fmtPKR(selectedBatch.sampleAnalysis.pricePerMT, { decimals: 2 })} /MT</p>
                     ) : <p className="text-sm text-gray-400">Not set</p>}
                   </div>
                   <div className="bg-blue-50 rounded-lg p-3">
                     <p className="text-xs text-blue-600 font-medium mb-1">Arrival / Agreed Price</p>
                     {selectedBatch.arrivalAnalysis?.pricePerMT ? (
-                      <p className="text-lg font-bold text-blue-900">Rs {(selectedBatch.arrivalAnalysis.pricePerMT).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} /MT</p>
+                      <p className="text-lg font-bold text-blue-900">{fmtPKR(selectedBatch.arrivalAnalysis.pricePerMT, { decimals: 2 })} /MT</p>
                     ) : <p className="text-sm text-gray-400">Not set</p>}
                   </div>
                 </div>
@@ -377,7 +378,7 @@ export default function QualityComparison() {
             </div>
           </div>
         )}
-      </Modal>
+      </SlideDrawer>
     </div>
   );
 }

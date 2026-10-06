@@ -13,13 +13,10 @@ import SlideDrawer from '../../../components/SlideDrawer';
 import SupplierPicker from '../../../components/SupplierPicker';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
+import { fmtPKR, fmtNum, fmtDate } from '../../../shared/utils/format';
 
-function formatPKR(v) {
-  const n = Number(v) || 0;
-  if (n >= 1_000_000) return `Rs ${(n / 1_000_000).toFixed(2)}M`;
-  if (n >= 1_000) return `Rs ${(n / 1_000).toFixed(1)}K`;
-  return `Rs ${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
+// Exact figures — never "M"/"K" (store values are reconciled line by line).
+const formatPKR = (v) => fmtPKR(Number(v) || 0, { decimals: 2 });
 
 function KPI({ icon: Icon, label, value, sub, accent = 'blue' }) {
   const colors = {
@@ -122,7 +119,7 @@ export default function StoreOverview() {
               <Boxes size={16} className="text-amber-600" />
               <h2 className="text-sm font-semibold text-amber-900">Katta Stock <span className="font-normal text-amber-700/80">by size</span></h2>
             </div>
-            <span className="text-xs text-amber-700">{kattaItems.reduce((s, k) => s + (Number(k.on_hand) || 0), 0).toLocaleString()} total pcs</span>
+            <span className="text-xs text-amber-700">{fmtNum(kattaItems.reduce((s, k) => s + (Number(k.on_hand) || 0), 0))} total pcs</span>
           </div>
           <div className="overflow-x-auto mobile-cards">
             <table className="w-full text-sm">
@@ -144,11 +141,11 @@ export default function StoreOverview() {
                   return (
                     <tr key={k.id} className="border-t border-amber-100">
                       <td data-label="Katta" className="py-1.5 pr-3 font-medium text-gray-800">{k.size} kg</td>
-                      <td data-label="Purchased" className="mob-hide py-1.5 px-2 text-right text-blue-700">{k.purchased > 0 ? `+${Math.round(k.purchased).toLocaleString()}` : '—'}</td>
-                      <td data-label="Freed" className="mob-hide py-1.5 px-2 text-right text-emerald-700">{k.freed > 0 ? `+${Math.round(k.freed).toLocaleString()}` : '—'}</td>
-                      <td data-label="Used" className="mob-hide py-1.5 px-2 text-right text-red-600">{k.packed > 0 ? `−${Math.round(k.packed).toLocaleString()}` : '—'}</td>
-                      <td data-label="Sold" className="mob-hide py-1.5 px-2 text-right text-red-600">{k.sold > 0 ? `−${Math.round(k.sold).toLocaleString()}` : '—'}</td>
-                      <td data-label="On hand" className={`py-1.5 px-2 text-right font-bold ${low ? 'text-red-600' : 'text-gray-900'}`}>{Math.round(onHand).toLocaleString()}</td>
+                      <td data-label="Purchased" className="mob-hide py-1.5 px-2 text-right text-blue-700">{k.purchased > 0 ? `+${fmtNum(k.purchased, 0)}` : '—'}</td>
+                      <td data-label="Freed" className="mob-hide py-1.5 px-2 text-right text-emerald-700">{k.freed > 0 ? `+${fmtNum(k.freed, 0)}` : '—'}</td>
+                      <td data-label="Used" className="mob-hide py-1.5 px-2 text-right text-red-600">{k.packed > 0 ? `−${fmtNum(k.packed, 0)}` : '—'}</td>
+                      <td data-label="Sold" className="mob-hide py-1.5 px-2 text-right text-red-600">{k.sold > 0 ? `−${fmtNum(k.sold, 0)}` : '—'}</td>
+                      <td data-label="On hand" className={`py-1.5 px-2 text-right font-bold ${low ? 'text-red-600' : 'text-gray-900'}`}>{fmtNum(onHand, 0)}</td>
                       <td data-label="Value" className="py-1.5 pl-2 text-right text-gray-700">{k.avg_cost > 0 ? formatPKR(onHand * k.avg_cost) : '—'}</td>
                     </tr>
                   );
@@ -220,7 +217,7 @@ export default function StoreOverview() {
                   return (
                     <tr key={item.id} className={`hover:bg-gray-50 ${isLow ? 'bg-red-50/50' : ''}`}>
                       <td data-label="Code" className="mob-hide py-2 px-3 font-mono text-xs text-gray-500">{item.code}</td>
-                      <td data-label="Item" className="py-2 px-3 font-medium text-gray-900">{item.name}</td>
+                      <td data-label="Item" className="py-2 px-3 font-medium text-gray-900 max-w-[14rem] truncate" title={item.name}>{item.name}</td>
                       <td data-label="Category" className="py-2 px-3">
                         <span className="inline-block px-2 py-0.5 text-xs font-medium rounded-full bg-gray-100 text-gray-700 capitalize">
                           {item.category}
@@ -241,6 +238,7 @@ export default function StoreOverview() {
                       <td data-label="Value" className="py-2 px-3 text-right text-gray-900 font-medium">{formatPKR(qty * avg)}</td>
                       <td className="mob-hide py-2 px-3 text-right">
                         <button
+                          aria-label="Edit stock"
                           onClick={() => setEditItem(item)}
                           className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                           title="Edit stock"
@@ -303,7 +301,7 @@ function PurchasePaymentsCard() {
             {unpaid.map(p => (
               <tr key={p.id} className="hover:bg-gray-50">
                 <td data-label="Purchase" className="py-2 px-2 font-medium text-gray-900">{p.purchase_no}</td>
-                <td data-label="Date" className="mob-hide py-2 px-2 text-gray-600 text-xs">{p.purchase_date ? new Date(p.purchase_date).toLocaleDateString('en-GB') : '—'}</td>
+                <td data-label="Date" className="mob-hide py-2 px-2 text-gray-600 text-xs">{fmtDate(p.purchase_date)}</td>
                 <td data-label="Total" className="py-2 px-2 text-right tabular-nums">{formatPKR(p.total_amount)}</td>
                 <td data-label="Paid" className="mob-hide py-2 px-2 text-right tabular-nums text-emerald-700">{formatPKR(p.paid_amount)}</td>
                 <td data-label="Due" className="py-2 px-2 text-right tabular-nums text-red-600 font-medium">{formatPKR(due(p))}</td>
@@ -493,7 +491,7 @@ function StockEditDrawer({ item, onClose }) {
           </div>
           <p className="text-[11px] text-gray-400 mt-1">
             Cost per unit values the stock and prices the purchase requests raised for export orders.
-            {stockValue > 0 && <> Current stock value: <span className="font-medium text-gray-600">Rs {stockValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>.</>}
+            {stockValue > 0 && <> Current stock value: <span className="font-medium text-gray-600">{fmtPKR(stockValue, { decimals: 2 })}</span>.</>}
           </p>
           <label className={`${lbl} mt-3`}>Preferred supplier</label>
           <SupplierPicker

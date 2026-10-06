@@ -22,10 +22,10 @@ import ServiceBillingTab from '../components/ServiceBillingTab';
 import { qualityParams, aggregateVehicleQuality } from '../qualityParams';
 import useConfirm from '../../../hooks/useConfirm';
 import useCanSeeCost from '../../../hooks/useCanSeeCost';
-import { todayLocalISO } from '../../../shared/utils/format';
+import { todayLocalISO, fmtKg, fmtNum } from '../../../shared/utils/format';
 
 const num = (v) => parseFloat(v) || 0;
-const kg = (v) => `${Math.round(num(v)).toLocaleString()} kg`;
+const kg = (v) => fmtKg(num(v));
 
 const LOT_STATUS_STYLE = {
   'Received': 'bg-slate-100 text-slate-700',
@@ -333,7 +333,7 @@ export default function ServiceMillingBatchDetail() {
     if (!await confirm({
       title: `Delete vehicle ${v.vehicleNo} arrival?`,
       consequence: 'The linked stock receipt is reversed, so the client\u2019s received quantity drops by this truck.',
-      amount: v.weightKg != null ? `${Math.round(parseFloat(v.weightKg) || 0).toLocaleString()} kg` : undefined,
+      amount: v.weightKg != null ? fmtKg(parseFloat(v.weightKg) || 0) : undefined,
       confirmLabel: 'Delete arrival',
     })) return;
     try {
@@ -470,7 +470,7 @@ export default function ServiceMillingBatchDetail() {
         <Stat icon={Package} tone="text-amber-500" label="Raw Received" value={kg(batch.rawQtyKg)}
           sub={milledKg > 0 && unmilledKg > 0
             ? `${kg(unmilledKg)} still unmilled`
-            : (unit ? `${unitCount.toLocaleString()} ${unit}` : null)} />
+            : (unit ? `${fmtNum(unitCount)} ${unit}` : null)} />
         <Stat icon={Factory} tone="text-indigo-500" label="Produced (client)" value={kg(producedKg)} sub={producedKg > 0 ? `Yield ${batch.yieldPct || 0}%` : 'Not milled yet'} />
         <Stat icon={Truck} tone="text-blue-500" label="Vehicles" value={safeVehicles.length} sub="arrivals recorded" />
         <Stat icon={Calendar} tone="text-gray-400" label="Received" value={batch.dateReceived ? new Date(batch.dateReceived).toLocaleDateString('en-GB') : '—'} />
@@ -500,7 +500,7 @@ export default function ServiceMillingBatchDetail() {
             <Row label="Client">{batch.clientName || '—'}</Row>
             <Row label="Date Received">{batch.dateReceived ? new Date(batch.dateReceived).toLocaleDateString('en-GB') : '—'}</Row>
             <Row label="Received Quantity">{kg(batch.rawQtyKg)}</Row>
-            {unit && <Row label={unit === 'kattas' ? 'Kattas Received' : 'Bags Received'}>{unitCount.toLocaleString()} {unit}</Row>}
+            {unit && <Row label={unit === 'kattas' ? 'Kattas Received' : 'Bags Received'}>{fmtNum(unitCount)} {unit}</Row>}
             {milledKg > 0 && <Row label="Milled">{kg(milledKg)}</Row>}
             {milledKg > 0 && <Row label="Unmilled">{kg(unmilledKg)}</Row>}
             {batch.serviceRemarks && <Row label="Remarks">{batch.serviceRemarks}</Row>}
@@ -525,8 +525,8 @@ export default function ServiceMillingBatchDetail() {
                       <span className="text-gray-600">{kg(v.weightKg)}{v.totalBags ? <span className="text-gray-400"> · {v.totalBags} bags</span> : null}</span>
                       {canEditVehicles && v.id && (
                         <>
-                          <button onClick={() => openEditVehicle(v)} title="Edit arrival" className="p-1 rounded hover:bg-blue-50 text-blue-500"><Pencil size={14} /></button>
-                          <button onClick={() => deleteVehicle(v)} title="Delete arrival" className="p-1 rounded hover:bg-red-50 text-red-500"><Trash2 size={14} /></button>
+                          <button aria-label="Edit arrival" onClick={() => openEditVehicle(v)} title="Edit arrival" className="p-1 rounded hover:bg-blue-50 text-blue-500"><Pencil size={14} /></button>
+                          <button aria-label="Delete arrival" onClick={() => deleteVehicle(v)} title="Delete arrival" className="p-1 rounded hover:bg-red-50 text-red-500"><Trash2 size={14} /></button>
                         </>
                       )}
                     </div>
@@ -610,6 +610,7 @@ export default function ServiceMillingBatchDetail() {
         qualityParams={qualityParams}
         batch={batch}
         hidePricing
+        saving={saveQualityMut.isPending}
       />
       <YieldOutputDrawer
         open={showYieldModal}
@@ -628,6 +629,7 @@ export default function ServiceMillingBatchDetail() {
         form={vehicleForm}
         setForm={setVehicleForm}
         onSubmit={handleVehicleSubmit}
+        saving={addVehicleMut.isPending || updateVehicleMut.isPending}
         showQuality={showVehicleQuality}
         setShowQuality={setShowVehicleQuality}
         hidePricing

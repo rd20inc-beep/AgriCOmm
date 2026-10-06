@@ -92,7 +92,7 @@ export default function MillExpenseDrawer({ open, onClose, addToast, prefill, on
       <div className="space-y-4">
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Category *</label>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Category <span className="text-red-500">*</span></label>
             <select value={form.category}
               onChange={e => setForm(p => ({ ...p, category: e.target.value, vendor_preset: '', vendor_name: '' }))}
               className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900 bg-white">
@@ -100,7 +100,7 @@ export default function MillExpenseDrawer({ open, onClose, addToast, prefill, on
             </select>
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Amount (PKR) *</label>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Amount (PKR) <span className="text-red-500">*</span></label>
             <input type="number" min="0" step="0.01" value={form.amount}
               onChange={e => setForm(p => ({ ...p, amount: e.target.value }))}
               className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900 tabular-nums" />

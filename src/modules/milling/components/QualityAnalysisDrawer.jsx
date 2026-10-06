@@ -1,5 +1,6 @@
 import { FlaskConical } from 'lucide-react';
 import SlideDrawer from '../../../components/SlideDrawer';
+import { fmtPKR, fmtKg } from '../../../shared/utils/format';
 
 /**
  * Sample / Arrival quality analysis — right slide-over.
@@ -9,7 +10,7 @@ import SlideDrawer from '../../../components/SlideDrawer';
  */
 export default function QualityAnalysisDrawer({
   open, onClose, type = 'arrival', form, setForm, onSubmit,
-  qualityParams = [], batch, hidePricing = false,
+  qualityParams = [], batch, hidePricing = false, saving = false,
 }) {
   const isSample = type === 'sample';
   return (
@@ -58,7 +59,7 @@ export default function QualityAnalysisDrawer({
           </div>
           {form.pricePerKg && batch.rawQtyKg > 0 && (
             <div className="mt-2 text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2">
-              Estimated total cost for {(batch.rawQtyKg).toLocaleString()} kg raw: <span className="font-semibold text-gray-800">Rs {(parseFloat(form.pricePerKg) * batch.rawQtyKg).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              Estimated total cost for {fmtKg(batch.rawQtyKg)} raw: <span className="font-semibold text-gray-800">{fmtPKR(parseFloat(form.pricePerKg) * batch.rawQtyKg, { decimals: 2 })}</span>
             </div>
           )}
         </div>
@@ -74,7 +75,8 @@ export default function QualityAnalysisDrawer({
           </button>
           <button
             type="submit"
-            className={`px-4 py-2 text-sm font-medium text-white rounded-lg transition-colors ${isSample ? 'bg-amber-600 hover:bg-amber-700' : 'bg-blue-600 hover:bg-blue-700'}`}
+            disabled={saving}
+            className={`px-4 py-2 text-sm font-medium text-white rounded-lg transition-colors disabled:opacity-50 ${isSample ? 'bg-amber-600 hover:bg-amber-700' : 'bg-blue-600 hover:bg-blue-700'}`}
           >
             Save {isSample ? 'Sample' : 'Arrival'} Analysis
           </button>

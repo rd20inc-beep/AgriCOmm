@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../../../api/client';
 import { useMillStoreItems } from '../../millStore/api/queries';
 import useCanSeeCost from '../../../hooks/useCanSeeCost';
+import { fmtPKR } from '../../../shared/utils/format';
 
 // Packaging recorded ON the batch, line by line.
 //
@@ -21,7 +22,7 @@ import useCanSeeCost from '../../../hooks/useCanSeeCost';
 //   Used      bags used to pack this batch's output.
 
 const num = (v) => Number(parseFloat(v) || 0);
-const rs = (v) => `Rs ${num(v).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const rs = (v) => fmtPKR(num(v), { decimals: 2 });
 
 const TYPE_LABEL = {
   katta: 'Katta', pp_bag: 'P.P. Bag', master_bag: 'Master Bag', polythene: 'Polythene', other: 'Other',
@@ -219,7 +220,7 @@ export default function BatchPackagingPanel({ batchId, batchStatus, addToast }) 
                 </td>}
                 {showCost && <td data-label="Cost" className="py-1.5 pr-2 text-right font-medium text-gray-900">{rs(lineCost(r))}</td>}
                 <td className="py-1.5 text-right">
-                  <button onClick={() => removeRow(idx)} disabled={locked} className="text-gray-400 hover:text-red-600 disabled:opacity-40" title="Remove this line">
+                  <button aria-label="Remove this line" onClick={() => removeRow(idx)} disabled={locked} className="text-gray-400 hover:text-red-600 disabled:opacity-40" title="Remove this line">
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
                 </td>

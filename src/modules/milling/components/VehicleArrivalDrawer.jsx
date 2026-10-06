@@ -1,5 +1,6 @@
 import { Truck } from 'lucide-react';
 import SlideDrawer from '../../../components/SlideDrawer';
+import { fmtKg, fmtNum, fmtPct } from '../../../shared/utils/format';
 
 /**
  * Add Vehicle Arrival — right slide-over.
@@ -9,14 +10,14 @@ import SlideDrawer from '../../../components/SlideDrawer';
 export default function VehicleArrivalDrawer({
   open, onClose, form, setForm, onSubmit,
   showQuality, setShowQuality, hidePricing = false,
-  title = 'Add Vehicle Arrival', submitLabel = 'Add Vehicle',
+  title = 'Add Vehicle Arrival', submitLabel = 'Add Vehicle', saving = false,
 }) {
   return (
     <SlideDrawer open={open} onClose={onClose} title={title} icon={Truck} size="xl">
       <form onSubmit={onSubmit} className="space-y-4">
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Vehicle / Truck Number *</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Vehicle / Truck Number <span className="text-red-500">*</span></label>
             <input
               type="text"
               required
@@ -67,7 +68,7 @@ export default function VehicleArrivalDrawer({
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
             {form.weightKg && (
-              <p className="text-xs text-gray-400 mt-0.5">{Math.round(parseFloat(form.weightKg) || 0).toLocaleString()} kg</p>
+              <p className="text-xs text-gray-400 mt-0.5">{fmtKg(parseFloat(form.weightKg) || 0)}</p>
             )}
           </div>
           <div>
@@ -82,7 +83,7 @@ export default function VehicleArrivalDrawer({
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
             {form.weightKg && form.totalBags && parseInt(form.totalBags, 10) > 0 && (
-              <p className="text-xs text-emerald-600 mt-0.5 font-medium">Avg: {(parseFloat(form.weightKg) / parseInt(form.totalBags, 10)).toFixed(2)} kg/bag</p>
+              <p className="text-xs text-emerald-600 mt-0.5 font-medium">Avg: {fmtNum(parseFloat(form.weightKg) / parseInt(form.totalBags, 10), 2)} kg/bag</p>
             )}
           </div>
           <div className="col-span-2">
@@ -153,9 +154,9 @@ export default function VehicleArrivalDrawer({
                         sumMatch === true ? 'text-emerald-700' :
                         sumMatch === false ? 'text-amber-700' : 'text-gray-500'
                       }`}>
-                        Σ = {gradeTotal.toFixed(2)}%
+                        Σ = {fmtPct(gradeTotal, { decimals: 2 })}
                         {sumMatch === false && brokenPct > 0 && (
-                          <span className="ml-1">(broken: {brokenPct.toFixed(2)}%)</span>
+                          <span className="ml-1">(broken: {fmtPct(brokenPct, { decimals: 2 })})</span>
                         )}
                       </span>
                     )}
@@ -200,7 +201,8 @@ export default function VehicleArrivalDrawer({
           </button>
           <button
             type="submit"
-            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors"
+            disabled={saving}
+            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
           >
             <Truck size={16} />
             {submitLabel}

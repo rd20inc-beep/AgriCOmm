@@ -5,10 +5,10 @@ import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import { usePayables, useMillPayables, useRecordPayment } from '../../../api/queries';
 import { payablesForRow } from '../utils/payableBuckets';
-import { todayLocalISO } from '../../../shared/utils/format';
+import { todayLocalISO, fmtPKR, fmtDate as fmtDateHouse } from '../../../shared/utils/format';
 
-const PKR = (v) => `Rs ${(parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const fmtDate = (d) => { if (!d) return ''; const dt = new Date(d); return Number.isNaN(dt.getTime()) ? '' : dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }); };
+const PKR = (v) => fmtPKR(parseFloat(v) || 0, { decimals: 2 });
+const fmtDate = (d) => (d ? fmtDateHouse(d) : '');
 
 // Pay a supplier AGAINST a specific invoice (payable), so each payment records
 // which invoice it settled — reconcilable later. Uses recordPayment with
@@ -105,7 +105,7 @@ export default function MillSupplierPayDrawer({ supplier, onClose }) {
         ) : (
           <>
             <div>
-              <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Pay against invoice *</label>
+              <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Pay against invoice <span className="text-red-500">*</span></label>
               <div className="space-y-1.5 max-h-44 overflow-y-auto rounded-lg border border-gray-200 p-1.5">
                 {openInvoices.map((p) => {
                   const id = String(p.dbId || p.id);
@@ -128,7 +128,7 @@ export default function MillSupplierPayDrawer({ supplier, onClose }) {
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Amount ({cur}) *</label>
+                <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Amount ({cur}) <span className="text-red-500">*</span></label>
                 <input type="number" value={form.amount} onChange={(e) => set('amount', e.target.value)} min="0" max={out}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-emerald-500" />
                 {selected && <p className="text-[11px] text-gray-400 mt-1">Outstanding: {PKR(out)}</p>}

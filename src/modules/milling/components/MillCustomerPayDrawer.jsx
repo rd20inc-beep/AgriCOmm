@@ -5,10 +5,10 @@ import { useApp } from '../../../context/AppContext';
 import { useLocalSales, useAcceptLocalSalePayment } from '../../../api/queries';
 import { CHEQUE_DATE_LABEL } from '../../../components/payments/paymentPayload';
 import { ChequeHint } from '../../../components/payments/PaymentFields';
-import { todayLocalISO } from '../../../shared/utils/format';
+import { todayLocalISO, fmtPKR, fmtDate as fmtDateHouse } from '../../../shared/utils/format';
 
-const PKR = (v) => `Rs ${(parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const fmtDate = (d) => { const dt = new Date(d); return Number.isNaN(dt.getTime()) ? '' : dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }); };
+const PKR = (v) => fmtPKR(parseFloat(v) || 0, { decimals: 2 });
+const fmtDate = (d) => (d ? fmtDateHouse(d) : '');
 
 // Record a receipt from a local customer AGAINST a specific invoice (local
 // sale), so the payment is reconcilable. Uses acceptLocalSalePayment which
@@ -86,7 +86,7 @@ export default function MillCustomerPayDrawer({ customer, onClose }) {
         ) : (
           <>
             <div>
-              <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Pay against invoice *</label>
+              <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Pay against invoice <span className="text-red-500">*</span></label>
               <div className="space-y-1.5 max-h-44 overflow-y-auto rounded-lg border border-gray-200 p-1.5">
                 {openInvoices.map((s) => {
                   const id = String(s.id);
@@ -109,7 +109,7 @@ export default function MillCustomerPayDrawer({ customer, onClose }) {
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Amount (PKR) *</label>
+                <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Amount (PKR) <span className="text-red-500">*</span></label>
                 <input type="number" value={form.amount} onChange={(e) => set('amount', e.target.value)} min="0" max={due}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-emerald-500" />
                 {selected && <p className="text-[11px] text-gray-400 mt-1">Outstanding: {PKR(due)}</p>}
