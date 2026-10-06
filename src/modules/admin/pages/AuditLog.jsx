@@ -3,8 +3,8 @@ import { Link } from 'react-router-dom';
 import { Shield, Search, Filter, Clock, User, FileText, Eye, ChevronDown, ChevronUp, RefreshCw, Download, Printer } from 'lucide-react';
 import { useAuditLogs } from '../../../api/queries';
 import { LoadingSpinner, ErrorState } from '../../../components/LoadingState';
-import Modal from '../../../components/Modal';
-import { todayLocalISO } from '../../../shared/utils/format';
+import Modal from '../components/AdminDrawer';
+import { todayLocalISO, fmtDateTime } from '../../../shared/utils/format';
 
 // Build + download a CSV of the currently-filtered audit rows.
 function exportAuditCsv(rows) {
@@ -48,12 +48,6 @@ function getActionColor(action) {
     if (lower.includes(key)) return color;
   }
   return 'bg-gray-100 text-gray-700';
-}
-
-function formatDate(dateStr) {
-  if (!dateStr) return '—';
-  const d = new Date(dateStr);
-  return d.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
 function DiffViewer({ before, after }) {
@@ -226,7 +220,7 @@ export default function AuditLog() {
                   <td data-label="Timestamp" className="px-4 py-3 text-gray-600 whitespace-nowrap">
                     <div className="flex items-center gap-1.5">
                       <Clock className="w-3.5 h-3.5 text-gray-400" />
-                      {formatDate(log.createdAt)}
+                      {fmtDateTime(log.createdAt)}
                     </div>
                   </td>
                   <td data-label="User" className="px-4 py-3">
@@ -285,7 +279,7 @@ export default function AuditLog() {
               </div>
               <div>
                 <p className="text-xs font-medium text-gray-500 uppercase">Timestamp</p>
-                <p className="text-sm text-gray-900 mt-1">{formatDate(selectedLog.createdAt)}</p>
+                <p className="text-sm text-gray-900 mt-1">{fmtDateTime(selectedLog.createdAt)}</p>
               </div>
               <div>
                 <p className="text-xs font-medium text-gray-500 uppercase">User</p>

@@ -5,6 +5,8 @@ import { Users, Plus, Globe, Mail, Phone, Pencil, Trash2, Star, BookOpen } from 
 import { useApp } from '../../../../context/AppContext';
 import { useCreateCustomer, useUpdateCustomer, useDeleteCustomer } from '../../../../api/queries';
 import Modal from '../../components/AdminDrawer';
+import FieldError from '../../../../shared/components/FieldError';
+import useConfirm from '../../../../hooks/useConfirm';
 
 const EMPTY = { name: '', country: '', contact_person: '', email: '', phone: '' };
 
@@ -14,15 +16,19 @@ export default function CustomersTab() {
   const createMut = useCreateCustomer();
   const updateMut = useUpdateCustomer();
   const deleteMut = useDeleteCustomer();
+  const [confirm, confirmDialog] = useConfirm();
+  const saving = createMut.isPending || updateMut.isPending;
 
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(EMPTY);
-  const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
+  const [errors, setErrors] = useState({});
+  const set = (k, v) => { setForm(p => ({ ...p, [k]: v })); setErrors(e => (e[k] ? { ...e, [k]: null } : e)); };
 
-  const openCreate = () => { setEditingId(null); setForm(EMPTY); setOpen(true); };
+  const openCreate = () => { setEditingId(null); setForm(EMPTY); setErrors({}); setOpen(true); };
   const openEdit = (c) => {
     setEditingId(c.id);
+    setErrors({});
     setForm({
       name: c.name || '',
       country: c.country || '',
@@ -34,8 +40,9 @@ export default function CustomersTab() {
   };
 
   const handleSave = async () => {
+    if (saving) return;
     const name = form.name.trim();
-    if (!name) { addToast('Customer name is required', 'error'); return; }
+    if (!name) { setErrors({ name: 'Customer name is required' }); return; }
     const payload = {
       name,
       country: form.country.trim(),
@@ -73,7 +80,11 @@ export default function CustomersTab() {
   }, [customersList]);
 
   const handleDelete = async (c) => {
-    if (!window.confirm(`Delete customer "${c.name}"? This cannot be undone.`)) return;
+    if (!await confirm({
+      title: `Delete customer "${c.name}"?`,
+      consequence: 'This cannot be undone.',
+      confirmLabel: 'Delete',
+    })) return;
     try {
       await deleteMut.mutateAsync(c.id);
       addToast(`Customer "${c.name}" deleted`, 'success');
@@ -84,6 +95,7 @@ export default function CustomersTab() {
 
   return (
     <>
+      {confirmDialog}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
@@ -119,6 +131,7 @@ export default function CustomersTab() {
                     <button
                       onClick={() => toggleFavorite(c)}
                       title={c.isFavorite ? 'Remove from favorites' : 'Mark as favorite'}
+                      aria-label={c.isFavorite ? `Remove ${c.name} from favorites` : `Mark ${c.name} as favorite`}
                       className="p-1 rounded hover:bg-amber-50 transition-colors"
                     >
                       <Star className={`w-4 h-4 ${c.isFavorite ? 'fill-amber-400 text-amber-500' : 'text-gray-300'}`} />
@@ -151,6 +164,7 @@ export default function CustomersTab() {
                         onClick={() => navigate(`/finance/statements?type=customer&id=${c.id}`)}
                         className="p-1.5 rounded hover:bg-emerald-50 text-emerald-600"
                         title="View ledger"
+                        aria-label={`View ledger for ${c.name}`}
                       >
                         <BookOpen className="w-4 h-4" />
                       </button>
@@ -158,6 +172,7 @@ export default function CustomersTab() {
                         onClick={() => openEdit(c)}
                         className="p-1.5 rounded hover:bg-blue-50 text-blue-600"
                         title="Edit"
+                        aria-label={`Edit ${c.name}`}
                       >
                         <Pencil className="w-4 h-4" />
                       </button>
@@ -165,6 +180,7 @@ export default function CustomersTab() {
                         onClick={() => handleDelete(c)}
                         className="p-1.5 rounded hover:bg-red-50 text-red-600"
                         title="Delete"
+                        aria-label={`Delete ${c.name}`}
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
@@ -185,8 +201,9 @@ export default function CustomersTab() {
       >
         <div className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Name *</label>
-            <input type="text" value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="Customer name" className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+            <label className="block text-sm font-medium text-gray-700 mb-1">Name <span className="text-red-500">*</span></label>
+            <input type="text" value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="Customer name" aria-invalid={!!errors.name} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+            <FieldError error={errors.name} />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Country</label>
@@ -206,7 +223,7 @@ export default function CustomersTab() {
           </div>
           <div className="flex justify-end gap-2 pt-2 border-t border-gray-200">
             <button onClick={() => setOpen(false)} className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">Cancel</button>
-            <button onClick={handleSave} className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors">{editingId ? 'Save Changes' : 'Add Customer'}</button>
+            <button onClick={handleSave} disabled={saving} className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">{saving ? 'Saving…' : editingId ? 'Save Changes' : 'Add Customer'}</button>
           </div>
         </div>
       </Modal>

@@ -5,6 +5,8 @@ import { Truck, Plus, MapPin, Pencil, Trash2, Star, BookOpen } from 'lucide-reac
 import { useApp } from '../../../../context/AppContext';
 import { useCreateSupplier, useUpdateSupplier, useDeleteSupplier } from '../../../../api/queries';
 import Modal from '../../components/AdminDrawer';
+import FieldError from '../../../../shared/components/FieldError';
+import useConfirm from '../../../../hooks/useConfirm';
 
 // Note: the suppliers table column is `address` (matching customers).
 // We label it "Location" in the UI for our trade convention but post
@@ -18,15 +20,19 @@ export default function SuppliersTab() {
   const createMut = useCreateSupplier();
   const updateMut = useUpdateSupplier();
   const deleteMut = useDeleteSupplier();
+  const [confirm, confirmDialog] = useConfirm();
+  const saving = createMut.isPending || updateMut.isPending;
 
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(EMPTY);
-  const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
+  const [errors, setErrors] = useState({});
+  const set = (k, v) => { setForm(p => ({ ...p, [k]: v })); setErrors(e => (e[k] ? { ...e, [k]: null } : e)); };
 
-  const openCreate = () => { setEditingId(null); setForm(EMPTY); setOpen(true); };
+  const openCreate = () => { setEditingId(null); setForm(EMPTY); setErrors({}); setOpen(true); };
   const openEdit = (s) => {
     setEditingId(s.id);
+    setErrors({});
     setForm({
       name: s.name || '',
       type: s.type || 'Rice Supplier',
@@ -37,8 +43,9 @@ export default function SuppliersTab() {
   };
 
   const handleSave = async () => {
+    if (saving) return;
     const name = form.name.trim();
-    if (!name) { addToast('Supplier name is required', 'error'); return; }
+    if (!name) { setErrors({ name: 'Supplier name is required' }); return; }
     const payload = {
       name,
       type: form.type,
@@ -78,7 +85,11 @@ export default function SuppliersTab() {
   }, [suppliersList]);
 
   const handleDelete = async (s) => {
-    if (!window.confirm(`Delete supplier "${s.name}"? This cannot be undone.`)) return;
+    if (!await confirm({
+      title: `Delete supplier "${s.name}"?`,
+      consequence: 'This cannot be undone.',
+      confirmLabel: 'Delete',
+    })) return;
     try {
       await deleteMut.mutateAsync(s.id);
       addToast(`Supplier "${s.name}" deleted`, 'success');
@@ -89,6 +100,7 @@ export default function SuppliersTab() {
 
   return (
     <>
+      {confirmDialog}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
@@ -123,6 +135,7 @@ export default function SuppliersTab() {
                     <button
                       onClick={() => toggleFavorite(s)}
                       title={s.isFavorite ? 'Remove from favorites' : 'Mark as favorite'}
+                      aria-label={s.isFavorite ? `Remove ${s.name} from favorites` : `Mark ${s.name} as favorite`}
                       className="p-1 rounded hover:bg-amber-50 transition-colors"
                     >
                       <Star className={`w-4 h-4 ${s.isFavorite ? 'fill-amber-400 text-amber-500' : 'text-gray-300'}`} />
@@ -148,13 +161,13 @@ export default function SuppliersTab() {
                   <td data-label="Contact Person" className="mob-hide px-4 py-3 text-gray-900">{s.contact}</td>
                   <td data-label="Actions" className="px-4 py-3 text-right">
                     <div className="inline-flex gap-1">
-                      <button onClick={() => navigate(`/finance/statements?type=supplier&id=${s.id}`)} className="p-1.5 rounded hover:bg-emerald-50 text-emerald-600" title="View ledger">
+                      <button onClick={() => navigate(`/finance/statements?type=supplier&id=${s.id}`)} className="p-1.5 rounded hover:bg-emerald-50 text-emerald-600" title="View ledger" aria-label={`View ledger for ${s.name}`}>
                         <BookOpen className="w-4 h-4" />
                       </button>
-                      <button onClick={() => openEdit(s)} className="p-1.5 rounded hover:bg-blue-50 text-blue-600" title="Edit">
+                      <button onClick={() => openEdit(s)} className="p-1.5 rounded hover:bg-blue-50 text-blue-600" title="Edit" aria-label={`Edit ${s.name}`}>
                         <Pencil className="w-4 h-4" />
                       </button>
-                      <button onClick={() => handleDelete(s)} className="p-1.5 rounded hover:bg-red-50 text-red-600" title="Delete">
+                      <button onClick={() => handleDelete(s)} className="p-1.5 rounded hover:bg-red-50 text-red-600" title="Delete" aria-label={`Delete ${s.name}`}>
                         <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
@@ -169,8 +182,9 @@ export default function SuppliersTab() {
       <Modal isOpen={open} onClose={() => setOpen(false)} title={editingId ? 'Edit Supplier' : 'Add New Supplier'} size="md">
         <div className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Name *</label>
-            <input type="text" value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="Supplier name" className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+            <label className="block text-sm font-medium text-gray-700 mb-1">Name <span className="text-red-500">*</span></label>
+            <input type="text" value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="Supplier name" aria-invalid={!!errors.name} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+            <FieldError error={errors.name} />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
@@ -189,7 +203,7 @@ export default function SuppliersTab() {
           </div>
           <div className="flex justify-end gap-2 pt-2 border-t border-gray-200">
             <button onClick={() => setOpen(false)} className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">Cancel</button>
-            <button onClick={handleSave} className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors">{editingId ? 'Save Changes' : 'Add Supplier'}</button>
+            <button onClick={handleSave} disabled={saving} className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">{saving ? 'Saving…' : editingId ? 'Save Changes' : 'Add Supplier'}</button>
           </div>
         </div>
       </Modal>

@@ -7,8 +7,10 @@ import {
 import { usePendingApprovals, useMyApprovalRequests, useApproveRequest, useRejectRequest } from '../../../api/queries';
 import { useApp } from '../../../context/AppContext';
 import { LoadingSpinner, ErrorState } from '../../../components/LoadingState';
-import Modal from '../../../components/Modal';
+import Modal from '../components/AdminDrawer';
+import StatusBadge from '../../../shared/components/StatusBadge';
 import PendingDocumentApprovals from '../../documents/components/PendingDocumentApprovals';
+import { fmtDateTime, fmtMoney } from '../../../shared/utils/format';
 
 const TYPE_LABELS = {
   payment_confirmation: 'Payment Confirmation',
@@ -39,25 +41,10 @@ const PRIORITY_COLORS = {
   Low: 'bg-gray-50 text-gray-500 border-gray-200',
 };
 
-const STATUS_COLORS = {
-  Pending: 'bg-amber-100 text-amber-700',
-  Approved: 'bg-emerald-100 text-emerald-700',
-  Rejected: 'bg-red-100 text-red-700',
-  Cancelled: 'bg-gray-100 text-gray-600',
-  Expired: 'bg-gray-100 text-gray-500',
-};
-
-function formatDate(dateStr) {
-  if (!dateStr) return '—';
-  return new Date(dateStr).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-}
 
 function formatCurrency(amount, currency = 'PKR') {
   if (!amount) return '—';
-  if (currency === 'USD') return '$' + parseFloat(amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  if (currency === 'EUR') return '€' + parseFloat(amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  if (currency === 'GBP') return '£' + parseFloat(amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  return 'Rs ' + (amount).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return fmtMoney(amount, currency || 'PKR', { decimals: 2 });
 }
 
 function timeUntilExpiry(expiresAt) {
@@ -254,9 +241,7 @@ export default function Approvals() {
                       <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${PRIORITY_COLORS[approval.priority] || ''}`}>
                         {approval.priority}
                       </span>
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[approval.status] || ''}`}>
-                        {approval.status}
-                      </span>
+                      <StatusBadge status={approval.status} />
                       {expiry && expiry !== 'Expired' && (
                         <span className="inline-flex items-center gap-1 text-xs text-amber-600">
                           <Clock className="w-3 h-3" />
@@ -292,7 +277,7 @@ export default function Approvals() {
                       </span>
                       <span className="flex items-center gap-1">
                         <Calendar className="w-3 h-3" />
-                        {formatDate(approval.requestedAt || approval.createdAt)}
+                        {fmtDateTime(approval.requestedAt || approval.createdAt)}
                       </span>
                     </div>
                   </div>
@@ -364,7 +349,7 @@ export default function Approvals() {
               </div>
               <div>
                 <p className="text-xs font-medium text-gray-500 uppercase">Requested At</p>
-                <p className="text-sm text-gray-900 mt-1">{formatDate(selectedApproval.requestedAt || selectedApproval.createdAt)}</p>
+                <p className="text-sm text-gray-900 mt-1">{fmtDateTime(selectedApproval.requestedAt || selectedApproval.createdAt)}</p>
               </div>
               {selectedApproval.approvedBy && (
                 <div>

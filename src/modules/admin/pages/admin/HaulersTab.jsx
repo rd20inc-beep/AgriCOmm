@@ -13,6 +13,9 @@ import {
 import { useApp } from '../../../../context/AppContext';
 import SlideDrawer from '../../../../components/SlideDrawer';
 import HaulerPicker from '../../../../components/HaulerPicker';
+import { fmtPKR } from '../../../../shared/utils/format';
+import FieldError from '../../../../shared/components/FieldError';
+import useConfirm from '../../../../hooks/useConfirm';
 
 const PAID_BY_OPTS = [
   ['company', 'Company (creates payable)'], ['supplier', 'Supplier'], ['customer', 'Customer'],
@@ -66,7 +69,7 @@ function ReconcileDrawer({ open, onClose, addToast }) {
                     <span className="font-medium text-gray-900">{row.ref}</span>
                     <span className="text-gray-400 text-xs ml-2">{row.date ? String(row.date).slice(0, 10) : ''}{row.supplier_name ? ` · ${row.supplier_name}` : ''}</span>
                   </div>
-                  <span className="font-semibold tabular-nums">Rs {Number(row.amount).toLocaleString('en-PK', { maximumFractionDigits: 0 })}</span>
+                  <span className="font-semibold tabular-nums">{fmtPKR(row.amount)}</span>
                 </div>
                 <div className="grid grid-cols-2 gap-2 mb-2">
                   <HaulerPicker value={st.hauler_id || ''} onChange={(id) => setRow(row.key, { hauler_id: id })} addToast={addToast} clearable placeholder="Transporter…" />
@@ -95,8 +98,6 @@ const EMPTY = {
   address: '', ntn: '', vehicle_types: '', notes: '', opening_balance: '', is_active: true,
 };
 
-const fmt = (n) => new Intl.NumberFormat('en-PK', { maximumFractionDigits: 0 }).format(Math.round(Number(n) || 0));
-
 // #14 Phase 1c — transporter ledger: opening balance, every charge and payment
 // in date order with a running balance, and the closing (outstanding) balance.
 // Lots and payments are drill-through links.
@@ -116,19 +117,19 @@ function HaulerLedgerDrawer({ id, open, onClose }) {
           <div className="grid grid-cols-4 gap-3">
             <div className="rounded-lg border border-gray-200 p-3">
               <p className="text-[11px] uppercase text-gray-400">Opening</p>
-              <p className="text-base font-semibold text-gray-900 tabular-nums">Rs {fmt(opening)}</p>
+              <p className="text-base font-semibold text-gray-900 tabular-nums">{fmtPKR(Number(opening) || 0)}</p>
             </div>
             <div className="rounded-lg border border-gray-200 p-3">
               <p className="text-[11px] uppercase text-gray-400">Charges</p>
-              <p className="text-base font-semibold text-gray-900 tabular-nums">Rs {fmt(totals.charges)}</p>
+              <p className="text-base font-semibold text-gray-900 tabular-nums">{fmtPKR(Number(totals.charges) || 0)}</p>
             </div>
             <div className="rounded-lg border border-gray-200 p-3">
               <p className="text-[11px] uppercase text-gray-400">Payments</p>
-              <p className="text-base font-semibold text-emerald-700 tabular-nums">Rs {fmt(totals.payments)}</p>
+              <p className="text-base font-semibold text-emerald-700 tabular-nums">{fmtPKR(Number(totals.payments) || 0)}</p>
             </div>
             <div className="rounded-lg border border-gray-200 p-3 bg-amber-50">
               <p className="text-[11px] uppercase text-amber-600">Outstanding</p>
-              <p className="text-base font-semibold text-amber-700 tabular-nums">Rs {fmt(closing)}</p>
+              <p className="text-base font-semibold text-amber-700 tabular-nums">{fmtPKR(Number(closing) || 0)}</p>
             </div>
           </div>
           <div className="overflow-x-auto">
@@ -146,7 +147,7 @@ function HaulerLedgerDrawer({ id, open, onClose }) {
               <tbody className="divide-y divide-gray-100">
                 <tr className="bg-gray-50/50">
                   <td className="px-3 py-2 text-gray-500" colSpan={5}>Opening balance</td>
-                  <td className="px-3 py-2 text-right tabular-nums font-medium">Rs {fmt(opening)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums font-medium">{fmtPKR(Number(opening) || 0)}</td>
                 </tr>
                 {entries.length === 0 ? (
                   <tr><td colSpan={6} className="px-3 py-8 text-center text-gray-400">No transactions yet.</td></tr>
@@ -162,14 +163,14 @@ function HaulerLedgerDrawer({ id, open, onClose }) {
                       )}
                     </td>
                     <td className="px-3 py-2 text-gray-500 font-mono text-xs">{e.ref || '—'}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{e.charge ? `Rs ${fmt(e.charge)}` : (e.informationalAmount ? <span className="text-gray-400">(Rs {fmt(e.informationalAmount)})</span> : '—')}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-emerald-700">{e.payment ? `Rs ${fmt(e.payment)}` : '—'}</td>
-                    <td className="px-3 py-2 text-right tabular-nums font-medium">Rs {fmt(e.balance)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{e.charge ? fmtPKR(e.charge) : (e.informationalAmount ? <span className="text-gray-400">({fmtPKR(e.informationalAmount)})</span> : '—')}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-emerald-700">{e.payment ? fmtPKR(e.payment) : '—'}</td>
+                    <td className="px-3 py-2 text-right tabular-nums font-medium">{fmtPKR(Number(e.balance) || 0)}</td>
                   </tr>
                 ))}
                 <tr className="bg-amber-50 font-semibold">
                   <td className="px-3 py-2" colSpan={5}>Closing balance (outstanding)</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-amber-700">Rs {fmt(closing)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-amber-700">{fmtPKR(Number(closing) || 0)}</td>
                 </tr>
               </tbody>
             </table>
@@ -190,6 +191,8 @@ export default function HaulersTab() {
   const createMut = useCreateHauler();
   const updateMut = useUpdateHauler();
   const deleteMut = useDeleteHauler();
+  const [confirm, confirmDialog] = useConfirm();
+  const saving = createMut.isPending || updateMut.isPending;
 
   const [q, setQ] = useState('');
   const [open, setOpen] = useState(false);
@@ -199,7 +202,8 @@ export default function HaulersTab() {
   const [reconcileOpen, setReconcileOpen] = useState(false);
   const { data: unrec } = useUnreconciledTransport();
   const unrecCount = unrec?.total || 0;
-  const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
+  const [errors, setErrors] = useState({});
+  const set = (k, v) => { setForm(p => ({ ...p, [k]: v })); setErrors(e => (e[k] ? { ...e, [k]: null } : e)); };
 
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
@@ -210,9 +214,10 @@ export default function HaulersTab() {
       (h.phone || '').toLowerCase().includes(s));
   }, [haulers, q]);
 
-  function openCreate() { setEditingId(null); setForm(EMPTY); setOpen(true); }
+  function openCreate() { setEditingId(null); setForm(EMPTY); setErrors({}); setOpen(true); }
   function openEdit(h) {
     setEditingId(h.id);
+    setErrors({});
     setForm({
       name: h.name || '', contact_person: h.contact_person || '', phone: h.phone || '',
       email: h.email || '', address: h.address || '', ntn: h.ntn || '',
@@ -222,8 +227,9 @@ export default function HaulersTab() {
   }
 
   async function handleSave() {
+    if (saving) return;
     const name = String(form.name || '').trim();
-    if (!name) { addToast('Hauler name is required', 'error'); return; }
+    if (!name) { setErrors({ name: 'Hauler name is required' }); return; }
     try {
       if (editingId) {
         await updateMut.mutateAsync({ id: editingId, data: form });
@@ -246,7 +252,11 @@ export default function HaulersTab() {
   }
 
   async function handleDelete(h) {
-    if (!window.confirm(`Delete "${h.name}"? If it has been used anywhere it will be hidden instead.`)) return;
+    if (!await confirm({
+      title: `Delete "${h.name}"?`,
+      consequence: 'If it has been used anywhere it will be hidden instead.',
+      confirmLabel: 'Delete',
+    })) return;
     try {
       await deleteMut.mutateAsync(h.id);
       addToast(`"${h.name}" removed`, 'success');
@@ -255,6 +265,7 @@ export default function HaulersTab() {
 
   return (
     <>
+      {confirmDialog}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-2">
@@ -315,19 +326,19 @@ export default function HaulersTab() {
                     </td>
                     <td data-label="Actions" className="px-4 py-3 text-center">
                       <div className="inline-flex items-center gap-1">
-                        <button onClick={() => setHistoryId(h.id)} title="History"
+                        <button onClick={() => setHistoryId(h.id)} title="History" aria-label={`History for ${h.name}`}
                           className="p-1.5 text-gray-500 hover:text-indigo-600 hover:bg-gray-100 rounded">
                           <History className="w-3.5 h-3.5" />
                         </button>
-                        <button onClick={() => handleToggle(h)} title={h.is_active ? 'Hide' : 'Show'}
+                        <button onClick={() => handleToggle(h)} title={h.is_active ? 'Hide' : 'Show'} aria-label={h.is_active ? `Hide ${h.name}` : `Show ${h.name}`}
                           className="p-1.5 text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded">
                           {h.is_active ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
                         </button>
-                        <button onClick={() => openEdit(h)} title="Edit"
+                        <button onClick={() => openEdit(h)} title="Edit" aria-label={`Edit ${h.name}`}
                           className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-gray-100 rounded">
                           <Pencil className="w-3.5 h-3.5" />
                         </button>
-                        <button onClick={() => handleDelete(h)} title="Delete"
+                        <button onClick={() => handleDelete(h)} title="Delete" aria-label={`Delete ${h.name}`}
                           className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-gray-100 rounded">
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -359,10 +370,11 @@ export default function HaulersTab() {
       >
         <div className="space-y-4">
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Hauler name *</label>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Hauler name <span className="text-red-500">*</span></label>
             <input type="text" value={form.name} onChange={(e) => set('name', e.target.value)}
-              placeholder="e.g. Malik Goods Transport"
+              placeholder="e.g. Malik Goods Transport" aria-invalid={!!errors.name}
               className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900" />
+            <FieldError error={errors.name} />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>

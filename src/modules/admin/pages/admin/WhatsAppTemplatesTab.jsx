@@ -7,6 +7,7 @@ import {
 import { useApp } from '../../../../context/AppContext';
 import api from '../../../../api/client';
 import SlideDrawer from '../../../../components/SlideDrawer';
+import useConfirm from '../../../../hooks/useConfirm';
 
 // ── Constants ──────────────────────────────────────────────────────────
 
@@ -188,6 +189,7 @@ function renderTemplate(body, data) {
 
 export default function WhatsAppTemplatesTab() {
   const { addToast } = useApp();
+  const [confirm, confirmDialog] = useConfirm();
 
   // ─ API Configuration State ─
   const [provider, setProvider] = useState('WhatsApp Business API');
@@ -268,7 +270,11 @@ export default function WhatsAppTemplatesTab() {
   };
 
   const handleQrLogout = async () => {
-    if (!window.confirm('Disconnect YOUR WhatsApp? You will not be able to send until you pair again. Other users are unaffected.')) return;
+    if (!await confirm({
+      title: 'Disconnect YOUR WhatsApp?',
+      consequence: 'You will not be able to send until you pair again. Other users are unaffected.',
+      confirmLabel: 'Disconnect',
+    })) return;
     setQrBusy(true);
     try {
       const res = await api.post('/api/communication/whatsapp/qr/logout', {});
@@ -553,6 +559,7 @@ export default function WhatsAppTemplatesTab() {
 
   return (
     <div className="space-y-6">
+      {confirmDialog}
       {/* Section 0: QR Pairing (WhatsApp Web) */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
         <div className="flex items-start justify-between gap-4 mb-4">

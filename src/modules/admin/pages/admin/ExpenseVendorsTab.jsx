@@ -8,6 +8,8 @@ import {
 } from '../../../../api/queries';
 import { useApp } from '../../../../context/AppContext';
 import SlideDrawer from '../../../../components/SlideDrawer';
+import FieldError from '../../../../shared/components/FieldError';
+import useConfirm from '../../../../hooks/useConfirm';
 
 const CATEGORIES = [
   'utilities', 'fuel', 'insurance', 'transport', 'maintenance',
@@ -22,12 +24,15 @@ export default function ExpenseVendorsTab() {
   const createMut = useCreateExpenseVendor();
   const updateMut = useUpdateExpenseVendor();
   const deleteMut = useDeleteExpenseVendor();
+  const [confirm, confirmDialog] = useConfirm();
+  const saving = createMut.isPending || updateMut.isPending;
 
   const [filterCat, setFilterCat] = useState('all');
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(EMPTY);
-  const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
+  const [errors, setErrors] = useState({});
+  const set = (k, v) => { setForm(p => ({ ...p, [k]: v })); setErrors(e => (e[k] ? { ...e, [k]: null } : e)); };
 
   const vendors = data?.vendors || [];
   const filtered = useMemo(() => {
@@ -43,11 +48,13 @@ export default function ExpenseVendorsTab() {
 
   function openCreate() {
     setEditingId(null);
+    setErrors({});
     setForm({ ...EMPTY, category: filterCat !== 'all' ? filterCat : 'utilities' });
     setOpen(true);
   }
   function openEdit(v) {
     setEditingId(v.id);
+    setErrors({});
     setForm({
       category: v.category,
       name: v.name,
@@ -58,8 +65,9 @@ export default function ExpenseVendorsTab() {
   }
 
   async function handleSave() {
+    if (saving) return;
     const name = String(form.name || '').trim();
-    if (!name) { addToast('Provider name is required', 'error'); return; }
+    if (!name) { setErrors({ name: 'Provider name is required' }); return; }
     const payload = {
       category: form.category,
       name,
@@ -90,7 +98,11 @@ export default function ExpenseVendorsTab() {
   }
 
   async function handleDelete(v) {
-    if (!window.confirm(`Delete "${v.name}" from ${v.category}? This is permanent. (Use the toggle to hide instead.)`)) return;
+    if (!await confirm({
+      title: `Delete "${v.name}" from ${v.category}?`,
+      consequence: 'This is permanent. (Use the toggle to hide instead.)',
+      confirmLabel: 'Delete',
+    })) return;
     try {
       await deleteMut.mutateAsync(v.id);
       addToast(`"${v.name}" deleted`, 'success');
@@ -101,6 +113,7 @@ export default function ExpenseVendorsTab() {
 
   return (
     <>
+      {confirmDialog}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -173,6 +186,7 @@ export default function ExpenseVendorsTab() {
                         <button
                           onClick={() => handleToggle(v)}
                           title={v.is_active ? 'Hide from drawer' : 'Show in drawer'}
+                          aria-label={v.is_active ? `Hide ${v.name} from drawer` : `Show ${v.name} in drawer`}
                           className="p-1.5 text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded"
                         >
                           {v.is_active ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
@@ -180,6 +194,7 @@ export default function ExpenseVendorsTab() {
                         <button
                           onClick={() => openEdit(v)}
                           title="Edit"
+                          aria-label={`Edit ${v.name}`}
                           className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-gray-100 rounded"
                         >
                           <Pencil className="w-3.5 h-3.5" />
@@ -187,6 +202,7 @@ export default function ExpenseVendorsTab() {
                         <button
                           onClick={() => handleDelete(v)}
                           title="Delete"
+                          aria-label={`Delete ${v.name}`}
                           className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-gray-100 rounded"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
@@ -212,17 +228,17 @@ export default function ExpenseVendorsTab() {
             <button onClick={() => setOpen(false)} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
             <button
               onClick={handleSave}
-              disabled={createMut.isPending || updateMut.isPending}
+              disabled={saving}
               className="px-4 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-60"
             >
-              {createMut.isPending || updateMut.isPending ? 'Saving…' : (editingId ? 'Save Changes' : 'Add Provider')}
+              {saving ? 'Saving…' : (editingId ? 'Save Changes' : 'Add Provider')}
             </button>
           </div>
         }
       >
         <div className="space-y-4">
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Category *</label>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Category <span className="text-red-500">*</span></label>
             <select
               value={form.category}
               onChange={(e) => set('category', e.target.value)}
@@ -232,14 +248,16 @@ export default function ExpenseVendorsTab() {
             </select>
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Provider Name *</label>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Provider Name <span className="text-red-500">*</span></label>
             <input
               type="text"
               value={form.name}
               onChange={(e) => set('name', e.target.value)}
               placeholder="e.g. K-Electric, Maersk Line, PSO"
+              aria-invalid={!!errors.name}
               className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900"
             />
+            <FieldError error={errors.name} />
             <p className="text-[11px] text-gray-400 mt-1">Use the same name you want shown on Money Out and journals.</p>
           </div>
           <div>

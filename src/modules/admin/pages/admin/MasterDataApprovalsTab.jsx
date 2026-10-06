@@ -5,20 +5,13 @@ import { adminApi } from '../../api/services';
 import { useApp } from '../../../../context/AppContext';
 import { useOwnerAuth } from '../../../../context/OwnerAuthContext';
 import SlideDrawer from '../../../../components/SlideDrawer';
+import { fmtDateTime } from '../../../../shared/utils/format';
 
 /**
  * Reviews pending product / supplier submissions made via the Purchase
  * Lot drawer's "+ Add new" affordances. Admin can Approve or Reject
  * with an optional note that the submitter sees on their side.
  */
-function fmtDate(d) {
-  if (!d) return '—';
-  return new Date(d).toLocaleDateString('en-GB', {
-    day: '2-digit', month: 'short', year: 'numeric',
-    hour: '2-digit', minute: '2-digit',
-  });
-}
-
 function StatusFilter({ value, onChange }) {
   const tabs = [
     { value: 'pending',  label: 'Pending',  cls: 'bg-amber-100 text-amber-800' },
@@ -121,12 +114,12 @@ function Section({ title, icon: Icon, color, rows, onApprove, onReject, busyId }
                     )}
                     {r.submitted_at && (
                       <span className="inline-flex items-center gap-1">
-                        <Calendar size={11} /> Submitted {fmtDate(r.submitted_at)}
+                        <Calendar size={11} /> Submitted {fmtDateTime(r.submitted_at)}
                       </span>
                     )}
                     {r.reviewed_at && (
                       <span className="inline-flex items-center gap-1">
-                        <Clock size={11} /> Reviewed {fmtDate(r.reviewed_at)}
+                        <Clock size={11} /> Reviewed {fmtDateTime(r.reviewed_at)}
                         {r.reviewed_by_name && <span>by {r.reviewed_by_name}</span>}
                       </span>
                     )}

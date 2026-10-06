@@ -3,6 +3,9 @@ import { UsersRound, Plus, XCircle, CheckCircle, KeyRound, Trash2, Pencil, Shiel
 import { useApp } from '../../../../context/AppContext';
 import { useUsers, useCreateUser, useDeactivateUser, useActivateUser, useSetUserPassword, useDeleteUser, useUpdateUser, useSetUserStatus, useForceUserPasswordChange, useUserResetLink, useRevokeUserSessions, useUserScopes, useSetUserScopes } from '../../../../api/queries';
 import Modal from '../../components/AdminDrawer';
+import FieldError from '../../../../shared/components/FieldError';
+import useConfirm from '../../../../hooks/useConfirm';
+import { fmtDate } from '../../../../shared/utils/format';
 
 // #9 Account lifecycle status badge colours.
 const STATUS_BADGE = {
@@ -46,10 +49,12 @@ export default function UsersRolesTab() {
   const setPasswordMut = useSetUserPassword();
   const deleteUserMut = useDeleteUser();
   const updateUserMut = useUpdateUser();
+  const [confirm, confirmDialog] = useConfirm();
 
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState({ fullName: '', email: '', password: '', roleId: '2' });
-  const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
+  const [errors, setErrors] = useState({});
+  const set = (k, v) => { setForm(p => ({ ...p, [k]: v })); setErrors(e => (e[k] ? { ...e, [k]: null } : e)); };
 
   const [pwUser, setPwUser] = useState(null);   // user whose password is being set
   const [pwValue, setPwValue] = useState('');
@@ -67,6 +72,7 @@ export default function UsersRolesTab() {
     setEditForm({ fullName: user.fullName || '', email: user.email || '', roleId: String(user.roleId || 2) });
   };
   const handleUpdate = async () => {
+    if (updateUserMut.isPending) return;
     if (!editForm.fullName.trim() || !editForm.email.trim()) { addToast('Name and email are required', 'error'); return; }
     try {
       await updateUserMut.mutateAsync({ id: editUser.id, data: {
@@ -96,7 +102,11 @@ export default function UsersRolesTab() {
   };
 
   const handleDelete = async (user) => {
-    if (!window.confirm(`Permanently delete ${user.fullName}? This can't be undone. (If they have activity in the system, deactivate them instead.)`)) return;
+    if (!await confirm({
+      title: `Permanently delete ${user.fullName}?`,
+      consequence: "This can't be undone. (If they have activity in the system, deactivate them instead.)",
+      confirmLabel: 'Delete',
+    })) return;
     try {
       await deleteUserMut.mutateAsync(user.id);
       addToast(`${user.fullName} deleted`, 'success');
@@ -105,13 +115,15 @@ export default function UsersRolesTab() {
     }
   };
 
-  const resetForm = () => setForm({ fullName: '', email: '', password: '', roleId: '2' });
+  const resetForm = () => { setForm({ fullName: '', email: '', password: '', roleId: '2' }); setErrors({}); };
 
   const handleCreate = async () => {
-    if (!form.fullName.trim() || !form.email.trim() || !form.password) {
-      addToast('Name, email, and password are required', 'error');
-      return;
-    }
+    if (createUserMut.isPending) return;
+    const missing = {};
+    if (!form.fullName.trim()) missing.fullName = 'Full name is required';
+    if (!form.email.trim()) missing.email = 'Email is required';
+    if (!form.password) missing.password = 'Password is required';
+    if (Object.keys(missing).length) { setErrors(missing); return; }
     try {
       await createUserMut.mutateAsync({
         full_name: form.fullName.trim(),
@@ -162,6 +174,7 @@ export default function UsersRolesTab() {
 
   return (
     <div className="space-y-6">
+      {confirmDialog}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
@@ -195,8 +208,8 @@ export default function UsersRolesTab() {
                 <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-500">No users found.</td></tr>
               ) : users.map(user => (
                 <tr key={user.id} className="hover:bg-gray-50 transition-colors">
-                  <td data-label="Name" className="py-3 px-4 font-medium text-gray-900">{user.fullName}</td>
-                  <td data-label="Email" className="py-3 px-4 text-gray-600">{user.email}</td>
+                  <td data-label="Name" className="py-3 px-4 font-medium text-gray-900 max-w-[14rem] truncate" title={user.fullName}>{user.fullName}</td>
+                  <td data-label="Email" className="py-3 px-4 text-gray-600 max-w-[16rem] truncate" title={user.email}>{user.email}</td>
                   <td data-label="Role" className="py-3 px-4">
                     <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${getRoleColor(user.roleName)}`}>
                       {user.roleName || 'Unknown'}
@@ -211,7 +224,7 @@ export default function UsersRolesTab() {
                     </div>
                   </td>
                   <td data-label="Last Login" className="mob-hide py-3 px-4 text-gray-500 text-xs">
-                    {user.lastLogin ? new Date(user.lastLogin).toLocaleDateString() : 'Never'}
+                    {user.lastLogin ? fmtDate(user.lastLogin) : 'Never'}
                   </td>
                   <td data-label="Actions" className="py-3 px-4">
                     <div className="flex items-center justify-center gap-1.5 flex-wrap">
@@ -282,16 +295,19 @@ export default function UsersRolesTab() {
       <Modal isOpen={showModal} onClose={() => setShowModal(false)} title="Invite New User" size="md">
         <div className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Full Name *</label>
-            <input type="text" value={form.fullName} onChange={e => set('fullName', e.target.value)} placeholder="Full name" className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+            <label className="block text-sm font-medium text-gray-700 mb-1">Full Name <span className="text-red-500">*</span></label>
+            <input type="text" value={form.fullName} onChange={e => set('fullName', e.target.value)} placeholder="Full name" aria-invalid={!!errors.fullName} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+            <FieldError error={errors.fullName} />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Email *</label>
-            <input type="email" value={form.email} onChange={e => set('email', e.target.value)} placeholder="user@company.com" className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+            <label className="block text-sm font-medium text-gray-700 mb-1">Email <span className="text-red-500">*</span></label>
+            <input type="email" value={form.email} onChange={e => set('email', e.target.value)} placeholder="user@company.com" aria-invalid={!!errors.email} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+            <FieldError error={errors.email} />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Password *</label>
-            <input type="password" value={form.password} onChange={e => set('password', e.target.value)} placeholder="Minimum 8 characters" className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+            <label className="block text-sm font-medium text-gray-700 mb-1">Password <span className="text-red-500">*</span></label>
+            <input type="password" value={form.password} onChange={e => set('password', e.target.value)} placeholder="Minimum 8 characters" aria-invalid={!!errors.password} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+            <FieldError error={errors.password} />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
@@ -301,7 +317,7 @@ export default function UsersRolesTab() {
           </div>
           <div className="flex justify-end gap-2 pt-2 border-t border-gray-200">
             <button onClick={() => setShowModal(false)} className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">Cancel</button>
-            <button onClick={handleCreate} className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors">Create User</button>
+            <button onClick={handleCreate} disabled={createUserMut.isPending} className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">{createUserMut.isPending ? 'Creating…' : 'Create User'}</button>
           </div>
         </div>
       </Modal>
@@ -309,11 +325,11 @@ export default function UsersRolesTab() {
       <Modal isOpen={!!editUser} onClose={() => setEditUser(null)} title={`Edit user — ${editUser?.fullName || ''}`} size="md">
         <div className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Full Name *</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Full Name <span className="text-red-500">*</span></label>
             <input type="text" value={editForm.fullName} onChange={e => setEditForm(p => ({ ...p, fullName: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Email *</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Email <span className="text-red-500">*</span></label>
             <input type="email" value={editForm.email} onChange={e => setEditForm(p => ({ ...p, email: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
           </div>
           <div>
@@ -333,7 +349,7 @@ export default function UsersRolesTab() {
         <div className="space-y-4">
           <p className="text-sm text-gray-600">Set a new password for <span className="font-semibold text-gray-900">{pwUser?.email}</span>. They'll use it on their next login.</p>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">New Password *</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">New Password <span className="text-red-500">*</span></label>
             <input
               type="password" value={pwValue} autoFocus
               onChange={e => setPwValue(e.target.value)}
