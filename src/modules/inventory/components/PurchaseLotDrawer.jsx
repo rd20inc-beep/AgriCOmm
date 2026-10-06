@@ -7,6 +7,7 @@ import HaulerPicker from '../../../components/HaulerPicker';
 import { lotInventoryApi } from '../api/services';
 import { useCreatePurchaseLot } from '../../../api/queries';
 import { STANDARD_BAG_SIZES, snapBagSizeKg, isStandardBagSize, DEFAULT_BAG_SIZE_KG } from '../../../utils/bagSize';
+import { todayLocalISO } from '../../../shared/utils/format';
 
 /**
  * Modern slide-from-right drawer for recording a rice purchase lot.
@@ -66,14 +67,14 @@ const defaultForm = () => ({
   transport_cost: '',     // freight → hauler payable + cost
   hauler_id: '',          // transport contractor (dedicated haulers registry, item #5)
   transport_paid_by: 'company', // #14 — who bears the freight (company → payable)
-  purchase_date: new Date().toISOString().slice(0, 10),
+  purchase_date: todayLocalISO(),
   warehouse_id: '',
   notes: '',
   quality: emptyQuality(),
   vehicles: [],
 });
 
-const emptyVehicle = () => ({ vehicle_no: '', driver_name: '', driver_phone: '', weight_kg: '', total_bags: '', weighbridge_kg: '', accepted_kg: '', arrival_date: new Date().toISOString().slice(0, 10), gate_pass_no: '', quality: {} });
+const emptyVehicle = () => ({ vehicle_no: '', driver_name: '', driver_phone: '', weight_kg: '', total_bags: '', weighbridge_kg: '', accepted_kg: '', arrival_date: todayLocalISO(), gate_pass_no: '', quality: {} });
 
 // Per-truck quality fields captured at intake (stored in the arrival's quality_json).
 const VEHICLE_QUALITY_FIELDS = [

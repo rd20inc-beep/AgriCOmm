@@ -28,6 +28,7 @@ import {
   mixedPackingTotals, singleBagCountFor, estimateCosting, buildCreateOrderPayload,
   customerPrefill, lastOrderPrefill,
 } from '../utils/createOrderForm';
+import { todayLocalISO } from '../../../shared/utils/format';
 
 const RECEIVING_MODES = [
   { value: 'bags', label: 'In Bags', desc: 'Standard packed bags', icon: ShoppingBag },
@@ -85,7 +86,7 @@ export default function CreateExportOrder() {
     // fact is the point: the quote goes out with the rate and the date it holds
     // to, so the escalation clause has something to escalate FROM.
     freightPerMT: '', insurancePerMT: '',
-    freightBasisDate: new Date().toISOString().slice(0, 10), freightValidUntil: '',
+    freightBasisDate: todayLocalISO(), freightValidUntil: '',
     freightDisplay: 'in_price', freightClause: '',
     // Section 5: Receiving mode (shown after qty entered)
     receivingMode: '',

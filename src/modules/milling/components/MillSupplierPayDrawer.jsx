@@ -5,6 +5,7 @@ import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import { usePayables, useMillPayables, useRecordPayment } from '../../../api/queries';
 import { payablesForRow } from '../utils/payableBuckets';
+import { todayLocalISO } from '../../../shared/utils/format';
 
 const PKR = (v) => `Rs ${(parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const fmtDate = (d) => { if (!d) return ''; const dt = new Date(d); return Number.isNaN(dt.getTime()) ? '' : dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }); };
@@ -42,7 +43,7 @@ export default function MillSupplierPayDrawer({ supplier, onClose }) {
     || (Array.isArray(bankAccountsList) ? bankAccountsList : []).find((b) => b.type === 'cash'), [bankAccountsList]);
 
   const [payId, setPayId] = useState('');
-  const [form, setForm] = useState({ amount: '', payment_method: 'cash', payment_date: new Date().toISOString().split('T')[0], bank_account_id: '', reference: '', due_date: '' });
+  const [form, setForm] = useState({ amount: '', payment_method: 'cash', payment_date: todayLocalISO(), bank_account_id: '', reference: '', due_date: '' });
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
   useEffect(() => {

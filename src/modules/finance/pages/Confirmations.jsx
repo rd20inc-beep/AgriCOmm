@@ -25,6 +25,7 @@ import EmailComposer from '../../../components/EmailComposer';
 import { favStar } from '../../../shared/utils/favorites';
 import useConfirm from '../../../hooks/useConfirm';
 import { isBalanceDue } from '../../exportOrders/components/constants';
+import { todayLocalISO } from '../../../shared/utils/format';
 
 function formatCurrency(value) {
   return '$' + value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -88,7 +89,7 @@ export default function FinanceConfirmations() {
   const [milestoneType, setMilestoneType] = useState('advance');
   const [formData, setFormData] = useState({
     receivedAmount: 0,
-    date: new Date().toISOString().split('T')[0],
+    date: todayLocalISO(),
     paymentMethod: 'Bank Transfer',
     bankAccount: '',
     bankReference: '',
@@ -160,7 +161,7 @@ export default function FinanceConfirmations() {
     const preAcct = (bankAccountsList || []).find(a => String(a.id) === String(preBank));
     setFormData({
       receivedAmount: Math.max(0, expectedAmount),
-      date: new Date().toISOString().split('T')[0],
+      date: todayLocalISO(),
       paymentMethod: 'Bank Transfer',
       bankAccount: preAcct ? preAcct.name : '',
       bankAccountId: preBank ? String(preBank) : '',

@@ -3,8 +3,9 @@ import { ArrowLeftRight, Building2, Factory } from 'lucide-react';
 import SlideDrawer from '../../../components/SlideDrawer';
 import { useBankAccounts, useCreateFundTransfer } from '../../../api/queries';
 import { favStar } from '../../../shared/utils/favorites';
+import { todayLocalISO } from '../../../shared/utils/format';
 
-const TODAY = () => new Date().toISOString().slice(0, 10);
+const TODAY = () => todayLocalISO();
 const fmt = (n) => `Rs ${(parseFloat(n) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 // Reusable Head Office ⇄ Mill money-transfer drawer. Moves cash between two real

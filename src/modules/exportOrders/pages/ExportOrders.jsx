@@ -9,6 +9,7 @@ import Modal from '../../../components/Modal';
 import ProformaInvoice from '../../../components/ProformaInvoice';
 import QuotationsPanel from '../components/QuotationsPanel';
 import { isBalanceDue } from '../components/constants';
+import { todayLocalISO } from '../../../shared/utils/format';
 
 const tabs = [
   { key: 'All', label: 'All' },
@@ -123,7 +124,7 @@ export default function ExportOrders() {
               { key: 'contractValue', label: 'Contract Value' },
               { key: 'status', label: 'Status' },
               { key: 'createdAt', label: 'Created' },
-            ], `export-orders-${new Date().toISOString().split('T')[0]}.csv`)}
+            ], `export-orders-${todayLocalISO()}.csv`)}
             className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200"
             title="Download CSV"
           >

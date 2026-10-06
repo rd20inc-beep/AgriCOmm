@@ -3,6 +3,7 @@ import { FileWarning, Plus, Loader2, Ban } from 'lucide-react';
 import SlideDrawer from '../../../components/SlideDrawer';
 import useConfirm from '../../../hooks/useConfirm';
 import { useDebitNotes, useIssueDebitNote, useCancelDebitNote } from '../../../api/queries';
+import { todayLocalISO } from '../../../shared/utils/format';
 
 // Freight escalation debit notes.
 //
@@ -40,7 +41,7 @@ export default function DebitNotesPanel({ order, addToast, canIssue = true }) {
     old_rate_per_mt: order?.freightPerMT ?? '',
     new_rate_per_mt: '',
     amount: '',
-    issue_date: new Date().toISOString().slice(0, 10),
+    issue_date: todayLocalISO(),
     reason: '',
   };
   const [form, setForm] = useState(blank);

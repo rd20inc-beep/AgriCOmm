@@ -54,6 +54,7 @@ import BatchPackagingPanel from '../components/BatchPackagingPanel';
 import { qualityParams } from '../qualityParams';
 import { favStar } from '../../../shared/utils/favorites';
 import useCanSeeCost from '../../../hooks/useCanSeeCost';
+import { todayLocalISO } from '../../../shared/utils/format';
 
 const tabs = [
   { key: 'overview', label: 'Overview', icon: Package },
@@ -219,7 +220,7 @@ export default function MillingBatchDetail() {
   const [vehicleForm, setVehicleForm] = useState({
     vehicleNo: '', driverName: '', driverPhone: '',
     weightKg: '', totalBags: '',
-    arrivalDate: new Date().toISOString().split('T')[0], notes: '',
+    arrivalDate: todayLocalISO(), notes: '',
     // Per-truck quality (optional) — full Pakistani grade sheet
     moisture: '', broken: '', foreignMatter: '', chalky: '', purity: '',
     b1: '', b2: '', b3: '', csr: '', shortGrain: '', cobba: '', nb: '', ov: '',
@@ -632,7 +633,7 @@ export default function MillingBatchDetail() {
     }
     setVehicleForm({
       vehicleNo: '', driverName: '', driverPhone: '', weightKg: '', totalBags: '',
-      arrivalDate: new Date().toISOString().split('T')[0], notes: '',
+      arrivalDate: todayLocalISO(), notes: '',
       moisture: '', broken: '', foreignMatter: '', chalky: '', purity: '',
       b1: '', b2: '', b3: '', csr: '', shortGrain: '', cobba: '', nb: '', ov: '',
       pricePerKg: '',
@@ -651,7 +652,7 @@ export default function MillingBatchDetail() {
       vehicleNo: v.vehicleNo || '', driverName: v.driverName || '', driverPhone: v.driverPhone || '',
       weightKg: v.weightKg ? String(Math.round(parseFloat(v.weightKg))) : '',
       totalBags: v.totalBags != null ? String(v.totalBags) : '',
-      arrivalDate: v.arrivalDate ? new Date(v.arrivalDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+      arrivalDate: v.arrivalDate ? new Date(v.arrivalDate).toISOString().split('T')[0] : todayLocalISO(),
       notes: v.notes || '',
       moisture: q.moisture ?? '', broken: q.broken ?? '', foreignMatter: q.foreign_matter ?? '',
       chalky: q.chalky ?? '', purity: q.purity ?? '',
@@ -1173,7 +1174,7 @@ export default function MillingBatchDetail() {
                         setVehicleForm({
                           vehicleNo: '', driverName: '', driverPhone: '',
                           weightKg: remW > 0 ? String(remW) : '', totalBags: remB > 0 ? String(remB) : '',
-                          arrivalDate: new Date().toISOString().split('T')[0], notes: '',
+                          arrivalDate: todayLocalISO(), notes: '',
                           moisture: '', broken: '', foreignMatter: '', chalky: '', purity: '',
                           b1: '', b2: '', b3: '', csr: '', shortGrain: '', cobba: '', nb: '', ov: '', pricePerKg: '',
                         });

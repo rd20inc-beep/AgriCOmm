@@ -22,6 +22,7 @@ import ServiceBillingTab from '../components/ServiceBillingTab';
 import { qualityParams, aggregateVehicleQuality } from '../qualityParams';
 import useConfirm from '../../../hooks/useConfirm';
 import useCanSeeCost from '../../../hooks/useCanSeeCost';
+import { todayLocalISO } from '../../../shared/utils/format';
 
 const num = (v) => parseFloat(v) || 0;
 const kg = (v) => `${Math.round(num(v)).toLocaleString()} kg`;
@@ -46,7 +47,7 @@ const TABS = [
 
 const emptyVehicleForm = () => ({
   vehicleNo: '', driverName: '', driverPhone: '', weightKg: '', totalBags: '',
-  arrivalDate: new Date().toISOString().split('T')[0], notes: '',
+  arrivalDate: todayLocalISO(), notes: '',
   moisture: '', broken: '', foreignMatter: '', chalky: '', purity: '',
   b1: '', b2: '', b3: '', csr: '', shortGrain: '', cobba: '', nb: '', ov: '',
   pricePerKg: '',
@@ -275,7 +276,7 @@ export default function ServiceMillingBatchDetail() {
       driverPhone: v.driverPhone || '',
       weightKg: v.weightKg ? String(Math.round(num(v.weightKg))) : '',
       totalBags: v.totalBags != null ? String(v.totalBags) : '',
-      arrivalDate: v.arrivalDate ? new Date(v.arrivalDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+      arrivalDate: v.arrivalDate ? new Date(v.arrivalDate).toISOString().split('T')[0] : todayLocalISO(),
       notes: v.notes || '',
       moisture: q.moisture ?? '', broken: q.broken ?? '', foreignMatter: q.foreign_matter ?? '',
       chalky: q.chalky ?? '', purity: q.purity ?? '', b1: q.b1 ?? '', b2: q.b2 ?? '', b3: q.b3 ?? '',

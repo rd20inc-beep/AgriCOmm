@@ -26,6 +26,7 @@ import QualityEditModal from '../components/QualityEditModal';
 import api from '../../../api/client';
 import { lotInventoryApi } from '../../../api/services';
 import useCanSeeCost from '../../../hooks/useCanSeeCost';
+import { todayLocalISO } from '../../../shared/utils/format';
 
 function fmtPKR(v) { return 'Rs ' + (parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 function fmtDate(d) { return d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'; }
@@ -1341,7 +1342,7 @@ export default function LotDetail() {
 // ─── Transaction Recording Modal ───
 const TXN_BLANK = {
   transaction_type: '', quantity_input: '', quantity_unit: 'katta',
-  transaction_date: new Date().toISOString().slice(0, 10),
+  transaction_date: todayLocalISO(),
   rate_input: '', rate_unit: 'kg',
   warehouse_from_id: '', warehouse_to_id: '',
   reference_module: '', reference_no: '', remarks: '',
@@ -1359,7 +1360,7 @@ function rateToPerKg(value, unit, bagWeightKg) {
 function TransactionModal({ isOpen, onClose, lotId, lotNo, availableKg, bagWeightKg, defaultRateKg, warehouses, addToast, refetch, mutation }) {
   const [form, setForm] = useState(TXN_BLANK);
   // Fresh form each time the drawer opens.
-  useEffect(() => { if (isOpen) setForm({ ...TXN_BLANK, transaction_date: new Date().toISOString().slice(0, 10) }); }, [isOpen]);
+  useEffect(() => { if (isOpen) setForm({ ...TXN_BLANK, transaction_date: todayLocalISO() }); }, [isOpen]);
 
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
   const qtyKg = toKg(form.quantity_input, form.quantity_unit, bagWeightKg);
@@ -2218,7 +2219,7 @@ function LotVehicleDrawer({ isOpen, onClose, lot, vehicle, addToast, onSaved }) 
     weight_kg: '', total_bags: '', bag_size_kg: '',
     weighbridge_kg: '', accepted_kg: '', quality: vehicleQualityToForm(null),
     hauler_id: '', gate_pass_no: '',
-    arrival_date: new Date().toISOString().slice(0, 10), departure_date: '',
+    arrival_date: todayLocalISO(), departure_date: '',
   });
   const [form, setForm] = useState(blankForm);
   const [saving, setSaving] = useState(false);
@@ -2240,7 +2241,7 @@ function LotVehicleDrawer({ isOpen, onClose, lot, vehicle, addToast, onSaved }) 
         quality: vehicleQualityToForm(vehicle.quality_json),
         hauler_id: vehicle.hauler_id ? String(vehicle.hauler_id) : '',
         gate_pass_no: vehicle.gate_pass_no || '',
-        arrival_date: iso(vehicle.arrival_date) || new Date().toISOString().slice(0, 10),
+        arrival_date: iso(vehicle.arrival_date) || todayLocalISO(),
         departure_date: iso(vehicle.departure_date),
       });
     } else {

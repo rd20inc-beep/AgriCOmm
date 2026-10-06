@@ -16,6 +16,7 @@ import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { favStar } from '../../../shared/utils/favorites';
 import { CHEQUE_DATE_LABEL } from '../../../components/payments/paymentPayload';
 import { ChequeHint } from '../../../components/payments/PaymentFields';
+import { todayLocalISO } from '../../../shared/utils/format';
 
 // ─── Formatting ──────────────────────────────────────────────────────
 function fmtPKR(n) {
@@ -87,7 +88,7 @@ const remainingOf = (e) => round2(e?.outstanding_pkr ?? e?.amount_pkr ?? e?.amou
 const mkPayForm = (e) => ({
   amount: e ? String(remainingOf(e)) : '',
   bank_account_id: '', payment_method: 'bank_transfer', payment_reference: '',
-  due_date: '', paid_date: new Date().toISOString().split('T')[0], notes: '',
+  due_date: '', paid_date: todayLocalISO(), notes: '',
 });
 
 // ─── Category catalogue ─────────────────────────────────────────────
@@ -250,7 +251,7 @@ export default function Expenses() {
   const initForm = {
     expense_type: 'general', category: 'utility_bill',
     amount: '', currency: 'PKR', vendor_name: '', supplier_id: '',
-    expense_date: new Date().toISOString().split('T')[0], due_date: '',
+    expense_date: todayLocalISO(), due_date: '',
     invoice_reference: '', description: '',
     batch_id: '', order_id: '', owner_name: '',
     pay_now: false, bank_account_id: '', payment_method: 'bank_transfer',
@@ -374,7 +375,7 @@ export default function Expenses() {
                 { key: 'vendor_name', label: 'Vendor' },
                 { key: 'description', label: 'Description' },
                 { key: 'payment_status', label: 'Status' },
-              ], `expenses-${new Date().toISOString().split('T')[0]}.csv`)}
+              ], `expenses-${todayLocalISO()}.csv`)}
               className="bg-white/15 hover:bg-white/25 backdrop-blur-sm px-3 py-2 rounded-lg text-xs font-medium inline-flex items-center gap-1 transition-colors"
             >
               <Download size={12} /> CSV

@@ -28,6 +28,7 @@ import { reportingApi, aiApi } from '../api/services';
 import { exportLedgerCSV, printLedger } from '../utils/ledgerExport';
 import SlideDrawer from '../../../components/SlideDrawer';
 import TransactionDocument from '../../../components/TransactionDocument';
+import { toLocalISODate, todayLocalISO } from '../../../shared/utils/format';
 
 // ─── Formatting ────────────────────────────────────────────────────────
 // When the "Exact numbers" toggle is on, money is shown in full digits
@@ -71,8 +72,8 @@ const RANGES = [
 function rangeToParams(range) {
   if (!range) return {};
   const now = new Date();
-  const startOf = (d) => { const x = new Date(d); x.setHours(0,0,0,0); return x.toISOString().slice(0,10); };
-  const endOf   = (d) => { const x = new Date(d); x.setHours(23,59,59,999); return x.toISOString().slice(0,10); };
+  const startOf = (d) => { const x = new Date(d); x.setHours(0,0,0,0); return toLocalISODate(x); };
+  const endOf   = (d) => { const x = new Date(d); x.setHours(23,59,59,999); return toLocalISODate(x); };
   switch (range) {
     case 'today':   return { from_date: startOf(now), to_date: endOf(now) };
     case 'week':    {
@@ -198,7 +199,7 @@ function LedgerExportBar({ title, subtitle, meta, columns, rows, footerNote, fil
   const { companyProfileData } = useApp();
   const { user } = useAuth();
   const companyName = companyProfileData?.legalName || companyProfileData?.name || 'AGRI COMMODITIES';
-  const stamp = new Date().toISOString().slice(0, 10);
+  const stamp = todayLocalISO();
   const disabled = !rows || rows.length === 0;
   return (
     <div className="flex justify-end gap-2 print:hidden">

@@ -6,6 +6,7 @@ import ItemPicker from './ItemPicker';
 import { useApp } from '../context/AppContext';
 import { useMillStoreItems, useCreatePurchase } from '../modules/millStore/api/queries';
 import { purchaseRequirementsApi } from '../modules/purchaseRequirements/api/services';
+import { todayLocalISO } from '../shared/utils/format';
 
 const CATEGORIES = [
   { value: 'packaging',   label: 'Packaging' },
@@ -50,7 +51,7 @@ export default function NewPurchaseDrawer({ open, onClose, onSaved, prefill = nu
   const [walkIn, setWalkIn] = useState(false); // cash / walk-in vendor (not in supplier list)
   const [vendorName, setVendorName] = useState('');
   const [invoiceNumber, setInvoiceNumber] = useState('');
-  const [purchaseDate, setPurchaseDate] = useState(new Date().toISOString().split('T')[0]);
+  const [purchaseDate, setPurchaseDate] = useState(todayLocalISO());
   const [notes, setNotes] = useState('');
   const [lines, setLines] = useState([newLine()]);
   // Approved purchase requirements (any item) + which ones this purchase closes.
@@ -62,7 +63,7 @@ export default function NewPurchaseDrawer({ open, onClose, onSaved, prefill = nu
   useEffect(() => {
     if (!open) return;
     setSupplierId(''); setWalkIn(false); setVendorName(''); setInvoiceNumber(''); setNotes('');
-    setPurchaseDate(new Date().toISOString().split('T')[0]);
+    setPurchaseDate(todayLocalISO());
     prefillFixed.current = false;
     if (prefill?.item_id) {
       setLines([{

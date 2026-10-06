@@ -7,6 +7,7 @@ import { useApp } from '../../../context/AppContext';
 import { favStar } from '../../../shared/utils/favorites';
 import { CHEQUE_DATE_LABEL } from '../../../components/payments/paymentPayload';
 import { ChequeHint } from '../../../components/payments/PaymentFields';
+import { todayLocalISO } from '../../../shared/utils/format';
 
 // Small currency formatter — mirrors the symbols used across the finance pages.
 function curSymbol(cur) {
@@ -102,7 +103,7 @@ export default function StatementPayDrawer({ mode, party, onClose }) {
     amount: '',
     bankAccountId: '',
     method: 'bank_transfer',
-    date: new Date().toISOString().split('T')[0],
+    date: todayLocalISO(),
     dueDate: '',
     notes: '',
   });

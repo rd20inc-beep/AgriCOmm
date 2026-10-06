@@ -47,6 +47,7 @@ import { favStar } from '../../../shared/utils/favorites';
 import { valueInventory } from '../utils/inventoryValue';
 import useConfirm from '../../../hooks/useConfirm';
 import PaymentDrawer from '../../../components/payments/PaymentDrawer';
+import { toLocalISODate, todayLocalISO } from '../../../shared/utils/format';
 
 const PKR = (v) => 'Rs ' + (v || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtDate = (d) => {
@@ -419,7 +420,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
     if (cashRange === 'month') from = new Date(y, now.getMonth(), 1);
     else if (cashRange === 'quarter') from = new Date(y, Math.floor(now.getMonth() / 3) * 3, 1);
     else from = new Date(y, 0, 1); // ytd
-    return { from_date: from.toISOString().slice(0, 10) };
+    return { from_date: toLocalISODate(from) };
   }, [cashRange]);
   const { data: cashFlow } = useMillCashFlow(cashParams);
   const cashLedger = useMemo(() => {
@@ -509,12 +510,12 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
   const [showExpDrawer, setShowExpDrawer] = useState(false);
   const [showWorkerDrawer, setShowWorkerDrawer] = useState(false);
   const [showTransfer, setShowTransfer] = useState(false);
-  const EMPTY_EXP = { category: 'salaries', vendor_preset: '', vendor_name: '', subcategory: '', employee_id: '', is_recurring: false, recurrence: 'monthly', description: '', amount: '', expense_date: new Date().toISOString().split('T')[0], reference: '', notes: '' };
+  const EMPTY_EXP = { category: 'salaries', vendor_preset: '', vendor_name: '', subcategory: '', employee_id: '', is_recurring: false, recurrence: 'monthly', description: '', amount: '', expense_date: todayLocalISO(), reference: '', notes: '' };
   const [expForm, setExpForm] = useState(EMPTY_EXP);
-  const EMPTY_WORKER = { id: null, name: '', role: '', entity: payrollEntity, department: '', pay_type: 'daily', daily_wage: '', monthly_salary: '', ot_rate_per_hour: '', phone: '', cnic: '', bank_name: '', bank_account_number: '', iban: '', joined_date: new Date().toISOString().split('T')[0], left_date: '', notes: '', portal_enabled: false };
+  const EMPTY_WORKER = { id: null, name: '', role: '', entity: payrollEntity, department: '', pay_type: 'daily', daily_wage: '', monthly_salary: '', ot_rate_per_hour: '', phone: '', cnic: '', bank_name: '', bank_account_number: '', iban: '', joined_date: todayLocalISO(), left_date: '', notes: '', portal_enabled: false };
   const [workerForm, setWorkerForm] = useState(EMPTY_WORKER);
   const [advanceTarget, setAdvanceTarget] = useState(null); // worker we're giving an advance to
-  const [advanceForm, setAdvanceForm] = useState({ amount: '', advance_date: new Date().toISOString().split('T')[0], payment_method: 'cash', notes: '', recovery_method: 'full_next_salary', recovery_start_period: '', installment_amount: '', installment_count: '', deduction_percent: '' });
+  const [advanceForm, setAdvanceForm] = useState({ amount: '', advance_date: todayLocalISO(), payment_method: 'cash', notes: '', recovery_method: 'full_next_salary', recovery_start_period: '', installment_amount: '', installment_count: '', deduction_percent: '' });
   const [deleteWorkerTarget, setDeleteWorkerTarget] = useState(null); // confirm-delete state
   const [advancesPanelWorker, setAdvancesPanelWorker] = useState(null); // view advances drawer
   const [ledgerWorker, setLedgerWorker] = useState(null); // per-employee ledger drawer
@@ -786,7 +787,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
 
   function openAdvanceDrawer(worker) {
     setAdvanceTarget(worker);
-    setAdvanceForm({ amount: '', advance_date: new Date().toISOString().split('T')[0], payment_method: 'cash', notes: '', recovery_method: 'full_next_salary', recovery_start_period: '', installment_amount: '', installment_count: '', deduction_percent: '' });
+    setAdvanceForm({ amount: '', advance_date: todayLocalISO(), payment_method: 'cash', notes: '', recovery_method: 'full_next_salary', recovery_start_period: '', installment_amount: '', installment_count: '', deduction_percent: '' });
   }
 
   async function handleGiveAdvance() {
@@ -2943,9 +2944,9 @@ function ExpensePayDrawer({ expense, bankAccounts = [], companyProfile, addToast
   const paid = expense ? (parseFloat(expense.payablePaid) || 0) : 0;
   const outstanding = expense ? (expense.payableOutstanding != null ? parseFloat(expense.payableOutstanding) : Math.max(0, total - paid)) : 0;
   const status = expense?.payableStatus || expense?.paymentStatus || 'Pending';
-  const [form, setForm] = useState({ amount: '', bankAccountId: '', paymentMethod: 'cash', paymentDate: new Date().toISOString().split('T')[0], chequeNo: '', dueDate: '', notes: '' });
+  const [form, setForm] = useState({ amount: '', bankAccountId: '', paymentMethod: 'cash', paymentDate: todayLocalISO(), chequeNo: '', dueDate: '', notes: '' });
   useEffect(() => {
-    if (expense) setForm({ amount: String(Math.round(outstanding) || ''), bankAccountId: '', paymentMethod: 'cash', paymentDate: new Date().toISOString().split('T')[0], chequeNo: '', dueDate: '', notes: '' });
+    if (expense) setForm({ amount: String(Math.round(outstanding) || ''), bankAccountId: '', paymentMethod: 'cash', paymentDate: todayLocalISO(), chequeNo: '', dueDate: '', notes: '' });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [expense]);
   if (!expense) return null;
@@ -4132,7 +4133,7 @@ function downloadBankTransferFile(run, lines, addToast) {
 // Drawer to post a payroll run: review the per-employee breakdown, then pay it
 // out from Mill Cash. Server recomputes the figures on submit.
 function PayrollRunDrawer({ month, entity = 'mill', employees, preselectId, bankAccounts = [], onClose, onPosted, postRunMut, addToast }) {
-  const [form, setForm] = useState({ pay_method: 'cash', bank_account_id: '', pay_date: new Date().toISOString().split('T')[0] });
+  const [form, setForm] = useState({ pay_method: 'cash', bank_account_id: '', pay_date: todayLocalISO() });
   // Banks the mill can pay salaries from (cash is the dedicated Mill Cash float).
   const payBanks = (bankAccounts || []).filter(a => a.type !== 'cash');
   // One editable row per unpaid employee: include, advance-to-clear, and the
@@ -4542,7 +4543,7 @@ function SalaryRevisionDrawer({ worker, company, onClose, addToast }) {
   const reviseMut = useReviseSalary();
   const monthly = worker.payType === 'monthly';
   const curAmt = monthly ? worker.monthlySalary : worker.dailyWage;
-  const [form, setForm] = useState({ amount: '', effective_date: new Date().toISOString().slice(0, 10), reason: '' });
+  const [form, setForm] = useState({ amount: '', effective_date: todayLocalISO(), reason: '' });
   const set = (p) => setForm((f) => ({ ...f, ...p }));
 
   async function submit() {
@@ -4550,7 +4551,7 @@ function SalaryRevisionDrawer({ worker, company, onClose, addToast }) {
     try {
       const data = { pay_type: worker.payType, effective_date: form.effective_date, reason: form.reason, [monthly ? 'monthly_salary' : 'daily_wage']: parseFloat(form.amount) };
       await reviseMut.mutateAsync({ workerId: worker.id, data });
-      addToast('Salary revised', 'success'); setForm({ amount: '', effective_date: new Date().toISOString().slice(0, 10), reason: '' });
+      addToast('Salary revised', 'success'); setForm({ amount: '', effective_date: todayLocalISO(), reason: '' });
     } catch (e) { addToast(e.message, 'error'); }
   }
 
@@ -4994,7 +4995,7 @@ function StatutoryRemittancePanel({ canPay, entity = 'mill', bankAccounts = [], 
   const deleteMut = useDeleteStatutoryRemittance();
   const payBanks = (bankAccounts || []).filter((a) => a.type !== 'cash');
   const owed = liabilities.filter((l) => parseFloat(l.outstanding) > 0);
-  const blank = { liability_account_code: '', amount: '', pay_method: 'cash', bank_account_id: '', remit_date: new Date().toISOString().slice(0, 10), reference: '', authority: '', period_from: '', period_to: '', notes: '' };
+  const blank = { liability_account_code: '', amount: '', pay_method: 'cash', bank_account_id: '', remit_date: todayLocalISO(), reference: '', authority: '', period_from: '', period_to: '', notes: '' };
   const [form, setForm] = useState(blank);
   const set = (patch) => setForm((f) => ({ ...f, ...patch }));
 

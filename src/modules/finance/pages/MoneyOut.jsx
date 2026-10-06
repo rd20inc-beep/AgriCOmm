@@ -14,6 +14,7 @@ import PartyLink from '../../../shared/components/PartyLink';
 import { toPkr } from '../utils/fx';
 import { shortenRef } from '../utils/refs';
 import { favStar } from '../../../shared/utils/favorites';
+import { todayLocalISO } from '../../../shared/utils/format';
 
 // Currency-aware formatter — picks Rs / $ / € / £ / AED based on the row's currency
 function fmtCur(n, currency = 'PKR') {
@@ -101,7 +102,7 @@ export default function MoneyOut() {
   // PaymentExtras reads and writes; they only reach the server on a PKR payable
   // (see the Tax & discount block below).
   const [payForm, setPayForm] = useState({
-    amount: '', bankAccountId: '', paymentMethod: 'bank_transfer', paymentDate: new Date().toISOString().split('T')[0],
+    amount: '', bankAccountId: '', paymentMethod: 'bank_transfer', paymentDate: todayLocalISO(),
     chequeNo: '', dueDate: '', notes: '', fundSource: 'bank',
     whtRate: '', whtAmount: '', discountAmount: '', attachmentUrl: '', attachmentName: '',
   });
@@ -113,7 +114,7 @@ export default function MoneyOut() {
       amount: String(parseFloat(row.outstanding) || 0),
       bankAccountId: '',
       paymentMethod: 'bank_transfer',
-      paymentDate: new Date().toISOString().split('T')[0],
+      paymentDate: todayLocalISO(),
       chequeNo: '', dueDate: '',
       notes: '',
       fundSource: 'bank',

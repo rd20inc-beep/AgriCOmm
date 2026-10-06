@@ -14,6 +14,7 @@ import { favStar, isFavorite } from '../../../shared/utils/favorites';
 import { paymentWord, defaultBankAccountId } from '../../localSales/utils/saleStatus';
 import { CHEQUE_DATE_LABEL } from '../../../components/payments/paymentPayload';
 import { ChequeHint } from '../../../components/payments/PaymentFields';
+import { todayLocalISO } from '../../../shared/utils/format';
 
 function fmtPKR(n) {
   const v = parseFloat(n) || 0;
@@ -135,7 +136,7 @@ export default function LocalSalesFinance() {
       Status: paymentWord(s),
       Profit_PKR: Math.round(parseFloat(s.grossProfit || s.grossProfitPkr) || 0),
     }));
-    downloadCSV(rows, `local-sales-${new Date().toISOString().slice(0, 10)}.csv`);
+    downloadCSV(rows, `local-sales-${todayLocalISO()}.csv`);
   }
 
   return (

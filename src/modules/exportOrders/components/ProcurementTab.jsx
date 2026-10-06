@@ -6,6 +6,7 @@ import { financeApi } from '../../../api/services';
 import { useApp } from '../../../context/AppContext';
 import { Package, Plus, ExternalLink, Warehouse, Scale, FileText, Truck, ArrowRight } from 'lucide-react';
 import StockAllocationPicker from './StockAllocationPicker';
+import { todayLocalISO } from '../../../shared/utils/format';
 
 export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], onCreateMilling, onStartDocsPreparation, onLinkExternalPurchase, canCreateMilling, canStartDocs, onStockAllocated }) {
   // Supplier privacy: Export users see the Supplier Code, not the name/ledger link.
@@ -409,7 +410,7 @@ function ReceiveFromMill({ order, linkedBatch, addToast, onTransferComplete }) {
         total_value_pkr: totalPKR,
         usd_equivalent: Math.round(totalPKR / pkrRate),
         pkr_rate: pkrRate,
-        dispatch_date: new Date().toISOString().split('T')[0],
+        dispatch_date: todayLocalISO(),
         status: 'In Transit',
       });
       addToast(`${Math.round(finishedMT * 1000).toLocaleString()} kg transferred from mill to export — ${linkedBatch.id}`, 'success');
