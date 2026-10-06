@@ -27,15 +27,16 @@ const activityColors = {
   transfer: 'bg-violet-100 text-violet-600',
 };
 
-export default function RecentActivity({ activities }) {
+export default function RecentActivity({ activities, viewAllTo = null }) {
   return (
     <div className="bg-white rounded-xl shadow-sm p-5">
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">
           Recent Activity
         </h2>
-        <Link to="/finance/accounting" className="text-xs text-blue-600 hover:text-blue-800 font-medium">View All &rarr;</Link>
+        {viewAllTo && <Link to={viewAllTo} className="text-xs text-blue-600 hover:text-blue-800 font-medium">View All &rarr;</Link>}
       </div>
+      {activities.length === 0 && <p className="text-sm text-gray-400 text-center py-6">No recent activity</p>}
       <div className="space-y-4 max-h-[420px] overflow-y-auto pr-1">
         {activities.map((item) => {
           const IconComponent = activityIcons[item.type] || Activity;
@@ -48,12 +49,12 @@ export default function RecentActivity({ activities }) {
                 <IconComponent className="w-4 h-4" />
               </div>
               <div className="min-w-0 flex-1">
-                <div className="text-sm text-gray-800 leading-snug">
+                <div className="text-sm text-gray-800 leading-snug truncate" title={item.action}>
                   {item.action}
                 </div>
                 <div className="flex items-center gap-2 mt-0.5">
-                  <span className="text-xs text-gray-500">{item.by}</span>
-                  <span className="text-gray-300">&middot;</span>
+                  {item.by && <span className="text-xs text-gray-500">{item.by}</span>}
+                  {item.by && item.time && <span className="text-gray-300">&middot;</span>}
                   <span className="text-xs text-gray-400">{item.time}</span>
                 </div>
               </div>

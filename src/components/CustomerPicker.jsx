@@ -117,14 +117,14 @@ export default function CustomerPicker({
       <div className="relative">
         {value && selected && !open ? (
           <div className="w-full px-3 py-2 rounded-lg border border-gray-300 bg-white flex items-center justify-between gap-2">
-            <button type="button" onClick={() => { setOpen(true); setSearch(''); }} className="flex-1 text-left truncate text-gray-900 font-medium">
+            <button type="button" onClick={() => { setOpen(true); setSearch(''); }} title={selected.name} className="flex-1 text-left truncate text-gray-900 font-medium">
               {isFavorite(selected) && <Star className="w-3.5 h-3.5 inline-block mr-1 -mt-0.5 fill-amber-400 text-amber-500" />}
               {selected.name}
             </button>
             <div className="flex items-center gap-2 flex-shrink-0">
               {selected.approval_status === 'pending' && <PendingBadge />}
               <button type="button" onClick={() => { setOpen(true); setSearch(''); }} className="text-xs text-blue-600">Change</button>
-              {clearable && <button type="button" onClick={() => onChange('')} className="text-gray-400 hover:text-gray-600"><X size={14} /></button>}
+              {clearable && <button type="button" onClick={() => onChange('')} aria-label="Clear client" title="Clear" className="text-gray-400 hover:text-gray-600"><X size={14} /></button>}
             </div>
           </div>
         ) : (
@@ -141,9 +141,9 @@ export default function CustomerPicker({
                   <button key={c.id} type="button"
                     onClick={() => { onChange(String(c.id)); setSearch(''); setOpen(false); }}
                     className={`w-full text-left px-3 py-2 text-sm hover:bg-blue-50 flex items-center justify-between gap-2 ${String(c.id) === String(value) ? 'bg-blue-50 text-blue-700 font-medium' : 'text-gray-900'}`}>
-                    <span className="truncate flex items-center gap-1.5">
+                    <span className="min-w-0 flex items-center gap-1.5" title={c.name}>
                       {isFavorite(c) && <Star className="w-3.5 h-3.5 flex-shrink-0 fill-amber-400 text-amber-500" />}
-                      {c.name}
+                      <span className="truncate">{c.name}</span>
                     </span>
                     {c.approval_status === 'pending' && <PendingBadge />}
                   </button>
@@ -158,12 +158,12 @@ export default function CustomerPicker({
         <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-lg space-y-3">
           <p className="text-xs font-semibold text-blue-800 uppercase tracking-wide">Add new client</p>
           <input value={draft.name} autoFocus onChange={e => setDraft(d => ({ ...d, name: e.target.value }))}
-            placeholder="Name * — e.g. Al Karam Rice Mills"
+            placeholder="Name * — e.g. Al Karam Rice Mills" aria-label="Client name (required)" aria-required="true"
             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
           <div className="grid grid-cols-2 gap-3">
-            <input value={draft.contact_person} onChange={e => setDraft(d => ({ ...d, contact_person: e.target.value }))} placeholder="Contact person"
+            <input value={draft.contact_person} onChange={e => setDraft(d => ({ ...d, contact_person: e.target.value }))} placeholder="Contact person" aria-label="Contact person"
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
-            <input value={draft.phone} onChange={e => setDraft(d => ({ ...d, phone: e.target.value }))} placeholder="Phone"
+            <input value={draft.phone} onChange={e => setDraft(d => ({ ...d, phone: e.target.value }))} placeholder="Phone" aria-label="Phone"
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
           </div>
           <div className="flex justify-end gap-2">

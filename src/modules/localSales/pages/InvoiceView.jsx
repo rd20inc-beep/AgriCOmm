@@ -8,7 +8,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   ArrowLeft, Printer, ShieldCheck, Wallet, BookUser, Package, Factory,
-  Truck, FileText, AlertTriangle, ChevronRight, Mail, MessageCircle,
+  Truck, FileText, ChevronRight, Mail, MessageCircle,
 } from 'lucide-react';
 import { localSalesApi } from '../api/services';
 import { useApp } from '../../../context/AppContext';
@@ -16,17 +16,16 @@ import { useAuth } from '../../../context/AuthContext';
 import { useAcceptLocalSalePayment } from '../../../api/queries';
 import SlideDrawer from '../../../components/SlideDrawer';
 import { printCustomerInvoice, printAdminInvoice, printGatePass } from '../utils/invoicePrint';
-import { todayLocalISO } from '../../../shared/utils/format';
+import { todayLocalISO, fmtPKR, fmtKg, fmtNum, fmtDate } from '../../../shared/utils/format';
+import StatusBadge from '../../../shared/components/StatusBadge';
+import FieldError from '../../../shared/components/FieldError';
 
 // Roles allowed to view the admin invoice copy (mirrors the backend route gate).
 const ADMIN_INVOICE_ROLES = ['Super Admin', 'Owner', 'Finance Manager', 'Mill Manager'];
 
-const pkr = (v) => `Rs ${(parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const dt = (v) => v ? new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
-const STATUS_TONE = {
-  Paid: 'bg-emerald-100 text-emerald-700', Partial: 'bg-amber-100 text-amber-700',
-  Credit: 'bg-red-100 text-red-700', Unpaid: 'bg-red-100 text-red-700',
-};
+const pkr = (v) => fmtPKR(parseFloat(v) || 0, { decimals: 2 });
+const dt = (v) => fmtDate(v);
+const kg0 = (v) => fmtKg(Math.round(parseFloat(v) || 0));
 
 export default function InvoiceView() {
   const { id } = useParams();
@@ -76,6 +75,7 @@ export default function InvoiceView() {
   const [emailOpen, setEmailOpen] = useState(false);
   const [emailTo, setEmailTo] = useState('');
   const [emailBusy, setEmailBusy] = useState(false);
+  const [payErrors, setPayErrors] = useState({});
 
   if (isLoading) return <div className="p-6 text-sm text-gray-400">Loading invoice…</div>;
   if (isError || !data?.sale) return (
@@ -115,11 +115,11 @@ export default function InvoiceView() {
     const co = companyProfileData?.legalName || companyProfileData?.name || 'AGRI COMMODITIES';
     const lines = [
       `*${co}* — Invoice ${sale.invoiceNo}`,
-      `Date: ${new Date(sale.date).toLocaleDateString('en-GB')}`,
+      `Date: ${dt(sale.date)}`,
       `Items: ${(items.map(i => i.gradeProduct).join(', ')) || '—'}`,
-      `Total: Rs ${(totals.total || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-      `Received: Rs ${(totals.received || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-      `Outstanding: Rs ${(totals.outstanding || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      `Total: ${pkr(totals.total)}`,
+      `Received: ${pkr(totals.received)}`,
+      `Outstanding: ${pkr(totals.outstanding)}`,
     ];
     window.open(`https://wa.me/${phone}?text=${encodeURIComponent(lines.join('\n'))}`, '_blank');
   };
@@ -136,7 +136,8 @@ export default function InvoiceView() {
 
   const submitPayment = async () => {
     const amt = parseFloat(payForm.amount) || 0;
-    if (amt <= 0) { addToast?.('Enter a valid amount.', 'error'); return; }
+    if (amt <= 0) { setPayErrors({ amount: 'Enter an amount greater than zero.' }); return; }
+    setPayErrors({});
     try {
       await payMutation.mutateAsync({ saleId: sale.id, data: payForm });
       addToast?.('Payment recorded.', 'success');
@@ -164,14 +165,14 @@ export default function InvoiceView() {
           <button onClick={() => navigate(-1)} className="text-blue-600 hover:underline inline-flex items-center gap-1 text-sm mb-1"><ArrowLeft size={14} /> Back</button>
           <h1 className="text-2xl font-bold text-gray-900 inline-flex items-center gap-2">
             Invoice {sale.invoiceNo}
-            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_TONE[sale.paymentStatus] || 'bg-gray-100 text-gray-600'}`}>{sale.paymentStatus}</span>
-            {sale.overdue && <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-red-100 text-red-700 inline-flex items-center gap-1"><AlertTriangle size={11} /> Overdue</span>}
+            {sale.paymentStatus && <StatusBadge status={sale.paymentStatus} />}
+            {sale.overdue && <StatusBadge status="Overdue" />}
             {awaitingConfirmation && <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-amber-100 text-amber-800 inline-flex items-center gap-1"><Truck size={11} /> Not yet dispatched — awaiting confirmation</span>}
           </h1>
           {sale.saleGroupNo && sale.saleGroupNo !== sale.invoiceNo && <p className="text-xs text-gray-400">Group {sale.saleGroupNo}</p>}
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <select value={template} onChange={e => setTemplate(e.target.value)} title="Print template"
+          <select value={template} onChange={e => setTemplate(e.target.value)} title="Print template" aria-label="Print template"
             className="text-xs border border-gray-200 rounded-lg px-2 py-2 bg-white text-gray-700 outline-none">
             <option value="standard">Standard template</option>
             <option value="compact">Compact template</option>
@@ -220,8 +221,8 @@ export default function InvoiceView() {
               ))}
               <tr className="bg-gray-50 font-semibold">
                 <td className="px-4 py-2" colSpan={2}>Total</td>
-                <td className="px-4 py-2 text-right tabular-nums">{Math.round(totals.quantityKg).toLocaleString()} kg</td>
-                <td className="px-4 py-2 text-right tabular-nums">{totals.bags ? Math.round(totals.bags).toLocaleString() : '—'}</td>
+                <td className="px-4 py-2 text-right tabular-nums">{kg0(totals.quantityKg)}</td>
+                <td className="px-4 py-2 text-right tabular-nums">{totals.bags ? fmtNum(Math.round(totals.bags)) : '—'}</td>
                 <td className="px-4 py-2" />
                 <td className="px-4 py-2 text-right tabular-nums">{pkr(totals.total)}</td>
               </tr>
@@ -237,12 +238,12 @@ export default function InvoiceView() {
           <h3 className="text-sm font-semibold text-gray-700 mb-2 inline-flex items-center gap-1.5"><Package size={15} /> Repacking</h3>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
             <Field label="Bag source" value={data.repacking.bagSourceLabel} />
-            {data.repacking.originalBagCount != null && <Field label="Original bags" value={`${data.repacking.originalBagCount} × ${data.repacking.originalBagSizeKg || '?'} kg`} />}
-            {data.repacking.newBagCount != null && <Field label="New bags" value={`${data.repacking.newBagCount} × ${data.repacking.newBagSizeKg || '?'} kg`} />}
+            {data.repacking.originalBagCount != null && <Field label="Original bags" value={`${fmtNum(data.repacking.originalBagCount)} × ${data.repacking.originalBagSizeKg ? fmtKg(data.repacking.originalBagSizeKg, { decimals: 0 }) : '? kg'}`} />}
+            {data.repacking.newBagCount != null && <Field label="New bags" value={`${fmtNum(data.repacking.newBagCount)} × ${data.repacking.newBagSizeKg ? fmtKg(data.repacking.newBagSizeKg, { decimals: 0 }) : '? kg'}`} />}
             {data.repacking.packagingCharge > 0 && <Field label="Packaging charge" value={pkr(data.repacking.packagingCharge)} />}
             {data.repacking.labourTotal > 0 && <Field label="Labour charge" value={pkr(data.repacking.labourTotal)} />}
-            {data.repacking.packingLossKg > 0 && <Field label="Packing loss" value={`${data.repacking.packingLossKg} kg`} tone="rose" />}
-            {data.repacking.finalDispatchedKg > 0 && <Field label="Final dispatched" value={`${data.repacking.finalDispatchedKg} kg`} />}
+            {data.repacking.packingLossKg > 0 && <Field label="Packing loss" value={fmtNum(data.repacking.packingLossKg) + ' kg'} tone="rose" />}
+            {data.repacking.finalDispatchedKg > 0 && <Field label="Final dispatched" value={fmtNum(data.repacking.finalDispatchedKg) + ' kg'} />}
           </div>
           {data.repacking.bagSource === 'customer' && <p className="text-[11px] text-gray-400 mt-2">Bags supplied by the customer — no packaging stock deducted.</p>}
         </div>
@@ -281,7 +282,7 @@ export default function InvoiceView() {
                       <tr key={o.lotId}>
                         <td className="px-4 py-2"><Link to={o.href} className="text-blue-600 hover:underline">{o.productGrade}</Link></td>
                         <td className="px-4 py-2 text-gray-600">{o.type === 'byproduct' ? 'by-product' : 'finished'}</td>
-                        <td className="px-4 py-2 text-right tabular-nums">{Math.round(o.producedKg).toLocaleString()} kg</td>
+                        <td className="px-4 py-2 text-right tabular-nums">{kg0(o.producedKg)}</td>
                         <td className="px-4 py-2 text-right tabular-nums">{o.costPerKg ? pkr(o.costPerKg) : '—'}</td>
                         <td className="px-4 py-2 text-right tabular-nums">{o.salePricePerKg ? pkr(o.salePricePerKg) : '—'}</td>
                         <td className="px-4 py-2 text-right tabular-nums">{o.recoveryValue ? pkr(o.recoveryValue) : '—'}</td>
@@ -344,7 +345,7 @@ export default function InvoiceView() {
         <div className="flex flex-wrap gap-2 text-xs">
           {(dispatch.intakeVehicles || []).length > 0
             ? dispatch.intakeVehicles.map((v, i) => (
-                <Chip key={i}>Truck {v.vehicleNo}{v.driverName ? ` · ${v.driverName}` : ''}{v.weightMt ? ` · ${v.weightMt} MT` : ''}{v.arrivalDate ? ` · ${dt(v.arrivalDate)}` : ''}</Chip>
+                <Chip key={i}>Truck {v.vehicleNo}{v.driverName ? ` · ${v.driverName}` : ''}{v.weightMt ? ` · ${kg0(v.weightMt * 1000)}` : ''}{v.arrivalDate ? ` · ${dt(v.arrivalDate)}` : ''}</Chip>
               ))
             : <span className="text-gray-400">No purchase/intake vehicle recorded for the source lot.</span>}
         </div>
@@ -361,7 +362,7 @@ export default function InvoiceView() {
       <SlideDrawer open={emailOpen} onClose={() => setEmailOpen(false)} title="Email invoice" subtitle={`Send invoice ${sale.invoiceNo} to the customer`} icon={Mail} size="md">
         {emailOpen && (
           <div className="space-y-3">
-            <Lbl text="Recipient email">
+            <Lbl text="Recipient email" required>
               <input type="email" value={emailTo} onChange={e => setEmailTo(e.target.value)} placeholder="customer@email.com"
                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none" />
             </Lbl>
@@ -379,7 +380,12 @@ export default function InvoiceView() {
       <SlideDrawer open={payOpen} onClose={() => setPayOpen(false)} title="Record payment" subtitle={`Against invoice ${sale.invoiceNo}`} icon={Wallet} size="md">
         {payOpen && (
           <div className="space-y-3">
-            <Lbl text="Amount"><input type="number" value={payForm.amount} onChange={e => setPayForm(f => ({ ...f, amount: e.target.value }))} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none" /></Lbl>
+            <Lbl text="Amount" required>
+              <input type="number" value={payForm.amount} autoFocus aria-invalid={!!payErrors.amount}
+                onChange={e => { setPayForm(f => ({ ...f, amount: e.target.value })); setPayErrors({}); }}
+                className={`w-full border rounded-lg px-3 py-2 text-sm outline-none ${payErrors.amount ? 'border-red-400' : 'border-gray-200'}`} />
+              <FieldError error={payErrors.amount} />
+            </Lbl>
             <Lbl text="Method">
               <select value={payForm.payment_method} onChange={e => setPayForm(f => ({ ...f, payment_method: e.target.value }))} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white outline-none">
                 <option value="cash">Cash</option><option value="cheque">Cheque</option><option value="bank_transfer">Bank transfer</option><option value="credit">Credit (udhaar)</option>
@@ -414,11 +420,11 @@ function ItemRow({ it }) {
       <tr className={`hover:bg-gray-50 ${hasTrace ? 'cursor-pointer' : ''}`} onClick={() => hasTrace && setOpen(o => !o)}>
         <td className="px-4 py-2">
           {hasTrace && <ChevronRight size={13} className={`inline mr-1 text-gray-400 transition-transform ${open ? 'rotate-90' : ''}`} />}
-          {it.riceType}{it.isBlend ? <span className="text-gray-400"> · blend</span> : ''}
+          <span className="inline-block max-w-[14rem] truncate align-bottom" title={it.riceType}>{it.riceType}</span>{it.isBlend ? <span className="text-gray-400"> · blend</span> : ''}
         </td>
         <td className="px-4 py-2">{it.gradeProduct}{it.itemType ? <span className="text-gray-400"> · {it.itemType}</span> : ''}</td>
-        <td className="px-4 py-2 text-right tabular-nums">{Math.round(it.quantityKg).toLocaleString()} kg</td>
-        <td className="px-4 py-2 text-right tabular-nums">{it.bags != null ? it.bags.toLocaleString() : '—'}</td>
+        <td className="px-4 py-2 text-right tabular-nums">{kg0(it.quantityKg)}</td>
+        <td className="px-4 py-2 text-right tabular-nums">{it.bags != null ? fmtNum(it.bags) : '—'}</td>
         <td className="px-4 py-2 text-right tabular-nums">{it.ratePerKg > 0 ? pkr(it.ratePerKg) : '—'}</td>
         <td className="px-4 py-2 text-right tabular-nums">{pkr(it.amount)}</td>
       </tr>
@@ -444,7 +450,7 @@ function ItemRow({ it }) {
               <div className="mt-1.5 text-gray-600">
                 Purchased / received on:
                 {it.intakeVehicles.map((v, i) => (
-                  <span key={i} className="text-gray-800">{i > 0 ? ', ' : ' '}{v.vehicleNo}{v.driverName ? ` (${v.driverName})` : ''}{v.weightMt ? ` · ${v.weightMt} MT` : ''}{v.arrivalDate ? ` · ${dt(v.arrivalDate)}` : ''}</span>
+                  <span key={i} className="text-gray-800">{i > 0 ? ', ' : ' '}{v.vehicleNo}{v.driverName ? ` (${v.driverName})` : ''}{v.weightMt ? ` · ${kg0(v.weightMt * 1000)}` : ''}{v.arrivalDate ? ` · ${dt(v.arrivalDate)}` : ''}</span>
                 ))}
               </div>
             )}
@@ -460,8 +466,8 @@ function Field({ label, value, sub, tone = 'gray' }) {
   return (
     <div>
       <p className="text-[11px] uppercase tracking-wider text-gray-400">{label}</p>
-      <p className={`text-sm font-medium ${toneCls}`}>{value || '—'}</p>
-      {sub && <p className="text-[11px] text-gray-400 truncate">{sub}</p>}
+      <p className={`text-sm font-medium truncate ${toneCls}`} title={typeof value === 'string' ? value : undefined}>{value || '—'}</p>
+      {sub && <p className="text-[11px] text-gray-400 truncate" title={sub}>{sub}</p>}
     </div>
   );
 }
@@ -474,6 +480,6 @@ function Chip({ children, tone = 'gray' }) {
   return <span className={`px-2.5 py-1 rounded-lg border ${cls}`}>{children}</span>;
 }
 
-function Lbl({ text, children }) {
-  return <label className="block"><span className="text-xs text-gray-500 block mb-1">{text}</span>{children}</label>;
+function Lbl({ text, required, children }) {
+  return <label className="block"><span className="text-xs text-gray-500 block mb-1">{text}{required && <span className="text-red-500 ml-0.5">*</span>}</span>{children}</label>;
 }

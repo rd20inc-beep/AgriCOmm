@@ -13,7 +13,8 @@ import { useAuth } from '../../../context/AuthContext';
 import TransactionDocument from '../../../components/TransactionDocument';
 import { useMillStoreItems } from '../../millStore/api/queries';
 import { LoadingSpinner, ErrorState, EmptyState } from '../../../components/LoadingState';
-import StatusBadge from '../../../components/StatusBadge';
+import StatusBadge from '../../../shared/components/StatusBadge';
+import FieldError from '../../../shared/components/FieldError';
 import SlideDrawer from '../../../components/SlideDrawer';
 import { adminApi, customersApi } from '../../admin/api/services';
 import CustomerPicker from '../../../components/CustomerPicker';
@@ -24,9 +25,12 @@ import { lotCategory, CAT_ORDER, CAT_COLOR } from '../../../utils/lotCategory';
 import { favStar, isFavorite } from '../../../shared/utils/favorites';
 import useConfirm from '../../../hooks/useConfirm';
 import { paymentWord, groupPaymentWord, payableDue, localToday, readLastCustomerId, rememberLastCustomerId, defaultBankAccountId } from '../utils/saleStatus';
-import { todayLocalISO } from '../../../shared/utils/format';
+import { todayLocalISO, fmtPKR as fmtPKRExact, fmtNum, fmtDate, fmtDateTime } from '../../../shared/utils/format';
 
-function fmtPKR(v) { return 'Rs ' + (parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+// Local-sale money is shown to the paisa (2 dp), exact, en-PK grouping.
+const fmtPKR = (v) => fmtPKRExact(parseFloat(v) || 0, { decimals: 2 });
+// A quantity in the chosen display unit: tons keep kg precision (3 dp).
+const fmtQty = (v, unit) => (unit === 'ton' ? fmtNum(v, 3) : fmtNum(v));
 
 // Small labelled number input used by the repacking section (#5).
 function RpNum({ label, value, onChange }) {
@@ -62,6 +66,8 @@ export default function LocalSales() {
   const EMPTY_PAY = () => ({ amount: '', payment_method: 'cash', bank_account_id: '', payment_date: localToday(), reference: '', notes: '', due_date: '', collection_location: 'Mill' });
   const [payForm, setPayForm] = useState(EMPTY_PAY);
   const [payLoading, setPayLoading] = useState(false);
+  const [payErrors, setPayErrors] = useState({});
+  const setPay = (k, v) => { setPayForm(p => ({ ...p, [k]: v })); setPayErrors(e => (e[k] ? { ...e, [k]: undefined } : e)); };
 
   const { data: sales = [], isLoading, error, refetch } = useLocalSales();
   const { data: summary = {} } = useLocalSalesSummary();
@@ -71,12 +77,14 @@ export default function LocalSales() {
     const due = payableDue(g.items);
     setPayGroup({ groupNo: g.key, due, count: g.items.length, buyer: g.items[0]?.customerName || g.items[0]?.buyerName || '' });
     setPayForm({ ...EMPTY_PAY(), amount: String(due), collection_location: g.items[0]?.collectionLocation || 'Mill' });
+    setPayErrors({});
     setShowPaymentModal(true);
   }
   function openLinePay(s) {
     setPayGroup(null);
     setSelectedSale(s);
     setPayForm({ ...EMPTY_PAY(), amount: String(parseFloat(s.dueAmount) || 0), collection_location: s.collectionLocation || s.collection_location || 'Mill' });
+    setPayErrors({});
     setShowPaymentModal(true);
   }
   // Sale confirmation (Batch 6 · item 9): only a Mill Manager/Owner releases a
@@ -184,7 +192,7 @@ export default function LocalSales() {
             className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200">
             <Download size={14} /> CSV
           </button>
-          <button onClick={() => refetch()} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg">
+          <button onClick={() => refetch()} aria-label="Refresh sales" title="Refresh" className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg">
             <RefreshCw size={16} />
           </button>
           {canCreate && (
@@ -201,7 +209,7 @@ export default function LocalSales() {
         <div className="bg-emerald-50 rounded-xl border border-emerald-200 p-4">
           <p className="text-xs font-medium text-emerald-600 uppercase">Today</p>
           <p className="text-xl font-bold text-emerald-700 mt-1">{fmtPKR(today.total)}</p>
-          <p className="text-xs text-emerald-500">{today.count || 0} sales · {Math.round(parseFloat(today.qtyKg) || 0).toLocaleString()} KG</p>
+          <p className="text-xs text-emerald-500">{today.count || 0} sales · {fmtNum(Math.round(parseFloat(today.qtyKg) || 0))} KG</p>
         </div>
         <div className="bg-blue-50 rounded-xl border border-blue-200 p-4">
           <p className="text-xs font-medium text-blue-600 uppercase">This Month</p>
@@ -263,7 +271,7 @@ export default function LocalSales() {
             {pendingSales.map(g => (
               <div key={g.saleGroupNo || g.id} className="px-4 py-3 flex items-center gap-3 flex-wrap">
                 <div className="min-w-0 flex-1">
-                  <div className="font-medium text-gray-900">{g.saleGroupNo || g.items?.[0]?.saleNo} · {g.buyerName || g.customerName || 'Walk-in'}</div>
+                  <div className="font-medium text-gray-900 truncate" title={g.buyerName || g.customerName || 'Walk-in'}>{g.saleGroupNo || g.items?.[0]?.saleNo} · {g.buyerName || g.customerName || 'Walk-in'}</div>
                   <div className="text-xs text-gray-400">{(g.items || []).length} item{(g.items || []).length > 1 ? 's' : ''} · {g.createdByName ? `by ${g.createdByName}` : ''}
                     <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-800">Not yet dispatched — awaiting confirmation</span>
                   </div>
@@ -272,8 +280,8 @@ export default function LocalSales() {
                     {(g.items || []).map(it => {
                       const pcs = it.quantityUnit === 'pcs' || it.itemType === 'packaging' || !!it.millItemId;
                       const qty = pcs
-                        ? `${Math.round(parseFloat(it.quantityKg) || 0).toLocaleString()} pcs`
-                        : `${(Math.round((parseFloat(it.quantityKg) || 0) * 100) / 100).toLocaleString()} kg`;
+                        ? `${fmtNum(Math.round(parseFloat(it.quantityKg) || 0))} pcs`
+                        : `${fmtNum(parseFloat(it.quantityKg) || 0)} kg`;
                       return (
                         <li key={it.id} className="flex items-baseline gap-2">
                           <span className="font-medium text-gray-800">{it.itemName || '—'}</span>
@@ -319,10 +327,10 @@ export default function LocalSales() {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {grouped.map(g => {
-                const qtyCell = (kg) => <>{fromKg(kg, displayUnit).toLocaleString()}<span className="text-xs text-gray-400 ml-1">{displayUnit === 'katta' ? 'kt' : displayUnit}</span></>;
+                const qtyCell = (kg) => <>{fmtQty(fromKg(kg, displayUnit), displayUnit)}<span className="text-xs text-gray-400 ml-1">{displayUnit === 'katta' ? 'kt' : displayUnit}</span></>;
                 const isPkgRow = (s) => s.quantityUnit === 'pcs' || s.itemType === 'packaging' || !!s.millItemId;
                 const rowQty = (s) => isPkgRow(s)
-                  ? <>{Math.round(parseFloat(s.quantityKg) || 0).toLocaleString()}<span className="text-xs text-gray-400 ml-1">pcs</span></>
+                  ? <>{fmtNum(Math.round(parseFloat(s.quantityKg) || 0))}<span className="text-xs text-gray-400 ml-1">pcs</span></>
                   : qtyCell(parseFloat(s.quantityKg) || 0);
                 // Single-item sale → plain row.
                 if (g.items.length === 1) {
@@ -331,12 +339,12 @@ export default function LocalSales() {
                     <tr key={s.id} onClick={() => openSaleDetail(s)} className="hover:bg-gray-50 cursor-pointer">
                       <td data-label="Sale #" className="py-2.5 px-4 font-medium text-blue-600">
                         {s.saleNo}
-                        {s.status === 'Pending' && <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-700 align-middle">Pending</span>}
-                        {s.status === 'Cancelled' && <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-red-100 text-red-700 align-middle">Rejected</span>}
+                        {s.status === 'Pending' && <span className="ml-1.5 align-middle"><StatusBadge status="Pending" /></span>}
+                        {s.status === 'Cancelled' && <span className="ml-1.5 align-middle"><StatusBadge status="Rejected" /></span>}
                       </td>
-                      <td data-label="Date" className="mob-hide py-2.5 px-4 text-gray-600 text-xs">{s.saleDate ? new Date(s.saleDate).toLocaleDateString('en-GB', { day:'2-digit', month:'short' }) : '—'}</td>
+                      <td data-label="Date" className="mob-hide py-2.5 px-4 text-gray-600 text-xs">{fmtDate(s.saleDate)}</td>
                       <td data-label="Buyer" className="py-2.5 px-4 text-gray-900"><PartyLink type="customer" id={s.customerId} name={s.customerName || s.buyerName} /></td>
-                      <td data-label="Item" className="py-2.5 px-4 text-gray-700">{s.itemName}</td>
+                      <td data-label="Item" className="py-2.5 px-4 text-gray-700"><span className="block max-w-[16rem] truncate" title={s.itemName}>{s.itemName}</span></td>
                       <td data-label="Qty" className="mob-hide py-2.5 px-4 text-right font-medium tabular-nums">{rowQty(s)}</td>
                       <td data-label="Rate" className="mob-hide py-2.5 px-4 text-right text-xs tabular-nums">{fmtPKR(s.ratePerKg)}/kg</td>
                       <td data-label="Total" className="py-2.5 px-4 text-right font-bold tabular-nums">{fmtPKR(s.totalAmount)}</td>
@@ -349,7 +357,7 @@ export default function LocalSales() {
                               <CreditCard size={12} /> Pay
                             </button>
                           )}
-                          <button onClick={(e) => { e.stopPropagation(); openSaleDetail(s); }} className="text-blue-600 hover:text-blue-800 p-1" title="View details"><Eye size={15} /></button>
+                          <button onClick={(e) => { e.stopPropagation(); openSaleDetail(s); }} className="text-blue-600 hover:text-blue-800 p-1" title="View details" aria-label={`View sale ${s.saleNo}`}><Eye size={15} /></button>
                         </div>
                       </td>
                     </tr>
@@ -366,13 +374,13 @@ export default function LocalSales() {
                           <ChevronRight size={14} className={`text-gray-400 transition-transform ${open ? 'rotate-90' : ''}`} />
                           {g.key}
                           <span className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-blue-100 text-blue-700">{g.items.length} items</span>
-                          {head.status === 'Pending' && <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-700">Pending</span>}
-                          {g.status === 'Rejected' && <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-red-100 text-red-700">Rejected</span>}
+                          {head.status === 'Pending' && <StatusBadge status="Pending" />}
+                          {g.status === 'Rejected' && <StatusBadge status="Rejected" />}
                         </span>
                       </td>
-                      <td data-label="Date" className="mob-hide py-2.5 px-4 text-gray-600 text-xs">{head.saleDate ? new Date(head.saleDate).toLocaleDateString('en-GB', { day:'2-digit', month:'short' }) : '—'}</td>
+                      <td data-label="Date" className="mob-hide py-2.5 px-4 text-gray-600 text-xs">{fmtDate(head.saleDate)}</td>
                       <td data-label="Buyer" className="py-2.5 px-4 text-gray-900"><PartyLink type="customer" id={head.customerId} name={head.customerName || head.buyerName} /></td>
-                      <td data-label="Items" className="py-2.5 px-4 text-gray-500 italic">{g.items.map(i => i.itemName).slice(0, 2).join(', ')}{g.items.length > 2 ? ` +${g.items.length - 2}` : ''}</td>
+                      <td data-label="Items" className="py-2.5 px-4 text-gray-500 italic"><span className="block max-w-[16rem] truncate" title={g.items.map(i => i.itemName).join(', ')}>{g.items.map(i => i.itemName).slice(0, 2).join(', ')}{g.items.length > 2 ? ` +${g.items.length - 2}` : ''}</span></td>
                       <td data-label="Qty" className="mob-hide py-2.5 px-4 text-right font-medium tabular-nums">{qtyCell(g.qtyKg)}</td>
                       <td data-label="Rate" className="mob-hide py-2.5 px-4 text-right text-xs text-gray-400">—</td>
                       <td data-label="Total" className="py-2.5 px-4 text-right font-bold tabular-nums">{fmtPKR(g.total)}</td>
@@ -392,12 +400,12 @@ export default function LocalSales() {
                         <td data-label="Sale #" className="py-2 px-4 pl-10 text-xs text-gray-400">{s.saleNo}</td>
                         <td className="py-2 px-4"></td>
                         <td className="py-2 px-4"></td>
-                        <td data-label="Item" className="py-2 px-4 text-gray-700 text-sm">{s.itemName}</td>
+                        <td data-label="Item" className="py-2 px-4 text-gray-700 text-sm"><span className="block max-w-[16rem] truncate" title={s.itemName}>{s.itemName}</span></td>
                         <td data-label="Qty" className="mob-hide py-2 px-4 text-right text-sm tabular-nums">{rowQty(s)}</td>
                         <td data-label="Rate" className="mob-hide py-2 px-4 text-right text-xs tabular-nums">{fmtPKR(s.ratePerKg)}/kg</td>
                         <td data-label="Total" className="py-2 px-4 text-right font-semibold text-sm tabular-nums">{fmtPKR(s.totalAmount)}</td>
                         <td data-label="Payment" className="py-2 px-4 text-center"><StatusBadge status={paymentWord(s)} /></td>
-                        <td className="py-2 px-4 text-center"><button onClick={(e) => { e.stopPropagation(); openSaleDetail(s); }} className="text-blue-600 hover:text-blue-800" title="View details"><Eye size={15} /></button></td>
+                        <td className="py-2 px-4 text-center"><button onClick={(e) => { e.stopPropagation(); openSaleDetail(s); }} className="text-blue-600 hover:text-blue-800" title="View details" aria-label={`View sale ${s.saleNo}`}><Eye size={15} /></button></td>
                       </tr>
                     ))}
                   </Fragment>
@@ -437,7 +445,7 @@ export default function LocalSales() {
             <div className="grid grid-cols-2 gap-3 text-sm">
               <div><span className="text-gray-500">Buyer:</span> <span className="font-medium"><PartyLink type="customer" id={selectedSale.customerId} name={selectedSale.customerName || selectedSale.buyerName} /></span></div>
               <div><span className="text-gray-500">Item:</span> <span className="font-medium">{selectedSale.itemName}</span></div>
-              <div><span className="text-gray-500">Qty:</span> <span className="font-medium">{Math.round(parseFloat(selectedSale.quantityKg) || 0).toLocaleString()} {(selectedSale.quantityUnit === 'pcs' || selectedSale.itemType === 'packaging' || selectedSale.millItemId) ? 'pcs' : 'KG'}</span></div>
+              <div><span className="text-gray-500">Qty:</span> <span className="font-medium">{fmtNum(Math.round(parseFloat(selectedSale.quantityKg) || 0))} {(selectedSale.quantityUnit === 'pcs' || selectedSale.itemType === 'packaging' || selectedSale.millItemId) ? 'pcs' : 'KG'}</span></div>
               <div><span className="text-gray-500">Rate:</span> <span className="font-medium">{fmtPKR(selectedSale.ratePerKg)}/KG</span></div>
               <div><span className="text-gray-500">Vehicle:</span> <span className="font-medium font-mono">{selectedSale.vehicleNo || '—'}</span></div>
               <div><span className="text-gray-500">Driver:</span> <span className="font-medium">{selectedSale.driverName || '—'}</span></div>
@@ -457,7 +465,7 @@ export default function LocalSales() {
                 );
               })()}
               <div className="inline-flex items-center gap-1.5"><User size={13} className="text-gray-400" /><span className="text-gray-500">Created by:</span> <span className="font-medium">{selectedSale.createdByName || '—'}</span></div>
-              <div><span className="text-gray-500">Created:</span> <span className="font-medium">{selectedSale.createdAt ? new Date(selectedSale.createdAt).toLocaleString('en-GB') : '—'}</span></div>
+              <div><span className="text-gray-500">Created:</span> <span className="font-medium">{fmtDateTime(selectedSale.createdAt)}</span></div>
             </div>
 
             {/* Downloadable / printable sales invoice */}
@@ -486,7 +494,7 @@ export default function LocalSales() {
                         <span className="font-medium text-gray-900">{fmtPKR(p.amount)}</span>
                         <span className="text-gray-400 ml-2 capitalize">{p.payment_method || p.paymentMethod}</span>
                       </div>
-                      <span className="text-gray-500 text-xs">{p.payment_date ? new Date(p.payment_date).toLocaleDateString('en-GB') : ''}</span>
+                      <span className="text-gray-500 text-xs">{p.payment_date ? fmtDate(p.payment_date) : ''}</span>
                     </div>
                   ))}
                 </div>
@@ -508,8 +516,10 @@ export default function LocalSales() {
           <div className="flex justify-end gap-3">
             <button onClick={() => setShowPaymentModal(false)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
             <button onClick={async () => {
-              if (!payForm.amount || parseFloat(payForm.amount) <= 0) { addToast('Enter a valid amount', 'error'); return; }
-              if (payForm.payment_method === 'bank_transfer' && !payForm.bank_account_id) { addToast('Select the bank account that received the payment', 'error'); return; }
+              const errs = {};
+              if (!payForm.amount || parseFloat(payForm.amount) <= 0) errs.amount = 'Enter an amount greater than zero';
+              if (payForm.payment_method === 'bank_transfer' && !payForm.bank_account_id) errs.bank_account_id = 'Select the bank account that received the payment';
+              if (Object.keys(errs).length) { setPayErrors(errs); return; }
               setPayLoading(true);
               try {
                 if (payGroup) {
@@ -543,7 +553,8 @@ export default function LocalSales() {
           </div>
           <div>
             <label className={LABEL}>Amount (PKR) *</label>
-            <input type="number" value={payForm.amount} onChange={e => setPayForm(p => ({...p, amount: e.target.value}))} className={INPUT} placeholder="Rs" min="0" />
+            <input type="number" value={payForm.amount} onChange={e => setPay('amount', e.target.value)} className={INPUT} placeholder="Rs" min="0" aria-invalid={!!payErrors.amount} />
+            <FieldError error={payErrors.amount} />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -572,10 +583,11 @@ export default function LocalSales() {
           {payForm.payment_method === 'bank_transfer' && (
             <div>
               <label className={LABEL}>Bank Account *</label>
-              <select value={payForm.bank_account_id} onChange={e => setPayForm(p => ({...p, bank_account_id: e.target.value}))} className={SELECT}>
+              <select value={payForm.bank_account_id} onChange={e => setPay('bank_account_id', e.target.value)} className={SELECT} aria-invalid={!!payErrors.bank_account_id}>
                 <option value="">Select bank account…</option>
                 {bankOpts.map(b => <option key={b.id} value={b.id}>{favStar(b)}{b.name}{(b.bankName || b.bank_name) ? ` — ${b.bankName || b.bank_name}` : ''}</option>)}
               </select>
+              <FieldError error={payErrors.bank_account_id} />
             </div>
           )}
           <div>
@@ -620,7 +632,8 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
     vehicle_no: '', driver_name: '', notes: '', gate_pass_no: '',
   });
   const [form, setForm] = useState(EMPTY_FORM);
-  const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
+  const [errors, setErrors] = useState({});
+  const set = (k, v) => { setForm(p => ({ ...p, [k]: v })); setErrors(e => (e[k] ? { ...e, [k]: undefined } : e)); };
   const [step, setStep] = useState(1); // 1=Buyer & Items, 2=Payment
   const [registerCustomer, setRegisterCustomer] = useState(true);
   // A remembered customer that is no longer a local customer (archived, or
@@ -731,7 +744,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
       const lotCost = parseFloat(selectedLot.landedCostPerKg) || parseFloat(selectedLot.costPerUnit) || parseFloat(selectedLot.ratePerKg) || 0;
       if (lotCost <= 0) { addToast(`${selectedLot.lotNo || 'This lot'} has no recorded cost (Rs 0/kg). Set its purchase price before selling.`, 'error'); return; }
     }
-    if (lineOverSell) { addToast(isPkg ? `Only ${Math.round(lineAvailCount).toLocaleString()} in stock` : `Only ${Math.round(lineAvailKg).toLocaleString()} kg left for this lot`, 'error'); return; }
+    if (lineOverSell) { addToast(isPkg ? `Only ${fmtNum(Math.round(lineAvailCount))} in stock` : `Only ${fmtNum(Math.round(lineAvailKg))} kg left for this lot`, 'error'); return; }
     setCart(c => [...c, {
       ...line, qtyKg: lineQtyKg, ratePerKg: lineRatePerKg, total: lineTotal,
       isMillItem: isPkg, count: isPkg ? lineCount : undefined,
@@ -805,7 +818,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
   const needsPhone = isWalkIn && owesBalance;
 
   function reset() {
-    setForm(EMPTY_FORM());
+    setForm(EMPTY_FORM()); setErrors({});
     setCart([]); setLine(EMPTY_LINE); setTag('All'); setStep(1); setPaidTouched(false);
     setRepack({ enabled: false, bag_source: 'none', packaging_item_id: '', freed_katta_to_store: true, original_bag_size_kg: '', original_bag_count: '', new_bag_size_kg: '', new_bag_count: '', bag_rate: '', labour_enabled: false, labour_mode: 'per_bag', labour_rate: '', packing_loss_kg: '', final_dispatched_kg: '', notes: '' });
   }
@@ -813,8 +826,9 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
   async function handleSubmit() {
     if (!customerId && !form.buyer_name) { addToast('Select a customer or enter buyer name', 'error'); return; }
     if (cart.length === 0) { addToast('Add at least one item to the sale', 'error'); return; }
-    if (form.payment_mode === 'bank_transfer' && !form.bank_account_id) { addToast('Select the bank account that received the payment', 'error'); return; }
-    if (form.payment_mode === 'cheque' && !form.cheque_no.trim()) { addToast('Enter the cheque number', 'error'); return; }
+    // Step-2 fields are on screen when this runs, so they get an inline message.
+    if (form.payment_mode === 'bank_transfer' && !form.bank_account_id) { setErrors({ bank_account_id: 'Select the bank account that received the payment' }); return; }
+    if (form.payment_mode === 'cheque' && !form.cheque_no.trim()) { setErrors({ cheque_no: 'Enter the cheque number' }); return; }
     if (needsPhone && !String(form.buyer_phone || '').replace(/\D/g, '')) { addToast('A walk-in credit sale needs the buyer\'s phone number — it is how their balance is tracked.', 'error'); return; }
     // The mode saved is the mode chosen. An empty amount means "in full" for
     // cash / bank / cheque (the server reads it the same way) and "nothing yet"
@@ -915,7 +929,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
     <div className="flex items-center justify-between gap-3">
       <div className="text-xs text-gray-500 flex items-center gap-3 flex-wrap">
         {cart.length > 0 && <span><span className="font-medium text-gray-900">{cart.length}</span> item{cart.length > 1 ? 's' : ''}</span>}
-        {grandTotal > 0 && <span><span className="text-gray-400">Total</span> <span className="font-medium text-emerald-700">Rs {grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></span>}
+        {grandTotal > 0 && <span><span className="text-gray-400">Total</span> <span className="font-medium text-emerald-700">{fmtPKR(grandTotal)}</span></span>}
       </div>
       <div className="flex items-center gap-2">
         <button onClick={onClose} className="px-3 py-1.5 text-sm text-gray-500 hover:text-gray-900">Cancel</button>
@@ -932,7 +946,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
         ) : (
           <button onClick={handleSubmit} disabled={createMutation.isPending || cart.length === 0}
             className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:bg-gray-300">
-            {createMutation.isPending ? 'Creating…' : grandTotal > 0 ? `Create Sale — Rs ${grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : 'Create Sale'}
+            {createMutation.isPending ? 'Creating…' : grandTotal > 0 ? `Create Sale — ${fmtPKR(grandTotal)}` : 'Create Sale'}
           </button>
         )}
       </div>
@@ -1042,7 +1056,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
                   {pkgItems.map(i => {
                     const avail = Number(i.quantity_available) - cartCountForPkg(i.id);
                     const cost = Number(i.avg_cost_per_unit) || 0;
-                    return <option key={i.id} value={i.id} disabled={avail <= 0}>{i.name} ({(avail).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {i.unit || 'pcs'}){cost > 0 ? ` · Rs ${(cost).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/${i.unit || 'pc'} cost` : ''}</option>;
+                    return <option key={i.id} value={i.id} disabled={avail <= 0}>{i.name} ({fmtNum(avail, 2)} {i.unit || 'pcs'}){cost > 0 ? ` · ${fmtPKR(cost)}/${i.unit || 'pc'} cost` : ''}</option>;
                   })}
                 </select>
               ) : (
@@ -1051,8 +1065,8 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
                   {filteredLots.map(l => {
                     const avail = (parseFloat(l.availableQty) || 0) - cartQtyForLot(l.id);
                     const costKg = parseFloat(l.landedCostPerKg) || parseFloat(l.ratePerKg) || (parseFloat(l.costPerUnit) || 0) / 1000;
-                    const costLabel = costKg > 0 ? ` · Rs ${(costKg).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/kg cost` : '';
-                    return <option key={l.id} value={l.id} disabled={avail <= 0}>{l.lotNo} — {l.itemName} ({Math.round(avail).toLocaleString()} KG){costLabel}</option>;
+                    const costLabel = costKg > 0 ? ` · ${fmtPKR(costKg)}/kg cost` : '';
+                    return <option key={l.id} value={l.id} disabled={avail <= 0}>{l.lotNo} — {l.itemName} ({fmtNum(Math.round(avail))} KG){costLabel}</option>;
                   })}
                 </select>
               )}
@@ -1095,12 +1109,12 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
               <div className="flex-1 text-xs">
                 {isPkg && lineAvailCount != null && (
                   <span className={lineOverSell ? 'text-red-600 font-semibold' : 'text-gray-500'}>
-                    {lineOverSell ? `Only ${Math.round(lineAvailCount).toLocaleString()} in stock` : `In stock: ${Math.round(lineAvailCount).toLocaleString()} ${selectedPkg?.unit || 'pcs'}`}
+                    {lineOverSell ? `Only ${fmtNum(Math.round(lineAvailCount))} in stock` : `In stock: ${fmtNum(Math.round(lineAvailCount))} ${selectedPkg?.unit || 'pcs'}`}
                   </span>
                 )}
                 {!isPkg && lineAvailKg != null && (
                   <span className={lineOverSell ? 'text-red-600 font-semibold' : 'text-gray-500'}>
-                    {lineOverSell ? `Only ${Math.round(lineAvailKg).toLocaleString()} kg left` : `In stock: ${Math.round(lineAvailKg).toLocaleString()} kg`}
+                    {lineOverSell ? `Only ${fmtNum(Math.round(lineAvailKg))} kg left` : `In stock: ${fmtNum(Math.round(lineAvailKg))} kg`}
                   </span>
                 )}
                 {selectedLot && (() => {
@@ -1110,12 +1124,12 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
                   const u = line.rate_unit;
                   const val = u === 'katta' ? eq.perKatta : u === 'maund' ? eq.perMaund : u === 'ton' ? ck * 1000 : ck;
                   const ul = u === 'katta' ? 'katta' : u === 'maund' ? 'maund' : u === 'ton' ? 'ton' : 'kg';
-                  return <span className="block text-gray-500">Cost: <span className="font-semibold text-gray-700">Rs {(val).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/{ul}</span>{u !== 'kg' && <span className="text-gray-400"> (Rs {(ck).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/kg)</span>}</span>;
+                  return <span className="block text-gray-500">Cost: <span className="font-semibold text-gray-700">{fmtPKR(val)}/{ul}</span>{u !== 'kg' && <span className="text-gray-400"> ({fmtPKR(ck)}/kg)</span>}</span>;
                 })()}
                 {!isPkg && line.suggested_per_kg > 0 && (
-                  <span className="block text-gray-500">Rates Center: <span className="font-semibold text-gray-700">Rs {(line.suggested_per_kg).toLocaleString(undefined, { maximumFractionDigits: 2 })}/kg</span>{line.rate_auto ? <span className="text-gray-400"> · prefilled, edit to override</span> : null}</span>
+                  <span className="block text-gray-500">Rates Center: <span className="font-semibold text-gray-700">{fmtPKR(line.suggested_per_kg)}/kg</span>{line.rate_auto ? <span className="text-gray-400"> · prefilled, edit to override</span> : null}</span>
                 )}
-                {lineTotal > 0 && <span className="block text-emerald-700 font-semibold mt-0.5">Line total: Rs {lineTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>}
+                {lineTotal > 0 && <span className="block text-emerald-700 font-semibold mt-0.5">Line total: {fmtPKR(lineTotal)}</span>}
               </div>
               <button type="button" onClick={addLine} disabled={lineOverSell}
                 className="px-3 py-2.5 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 inline-flex items-center gap-1 shrink-0">
@@ -1144,10 +1158,10 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
                         </div>
                         {c.lotNo && <div className="text-[11px] text-gray-400">{c.lotNo}</div>}
                       </td>
-                      <td className="px-3 py-2 text-right tabular-nums">{c.isCharge ? <span className="text-gray-400">—</span> : `${Math.round(c.qtyKg).toLocaleString()} ${c.isMillItem ? 'pcs' : 'kg'}`}</td>
-                      <td className="px-3 py-2 text-right tabular-nums">{c.isCharge ? <span className="text-gray-400">—</span> : `Rs ${(c.ratePerKg).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${c.isMillItem ? ' ea' : '/kg'}`}</td>
-                      <td className="px-3 py-2 text-right font-semibold tabular-nums">Rs {c.total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                      <td className="px-3 py-2 text-right"><button onClick={() => removeLine(i)} className="text-gray-300 hover:text-red-500"><X size={15} /></button></td>
+                      <td className="px-3 py-2 text-right tabular-nums">{c.isCharge ? <span className="text-gray-400">—</span> : `${fmtNum(Math.round(c.qtyKg))} ${c.isMillItem ? 'pcs' : 'kg'}`}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{c.isCharge ? <span className="text-gray-400">—</span> : `${fmtPKR(c.ratePerKg)}${c.isMillItem ? ' ea' : '/kg'}`}</td>
+                      <td className="px-3 py-2 text-right font-semibold tabular-nums">{fmtPKR(c.total)}</td>
+                      <td className="px-3 py-2 text-right"><button onClick={() => removeLine(i)} aria-label={`Remove ${c.item_name}`} title="Remove" className="text-gray-300 hover:text-red-500"><X size={15} /></button></td>
                     </tr>
                   ))}
                 </tbody>
@@ -1178,7 +1192,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
                   </tr>
                   <tr className="bg-gray-50 font-bold text-gray-900">
                     <td className="px-3 py-2" colSpan={3}>Total ({cart.length})</td>
-                    <td className="px-3 py-2 text-right text-emerald-700 tabular-nums">Rs {grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td><td></td>
+                    <td className="px-3 py-2 text-right text-emerald-700 tabular-nums">{fmtPKR(grandTotal)}</td><td></td>
                   </tr>
                 </tfoot>
               </table>
@@ -1235,7 +1249,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
                       <label className="block text-[11px] text-gray-500 mb-0.5">Packaging item (from stock)</label>
                       <select value={repack.packaging_item_id} onChange={e => setRp('packaging_item_id', e.target.value)} className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm">
                         <option value="">Select bag…</option>
-                        {pkgItems.map(i => <option key={i.id} value={i.id}>{i.name} ({Math.round(Number(i.quantity_available)).toLocaleString()} in stock)</option>)}
+                        {pkgItems.map(i => <option key={i.id} value={i.id}>{i.name} ({fmtNum(Math.round(Number(i.quantity_available)))} in stock)</option>)}
                       </select>
                     </div>
                     <RpNum label="Bag rate (Rs each)" value={repack.bag_rate} onChange={v => setRp('bag_rate', v)} />
@@ -1279,13 +1293,13 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
           <div className="px-3 py-2 bg-gray-50 text-[11px] uppercase text-gray-500 font-semibold">{cart.length} item{cart.length > 1 ? 's' : ''}</div>
           {cart.map((c, i) => (
             <div key={i} className="flex items-center justify-between px-3 py-2 border-t border-gray-100 text-sm">
-              <span className="text-gray-700"><span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold mr-1.5 ${CAT_COLOR[c.category] || 'bg-gray-100 text-gray-600'}`}>{c.category}</span>{c.item_name} · {Math.round(c.qtyKg).toLocaleString()} {c.isMillItem ? 'pcs' : 'kg'}</span>
-              <span className="font-semibold tabular-nums">Rs {c.total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              <span className="text-gray-700"><span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold mr-1.5 ${CAT_COLOR[c.category] || 'bg-gray-100 text-gray-600'}`}>{c.category}</span>{c.item_name} · {fmtNum(Math.round(c.qtyKg))} {c.isMillItem ? 'pcs' : 'kg'}</span>
+              <span className="font-semibold tabular-nums">{fmtPKR(c.total)}</span>
             </div>
           ))}
           <div className="flex items-center justify-between px-3 py-2.5 border-t border-gray-200 bg-emerald-50">
             <span className="text-sm font-semibold text-emerald-800">Grand Total</span>
-            <span className="text-xl font-bold text-emerald-700">Rs {grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+            <span className="text-xl font-bold text-emerald-700">{fmtPKR(grandTotal)}</span>
           </div>
         </div>
 
@@ -1300,6 +1314,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
                 // Bank transfer starts on the starred account (favorites.js).
                 setForm(p => ({ ...p, payment_mode: m, bank_account_id: m === 'bank_transfer' && !p.bank_account_id ? defaultBankAccountId(bankOptions, isFavorite) : p.bank_account_id }));
                 setPaidTouched(false);
+                setErrors({});
               }} className={SELECT}>
                 <option value="cash">Cash</option><option value="cheque">Cheque</option><option value="bank_transfer">Bank Transfer</option><option value="credit">Credit (Udhaar)</option>
               </select>
@@ -1307,9 +1322,9 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
             <div>
               <label className={LABEL}>Amount Received</label>
               <input type="number" value={paidAmount} onChange={e => { setPaidTouched(true); set('paid_amount', e.target.value); }} className={INPUT}
-                placeholder={grandTotal > 0 ? `Rs ${grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (full)` : 'Rs'} />
+                placeholder={grandTotal > 0 ? `${fmtPKR(grandTotal)} (full)` : 'Rs'} />
               {form.payment_mode === 'credit' && <p className="text-xs text-amber-600 mt-1">Leave empty or partial for credit sale</p>}
-              {form.payment_mode !== 'credit' && form.payment_mode !== 'cheque' && owesBalance && <p className="text-xs text-amber-600 mt-1">Rs {(grandTotal - (paidNum || 0)).toLocaleString(undefined, { maximumFractionDigits: 2 })} will be owed on this sale</p>}
+              {form.payment_mode !== 'credit' && form.payment_mode !== 'cheque' && owesBalance && <p className="text-xs text-amber-600 mt-1">{fmtPKR(grandTotal - (paidNum || 0))} will be owed on this sale</p>}
             </div>
           </div>
           {owesBalance && isWalkIn && (
@@ -1331,18 +1346,20 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
           {form.payment_mode === 'bank_transfer' && (
             <div className="mt-3">
               <label className={LABEL}>Bank Account *</label>
-              <select value={form.bank_account_id} onChange={e => set('bank_account_id', e.target.value)} className={SELECT}>
+              <select value={form.bank_account_id} onChange={e => set('bank_account_id', e.target.value)} className={SELECT} aria-invalid={!!errors.bank_account_id}>
                 <option value="">Select bank account…</option>
                 {bankOptions.map(b => (
                   <option key={b.id} value={b.id}>{favStar(b)}{b.name}{(b.bankName || b.bank_name) ? ` — ${b.bankName || b.bank_name}` : ''}{b.currency && b.currency !== 'PKR' ? ` (${b.currency})` : ''}</option>
                 ))}
               </select>
+              <FieldError error={errors.bank_account_id} />
             </div>
           )}
           {form.payment_mode === 'cheque' && (
             <div className="mt-3">
               <label className={LABEL}>Cheque Number *</label>
-              <input value={form.cheque_no} onChange={e => set('cheque_no', e.target.value)} className={INPUT} placeholder="e.g. 0012345" />
+              <input value={form.cheque_no} onChange={e => set('cheque_no', e.target.value)} className={INPUT} placeholder="e.g. 0012345" aria-invalid={!!errors.cheque_no} />
+              <FieldError error={errors.cheque_no} />
               <p className="text-[11px] text-amber-700 mt-1">Cheques settle when cleared in Due Dates. The sale stays on credit (owed in full) until the cheque is cleared.</p>
             </div>
           )}

@@ -1,3 +1,5 @@
+import { toLocalISODate } from '../../../shared/utils/format';
+
 // Local-sale words and small form helpers shared by Local Sales and the
 // Finance › Local Sales / Money In screens.
 
@@ -36,11 +38,9 @@ export function payableDue(items = []) {
 
 // Today's date in the user's LOCAL time as YYYY-MM-DD. toISOString() is UTC,
 // which in Pakistan (UTC+5) is still yesterday until 5 a.m.
+// Same as format.js todayLocalISO(), kept for its injectable `now` (tests).
 export function localToday(now = new Date()) {
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, '0');
-  const d = String(now.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
+  return toLocalISODate(now);
 }
 
 // Last customer used on a local sale, remembered per browser. Storage can be

@@ -15,7 +15,15 @@ const ICE_FALLBACK = {
   ],
 };
 
-export function useCalling(user) {
+// `onError(message)` surfaces a failure to the user (the chat widget passes its
+// toast). Kept in a ref so a new callback each render doesn't rebuild the calls.
+export function useCalling(user, { onError } = {}) {
+  const onErrorRef = useRef(onError);
+  useEffect(() => { onErrorRef.current = onError; }, [onError]);
+  const reportError = (msg) => {
+    if (onErrorRef.current) onErrorRef.current(msg);
+    else console.error(msg);
+  };
   // call: { peerId, peerName, kind: 'audio'|'video', status: 'outgoing'|'incoming'|'connected' }
   const [call, setCall] = useState(null);
   const [muted, setMuted] = useState(false);
@@ -129,7 +137,7 @@ export function useCalling(user) {
       const offer = await pc.createOffer(); await pc.setLocalDescription(offer);
       setCall({ peerId: peer.id, peerName: peer.name, kind, status: 'outgoing' });
       signal(peer.id, 'offer', offer, kind);
-    } catch (e) { cleanup(); window.alert('Could not start the call (mic/camera): ' + e.message); }
+    } catch (e) { cleanup(); reportError('Could not start the call (mic/camera): ' + e.message); }
   }, [signal, cleanup]);
 
   const acceptCall = useCallback(async () => {
@@ -144,7 +152,7 @@ export function useCalling(user) {
       const answer = await pc.createAnswer(); await pc.setLocalDescription(answer);
       setCall({ ...c, status: 'connected' });
       signal(c.peerId, 'answer', answer);
-    } catch (e) { cleanup(); window.alert('Could not join the call (mic/camera): ' + e.message); }
+    } catch (e) { cleanup(); reportError('Could not join the call (mic/camera): ' + e.message); }
   }, [signal, cleanup]);
 
   const declineCall = useCallback(() => { const c = callRef.current; if (c) signal(c.peerId, 'decline'); cleanup(); }, [signal, cleanup]);

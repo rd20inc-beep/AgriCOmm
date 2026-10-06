@@ -12,23 +12,11 @@ import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import { paymentWord } from '../utils/saleStatus';
 import { LoadingSpinner, ErrorState } from '../../../components/LoadingState';
+import StatusBadge from '../../../shared/components/StatusBadge';
+import { fmtPKR, fmtKg, fmtNum, fmtPct, fmtDate } from '../../../shared/utils/format';
 
-function fmtPkr(n) {
-  return 'Rs ' + (parseFloat(n) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-function fmtDate(s) {
-  if (!s) return '—';
-  return new Date(s).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-}
-
-const STATUS_TONE = {
-  Paid:     'bg-emerald-50 text-emerald-700 border-emerald-200',
-  Partial:  'bg-amber-50 text-amber-700 border-amber-200',
-  Pending:  'bg-gray-50 text-gray-600 border-gray-200',
-  Credit:   'bg-blue-50 text-blue-700 border-blue-200',
-  Refunded: 'bg-red-50 text-red-700 border-red-200',
-  Rejected: 'bg-red-50 text-red-700 border-red-200',
-};
+// Money on this page is shown to the paisa, as before.
+const fmtPkr = (n) => fmtPKR(parseFloat(n) || 0, { decimals: 2 });
 
 export default function LocalSaleDetail() {
   const { id } = useParams();
@@ -60,7 +48,6 @@ export default function LocalSaleDetail() {
     ? 'from-purple-700 via-fuchsia-600 to-pink-500'
     : 'from-red-700 via-red-600 to-red-500';
   const payWord = paymentWord(sale);
-  const statusTone = STATUS_TONE[payWord] || STATUS_TONE.Pending;
 
   return (
     <div className="space-y-5 pb-4">
@@ -88,8 +75,8 @@ export default function LocalSaleDetail() {
               {fmtPkr(sale.totalAmount)}
             </div>
             <div className="text-xs opacity-90 mt-1">
-              {sale.buyerName || 'Walk-in'} · {Math.round(parseFloat(sale.quantityKg) || 0).toLocaleString()} kg
-              {sale.quantityBags ? ` · ${sale.quantityBags} bags` : ''}
+              {sale.buyerName || 'Walk-in'} · {fmtKg(Math.round(parseFloat(sale.quantityKg) || 0))}
+              {sale.quantityBags ? ` · ${fmtNum(sale.quantityBags)} bags` : ''}
               {' · '}@ {fmtPkr(sale.ratePerKg)}/kg
             </div>
           </div>
@@ -100,7 +87,7 @@ export default function LocalSaleDetail() {
               {payWord}
             </span>
             <div className="opacity-80 text-right">
-              {profitPkr !== 0 && <>Profit {fmtPkr(profitPkr)} ({marginPct.toFixed(1)}%)</>}
+              {profitPkr !== 0 && <>Profit {fmtPkr(profitPkr)} ({fmtPct(marginPct)})</>}
             </div>
             {canEdit && sale.status !== 'Cancelled' && <button onClick={() => setEdit({
               buyer_name: sale.buyerName || '', buyer_phone: sale.buyerPhone || '',
@@ -122,7 +109,7 @@ export default function LocalSaleDetail() {
         <div className="bg-white rounded-xl border border-blue-200 p-4 space-y-3">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-semibold text-gray-900">Edit {sale.saleNo}</h3>
-            <span className={`text-[11px] px-2 py-0.5 rounded-full ${sale.status === 'Pending' ? 'bg-amber-50 text-amber-700' : 'bg-gray-100 text-gray-500'}`}>
+            <span className={`text-[11px] px-2 py-0.5 rounded-md ring-1 ring-inset ${sale.status === 'Pending' ? 'bg-amber-50 text-amber-700 ring-amber-200' : 'bg-gray-100 text-gray-500 ring-gray-200'}`}>
               {sale.status === 'Pending' ? 'Pending — quantity and rate can still change' : 'Confirmed — details only'}
             </span>
           </div>
@@ -192,7 +179,7 @@ export default function LocalSaleDetail() {
           sub={parseFloat(sale.dueAmount) > 0 ? `Due ${fmtPkr(sale.dueAmount)}` : 'Fully collected'} />
         <Card icon={Truck} label="Dispatch"
           value={sale.status === 'Pending'
-            ? <span className="inline-block text-xs px-2 py-0.5 rounded-full font-medium bg-amber-100 text-amber-800">Not yet dispatched — awaiting confirmation</span>
+            ? <span className="inline-block text-xs px-2 py-0.5 rounded-md ring-1 ring-inset font-medium bg-amber-50 text-amber-800 ring-amber-200 whitespace-normal">Not yet dispatched — awaiting confirmation</span>
             : (sale.dispatched ? 'Dispatched' : 'Pending dispatch')}
           sub={sale.dispatchDate ? fmtDate(sale.dispatchDate) : null} />
       </div>
@@ -219,7 +206,7 @@ export default function LocalSaleDetail() {
             <Row label="Revenue (total sale)" value={fmtPkr(sale.totalAmount)} />
             <Row label="Cost of goods sold"  value={`(${fmtPkr(sale.cogsTotalPkr || sale.landedCostTotal)})`} />
             <Row label="Gross profit"        value={fmtPkr(profitPkr)} highlight />
-            <Row label="Margin %"             value={`${marginPct.toFixed(1)}%`} />
+            <Row label="Margin %"             value={fmtPct(marginPct)} />
             {parseFloat(sale.cogsPerKg) > 0 && <Row label="Cost per kg" value={fmtPkr(sale.cogsPerKg)} />}
             {parseFloat(sale.profitPerKg) !== 0 && <Row label="Profit per kg" value={fmtPkr(sale.profitPerKg)} />}
           </tbody>
@@ -230,7 +217,7 @@ export default function LocalSaleDetail() {
       <div className="bg-white rounded-xl border border-gray-200 p-5">
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">Payments</h3>
-          <span className={`text-xs px-2 py-0.5 rounded-full border ${statusTone}`}>{payWord}</span>
+          <StatusBadge status={payWord} />
         </div>
         {payments.length === 0 ? (
           <p className="text-sm text-gray-400 text-center py-6">
@@ -273,7 +260,7 @@ function Card({ icon: Icon, label, value, sub }) {
       <div className="text-[11px] text-gray-500 uppercase tracking-wider flex items-center gap-1.5 mb-1">
         <Icon size={11} /> {label}
       </div>
-      <div className="text-sm font-semibold text-gray-900">{value}</div>
+      <div className="text-sm font-semibold text-gray-900 truncate" title={typeof value === 'string' ? value : undefined}>{value}</div>
       {sub && <div className="text-xs text-gray-500 mt-0.5">{sub}</div>}
     </div>
   );
