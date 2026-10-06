@@ -3,6 +3,12 @@ const fs = require('fs');
 const db = require('../../config/database');
 
 const { UPLOADS_ROOT: UPLOAD_DIR } = require('../../config/paths');
+const auditService = require('../admin/audit.service');
+
+// A document marked deleted: kept on disk and in the history, never removed.
+const DELETED = 'Deleted';
+// The only roles that may delete a document without a request.
+const DOC_ADMIN_ROLES = ['Super Admin', 'Owner'];
 
 // Ensure upload directory exists
 if (!fs.existsSync(UPLOAD_DIR)) {
@@ -39,87 +45,94 @@ const documentService = {
   },
 
   // === Upload & Store ===
-  async uploadDocument(trx, { entity, linkedType, linkedId, docType, title, description, file, uploadedBy }) {
-    const conn = trx || db;
-
-    // Build target directory
-    const targetDir = path.join(UPLOAD_DIR, entity || 'general', linkedType, String(linkedId || 'misc'));
-    if (!fs.existsSync(targetDir)) {
-      fs.mkdirSync(targetDir, { recursive: true });
-    }
-
-    let fileName = null;
-    let filePath = null;
-    let fileSize = null;
-    let mimeType = null;
-
-    if (file) {
-      fileName = file.originalname;
-      const ext = path.extname(fileName);
-      const uniqueName = `${Date.now()}-${Math.round(Math.random() * 1e6)}${ext}`;
-      filePath = path.join(targetDir, uniqueName);
-      fileSize = file.size;
-      mimeType = file.mimetype;
-
-      // Move file from multer temp to target
-      fs.copyFileSync(file.path, filePath);
-      fs.unlinkSync(file.path);
-    }
-
-    // A plain upload ADDS a file; it does not replace one. This used to
-    // supersede any existing file of the same type, which meant a document type
-    // could only ever hold one file — a phytosanitary certificate scanned as
-    // three pages lost the first two, and getDocumentsByRef (is_latest only)
-    // would never show them again. Replacing a file is the explicit
-    // "new version" action (uploadNewVersion), which still supersedes.
-    //
-    // version numbers the files within a type so the order is still legible.
-    const siblingCount = await conn('document_store')
-      .where({ linked_type: linkedType, linked_id: linkedId, doc_type: docType })
-      .count('id as n')
-      .first();
-    const existingCount = parseInt(siblingCount && siblingCount.n, 10) || 0;
-    const version = existingCount + 1;
-    const previousVersionId = null;
-
-    // Every upload is live at once (owner decision 2026-10-06: fewer
-    // approvals). The first file of a type used to be the only one that skipped
-    // the Owner; a 2nd or later file now does too. Nothing is lost — each file
-    // keeps its own row, uploader and version number.
-    const status = 'Approved';
-
-    const docUid = await this.generateDocUid(conn);
-
-    const [doc] = await conn('document_store')
-      .insert({
-        doc_uid: docUid,
-        entity: entity || null,
-        linked_type: linkedType,
-        linked_id: linkedId || null,
-        doc_type: docType,
-        title,
-        description: description || null,
-        file_name: fileName,
-        file_path: filePath,
-        file_size: fileSize,
-        mime_type: mimeType,
-        version,
-        is_latest: true,
-        previous_version_id: previousVersionId,
-        status,
-        uploaded_by: uploadedBy,
-      })
-      .returning('*');
-
-    // Update document checklist if matching entry exists
-    await conn('document_checklists')
-      .where({ linked_type: linkedType, linked_id: linkedId, doc_type: docType })
-      .whereNot({ linked_id: 0 })
-      .update({ document_id: doc.id, is_fulfilled: true, updated_at: conn.fn.now() });
-
-    return doc;
+  // Move one multer temp file into the reference's folder on the uploads volume.
+  storeFile(file, targetDir) {
+    if (!file) return { fileName: null, filePath: null, fileSize: null, mimeType: null };
+    if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+    const fileName = file.originalname;
+    const ext = path.extname(fileName || '');
+    const uniqueName = `${Date.now()}-${Math.round(Math.random() * 1e6)}${ext}`;
+    const filePath = path.join(targetDir, uniqueName);
+    fs.copyFileSync(file.path, filePath);
+    fs.unlinkSync(file.path);
+    return { fileName, filePath, fileSize: file.size, mimeType: file.mimetype };
   },
 
+  // One upload ACTION = one version of a document type. It may carry several
+  // files (a phytosanitary certificate scanned as three pages is three rows
+  // sharing one version number), and it REPLACES whatever was live for that
+  // type (owner decision 2026-10-07): the previous live file(s) are marked
+  // Superseded / is_latest = false and stay in the version history, still
+  // downloadable. Nothing is deleted.
+  //
+  // Returns every row written, in upload order.
+  async uploadDocuments(trx, {
+    entity, linkedType, linkedId, docType, title, description, file, files,
+    uploadedBy, previousVersionId = null, inheritFrom = null,
+  }) {
+    const conn = trx || db;
+    const list = [...(Array.isArray(files) ? files : []), ...(file ? [file] : [])];
+    const linked = linkedId == null ? null : linkedId;
+
+    const scope = { linked_type: linkedType, linked_id: linked, doc_type: docType };
+    const siblings = await conn('document_store').where(scope);
+    // Versions number the upload actions within a type. Deleted rows count too,
+    // so a number is never reused.
+    const version = siblings.reduce((m, d) => Math.max(m, Number(d.version) || 0), 0) + 1;
+    const live = siblings.filter((d) => d.is_latest && d.status !== DELETED);
+    const prevId = previousVersionId || (live[0] && live[0].id) || null;
+
+    if (live.length) {
+      await conn('document_store')
+        .whereIn('id', live.map((d) => d.id))
+        .update({ is_latest: false, status: 'Superseded', updated_at: conn.fn.now() });
+    }
+
+    const targetDir = path.join(UPLOAD_DIR, entity || 'general', linkedType, String(linkedId || 'misc'));
+    const stored = list.length ? list.map((f) => this.storeFile(f, targetDir)) : [this.storeFile(null, targetDir)];
+    const inherit = inheritFrom || {};
+
+    const rows = [];
+    for (const s of stored) {
+      const docUid = await this.generateDocUid(conn);
+      const [doc] = await conn('document_store')
+        .insert({
+          doc_uid: docUid,
+          entity: entity || null,
+          linked_type: linkedType,
+          linked_id: linked,
+          doc_type: docType,
+          title,
+          description: description || null,
+          file_name: s.fileName || inherit.file_name || null,
+          file_path: s.filePath || inherit.file_path || null,
+          file_size: s.fileSize || inherit.file_size || null,
+          mime_type: s.mimeType || inherit.mime_type || null,
+          version,
+          is_latest: true,
+          previous_version_id: prevId,
+          // Live at once, no Owner step (owner decision 2026-10-06).
+          status: 'Approved',
+          uploaded_by: uploadedBy,
+        })
+        .returning('*');
+      rows.push(doc);
+    }
+
+    // The checklist points at the new version.
+    await conn('document_checklists')
+      .where(scope)
+      .whereNot({ linked_id: 0 })
+      .update({ document_id: rows[0].id, is_fulfilled: true, updated_at: conn.fn.now() });
+
+    return rows;
+  },
+
+  // Single-file form, kept for existing callers: returns the first row.
+  async uploadDocument(trx, args) {
+    const rows = await this.uploadDocuments(trx, args);
+    return rows[0];
+  },
   async getDocument(docId) {
     const doc = await db('document_store as ds')
       .leftJoin('users as u', 'ds.uploaded_by', 'u.id')
@@ -138,156 +151,201 @@ const documentService = {
     return { ...doc, approvals };
   },
 
-  // Everything attached to a reference — approved AND awaiting approval. The
-  // caller marks the pending ones; hiding them would leave an Export Manager
-  // unable to see the file they just uploaded.
-  async getDocumentsByRef(linkedType, linkedId) {
-    return db('document_store as ds')
+  // What is attached to a reference. By default only the live files
+  // (is_latest); with includeHistory, every row — Superseded and Deleted ones
+  // too — annotated with who replaced / deleted it and when, for the version
+  // history.
+  async getDocumentsByRef(linkedType, linkedId, { includeHistory = false } = {}) {
+    let q = db('document_store as ds')
       .leftJoin('users as u', 'ds.uploaded_by', 'u.id')
       .leftJoin('users as p', 'ds.pending_by', 'p.id')
       .select('ds.*', 'u.full_name as uploaded_by_name', 'p.full_name as pending_by_name')
-      .where({ 'ds.linked_type': linkedType, 'ds.linked_id': linkedId, 'ds.is_latest': true })
-      .orderBy('ds.created_at', 'desc');
+      .where({ 'ds.linked_type': linkedType, 'ds.linked_id': linkedId });
+    if (!includeHistory) q = q.where({ 'ds.is_latest': true });
+    const rows = await q.orderBy('ds.created_at', 'desc');
+    return includeHistory ? this.annotateHistory(rows) : rows;
   },
 
-  // Ask for a document to be deleted. Nothing is removed until an approver
-  // agrees — the file stays downloadable and current until then.
+  // Adds superseded_by_name / superseded_at (the uploader and time of the next
+  // version of the same type) and deleted_by_name / deleted_at (from the
+  // document_approvals 'delete' row) to each row.
+  async annotateHistory(rows) {
+    const deletedIds = rows.filter((r) => r.status === DELETED).map((r) => r.id);
+    const delRows = deletedIds.length
+      ? await db('document_approvals as da')
+        .leftJoin('users as u', 'da.approver_id', 'u.id')
+        .select('da.document_id', 'da.approver_id', 'da.created_at', 'u.full_name as approver_name')
+        .whereIn('da.document_id', deletedIds)
+        .where({ 'da.action': 'delete' })
+      : [];
+    const delBy = new Map(delRows.map((d) => [Number(d.document_id), d]));
+    return rows.map((r) => {
+      const out = { ...r };
+      if (r.status === 'Superseded') {
+        const next = rows
+          .filter((o) => o.doc_type === r.doc_type && (Number(o.version) || 0) > (Number(r.version) || 0))
+          .sort((a, b) => (Number(a.version) || 0) - (Number(b.version) || 0))[0];
+        if (next) {
+          out.superseded_by_name = next.uploaded_by_name || null;
+          out.superseded_at = next.created_at || null;
+        }
+      }
+      if (r.status === DELETED) {
+        const d = delBy.get(Number(r.id));
+        if (d) {
+          out.deleted_by = d.approver_id;
+          out.deleted_by_name = d.approver_name || null;
+          out.deleted_at = d.created_at || null;
+        }
+      }
+      return out;
+    });
+  },
+
+  // Owner / Super Admin are the only roles that may delete a document outright
+  // (and the only ones holding documents.approve since migration 297).
+  async isDocumentAdmin(user, trx) {
+    if (!user) return false;
+    const conn = trx || db;
+    let roleId = user.role_id;
+    if (!roleId) {
+      const u = await conn('users').where({ id: user.id }).first();
+      roleId = u && u.role_id;
+    }
+    if (!roleId) return false;
+    const role = await conn('roles').where({ id: roleId }).first();
+    return !!role && DOC_ADMIN_ROLES.includes(role.name);
+  },
+
+  // Ask for a document to be deleted. Nothing is removed — the file stays
+  // downloadable and current until an Owner/Super Admin approves.
   async requestDelete(trx, { documentId, userId }) {
     const conn = trx || db;
     const doc = await conn('document_store').where({ id: documentId }).first();
     if (!doc) throw new Error('Document not found');
+    if (doc.status === DELETED) throw new Error('Document is already deleted');
     if (doc.pending_action === 'delete') return doc;
     await conn('document_store').where({ id: documentId }).update({
       pending_action: 'delete', pending_by: userId || null, pending_at: conn.fn.now(), updated_at: conn.fn.now(),
     });
-    return conn('document_store').where({ id: documentId }).first();
-  },
-
-  // Withdraw a deletion request (the requester changed their mind, or an
-  // approver refused it).
-  async cancelDelete(trx, { documentId }) {
-    const conn = trx || db;
-    await conn('document_store').where({ id: documentId }).update({
-      pending_action: null, pending_by: null, pending_at: null, updated_at: conn.fn.now(),
+    await auditService.log({
+      userId: userId || null,
+      action: 'request_delete',
+      entityType: 'document',
+      entityId: documentId,
+      details: { doc_type: doc.doc_type, file_name: doc.file_name, linked_type: doc.linked_type, linked_id: doc.linked_id },
+      db_instance: conn,
     });
     return conn('document_store').where({ id: documentId }).first();
   },
 
-  // Approver agreed to a deletion: remove the row and its file for real.
-  async applyDelete(trx, { documentId }) {
+  // Withdraw a deletion request (the requester changed their mind), or an
+  // approver refused it (rejectedBy set: recorded in document_approvals).
+  async cancelDelete(trx, { documentId, rejectedBy = null, comments = null }) {
+    const conn = trx || db;
+    await conn('document_store').where({ id: documentId }).update({
+      pending_action: null, pending_by: null, pending_at: null, updated_at: conn.fn.now(),
+    });
+    if (rejectedBy) {
+      await conn('document_approvals').insert({
+        document_id: documentId, approver_id: rejectedBy, action: 'reject_delete', comments: comments || null,
+      });
+    }
+    return conn('document_store').where({ id: documentId }).first();
+  },
+
+  // A deletion takes effect — an approved request, or an Owner/Super Admin
+  // deleting directly. NOTHING is removed: the row is marked Deleted and drops
+  // out of the live list (is_latest = false); the file stays on disk and in the
+  // version history. Who/when goes to document_approvals (action 'delete') and
+  // audit_logs.
+  async applyDelete(trx, { documentId, userId, direct = false }) {
     const conn = trx || db;
     const doc = await conn('document_store').where({ id: documentId }).first();
     if (!doc) throw new Error('Document not found');
-    if (doc.file_path) {
-      try { if (fs.existsSync(doc.file_path)) fs.unlinkSync(doc.file_path); } catch (e) { console.error('applyDelete file removal failed:', e.message); }
-    }
-    await conn('document_approvals').where({ document_id: documentId }).del();
-    await conn('document_checklists').where({ document_id: documentId }).update({ document_id: null, is_fulfilled: false });
-    await conn('document_store').where({ id: documentId }).del();
-    return { deleted: true, id: documentId };
+    if (doc.status === DELETED) return { deleted: true, id: documentId, already: true, file_kept: true };
+
+    const requestedBy = doc.pending_action === 'delete' ? doc.pending_by : null;
+    await conn('document_store').where({ id: documentId }).update({
+      status: DELETED,
+      is_latest: false,
+      pending_action: null,
+      pending_by: null,
+      pending_at: null,
+      updated_at: conn.fn.now(),
+    });
+    const comments = direct
+      ? 'Deleted directly by Owner/Super Admin'
+      : `Deletion approved${requestedBy ? ` (requested by user #${requestedBy})` : ''}`;
+    await conn('document_approvals').insert({
+      document_id: documentId, approver_id: userId || null, action: 'delete', comments,
+    });
+    await auditService.log({
+      userId: userId || null,
+      action: direct ? 'delete_direct' : 'approve_delete',
+      entityType: 'document',
+      entityId: documentId,
+      details: {
+        doc_type: doc.doc_type,
+        file_name: doc.file_name,
+        file_path: doc.file_path,
+        linked_type: doc.linked_type,
+        linked_id: doc.linked_id,
+        version: doc.version,
+        requested_by: requestedBy,
+        file_kept: true,
+      },
+      db_instance: conn,
+    });
+
+    // The checklist follows whatever is still live for the type, if anything.
+    const sameType = await conn('document_store')
+      .where({ linked_type: doc.linked_type, linked_id: doc.linked_id, doc_type: doc.doc_type, is_latest: true });
+    const stillLive = sameType.find((d) => d.status !== DELETED && Number(d.id) !== Number(documentId));
+    await conn('document_checklists').where({ document_id: documentId }).update(
+      stillLive ? { document_id: stillLive.id } : { document_id: null, is_fulfilled: false },
+    );
+    return { deleted: true, id: documentId, file_kept: true };
   },
 
   // === Version Control ===
-  async uploadNewVersion(trx, { documentId, file, uploadedBy }) {
+  // "Upload new version" of a specific document: the same replace as a plain
+  // re-upload of its type, recording which file it replaced.
+  async uploadNewVersion(trx, { documentId, file, files, uploadedBy }) {
     const conn = trx || db;
-
     const existing = await conn('document_store').where({ id: documentId }).first();
-    if (!existing) {
-      throw new Error('Document not found');
-    }
-
-    // Build target directory
-    const targetDir = path.join(
-      UPLOAD_DIR,
-      existing.entity || 'general',
-      existing.linked_type,
-      String(existing.linked_id || 'misc')
-    );
-    if (!fs.existsSync(targetDir)) {
-      fs.mkdirSync(targetDir, { recursive: true });
-    }
-
-    let fileName = null;
-    let filePath = null;
-    let fileSize = null;
-    let mimeType = null;
-
-    if (file) {
-      fileName = file.originalname;
-      const ext = path.extname(fileName);
-      const uniqueName = `${Date.now()}-${Math.round(Math.random() * 1e6)}${ext}`;
-      filePath = path.join(targetDir, uniqueName);
-      fileSize = file.size;
-      mimeType = file.mimetype;
-
-      fs.copyFileSync(file.path, filePath);
-      fs.unlinkSync(file.path);
-    }
-
-    // Mark old as superseded
-    await conn('document_store')
-      .where({ id: documentId })
-      .update({ is_latest: false, status: 'Superseded', updated_at: conn.fn.now() });
-
-    const docUid = await this.generateDocUid(conn);
-
-    const [newDoc] = await conn('document_store')
-      .insert({
-        doc_uid: docUid,
-        entity: existing.entity,
-        linked_type: existing.linked_type,
-        linked_id: existing.linked_id,
-        doc_type: existing.doc_type,
-        title: existing.title,
-        description: existing.description,
-        file_name: fileName || existing.file_name,
-        file_path: filePath || existing.file_path,
-        file_size: fileSize || existing.file_size,
-        mime_type: mimeType || existing.mime_type,
-        version: existing.version + 1,
-        is_latest: true,
-        previous_version_id: documentId,
-        // Live at once, no Owner step (owner decision 2026-10-06). The previous
-        // version was marked Superseded above and stays in the history
-        // (previous_version_id chain, getVersionHistory), so nothing is lost.
-        status: 'Approved',
-        uploaded_by: uploadedBy,
-      })
-      .returning('*');
-
-    // Update checklist to point to new version
-    await conn('document_checklists')
-      .where({
-        linked_type: existing.linked_type,
-        linked_id: existing.linked_id,
-        doc_type: existing.doc_type,
-      })
-      .whereNot({ linked_id: 0 })
-      .update({ document_id: newDoc.id, is_fulfilled: true, updated_at: conn.fn.now() });
-
-    return newDoc;
+    if (!existing) throw new Error('Document not found');
+    const rows = await this.uploadDocuments(conn, {
+      entity: existing.entity,
+      linkedType: existing.linked_type,
+      linkedId: existing.linked_id,
+      docType: existing.doc_type,
+      title: existing.title,
+      description: existing.description,
+      file,
+      files,
+      uploadedBy,
+      previousVersionId: documentId,
+      inheritFrom: existing,
+    });
+    return rows[0];
   },
 
   async getVersionHistory(documentId) {
-    const versions = [];
-    let currentId = documentId;
-
-    // First get the latest version for this chain
     const startDoc = await db('document_store').where({ id: documentId }).first();
-    if (!startDoc) return versions;
-
-    // Get all versions for same linked_type+linked_id+doc_type
-    const allVersions = await db('document_store')
+    if (!startDoc) return [];
+    // Every version of the same linked_type + linked_id + doc_type.
+    const rows = await db('document_store as ds')
+      .leftJoin('users as u', 'ds.uploaded_by', 'u.id')
+      .select('ds.*', 'u.full_name as uploaded_by_name')
       .where({
-        linked_type: startDoc.linked_type,
-        linked_id: startDoc.linked_id,
-        doc_type: startDoc.doc_type,
+        'ds.linked_type': startDoc.linked_type,
+        'ds.linked_id': startDoc.linked_id,
+        'ds.doc_type': startDoc.doc_type,
       })
-      .orderBy('version', 'desc');
-
-    return allVersions;
+      .orderBy('ds.version', 'desc');
+    return this.annotateHistory(rows);
   },
-
   // === Approval Workflow ===
   async submitForReview(trx, { documentId, userId }) {
     const conn = trx || db;

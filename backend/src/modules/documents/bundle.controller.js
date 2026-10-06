@@ -267,7 +267,8 @@ async function bundle(req, res) {
   }
 
   const rows = uploadedIds.length
-    ? await db('document_store').whereIn('id', uploadedIds.map((n) => parseInt(n, 10)).filter(Boolean))
+    // A Deleted file is kept on disk for the history but is not part of the set.
+    ? await db('document_store').whereIn('id', uploadedIds.map((n) => parseInt(n, 10)).filter(Boolean)).whereNot({ status: 'Deleted' })
     : [];
   // A `whereIn` comes back in no particular order, so the requested sequence is
   // re-applied by id rather than read off the result set.

@@ -207,6 +207,8 @@ describe('D. document re-uploads go live', () => {
     expect(first.status).toBe('Approved');
     expect(second.status).toBe('Approved');
     expect(second.version).toBe(2);
+    // Since 2026-10-07 a re-upload REPLACES the live file; the first is kept as Superseded.
+    expect(db.tables.document_store.find((d) => d.id === first.id)).toMatchObject({ status: 'Superseded', is_latest: false });
   });
 
   test('a new version is live and supersedes the previous one, which stays in history', async () => {

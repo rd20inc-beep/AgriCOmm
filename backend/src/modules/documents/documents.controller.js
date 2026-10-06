@@ -2,6 +2,17 @@ const db = require('../../config/database');
 const documentService = require('../../services/documentService');
 const automationService = require('../../services/automationService');
 
+// multer .fields() puts files under req.files[field]; .single() under req.file.
+// Every file of one request becomes ONE version of the document type.
+function uploadedFiles(req) {
+  const out = [];
+  if (req.files && !Array.isArray(req.files)) {
+    for (const k of ['files', 'file']) if (Array.isArray(req.files[k])) out.push(...req.files[k]);
+  } else if (Array.isArray(req.files)) out.push(...req.files);
+  if (req.file) out.push(req.file);
+  return out;
+}
+
 const documentController = {
   // === Upload ===
   async upload(req, res) {
@@ -15,22 +26,25 @@ const documentController = {
         });
       }
 
-      const result = await db.transaction(async (trx) => {
-        return documentService.uploadDocument(trx, {
+      // A re-upload of a type REPLACES its live file(s) — they are marked
+      // Superseded and stay in the history. Several files in one request (a
+      // multi-page scan) are one version, so no page is lost.
+      const rows = await db.transaction(async (trx) => {
+        return documentService.uploadDocuments(trx, {
           entity: entity || null,
           linkedType: linked_type,
           linkedId: linked_id ? parseInt(linked_id) : null,
           docType: doc_type,
           title,
           description: description || null,
-          file: req.file || null,
+          files: uploadedFiles(req),
           uploadedBy: req.user.id,
         });
       });
 
       return res.status(201).json({
         success: true,
-        data: { document: result },
+        data: { document: rows[0], documents: rows },
       });
     } catch (err) {
       console.error('Document upload error:', err);
@@ -113,11 +127,47 @@ const documentController = {
 
   async cancelDelete(req, res) {
     try {
-      const doc = await documentService.cancelDelete(null, { documentId: parseInt(req.params.id, 10) });
-      return res.json({ success: true, data: { document: doc }, message: 'Deletion request withdrawn.' });
+      const documentId = parseInt(req.params.id, 10);
+      const current = await db('document_store').where({ id: documentId }).first();
+      if (!current) return res.status(404).json({ success: false, message: 'Document not found.' });
+      // An Owner/Super Admin turning down someone else's request is a refusal,
+      // and is recorded as one; the requester withdrawing their own is not.
+      const isAdmin = await documentService.isDocumentAdmin(req.user);
+      const refusing = isAdmin && current.pending_by != null && Number(current.pending_by) !== Number(req.user.id);
+      const doc = await documentService.cancelDelete(null, {
+        documentId,
+        rejectedBy: refusing ? req.user.id : null,
+        comments: (req.body && req.body.comments) || null,
+      });
+      return res.json({
+        success: true,
+        data: { document: doc },
+        message: refusing ? 'Deletion refused — the document is kept.' : 'Deletion request withdrawn.',
+      });
     } catch (err) {
       console.error('Document cancelDelete error:', err);
       return res.status(500).json({ success: false, message: err.message || 'Internal server error.' });
+    }
+  },
+
+  // === Delete ===
+  // Owner / Super Admin: the document is marked Deleted at once (file kept,
+  // audited). Anyone else: this becomes a deletion REQUEST and nothing changes
+  // until an Owner/Super Admin approves it from Admin ▸ Approvals.
+  async remove(req, res) {
+    try {
+      const documentId = parseInt(req.params.id, 10);
+      const existing = await db('document_store').where({ id: documentId }).first();
+      if (!existing) return res.status(404).json({ success: false, message: 'Document not found.' });
+      if (await documentService.isDocumentAdmin(req.user)) {
+        const out = await db.transaction((trx) => documentService.applyDelete(trx, { documentId, userId: req.user.id, direct: true }));
+        return res.json({ success: true, data: { ...out, requested: false }, message: 'Document deleted — the file is kept in its version history.' });
+      }
+      const doc = await db.transaction((trx) => documentService.requestDelete(trx, { documentId, userId: req.user.id }));
+      return res.status(202).json({ success: true, data: { document: doc, requested: true }, message: 'Deletion requested — awaiting owner approval.' });
+    } catch (err) {
+      console.error('Document remove error:', err);
+      return res.status(400).json({ success: false, message: err.message || 'Internal server error.' });
     }
   },
 
@@ -130,7 +180,8 @@ const documentController = {
       // fail with a 500. Nothing is linked to a non-numeric id, so answer empty.
       const id = parseInt(linkedId, 10);
       if (!Number.isFinite(id)) return res.json({ success: true, data: { documents: [] } });
-      const documents = await documentService.getDocumentsByRef(linkedType, id);
+      const includeHistory = ['1', 'true'].includes(String((req.query && req.query.include_history) || ''));
+      const documents = await documentService.getDocumentsByRef(linkedType, id, { includeHistory });
 
       return res.json({ success: true, data: { documents } });
     } catch (err) {
@@ -208,7 +259,7 @@ const documentController = {
       const result = await db.transaction(async (trx) => {
         return documentService.uploadNewVersion(trx, {
           documentId: parseInt(id),
-          file: req.file || null,
+          files: uploadedFiles(req),
           uploadedBy: req.user.id,
         });
       });
@@ -248,12 +299,12 @@ const documentController = {
       const { id } = req.params;
       const { comments } = req.body;
 
-      // A row flagged for deletion is approved by actually deleting it — the
-      // approval IS the change taking effect, exactly as it is for an upload.
+      // Approving a row flagged for deletion makes the deletion take effect:
+      // it is marked Deleted (file kept, in the history) and audited.
       const flagged = await db('document_store').where({ id: parseInt(id, 10) }).first();
       if (flagged && flagged.pending_action === 'delete') {
-        const out = await db.transaction((trx) => documentService.applyDelete(trx, { documentId: parseInt(id, 10) }));
-        return res.json({ success: true, data: out, message: 'Deletion approved — document removed.' });
+        const out = await db.transaction((trx) => documentService.applyDelete(trx, { documentId: parseInt(id, 10), userId: req.user.id }));
+        return res.json({ success: true, data: out, message: 'Deletion approved — document marked deleted; the file is kept in its history.' });
       }
 
       const result = await db.transaction(async (trx) => {
