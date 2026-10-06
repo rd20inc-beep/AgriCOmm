@@ -45,7 +45,7 @@ const UPLOAD_HINTS = {
   phyto: 'Issued by Department of Plant Protection after inspection.',
   fumigation: 'Issued by your licensed fumigator after treatment.',
   blDraft: 'Provided by the shipping line after vessel booking.',
-  blFinal: 'Final signed BL released by the shipping line.',
+  blFinal: 'Final signed BL released by the shipping line after sailing. Post-shipment: not needed to ship, required to close.',
   quality: 'Third-party quality / pre-shipment inspection report.',
   custom: 'Any additional document for this shipment.',
 };

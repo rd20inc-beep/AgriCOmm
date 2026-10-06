@@ -1,11 +1,13 @@
 import React from 'react';
 import { Check } from 'lucide-react';
-import { workflowSteps } from './constants';
+import { workflowSteps, workflowStepFor, isBalanceDue } from './constants';
 
 export default function WorkflowTimeline({ order }) {
-  // Derive active step from status for accuracy (currentStep may be stale)
-  const statusStep = workflowSteps.find(s => s.status === order.status);
-  const activeStep = statusStep ? statusStep.step : (order.currentStep || 1);
+  // Derive active step from status for accuracy (currentStep is the backend's
+  // finer-grained step number and doesn't line up with these grouped steps).
+  const statusStep = workflowStepFor(order.status);
+  const activeStep = statusStep ? statusStep.step : 1;
+  const balanceDue = isBalanceDue(order);
 
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
@@ -15,7 +17,7 @@ export default function WorkflowTimeline({ order }) {
           const isCurrent = activeStep === step.step;
           const isUpcoming = activeStep < step.step;
           const daysSinceCreated = Math.floor((new Date() - new Date(order.createdAt)) / (1000 * 60 * 60 * 24));
-          const isOverdue = isCurrent && daysSinceCreated > 14 && step.step >= 2 && step.step <= 6;
+          const isOverdue = isCurrent && daysSinceCreated > 14 && step.step >= 2 && step.step <= 4;
 
           return (
             <div key={step.step} className="flex items-center flex-1 last:flex-none">
@@ -38,6 +40,11 @@ export default function WorkflowTimeline({ order }) {
                 }`}>
                   {step.label}
                 </span>
+                {step.label === 'Balance' && ['Shipped', 'Arrived'].includes(order.status) && (
+                  <span className={`text-[10px] mt-0.5 ${balanceDue ? 'text-amber-600 font-medium' : 'text-emerald-600'}`}>
+                    {balanceDue ? 'Due' : 'Received'}
+                  </span>
+                )}
               </div>
               {index < workflowSteps.length - 1 && (
                 <div className={`flex-1 h-0.5 mx-1 ${

@@ -24,6 +24,7 @@ import StatusBadge from '../../../components/StatusBadge';
 import EmailComposer from '../../../components/EmailComposer';
 import { favStar } from '../../../shared/utils/favorites';
 import useConfirm from '../../../hooks/useConfirm';
+import { isBalanceDue } from '../../exportOrders/components/constants';
 
 function formatCurrency(value) {
   return '$' + value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -106,9 +107,9 @@ export default function FinanceConfirmations() {
   }, [exportOrders]);
 
   const pendingBalance = useMemo(() => {
-    return exportOrders.filter(
-      (o) => o.balanceReceived < o.balanceExpected && o.status === 'Awaiting Balance'
-    );
+    // Ship on the advance: the balance is owed after sailing (plus any legacy
+    // order still parked in 'Awaiting Balance').
+    return exportOrders.filter(isBalanceDue);
   }, [exportOrders]);
 
   const overdueCollections = useMemo(() => {

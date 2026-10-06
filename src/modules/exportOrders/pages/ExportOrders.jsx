@@ -8,15 +8,17 @@ import { downloadCSV } from '../../../utils/csvExport';
 import Modal from '../../../components/Modal';
 import ProformaInvoice from '../../../components/ProformaInvoice';
 import QuotationsPanel from '../components/QuotationsPanel';
+import { isBalanceDue } from '../components/constants';
 
 const tabs = [
   { key: 'All', label: 'All' },
   { key: 'Awaiting Advance', label: 'Awaiting Advance' },
   { key: 'Procurement', label: 'Procurement' },
   { key: 'Docs Pending', label: 'Docs Pending' },
-  { key: 'Awaiting Balance', label: 'Awaiting Balance' },
   { key: 'Ready to Ship', label: 'Ready to Ship' },
   { key: 'Shipped', label: 'Shipped' },
+  // Ship on the advance: the balance is collected after sailing.
+  { key: 'Balance Due', label: 'Balance Due' },
   { key: 'Quotations', label: 'Quotations' },
 ];
 
@@ -25,8 +27,9 @@ function matchesTab(order, tab) {
   if (tab === 'Awaiting Advance') return order.status === 'Awaiting Advance';
   if (tab === 'Procurement') return ['Advance Received', 'Procurement Pending', 'In Milling'].includes(order.status);
   if (tab === 'Docs Pending') return order.status === 'Docs In Preparation';
-  if (tab === 'Awaiting Balance') return order.status === 'Awaiting Balance';
-  if (tab === 'Ready to Ship') return order.status === 'Ready to Ship';
+  // Legacy 'Awaiting Balance' orders can ship on the advance, so they sit here.
+  if (tab === 'Ready to Ship') return order.status === 'Ready to Ship' || order.status === 'Awaiting Balance';
+  if (tab === 'Balance Due') return isBalanceDue(order);
   if (tab === 'Shipped') return order.status === 'Shipped' || order.status === 'Arrived';
   return false;
 }
@@ -42,7 +45,7 @@ export default function ExportOrders() {
     if (urlStatus === 'Awaiting Advance') return 'Awaiting Advance';
     if (urlStatus === 'Advance Received' || urlStatus === 'Procurement Pending' || urlStatus === 'In Milling') return 'Procurement';
     if (urlStatus === 'Docs In Preparation') return 'Docs Pending';
-    if (urlStatus === 'Awaiting Balance') return 'Awaiting Balance';
+    if (urlStatus === 'Balance Due' || urlStatus === 'Awaiting Balance') return 'Balance Due';
     if (urlStatus === 'Ready to Ship') return 'Ready to Ship';
     if (urlStatus === 'Shipped' || urlStatus === 'Arrived') return 'Shipped';
     return 'All';

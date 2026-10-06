@@ -1,17 +1,35 @@
-// Workflow steps — static config
+// Workflow steps — static config. Ship on the advance (2026-10-07): the order
+// ships once the advance is confirmed and the pre-shipment documents approved;
+// the balance (and BL Final) are collected after sailing, before Close.
+// `statuses` are the order statuses a step covers; `status` is the one a
+// pipeline click filters on. The legacy 'Awaiting Balance' sits on Ready to
+// Ship: its documents are done and it can ship on the advance.
 export const workflowSteps = [
-  { step: 1, label: 'Order Created', status: 'Draft' },
-  { step: 2, label: 'Awaiting Advance', status: 'Awaiting Advance' },
-  { step: 3, label: 'Advance Received', status: 'Advance Received' },
-  { step: 4, label: 'Procurement', status: 'Procurement Pending' },
-  { step: 5, label: 'In Milling', status: 'In Milling' },
-  { step: 6, label: 'Docs Preparation', status: 'Docs In Preparation' },
-  { step: 7, label: 'Awaiting Balance', status: 'Awaiting Balance' },
-  { step: 8, label: 'Ready to Ship', status: 'Ready to Ship' },
-  { step: 9, label: 'Shipped', status: 'Shipped' },
-  { step: 10, label: 'Arrived', status: 'Arrived' },
-  { step: 11, label: 'Closed', status: 'Closed' },
+  { step: 1, label: 'Order Created', status: 'Draft', statuses: ['Draft'] },
+  { step: 2, label: 'Advance', status: 'Awaiting Advance', statuses: ['Awaiting Advance'] },
+  { step: 3, label: 'Production', status: 'In Milling', statuses: ['Advance Received', 'Procurement Pending', 'In Milling'] },
+  { step: 4, label: 'Docs', status: 'Docs In Preparation', statuses: ['Docs In Preparation'] },
+  { step: 5, label: 'Ready to Ship', status: 'Ready to Ship', statuses: ['Ready to Ship', 'Awaiting Balance'] },
+  { step: 6, label: 'Shipped', status: 'Shipped', statuses: ['Shipped'] },
+  { step: 7, label: 'Balance', status: 'Balance Due', statuses: ['Arrived'] },
+  { step: 8, label: 'Closed', status: 'Closed', statuses: ['Closed'] },
 ];
+
+export function workflowStepFor(status) {
+  return workflowSteps.find((s) => s.statuses.includes(status)) || null;
+}
+
+// Where an owed balance is collected (mirrors backend balanceCollection.js):
+// after sailing, plus the legacy 'Awaiting Balance' stage.
+export const BALANCE_COLLECTION_STATUSES = ['Awaiting Balance', 'Shipped', 'Arrived'];
+
+export function balanceOutstanding(order) {
+  return Math.max(0, (Number(order?.balanceExpected) || 0) - (Number(order?.balanceReceived) || 0));
+}
+
+export function isBalanceDue(order) {
+  return !!order && BALANCE_COLLECTION_STATUSES.includes(order.status) && balanceOutstanding(order) > 0.01;
+}
 
 // #2 Financial status track — the advance-confirmation lifecycle, shown as a
 // separate pill from the operational status. Mirrors export_orders.financial_status

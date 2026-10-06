@@ -21,6 +21,7 @@ import RecentActivity from './dashboard/RecentActivity';
 import PendingApprovalsCard from '../components/PendingApprovalsCard';
 import { useOwnerAuth } from '../../../context/OwnerAuthContext';
 import { canSeeCost } from '../../../hooks/useCanSeeCost';
+import { isBalanceDue } from '../../exportOrders/components/constants';
 
 // ─── Formatting ────────────────────────────────────────────────────────
 const fmt = (v) => '$' + (Number(v) || 0).toLocaleString('en-US', { maximumFractionDigits: 0 });
@@ -87,7 +88,8 @@ export default function Dashboard() {
   const awaitingAdvance = safeOrders.filter(o => o.status === 'Awaiting Advance').length;
   const docsInPrep = safeOrders.filter(o => o.status === 'Docs In Preparation').length;
   const readyToShip = safeOrders.filter(o => o.status === 'Ready to Ship').length;
-  const awaitingBalance = safeOrders.filter(o => o.status === 'Awaiting Balance').length;
+  // Ship on the advance: balances are collected after sailing.
+  const awaitingBalance = safeOrders.filter(isBalanceDue).length;
   const varianceAlerts = safeBatches.filter(b => b.variancePct != null && Math.abs(Number(b.variancePct)) > 1).length;
   const masterApprovals = isOwnerOrAdmin ? pendingMasterApprovals : 0;
   const totalActions = pendingApprovalBatches.length + awaitingAdvance + docsInPrep + readyToShip + varianceAlerts + masterApprovals + dashApprovals;
@@ -305,7 +307,7 @@ export default function Dashboard() {
           {canExport && <ActionItem icon={CreditCard} label="Awaiting advance payment"  count={awaitingAdvance} to="/export?status=Awaiting+Advance"    accent="amber" />}
           {canExport && <ActionItem icon={FileText}   label="Documents in preparation"  count={docsInPrep}      to="/export?status=Docs+In+Preparation" accent="blue" />}
           {canExport && <ActionItem icon={Ship}       label="Ready to ship"             count={readyToShip}     to="/export?status=Ready+to+Ship"       accent="green" />}
-          {canExport && <ActionItem icon={Clock}      label="Awaiting balance payment"  count={awaitingBalance} to="/export?status=Awaiting+Balance"    accent="amber" />}
+          {canExport && <ActionItem icon={Clock}      label="Awaiting balance payment"  count={awaitingBalance} to="/export?status=Balance+Due"    accent="amber" />}
           {canMill   && <ActionItem icon={AlertTriangle} label="Mill yield variance"    count={varianceAlerts}  to="/quality"                            accent="red" />}
         </div>
 

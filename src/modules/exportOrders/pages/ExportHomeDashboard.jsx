@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import { useExportOrders, useCustomers, useInternalTransfers, useConfirmTransferExport } from '../../../api/queries';
 import { useApp } from '../../../context/AppContext';
-import { workflowSteps } from '../components/constants';
+import { workflowSteps, isBalanceDue } from '../components/constants';
 
 function formatUSD(value) {
   const n = Number(value) || 0;
@@ -111,7 +111,10 @@ export default function ExportHomeDashboard() {
     // Pipeline grouping by status
     const pipelineSteps = workflowSteps.filter(s => !['Draft', 'Closed', 'Cancelled'].includes(s.status));
     const pipeline = pipelineSteps.map(step => {
-      const ordersInStep = orders.filter(o => o.status === step.status);
+      // The Balance step counts every sailed order still owed its balance.
+      const ordersInStep = step.status === 'Balance Due'
+        ? orders.filter(isBalanceDue)
+        : orders.filter(o => step.statuses.includes(o.status));
       return {
         ...step,
         count: ordersInStep.length,
@@ -133,8 +136,9 @@ export default function ExportHomeDashboard() {
       return !o.vesselName || !o.bookingNo || !o.fiNumber;
     }).length;
 
+    // Ship on the advance: the balance is collected after sailing.
     const balanceOverdue = orders.filter(o => {
-      if (o.status !== 'Awaiting Balance') return false;
+      if (!isBalanceDue(o)) return false;
       const etd = o.etd ? new Date(o.etd) : null;
       return etd && etd < now;
     }).length;
@@ -271,7 +275,7 @@ export default function ExportHomeDashboard() {
             icon={Clock}
             label="Balance overdue (ETD passed)"
             count={stats.balanceOverdue}
-            to="/export?status=Awaiting+Balance"
+            to="/export?status=Balance+Due"
             accent="red"
           />
           {stats.awaitingAdvance + stats.docsLagging + stats.shipmentsMissingFields + stats.balanceOverdue === 0 && (

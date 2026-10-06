@@ -683,6 +683,22 @@ export default function ExportOrderDetail() {
     }
   };
 
+  // Docs In Preparation (or a legacy Awaiting Balance order) → Ready to Ship.
+  // Normally automatic once the last pre-shipment document is approved; this is
+  // the manual nudge. The server holds it to the same gate (advance confirmed,
+  // pre-shipment documents approved) and says what is missing.
+  const handleMarkReadyToShip = async () => {
+    try {
+      await updateStatusMut.mutateAsync({
+        id: orderId,
+        data: { status: 'Ready to Ship', notes: 'Marked ready to ship (advance confirmed, pre-shipment documents approved)' },
+      });
+      addToast(`Order ${order.id} is ready to ship`);
+    } catch (err) {
+      addToast(err?.data?.message || err?.message || 'Could not mark the order ready to ship', 'error');
+    }
+  };
+
   const handleCloseOrder = async () => {
     try {
       await updateStatusMut.mutateAsync({
@@ -691,7 +707,7 @@ export default function ExportOrderDetail() {
       });
       addToast(`Order ${order.id} has been closed`);
     } catch (err) {
-      addToast(`Failed to close order: ${err.message || 'Server error'}`, 'error');
+      addToast(`Failed to close order: ${err?.data?.message || err.message || 'Server error'}`, 'error');
     }
     setShowActions(false);
   };
@@ -779,21 +795,34 @@ export default function ExportOrderDetail() {
         </div>
       )}
       {order.status === 'Docs In Preparation' && (
-        <div className="bg-violet-50 border border-violet-300 rounded-xl p-4 flex items-center justify-between">
+        <div className="bg-violet-50 border border-violet-300 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
-            <p className="text-sm font-semibold text-violet-800">Prepare Documents</p>
-            <p className="text-xs text-violet-600">Upload and approve all required export documents to advance to balance payment stage.</p>
+            <p className="text-sm font-semibold text-violet-800">Prepare Pre-Shipment Documents</p>
+            <p className="text-xs text-violet-600">Approve the phyto, BL draft, commercial invoice, packing list, certificate of origin and fumigation certificate. With the advance confirmed the order is then Ready to Ship; the balance and the BL Final are collected after sailing.</p>
           </div>
-          <button onClick={() => setActiveTab('documents')} className="px-4 py-2 bg-violet-600 text-white rounded-lg text-sm font-medium hover:bg-violet-700">Go to Documents</button>
+          <div className="flex items-center gap-2 shrink-0">
+            <button onClick={() => setActiveTab('documents')} className="px-4 py-2 bg-violet-600 text-white rounded-lg text-sm font-medium hover:bg-violet-700">Go to Documents</button>
+            <button onClick={handleMarkReadyToShip} className="px-4 py-2 bg-white border border-violet-400 text-violet-800 rounded-lg text-sm font-medium hover:bg-violet-100">Mark Ready to Ship</button>
+          </div>
         </div>
       )}
-      {canRequestBalance && ['Awaiting Balance', 'Shipped', 'Arrived'].includes(order.status) && (
-        <div className="bg-blue-50 border border-blue-300 rounded-xl p-4 flex items-center justify-between">
+      {order.status === 'Awaiting Balance' && (
+        <div className="bg-sky-50 border border-sky-300 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
-            <p className="text-sm font-semibold text-blue-800">{order.status === 'Awaiting Balance' ? 'Waiting for Balance Payment' : 'Balance Still Owed'}</p>
-            <p className="text-xs text-blue-600">Expected: {formatCurrency(order.balanceExpected)} | Received: {formatCurrency(order.balanceReceived)} | Outstanding: {formatCurrency(order.balanceExpected - order.balanceReceived)}</p>
+            <p className="text-sm font-semibold text-sky-800">Can ship on the advance</p>
+            <p className="text-xs text-sky-600">This order was waiting for its balance before shipment. Orders now ship on the advance and collect the balance after sailing (outstanding: {formatCurrency(order.balanceExpected - order.balanceReceived)}).</p>
           </div>
-          <button onClick={openBalanceModal} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">Confirm Balance Received</button>
+          <button onClick={handleMarkReadyToShip} className="shrink-0 px-4 py-2 bg-sky-600 text-white rounded-lg text-sm font-medium hover:bg-sky-700">Move to Ready to Ship</button>
+        </div>
+      )}
+      {canRequestBalance && ['Shipped', 'Arrived'].includes(order.status) && (
+        <div className="bg-amber-50 border border-amber-300 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold text-amber-800">Balance due — record when the buyer pays</p>
+            <p className="text-xs text-amber-700">Expected: {formatCurrency(order.balanceExpected)} | Received: {formatCurrency(order.balanceReceived)} | Outstanding: {formatCurrency(order.balanceExpected - order.balanceReceived)}</p>
+            <p className="text-xs text-amber-700 mt-1">The order shipped on the advance. It closes once the balance is received and the BL Final is approved.</p>
+          </div>
+          <button onClick={openBalanceModal} className="shrink-0 px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700">Record Balance</button>
         </div>
       )}
       {order.status === 'Ready to Ship' && (
@@ -815,7 +844,7 @@ export default function ExportOrderDetail() {
         <div className="bg-teal-50 border border-teal-300 rounded-xl p-4 flex items-center justify-between">
           <div>
             <p className="text-sm font-semibold text-teal-800">Shipment Arrived</p>
-            <p className="text-xs text-teal-600">Verify all payments received and close the order.</p>
+            <p className="text-xs text-teal-600">Balance received. Close the order once the BL Final is approved.</p>
           </div>
           <button onClick={handleCloseOrder} className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700">Close Order</button>
         </div>
