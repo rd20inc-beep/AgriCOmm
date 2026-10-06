@@ -123,13 +123,13 @@ describe('freeing a sack can no longer mint a fake katta', () => {
   const SVC = fs.readFileSync(path.join(__dirname, '../modules/inventory/inventory.service.js'), 'utf8');
 
   it('it prefers a real katta item of that size over the size-keyed code', () => {
-    const fn = SVC.slice(SVC.indexOf('const itemForSize ='), SVC.indexOf('// Reverse the batch'));
+    const fn = SVC.slice(SVC.indexOf('const itemForSize ='), SVC.indexOf('const outLots', SVC.indexOf('const itemForSize =')));
     expect(fn).toContain("where('pack_type', 'katta')");
     expect(fn).toContain("andWhere('capacity_kg', size)");
   });
 
   it('anything it does create is typed katta explicitly', () => {
-    const fn = SVC.slice(SVC.indexOf('const itemForSize ='), SVC.indexOf('// Reverse the batch'));
+    const fn = SVC.slice(SVC.indexOf('const itemForSize ='), SVC.indexOf('const outLots', SVC.indexOf('const itemForSize =')));
     expect(fn).toContain("pack_type: 'katta'");
   });
 });

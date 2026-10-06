@@ -2,10 +2,20 @@ const db = require('../../config/database');
 const accountingService = require('../accounting/accounting.service');
 const inventoryService = require('../inventory/inventory.service');
 const { NotFoundError, ValidationError } = require('../../shared/errors');
+const { isKattaItem } = require('../../shared/packagingTypes');
 
-// Packing a milling batch's finished rice into bags. Consumes bags from store
-// stock, records the packed (net) / tare / gross weight, and posts the bag cost
-// to the P&L (mirrors mill-store consumption GL: DR 6000 / CR 1250).
+// Packing a milling batch's finished rice into bags. Records the packed (net) /
+// tare / gross weight, posts the bag cost to the P&L (mirrors mill-store
+// consumption GL: DR 6000 / CR 1250) and folds it into the batch's residual cost.
+//
+// Store stock — ONE mover per kind of packaging (owner decision 2026-10-07):
+//   P.P. bags, master bags, polythene  → drawn HERE (reference_type='packing'),
+//                                        the moment they are physically used.
+//   KATTA                              → NOT drawn here. Katta stock moves only
+//                                        through inventoryService.reconcileBatchKatta
+//                                        at yield, which consumes this run's
+//                                        recorded katta count (reference_type=
+//                                        'batch_katta'). The log still records it.
 const packingService = {
   // Summary of what's already been packed for a batch + how much finished rice
   // remains unpacked.
@@ -73,12 +83,15 @@ const packingService = {
       // stock, record the shortfall, and flag it so a purchase alert follows. The
       // depleted item also auto-surfaces in the low-stock alerts (reorder level).
       const shortages = [];
-      const stockRow = await trx('mill_stock')
+      // Katta is recorded on the log but drawn at yield by the katta reconcile
+      // (which flags its own shortage) — never here as well.
+      const bagIsKatta = isKattaItem(item);
+      const stockRow = bagIsKatta ? null : await trx('mill_stock')
         .where({ item_id: bag_item_id, warehouse_id: warehouseId })
         .first();
       const available = Number(stockRow?.quantity_available || 0);
-      const bagsConsumed = Math.min(available, bagsCount);
-      const bagsShort = bagsCount - bagsConsumed;
+      const bagsConsumed = bagIsKatta ? 0 : Math.min(available, bagsCount);
+      const bagsShort = bagIsKatta ? 0 : bagsCount - bagsConsumed;
       if (bagsShort > 0) shortages.push({ item: item.name, unit: item.unit, needed: bagsCount, available, short: bagsShort });
 
       const packedKg = Number((bagsCount * capacity).toFixed(3));   // net rice
@@ -152,6 +165,10 @@ const packingService = {
         if (!itemId || !qty || qty <= 0) return { cost: 0, item: null, qty: 0 };
         const pkg = await trx('mill_items').where('id', itemId).first();
         if (!pkg) throw new NotFoundError(`${label} item not found.`);
+        const unitCostK = Number(pkg.avg_cost_per_unit) || 0;
+        // A katta used here is recorded and costed, but drawn at yield by the
+        // katta reconcile — the one mover for katta stock.
+        if (isKattaItem(pkg)) return { cost: Number((qty * unitCostK).toFixed(2)), item: pkg, qty };
         const stk = await trx('mill_stock').where({ item_id: itemId, warehouse_id: warehouseId }).first();
         const avail = Number(stk?.quantity_available || 0);
         const consumed = Math.min(avail, qty);
@@ -275,14 +292,21 @@ const packingService = {
       // reconcileBatchKatta is idempotent — it reverses its own prior movements
       // before recomputing — so running it again here is safe, and it is the
       // single source of truth for the spec AND for the katta accounting. That
-      // second part matters: bags drawn from mill store are not freed katta, so
-      // re-running also releases the katta the yield had assumed would be used.
+      // second part matters: it is the ONLY thing that moves katta stock, so
+      // re-running is what draws this run's katta (and releases the katta the
+      // yield had assumed by weight). Before yield nothing moves: the yield's
+      // own reconcile picks the run up.
       //
       // Non-blocking, like the GL and cost steps above: the packing run itself is
       // recorded either way.
+      // Katta this run named but the store does not hold is flagged like any
+      // other packing shortage.
       if ((Number(batch.actual_finished_kg) || 0) > 0) {
-        try { await inventoryService.reconcileBatchKatta(trx, batchId, userId); }
-        catch (e) { console.error('Packing katta/bag-spec reconcile failed (packing still recorded):', e.message); }
+        try { const katta = await inventoryService.reconcileBatchKatta(trx, batchId, userId);
+          for (const s of (katta && katta.shortages) || []) {
+            shortages.push({ item: s.item, unit: 'pcs', needed: s.needed, available: s.available, short: s.short });
+          }
+        } catch (e) { console.error('Packing katta/bag-spec reconcile failed (packing still recorded):', e.message); }
       }
 
       // Flag any packing-material shortage on the log (Purchase Required) so the UI

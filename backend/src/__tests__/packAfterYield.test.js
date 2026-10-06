@@ -50,7 +50,7 @@ describe('a packing run reaches the lot', () => {
 
   it('it only runs once the batch has actually yielded', () => {
     // Before the yield there is no output lot to stamp.
-    expect(pack).toMatch(/if \(\(Number\(batch\.actual_finished_kg\) \|\| 0\) > 0\) \{\s*\n\s*try \{ await inventoryService\.reconcileBatchKatta/);
+    expect(pack).toMatch(/if \(\(Number\(batch\.actual_finished_kg\) \|\| 0\) > 0\) \{\s*\n\s*try \{ (const katta = )?await inventoryService\.reconcileBatchKatta/);
   });
 
   it('a failure there does not lose the packing run', () => {

@@ -7,8 +7,10 @@ import useCanSeeCost from '../../../hooks/useCanSeeCost';
 const num = (v) => Number(v) || 0;
 const fmtKg = (v) => `${num(v).toLocaleString(undefined, { maximumFractionDigits: 1 })} kg`;
 
-// Bag the finished rice of a milling batch. Consuming N bags of a packaging item
-// deducts store stock and records the packed (net), tare and gross weight.
+// Bag the finished rice of a milling batch. Records the packed (net), tare and
+// gross weight. Store stock has ONE mover per kind of packaging: P.P. bags,
+// masters and polythene are drawn by this run; KATTA is drawn only by the katta
+// reconcile at yield (the run records the count, the yield moves the stock).
 export default function PackingPanel({ batchId, batchStatus, addToast, exportOrderId }) {
   // Packing material cost is hidden from roles without reports.view_cost.
   const showCost = useCanSeeCost();
@@ -41,6 +43,9 @@ export default function PackingPanel({ batchId, batchStatus, addToast, exportOrd
   const capacity = num(selected?.capacity_kg);
   const tare = num(selected?.tare_weight_kg);
   const available = num(selected?.quantity_available);
+  // Katta is drawn by the katta reconcile at yield (which also frees the raw's
+  // sacks), not by this run — so store stock now is not a shortage for it.
+  const selectedIsKatta = selected?.pack_type === 'katta';
   const bagsN = num(bags);
   const projPacked = bagsN * capacity;
   const projTare = bagsN * tare;
@@ -83,7 +88,7 @@ export default function PackingPanel({ batchId, batchStatus, addToast, exportOrd
   // Packing-material shortages are allowed (non-blocking) — consume what's in
   // stock, flag the shortfall + purchase alert. So the gate no longer blocks on
   // available stock; it only requires a valid bag + count on an open batch.
-  const bagShort = bagsN > available;
+  const bagShort = !selectedIsKatta && bagsN > available;
   const masterShort = mpActive && masterId && masterQty > masterAvail;
   const polyShort = mpActive && polyId && polyQty > polyAvail;
   const hasShortage = bagShort || masterShort || polyShort;
@@ -106,7 +111,9 @@ export default function PackingPanel({ batchId, batchStatus, addToast, exportOrd
       if (shortages.length) {
         addToast?.(`Packed with material shortage — purchase required: ${shortages.map((s) => `${s.short} ${s.unit} ${s.item}`).join(', ')}`, 'warning');
       } else {
-        addToast?.('Packed — stock deducted, weight & cost recorded', 'success');
+        addToast?.(selectedIsKatta
+          ? 'Packed — weight & cost recorded; katta stock moves at yield'
+          : 'Packed — stock deducted, weight & cost recorded', 'success');
       }
       setBags(''); setMasterQtyManual(''); setPolyQtyManual(''); setPolyScope('bag');
     } catch (err) {
@@ -291,8 +298,14 @@ export default function PackingPanel({ batchId, batchStatus, addToast, exportOrd
               )}
               {selected && capacity <= 0 && <span className="text-amber-600">Set this bag's capacity in Mill Store first.</span>}
               {bagShort && <span className="text-amber-600">Short {bagsN - available} {selected.unit} — packing allowed, purchase required.</span>}
+              {selectedIsKatta && <span className="text-amber-700">Katta: recorded here, drawn from store by the katta reconcile at yield — not by this run.</span>}
             </div>
           )}
+          <p className="mt-3 text-[11px] text-gray-500 leading-snug">
+            P.P. bags, master bags and polythene leave store stock when this run is logged.
+            Katta stock moves only at yield (freed from the raw, used to pack), so a run in
+            katta records the count and the yield draws it.
+          </p>
 
           {/* Master (outer) bag + polythene — bags are collected into a larger
               sack lined with a polythene sheet; their cost folds into the run. */}

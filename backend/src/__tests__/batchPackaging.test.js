@@ -80,37 +80,31 @@ describe('a line names an ITEM, which is the whole point', () => {
   });
 });
 
-describe('editing a batch moves stock by the DIFFERENCE', () => {
-  it('a corrected quantity posts the change, not the whole figure again', () => {
-    // 300 -> 320 must post 20. Same reason reconcileBatchKatta reverses itself
-    // before recomputing.
-    expect(SVC).toContain('const delta = (qty - round3(prev?.quantity || 0)) * sign');
+// Lines are RECORD-ONLY since the single-mover rule (owner decision
+// 2026-10-07, audit MIL-M1): katta moves at yield through reconcileBatchKatta,
+// P.P. bags / masters / polythene with the packing run. Behaviour is EXECUTED in
+// packagingSingleMover.test.js; these pin the shape of the code.
+describe('saving lines moves no store stock', () => {
+  const body = SVC.slice(SVC.indexOf('async save('), SVC.indexOf('async costAdjustments('));
+
+  it('save() never moves stock for the lines it writes', () => {
+    // The only stock move left in save() is the one-time undo of legacy moves.
+    expect(body.match(/moveStock\(/g) || []).toHaveLength(1);
+    expect(body).toContain('delta: -m.quantity');
   });
 
-  it('a removed line gives its stock back', () => {
-    expect(SVC).toContain('if (kept.has(key)) continue;');
-    expect(SVC).toContain('const delta = -round3(prev.quantity) * sign;');
+  it('the legacy undo nets per line, so a second save moves nothing', () => {
+    expect(body).toContain('if (!m.quantity) continue;');
+    expect(body).toContain("where({ reference_type: REF })");
   });
 
-  it('deltas are NETTED per item and applied once', () => {
-    // The zero-clamp that stops store stock going negative also destroys
-    // quantity if an intermediate step dips below zero: dropping a
-    // "500 received / 400 consumed" pair left 400 bags behind, because removing
-    // the 500 clamped 100 to 0 before the 400 came back. Found by running it.
-    expect(SVC).toContain('const stockDelta = new Map()');
-    expect(SVC).toContain('for (const [itemId, delta] of stockDelta)');
-    // And the per-line ledger rows survive that batching.
-    expect(SVC).toContain('const movements = []');
-    expect(SVC).toContain("trx('mill_stock_movements').insert(movements)");
+  it('every legacy undo stays traceable back to its line', () => {
+    expect(SVC).toContain("const REF = 'batch_packaging'");
+    expect(body).toContain('reference_type: REF, reference_id: m.reference_id');
   });
 
   it('store stock still cannot go negative', () => {
     expect(SVC).toContain('GREATEST(quantity_available + ?, 0)');
-  });
-
-  it('every movement is traceable back to its line', () => {
-    expect(SVC).toContain("const REF = 'batch_packaging'");
-    expect(SVC).toContain('reference_id: lineId');
   });
 });
 
@@ -139,7 +133,7 @@ describe('the shape it is stored in', () => {
 
 describe('it is reachable and guarded', () => {
   const ROUTES = fs.readFileSync(path.join(__dirname, '../modules/milling/milling.routes.js'), 'utf8');
-  it('saving sits behind the store-consumption permission, since it moves stock', () => {
+  it('saving sits behind the store-consumption permission', () => {
     const block = ROUTES.slice(ROUTES.indexOf("'/batches/:id/packaging',"));
     expect(block).toContain("authorize('mill_store', 'record_consumption')");
     expect(block).toContain('validate(schemas.saveBatchPackaging)');

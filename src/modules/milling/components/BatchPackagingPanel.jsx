@@ -9,13 +9,16 @@ import useCanSeeCost from '../../../hooks/useCanSeeCost';
 //
 // A batch could only ever state one bag size, so "300 katta and 500 P.P. bags"
 // could not be said at all. Each line names a real packaging item from Mill
-// Store, so its type decides which stock it moves and its own price decides what
-// it costs — a 25 kg P.P. bag can no longer be taken for a 25 kg katta.
+// Store and its own price — a 25 kg P.P. bag can no longer be taken for a 25 kg
+// katta.
+//
+// RECORD-ONLY: saving moves no store stock. Katta moves at yield (the katta
+// reconcile); P.P. bags, masters and polythene move when a packing run is
+// logged. The cost section is the client's formula, shown for information — it
+// is not posted to the batch's cost (the packing run's cost already is).
 //
 //   Received  the empty bags that come free as the rice is milled out of them.
-//             They go INTO store stock, and their cost leaves this batch.
-//   Used      bags drawn from store to pack this batch's output. Katta spent on
-//             by-products comes back INTO the batch's cost.
+//   Used      bags used to pack this batch's output.
 
 const num = (v) => Number(parseFloat(v) || 0);
 const rs = (v) => `Rs ${num(v).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -61,9 +64,9 @@ export default function BatchPackagingPanel({ batchId, batchStatus, addToast }) 
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['batch-packaging', batchId] });
       qc.invalidateQueries({ queryKey: ['milling', 'batch', batchId] });
-      // Store stock moved, so anything showing it is now stale.
-      // Store stock moved, so every view of it is stale. Every storeKeys entry
-      // is prefixed 'mill-store', so this one prefix covers items and stock.
+      // Lines are record-only, but the first save after that rule can put back
+      // stock older saves moved — so store views are refreshed. Every storeKeys
+      // entry is prefixed 'mill-store', so this one prefix covers items and stock.
       qc.invalidateQueries({ queryKey: ['mill-store'] });
     },
   });
@@ -143,7 +146,7 @@ export default function BatchPackagingPanel({ batchId, batchStatus, addToast }) 
         output_type: r.direction === 'consumed' ? (r.output_type || null) : null,
         ...(r.unit_cost_pkr !== '' ? { unit_cost_pkr: num(r.unit_cost_pkr) } : {}),
       })));
-      addToast?.('Packaging saved — store stock updated', 'success');
+      addToast?.('Packaging recorded — store stock moves at yield and with packing runs', 'success');
     } catch (err) {
       addToast?.(err?.data?.errors?.[0]?.message || err?.data?.message || err.message || 'Failed to save packaging', 'error');
     }
@@ -184,8 +187,8 @@ export default function BatchPackagingPanel({ batchId, batchStatus, addToast }) 
           {list.length === 0 && (
             <tr><td colSpan={(direction === 'consumed' ? 7 : 6) - (showCost ? 0 : 2)} className="colspan-empty py-2 text-xs text-gray-400">
               {direction === 'received'
-                ? 'Nothing recorded. Add the katta and P.P. bags this batch freed — they go into store stock.'
-                : 'Nothing recorded. Add the bags, masters and polythene drawn from store to pack this batch.'}
+                ? 'Nothing recorded. Add the katta and P.P. bags this batch freed (a record — the yield returns them to store).'
+                : 'Nothing recorded. Add the bags, masters and polythene used to pack this batch (a record — packing runs draw them).'}
             </td></tr>
           )}
           {list.map((r) => {
@@ -236,9 +239,10 @@ export default function BatchPackagingPanel({ batchId, batchStatus, addToast }) 
         <div>
           <h3 className="text-sm font-semibold text-gray-700 inline-flex items-center gap-1.5"><Boxes className="w-4 h-4 text-blue-600" /> Packaging on this batch</h3>
           <p className="text-xs text-gray-500 mt-1 leading-snug max-w-2xl">
-            Each line names a real item from Mill Store, so katta, P.P. bags and master bags keep
-            their own stock and their own price. Saving moves store stock by the change only, so
-            correcting a figure posts the difference rather than counting it twice.
+            Each line names a real item from Mill Store at its own price. This is a record of what
+            the batch freed and used — saving does not move store stock. Katta stock moves at yield
+            (freed from the raw, used to pack the output); P.P. bags, master bags and polythene move
+            when a packing run is logged.
           </p>
         </div>
         <button onClick={submit} disabled={locked || !dirty || problems.length > 0 || save.isPending}
@@ -255,7 +259,7 @@ export default function BatchPackagingPanel({ batchId, batchStatus, addToast }) 
 
       <div className="border border-gray-200 rounded-xl p-4">
         <div className="flex items-center justify-between mb-2">
-          <h4 className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Received — katta &amp; P.P. bags freed into store</h4>
+          <h4 className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Received — katta &amp; P.P. bags freed</h4>
           <button onClick={() => addRow('received')} disabled={locked} className="text-xs font-medium text-blue-600 hover:text-blue-700 inline-flex items-center gap-1 disabled:opacity-40">
             <Plus className="w-3.5 h-3.5" /> Add
           </button>
@@ -265,7 +269,7 @@ export default function BatchPackagingPanel({ batchId, batchStatus, addToast }) 
 
       <div className="border border-gray-200 rounded-xl p-4">
         <div className="flex items-center justify-between mb-2">
-          <h4 className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Used — drawn from store to pack</h4>
+          <h4 className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Used — to pack this batch</h4>
           <button onClick={() => addRow('consumed')} disabled={locked} className="text-xs font-medium text-blue-600 hover:text-blue-700 inline-flex items-center gap-1 disabled:opacity-40">
             <Plus className="w-3.5 h-3.5" /> Add
           </button>
@@ -277,17 +281,19 @@ export default function BatchPackagingPanel({ batchId, batchStatus, addToast }) 
           easy to get backwards, so the arithmetic is shown rather than implied. */}
       {showCost && (
       <div className="bg-gray-50 border border-gray-200 rounded-xl p-4">
-        <h4 className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Effect on this batch&rsquo;s cost</h4>
+        <h4 className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Packaging cost formula <span className="normal-case font-normal text-gray-400">(informational — not posted to batch cost)</span></h4>
         <div className="space-y-1 text-sm">
           <div className="flex justify-between"><span className="text-gray-600">Less: katta &amp; P.P. bags freed into store</span><span className="font-medium text-emerald-700">− {rs(receivedCost)}</span></div>
           <div className="flex justify-between"><span className="text-gray-600">Add: katta used on by-products</span><span className="font-medium text-red-600">+ {rs(byproductKattaCost)}</span></div>
           <div className="flex justify-between border-t border-gray-200 pt-1 font-semibold">
-            <span className="text-gray-700">Net adjustment</span>
+            <span className="text-gray-700">Net adjustment (not posted)</span>
             <span className={netAdjustment < 0 ? 'text-emerald-700' : 'text-red-600'}>{netAdjustment < 0 ? '−' : '+'} {rs(Math.abs(netAdjustment))}</span>
           </div>
         </div>
         <p className="text-[11px] text-gray-500 mt-2 leading-snug">
-          Katta and P.P. bags freed are stock the mill now holds, so their cost leaves this batch.
+          This figure is not applied to the batch&rsquo;s cost. The batch&rsquo;s packaging cost comes
+          from its packing runs (Costs &rsaquo; Packaging), and adding this as well would count the
+          same bags twice. Under the formula: katta and P.P. bags freed are stock the mill holds, so their cost would leave this batch.
           Katta spent bagging by-products is gone, so it stays in. Bags used on the finished rice
           are part of what was packed and are already in the packing cost. Masters and polythene are
           only ever used, never freed, so they are not credited here.
