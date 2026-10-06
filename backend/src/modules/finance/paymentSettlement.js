@@ -12,6 +12,7 @@
  */
 const { nextDocNo } = require('../../utils/docNumber');
 const accountingService = require('../accounting/accounting.service');
+const { ledgerFailure, missingAccounts } = require('../../shared/ledgerFailure');
 
 const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 const num = (v) => parseFloat(v) || 0;
@@ -164,7 +165,133 @@ async function postDeltaOf(trx, { refNo, refTypes, refType, description, userId,
   return n;
 }
 
+/**
+ * A cheque is never money in the bank until it clears (owner decision,
+ * 2026-10-07 — same-day cheques included). Recording one settles nothing,
+ * moves no account and posts no journal; Clear Cheque does all three.
+ */
+const isCheque = (method) => String(method || '').toLowerCase() === 'cheque';
+
+/** True when a journal already carries this payment's number (idempotent clear). */
+async function hasPaymentJournal(trx, paymentNo) {
+  if (!paymentNo) return false;
+  const j = await trx('journal_entries').where({ ref_no: paymentNo }).first('id');
+  return !!j;
+}
+
+const expenseEntity = (t) => (t === 'mill' ? 'mill' : t === 'export' ? 'export' : 'general');
+
+/**
+ * The settlement journal for one payment row, posted under its payment_no:
+ *  - a receipt: Dr 1000 / Cr 1120 (local sale), 1310 (advance), 1110 (export
+ *    balance) or 1100, stamped to the receivable's customer;
+ *  - a payment: Dr the payable (2010; 2040 for a salaries expense) for the
+ *    gross / Cr 1000 for the net cash, Cr 2060 for WHT, Cr 4060 for the
+ *    discount, stamped to the supplier.
+ * This is what recordPayment posts for a settled payment, and what Clear Cheque
+ * posts for a cheque recorded on any screen (Money In/Out, Purchases,
+ * Expenses). Throws through ledgerFailure so the caller's transaction rolls back.
+ */
+async function postPaymentJournal(trx, { payment, userId, date, description }) {
+  try {
+    const isReceivable = payment.type === 'receipt';
+    const paymentNo = payment.payment_no;
+    const amtNum = num(payment.amount);
+    const cur = String(payment.currency || 'PKR').toUpperCase();
+    const fx = num(payment.fx_rate) || 1;
+    const amtPkr = round2(num(payment.base_amount_pkr) || (cur === 'PKR' ? amtNum : amtNum * fx));
+    if (!(amtPkr > 0)) return null;
+    const wht = isReceivable ? 0 : num(payment.wht_amount);
+    const disc = isReceivable ? 0 : num(payment.discount_amount);
+
+    let counterCode = isReceivable ? '1100' : '2010';
+    let entity = isReceivable ? 'export' : 'mill';
+    let partyType = null; let partyId = null;
+    let what = isReceivable ? `receivable #${payment.linked_receivable_id || ''}` : `payable #${payment.linked_payable_id || ''}`;
+    if (isReceivable && payment.linked_receivable_id) {
+      const r = await trx('receivables').where({ id: payment.linked_receivable_id }).first();
+      if (r) {
+        if (r.local_sale_id) { counterCode = '1120'; entity = 'mill'; }
+        else if (String(r.type || '').toLowerCase() === 'advance') { counterCode = '1310'; entity = 'export'; }
+        else counterCode = '1110';
+        if (r.customer_id) { partyType = 'customer'; partyId = r.customer_id; }
+      }
+    } else if (!isReceivable) {
+      const pa = payment.linked_payable_id ? await trx('payables').where({ id: payment.linked_payable_id }).first() : null;
+      if (pa?.supplier_id) { partyType = 'supplier'; partyId = pa.supplier_id; }
+      // A payment recorded against a source document (Purchases tab, Expenses)
+      // carries it on the payment row.
+      const src = SOURCES[payment.source_table] && payment.source_id
+        ? await trx(payment.source_table).where({ id: payment.source_id }).first()
+        : null;
+      if (src) {
+        what = src.expense_no || src.lot_no || src.purchase_no || src.pbo_no || `${payment.source_table} #${payment.source_id}`;
+        if (payment.source_table === 'business_expenses') {
+          if (src.category === 'salaries') counterCode = '2040';
+          entity = expenseEntity(src.expense_type);
+        } else if (['export_order_costs', 'printed_bag_orders'].includes(payment.source_table)) {
+          entity = 'export';
+        }
+        const sid = src.supplier_id || pa?.supplier_id || null;
+        if (sid) { partyType = 'supplier'; partyId = sid; }
+      }
+    }
+
+    const cash = await trx('chart_of_accounts').where({ code: '1000' }).first();
+    let counter = await trx('chart_of_accounts').where({ code: counterCode }).first();
+    // Salaries Payable missing on an older DB → Supplier Payable, as expenses do.
+    if (!counter && counterCode === '2040') { counterCode = '2010'; counter = await trx('chart_of_accounts').where({ code: '2010' }).first(); }
+    if (!cash || !counter) throw missingAccounts(['1000', counterCode]);
+
+    let lines;
+    if (!isReceivable && (wht > 0 || disc > 0)) {
+      // #14 1e — the payable clears for the gross; only the net leaves the bank.
+      const netCash = round2(amtPkr - wht - disc);
+      lines = [
+        { account_id: counter.id, account: counter.name, debit: amtPkr, credit: 0, narration: `DR ${counter.code} ${counter.name} — ${paymentNo}` },
+        { account_id: cash.id, account: cash.name, debit: 0, credit: netCash, narration: `CR ${cash.code} ${cash.name} — net cash ${paymentNo}` },
+      ];
+      if (wht > 0) {
+        const whtAcc = await trx('chart_of_accounts').where({ code: '2060' }).first();
+        if (whtAcc) lines.push({ account_id: whtAcc.id, account: whtAcc.name, debit: 0, credit: round2(wht), narration: `CR ${whtAcc.code} ${whtAcc.name} — WHT ${paymentNo}` });
+      }
+      if (disc > 0) {
+        const discAcc = await trx('chart_of_accounts').where({ code: '4060' }).first();
+        if (discAcc) lines.push({ account_id: discAcc.id, account: discAcc.name, debit: 0, credit: round2(disc), narration: `CR ${discAcc.code} ${discAcc.name} — discount ${paymentNo}` });
+      }
+    } else {
+      const dr = isReceivable ? cash : counter;
+      const cr = isReceivable ? counter : cash;
+      lines = [
+        { account_id: dr.id, account: dr.name, debit: amtPkr, credit: 0, narration: `DR ${dr.code} ${dr.name} — ${paymentNo}` },
+        { account_id: cr.id, account: cr.name, debit: 0, credit: amtPkr, narration: `CR ${cr.code} ${cr.name} — ${paymentNo}` },
+      ];
+    }
+    const noteOriginal = cur !== 'PKR' ? ` (orig ${cur} ${amtNum.toLocaleString()} @ ${fx})` : '';
+    const d = date ? new Date(date) : new Date();
+    const journal = await accountingService.createJournal(trx, {
+      date: (Number.isNaN(d.getTime()) ? new Date() : d).toISOString().slice(0, 10),
+      entity,
+      refType: 'Payment',
+      refNo: paymentNo,
+      description: description || `Payment ${paymentNo} for ${what}${noteOriginal}`,
+      currency: 'PKR',
+      fxRate: 1,
+      isAuto: true,
+      userId: userId || null,
+      partyType,
+      partyId,
+      lines,
+    });
+    if (journal?.id) await accountingService.postJournal(trx, journal.id);
+    return journal;
+  } catch (e) {
+    throw ledgerFailure(e);
+  }
+}
+
 module.exports = {
+  isCheque, hasPaymentJournal, postPaymentJournal,
   SOURCES, round2, resolveSource, mirrorSourcePaid, applyPayableDelta, applyReceivableDelta,
   pendingChequeTotal, nextBtNo, postDeltaOf,
 };

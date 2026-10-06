@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import useConfirm from '../../../hooks/useConfirm';
-import { PaymentExtras } from '../../../components/payments/PaymentFields';
-import { isPostDatedCheque } from '../../../components/payments/paymentPayload';
+import { PaymentExtras, ChequeHint } from '../../../components/payments/PaymentFields';
+import { isUnclearedCheque, CHEQUE_DATE_LABEL } from '../../../components/payments/paymentPayload';
 import OrderRefLink from '../../../shared/components/OrderRefLink';
 import { ArrowUpRight, AlertTriangle, CheckCircle, Clock, Eye, X, DollarSign, Landmark, Printer } from 'lucide-react';
 import { FinanceKPI, FinanceTable, FinanceFilterBar } from '../../../components/finance';
@@ -231,7 +231,9 @@ export default function MoneyOut() {
         currency: pay.currency || 'PKR',
         payment_method: payForm.paymentMethod,
         payment_date: payForm.paymentDate,
-        bank_account_id: isPostDatedCheque(payForm) ? null : (payForm.bankAccountId || null),
+        // A cheque may name the account it will clear through (kept for the
+        // clear); it moves nothing until it is cleared in Due Dates.
+        bank_account_id: payForm.bankAccountId || null,
         bank_reference: payForm.chequeNo || null,
         due_date: payForm.dueDate || null,
         linked_payable_id: pay.dbId || pay.id,
@@ -450,7 +452,7 @@ export default function MoneyOut() {
                 </div>
 
                 {/* Cheque details — number (optional) + clearing date for Due Dates.
-                    A post-dated cheque needs no account until it clears. */}
+                    A cheque needs no account until it is cleared there. */}
                 {payForm.paymentMethod === 'cheque' && (
                   <div className="grid grid-cols-2 gap-3">
                     <div>
@@ -459,20 +461,20 @@ export default function MoneyOut() {
                         className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" placeholder="e.g. 004512" />
                     </div>
                     <div>
-                      <label className="text-xs text-gray-500 block mb-1">Cheque date</label>
+                      <label className="text-xs text-gray-500 block mb-1">{CHEQUE_DATE_LABEL}</label>
                       <input type="date" value={payForm.dueDate} onChange={e => setPayForm({ ...payForm, dueDate: e.target.value })}
                         className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
                     </div>
+                    <ChequeHint className="col-span-2 -mt-1" />
                   </div>
                 )}
 
                 {/* Pay From Account — every payment moves money through one: a
                     cash account for cash, a bank account otherwise. Only a
-                    post-dated cheque waits; it moves money when it clears. */}
-                {!isPostDatedCheque(payForm) && (
-                  <div>
-                    <label className="text-xs text-gray-500 block mb-1">Pay From Account</label>
-                    <select required value={payForm.bankAccountId} onChange={e => setPayForm({ ...payForm, bankAccountId: e.target.value })}
+                    cheque waits; it moves money when it is cleared. */}
+                <div>
+                    <label className="text-xs text-gray-500 block mb-1">{isUnclearedCheque(payForm) ? 'Bank account it will clear through (optional)' : 'Pay From Account'}</label>
+                    <select required={!isUnclearedCheque(payForm)} value={payForm.bankAccountId} onChange={e => setPayForm({ ...payForm, bankAccountId: e.target.value })}
                       className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
                       <option value="">{payForm.paymentMethod === 'cash' ? 'Select cash account...' : 'Select account...'}</option>
                       {(payForm.paymentMethod === 'cash' ? cashAccounts : bankOnlyAccounts).map(a => (
@@ -481,8 +483,7 @@ export default function MoneyOut() {
                         </option>
                       ))}
                     </select>
-                  </div>
-                )}
+                </div>
 
                 {/* Amount + Date */}
                 <div className="grid grid-cols-2 gap-3">

@@ -4,7 +4,8 @@ import { useQueryClient } from '@tanstack/react-query';
 import { ArrowDownLeft, DollarSign, AlertTriangle, CheckCircle, Clock, Eye, X, Printer } from 'lucide-react';
 import { FinanceKPI, FinanceTable, FinanceChart, FinanceFilterBar } from '../../../components/finance';
 import { useReceivables, useRecordPayment, useBankAccounts, useReceivableReceipts, useAcceptLocalSaleGroupPayment } from '../../../api/queries';
-import { isPostDatedCheque } from '../../../components/payments/paymentPayload';
+import { isUnclearedCheque, CHEQUE_DATE_LABEL } from '../../../components/payments/paymentPayload';
+import { ChequeHint } from '../../../components/payments/PaymentFields';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { useApp } from '../../../context/AppContext';
 import TransactionDocument from '../../../components/TransactionDocument';
@@ -194,7 +195,7 @@ export default function MoneyIn() {
             payment_date: recvForm.paymentDate,
             // Cash is routed by collection_location (Mill Cash / Office Petty
             // Cash), not by an account pick.
-            bank_account_id: (isPostDatedCheque(recvForm) || recvForm.paymentMethod === 'cash') ? null : (recvForm.bankAccountId || null),
+            bank_account_id: recvForm.paymentMethod === 'cash' ? null : (recvForm.bankAccountId || null),
             collection_location: recvForm.paymentMethod === 'cash' ? (recvForm.collectionLocation || 'Mill') : null,
             reference: recvForm.chequeNo || null,
             due_date: recvForm.dueDate || null,
@@ -207,7 +208,9 @@ export default function MoneyIn() {
           currency: recv.currency || 'USD',
           payment_method: recvForm.paymentMethod,
           payment_date: recvForm.paymentDate,
-          bank_account_id: isPostDatedCheque(recvForm) ? null : (recvForm.bankAccountId || null),
+          // A cheque may name the account it will clear into (kept for the
+          // clear); it moves nothing until it is cleared in Due Dates.
+          bank_account_id: recvForm.bankAccountId || null,
           bank_reference: recvForm.chequeNo || null,
           due_date: recvForm.dueDate || null,
           linked_receivable_id: recv.dbId || recv.id,
@@ -397,8 +400,8 @@ export default function MoneyIn() {
                 </div>
 
                 {/* Cheque details — number (optional) + the date it clears, so
-                    Due Dates knows when to expect the money. A post-dated cheque
-                    needs no account until it clears. */}
+                    Due Dates knows when to expect the money. A cheque needs no
+                    account until it is cleared there. */}
                 {recvForm.paymentMethod === 'cheque' && (
                   <div className="grid grid-cols-2 gap-3">
                     <div>
@@ -407,16 +410,17 @@ export default function MoneyIn() {
                         className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" placeholder="e.g. 004512" />
                     </div>
                     <div>
-                      <label className="text-xs text-gray-500 block mb-1">Cheque date</label>
+                      <label className="text-xs text-gray-500 block mb-1">{CHEQUE_DATE_LABEL}</label>
                       <input type="date" value={recvForm.dueDate} onChange={e => setRecvForm({ ...recvForm, dueDate: e.target.value })}
                         className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
                     </div>
+                    <ChequeHint className="col-span-2 -mt-1" />
                   </div>
                 )}
 
                 {/* Receive Into Account — every receipt lands in one: a cash
-                    account for cash, a bank account otherwise. Only a post-dated
-                    cheque waits; it moves money when it clears. */}
+                    account for cash, a bank account otherwise. Only a cheque
+                    waits; it moves money when it is cleared. */}
                 {isLocalCash && (
                   <div>
                     <label className="text-xs text-gray-500 block mb-1">Cash collected at</label>
@@ -429,10 +433,10 @@ export default function MoneyIn() {
                     <p className="text-[11px] text-gray-400 mt-1">{recvForm.collectionLocation === 'Head Office' ? 'Lands in Office Petty Cash.' : 'Lands in Mill Cash.'}</p>
                   </div>
                 )}
-                {!isPostDatedCheque(recvForm) && !isLocalCash && (
+                {!isLocalCash && (
                   <div>
-                    <label className="text-xs text-gray-500 block mb-1">Receive Into Account</label>
-                    <select required value={recvForm.bankAccountId} onChange={e => setRecvForm({ ...recvForm, bankAccountId: e.target.value })}
+                    <label className="text-xs text-gray-500 block mb-1">{isUnclearedCheque(recvForm) ? 'Bank account it will clear into (optional)' : 'Receive Into Account'}</label>
+                    <select required={!isUnclearedCheque(recvForm)} value={recvForm.bankAccountId} onChange={e => setRecvForm({ ...recvForm, bankAccountId: e.target.value })}
                       className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
                       <option value="">{recvForm.paymentMethod === 'cash' ? 'Select cash account...' : 'Select bank account...'}</option>
                       {bankAccounts.filter(a => (a.type === 'cash') === (recvForm.paymentMethod === 'cash')).map(a => (

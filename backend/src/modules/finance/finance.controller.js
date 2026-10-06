@@ -24,6 +24,7 @@ const { ledgerFailure, missingAccounts } = require('../../shared/ledgerFailure')
 const {
   resolveSource, mirrorSourcePaid, applyPayableDelta, applyReceivableDelta,
   pendingChequeTotal, nextBtNo, postDeltaOf, round2,
+  isCheque, hasPaymentJournal, postPaymentJournal,
 } = require('./paymentSettlement');
 
 // Resolve a payment row to its PKR equivalent using the strongest
@@ -516,19 +517,51 @@ const financeController = {
         .leftJoin('local_sales as ls', 'ls.id', 'p.local_sale_id')
         .leftJoin('customers as c', 'c.id', 'r.customer_id')
         .leftJoin('suppliers as s', 's.id', 'pa.supplier_id')
-        .where('p.payment_method', 'cheque').whereNotNull('p.due_date').where('p.cleared', false)
+        // Every uncleared cheque — one with no clearing date is due the day it
+        // was recorded (it still has to be cleared here before it counts).
+        .where('p.payment_method', 'cheque').where('p.cleared', false)
         // A reversed (or rejected) cheque is not coming — don't count it down.
         .whereNotIn('p.status', ['Reversed', 'Rejected'])
-        .select('p.id', 'p.type', 'p.amount', 'p.currency', 'p.fx_rate', 'p.base_amount_pkr', 'p.due_date', 'p.bank_reference',
+        .select('p.id', 'p.type', 'p.amount', 'p.currency', 'p.fx_rate', 'p.base_amount_pkr', 'p.due_date', 'p.payment_date', 'p.payment_no', 'p.bank_account_id', 'p.bank_reference',
+          'p.local_sale_id', 'r.local_sale_id as recv_local_sale_id',
           'r.customer_id as recv_customer_id', 'pa.supplier_id as pay_supplier_id', 'ls.customer_id as ls_customer_id',
           db.raw("COALESCE(c.name, s.name, ls.buyer_name, 'Counterparty') as party"));
 
+      // A local sale is listed ONCE. It used to surface up to three times: its
+      // pending cheque, the receivable raised for it, and its own credit row.
+      // Now a sale's receivable never lists here (the sale stands for it); a
+      // sale with a cheque pending lists as that cheque (with its clearing
+      // date); any other confirmed sale still owing lists as one credit row
+      // per sale group — as Money In groups them — dated COALESCE(due_date,
+      // sale_date).
       const recv = await db('receivables as r').leftJoin('customers as c', 'c.id', 'r.customer_id')
         .whereNot('r.status', 'Paid').whereNotNull('r.due_date').where('r.outstanding', '>', 0)
+        .whereNull('r.local_sale_id')
         .select('r.outstanding as amount', 'r.currency', 'r.fx_rate', 'r.due_date', 'r.customer_id', db.raw("COALESCE(c.name, 'Customer') as party"), 'r.recv_no as ref');
-      const lsCredit = await db('local_sales as ls').leftJoin('customers as c', 'c.id', 'ls.customer_id')
-        .where('ls.due_amount', '>', 0).whereNotNull('ls.due_date').whereNotIn('ls.status', ['Pending', 'Cancelled'])
-        .select('ls.due_amount as amount', 'ls.due_date', 'ls.customer_id', 'ls.sale_no as ref', db.raw("COALESCE(c.name, ls.buyer_name, 'Walk-in') as party"));
+      const salesWithCheque = new Set(cheques
+        .map((x) => x.local_sale_id || x.recv_local_sale_id)
+        .filter(Boolean).map(String));
+      // Confirmed sales only — not Pending (unconfirmed), Cancelled, Reversed
+      // or Rejected — matching Money In.
+      const lsRows = await db('local_sales as ls').leftJoin('customers as c', 'c.id', 'ls.customer_id')
+        .where('ls.status', 'Completed').where('ls.due_amount', '>', 0)
+        .select('ls.id', 'ls.sale_group_no', 'ls.sale_no', 'ls.due_amount', 'ls.due_date', 'ls.sale_date', 'ls.customer_id',
+          db.raw("COALESCE(c.name, ls.buyer_name, 'Walk-in') as party"));
+      const lsGroups = new Map();
+      for (const x of lsRows) {
+        if (salesWithCheque.has(String(x.id))) continue;
+        const key = x.sale_group_no || x.sale_no || `#${x.id}`;
+        const due = x.due_date || x.sale_date || null;
+        const g = lsGroups.get(key);
+        if (!g) {
+          lsGroups.set(key, { amount: parseFloat(x.due_amount) || 0, due_date: due, customer_id: x.customer_id || null, ref: key, party: x.party });
+        } else {
+          g.amount += parseFloat(x.due_amount) || 0;
+          if (due && (!g.due_date || new Date(due) < new Date(g.due_date))) g.due_date = due;
+          g.customer_id = g.customer_id || x.customer_id || null;
+        }
+      }
+      const lsCredit = [...lsGroups.values()].map((g) => ({ ...g, amount: round2(g.amount) }));
       const pay = await db('payables as pa').leftJoin('suppliers as s', 's.id', 'pa.supplier_id')
         .whereNot('pa.status', 'Paid').whereNotNull('pa.due_date').where('pa.outstanding', '>', 0)
         .select('pa.outstanding as amount', 'pa.currency', 'pa.due_date', 'pa.supplier_id', 'pa.linked_ref as ref', db.raw("COALESCE(s.name, 'Supplier') as party"));
@@ -545,9 +578,10 @@ const financeController = {
         const amount = parseFloat(x.amount) || 0;
         const currency = (x.currency || 'PKR').toUpperCase();
         return {
-          kind: 'cheque', label: 'Cheque (pending)', dueDate: x.due_date, amount, currency,
+          kind: 'cheque', label: 'Cheque (pending)', dueDate: x.due_date || x.payment_date, amount, currency,
           amountPkr: parseFloat(x.base_amount_pkr) || toPkr(amount, currency, x.fx_rate),
           party: x.party, reference: x.bank_reference, paymentId: x.id,
+          paymentNo: x.payment_no, bankAccountId: x.bank_account_id || null,
           partyType: t === 'receipt' ? 'customer' : 'supplier',
           partyId: t === 'receipt' ? (x.recv_customer_id || x.ls_customer_id || null) : (x.pay_supplier_id || null),
         };
@@ -574,10 +608,14 @@ const financeController = {
     }
   },
 
-  // Clear a post-dated cheque — applies the (until-now deferred) payment to its
-  // linked sale/receivable/payable and (optionally) moves the bank account it
-  // cleared into/out of. Idempotent: a cleared cheque is a no-op; a reversed one
-  // is refused. When a cheque reaches the GL is deliberately left as it was.
+  // Clear a cheque. A cheque is not money in the bank until this runs (owner
+  // decision 2026-10-07, same-day cheques included), so clearing does all of
+  // it: settles the linked sale / receivable / payable and its source row,
+  // moves the bank account it cleared through (required — picked here, else the
+  // one named at recording) by the net, and posts the settlement journal under
+  // the payment number. Idempotent: a cleared cheque is a no-op, and a cheque
+  // that already has a journal (recorded under the old post-dated rules) gets no
+  // second one. A reversed cheque is refused.
   async clearCheque(req, res) {
     try {
       const { id } = req.params;
@@ -593,8 +631,14 @@ const financeController = {
         if (p.cleared) return { alreadyCleared: true };
         const amount = parseFloat(p.amount) || 0;
         const amountPkr = paymentToPkr(p);
+        // The money moves today, so it has to move through an account: the one
+        // picked in Due Dates, else the one named when the cheque was recorded.
         const acctId = bank_account_id || p.bank_account_id || null;
+        if (!acctId) throw fail('Choose the bank account this cheque cleared through.', 400);
+        const acctRow = await trx('bank_accounts').where({ id: acctId }).first();
+        if (!acctRow) throw fail('Bank account not found.', 400);
         await trx('payments').where({ id }).update({ cleared: true, bank_account_id: acctId, updated_at: trx.fn.now() });
+        const clearedPayment = { ...p, cleared: true, bank_account_id: acctId };
 
         if (p.local_sale_id) {
           const s = await trx('local_sales').where({ id: p.local_sale_id }).forUpdate().first();
@@ -621,16 +665,30 @@ const financeController = {
           const pa = p.linked_payable_id ? await trx('payables').where({ id: p.linked_payable_id }).forUpdate().first() : null;
           if (pa) await applyPayableDelta(trx, pa, amount);
           const source = await resolveSource(trx, { payment: p, payable: pa });
-          await mirrorSourcePaid(trx, source, amountPkr);
+          // Rows that record how they were paid hear which account it was.
+          const stamp = source && ['business_expenses', 'export_order_costs', 'mill_purchases'].includes(source.table)
+            ? { bank_account_id: acctId, payment_method: 'cheque', payment_reference: p.bank_reference || null }
+            : {};
+          await mirrorSourcePaid(trx, source, amountPkr, stamp);
         }
 
-        if (acctId) {
+        // The GL: the settlement journal recordPayment would have posted, under
+        // the payment's own number, dated the day it cleared. Idempotent — a
+        // cheque recorded under the old rules (a post-dated one journalled when
+        // it was recorded) already has its journal and gets no second one.
+        // Local-sale receipts journalled above (Dr 1000 / Cr 1120).
+        if (!p.local_sale_id && (p.linked_receivable_id || p.linked_payable_id || (p.source_table && p.source_id))
+          && !(await hasPaymentJournal(trx, p.payment_no))) {
+          await postPaymentJournal(trx, { payment: clearedPayment, userId: req.user?.id, date: new Date() });
+        }
+
+        {
           // Exactly what recordPayment moves for a cleared payment: the amount
           // in the account's own currency (native when it matches the cheque,
           // else the PKR equivalent), less any WHT and discount — those never
           // leave the bank. This used to move the gross and stamp it PKR even
           // for a USD cheque into a USD account.
-          const acct = await trx('bank_accounts').where({ id: acctId }).first();
+          const acct = acctRow;
           const wht = p.type === 'payment' ? (parseFloat(p.wht_amount) || 0) : 0;
           const disc = p.type === 'payment' ? (parseFloat(p.discount_amount) || 0) : 0;
           const bankMove = round2((acct && acct.currency === (p.currency || 'PKR') ? amount : amountPkr) - wht - disc);
@@ -1168,10 +1226,12 @@ const financeController = {
         });
       }
 
-      // A post-dated cheque records but does NOT settle the receivable/payable
-      // (or move the bank) until it clears — it stays Pending/Partial.
-      const _today = new Date(new Date().toDateString());
-      const isPostDated = payment_method === 'cheque' && due_date && new Date(due_date) > _today;
+      // A cheque — any cheque, same-day included — is not money in the bank
+      // until it clears: it records but does NOT settle the receivable/payable,
+      // move the account or reach the GL. Clear Cheque (Due Dates) does all
+      // three. Without a clearing date it is due the day it was recorded.
+      const isPostDated = isCheque(payment_method);
+      const chequeDue = isPostDated ? (due_date || payment_date || new Date().toISOString().slice(0, 10)) : (due_date || null);
       // Without finance.confirm_payment (the Mill Operator, via milling.edit)
       // only mill payables / receivables, through a mill account.
       const millOnly = await isMillOnlyPayer(req);
@@ -1220,8 +1280,8 @@ const financeController = {
 
         // The account the money moves through. Cash with none picked lands in
         // the owning entity's cash float (Mill Cash / Office Petty Cash); any
-        // other method must name one, except a post-dated cheque, which moves
-        // money only when it clears.
+        // other method must name one, except a cheque, which moves money only
+        // when it clears (an account named now is kept for the clear).
         const accountId = await resolvePaymentAccountId(trx, {
           bankAccountId: bank_account_id,
           method: payment_method,
@@ -1268,7 +1328,7 @@ const financeController = {
             payment_method: payment_method || null,
             bank_account_id: accountId || null,
             bank_reference: bank_reference || null,
-            due_date: due_date || null,
+            due_date: chequeDue,
             cleared: !isPostDated,
             payment_date: payment_date || trx.fn.now(),
             notes: notes || null,
@@ -1381,99 +1441,11 @@ const financeController = {
           }
         }
 
-        // ── Journal entry — direct post, not autoPost. ─────────────
-        // autoPost looks up posting_rules where trigger_event matches
-        // 'payment_receipt' / 'payment_made'; those rows don't exist,
-        // so every payment since day one quietly skipped the ledger.
-        // Mirror the pattern used by payPurchase: build the balanced
-        // entry inline using chart_of_accounts codes (1000 Cash & Bank,
-        // 1100 A/R, 2000 A/P). Bank-level detail still lives in
-        // bank_transactions, which is the sub-ledger for Cash & Bank.
-        try {
-          const isReceivable = type === 'receipt';
-          const stampedAmtPkr = Number(stampedPkr.toFixed(2));
-          const cashAndBank = await trx('chart_of_accounts').where({ code: '1000' }).first();
-
-          // Determine the correct counter account based on the source row.
-          //   AR accounts in use (per posting_rules):
-          //     1110 Export AR (USD)        ← export sales, balance receipts
-          //     1120 Local AR (PKR)         ← local sales
-          //     1310 Customer Advances      ← advance receipts
-          //   AP accounts in use:
-          //     2010 Supplier Payable       ← all expense_recorded /
-          //         purchase_invoice / store_purchase rules
-          // Previously the code used 1100 / 2000, which no posting rule
-          // touches, so the original liability/receivable never cleared.
-          let counterCode = isReceivable ? '1100' : '2010';
-          let counterEntity = 'export';
-          // Stamp the party so this settlement lands in the right ledger.
-          let partyType = null, partyId = null;
-          if (isReceivable && linked_receivable_id) {
-            const r = await trx('receivables').where({ id: linked_receivable_id }).first();
-            if (r) {
-              if (r.local_sale_id) { counterCode = '1120'; counterEntity = 'mill'; }
-              else if (String(r.type || '').toLowerCase() === 'advance') { counterCode = '1310'; counterEntity = 'export'; }
-              else counterCode = '1110'; // Export balance
-              if (r.customer_id) { partyType = 'customer'; partyId = r.customer_id; }
-            }
-          } else if (!isReceivable && linked_payable_id) {
-            const pa = await trx('payables').where({ id: linked_payable_id }).first();
-            if (pa?.supplier_id) { partyType = 'supplier'; partyId = pa.supplier_id; }
-          }
-          const counterAcc = await trx('chart_of_accounts').where({ code: counterCode }).first();
-          if (cashAndBank && counterAcc) {
-            const debitAcc  = isReceivable ? cashAndBank : counterAcc;
-            const creditAcc = isReceivable ? counterAcc : cashAndBank;
-            // The journal is always posted in PKR (the company's base
-            // currency). Line amounts above are already PKR-equivalents,
-            // so currency='PKR' / fxRate=1 keeps the FE conversion math
-            // a no-op. The original foreign amount is captured in the
-            // description for traceability.
-            const noteOriginal = cur !== 'PKR' ? ` (orig ${cur} ${amtNum.toLocaleString()} @ ${stampedFxRate})` : '';
-            let lines;
-            if (!isReceivable && (whtNum > 0 || discNum > 0)) {
-              // #14 1e — split the credit: net cash + WHT payable + discount income
-              // (the debit still clears the payable for the full gross amount).
-              const netCashPkr = Number((stampedAmtPkr - whtNum - discNum).toFixed(2));
-              lines = [
-                { account_id: counterAcc.id, account: counterAcc.name, debit: stampedAmtPkr, credit: 0, narration: `DR ${counterAcc.code} ${counterAcc.name} — ${paymentNo}` },
-                { account_id: cashAndBank.id, account: cashAndBank.name, debit: 0, credit: netCashPkr, narration: `CR ${cashAndBank.code} ${cashAndBank.name} — net cash ${paymentNo}` },
-              ];
-              if (whtNum > 0) {
-                const whtAcc = await trx('chart_of_accounts').where({ code: '2060' }).first();
-                if (whtAcc) lines.push({ account_id: whtAcc.id, account: whtAcc.name, debit: 0, credit: Number(whtNum.toFixed(2)), narration: `CR ${whtAcc.code} ${whtAcc.name} — WHT ${paymentNo}` });
-              }
-              if (discNum > 0) {
-                const discAcc = await trx('chart_of_accounts').where({ code: '4060' }).first();
-                if (discAcc) lines.push({ account_id: discAcc.id, account: discAcc.name, debit: 0, credit: Number(discNum.toFixed(2)), narration: `CR ${discAcc.code} ${discAcc.name} — discount ${paymentNo}` });
-              }
-            } else {
-              lines = [
-                { account_id: debitAcc.id,  account: debitAcc.name,  debit: stampedAmtPkr, credit: 0,              narration: `DR ${debitAcc.code} ${debitAcc.name} — ${paymentNo}` },
-                { account_id: creditAcc.id, account: creditAcc.name, debit: 0,             credit: stampedAmtPkr,  narration: `CR ${creditAcc.code} ${creditAcc.name} — ${paymentNo}` },
-              ];
-            }
-            const journal = await accountingService.createJournal(trx, {
-              date: (payment_date ? new Date(payment_date) : new Date()).toISOString().slice(0, 10),
-              entity: isReceivable ? counterEntity : 'mill',
-              refType: 'Payment',
-              refNo: paymentNo,
-              description: `Payment ${paymentNo} for ${entity_type} #${entity_id}${noteOriginal}`,
-              currency: 'PKR',
-              fxRate: 1,
-              isAuto: true,
-              userId: req.user.id,
-              partyType,
-              partyId,
-              lines,
-            });
-            if (journal?.id) await accountingService.postJournal(trx, journal.id);
-          } else {
-            throw missingAccounts(['1000', counterCode]);
-          }
-        } catch (jeErr) {
-          // The payment and its journal commit together or not at all.
-          throw ledgerFailure(jeErr);
+        // ── Journal entry — direct post (codes 1000 / 1110·1120·1310 / 2010,
+        // party-stamped, WHT + discount split). A cheque posts nothing here:
+        // its journal is posted by Clear Cheque, the day the money moves.
+        if (!isPostDated) {
+          await postPaymentJournal(trx, { payment, userId: req.user.id, date: payment_date || new Date() });
         }
 
         return payment;
@@ -1597,7 +1569,11 @@ const financeController = {
           }
         }
 
-        // 3) The GL: the signed delta of whatever this payment posted.
+        // 3) The GL: the signed delta of whatever this payment posted. An
+        //    uncleared cheque posts nothing until it clears, so there is
+        //    nothing to mirror and it is simply marked Reversed — except one
+        //    recorded under the old rules (post-dated cheques used to journal
+        //    at recording), whose journal is found here and undone.
         try {
           const mirrored = await postDeltaOf(trx, {
             refNo: pay.payment_no, refTypes: ownJournalTypes,
@@ -2517,14 +2493,16 @@ financeController.payPurchase = async (req, res) => {
       const paidAt = payment_date ? new Date(payment_date) : new Date();
       const status = fullyPaid ? 'Paid' : 'Partial';
 
-      // A post-dated cheque records but does NOT settle the purchase (source row,
-      // payable, bank, journal) until it clears — insert the uncleared payment
-      // and stop. Cleared later via POST /payments/:id/clear.
-      const isPostDated = payMethod === 'cheque' && due_date && new Date(due_date) > new Date(new Date().toDateString());
-      if (isPostDated) {
+      // A cheque — same-day included — records but does NOT settle the purchase
+      // (source row, payable, bank, journal) until it clears: insert the
+      // uncleared payment, carrying its source document, and stop. Clear Cheque
+      // (POST /payments/:id/clear) settles, moves the bank and journals it.
+      if (isCheque(payMethod)) {
         if (millOnly) await assertMillAccount(trx, bank_account_id);
         const natRef = row.lot_no || row.purchase_no || row.expense_no || null;
-        const payable = await trx('payables').where(function () {
+        // The payable read under lock above is the one this purchase settles;
+        // the natural-key match is only for a legacy payable with no source.
+        const payable = linkedPayable || await trx('payables').where(function () {
           this.where({ source_table: sourceTable, source_id: id });
           if (natRef) this.orWhere(function () { this.where('linked_ref', natRef).andWhere(function () { this.whereNull('source_table').orWhereNot('source_table', 'lot_transport'); }); });
         }).first();
@@ -2532,13 +2510,14 @@ financeController.payPurchase = async (req, res) => {
           payment_no: await nextDocNo(trx, { table: 'payments', column: 'payment_no', prefix: 'PP-', pad: 0 }),
           type: 'payment', amount: amountPkr, currency: 'PKR', fx_rate: 1, base_amount_pkr: amountPkr,
           payment_method: payMethod, bank_account_id: bank_account_id || null,
-          bank_reference: payment_reference || null, due_date, cleared: false,
+          bank_reference: payment_reference || null,
+          due_date: due_date || paidAt.toISOString().slice(0, 10), cleared: false,
           linked_payable_id: payable ? payable.id : null,
           source_table: sourceTable, source_id: id, payment_date: paidAt,
           notes: `Pending cheque for ${source} ${row.lot_no || row.purchase_no || row.expense_no || `#${id}`}`,
           created_by: req.user?.id || null,
         });
-        return { postDated: true, source, source_id: id, amount: amountPkr };
+        return { postDated: true, uncleared: true, source, source_id: id, amount: amountPkr };
       }
 
       // The account the money leaves. Cash with none picked comes out of the

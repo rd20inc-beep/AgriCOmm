@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Percent, Paperclip, FileText, X } from 'lucide-react';
 import api from '../../api/client';
 import { favStar } from '../../shared/utils/favorites';
-import { PAYMENT_METHODS, money, netCash, pickAccountForMethod } from './paymentPayload';
+import { PAYMENT_METHODS, money, netCash, pickAccountForMethod, CHEQUE_DATE_LABEL, CHEQUE_HINT } from './paymentPayload';
 
 /**
  * The payment form body: amount, method, date, account, reference, and the
@@ -16,6 +16,14 @@ import { PAYMENT_METHODS, money, netCash, pickAccountForMethod } from './payment
 
 const inp = 'w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 bg-white';
 const lbl = 'block text-xs font-medium text-gray-600 mb-1';
+
+/**
+ * What recording a cheque does — nothing, until it is cleared in Due Dates.
+ * Shown wherever a cheque can be recorded, in the same words.
+ */
+export function ChequeHint({ className = '' }) {
+  return <p className={`mt-1 text-[11px] text-amber-700 ${className}`}>{CHEQUE_HINT}</p>;
+}
 
 /** Cash / bank account picker. Favourites first, cash accounts marked. */
 export function AccountSelect({ accounts = [], value, onChange, label = 'Cash / Bank account *', id }) {
@@ -166,7 +174,8 @@ export default function PaymentFields({
       </div>
       {!hideAccount && (
         <AccountSelect id={`${idPrefix}-account`} accounts={accountOptions}
-          label={filterAccountsByMethod && form.method === 'cash' ? 'Cash account *' : 'Cash / Bank account *'}
+          label={form.method === 'cheque' ? 'Bank account it will clear through (optional)'
+            : filterAccountsByMethod && form.method === 'cash' ? 'Cash account *' : 'Cash / Bank account *'}
           value={form.bankAccountId} onChange={(v) => set('bankAccountId', v)} />
       )}
       <div>
@@ -179,8 +188,9 @@ export default function PaymentFields({
           Due Dates dashboard counts down to. */}
       {form.method === 'cheque' && (
         <div>
-          <label className={lbl} htmlFor={`${idPrefix}-due`}>Cheque clears on <span className="text-gray-400 font-normal">(optional)</span></label>
+          <label className={lbl} htmlFor={`${idPrefix}-due`}>{CHEQUE_DATE_LABEL} <span className="text-gray-400 font-normal">(optional)</span></label>
           <input id={`${idPrefix}-due`} type="date" value={form.dueDate} onChange={(e) => set('dueDate', e.target.value)} className={inp} />
+          <ChequeHint />
         </div>
       )}
       {extras && <PaymentExtras form={form} set={set} gross={parseFloat(form.amount) || 0} currency={currency} addToast={addToast} />}
