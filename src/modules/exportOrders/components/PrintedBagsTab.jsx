@@ -10,9 +10,10 @@ import { printedBagsApi } from '../api/services';
 import useConfirm from '../../../hooks/useConfirm';
 import PaymentDrawer from '../../../components/payments/PaymentDrawer';
 import { purchasePayPayload } from '../../../components/payments/paymentPayload';
+import { fmtPKR, fmtNum } from '../../../shared/utils/format';
 
 const PRINTING_OPTIONS = ['Plain', 'Buyer Logo', 'Buyer Logo + Text', 'Custom Design'];
-const rs = (n) => `Rs ${(parseFloat(n) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const rs = (n) => fmtPKR(parseFloat(n) || 0, { decimals: 2 });
 
 function StatusPill({ status }) {
   const map = {
@@ -170,8 +171,8 @@ export default function PrintedBagsTab({ order, onUpdated }) {
                     <div className="font-medium text-gray-900">{r.bag_type_name || r.bag_type_current_name || '—'}{r.bag_size_kg ? ` · ${r.bag_size_kg}kg` : ''}</div>
                     {(r.printing || r.brand_marking) && <div className="text-xs text-gray-500">{[r.printing, r.brand_marking].filter(Boolean).join(' · ')}</div>}
                   </td>
-                  <td data-label="Vendor" className="mob-hide px-4 py-2 text-gray-700">{r.vendor_name || <span className="text-gray-400">—</span>}</td>
-                  <td data-label="Qty" className="px-4 py-2 text-right text-gray-700">{(parseInt(r.quantity, 10) || 0).toLocaleString()}</td>
+                  <td data-label="Vendor" className="mob-hide px-4 py-2 text-gray-700"><div className="max-w-[200px] truncate" title={r.vendor_name || undefined}>{r.vendor_name || <span className="text-gray-400">—</span>}</div></td>
+                  <td data-label="Qty" className="px-4 py-2 text-right text-gray-700">{fmtNum(parseInt(r.quantity, 10) || 0)}</td>
                   <td data-label="Unit" className="mob-hide px-4 py-2 text-right text-gray-700">{rs(r.unit_cost)}</td>
                   <td data-label="Total" className="px-4 py-2 text-right font-semibold text-gray-900">{rs(r.total_amount)}</td>
                   <td data-label="Status" className="px-4 py-2"><StatusPill status={r.status} /></td>
@@ -190,7 +191,7 @@ export default function PrintedBagsTab({ order, onUpdated }) {
                           <Wallet className="w-3 h-3" /> Pay
                         </button>
                       )}
-                      <button onClick={() => remove(r)} disabled={busyId === r.id} title="Delete"
+                      <button onClick={() => remove(r)} disabled={busyId === r.id} title="Delete" aria-label={`Delete ${r.pbo_no}`}
                         className="inline-flex items-center px-1.5 py-1 text-xs text-red-500 hover:bg-red-50 rounded disabled:opacity-50">
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>

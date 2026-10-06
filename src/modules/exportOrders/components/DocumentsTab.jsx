@@ -8,6 +8,8 @@ import api from '../../../api/client';
 import { renderDocument, buildDocHtml } from './DocumentCenter';
 import { useAuth } from '../../../context/AuthContext';
 import { useApp } from '../../../context/AppContext';
+import useConfirm from '../../../hooks/useConfirm';
+import { fmtDate } from '../../../shared/utils/format';
 
 // Documents issued externally (regulator / shipping line / fumigator / inspector)
 // — upload-only; they cannot be system-generated.
@@ -54,6 +56,7 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
   const fileInputs = useRef({});
   const { hasPermission } = useAuth();
   const { addToast } = useApp();
+  const [confirm, confirmDialog] = useConfirm();
   // Only an Owner / Super Admin can make a change take effect. Everyone else
   // can upload, replace and request deletion freely — they are never blocked,
   // their changes simply wait.
@@ -297,9 +300,12 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
   const requestDelete = (f) => act(() => documentsApi.requestDelete(f.id), 'Deletion requested — awaiting owner approval.');
   // Owner / Super Admin delete directly. Nothing leaves the disk: the file is
   // marked deleted and stays in the type's version history.
-  const deleteNow = (f) => {
-    // eslint-disable-next-line no-alert
-    if (!window.confirm(`Delete "${f.file_name || f.title}"? It is kept in the version history and the deletion is recorded.`)) return;
+  const deleteNow = async (f) => {
+    if (!await confirm({
+      title: `Delete "${f.file_name || f.title}"?`,
+      consequence: 'It is kept in the version history and the deletion is recorded.',
+      confirmLabel: 'Delete',
+    })) return;
     act(() => documentsApi.remove(f.id), 'Deleted — the file is kept in the version history.');
   };
   const cancelDelete = (f) => act(() => documentsApi.cancelDelete(f.id), 'Deletion request withdrawn.');
@@ -436,6 +442,7 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
                       onClick={() => movePicked(key, -1)}
                       disabled={picked.indexOf(key) === 0}
                       title="Move earlier"
+                      aria-label={`Move ${LABELS[key]} earlier`}
                       className="text-gray-400 hover:text-gray-700 disabled:opacity-25 leading-none"
                     >
                       <ChevronUp className="w-3.5 h-3.5" />
@@ -445,6 +452,7 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
                       onClick={() => movePicked(key, 1)}
                       disabled={picked.indexOf(key) === picked.length - 1}
                       title="Move later"
+                      aria-label={`Move ${LABELS[key]} later`}
                       className="text-gray-400 hover:text-gray-700 disabled:opacity-25 leading-none"
                     >
                       <ChevronDown className="w-3.5 h-3.5" />
@@ -473,7 +481,7 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
                   return (
                     <div key={f.id} className="flex items-center gap-2 mt-0.5 flex-wrap">
                       <p className="text-[11px] text-gray-500 truncate">
-                        {f.file_name || f.title}{f.created_at ? ` · ${new Date(f.created_at).toLocaleDateString('en-GB')}` : ''}
+                        {f.file_name || f.title}{f.created_at ? ` · ${fmtDate(f.created_at)}` : ''}
                       </p>
                       {/* What this file's state actually means, in words */}
                       {pendingDelete ? (
@@ -527,15 +535,15 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
                             <p className="text-[11px] text-gray-400 truncate">
                               v{h.version} · {h.file_name || h.title}
                               {h.uploaded_by_name ? ` · uploaded by ${h.uploaded_by_name}` : ''}
-                              {h.created_at ? ` on ${new Date(h.created_at).toLocaleDateString('en-GB')}` : ''}
+                              {h.created_at ? ` on ${fmtDate(h.created_at)}` : ''}
                             </p>
                             {h.status === 'Deleted' ? (
                               <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-red-50 text-red-600 border border-red-200">
-                                deleted{h.deleted_by_name ? ` by ${h.deleted_by_name}` : ''}{h.deleted_at ? ` on ${new Date(h.deleted_at).toLocaleDateString('en-GB')}` : ''}
+                                deleted{h.deleted_by_name ? ` by ${h.deleted_by_name}` : ''}{h.deleted_at ? ` on ${fmtDate(h.deleted_at)}` : ''}
                               </span>
                             ) : (
                               <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500 border border-gray-200">
-                                superseded{h.superseded_by_name ? ` by ${h.superseded_by_name}` : ''}{h.superseded_at ? ` on ${new Date(h.superseded_at).toLocaleDateString('en-GB')}` : ''}
+                                superseded{h.superseded_by_name ? ` by ${h.superseded_by_name}` : ''}{h.superseded_at ? ` on ${fmtDate(h.superseded_at)}` : ''}
                               </span>
                             )}
                             <button onClick={() => previewStored(key, h)} className="text-[11px] text-blue-600 hover:underline flex-shrink-0">view</button>
@@ -593,6 +601,7 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
           <p className="text-xs text-emerald-600 mt-1">Order is ready to advance to the next stage.</p>
         </div>
       )}
+      {confirmDialog}
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { Check, Circle, Ship, Anchor } from 'lucide-react';
+import { fmtKg } from '../../../shared/utils/format';
 
 export default function ShipmentTab({ order, onUpdateShipment, canUpdateShipment }) {
   const shipmentContainers = order.shipmentContainers || [];
@@ -118,7 +119,7 @@ export default function ShipmentTab({ order, onUpdateShipment, canUpdateShipment
                       {container.lots.map((l) => (
                         <Link key={l.lotId} to={l.href || `/lot-inventory/${l.lotId}`}
                           className="text-xs font-mono px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 hover:bg-blue-100">
-                          {l.lotNo || `#${l.lotId}`}{l.qtyKg ? ` · ${Math.round(l.qtyKg).toLocaleString()}kg` : ''}
+                          {l.lotNo || `#${l.lotId}`}{l.qtyKg ? ` · ${fmtKg(l.qtyKg)}` : ''}
                         </Link>
                       ))}
                     </div>

@@ -4,7 +4,9 @@ import PartyLink from '../../../shared/components/PartyLink';
 import { Users, Plus, Search, Globe, Mail, Phone, Edit2, Trash2, DollarSign, CreditCard, Building2, BookOpen } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
 import { useBuyers, useSaveBuyer, useDeleteBuyer } from '../../../api/queries';
-import Modal from '../../../components/Modal';
+import SlideDrawer from '../../../components/SlideDrawer';
+import FieldError from '../../../shared/components/FieldError';
+import useConfirm from '../../../hooks/useConfirm';
 import StatusBadge from '../../../components/StatusBadge';
 import { PAYMENT_TERMS } from '../../../shared/constants/paymentTerms';
 import { PORTS } from '../../../shared/constants/ports';
@@ -31,6 +33,8 @@ export default function Buyers() {
   const [form, setForm] = useState({ ...emptyForm });
   const [saving, setSaving] = useState(false);
   const [showBankFields, setShowBankFields] = useState(false);
+  const [nameError, setNameError] = useState(null);
+  const [confirm, confirmDialog] = useConfirm();
 
   const countries = useMemo(() => {
     const set = new Set(buyers.map(b => b.country).filter(Boolean));
@@ -52,6 +56,7 @@ export default function Buyers() {
   function openAdd() {
     setEditId(null);
     setForm({ ...emptyForm });
+    setNameError(null);
     setShowBankFields(false);
     setModalOpen(true);
   }
@@ -74,12 +79,14 @@ export default function Buyers() {
       bank_swift: buyer.bank_swift || '',
       bank_iban: buyer.bank_iban || '',
     });
+    setNameError(null);
     setShowBankFields(!!(buyer.bank_name || buyer.bank_account));
     setModalOpen(true);
   }
 
   async function handleSave() {
     if (!form.name.trim()) {
+      setNameError('Buyer name is required');
       addToast('Buyer name is required', 'error');
       return;
     }
@@ -96,7 +103,11 @@ export default function Buyers() {
   }
 
   async function handleDelete(buyer) {
-    if (!confirm(`Delete buyer "${buyer.name}"? This cannot be undone if they have no orders.`)) return;
+    if (!await confirm({
+      title: `Delete buyer "${buyer.name}"?`,
+      consequence: 'This cannot be undone if they have no orders.',
+      confirmLabel: 'Delete buyer',
+    })) return;
     try {
       await deleteBuyerMut.mutateAsync(buyer.id);
       addToast(`Buyer "${buyer.name}" removed`);
@@ -105,7 +116,10 @@ export default function Buyers() {
     }
   }
 
-  const set = (field, value) => setForm(prev => ({ ...prev, [field]: value }));
+  const set = (field, value) => {
+    if (field === 'name' && nameError && value.trim()) setNameError(null);
+    setForm(prev => ({ ...prev, [field]: value }));
+  };
 
   return (
     <div className="space-y-6">
@@ -169,8 +183,8 @@ export default function Buyers() {
               ) : filtered.map(b => (
                 <tr key={b.id} className="hover:bg-gray-50 transition-colors">
                   <td data-label="Buyer" className="px-4 py-3">
-                    <div className="font-medium"><PartyLink type="customer" id={b.id} name={b.name} /></div>
-                    {b.email && <div className="text-xs text-gray-500 flex items-center gap-1 mt-0.5"><Mail className="w-3 h-3" />{b.email}</div>}
+                    <div className="font-medium max-w-[260px] truncate" title={b.name}><PartyLink type="customer" id={b.id} name={b.name} /></div>
+                    {b.email && <div className="text-xs text-gray-500 flex items-center gap-1 mt-0.5 max-w-[260px]"><Mail className="w-3 h-3 flex-shrink-0" /><span className="truncate" title={b.email}>{b.email}</span></div>}
                   </td>
                   <td data-label="Country" className="px-4 py-3">
                     {b.country ? (
@@ -193,13 +207,13 @@ export default function Buyers() {
                   </td>
                   <td data-label="Actions" className="px-4 py-3 text-center">
                     <div className="flex items-center justify-center gap-1">
-                      <button onClick={() => navigate(`/finance/statements?type=customer&id=${b.id}`)} className="p-1.5 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors" title="View ledger">
+                      <button onClick={() => navigate(`/finance/statements?type=customer&id=${b.id}`)} className="p-1.5 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors" title="View ledger" aria-label={`View ledger for ${b.name}`}>
                         <BookOpen className="w-4 h-4" />
                       </button>
-                      <button onClick={() => openEdit(b)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Edit">
+                      <button onClick={() => openEdit(b)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Edit" aria-label={`Edit ${b.name}`}>
                         <Edit2 className="w-4 h-4" />
                       </button>
-                      <button onClick={() => handleDelete(b)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Delete">
+                      <button onClick={() => handleDelete(b)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Delete" aria-label={`Delete ${b.name}`}>
                         <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
@@ -212,13 +226,28 @@ export default function Buyers() {
       </div>
 
       {/* Add/Edit Modal */}
-      <Modal isOpen={modalOpen} onClose={() => setModalOpen(false)} title={editId ? 'Edit Buyer' : 'Add New Buyer'} size="lg">
+      <SlideDrawer
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        title={editId ? 'Edit Buyer' : 'Add New Buyer'}
+        icon={Users}
+        size="xl"
+        footer={(
+          <div className="flex justify-end gap-2">
+            <button type="button" onClick={() => setModalOpen(false)} className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">Cancel</button>
+            <button type="button" onClick={handleSave} disabled={saving} className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+              {saving ? 'Saving...' : editId ? 'Update Buyer' : 'Add Buyer'}
+            </button>
+          </div>
+        )}
+      >
         <div className="space-y-4">
           {/* Basic Info */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="sm:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Company / Buyer Name *</label>
-              <input type="text" value={form.name} onChange={e => set('name', e.target.value)} placeholder="e.g. Al Jazeera Trading LLC" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+              <label className="block text-sm font-medium text-gray-700 mb-1">Company / Buyer Name <span className="text-red-500">*</span></label>
+              <input type="text" value={form.name} onChange={e => set('name', e.target.value)} placeholder="e.g. Al Jazeera Trading LLC" aria-invalid={!!nameError} className={`w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none ${nameError ? 'border-red-400' : 'border-gray-300'}`} />
+              <FieldError error={nameError} />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Country</label>
@@ -302,16 +331,9 @@ export default function Buyers() {
               </div>
             )}
           </div>
-
-          {/* Actions */}
-          <div className="flex justify-end gap-2 pt-3 border-t border-gray-200">
-            <button onClick={() => setModalOpen(false)} className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">Cancel</button>
-            <button onClick={handleSave} disabled={saving} className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50">
-              {saving ? 'Saving...' : editId ? 'Update Buyer' : 'Add Buyer'}
-            </button>
-          </div>
         </div>
-      </Modal>
+      </SlideDrawer>
+      {confirmDialog}
     </div>
   );
 }

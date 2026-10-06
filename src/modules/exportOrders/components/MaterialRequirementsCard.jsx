@@ -3,8 +3,9 @@ import { Boxes, AlertTriangle, ShoppingCart } from 'lucide-react';
 import api from '../../../api/client';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
+import { fmtNum, fmtPKR } from '../../../shared/utils/format';
 
-const n0 = (v) => Math.round(parseFloat(v) || 0).toLocaleString();
+const n0 = (v) => fmtNum(Math.round(parseFloat(v) || 0));
 
 // Proactive material requirements (before packing): bags / master bags / polythene
 // / pallets needed for the order vs mill stock, with a shortage per item and a
@@ -100,7 +101,7 @@ export default function MaterialRequirementsCard({ order }) {
                       looked identical to one that was simply in stock. */}
                   <td data-label="Unit Cost" className="py-2 text-right tabular-nums text-gray-500">
                     {l.est_unit_cost != null
-                      ? `Rs ${Number(l.est_unit_cost).toLocaleString(undefined, { maximumFractionDigits: 2 })}`
+                      ? fmtPKR(l.est_unit_cost, { decimals: 2 })
                       : <span className="text-amber-600" title="No cost recorded on this item — set it in Mill Store">no cost set</span>}
                   </td>
                   {/* Value of what has to be BOUGHT (the shortage), not of the
@@ -108,7 +109,7 @@ export default function MaterialRequirementsCard({ order }) {
                       than a misleading Rs 0. */}
                   <td data-label="To Buy" className="py-2 text-right tabular-nums text-gray-700">
                     {short <= 0 ? <span className="text-gray-400">—</span>
-                      : l.est_amount != null ? `Rs ${n0(l.est_amount)}` : <span className="text-amber-600">unpriced</span>}
+                      : l.est_amount != null ? fmtPKR(Math.round(parseFloat(l.est_amount) || 0)) : <span className="text-amber-600">unpriced</span>}
                   </td>
                 </tr>
               );

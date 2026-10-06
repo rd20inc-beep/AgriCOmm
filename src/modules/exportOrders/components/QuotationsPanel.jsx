@@ -7,6 +7,7 @@ import ProformaInvoice from '../../../components/ProformaInvoice';
 import QuotationDrawer from './QuotationDrawer';
 import { quotationsApi } from '../api/services';
 import useConfirm from '../../../hooks/useConfirm';
+import { fmtNum, fmtDate } from '../../../shared/utils/format';
 
 const num = (v) => parseFloat(v) || 0;
 const STATUS_TABS = ['All', 'Draft', 'Sent', 'Accepted', 'Rejected', 'Expired'];
@@ -129,7 +130,7 @@ export default function QuotationsPanel() {
     if (!await confirm({
       title: `Convert ${row.quotation_no} into an export order?`,
       consequence: 'A real export order is created from this quote, with its receivables and document checklist. The quote itself stays on record.',
-      amount: `${row.currency || ''} ${num(row.total_amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`.trim(),
+      amount: `${row.currency || ''} ${fmtNum(num(row.total_amount), 2)}`.trim(),
       danger: false,
       confirmLabel: 'Create the order',
     })) return;
@@ -148,7 +149,7 @@ export default function QuotationsPanel() {
     if (!await confirm({
       title: `Delete quotation ${row.quotation_no}?`,
       consequence: 'The quote and its lines go. This cannot be undone.',
-      amount: `${row.currency || ''} ${num(row.total_amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`.trim(),
+      amount: `${row.currency || ''} ${fmtNum(num(row.total_amount), 2)}`.trim(),
       confirmLabel: 'Delete quotation',
     })) return;
     setBusyId(row.id);
@@ -197,23 +198,23 @@ export default function QuotationsPanel() {
                 return (
                   <tr key={r.id} className="hover:bg-gray-50">
                     <td data-label="Quote No" className="px-4 py-3 font-medium text-blue-600">{r.quotation_no}</td>
-                    <td data-label="Customer" className="px-4 py-3 text-gray-900">{r.customer_name || '—'}{r.country ? <span className="text-gray-400 text-xs"> · {r.country}</span> : null}</td>
+                    <td data-label="Customer" className="px-4 py-3 text-gray-900"><div className="max-w-[260px] truncate" title={r.customer_name || undefined}>{r.customer_name || '—'}{r.country ? <span className="text-gray-400 text-xs"> · {r.country}</span> : null}</div></td>
                     <td data-label="Incoterm" className="mob-hide px-4 py-3 text-gray-600">{r.incoterm || '—'}</td>
-                    <td data-label="Total" className="px-4 py-3 text-right font-medium text-gray-900">{r.currency} {num(r.total_amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                    <td data-label="Valid Until" className="mob-hide px-4 py-3 text-center text-gray-600">{r.valid_until ? String(r.valid_until).split('T')[0] : '—'}</td>
+                    <td data-label="Total" className="px-4 py-3 text-right font-medium text-gray-900">{r.currency} {fmtNum(num(r.total_amount), 2)}</td>
+                    <td data-label="Valid Until" className="mob-hide px-4 py-3 text-center text-gray-600">{fmtDate(r.valid_until)}</td>
                     <td data-label="Status" className="px-4 py-3 text-center">
                       <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[r.status] || 'bg-gray-100 text-gray-600'}`}>{r.status}</span>
                       {converted && r.converted_order_no && (
-                        <button onClick={() => navigate(`/export/${r.converted_order_no}`)} className="ml-1 inline-flex items-center text-emerald-600 hover:text-emerald-800" title={`Order ${r.converted_order_no}`}>
+                        <button onClick={() => navigate(`/export/${r.converted_order_no}`)} className="ml-1 inline-flex items-center text-emerald-600 hover:text-emerald-800" title={`Order ${r.converted_order_no}`} aria-label={`Open order ${r.converted_order_no}`}>
                           <ExternalLink className="w-3 h-3" />
                         </button>
                       )}
                     </td>
                     <td data-label="Actions" className="px-4 py-3">
                       <div className="flex items-center justify-center gap-3 flex-wrap">
-                        <button onClick={() => openPdf(r)} className={`${iconBtn} text-gray-600 hover:text-gray-900`} title="View / Print"><Eye className="w-3.5 h-3.5" /></button>
+                        <button onClick={() => openPdf(r)} className={`${iconBtn} text-gray-600 hover:text-gray-900`} title="View / Print" aria-label={`View or print ${r.quotation_no}`}><Eye className="w-3.5 h-3.5" /></button>
                         {!converted && ['Draft', 'Sent', 'Rejected', 'Expired'].includes(r.status) && (
-                          <button onClick={() => openEdit(r)} className={`${iconBtn} text-blue-600 hover:text-blue-800`} title="Edit"><Edit2 className="w-3.5 h-3.5" /></button>
+                          <button onClick={() => openEdit(r)} className={`${iconBtn} text-blue-600 hover:text-blue-800`} title="Edit" aria-label={`Edit ${r.quotation_no}`}><Edit2 className="w-3.5 h-3.5" /></button>
                         )}
                         {r.status === 'Draft' && (
                           <button disabled={busy} onClick={() => setStatus(r, 'Sent')} className={`${iconBtn} text-blue-600 hover:text-blue-800`} title="Mark Sent"><Send className="w-3.5 h-3.5" /> Send</button>
@@ -228,7 +229,7 @@ export default function QuotationsPanel() {
                           <button disabled={busy} onClick={() => convert(r)} className={`${iconBtn} text-white bg-emerald-600 hover:bg-emerald-700 px-2 py-1 rounded`} title="Convert to export order"><ArrowRightCircle className="w-3.5 h-3.5" /> Convert</button>
                         )}
                         {!converted && ['Draft', 'Rejected', 'Expired'].includes(r.status) && (
-                          <button disabled={busy} onClick={() => remove(r)} className={`${iconBtn} text-gray-400 hover:text-red-500`} title="Delete"><Trash2 className="w-3.5 h-3.5" /></button>
+                          <button disabled={busy} onClick={() => remove(r)} className={`${iconBtn} text-gray-400 hover:text-red-500`} title="Delete" aria-label={`Delete ${r.quotation_no}`}><Trash2 className="w-3.5 h-3.5" /></button>
                         )}
                       </div>
                     </td>

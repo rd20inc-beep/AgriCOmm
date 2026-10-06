@@ -86,6 +86,7 @@ export default function EmailComposer({
           <button
             onClick={onClose}
             disabled={sending}
+            aria-label="Close"
             className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50"
           >
             <X size={20} />

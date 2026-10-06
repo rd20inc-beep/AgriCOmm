@@ -9,13 +9,10 @@ import {
 import { useExportOrders, useCustomers, useInternalTransfers, useConfirmTransferExport } from '../../../api/queries';
 import { useApp } from '../../../context/AppContext';
 import { workflowSteps, isBalanceDue } from '../components/constants';
+import { fmtUSD, fmtKg, fmtDate } from '../../../shared/utils/format';
 
-function formatUSD(value) {
-  const n = Number(value) || 0;
-  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`;
-  if (n >= 1_000) return `$${(n / 1_000).toFixed(1)}K`;
-  return `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
+// Exact figures — money is never abbreviated to K/M (see shared/utils/format.js).
+const formatUSD = (value) => fmtUSD(Number(value) || 0);
 
 function daysBetween(a, b) {
   return Math.round((new Date(b) - new Date(a)) / (1000 * 60 * 60 * 24));
@@ -81,7 +78,7 @@ export default function ExportHomeDashboard() {
   const acceptTransfer = async (t) => {
     try {
       await confirmTransfer.mutateAsync(t.id);
-      addToast?.(`Accepted transfer ${t.transferNo || ''} — ${Math.round((Number(t.qtyMt) || 0) * 1000).toLocaleString()} kg received into export`, 'success');
+      addToast?.(`Accepted transfer ${t.transferNo || ''} — ${fmtKg((Number(t.qtyMt) || 0) * 1000)} received into export`, 'success');
     } catch (err) {
       addToast?.(err?.response?.data?.message || err?.message || 'Failed to accept transfer', 'error');
     }
@@ -223,11 +220,11 @@ export default function ExportHomeDashboard() {
               <div key={t.id} className="flex items-center justify-between gap-3 py-2.5">
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-gray-900 truncate">
-                    {t.productName || 'Finished Rice'} · <span className="tabular-nums">{Math.round((Number(t.qtyMt) || 0) * 1000).toLocaleString()} kg</span>
+                    {t.productName || 'Finished Rice'} · <span className="tabular-nums">{fmtKg((Number(t.qtyMt) || 0) * 1000)}</span>
                   </p>
                   <p className="text-[11px] text-gray-400">
                     {t.transferNo || `IT-${t.id}`} · from batch {t.batchNo || `#${t.batchId}`}
-                    {t.dispatchDate ? ` · ${new Date(t.dispatchDate).toLocaleDateString('en-GB')}` : ''}
+                    {t.dispatchDate ? ` · ${fmtDate(t.dispatchDate)}` : ''}
                   </p>
                 </div>
                 <button
@@ -340,13 +337,13 @@ export default function ExportHomeDashboard() {
                   className="flex items-center justify-between py-3 hover:bg-gray-50 -mx-2 px-2 rounded transition-colors"
                 >
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900 truncate">{o.id} · <PartyLink type="customer" id={o.customerId} name={o.customerName} /></p>
+                    <p className="text-sm font-medium text-gray-900 truncate" title={`${o.id} · ${o.customerName || ''}`}>{o.id} · <PartyLink type="customer" id={o.customerId} name={o.customerName} /></p>
                     <p className="text-xs text-gray-500 truncate">
                       {o.productName} · {o.qtyMT} MT · {o.destinationPort || o.country}
                     </p>
                   </div>
                   <div className="text-right ml-4">
-                    <p className="text-sm font-medium text-gray-900">{new Date(o.etd).toLocaleDateString('en-GB')}</p>
+                    <p className="text-sm font-medium text-gray-900">{fmtDate(o.etd)}</p>
                     <p className="text-xs text-gray-500">{o.vesselName || 'No vessel'}</p>
                   </div>
                 </Link>
@@ -371,7 +368,7 @@ export default function ExportHomeDashboard() {
                   className="block p-2 rounded hover:bg-gray-50 transition-colors"
                 >
                   <p className="text-sm font-medium text-gray-900 truncate">{o.id}</p>
-                  <p className="text-xs text-gray-500 truncate"><PartyLink type="customer" id={o.customerId} name={o.customerName} /> · {o.status}</p>
+                  <p className="text-xs text-gray-500 truncate" title={o.customerName}><PartyLink type="customer" id={o.customerId} name={o.customerName} /> · {o.status}</p>
                 </Link>
               ))}
             </div>
@@ -380,7 +377,7 @@ export default function ExportHomeDashboard() {
             <div className="mt-4 pt-4 border-t border-gray-100">
               <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-2">New buyers (30d)</p>
               {stats.newBuyers.map(b => (
-                <p key={b.id} className="text-xs text-gray-700 py-0.5 truncate">{b.name}</p>
+                <p key={b.id} className="text-xs text-gray-700 py-0.5 truncate" title={b.name}>{b.name}</p>
               ))}
             </div>
           )}

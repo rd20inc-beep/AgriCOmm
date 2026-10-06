@@ -1,14 +1,10 @@
 import React from 'react';
 import { ArrowRight } from 'lucide-react';
+import { fmtDateTime, toDate } from '../../../shared/utils/format';
 
 function fmt(d) {
   if (!d) return '';
-  const dt = new Date(d);
-  if (Number.isNaN(dt.getTime())) return String(d);
-  return dt.toLocaleString('en-GB', {
-    day: '2-digit', month: 'short', year: 'numeric',
-    hour: '2-digit', minute: '2-digit',
-  });
+  return toDate(d) ? fmtDateTime(d) : String(d);
 }
 
 export default function TimelineTab({ order }) {

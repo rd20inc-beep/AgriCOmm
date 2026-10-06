@@ -9,7 +9,7 @@ import Modal from '../../../components/Modal';
 import ProformaInvoice from '../../../components/ProformaInvoice';
 import QuotationsPanel from '../components/QuotationsPanel';
 import { isBalanceDue } from '../components/constants';
-import { todayLocalISO } from '../../../shared/utils/format';
+import { todayLocalISO, fmtUSD, fmtPct } from '../../../shared/utils/format';
 
 const tabs = [
   { key: 'All', label: 'All' },
@@ -77,9 +77,7 @@ export default function ExportOrders() {
       return 0;
     });
 
-  const formatCurrency = (value) => {
-    return '$' + value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  };
+  const formatCurrency = (value) => fmtUSD(value);
 
   const getAdvanceStatus = (order) => {
     if (order.advanceReceived >= order.advanceExpected && order.advanceExpected > 0) return 'received';
@@ -104,7 +102,7 @@ export default function ExportOrders() {
     const cv = parseFloat(order.contractValue) || 0;
     if (cv === 0) return '—';
     const margin = ((cv - totalCosts) / cv) * 100;
-    return margin.toFixed(1) + '%';
+    return fmtPct(margin);
   };
 
   return (
@@ -221,28 +219,16 @@ export default function ExportOrders() {
                     className="hover:bg-gray-50 cursor-pointer transition-colors"
                   >
                     <td data-label="Order No" className="px-4 py-3 font-medium text-blue-600">{order.id}</td>
-                    <td data-label="Customer" className="px-4 py-3 text-gray-900"><PartyLink type="customer" id={order.customerId} name={order.customerName} /></td>
+                    <td data-label="Customer" className="px-4 py-3 text-gray-900"><div className="max-w-[220px] truncate" title={order.customerName}><PartyLink type="customer" id={order.customerId} name={order.customerName} /></div></td>
                     <td data-label="Country" className="mob-hide px-4 py-3 text-gray-600">{order.country}</td>
                     <td data-label="Product" className="mob-hide px-4 py-3 text-gray-600">{order.productName}</td>
                     <td data-label="Qty MT" className="px-4 py-3 text-right text-gray-900 font-medium">{order.qtyMT}</td>
                     <td data-label="Value" className="px-4 py-3 text-right text-gray-900 font-medium">{formatCurrency(order.contractValue)}</td>
                     <td data-label="Advance" className="mob-hide px-4 py-3 text-center">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                        advanceStatus === 'received'
-                          ? 'bg-emerald-100 text-emerald-700'
-                          : 'bg-amber-100 text-amber-700'
-                      }`}>
-                        {advanceStatus === 'received' ? 'Received' : 'Pending'}
-                      </span>
+                      <StatusBadge status={advanceStatus === 'received' ? 'Received' : 'Pending'} />
                     </td>
                     <td data-label="Balance" className="mob-hide px-4 py-3 text-center">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                        balanceStatus === 'received'
-                          ? 'bg-emerald-100 text-emerald-700'
-                          : 'bg-amber-100 text-amber-700'
-                      }`}>
-                        {balanceStatus === 'received' ? 'Received' : 'Pending'}
-                      </span>
+                      <StatusBadge status={balanceStatus === 'received' ? 'Received' : 'Pending'} />
                     </td>
                     <td data-label="Shipment" className="px-4 py-3 text-center">
                       <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
@@ -290,6 +276,7 @@ export default function ExportOrders() {
                           }}
                           className="inline-flex items-center text-gray-500 hover:text-blue-600 text-xs font-medium"
                           title="Email Proforma Invoice"
+                          aria-label={`Email Proforma Invoice for ${order.id}`}
                         >
                           <Mail className="w-3.5 h-3.5" />
                         </button>

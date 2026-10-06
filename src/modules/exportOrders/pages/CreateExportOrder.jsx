@@ -15,6 +15,7 @@ import RiceTypePicker from '../../../components/RiceTypePicker';
 import BagTypePicker from '../../../components/BagTypePicker';
 import SupplierPicker from '../../../components/SupplierPicker';
 import SlideDrawer from '../../../components/SlideDrawer';
+import FieldError from '../../../shared/components/FieldError';
 import { printedBagsApi, exportOrdersApi } from '../api/services';
 import { INCOTERMS, incotermHint, advancePctForIncoterm } from '../../../shared/constants/incoterms';
 import { WEIGHT_UNITS, weightUnit } from '../../../shared/constants/weightUnits';
@@ -28,7 +29,7 @@ import {
   mixedPackingTotals, singleBagCountFor, estimateCosting, buildCreateOrderPayload,
   customerPrefill, lastOrderPrefill,
 } from '../utils/createOrderForm';
-import { todayLocalISO } from '../../../shared/utils/format';
+import { todayLocalISO, fmtNum, fmtUSD, fmtPKR, fmtPct } from '../../../shared/utils/format';
 
 const RECEIVING_MODES = [
   { value: 'bags', label: 'In Bags', desc: 'Standard packed bags', icon: ShoppingBag },
@@ -67,6 +68,7 @@ export default function CreateExportOrder() {
 
   // Quick-add customer
   const [showAddCustomer, setShowAddCustomer] = useState(false);
+  const [savingCust, setSavingCust] = useState(false);
   const [newCust, setNewCust] = useState({ name: '', country: '', port: '', address: '', email: '', phone: '', contact_person: '' });
 
   const [form, setForm] = useState(() => ({
@@ -180,10 +182,10 @@ export default function CreateExportOrder() {
   // bulk load is hard-blocked; bagged orders just get a containers-needed hint.
   const perContainerCap = form.palletized ? 20000 : 25000;
   const capacityWarning = form.packingType === 'container' && totalKg > perContainerCap
-    ? `Container bulk load capped at ${perContainerCap.toLocaleString()} KG${form.palletized ? ' (palletized)' : ''}. Use a bagged packing type or split into multiple orders.`
+    ? `Container bulk load capped at ${fmtNum(perContainerCap)} KG${form.palletized ? ' (palletized)' : ''}. Use a bagged packing type or split into multiple orders.`
     : '';
   const containersNote = totalKg > 0 && form.packingType !== 'container'
-    ? `≈ ${Math.ceil(totalKg / perContainerCap).toLocaleString()} container(s) at ${perContainerCap.toLocaleString()} KG each${form.palletized ? ' (palletized)' : ''}.`
+    ? `≈ ${fmtNum(Math.ceil(totalKg / perContainerCap))} container(s) at ${fmtNum(perContainerCap)} KG each${form.palletized ? ' (palletized)' : ''}.`
     : '';
 
   // Mixed packing totals
@@ -198,7 +200,6 @@ export default function CreateExportOrder() {
   // ─── Costing ─── (see estimateCosting: entered freight beats the $65/MT guess)
   const costing = useMemo(() => estimateCosting(form, items), [form, items]);
 
-  const fmtUSD = (v) => '$' + (v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   // ─── Wizard step ───
   // 1 = Buyer & Items, 2 = Terms & Packing, 3 = Specs & Review
@@ -339,7 +340,7 @@ export default function CreateExportOrder() {
     <div className="space-y-6 max-w-5xl">
       {/* Header + Step indicator */}
       <div className="flex items-center gap-4">
-        <button onClick={() => navigate(-1)} className="p-2 hover:bg-gray-100 rounded-lg"><ArrowLeft className="w-5 h-5 text-gray-600" /></button>
+        <button onClick={() => navigate(-1)} aria-label="Back" className="p-2 hover:bg-gray-100 rounded-lg"><ArrowLeft className="w-5 h-5 text-gray-600" /></button>
         <h1 className="text-2xl font-bold text-gray-900">Create Export Order</h1>
       </div>
       <div className="bg-white rounded-xl border border-gray-200 px-6 py-4">
@@ -381,7 +382,7 @@ export default function CreateExportOrder() {
         <div className="form-grid">
           <div className="form-group">
             <label className="form-label flex items-center justify-between">
-              <span>Customer *</span>
+              <span>Customer <span className="text-red-500">*</span></span>
               <span className="flex items-center gap-3">
                 {form.customerId && (
                   <button type="button"
@@ -408,6 +409,7 @@ export default function CreateExportOrder() {
               options={customers.filter(c => (c.customerType || 'export') === 'export').map(c => ({ value: c.id, label: `${favStar(c)}${c.name}`, sub: c.country }))}
               placeholder="Type to search buyer..."
             />
+            <FieldError error={!form.customerId ? formErrors.customerId : null} />
           </div>
           <div className="form-group">
             <label className="form-label">Destination Country</label>
@@ -452,7 +454,7 @@ export default function CreateExportOrder() {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
                 <div className="md:col-span-4">
-                  <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Product *</label>
+                  <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Product <span className="text-red-500">*</span></label>
                   <RiceTypePicker
                     value={it.productId}
                     onChange={val => updateItem(idx, 'productId', val)}
@@ -462,11 +464,11 @@ export default function CreateExportOrder() {
                   />
                 </div>
                 <div className="md:col-span-2">
-                  <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Qty (MT) *</label>
+                  <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Qty (MT) <span className="text-red-500">*</span></label>
                   <input type="number" min="0" step="0.01" value={it.qtyMT} onChange={e => updateItem(idx, 'qtyMT', e.target.value)} className="form-input" placeholder="MT" />
                 </div>
                 <div className="md:col-span-2">
-                  <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Rate / MT *</label>
+                  <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Rate / MT <span className="text-red-500">*</span></label>
                   <input type="number" min="0" step="0.01" value={it.pricePerMT} onChange={e => updateItem(idx, 'pricePerMT', e.target.value)} className="form-input" placeholder={form.currency} />
                 </div>
                 <div className="md:col-span-2">
@@ -476,7 +478,7 @@ export default function CreateExportOrder() {
                 <div className="md:col-span-2">
                   <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Line Total ({form.currency})</label>
                   <div className="form-input bg-white text-right font-semibold text-gray-900">
-                    {itemTotal(it).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                    {fmtNum(itemTotal(it))}
                   </div>
                 </div>
               </div>
@@ -487,7 +489,7 @@ export default function CreateExportOrder() {
         {isMultiItem && (
           <div className="mt-4 bg-blue-50 border border-blue-200 rounded-lg p-3 flex items-center justify-between text-sm">
             <span className="text-blue-700 font-semibold">Order total ({items.length} items)</span>
-            <span className="text-blue-900 font-bold">{qtyMT.toLocaleString()} MT · {form.currency} {contractValue.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+            <span className="text-blue-900 font-bold">{fmtNum(qtyMT)} MT · {form.currency} {fmtNum(contractValue)}</span>
           </div>
         )}
       </div>
@@ -635,9 +637,9 @@ export default function CreateExportOrder() {
           <div className="mt-4 bg-blue-50 rounded-xl border border-blue-200 p-4">
             <p className="text-xs font-semibold text-blue-700 uppercase tracking-wider mb-2">Quantity Equivalents</p>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-              <div><span className="text-blue-600">KG:</span> <span className="font-bold text-gray-900">{totalKg.toLocaleString()}</span></div>
-              <div><span className="text-blue-600">Bags (25kg):</span> <span className="font-bold text-gray-900">{Math.round(totalKg / 25).toLocaleString()}</span></div>
-              <div><span className="text-blue-600">Bags (50kg):</span> <span className="font-bold text-gray-900">{Math.round(totalKg / 50).toLocaleString()}</span></div>
+              <div><span className="text-blue-600">KG:</span> <span className="font-bold text-gray-900">{fmtNum(totalKg)}</span></div>
+              <div><span className="text-blue-600">Bags (25kg):</span> <span className="font-bold text-gray-900">{fmtNum(Math.round(totalKg / 25))}</span></div>
+              <div><span className="text-blue-600">Bags (50kg):</span> <span className="font-bold text-gray-900">{fmtNum(Math.round(totalKg / 50))}</span></div>
               <div><span className="text-blue-600">MT:</span> <span className="font-bold text-gray-900">{qtyMT}</span></div>
             </div>
             {contractValue > 0 && (
@@ -849,7 +851,7 @@ export default function CreateExportOrder() {
           {singleBagCount > 0 && (
             <div className="mt-4 bg-amber-50 rounded-lg border border-amber-200 p-3 text-sm text-amber-800">
               <span className="font-semibold">Estimated: </span>
-              {singleBagCount.toLocaleString()} bags x {form.bagSizeKg} KG = {totalKg.toLocaleString()} KG
+              {fmtNum(singleBagCount)} bags x {form.bagSizeKg} KG = {fmtNum(totalKg)} KG
               {form.bagType && ` | ${form.bagType}`}
               {requiresMasterBag(form.bagSizeKg) && form.masterBagSizeKg && (() => {
                 const inner = parseFloat(form.bagSizeKg) || 1;
@@ -859,7 +861,7 @@ export default function CreateExportOrder() {
                 return (
                   <div className="mt-2 pt-2 border-t border-amber-200 text-[12px] text-amber-800 space-y-0.5">
                     <div><span className="font-semibold">Master bag:</span> {inner}kg × {retailPerMaster} = {mbSize}kg</div>
-                    <div><span className="font-semibold">Master bags:</span> {totalKg.toLocaleString()} KG ÷ {mbSize} KG = <span className="font-semibold">{masterBagCount.toLocaleString()}</span> master bags</div>
+                    <div><span className="font-semibold">Master bags:</span> {fmtNum(totalKg)} KG ÷ {mbSize} KG = <span className="font-semibold">{fmtNum(masterBagCount)}</span> master bags</div>
                   </div>
                 );
               })()}
@@ -882,7 +884,7 @@ export default function CreateExportOrder() {
                 <div className="flex items-center justify-between mb-3">
                   <span className="text-xs font-semibold text-gray-500">Line {idx + 1}</span>
                   {packingLines.length > 1 && (
-                    <button onClick={() => removePackingLine(idx)} className="text-red-400 hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
+                    <button onClick={() => removePackingLine(idx)} aria-label={`Remove packing line ${idx + 1}`} title="Remove line" className="text-red-400 hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
                   )}
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -907,7 +909,7 @@ export default function CreateExportOrder() {
                   <div className="form-group">
                     <label className="form-label text-xs">Line Total</label>
                     <div className="form-input bg-gray-100 text-sm py-1.5 text-gray-700 font-medium">
-                      {((parseFloat(line.fillWeightKg) || 0) * (parseInt(line.bagCount) || 0)).toLocaleString()} KG
+                      {fmtNum((parseFloat(line.fillWeightKg) || 0) * (parseInt(line.bagCount) || 0))} KG
                     </div>
                   </div>
                 </div>
@@ -918,9 +920,9 @@ export default function CreateExportOrder() {
           {/* Mixed packing totals */}
           <div className="mt-4 bg-violet-50 rounded-lg border border-violet-200 p-3">
             <div className="grid grid-cols-3 gap-3 text-sm">
-              <div><span className="text-violet-600 text-xs font-medium">Packed:</span> <span className="font-bold text-gray-900">{mixedTotals.packedKg.toLocaleString()} KG ({mixedTotals.packedBags} bags)</span></div>
-              <div><span className="text-violet-600 text-xs font-medium">Loose:</span> <span className="font-bold text-gray-900">{mixedTotals.looseKg.toLocaleString()} KG</span></div>
-              <div><span className="text-violet-600 text-xs font-medium">Order Total:</span> <span className={`font-bold ${Math.abs(mixedTotals.packedKg + mixedTotals.looseKg - totalKg) < 1 ? 'text-emerald-600' : 'text-red-600'}`}>{totalKg.toLocaleString()} KG</span></div>
+              <div><span className="text-violet-600 text-xs font-medium">Packed:</span> <span className="font-bold text-gray-900">{fmtNum(mixedTotals.packedKg)} KG ({mixedTotals.packedBags} bags)</span></div>
+              <div><span className="text-violet-600 text-xs font-medium">Loose:</span> <span className="font-bold text-gray-900">{fmtNum(mixedTotals.looseKg)} KG</span></div>
+              <div><span className="text-violet-600 text-xs font-medium">Order Total:</span> <span className={`font-bold ${Math.abs(mixedTotals.packedKg + mixedTotals.looseKg - totalKg) < 1 ? 'text-emerald-600' : 'text-red-600'}`}>{fmtNum(totalKg)} KG</span></div>
             </div>
             {mixedTotals.packedKg > totalKg + 1 && (
               <p className="mt-2 text-xs text-red-600 font-medium">Packed weight exceeds order quantity!</p>
@@ -1006,7 +1008,7 @@ export default function CreateExportOrder() {
                       const itemKg = (parseFloat(it.qtyMT) || 0) * 1000;
                       return (
                         <div className="md:col-span-12 text-[11px] text-amber-700 -mt-1">
-                          {Math.floor(m / inner)} × {inner}kg = {m}kg master · {itemKg.toLocaleString()} KG ÷ {m} = <span className="font-semibold">{Math.ceil(itemKg / m).toLocaleString()}</span> master bags
+                          {Math.floor(m / inner)} × {inner}kg = {m}kg master · {fmtNum(itemKg)} KG ÷ {m} = <span className="font-semibold">{fmtNum(Math.ceil(itemKg / m))}</span> master bags
                         </div>
                       );
                     })()}
@@ -1090,7 +1092,7 @@ export default function CreateExportOrder() {
                 <div key={idx} className="bg-violet-50/50 rounded-lg p-4 border border-violet-100">
                   <div className="flex items-center justify-between mb-3">
                     <span className="text-xs font-semibold text-gray-500">Printed bags {idx + 1}</span>
-                    <button type="button" onClick={() => removePrintedBag(idx)} className="text-red-400 hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
+                    <button type="button" onClick={() => removePrintedBag(idx)} aria-label={`Remove printed bag ${idx + 1}`} title="Remove" className="text-red-400 hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <BagTypePicker label="Bag Type" value={b.bagType} bagTypes={bagTypesList} addToast={addToast}
@@ -1117,7 +1119,7 @@ export default function CreateExportOrder() {
                     </div>
                     <div className="form-group">
                       <label className="form-label text-xs">Line Total</label>
-                      <div className="form-input bg-gray-100 text-sm py-1.5 text-gray-700 font-medium">Rs {(lineTotal).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                      <div className="form-input bg-gray-100 text-sm py-1.5 text-gray-700 font-medium">{fmtPKR(lineTotal, { decimals: 2 })}</div>
                     </div>
                   </div>
                 </div>
@@ -1172,7 +1174,7 @@ export default function CreateExportOrder() {
               </div>
               <div className="flex justify-between text-sm font-semibold">
                 <span>Margin</span>
-                <span className={costing.marginPct >= 15 ? 'text-emerald-600' : costing.marginPct >= 5 ? 'text-amber-600' : 'text-red-600'}>{costing.marginPct.toFixed(1)}%</span>
+                <span className={costing.marginPct >= 15 ? 'text-emerald-600' : costing.marginPct >= 5 ? 'text-amber-600' : 'text-red-600'}>{fmtPct(costing.marginPct)}</span>
               </div>
               {/* Advance / balance split, driven by the incoterm-derived advance % */}
               <div className="border-t pt-2 flex justify-between text-sm"><span className="text-gray-600">Advance ({costing.advPct}%)</span><span className="font-medium">{fmtUSD(costing.advanceExpected)}</span></div>
@@ -1209,10 +1211,10 @@ export default function CreateExportOrder() {
         return (
           <div className="bg-white rounded-xl border border-gray-200 px-6 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 sticky bottom-0">
             <div className="text-xs text-gray-500 flex items-center gap-4 flex-wrap">
-              {qtyMT > 0 && <span><span className="font-medium text-gray-900">{qtyMT.toLocaleString()}</span> MT</span>}
-              {contractValue > 0 && <span><span className="text-gray-400">Value</span> <span className="font-medium text-gray-900">{form.currency} {contractValue.toLocaleString()}</span></span>}
-              {advExpected > 0 && <span><span className="text-gray-400">Adv</span> <span className="font-medium text-gray-900">{form.currency} {advExpected.toLocaleString()}</span></span>}
-              {balExpected > 0 && <span><span className="text-gray-400">Bal</span> <span className="font-medium text-emerald-700">{form.currency} {balExpected.toLocaleString()}</span></span>}
+              {qtyMT > 0 && <span><span className="font-medium text-gray-900">{fmtNum(qtyMT)}</span> MT</span>}
+              {contractValue > 0 && <span><span className="text-gray-400">Value</span> <span className="font-medium text-gray-900">{form.currency} {fmtNum(contractValue)}</span></span>}
+              {advExpected > 0 && <span><span className="text-gray-400">Adv</span> <span className="font-medium text-gray-900">{form.currency} {fmtNum(advExpected)}</span></span>}
+              {balExpected > 0 && <span><span className="text-gray-400">Bal</span> <span className="font-medium text-emerald-700">{form.currency} {fmtNum(balExpected)}</span></span>}
             </div>
             <div className="flex items-center gap-2">
               {step > 1 && (
@@ -1240,10 +1242,14 @@ export default function CreateExportOrder() {
         size="md"
         footer={(
           <div className="flex gap-2 justify-end">
-            <button onClick={() => setShowAddCustomer(false)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
+            <button type="button" onClick={() => setShowAddCustomer(false)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
             <button
+              type="button"
+              disabled={savingCust}
               onClick={async () => {
                 if (!newCust.name.trim()) { addToast('Company name is required', 'error'); return; }
+                if (savingCust) return;
+                setSavingCust(true);
                 try {
                   if (newCust.id) {
                     // Edit existing buyer → applies now + flagged for admin review.
@@ -1265,22 +1271,23 @@ export default function CreateExportOrder() {
                   setShowAddCustomer(false);
                   setNewCust({ name: '', country: '', port: '', address: '', email: '', phone: '', contact_person: '' });
                 } catch (err) { addToast(err?.response?.data?.message || 'Failed to save buyer', 'error'); }
+                finally { setSavingCust(false); }
               }}
-              className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700"
+              className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {newCust.id ? 'Save Changes' : 'Add Buyer'}
+              {savingCust ? 'Saving…' : newCust.id ? 'Save Changes' : 'Add Buyer'}
             </button>
           </div>
         )}
       >
         <div className="space-y-4">
           <div>
-            <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Company Name *</label>
+            <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Company Name <span className="text-red-500">*</span></label>
             <input type="text" value={newCust.name} onChange={e => setNewCust(p => ({ ...p, name: e.target.value }))}
               className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500" placeholder="Buyer company name" autoFocus />
           </div>
           <div>
-            <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Country *</label>
+            <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Country <span className="text-red-500">*</span></label>
             <SearchSelect
               value={newCust.country}
               onChange={val => setNewCust(p => ({ ...p, country: val }))}

@@ -1,5 +1,6 @@
 import React from 'react';
 import { DollarSign, Plus, Factory } from 'lucide-react';
+import { fmtKg } from '../../../shared/utils/format';
 import DebitNotesPanel from './DebitNotesPanel';
 
 export default function FinancialsTab({ order, formatCurrency, formatPKR, totalCosts, grossProfit, marginPct, onConfirmAdvance, onRequestBalance, onAddExpense, onAddReceivable, canConfirmAdvance, canRequestBalance, exportCostCategories, addToast }) {
@@ -154,7 +155,7 @@ export default function FinancialsTab({ order, formatCurrency, formatPKR, totalC
                       <tr key={o.lotId}>
                         <td data-label="Product / grade" className="px-6 py-2"><a href={o.href} className="text-blue-600 hover:underline">{o.productGrade}</a></td>
                         <td data-label="Type" className="mob-hide px-3 py-2 text-gray-600">{o.type === 'byproduct' ? 'by-product' : 'finished'}</td>
-                        <td data-label="Produced" className="px-3 py-2 text-right tabular-nums">{Math.round(o.producedKg).toLocaleString()} kg</td>
+                        <td data-label="Produced" className="px-3 py-2 text-right tabular-nums">{fmtKg(o.producedKg)}</td>
                         <td data-label="Cost/kg" className="mob-hide px-3 py-2 text-right tabular-nums">{o.costPerKg ? formatCost(o.costPerKg) : '—'}</td>
                         <td data-label="Sale price/kg" className="mob-hide px-3 py-2 text-right tabular-nums">{o.salePricePerKg ? formatCost(o.salePricePerKg) : '—'}</td>
                         <td data-label="Recovery value" className="px-3 py-2 text-right tabular-nums">{o.recoveryValue ? formatCost(o.recoveryValue) : '—'}</td>
