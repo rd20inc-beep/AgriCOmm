@@ -3,7 +3,7 @@ import { FileWarning, Plus, Loader2, Ban } from 'lucide-react';
 import SlideDrawer from '../../../components/SlideDrawer';
 import useConfirm from '../../../hooks/useConfirm';
 import { useDebitNotes, useIssueDebitNote, useCancelDebitNote } from '../../../api/queries';
-import { todayLocalISO } from '../../../shared/utils/format';
+import { todayLocalISO, fmtMoney, fmtNum, fmtDate } from '../../../shared/utils/format';
 
 // Freight escalation debit notes.
 //
@@ -15,8 +15,7 @@ import { todayLocalISO } from '../../../shared/utils/format';
 // one amount and the usual balance confirmation clears it.
 
 const num = (v) => Number(parseFloat(v) || 0);
-const money = (v, cur) => `${cur === 'USD' ? '$' : `${cur || ''} `}${num(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const fmtDate = (d) => (d ? String(d).slice(0, 10) : '—');
+const money = (v, cur) => (cur ? fmtMoney(num(v), cur, { decimals: 2 }) : fmtNum(num(v), 2));
 
 const BASES = [
   { code: 'freight_escalation', label: 'Freight escalation' },

@@ -34,7 +34,7 @@ export default function OrderHeader({
   return (
     <div className="flex flex-col sm:flex-row items-start justify-between gap-4">
       <div className="flex items-start gap-4">
-        <button onClick={onNavigateBack} className="mt-1 p-2 hover:bg-gray-100 rounded-lg transition-colors">
+        <button onClick={onNavigateBack} aria-label="Back to export orders" className="mt-1 p-2 hover:bg-gray-100 rounded-lg transition-colors">
           <ArrowLeft className="w-5 h-5 text-gray-600" />
         </button>
         <div>

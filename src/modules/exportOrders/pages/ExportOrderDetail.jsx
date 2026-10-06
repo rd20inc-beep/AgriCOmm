@@ -29,6 +29,7 @@ import { useCreateMillingBatch } from '../../../api/queries';
 import { exportOrdersApi } from '../api/services';
 import { duplicateStateFromOrder } from '../utils/createOrderForm';
 import useConfirm from '../../../hooks/useConfirm';
+import { fmtPKR, fmtUSD, fmtNum, fmtMoney } from '../../../shared/utils/format';
 import {
   OrderHeader,
   WorkflowTimeline,
@@ -239,8 +240,10 @@ export default function ExportOrderDetail() {
   const marginPct = contractValuePkr > 0 ? ((grossProfit / contractValuePkr) * 100).toFixed(1) : '0.0';
   const currencySymbols = { USD: '$', EUR: '€', GBP: '£' };
   const orderSymbol = currencySymbols[order.currency] || '$';
-  const formatCurrency = (value) => orderSymbol + (parseFloat(value) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const formatPKR = (value) => 'Rs ' + (parseFloat(value) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const formatCurrency = (value) => (orderSymbol === '$'
+    ? fmtUSD(parseFloat(value) || 0)
+    : `${orderSymbol}${fmtNum(parseFloat(value) || 0, 2)}`);
+  const formatPKR = (value) => fmtPKR(parseFloat(value) || 0, { decimals: 2 });
   const backendActions = order.allowedActions || {};
 
   // #3 How much finished demand is already reserved from existing stock (mirrors
@@ -388,7 +391,7 @@ export default function ExportOrderDetail() {
           notes: advanceNotes,
         },
       });
-      addToast(`Advance of ${amount.toLocaleString()} submitted — pending Finance confirmation`);
+      addToast(`Advance of ${formatCurrency(amount)} submitted — pending Finance confirmation`);
       invalidateFinance();
     } catch (err) {
       addToast(err?.data?.message || err?.message || 'Failed to submit advance', 'error');
@@ -415,7 +418,7 @@ export default function ExportOrderDetail() {
           notes: balanceNotes,
         },
       });
-      addToast(`Balance of ${amount.toLocaleString()} submitted — pending Finance confirmation`);
+      addToast(`Balance of ${formatCurrency(amount)} submitted — pending Finance confirmation`);
       invalidateFinance();
     } catch (err) {
       addToast(err?.data?.message || err?.message || 'Failed to submit balance', 'error');
@@ -556,7 +559,7 @@ export default function ExportOrderDetail() {
         id: orderId,
         data: { category: expenseCategory, amount, notes: expenseNotes },
       });
-      addToast(`Rs ${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} added to ${expenseCategory}`);
+      addToast(`${fmtPKR(amount, { decimals: 2 })} added to ${expenseCategory}`);
     } catch (err) {
       addToast(err.message || 'Failed to add expense', 'error');
     }
@@ -670,7 +673,7 @@ export default function ExportOrderDetail() {
       // The contract value is the exposure being unwound — the figure the person
       // cancelling should see before an owner is asked to authorise it.
       amount: order.contractValue != null
-        ? `${order.currency || 'USD'} ${(parseFloat(order.contractValue) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+        ? fmtMoney(parseFloat(order.contractValue) || 0, order.currency || 'USD')
         : undefined,
       reason: 'optional',
       confirmLabel: 'Cancel order',
@@ -1001,6 +1004,7 @@ export default function ExportOrderDetail() {
         setAdvanceNotes={setAdvanceNotes}
         bankAccountsList={bankAccountsList}
         onConfirm={handleConfirmAdvance}
+        pending={recordReceiptMut.isPending}
       />
 
       <BalancePaymentModal
@@ -1024,6 +1028,7 @@ export default function ExportOrderDetail() {
         setBalanceFxRate={setBalanceFxRate}
         bankAccountsList={bankAccountsList}
         onConfirm={handleConfirmBalance}
+        pending={recordReceiptMut.isPending}
       />
 
       <MillingDemandModal
@@ -1040,6 +1045,7 @@ export default function ExportOrderDetail() {
         onAllocated={invalidateOrder}
         onSourceFromStock={handleSourceFromStock}
         addToast={addToast}
+        pending={createMillingMut.isPending}
       />
 
       <ShipmentModal
@@ -1089,6 +1095,7 @@ export default function ExportOrderDetail() {
         setShipmentContainers={setShipContainers}
         canRecordDeparture={canRecordDeparture}
         onConfirm={handleUpdateShipment}
+        pending={updateShipmentMut.isPending}
       />
 
       <ExpenseModal
@@ -1102,6 +1109,7 @@ export default function ExportOrderDetail() {
         setExpenseNotes={setExpenseNotes}
         exportCostCategories={exportCostCategories}
         onConfirm={handleAddExpense}
+        pending={addCostMut.isPending}
       />
 
       <InvoicePreviewModal

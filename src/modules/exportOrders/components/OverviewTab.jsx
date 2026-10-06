@@ -1,6 +1,9 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ExternalLink, Pencil, Save, X } from 'lucide-react';
+import { LOCALE } from '../../../shared/utils/format';
+
+const nf3 = new Intl.NumberFormat(LOCALE, { maximumFractionDigits: 3 });
 import PartyLink from '../../../shared/components/PartyLink';
 import { useUpdateOrder } from '../../../api/queries';
 import { useApp } from '../../../context/AppContext';
@@ -506,7 +509,7 @@ export default function OverviewTab({ order, formatCurrency, formatPKR, totalCos
                       </>
                     ) : (
                       <>
-                        <td data-label="Qty (MT)" className="py-2 pr-3 text-right text-gray-900">{it.qtyMT.toLocaleString(undefined, { maximumFractionDigits: 3 })}</td>
+                        <td data-label="Qty (MT)" className="py-2 pr-3 text-right text-gray-900">{nf3.format(it.qtyMT)}</td>
                         <td data-label="Rate / MT" className="py-2 pr-3 text-right text-gray-900">{formatCurrency(it.pricePerMT)}</td>
                         <td data-label="Line Total" className="py-2 pl-3 text-right font-semibold text-gray-900">{formatCurrency(it.lineTotal)}</td>
                       </>
@@ -517,7 +520,7 @@ export default function OverviewTab({ order, formatCurrency, formatPKR, totalCos
               <tfoot>
                 <tr className="border-t-2 border-gray-200">
                   <td colSpan={6} className="mob-full py-2 pr-3 text-right text-xs uppercase text-gray-500 font-semibold">Total</td>
-                  <td data-label="Total qty" className="py-2 pr-3 text-right font-bold text-gray-900">{order.qtyMT.toLocaleString(undefined, { maximumFractionDigits: 3 })}</td>
+                  <td data-label="Total qty" className="py-2 pr-3 text-right font-bold text-gray-900">{nf3.format(order.qtyMT)}</td>
                   <td className="py-2 pr-3"></td>
                   <td data-label="Contract value" className="py-2 pl-3 text-right font-bold text-gray-900">{formatCurrency(order.contractValue)}</td>
                 </tr>

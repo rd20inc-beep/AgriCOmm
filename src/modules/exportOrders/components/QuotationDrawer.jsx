@@ -8,6 +8,10 @@ import RiceTypePicker from '../../../components/RiceTypePicker';
 import ItemPicker from '../../../components/ItemPicker';
 import { millStoreApi } from '../../millStore/api/services';
 import { quotationsApi } from '../api/services';
+import { fmtNum, LOCALE } from '../../../shared/utils/format';
+import FieldError from '../../../shared/components/FieldError';
+
+const nf4 = new Intl.NumberFormat(LOCALE, { maximumFractionDigits: 4 });
 
 const num = (v) => parseFloat(v) || 0;
 const emptyItem = () => ({ productId: '', productName: '', qtyMT: '', pricePerMT: '', hsCode: '', bagSizeKg: '', bagType: 'PP' });
@@ -28,6 +32,8 @@ export default function QuotationDrawer({ open, onClose, quotation, onSaved }) {
   const [form, setForm] = useState(defaults());
   const [items, setItems] = useState([emptyItem()]);
   const [saving, setSaving] = useState(false);
+  const [customerError, setCustomerError] = useState(null);
+  useEffect(() => { if (open) setCustomerError(null); }, [open]);
   const [packagingItems, setPackagingItems] = useState([]);
   const [pack, setPack] = useState(emptyPack());
   // Auto-default master/poly only once per open (so it never fights a manual clear).
@@ -104,6 +110,7 @@ export default function QuotationDrawer({ open, onClose, quotation, onSaved }) {
 
   const onPickCustomer = (id) => {
     set('customerId', id);
+    if (id) setCustomerError(null);
     const c = customersList.find((x) => String(x.id) === String(id));
     if (c && c.country && !form.country) set('country', c.country);
   };
@@ -115,9 +122,9 @@ export default function QuotationDrawer({ open, onClose, quotation, onSaved }) {
   };
 
   const round2 = (n) => Math.round((num(n)) * 100) / 100;
-  const fmt2 = (n) => num(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const fmt3 = (n) => num(n).toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 });
-  const fmtN = (n) => num(n).toLocaleString(undefined, { maximumFractionDigits: 4 });
+  const fmt2 = (n) => fmtNum(num(n), 2);
+  const fmt3 = (n) => fmtNum(num(n), 3);
+  const fmtN = (n) => nf4.format(num(n)); // unit rates can carry 4 decimals
   const itemsTotal = items.reduce((s, it) => s + num(it.qtyMT) * num(it.pricePerMT), 0);
 
   // ── Packaging builder maths — quantities are DERIVED live from the net weight
@@ -184,7 +191,7 @@ export default function QuotationDrawer({ open, onClose, quotation, onSaved }) {
   const total = itemsTotal + chargesTotal;
 
   async function save(sendNow = false) {
-    if (!form.customerId) { addToast('Select a customer', 'error'); return; }
+    if (!form.customerId) { setCustomerError('Select a customer'); addToast('Select a customer', 'error'); return; }
     const cleanItems = items.filter((it) => (it.productId || it.productName) && num(it.qtyMT) > 0);
     if (!cleanItems.length) { addToast('Add at least one line item with a quantity', 'error'); return; }
     setSaving(true);
@@ -243,9 +250,9 @@ export default function QuotationDrawer({ open, onClose, quotation, onSaved }) {
       size="2xl"
       footer={(
         <div className="flex items-center justify-between gap-2">
-          <div className="text-sm text-gray-500">Total: <span className="font-semibold text-gray-900">{form.currency} {total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+          <div className="text-sm text-gray-500">Total: <span className="font-semibold text-gray-900">{form.currency} {fmt2(total)}</span></div>
           <div className="flex gap-2">
-            <button onClick={onClose} className="px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
+            <button type="button" onClick={onClose} className="px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
             <button onClick={() => save(false)} disabled={saving} className="px-3 py-2 text-sm font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 disabled:opacity-50">{isEdit ? 'Save' : 'Save Draft'}</button>
             <button onClick={() => save(true)} disabled={saving} className="px-3 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">{saving ? 'Saving…' : 'Save & Send'}</button>
           </div>
@@ -264,6 +271,7 @@ export default function QuotationDrawer({ open, onClose, quotation, onSaved }) {
               addToast={addToast}
               clearable
             />
+            <FieldError error={customerError} />
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">Country</label>
@@ -332,10 +340,10 @@ export default function QuotationDrawer({ open, onClose, quotation, onSaved }) {
                     <input type="number" min="0" step="0.01" value={it.pricePerMT} onChange={(e) => setItem(i, 'pricePerMT', e.target.value)} className={inputCls} />
                   </div>
                   <div className="col-span-2 text-right pb-1.5 text-sm font-medium text-gray-700">
-                    {(num(it.qtyMT) * num(it.pricePerMT)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    {fmt2(num(it.qtyMT) * num(it.pricePerMT))}
                   </div>
                   <div className="col-span-1 flex justify-end pb-1">
-                    <button onClick={() => removeItem(i)} className="text-gray-300 hover:text-red-500" title="Remove line"><Trash2 size={15} /></button>
+                    <button onClick={() => removeItem(i)} className="text-gray-300 hover:text-red-500" title="Remove line" aria-label={`Remove line ${i + 1}`}><Trash2 size={15} /></button>
                   </div>
                 </div>
                 <div className="grid grid-cols-12 gap-2">
@@ -360,7 +368,7 @@ export default function QuotationDrawer({ open, onClose, quotation, onSaved }) {
             <label className="block text-sm font-semibold text-gray-800">Packaging ({form.currency})</label>
             <span className="text-[11px] text-gray-500">
               Net weight <b className="text-gray-700">{fmt3(totalMt)} MT</b>
-              {bagSize > 0 && <> · <b className="text-gray-700">{bagCount.toLocaleString()}</b> bags @ {fmtN(bagSize)} kg</>}
+              {bagSize > 0 && <> · <b className="text-gray-700">{fmtNum(bagCount)}</b> bags @ {fmtN(bagSize)} kg</>}
             </span>
           </div>
           <p className="text-[11px] text-gray-400 -mt-1.5">Unit costs pre-fill from each item's saved cost — enter/adjust them in <b>{form.currency}</b>.</p>
@@ -381,7 +389,7 @@ export default function QuotationDrawer({ open, onClose, quotation, onSaved }) {
                 <input type="number" min="0" step="0.0001" value={pack.bagUnitCost} onChange={(e) => setPackF('bagUnitCost', e.target.value)} placeholder="0.00" className={inputCls} />
               </div>
             </div>
-            <div className="text-right text-xs text-gray-600"><b className="text-gray-800">{bagCount.toLocaleString()}</b> bags × {fmtN(bagCost)} = <b className="text-gray-900">{form.currency} {fmt2(bagAmt)}</b></div>
+            <div className="text-right text-xs text-gray-600"><b className="text-gray-800">{fmtNum(bagCount)}</b> bags × {fmtN(bagCost)} = <b className="text-gray-900">{form.currency} {fmt2(bagAmt)}</b></div>
             {smallBag && (
               <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
                 Small bag (≤{SMALL_BAG_KG} kg) — a master bag &amp; polythene liner are added below.
@@ -407,7 +415,7 @@ export default function QuotationDrawer({ open, onClose, quotation, onSaved }) {
                     <input type="number" min="0" step="0.0001" value={pack.masterUnitCost} onChange={(e) => setPackF('masterUnitCost', e.target.value)} placeholder="0.00" className={inputCls} />
                   </div>
                 </div>
-                <div className="text-right text-xs text-gray-600"><b className="text-gray-800">{masterCount.toLocaleString()}</b> masters × {fmtN(masterCost)} = <b className="text-gray-900">{form.currency} {fmt2(masterAmt)}</b></div>
+                <div className="text-right text-xs text-gray-600"><b className="text-gray-800">{fmtNum(masterCount)}</b> masters × {fmtN(masterCost)} = <b className="text-gray-900">{form.currency} {fmt2(masterAmt)}</b></div>
               </div>
               <div className="rounded-lg border border-gray-200 p-3 space-y-1.5">
                 <div className="grid grid-cols-12 gap-2 items-end">
@@ -421,7 +429,7 @@ export default function QuotationDrawer({ open, onClose, quotation, onSaved }) {
                     <input type="number" min="0" step="0.0001" value={pack.polyUnitCost} onChange={(e) => setPackF('polyUnitCost', e.target.value)} placeholder="0.00" className={inputCls} />
                   </div>
                 </div>
-                <div className="text-right text-xs text-gray-600"><b className="text-gray-800">{polyCount.toLocaleString()}</b> sheets × {fmtN(polyCost)} = <b className="text-gray-900">{form.currency} {fmt2(polyAmt)}</b></div>
+                <div className="text-right text-xs text-gray-600"><b className="text-gray-800">{fmtNum(polyCount)}</b> sheets × {fmtN(polyCost)} = <b className="text-gray-900">{form.currency} {fmt2(polyAmt)}</b></div>
               </div>
             </>
           )}
@@ -444,8 +452,8 @@ export default function QuotationDrawer({ open, onClose, quotation, onSaved }) {
           </div>
 
           <div className="mt-1 flex justify-between text-xs text-gray-500">
-            <span>Rice subtotal: {form.currency} {itemsTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-            <span>+ Charges: {form.currency} {chargesTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+            <span>Rice subtotal: {form.currency} {fmt2(itemsTotal)}</span>
+            <span>+ Charges: {form.currency} {fmt2(chargesTotal)}</span>
           </div>
         </div>
 

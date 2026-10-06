@@ -4,9 +4,10 @@ import api from '../../../api/client';
 import { useAuth } from '../../../context/AuthContext';
 import { useOwnerAuth } from '../../../context/OwnerAuthContext';
 import { useApp } from '../../../context/AppContext';
+import { fmtKg, fmtPct } from '../../../shared/utils/format';
 
-const kg = (v) => `${Math.round((parseFloat(v) || 0)).toLocaleString()} kg`;
-const pct = (v) => `${(parseFloat(v) || 0).toFixed(2)}%`;
+const kg = (v) => fmtKg(parseFloat(v) || 0);
+const pct = (v) => fmtPct(parseFloat(v) || 0, { decimals: 2 });
 
 // Packed-weight variance (Phase 1). The mill enters the actual packed NET rice +
 // packing-material weight; the card computes gross, variance vs the order qty, and

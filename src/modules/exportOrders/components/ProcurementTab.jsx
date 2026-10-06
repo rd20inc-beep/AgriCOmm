@@ -6,7 +6,7 @@ import { financeApi } from '../../../api/services';
 import { useApp } from '../../../context/AppContext';
 import { Package, Plus, ExternalLink, Warehouse, Scale, FileText, Truck, ArrowRight } from 'lucide-react';
 import StockAllocationPicker from './StockAllocationPicker';
-import { todayLocalISO } from '../../../shared/utils/format';
+import { todayLocalISO, fmtKg, fmtNum, fmtPKR, fmtUSD, fmtPct } from '../../../shared/utils/format';
 
 export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], onCreateMilling, onStartDocsPreparation, onLinkExternalPurchase, canCreateMilling, canStartDocs, onStockAllocated }) {
   // Supplier privacy: Export users see the Supplier Code, not the name/ledger link.
@@ -57,28 +57,28 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
           </div>
           <div className="flex justify-between text-sm">
             <span className="text-gray-500">Estimated Raw Qty Required</span>
-            <span className="font-medium text-gray-900">{Math.round(estimatedRawQty * 1000).toLocaleString()} kg</span>
+            <span className="font-medium text-gray-900">{fmtKg(estimatedRawQty * 1000)}</span>
           </div>
           <div className="flex justify-between text-sm">
             <span className="text-gray-500">Finished Qty Target</span>
-            <span className="font-medium text-gray-900">{Math.round(order.qtyMT * 1000).toLocaleString()} kg</span>
+            <span className="font-medium text-gray-900">{fmtKg(order.qtyMT * 1000)}</span>
           </div>
           {finishedLots.length > 0 && (
             <>
               <div className="flex justify-between text-sm">
                 <span className="text-gray-500">Reserved from Lots</span>
-                <span className="font-medium text-gray-900">{Math.round(totalAllocatedMT * 1000).toLocaleString()} kg</span>
+                <span className="font-medium text-gray-900">{fmtKg(totalAllocatedMT * 1000)}</span>
               </div>
               {remainingNeeded > 0 && (
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-500">Remaining to Reserve</span>
-                  <span className="font-medium text-amber-600">{Math.round(remainingNeeded * 1000).toLocaleString()} kg</span>
+                  <span className="font-medium text-amber-600">{fmtKg(remainingNeeded * 1000)}</span>
                 </div>
               )}
               <div className="mt-2">
                 <div className="flex justify-between text-xs text-gray-500 mb-1">
                   <span>Fulfillment</span>
-                  <span>{fulfillmentPct.toFixed(0)}%</span>
+                  <span>{fmtPct(fulfillmentPct, { decimals: 0 })}</span>
                 </div>
                 <div className="w-full bg-gray-200 rounded-full h-2">
                   <div
@@ -141,7 +141,7 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
             )}
             <div className="flex justify-between text-sm">
               <span className="text-gray-500">Total Bags</span>
-              <span className="font-medium text-gray-900">{Math.round((order.qtyMT * 1000) / (order.bagSizeKg || 25)).toLocaleString()}</span>
+              <span className="font-medium text-gray-900">{fmtNum(Math.round((order.qtyMT * 1000) / (order.bagSizeKg || 25)))}</span>
             </div>
           </div>
           {order.bagNotes && (
@@ -218,7 +218,7 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
           <h3 className="text-sm font-semibold text-emerald-700 uppercase tracking-wide mb-1">Fulfil from Existing Inventory</h3>
           <p className="text-[11px] text-gray-400 mb-1">Reserving holds this stock for the order (it stays in the mill and is deducted when the order ships). To physically move a lot to the export entity, use “Transfer to Export” on the lot.</p>
           <p className="text-xs text-gray-400 mb-4">
-            Need <span className="font-semibold text-emerald-700">{Math.round(remainingNeeded * 1000).toLocaleString()} kg</span> more. Reserve available finished stock, or use “Create Milling Demand” above to mill the remainder.
+            Need <span className="font-semibold text-emerald-700">{fmtKg(remainingNeeded * 1000)}</span> more. Reserve available finished stock, or use “Create Milling Demand” above to mill the remainder.
           </p>
 
           {orderItems.length > 1 && (
@@ -228,7 +228,7 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
                 className="w-full sm:w-auto border border-gray-300 rounded-lg px-3 py-1.5 text-sm bg-white focus:ring-2 focus:ring-emerald-500 outline-none">
                 <option value="">Order-wide (no specific line)</option>
                 {orderItems.map(it => (
-                  <option key={it.id} value={it.id}>Line {it.lineNo}: {it.productName || 'Product'} ({Math.round(it.qtyMt * 1000).toLocaleString()} kg)</option>
+                  <option key={it.id} value={it.id}>Line {it.lineNo}: {it.productName || 'Product'} ({fmtKg(it.qtyMt * 1000)})</option>
                 ))}
               </select>
               <p className="text-[11px] text-gray-400 mt-1">Multi-product order — the lots you reserve below are held against this line.</p>
@@ -276,7 +276,7 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
                   const allocKg = parseFloat(lot.allocated_qty_kg) || parseFloat(lot.net_weight_kg) || (parseFloat(lot.qty) || 0);
                   const allocMT = (allocKg / 1000).toFixed(2);
                   const ratePerKg = parseFloat(lot.landed_cost_per_kg) || parseFloat(lot.rate_per_kg) || 0;
-                  const ratePerKgDisplay = ratePerKg > 0 ? Math.round(ratePerKg).toLocaleString() : '\u2014';
+                  const ratePerKgDisplay = ratePerKg > 0 ? fmtPKR(ratePerKg) : '\u2014';
 
                   return (
                     <tr key={lot.id || idx} className="border-b border-gray-100 hover:bg-gray-50">
@@ -293,9 +293,9 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
                       </td>
                       <td data-label="Product" className="py-2.5 text-gray-700">{lot.product_name || lot.item_name || '\u2014'}</td>
                       <td data-label="Supplier" className="mob-hide py-2.5 text-gray-700">{lot.supplier_name || lot.supplier_code || '\u2014'}</td>
-                      <td data-label="Allocated" className="py-2.5 text-right font-medium text-gray-900">{Math.round(allocKg).toLocaleString()} kg</td>
+                      <td data-label="Allocated" className="py-2.5 text-right font-medium text-gray-900">{fmtKg(allocKg)}</td>
                       <td data-label="Rate/kg" className="mob-hide py-2.5 text-right text-gray-700">
-                        {ratePerKg > 0 ? `PKR ${ratePerKgDisplay}` : '\u2014'}
+                        {ratePerKgDisplay}
                       </td>
                       <td data-label="Warehouse" className="mob-hide py-2.5 text-gray-700">
                         {lot.warehouse_name ? (
@@ -327,7 +327,7 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
         {finishedLots.length > 0 && (
           <div className="mt-3 pt-3 border-t border-gray-200 flex justify-between text-sm">
             <span className="font-semibold text-gray-700">Total Allocated</span>
-            <span className="font-bold text-gray-900">{Math.round(totalAllocatedMT * 1000).toLocaleString()} kg / {Math.round(order.qtyMT * 1000).toLocaleString()} kg required</span>
+            <span className="font-bold text-gray-900">{fmtKg(totalAllocatedMT * 1000)} / {fmtKg(order.qtyMT * 1000)} required</span>
           </div>
         )}
       </div>
@@ -356,7 +356,7 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
                       </Link>
                     </td>
                     <td data-label="Product" className="py-2 text-gray-700">{lot.product_name || lot.item_name}</td>
-                    <td data-label="Qty kg" className="py-2 text-right text-gray-900">{Math.round(parseFloat(lot.qty) || 0).toLocaleString()}</td>
+                    <td data-label="Qty kg" className="py-2 text-right text-gray-900">{fmtNum(Math.round(parseFloat(lot.qty) || 0))}</td>
                     <td data-label="Warehouse" className="mob-hide py-2 text-gray-700">{lot.warehouse_name || '\u2014'}</td>
                     <td data-label="Status" className="py-2 text-center"><StatusBadge status={lot.status} /></td>
                   </tr>
@@ -413,7 +413,7 @@ function ReceiveFromMill({ order, linkedBatch, addToast, onTransferComplete }) {
         dispatch_date: todayLocalISO(),
         status: 'In Transit',
       });
-      addToast(`${Math.round(finishedMT * 1000).toLocaleString()} kg transferred from mill to export — ${linkedBatch.id}`, 'success');
+      addToast(`${fmtKg(finishedMT * 1000)} transferred from mill to export — ${linkedBatch.id}`, 'success');
       if (onTransferComplete) onTransferComplete();
     } catch (err) {
       addToast(`Transfer failed: ${err.message}`, 'error');
@@ -438,7 +438,7 @@ function ReceiveFromMill({ order, linkedBatch, addToast, onTransferComplete }) {
         <>
           <p className="text-sm text-amber-700 mb-4">
             Milling batch <span className="font-bold">{linkedBatch.id}</span> has completed with{' '}
-            <span className="font-bold">{Math.round(finishedMT * 1000).toLocaleString()} kg</span> finished rice.
+            <span className="font-bold">{fmtKg(finishedMT * 1000)}</span> finished rice.
             Transfer this stock from the mill to your export warehouse to make it available for allocation.
           </p>
 
@@ -450,7 +450,7 @@ function ReceiveFromMill({ order, linkedBatch, addToast, onTransferComplete }) {
               </div>
               <div>
                 <span className="text-xs text-gray-500">Finished Output</span>
-                <p className="font-bold text-gray-900">{Math.round(finishedMT * 1000).toLocaleString()} kg</p>
+                <p className="font-bold text-gray-900">{fmtKg(finishedMT * 1000)}</p>
               </div>
               <div>
                 <span className="text-xs text-gray-500">Yield</span>
@@ -467,16 +467,16 @@ function ReceiveFromMill({ order, linkedBatch, addToast, onTransferComplete }) {
               <div className="border-t border-amber-200 pt-3 grid grid-cols-3 gap-3 text-xs">
                 <div>
                   <span className="text-gray-500">Raw Cost</span>
-                  <p className="font-bold text-gray-900">PKR {(linkedBatch.rawCostPerKgFinished || 0).toFixed(2)}/KG</p>
+                  <p className="font-bold text-gray-900">{fmtPKR(linkedBatch.rawCostPerKgFinished || 0, { decimals: 2 })}/KG</p>
                 </div>
                 <div>
                   <span className="text-gray-500">Milling Cost</span>
-                  <p className="font-bold text-gray-900">PKR {(linkedBatch.millingCostPerKgFinished || 0).toFixed(2)}/KG</p>
+                  <p className="font-bold text-gray-900">{fmtPKR(linkedBatch.millingCostPerKgFinished || 0, { decimals: 2 })}/KG</p>
                 </div>
                 <div>
                   <span className="text-gray-500">Total Finished Cost</span>
-                  <p className="font-bold text-emerald-700">PKR {(linkedBatch.totalCostPerKgFinished || 0).toFixed(2)}/KG</p>
-                  <p className="text-gray-400">= PKR {(linkedBatch.totalCostPerKgFinished || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/kg</p>
+                  <p className="font-bold text-emerald-700">{fmtPKR(linkedBatch.totalCostPerKgFinished || 0, { decimals: 2 })}/KG</p>
+                  <p className="text-gray-400">= {fmtPKR(linkedBatch.totalCostPerKgFinished || 0, { decimals: 2 })}/kg</p>
                 </div>
               </div>
             )}
@@ -484,7 +484,7 @@ function ReceiveFromMill({ order, linkedBatch, addToast, onTransferComplete }) {
 
           <div className="flex flex-col sm:flex-row items-end gap-3">
             <div className="flex-1">
-              <label className="block text-xs font-medium text-amber-800 mb-1">Transfer Price (PKR/kg) *</label>
+              <label className="block text-xs font-medium text-amber-800 mb-1">Transfer Price (PKR/kg) <span className="text-red-500">*</span></label>
               <input
                 type="number"
                 step="0.01"
@@ -495,7 +495,7 @@ function ReceiveFromMill({ order, linkedBatch, addToast, onTransferComplete }) {
               />
               {transferPrice && finishedMT > 0 && (
                 <p className="text-xs text-amber-600 mt-1">
-                  Total: PKR {(parseFloat(transferPrice) * finishedMT * 1000).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (~${((parseFloat(transferPrice) * finishedMT * 1000) / (parseFloat(order?.bookedFxRate) || 280)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
+                  Total: {fmtPKR(parseFloat(transferPrice) * finishedMT * 1000, { decimals: 2 })} (~{fmtUSD((parseFloat(transferPrice) * finishedMT * 1000) / (parseFloat(order?.bookedFxRate) || 280))})
                 </p>
               )}
             </div>
@@ -512,7 +512,7 @@ function ReceiveFromMill({ order, linkedBatch, addToast, onTransferComplete }) {
               ) : (
                 <>
                   <ArrowRight className="w-4 h-4" />
-                  Receive {Math.round(finishedMT * 1000).toLocaleString()} kg from Mill
+                  Receive {fmtKg(finishedMT * 1000)} from Mill
                 </>
               )}
             </button>

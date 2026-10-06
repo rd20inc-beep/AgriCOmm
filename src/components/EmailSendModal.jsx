@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Mail, Loader2 } from 'lucide-react';
 import Modal from './Modal';
+import FieldError from '../shared/components/FieldError';
 
 // Web-friendly confirm dialog for emailing a document. Prefills the customer's
 // email on file (editable) plus an editable subject, then sends the PDF as an
@@ -50,7 +51,7 @@ export default function EmailSendModal({
         </p>
 
         <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1">To — email address</label>
+          <label className="block text-xs font-medium text-gray-500 mb-1">To — email address <span className="text-red-500">*</span></label>
           <input
             type="email"
             autoFocus
@@ -62,9 +63,7 @@ export default function EmailSendModal({
           <p className="mt-1.5 text-xs text-gray-400">
             {defaultEmail ? 'Prefilled from the customer record — edit if needed.' : 'No email was on file for this customer.'}
           </p>
-          {!valid && String(email || '').trim().length > 0 && (
-            <p className="mt-1 text-xs text-red-500">That doesn't look like a valid email address.</p>
-          )}
+          <FieldError error={!valid && String(email || '').trim().length > 0 ? "That doesn't look like a valid email address." : null} />
         </div>
 
         <div>

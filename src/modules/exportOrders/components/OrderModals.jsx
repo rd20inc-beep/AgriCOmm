@@ -1,10 +1,33 @@
 import React, { useEffect, useRef } from 'react';
 import Modal from '../../../components/Modal';
+import SlideDrawer from '../../../components/SlideDrawer';
+import FieldError from '../../../shared/components/FieldError';
+import { fmtPKR, fmtNum } from '../../../shared/utils/format';
 import ProformaInvoice from '../../../components/ProformaInvoice';
-import SearchSelect from '../../../components/SearchSelect';
-import { Boxes, Factory, CheckCircle } from 'lucide-react';
+import SupplierPicker from '../../../components/SupplierPicker';
+import { Boxes, Factory, CheckCircle, Wallet, Ship, Receipt } from 'lucide-react';
 import StockAllocationPicker from './StockAllocationPicker';
 import { favStar } from '../../../shared/utils/favorites';
+
+const BTN_CANCEL = 'px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50';
+
+// Cancel + primary action for a drawer footer. The primary is disabled while
+// the save is in flight so a double-click can't submit twice.
+function DrawerFooter({ onClose, onConfirm, label, pendingLabel = 'Saving…', pending = false, tone = 'bg-blue-600 hover:bg-blue-700', closeLabel = 'Cancel' }) {
+  return (
+    <div className="flex items-center justify-end gap-3">
+      <button type="button" onClick={onClose} className={BTN_CANCEL}>{closeLabel}</button>
+      <button
+        type="button"
+        onClick={onConfirm}
+        disabled={pending}
+        className={`px-4 py-2 text-sm font-medium text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${tone}`}
+      >
+        {pending ? pendingLabel : label}
+      </button>
+    </div>
+  );
+}
 
 export function AdvancePaymentModal({
   isOpen, onClose, order, formatCurrency,
@@ -17,6 +40,7 @@ export function AdvancePaymentModal({
   advanceFxRate, setAdvanceFxRate,
   bankAccountsList,
   onConfirm,
+  pending = false,
 }) {
   const orderCurrency = order?.currency || 'USD';
   const symbol = orderCurrency === 'USD' ? '$' : orderCurrency === 'EUR' ? '€' : orderCurrency === 'GBP' ? '£' : orderCurrency;
@@ -26,10 +50,18 @@ export function AdvancePaymentModal({
   const pkrEquivalent = isForeign ? amountNum * fxRateNum : amountNum;
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Confirm Advance Payment" size="md">
+    <SlideDrawer
+      open={isOpen}
+      onClose={onClose}
+      title="Confirm Advance Payment"
+      subtitle={order?.id}
+      icon={Wallet}
+      size="md"
+      footer={<DrawerFooter onClose={onClose} onConfirm={onConfirm} pending={pending} label="Confirm Payment" pendingLabel="Submitting…" tone="bg-emerald-600 hover:bg-emerald-700" />}
+    >
       <div className="space-y-4">
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Received Amount ({symbol})</label>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Received Amount ({symbol}) <span className="text-red-500">*</span></label>
           <input
             type="number"
             value={advanceAmount}
@@ -45,7 +77,7 @@ export function AdvancePaymentModal({
           <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-2">
             <div>
               <label className="block text-sm font-medium text-amber-900 mb-1">
-                Exchange Rate (1 {symbol} = ? Rs) <span className="text-red-600">*</span>
+                Exchange Rate (1 {symbol} = ? Rs) <span className="text-red-500">*</span>
               </label>
               <input
                 type="number"
@@ -62,7 +94,7 @@ export function AdvancePaymentModal({
             {fxRateNum > 0 && amountNum > 0 && (
               <div className="bg-white border border-amber-200 rounded-md px-3 py-2 flex items-center justify-between text-sm">
                 <span className="text-gray-500">PKR equivalent banked</span>
-                <span className="font-bold text-gray-900">Rs {pkrEquivalent.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                <span className="font-bold text-gray-900">{fmtPKR(pkrEquivalent)}</span>
               </div>
             )}
             {order?.bookedFxRate && fxRateNum > 0 && (
@@ -74,7 +106,7 @@ export function AdvancePaymentModal({
                 return (
                   <div className={`text-[11px] flex items-center justify-between px-3 py-1.5 rounded-md ${isGain ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>
                     <span>vs booked {order.bookedFxRate}: {isGain ? '+' : '-'}{Math.abs(delta).toFixed(4)} Rs/{symbol}</span>
-                    <span className="font-semibold">{isGain ? '+' : '-'}Rs {pkrDelta.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                    <span className="font-semibold">{isGain ? '+' : '-'}{fmtPKR(pkrDelta)}</span>
                   </div>
                 );
               })()
@@ -134,22 +166,8 @@ export function AdvancePaymentModal({
             className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none"
           />
         </div>
-        <div className="flex items-center justify-end gap-3 pt-2">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={onConfirm}
-            className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 transition-colors"
-          >
-            Confirm Payment
-          </button>
-        </div>
       </div>
-    </Modal>
+    </SlideDrawer>
   );
 }
 
@@ -164,6 +182,7 @@ export function BalancePaymentModal({
   balanceFxRate, setBalanceFxRate,
   bankAccountsList,
   onConfirm,
+  pending = false,
 }) {
   const outstanding = Math.max(0, (order.balanceExpected || 0) - (order.balanceReceived || 0));
   const orderCurrency = order?.currency || 'USD';
@@ -175,7 +194,15 @@ export function BalancePaymentModal({
   // Locked rate from advance receipt — most realistic comparison anchor
   const lockedRate = parseFloat(order?.advanceFxRate) || parseFloat(order?.bookedFxRate) || 0;
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Confirm Balance Payment" size="md">
+    <SlideDrawer
+      open={isOpen}
+      onClose={onClose}
+      title="Confirm Balance Payment"
+      subtitle={order?.id}
+      icon={Wallet}
+      size="md"
+      footer={<DrawerFooter onClose={onClose} onConfirm={onConfirm} pending={pending} label="Confirm Balance Payment" pendingLabel="Submitting…" tone="bg-emerald-600 hover:bg-emerald-700" />}
+    >
       <div className="space-y-4">
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
           <h4 className="text-sm font-semibold text-blue-800 mb-2">Balance Details</h4>
@@ -199,7 +226,7 @@ export function BalancePaymentModal({
           </div>
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Amount Received ({symbol})</label>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Amount Received ({symbol}) <span className="text-red-500">*</span></label>
           <input type="number" value={balanceAmount} onChange={e => setBalanceAmount(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
         </div>
 
@@ -210,7 +237,7 @@ export function BalancePaymentModal({
           <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-2">
             <div>
               <label className="block text-sm font-medium text-amber-900 mb-1">
-                Exchange Rate (1 {symbol} = ? Rs) <span className="text-red-600">*</span>
+                Exchange Rate (1 {symbol} = ? Rs) <span className="text-red-500">*</span>
               </label>
               <input
                 type="number"
@@ -227,7 +254,7 @@ export function BalancePaymentModal({
             {fxRateNum > 0 && amountNum > 0 && (
               <div className="bg-white border border-amber-200 rounded-md px-3 py-2 flex items-center justify-between text-sm">
                 <span className="text-gray-500">PKR equivalent banked</span>
-                <span className="font-bold text-gray-900">Rs {pkrEquivalent.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                <span className="font-bold text-gray-900">{fmtPKR(pkrEquivalent)}</span>
               </div>
             )}
             {lockedRate > 0 && fxRateNum > 0 && (
@@ -239,7 +266,7 @@ export function BalancePaymentModal({
                 return (
                   <div className={`text-[11px] flex items-center justify-between px-3 py-1.5 rounded-md ${isGain ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>
                     <span>vs advance/booked {lockedRate}: {isGain ? '+' : '-'}{Math.abs(delta).toFixed(4)} Rs/{symbol}</span>
-                    <span className="font-semibold">{isGain ? '+' : '-'}Rs {pkrDelta.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                    <span className="font-semibold">{isGain ? '+' : '-'}{fmtPKR(pkrDelta)}</span>
                   </div>
                 );
               })()
@@ -276,12 +303,8 @@ export function BalancePaymentModal({
           <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
           <textarea value={balanceNotes} onChange={e => setBalanceNotes(e.target.value)} rows={2} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none" />
         </div>
-        <div className="flex items-center justify-end gap-3 pt-2">
-          <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">Cancel</button>
-          <button onClick={onConfirm} className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 transition-colors">Confirm Balance Payment</button>
-        </div>
       </div>
-    </Modal>
+    </SlideDrawer>
   );
 }
 
@@ -308,6 +331,7 @@ export function MillingDemandModal({
   onAllocated,              // called after a reservation (parent refetches)
   onSourceFromStock,        // called to skip milling when fully covered
   addToast,
+  pending = false,          // milling batch create in flight
 }) {
   const requiredMT = parseFloat(order.qtyMT) || 0;
   const remainingMT = Math.max(0, Math.round((requiredMT - (parseFloat(allocatedMT) || 0)) * 1000) / 1000);
@@ -324,7 +348,17 @@ export function MillingDemandModal({
   }, [isOpen, remainingMT]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Fulfil Milling Demand" size="lg">
+    <SlideDrawer
+      open={isOpen}
+      onClose={onClose}
+      title="Fulfil Milling Demand"
+      subtitle={order?.id}
+      icon={Factory}
+      size="2xl"
+      footer={fullyCovered
+        ? <DrawerFooter onClose={onClose} onConfirm={onSourceFromStock} closeLabel="Close" label="Proceed to Documentation" tone="bg-emerald-600 hover:bg-emerald-700" />
+        : <DrawerFooter onClose={onClose} onConfirm={onConfirm} pending={pending} label="Create Milling Batch" pendingLabel="Creating…" />}
+    >
       <div className="space-y-5">
         {/* Fulfilment summary */}
         <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
@@ -333,8 +367,8 @@ export function MillingDemandModal({
           </p>
           <div className="grid grid-cols-3 gap-2">
             <FulfilStat label="Required" value={`${requiredMT} MT`} />
-            <FulfilStat label="From stock" value={`${(parseFloat(allocatedMT) || 0).toFixed(2)} MT`} tone="text-emerald-700" />
-            <FulfilStat label="To mill" value={`${remainingMT.toFixed(2)} MT`} tone={fullyCovered ? 'text-emerald-700' : 'text-amber-600'} />
+            <FulfilStat label="From stock" value={`${fmtNum(parseFloat(allocatedMT) || 0, 2)} MT`} tone="text-emerald-700" />
+            <FulfilStat label="To mill" value={`${fmtNum(remainingMT, 2)} MT`} tone={fullyCovered ? 'text-emerald-700' : 'text-amber-600'} />
           </div>
         </div>
 
@@ -364,14 +398,8 @@ export function MillingDemandModal({
 
         {/* Option 2 — Create New Milling Order (or proceed, if fully covered) */}
         {fullyCovered ? (
-          <div className="border-t border-gray-100 pt-4 flex items-center justify-between gap-3">
+          <div className="border-t border-gray-100 pt-4">
             <p className="text-xs text-gray-500">Nothing left to mill. Move the order straight to documentation.</p>
-            <div className="flex items-center gap-3">
-              <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">Close</button>
-              <button onClick={onSourceFromStock} className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700">
-                <CheckCircle className="w-4 h-4" /> Proceed to Documentation
-              </button>
-            </div>
           </div>
         ) : (
           <div className="border-t border-gray-100 pt-4">
@@ -396,23 +424,21 @@ export function MillingDemandModal({
               </div>
             </div>
             <div className="mt-3">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Supplier</label>
-              <SearchSelect
-                value={millingSupplier}
+              <SupplierPicker
+                label="Supplier"
+                value={millingSupplier ? String(millingSupplier) : ''}
                 onChange={setMillingSupplier}
-                options={(suppliersList || []).map(s => ({ value: s.id, label: `${favStar(s)}${s.name}`, sub: s.location || s.type || '' }))}
+                suppliers={suppliersList || []}
                 placeholder="Type to search supplier or leave for mill to decide..."
+                addToast={addToast}
+                clearable
               />
               <p className="text-xs text-gray-400 mt-1">Optional — mill can assign the supplier later</p>
-            </div>
-            <div className="flex items-center justify-end gap-3 pt-4">
-              <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
-              <button onClick={onConfirm} className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700">Create Milling Batch</button>
             </div>
           </div>
         )}
       </div>
-    </Modal>
+    </SlideDrawer>
   );
 }
 
@@ -454,6 +480,7 @@ export function ShipmentModal({
   shipmentContainers, setShipmentContainers,
   reservedLots = [],
   onConfirm,
+  pending = false,
 }) {
   const bankOptions = (bankAccountsList || []).filter((b) => b.type !== 'cash');
   const rows = Array.isArray(shipmentContainers) ? shipmentContainers : [];
@@ -512,7 +539,14 @@ export function ShipmentModal({
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Update Shipment Details" size="lg">
+    <SlideDrawer
+      open={isOpen}
+      onClose={onClose}
+      title="Update Shipment Details"
+      icon={Ship}
+      size="3xl"
+      footer={<DrawerFooter onClose={onClose} onConfirm={onConfirm} pending={pending} label="Save Shipment" />}
+    >
       <div className="space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
@@ -573,7 +607,7 @@ export function ShipmentModal({
               </div>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Container No *</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Container No <span className="text-red-500">*</span></label>
                   <input
                     type="text"
                     value={container.containerNo || ''}
@@ -702,6 +736,7 @@ export function ShipmentModal({
           </label>
           <input type="text" value={shipGatePass || ''} onChange={e => setShipGatePass(e.target.value)} placeholder="e.g. GP-2026-014"
             className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+          <FieldError error={shipATD && !String(shipGatePass || '').trim() ? 'Required once an ATD is set' : null} />
           <p className="text-xs text-gray-400 mt-1">Recorded when the goods leave the premises (set an ATD to mark departure). Tracked on the order.</p>
         </div>
         <div>
@@ -821,12 +856,8 @@ export function ShipmentModal({
           <textarea value={shipRemarks || ''} onChange={e => setShipRemarks(e.target.value)} rows={2} placeholder="e.g. Partial shipment allowed, SGS inspection required" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none" />
         </div>
 
-        <div className="flex items-center justify-end gap-3 pt-2 border-t border-gray-200">
-          <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">Cancel</button>
-          <button onClick={onConfirm} className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors">Save Shipment</button>
-        </div>
       </div>
-    </Modal>
+    </SlideDrawer>
   );
 }
 
@@ -837,9 +868,17 @@ export function ExpenseModal({
   expenseNotes, setExpenseNotes,
   exportCostCategories,
   onConfirm,
+  pending = false,
 }) {
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Add Expense" size="md">
+    <SlideDrawer
+      open={isOpen}
+      onClose={onClose}
+      title="Add Expense"
+      icon={Receipt}
+      size="md"
+      footer={<DrawerFooter onClose={onClose} onConfirm={onConfirm} pending={pending} label="Add Expense" />}
+    >
       <div className="space-y-4">
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
@@ -854,7 +893,7 @@ export function ExpenseModal({
           </select>
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Amount (Rs)</label>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Amount (Rs) <span className="text-red-500">*</span></label>
           <input
             type="number"
             value={expenseAmount}
@@ -873,22 +912,8 @@ export function ExpenseModal({
             className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none"
           />
         </div>
-        <div className="flex items-center justify-end gap-3 pt-2">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={onConfirm}
-            className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors"
-          >
-            Add Expense
-          </button>
-        </div>
       </div>
-    </Modal>
+    </SlideDrawer>
   );
 }
 

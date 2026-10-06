@@ -223,6 +223,7 @@ export default function Documents() {
                         onClick={() => setPreviewModal(doc)}
                         className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
                         title="Preview"
+                        aria-label={`Preview ${doc.docType}`}
                       >
                         <Eye className="w-3.5 h-3.5" />
                       </button>
@@ -231,6 +232,7 @@ export default function Documents() {
                           onClick={() => handleMarkApproved(doc)}
                           className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-emerald-600 hover:bg-emerald-50 rounded transition-colors"
                           title="Mark Approved"
+                          aria-label={`Mark ${doc.docType} approved`}
                         >
                           <CheckCircle className="w-3.5 h-3.5" />
                         </button>
@@ -240,6 +242,7 @@ export default function Documents() {
                           onClick={() => handleRequestRevision(doc)}
                           className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-amber-600 hover:bg-amber-50 rounded transition-colors"
                           title="Request Revision"
+                          aria-label={`Request revision of ${doc.docType}`}
                         >
                           <RotateCcw className="w-3.5 h-3.5" />
                         </button>

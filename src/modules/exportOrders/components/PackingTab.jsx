@@ -1,5 +1,8 @@
 import { useState } from 'react';
 import { Package, Edit3, Save, X, Plus, Trash2 } from 'lucide-react';
+import { fmtNum, LOCALE } from '../../../shared/utils/format';
+
+const nf3 = new Intl.NumberFormat(LOCALE, { maximumFractionDigits: 3 });
 import api from '../../../api/client';
 import PackingWeightCard from './PackingWeightCard';
 import MaterialRequirementsCard from './MaterialRequirementsCard';
@@ -165,7 +168,7 @@ export default function PackingTab({ order, onUpdated }) {
               <span key={i} className="text-sm bg-white border border-gray-200 rounded-lg px-3 py-1.5 tabular-nums">
                 <span className="font-semibold">{p.bags}</span> × <span className="font-semibold">{p.bagSizeKg}kg</span>
                 {p.bagName ? <span className="text-gray-500"> · {p.bagName}</span> : null}
-                {p.packedWeightKg ? <span className="text-gray-400"> · {Number(p.packedWeightKg).toLocaleString()} kg</span> : null}
+                {p.packedWeightKg ? <span className="text-gray-400"> · {fmtNum(Number(p.packedWeightKg))} kg</span> : null}
               </span>
             ))}
           </div>
@@ -210,15 +213,15 @@ export default function PackingTab({ order, onUpdated }) {
                     {bagSpec.quality && <div><p className="text-xs text-gray-500">Quality</p><p className="text-sm font-medium">{bagSpec.quality}</p></div>}
                     {bagSpec.sizeKg && <div><p className="text-xs text-gray-500">Bag Size</p><p className="text-sm font-medium">{bagSpec.sizeKg} KG</p></div>}
                     {masterKg > 0 && <div><p className="text-xs text-gray-500">Master Bag</p><p className="text-sm font-medium">{masterKg} KG{retailPerMaster > 0 ? ` (${retailPerMaster} × ${bagSpec.sizeKg}kg)` : ''}</p></div>}
-                    {masterBagCount > 0 && <div><p className="text-xs text-gray-500">Master Bags</p><p className="text-sm font-medium text-amber-700">{masterBagCount.toLocaleString()}</p></div>}
+                    {masterBagCount > 0 && <div><p className="text-xs text-gray-500">Master Bags</p><p className="text-sm font-medium text-amber-700">{fmtNum(masterBagCount)}</p></div>}
                     {bagSpec.weightGm && <div><p className="text-xs text-gray-500">Bag Weight (empty)</p><p className="text-sm font-medium">{bagSpec.weightGm} gm</p></div>}
                     {bagSpec.masterWeightGm && <div><p className="text-xs text-gray-500">Master Bag Weight (empty)</p><p className="text-sm font-medium">{bagSpec.masterWeightGm} gm</p></div>}
-                    {tareKg > 0 && <div><p className="text-xs text-gray-500">Packaging Tare</p><p className="text-sm font-medium text-amber-700" title="Added to net weight to give the gross weight printed on the export documents">{tareKg.toLocaleString(undefined, { maximumFractionDigits: 3 })} KG</p></div>}
+                    {tareKg > 0 && <div><p className="text-xs text-gray-500">Packaging Tare</p><p className="text-sm font-medium text-amber-700" title="Added to net weight to give the gross weight printed on the export documents">{nf3.format(tareKg)} KG</p></div>}
                     {bagSpec.printing && <div><p className="text-xs text-gray-500">Printing</p><p className="text-sm font-medium">{bagSpec.printing}</p></div>}
                     {bagSpec.color && <div><p className="text-xs text-gray-500">Color</p><p className="text-sm font-medium">{bagSpec.color}</p></div>}
                     {bagSpec.brand && <div><p className="text-xs text-gray-500">Brand / Mark</p><p className="text-sm font-medium">{bagSpec.brand}</p></div>}
                     {receivingMode && <div><p className="text-xs text-gray-500">Receiving Mode</p><p className="text-sm font-medium capitalize">{receivingMode}</p></div>}
-                    {totalBags > 0 && <div><p className="text-xs text-gray-500">Total Bags</p><p className="text-sm font-medium">{totalBags.toLocaleString()}</p></div>}
+                    {totalBags > 0 && <div><p className="text-xs text-gray-500">Total Bags</p><p className="text-sm font-medium">{fmtNum(totalBags)}</p></div>}
                   </div>
                 </div>
               )}
@@ -286,16 +289,16 @@ export default function PackingTab({ order, onUpdated }) {
                           <td data-label="Bag Type" className="px-4 py-2.5 text-sm font-medium">{line.bagType || line.bag_type || '—'}</td>
                           <td data-label="Quality" className="px-4 py-2.5 text-sm">{line.bagQuality || line.bag_quality || '—'}</td>
                           <td data-label="Fill (KG)" className="mob-hide px-4 py-2.5 text-sm text-right tabular-nums">{line.fillWeightKg || line.fill_weight_kg || '—'}</td>
-                          <td data-label="Bags" className="px-4 py-2.5 text-sm text-right tabular-nums font-medium">{(line.bagCount || line.bag_count || 0).toLocaleString()}</td>
-                          <td data-label="Total (KG)" className="px-4 py-2.5 text-sm text-right tabular-nums">{((parseFloat(line.fillWeightKg || line.fill_weight_kg || 0)) * (parseInt(line.bagCount || line.bag_count || 0))).toLocaleString()} KG</td>
+                          <td data-label="Bags" className="px-4 py-2.5 text-sm text-right tabular-nums font-medium">{fmtNum(line.bagCount || line.bag_count || 0)}</td>
+                          <td data-label="Total (KG)" className="px-4 py-2.5 text-sm text-right tabular-nums">{fmtNum((parseFloat(line.fillWeightKg || line.fill_weight_kg || 0)) * (parseInt(line.bagCount || line.bag_count || 0)))} KG</td>
                           <td data-label="Printing" className="mob-hide px-4 py-2.5 text-sm">{line.bagPrinting || line.bag_printing || '—'}</td>
                           <td data-label="Notes" className="mob-hide px-4 py-2.5 text-sm text-gray-500">{line.notes || '—'}</td>
                         </tr>
                       ))}
                       <tr className="bg-gray-50 font-semibold text-sm">
                         <td colSpan={4} className="mob-full px-4 py-2 text-right">Total</td>
-                        <td data-label="Bags" className="px-4 py-2 text-right tabular-nums">{packingLines.reduce((s, l) => s + (parseInt(l.bagCount || l.bag_count || 0)), 0).toLocaleString()}</td>
-                        <td data-label="Total (KG)" className="px-4 py-2 text-right tabular-nums">{packingLines.reduce((s, l) => s + (parseFloat(l.fillWeightKg || l.fill_weight_kg || 0) * parseInt(l.bagCount || l.bag_count || 0)), 0).toLocaleString()} KG</td>
+                        <td data-label="Bags" className="px-4 py-2 text-right tabular-nums">{fmtNum(packingLines.reduce((s, l) => s + (parseInt(l.bagCount || l.bag_count || 0)), 0))}</td>
+                        <td data-label="Total (KG)" className="px-4 py-2 text-right tabular-nums">{fmtNum(packingLines.reduce((s, l) => s + (parseFloat(l.fillWeightKg || l.fill_weight_kg || 0) * parseInt(l.bagCount || l.bag_count || 0)), 0))} KG</td>
                         <td colSpan={2}></td>
                       </tr>
                     </tbody>
@@ -473,7 +476,7 @@ export default function PackingTab({ order, onUpdated }) {
                   <input type="text" value={line.bag_printing} onChange={e => updateLine(idx, 'bag_printing', e.target.value)}
                     className="w-full border border-gray-200 rounded px-2 py-1 text-xs" />
                 </div>
-                <button type="button" onClick={() => removeLine(idx)} className="p-1 text-red-400 hover:text-red-600 self-end mb-0.5">
+                <button type="button" onClick={() => removeLine(idx)} aria-label={`Remove packing line ${idx + 1}`} title="Remove line" className="p-1 text-red-400 hover:text-red-600 self-end mb-0.5">
                   <Trash2 size={14} />
                 </button>
               </div>

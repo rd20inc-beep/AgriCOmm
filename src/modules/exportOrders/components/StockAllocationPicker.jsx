@@ -7,8 +7,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Plus, Search, RefreshCw } from 'lucide-react';
 import { exportOrdersApi } from '../api/services';
+import { fmtNum } from '../../../shared/utils/format';
 
-const kg = (v) => Math.round(parseFloat(v) || 0).toLocaleString();
+const kg = (v) => fmtNum(Math.round(parseFloat(v) || 0));
 
 // Does a pool lot plausibly match the order's product? (Export users only get a
 // display name, so fall back to significant-word matching.)
@@ -122,7 +123,7 @@ export default function StockAllocationPicker({
             </button>
           ))}
         </div>
-        <button onClick={() => setFetchTrigger((t) => t + 1)} className="p-1.5 text-gray-400 hover:text-gray-600" title="Refresh stock">
+        <button onClick={() => setFetchTrigger((t) => t + 1)} className="p-1.5 text-gray-400 hover:text-gray-600" title="Refresh stock" aria-label="Refresh stock">
           <RefreshCw className="w-3.5 h-3.5" />
         </button>
       </div>
