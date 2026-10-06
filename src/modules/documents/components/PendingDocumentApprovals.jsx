@@ -108,14 +108,14 @@ export default function PendingDocumentApprovals() {
                         <Eye size={13} /> View
                       </button>
                       <button
-                        onClick={() => act(r, () => documentsApi.approve(r.id, {}), isDelete ? 'Deletion approved — document removed.' : 'Approved — this version is now live.')}
+                        onClick={() => act(r, () => documentsApi.approve(r.id, {}), isDelete ? 'Deletion approved — marked deleted; the file stays in its history.' : 'Approved — this version is now live.')}
                         disabled={busy}
                         className={`inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-white rounded disabled:opacity-50 ${isDelete ? 'bg-red-600 hover:bg-red-700' : 'bg-emerald-600 hover:bg-emerald-700'}`}
                       >
                         {isDelete ? <><Trash2 size={13} /> Approve deletion</> : <><Check size={13} /> Approve</>}
                       </button>
                       <button
-                        onClick={() => act(r, () => (isDelete ? documentsApi.cancelDelete(r.id) : documentsApi.reject(r.id, {})), isDelete ? 'Kept — deletion request withdrawn.' : 'Rejected.')}
+                        onClick={() => act(r, () => (isDelete ? documentsApi.cancelDelete(r.id) : documentsApi.reject(r.id, {})), isDelete ? 'Kept — deletion refused.' : 'Rejected.')}
                         disabled={busy}
                         className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-gray-600 bg-gray-50 border border-gray-200 rounded hover:bg-gray-100 disabled:opacity-50"
                       >

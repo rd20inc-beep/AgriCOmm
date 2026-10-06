@@ -69,7 +69,9 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
   const { data: storedDocs = [], refetch: refetchStored } = useQuery({
     queryKey: ['export-order-docs', orderDbId],
     queryFn: async () => {
-      const res = await documentsApi.getByRef('export_order', orderDbId);
+      // include_history: Superseded / Deleted files come back too, for the
+      // version history under each type. Only is_latest rows are live.
+      const res = await documentsApi.getByRef('export_order', orderDbId, { include_history: 1 });
       // The endpoint answers { success, data: { documents: [...] } }, so res.data
       // is an OBJECT. Returning it straight through handed an object to the
       // Array.isArray() guard below, which silently produced an empty list even
@@ -107,15 +109,20 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
     return { DOC_KEYS: keys, LABELS: labels };
   }, [catalogue]);
 
-  const storedByType = React.useMemo(() => {
-    const m = {};
+  // Live files (is_latest) per type, and everything they replaced or that was
+  // deleted (kept, never removed) as that type's version history.
+  const { storedByType, historyByType } = React.useMemo(() => {
+    const live = {};
+    const hist = {};
     for (const d of (Array.isArray(storedDocs) ? storedDocs : [])) {
       const key = d.doc_type || d.document_type || d.type;
       if (!key) continue;
-      (m[key] ||= []).push(d);
+      const isLive = d.is_latest !== false && d.status !== 'Superseded' && d.status !== 'Deleted';
+      ((isLive ? live : hist)[key] ||= []).push(d);
     }
-    return m;
+    return { storedByType: live, historyByType: hist };
   }, [storedDocs]);
+  const [openHistory, setOpenHistory] = React.useState({});
   // The LIVE file for a type is the latest APPROVED one. A pending upload or a
   // pending deletion does not change what the order counts as its document, so
   // preview/download keep pointing at the approved copy until an owner acts.
@@ -147,14 +154,14 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
     const files = Array.from(e.target.files || []);
     e.target.value = '';
     if (!files.length) return;
-    // Sequential, not Promise.all: each upload writes a document_store row and
-    // bumps the order's document status, and the server is happier with one at
-    // a time than with ten parallel multipart writes.
-    for (const file of files) {
-      // Pass the label too: the page's own map only knows the original seven
-      // types, so anything else was stored as its raw key ("custom - EX-006").
-      if (typeof onUpload === 'function') await onUpload(key, file, LABELS[key]);
-    }
+    // ONE request for all of them: the files chosen together are one version
+    // of the document (a multi-page scan), and that version REPLACES the
+    // type's current file(s), which move to its version history — kept and
+    // still downloadable. Uploading them one by one would have made each page
+    // replace the previous one.
+    // Pass the label too: the page's own map only knows the original seven
+    // types, so anything else was stored as its raw key ("custom - EX-006").
+    if (typeof onUpload === 'function') await onUpload(key, files, LABELS[key]);
     refetchStored();
   }
   // Open an uploaded file in a new tab. Every stored document can be previewed,
@@ -218,7 +225,7 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
       const fresh = await refetchStored();
       const current = fresh?.data;
       if (Array.isArray(current)) {
-        const alive = new Set(current.map((f) => f.id));
+        const alive = new Set(current.filter((f) => f.is_latest !== false && f.status !== 'Deleted' && f.status !== 'Superseded').map((f) => f.id));
         for (const key of picked) {
           const stale = (storedByType[key] || []).some((f) => !alive.has(f.id));
           if (stale) addToast?.('The document list had changed — using the latest files.', 'info');
@@ -288,8 +295,15 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
     catch (e) { addToast?.(e?.data?.message || e.message || 'Action failed', 'error'); }
   }
   const requestDelete = (f) => act(() => documentsApi.requestDelete(f.id), 'Deletion requested — awaiting owner approval.');
+  // Owner / Super Admin delete directly. Nothing leaves the disk: the file is
+  // marked deleted and stays in the type's version history.
+  const deleteNow = (f) => {
+    // eslint-disable-next-line no-alert
+    if (!window.confirm(`Delete "${f.file_name || f.title}"? It is kept in the version history and the deletion is recorded.`)) return;
+    act(() => documentsApi.remove(f.id), 'Deleted — the file is kept in the version history.');
+  };
   const cancelDelete = (f) => act(() => documentsApi.cancelDelete(f.id), 'Deletion request withdrawn.');
-  const approveFile = (f) => act(() => documentsApi.approve(f.id, {}), f.pending_action === 'delete' ? 'Deletion approved — document removed.' : 'Approved — this version is now live.');
+  const approveFile = (f) => act(() => documentsApi.approve(f.id, {}), f.pending_action === 'delete' ? 'Deletion approved — marked deleted; the file stays in the version history.' : 'Approved — this version is now live.');
   const rejectFile = (f) => act(() => documentsApi.reject(f.id, {}), 'Rejected.');
 
   async function downloadStored(key, doc) {
@@ -450,9 +464,9 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
                   {pendingCount > 0 && <span className="text-[10px] font-medium px-1.5 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-full">{pendingCount} awaiting approval</span>}
                 </div>
                 {uploadOnly && !stored && <p className="text-[11px] text-gray-500 mt-0.5">{UPLOAD_HINTS[key]}</p>}
-                {/* Every attached file, not just the newest — a document type
-                    can legitimately carry several (a BL plus its amendment, a
-                    multi-page scan sent as separate images). */}
+                {/* Every file of the live version — one upload can carry several
+                    (a multi-page scan sent as separate images). Older versions
+                    are listed under "version history" below. */}
                 {files.map((f) => {
                   const pendingDelete = f.pending_action === 'delete';
                   const live = f.status === 'Approved' && !pendingDelete;
@@ -481,18 +495,57 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
                           {!pendingDelete && f.status !== 'Rejected' && (
                             <button onClick={() => rejectFile(f)} className="text-[11px] text-red-600 hover:underline flex-shrink-0">reject</button>
                           )}
-                          {pendingDelete && (
+                          {pendingDelete ? (
                             <button onClick={() => cancelDelete(f)} className="text-[11px] text-gray-500 hover:underline flex-shrink-0">keep</button>
+                          ) : (
+                            <button onClick={() => deleteNow(f)} className="text-[11px] text-red-600 hover:underline flex-shrink-0">delete</button>
                           )}
                         </>
                       ) : pendingDelete ? (
-                        <button onClick={() => cancelDelete(f)} className="text-[11px] text-gray-500 hover:underline flex-shrink-0">withdraw</button>
+                        <button onClick={() => cancelDelete(f)} className="text-[11px] text-gray-500 hover:underline flex-shrink-0">withdraw request</button>
                       ) : (
-                        <button onClick={() => requestDelete(f)} className="text-[11px] text-red-600 hover:underline flex-shrink-0">request delete</button>
+                        <button onClick={() => requestDelete(f)} title="An Owner / Super Admin must approve before anything is deleted" className="text-[11px] text-red-600 hover:underline flex-shrink-0">Request deletion</button>
                       )}
                     </div>
                   );
                 })}
+                {/* Version history: files this type's uploads replaced
+                    (Superseded) and deleted ones — kept, still downloadable. */}
+                {(historyByType[key] || []).length > 0 && (
+                  <div className="mt-1">
+                    <button
+                      type="button"
+                      onClick={() => setOpenHistory((o) => ({ ...o, [key]: !o[key] }))}
+                      className="text-[11px] text-slate-500 hover:text-slate-700 hover:underline"
+                    >
+                      {openHistory[key] ? 'Hide' : 'Show'} version history ({historyByType[key].length})
+                    </button>
+                    {openHistory[key] && (
+                      <div className="mt-1 pl-2 border-l-2 border-gray-200 space-y-0.5">
+                        {historyByType[key].map((h) => (
+                          <div key={h.id} className="flex items-center gap-2 flex-wrap">
+                            <p className="text-[11px] text-gray-400 truncate">
+                              v{h.version} · {h.file_name || h.title}
+                              {h.uploaded_by_name ? ` · uploaded by ${h.uploaded_by_name}` : ''}
+                              {h.created_at ? ` on ${new Date(h.created_at).toLocaleDateString('en-GB')}` : ''}
+                            </p>
+                            {h.status === 'Deleted' ? (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-red-50 text-red-600 border border-red-200">
+                                deleted{h.deleted_by_name ? ` by ${h.deleted_by_name}` : ''}{h.deleted_at ? ` on ${new Date(h.deleted_at).toLocaleDateString('en-GB')}` : ''}
+                              </span>
+                            ) : (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500 border border-gray-200">
+                                superseded{h.superseded_by_name ? ` by ${h.superseded_by_name}` : ''}{h.superseded_at ? ` on ${new Date(h.superseded_at).toLocaleDateString('en-GB')}` : ''}
+                              </span>
+                            )}
+                            <button onClick={() => previewStored(key, h)} className="text-[11px] text-blue-600 hover:underline flex-shrink-0">view</button>
+                            <button onClick={() => downloadStored(key, h)} className="text-[11px] text-gray-500 hover:underline flex-shrink-0">download</button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
                 {isChecked && doc.date && !stored && <p className="text-xs text-emerald-600 mt-0.5">Confirmed {doc.date}</p>}
               </div>
 
@@ -511,8 +564,14 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
                     <Eye className="w-3.5 h-3.5" /> Preview
                   </button>
                 )}
-                <button onClick={() => pickFile(key)} className="inline-flex items-center gap-1 text-xs font-medium px-3 py-1.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg hover:bg-amber-100">
-                  <Upload className="w-3.5 h-3.5" /> {stored ? 'Add file' : 'Upload'}
+                <button
+                  onClick={() => pickFile(key)}
+                  title={stored
+                    ? 'Replaces the current file(s) — they stay in the version history. Select several files at once for a multi-page document.'
+                    : 'Select several files at once for a multi-page document.'}
+                  className="inline-flex items-center gap-1 text-xs font-medium px-3 py-1.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg hover:bg-amber-100"
+                >
+                  <Upload className="w-3.5 h-3.5" /> {stored ? 'Replace' : 'Upload'}
                 </button>
                 {key !== 'custom' && (isChecked ? (
                   <span className="text-xs font-medium text-emerald-600 bg-emerald-100 px-2 py-1 rounded-full">Ready</span>

@@ -8,9 +8,14 @@ export const documentsApi = {
   approve: (id, data) => api.put(`/api/documents/${id}/approve`, data),
   requestDelete: (id) => api.put(`/api/documents/${id}/request-delete`, {}),
   cancelDelete: (id) => api.put(`/api/documents/${id}/cancel-delete`, {}),
+  // Owner / Super Admin: deletes at once (marked Deleted, file kept in history).
+  // Anyone else: the server turns this into a deletion request (202).
+  remove: (id) => api.delete(`/api/documents/${id}`),
   reject: (id, data) => api.put(`/api/documents/${id}/reject`, data),
   finalize: (id) => api.put(`/api/documents/${id}/finalize`),
-  getByRef: (type, id) => api.get(`/api/documents/ref/${type}/${id}`),
+  // params.include_history = 1 also returns Superseded / Deleted rows.
+  getByRef: (type, id, params) => api.get(`/api/documents/ref/${type}/${id}`, params),
+  versions: (id) => api.get(`/api/documents/${id}/versions`),
   download: (id, filename) => api.download(`/api/documents/${id}/download`, filename),
   // Same endpoint, opened in a tab rather than saved — a stored document should
   // be viewable without downloading it first.

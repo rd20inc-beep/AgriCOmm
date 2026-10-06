@@ -563,13 +563,18 @@ export default function ExportOrderDetail() {
     setShowExpenseModal(false);
   };
 
-  const handleDocumentUpload = async (docKey, file, docLabel) => {
+  // `fileOrFiles` may be one File or several: every file chosen in one go is
+  // ONE version of the document (a multi-page scan), and it REPLACES the
+  // type's current file(s), which stay in the version history.
+  const handleDocumentUpload = async (docKey, fileOrFiles, docLabel) => {
     // docLabel comes from the Documents tab, which knows every document type;
     // documentLabels here only covers the original seven.
     const label = docLabel || documentLabels[docKey] || docKey;
-    if (file) {
+    const files = (Array.isArray(fileOrFiles) ? fileOrFiles : [fileOrFiles]).filter(Boolean);
+    const names = files.map((f) => f.name).join(', ');
+    if (files.length) {
       const formData = new FormData();
-      formData.append('file', file);
+      for (const f of files) formData.append('files', f);
       formData.append('doc_type', docKey);
       formData.append('linked_type', 'export_order');
       formData.append('linked_id', orderId);
@@ -585,9 +590,9 @@ export default function ExportOrderDetail() {
     try {
       await uploadDocMut.mutateAsync({
         id: orderId,
-        data: { doc_type: docKey, file_path: file ? file.name : null },
+        data: { doc_type: docKey, file_path: names || null },
       });
-      addToast(`${label} uploaded${file ? ` (${file.name})` : ''}`);
+      addToast(`${label} uploaded${names ? ` (${names})` : ''}`);
     } catch (err) {
       addToast(`Failed to upload ${label}: ${err.message}`, 'error');
     }
