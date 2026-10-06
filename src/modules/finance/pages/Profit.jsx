@@ -5,21 +5,8 @@ import { FinanceKPI, FinanceTable, FinanceChart } from '../../../components/fina
 import { useProfitabilitySummary, useLocalSales, useLocalSalesSummary } from '../../../api/queries';
 import { DEFAULT_FX_RATE } from '../utils/fx';
 import { useApp } from '../../../context/AppContext';
-
-function fmtPKR(n) {
-  if (n == null || isNaN(n)) return 'Rs 0';
-  if (Math.abs(n) >= 10_000_000) return `Rs ${(n / 10_000_000).toFixed(2)}Cr`;
-  if (Math.abs(n) >= 100_000) return `Rs ${(n / 100_000).toFixed(2)}L`;
-  if (Math.abs(n) >= 1_000) return `Rs ${(n / 1_000).toFixed(0)}K`;
-  return `Rs ${(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
-function fmtUSD(n) {
-  if (n == null || isNaN(n)) return '$0';
-  if (Math.abs(n) >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
-  if (Math.abs(n) >= 1_000) return `$${(n / 1_000).toFixed(1)}K`;
-  return `$${(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
+import StatusBadge from '../../../shared/components/StatusBadge';
+import { fmtPKR, fmtMoney, fmtPct, fmtDate, fmtDateTime, fmtKg } from '../../../shared/utils/format';
 
 const TABS = ['Export', 'Mill', 'Local', 'Consolidated'];
 
@@ -64,9 +51,9 @@ export default function Profit() {
     { key: 'orderNo', label: 'Order', sortable: true, render: (v, row) => (
       <OrderRefLink to={`/export/${row.id}`} module="export_orders" onClick={e => e.stopPropagation()}>{v}</OrderRefLink>
     )},
-    { key: 'status', label: 'Status', sortable: true },
+    { key: 'status', label: 'Status', sortable: true, render: (v) => (v ? <StatusBadge status={v} /> : '—') },
     { key: 'currency', label: 'Cur.', render: (v) => <span className="text-xs bg-gray-100 px-1.5 py-0.5 rounded">{v}</span> },
-    { key: 'contractValueForeign', label: 'Contract (Foreign)', sortable: true, align: 'right', render: (v, row) => fmtUSD(v) },
+    { key: 'contractValueForeign', label: 'Contract (Foreign)', sortable: true, align: 'right', render: (v, row) => fmtMoney(v, row.currency || 'USD') },
     { key: 'bookedFxRate', label: 'Locked Rate', align: 'right', render: (v) => <span className="text-xs text-gray-500">{v}</span> },
     { key: 'revenuePkrBooked', label: 'Revenue (PKR)', sortable: true, align: 'right', render: (v) => fmtPKR(v) },
     { key: 'totalCostPkr', label: 'Total Cost (PKR)', sortable: true, align: 'right', render: (v) => fmtPKR(v) },
@@ -76,7 +63,7 @@ export default function Profit() {
     { key: 'fxGainLossPkr', label: 'FX +/-', sortable: true, align: 'right', render: (v) => (
       <span className={v >= 0 ? 'text-blue-600' : 'text-amber-600'}>{fmtPKR(v)}</span>
     )},
-    { key: 'marginPct', label: 'Margin', sortable: true, align: 'right', render: (v) => v == null || isNaN(v) ? '—' : `${v}%`},
+    { key: 'marginPct', label: 'Margin', sortable: true, align: 'right', render: (v) => fmtPct(v, { decimals: 2 })},
     { key: 'calculationStatus', label: 'Accuracy', render: (v) => <AccuracyBadge status={v} /> },
   ];
 
@@ -84,7 +71,7 @@ export default function Profit() {
     { key: 'batchNo', label: 'Batch', sortable: true, render: (v, row) => (
       <OrderRefLink to={`/milling/${row.id}`} module="milling" onClick={e => e.stopPropagation()}>{v}</OrderRefLink>
     )},
-    { key: 'status', label: 'Status', sortable: true },
+    { key: 'status', label: 'Status', sortable: true, render: (v) => (v ? <StatusBadge status={v} /> : '—') },
     { key: 'rawQtyMT', label: 'Raw (MT)', sortable: true, align: 'right' },
     { key: 'finishedMT', label: 'Finished (MT)', sortable: true, align: 'right' },
     { key: 'revenue', label: 'Revenue (PKR)', sortable: true, align: 'right', render: (v) => fmtPKR(v) },
@@ -92,7 +79,7 @@ export default function Profit() {
     { key: 'grossProfit', label: 'Profit (PKR)', sortable: true, align: 'right', render: (v) => (
       <span className={v >= 0 ? 'text-emerald-600 font-medium' : 'text-red-600 font-medium'}>{fmtPKR(v)}</span>
     )},
-    { key: 'marginPct', label: 'Margin', sortable: true, align: 'right', render: (v) => v == null || isNaN(v) ? '—' : `${v}%`},
+    { key: 'marginPct', label: 'Margin', sortable: true, align: 'right', render: (v) => fmtPct(v, { decimals: 2 })},
     { key: 'priceSource', label: 'Price Source', render: (v) => (
       <span className={`text-xs px-1.5 py-0.5 rounded ${v === 'confirmed' ? 'bg-emerald-50 text-emerald-700' : v === 'commodity_rates' ? 'bg-blue-50 text-blue-700' : 'bg-red-50 text-red-700'}`}>{v || 'none'}</span>
     )},
@@ -148,18 +135,18 @@ export default function Profit() {
     { key: 'saleNo', label: 'Sale', sortable: true, render: (v, row) => (
       <OrderRefLink to={`/local-sales/${row.id}`} module="inventory" className="text-blue-600 hover:underline font-medium">{v}</OrderRefLink>
     )},
-    { key: 'saleDate', label: 'Date', sortable: true, render: (v) => v ? new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }) : '—' },
-    { key: 'buyerName', label: 'Buyer', sortable: true, render: (v) => v || '—' },
+    { key: 'saleDate', label: 'Date', sortable: true, render: (v) => fmtDate(v) },
+    { key: 'buyerName', label: 'Buyer', sortable: true, render: (v) => <span className="block max-w-[220px] truncate" title={v || ''}>{v || '—'}</span> },
     { key: 'itemName', label: 'Item', render: (v) => v || '—' },
-    { key: 'quantityKg', label: 'Qty (kg)', sortable: true, align: 'right', render: (v) => Math.round(parseFloat(v) || 0).toLocaleString() },
+    { key: 'quantityKg', label: 'Qty (kg)', sortable: true, align: 'right', render: (v) => fmtKg(parseFloat(v) || 0) },
     { key: 'totalAmount', label: 'Revenue', sortable: true, align: 'right', render: (v) => fmtPKR(v) },
     { key: 'cogsTotalPkr', label: 'Cost', align: 'right', render: (v, row) => fmtPKR(v || row.landedCostTotal) },
     { key: 'grossProfit', label: 'Profit', sortable: true, align: 'right', render: (v, row) => {
       const n = parseFloat(v || row.grossProfitPkr) || 0;
       return <span className={n >= 0 ? 'text-emerald-600 font-medium' : 'text-red-600 font-medium'}>{fmtPKR(n)}</span>;
     }},
-    { key: 'marginPct', label: 'Margin', sortable: true, align: 'right', render: (v) => v == null || isNaN(parseFloat(v)) ? '—' : `${parseFloat(v).toFixed(1)}%` },
-    { key: 'paymentStatus', label: 'Status', render: (v) => <span className="text-xs px-2 py-0.5 rounded-full bg-gray-50 text-gray-700 border border-gray-200">{v || 'Pending'}</span> },
+    { key: 'marginPct', label: 'Margin', sortable: true, align: 'right', render: (v) => fmtPct(v) },
+    { key: 'paymentStatus', label: 'Status', render: (v) => <StatusBadge status={v || 'Pending'} /> },
   ];
 
   const heroGradient = consolidatedPkr >= 0
@@ -180,12 +167,12 @@ export default function Profit() {
           <div className="border-b-2 border-gray-900 pb-2 flex items-end justify-between mb-4">
             <div>
               <div className="text-base font-bold uppercase tracking-wider">{companyName}</div>
-              <div className="text-xs text-gray-500">Generated {new Date().toLocaleString()}</div>
+              <div className="text-xs text-gray-500">Generated {fmtDateTime(new Date())}</div>
             </div>
             <div className="text-right">
               <div className="text-lg font-bold">Profitability — {tab}</div>
               <div className="text-xs text-gray-600">
-                Consolidated {fmtPKR(consolidatedPkr)} · Margin {overallMargin == null ? '—' : `${overallMargin.toFixed(1)}%`} · 1 USD = {currentFxRate}
+                Consolidated {fmtPKR(consolidatedPkr)} · Margin {fmtPct(overallMargin)} · 1 USD = {currentFxRate}
               </div>
             </div>
           </div>
@@ -209,7 +196,7 @@ export default function Profit() {
           </div>
           <div className="flex flex-col items-start sm:items-end gap-1.5 text-[11px]">
             <span className="inline-flex items-center gap-1.5 font-semibold uppercase tracking-wider px-3 py-1.5 rounded-full bg-white/15 ring-1 ring-white/30">
-              <Activity size={12} /> Margin {overallMargin == null ? '—' : `${overallMargin.toFixed(1)}%`}
+              <Activity size={12} /> Margin {fmtPct(overallMargin)}
             </span>
             <div className="opacity-80 text-right">Base PKR · 1 USD = {currentFxRate}</div>
           </div>

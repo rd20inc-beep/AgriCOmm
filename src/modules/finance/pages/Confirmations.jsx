@@ -20,26 +20,18 @@ import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import { useUpdateOrderStatus, useRecordExportReceipt, usePendingExportReceipts, useConfirmExportReceipt, useRejectExportReceipt, useReceivables } from '../../../api/queries';
 import Modal from '../../../components/Modal';
-import StatusBadge from '../../../components/StatusBadge';
+import StatusBadge from '../../../shared/components/StatusBadge';
+import FieldError from '../../../shared/components/FieldError';
 import EmailComposer from '../../../components/EmailComposer';
 import { favStar } from '../../../shared/utils/favorites';
 import useConfirm from '../../../hooks/useConfirm';
 import { isBalanceDue } from '../../exportOrders/components/constants';
-import { todayLocalISO } from '../../../shared/utils/format';
+import { todayLocalISO, fmtUSD, fmtPKR, fmtMoney, fmtDate, fmtDateTime } from '../../../shared/utils/format';
 
-function formatCurrency(value) {
-  return '$' + value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-
-// Amount in the order's own currency, for text that leaves the system (the
-// reminder email) — an EUR order must not be dunned in dollars.
-function fmtOrderMoney(value, currency) {
-  return `${currency || 'USD'} ${(parseFloat(value) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
-function fmtPKR(value) {
-  return 'Rs ' + (parseFloat(value) || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
+// Amount in the order's own currency (an EUR order must not read — or be
+// dunned — in dollars). Export orders default to USD.
+const fmtOrd = (value, order) => fmtMoney(parseFloat(value) || 0, order?.currency || 'USD');
+const fmtRs2 = (value) => fmtPKR(parseFloat(value) || 0, { decimals: 2 });
 
 function daysSince(dateStr) {
   const created = new Date(dateStr);
@@ -96,6 +88,7 @@ export default function FinanceConfirmations() {
     notes: '',
   });
   const [paymentHistory, setPaymentHistory] = useState([]);
+  const [formErrors, setFormErrors] = useState({});
   const [emailOrder, setEmailOrder] = useState(null);
   const [emailType, setEmailType] = useState('advance');
 
@@ -168,6 +161,7 @@ export default function FinanceConfirmations() {
       bankReference: '',
       notes: '',
     });
+    setFormErrors({});
     setModalOpen(true);
   }
 
@@ -186,15 +180,16 @@ export default function FinanceConfirmations() {
       reference,
       bankAccount,
       date: formData.date,
-      timestamp: new Date().toLocaleString(),
+      timestamp: fmtDateTime(new Date()),
     }, ...prev]);
   }
 
   // Recording a receipt (full or partial) now SUBMITS a pending receipt; Finance
   // confirms it below with the actual FX rate (item 14).
   async function submitPendingReceipt(amount) {
-    if (!selectedOrder) return;
-    if (isNaN(amount) || amount <= 0) { addToast('Please enter a valid amount', 'error'); return; }
+    if (!selectedOrder || recordReceiptMut.isPending) return;
+    if (isNaN(amount) || amount <= 0) { setFormErrors({ receivedAmount: 'Enter a valid amount' }); return; }
+    setFormErrors({});
     const orderId = selectedOrder.dbId || selectedOrder.id;
     try {
       await recordReceiptMut.mutateAsync({
@@ -208,7 +203,7 @@ export default function FinanceConfirmations() {
           notes: formData.notes,
         },
       });
-      addToast(`${milestoneType === 'advance' ? 'Advance' : 'Balance'} of ${formatCurrency(amount)} submitted — pending confirmation`);
+      addToast(`${milestoneType === 'advance' ? 'Advance' : 'Balance'} of ${fmtOrd(amount, selectedOrder)} submitted — pending confirmation`);
     } catch (err) {
       addToast(err?.data?.message || err?.message || 'Failed to submit receipt', 'error');
     }
@@ -219,6 +214,7 @@ export default function FinanceConfirmations() {
 
   // Finance confirms a PENDING receipt with the actual FX rate → posts it.
   async function confirmPending(p) {
+    if (confirmReceiptMut.isPending) return;
     const isForeign = (p.currency || 'USD') !== 'PKR';
     const fx = parseFloat(fxByPayment[p.id]) || parseFloat(p.fxRate) || 0;
     if (isForeign && fx <= 0) { addToast('Enter the FX rate the bank applied', 'error'); return; }
@@ -234,12 +230,12 @@ export default function FinanceConfirmations() {
     const ok = await confirm({
       title: `Reject the ${p.receiptType} receipt for ${p.orderNo}?`,
       consequence: 'The receipt is marked as not received. Nothing is posted to the bank or the ledger, and the reason is recorded for whoever entered it.',
-      amount: `${p.currency || ''} ${Number(p.amount || 0).toLocaleString()}`.trim(),
+      amount: fmtMoney(p.amount || 0, p.currency || 'USD'),
       reason: 'required',
       confirmLabel: 'Mark not received',
       cancelLabel: 'Go back',
     });
-    if (!ok) return;
+    if (!ok || rejectReceiptMut.isPending) return;
     try {
       await rejectReceiptMut.mutateAsync({ paymentId: p.id, data: { reason: ok.reason } });
       addToast('Receipt marked as not received', 'warning');
@@ -249,7 +245,7 @@ export default function FinanceConfirmations() {
   }
 
   async function handlePutOnHold() {
-    if (!selectedOrder) return;
+    if (!selectedOrder || updateStatusMut.isPending) return;
     try {
       await updateStatusMut.mutateAsync({
         id: selectedOrder.dbId || selectedOrder.id,
@@ -289,10 +285,10 @@ export default function FinanceConfirmations() {
             )}
           </div>
           <div className="min-w-0">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 min-w-0">
               {orderRef(order.id, 'text-sm font-semibold text-blue-600 hover:text-blue-800')}
               <span className="text-xs text-gray-400">|</span>
-              <span className="text-sm text-gray-600 truncate"><PartyLink type="customer" id={order.customerId} name={order.customerName} /></span>
+              <span className="text-sm text-gray-600 truncate min-w-0" title={order.customerName || undefined}><PartyLink type="customer" id={order.customerId} name={order.customerName} /></span>
               <span className="text-xs text-gray-400">|</span>
               <span className="text-xs text-gray-500">{order.country}</span>
             </div>
@@ -321,10 +317,10 @@ export default function FinanceConfirmations() {
         <div className="flex items-center gap-4 flex-shrink-0">
           <div className="text-right">
             <div className="text-sm font-semibold text-gray-900">
-              {formatCurrency(remaining)}
+              {fmtOrd(remaining, order)}
             </div>
             <div className="text-xs text-gray-400">
-              of {formatCurrency(expected)}
+              of {fmtOrd(expected, order)}
             </div>
           </div>
           <StatusBadge status={order.status} />
@@ -332,6 +328,7 @@ export default function FinanceConfirmations() {
             onClick={() => { setEmailOrder(order); setEmailType(type); }}
             className="inline-flex items-center justify-center w-8 h-8 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
             title="Send Payment Reminder"
+            aria-label="Send payment reminder"
           >
             <Mail size={14} />
           </button>
@@ -350,8 +347,8 @@ export default function FinanceConfirmations() {
   // Card figures: Owner/Export get the order-level summary ($); payments-only
   // Finance gets the receivables-based summary (Rs), which is populated for them.
   const cards = canViewExport
-    ? { fmt: formatCurrency, receivables: summary.totalReceivables, received: summary.totalReceived, outstanding: summary.totalOutstanding, subCount: exportOrders.filter((o) => o.status !== 'Cancelled').length }
-    : { fmt: fmtPKR, receivables: financeSummary.expected, received: financeSummary.received, outstanding: financeSummary.outstanding, subCount: receivables.length };
+    ? { fmt: fmtUSD, receivables: summary.totalReceivables, received: summary.totalReceived, outstanding: summary.totalOutstanding, subCount: exportOrders.filter((o) => o.status !== 'Cancelled').length }
+    : { fmt: fmtRs2, receivables: financeSummary.expected, received: financeSummary.received, outstanding: financeSummary.outstanding, subCount: receivables.length };
   const cardRate = cards.receivables > 0 ? (cards.received / cards.receivables) * 100 : 0;
 
   return (
@@ -410,16 +407,16 @@ export default function FinanceConfirmations() {
               return (
                 <div key={p.id} className="flex flex-wrap items-center justify-between gap-3 border border-gray-100 rounded-lg p-3 bg-amber-50/40">
                   <div className="min-w-0">
-                    <div className="flex items-center gap-2 text-sm">
+                    <div className="flex items-center gap-2 text-sm min-w-0">
                       {p.orderId && canViewExport
                         ? <Link to={`/export/${p.orderId}`} className="font-semibold text-blue-600 hover:text-blue-800">{p.orderNo}</Link>
                         : <span className="font-semibold text-gray-700">{p.orderNo}</span>}
                       <span className="text-gray-400">|</span>
-                      <span className="text-gray-700"><PartyLink type="customer" id={p.customerId} name={p.customerName} /></span>
+                      <span className="text-gray-700 truncate min-w-0 max-w-[220px]" title={p.customerName || undefined}><PartyLink type="customer" id={p.customerId} name={p.customerName} /></span>
                       <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 capitalize">{p.receiptType}</span>
                     </div>
                     <div className="text-xs text-gray-500 mt-0.5">
-                      {p.currency} {Number(p.amount).toLocaleString()} · recorded by {p.recordedByName || '—'} · {p.paymentDate ? String(p.paymentDate).slice(0, 10) : ''}
+                      {fmtMoney(p.amount, p.currency || 'USD')} · recorded by {p.recordedByName || '—'} · {p.paymentDate ? fmtDate(String(p.paymentDate).slice(0, 10)) : ''}
                     </div>
                     <div className="text-xs mt-0.5 inline-flex items-center gap-1 text-emerald-700">
                       <Landmark size={12} className="flex-shrink-0" />
@@ -434,19 +431,19 @@ export default function FinanceConfirmations() {
                         <label className="block text-[10px] text-gray-400 uppercase">FX rate</label>
                         <input type="number" step="0.0001" value={fxByPayment[p.id] ?? (p.fxRate || '')}
                           onChange={(e) => setFxByPayment((s) => ({ ...s, [p.id]: e.target.value }))}
-                          placeholder="rate" className="w-24 px-2 py-1 border border-gray-300 rounded text-sm text-right" />
+                          placeholder="rate" aria-label="FX rate" className="w-24 px-2 py-1 border border-gray-300 rounded text-sm text-right" />
                       </div>
                     )}
                     <div className="text-right text-xs text-gray-500 w-28">
                       <span className="block text-[10px] uppercase text-gray-400">PKR</span>
-                      Rs {pkr.toLocaleString('en-PK', { maximumFractionDigits: 0 })}
+                      {fmtPKR(pkr)}
                     </div>
                     <button onClick={() => confirmPending(p)} disabled={confirmReceiptMut.isPending}
                       className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 text-white text-xs font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-50">
                       <CheckCircle size={14} /> Confirm
                     </button>
-                    <button onClick={() => rejectPending(p)}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 text-gray-600 text-xs font-medium rounded-lg hover:bg-gray-50">
+                    <button onClick={() => rejectPending(p)} disabled={rejectReceiptMut.isPending}
+                      className="disabled:opacity-50 inline-flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 text-gray-600 text-xs font-medium rounded-lg hover:bg-gray-50">
                       Reject
                     </button>
                   </div>
@@ -596,16 +593,16 @@ export default function FinanceConfirmations() {
                       <td data-label="Order" className="py-2.5 px-3">
                         {orderRef(o.id)}
                       </td>
-                      <td data-label="Customer" className="py-2.5 px-3 text-gray-600 truncate max-w-[150px]"><PartyLink type="customer" id={o.customerId} name={o.customerName} /></td>
-                      <td data-label="Adv Expected" className="mob-hide py-2.5 px-3 text-right text-gray-700">{formatCurrency(o.advanceExpected)}</td>
+                      <td data-label="Customer" className="py-2.5 px-3 text-gray-600 truncate max-w-[150px]" title={o.customerName || undefined}><PartyLink type="customer" id={o.customerId} name={o.customerName} /></td>
+                      <td data-label="Adv Expected" className="mob-hide py-2.5 px-3 text-right text-gray-700">{fmtOrd(o.advanceExpected, o)}</td>
                       <td data-label="Adv Received" className={`py-2.5 px-3 text-right font-medium ${o.advanceReceived >= o.advanceExpected ? 'text-emerald-600' : 'text-amber-600'}`}>
-                        {formatCurrency(o.advanceReceived)}
+                        {fmtOrd(o.advanceReceived, o)}
                       </td>
-                      <td data-label="Bal Expected" className="mob-hide py-2.5 px-3 text-right text-gray-700">{formatCurrency(o.balanceExpected)}</td>
+                      <td data-label="Bal Expected" className="mob-hide py-2.5 px-3 text-right text-gray-700">{fmtOrd(o.balanceExpected, o)}</td>
                       <td data-label="Bal Received" className={`py-2.5 px-3 text-right font-medium ${o.balanceReceived >= o.balanceExpected ? 'text-emerald-600' : 'text-amber-600'}`}>
-                        {formatCurrency(o.balanceReceived)}
+                        {fmtOrd(o.balanceReceived, o)}
                       </td>
-                      <td data-label="Outstanding" className="py-2.5 px-3 text-right font-bold text-red-600">{formatCurrency(outstanding)}</td>
+                      <td data-label="Outstanding" className="py-2.5 px-3 text-right font-bold text-red-600">{fmtOrd(outstanding, o)}</td>
                       <td data-label="Action" className="py-2.5 px-3 text-center">
                         <button
                           onClick={() => openModal(o, advPartial ? 'advance' : 'balance')}
@@ -661,11 +658,11 @@ export default function FinanceConfirmations() {
                       <td data-label="Order" className="py-2 px-3">
                         {orderRef(o.id)}
                       </td>
-                      <td data-label="Customer" className="py-2 px-3 text-gray-600 truncate max-w-[150px]"><PartyLink type="customer" id={o.customerId} name={o.customerName} /></td>
-                      <td data-label="Contract Value" className="mob-hide py-2 px-3 text-right text-gray-700">{formatCurrency(o.contractValue)}</td>
-                      <td data-label="Total Received" className="py-2 px-3 text-right text-emerald-600 font-medium">{formatCurrency(totalReceived)}</td>
+                      <td data-label="Customer" className="py-2 px-3 text-gray-600 truncate max-w-[150px]" title={o.customerName || undefined}><PartyLink type="customer" id={o.customerId} name={o.customerName} /></td>
+                      <td data-label="Contract Value" className="mob-hide py-2 px-3 text-right text-gray-700">{fmtOrd(o.contractValue, o)}</td>
+                      <td data-label="Total Received" className="py-2 px-3 text-right text-emerald-600 font-medium">{fmtOrd(totalReceived, o)}</td>
                       <td data-label="Outstanding" className={`py-2 px-3 text-right font-bold ${outstanding > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
-                        {outstanding > 0 ? formatCurrency(outstanding) : 'Paid'}
+                        {outstanding > 0 ? fmtOrd(outstanding, o) : 'Paid'}
                       </td>
                       <td data-label="Status" className="py-2 px-3 text-center"><StatusBadge status={o.status} /></td>
                       <td data-label="Days" className={`mob-hide py-2 px-3 text-center text-xs font-medium ${days > 60 ? 'text-red-600' : days > 30 ? 'text-amber-600' : 'text-gray-500'}`}>
@@ -701,7 +698,7 @@ export default function FinanceConfirmations() {
                   </div>
                 </div>
                 <div className="flex items-center gap-4">
-                  <span className="font-bold text-emerald-700">{formatCurrency(p.amount)}</span>
+                  <span className="font-bold text-emerald-700">{fmtMoney(p.amount, p.currency || 'USD')}</span>
                   <span className="text-xs text-gray-500">{p.method}</span>
                   {p.bankAccount && <span className="text-xs text-gray-400">{p.bankAccount}</span>}
                   {p.reference && <span className="text-xs text-gray-400 font-mono">Ref: {p.reference}</span>}
@@ -728,29 +725,30 @@ export default function FinanceConfirmations() {
               <div className="grid grid-cols-2 gap-2 text-sm">
                 <div>
                   <span className="text-gray-500">Customer:</span>{' '}
-                  <span className="font-medium text-gray-900"><PartyLink type="customer" id={selectedOrder.customerId} name={selectedOrder.customerName} /></span>
+                  <span className="font-medium text-gray-900 break-words"><PartyLink type="customer" id={selectedOrder.customerId} name={selectedOrder.customerName} /></span>
                 </div>
                 <div>
                   <span className="text-gray-500">Contract:</span>{' '}
-                  <span className="font-medium text-gray-900">{formatCurrency(selectedOrder.contractValue)}</span>
+                  <span className="font-medium text-gray-900">{fmtOrd(selectedOrder.contractValue, selectedOrder)}</span>
                 </div>
                 <div>
                   <span className="text-gray-500">Expected:</span>{' '}
                   <span className="font-medium text-gray-900">
-                    {formatCurrency(milestoneType === 'advance' ? selectedOrder.advanceExpected : selectedOrder.balanceExpected)}
+                    {fmtOrd(milestoneType === 'advance' ? selectedOrder.advanceExpected : selectedOrder.balanceExpected, selectedOrder)}
                   </span>
                 </div>
                 <div>
                   <span className="text-gray-500">Received so far:</span>{' '}
                   <span className="font-medium text-emerald-600">
-                    {formatCurrency(milestoneType === 'advance' ? selectedOrder.advanceReceived : selectedOrder.balanceReceived)}
+                    {fmtOrd(milestoneType === 'advance' ? selectedOrder.advanceReceived : selectedOrder.balanceReceived, selectedOrder)}
                   </span>
                 </div>
                 <div>
                   <span className="text-gray-500">Remaining:</span>{' '}
                   <span className="font-bold text-amber-700">
-                    {formatCurrency(
-                      (milestoneType === 'advance' ? selectedOrder.advanceExpected - selectedOrder.advanceReceived : selectedOrder.balanceExpected - selectedOrder.balanceReceived)
+                    {fmtOrd(
+                      (milestoneType === 'advance' ? selectedOrder.advanceExpected - selectedOrder.advanceReceived : selectedOrder.balanceExpected - selectedOrder.balanceReceived),
+                      selectedOrder,
                     )}
                   </span>
                 </div>
@@ -763,13 +761,14 @@ export default function FinanceConfirmations() {
 
             {/* Form Fields */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Received Amount (USD)</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Received Amount ({selectedOrder.currency || 'USD'}) <span className="text-red-500">*</span></label>
               <input
                 type="number"
                 value={formData.receivedAmount}
                 onChange={(e) => setFormData({ ...formData, receivedAmount: e.target.value })}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
               />
+              <FieldError error={formErrors.receivedAmount} />
             </div>
 
             <div className="grid grid-cols-2 gap-4">
@@ -845,11 +844,11 @@ export default function FinanceConfirmations() {
               <div className="font-mono text-xs space-y-1">
                 <div className="flex justify-between">
                   <span className="text-gray-700">DR: {formData.bankAccount || 'Bank Account'}</span>
-                  <span className="text-gray-900 font-medium">{formatCurrency(parseFloat(formData.receivedAmount) || 0)}</span>
+                  <span className="text-gray-900 font-medium">{fmtOrd(formData.receivedAmount, selectedOrder)}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-700">CR: Accounts Receivable — {selectedOrder.customerName}</span>
-                  <span className="text-gray-900 font-medium">{formatCurrency(parseFloat(formData.receivedAmount) || 0)}</span>
+                  <span className="text-gray-900 font-medium">{fmtOrd(formData.receivedAmount, selectedOrder)}</span>
                 </div>
               </div>
             </div>
@@ -858,14 +857,16 @@ export default function FinanceConfirmations() {
             <div className="flex items-center gap-3 pt-2 border-t border-gray-100">
               <button
                 onClick={handleConfirmReceipt}
-                className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
+                disabled={recordReceiptMut.isPending}
+                className="disabled:opacity-50 flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
               >
                 <CheckCircle size={16} />
                 Submit for confirmation
               </button>
               <button
                 onClick={handlePutOnHold}
-                className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-red-500 text-white text-sm font-medium rounded-lg hover:bg-red-600 transition-colors"
+                disabled={updateStatusMut.isPending}
+                className="disabled:opacity-50 flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-red-500 text-white text-sm font-medium rounded-lg hover:bg-red-600 transition-colors"
               >
                 <PauseCircle size={16} />
                 Hold
@@ -888,8 +889,14 @@ export default function FinanceConfirmations() {
             : `Balance Payment Due - Order ${emailOrder.id}`
           }
           defaultBody={emailType === 'advance'
-            ? `Dear Customer,\n\nThis is a reminder regarding the advance payment for Order ${emailOrder.id}.\n\nAdvance Expected: ${fmtOrderMoney(emailOrder.advanceExpected, emailOrder.currency)}\nAdvance Received: ${fmtOrderMoney(emailOrder.advanceReceived, emailOrder.currency)}\nRemaining: ${fmtOrderMoney(emailOrder.advanceExpected - emailOrder.advanceReceived, emailOrder.currency)}\n\nPlease arrange the payment at your earliest convenience.\n\nBest regards,\nAGRI COMMODITIES`
-            : `Dear Customer,\n\nThis is a reminder regarding the balance payment for Order ${emailOrder.id}.\n\nBalance Expected: ${fmtOrderMoney(emailOrder.balanceExpected, emailOrder.currency)}\nBalance Received: ${fmtOrderMoney(emailOrder.balanceReceived, emailOrder.currency)}\nRemaining: ${fmtOrderMoney(emailOrder.balanceExpected - emailOrder.balanceReceived, emailOrder.currency)}\n\nPlease arrange the payment at your earliest convenience.\n\nBest regards,\nAGRI COMMODITIES`
+            ? `Dear Customer,\n\nThis is a reminder regarding the advance payment for Order ${emailOrder.id}.\n\nAdvance Expected: ${fmtOrd(emailOrder.advanceExpected, emailOrder)}
+\nAdvance Received: ${fmtOrd(emailOrder.advanceReceived, emailOrder)}
+\nRemaining: ${fmtOrd(emailOrder.advanceExpected - emailOrder.advanceReceived, emailOrder)}
+\n\nPlease arrange the payment at your earliest convenience.\n\nBest regards,\nAGRI COMMODITIES`
+            : `Dear Customer,\n\nThis is a reminder regarding the balance payment for Order ${emailOrder.id}.\n\nBalance Expected: ${fmtOrd(emailOrder.balanceExpected, emailOrder)}
+\nBalance Received: ${fmtOrd(emailOrder.balanceReceived, emailOrder)}
+\nRemaining: ${fmtOrd(emailOrder.balanceExpected - emailOrder.balanceReceived, emailOrder)}
+\n\nPlease arrange the payment at your earliest convenience.\n\nBest regards,\nAGRI COMMODITIES`
           }
         />
       )}

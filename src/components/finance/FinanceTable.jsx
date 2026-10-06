@@ -97,6 +97,7 @@ export default function FinanceTable({
                 <input
                   type="text"
                   placeholder="Search..."
+                  aria-label="Search table"
                   value={search}
                   onChange={e => { setSearch(e.target.value); setPage(1); }}
                   className="text-sm border border-gray-200 rounded-lg pl-8 pr-3 py-1.5 w-48 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -173,10 +174,10 @@ export default function FinanceTable({
         <div className="flex items-center justify-between px-4 py-2.5 border-t border-gray-100 bg-gray-50/30 text-xs text-gray-500">
           <span>{filtered.length} records</span>
           <div className="flex items-center gap-1">
-            <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={safePage <= 1}
+            <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={safePage <= 1} aria-label="Previous page"
               className="p-1 rounded hover:bg-gray-200 disabled:opacity-30"><ChevronLeft size={14} /></button>
             <span className="px-2">Page {safePage} of {totalPages}</span>
-            <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={safePage >= totalPages}
+            <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={safePage >= totalPages} aria-label="Next page"
               className="p-1 rounded hover:bg-gray-200 disabled:opacity-30"><ChevronRight size={14} /></button>
           </div>
         </div>

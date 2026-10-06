@@ -16,30 +16,17 @@ import {
 // Cost allocations computed from real export orders and milling batches
 import { useApp } from '../../../context/AppContext';
 import { financeApi } from '../../../api/services';
-import StatusBadge from '../../../components/StatusBadge';
+import StatusBadge from '../../../shared/components/StatusBadge';
+import FieldError from '../../../shared/components/FieldError';
+import { fmtMoney, fmtUSD, fmtNum, fmtPct, fmtDate } from '../../../shared/utils/format';
 import { DEFAULT_FX_RATE } from '../utils/fx';
 
 // Page-level fallback — real rate comes from finance overview / fx_rates
 // elsewhere. Kept aliased so the rest of the file reads unchanged.
 const PKR_RATE_DEFAULT_DEFAULT = DEFAULT_FX_RATE;
 
-function formatPKR(value) {
-  return 'Rs ' + (value).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-
-function formatUSD(value) {
-  return '$' + value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-
-function formatAmount(value, currency) {
-  return currency === 'PKR' ? formatPKR(value) : formatUSD(value);
-}
-
-const statusColors = {
-  Allocated: 'bg-emerald-100 text-emerald-700',
-  Partial: 'bg-amber-100 text-amber-700',
-  Unallocated: 'bg-red-100 text-red-700',
-};
+// Exact, per-row currency (USD export costs, PKR mill costs).
+const formatAmount = (value, currency) => fmtMoney(value, currency || 'USD', { decimals: 2 });
 
 const entityColors = {
   Export: 'bg-blue-100 text-blue-700',
@@ -105,6 +92,8 @@ export default function CostAllocation() {
     targetId: '',
     amount: '',
   });
+  const [allocErrors, setAllocErrors] = useState({});
+  const [allocating, setAllocating] = useState(false);
 
   // Derived data
   const categories = useMemo(() => {
@@ -172,6 +161,7 @@ export default function CostAllocation() {
     } else {
       setExpandedRow(costId);
       setAllocForm({ targetType: 'Export Order', targetId: '', amount: '' });
+      setAllocErrors({});
     }
   }
 
@@ -183,11 +173,11 @@ export default function CostAllocation() {
   }
 
   async function handleAllocate(costId) {
+    if (allocating) return;
     const amount = parseFloat(allocForm.amount);
-    if (!allocForm.targetId || isNaN(amount) || amount <= 0) {
-      addToast('Please select a target and enter a valid amount', 'error');
-      return;
-    }
+    const errs = {};
+    if (!allocForm.targetId) errs.targetId = 'Select a target';
+    if (isNaN(amount) || amount <= 0) errs.amount = 'Enter an amount greater than zero';
 
     const cost = costs.find(c => c.id === costId);
     if (!cost) return;
@@ -195,15 +185,17 @@ export default function CostAllocation() {
     const currentAllocated = getAllocatedAmount(cost);
     const remaining = cost.grossAmount - currentAllocated;
 
-    if (amount > remaining) {
-      addToast(`Amount exceeds unallocated balance of ${formatAmount(remaining, cost.currency)}`, 'error');
-      return;
+    if (!errs.amount && amount > remaining) {
+      errs.amount = `Exceeds the unallocated balance of ${formatAmount(remaining, cost.currency)}`;
     }
+    setAllocErrors(errs);
+    if (Object.keys(errs).length) return;
 
     const pct = parseFloat(((amount / cost.grossAmount) * 100).toFixed(1));
 
     // Persist to backend if this cost has a DB id
     if (cost.dbId) {
+      setAllocating(true);
       try {
         await financeApi.addAllocationLine(cost.dbId, {
           target_type: allocForm.targetType === 'Export Order' ? 'export_order' : 'milling_batch',
@@ -214,6 +206,8 @@ export default function CostAllocation() {
       } catch (err) {
         addToast(`Failed to save allocation: ${err.message}`, 'error');
         return;
+      } finally {
+        setAllocating(false);
       }
     }
 
@@ -312,7 +306,7 @@ export default function CostAllocation() {
             <DollarSign size={16} className="text-blue-500" />
             <span className="text-xs font-medium text-gray-500 uppercase">Total Costs (USD equiv.)</span>
           </div>
-          <p className="text-xl font-bold text-gray-900">{formatUSD(Math.round(summary.totalGross))}</p>
+          <p className="text-xl font-bold text-gray-900">{fmtUSD(summary.totalGross)}</p>
           <p className="text-xs text-gray-400 mt-0.5">{costs.length} cost entries</p>
         </div>
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
@@ -320,7 +314,7 @@ export default function CostAllocation() {
             <CheckCircle size={16} className="text-emerald-500" />
             <span className="text-xs font-medium text-gray-500 uppercase">Allocated (USD equiv.)</span>
           </div>
-          <p className="text-xl font-bold text-emerald-700">{formatUSD(Math.round(summary.totalAllocated))}</p>
+          <p className="text-xl font-bold text-emerald-700">{fmtUSD(summary.totalAllocated)}</p>
           <div className="w-full bg-gray-200 rounded-full h-1.5 mt-2">
             <div
               className="h-1.5 rounded-full bg-emerald-500"
@@ -333,11 +327,9 @@ export default function CostAllocation() {
             <AlertTriangle size={16} className="text-red-500" />
             <span className="text-xs font-medium text-gray-500 uppercase">Unallocated (USD equiv.)</span>
           </div>
-          <p className="text-xl font-bold text-red-600">{formatUSD(Math.round(summary.totalUnallocated))}</p>
+          <p className="text-xl font-bold text-red-600">{fmtUSD(summary.totalUnallocated)}</p>
           <p className="text-xs text-gray-400 mt-0.5">
-            {summary.totalGross > 0
-              ? ((summary.totalUnallocated / summary.totalGross) * 100).toFixed(1)
-              : 0}% of total
+            {fmtPct(summary.totalGross > 0 ? (summary.totalUnallocated / summary.totalGross) * 100 : 0)} of total
           </p>
         </div>
       </div>
@@ -447,14 +439,14 @@ export default function CostAllocation() {
                         {isExpanded ? <ChevronUp size={14} className="text-gray-400" /> : <ChevronDown size={14} className="text-gray-400" />}
                       </td>
                       <td data-label="Cost No" className="px-2 py-2.5 font-medium text-blue-600 whitespace-nowrap">{cost.id}</td>
-                      <td data-label="Date" className="mob-hide px-2 py-2.5 text-gray-500 whitespace-nowrap">{cost.date}</td>
+                      <td data-label="Date" className="mob-hide px-2 py-2.5 text-gray-500 whitespace-nowrap">{fmtDate(cost.date)}</td>
                       <td data-label="Entity" className="mob-hide px-2 py-2.5">
                         <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${entityColors[cost.entity] || 'bg-gray-100 text-gray-700'}`}>
                           {cost.entity}
                         </span>
                       </td>
                       <td data-label="Category" className="px-2 py-2.5 text-gray-700 whitespace-nowrap">{cost.category}</td>
-                      <td data-label="Vendor" className="mob-hide px-2 py-2.5 text-gray-600 truncate max-w-[140px]">{cost.vendor}</td>
+                      <td data-label="Vendor" className="mob-hide px-2 py-2.5 text-gray-600 truncate max-w-[140px]" title={cost.vendor || ''}>{cost.vendor}</td>
                       <td data-label="Gross Amt" className="px-2 py-2.5 text-right font-medium text-gray-900 whitespace-nowrap">
                         {formatAmount(cost.grossAmount, cost.currency)}
                       </td>
@@ -465,9 +457,7 @@ export default function CostAllocation() {
                         {unallocated > 0 ? formatAmount(unallocated, cost.currency) : '—'}
                       </td>
                       <td data-label="Status" className="px-2 py-2.5 text-center">
-                        <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${statusColors[cost.status]}`}>
-                          {cost.status}
-                        </span>
+                        <StatusBadge status={cost.status} />
                       </td>
                       <td data-label="Action" className="px-2 py-2.5 text-center">
                         <button
@@ -526,7 +516,7 @@ export default function CostAllocation() {
                                               {formatAmount(alloc.amount, cost.currency)}
                                             </td>
                                             <td data-label="% of Total" className="px-3 py-2 text-right text-gray-600">
-                                              {alloc.pct}%
+                                              {fmtPct(alloc.pct)}
                                             </td>
                                             <td data-label="" className="px-3 py-2 text-center">
                                               <button
@@ -536,6 +526,7 @@ export default function CostAllocation() {
                                                 }}
                                                 className="p-1 text-gray-400 hover:text-red-500 rounded transition-colors"
                                                 title="Remove allocation"
+                                                aria-label="Remove allocation"
                                               >
                                                 <X size={12} />
                                               </button>
@@ -598,13 +589,14 @@ export default function CostAllocation() {
 
                                       <div>
                                         <label className="block text-xs font-medium text-gray-600 mb-1">
-                                          Target ID
+                                          Target ID <span className="text-red-500">*</span>
                                         </label>
                                         <select
                                           value={allocForm.targetId}
-                                          onChange={(e) =>
-                                            setAllocForm({ ...allocForm, targetId: e.target.value })
-                                          }
+                                          onChange={(e) => {
+                                            setAllocForm({ ...allocForm, targetId: e.target.value });
+                                            if (allocErrors.targetId) setAllocErrors({ ...allocErrors, targetId: undefined });
+                                          }}
                                           onClick={(e) => e.stopPropagation()}
                                           className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white"
                                         >
@@ -615,11 +607,12 @@ export default function CostAllocation() {
                                             </option>
                                           ))}
                                         </select>
+                                        <FieldError error={allocErrors.targetId} />
                                       </div>
 
                                       <div>
                                         <label className="block text-xs font-medium text-gray-600 mb-1">
-                                          Amount ({cost.currency})
+                                          Amount ({cost.currency}) <span className="text-red-500">*</span>
                                         </label>
                                         <input
                                           type="number"
@@ -627,13 +620,15 @@ export default function CostAllocation() {
                                           min="0"
                                           max={unallocated}
                                           value={allocForm.amount}
-                                          onChange={(e) =>
-                                            setAllocForm({ ...allocForm, amount: e.target.value })
-                                          }
+                                          onChange={(e) => {
+                                            setAllocForm({ ...allocForm, amount: e.target.value });
+                                            if (allocErrors.amount) setAllocErrors({ ...allocErrors, amount: undefined });
+                                          }}
                                           onClick={(e) => e.stopPropagation()}
-                                          placeholder={`Max: ${unallocated.toLocaleString()}`}
+                                          placeholder={`Max: ${fmtNum(unallocated, 2)}`}
                                           className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
                                         />
+                                        <FieldError error={allocErrors.amount} />
                                       </div>
 
                                       <button
@@ -641,10 +636,11 @@ export default function CostAllocation() {
                                           e.stopPropagation();
                                           handleAllocate(cost.id);
                                         }}
-                                        className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
+                                        disabled={allocating}
+                                        className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                       >
                                         <Target size={14} />
-                                        Allocate
+                                        {allocating ? 'Allocating…' : 'Allocate'}
                                       </button>
                                     </div>
                                   </div>
@@ -664,7 +660,7 @@ export default function CostAllocation() {
                                           {formatAmount(allocated, cost.currency)}
                                         </p>
                                         <p className="text-[10px] text-gray-500">
-                                          allocated ({cost.grossAmount > 0 ? ((allocated / cost.grossAmount) * 100).toFixed(1) : 0}%)
+                                          allocated ({fmtPct(cost.grossAmount > 0 ? (allocated / cost.grossAmount) * 100 : 0)})
                                         </p>
                                       </div>
                                       <div className="bg-blue-50 rounded-lg p-3">
@@ -676,11 +672,9 @@ export default function CostAllocation() {
                                           )}
                                         </p>
                                         <p className="text-[10px] text-blue-500">
-                                          allocated (
-                                          {cost.grossAmount > 0
-                                            ? (((allocated + (parseFloat(allocForm.amount) || 0)) / cost.grossAmount) * 100).toFixed(1)
-                                            : 0}
-                                          %)
+                                          allocated ({fmtPct(cost.grossAmount > 0
+                                            ? ((allocated + (parseFloat(allocForm.amount) || 0)) / cost.grossAmount) * 100
+                                            : 0)})
                                         </p>
                                       </div>
                                     </div>

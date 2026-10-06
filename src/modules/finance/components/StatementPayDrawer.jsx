@@ -7,17 +7,12 @@ import { useApp } from '../../../context/AppContext';
 import { favStar } from '../../../shared/utils/favorites';
 import { CHEQUE_DATE_LABEL } from '../../../components/payments/paymentPayload';
 import { ChequeHint } from '../../../components/payments/PaymentFields';
-import { todayLocalISO } from '../../../shared/utils/format';
+import StatusBadge from '../../../shared/components/StatusBadge';
+import FieldError from '../../../shared/components/FieldError';
+import { todayLocalISO, fmtMoney, fmtDate } from '../../../shared/utils/format';
 
-// Small currency formatter — mirrors the symbols used across the finance pages.
-function curSymbol(cur) {
-  const c = (cur || 'PKR').toUpperCase();
-  return c === 'PKR' ? 'Rs ' : c === 'USD' ? '$' : c === 'EUR' ? '€' : c === 'GBP' ? '£' : c === 'AED' ? 'AED ' : `${c} `;
-}
-function fmt(v, cur) {
-  const n = parseFloat(v) || 0;
-  return `${curSymbol(cur)}${(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
+// Exact, two decimals, in the invoice's own currency.
+const fmt = (v, cur) => fmtMoney(parseFloat(v) || 0, cur || 'PKR', { decimals: 2 });
 
 const eqStatus = (a, b) => String(a || '').toLowerCase() === String(b || '').toLowerCase();
 const sumOut = (rows) => rows.reduce((s, r) => s + (parseFloat(r.outstanding) || 0), 0);
@@ -134,17 +129,25 @@ export default function StatementPayDrawer({ mode, party, onClose }) {
   const verb = isCustomer ? 'Receipt' : 'Payment';
   const refOf = (it) => it.recvNo || it.payNo || `#${it.dbId || it.id}`;
 
+  // The allocation loop makes one request per invoice; isPending can drop
+  // between them, so the drawer holds its own busy flag for the whole run.
+  const [saving, setSaving] = useState(false);
+  const [amountError, setAmountError] = useState('');
+
   function setAmount(v) {
     setAmountTouched(true);
+    setAmountError('');
     setForm((f) => ({ ...f, amount: v }));
   }
 
   async function handleSubmit(e) {
     e.preventDefault();
+    if (saving) return;
     if (allocatedTotal <= 0) {
-      addToast('Enter a valid amount to apply', 'error');
+      setAmountError('Enter a valid amount to apply');
       return;
     }
+    setSaving(true);
     try {
       // Sequential so each invoice's outstanding is read fresh by the backend.
       for (const { item, chunk } of allocation) {
@@ -175,6 +178,8 @@ export default function StatementPayDrawer({ mode, party, onClose }) {
       // shows what actually went through.
       qc.invalidateQueries({ queryKey: ['party-statement'] });
       addToast(`Failed: ${err.message}`, 'error');
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -234,7 +239,7 @@ export default function StatementPayDrawer({ mode, party, onClose }) {
               <option value="">All open — oldest first ({sortedItems.length} invoice{sortedItems.length === 1 ? '' : 's'}, {fmt(sumOut(sortedItems), activeCur)})</option>
               {sortedItems.map((it) => (
                 <option key={it.dbId || it.id} value={it.dbId || it.id}>
-                  {refOf(it)} — {fmt(it.outstanding, activeCur)}{it.dueDate ? ` · due ${new Date(it.dueDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' })}` : ''}
+                  {refOf(it)} — {fmt(it.outstanding, activeCur)}{it.dueDate ? ` · due ${fmtDate(it.dueDate)}` : ''}
                 </option>
               ))}
             </select>
@@ -270,7 +275,7 @@ export default function StatementPayDrawer({ mode, party, onClose }) {
               <option value="">Select bank account…</option>
               {bankAccounts.map((a) => (
                 <option key={a.id} value={a.id}>
-                  {favStar(a)}{a.name} — {a.bankName || ''} ({a.currency || 'PKR'} {(parseFloat(a.currentBalance) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
+                  {favStar(a)}{a.name} — {a.bankName || ''} ({fmt(a.currentBalance, a.currency || 'PKR')})
                 </option>
               ))}
             </select>
@@ -279,15 +284,16 @@ export default function StatementPayDrawer({ mode, party, onClose }) {
           {/* Amount + date */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-xs text-gray-500 block mb-1">Amount ({activeCur})</label>
+              <label className="text-xs text-gray-500 block mb-1">Amount ({activeCur}) <span className="text-red-500">*</span></label>
               <input
                 type="number" step="0.01" min="0"
                 value={amountTouched ? form.amount : String(Math.round(totalOut))}
                 onChange={(e) => setAmount(e.target.value)}
                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              <FieldError error={amountError} />
             </div>
             <div>
-              <label className="text-xs text-gray-500 block mb-1">Date</label>
+              <label className="text-xs text-gray-500 block mb-1">Date <span className="text-red-500">*</span></label>
               <input
                 type="date" required value={form.date}
                 onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))}
@@ -351,17 +357,15 @@ export default function StatementPayDrawer({ mode, party, onClose }) {
                   const settles = chunk >= out - 0.0001;
                   return (
                     <div key={item.dbId || item.id} className="px-3 py-2 flex items-center justify-between text-xs">
-                      <div className="min-w-0">
+                      <div className="min-w-0 truncate" title={refOf(item)}>
                         <span className="font-medium text-gray-700">{refOf(item)}</span>
                         <span className="text-gray-400 ml-2">
-                          {item.dueDate ? new Date(item.dueDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }) : '—'}
+                          {fmtDate(item.dueDate)}
                         </span>
                       </div>
                       <div className="text-right whitespace-nowrap">
                         <span className="tabular-nums text-gray-900">{fmt(chunk, activeCur)}</span>
-                        <span className={`ml-2 px-1.5 py-0.5 rounded-full text-[10px] ${settles ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>
-                          {settles ? 'Paid' : 'Partial'}
-                        </span>
+                        <span className="ml-2"><StatusBadge status={settles ? 'Paid' : 'Partial'} /></span>
                       </div>
                     </div>
                   );
@@ -377,10 +381,10 @@ export default function StatementPayDrawer({ mode, party, onClose }) {
 
           <button
             type="submit"
-            disabled={recordPaymentMut.isPending || allocatedTotal <= 0}
+            disabled={saving || recordPaymentMut.isPending || allocatedTotal <= 0}
             className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-medium text-sm disabled:opacity-50">
             <CheckCircle size={16} />
-            {recordPaymentMut.isPending
+            {saving || recordPaymentMut.isPending
               ? 'Processing…'
               : `Record ${verb} — ${fmt(allocatedTotal, activeCur)}`}
           </button>

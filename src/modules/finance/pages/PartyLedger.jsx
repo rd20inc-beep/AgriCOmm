@@ -14,36 +14,13 @@ import { useCustomers, useSuppliers } from '../../../api/queries';
 import { favStar } from '../../../shared/utils/favorites';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { useApp } from '../../../context/AppContext';
+import StatusBadge from '../../../shared/components/StatusBadge';
+import { fmtMoney, fmtDate, fmtDateTime } from '../../../shared/utils/format';
 
 // Statements are shown in the party's transaction currency (export parties are
 // USD; mill/local are PKR), as returned by the backend's `currency` field.
-function curSymbol(cur) {
-  const c = (cur || 'PKR').toUpperCase();
-  return c === 'PKR' ? 'Rs ' : c === 'USD' ? '$' : c === 'EUR' ? '€' : c === 'GBP' ? '£' : c === 'AED' ? 'AED ' : `${c} `;
-}
-function fmtCur(v, cur) {
-  const n = parseFloat(v) || 0;
-  return `${curSymbol(cur)}${(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-function fmtCurSigned(v, cur) {
-  const n = parseFloat(v) || 0;
-  const sign = n < 0 ? '-' : '';
-  return `${sign}${curSymbol(cur)}${(Math.abs(n)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-function fmtCurCompact(v, cur) {
-  const n = parseFloat(v) || 0;
-  const s = curSymbol(cur);
-  if ((cur || 'PKR').toUpperCase() === 'PKR') {
-    // Pakistani Crore / Lakh shorthand for the base currency.
-    if (Math.abs(n) >= 10_000_000) return `${s}${(n / 10_000_000).toFixed(2)}Cr`;
-    if (Math.abs(n) >= 100_000) return `${s}${(n / 100_000).toFixed(2)}L`;
-    if (Math.abs(n) >= 1_000) return `${s}${(n / 1_000).toFixed(0)}K`;
-    return `${s}${Math.round(n).toLocaleString()}`;
-  }
-  if (Math.abs(n) >= 1_000_000) return `${s}${(n / 1_000_000).toFixed(2)}M`;
-  if (Math.abs(n) >= 1_000) return `${s}${(n / 1_000).toFixed(1)}K`;
-  return `${s}${Math.round(n).toLocaleString()}`;
-}
+// fmtMoney prints the sign in front of the symbol ("-Rs 1,234.00"), exact.
+const fmtCur = (v, cur) => fmtMoney(v, cur || 'PKR', { decimals: 2 });
 
 const refLink = (refNo) => {
   if (!refNo) return null;
@@ -54,7 +31,6 @@ const refLink = (refNo) => {
 
 // Per-row tint + pill so a sale/bill row reads Paid / Partial / Unpaid at a glance.
 const STATUS_ROW = { Paid: 'bg-emerald-50', Partial: 'bg-amber-50', Unpaid: 'bg-red-50' };
-const STATUS_PILL = { Paid: 'bg-emerald-100 text-emerald-700', Partial: 'bg-amber-100 text-amber-700', Unpaid: 'bg-red-100 text-red-700' };
 
 export default function PartyLedger() {
   const { companyProfileData } = useApp();
@@ -220,7 +196,7 @@ export default function PartyLedger() {
             <div className="border-b-2 border-gray-900 pb-2 flex items-end justify-between">
               <div>
                 <div className="text-base font-bold uppercase tracking-wider">{companyName}</div>
-                <div className="text-xs text-gray-500">Generated {new Date().toLocaleString()}</div>
+                <div className="text-xs text-gray-500">Generated {fmtDateTime(new Date())}</div>
               </div>
               <div className="text-right">
                 <div className="text-lg font-bold">{mode === 'customer' ? 'Customer' : 'Supplier'} Statement</div>
@@ -239,29 +215,29 @@ export default function PartyLedger() {
                 <div className="flex items-center gap-2 text-xs uppercase tracking-wider opacity-80 mb-1">
                   <BookUser size={14} /> {mode === 'customer' ? 'Customer' : 'Supplier'} ledger
                 </div>
-                <div className="text-2xl sm:text-3xl font-bold leading-tight truncate">{selectedParty?.name || '—'}</div>
+                <div className="text-2xl sm:text-3xl font-bold leading-tight truncate" title={selectedParty?.name || ''}>{selectedParty?.name || '—'}</div>
                 <div className="text-xs opacity-90 mt-1">
                   {transactions.length} {transactions.length === 1 ? 'transaction' : 'transactions'} in selected period
                 </div>
               </div>
               <div className="flex flex-col items-start sm:items-end gap-1">
                 <span className="text-[11px] uppercase tracking-wider opacity-80">{balanceLabel} (closing)</span>
-                <span className="text-2xl font-bold tabular-nums">{fmtCurSigned(closing, cur)}</span>
-                {showUsd && <span className="text-xs opacity-70 tabular-nums">≈ {fmtCurSigned(closingUsd, 'USD')}</span>}
+                <span className="text-2xl font-bold tabular-nums">{fmtCur(closing, cur)}</span>
+                {showUsd && <span className="text-xs opacity-70 tabular-nums">≈ {fmtCur(closingUsd, 'USD')}</span>}
               </div>
             </div>
           </div>
 
           {/* KPI tiles — screen only, excluded from the printed ledger */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 no-print">
-            <FinanceKPI icon={Scale} title="Opening Balance" value={fmtCurCompact(opening, cur)}
-              subtitle={showUsd ? `≈ ${fmtCurCompact(openingUsd, 'USD')}` : 'Before this period'} status="neutral" loading={stmtLoading} />
-            <FinanceKPI icon={ArrowDownLeft} title="Total Debit" value={fmtCurCompact(totalDebit, cur)}
-              subtitle={showUsd ? `≈ ${fmtCurCompact(totalDebitUsd, 'USD')}` : (mode === 'customer' ? 'Invoiced / charged' : 'Paid / settled')} status="info" loading={stmtLoading} />
-            <FinanceKPI icon={ArrowUpRight} title="Total Credit" value={fmtCurCompact(totalCredit, cur)}
-              subtitle={showUsd ? `≈ ${fmtCurCompact(totalCreditUsd, 'USD')}` : (mode === 'customer' ? 'Received' : 'Billed to us')} status="info" loading={stmtLoading} />
-            <FinanceKPI icon={Scale} title="Closing Balance" value={fmtCurCompact(closing, cur)}
-              subtitle={showUsd ? `${balanceLabel} · ≈ ${fmtCurCompact(closingUsd, 'USD')}` : balanceLabel} status={closing > 0 ? 'warning' : 'good'} loading={stmtLoading} />
+            <FinanceKPI icon={Scale} title="Opening Balance" value={fmtCur(opening, cur)}
+              subtitle={showUsd ? `≈ ${fmtCur(openingUsd, 'USD')}` : 'Before this period'} status="neutral" loading={stmtLoading} />
+            <FinanceKPI icon={ArrowDownLeft} title="Total Debit" value={fmtCur(totalDebit, cur)}
+              subtitle={showUsd ? `≈ ${fmtCur(totalDebitUsd, 'USD')}` : (mode === 'customer' ? 'Invoiced / charged' : 'Paid / settled')} status="info" loading={stmtLoading} />
+            <FinanceKPI icon={ArrowUpRight} title="Total Credit" value={fmtCur(totalCredit, cur)}
+              subtitle={showUsd ? `≈ ${fmtCur(totalCreditUsd, 'USD')}` : (mode === 'customer' ? 'Received' : 'Billed to us')} status="info" loading={stmtLoading} />
+            <FinanceKPI icon={Scale} title="Closing Balance" value={fmtCur(closing, cur)}
+              subtitle={showUsd ? `${balanceLabel} · ≈ ${fmtCur(closingUsd, 'USD')}` : balanceLabel} status={closing > 0 ? 'warning' : 'good'} loading={stmtLoading} />
           </div>
 
           {/* Section heading + Statement | Allocation toggle */}
@@ -310,8 +286,8 @@ export default function PartyLedger() {
                     <tr className="bg-gray-50/60 text-gray-500">
                       <td className="mob-full py-2 px-3 text-xs" colSpan={6}>Opening balance</td>
                       <td data-label="Opening balance" className="py-2 px-3 text-right font-medium tabular-nums">
-                        {fmtCurSigned(opening, cur)}
-                        {showUsd && <span className="block text-[10px] text-gray-400 font-normal">≈ {fmtCurSigned(openingUsd, 'USD')}</span>}
+                        {fmtCur(opening, cur)}
+                        {showUsd && <span className="block text-[10px] text-gray-400 font-normal">≈ {fmtCur(openingUsd, 'USD')}</span>}
                       </td>
                     </tr>
                     {transactions.length === 0 ? (
@@ -328,7 +304,7 @@ export default function PartyLedger() {
                         return (
                           <tr key={`${t.journal_no || 'jl'}-${i}`} className={STATUS_ROW[t.status] || 'hover:bg-gray-50'}>
                             <td data-label="Date" className="py-2.5 px-3 text-gray-600 whitespace-nowrap text-xs">
-                              {t.date ? new Date(t.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }) : '—'}
+                              {fmtDate(t.date)}
                             </td>
                             <td data-label="Type" className="mob-hide py-2.5 px-3 text-xs text-gray-600 whitespace-nowrap">{t.vch_type || '—'}</td>
                             <td data-label="Voucher No." className="py-2.5 px-3 text-xs whitespace-nowrap">
@@ -340,7 +316,7 @@ export default function PartyLedger() {
                             </td>
                             <td data-label="Description" className="py-2.5 px-3 text-gray-700 min-w-[220px]" style={{ maxWidth: 420 }}>
                               <span className="block whitespace-normal break-words">
-                                {t.status && <span className={`mr-1.5 px-1.5 py-0.5 rounded text-[9px] font-semibold align-middle ${STATUS_PILL[t.status]}`}>{t.status}</span>}
+                                {t.status && <span className="mr-1.5 align-middle"><StatusBadge status={t.status} /></span>}
                                 {t.description || '—'}
                               </span>
                               {t.account_name && <span className="block text-[10px] text-gray-400 whitespace-normal break-words">{t.account_code} · {t.account_name}</span>}
@@ -354,8 +330,8 @@ export default function PartyLedger() {
                               {showUsd && cr > 0 && <span className="block text-[10px] text-gray-400">{fmtCur(t.credit_usd, 'USD')}</span>}
                             </td>
                             <td data-label="Balance" className="py-2.5 px-3 text-right font-medium tabular-nums whitespace-nowrap">
-                              {fmtCurSigned(t.running_balance, cur)}
-                              {showUsd && <span className="block text-[10px] text-gray-400 font-normal">≈ {fmtCurSigned(t.running_balance_usd, 'USD')}</span>}
+                              {fmtCur(t.running_balance, cur)}
+                              {showUsd && <span className="block text-[10px] text-gray-400 font-normal">≈ {fmtCur(t.running_balance_usd, 'USD')}</span>}
                             </td>
                           </tr>
                         );
@@ -373,8 +349,8 @@ export default function PartyLedger() {
                         {showUsd && <span className="block text-[10px] text-gray-400 font-normal">{fmtCur(totalCreditUsd, 'USD')}</span>}
                       </td>
                       <td data-label="Closing balance" className="py-2.5 px-3 text-right tabular-nums">
-                        {fmtCurSigned(closing, cur)}
-                        {showUsd && <span className="block text-[10px] text-gray-400 font-normal">≈ {fmtCurSigned(closingUsd, 'USD')}</span>}
+                        {fmtCur(closing, cur)}
+                        {showUsd && <span className="block text-[10px] text-gray-400 font-normal">≈ {fmtCur(closingUsd, 'USD')}</span>}
                       </td>
                     </tr>
                   </tbody>

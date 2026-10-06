@@ -3,12 +3,11 @@ import OrderRefLink from '../../../shared/components/OrderRefLink';
 import { CheckCircle, AlertTriangle, Clock, DollarSign, ArrowRight, XCircle } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
 import { useReceivables, usePayables } from '../../../api/queries';
+import StatusBadge from '../../../shared/components/StatusBadge';
+import { fmtUSD, fmtPct, toNumber } from '../../../shared/utils/format';
 
-function formatCurrency(value, currency = 'USD') {
-  if (!value || isNaN(value)) return '$0';
-  if (currency === 'PKR') return 'Rs ' + (value).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  return '$' + parseFloat(value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
+// Export contracts are USD; missing values read as $0.00 like before.
+const usd = (v) => fmtUSD(toNumber(v) ?? 0);
 
 function getDaysOverdue(dueDate) {
   if (!dueDate) return 0;
@@ -65,7 +64,7 @@ export default function Reconciliation() {
     const totalOutstanding = reconciliation.reduce((s, r) => s + Math.max(0, parseFloat(r.outstanding) || 0), 0);
     const totalReceived = reconciliation.reduce((s, r) => s + (parseFloat(r.totalReceived) || 0), 0);
     const totalExpected = reconciliation.reduce((s, r) => s + (parseFloat(r.contractValue) || 0), 0);
-    const collectionRate = totalExpected > 0 ? ((totalReceived / totalExpected) * 100).toFixed(1) : '0.0';
+    const collectionRate = totalExpected > 0 ? (totalReceived / totalExpected) * 100 : 0;
 
     // Overdue receivables
     const overdueReceivables = receivables.filter(r =>
@@ -136,18 +135,18 @@ export default function Reconciliation() {
             <DollarSign className="w-4 h-4 text-blue-500" />
             <p className="text-xs font-medium text-gray-500">Outstanding</p>
           </div>
-          <p className="text-xl font-bold text-gray-900">{formatCurrency(kpis.totalOutstanding)}</p>
+          <p className="text-xl font-bold text-gray-900">{usd(kpis.totalOutstanding)}</p>
         </div>
         <div className="bg-white rounded-lg border border-gray-200 p-4">
           <p className="text-xs font-medium text-gray-500 mb-1">Collection Rate</p>
-          <p className="text-xl font-bold text-emerald-600">{kpis.collectionRate}%</p>
+          <p className="text-xl font-bold text-emerald-600">{fmtPct(kpis.collectionRate)}</p>
         </div>
         <div className="bg-white rounded-lg border border-gray-200 p-4">
           <div className="flex items-center gap-2 mb-1">
             <AlertTriangle className="w-4 h-4 text-red-500" />
             <p className="text-xs font-medium text-gray-500">Overdue</p>
           </div>
-          <p className="text-xl font-bold text-red-600">{formatCurrency(kpis.overdueAmount)}</p>
+          <p className="text-xl font-bold text-red-600">{usd(kpis.overdueAmount)}</p>
           <p className="text-xs text-gray-400">{kpis.overdueReceivableCount} items</p>
         </div>
       </div>
@@ -173,7 +172,7 @@ export default function Reconciliation() {
           {Object.entries(agingBuckets).map(([bucket, amount]) => (
             <div key={bucket} className="text-center">
               <p className="text-xs font-medium text-gray-500">{bucket === 'current' ? 'Current' : `${bucket} days`}</p>
-              <p className="text-sm font-bold text-gray-900">{formatCurrency(Math.round(amount))}</p>
+              <p className="text-sm font-bold text-gray-900">{usd(Math.round(amount))}</p>
             </div>
           ))}
         </div>
@@ -205,39 +204,27 @@ export default function Reconciliation() {
                   <td data-label="Order" className="px-4 py-3">
                     <OrderRefLink to={`/export/${r.orderId}`} module="export_orders" className="font-medium text-blue-600 hover:text-blue-800">{r.orderId}</OrderRefLink>
                   </td>
-                  <td data-label="Customer" className="px-4 py-3 text-gray-700">{r.customer}</td>
-                  <td data-label="Contract" className="px-4 py-3 text-right font-medium text-gray-900">{formatCurrency(r.contractValue)}</td>
-                  <td data-label="Adv Expected" className="mob-hide px-4 py-3 text-right text-gray-600">{formatCurrency(r.advanceExpected)}</td>
+                  <td data-label="Customer" className="px-4 py-3 text-gray-700 max-w-[220px] truncate" title={r.customer}>{r.customer}</td>
+                  <td data-label="Contract" className="px-4 py-3 text-right font-medium text-gray-900">{usd(r.contractValue)}</td>
+                  <td data-label="Adv Expected" className="mob-hide px-4 py-3 text-right text-gray-600">{usd(r.advanceExpected)}</td>
                   <td data-label="Adv Received" className="px-4 py-3 text-right">
                     <span className={r.advanceMatched ? 'text-emerald-600 font-medium' : 'text-amber-600'}>
-                      {formatCurrency(r.advanceReceived)}
+                      {usd(r.advanceReceived)}
                     </span>
                   </td>
-                  <td data-label="Bal Expected" className="mob-hide px-4 py-3 text-right text-gray-600">{formatCurrency(r.balanceExpected)}</td>
+                  <td data-label="Bal Expected" className="mob-hide px-4 py-3 text-right text-gray-600">{usd(r.balanceExpected)}</td>
                   <td data-label="Bal Received" className="px-4 py-3 text-right">
                     <span className={r.balanceMatched ? 'text-emerald-600 font-medium' : 'text-amber-600'}>
-                      {formatCurrency(r.balanceReceived)}
+                      {usd(r.balanceReceived)}
                     </span>
                   </td>
                   <td data-label="Outstanding" className={`px-4 py-3 text-right font-semibold ${r.outstanding > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
-                    {formatCurrency(r.outstanding)}
+                    {usd(r.outstanding)}
                   </td>
                   <td data-label="Match" className="px-4 py-3 text-center">
-                    {r.matchStatus === 'fully_matched' && (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">
-                        <CheckCircle className="w-3 h-3" /> Matched
-                      </span>
-                    )}
-                    {r.matchStatus === 'partial' && (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">
-                        <Clock className="w-3 h-3" /> Partial
-                      </span>
-                    )}
-                    {r.matchStatus === 'pending' && (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">
-                        <XCircle className="w-3 h-3" /> Pending
-                      </span>
-                    )}
+                    {r.matchStatus === 'fully_matched' && <StatusBadge status="Matched" />}
+                    {r.matchStatus === 'partial' && <StatusBadge status="Partial" />}
+                    {r.matchStatus === 'pending' && <StatusBadge status="Pending" />}
                     {r.matchStatus === 'no_payment_expected' && (
                       <span className="text-xs text-gray-400">N/A</span>
                     )}

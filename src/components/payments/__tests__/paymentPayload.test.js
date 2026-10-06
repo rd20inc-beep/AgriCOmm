@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 import {
   PAYMENT_METHODS, blankPaymentForm, netCash, validatePayment, paymentPayload, purchasePayPayload, money,
-  pickAccountForMethod, isUnclearedCheque,
+  pickAccountForMethod, isUnclearedCheque, paymentFieldError, paymentErrors,
 } from '../paymentPayload';
 
 /**
@@ -179,6 +179,10 @@ describe('payment methods', () => {
   it('formats money the way the rest of the app does', () => {
     expect(money(1234.5)).toBe('Rs 1,234.50');
     expect(money(1234.5, 'USD')).toBe('$1,234.50');
+    expect(money(1234567.891)).toBe('Rs 1,234,567.89');
+    expect(money(-50)).toBe('-Rs 50.00');
+    expect(money(10, 'AED')).toBe('AED 10.00');
+    expect(money(null)).toBe('Rs 0.00');
   });
 });
 
@@ -199,5 +203,22 @@ describe('pickAccountForMethod', () => {
     expect(pickAccountForMethod({ accounts: ACCTS, method: 'cheque', current: '' })).toBe('2');
     expect(pickAccountForMethod({ accounts: [...ACCTS, { id: 4, name: 'Petty', type: 'cash' }], method: 'cash', current: '' })).toBe('');
     expect(pickAccountForMethod({ accounts: [{ id: 5, type: 'cash', is_favorite: true }, ...ACCTS], method: 'online', current: '' })).toBe('2');
+  });
+});
+
+describe('paymentFieldError', () => {
+  const base = { amount: '100', method: 'bank_transfer', bankAccountId: '1', whtAmount: '', discountAmount: '' };
+  it('names the field each problem belongs to', () => {
+    expect(paymentFieldError({ ...base, amount: '' })).toEqual({ field: 'amount', message: 'Enter a positive amount' });
+    expect(paymentFieldError({ ...base, amount: '600' }, { outstanding: 500 }).field).toBe('amount');
+    expect(paymentFieldError({ ...base, whtAmount: '80', discountAmount: '30' }).field).toBe('whtAmount');
+    expect(paymentFieldError({ ...base, bankAccountId: '' }).field).toBe('bankAccountId');
+    expect(paymentFieldError(base)).toBeNull();
+  });
+  it('agrees with validatePayment and maps to an errors object', () => {
+    const bad = { ...base, bankAccountId: '' };
+    expect(validatePayment(bad)).toBe(paymentFieldError(bad).message);
+    expect(paymentErrors(bad)).toEqual({ bankAccountId: 'Select a cash or bank account' });
+    expect(paymentErrors(base)).toEqual({});
   });
 });

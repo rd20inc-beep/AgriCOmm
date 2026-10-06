@@ -1,8 +1,5 @@
 import { METHOD_LABEL, money } from './paymentPayload';
-
-const fmtDate = (d) => (d
-  ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
-  : '—');
+import { fmtDate } from '../../shared/utils/format';
 
 /**
  * What has already been paid against this payable or receivable.
@@ -24,7 +21,7 @@ export default function PaymentHistory({ payments, loading, currency = 'PKR', co
         <div className="rounded-lg border border-gray-200 divide-y divide-gray-100 text-xs">
           {rows.map((h, idx) => (
             <div key={h.id || idx} className="flex justify-between px-2.5 py-1.5">
-              <span className="text-gray-500">{fmtDate(h.paymentDate)} · {h.paymentNo || '—'}</span>
+              <span className="text-gray-500 min-w-0 truncate" title={h.paymentNo || undefined}>{fmtDate(h.paymentDate)} · {h.paymentNo || '—'}</span>
               <span className="tabular-nums text-emerald-600">{money(h.amount, currency)}</span>
             </div>
           ))}
@@ -42,7 +39,7 @@ export default function PaymentHistory({ payments, loading, currency = 'PKR', co
                 </div>
                 <div className="mt-1 flex flex-wrap gap-x-3 text-xs text-gray-500">
                   <span>Method: <span className="font-medium text-gray-700">{METHOD_LABEL[p.paymentMethod] || p.paymentMethod || '—'}</span></span>
-                  <span>From: <span className="font-medium text-gray-700">{from}</span></span>
+                  <span className="min-w-0 break-words">From: <span className="font-medium text-gray-700">{from}</span></span>
                   {p.bankReference && <span>Ref: <span className="font-medium text-gray-700">{p.bankReference}</span></span>}
                 </div>
               </div>

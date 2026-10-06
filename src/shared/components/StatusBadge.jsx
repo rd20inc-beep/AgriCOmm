@@ -27,6 +27,23 @@ const statusStyles = {
   'Paid': 'bg-emerald-50 text-emerald-700 ring-emerald-200',
   'Disputed': 'bg-red-50 text-red-600 ring-red-200',
   'Expired': 'bg-gray-100 text-gray-500 ring-gray-200',
+  // Finance (reconciliation, suspense, transfers)
+  'Matched': 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+  'Open': 'bg-blue-50 text-blue-700 ring-blue-200',
+  'Partially Resolved': 'bg-indigo-50 text-indigo-700 ring-indigo-200',
+  'Resolved': 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+  'Reversed': 'bg-gray-100 text-gray-500 ring-gray-200',
+  'In Transit': 'bg-blue-50 text-blue-700 ring-blue-200',
+  'Awaiting you': 'bg-amber-50 text-amber-700 ring-amber-200',
+  'Awaiting mill': 'bg-amber-50 text-amber-700 ring-amber-200',
+  'Posted': 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+  'Unpaid': 'bg-red-50 text-red-700 ring-red-200',
+  'Allocated': 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+  'Unallocated': 'bg-red-50 text-red-700 ring-red-200',
+  'Snoozed': 'bg-yellow-50 text-yellow-700 ring-yellow-200',
+  'Escalated': 'bg-red-50 text-red-700 ring-red-200',
+  'Credit': 'bg-blue-50 text-blue-700 ring-blue-200',
+  'Refunded': 'bg-red-50 text-red-700 ring-red-200',
 };
 
 // Dot colors for compact variant

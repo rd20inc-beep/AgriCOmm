@@ -5,12 +5,11 @@ import { useUpcoming, useClearCheque, useBankAccounts } from '../../../api/queri
 import { useApp } from '../../../context/AppContext';
 import { AccountSelect } from '../../../components/payments/PaymentFields';
 import { accountsForMethod, pickAccountForMethod } from '../../../components/payments/paymentPayload';
+import { fmtPKR as fmtPKRBase, fmtMoney as fmtMoneyBase, fmtDate } from '../../../shared/utils/format';
 
-const fmtPKR = (n) => `Rs ${(parseFloat(n) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-// Format an amount in its own currency (USD export receivables vs PKR dues).
-const CUR_SYMBOL = { USD: '$', PKR: 'Rs', EUR: '€' };
-const fmtMoney = (n, cur) => `${CUR_SYMBOL[(cur || 'PKR').toUpperCase()] || (cur + ' ')}${(parseFloat(n) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const fmtDate = (s) => s ? new Date(s).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+// Exact, two decimals; each amount in its own currency (USD export receivables vs PKR dues).
+const fmtPKR = (n) => fmtPKRBase(parseFloat(n) || 0, { decimals: 2 });
+const fmtMoney = (n, cur) => fmtMoneyBase(parseFloat(n) || 0, cur || 'PKR', { decimals: 2 });
 const isOverdue = (s) => s && new Date(s) < new Date(new Date().toDateString());
 
 function List({ title, icon: Icon, tone, items, total, onClear, clearing }) {
@@ -40,7 +39,7 @@ function List({ title, icon: Icon, tone, items, total, onClear, clearing }) {
                     <span className={isOverdue(x.dueDate) ? 'text-red-600 font-medium' : 'text-gray-700'}>{fmtDate(x.dueDate)}</span>
                     {isOverdue(x.dueDate) && <span className="ml-1.5 text-[10px] text-red-500 inline-flex items-center gap-0.5"><AlertTriangle size={10} /> overdue</span>}
                   </td>
-                  <td data-label="Party" className="py-2 px-4 text-gray-900">
+                  <td data-label="Party" className="py-2 px-4 text-gray-900 break-words">
                     {x.partyId ? (
                       <Link to={`/finance/statements?type=${x.partyType}&id=${x.partyId}`}
                         className="text-blue-600 hover:underline font-medium">{x.party}</Link>

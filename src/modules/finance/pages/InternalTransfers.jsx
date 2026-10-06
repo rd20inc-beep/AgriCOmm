@@ -14,18 +14,13 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { useInternalTransfers } from '../../../api/queries';
-import StatusBadge from '../../../components/StatusBadge';
+import StatusBadge from '../../../shared/components/StatusBadge';
 import { DEFAULT_FX_RATE } from '../utils/fx';
+import { fmtPKR, fmtUSD, fmtDate } from '../../../shared/utils/format';
 
 const PKR_RATE = DEFAULT_FX_RATE;
 
-function formatPKR(value) {
-  return 'Rs ' + (value).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-
-function formatUSD(value) {
-  return '$' + value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
+const formatPKR = (v) => fmtPKR(v, { decimals: 2 });
 
 export default function InternalTransfers() {
   const { data: apiTransfers = [] } = useInternalTransfers();
@@ -105,7 +100,7 @@ export default function InternalTransfers() {
             <DollarSign size={16} className="text-emerald-500" />
             <span className="text-xs font-medium text-gray-500 uppercase">Total USD Equivalent</span>
           </div>
-          <p className="text-xl font-bold text-emerald-700">{formatUSD(summary.totalUSD)}</p>
+          <p className="text-xl font-bold text-emerald-700">{fmtUSD(summary.totalUSD)}</p>
           <p className="text-xs text-gray-400 mt-0.5">@ PKR {PKR_RATE}/USD avg rate</p>
         </div>
       </div>
@@ -167,24 +162,20 @@ export default function InternalTransfers() {
                       {isExpanded ? <ChevronUp size={14} className="text-gray-400" /> : <ChevronDown size={14} className="text-gray-400" />}
                     </td>
                     <td data-label="Transfer No" className="px-2 py-2.5 font-medium text-blue-600 whitespace-nowrap">{t.id}</td>
-                    <td data-label="Date" className="mob-hide px-2 py-2.5 text-gray-500 whitespace-nowrap">{t.date}</td>
+                    <td data-label="Date" className="mob-hide px-2 py-2.5 text-gray-500 whitespace-nowrap">{fmtDate(t.date)}</td>
                     <td data-label="Batch" className="mob-hide px-2 py-2.5">
                       <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-purple-50 text-purple-700">{t.batchNo}</span>
                     </td>
                     <td data-label="Order" className="mob-hide px-2 py-2.5">
                       <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-50 text-blue-700">{t.exportOrder}</span>
                     </td>
-                    <td data-label="Product" className="px-2 py-2.5 text-gray-600 truncate max-w-[120px]">{t.product}</td>
+                    <td data-label="Product" className="px-2 py-2.5 text-gray-600 truncate max-w-[120px]" title={t.product}>{t.product}</td>
                     <td data-label="MT" className="px-2 py-2.5 text-right font-medium text-gray-900">{t.qtyMT}</td>
                     <td data-label="Price (PKR)" className="mob-hide px-2 py-2.5 text-right text-gray-700 whitespace-nowrap">{formatPKR(t.transferPricePKR)}</td>
                     <td data-label="Total (PKR)" className="px-2 py-2.5 text-right font-medium text-gray-900 whitespace-nowrap">{formatPKR(t.totalValuePKR)}</td>
-                    <td data-label="USD Equiv." className="mob-hide px-2 py-2.5 text-right font-medium text-emerald-700 whitespace-nowrap">{formatUSD(t.usdEquivalent)}</td>
+                    <td data-label="USD Equiv." className="mob-hide px-2 py-2.5 text-right font-medium text-emerald-700 whitespace-nowrap">{fmtUSD(t.usdEquivalent)}</td>
                     <td data-label="Status" className="px-2 py-2.5 text-center">
-                      <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${
-                        t.status === 'Completed' ? 'bg-emerald-100 text-emerald-700' :
-                        t.status === 'In Transit' ? 'bg-blue-100 text-blue-700' :
-                        'bg-gray-100 text-gray-700'
-                      }`}>{t.status}</span>
+                      <StatusBadge status={t.status} />
                     </td>
                   </tr>
 
@@ -203,6 +194,7 @@ export default function InternalTransfers() {
                                   setExpandedRow(null);
                                 }}
                                 className="p-1 text-gray-400 hover:text-gray-600 rounded transition-colors"
+                                aria-label="Close transfer detail"
                               >
                                 <X size={16} />
                               </button>
@@ -241,12 +233,12 @@ export default function InternalTransfers() {
                                 <div className="space-y-2 text-sm">
                                   <div className="flex justify-between">
                                     <span className="text-amber-600">Records purchase cost</span>
-                                    <span className="font-bold text-amber-900">-{formatUSD(t.usdEquivalent)}</span>
+                                    <span className="font-bold text-amber-900">-{fmtUSD(t.usdEquivalent)}</span>
                                   </div>
                                   <div className="flex justify-between">
                                     <span className="text-amber-600">Converted at PKR rate</span>
                                     <span className="font-medium text-amber-800">
-                                      {formatPKR(t.totalValuePKR)} / {t.pkrRate} = {formatUSD(t.usdEquivalent)}
+                                      {formatPKR(t.totalValuePKR)} / {t.pkrRate} = {fmtUSD(t.usdEquivalent)}
                                     </span>
                                   </div>
                                   <p className="text-xs text-amber-500 mt-2 border-t border-amber-200 pt-2">
@@ -308,11 +300,11 @@ export default function InternalTransfers() {
                                     <div className="font-mono text-xs space-y-0.5">
                                       <div className="flex justify-between">
                                         <span className="text-gray-700">DR: Inventory - Rice Stock</span>
-                                        <span className="text-gray-900 font-medium">{formatUSD(t.usdEquivalent)}</span>
+                                        <span className="text-gray-900 font-medium">{fmtUSD(t.usdEquivalent)}</span>
                                       </div>
                                       <div className="flex justify-between pl-4">
                                         <span className="text-gray-700">CR: Inter-Company Payable</span>
-                                        <span className="text-gray-900 font-medium">{formatUSD(t.usdEquivalent)}</span>
+                                        <span className="text-gray-900 font-medium">{fmtUSD(t.usdEquivalent)}</span>
                                       </div>
                                     </div>
                                   </div>
@@ -331,7 +323,7 @@ export default function InternalTransfers() {
                                   <p className="text-xs text-indigo-600 mt-0.5">
                                     This inter-company transfer has no net P&L impact at the group level.
                                     The Mill's internal sale revenue of {formatPKR(t.totalValuePKR)} is eliminated
-                                    against the Export entity's purchase cost of {formatUSD(t.usdEquivalent)}.
+                                    against the Export entity's purchase cost of {fmtUSD(t.usdEquivalent)}.
                                     The inter-company receivable/payable balances are also eliminated.
                                     Only the original manufacturing cost flows through to the consolidated cost of goods sold.
                                   </p>

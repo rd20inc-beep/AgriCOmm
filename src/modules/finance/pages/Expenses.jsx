@@ -16,16 +16,15 @@ import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { favStar } from '../../../shared/utils/favorites';
 import { CHEQUE_DATE_LABEL } from '../../../components/payments/paymentPayload';
 import { ChequeHint } from '../../../components/payments/PaymentFields';
-import { todayLocalISO } from '../../../shared/utils/format';
+import { todayLocalISO, fmtPKR, fmtMoney, fmtDate, fmtDateTime } from '../../../shared/utils/format';
+import StatusBadge from '../../../shared/components/StatusBadge';
+import FieldError from '../../../shared/components/FieldError';
+import SupplierPicker from '../../../components/SupplierPicker';
 
 // ─── Formatting ──────────────────────────────────────────────────────
-function fmtPKR(n) {
-  const v = Number(n) || 0;
-  if (Math.abs(v) >= 10_000_000) return `Rs ${(v / 10_000_000).toFixed(2)}Cr`;
-  if (Math.abs(v) >= 100_000) return `Rs ${(v / 100_000).toFixed(2)}L`;
-  if (Math.abs(v) >= 1_000) return `Rs ${(v / 1_000).toFixed(0)}K`;
-  return `Rs ${(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
+// Exact to the paisa, in the expense's own currency (PKR / USD / EUR / GBP).
+const fmtAmt = (v, currency) => fmtMoney(v, currency || 'PKR', { decimals: 2 });
+const fmtRs2 = (v) => fmtPKR(v, { decimals: 2 });
 function unwrap(res, key) {
   const d = res?.data?.data || res?.data || res;
   return key ? (d?.[key] ?? d) : d;
@@ -181,13 +180,6 @@ const UTILITY_VENDORS = [
   'Internet Provider',
 ];
 
-const STATUS_COLORS = {
-  Unpaid: 'bg-red-100 text-red-800',
-  Pending: 'bg-red-100 text-red-800',
-  Partial: 'bg-amber-100 text-amber-800',
-  Paid: 'bg-emerald-100 text-emerald-800',
-};
-
 // ─── Page ────────────────────────────────────────────────────────────
 export default function Expenses() {
   const { addToast, suppliersList, bankAccountsList, millingBatches, exportOrders } = useApp();
@@ -299,10 +291,17 @@ export default function Expenses() {
   const [payId, setPayId] = useState(null);
   const [payForm, setPayForm] = useState(mkPayForm());
 
+  const [formErrors, setFormErrors] = useState({});
+  const [payErrors, setPayErrors] = useState({});
+
   async function handleCreate(e) {
     e.preventDefault();
-    if (!form.amount) { addToast('Amount is required', 'error'); return; }
-    if (!form.category) { addToast('Category is required', 'error'); return; }
+    if (createMut.isPending) return;
+    const errs = {};
+    if (!form.amount) errs.amount = 'Amount is required';
+    if (!form.category) errs.category = 'Category is required';
+    setFormErrors(errs);
+    if (Object.keys(errs).length) return;
     try {
       const payload = {
         expense_type: form.expense_type === 'personal' ? 'general' : form.expense_type,
@@ -334,12 +333,16 @@ export default function Expenses() {
   async function handlePay() {
     // Cash & Cheque don't draw from a tracked account (same as Money In/Out).
     const needsAccount = payForm.payment_method !== 'cash' && payForm.payment_method !== 'cheque';
-    if (needsAccount && !payForm.bank_account_id) { addToast('Select bank account', 'error'); return; }
+    if (payMut.isPending) return;
     const pe = filtered.find((x) => String(x.id) === String(payId));
     const remaining = pe ? remainingOf(pe) : 0;
     const payNum = parseFloat(payForm.amount) || 0;
-    if (!(payNum > 0)) { addToast('Enter a payment amount', 'error'); return; }
-    if (payNum > remaining + 0.01) { addToast(`Amount exceeds the outstanding (Rs ${remaining.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`, 'error'); return; }
+    const errs = {};
+    if (needsAccount && !payForm.bank_account_id) errs.bank_account_id = 'Select a bank account';
+    if (!(payNum > 0)) errs.amount = 'Enter a payment amount';
+    setPayErrors(errs);
+    if (Object.keys(errs).length) return;
+    if (payNum > remaining + 0.01) { addToast(`Amount exceeds the outstanding (${fmtRs2(remaining)})`, 'error'); return; }
     try {
       await payMut.mutateAsync({ id: payId, data: payForm });
       addToast(payNum >= remaining - 0.01 ? 'Payment recorded — fully paid' : 'Partial payment recorded', 'success');
@@ -453,7 +456,9 @@ export default function Expenses() {
           showOwnerField={showOwnerField}
           createMut={createMut}
           handleCreate={handleCreate}
-          onCancel={() => { setShowForm(false); setForm(initForm); }}
+          errors={formErrors}
+          addToast={addToast}
+          onCancel={() => { setShowForm(false); setForm(initForm); setFormErrors({}); }}
         />
       )}
 
@@ -461,7 +466,7 @@ export default function Expenses() {
       <ExpenseTable
         loading={isLoading}
         rows={filtered}
-        onPay={(e) => { setPayId(e.id); setPayForm(mkPayForm(e)); }}
+        onPay={(e) => { setPayId(e.id); setPayForm(mkPayForm(e)); setPayErrors({}); }}
         onView={setDetailExpense}
       />
 
@@ -474,13 +479,13 @@ export default function Expenses() {
             <span className="text-sm font-medium text-gray-900 text-right">{value || '—'}</span>
           </div>
         );
-        const amt = e.currency === 'PKR' ? fmtPKR(e.amount) : `${e.currency} ${Number(e.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        const amt = fmtAmt(e.amount, e.currency);
         return (
           <SlideDrawer open={!!detailExpense} onClose={() => setDetailExpense(null)}
             title={e.expense_no || 'Expense'} subtitle={e.created_by_name ? `Created by ${e.created_by_name}` : undefined}
             icon={Receipt} size="md"
             footer={e.payment_status !== 'Paid' ? (
-              <button onClick={() => { setDetailExpense(null); setPayId(e.id); setPayForm(mkPayForm(e)); }}
+              <button onClick={() => { setDetailExpense(null); setPayId(e.id); setPayForm(mkPayForm(e)); setPayErrors({}); }}
                 className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700">
                 <CreditCard size={16} /> Record Payment
               </button>
@@ -495,7 +500,7 @@ export default function Expenses() {
               <div>
                 <Row label="Type" value={<span className="capitalize">{e.expense_type}</span>} />
                 <Row label="Category" value={<span className="capitalize">{(e.category || '').replace(/_/g, ' ')}</span>} />
-                <Row label="Date" value={e.expense_date ? new Date(e.expense_date).toLocaleDateString('en-GB') : '—'} />
+                <Row label="Date" value={fmtDate(e.expense_date)} />
                 <Row label="Vendor" value={e.vendor_name || e.supplier_name_joined} />
                 {/* Whose ledger this sits on. An expense with no supplier is
                     recorded but appears on nobody's statement, which is easy to
@@ -507,11 +512,16 @@ export default function Expenses() {
                       {e.supplier_id ? (e.supplier_name_joined || 'Linked') : <span className="text-amber-700">not on any ledger</span>}
                     </span>
                   </div>
-                  <select
-                    value={e.supplier_id || ''}
-                    disabled={linkSupplier.isPending}
-                    onChange={async (ev) => {
-                      const supplier_id = ev.target.value || null;
+                  <div className={`mt-1.5 ${linkSupplier.isPending ? 'opacity-50 pointer-events-none' : ''}`}>
+                  <SupplierPicker
+                    value={e.supplier_id ? String(e.supplier_id) : ''}
+                    suppliers={suppliersList || []}
+                    addToast={addToast}
+                    clearable
+                    placeholder="— No supplier (one-off payee) —"
+                    onChange={async (picked) => {
+                      const supplier_id = picked || null;
+                      if (String(supplier_id || '') === String(e.supplier_id || '')) return;
                       try {
                         const res = await linkSupplier.mutateAsync({ id: e.id, supplier_id });
                         setDetailExpense((cur) => (cur && cur.id === e.id ? { ...cur, ...(res?.data || {}) } : cur));
@@ -522,10 +532,8 @@ export default function Expenses() {
                         addToast(err?.data?.errors?.[0]?.message || err?.data?.message || err.message || 'Failed to link the supplier', 'error');
                       }
                     }}
-                    className="mt-1.5 w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm bg-white disabled:opacity-50">
-                    <option value="">— No supplier (one-off payee) —</option>
-                    {(suppliersList || []).map(s => <option key={s.id} value={s.id}>{favStar(s)}{s.name}</option>)}
-                  </select>
+                  />
+                  </div>
                   <p className="text-[11px] text-gray-500 mt-1 leading-snug">
                     Linking shows the bill and its payment on that supplier&rsquo;s statement. It does
                     not change the amount, the accounts or the trial balance.
@@ -543,12 +551,12 @@ export default function Expenses() {
                       <Row label="Paid via" value={method} />
                       <Row label="Paid from" value={where} />
                       {e.payment_reference && <Row label="Reference / Cheque" value={e.payment_reference} />}
-                      {e.paid_date && <Row label="Paid on" value={new Date(e.paid_date).toLocaleDateString('en-GB')} />}
+                      {e.paid_date && <Row label="Paid on" value={fmtDate(e.paid_date)} />}
                     </>
                   );
                 })()}
                 <Row label="Created by" value={<span className="inline-flex items-center gap-1.5"><User size={13} className="text-gray-400" />{e.created_by_name || '—'}</span>} />
-                <Row label="Created at" value={e.created_at ? new Date(e.created_at).toLocaleString('en-GB') : '—'} />
+                <Row label="Created at" value={fmtDateTime(e.created_at)} />
               </div>
             </div>
           </SlideDrawer>
@@ -559,7 +567,7 @@ export default function Expenses() {
           and the other pay/receive flows), not a centered dialog */}
       {payId && (() => {
         const pe = filtered.find((x) => String(x.id) === String(payId));
-        const amt = pe ? (pe.currency === 'PKR' ? fmtPKR(pe.amount) : `${pe.currency} ${Number(pe.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`) : '';
+        const amt = pe ? fmtAmt(pe.amount, pe.currency) : '';
         const remaining = pe ? remainingOf(pe) : 0;
         const alreadyPaid = pe ? round2(pe.paid_pkr) : 0;
         const payNum = parseFloat(payForm.amount) || 0;
@@ -570,7 +578,7 @@ export default function Expenses() {
             footer={
               <button onClick={handlePay} disabled={payMut.isPending || payNum <= 0 || overPay}
                 className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-50">
-                {payMut.isPending ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />} Confirm Payment{payNum > 0 ? ` — ${fmtPKR(payNum)}` : ''}
+                {payMut.isPending ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />} Confirm Payment{payNum > 0 ? ` — ${fmtRs2(payNum)}` : ''}
               </button>
             }>
             <div className="space-y-4">
@@ -578,17 +586,18 @@ export default function Expenses() {
                 <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 text-center">
                   <p className="text-xs text-gray-500">Paying{pe.vendor_name || pe.supplier_name_joined ? ` ${pe.vendor_name || pe.supplier_name_joined}` : ''}</p>
                   <p className="text-lg font-semibold text-gray-900 tabular-nums">{amt}</p>
-                  {alreadyPaid > 0 && <p className="text-[11px] text-gray-400">Rs {alreadyPaid.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} paid · Rs {remaining.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} outstanding</p>}
+                  {alreadyPaid > 0 && <p className="text-[11px] text-gray-400">{fmtRs2(alreadyPaid)} paid · {fmtRs2(remaining)} outstanding</p>}
                 </div>
               )}
 
               {/* Amount — defaults to the outstanding; enter a smaller figure for
                   a partial / installment payment. */}
               <div>
-                <label className="text-xs text-gray-500 block mb-1">Amount (PKR){remaining > 0 ? ` · outstanding Rs ${remaining.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : ''}</label>
+                <label className="text-xs text-gray-500 block mb-1">Amount (PKR) <span className="text-red-500">*</span>{remaining > 0 ? ` · outstanding ${fmtRs2(remaining)}` : ''}</label>
                 <input type="number" step="0.01" min="0" value={payForm.amount}
                   onChange={e => setPayForm(p => ({ ...p, amount: e.target.value }))}
                   className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                <FieldError error={payErrors.amount} />
                 <div className="flex gap-2 mt-2">
                   <button type="button" onClick={() => setPayForm(p => ({ ...p, amount: String(remaining) }))}
                     className="text-xs px-3 py-1 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">Full</button>
@@ -597,7 +606,7 @@ export default function Expenses() {
                   <button type="button" onClick={() => setPayForm(p => ({ ...p, amount: '' }))}
                     className="text-xs px-3 py-1 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">Custom</button>
                 </div>
-                {overPay && <p className="text-[11px] text-red-500 mt-1">Amount exceeds the outstanding (Rs {remaining.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}).</p>}
+                {overPay && <p className="text-[11px] text-red-500 mt-1">Amount exceeds the outstanding ({fmtRs2(remaining)}).</p>}
               </div>
 
               {/* Payment Method — first; it drives whether an account is needed
@@ -635,14 +644,15 @@ export default function Expenses() {
               {/* Pay From Account — only for account-based methods (Bank / Online) */}
               {payForm.payment_method !== 'cash' && payForm.payment_method !== 'cheque' && (
                 <div>
-                  <label className="text-xs text-gray-500 block mb-1">Pay From Account</label>
+                  <label className="text-xs text-gray-500 block mb-1">Pay From Account <span className="text-red-500">*</span></label>
                   <select value={payForm.bank_account_id} onChange={e => setPayForm(p => ({ ...p, bank_account_id: e.target.value }))}
                     className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
                     <option value="">Select bank account…</option>
                     {(bankAccountsList || []).map(b => (
-                      <option key={b.id} value={b.id}>{favStar(b)}{b.name} — {b.bankName || ''} ({b.currency || 'PKR'} {(parseFloat(b.currentBalance) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})</option>
+                      <option key={b.id} value={b.id}>{favStar(b)}{b.name} — {b.bankName || ''} ({fmtMoney(parseFloat(b.currentBalance) || 0, b.currency || 'PKR', { decimals: 2 })})</option>
                     ))}
                   </select>
+                  <FieldError error={payErrors.bank_account_id} />
                 </div>
               )}
 
@@ -687,7 +697,7 @@ function ExpenseForm({
   form, setF, cats, currentCat, vendorKind, apiVendors, apiCategory,
   suppliersList, bankAccountsList, safeBatches, safeOrders,
   showBatchPicker, showOrderPicker, showOwnerField,
-  createMut, handleCreate, onCancel,
+  createMut, handleCreate, onCancel, errors = {}, addToast,
 }) {
   // Only Super Admin / Owner see the batch's supplier / order's customer in the
   // link pickers — restricted roles pick by reference number (batch/order) only.
@@ -697,7 +707,7 @@ function ExpenseForm({
     <form onSubmit={handleCreate} className="bg-white rounded-xl border border-blue-200 p-5 space-y-5">
       <div className="flex items-center justify-between">
         <h3 className="text-base font-semibold text-gray-900">Record New Expense</h3>
-        <button type="button" onClick={onCancel} className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100"><X size={16} /></button>
+        <button type="button" onClick={onCancel} aria-label="Close form" title="Close" className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100"><X size={16} /></button>
       </div>
 
       {/* Type tiles */}
@@ -722,7 +732,7 @@ function ExpenseForm({
 
       {/* Category grid (icon cards instead of select) */}
       <div>
-        <label className="block text-[11px] font-semibold text-gray-500 uppercase mb-2 tracking-wider">Category *</label>
+        <label className="block text-[11px] font-semibold text-gray-500 uppercase mb-2 tracking-wider">Category <span className="text-red-500">*</span></label>
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
           {cats.map(c => {
             const Icon = c.icon;
@@ -740,12 +750,13 @@ function ExpenseForm({
             );
           })}
         </div>
+        <FieldError error={errors.category} />
       </div>
 
       {/* Amount + Date row */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div className="sm:col-span-2">
-          <label className="block text-[11px] font-semibold text-gray-500 uppercase mb-1 tracking-wider">Amount *</label>
+          <label className="block text-[11px] font-semibold text-gray-500 uppercase mb-1 tracking-wider">Amount <span className="text-red-500">*</span></label>
           <div className="flex">
             <select value={form.currency} onChange={e => setF('currency', e.target.value)}
               className="border border-r-0 border-gray-300 rounded-l-lg px-2 py-2.5 text-sm bg-gray-50 outline-none w-20">
@@ -761,9 +772,10 @@ function ExpenseForm({
               autoFocus
             />
           </div>
+          <FieldError error={errors.amount} />
         </div>
         <div>
-          <label className="block text-[11px] font-semibold text-gray-500 uppercase mb-1 tracking-wider">Date *</label>
+          <label className="block text-[11px] font-semibold text-gray-500 uppercase mb-1 tracking-wider">Date <span className="text-red-500">*</span></label>
           <div className="relative">
             <Calendar size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input type="date" value={form.expense_date} onChange={e => setF('expense_date', e.target.value)}
@@ -782,13 +794,14 @@ function ExpenseForm({
           setF={setF}
           suppliersList={suppliersList}
           bankAccountsList={bankAccountsList}
+          addToast={addToast}
         />
       )}
 
       {/* Owner selector for personal expenses */}
       {showOwnerField && (
         <div>
-          <label className="block text-[11px] font-semibold text-gray-500 uppercase mb-1 tracking-wider">Owner *</label>
+          <label className="block text-[11px] font-semibold text-gray-500 uppercase mb-1 tracking-wider">Owner <span className="text-red-500">*</span></label>
           <select value={form.owner_name} onChange={e => setF('owner_name', e.target.value)}
             className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500 bg-white">
             <option value="">Select owner</option>
@@ -857,7 +870,7 @@ function ExpenseForm({
         {form.pay_now && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
             <div>
-              <label className="block text-[11px] text-gray-500 mb-1">Bank Account *</label>
+              <label className="block text-[11px] text-gray-500 mb-1">Bank Account <span className="text-red-500">*</span></label>
               <select value={form.bank_account_id} onChange={e => setF('bank_account_id', e.target.value)}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none bg-white">
                 <option value="">Select bank</option>
@@ -896,7 +909,7 @@ function ExpenseForm({
   );
 }
 
-function VendorSection({ vendorKind, apiVendors, apiCategory, form, setF, suppliersList, bankAccountsList }) {
+function VendorSection({ vendorKind, apiVendors, apiCategory, form, setF, suppliersList, bankAccountsList, addToast }) {
   // DB-backed apiVendors wins when the current category is mapped to
   // an expense_vendors row (Admin → Expense Vendors). Falls back to
   // the legacy vendorKind suggestions when no mapping exists.
@@ -989,15 +1002,19 @@ function VendorSection({ vendorKind, apiVendors, apiCategory, form, setF, suppli
       <label className="block text-[11px] font-semibold text-gray-500 uppercase mb-1 tracking-wider">{config.title}</label>
       {config.supplierDropdown ? (
         <div className="space-y-2">
-          <select value={form.supplier_id} onChange={e => {
-              setF('supplier_id', e.target.value);
-              const s = suppliersList.find(s => String(s.id) === e.target.value);
+          <SupplierPicker
+            value={form.supplier_id}
+            suppliers={suppliersList}
+            addToast={addToast}
+            clearable
+            placeholder="— Pick a supplier —"
+            onChange={(id) => {
+              setF('supplier_id', id);
+              const s = suppliersList.find(x => String(x.id) === String(id));
               if (s) setF('vendor_name', s.name);
             }}
-            className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500 bg-white">
-            <option value="">— Pick a supplier —</option>
-            {suppliersList.map(s => <option key={s.id} value={s.id}>{favStar(s)}{s.name}{s.country ? ` · ${s.country}` : ''}</option>)}
-          </select>
+            onCreated={(s) => { if (s?.name) setF('vendor_name', s.name); }}
+          />
           {!form.supplier_id && (
             <>
               <input type="text" value={form.vendor_name} onChange={e => setF('vendor_name', e.target.value)}
@@ -1075,12 +1092,12 @@ function ExpenseTable({ loading, rows, onPay, onView }) {
                 <p className="font-mono text-xs text-gray-700">{e.expense_no}</p>
                 <p className="text-[10px] text-gray-400 capitalize">{e.expense_type}</p>
               </td>
-              <td data-label="Date" className="mob-hide py-2.5 px-4 text-gray-600">{e.expense_date ? new Date(e.expense_date).toLocaleDateString('en-GB') : '—'}</td>
+              <td data-label="Date" className="mob-hide py-2.5 px-4 text-gray-600">{fmtDate(e.expense_date)}</td>
               <td data-label="Vendor / Description" className="py-2.5 px-4">
-                <p className="font-medium text-gray-900 truncate max-w-[240px]">
+                <p className="font-medium text-gray-900 truncate max-w-[240px]" title={e.vendor_name || e.supplier_name_joined || undefined}>
                   {e.vendor_name || e.supplier_name_joined || '—'}
                 </p>
-                {e.description && <p className="text-[11px] text-gray-500 truncate max-w-[240px]">{e.description}</p>}
+                {e.description && <p className="text-[11px] text-gray-500 truncate max-w-[240px]" title={e.description}>{e.description}</p>}
               </td>
               <td data-label="Category" className="mob-hide py-2.5 px-4">
                 <span className="inline-block px-2 py-0.5 text-xs font-medium rounded-full bg-gray-100 text-gray-700 capitalize">
@@ -1088,7 +1105,7 @@ function ExpenseTable({ loading, rows, onPay, onView }) {
                 </span>
               </td>
               <td data-label="Amount" className="py-2.5 px-4 text-right font-bold text-gray-900">
-                {e.currency === 'PKR' ? fmtPKR(e.amount) : `${e.currency} ${Number(e.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                {fmtAmt(e.amount, e.currency)}
               </td>
               <td data-label="Linked To" className="mob-hide py-2.5 px-4 text-xs">
                 {e.batch_no ? <span className="text-blue-600 font-medium">{e.batch_no}</span>
@@ -1096,9 +1113,7 @@ function ExpenseTable({ loading, rows, onPay, onView }) {
                  : <span className="text-gray-400">—</span>}
               </td>
               <td data-label="Status" className="py-2.5 px-4">
-                <span className={`inline-block px-2 py-0.5 text-xs font-medium rounded-full ${STATUS_COLORS[e.payment_status] || 'bg-gray-100'}`}>
-                  {e.payment_status}
-                </span>
+                <StatusBadge status={e.payment_status} />
               </td>
               <td data-label="Actions" className="py-2.5 px-4 text-right">
                 <div className="inline-flex items-center gap-1.5">
@@ -1108,7 +1123,8 @@ function ExpenseTable({ loading, rows, onPay, onView }) {
                       <CreditCard size={12} /> Pay
                     </button>
                   )}
-                  <button onClick={() => onView?.(e)} className="text-blue-600 hover:text-blue-800 p-1" title="View details">
+                  <button onClick={() => onView?.(e)} className="text-blue-600 hover:text-blue-800 p-1" title="View details" aria-label="View details">
+
                     <Eye size={15} />
                   </button>
                 </div>

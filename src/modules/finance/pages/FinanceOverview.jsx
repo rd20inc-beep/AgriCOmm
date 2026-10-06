@@ -22,21 +22,8 @@ import {
 import { useFxRate } from '../utils/fx';
 import AnomalyWatchCard from '../../ai/components/AnomalyWatchCard';
 import PurchaseRequirementsPanel from '../../purchaseRequirements/components/PurchaseRequirementsPanel';
+import { fmtPKR, fmtUSD, fmtDate, fmtPct } from '../../../shared/utils/format';
 
-// ─── Formatting helpers ───────────────────────────────────────────────
-function fmtPKR(n) {
-  if (n == null || isNaN(n)) return 'Rs 0';
-  if (Math.abs(n) >= 10_000_000) return `Rs ${(n / 10_000_000).toFixed(2)}Cr`;
-  if (Math.abs(n) >= 100_000) return `Rs ${(n / 100_000).toFixed(2)}L`;
-  if (Math.abs(n) >= 1_000) return `Rs ${(n / 1_000).toFixed(0)}K`;
-  return `Rs ${(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-function fmtUSD(n) {
-  if (n == null || isNaN(n)) return '$0';
-  if (Math.abs(n) >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`;
-  if (Math.abs(n) >= 1_000) return `$${(n / 1_000).toFixed(1)}K`;
-  return `$${(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
 // Aging helpers + bucket palette moved to ../utils/aging so MoneyIn and
 // any future caller render the same buckets. See useFxRate() too for
 // the FX fallback used by mixed-currency receivables.
@@ -367,10 +354,10 @@ export default function FinanceOverview() {
                     <Receipt size={13} className="text-indigo-500" />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm text-gray-800 truncate">{j.description || j.narration || 'Journal entry'}</p>
+                    <p className="text-sm text-gray-800 truncate" title={j.description || j.narration || 'Journal entry'}>{j.description || j.narration || 'Journal entry'}</p>
                     {j.referenceNo && <p className="text-[11px] text-gray-400 truncate">{j.referenceNo}</p>}
                   </div>
-                  <span className="text-[10px] text-gray-400 flex-shrink-0">{j.date || ''}</span>
+                  <span className="text-[10px] text-gray-400 flex-shrink-0">{j.date ? fmtDate(j.date) : ''}</span>
                 </li>
               ))}
             </ul>
@@ -430,7 +417,7 @@ function KpiTile({ icon: Icon, tone = 'gray', label, primary, secondary, hint, h
         <span className="text-[11px] uppercase tracking-wider text-gray-500 font-medium min-w-0 truncate">{label}</span>
         {Icon && <span className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${t.icon}`}><Icon size={14} /></span>}
       </div>
-      <div className="text-xl font-bold text-gray-900 leading-none truncate">{primary}</div>
+      <div className="text-xl font-bold text-gray-900 leading-tight break-words tabular-nums">{primary}</div>
       {secondary && <div className="text-[11px] text-gray-500 mt-1">{secondary}</div>}
       {hint && (
         <div className={`text-[11px] mt-2 ${hintBad ? 'text-red-600' : 'text-emerald-600'} font-medium`}>
@@ -464,7 +451,7 @@ function SegmentCard({ tone = 'gray', title, subtitle, revenueLabel, revenue, re
         <h3 className={`text-sm font-semibold ${t.accent}`}>{title}</h3>
         {margin !== 0 && (
           <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${margin >= 15 ? 'bg-emerald-50 text-emerald-700' : margin >= 5 ? 'bg-amber-50 text-amber-700' : 'bg-red-50 text-red-700'}`}>
-            {margin.toFixed(1)}% margin
+            {fmtPct(margin)} margin
           </span>
         )}
       </div>
@@ -551,7 +538,7 @@ function CounterpartyList({ title, icon: Icon, rows, itemLabel, itemAmount, item
                 <Link to={itemHref(r)} className="flex items-center gap-3 p-2.5 rounded-lg bg-gray-50 hover:bg-gray-100 transition-colors">
                   <span className="w-7 h-7 rounded-full bg-white flex items-center justify-center text-xs font-bold text-gray-500 flex-shrink-0">{i + 1}</span>
                   <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium text-gray-900 truncate">{itemLabel(r)}</div>
+                    <div className="text-sm font-medium text-gray-900 truncate" title={itemLabel(r)}>{itemLabel(r)}</div>
                     {days != null && <div className="text-[11px] text-gray-500">{days} days overdue</div>}
                   </div>
                   <span className="text-sm font-bold text-gray-900 flex-shrink-0">{itemAmount(r)}</span>

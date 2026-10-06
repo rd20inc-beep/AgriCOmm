@@ -13,7 +13,7 @@
  */
 
 import { isFavorite } from '../../shared/utils/favorites';
-import { todayLocalISO } from '../../shared/utils/format';
+import { todayLocalISO, fmtMoney } from '../../shared/utils/format';
 
 export const PAYMENT_METHODS = [
   { value: 'bank_transfer', label: 'Bank Transfer' },
@@ -28,10 +28,9 @@ export const METHOD_LABEL = PAYMENT_METHODS.reduce((m, o) => ({ ...m, [o.value]:
 
 const num = (v) => parseFloat(v) || 0;
 
-export const money = (v, currency = 'PKR') => {
-  const n = num(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  return currency === 'USD' ? `$${n}` : `${currency === 'PKR' ? 'Rs' : currency} ${n}`;
-};
+// Two decimals, fixed locale (format.js). A blank amount reads as 0.00 here,
+// not "—": this labels an amount being paid, which is never "unknown".
+export const money = (v, currency = 'PKR') => fmtMoney(num(v), currency || 'PKR', { decimals: 2 });
 
 export function blankPaymentForm({ amount = '', method = 'bank_transfer', date } = {}) {
   return {
@@ -97,22 +96,37 @@ export function netCash(form) {
 }
 
 /**
- * Returns the first problem with the form as a sentence, or null when it is
- * payable. `outstanding` null means uncapped (nothing to overpay against).
+ * The first problem with the form, and the field it belongs to, so the form
+ * can show it under that field: `{ field: 'amount' | 'whtAmount' |
+ * 'bankAccountId', message }`, or null when it is payable. `outstanding` null
+ * means uncapped (nothing to overpay against).
  */
-export function validatePayment(form, { outstanding = null, requireAccount = true, currency = 'PKR' } = {}) {
+export function paymentFieldError(form, { outstanding = null, requireAccount = true, currency = 'PKR' } = {}) {
   const amt = num(form.amount);
-  if (!(amt > 0)) return 'Enter a positive amount';
+  if (!(amt > 0)) return { field: 'amount', message: 'Enter a positive amount' };
   // A cent of float slop is not an overpayment.
   if (outstanding != null && amt - num(outstanding) > 0.01) {
-    return `Amount exceeds the outstanding ${money(outstanding, currency)}.`;
+    return { field: 'amount', message: `Amount exceeds the outstanding ${money(outstanding, currency)}.` };
   }
   if (num(form.whtAmount) + num(form.discountAmount) - amt > 0.01) {
-    return 'WHT + discount cannot exceed the amount.';
+    return { field: 'whtAmount', message: 'WHT + discount cannot exceed the amount.' };
   }
   // A cheque picks its account when it is cleared.
-  if (requireAccount && !form.bankAccountId && !isUnclearedCheque(form)) return 'Select a cash or bank account';
+  if (requireAccount && !form.bankAccountId && !isUnclearedCheque(form)) {
+    return { field: 'bankAccountId', message: 'Select a cash or bank account' };
+  }
   return null;
+}
+
+/** The first problem with the form as a sentence, or null when it is payable. */
+export function validatePayment(form, opts) {
+  return paymentFieldError(form, opts)?.message ?? null;
+}
+
+/** paymentFieldError as the `errors` map PaymentFields renders inline. */
+export function paymentErrors(form, opts) {
+  const e = paymentFieldError(form, opts);
+  return e ? { [e.field]: e.message } : {};
 }
 
 /**
