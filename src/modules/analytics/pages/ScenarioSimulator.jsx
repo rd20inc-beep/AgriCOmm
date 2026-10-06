@@ -4,15 +4,14 @@ import {
   ArrowRightLeft, Wheat, Globe, Calculator, RefreshCw,
 } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
+import CustomerPicker from '../../../components/CustomerPicker';
 import { useRunScenario, useCostPredict } from '../../../api/queries';
 import { useCommodityPrices } from '../../../modules/milling/hooks/useCommodityPrices';
 import { INCOTERMS } from '../../../shared/constants/incoterms';
-import { favStar } from '../../../shared/utils/favorites';
+import { fmtMoney, fmtKg, fmtPKR } from '../../../shared/utils/format';
 
 function formatCurrency(v, cur = 'USD') {
-  if (!v && v !== 0) return '—';
-  if (cur === 'PKR') return 'Rs ' + (v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  return '$' + parseFloat(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return fmtMoney(v, cur, { decimals: 2 });
 }
 
 function ResultCard({ label, value, subtitle, positive }) {
@@ -236,8 +235,6 @@ function YieldSimulator() {
     return { lines, revenue, inputCost, profit, raw, sellableKg, profitPerKg: raw > 0 ? profit / raw : 0 };
   }, [ref, rawQtyKg, effYield, effBroken]);
 
-  const fmtKg = (kg) => `${Math.round(kg).toLocaleString()} kg`;
-
   if (ref.batchCount === 0) {
     return <div className="p-10 text-center text-sm text-gray-400">No completed milling batches yet — run a batch to seed the yield model.</div>;
   }
@@ -284,7 +281,7 @@ function YieldSimulator() {
         <ResultCard label="Sellable Output" value={fmtKg(sim.sellableKg)} subtitle={`${(sim.raw ? sim.sellableKg / sim.raw * 100 : 0).toFixed(1)}% of raw`} />
         <ResultCard label="Est. Revenue" value={formatCurrency(sim.revenue, 'PKR')} />
         <ResultCard label="Input Cost" value={formatCurrency(sim.inputCost, 'PKR')}
-          subtitle={ref.rawRatePerKg > 0 ? `raw Rs${ref.rawRatePerKg.toFixed(1)}/kg + milling` : 'milling only — raw cost not recorded'} />
+          subtitle={ref.rawRatePerKg > 0 ? `raw ${fmtPKR(ref.rawRatePerKg, { decimals: 1 })}/kg + milling` : 'milling only — raw cost not recorded'} />
         <ResultCard label="Est. Profit / Loss" value={formatCurrency(sim.profit, 'PKR')}
           subtitle={`${formatCurrency(sim.profitPerKg, 'PKR')}/kg raw`} positive={sim.profit >= 0} />
       </div>
@@ -318,7 +315,7 @@ function YieldSimulator() {
 }
 
 function FullOrderSimulator() {
-  const { customersList, productsList, settings } = useApp();
+  const { customersList, productsList, settings, addToast } = useApp();
   const scenarioMutation = useRunScenario();
   const [form, setForm] = useState({
     customer_id: '', product_id: '', qty_mt: 50, incoterm: 'FOB', margin_target: 15,
@@ -350,11 +347,8 @@ function FullOrderSimulator() {
     <div className="space-y-5">
       <div className="form-grid">
         <div className="form-group">
-          <label className="form-label">Customer</label>
-          <select value={form.customer_id} onChange={e => setForm(p => ({ ...p, customer_id: e.target.value }))} className="form-input">
-            <option value="">Select customer...</option>
-            {customersList.slice(0, 100).map(c => <option key={c.id} value={c.id}>{favStar(c)}{c.name}</option>)}
-          </select>
+          <CustomerPicker label="Customer" value={form.customer_id} customers={customersList} addToast={addToast}
+            placeholder="Select customer..." onChange={id => setForm(p => ({ ...p, customer_id: id }))} />
         </div>
         <div className="form-group">
           <label className="form-label">Product</label>

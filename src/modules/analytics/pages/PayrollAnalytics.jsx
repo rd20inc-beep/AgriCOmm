@@ -7,14 +7,16 @@ import {
 } from 'recharts';
 import { Users, TrendingUp, Wallet, HandCoins, AlertTriangle, FileText } from 'lucide-react';
 import { reportingApi } from '../api/services';
+import { fmtPKR } from '../../../shared/utils/format';
 
-const pkr = (v) => `Rs ${(parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const pkr = (v) => fmtPKR(v, { decimals: 2 });
+// Chart axis ticks only — KPIs and tables show the exact figure.
 const pkrShort = (v) => {
   const n = Math.abs(parseFloat(v) || 0);
   if (n >= 1e7) return `Rs ${(v / 1e7).toFixed(1)}Cr`;
   if (n >= 1e5) return `Rs ${(v / 1e5).toFixed(1)}L`;
   if (n >= 1e3) return `Rs ${Math.round(v / 1e3)}K`;
-  return `Rs ${(parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return fmtPKR(v);
 };
 const monthShort = (p) => { if (!/^\d{4}-\d{2}$/.test(p || '')) return p; const d = new Date(Date.UTC(+p.slice(0, 4), +p.slice(5, 7) - 1, 1)); return d.toLocaleDateString('en-GB', { month: 'short', year: '2-digit', timeZone: 'UTC' }); };
 const ROLE_COLORS = ['#2563eb', '#059669', '#d97706', '#7c3aed', '#dc2626', '#0891b2', '#65a30d', '#db2777'];
@@ -62,11 +64,11 @@ export default function PayrollAnalytics() {
         <>
           {/* KPI row */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-            <Kpi icon={Wallet} label="Net payroll" value={pkrShort(s.totalNet)} sub={`${s.runs || 0} run(s)`} />
-            <Kpi icon={TrendingUp} label="Avg / month" value={pkrShort(s.avgNetPerMonth)} sub="net" />
-            <Kpi icon={Users} label="Avg / employee" value={pkrShort(s.avgNetPerEmployee)} sub={`${s.paidEmployees || 0} paid`} />
+            <Kpi icon={Wallet} label="Net payroll" value={fmtPKR(s.totalNet)} sub={`${s.runs || 0} run(s)`} />
+            <Kpi icon={TrendingUp} label="Avg / month" value={fmtPKR(s.avgNetPerMonth)} sub="net" />
+            <Kpi icon={Users} label="Avg / employee" value={fmtPKR(s.avgNetPerEmployee)} sub={`${s.paidEmployees || 0} paid`} />
             <Kpi icon={Users} label="Active staff" value={String(s.activeWorkers || 0)} sub={`${(s.byPayType || {}).monthly || 0} salary · ${(s.byPayType || {}).daily || 0} daily`} />
-            <Kpi icon={HandCoins} label="Advances out" value={pkrShort(s.advancesOutstanding)} sub="to recover" tone="amber" />
+            <Kpi icon={HandCoins} label="Advances out" value={fmtPKR(s.advancesOutstanding)} sub="to recover" tone="amber" />
             <Kpi icon={HandCoins} label="Recovery rate" value={`${s.advanceRecoveryRate || 0}%`} sub="recovered/given" tone="amber" />
           </div>
 
@@ -149,9 +151,9 @@ export default function PayrollAnalytics() {
                     const max = topEarners[0].net || 1;
                     return (
                       <div key={i} className="flex items-center gap-2">
-                        <span className="w-28 truncate text-sm text-gray-700">{e.name}</span>
+                        <span className="w-28 truncate text-sm text-gray-700" title={e.name}>{e.name}</span>
                         <div className="flex-1 bg-gray-100 rounded h-4 overflow-hidden"><div className="h-full bg-emerald-500/80" style={{ width: `${Math.max(4, (e.net / max) * 100)}%` }} /></div>
-                        <span className="w-20 text-right text-xs tabular-nums text-gray-700">{pkrShort(e.net)}</span>
+                        <span className="w-28 shrink-0 whitespace-nowrap text-right text-xs tabular-nums text-gray-700">{fmtPKR(e.net)}</span>
                       </div>
                     );
                   })}

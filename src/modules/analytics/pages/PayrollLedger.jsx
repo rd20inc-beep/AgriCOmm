@@ -8,10 +8,10 @@ import { reportingApi } from '../api/services';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import { exportLedgerCSV, printLedger } from '../utils/ledgerExport';
-import { todayLocalISO } from '../../../shared/utils/format';
+import { todayLocalISO, fmtDate, fmtPKR } from '../../../shared/utils/format';
 
-const pkr = (v) => `Rs ${(parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const dt = (v) => v ? new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+const pkr = (v) => fmtPKR(v, { decimals: 2 });
+const dt = (v) => fmtDate(v);
 
 const COLS = [
   { label: 'Date', accessor: (r) => dt(r.date) },

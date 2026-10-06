@@ -3,6 +3,7 @@ import { Printer, Download, Send, Loader2 } from 'lucide-react';
 import api from '../api/client';
 import { useApp } from '../context/AppContext';
 import WhatsAppSendModal from './WhatsAppSendModal';
+import { fmtDate, fmtNum } from '../shared/utils/format';
 
 // One printable/downloadable document for the three transaction kinds:
 //   kind='receipt' → Payment Receipt (Money In / a receivable)
@@ -15,8 +16,8 @@ const sym = (c) => {
   const u = (c || 'PKR').toUpperCase();
   return u === 'PKR' ? 'Rs ' : u === 'USD' ? '$' : u === 'EUR' ? '€' : u === 'GBP' ? '£' : `${u} `;
 };
-const money = (v, c) => `${sym(c)}${Math.round(parseFloat(v) || 0).toLocaleString()}`;
-const dt = (d) => { if (!d) return new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }); const x = new Date(d); return Number.isNaN(x.getTime()) ? '—' : x.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }); };
+const money = (v, c) => `${sym(c)}${fmtNum(parseFloat(v) || 0, 0)}`;
+const dt = (d) => fmtDate(d || new Date());
 
 const METHOD = { cash: 'Cash', cheque: 'Cheque', bank: 'Bank Transfer', bank_transfer: 'Bank Transfer', online: 'Online', mobile: 'Mobile' };
 
@@ -29,7 +30,7 @@ function model(kind, d) {
       const unit = (it.quantityUnit === 'pcs' || it.itemType === 'packaging' || it.millItemId) ? 'pcs' : 'kg';
       return {
         desc: [it.itemName || it.desc, it.itemType && it.itemType !== it.itemName ? `(${it.itemType})` : ''].filter(Boolean).join(' '),
-        qty: qtyKg ? `${Math.round(qtyKg).toLocaleString()} ${unit}` : '—',
+        qty: qtyKg ? `${fmtNum(qtyKg, 0)} ${unit}` : '—',
         rate: rate ? `${money(rate, 'PKR')}/${unit}` : '—',
         amount: parseFloat(it.totalAmount ?? it.amount) || 0,
       };

@@ -3,9 +3,10 @@
 // certificate and advance balance.
 import { useState, useEffect, useCallback } from 'react';
 import { portalRequest } from '../../data/repositories/portal';
+import { fmtDate, fmtPKR } from '../../shared/utils/format';
 
 const TOKEN_KEY = 'rf_portal_token';
-const PKR = (v) => 'Rs ' + (parseFloat(v) || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const PKR = (v) => fmtPKR(parseFloat(v) || 0, { decimals: 2 });
 
 // ── tiny self-contained print stack (kept separate from the staff app) ──
 function amountInWords(value) {
@@ -56,7 +57,7 @@ function printPayslip(run, line, co) {
     <div class="meta"><span><div class="k">Employee</div><div class="v">${line.workerName || '—'}</div></span>
     <span><div class="k">Designation</div><div class="v" style="text-transform:capitalize">${line.role || '—'}</div></span>
     <span><div class="k">CNIC</div><div class="v">${line.cnic || '—'}</div></span>
-    <span><div class="k">Pay date</div><div class="v">${run.payDate ? new Date(run.payDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}</div></span></div>
+    <span><div class="k">Pay date</div><div class="v">${fmtDate(run.payDate)}</div></span></div>
     <div class="sec">Earnings</div><table><tbody>
       <tr><td>Basic pay${prorated ? ` (prorated ${line.employedDays}/${line.daysInMonth} days)` : ''}</td><td class="r">${rs(line.basicPay)}</td></tr>
       ${ot > 0 ? `<tr><td>Overtime</td><td class="r">${rs(ot)}</td></tr>` : ''}

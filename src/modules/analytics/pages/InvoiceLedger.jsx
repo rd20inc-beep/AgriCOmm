@@ -12,13 +12,13 @@ import { localSalesApi, lotInventoryApi } from '../../../api/services';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import { exportLedgerCSV, printLedger } from '../utils/ledgerExport';
-import { todayLocalISO } from '../../../shared/utils/format';
+import { todayLocalISO, fmtDate, fmtPKR, fmtKg } from '../../../shared/utils/format';
 
 // Roles allowed to see internal by-product pricing (mirrors the invoice gates).
 const ADMIN_PRICING_ROLES = ['Super Admin', 'Owner', 'Finance Manager', 'Mill Manager'];
 
-const pkr = (v) => `Rs ${(parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const dt = (v) => v ? new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+const pkr = (v) => fmtPKR(v, { decimals: 2 });
+const dt = (v) => fmtDate(v);
 const STATUS_TONE = {
   Paid: 'bg-emerald-100 text-emerald-700', Partial: 'bg-amber-100 text-amber-700', Unpaid: 'bg-red-100 text-red-700',
 };
@@ -264,7 +264,7 @@ function BpPanel({ groups, loading, kind }) {
                   <tr key={o.lotId}>
                     <td data-label="Product / grade" className="px-3 py-1.5"><Link to={o.href} className="text-blue-600 hover:underline">{o.productGrade}</Link></td>
                     <td data-label="Type" className="mob-hide px-3 py-1.5 text-gray-600">{o.type === 'byproduct' ? 'by-product' : 'finished'}</td>
-                    <td data-label="Produced" className="px-3 py-1.5 text-right tabular-nums">{Math.round(o.producedKg).toLocaleString()} kg</td>
+                    <td data-label="Produced" className="px-3 py-1.5 text-right tabular-nums">{fmtKg(o.producedKg)}</td>
                     <td data-label="Cost/kg" className="mob-hide px-3 py-1.5 text-right tabular-nums">{o.costPerKg ? pkr(o.costPerKg) : '—'}</td>
                     <td data-label="Sale price/kg" className="mob-hide px-3 py-1.5 text-right tabular-nums">{o.salePricePerKg ? pkr(o.salePricePerKg) : '—'}</td>
                     <td data-label="Recovery value" className="px-3 py-1.5 text-right tabular-nums">{o.recoveryValue ? pkr(o.recoveryValue) : '—'}</td>

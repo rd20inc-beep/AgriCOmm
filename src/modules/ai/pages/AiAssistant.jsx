@@ -4,8 +4,9 @@ import { Sparkles, Search, Mail, AlertTriangle, Copy, Database, Loader2, Message
 import api from '../../../api/client';
 import { useCustomers, useSuppliers } from '../../../api/queries';
 import SearchSelect from '../../../shared/components/SearchSelect';
+import { fmtNum, fmtPKR } from '../../../shared/utils/format';
 
-const PKR = (v) => 'Rs ' + (Number(v) || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const PKR = (v) => fmtPKR(Number(v) || 0, { decimals: 2 });
 const SEV = { high: 'bg-red-100 text-red-700 border-red-200', medium: 'bg-amber-100 text-amber-700 border-amber-200', low: 'bg-slate-100 text-slate-600 border-slate-200' };
 
 const TABS = [
@@ -168,7 +169,7 @@ function DraftTab({ enabled }) {
           </div>
           <div className="flex items-center gap-2">
             <input readOnly value={res.subject} className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm font-medium bg-gray-50" />
-            <button onClick={() => copy(res.subject)} className="p-2 text-gray-400 hover:text-gray-700"><Copy className="w-4 h-4" /></button>
+            <button onClick={() => copy(res.subject)} title="Copy subject" aria-label="Copy subject" className="p-2 text-gray-400 hover:text-gray-700"><Copy className="w-4 h-4" /></button>
           </div>
           <textarea readOnly value={res.body} rows={12} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-gray-50 whitespace-pre-wrap" />
         </div>
@@ -224,7 +225,7 @@ function Err({ msg }) {
 
 function fmtCell(v) {
   if (v === null || v === undefined) return '—';
-  if (typeof v === 'number') return Number.isInteger(v) ? v.toLocaleString() : v.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  if (typeof v === 'number') return Number.isInteger(v) ? fmtNum(v, 0) : fmtNum(v);
   const s = String(v);
   return s.length > 60 ? s.slice(0, 60) + '…' : s;
 }

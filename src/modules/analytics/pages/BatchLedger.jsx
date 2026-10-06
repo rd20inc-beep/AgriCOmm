@@ -9,11 +9,12 @@ import { reportingApi } from '../api/services';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import { exportLedgerCSV, printBatchLedger } from '../utils/ledgerExport';
+import { fmtDate, fmtKg, fmtMT, fmtPKR, fmtPct } from '../../../shared/utils/format';
 
-const pkr = (v) => (v == null ? '—' : `Rs ${(parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
-const kg = (v) => `${Math.round(parseFloat(v) || 0).toLocaleString()} kg`;
-const mt = (v) => `${(parseFloat(v) || 0).toFixed(2)} MT`;
-const dt = (v) => v ? new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+const pkr = (v) => fmtPKR(v, { decimals: 2 });
+const kg = (v) => fmtKg(v);
+const mt = (v) => fmtMT(v, { decimals: 2 });
+const dt = (v) => fmtDate(v);
 
 export default function BatchLedger() {
   const { id } = useParams();
@@ -100,7 +101,7 @@ export default function BatchLedger() {
         <Cell label="Created" value={dt(b.createdAt)} />
         <Cell label="Completed" value={dt(b.completedAt)} />
         <Cell label="Type" value={b.isBlend ? 'Blend' : 'Milling'} />
-        <Cell label="Yield" value={`${(parseFloat(ys.yieldPct) || 0).toFixed(1)}%`} />
+        <Cell label="Yield" value={fmtPct(ys.yieldPct ?? 0)} />
       </div>
 
       {/* Yield summary */}
@@ -111,7 +112,7 @@ export default function BatchLedger() {
           <Cell label="By-product" value={mt(ys.byproductMt)} />
           <Cell label="Total output" value={mt(ys.totalOutputMt)} />
           <Cell label="Processing loss" value={mt(ys.lossMt)} />
-          <Cell label="Yield %" value={`${(parseFloat(ys.yieldPct) || 0).toFixed(1)}%`} />
+          <Cell label="Yield %" value={fmtPct(ys.yieldPct ?? 0)} />
         </div>
       </Section>
 
@@ -125,7 +126,7 @@ export default function BatchLedger() {
           <Cell label="By-product recovery (valued)" value={pkr(fs.byproductRecovery)} />
           <Cell label="Revenue (sold output)" value={pkr(fs.revenue)} />
           <Cell label="Cost of sold (COGS)" value={pkr(fs.cogsOfSold)} />
-          <Cell label="Realized profit" value={`${pkr(fs.realizedProfit)} (${(parseFloat(fs.realizedProfitPct) || 0).toFixed(1)}%)`} tone={fs.realizedProfit >= 0 ? 'emerald' : 'rose'} />
+          <Cell label="Realized profit" value={`${pkr(fs.realizedProfit)} (${fmtPct(fs.realizedProfitPct ?? 0)})`} tone={fs.realizedProfit >= 0 ? 'emerald' : 'rose'} />
           <Cell label="Payment received" value={pkr(fs.paymentReceived)} tone="emerald" />
           <Cell label="Outstanding" value={pkr(fs.outstanding)} tone={fs.outstanding > 0 ? 'rose' : 'gray'} />
           <Cell label="On-hand output value" value={pkr(fs.onHandValue)} />
