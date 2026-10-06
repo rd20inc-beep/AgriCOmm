@@ -63,8 +63,14 @@ function priceSaleLine({ qtyKg, total, costPerKg, bagWt, isMillItem }) {
 // way. ('Unpaid' was written here for a cash/bank sale with nothing tendered,
 // but chk_local_sales_payment_status_valid only allows Pending / Partial / Paid
 // / Credit / Refunded, so that insert failed outright.)
-// eslint-disable-next-line no-unused-vars
+//
+// A cheque is not money until it clears, so on a cheque sale the cheque amount
+// still sitting in `paid` (a Pending sale holds what was tendered) settles
+// nothing: the line is Credit until Clear Cheque applies it.
 function salePaymentStatus({ due, paid, paymentMode }) {
+  if (String(paymentMode || '').toLowerCase() === 'cheque' && paid > 0) {
+    return due + paid <= 0.01 ? 'Paid' : 'Credit';
+  }
   if (due <= 0.01) return 'Paid';
   if (paid > 0) return 'Partial';
   return 'Credit';

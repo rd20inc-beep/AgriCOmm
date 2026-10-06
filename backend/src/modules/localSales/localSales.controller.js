@@ -33,6 +33,25 @@ async function resolveReceiptAccountId(trx, { paymentMode, bankAccountId, amount
   return null;
 }
 
+// A cheque never counts as money until it clears (owner decision 2026-10-07),
+// whatever its date — so every cheque receipt is recorded uncleared.
+function isChequeMode(mode) { return String(mode || '').toLowerCase() === 'cheque'; }
+
+// Uncleared cheques already taken against these sale lines, by line id. They
+// do not reduce due_amount until they clear, so a new receipt must leave room
+// for them or the sale is collected twice once they do.
+async function unclearedChequesBySale(trx, saleIds) {
+  const out = new Map();
+  if (!saleIds || !saleIds.length) return out;
+  const rows = await trx('payments')
+    .whereIn('local_sale_id', saleIds)
+    .where({ payment_method: 'cheque', cleared: false })
+    .whereNotIn('status', ['Reversed', 'Rejected'])
+    .select('local_sale_id', 'amount');
+  for (const r of rows || []) out.set(r.local_sale_id, uc.round2((out.get(r.local_sale_id) || 0) + (parseFloat(r.amount) || 0)));
+  return out;
+}
+
 // Move a receiving account's balance by the amount received and drop a Cash &
 // Bank sub-ledger row (linked to the payment so a delete can reverse it).
 async function postReceiptToAccount(trx, { accountId, amount, paymentId, reference, notes, date, userId }) {
@@ -107,8 +126,20 @@ async function postSaleSideEffects(trx, saleRows, { userId } = {}) {
 
   for (const sale of saleRows) {
     const qtyKg = parseFloat(sale.quantity_kg) || 0;
-    const paid = parseFloat(sale.paid_amount) || 0;
-    const dueAmt = parseFloat(sale.due_amount) || 0;
+    // A cheque taken at the time of sale is not money until it clears — not
+    // even a same-day one. It is recorded as an UNCLEARED payment below and the
+    // sale stays Credit with its whole total owed; Clear Cheque (Due Dates)
+    // settles the sale, moves the bank and posts the receipt journal then.
+    const tendered = parseFloat(sale.paid_amount) || 0;
+    const chequeAmt = isChequeMode(sale.payment_mode) ? tendered : 0;
+    const paid = chequeAmt > 0 ? 0 : tendered;
+    let dueAmt = parseFloat(sale.due_amount) || 0;
+    if (chequeAmt > 0) {
+      dueAmt = uc.round2(parseFloat(sale.total_amount) || 0);
+      const patch = { paid_amount: 0, due_amount: dueAmt, payment_status: salePaymentStatus({ due: dueAmt, paid: 0, paymentMode: sale.payment_mode }) };
+      await trx('local_sales').where({ id: sale.id }).update({ ...patch, updated_at: trx.fn.now() });
+      Object.assign(sale, patch);
+    }
 
     if (sale.mill_item_id) {
       const count = parseFloat(sale.quantity_bags) || qtyKg;
@@ -161,6 +192,23 @@ async function postSaleSideEffects(trx, saleRows, { userId } = {}) {
           if (j?.id) await accountingService.postJournal(trx, j.id);
         }
       }
+    }
+
+    if (chequeAmt > 0) {
+      const paymentNo = await nextDocNo(trx, { table: 'payments', column: 'payment_no', prefix: 'PL-', pad: 0 });
+      await trx('payments').insert({
+        payment_no: paymentNo, type: 'receipt',
+        amount: chequeAmt, currency: 'PKR', fx_rate: 1, base_amount_pkr: chequeAmt,
+        payment_method: 'cheque', bank_reference: sale.payment_reference || null,
+        bank_account_id: sale.bank_account_id || null,
+        // The cheque date; without one it is due the day of the sale. Due Dates
+        // lists only cheques that carry a date, so it always gets one.
+        due_date: sale.due_date || sale.sale_date || new Date().toISOString().split('T')[0],
+        cleared: false,
+        payment_date: sale.sale_date || trx.fn.now(), notes: `Cheque for local sale ${sale.sale_no} — ${sale.item_name} (settles when cleared)`,
+        local_sale_id: sale.id, created_by: userId || null,
+      }).returning('id');
+      // No bank move, no Dr 1000 / Cr 1120 — both happen on Clear Cheque.
     }
 
     if (paid > 0) {
@@ -371,12 +419,16 @@ async function assembleInvoice(id, includeAdmin = false) {
       dueDate: base.due_date || null, overdue,
       createdByName: base.created_by_name || null, notes: base.notes || null,
       gatePassNo: base.gate_pass_no || null,
+      status: base.status || null,
     },
     items,
     payments: timeline,
     dispatch: {
       dispatched: !!base.dispatched,
-      deliveryStatus: base.dispatched ? 'Dispatched' : 'Not dispatched',
+      awaitingConfirmation: base.status === 'Pending',
+      deliveryStatus: base.status === 'Pending'
+        ? 'Not yet dispatched — awaiting confirmation'
+        : (base.dispatched ? 'Dispatched' : 'Not dispatched'),
       dispatchDate: base.dispatch_date || null,
       vehicleNo: base.vehicle_no || null, driverName: base.driver_name || null,
       collectionLocation: base.collection_location || null,
@@ -533,14 +585,17 @@ function readReceiptInput(body = {}) {
   // Same guard as create: a bank-transfer receipt must name its account, else
   // the payment records but no bank balance moves.
   if (payment_method === 'bank_transfer' && !bank_account_id) return { error: 'A bank account is required for a bank-transfer receipt.' };
-  // A post-dated cheque (cheque with a future due_date) is recorded but does
-  // NOT settle the sale until it clears — the sale stays Partial/Credit.
-  const today = new Date(new Date().toDateString());
-  const isPostDated = payment_method === 'cheque' && !!due_date && new Date(due_date) > today;
+  // A cheque — any cheque, same-day included — is recorded but does NOT
+  // settle the sale until it is cleared in Due Dates: the sale stays
+  // Partial/Credit, no bank moves, no journal. It keeps its cheque date (or the
+  // receipt date) so Due Dates lists it.
+  const isUncleared = isChequeMode(payment_method);
+  const today = new Date().toISOString().split('T')[0];
   return {
     amount: parseFloat(amount), paymentMethod: payment_method, paymentDate: payment_date || null,
     reference: reference || null, notes: notes || null, bankAccountId: bank_account_id || null,
-    dueDate: due_date || null, collectionLocation: collection_location || null, isPostDated,
+    dueDate: due_date || (isUncleared ? (payment_date || today) : null),
+    collectionLocation: collection_location || null, isUncleared,
   };
 }
 
@@ -577,13 +632,13 @@ function allocateOldestFirst(amount, lines) {
 // journal and the linked receivable. The single-line Pay and the group Pay
 // both come through here, so a receipt is recorded the same way either way.
 async function applyReceiptToSale(trx, sale, {
-  amount, paymentMethod = 'cash', paymentDate, reference, notes, bankAccountId, dueDate, collectionLocation, isPostDated = false, userId,
+  amount, paymentMethod = 'cash', paymentDate, reference, notes, bankAccountId, dueDate, collectionLocation, isUncleared = false, userId,
 }) {
   const payAmount = uc.round2(parseFloat(amount) || 0);
   const newPaid = (parseFloat(sale.paid_amount) || 0) + payAmount;
   const newDue = Math.max(0, (parseFloat(sale.total_amount) || 0) - newPaid);
 
-  if (!isPostDated) {
+  if (!isUncleared) {
     await trx('local_sales').where({ id: sale.id }).update({
       paid_amount: uc.round2(newPaid),
       due_amount: uc.round2(newDue),
@@ -594,8 +649,8 @@ async function applyReceiptToSale(trx, sale, {
     });
   }
 
-  // Create payment record (cleared=false for an uncleared post-dated cheque).
-  const receiptAccountId = isPostDated ? null : await resolveReceiptAccountId(trx, { paymentMode: paymentMethod, bankAccountId, amount: payAmount, collectionLocation });
+  // Create payment record (cleared=false for a cheque until it clears).
+  const receiptAccountId = isUncleared ? null : await resolveReceiptAccountId(trx, { paymentMode: paymentMethod, bankAccountId, amount: payAmount, collectionLocation });
   const paymentNo = await nextDocNo(trx, { table: 'payments', column: 'payment_no', prefix: 'PL-', pad: 0 });
   const [payRow] = await trx('payments').insert({
     payment_no: paymentNo,
@@ -606,7 +661,7 @@ async function applyReceiptToSale(trx, sale, {
     base_amount_pkr: payAmount,
     payment_method: paymentMethod,
     due_date: dueDate || null,
-    cleared: !isPostDated,
+    cleared: !isUncleared,
     bank_reference: reference || null,
     bank_account_id: receiptAccountId || bankAccountId || null,
     payment_date: paymentDate || trx.fn.now(),
@@ -615,15 +670,15 @@ async function applyReceiptToSale(trx, sale, {
     created_by: userId || null,
   }).returning('id');
 
-  if (!isPostDated) {
+  if (!isUncleared) {
     // Cash / bank receipt → move the receiving account's balance.
     await postReceiptToAccount(trx, {
       accountId: receiptAccountId, amount: payAmount, paymentId: payRow.id,
       reference: reference || sale.sale_no, notes: `Payment for local sale ${sale.sale_no}`,
       date: paymentDate, userId,
     });
-    // …and into the GL: Dr 1000 Cash & Bank / Cr 1120 Local AR. A
-    // post-dated cheque journals when it clears (finance clearCheque).
+    // …and into the GL: Dr 1000 Cash & Bank / Cr 1120 Local AR. A cheque
+    // journals when it clears (finance clearCheque).
     await postLocalReceiptJournal(trx, { paymentNo, amount: payAmount, sale, date: paymentDate, userId });
 
     // Update linked receivable — prefer FK, fall back to notes search
@@ -674,28 +729,43 @@ function validateSaleDate(input, now = new Date()) {
 }
 
 // LS-11b: the customer a walk-in CREDIT buyer's balance is tracked against.
-// Only a LOCAL customer can be reused, and only when the name AND the phone
-// match (phone compared on digits only). With no phone there is nothing to
-// tell two same-named buyers apart, so a new local customer is created rather
-// than attaching the debt to whoever already has that name. (Interim rule —
-// CNIC vs phone as the identity is an open owner decision.)
+// The buyer's identity is their PHONE NUMBER (owner decision 2026-10-07, final):
+// a walk-in credit sale must carry one, and it is matched on digits only
+// against LOCAL customers. A match is that customer even when the name typed
+// today differs — the existing record is kept as it is, nothing is updated.
+// No match → a new local customer is created with that phone.
+function phoneDigits(phone) { return String(phone || '').replace(/\D/g, ''); }
 async function resolveWalkInCustomer(trx, { name, phone, userId }) {
   const nm = String(name || '').trim();
-  const digits = String(phone || '').replace(/\D/g, '');
-  if (digits) {
-    const existing = await trx('customers')
-      .where('customer_type', 'local')
-      .whereRaw('LOWER(name) = LOWER(?)', [nm])
-      .whereRaw("regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = ?", [digits])
-      .first();
-    if (existing) return existing;
+  const digits = phoneDigits(phone);
+  if (!digits) {
+    const e = new Error('A walk-in credit sale needs the buyer\'s phone number — it is how their balance is tracked.');
+    e.status = 400; throw e;
   }
+  const existing = await trx('customers')
+    .where('customer_type', 'local')
+    .whereRaw("regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = ?", [digits])
+    .orderBy('id', 'asc')
+    .first();
+  if (existing) return existing;
   const [cust] = await trx('customers').insert({
-    name: nm, phone: phone ? String(phone).trim() : null, payment_terms: 'Credit', currency: 'PKR',
+    name: nm, phone: String(phone).trim(), payment_terms: 'Credit', currency: 'PKR',
     customer_type: 'local', is_active: true, approval_status: 'pending',
     submitted_by: userId || null, submitted_at: trx.fn.now(),
   }).returning('*');
   return cust;
+}
+
+// Pure. Why a gate pass may not be issued for this sale, or null if it may.
+function gatePassRefusal(sale) {
+  const ref = (sale && (sale.saleGroupNo || sale.invoiceNo)) || 'This sale';
+  if (sale && sale.status === 'Pending') {
+    return { code: 'AWAITING_CONFIRMATION', message: `Awaiting manager confirmation — ${ref} has not been confirmed by a Mill Manager or Owner, so the goods may not leave and no gate pass can be issued yet.` };
+  }
+  if (sale && sale.status === 'Cancelled') {
+    return { code: 'SALE_REJECTED', message: `${ref} was rejected — there is nothing to release.` };
+  }
+  return null;
 }
 
 // LS-12: the gate pass number already on another (non-rejected) sale, if any.
@@ -899,8 +969,20 @@ module.exports = {
         else { l.paid = grandTotal > 0 ? uc.round2(totalPaid * (l.total / grandTotal)) : 0; allocated += l.paid; }
       });
       // A credit / partial sale leaves a balance owed → a receivable, which needs
-      // a customer to chase. (receivables.customer_id is NOT NULL.)
-      const hasDue = totalPaid < grandTotal - 0.01;
+      // a customer to chase. (receivables.customer_id is NOT NULL.) A cheque is
+      // not money until it clears, so a cheque sale is owed in full until then.
+      const hasDue = totalPaid < grandTotal - 0.01 || (isChequeMode(payment_mode) && grandTotal > 0.01);
+
+      // Walk-in credit buyer → identified by phone (see resolveWalkInCustomer).
+      // Refused up front, before anything is written. A cash walk-in needs none.
+      if (hasDue && !customer_id) {
+        if (!String(buyer_name || '').trim()) {
+          return res.status(400).json({ success: false, message: 'A credit or partial sale needs a buyer name (or a registered customer) so the balance can be tracked.' });
+        }
+        if (!phoneDigits(buyer_phone)) {
+          return res.status(400).json({ success: false, code: 'WALK_IN_PHONE_REQUIRED', message: 'A walk-in credit sale needs the buyer\'s phone number — it is how their balance is tracked. Enter a phone, or pick a registered customer.' });
+        }
+      }
 
       // A sale RECORDED by a Mill Manager/Owner auto-confirms (posts immediately);
       // anyone else's sits Pending until a Mill Manager/Owner confirms it.
@@ -908,8 +990,8 @@ module.exports = {
 
       const result = await db.transaction(async (trx) => {
         // Resolve the customer for any owed balance: use the selected one, else
-        // register the walk-in buyer (a LOCAL customer matched on name + phone,
-        // see resolveWalkInCustomer) so credit sales work without a manual
+        // register the walk-in buyer (a LOCAL customer matched on phone, see
+        // resolveWalkInCustomer) so credit sales work without a manual
         // registration step. A fully-paid walk-in stays anonymous.
         let resolvedCustomerId = customer_id || null;
         if (hasDue && !resolvedCustomerId) {
@@ -952,7 +1034,10 @@ module.exports = {
             collection_location: collection_location || null, due_date: due_date || null,
             bank_account_id: bank_account_id || null,
             vehicle_no: vehicle_no || null, driver_name: driver_name || null,
-            dispatched: !!dispatched, dispatch_date: dispatched ? saleDate : null,
+            // Goods may not leave before a manager confirms a clerk's sale: a
+            // Pending sale is not dispatched; confirmSale dispatches it.
+            dispatched: autoConfirm ? !!dispatched : false,
+            dispatch_date: autoConfirm && dispatched ? saleDate : null,
             notes: notes || null,
             gate_pass_no: gatePassNo,
             status: autoConfirm ? 'Completed' : 'Pending',
@@ -1191,8 +1276,11 @@ module.exports = {
         if (!rows.length) { const e = new Error('This sale is not awaiting confirmation.'); e.status = 409; throw e; }
         await postSaleSideEffects(trx, rows, { userId: req.user?.id });
         const ids = rows.map((r) => r.id);
+        // Confirmation is the release: the goods leave now, so the sale is
+        // dispatched on the day it is confirmed.
         await trx('local_sales').whereIn('id', ids).update({
           status: 'Completed', confirmed_by: req.user?.id || null, confirmed_at: trx.fn.now(), updated_at: trx.fn.now(),
+          dispatched: true, dispatch_date: new Date().toISOString().split('T')[0],
         });
         return { count: ids.length, group_no: groupKey };
       });
@@ -1258,9 +1346,12 @@ module.exports = {
           await assertMillReceipt(trx, input);
         }
 
-        const currentDue = parseFloat(sale.due_amount) || 0;
+        // Uncleared cheques already on this sale will settle it when they
+        // clear — leave room for them so the sale is not collected twice.
+        const pendingCheques = (await unclearedChequesBySale(trx, [sale.id])).get(sale.id) || 0;
+        const currentDue = uc.round2(Math.max(0, (parseFloat(sale.due_amount) || 0) - pendingCheques));
         if (input.amount > currentDue + 0.01) {
-          const e = new Error(`Cannot pay Rs ${input.amount} — only Rs ${currentDue.toFixed(2)} remaining.`); e.status = 400; throw e;
+          const e = new Error(`Cannot pay Rs ${input.amount} — only Rs ${currentDue.toFixed(2)} remaining${pendingCheques > 0 ? ` (Rs ${pendingCheques.toFixed(2)} is in cheques waiting to clear)` : ''}.`); e.status = 400; throw e;
         }
 
         await applyReceiptToSale(trx, sale, { ...input, userId: req.user?.id });
@@ -1304,11 +1395,14 @@ module.exports = {
           for (const l of lines) assertMillEntity(l.entity, 'sales');
           await assertMillReceipt(trx, input);
         }
-        const totalDue = uc.round2(lines.reduce((s, l) => s + (parseFloat(l.due_amount) || 0), 0));
+        // Uncleared cheques count against what is still open on each line.
+        const pending = await unclearedChequesBySale(trx, lines.map((l) => l.id));
+        const open = lines.map((l) => ({ ...l, due_amount: uc.round2(Math.max(0, (parseFloat(l.due_amount) || 0) - (pending.get(l.id) || 0))) }));
+        const totalDue = uc.round2(open.reduce((s, l) => s + (parseFloat(l.due_amount) || 0), 0));
         if (input.amount > totalDue + 0.01) {
           const e = new Error(`Cannot pay Rs ${input.amount} — only Rs ${totalDue.toFixed(2)} remaining on ${groupNo}.`); e.status = 400; throw e;
         }
-        const allocations = allocateOldestFirst(input.amount, lines);
+        const allocations = allocateOldestFirst(input.amount, open);
         const applied = [];
         for (const { sale, amount } of allocations) {
           const r = await applyReceiptToSale(trx, sale, {
@@ -1375,6 +1469,22 @@ module.exports = {
     try {
       const data = await assembleInvoice(req.params.id, false);
       if (!data) return res.status(404).json({ success: false, message: 'Sale not found.' });
+      return res.json({ success: true, data });
+    } catch (err) {
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  },
+
+  // Gate pass — the release document that lets the goods out of the gate. A
+  // clerk's sale awaiting a Mill Manager/Owner's confirmation has not been
+  // released, so no gate pass is issued for it (409); a rejected one never
+  // happened. Returns the customer-safe invoice payload the pass prints from.
+  async getGatePass(req, res) {
+    try {
+      const data = await assembleInvoice(req.params.id, false);
+      if (!data) return res.status(404).json({ success: false, message: 'Sale not found.' });
+      const refusal = gatePassRefusal(data.sale);
+      if (refusal) return res.status(409).json({ success: false, ...refusal });
       return res.json({ success: true, data });
     } catch (err) {
       return res.status(500).json({ success: false, message: err.message });
@@ -1463,4 +1573,5 @@ module.exports.applyReceiptToSale = applyReceiptToSale;
 module.exports.allocateOldestFirst = allocateOldestFirst;
 module.exports.validateSaleDate = validateSaleDate;
 module.exports.resolveWalkInCustomer = resolveWalkInCustomer;
+module.exports.gatePassRefusal = gatePassRefusal;
 module.exports.readReceiptInput = readReceiptInput;
