@@ -11,22 +11,27 @@ const { formatPackSize } = require('../../shared/packagingTypes');
  * actual packaging item, so its pack_type decides which stock it belongs to and
  * its own price decides what it costs.
  *
- *   received  empty bags that come free as the rice is milled out of them → into store
- *   consumed  bags drawn from store to pack this batch's output → out of store
+ *   received  empty bags that come free as the rice is milled out of them
+ *   consumed  bags used to pack this batch's output
  *
- * Saving is a REPLACE of the batch's lines, and stock is moved by the DIFFERENCE
- * against what was there before. Editing a line from 300 to 320 posts 20, not
- * another 320 — the same reason reconcileBatchKatta reverses itself before
- * recomputing. Every movement carries reference_type='batch_packaging' and the
- * line id, so it can always be traced back and undone.
+ * RECORD-ONLY (owner decision 2026-10-07, audit MIL-M1): saving lines moves NO
+ * store stock. Exactly one mechanism moves each kind of packaging:
+ *
+ *   katta                         inventoryService.reconcileBatchKatta at yield
+ *                                 (reference_type='batch_katta')
+ *   P.P. bags / masters / poly    packing.service pack() — the packing run
+ *                                 (reference_type='packing')
+ *
+ * Saving is a REPLACE of the batch's lines. Lines saved before this rule did
+ * move stock (reference_type='batch_packaging'); the first save after it puts
+ * that net back, once (see save()).
  */
 
 const round3 = (n) => Math.round((Number(n) || 0) * 1000) / 1000;
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
-// Inbound uses 'return' and outbound 'consumption': mill_stock_movements.
-// movement_type is CHECK-constrained to purchase/consumption/adjustment/
-// reservation/return, so these are the only two that fit what is happening.
+// The two directions a line can take. Lines no longer move stock; this only
+// validates the direction (the movement types are kept for the legacy undo).
 const MOVEMENT_FOR = { received: 'return', consumed: 'consumption' };
 const REF = 'batch_packaging';
 
@@ -120,25 +125,52 @@ const batchPackagingService = {
         }
       }
 
-      // What the batch had, so stock can move by the difference rather than
-      // being posted again in full on every edit.
+      // What the batch had: a save REPLACES the batch's lines.
       const existing = await trx('milling_batch_packaging').where('batch_id', batchId);
       const keyOf = (l) => `${Number(l.mill_item_id)}|${l.direction}|${l.output_type || ''}`;
       const wasBy = new Map(existing.map((e) => [keyOf(e), e]));
 
-      // Stock deltas are ACCUMULATED per item and applied once at the end, not
-      // as each line is walked. moveStock clamps at zero so store stock can
-      // never go negative, and that clamp destroys quantity if an intermediate
-      // step dips below zero: dropping a "500 received / 400 consumed" pair left
-      // 400 bags behind, because removing the 500 clamped 100 to 0 before the
-      // 400 came back. The net is what actually happened; the order is not.
-      const stockDelta = new Map();
-      const bump = (itemId, delta) => {
-        if (!delta) return;
-        stockDelta.set(itemId, (stockDelta.get(itemId) || 0) + delta);
-      };
-      // The ledger still gets a row per line, so every change stays traceable.
-      const movements = [];
+      // RECORD-ONLY. These lines no longer move mill_stock (owner decision
+      // 2026-10-07, audit MIL-M1): the same bags were being moved by three
+      // mechanisms at once. Katta moves only through the yield's katta
+      // reconcile; P.P. bags, masters and polythene move only when a packing
+      // run is logged. A line here is what the mill SAYS it used or freed —
+      // the figure the variance and costing views compare against.
+      //
+      // Lines saved before this change did move stock under
+      // reference_type='batch_packaging'. Whatever net of that is still
+      // standing is put back once, here, so the store returns to what the
+      // single movers say. Netting makes it idempotent: a second save finds
+      // the net already at zero and moves nothing.
+      if (existing.length) {
+        const legacy = await trx('mill_stock_movements')
+          .where({ reference_type: REF })
+          .whereIn('reference_id', existing.map((e) => e.id))
+          .select('item_id', 'warehouse_id', 'quantity', 'cost_per_unit', 'reference_id');
+        const net = new Map();
+        for (const m of legacy) {
+          const k = `${m.item_id}|${m.warehouse_id ?? ''}|${m.reference_id}`;
+          const cur = net.get(k) || { ...m, warehouse_id: m.warehouse_id ?? null, quantity: 0 };
+          cur.quantity = round3(cur.quantity + (Number(m.quantity) || 0));
+          net.set(k, cur);
+        }
+        const undo = [];
+        for (const m of net.values()) {
+          if (!m.quantity) continue;
+          await moveStock(trx, { itemId: m.item_id, warehouseId: m.warehouse_id, delta: -m.quantity });
+          undo.push({
+            item_id: m.item_id, warehouse_id: m.warehouse_id,
+            movement_type: m.quantity > 0 ? 'consumption' : 'return',
+            quantity: -m.quantity,
+            cost_per_unit: m.cost_per_unit,
+            total_cost: round2(Math.abs(m.quantity) * (Number(m.cost_per_unit) || 0)),
+            reference_type: REF, reference_id: m.reference_id,
+            reason: `Packaging lines are record-only now — ${batch.batch_no || `batch ${batchId}`}: earlier stock move undone (stock moves at yield / packing run)`,
+            performed_by: userId || null,
+          });
+        }
+        if (undo.length) await trx('mill_stock_movements').insert(undo);
+      }
 
       const kept = new Set();
       const saved = [];
@@ -174,53 +206,14 @@ const batchPackagingService = {
           const [ins] = await trx('milling_batch_packaging').insert(row).returning('id');
           lineId = ins?.id || ins;
         }
-
-        // received adds to store, consumed takes away — and only the CHANGE moves.
-        const sign = l.direction === 'received' ? 1 : -1;
-        const delta = (qty - round3(prev?.quantity || 0)) * sign;
-        if (delta !== 0) {
-          bump(item.id, delta);
-          movements.push({
-            item_id: item.id, warehouse_id: null,
-            movement_type: MOVEMENT_FOR[l.direction],
-            quantity: delta,
-            cost_per_unit: unitCost,
-            total_cost: round2(Math.abs(delta) * unitCost),
-            reference_type: REF, reference_id: lineId,
-            reason: `${l.direction === 'received' ? 'Freed into store' : 'Used to pack'}`
-              + ` — ${batch.batch_no || `batch ${batchId}`}`
-              + `: ${qty} x ${item.name}${l.output_type ? ` (${l.output_type})` : ''}`
-              + `${prev ? ` (was ${round3(prev.quantity)})` : ''}`,
-            performed_by: userId || null,
-          });
-        }
         saved.push({ id: lineId, ...row });
       }
 
-      // Lines the user removed: put their stock back the way it was.
+      // Lines the user removed are simply dropped — they never moved stock.
       for (const [key, prev] of wasBy) {
         if (kept.has(key)) continue;
-        const sign = prev.direction === 'received' ? 1 : -1;
-        const delta = -round3(prev.quantity) * sign;
-        bump(prev.mill_item_id, delta);
-        movements.push({
-          item_id: prev.mill_item_id, warehouse_id: null,
-          movement_type: MOVEMENT_FOR[prev.direction],
-          quantity: delta,
-          cost_per_unit: prev.unit_cost_pkr,
-          total_cost: round2(Math.abs(delta) * (Number(prev.unit_cost_pkr) || 0)),
-          reference_type: REF, reference_id: prev.id,
-          reason: `Removed from ${batch.batch_no || `batch ${batchId}`}: ${round3(prev.quantity)} x item ${prev.mill_item_id}`,
-          performed_by: userId || null,
-        });
         await trx('milling_batch_packaging').where('id', prev.id).del();
       }
-
-      // One stock move per item, for the net of everything above.
-      for (const [itemId, delta] of stockDelta) {
-        await moveStock(trx, { itemId, delta: round3(delta) });
-      }
-      if (movements.length) await trx('mill_stock_movements').insert(movements);
 
       return batchPackagingService.list(batchId, trx);
     };
@@ -239,6 +232,12 @@ const batchPackagingService = {
    * Received packaging is store stock the mill now holds, so its cost does not
    * belong in this batch's expenses; katta spent bagging by-products is gone and
    * does. Prices are each line's own snapshot, never a rate typed in here.
+   *
+   * INFORMATIONAL ONLY — nothing posts this to the batch's cost. The batch's
+   * packaging cost reaches residual costing through ONE path: the packing run's
+   * milling_costs category='packaging' row (plus its 6000/1250 journal). Feeding
+   * netAdjustmentPkr in as well would count the same bags twice, and crediting
+   * freed katta would be a new costing policy the owner has not decided on.
    */
   async costAdjustments(batchId, conn = db) {
     const rows = await conn('milling_batch_packaging as bp')
@@ -275,8 +274,11 @@ const batchPackagingService = {
       ...bucket,
       receivedCost: round2(receivedCost),
       byproductKattaCost: round2(bucket.byproductKatta.cost),
-      // What to apply to the batch's total expenses. Negative reduces them.
+      // What the client's formula WOULD apply to the batch's expenses (negative
+      // reduces them). Not posted anywhere — see postedToBatchCost.
       netAdjustmentPkr: round2(bucket.byproductKatta.cost - receivedCost),
+      // Said outright so no screen presents it as a change to the batch's cost.
+      postedToBatchCost: false,
       hasLines: rows.length > 0,
     };
   },

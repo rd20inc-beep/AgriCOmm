@@ -180,8 +180,20 @@ function hasCapacity(packType) {
   return CAPACITY_TYPES.includes(packType);
 }
 
+/**
+ * Is this item a KATTA — the sack whose store stock only the yield's katta
+ * reconcile (inventoryService.reconcileBatchKatta) may move?
+ *
+ * The stored pack_type wins (migration 305); an item that has none yet is
+ * classified the one way everything else classifies it.
+ */
+function isKattaItem(item) {
+  if (!item) return false;
+  return (item.pack_type || classifyPackaging(item)) === 'katta';
+}
+
 module.exports = {
   PACK_TYPES, PACK_TYPE_CODES, KG_PER_LB, CAPACITY_TYPES,
   classifyPackaging, resolveSize, sizeToKg, formatPackSize,
-  deriveSizeFromLabel, hasCapacity, isMissingSize,
+  deriveSizeFromLabel, hasCapacity, isMissingSize, isKattaItem,
 };
