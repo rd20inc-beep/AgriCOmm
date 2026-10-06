@@ -5,8 +5,10 @@ import { useOwnerAuth } from '../../../context/OwnerAuthContext';
 import { useAuth } from '../../../context/AuthContext';
 import { lotInventoryApi } from '../../../api/services';
 import { useLotInventory } from '../../../api/queries';
-import Modal from '../../../components/Modal';
+import SlideDrawer from '../../../components/SlideDrawer';
 import StatusBadge from '../../../components/StatusBadge';
+import FieldError from '../../../shared/components/FieldError';
+import { fmtPKR, fmtKg, fmtNum } from '../../../shared/utils/format';
 import SearchSelect from '../../../components/SearchSelect';
 import {
   AdjustmentTypeChip,
@@ -21,7 +23,9 @@ import {
 // decision 2026-10-05); the server enforces the same list.
 const WRITE_OFF_APPROVERS = ['Owner', 'Super Admin'];
 
-const PKR = (v) => 'Rs ' + (parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const PKR = (v) => fmtPKR(parseFloat(v) || 0, { decimals: 2 });
+// 'pending_approval' → 'Pending Approval' (StatusBadge keys are Title Case).
+const statusLabel = (s) => (s ? s.split('_').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') : '—');
 
 // Period for KPI calc — last 30 days, computed once per render.
 function periodStart() {
@@ -45,6 +49,12 @@ export default function StockAdjustments() {
   const [filters, setFilters] = useState({ status: 'all', types: [], fromDate: '', toDate: '' });
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState({ lot_id: '', adjustmentType: 'shortage_found', quantityKg: '', reason: '' });
+  const [submitting, setSubmitting] = useState(false);
+  const [triedSubmit, setTriedSubmit] = useState(false);
+  const formErrors = triedSubmit ? {
+    lot_id: form.lot_id ? null : 'Pick a lot',
+    quantityKg: form.quantityKg ? null : 'Enter a quantity',
+  } : {};
   const [reconciliation, setReconciliation] = useState(null);
   const [expanded, setExpanded] = useState(null); // adjustment id whose reason is expanded
 
@@ -111,8 +121,12 @@ export default function StockAdjustments() {
     };
   }, [form.lot_id, form.quantityKg, form.adjustmentType, lots]);
 
+  function closeModal() { setShowModal(false); setTriedSubmit(false); }
+
   async function handleCreate() {
-    if (!form.lot_id || !form.quantityKg) { addToast('Lot and quantity are required', 'error'); return; }
+    if (submitting) return;
+    if (!form.lot_id || !form.quantityKg) { setTriedSubmit(true); addToast('Lot and quantity are required', 'error'); return; }
+    setSubmitting(true);
     try {
       await lotInventoryApi.createAdjustment({
         lotId: parseInt(form.lot_id),
@@ -121,10 +135,11 @@ export default function StockAdjustments() {
         reason: form.reason,
       });
       addToast('Adjustment submitted — pending approval');
-      setShowModal(false);
+      closeModal();
       setForm({ lot_id: '', adjustmentType: 'shortage_found', quantityKg: '', reason: '' });
       loadAdjustments();
     } catch (err) { addToast(err.message || 'Failed', 'error'); }
+    finally { setSubmitting(false); }
   }
 
   async function handleApprove(id) {
@@ -215,9 +230,9 @@ export default function StockAdjustments() {
                   {reconciliation.discrepancies.map((d) => (
                     <tr key={d.lotId} className="border-b border-gray-100 hover:bg-red-50">
                       <td data-label="Lot" className="py-2 font-medium text-blue-600">{d.lotNo}</td>
-                      <td data-label="System (kg)" className="py-2 text-right">{Math.round((d.systemQtyMT || 0) * 1000).toLocaleString()} kg</td>
-                      <td data-label="Ledger (KG)" className="py-2 text-right">{d.ledgerQtyKg?.toFixed(0)} KG</td>
-                      <td data-label="Discrepancy" className="py-2 text-right text-red-600 font-medium">{d.discrepancyKg?.toFixed(0)} KG</td>
+                      <td data-label="System (kg)" className="py-2 text-right">{fmtKg(Math.round((d.systemQtyMT || 0) * 1000))}</td>
+                      <td data-label="Ledger (KG)" className="py-2 text-right">{fmtKg(d.ledgerQtyKg)}</td>
+                      <td data-label="Discrepancy" className="py-2 text-right text-red-600 font-medium">{fmtKg(d.discrepancyKg)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -269,7 +284,7 @@ export default function StockAdjustments() {
                     <AdjustmentTypeChip type={type} />
                   </td>
                   <td data-label="Qty (KG)" className="px-4 py-3 text-right font-medium align-top">
-                    {parseFloat(a.quantity_kg)?.toLocaleString()} KG
+                    {fmtNum(a.quantity_kg)} kg
                   </td>
                   <td data-label="Reason" className="mob-hide px-4 py-3 text-gray-600 max-w-[260px] align-top">
                     {a.reason ? (
@@ -296,7 +311,7 @@ export default function StockAdjustments() {
                   </td>
                   <td data-label="Requested By" className="mob-hide px-4 py-3 text-gray-600 align-top">{a.requested_by_name || '—'}</td>
                   <td data-label="Status" className="px-4 py-3 text-center align-top">
-                    <StatusBadge status={a.approval_status?.replace('_', ' ')} />
+                    <StatusBadge status={statusLabel(a.approval_status)} />
                   </td>
                   <td data-label="Actions" className="px-4 py-3 text-center align-top">
                     {isPending && !canApprove && (
@@ -304,11 +319,11 @@ export default function StockAdjustments() {
                     )}
                     {isPending && canApprove && (
                       <div className="flex gap-1 justify-center">
-                        <button onClick={() => handleApprove(a.id)} disabled={decidingId != null} className="p-1.5 text-emerald-600 bg-emerald-50 rounded hover:bg-emerald-100 disabled:opacity-40" title="Approve">
-                          <CheckCircle className="w-4 h-4" />
+                        <button onClick={() => handleApprove(a.id)} disabled={decidingId != null} className="p-1.5 text-emerald-600 bg-emerald-50 rounded hover:bg-emerald-100 disabled:opacity-40" title="Approve" aria-label={`Approve adjustment on ${a.lot_no || `LOT-${a.lot_id}`}`}>
+                          <CheckCircle className="w-4 h-4" aria-hidden="true" />
                         </button>
-                        <button onClick={() => handleReject(a.id)} disabled={decidingId != null} className="p-1.5 text-red-600 bg-red-50 rounded hover:bg-red-100 disabled:opacity-40" title="Reject">
-                          <XCircle className="w-4 h-4" />
+                        <button onClick={() => handleReject(a.id)} disabled={decidingId != null} className="p-1.5 text-red-600 bg-red-50 rounded hover:bg-red-100 disabled:opacity-40" title="Reject" aria-label={`Reject adjustment on ${a.lot_no || `LOT-${a.lot_id}`}`}>
+                          <XCircle className="w-4 h-4" aria-hidden="true" />
                         </button>
                       </div>
                     )}
@@ -324,21 +339,35 @@ export default function StockAdjustments() {
       </div>
 
       {/* New Adjustment Modal */}
-      <Modal isOpen={showModal} onClose={() => setShowModal(false)} title="New Stock Adjustment" size="md">
+      <SlideDrawer
+        open={showModal}
+        onClose={closeModal}
+        title="New Stock Adjustment"
+        subtitle="Goes to the Owner for approval"
+        icon={Plus}
+        size="md"
+        footer={(
+          <div className="flex justify-end gap-2">
+            <button onClick={closeModal} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
+            <button onClick={handleCreate} disabled={submitting} className="px-4 py-2 text-sm text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-50">{submitting ? 'Submitting…' : 'Submit for Approval'}</button>
+          </div>
+        )}
+      >
         <div className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Lot *</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Lot <span className="text-red-500">*</span></label>
             <SearchSelect
               value={form.lot_id}
               onChange={(v) => setForm((p) => ({ ...p, lot_id: v }))}
-              options={lots.map((l) => ({ value: l.id, label: l.lotNo, sub: `${l.itemName} — ${Math.round(parseFloat(l.qty) || 0).toLocaleString()} kg` }))}
+              options={lots.map((l) => ({ value: l.id, label: l.lotNo, sub: `${l.itemName} — ${fmtKg(Math.round(parseFloat(l.qty) || 0))}` }))}
               placeholder="Search lot…"
             />
+            <FieldError error={formErrors.lot_id} />
           </div>
 
           {/* Type as chips */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Type *</label>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Type <span className="text-red-500">*</span></label>
             <div className="flex flex-wrap gap-2">
               {STOCK_ADJ_TYPES.map((t) => {
                 const selected = form.adjustmentType === t.value;
@@ -346,6 +375,7 @@ export default function StockAdjustments() {
                   <button
                     key={t.value}
                     type="button"
+                    aria-pressed={selected}
                     onClick={() => setForm((p) => ({ ...p, adjustmentType: t.value }))}
                     className={`transition-all ${selected ? 'ring-2 ring-blue-500 ring-offset-1 rounded-full' : 'opacity-60 hover:opacity-100'}`}
                   >
@@ -360,7 +390,7 @@ export default function StockAdjustments() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Quantity (KG) *</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Quantity (KG) <span className="text-red-500">*</span></label>
             <input
               type="number"
               value={form.quantityKg}
@@ -368,6 +398,7 @@ export default function StockAdjustments() {
               placeholder="e.g. 500"
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none"
             />
+            <FieldError error={formErrors.quantityKg} />
           </div>
 
           {/* Cost-impact preview */}
@@ -383,8 +414,8 @@ export default function StockAdjustments() {
                     </span>
                   </div>
                   <div className="text-[11px] text-gray-600 mt-0.5">
-                    {costPreview.qty.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} KG × {PKR(costPreview.costPerKg)}/kg ·
-                    Lot {costPreview.lotNo} ({costPreview.lotName} · {Math.round(costPreview.lotQtyMT || 0).toLocaleString()} kg on hand)
+                    {fmtNum(costPreview.qty, 2)} KG × {PKR(costPreview.costPerKg)}/kg ·
+                    Lot {costPreview.lotNo} ({costPreview.lotName} · {fmtKg(Math.round(costPreview.lotQtyMT || 0))} on hand)
                   </div>
                 </div>
               </div>
@@ -401,12 +432,8 @@ export default function StockAdjustments() {
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none resize-none"
             />
           </div>
-          <div className="flex justify-end gap-2 pt-2 border-t">
-            <button onClick={() => setShowModal(false)} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
-            <button onClick={handleCreate} className="px-4 py-2 text-sm text-white bg-red-600 rounded-lg hover:bg-red-700">Submit for Approval</button>
-          </div>
         </div>
-      </Modal>
+      </SlideDrawer>
     </div>
   );
 }

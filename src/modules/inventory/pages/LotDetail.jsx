@@ -17,7 +17,7 @@ import { useAuth } from '../../../context/AuthContext';
 import OrderRefLink from '../../../shared/components/OrderRefLink';
 import { LoadingSpinner, ErrorState } from '../../../components/LoadingState';
 import StatusBadge from '../../../components/StatusBadge';
-import Modal from '../../../components/Modal';
+
 import SlideDrawer from '../../../components/SlideDrawer';
 import { fromKg, allEquivalents, allRateEquivalents, toKg, UNITS } from '../../../shared/utils/unitConversion';
 import LotCostSheet from '../components/LotCostSheet';
@@ -26,10 +26,11 @@ import QualityEditModal from '../components/QualityEditModal';
 import api from '../../../api/client';
 import { lotInventoryApi } from '../../../api/services';
 import useCanSeeCost from '../../../hooks/useCanSeeCost';
-import { todayLocalISO } from '../../../shared/utils/format';
+import { todayLocalISO, fmtPKR as fmtPKRBase, fmtNum, fmtPct, fmtDate } from '../../../shared/utils/format';
+import useConfirm from '../../../hooks/useConfirm';
 
-function fmtPKR(v) { return 'Rs ' + (parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
-function fmtDate(d) { return d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'; }
+// Lot money is exact to the paisa; a missing figure reads Rs 0.00 here.
+const fmtPKR = (v, opts) => fmtPKRBase(parseFloat(v) || 0, { decimals: 2, ...opts });
 
 const TABS = [
   { key: 'overview', label: 'Overview', icon: Package },
@@ -214,6 +215,8 @@ export default function LotDetail() {
   const usedPct = receivedKg > 0 ? Math.round(((receivedKg - availKg) / receivedKg) * 100) : 0;
 
   function dv(kg) { return fromKg(kg, displayUnit, bw); }
+  // A display-unit quantity: MT keeps 3 decimals (= whole kg), others up to 2.
+  const fmtQty = (v) => (displayUnit === 'ton' ? fmtNum(v || 0, 3) : fmtNum(v || 0));
   function ul() { return displayUnit === 'katta' ? 'Katta' : displayUnit === 'maund' ? 'Maund' : displayUnit === 'ton' ? 'Ton' : 'KG'; }
 
   // Derive inbound/outbound from transactions
@@ -251,8 +254,8 @@ export default function LotDetail() {
           <div className="flex items-center gap-3 flex-wrap">
             <h1 className="text-2xl font-bold text-gray-900">{lot.lotNo}</h1>
             {canEditLot && (
-              <button onClick={handleRenameLot} title="Rename lot" className="text-gray-400 hover:text-blue-600">
-                <Edit3 className="w-4 h-4" />
+              <button onClick={handleRenameLot} title="Rename lot" aria-label="Rename lot" className="text-gray-400 hover:text-blue-600">
+                <Edit3 className="w-4 h-4" aria-hidden="true" />
               </button>
             )}
             <StatusBadge status={lot.status} />
@@ -405,34 +408,34 @@ export default function LotDetail() {
       <div className={`grid grid-cols-2 sm:grid-cols-3 gap-3 ${(milledKg > 0) === showCost ? 'xl:grid-cols-7' : (milledKg > 0 || showCost) ? 'xl:grid-cols-6' : 'xl:grid-cols-5'}`}>
         <div className="bg-white rounded-xl border border-gray-100 p-4">
           <p className="text-xs font-medium text-gray-500 uppercase">{milledKg > 0 ? 'Total Received' : 'Total Stock'}</p>
-          <p className="text-xl font-bold text-gray-900 mt-1">{dv(receivedKg).toLocaleString()}</p>
-          <p className="text-xs text-gray-400">{Math.round(receivedKg).toLocaleString()} kg</p>
+          <p className="text-xl font-bold text-gray-900 mt-1">{fmtQty(dv(receivedKg))}</p>
+          <p className="text-xs text-gray-400">{fmtNum(Math.round(receivedKg))} kg</p>
         </div>
         <div className="bg-emerald-50 rounded-xl border border-emerald-100 p-4">
           <p className="text-xs font-medium text-emerald-600 uppercase">Available</p>
-          <p className="text-xl font-bold text-emerald-700 mt-1">{dv(availKg).toLocaleString()}</p>
+          <p className="text-xl font-bold text-emerald-700 mt-1">{fmtQty(dv(availKg))}</p>
           <p className="text-xs text-emerald-500">{ul()}</p>
         </div>
         {milledKg > 0 && (
           <div className="bg-indigo-50 rounded-xl border border-indigo-100 p-4">
             <p className="text-xs font-medium text-indigo-600 uppercase">Milled / Utilized</p>
-            <p className="text-xl font-bold text-indigo-700 mt-1">{dv(milledKg).toLocaleString()}</p>
+            <p className="text-xl font-bold text-indigo-700 mt-1">{fmtQty(dv(milledKg))}</p>
             <p className="text-xs text-indigo-500">{ul()}</p>
           </div>
         )}
         <div className="bg-amber-50 rounded-xl border border-amber-100 p-4">
           <p className="text-xs font-medium text-amber-600 uppercase">Reserved</p>
-          <p className="text-xl font-bold text-amber-700 mt-1">{dv(reservedKg).toLocaleString()}</p>
+          <p className="text-xl font-bold text-amber-700 mt-1">{fmtQty(dv(reservedKg))}</p>
           <p className="text-xs text-amber-500">{ul()}</p>
         </div>
         <div className="bg-blue-50 rounded-xl border border-blue-100 p-4">
           <p className="text-xs font-medium text-blue-600 uppercase">Sold / Dispatched</p>
-          <p className="text-xl font-bold text-blue-700 mt-1">{dv(soldKg).toLocaleString()}</p>
+          <p className="text-xl font-bold text-blue-700 mt-1">{fmtQty(dv(soldKg))}</p>
           <p className="text-xs text-blue-500">{ul()}</p>
         </div>
         <div className="bg-red-50 rounded-xl border border-red-100 p-4">
           <p className="text-xs font-medium text-red-600 uppercase">Damaged / Short</p>
-          <p className="text-xl font-bold text-red-700 mt-1">{dv(damagedKg).toLocaleString()}</p>
+          <p className="text-xl font-bold text-red-700 mt-1">{fmtQty(dv(damagedKg))}</p>
           <p className="text-xs text-red-500">{ul()}</p>
         </div>
         {showCost && (
@@ -447,7 +450,7 @@ export default function LotDetail() {
       {/* Ordered vs received — only when they differ (short or over shipment).
           Shown in MT (procurement unit) + the lot's display unit in brackets. */}
       {lot.type === 'raw' && orderedKg > 0 && Math.abs(orderVariance) > 0.5 && (() => {
-        const kg = (k) => Math.round(k).toLocaleString();
+        const kg = (k) => fmtNum(Math.round(k));
         return (
           <div className={`rounded-xl border p-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm ${orderVariance < 0 ? 'bg-amber-50 border-amber-200 text-amber-900' : 'bg-blue-50 border-blue-200 text-blue-900'}`}>
             <AlertTriangle className="w-4 h-4 flex-shrink-0" />
@@ -455,7 +458,7 @@ export default function LotDetail() {
             <span className="text-gray-400">·</span>
             <span><span className="font-semibold">Received</span> {kg(receivedKg)} kg</span>
             <span className="text-gray-400">·</span>
-            <span className="font-semibold">{orderVariance < 0 ? `Short ${kg(Math.abs(orderVariance))}` : `Over ${kg(orderVariance)}`} kg ({dv(Math.abs(orderVariance)).toLocaleString()} {ul()})</span>
+            <span className="font-semibold">{orderVariance < 0 ? `Short ${kg(Math.abs(orderVariance))}` : `Over ${kg(orderVariance)}`} kg ({fmtQty(dv(Math.abs(orderVariance)))} {ul()})</span>
             <span className="text-gray-500">— the supplier bill is based on the received amount.</span>
           </div>
         );
@@ -483,7 +486,7 @@ export default function LotDetail() {
             <div className="lg:col-span-2 bg-purple-50/50 rounded-xl border border-purple-200 p-5">
               <h3 className="text-sm font-semibold text-purple-800 uppercase tracking-wider mb-3 flex items-center gap-2">
                 <BarChart3 className="w-4 h-4 text-purple-600" /> Blend Recipe
-                <span className="text-[11px] font-medium text-purple-500 normal-case">· batch {blendRecipe.batchNo} · {Math.round((blendRecipe.rawQtyMt || 0) * 1000).toLocaleString()} kg in</span>
+                <span className="text-[11px] font-medium text-purple-500 normal-case">· batch {blendRecipe.batchNo} · {fmtNum(Math.round((blendRecipe.rawQtyMt || 0) * 1000))} kg in</span>
               </h3>
               <div className="space-y-2">
                 {blendRecipe.inputs.map((inp, i) => (
@@ -507,7 +510,7 @@ export default function LotDetail() {
                       </div>
                     </div>
                     <div className="w-28 shrink-0 text-right text-xs text-gray-600 tabular-nums">
-                      {Math.round((inp.qtyMt || 0) * 1000).toLocaleString()} kg
+                      {fmtNum(Math.round((inp.qtyMt || 0) * 1000))} kg
                       {inp.lotType === 'finished' ? ' · re-mill' : ''}
                     </div>
                   </div>
@@ -556,7 +559,7 @@ export default function LotDetail() {
                 }
                 return null;
               };
-              const pct = (v) => (v == null || v === '') ? '—' : `${Number(v).toFixed(2)}%`;
+              const pct = (v) => (v == null || v === '') ? '—' : fmtPct(v, { decimals: 2 });
               const raw = (v) => (v == null || v === '') ? '—' : v;
               const specs = [
                 ['Rice Type', raw(lot.itemName)],
@@ -621,7 +624,7 @@ export default function LotDetail() {
               const choba = n(batchYield.chobaMt);
               const total = fin + broken + sortex + powder + sweeping + choba;
               if (total <= 0) return null;
-              const pctOf = (v) => total > 0 ? `${(v / total * 100).toFixed(1)}%` : '—';
+              const pctOf = (v) => total > 0 ? fmtPct(v / total * 100) : '—';
               const subGrades = [
                 ['B1', n(batchYield.b1Mt)], ['B2', n(batchYield.b2Mt)], ['B3', n(batchYield.b3Mt)],
                 ['CSR', n(batchYield.csrMt)], ['Short Grain', n(batchYield.shortGrainMt)],
@@ -641,7 +644,7 @@ export default function LotDetail() {
                     {tops.map(([l, v]) => (
                       <div key={l} className="flex justify-between text-sm">
                         <span className="text-gray-500">{l}</span>
-                        <span className="font-medium text-gray-900 tabular-nums">{Math.round(v * 1000).toLocaleString()} kg <span className="text-gray-400">({pctOf(v)})</span></span>
+                        <span className="font-medium text-gray-900 tabular-nums">{fmtNum(Math.round(v * 1000))} kg <span className="text-gray-400">({pctOf(v)})</span></span>
                       </div>
                     ))}
                     {subGrades.length > 0 && (
@@ -649,7 +652,7 @@ export default function LotDetail() {
                         {subGrades.map(([l, v]) => (
                           <div key={l} className="flex justify-between text-xs">
                             <span className="text-gray-400">{l}</span>
-                            <span className="text-amber-700 tabular-nums">{Math.round(v * 1000).toLocaleString()} kg</span>
+                            <span className="text-amber-700 tabular-nums">{fmtNum(Math.round(v * 1000))} kg</span>
                           </div>
                         ))}
                       </div>
@@ -702,10 +705,10 @@ export default function LotDetail() {
             <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-4 flex items-center gap-2"><Scale className="w-4 h-4 text-blue-600" /> Weight & Unit Breakdown</h3>
             <div className="space-y-2.5">
               {[
-                ['Gross Weight', lot.grossWeightKg ? `${parseFloat(lot.grossWeightKg).toLocaleString()} KG` : null],
-                ['Net Weight', `${netKg.toLocaleString()} KG`],
-                ['In Katta / Bags', `${eq.katta.toLocaleString()} katta`],
-                ['In Maund', `${eq.maund.toLocaleString()} maund`],
+                ['Gross Weight', lot.grossWeightKg ? `${fmtNum(parseFloat(lot.grossWeightKg))} KG` : null],
+                ['Net Weight', `${fmtNum(netKg)} KG`],
+                ['In Katta / Bags', `${fmtNum(eq.katta)} katta`],
+                ['In Maund', `${fmtNum(eq.maund)} maund`],
                 ['In Metric Ton', `${eq.ton} MT`],
                 ['Standard Unit', lot.standardUnitType || 'katta'],
               ].map(([l, v]) => v ? <div key={l} className="flex justify-between text-sm"><span className="text-gray-500">{l}</span><span className="font-medium text-gray-900">{v}</span></div> : null)}
@@ -750,7 +753,7 @@ export default function LotDetail() {
               </div>
             </div>
             ) : (
-              <p className="text-sm text-gray-700">{Math.round(receivedKg).toLocaleString()} kg received</p>
+              <p className="text-sm text-gray-700">{fmtNum(Math.round(receivedKg))} kg received</p>
             )}
           </div>
 
@@ -765,7 +768,7 @@ export default function LotDetail() {
                 <div><p className="text-xs text-gray-500">Status</p><StatusBadge status={linkedBatch.status} /></div>
                 <div><p className="text-xs text-gray-500">Supplier</p><p className="text-sm font-medium"><PartyLink type="supplier" id={linkedBatch.supplierId} name={linkedBatch.supplierName} /></p></div>
                 {showCost && linkedBatch.arrivalAnalysis?.pricePerMT && (
-                  <div><p className="text-xs text-gray-500">Agreed Price</p><p className="text-sm font-bold text-gray-900">Rs {(Math.round((linkedBatch.arrivalAnalysis.pricePerMT / 1000) * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} /kg</p></div>
+                  <div><p className="text-xs text-gray-500">Agreed Price</p><p className="text-sm font-bold text-gray-900">{fmtPKR((Math.round((linkedBatch.arrivalAnalysis.pricePerMT / 1000) * 100) / 100), { decimals: 2 })} /kg</p></div>
                 )}
               </div>
 
@@ -803,14 +806,14 @@ export default function LotDetail() {
                           {v.driverName && <span className="text-gray-500">({v.driverName})</span>}
                         </div>
                         <div className="text-right">
-                          <span className="font-medium text-gray-900">{v.weightMT ? `${Math.round(v.weightMT * 1000).toLocaleString()} kg` : '—'}</span>
+                          <span className="font-medium text-gray-900">{v.weightMT ? `${fmtNum(Math.round(v.weightMT * 1000))} kg` : '—'}</span>
                           {v.arrivalDate && <span className="text-gray-400 text-xs ml-2">{fmtDate(v.arrivalDate)}</span>}
                         </div>
                       </div>
                     ))}
                     <div className="text-xs text-gray-500 pt-1 flex justify-between border-t border-gray-100">
                       <span>{linkedBatch.vehicles.length} vehicle(s)</span>
-                      <span>Total: {Math.round(linkedBatch.vehicles.reduce((s, v) => s + (v.weightMT || 0), 0) * 1000).toLocaleString()} kg</span>
+                      <span>Total: {fmtNum(Math.round(linkedBatch.vehicles.reduce((s, v) => s + (v.weightMT || 0), 0) * 1000))} kg</span>
                     </div>
                   </div>
                 </div>
@@ -934,7 +937,7 @@ export default function LotDetail() {
             </div>
             <div className="bg-white rounded-xl border border-gray-100 p-4">
               <p className="text-xs font-medium text-gray-500 uppercase">Qty Sold</p>
-              <p className="text-xl font-bold text-gray-900 mt-1">{dv(totalSaleKg).toLocaleString()} <span className="text-sm font-normal text-gray-400">{ul()}</span></p>
+              <p className="text-xl font-bold text-gray-900 mt-1">{fmtQty(dv(totalSaleKg))} <span className="text-sm font-normal text-gray-400">{ul()}</span></p>
             </div>
             <div className="bg-blue-50 rounded-xl border border-blue-100 p-4">
               <p className="text-xs font-medium text-blue-600 uppercase">Revenue</p>
@@ -954,7 +957,7 @@ export default function LotDetail() {
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             <div className="bg-white rounded-xl border border-gray-100 p-4">
               <p className="text-xs font-medium text-gray-500 uppercase">Remaining Stock</p>
-              <p className="text-xl font-bold text-gray-900 mt-1">{dv(netKg).toLocaleString()} <span className="text-sm font-normal text-gray-400">{ul()}</span></p>
+              <p className="text-xl font-bold text-gray-900 mt-1">{fmtQty(dv(netKg))} <span className="text-sm font-normal text-gray-400">{ul()}</span></p>
             </div>
             <div className="bg-white rounded-xl border border-gray-100 p-4">
               <p className="text-xs font-medium text-gray-500 uppercase">Remaining Stock Value</p>
@@ -1001,9 +1004,9 @@ export default function LotDetail() {
                       return (
                         <tr key={sale.id}>
                           <td data-label="Sale No" className="font-medium text-blue-600">{sale.sale_no}</td>
-                          <td data-label="Date" className="mob-hide text-gray-600 text-xs">{sale.sale_date ? new Date(sale.sale_date).toLocaleDateString('en-GB', {day:'2-digit',month:'short',year:'numeric'}) : '—'}</td>
+                          <td data-label="Date" className="mob-hide text-gray-600 text-xs">{fmtDate(sale.sale_date)}</td>
                           <td data-label="Buyer" className="text-gray-900">{sale.customer_name || sale.buyer_name || '—'}</td>
-                          <td data-label="Qty" className="text-right tabular-nums">{dv(parseFloat(sale.quantity_kg) || 0).toLocaleString()} {ul()}</td>
+                          <td data-label="Qty" className="text-right tabular-nums">{fmtQty(dv(parseFloat(sale.quantity_kg) || 0))} {ul()}</td>
                           <td data-label="Sale Rate/KG" className="mob-hide text-right tabular-nums text-xs">{fmtPKR(sale.rate_per_kg)}</td>
                           <td data-label="Cost/KG" className="mob-hide text-right tabular-nums text-xs">{parseFloat(sale.cost_per_kg) > 0 ? fmtPKR(sale.cost_per_kg) : '—'}</td>
                           <td data-label="Revenue" className="text-right tabular-nums font-medium">{fmtPKR(sale.total_amount)}</td>
@@ -1017,7 +1020,7 @@ export default function LotDetail() {
                   <tfoot>
                     <tr className="border-t-2 border-gray-300 bg-gray-50">
                       <td colSpan={3} className="mob-full font-bold text-gray-900">Total</td>
-                      <td data-label="Total qty" className="text-right font-bold">{dv(totalSaleKg).toLocaleString()}</td>
+                      <td data-label="Total qty" className="text-right font-bold">{fmtQty(dv(totalSaleKg))}</td>
                       <td></td><td></td>
                       <td data-label="Total revenue" className="text-right font-bold">{fmtPKR(totalSaleRevenue)}</td>
                       <td data-label="Total cost" className="text-right font-bold">{fmtPKR(totalSaleCost)}</td>
@@ -1052,17 +1055,17 @@ export default function LotDetail() {
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div className="bg-emerald-50 rounded-xl border border-emerald-100 p-4">
               <p className="text-xs font-medium text-emerald-600 uppercase">Total Inbound</p>
-              <p className="text-xl font-bold text-emerald-700">{dv(totalInKg).toLocaleString()} <span className="text-sm font-normal">{ul()}</span></p>
+              <p className="text-xl font-bold text-emerald-700">{fmtQty(dv(totalInKg))} <span className="text-sm font-normal">{ul()}</span></p>
               <p className="text-xs text-emerald-500">{inboundTxns.length} transaction(s)</p>
             </div>
             <div className="bg-red-50 rounded-xl border border-red-100 p-4">
               <p className="text-xs font-medium text-red-600 uppercase">Total Outbound</p>
-              <p className="text-xl font-bold text-red-700">{dv(totalOutKg).toLocaleString()} <span className="text-sm font-normal">{ul()}</span></p>
+              <p className="text-xl font-bold text-red-700">{fmtQty(dv(totalOutKg))} <span className="text-sm font-normal">{ul()}</span></p>
               <p className="text-xs text-red-500">{outboundTxns.length} transaction(s)</p>
             </div>
             <div className="bg-blue-50 rounded-xl border border-blue-100 p-4">
               <p className="text-xs font-medium text-blue-600 uppercase">Net Balance</p>
-              <p className="text-xl font-bold text-blue-700">{dv(availKg).toLocaleString()} <span className="text-sm font-normal">{ul()}</span></p>
+              <p className="text-xl font-bold text-blue-700">{fmtQty(dv(availKg))} <span className="text-sm font-normal">{ul()}</span></p>
             </div>
             <div className="bg-white rounded-xl border border-gray-100 p-4">
               <p className="text-xs font-medium text-gray-500 uppercase">Utilization</p>
@@ -1080,32 +1083,32 @@ export default function LotDetail() {
               <div className="flex items-center gap-3">
                 <div className="w-3 h-3 rounded-full bg-emerald-500 flex-shrink-0" />
                 <span className="text-sm text-gray-600 w-40">Purchased / Received</span>
-                <div className="flex-1 bg-emerald-100 rounded h-6 relative"><div className="bg-emerald-500 h-full rounded" style={{ width: '100%' }} /><span className="absolute inset-0 flex items-center justify-center text-xs font-bold text-white">{dv(receivedKg).toLocaleString()} {ul()}</span></div>
+                <div className="flex-1 bg-emerald-100 rounded h-6 relative"><div className="bg-emerald-500 h-full rounded" style={{ width: '100%' }} /><span className="absolute inset-0 flex items-center justify-center text-xs font-bold text-white">{fmtQty(dv(receivedKg))} {ul()}</span></div>
               </div>
               {milledKg > 0 && <div className="flex items-center gap-3">
                 <div className="w-3 h-3 rounded-full bg-indigo-500 flex-shrink-0" />
                 <span className="text-sm text-gray-600 w-40">Milled / Utilized</span>
-                <div className="flex-1 bg-indigo-100 rounded h-6 relative"><div className="bg-indigo-500 h-full rounded" style={{ width: `${receivedKg > 0 ? (milledKg/receivedKg)*100 : 0}%` }} /><span className="absolute inset-0 flex items-center px-2 text-xs font-bold text-indigo-700">{dv(milledKg).toLocaleString()} {ul()}</span></div>
+                <div className="flex-1 bg-indigo-100 rounded h-6 relative"><div className="bg-indigo-500 h-full rounded" style={{ width: `${receivedKg > 0 ? (milledKg/receivedKg)*100 : 0}%` }} /><span className="absolute inset-0 flex items-center px-2 text-xs font-bold text-indigo-700">{fmtQty(dv(milledKg))} {ul()}</span></div>
               </div>}
               {soldKg > 0 && <div className="flex items-center gap-3">
                 <div className="w-3 h-3 rounded-full bg-blue-500 flex-shrink-0" />
                 <span className="text-sm text-gray-600 w-40">Sold / Dispatched</span>
-                <div className="flex-1 bg-blue-100 rounded h-6 relative"><div className="bg-blue-500 h-full rounded" style={{ width: `${receivedKg > 0 ? (soldKg/receivedKg)*100 : 0}%` }} /><span className="absolute inset-0 flex items-center px-2 text-xs font-bold text-blue-700">{dv(soldKg).toLocaleString()} {ul()}</span></div>
+                <div className="flex-1 bg-blue-100 rounded h-6 relative"><div className="bg-blue-500 h-full rounded" style={{ width: `${receivedKg > 0 ? (soldKg/receivedKg)*100 : 0}%` }} /><span className="absolute inset-0 flex items-center px-2 text-xs font-bold text-blue-700">{fmtQty(dv(soldKg))} {ul()}</span></div>
               </div>}
               {reservedKg > 0 && <div className="flex items-center gap-3">
                 <div className="w-3 h-3 rounded-full bg-amber-500 flex-shrink-0" />
                 <span className="text-sm text-gray-600 w-40">Reserved</span>
-                <div className="flex-1 bg-amber-100 rounded h-6 relative"><div className="bg-amber-500 h-full rounded" style={{ width: `${receivedKg > 0 ? (reservedKg/receivedKg)*100 : 0}%` }} /><span className="absolute inset-0 flex items-center px-2 text-xs font-bold text-amber-700">{dv(reservedKg).toLocaleString()} {ul()}</span></div>
+                <div className="flex-1 bg-amber-100 rounded h-6 relative"><div className="bg-amber-500 h-full rounded" style={{ width: `${receivedKg > 0 ? (reservedKg/receivedKg)*100 : 0}%` }} /><span className="absolute inset-0 flex items-center px-2 text-xs font-bold text-amber-700">{fmtQty(dv(reservedKg))} {ul()}</span></div>
               </div>}
               {damagedKg > 0 && <div className="flex items-center gap-3">
                 <div className="w-3 h-3 rounded-full bg-red-500 flex-shrink-0" />
                 <span className="text-sm text-gray-600 w-40">Damaged / Short</span>
-                <div className="flex-1 bg-red-100 rounded h-6 relative"><div className="bg-red-500 h-full rounded" style={{ width: `${receivedKg > 0 ? (damagedKg/receivedKg)*100 : 0}%` }} /><span className="absolute inset-0 flex items-center px-2 text-xs font-bold text-red-700">{dv(damagedKg).toLocaleString()} {ul()}</span></div>
+                <div className="flex-1 bg-red-100 rounded h-6 relative"><div className="bg-red-500 h-full rounded" style={{ width: `${receivedKg > 0 ? (damagedKg/receivedKg)*100 : 0}%` }} /><span className="absolute inset-0 flex items-center px-2 text-xs font-bold text-red-700">{fmtQty(dv(damagedKg))} {ul()}</span></div>
               </div>}
               <div className="flex items-center gap-3">
                 <div className="w-3 h-3 rounded-full bg-emerald-400 flex-shrink-0" />
                 <span className="text-sm text-gray-600 w-40 font-medium">Available</span>
-                <div className="flex-1 bg-emerald-100 rounded h-6 relative"><div className="bg-emerald-400 h-full rounded" style={{ width: `${receivedKg > 0 ? (availKg/receivedKg)*100 : 0}%` }} /><span className="absolute inset-0 flex items-center px-2 text-xs font-bold text-emerald-800">{dv(availKg).toLocaleString()} {ul()}</span></div>
+                <div className="flex-1 bg-emerald-100 rounded h-6 relative"><div className="bg-emerald-400 h-full rounded" style={{ width: `${receivedKg > 0 ? (availKg/receivedKg)*100 : 0}%` }} /><span className="absolute inset-0 flex items-center px-2 text-xs font-bold text-emerald-800">{fmtQty(dv(availKg))} {ul()}</span></div>
               </div>
             </div>
           </div>
@@ -1128,9 +1131,9 @@ export default function LotDetail() {
                 )}
               </div>
               <div className="flex items-center gap-4 mt-2 text-xs">
-                {reservedKg > 0 && <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-amber-500" />Reserved: {dv(reservedKg).toLocaleString()} {ul()}</span>}
-                {soldKg > 0 && <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-blue-500" />Sold: {dv(soldKg).toLocaleString()} {ul()}</span>}
-                <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />Available: {dv(availKg).toLocaleString()} {ul()}</span>
+                {reservedKg > 0 && <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-amber-500" />Reserved: {fmtQty(dv(reservedKg))} {ul()}</span>}
+                {soldKg > 0 && <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-blue-500" />Sold: {fmtQty(dv(soldKg))} {ul()}</span>}
+                <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />Available: {fmtQty(dv(availKg))} {ul()}</span>
               </div>
             </div>
 
@@ -1149,7 +1152,7 @@ export default function LotDetail() {
                         <p className="text-xs text-gray-500 mt-0.5">Reserved for export</p>
                       </div>
                       <div className="text-right">
-                        <p className="text-sm font-bold text-amber-700">{dv(rKg).toLocaleString()} {ul()}</p>
+                        <p className="text-sm font-bold text-amber-700">{fmtQty(dv(rKg))} {ul()}</p>
                         <p className="text-xs text-amber-500">{pct}% of lot</p>
                       </div>
                       <StatusBadge status={r.status} />
@@ -1166,7 +1169,7 @@ export default function LotDetail() {
               <div className="mt-3 bg-emerald-50 border border-emerald-200 rounded-lg p-3 flex items-center justify-between">
                 <div>
                   <p className="text-sm font-semibold text-emerald-800">Surplus Available</p>
-                  <p className="text-xs text-emerald-600">{dv(availKg).toLocaleString()} {ul()} not allocated to any order</p>
+                  <p className="text-xs text-emerald-600">{fmtQty(dv(availKg))} {ul()} not allocated to any order</p>
                 </div>
                 <div className="flex items-center gap-2">
                   {canExport && <Link to="/export" className="text-xs font-medium text-emerald-700 bg-emerald-100 px-3 py-1.5 rounded-lg hover:bg-emerald-200">Allocate to Order</Link>}
@@ -1226,8 +1229,8 @@ export default function LotDetail() {
                       <td data-label="Type"><span className={`inline-flex px-2 py-0.5 rounded-md text-[11px] font-semibold ${parseFloat(t.quantityKg) >= 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>{(t.transactionType || '').replace(/_/g, ' ')}</span></td>
                       <td data-label="Reference" className="mob-hide text-xs text-gray-500">{t.referenceNo || t.referenceModule || '—'}</td>
                       <td data-label="Qty (input)" className="mob-hide text-right text-xs tabular-nums">{t.inputQty} {t.inputUnit}</td>
-                      <td data-label="Qty KG" className={`text-right font-medium tabular-nums ${parseFloat(t.quantityKg) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{parseFloat(t.quantityKg || 0).toLocaleString()}</td>
-                      <td data-label="Balance KG" className="text-right tabular-nums">{parseFloat(t.balanceKg || 0).toLocaleString()}</td>
+                      <td data-label="Qty KG" className={`text-right font-medium tabular-nums ${parseFloat(t.quantityKg) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{fmtNum(parseFloat(t.quantityKg || 0))}</td>
+                      <td data-label="Balance KG" className="text-right tabular-nums">{fmtNum(parseFloat(t.balanceKg || 0))}</td>
                       {showCost && <td data-label="Cost Impact" className="mob-hide text-right tabular-nums text-xs">{t.costImpact ? fmtPKR(t.costImpact) : '—'}</td>}
                       <td data-label="Remarks" className="mob-hide text-xs text-gray-500 max-w-[200px] truncate">{t.remarks || '—'}</td>
                     </tr>
@@ -1249,7 +1252,7 @@ export default function LotDetail() {
                 {reservations.map(r => (
                   <div key={r.id} className="flex items-center justify-between bg-gray-50 rounded-lg p-3">
                     <OrderRefLink to={`/export/${r.orderNo || r.orderId}`} module="export_orders" className="text-sm font-medium text-blue-600 hover:text-blue-800 flex items-center gap-1"><ChevronRight className="w-3 h-3" />{r.orderNo || `Order #${r.orderId}`}</OrderRefLink>
-                    <span className="text-sm text-gray-600">{dv((parseFloat(r.reservedQty) || 0)).toLocaleString()} {ul()}</span>
+                    <span className="text-sm text-gray-600">{fmtQty(dv((parseFloat(r.reservedQty) || 0)))} {ul()}</span>
                     <StatusBadge status={r.status} />
                   </div>
                 ))}
@@ -1331,10 +1334,11 @@ export default function LotDetail() {
         onSuccess={() => refetch()}
       />
 
-      {/* Costing Sheet Modal — Print button lives inside LotCostSheet */}
-      <Modal isOpen={showCostSheet} onClose={() => setShowCostSheet(false)} title={`Costing Sheet — ${lot.lotNo}`} size="xl">
+      {/* Costing Sheet — read-only, so a backdrop click closes it. The Print
+          button lives inside LotCostSheet and prints only the sheet itself. */}
+      <SlideDrawer open={showCostSheet} onClose={() => setShowCostSheet(false)} title={`Costing Sheet — ${lot.lotNo}`} icon={FileText} size="4xl" closeOnBackdrop>
         <LotCostSheet lot={lot} companyProfile={companyProfileData} linkedBatch={linkedBatch} transactions={transactions} sales={lotSales} />
-      </Modal>
+      </SlideDrawer>
     </div>
   );
 }
@@ -1380,7 +1384,7 @@ function TransactionModal({ isOpen, onClose, lotId, lotNo, availableKg, bagWeigh
 
   async function handleSubmit() {
     if (!form.transaction_type || !form.quantity_input) { addToast('Transaction type and quantity are required', 'error'); return; }
-    if (exceeds) { addToast(`Insufficient stock: need ${qtyKg.toLocaleString()} kg but only ${availableKg.toFixed(0)} kg available`, 'error'); return; }
+    if (exceeds) { addToast(`Insufficient stock: need ${fmtNum(qtyKg)} kg but only ${fmtNum(availableKg, 0)} kg available`, 'error'); return; }
     // Numeric/optional fields must be null (not '') — the Joi schema types them as
     // number().allow(null) and rejects empty strings.
     const data = {
@@ -1427,7 +1431,7 @@ function TransactionModal({ isOpen, onClose, lotId, lotNo, availableKg, bagWeigh
         {selectedType ? (
           <span className={`inline-flex items-center gap-1 font-medium ${isOutbound ? 'text-red-600' : 'text-emerald-600'}`}>
             {isOutbound ? <ArrowUpRight size={13} /> : <ArrowDownLeft size={13} />}
-            {qtyKg > 0 ? `${qtyKg.toLocaleString()} kg` : selectedType.label}
+            {qtyKg > 0 ? `${fmtNum(qtyKg)} kg` : selectedType.label}
           </span>
         ) : 'Select a transaction type'}
       </span>
@@ -1444,7 +1448,7 @@ function TransactionModal({ isOpen, onClose, lotId, lotNo, availableKg, bagWeigh
       <div className="space-y-5">
         {/* Transaction type — grouped pills */}
         <div>
-          <label className="form-label">Transaction Type *</label>
+          <label className="form-label">Transaction Type <span className="text-red-500">*</span></label>
           <div className="mt-1 space-y-2.5">
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-600 mb-1 flex items-center gap-1"><ArrowDownLeft size={11} /> Stock In</p>
@@ -1464,7 +1468,7 @@ function TransactionModal({ isOpen, onClose, lotId, lotNo, availableKg, bagWeigh
 
         {/* Quantity */}
         <div className="form-group">
-          <label className="form-label">Quantity *</label>
+          <label className="form-label">Quantity <span className="text-red-500">*</span></label>
           <div className="flex gap-2">
             <input type="number" value={form.quantity_input} onChange={e => set('quantity_input', e.target.value)} className="form-input flex-1" placeholder="0" min="0" />
             <select value={form.quantity_unit} onChange={e => set('quantity_unit', e.target.value)} className="form-input w-24">
@@ -1472,9 +1476,9 @@ function TransactionModal({ isOpen, onClose, lotId, lotNo, availableKg, bagWeigh
             </select>
           </div>
           {qtyKg > 0 && (
-            <p className="text-xs text-gray-500 mt-1">= <span className="font-semibold text-blue-600">{qtyKg.toLocaleString()} kg</span>{bags > 0 ? ` · ${bags.toLocaleString()} bags` : ''}</p>
+            <p className="text-xs text-gray-500 mt-1">= <span className="font-semibold text-blue-600">{fmtNum(qtyKg)} kg</span>{bags > 0 ? ` · ${fmtNum(bags)} bags` : ''}</p>
           )}
-          {exceeds && <p className="text-xs text-red-600 mt-1 font-medium flex items-center gap-1"><AlertTriangle size={12} /> Exceeds available ({availableKg.toFixed(0)} kg)</p>}
+          {exceeds && <p className="text-xs text-red-600 mt-1 font-medium flex items-center gap-1"><AlertTriangle size={12} /> Exceeds available ({fmtNum(availableKg, 0)} kg)</p>}
         </div>
 
         {/* Date + Unit cost */}
@@ -1531,10 +1535,10 @@ function TransactionModal({ isOpen, onClose, lotId, lotNo, availableKg, bagWeigh
             <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-2">Impact Preview</p>
             <div className="space-y-1.5 text-sm">
               <div className="flex justify-between"><span className="text-gray-500">Movement</span>
-                <span className={`font-semibold ${isOutbound ? 'text-red-700' : 'text-emerald-700'}`}>{isOutbound ? '−' : '+'}{qtyKg.toLocaleString()} kg</span></div>
-              <div className="flex justify-between"><span className="text-gray-500">Available now</span><span className="font-medium text-gray-900">{availableKg.toLocaleString(undefined, { maximumFractionDigits: 0 })} kg</span></div>
+                <span className={`font-semibold ${isOutbound ? 'text-red-700' : 'text-emerald-700'}`}>{isOutbound ? '−' : '+'}{fmtNum(qtyKg)} kg</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">Available now</span><span className="font-medium text-gray-900">{fmtNum(availableKg, 0)} kg</span></div>
               <div className="flex justify-between"><span className="text-gray-500">Available after</span>
-                <span className={`font-bold ${availAfter < 0 ? 'text-red-600' : 'text-gray-900'}`}>{availAfter.toLocaleString(undefined, { maximumFractionDigits: 0 })} kg</span></div>
+                <span className={`font-bold ${availAfter < 0 ? 'text-red-600' : 'text-gray-900'}`}>{fmtNum(availAfter, 0)} kg</span></div>
               {costImpact > 0 && (
                 <div className="flex justify-between border-t border-gray-200/70 pt-1.5 mt-1.5">
                   <span className="text-gray-500">Cost impact{usingLotCost && <span className="text-gray-400"> (lot cost)</span>}</span>
@@ -1578,7 +1582,7 @@ function PriceEditModal({ isOpen, onClose, lot, addToast, refetch }) {
     try {
       const res = await lotInventoryApi.setPurchaseRate(lot.id, newRate);
       const prop = res?.data?.propagation;
-      const parts = [`Price set to Rs ${(newRate).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/kg`];
+      const parts = [`Price set to ${fmtPKR((newRate), { decimals: 2 })}/kg`];
       if (res?.data?.payableUpdated) parts.push('payable adjusted');
       if (res?.data?.openingStockRestated) parts.push('opening stock restated against equity');
       if (prop?.affectedBatches > 0) parts.push(`${prop.affectedBatches} batch(es) re-costed`);
@@ -1601,15 +1605,15 @@ function PriceEditModal({ isOpen, onClose, lot, addToast, refetch }) {
     <SlideDrawer open={isOpen} onClose={onClose} title="Edit Purchase Price" subtitle={lot.lotNo} icon={DollarSign} size="md" footer={footer}>
       <div className="space-y-5">
         <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-800">
-          Re-prices on the lot's received weight ({Math.round(receivedKg).toLocaleString()} kg). The supplier payable and any batch that used this lot are updated to match; already-sold/dispatched output with locked COGS is left as-is.
+          Re-prices on the lot's received weight ({fmtNum(Math.round(receivedKg))} kg). The supplier payable and any batch that used this lot are updated to match; already-sold/dispatched output with locked COGS is left as-is.
         </div>
         <div>
           <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">New Rate (Rs / kg)</label>
           <input type="number" step="0.01" value={rate} onChange={e => setRate(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm" autoFocus />
-          <p className="text-[11px] text-gray-400 mt-1">Current: Rs {currentRate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/kg</p>
+          <p className="text-[11px] text-gray-400 mt-1">Current: {fmtPKR(currentRate, { decimals: 2 })}/kg</p>
         </div>
         <div className="bg-gray-50 rounded-lg p-3 space-y-1.5 text-sm">
-          <div className="flex justify-between"><span className="text-gray-500">Received weight</span><span className="font-medium">{Math.round(receivedKg).toLocaleString()} kg</span></div>
+          <div className="flex justify-between"><span className="text-gray-500">Received weight</span><span className="font-medium">{fmtNum(Math.round(receivedKg))} kg</span></div>
           <div className="flex justify-between"><span className="text-gray-500">New rice cost</span><span className="font-medium">{fmtPKR(newAmount)}</span></div>
           <div className="flex justify-between border-t pt-1.5"><span className="text-gray-600 font-semibold">Change</span><span className={`font-bold ${delta >= 0 ? 'text-red-600' : 'text-emerald-700'}`}>{delta >= 0 ? '+' : ''}{fmtPKR(delta)}</span></div>
         </div>
@@ -1641,7 +1645,7 @@ function ReceivedQtyModal({ isOpen, onClose, lot, showCost = true, addToast, ref
     try {
       const res = await lotInventoryApi.setReceivedQty(lot.id, { received_net_weight_kg: newReceived, ordered_net_weight_kg: newOrdered || null });
       const prop = res?.data?.propagation;
-      const parts = [`Received set to ${Math.round(newReceived).toLocaleString()} kg`];
+      const parts = [`Received set to ${fmtNum(Math.round(newReceived))} kg`];
       if (res?.data?.payableUpdated) parts.push('bill adjusted');
       if (res?.data?.openingStockRestated) parts.push('opening stock restated against equity');
       if (prop?.affectedBatches > 0) parts.push(`${prop.affectedBatches} batch(es) re-costed`);
@@ -1669,21 +1673,21 @@ function ReceivedQtyModal({ isOpen, onClose, lot, showCost = true, addToast, ref
           <div>
             <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Received (kg)</label>
             <input type="number" step="1" value={received} onChange={e => setReceived(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm" autoFocus />
-            <p className="text-[11px] text-gray-400 mt-1">{Math.round(newReceived || 0).toLocaleString()} kg</p>
+            <p className="text-[11px] text-gray-400 mt-1">{fmtNum(Math.round(newReceived || 0))} kg</p>
           </div>
           <div>
             <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Ordered (kg)</label>
             <input type="number" step="1" value={ordered} onChange={e => setOrdered(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm" />
-            <p className="text-[11px] text-gray-400 mt-1">{Math.round(newOrdered || 0).toLocaleString()} kg</p>
+            <p className="text-[11px] text-gray-400 mt-1">{fmtNum(Math.round(newOrdered || 0))} kg</p>
           </div>
         </div>
         {newOrdered > 0 && Math.abs(variance) > 0.5 && (
           <div className={`text-sm font-medium ${variance < 0 ? 'text-amber-700' : 'text-blue-700'}`}>
-            {variance < 0 ? `Short ${Math.round(Math.abs(variance)).toLocaleString()} kg vs order` : `Over ${Math.round(variance).toLocaleString()} kg vs order`}
+            {variance < 0 ? `Short ${fmtNum(Math.round(Math.abs(variance)))} kg vs order` : `Over ${fmtNum(Math.round(variance))} kg vs order`}
           </div>
         )}
         {showCost && <div className="bg-gray-50 rounded-lg p-3 space-y-1.5 text-sm">
-          <div className="flex justify-between"><span className="text-gray-500">Rate</span><span className="font-medium">Rs {rate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/kg</span></div>
+          <div className="flex justify-between"><span className="text-gray-500">Rate</span><span className="font-medium">{fmtPKR(rate, { decimals: 2 })}/kg</span></div>
           <div className="flex justify-between"><span className="text-gray-500">Add-on costs</span><span className="font-medium">{fmtPKR(addOns)}</span></div>
           <div className="flex justify-between border-t pt-1.5"><span className="text-gray-600 font-semibold">New bill</span><span className="font-bold text-gray-900">{fmtPKR(newBill)}</span></div>
         </div>}
@@ -1776,7 +1780,7 @@ function CostEditModal({ isOpen, onClose, lot, milled, addToast, refetch }) {
                 <div className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center shrink-0"><Icon size={15} className="text-gray-600" /></div>
                 <div className="flex-1 min-w-0">
                   <span className="text-sm text-gray-700">{l}{perBag && <span className="text-gray-400 text-xs"> / bag</span>}</span>
-                  {perBag && n(k) > 0 && bags > 0 && <span className="block text-[11px] text-gray-400">× {bags.toLocaleString()} bags = {fmtPKR(contribution)}</span>}
+                  {perBag && n(k) > 0 && bags > 0 && <span className="block text-[11px] text-gray-400">× {fmtNum(bags)} bags = {fmtPKR(contribution)}</span>}
                 </div>
                 <div className="relative w-32 shrink-0">
                   <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-gray-400">Rs</span>
@@ -1791,7 +1795,7 @@ function CostEditModal({ isOpen, onClose, lot, milled, addToast, refetch }) {
         <div className="rounded-xl border border-gray-100 bg-gray-50 p-4 space-y-1.5 text-sm">
           <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-1">Summary</p>
           <div className="flex justify-between"><span className="text-gray-500">Rice add-ons (flat)</span><span className="font-medium text-gray-900">{fmtPKR(flatTotal)}</span></div>
-          {bagTotal > 0 && <div className="flex justify-between"><span className="text-gray-500">Bag cost ({bags.toLocaleString()} bags)</span><span className="font-medium text-gray-900">{fmtPKR(bagTotal)}</span></div>}
+          {bagTotal > 0 && <div className="flex justify-between"><span className="text-gray-500">Bag cost ({fmtNum(bags)} bags)</span><span className="font-medium text-gray-900">{fmtPKR(bagTotal)}</span></div>}
           <div className="flex justify-between border-t border-gray-200 pt-1.5 mt-1.5"><span className="text-gray-700 font-semibold">Rice add-ons total</span><span className="font-bold text-gray-900">{fmtPKR(landedAdditional)}</span></div>
           <div className="flex justify-between"><span className="text-gray-500">Per kg (added to rice cost)</span><span className="font-medium text-blue-600">{fmtPKR(perKg)} /kg</span></div>
           {transport > 0 && <div className="flex justify-between border-t border-gray-200 pt-1.5 mt-1.5"><span className="text-indigo-600">Transport → hauler payable</span><span className="font-bold text-indigo-700">{fmtPKR(transport)}</span></div>}
@@ -1847,7 +1851,7 @@ function LotLineage({ lotId, lotNo }) {
                   )}
                 </div>
                 <div className="text-right text-xs">
-                  <span className="text-gray-500">{Math.round(parseFloat(a.quantity_kg) || 0).toLocaleString()} kg</span>
+                  <span className="text-gray-500">{fmtNum(Math.round(parseFloat(a.quantity_kg) || 0))} kg</span>
                   {a.cost_share_amount > 0 && <span className="ml-2 text-gray-500">Cost: {fmtPKR(a.cost_share_amount)}</span>}
                 </div>
               </div>
@@ -1867,7 +1871,7 @@ function LotLineage({ lotId, lotNo }) {
                   <span className={`ml-2 text-xs px-1.5 py-0.5 rounded ${d.child_type === 'finished' ? 'bg-emerald-100 text-emerald-700' : 'bg-purple-100 text-purple-700'}`}>{d.child_type}</span>
                 </div>
                 <div className="text-right text-xs">
-                  <span className="text-gray-500">{Math.round(parseFloat(d.qty) || 0).toLocaleString()} kg</span>
+                  <span className="text-gray-500">{fmtNum(Math.round(parseFloat(d.qty) || 0))} kg</span>
                   <span className={`ml-2 px-1.5 py-0.5 rounded text-xs ${d.entity === 'mill' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}`}>{d.entity}</span>
                 </div>
               </div>
@@ -1885,16 +1889,16 @@ function LotLineage({ lotId, lotNo }) {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Link to={`/milling/${c.batch_no}`} className="font-medium text-blue-600 hover:underline">Batch {c.batch_no}</Link>
-                    <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">{c.status}</span>
+                    <StatusBadge status={c.status} />
                   </div>
-                  <span className="text-xs text-gray-600">{Math.round(parseFloat(c.qty_kg) || 0).toLocaleString()} kg{c.ratio_pct ? ` · ${parseFloat(c.ratio_pct).toFixed(1)}% of blend` : ''}</span>
+                  <span className="text-xs text-gray-600">{fmtNum(Math.round(parseFloat(c.qty_kg) || 0))} kg{c.ratio_pct ? ` · ${fmtPct(c.ratio_pct)} of blend` : ''}</span>
                 </div>
                 {c.outputs?.length > 0 && (
                   <div className="mt-1.5 flex flex-wrap gap-1.5">
                     {c.outputs.map((o, j) => (
                       <Link key={j} to={`/lot-inventory/${o.lot_no}`}
                         className={`text-[11px] px-1.5 py-0.5 rounded hover:underline ${o.type === 'finished' ? 'bg-emerald-100 text-emerald-700' : 'bg-purple-100 text-purple-700'}`}>
-                        {o.lot_no} ({Math.round(parseFloat(o.qty) || 0).toLocaleString()} kg)
+                        {o.lot_no} ({fmtNum(Math.round(parseFloat(o.qty) || 0))} kg)
                       </Link>
                     ))}
                   </div>
@@ -1937,14 +1941,14 @@ function AllocateToBatchModal({ isOpen, onClose, lot, addToast, refetch }) {
     if (!batchId)                       return addToast('Pick a milling batch', 'error');
     const w = parseFloat(weightKg);
     if (!w || w <= 0)                    return addToast('Weight must be greater than 0', 'error');
-    if (w > availableKg + 0.0001)        return addToast(`Lot only has ${Math.round(availableKg).toLocaleString()} kg available`, 'error');
+    if (w > availableKg + 0.0001)        return addToast(`Lot only has ${fmtNum(Math.round(availableKg))} kg available`, 'error');
     try {
       const res = await allocateMut.mutateAsync({ lotId: lot.id, batchId: parseInt(batchId, 10), weightKg: w, notes });
       const data = res?.data || res;
       addToast(
         data?.fully_consumed
           ? `Lot fully consumed by batch ${batches.find(b => String(b.id) === String(batchId))?.batchNo || ''}`
-          : `${Math.round(w).toLocaleString()} kg allocated — ${data?.lot_remaining_kg != null ? Math.round(data.lot_remaining_kg).toLocaleString() : '?'} kg still in lot`,
+          : `${fmtNum(Math.round(w))} kg allocated — ${data?.lot_remaining_kg != null ? fmtNum(Math.round(data.lot_remaining_kg)) : '?'} kg still in lot`,
         'success'
       );
       onClose();
@@ -1956,22 +1960,32 @@ function AllocateToBatchModal({ isOpen, onClose, lot, addToast, refetch }) {
 
   if (!isOpen) return null;
 
+  const footer = (
+    <div className="flex justify-end gap-2">
+      <button type="button" onClick={onClose} className="btn btn-secondary">Cancel</button>
+      <button type="submit" form="allocate-lot-to-batch" disabled={allocateMut.isPending || openBatches.length === 0}
+        className="btn btn-primary disabled:opacity-50">
+        {allocateMut.isPending ? 'Allocating…' : 'Allocate to Batch'}
+      </button>
+    </div>
+  );
+
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={`Use ${lot.lotNo} in a milling batch`} size="md">
-      <form onSubmit={handleSubmit} className="space-y-4">
+    <SlideDrawer open={isOpen} onClose={onClose} title={`Use ${lot.lotNo} in a milling batch`} icon={Factory} size="md" footer={footer}>
+      <form id="allocate-lot-to-batch" onSubmit={handleSubmit} className="space-y-4">
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-800">
-          <p><strong>{lot.itemName}</strong>{lot.variety ? ` — ${lot.variety}` : ''}</p>
-          <p>Available: <strong>{Math.round(availableKg).toLocaleString()} kg</strong></p>
+          <p className="truncate" title={`${lot.itemName || ''}${lot.variety ? ` — ${lot.variety}` : ''}`}><strong>{lot.itemName}</strong>{lot.variety ? ` — ${lot.variety}` : ''}</p>
+          <p>Available: <strong>{fmtNum(Math.round(availableKg))} kg</strong></p>
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Milling batch *</label>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Milling batch <span className="text-red-500">*</span></label>
           <select value={batchId} onChange={e => setBatchId(e.target.value)} required
             className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm">
             <option value="">Select an open batch…</option>
             {openBatches.map(b => (
               <option key={b.id} value={b.id}>
-                {b.batchNo} — {b.supplierName || '—'} · {b.status} ({Math.round((parseFloat(b.rawQtyMT) || 0) * 1000).toLocaleString()} kg raw){b.batchName ? ` · ${b.batchName}` : ''}
+                {b.batchNo} — {b.supplierName || '—'} · {b.status} ({fmtNum(Math.round((parseFloat(b.rawQtyMT) || 0) * 1000))} kg raw){b.batchName ? ` · ${b.batchName}` : ''}
               </option>
             ))}
           </select>
@@ -1981,7 +1995,7 @@ function AllocateToBatchModal({ isOpen, onClose, lot, addToast, refetch }) {
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Weight to allocate (kg) *</label>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Weight to allocate (kg) <span className="text-red-500">*</span></label>
           <input type="number" step="0.01" min="0.01" max={availableKg} required
             value={weightKg} onChange={e => setWeightKg(e.target.value)}
             className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm" />
@@ -1994,16 +2008,8 @@ function AllocateToBatchModal({ isOpen, onClose, lot, addToast, refetch }) {
             placeholder={`Allocated from ${lot.lotNo}`}
             className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm" />
         </div>
-
-        <div className="flex justify-end gap-2 pt-2 border-t">
-          <button type="button" onClick={onClose} className="btn btn-secondary">Cancel</button>
-          <button type="submit" disabled={allocateMut.isPending || openBatches.length === 0}
-            className="btn btn-primary disabled:opacity-50">
-            {allocateMut.isPending ? 'Allocating…' : 'Allocate to Batch'}
-          </button>
-        </div>
       </form>
-    </Modal>
+    </SlideDrawer>
   );
 }
 
@@ -2100,15 +2106,17 @@ function vehicleQualitySummary(q) {
   const bits = [];
   if (q.moisture != null) bits.push(`M ${q.moisture}%`);
   if (q.broken != null) bits.push(`Br ${q.broken}%`);
-  if (q.price_per_mt != null) bits.push(`Rs ${(parseFloat(q.price_per_mt) / 1000).toLocaleString(undefined, { maximumFractionDigits: 2 })}/kg`);
+  if (q.price_per_mt != null) bits.push(`${fmtPKRBase(parseFloat(q.price_per_mt) / 1000, { decimals: 2 })}/kg`);
   return bits.length ? bits.join(' · ') : null;
 }
 
 // ─── Lot Vehicles Panel ───
 function LotVehiclesPanel({ lot, vehicles, onAdd, onEdit, onRefresh, addToast }) {
   const safe = Array.isArray(vehicles) ? vehicles : [];
+  const [confirm, confirmDialog] = useConfirm();
   async function handleDelete(v) {
-    if (!confirm(`Delete vehicle ${v.vehicle_no || ''}?`)) return;
+    const ok = await confirm({ title: v.vehicle_no ? `Delete vehicle ${v.vehicle_no}?` : 'Delete this vehicle?', consequence: 'The vehicle record is removed from this lot.', confirmLabel: 'Delete' });
+    if (!ok) return;
     try {
       await lotInventoryApi.deleteLotVehicle(lot.id, v.id);
       addToast?.('Vehicle removed', 'success');
@@ -2131,7 +2139,7 @@ function LotVehiclesPanel({ lot, vehicles, onAdd, onEdit, onRefresh, addToast })
         <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider flex items-center gap-2">
           <Truck className="w-4 h-4 text-blue-600" />
           Vehicles ({safe.length})
-          {totalMT > 0 && <span className="text-xs font-normal text-gray-500 normal-case">— {Math.round(totalMT * 1000).toLocaleString()} kg total</span>}
+          {totalMT > 0 && <span className="text-xs font-normal text-gray-500 normal-case">— {fmtNum(Math.round(totalMT * 1000))} kg total</span>}
         </h3>
         <button onClick={onAdd} className="btn btn-sm btn-secondary">
           <Plus className="w-3.5 h-3.5" /> Add Vehicle
@@ -2170,9 +2178,9 @@ function LotVehiclesPanel({ lot, vehicles, onAdd, onEdit, onRefresh, addToast })
                     {v.driver_phone && <span className="text-xs text-gray-400 ml-1">· {v.driver_phone}</span>}
                   </td>
                   <td data-label="Hauler" className="mob-hide py-2 text-gray-700">{v.hauler_name || '—'}</td>
-                  <td data-label="Weight (kg)" className="py-2 text-right tabular-nums font-medium">{Math.round(parseFloat(v.weight_kg) || 0).toLocaleString()}</td>
-                  <td data-label="Weighbridge (kg)" className="py-2 text-right tabular-nums">{v.weighbridge_kg != null ? Math.round(parseFloat(v.weighbridge_kg)).toLocaleString() : '—'}</td>
-                  <td data-label="Accepted (kg)" className="py-2 text-right tabular-nums">{v.accepted_kg != null ? Math.round(parseFloat(v.accepted_kg)).toLocaleString() : '—'}</td>
+                  <td data-label="Weight (kg)" className="py-2 text-right tabular-nums font-medium">{fmtNum(Math.round(parseFloat(v.weight_kg) || 0))}</td>
+                  <td data-label="Weighbridge (kg)" className="py-2 text-right tabular-nums">{v.weighbridge_kg != null ? fmtNum(Math.round(parseFloat(v.weighbridge_kg))) : '—'}</td>
+                  <td data-label="Accepted (kg)" className="py-2 text-right tabular-nums">{v.accepted_kg != null ? fmtNum(Math.round(parseFloat(v.accepted_kg))) : '—'}</td>
                   <td data-label="Bags" className="py-2 text-right tabular-nums">{v.total_bags || '—'}</td>
                   <td data-label="Quality" className="mob-hide py-2 text-xs text-gray-600">{vehicleQualitySummary(v.quality_json) || '—'}</td>
                   <td data-label="Date" className="mob-hide py-2 text-gray-600">{fmtDate(v.arrival_date)}</td>
@@ -2186,11 +2194,11 @@ function LotVehiclesPanel({ lot, vehicles, onAdd, onEdit, onRefresh, addToast })
                   <td data-label="Actions" className="py-2 text-right">
                     {!v.batch_id && (
                       <div className="inline-flex items-center gap-2">
-                        <button onClick={() => onEdit?.(v)} className="text-blue-600 hover:text-blue-700" title="Edit">
-                          <Pencil className="w-3.5 h-3.5" />
+                        <button onClick={() => onEdit?.(v)} className="text-blue-600 hover:text-blue-700" title="Edit" aria-label={`Edit vehicle ${v.vehicle_no || ''}`.trim()}>
+                          <Pencil className="w-3.5 h-3.5" aria-hidden="true" />
                         </button>
-                        <button onClick={() => handleDelete(v)} className="text-red-600 hover:text-red-700" title="Remove">
-                          <Trash2 className="w-3.5 h-3.5" />
+                        <button onClick={() => handleDelete(v)} className="text-red-600 hover:text-red-700" title="Remove" aria-label={`Remove vehicle ${v.vehicle_no || ''}`.trim()}>
+                          <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
                         </button>
                       </div>
                     )}
@@ -2203,10 +2211,11 @@ function LotVehiclesPanel({ lot, vehicles, onAdd, onEdit, onRefresh, addToast })
       )}
       {Math.abs(acceptedGap) >= 0.5 && (
         <p className="mt-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-          Accepted across {withAccepted.length === safe.length ? 'the' : `${withAccepted.length} of ${safe.length}`} vehicle(s): <b>{Math.round(acceptedTotal).toLocaleString()} kg</b> vs lot received <b>{Math.round(receivedKg).toLocaleString()} kg</b>
-          {' '}({acceptedGap > 0 ? '+' : ''}{Math.round(acceptedGap).toLocaleString()} kg). The lot stays at its received weight — correct it with Received Qty if needed.
+          Accepted across {withAccepted.length === safe.length ? 'the' : `${withAccepted.length} of ${safe.length}`} vehicle(s): <b>{fmtNum(Math.round(acceptedTotal))} kg</b> vs lot received <b>{fmtNum(Math.round(receivedKg))} kg</b>
+          {' '}({acceptedGap > 0 ? '+' : ''}{fmtNum(Math.round(acceptedGap))} kg). The lot stays at its received weight — correct it with Received Qty if needed.
         </p>
       )}
+      {confirmDialog}
     </div>
   );
 }
@@ -2304,7 +2313,7 @@ function LotVehicleDrawer({ isOpen, onClose, lot, vehicle, addToast, onSaved }) 
     const raw = wk / bs;
     return Number.isInteger(raw)
       ? `${raw} bags (exact)`
-      : `≈ ${raw.toFixed(1)} → ${Math.ceil(raw)} bags (last partially filled)`;
+      : `≈ ${fmtNum(raw, 1)} → ${Math.ceil(raw)} bags (last partially filled)`;
   })();
 
   const inp = 'w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500';
@@ -2338,14 +2347,14 @@ function LotVehicleDrawer({ isOpen, onClose, lot, vehicle, addToast, onSaved }) 
             <div><span className="text-gray-500">Supplier</span> <span className="font-medium text-gray-900">{lot?.supplierName || '—'}</span></div>
             <div><span className="text-gray-500">Variety</span> <span className="font-medium text-gray-900">{lot?.variety || '—'}</span></div>
             <div><span className="text-gray-500">Grade</span> <span className="font-medium text-gray-900">{lot?.grade || '—'}</span></div>
-            <div><span className="text-gray-500">Ordered</span> <span className="font-medium text-gray-900">{lot?.orderedNetWeightKg != null ? `${Math.round(parseFloat(lot.orderedNetWeightKg)).toLocaleString()} kg` : '—'}</span></div>
-            <div><span className="text-gray-500">Received</span> <span className="font-medium text-gray-900">{lot?.receivedNetWeightKg != null ? `${Math.round(parseFloat(lot.receivedNetWeightKg)).toLocaleString()} kg` : '—'}</span></div>
+            <div><span className="text-gray-500">Ordered</span> <span className="font-medium text-gray-900">{lot?.orderedNetWeightKg != null ? `${fmtNum(Math.round(parseFloat(lot.orderedNetWeightKg)))} kg` : '—'}</span></div>
+            <div><span className="text-gray-500">Received</span> <span className="font-medium text-gray-900">{lot?.receivedNetWeightKg != null ? `${fmtNum(Math.round(parseFloat(lot.receivedNetWeightKg)))} kg` : '—'}</span></div>
           </div>
         </div>
 
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className={lbl}>Vehicle / Truck Number *</label>
+            <label className={lbl}>Vehicle / Truck Number <span className="text-red-500">*</span></label>
             <input type="text" required value={form.vehicle_no}
               onChange={(e) => setForm(p => ({ ...p, vehicle_no: e.target.value }))}
               placeholder="e.g. ABC-1234" className={inp} />
@@ -2397,7 +2406,7 @@ function LotVehicleDrawer({ isOpen, onClose, lot, vehicle, addToast, onSaved }) 
               onChange={(e) => setForm(p => ({ ...p, weight_kg: e.target.value }))}
               placeholder="e.g. 30000" className={inp} />
             {form.weight_kg && (
-              <p className="text-[11px] text-gray-400 mt-0.5">{Math.round(parseFloat(form.weight_kg) || 0).toLocaleString()} kg</p>
+              <p className="text-[11px] text-gray-400 mt-0.5">{fmtNum(Math.round(parseFloat(form.weight_kg) || 0))} kg</p>
             )}
           </div>
           <div />
@@ -2483,7 +2492,7 @@ function StartMillingModal({ isOpen, onClose, lot, addToast, onStarted }) {
       return;
     }
     if (!qtyValid) {
-      addToast?.(`Enter a quantity between 0 and ${availableKg.toFixed(2)} KG.`, 'error');
+      addToast?.(`Enter a quantity between 0 and ${fmtNum(availableKg, 2)} KG.`, 'error');
       return;
     }
     setSubmitting(true);
@@ -2512,7 +2521,7 @@ function StartMillingModal({ isOpen, onClose, lot, addToast, onStarted }) {
 
   const footer = (
     <div className="flex items-center justify-between gap-3">
-      <span className="text-xs text-gray-500">{qtyValid ? `${Math.round(qtyToMill).toLocaleString()} kg → new batch` : 'Set a quantity to mill'}</span>
+      <span className="text-xs text-gray-500">{qtyValid ? `${fmtNum(Math.round(qtyToMill))} kg → new batch` : 'Set a quantity to mill'}</span>
       <div className="flex gap-2">
         <button type="button" onClick={onClose} className="btn btn-secondary btn-sm">Cancel</button>
         <button type="button" onClick={handleSubmit} disabled={submitting || availableKg <= 0 || !qtyValid}
@@ -2536,7 +2545,7 @@ function StartMillingModal({ isOpen, onClose, lot, addToast, onStarted }) {
           ) : (
             <>
               <strong>First pass.</strong> {lot.itemName}{lot.variety ? ` (${lot.variety})` : ''} —
-              {' '}<span className="font-medium">{availableKg.toFixed(2)} KG available</span>.
+              {' '}<span className="font-medium">{fmtNum(availableKg, 2)} KG available</span>.
             </>
           )}
         </div>
@@ -2551,7 +2560,7 @@ function StartMillingModal({ isOpen, onClose, lot, addToast, onStarted }) {
               Vehicles to attach ({inheritableVehicles.length})
             </span>
             {inheritedMT > 0 && (
-              <span className="text-[11px] text-gray-500">{Math.round(inheritedMT * 1000).toLocaleString()} kg total</span>
+              <span className="text-[11px] text-gray-500">{fmtNum(Math.round(inheritedMT * 1000))} kg total</span>
             )}
           </div>
           {inheritableVehicles.length === 0 ? (
@@ -2567,7 +2576,7 @@ function StartMillingModal({ isOpen, onClose, lot, addToast, onStarted }) {
                     {v.driver_name && <span className="text-gray-500 ml-1.5">· {v.driver_name}</span>}
                   </span>
                   <span className="text-gray-500 tabular-nums">
-                    {Math.round(parseFloat(v.weight_kg) || 0).toLocaleString()} kg
+                    {fmtNum(Math.round(parseFloat(v.weight_kg) || 0))} kg
                   </span>
                 </li>
               ))}
@@ -2592,13 +2601,13 @@ function StartMillingModal({ isOpen, onClose, lot, addToast, onStarted }) {
               className="w-40 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
             <button type="button" onClick={() => setForm(p => ({ ...p, qty_kg: String(availableKg) }))}
-              className="text-xs text-blue-600 hover:underline">Mill all ({availableKg.toFixed(2)} KG)</button>
+              className="text-xs text-blue-600 hover:underline">Mill all ({fmtNum(availableKg, 2)} KG)</button>
           </div>
           <p className="text-xs mt-1">
             {!qtyValid ? (
-              <span className="text-red-500">Enter a value between 0 and {availableKg.toFixed(2)} KG.</span>
+              <span className="text-red-500">Enter a value between 0 and {fmtNum(availableKg, 2)} KG.</span>
             ) : remainingKg > 0 ? (
-              <span className="text-amber-600">{qtyToMill.toFixed(2)} KG will be milled · <span className="font-medium">{remainingKg.toFixed(2)} KG stays in the lot</span>.</span>
+              <span className="text-amber-600">{fmtNum(qtyToMill, 2)} KG will be milled · <span className="font-medium">{fmtNum(remainingKg, 2)} KG stays in the lot</span>.</span>
             ) : (
               <span className="text-gray-500">Milling the whole lot.</span>
             )}
@@ -2723,7 +2732,7 @@ function TransferToExportDrawer({ isOpen, onClose, lot, addToast, onSuccess }) {
 
   const footer = (
     <div className="flex items-center justify-between gap-3">
-      <span className="text-sm text-gray-500">Value <span className="font-semibold text-gray-900">Rs {totalVal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></span>
+      <span className="text-sm text-gray-500">Value <span className="font-semibold text-gray-900">{fmtPKR(totalVal, { decimals: 2 })}</span></span>
       <div className="flex gap-2">
         <button onClick={onClose} className="btn btn-secondary btn-sm">Cancel</button>
         <button onClick={handleSubmit} disabled={saving || !q || exceeds} className="btn btn-primary btn-sm">
@@ -2740,7 +2749,7 @@ function TransferToExportDrawer({ isOpen, onClose, lot, addToast, onSuccess }) {
           Moves finished rice from the <b>mill</b> entity to <b>export</b>. A new export-entity lot is created and this lot is drawn down. Available: <b>{availableKg} KG</b>.
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Quantity (KG) *</label>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Quantity (KG) <span className="text-red-500">*</span></label>
           <input type="number" min="0" max={availableKg} step="any" value={qty} onChange={e => setQty(e.target.value)}
             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
           {exceeds && <p className="text-xs text-red-600 mt-1">Only {availableKg} KG available.</p>}
@@ -2802,7 +2811,7 @@ function TransferToMillDrawer({ isOpen, onClose, lot, addToast, onSuccess }) {
 
   const footer = (
     <div className="flex items-center justify-between gap-3">
-      <span className="text-sm text-gray-500">Value <span className="font-semibold text-gray-900">Rs {totalVal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></span>
+      <span className="text-sm text-gray-500">Value <span className="font-semibold text-gray-900">{fmtPKR(totalVal, { decimals: 2 })}</span></span>
       <div className="flex gap-2">
         <button onClick={onClose} className="btn btn-secondary btn-sm">Cancel</button>
         <button onClick={handleSubmit} disabled={saving || !q || exceeds} className="btn btn-primary btn-sm">
@@ -2816,10 +2825,10 @@ function TransferToMillDrawer({ isOpen, onClose, lot, addToast, onSuccess }) {
     <SlideDrawer open={isOpen} onClose={onClose} title="Transfer to Mill" subtitle={lot.lotNo} icon={ArrowRightLeft} size="md" footer={footer}>
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="rounded-lg bg-amber-50 border border-amber-200 p-3 text-sm text-amber-900">
-          Moves stock from the <b>export</b> entity back to <b>mill</b>. A new mill-entity lot is created and this lot is drawn down. Available: <b>{availableKg} KG</b>{reservedKg > 0 ? ` (${Math.round(reservedKg).toLocaleString()} kg reserved for an order can't move)` : ''}.
+          Moves stock from the <b>export</b> entity back to <b>mill</b>. A new mill-entity lot is created and this lot is drawn down. Available: <b>{availableKg} KG</b>{reservedKg > 0 ? ` (${fmtNum(Math.round(reservedKg))} kg reserved for an order can't move)` : ''}.
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Quantity (KG) *</label>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Quantity (KG) <span className="text-red-500">*</span></label>
           <input type="number" min="0" max={availableKg} step="any" value={qty} onChange={e => setQty(e.target.value)}
             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
           {exceeds && <p className="text-xs text-red-600 mt-1">Only {availableKg} KG available.</p>}

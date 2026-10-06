@@ -1,6 +1,7 @@
 // Stock quantity rules shared by the Stock Summary page and its drill-down.
 // Mirrors backend/src/modules/inventory/stockSql.js — keep the two in step.
 
+import { fmtNum } from '../../../shared/utils/format';
 const n = (v) => Number(v) || 0;
 
 /** KG physically on hand: net_weight_kg, falling back to qty (KG). */
@@ -34,8 +35,8 @@ export function unitsOnHand(lot) {
 /** "120 katta · 40 bags" — empty string when there are none. */
 export function formatUnits({ katta, bags }) {
   const parts = [];
-  if (katta > 0) parts.push(`${katta.toLocaleString()} katta`);
-  if (bags > 0) parts.push(`${bags.toLocaleString()} bags`);
+  if (katta > 0) parts.push(`${fmtNum(katta)} katta`);
+  if (bags > 0) parts.push(`${fmtNum(bags)} bags`);
   return parts.join(' · ');
 }
 

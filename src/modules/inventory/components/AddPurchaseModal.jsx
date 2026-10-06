@@ -4,9 +4,9 @@ import { Loader2, CheckCircle2, PlusCircle, Package, Wrench, Warehouse, Boxes, D
 import SlideDrawer from '../../../components/SlideDrawer';
 import { useApp } from '../../../context/AppContext';
 import { useAddPurchaseToLot } from '../../../api/queries';
-import { todayLocalISO } from '../../../shared/utils/format';
+import { todayLocalISO, fmtPKR as fmtPKRBase, fmtNum } from '../../../shared/utils/format';
 
-const fmtPKR = (v) => 'Rs ' + (Math.round((parseFloat(v) || 0) * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtPKR = (v) => fmtPKRBase(v, { decimals: 2 });
 const num = (v) => parseFloat(v) || 0;
 
 // Landed (in-COGS) add-on costs. Transport is NOT here — it's a hauler payable set
@@ -90,7 +90,7 @@ export default function AddPurchaseModal({ isOpen, lot, onClose, onSuccess }) {
         addToast?.(`Committed stock kept on ${lot.lotNo}; remainder + purchase → new lot ${d.newLotNo}`, 'success');
         navigate(`/lot-inventory/${d.newLotNo}`);
       } else {
-        addToast?.(`Added ${(calc.addKg / 1000).toFixed(2)} MT to ${lot.lotNo}`, 'success');
+        addToast?.(`Added ${fmtNum(calc.addKg / 1000, 2)} MT to ${lot.lotNo}`, 'success');
       }
     } catch (err) {
       addToast?.(err?.response?.data?.message || err.message || 'Failed to add purchase', 'error');
@@ -121,18 +121,18 @@ export default function AddPurchaseModal({ isOpen, lot, onClose, onSuccess }) {
       <div className="space-y-5">
         {/* Inherited context */}
         <div className="rounded-xl border border-gray-100 bg-gray-50 p-3 text-sm space-y-1">
-          <div className="flex justify-between"><span className="text-gray-500">Supplier</span><span className="font-medium text-gray-900">{lot?.supplierName || '—'}</span></div>
-          <div className="flex justify-between"><span className="text-gray-500">Rice</span><span className="font-medium text-gray-900 truncate ml-2">{lot?.itemName}{lot?.variety ? ` — ${lot.variety}` : ''}</span></div>
-          <div className="flex justify-between"><span className="text-gray-500">Current stock</span><span className="font-medium text-gray-900">{(calc.oldKg / 1000).toLocaleString(undefined, { maximumFractionDigits: 2 })} MT @ {fmtPKR(calc.oldPerKg)}/kg</span></div>
+          <div className="flex justify-between"><span className="text-gray-500">Supplier</span><span className="font-medium text-gray-900 truncate ml-2" title={lot?.supplierName || undefined}>{lot?.supplierName || '—'}</span></div>
+          <div className="flex justify-between"><span className="text-gray-500">Rice</span><span className="font-medium text-gray-900 truncate ml-2" title={`${lot?.itemName || ''}${lot?.variety ? ` — ${lot.variety}` : ''}`}>{lot?.itemName}{lot?.variety ? ` — ${lot.variety}` : ''}</span></div>
+          <div className="flex justify-between"><span className="text-gray-500">Current stock</span><span className="font-medium text-gray-900">{fmtNum(calc.oldKg / 1000)} MT @ {fmtPKR(calc.oldPerKg)}/kg</span></div>
         </div>
 
         {/* Delivery */}
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-2 flex items-center gap-1"><Package size={12} /> New delivery</p>
           <div className="grid grid-cols-3 gap-2.5">
-            <div><label className={lbl}>Weight (kg) *</label><input type="number" min="0" value={form.weight_kg} onChange={(e) => set('weight_kg', e.target.value)} className={inp} placeholder="0" /></div>
+            <div><label className={lbl}>Weight (kg) <span className="text-red-500">*</span></label><input type="number" min="0" value={form.weight_kg} onChange={(e) => set('weight_kg', e.target.value)} className={inp} placeholder="0" /></div>
             <div><label className={lbl}>Total bags</label><input type="number" min="0" value={form.total_bags} onChange={(e) => set('total_bags', e.target.value)} className={inp} placeholder="0" /></div>
-            <div><label className={lbl}>Price (Rs/kg) *</label><input type="number" min="0" value={form.price_per_kg} onChange={(e) => set('price_per_kg', e.target.value)} className={inp} placeholder="0" /></div>
+            <div><label className={lbl}>Price (Rs/kg) <span className="text-red-500">*</span></label><input type="number" min="0" value={form.price_per_kg} onChange={(e) => set('price_per_kg', e.target.value)} className={inp} placeholder="0" /></div>
           </div>
         </div>
 
@@ -177,7 +177,7 @@ export default function AddPurchaseModal({ isOpen, lot, onClose, onSuccess }) {
           </div>
           <div>
             <p className="text-[11px] text-amber-700">New lot total</p>
-            <p className="text-base font-bold text-gray-900">{(calc.newKg / 1000).toLocaleString(undefined, { maximumFractionDigits: 2 })} MT</p>
+            <p className="text-base font-bold text-gray-900">{fmtNum(calc.newKg / 1000)} MT</p>
           </div>
           <div>
             <p className="text-[11px] text-amber-700">New blended cost</p>

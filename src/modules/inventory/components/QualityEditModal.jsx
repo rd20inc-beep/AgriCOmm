@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { Save, Loader2 } from 'lucide-react';
-import Drawer from '../../../components/Drawer';
+import { Save, Loader2, FlaskConical } from 'lucide-react';
+import SlideDrawer from '../../../components/SlideDrawer';
 import RiceTypePicker from '../../../components/RiceTypePicker';
 import { useProducts } from '../../../api/queries';
 import { lotInventoryApi } from '../api/services';
@@ -93,12 +93,13 @@ export default function QualityEditModal({ isOpen, lot, onClose, onSuccess, addT
   );
 
   return (
-    <Drawer
-      isOpen={isOpen}
+    <SlideDrawer
+      open={isOpen}
       onClose={onClose}
       title={`Edit quality — ${lot?.lotNo || 'lot'}`}
       subtitle="Correct the recorded analysis — never touches cost or stock"
-      width="2xl"
+      icon={FlaskConical}
+      size="2xl"
       footer={
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className="px-4 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
@@ -146,6 +147,6 @@ export default function QualityEditModal({ isOpen, lot, onClose, onSuccess, addT
           <input value={form.quality_notes} onChange={(e) => set('quality_notes', e.target.value)} className={inp} placeholder="Optional" />
         </div>
       </div>
-    </Drawer>
+    </SlideDrawer>
   );
 }
