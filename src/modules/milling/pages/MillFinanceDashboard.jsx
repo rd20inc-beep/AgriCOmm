@@ -47,21 +47,11 @@ import { favStar } from '../../../shared/utils/favorites';
 import { valueInventory } from '../utils/inventoryValue';
 import useConfirm from '../../../hooks/useConfirm';
 import PaymentDrawer from '../../../components/payments/PaymentDrawer';
-import { toLocalISODate, todayLocalISO } from '../../../shared/utils/format';
+import { toLocalISODate, todayLocalISO, fmtPKR, fmtNum, fmtPct, fmtKg, fmtDate, fmtDateTime } from '../../../shared/utils/format';
 
-const PKR = (v) => 'Rs ' + (v || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const fmtDate = (d) => {
-  if (!d) return '—';
-  const dt = new Date(d);
-  return Number.isNaN(dt.getTime()) ? '—' : dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
-};
-const COMPACT_PKR = (v) => {
-  const n = Math.round(v || 0);
-  if (Math.abs(n) >= 10000000) return `Rs ${(n / 10000000).toFixed(2)}Cr`;
-  if (Math.abs(n) >= 100000) return `Rs ${(n / 100000).toFixed(2)}L`;
-  if (Math.abs(n) >= 1000) return `Rs ${(n / 1000).toFixed(1)}k`;
-  return `Rs ${n.toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-};
+const PKR = (v) => fmtPKR(v || 0, { decimals: 2 });
+// Was a Cr/L/k abbreviator; KPI cards now show the exact rupee figure.
+const COMPACT_PKR = (v) => fmtPKR(v || 0);
 
 const EXPENSE_CATS = [
   'salaries', 'utilities', 'rent', 'maintenance', 'insurance',
@@ -290,7 +280,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
     try {
       const res = await categorizeMut.mutateAsync({ description, vendor_name });
       const d = res?.data || res;
-      if (d?.aiEnabled === false) { window.alert(d.message || 'AI is off.'); return; }
+      if (d?.aiEnabled === false) { addToast(d.message || 'AI is off.', 'info'); return; }
       if (d?.category) {
         setExpForm(p => ({
           ...p,
@@ -299,7 +289,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
           subcategory: (d.category !== 'salaries' && d.subcategory) ? d.subcategory : '',
         }));
       }
-    } catch (e) { window.alert(`Could not suggest a category: ${e?.message || e}`); }
+    } catch (e) { addToast(`Could not suggest a category: ${e?.message || e}`, 'error'); }
   }
 
   async function handleMaterialize(r) {
@@ -443,7 +433,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
   async function handleAcceptTransfer(t) {
     // No Owner step: the receiving side's permission is the whole check.
     try { await acceptTransferMut.mutateAsync(t.id); }
-    catch (e) { window.alert(e?.response?.data?.message || e?.message || 'Could not accept the transfer.'); }
+    catch (e) { addToast(e?.response?.data?.message || e?.message || 'Could not accept the transfer.', 'error'); }
   }
 
   // Salary-advance approval inbox (Batch 6 · item 8): request → Owner approves →
@@ -929,7 +919,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
               <div key={t.id} className="flex items-center justify-between gap-3 bg-white rounded-lg border border-amber-200 px-3 py-2 flex-wrap">
                 <div className="text-xs text-gray-700 min-w-0">
                   <span className="font-semibold text-gray-900">{t.transferNo}</span> · <span className="font-medium">{PKR(t.amount)}</span>
-                  {t.date && <> · {new Date(t.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}</>}
+                  {t.date && <> · {fmtDate(t.date)}</>}
                   <span className="text-gray-400"> · from {t.fromAccount || 'Head Office'} → {t.toAccount || 'Mill Cash'}</span>
                   {t.reference && <span className="text-gray-400"> · Ref {t.reference}</span>}
                 </div>
@@ -1020,7 +1010,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
             <Stat tone="purple" icon={Factory}      label="Milling Cost"   value={PKR(kpis.totalMilling)} sub="Processing fee" />
             <Stat tone="amber"  icon={DollarSign}   label="Operating"      value={PKR(kpis.totalOtherCosts + totalOverhead)} sub={`Batch ${COMPACT_PKR(kpis.totalOtherCosts)} · OH ${COMPACT_PKR(totalOverhead)}`} />
             <Stat tone={kpis.netProfit >= 0 ? 'green' : 'red'} icon={TrendingUp} label="Production Margin" value={PKR(kpis.netProfit)} sub={`Margin ${margin}% · milling only`} />
-            <Stat tone="slate"  icon={DollarSign}   label="Cost/kg"        value={`Rs ${kpis.costPerKg.toFixed(2)}`} sub="All-in" />
+            <Stat tone="slate"  icon={DollarSign}   label="Cost/kg"        value={fmtPKR(kpis.costPerKg, { decimals: 2 })} sub="All-in" />
             <Stat tone="purple" icon={Package}      label="Inventory"      value={PKR(inventoryValue.total)} sub={`Raw ${COMPACT_PKR(inventoryValue.raw)}`} />
           </div>
 
@@ -1034,7 +1024,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
                   value={books.hasData ? PKR(books.cogs) : '—'} sub="cost of what was sold" />
             <Stat tone={books.grossProfit >= 0 ? 'green' : 'red'} icon={DollarSign} label="Gross Profit"
                   value={books.hasData ? PKR(books.grossProfit) : '—'}
-                  sub={books.revenue > 0 ? `${(100 * books.grossProfit / books.revenue).toFixed(1)}% of revenue` : 'no sales yet'} />
+                  sub={books.revenue > 0 ? `${fmtPct(100 * books.grossProfit / books.revenue)} of revenue` : 'no sales yet'} />
             <Stat tone={books.netProfit >= 0 ? 'green' : 'red'} icon={TrendingUp} label="Net Profit (books)"
                   value={books.hasData ? PKR(books.netProfit) : '—'}
                   sub={`after ${COMPACT_PKR(books.expenses)} expenses`} />
@@ -1042,9 +1032,9 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
 
           {/* Inventory breakdown */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            <Stat tone="amber"  label="Raw Rice"      value={PKR(inventoryValue.raw)} sub={`${(inventory.filter(i => i.type === 'raw').reduce((s, i) => s + pf(i.qty), 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg`} />
-            <Stat tone="green"  label="Finished Rice" value={PKR(inventoryValue.fin)} sub={`${(inventory.filter(i => i.type === 'finished').reduce((s, i) => s + pf(i.availableQty), 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg`} />
-            <Stat tone="purple" label="Byproducts"    value={PKR(inventoryValue.bp)}  sub={`${(inventory.filter(i => i.type === 'byproduct').reduce((s, i) => s + pf(i.availableQty), 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg`} />
+            <Stat tone="amber"  label="Raw Rice"      value={PKR(inventoryValue.raw)} sub={fmtKg(inventory.filter(i => i.type === 'raw').reduce((s, i) => s + pf(i.qty), 0), { decimals: 2 })} />
+            <Stat tone="green"  label="Finished Rice" value={PKR(inventoryValue.fin)} sub={fmtKg(inventory.filter(i => i.type === 'finished').reduce((s, i) => s + pf(i.availableQty), 0), { decimals: 2 })} />
+            <Stat tone="purple" label="Byproducts"    value={PKR(inventoryValue.bp)}  sub={fmtKg(inventory.filter(i => i.type === 'byproduct').reduce((s, i) => s + pf(i.availableQty), 0), { decimals: 2 })} />
             <Stat tone="blue"   label="Working Cap."  value={PKR(inventoryValue.total)} sub="Locked in stock" />
           </div>
 
@@ -1062,7 +1052,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
                   sub={heldProfit.ratesConfigured === 0
                     ? 'needs a price per grade / variety'
                     : (heldProfit.pricedCostValue > 0
-                        ? `${(100 * heldProfit.profit / heldProfit.pricedCostValue).toFixed(1)}% on priced stock`
+                        ? `${fmtPct(100 * heldProfit.profit / heldProfit.pricedCostValue)} on priced stock`
                         : '—')} />
             <Stat tone="amber" label="Not Yet Priced"
                   value={heldProfit.unpricedLots ? PKR(heldProfit.unpricedCostValue) : PKR(0)}
@@ -1596,9 +1586,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
                     </td>
                     <td data-label="Reference" className="mob-hide px-4 py-3 text-gray-500 text-xs">{e.reference || e.invoiceReference || '—'}</td>
                     <td data-label="Status" className="px-4 py-3">
-                      <span className={`px-2 py-0.5 rounded-full text-[11px] font-medium ${(e.paymentStatus === 'Paid') ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
-                        {e.paymentStatus || 'Pending'}
-                      </span>
+                      <StatusBadge status={e.paymentStatus || 'Pending'} />
                     </td>
                     <td data-label="Amount" className="px-4 py-3 text-right font-medium tabular-nums">{PKR(parseFloat(e.amount))}</td>
                     {canPay && (
@@ -1631,7 +1619,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
             <p className="text-xs text-gray-500">Expenses you marked recurring. These auto-post daily once due (accrued as a payable + GL); use the button below to catch up every missed period now.</p>
             {recurring.some(r => r.due) && (
               <button
-                onClick={async () => { const r = await runDueMut.mutateAsync(); window.alert(`Auto-posted ${r?.created ?? r?.processed ?? 0} due recurring expense(s).`); }}
+                onClick={async () => { try { const r = await runDueMut.mutateAsync(); addToast(`Auto-posted ${r?.created ?? r?.processed ?? 0} due recurring expense(s).`, 'success'); } catch (e) { addToast(e?.message || 'Could not post the due expenses.', 'error'); } }}
                 disabled={runDueMut.isPending}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
               >
@@ -1766,7 +1754,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
             <Stat tone="green" icon={TrendingUp}    label="Avg Recovery"  value={`${efficiency.avgYield}%`}    sub="Finished / Raw" />
             <Stat tone="red"   icon={AlertTriangle} label="Avg Wastage"   value={`${efficiency.avgWastage}%`}  sub="Waste / Raw" />
             <Stat tone="blue"  icon={DollarSign}    label="Cost per KG"   value={`Rs ${efficiency.costPerKg}`} sub="All-in finished" />
-            <Stat tone="slate" icon={Factory}       label="Batches"       value={completed.length}             sub={`${Math.round((efficiency.totalRaw || 0) * 1000).toLocaleString()} kg processed`} />
+            <Stat tone="slate" icon={Factory}       label="Batches"       value={completed.length}             sub={`${fmtKg((efficiency.totalRaw || 0) * 1000)} processed`} />
           </div>
           <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
             <table className="w-full text-sm mobile-cards">
@@ -1788,11 +1776,11 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
                   return (
                     <tr key={b.id} className="hover:bg-gray-50">
                       <td data-label="Batch" className="px-4 py-3 font-medium"><Link to={`/milling/${b.id}`} className="text-blue-600">{b.id}</Link></td>
-                      <td data-label="Raw kg" className="mob-hide px-4 py-3 text-right tabular-nums">{Math.round(b.rawQtyKg).toLocaleString()}</td>
-                      <td data-label="Finished kg" className="px-4 py-3 text-right tabular-nums">{Math.round(b.actualFinishedKg).toLocaleString()}</td>
+                      <td data-label="Raw kg" className="mob-hide px-4 py-3 text-right tabular-nums">{fmtNum(Math.round(b.rawQtyKg))}</td>
+                      <td data-label="Finished kg" className="px-4 py-3 text-right tabular-nums">{fmtNum(Math.round(b.actualFinishedKg))}</td>
                       <td data-label="Yield %" className="px-4 py-3 text-right font-medium tabular-nums">{b.yieldPct}%</td>
                       <td data-label="Wastage %" className="px-4 py-3 text-right text-red-600 tabular-nums">{wastePct}%</td>
-                      <td data-label="Cost/KG" className="px-4 py-3 text-right tabular-nums">Rs {costKg.toFixed(2)}</td>
+                      <td data-label="Cost/KG" className="px-4 py-3 text-right tabular-nums">{fmtPKR(costKg, { decimals: 2 })}</td>
                     </tr>
                   );
                 })}
@@ -1829,10 +1817,10 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
                 {lossData.map(b => (
                   <tr key={b.id} className={`hover:bg-gray-50 ${b.flagged ? 'bg-red-50/50' : ''}`}>
                     <td data-label="Batch" className="px-4 py-3 font-medium"><Link to={`/milling/${b.id}`} className="text-blue-600">{b.id}</Link></td>
-                    <td data-label="Raw kg" className="mob-hide px-4 py-3 text-right tabular-nums">{Math.round(b.rawQtyKg).toLocaleString()}</td>
-                    <td data-label="Expected" className="px-4 py-3 text-right tabular-nums">{Math.round(b.expected * 1000).toLocaleString()}</td>
-                    <td data-label="Actual" className="px-4 py-3 text-right tabular-nums">{Math.round(b.actualFinishedKg).toLocaleString()}</td>
-                    <td data-label="Var kg" className={`px-4 py-3 text-right font-medium tabular-nums ${b.variance < 0 ? 'text-red-600' : 'text-emerald-600'}`}>{b.variance > 0 ? '+' : ''}{Math.round(b.variance * 1000).toLocaleString()}</td>
+                    <td data-label="Raw kg" className="mob-hide px-4 py-3 text-right tabular-nums">{fmtNum(Math.round(b.rawQtyKg))}</td>
+                    <td data-label="Expected" className="px-4 py-3 text-right tabular-nums">{fmtNum(Math.round(b.expected * 1000))}</td>
+                    <td data-label="Actual" className="px-4 py-3 text-right tabular-nums">{fmtNum(Math.round(b.actualFinishedKg))}</td>
+                    <td data-label="Var kg" className={`px-4 py-3 text-right font-medium tabular-nums ${b.variance < 0 ? 'text-red-600' : 'text-emerald-600'}`}>{b.variance > 0 ? '+' : ''}{fmtNum(Math.round(b.variance * 1000))}</td>
                     <td data-label="Var %" className={`px-4 py-3 text-right font-medium tabular-nums ${parseFloat(b.variancePct) < -3 ? 'text-red-600' : 'text-gray-600'}`}>{b.variancePct}%</td>
                     <td data-label="Status" className="px-4 py-3 text-center">
                       {b.flagged
@@ -1972,7 +1960,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
               <div className="flex flex-wrap gap-2">
                 {monthRuns.filter(r => isPaidStatus(r.status)).map(r => (
                   <div key={r.id} className="inline-flex items-center gap-2 bg-white border border-emerald-200 rounded-lg px-2.5 py-1 text-xs">
-                    <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-700">paid</span>
+                    <StatusBadge status="Paid" />
                     <span className="text-gray-600">{r.employeeCount} emp · <span className="font-semibold tabular-nums">{PKR(r.netTotal)}</span> · {r.payMethod === 'bank' ? (r.bankName || 'bank') : 'cash'} · {fmtDate(r.payDate)}</span>
                     <button onClick={() => setPayslipsRunId(r.id)} className="text-emerald-700 font-medium hover:underline">payslips</button>
                     {canDeletePayroll && <button onClick={() => handleDeleteRun(r)} disabled={deleteRunMut.isPending} className="text-red-500 hover:text-red-700 disabled:opacity-50">undo</button>}
@@ -2005,8 +1993,8 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
                         {a.workerName || 'Worker'}
                         <span className="px-1.5 py-0.5 rounded text-[10px] uppercase bg-gray-100 text-gray-500">{a.workerEntity === 'general' ? 'Head Office' : 'Mill'}</span>
                         {a.approvalStatus === 'approved'
-                          ? <span className="px-1.5 py-0.5 rounded text-[10px] uppercase bg-blue-100 text-blue-700">Approved</span>
-                          : <span className="px-1.5 py-0.5 rounded text-[10px] uppercase bg-amber-100 text-amber-700">Pending approval</span>}
+                          ? <StatusBadge status="Approved" />
+                          : <StatusBadge status="Pending Approval" />}
                       </div>
                       <div className="text-xs text-gray-400">{fmtDate(a.advanceDate)}{a.notes ? ` · ${a.notes}` : ''}</div>
                     </div>
@@ -2073,21 +2061,21 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
                     </td>
                     <td data-label="Net pay" className="px-4 py-3 text-right font-semibold tabular-nums">
                       {p?.paid
-                        ? <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-100 text-emerald-700 uppercase">Paid</span>
+                        ? <StatusBadge status="Paid" />
                         : (p ? PKR(p.netPay) : '—')}
                     </td>
                     <td data-label="Actions" className="px-4 py-3 no-print">
                       <div className="flex items-center justify-end gap-1">
                         {canPreparePayroll && p && !p.committed && p.grossPay > 0 && (
-                          <button title="Prepare for this employee" onClick={() => openRunDrawer(w.id)} className="p-1.5 rounded-md text-emerald-600 hover:bg-emerald-50"><Wallet className="w-3.5 h-3.5" /></button>
+                          <button aria-label="Prepare for this employee" title="Prepare for this employee" onClick={() => openRunDrawer(w.id)} className="p-1.5 rounded-md text-emerald-600 hover:bg-emerald-50"><Wallet className="w-3.5 h-3.5" /></button>
                         )}
-                        {canPreparePayroll && <button title="Give advance" onClick={() => openAdvanceDrawer(w)} className="p-1.5 rounded-md text-amber-600 hover:bg-amber-50"><HandCoins className="w-3.5 h-3.5" /></button>}
-                        {canPreparePayroll && <button title="Bonuses & deductions" onClick={() => setAdjustWorker(w)} className="p-1.5 rounded-md text-violet-600 hover:bg-violet-50"><Plus className="w-3.5 h-3.5" /></button>}
-                        {canPreparePayroll && <button title="Revise salary" onClick={() => setReviseWorker(w)} className="p-1.5 rounded-md text-blue-600 hover:bg-blue-50"><TrendingUp className="w-3.5 h-3.5" /></button>}
-                        {canPreparePayroll && <button title="Edit" onClick={() => openWorkerDrawer(w)} className="p-1.5 rounded-md text-gray-500 hover:bg-gray-100"><Pencil className="w-3.5 h-3.5" /></button>}
-                        {canPayPayroll && w.isActive && <button title="Final settlement" onClick={() => setSettleWorker(w)} className="p-1.5 rounded-md text-red-600 hover:bg-red-50"><LogOut className="w-3.5 h-3.5" /></button>}
-                        {canPreparePayroll && <button title={w.isActive ? 'Deactivate' : 'Reactivate'} onClick={() => handleToggleActive(w)} className={`p-1.5 rounded-md hover:bg-gray-100 ${w.isActive ? 'text-gray-500' : 'text-emerald-600'}`}><Power className="w-3.5 h-3.5" /></button>}
-                        {canDeletePayroll && <button title="Delete" onClick={() => setDeleteWorkerTarget(w)} className="p-1.5 rounded-md text-red-500 hover:bg-red-50"><Trash2 className="w-3.5 h-3.5" /></button>}
+                        {canPreparePayroll && <button aria-label="Give advance" title="Give advance" onClick={() => openAdvanceDrawer(w)} className="p-1.5 rounded-md text-amber-600 hover:bg-amber-50"><HandCoins className="w-3.5 h-3.5" /></button>}
+                        {canPreparePayroll && <button aria-label="Bonuses & deductions" title="Bonuses & deductions" onClick={() => setAdjustWorker(w)} className="p-1.5 rounded-md text-violet-600 hover:bg-violet-50"><Plus className="w-3.5 h-3.5" /></button>}
+                        {canPreparePayroll && <button aria-label="Revise salary" title="Revise salary" onClick={() => setReviseWorker(w)} className="p-1.5 rounded-md text-blue-600 hover:bg-blue-50"><TrendingUp className="w-3.5 h-3.5" /></button>}
+                        {canPreparePayroll && <button aria-label="Edit" title="Edit" onClick={() => openWorkerDrawer(w)} className="p-1.5 rounded-md text-gray-500 hover:bg-gray-100"><Pencil className="w-3.5 h-3.5" /></button>}
+                        {canPayPayroll && w.isActive && <button aria-label="Final settlement" title="Final settlement" onClick={() => setSettleWorker(w)} className="p-1.5 rounded-md text-red-600 hover:bg-red-50"><LogOut className="w-3.5 h-3.5" /></button>}
+                        {canPreparePayroll && <button aria-label={w.isActive ? 'Deactivate' : 'Reactivate'} title={w.isActive ? 'Deactivate' : 'Reactivate'} onClick={() => handleToggleActive(w)} className={`p-1.5 rounded-md hover:bg-gray-100 ${w.isActive ? 'text-gray-500' : 'text-emerald-600'}`}><Power className="w-3.5 h-3.5" /></button>}
+                        {canDeletePayroll && <button aria-label="Delete" title="Delete" onClick={() => setDeleteWorkerTarget(w)} className="p-1.5 rounded-md text-red-500 hover:bg-red-50"><Trash2 className="w-3.5 h-3.5" /></button>}
                         {!canPreparePayroll && !canDeletePayroll && <span className="text-[11px] text-gray-300">—</span>}
                       </div>
                     </td>
@@ -2201,7 +2189,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
                     className="px-2.5 py-2 text-xs font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">
                     {headMut.isPending ? '…' : 'Add'}
                   </button>
-                  <button type="button" onClick={() => { setAddingHead(false); setNewHead(''); }}
+                  <button aria-label="Cancel" type="button" onClick={() => { setAddingHead(false); setNewHead(''); }}
                     className="px-2 py-2 text-gray-400 hover:text-gray-600"><X size={14} /></button>
                 </div>
               ) : (
@@ -2721,15 +2709,15 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
                 const amt = parseFloat(advanceForm.amount) || 0;
                 if (!amt) return null;
                 let line = null;
-                if (advanceForm.recovery_method === 'full_next_salary') line = `Recovery: full Rs ${amt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} from the next payroll.`;
+                if (advanceForm.recovery_method === 'full_next_salary') line = `Recovery: full ${fmtPKR(amt, { decimals: 2 })} from the next payroll.`;
                 else if (advanceForm.recovery_method === 'manual') line = 'Recovery: admin enters the deduction manually each payroll.';
                 else if (advanceForm.recovery_method === 'fixed_installment') {
                   const inst = parseFloat(advanceForm.installment_amount) || 0;
                   const cnt = parseInt(advanceForm.installment_count, 10) || (inst > 0 ? Math.ceil(amt / inst) : 0);
-                  if (inst > 0 && cnt > 0) line = `Recovery: Rs ${inst.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} per month for ${cnt} month(s)${advanceForm.recovery_start_period ? `, from ${advanceForm.recovery_start_period}` : ''}.`;
+                  if (inst > 0 && cnt > 0) line = `Recovery: ${fmtPKR(inst, { decimals: 2 })} per month for ${cnt} month(s)${advanceForm.recovery_start_period ? `, from ${advanceForm.recovery_start_period}` : ''}.`;
                 } else if (advanceForm.recovery_method === 'salary_percentage') {
                   const pct = parseFloat(advanceForm.deduction_percent) || 0;
-                  if (pct > 0) line = `Recovery: ${pct}% of each salary${advanceForm.recovery_start_period ? `, from ${advanceForm.recovery_start_period}` : ''}, until Rs ${amt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} is recovered.`;
+                  if (pct > 0) line = `Recovery: ${pct}% of each salary${advanceForm.recovery_start_period ? `, from ${advanceForm.recovery_start_period}` : ''}, until ${fmtPKR(amt, { decimals: 2 })} is recovered.`;
                 }
                 return line ? <div className="rounded-md bg-blue-50 border border-blue-100 p-2 text-xs text-blue-800">{line}</div> : null;
               })()}
@@ -2950,7 +2938,7 @@ function ExpensePayDrawer({ expense, bankAccounts = [], companyProfile, addToast
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [expense]);
   if (!expense) return null;
-  const PKR = (n) => `Rs ${(parseFloat(n) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const PKR = (n) => fmtPKR(parseFloat(n) || 0, { decimals: 2 });
   // Mill cash payments are drawn from the dedicated Mill Cash account so they
   // reduce "Mill Cash available" on the dashboard (and go negative when the mill
   // has spent more than it holds — a signal it needs funding from Head Office).
@@ -3024,7 +3012,7 @@ function ExpensePayDrawer({ expense, bankAccounts = [], companyProfile, addToast
                     <div key={p.id || idx} className="border border-gray-200 rounded-lg px-3 py-2">
                       <div className="flex items-center justify-between">
                         <span className="text-sm font-semibold text-emerald-700">{PKR(p.amount)}</span>
-                        <span className="text-xs text-gray-500">{p.paymentDate ? new Date(p.paymentDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}</span>
+                        <span className="text-xs text-gray-500">{fmtDate(p.paymentDate)}</span>
                       </div>
                       <div className="mt-1 flex flex-wrap gap-x-3 text-xs text-gray-500">
                         <span>Method: <span className="font-medium text-gray-700">{EXP_METHOD_LABEL[p.paymentMethod] || p.paymentMethod || '—'}</span></span>
@@ -3073,7 +3061,7 @@ function ExpensePayDrawer({ expense, bankAccounts = [], companyProfile, addToast
 // (payment) or receipt (money in). Read-only — these are settled cash movements.
 function CashEntryDrawer({ entry, companyProfile, onClose }) {
   if (!entry) return null;
-  const PKR = (n) => `Rs ${(parseFloat(n) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const PKR = (n) => fmtPKR(parseFloat(n) || 0, { decimals: 2 });
   const isIn = entry.direction === 'in';
   const amount = parseFloat(entry.amount_pkr) || 0;
   // Build the doc model TransactionDocument expects (voucher for out, receipt for in).
@@ -3084,7 +3072,7 @@ function CashEntryDrawer({ entry, companyProfile, onClose }) {
     <SlideDrawer open={!!entry} onClose={onClose} title={isIn ? 'Money In' : 'Money Out'} subtitle={entry.counterparty || entry.category} icon={isIn ? ArrowDownRight : ArrowUpRight} size="lg">
       <div className="space-y-4">
         <div className="grid grid-cols-2 gap-3 text-sm">
-          <div><p className="text-xs text-gray-500">Date</p><p>{entry.payment_date ? new Date(entry.payment_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}</p></div>
+          <div><p className="text-xs text-gray-500">Date</p><p>{fmtDate(entry.payment_date)}</p></div>
           <div><p className="text-xs text-gray-500">{isIn ? 'Received from' : 'Paid to'}</p><p className="font-medium">{entry.counterparty || '—'}</p></div>
           <div><p className="text-xs text-gray-500">Category</p><p className="capitalize">{entry.category || '—'}</p></div>
           <div><p className="text-xs text-gray-500">Method</p><p className="capitalize">{entry.payment_method || '—'}</p></div>
@@ -3294,7 +3282,7 @@ function EmployeeAttendanceGrid({ month, employees, recordAttMut, addToast }) {
                 className={`px-2 py-1 rounded text-[11px] font-bold ${ATT_STYLE[s]} disabled:opacity-50`} title={ATT_LABEL[s]}>{ATT_LETTER[s]}</button>
             ))}
             <button onClick={() => applySelected('clear')} disabled={bulkMut.isPending} className="px-2 py-1 rounded text-[11px] font-medium bg-white text-gray-600 border border-gray-300 hover:bg-gray-50">Clear</button>
-            <button onClick={clearSel} className="ml-1 p-1 text-blue-400 hover:text-blue-700"><X className="w-3.5 h-3.5" /></button>
+            <button aria-label="Clear selection" onClick={clearSel} className="ml-1 p-1 text-blue-400 hover:text-blue-700"><X className="w-3.5 h-3.5" /></button>
           </div>
         </div>
       )}
@@ -3630,11 +3618,11 @@ function WorkerAdvancesPanel({ worker, onClose, onGiveAdvance, addToast }) {
                 </div>
                 <div className="flex items-center gap-2">
                   {a.approvalStatus === 'pending' ? (
-                    <span className="px-2 py-0.5 rounded text-[11px] font-medium bg-amber-100 text-amber-700">Pending approval</span>
+                    <StatusBadge status="Pending Approval" />
                   ) : a.approvalStatus === 'approved' ? (
                     <span className="px-2 py-0.5 rounded text-[11px] font-medium bg-blue-100 text-blue-700">Approved · unpaid</span>
                   ) : a.approvalStatus === 'rejected' ? (
-                    <span className="px-2 py-0.5 rounded text-[11px] font-medium bg-gray-100 text-gray-500">Rejected</span>
+                    <StatusBadge status="Rejected" />
                   ) : (
                     <span className={`px-2 py-0.5 rounded text-[11px] font-medium ${a.status === 'outstanding' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
                       {a.status === 'outstanding' ? `${PKR(out)} due` : 'Recovered'}
@@ -3643,10 +3631,10 @@ function WorkerAdvancesPanel({ worker, onClose, onGiveAdvance, addToast }) {
                   {confirmId === a.id ? (
                     <span className="flex items-center gap-1">
                       <button onClick={() => handleDelete(a.id)} disabled={deleteAdvanceMut.isPending} className="px-2 py-1 text-[11px] text-white bg-red-600 rounded hover:bg-red-700">Confirm</button>
-                      <button onClick={() => setConfirmId(null)} className="p-1 text-gray-400 hover:text-gray-600"><X className="w-3.5 h-3.5" /></button>
+                      <button aria-label="Cancel" onClick={() => setConfirmId(null)} className="p-1 text-gray-400 hover:text-gray-600"><X className="w-3.5 h-3.5" /></button>
                     </span>
                   ) : (
-                    <button title="Delete & reverse" onClick={() => setConfirmId(a.id)} className="p-1.5 rounded-md text-red-500 hover:bg-red-50"><Trash2 className="w-3.5 h-3.5" /></button>
+                    <button aria-label="Delete & reverse" title="Delete & reverse" onClick={() => setConfirmId(a.id)} className="p-1.5 rounded-md text-red-500 hover:bg-red-50"><Trash2 className="w-3.5 h-3.5" /></button>
                   )}
                 </div>
               </div>
@@ -3692,7 +3680,7 @@ function AdjustmentsDrawer({ worker, month, onClose, addToast }) {
       </div>
       <div className="flex items-center gap-2">
         <span className={`tabular-nums font-semibold ${a.type === 'bonus' ? 'text-emerald-700' : 'text-red-600'}`}>{a.type === 'bonus' ? '+' : '−'}{PKR(a.amount)}</span>
-        <button onClick={async () => { try { await delMut.mutateAsync(a.id); addToast('Removed', 'success'); } catch (e) { addToast(e.message, 'error'); } }} className="p-1 text-red-500 hover:bg-red-50 rounded"><Trash2 className="w-3.5 h-3.5" /></button>
+        <button aria-label="Remove" onClick={async () => { try { await delMut.mutateAsync(a.id); addToast('Removed', 'success'); } catch (e) { addToast(e.message, 'error'); } }} className="p-1 text-red-500 hover:bg-red-50 rounded"><Trash2 className="w-3.5 h-3.5" /></button>
       </div>
     </div>
   );
@@ -3849,8 +3837,8 @@ function payslipBody(run, line, company) {
   const co = company || {};
   const name = co.legalName || co.name || 'AGRI COMMODITIES';
   const logo = co.logo ? (String(co.logo).startsWith('http') ? co.logo : `${typeof location !== 'undefined' ? location.origin : ''}${co.logo}`) : null;
-  const rs = (v) => 'Rs ' + (parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const payDate = run.payDate ? new Date(run.payDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+  const rs = (v) => fmtPKR(parseFloat(v) || 0, { decimals: 2 });
+  const payDate = fmtDate(run.payDate);
   const method = run.payMethod === 'bank' ? (run.bankName || 'Bank transfer') : 'Cash';
   const ot = parseFloat(line.otPay) || 0; const adv = parseFloat(line.advanceDeducted) || 0;
   const advBal = parseFloat(line.advanceOutstanding) || 0;
@@ -3934,8 +3922,8 @@ function docHeaderHtml(company, docTitle, sub1, sub2) {
   </div>`;
 }
 
-const rsAmt = (v) => 'Rs ' + (parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const docDate = (x) => x ? new Date(x).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+const rsAmt = (v) => fmtPKR(parseFloat(v) || 0, { decimals: 2 });
+const docDate = (x) => fmtDate(x);
 // Derived (un-stored) document numbers — the run id + period make them stable
 // and unique without a vouchers table (mirrors the "sale row = invoice" model).
 const voucherNo = (run) => `PV/${run.period}/${String(run.id || 0).padStart(4, '0')}`;
@@ -4468,7 +4456,7 @@ function StatutoryDeductionsDrawer({ canPay, entity = 'mill', bankAccounts = [],
                   <input type="number" value={s.threshold} onChange={(e) => setSlab(i, { threshold: e.target.value })} placeholder="0" className="border border-gray-200 rounded-md px-2 py-1.5 text-xs" />
                   <input type="number" step="0.01" value={s.rate} onChange={(e) => setSlab(i, { rate: e.target.value })} placeholder="0" className="border border-gray-200 rounded-md px-2 py-1.5 text-xs" />
                   <input type="number" value={s.base} onChange={(e) => setSlab(i, { base: e.target.value })} placeholder="0" className="border border-gray-200 rounded-md px-2 py-1.5 text-xs" />
-                  <button onClick={() => rmSlab(i)} className="p-1 rounded text-red-500 hover:bg-red-50"><Trash2 className="w-3.5 h-3.5" /></button>
+                  <button aria-label="Remove slab" onClick={() => rmSlab(i)} className="p-1 rounded text-red-500 hover:bg-red-50"><Trash2 className="w-3.5 h-3.5" /></button>
                 </div>
               ))}
               <p className="text-[10px] text-gray-400">Tax = <em>fixed tax at the bracket</em> + <em>rate%</em> × (annual income − <em>bracket threshold</em>), then ÷12 for the month. Income is the chosen base × 12. Enter brackets lowest-threshold first.</p>
@@ -4494,8 +4482,8 @@ function StatutoryDeductionsDrawer({ canPay, entity = 'mill', bankAccounts = [],
                   </div>
                   <div className="flex items-center gap-1.5">
                     <button onClick={() => toggleActive(r)} className={`px-2 py-1 text-[11px] rounded-md ${r.isActive ? 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100' : 'text-gray-500 bg-gray-100 hover:bg-gray-200'}`}>{r.isActive ? 'Active' : 'Inactive'}</button>
-                    <button onClick={() => startEdit(r)} className="p-1.5 rounded-md text-gray-500 hover:bg-gray-100"><Pencil className="w-3.5 h-3.5" /></button>
-                    <button onClick={() => remove(r)} className="p-1.5 rounded-md text-red-500 hover:bg-red-50"><Trash2 className="w-3.5 h-3.5" /></button>
+                    <button aria-label="Edit rule" onClick={() => startEdit(r)} className="p-1.5 rounded-md text-gray-500 hover:bg-gray-100"><Pencil className="w-3.5 h-3.5" /></button>
+                    <button aria-label="Remove rule" onClick={() => remove(r)} className="p-1.5 rounded-md text-red-500 hover:bg-red-50"><Trash2 className="w-3.5 h-3.5" /></button>
                   </div>
                 </div>
               ))}
@@ -4620,7 +4608,7 @@ function PayrollAuditDrawer({ onClose }) {
   const params = { ...Object.fromEntries(Object.entries(filters).filter(([, v]) => v)), limit };
   const { data, isLoading } = usePayrollAudit(params);
   const logs = data?.logs || []; const actions = data?.actions || []; const total = data?.total || 0;
-  const fmtTs = (t) => (t ? new Date(t).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : '');
+  const fmtTs = (t) => (t ? fmtDateTime(t) : '');
   const set = (p) => setFilters((f) => ({ ...f, ...p }));
 
   return (
@@ -4826,7 +4814,7 @@ function LeaveDrawer({ canManage, workers = [], onClose, addToast }) {
               <div><label className="block text-[11px] text-gray-500 mb-1">Paid?</label><select value={typeForm.paid ? 'y' : 'n'} onChange={(e) => setTypeForm((f) => ({ ...f, paid: e.target.value === 'y' }))} className="border border-gray-200 rounded-lg px-2 py-2 text-sm bg-white"><option value="y">Paid</option><option value="n">Unpaid</option></select></div>
               <div><label className="block text-[11px] text-gray-500 mb-1">Days/yr</label><input type="number" value={typeForm.annual_quota} onChange={(e) => setTypeForm((f) => ({ ...f, annual_quota: e.target.value }))} placeholder="∞" className="w-20 border border-gray-200 rounded-lg px-2 py-2 text-sm" /></div>
               <label className="flex items-center gap-1.5 text-xs text-gray-600 pb-2.5"><input type="checkbox" checked={typeForm.accrues} onChange={(e) => setTypeForm((f) => ({ ...f, accrues: e.target.checked }))} className="rounded border-gray-300" /> Accrues monthly</label>
-              <button onClick={addType} className="px-3 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700">Add</button>
+              <button onClick={addType} disabled={createType.isPending} className="px-3 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-60">Add</button>
             </div>
           )}
           <div className="space-y-2">
@@ -4837,7 +4825,7 @@ function LeaveDrawer({ canManage, workers = [], onClose, addToast }) {
                 {canManage && <div className="flex items-center gap-1.5">
                   {t.annualQuota != null && <button onClick={async () => { try { await updateType.mutateAsync({ id: t.id, data: { accrues: !t.accrues } }); addToast(t.accrues ? 'Now full-quota' : 'Now accrues monthly', 'success'); } catch (e) { addToast(e.message, 'error'); } }} className={`px-2 py-1 text-[11px] rounded-md ${t.accrues ? 'text-violet-700 bg-violet-50' : 'text-gray-500 bg-gray-100'}`}>{t.accrues ? 'Accrual' : 'Up-front'}</button>}
                   <button onClick={async () => { try { await updateType.mutateAsync({ id: t.id, data: { is_active: !t.isActive } }); } catch (e) { addToast(e.message, 'error'); } }} className={`px-2 py-1 text-[11px] rounded-md ${t.isActive ? 'text-emerald-700 bg-emerald-50' : 'text-gray-500 bg-gray-100'}`}>{t.isActive ? 'Active' : 'Inactive'}</button>
-                  <button onClick={async () => { try { await deleteType.mutateAsync(t.id); addToast('Removed', 'success'); } catch (e) { addToast(e.message, 'error'); } }} className="p-1.5 rounded-md text-red-500 hover:bg-red-50"><Trash2 className="w-3.5 h-3.5" /></button>
+                  <button aria-label="Remove leave type" onClick={async () => { try { await deleteType.mutateAsync(t.id); addToast('Removed', 'success'); } catch (e) { addToast(e.message, 'error'); } }} className="p-1.5 rounded-md text-red-500 hover:bg-red-50"><Trash2 className="w-3.5 h-3.5" /></button>
                 </div>}
               </div>
             ))}
@@ -5100,7 +5088,7 @@ function StatutoryRemittancePanel({ canPay, entity = 'mill', bankAccounts = [], 
                 </div>
                 <div className="flex items-center gap-1.5">
                   <button onClick={() => printStatutoryRemittance(r, company)} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-indigo-700 bg-indigo-50 rounded-lg hover:bg-indigo-100" title="Print remittance voucher"><Receipt className="w-3.5 h-3.5" /> Voucher</button>
-                  {canPay && <button onClick={() => reverse(r)} disabled={deleteMut.isPending} className="p-1.5 rounded-md text-red-500 hover:bg-red-50" title="Reverse remittance"><Trash2 className="w-3.5 h-3.5" /></button>}
+                  {canPay && <button aria-label="Reverse remittance" onClick={() => reverse(r)} disabled={deleteMut.isPending} className="p-1.5 rounded-md text-red-500 hover:bg-red-50" title="Reverse remittance"><Trash2 className="w-3.5 h-3.5" /></button>}
                 </div>
               </div>
             ))}
@@ -5273,7 +5261,7 @@ function PayslipsPanel({ runId, companyProfile, canApprove, canPay, canDelete, a
                 <div>
                   <div className="text-sm font-semibold text-gray-900 flex items-center gap-1.5">
                     {l.workerName}
-                    {linePaid && <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-emerald-100 text-emerald-700 uppercase">paid</span>}
+                    {linePaid && <StatusBadge status="Paid" />}
                   </div>
                   <div className="text-xs text-gray-400">
                     Gross {PKR(l.grossPay)}{parseFloat(l.advanceDeducted) > 0 ? ` · advance −${PKR(l.advanceDeducted)}` : ''} · <span className="text-emerald-700 font-medium">net {PKR(l.netPay)}</span>
@@ -5303,8 +5291,8 @@ function PayslipsPanel({ runId, companyProfile, canApprove, canPay, canDelete, a
 function printPayrollReport(runs, totals, company, range) {
   const co = company || {};
   const name = co.legalName || co.name || 'AGRI COMMODITIES';
-  const rs = (v) => 'Rs ' + (parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const d = (x) => x ? new Date(x).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '';
+  const rs = (v) => fmtPKR(parseFloat(v) || 0, { decimals: 2 });
+  const d = (x) => (x ? fmtDate(x) : '');
   const runBlocks = runs.map((r) => `
     <div style="margin-top:18px;break-inside:avoid">
       <div style="display:flex;justify-content:space-between;border-bottom:1px solid #cbd5e1;padding-bottom:4px">
@@ -5467,7 +5455,7 @@ function Sm({ label, value, tone = 'gray' }) {
 
 function EmployeeLedgerDrawer({ worker, onClose }) {
   const { data, isLoading } = useWorkerLedger(worker?.id);
-  const rs = (n) => `Rs ${(parseFloat(n) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const rs = (n) => fmtPKR(parseFloat(n) || 0, { decimals: 2 });
   const entries = data?.entries || [];
   return (
     <SlideDrawer
@@ -5511,7 +5499,7 @@ function EmployeeLedgerDrawer({ worker, onClose }) {
                 <tbody className="divide-y divide-gray-100">
                   {entries.map((e, i) => (
                     <tr key={i} className="hover:bg-gray-50">
-                      <td data-label="Date" className="px-3 py-2 whitespace-nowrap text-gray-600">{e.date ? new Date(e.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}</td>
+                      <td data-label="Date" className="px-3 py-2 whitespace-nowrap text-gray-600">{fmtDate(e.date)}</td>
                       <td data-label="Description" className="px-3 py-2 text-gray-700">{e.label}{e.note ? <span className="text-gray-400 text-xs"> · {e.note}</span> : ''}</td>
                       <td data-label="Debit" className="px-3 py-2 text-right tabular-nums text-red-600">{e.debit ? rs(e.debit) : '—'}</td>
                       <td data-label="Credit" className="px-3 py-2 text-right tabular-nums text-emerald-600">{e.credit ? rs(e.credit) : '—'}</td>

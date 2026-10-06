@@ -2,10 +2,9 @@ import { useState, useEffect } from 'react';
 import { Package, AlertTriangle, Check, Loader2 } from 'lucide-react';
 import { useConsumptionHistory, useSuggestConsumption, useConfirmConsumption } from '../api/queries';
 import useCanSeeCost from '../../../hooks/useCanSeeCost';
+import { fmtPKR } from '../../../shared/utils/format';
 
-function formatPKR(v) {
-  return 'Rs ' + (Number(v) || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
+const formatPKR = (v) => fmtPKR(Number(v) || 0, { decimals: 2 });
 
 export default function ConsumptionPanel({ batchId, batchStatus, addToast }) {
   // Material cost is hidden from roles without reports.view_cost.

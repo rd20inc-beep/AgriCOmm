@@ -7,10 +7,12 @@ import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import { canSeeCost } from '../../../hooks/useCanSeeCost';
 import { CreateInvoiceDrawer, RecordPaymentDrawer } from '../components/ServiceInvoiceDrawers';
+import { fmtPKR, fmtKg, fmtNum, fmtDate } from '../../../shared/utils/format';
+import StatusBadge from '../../../shared/components/StatusBadge';
 
 const num = (v) => parseFloat(v) || 0;
-const pkr = (v) => `PKR ${(num(v)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const kg = (v) => `${Math.round(num(v)).toLocaleString()} kg`;
+const pkr = (v) => fmtPKR(num(v), { decimals: 2 });
+const kg = (v) => fmtKg(num(v));
 
 const LOT_STATUS_STYLE = {
   'Received': 'bg-slate-100 text-slate-700',
@@ -21,12 +23,6 @@ const LOT_STATUS_STYLE = {
   'Fully Dispatched': 'bg-emerald-100 text-emerald-700',
   'Closed': 'bg-gray-200 text-gray-600',
   'Draft': 'bg-gray-100 text-gray-500',
-};
-const BILLING_STYLE = {
-  'Not Invoiced': 'bg-gray-100 text-gray-600',
-  'Invoiced': 'bg-blue-100 text-blue-700',
-  'Partial': 'bg-amber-100 text-amber-800',
-  'Paid': 'bg-emerald-100 text-emerald-700',
 };
 
 function Chip({ text, map }) {
@@ -165,14 +161,14 @@ export default function ServiceMilling() {
                   <td data-label="Lot" className="px-4 py-2.5">
                     <Link to={`/service-milling/${b.batch_no || b.id}`} className="font-semibold text-blue-600 hover:underline">{b.batch_no || `#${b.id}`}</Link>
                     {b.batch_name && <div className="text-[11px] font-medium text-gray-600 truncate max-w-[180px]" title={b.batch_name}>{b.batch_name}</div>}
-                    {b.date_received && <div className="text-[11px] text-gray-400">{new Date(b.date_received).toLocaleDateString('en-GB')}</div>}
+                    {b.date_received && <div className="text-[11px] text-gray-400">{fmtDate(b.date_received)}</div>}
                   </td>
-                  <td data-label="Client" className="px-4 py-2.5 text-gray-800">{b.client_name || <span className="text-gray-400">—</span>}</td>
+                  <td data-label="Client" className="px-4 py-2.5 text-gray-800 max-w-[14rem] truncate" title={b.client_name || undefined}>{b.client_name || <span className="text-gray-400">—</span>}</td>
                   <td data-label="Kattas / Bags" className="mob-hide px-4 py-2.5 text-right text-gray-700">
                     {num(b.katta_count) > 0
-                      ? <span>{num(b.katta_count).toLocaleString()} <span className="text-gray-400 text-xs">kattas</span></span>
+                      ? <span>{fmtNum(num(b.katta_count))} <span className="text-gray-400 text-xs">kattas</span></span>
                       : num(b.bag_count) > 0
-                        ? <span>{num(b.bag_count).toLocaleString()} <span className="text-gray-400 text-xs">bags</span></span>
+                        ? <span>{fmtNum(num(b.bag_count))} <span className="text-gray-400 text-xs">bags</span></span>
                         : '—'}
                   </td>
                   <td data-label="Raw / Milled" className="mob-hide px-4 py-2.5 text-right text-gray-700">
@@ -184,7 +180,7 @@ export default function ServiceMilling() {
                   <td data-label="In Stock" className="px-4 py-2.5 text-right font-medium text-emerald-700">{kg(inStock)}</td>
                   <td data-label="Lot Status" className="px-4 py-2.5"><Chip text={b.service_lot_status} map={LOT_STATUS_STYLE} /></td>
                   {showCost && <td data-label="Service Amt" className="px-4 py-2.5 text-right font-medium text-gray-900">{pkr(b.service_total_amount)}</td>}
-                  <td data-label="Billing" className="px-4 py-2.5"><Chip text={b.billing_status} map={BILLING_STYLE} /></td>
+                  <td data-label="Billing" className="px-4 py-2.5">{b.billing_status ? <StatusBadge status={b.billing_status} /> : '—'}</td>
                   <td data-label="Actions" className="px-4 py-2.5 text-right whitespace-nowrap">
                     {b.billing_status === 'Not Invoiced' ? (
                       canInvoice ? (

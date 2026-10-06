@@ -3,9 +3,10 @@ import { Boxes, Package, Plus, Loader2, ClipboardList } from 'lucide-react';
 import { usePackingHistory, usePackBatch, useMillStoreItems, useBatchKatta } from '../api/queries';
 import { useExportOrder } from '../../../api/queries';
 import useCanSeeCost from '../../../hooks/useCanSeeCost';
+import { fmtPKR, fmtNum, fmtDate, fmtKg as fmtKgBase } from '../../../shared/utils/format';
 
 const num = (v) => Number(v) || 0;
-const fmtKg = (v) => `${num(v).toLocaleString(undefined, { maximumFractionDigits: 1 })} kg`;
+const fmtKg = (v) => fmtKgBase(num(v), { decimals: 1 });
 
 // Bag the finished rice of a milling batch. Records the packed (net), tare and
 // gross weight. Store stock has ONE mover per kind of packaging: P.P. bags,
@@ -144,9 +145,9 @@ export default function PackingPanel({ batchId, batchStatus, addToast, exportOrd
             a different size is shown at its own size below.
           </p>
           <div className="grid grid-cols-3 gap-3 text-center">
-            <div><p className="text-[11px] uppercase tracking-wide text-amber-700">Freed from raw</p><p className="text-lg font-bold text-emerald-700">+{num(katta.freed).toLocaleString()}</p></div>
-            <div><p className="text-[11px] uppercase tracking-wide text-amber-700">Re-used to pack</p><p className="text-lg font-bold text-red-600">−{num(katta.packed).toLocaleString()}</p></div>
-            <div><p className="text-[11px] uppercase tracking-wide text-amber-700">Net to store</p><p className="text-lg font-bold text-gray-900">{katta.net >= 0 ? '+' : ''}{num(katta.net).toLocaleString()}</p></div>
+            <div><p className="text-[11px] uppercase tracking-wide text-amber-700">Freed from raw</p><p className="text-lg font-bold text-emerald-700">+{fmtNum(num(katta.freed))}</p></div>
+            <div><p className="text-[11px] uppercase tracking-wide text-amber-700">Re-used to pack</p><p className="text-lg font-bold text-red-600">−{fmtNum(num(katta.packed))}</p></div>
+            <div><p className="text-[11px] uppercase tracking-wide text-amber-700">Net to store</p><p className="text-lg font-bold text-gray-900">{katta.net >= 0 ? '+' : ''}{fmtNum(num(katta.net))}</p></div>
           </div>
 
           {/* Per bag size — freed / packed / net */}
@@ -160,9 +161,9 @@ export default function PackingPanel({ batchId, batchStatus, addToast, exportOrd
                     {katta.bySize.map((s, i) => (
                       <tr key={i} className="border-t border-amber-100">
                         <td data-label="Katta" className="py-1 pr-3 font-medium text-gray-800">{s.size} kg</td>
-                        <td data-label="Freed" className="py-1 px-2 text-right text-emerald-700">+{num(s.freed).toLocaleString()}</td>
-                        <td data-label="Packed" className="py-1 px-2 text-right text-red-600">{s.packed > 0 ? `−${num(s.packed).toLocaleString()}` : '—'}</td>
-                        <td data-label="In store" className="py-1 pl-2 text-right font-semibold text-gray-900">{num(s.net).toLocaleString()}</td>
+                        <td data-label="Freed" className="py-1 px-2 text-right text-emerald-700">+{fmtNum(num(s.freed))}</td>
+                        <td data-label="Packed" className="py-1 px-2 text-right text-red-600">{s.packed > 0 ? `−${fmtNum(num(s.packed))}` : '—'}</td>
+                        <td data-label="In store" className="py-1 pl-2 text-right font-semibold text-gray-900">{fmtNum(num(s.net))}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -204,7 +205,7 @@ export default function PackingPanel({ batchId, batchStatus, addToast, exportOrd
               <a href={`/export/${orderNo}`} className="text-xs font-medium text-blue-600 hover:underline">{orderNo} ↗</a>
             </div>
             {(recv || exportOrder.totalBags) && (
-              <p className="text-xs text-blue-800 mb-2">Receiving: <b className="capitalize">{recv || '—'}</b>{exportOrder.totalBags ? ` · ${Number(exportOrder.totalBags).toLocaleString()} bags` : ''}</p>
+              <p className="text-xs text-blue-800 mb-2">Receiving: <b className="capitalize">{recv || '—'}</b>{exportOrder.totalBags ? ` · ${fmtNum(Number(exportOrder.totalBags))} bags` : ''}</p>
             )}
             {multi ? (
               <div className="overflow-x-auto mobile-cards">
@@ -345,7 +346,7 @@ export default function PackingPanel({ batchId, batchStatus, addToast, exportOrd
                         </div>
                         <div className="mt-1.5 text-xs text-gray-500 flex flex-wrap gap-x-3">
                           <span>In stock: <b className={masterQty > masterAvail ? 'text-red-600' : ''}>{masterAvail}</b></span>
-                          {showCost && num(masterSel?.avg_cost_per_unit) > 0 && <span>Cost: <b>Rs {(masterCost).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></span>}
+                          {showCost && num(masterSel?.avg_cost_per_unit) > 0 && <span>Cost: <b>{fmtPKR(masterCost, { decimals: 2 })}</b></span>}
                         </div>
                         {masterShort && <p className="text-xs text-amber-600 mt-1">Short {masterQty - masterAvail} — packing allowed, purchase required.</p>}
                       </>
@@ -387,7 +388,7 @@ export default function PackingPanel({ batchId, batchStatus, addToast, exportOrd
                         </div>
                         <div className="mt-1.5 text-xs text-gray-500 flex flex-wrap gap-x-3">
                           <span>In stock: <b className={polyQty > polyAvail ? 'text-red-600' : ''}>{polyAvail}</b></span>
-                          {showCost && num(polySel?.avg_cost_per_unit) > 0 && <span>Cost: <b>Rs {(polyCost).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></span>}
+                          {showCost && num(polySel?.avg_cost_per_unit) > 0 && <span>Cost: <b>{fmtPKR(polyCost, { decimals: 2 })}</b></span>}
                         </div>
                         {polyShort && <p className="text-xs text-amber-600 mt-1">Short {polyQty - polyAvail} — packing allowed, purchase required.</p>}
                       </>
@@ -422,7 +423,7 @@ export default function PackingPanel({ batchId, batchStatus, addToast, exportOrd
               <tbody className="divide-y divide-gray-100">
                 {logs.map((l) => (
                   <tr key={l.id} className="hover:bg-gray-50">
-                    <td data-label="Date" className="py-2 px-3 text-gray-600">{l.created_at ? new Date(l.created_at).toLocaleDateString() : '—'}</td>
+                    <td data-label="Date" className="py-2 px-3 text-gray-600">{fmtDate(l.created_at)}</td>
                     <td data-label="Bag" className="py-2 px-3 text-gray-900">
                       <span className="inline-flex items-center gap-1.5"><Package size={13} className="text-gray-400" />{l.bag_item_name || l.bag_item_code || '—'}</span>
                       {(num(l.master_bags_count) > 0 || num(l.poly_count) > 0) && (

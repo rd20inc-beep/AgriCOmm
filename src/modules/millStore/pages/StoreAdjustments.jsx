@@ -18,12 +18,9 @@ import {
   findStoreType,
   themeFor,
 } from '../../../shared/components/adjustments';
-
-const STATUS_COLORS = {
-  Pending: 'bg-amber-100 text-amber-800',
-  Approved: 'bg-emerald-100 text-emerald-800',
-  Rejected: 'bg-red-100 text-red-800',
-};
+import ItemPicker from '../../../components/ItemPicker';
+import FieldError from '../../../shared/components/FieldError';
+import StatusBadge from '../../../shared/components/StatusBadge';
 
 function periodStart() {
   const d = new Date();
@@ -47,7 +44,13 @@ export default function StoreAdjustments() {
   });
   const { data: items = [] } = useMillStoreItems({ limit: 500 });
   const safeAdj = Array.isArray(adjustments) ? adjustments : [];
-  const safeItems = Array.isArray(items) ? items : [];
+  // Items quick-added from the picker show up before the list refetches.
+  const [addedItems, setAddedItems] = useState([]);
+  const safeItems = useMemo(() => {
+    const base = Array.isArray(items) ? items : [];
+    const seen = new Set(base.map((i) => String(i.id)));
+    return [...base, ...addedItems.filter((i) => !seen.has(String(i.id)))];
+  }, [items, addedItems]);
   // We also need the unfiltered list for KPI math; refetch with no status applied is wasteful,
   // so KPIs derive from the currently-loaded slice. For 'Pending' default that means the
   // KPI cards reflect "pending" only. Safe trade-off until backend exposes a stats endpoint.
@@ -60,7 +63,11 @@ export default function StoreAdjustments() {
   // Request form
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ item_id: '', adjustment_type: 'damage', quantity_delta: '', reason: '' });
-  const setF = (k, v) => setForm((p) => ({ ...p, [k]: v }));
+  const [formErrors, setFormErrors] = useState({});
+  const setF = (k, v) => {
+    setForm((p) => ({ ...p, [k]: v }));
+    setFormErrors((e) => (e[k] ? { ...e, [k]: undefined } : e));
+  };
 
   // Reject modal
   const [rejectId, setRejectId] = useState(null);
@@ -113,6 +120,12 @@ export default function StoreAdjustments() {
 
   async function handleRequest(e) {
     e.preventDefault();
+    const errs = {
+      item_id: form.item_id ? undefined : 'Pick an item',
+      quantity_delta: form.quantity_delta ? undefined : 'Enter the quantity change',
+      reason: form.reason ? undefined : 'Give a reason',
+    };
+    setFormErrors(errs);
     if (!form.item_id || !form.quantity_delta || !form.reason) {
       addToast('All fields are required', 'error');
       return;
@@ -201,18 +214,19 @@ export default function StoreAdjustments() {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Item *</label>
-              <select value={form.item_id} onChange={(e) => setF('item_id', e.target.value)} className="form-input w-full text-sm" required>
-                <option value="">Select item</option>
-                {safeItems.map((i) => (
-                  <option key={i.id} value={i.id}>
-                    {i.code} — {i.name}
-                  </option>
-                ))}
-              </select>
+              <ItemPicker
+                label={<>Item <span className="text-red-500">*</span></>}
+                value={form.item_id}
+                onChange={(id) => setF('item_id', id)}
+                items={safeItems}
+                onItemAdded={(item) => setAddedItems((prev) => [...prev, item])}
+                addToast={addToast}
+                placeholder="Search item…"
+              />
+              <FieldError error={formErrors.item_id} />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Quantity (+/-) *</label>
+              <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Quantity (+/-) <span className="text-red-500">*</span></label>
               <input
                 type="number"
                 step="any"
@@ -222,12 +236,13 @@ export default function StoreAdjustments() {
                 placeholder="-5 (decrease) or 10 (increase)"
                 required
               />
+              <FieldError error={formErrors.quantity_delta} />
             </div>
           </div>
 
           {/* Type chips */}
           <div>
-            <label className="block text-xs font-semibold text-gray-600 uppercase mb-2">Type *</label>
+            <label className="block text-xs font-semibold text-gray-600 uppercase mb-2">Type <span className="text-red-500">*</span></label>
             <div className="flex flex-wrap gap-2">
               {STORE_ADJ_TYPES.map((t) => {
                 const selected = form.adjustment_type === t.value;
@@ -269,7 +284,7 @@ export default function StoreAdjustments() {
           )}
 
           <div>
-            <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Reason *</label>
+            <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Reason <span className="text-red-500">*</span></label>
             <textarea
               value={form.reason}
               onChange={(e) => setF('reason', e.target.value)}
@@ -278,6 +293,7 @@ export default function StoreAdjustments() {
               placeholder="Explain why this adjustment is needed…"
               required
             />
+            <FieldError error={formErrors.reason} />
           </div>
           <div className="flex gap-2 justify-end">
             <button type="button" onClick={() => setShowForm(false)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
@@ -335,9 +351,7 @@ export default function StoreAdjustments() {
                     <td data-label="Reason" className="mob-hide py-2.5 px-4 text-gray-600 max-w-xs truncate" title={a.reason}>{a.reason}</td>
                     <td data-label="Requested by" className="mob-hide py-2.5 px-4 text-gray-600">{a.requested_by_name || '—'}</td>
                     <td data-label="Status" className="py-2.5 px-4">
-                      <span className={`inline-block px-2 py-0.5 text-xs font-medium rounded-full ${STATUS_COLORS[a.status] || 'bg-gray-100'}`}>
-                        {a.status}
-                      </span>
+                      <StatusBadge status={a.status} />
                       {a.status === 'Rejected' && a.rejection_reason && (
                         <p className="text-[10px] text-red-500 mt-0.5 truncate max-w-[150px]">{a.rejection_reason}</p>
                       )}
@@ -350,6 +364,7 @@ export default function StoreAdjustments() {
                         {isPending && (
                           <div className="flex gap-1 justify-end">
                             <button
+                              aria-label="Approve"
                               onClick={() => handleApprove(a.id)}
                               disabled={approveMut.isPending}
                               className="p-1.5 bg-emerald-50 text-emerald-700 rounded hover:bg-emerald-100"
@@ -358,6 +373,7 @@ export default function StoreAdjustments() {
                               <Check size={14} />
                             </button>
                             <button
+                              aria-label="Reject"
                               onClick={() => { setRejectId(a.id); setRejectReason(''); }}
                               className="p-1.5 bg-red-50 text-red-700 rounded hover:bg-red-100"
                               title="Reject"
@@ -382,7 +398,7 @@ export default function StoreAdjustments() {
           <div className="bg-white rounded-xl p-6 w-full max-w-md space-y-4" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-lg font-semibold text-gray-900">Reject Adjustment</h3>
             <div>
-              <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Reason for rejection *</label>
+              <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Reason for rejection <span className="text-red-500">*</span></label>
               <textarea
                 value={rejectReason}
                 onChange={(e) => setRejectReason(e.target.value)}

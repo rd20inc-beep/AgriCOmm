@@ -1,5 +1,6 @@
 import { Boxes } from 'lucide-react';
 import SlideDrawer from '../../../components/SlideDrawer';
+import { fmtKg, fmtNum } from '../../../shared/utils/format';
 
 /**
  * Record Yield Output — right slide-over.
@@ -22,17 +23,17 @@ export default function YieldOutputDrawer({ open, onClose, form, setForm, onSubm
     <SlideDrawer open={open} onClose={onClose} title="Record Yield Output" icon={Boxes} size="xl">
       <form onSubmit={onSubmit} className="space-y-4">
         <div className="bg-blue-50 rounded-lg p-3 text-sm text-blue-800">
-          <span className="font-semibold">{isPartial ? 'Milling Qty' : 'Raw Input'}:</span> {Math.round(basis).toLocaleString()} kg
-          {isPartial && <span className="text-blue-600"> (of {Math.round(receivedKg).toLocaleString()} kg received)</span>}
+          <span className="font-semibold">{isPartial ? 'Milling Qty' : 'Raw Input'}:</span> {fmtKg(basis)}
+          {isPartial && <span className="text-blue-600"> (of {fmtKg(receivedKg)} received)</span>}
           {/* No planned target is captured on new batches — show it only when one exists. */}
           {Number(batch.plannedFinishedKg) > 0 && (
-            <> &nbsp;|&nbsp; <span className="font-semibold">Planned Finished:</span> {Math.round(batch.plannedFinishedKg).toLocaleString()} kg</>
+            <> &nbsp;|&nbsp; <span className="font-semibold">Planned Finished:</span> {fmtKg(batch.plannedFinishedKg)}</>
           )}
         </div>
 
         {/* Finished rice */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Finished Rice (KG) *</label>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Finished Rice (KG) <span className="text-red-500">*</span></label>
           <input type="number" step="0.01" min="0" required value={form.actualFinishedMT}
             onChange={(e) => setForm(prev => ({ ...prev, actualFinishedMT: e.target.value }))}
             placeholder="e.g. 32000"
@@ -52,7 +53,7 @@ export default function YieldOutputDrawer({ open, onClose, form, setForm, onSubm
               // were being left out of the yield — they are not (see Total
               // Output below), this subtotal simply never covered them.
               return total > 0 ? (
-                <span className="text-xs font-medium text-amber-700">Grades subtotal: {Math.round(total).toLocaleString()} kg</span>
+                <span className="text-xs font-medium text-amber-700">Grades subtotal: {fmtKg(total)}</span>
               ) : null;
             })()}
           </div>
@@ -102,7 +103,7 @@ export default function YieldOutputDrawer({ open, onClose, form, setForm, onSubm
             const bp = ['sortexMT', 'powderMT', 'sweepingMT', 'chobaMT']
               .reduce((s2, k) => s2 + (parseFloat(form[k]) || 0), 0);
             return bp > 0 ? (
-              <span className="text-xs font-medium text-emerald-700">By-products subtotal: {Math.round(bp).toLocaleString()} kg</span>
+              <span className="text-xs font-medium text-emerald-700">By-products subtotal: {fmtKg(bp)}</span>
             ) : null;
           })()}
         </div>
@@ -223,23 +224,23 @@ export default function YieldOutputDrawer({ open, onClose, form, setForm, onSubm
               {rows.map((r, i) => r.value > 0 && (
                 <div key={i} className={`flex justify-between ${r.indent ? 'pl-4 text-xs text-gray-500' : ''}`}>
                   <span className={r.bold ? 'font-semibold text-gray-900' : 'text-gray-600'}>{r.label}</span>
-                  <span className={`font-medium ${r.color || 'text-gray-900'}`}>{Math.round(r.value).toLocaleString()} kg</span>
+                  <span className={`font-medium ${r.color || 'text-gray-900'}`}>{fmtKg(r.value)}</span>
                 </div>
               ))}
               {gradeTotal > 0 && b > 0 && Math.abs(gradeTotal - b) > 0.01 && (
                 <div className="flex justify-between pl-4 text-xs text-red-500">
                   <span>Grade total vs Broken total mismatch</span>
-                  <span>{Math.round(gradeTotal).toLocaleString()} vs {Math.round(b).toLocaleString()} kg</span>
+                  <span>{fmtNum(gradeTotal, 0)} vs {fmtKg(b)}</span>
                 </div>
               )}
               <div className="border-t border-gray-200 pt-2 mt-2 flex justify-between">
                 <span className="font-semibold text-gray-700">Total Output</span>
-                <span className="font-bold text-gray-900">{Math.round(total).toLocaleString()} kg</span>
+                <span className="font-bold text-gray-900">{fmtKg(total)}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-600">Accounted for</span>
                 <span className={`font-semibold ${parseFloat(accounted) > 100 ? 'text-red-600' : parseFloat(accounted) >= 95 ? 'text-emerald-600' : 'text-amber-600'}`}>
-                  {accounted}% of {Math.round(rawQty).toLocaleString()} kg
+                  {accounted}% of {fmtKg(rawQty)}
                 </span>
               </div>
               <div className="flex justify-between border-t border-gray-200 pt-2">

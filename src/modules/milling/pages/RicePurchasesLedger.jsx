@@ -3,17 +3,17 @@ import { Link } from 'react-router-dom';
 import { Truck, Search, Filter, Download } from 'lucide-react';
 import api from '../../../api/client';
 import { favStar } from '../../../shared/utils/favorites';
-import { toLocalISODate, todayLocalISO } from '../../../shared/utils/format';
+import { toLocalISODate, todayLocalISO, fmtPKR, fmtMT } from '../../../shared/utils/format';
 
 function formatPKR(value) {
   if (!value) return '—';
-  return 'Rs ' + (value).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return fmtPKR(value, { decimals: 2 });
 }
 
 function formatMT(value) {
   const n = parseFloat(value);
   if (!n) return '—';
-  return n.toFixed(2) + ' MT';
+  return fmtMT(n, { decimals: 2 });
 }
 
 function todayISO() {
@@ -246,7 +246,7 @@ export default function RicePurchasesLedger() {
                         {r.arrival_date ? new Date(r.arrival_date).toISOString().split('T')[0] : '—'}
                       </td>
                       <td data-label="Vehicle" className="px-3 py-2 font-medium text-gray-900">{r.vehicle_no || '—'}</td>
-                      <td data-label="Supplier" className="px-3 py-2 text-gray-700">{r.supplier_name || '—'}</td>
+                      <td data-label="Supplier" className="px-3 py-2 text-gray-700 max-w-[14rem] truncate" title={r.supplier_name || undefined}>{r.supplier_name || '—'}</td>
                       <td data-label="Variety" className="mob-hide px-3 py-2">
                         {r.product_name || r.product_code ? (
                           <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-50 text-amber-700">

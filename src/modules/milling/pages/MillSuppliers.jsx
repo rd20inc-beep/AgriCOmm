@@ -88,7 +88,7 @@ export default function MillSuppliers() {
             <tbody>
               {rows.map(s => (
                 <tr key={s.id} className="border-t border-gray-100 hover:bg-gray-50">
-                  <td data-label="Supplier" className="px-4 py-3 font-medium text-gray-900">{s.name}</td>
+                  <td data-label="Supplier" className="px-4 py-3 font-medium text-gray-900 max-w-[14rem] truncate" title={s.name}>{s.name}</td>
                   <td data-label="Contact" className="mob-hide px-4 py-3 text-gray-700">
                     <div>{s.contact || '—'}</div>
                     {s.phone && <div className="text-xs text-gray-500 flex items-center gap-1 mt-0.5"><Phone className="w-3 h-3" />{s.phone}</div>}
@@ -134,7 +134,7 @@ export default function MillSuppliers() {
       >
         <div className="space-y-4">
           <div>
-            <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Name *</label>
+            <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Name <span className="text-red-500">*</span></label>
             <input type="text" value={draft.name} onChange={e => setD('name', e.target.value)} autoFocus
               className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-amber-500" placeholder="Supplier name" />
           </div>

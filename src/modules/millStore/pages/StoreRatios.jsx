@@ -91,7 +91,7 @@ export default function StoreRatios() {
           <h2 className="text-sm font-semibold text-gray-700">{editId ? 'Edit Ratio' : 'New Ratio'}</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Item *</label>
+              <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Item <span className="text-red-500">*</span></label>
               <select
                 value={form.item_id}
                 onChange={(e) => setF('item_id', e.target.value)}
@@ -106,7 +106,7 @@ export default function StoreRatios() {
               </select>
             </div>
             <div>
-              <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Units per MT of raw rice *</label>
+              <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Units per MT of raw rice <span className="text-red-500">*</span></label>
               <input
                 type="number"
                 min="0"
@@ -178,7 +178,7 @@ export default function StoreRatios() {
                   <td data-label="Product" className="py-2.5 px-4 text-gray-600">{r.product_name || 'All products'}</td>
                   <td data-label="Notes" className="mob-hide py-2.5 px-4 text-gray-500 text-xs max-w-xs truncate">{r.notes || '—'}</td>
                   <td data-label="Actions" className="py-2.5 px-4 text-right">
-                    <button onClick={() => startEdit(r)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded" title="Edit">
+                    <button aria-label="Edit" onClick={() => startEdit(r)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded" title="Edit">
                       <Edit3 size={14} />
                     </button>
                   </td>

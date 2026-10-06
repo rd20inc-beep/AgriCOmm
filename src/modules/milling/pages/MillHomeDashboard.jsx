@@ -17,10 +17,9 @@ import {
 import { useMillSummary } from '../hooks/useMillSummary';
 import { useInventory } from '../../../api/queries';
 import { useMillStoreSummary, useMillStoreAlerts } from '../../millStore/api/queries';
+import { fmtPKR, fmtKg, fmtPct } from '../../../shared/utils/format';
 
-function formatKg(n) {
-  return `${Math.round(Number(n) || 0).toLocaleString()} kg`;
-}
+const formatKg = (n) => fmtKg(Number(n) || 0);
 
 function daysBetween(a, b) {
   return Math.round((new Date(b) - new Date(a)) / (1000 * 60 * 60 * 24));
@@ -119,10 +118,10 @@ function BatchColumn({ title, batches, accent, onBatchClick }) {
           >
             <p className="text-xs font-semibold text-gray-900 truncate">{b.id}</p>
             <p className="text-[11px] text-gray-500 truncate">
-              {b.supplierName || 'Unknown'} · {Math.round(Number(b.rawQtyKg || 0)).toLocaleString()} kg
+              {b.supplierName || 'Unknown'} · {fmtKg(Number(b.rawQtyKg || 0))}
             </p>
             {b.yieldPct > 0 && (
-              <p className="text-[11px] text-gray-600 mt-0.5">Yield: {Number(b.yieldPct).toFixed(1)}%</p>
+              <p className="text-[11px] text-gray-600 mt-0.5">Yield: {fmtPct(b.yieldPct)}</p>
             )}
           </button>
         ))}
@@ -384,7 +383,7 @@ export default function MillHomeDashboard() {
         <KPI
           icon={Gauge}
           label="Yield (last 7 days)"
-          value={data.yieldLast7 > 0 ? `${data.yieldLast7.toFixed(1)}%` : '—'}
+          value={data.yieldLast7 > 0 ? fmtPct(data.yieldLast7) : '—'}
           sub={`from ${data.completedThisWeek} completed batches`}
           accent="green"
         />
@@ -433,7 +432,7 @@ export default function MillHomeDashboard() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
           <div className="rounded-lg border border-amber-100 bg-amber-50/40 p-3">
             <p className="text-[11px] uppercase tracking-wide text-amber-700 font-medium">Stock Value</p>
-            <p className="text-lg font-bold text-gray-900 mt-0.5">Rs {(Number(storeSummary?.stock_value || 0)).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+            <p className="text-lg font-bold text-gray-900 mt-0.5">{fmtPKR(Number(storeSummary?.stock_value || 0), { decimals: 2 })}</p>
             <p className="text-[11px] text-gray-500 mt-0.5">across {storeSummary?.total_items || 0} items</p>
           </div>
           <div className={`rounded-lg border p-3 ${(storeSummary?.low_stock_items || 0) > 0 ? 'border-red-200 bg-red-50/40' : 'border-emerald-100 bg-emerald-50/40'}`}>
@@ -513,7 +512,7 @@ export default function MillHomeDashboard() {
                       <p className="text-gray-800 font-medium truncate">{name}</p>
                       <p className="text-[11px] text-gray-400 truncate">
                         {qty} {unit}
-                        {rate > 0 ? ` @ Rs ${(rate).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : ''}
+                        {rate > 0 ? ` @ ${fmtPKR(rate, { decimals: 2 })}` : ''}
                         {category ? ` · ${category}` : ''}
                         {ref ? ` · ${ref}` : ''}
                         {refType && refType !== 'milling' ? ` (${refType})` : ''}
@@ -521,7 +520,7 @@ export default function MillHomeDashboard() {
                       </p>
                     </div>
                     <span className={`tabular-nums flex-shrink-0 ${cost > 0 ? 'text-gray-700 font-medium' : 'text-gray-300'}`}>
-                      {cost > 0 ? `Rs ${cost.toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : 'no cost'}
+                      {cost > 0 ? fmtPKR(cost, { decimals: 2 }) : 'no cost'}
                     </span>
                   </div>
                 );

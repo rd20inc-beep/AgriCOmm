@@ -6,10 +6,10 @@ import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import SlideDrawer from '../../../components/SlideDrawer';
 import useConfirm from '../../../hooks/useConfirm';
-import { todayLocalISO } from '../../../shared/utils/format';
+import { todayLocalISO, fmtKg, fmtDate } from '../../../shared/utils/format';
 
 const num = (v) => parseFloat(v) || 0;
-const kg = (v) => `${Math.round(num(v)).toLocaleString()} kg`;
+const kg = (v) => fmtKg(num(v));
 
 /**
  * Dispatch tab for a service-milling batch — hand client-owned finished /
@@ -148,7 +148,7 @@ export default function ServiceDispatchTab({ routeId, onChanged }) {
               {dispatches.map((d) => (
                 <tr key={d.id} className="hover:bg-gray-50">
                   <td data-label="Dispatch #" className="px-4 py-2.5 font-medium text-gray-900">{d.dispatch_no}</td>
-                  <td data-label="Date" className="mob-hide px-4 py-2.5 text-gray-600">{d.dispatch_date ? new Date(d.dispatch_date).toLocaleDateString('en-GB') : '—'}</td>
+                  <td data-label="Date" className="mob-hide px-4 py-2.5 text-gray-600">{fmtDate(d.dispatch_date)}</td>
                   <td data-label="Lot" className="px-4 py-2.5 text-gray-600">{d.lot_no}</td>
                   <td data-label="Vehicle" className="mob-hide px-4 py-2.5 text-gray-600">{d.vehicle_no || '—'}{d.driver_name ? <span className="text-gray-400"> · {d.driver_name}</span> : null}</td>
                   <td data-label="Qty" className="px-4 py-2.5 text-right text-gray-700">{kg(d.qty_kg)}{d.bag_count ? <span className="text-gray-400"> · {d.bag_count} bags</span> : null}</td>
@@ -184,7 +184,7 @@ export default function ServiceDispatchTab({ routeId, onChanged }) {
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Quantity (KG) *</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Quantity (KG) <span className="text-red-500">*</span></label>
                 <input type="number" step="0.01" min="0" required value={form.qtyKg}
                   onChange={(e) => setForm(p => ({ ...p, qtyKg: e.target.value }))}
                   className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />

@@ -102,7 +102,7 @@ export default function SupplierPicker({ label, value, onChange, suppliers = [],
             <div className="flex items-center gap-2 flex-shrink-0">
               {selected.approval_status === 'pending' && <PendingBadge />}
               <button type="button" onClick={() => { setOpen(true); setSearch(''); }} className="text-xs text-blue-600">Change</button>
-              {clearable && <button type="button" onClick={() => onChange('')} className="text-gray-400 hover:text-gray-600"><X size={14} /></button>}
+              {clearable && <button aria-label="Clear selection" type="button" onClick={() => onChange('')} className="text-gray-400 hover:text-gray-600"><X size={14} /></button>}
             </div>
           </div>
         ) : (

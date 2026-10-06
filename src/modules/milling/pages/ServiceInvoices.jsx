@@ -6,14 +6,11 @@ import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import { RecordPaymentDrawer } from '../components/ServiceInvoiceDrawers';
 import { printServiceInvoice } from '../utils/serviceInvoicePrint';
+import { fmtPKR, fmtDate } from '../../../shared/utils/format';
+import StatusBadge from '../../../shared/components/StatusBadge';
 
 const num = (v) => parseFloat(v) || 0;
-const pkr = (v) => `PKR ${(num(v)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const BILLING_STYLE = {
-  'Unpaid': 'bg-rose-100 text-rose-700',
-  'Partial': 'bg-amber-100 text-amber-800',
-  'Paid': 'bg-emerald-100 text-emerald-700',
-};
+const pkr = (v) => fmtPKR(num(v), { decimals: 2 });
 
 export default function ServiceInvoices() {
   const { addToast, companyProfileData } = useApp();
@@ -84,13 +81,13 @@ export default function ServiceInvoices() {
                 <tr><td colSpan={8} className="px-4 py-10 text-center text-gray-400">No service-milling invoices yet.</td></tr>
               ) : rows.map((r) => (
                 <tr key={r.id} className="hover:bg-gray-50">
-                  <td data-label="Invoice" className="px-4 py-2.5 font-semibold text-gray-900">{r.invoice_no}<div className="text-[11px] text-gray-400">{r.invoice_date ? new Date(r.invoice_date).toLocaleDateString('en-GB') : ''}</div></td>
-                  <td data-label="Client" className="px-4 py-2.5 text-gray-800">{r.client_name || '—'}</td>
+                  <td data-label="Invoice" className="px-4 py-2.5 font-semibold text-gray-900">{r.invoice_no}<div className="text-[11px] text-gray-400">{(r.invoice_date ? fmtDate(r.invoice_date) : '')}</div></td>
+                  <td data-label="Client" className="px-4 py-2.5 text-gray-800 max-w-[14rem] truncate" title={r.client_name || undefined}>{r.client_name || '—'}</td>
                   <td data-label="Batch" className="mob-hide px-4 py-2.5 text-gray-500">{r.batch_no || '—'}</td>
                   <td data-label="Total" className="px-4 py-2.5 text-right font-medium text-gray-900">{pkr(r.total_amount)}</td>
                   <td data-label="Received" className="mob-hide px-4 py-2.5 text-right text-emerald-700">{pkr(r.received_amount)}</td>
                   <td data-label="Balance" className="px-4 py-2.5 text-right text-rose-600">{pkr(r.balance_amount)}</td>
-                  <td data-label="Status" className="px-4 py-2.5"><span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold ${BILLING_STYLE[r.payment_status] || 'bg-gray-100 text-gray-600'}`}>{r.payment_status}</span></td>
+                  <td data-label="Status" className="px-4 py-2.5"><StatusBadge status={r.payment_status} /></td>
                   <td data-label="Action" className="px-4 py-2.5 text-right whitespace-nowrap">
                     <button onClick={() => viewInvoice(r.id)} className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 mr-2"><Printer size={12} /> View</button>
                     {r.payment_status !== 'Paid' && canPay && (

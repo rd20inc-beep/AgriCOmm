@@ -6,7 +6,7 @@ import ItemPicker from './ItemPicker';
 import { useApp } from '../context/AppContext';
 import { useMillStoreItems, useCreatePurchase } from '../modules/millStore/api/queries';
 import { purchaseRequirementsApi } from '../modules/purchaseRequirements/api/services';
-import { todayLocalISO } from '../shared/utils/format';
+import { todayLocalISO, fmtPKR, fmtNum } from '../shared/utils/format';
 
 const CATEGORIES = [
   { value: 'packaging',   label: 'Packaging' },
@@ -176,7 +176,7 @@ export default function NewPurchaseDrawer({ open, onClose, onSaved, prefill = nu
       size="lg"
       footer={
         <div className="flex items-center justify-between gap-3">
-          <span className="text-sm text-gray-500">Total <span className="font-semibold text-gray-900">Rs {totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></span>
+          <span className="text-sm text-gray-500">Total <span className="font-semibold text-gray-900">{fmtPKR(totalAmount, { decimals: 2 })}</span></span>
           <div className="flex gap-2">
             <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
             <button onClick={handleSubmit} disabled={createMut.isPending}
@@ -217,7 +217,7 @@ export default function NewPurchaseDrawer({ open, onClose, onSaved, prefill = nu
             )}
           </div>
           <div>
-            <label className={LABEL}>Date *</label>
+            <label className={LABEL}>Date <span className="text-red-500">*</span></label>
             <input type="date" value={purchaseDate} onChange={e => setPurchaseDate(e.target.value)} className={INPUT} required />
           </div>
           <div>
@@ -299,7 +299,7 @@ export default function NewPurchaseDrawer({ open, onClose, onSaved, prefill = nu
                   {line.category === 'packaging' && line.item_id && (
                     <div className="grid grid-cols-2 gap-2">
                       <div>
-                        <label className="block text-[10px] font-semibold text-blue-700 uppercase mb-0.5">Bag Kg *</label>
+                        <label className="block text-[10px] font-semibold text-blue-700 uppercase mb-0.5">Bag Kg <span className="text-red-500">*</span></label>
                         <input type="number" min="0" step="any" value={line.bag_kg}
                           onChange={e => setLine(idx, 'bag_kg', e.target.value)}
                           className={INPUT} placeholder="rice per bag" />
@@ -323,7 +323,7 @@ export default function NewPurchaseDrawer({ open, onClose, onSaved, prefill = nu
                     </div>
                     <div>
                       <label className="block text-[10px] font-semibold text-gray-500 uppercase mb-0.5">Total</label>
-                      <p className="text-sm font-medium text-gray-900 py-2 tabular-nums">Rs {lineTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                      <p className="text-sm font-medium text-gray-900 py-2 tabular-nums">{fmtPKR(lineTotal, { decimals: 2 })}</p>
                     </div>
                   </div>
                   {lines.length > 1 && (
@@ -348,7 +348,7 @@ export default function NewPurchaseDrawer({ open, onClose, onSaved, prefill = nu
                     <input type="checkbox" checked={closeReqIds.has(Number(r.id))} onChange={() => toggleReq(Number(r.id))}
                       className="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
                     <span className="font-medium">{r.pr_no}</span>
-                    <span className="text-gray-500">— {r.item_name}, {Math.round(parseFloat(r.shortage_qty) || 0).toLocaleString()} {r.unit}</span>
+                    <span className="text-gray-500">— {r.item_name}, {fmtNum(parseFloat(r.shortage_qty) || 0, 0)} {r.unit}</span>
                   </label>
                 ))}
               </div>
@@ -357,7 +357,7 @@ export default function NewPurchaseDrawer({ open, onClose, onSaved, prefill = nu
           )}
           <div className="mt-3 pt-3 border-t border-gray-200 flex justify-between items-center">
             <p className="text-sm text-gray-500">{lines.filter(l => l.item_id).length} item(s)</p>
-            <p className="text-base font-bold text-gray-900">Total: Rs {totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+            <p className="text-base font-bold text-gray-900">Total: {fmtPKR(totalAmount, { decimals: 2 })}</p>
           </div>
         </div>
       </div>

@@ -8,17 +8,14 @@ import PartyAllocationLedger from './PartyAllocationLedger';
 import LedgerTypeCounts from './LedgerTypeCounts';
 import OpenItemsPanel from './OpenItemsPanel';
 import { printStatement } from './printStatement';
+import StatusBadge from '../../../shared/components/StatusBadge';
+import { fmtMoney, fmtDate } from '../../../shared/utils/format';
 
 // Statements are shown in the party's transaction currency (mill suppliers are
 // PKR), as returned by the backend. Mirrors finance/PartyLedger formatting.
-function curSymbol(cur) {
-  const c = (cur || 'PKR').toUpperCase();
-  return c === 'PKR' ? 'Rs ' : c === 'USD' ? '$' : c === 'EUR' ? '€' : c === 'GBP' ? '£' : `${c} `;
-}
-const fmtCur = (v, cur) => `${curSymbol(cur)}${(parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const fmtCur = (v, cur) => fmtMoney(parseFloat(v) || 0, cur, { decimals: 2 });
 
 const STATUS_ROW = { Paid: 'bg-emerald-50', Partial: 'bg-amber-50', Unpaid: 'bg-red-50' };
-const STATUS_PILL = { Paid: 'bg-emerald-100 text-emerald-700', Partial: 'bg-amber-100 text-amber-700', Unpaid: 'bg-red-100 text-red-700' };
 
 const METHOD_LABELS = {
   bank_transfer: 'Bank Transfer', cheque: 'Cheque', cash: 'Cash', online: 'Online',
@@ -31,12 +28,6 @@ const refLink = (refNo) => {
   if (refNo.startsWith('EX-')) return `/export/${refNo}`;
   if (refNo.startsWith('M-')) return `/milling/${refNo}`;
   return null;
-};
-
-const fmtDate = (d) => {
-  if (!d) return '—';
-  const dt = new Date(d);
-  return Number.isNaN(dt.getTime()) ? d : dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' });
 };
 
 /**
@@ -94,7 +85,7 @@ export default function MillSupplierStatement({ supplierId, supplierName, params
             <ExternalLink size={13} /> Full view
           </Link>
           {onClose && (
-            <button onClick={onClose} className="rounded-lg bg-white/10 hover:bg-white/20 p-1.5" title="Close">
+            <button aria-label="Close" onClick={onClose} className="rounded-lg bg-white/10 hover:bg-white/20 p-1.5" title="Close">
               <X size={15} />
             </button>
           )}
@@ -154,7 +145,7 @@ export default function MillSupplierStatement({ supplierId, supplierName, params
                     </td>
                     <td data-label="Description" className="mob-hide px-3 py-1.5 min-w-[200px] max-w-[420px]">
                       <span className="block text-gray-700 whitespace-normal break-words">
-                        {t.status && <span className={`mr-1.5 px-1.5 py-0.5 rounded text-[9px] font-semibold align-middle ${STATUS_PILL[t.status]}`}>{t.status}</span>}
+                        {t.status && <span className="mr-1.5 align-middle"><StatusBadge status={t.status} /></span>}
                         {t.description || '—'}
                       </span>
                       {(t.account_code || t.account_name) && (

@@ -1,12 +1,13 @@
+import { fmtPKR, fmtNum, fmtDate } from '../../../shared/utils/format';
 // A4 print template for a Service Milling invoice — mirrors the local-sales
 // invoice print (self-contained window, browser Print → Save as PDF = download).
 // This is a SERVICE fee document (milling / rental / labour), not a sale of rice.
 
 const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const num = (v) => parseFloat(v) || 0;
-const pkr = (v) => `Rs ${(num(v)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const n0 = (v) => `${Math.round(num(v)).toLocaleString()}`;
-const dt = (v) => v ? new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+const pkr = (v) => fmtPKR(num(v), { decimals: 2 });
+const n0 = (v) => fmtNum(num(v), 0);
+const dt = (v) => fmtDate(v);
 
 function companyBlock(co) {
   const name = co?.legalName || co?.name || 'AGRI COMMODITIES';
