@@ -12,6 +12,7 @@ const accountingService = require('../../services/accountingService');
 const inventoryService = require('./inventory.service');
 const { blendPurchaseIntoLot, computeLotLanded, repriceLotPurchase, normalizeTransportPaidBy } = require('./lotCosting');
 const { nextDocNo } = require('../../utils/docNumber');
+const { inventoryAccountForLot } = require('../localSales/inventoryAccount');
 const { commitLotToBatch } = require('../milling/batchLifecycle');
 // #9-scoping: per-user warehouse restriction, applied to READ paths only.
 const whScope = require('../../utils/warehouseScope');
@@ -402,18 +403,82 @@ async function postPurchaseDelta(trx, { delta, refType, refNo, description, narr
   return adj;
 }
 
+// OPENING STOCK = a lot created by the go-live opening-balance load. That load
+// inserted the lot directly (no supplier payable — its GL counterpart was 3000
+// Owner's Equity, journal OPEN-STOCK-1) and wrote ONE ledger row for it with
+// transaction_type AND reference_module 'opening_balance' (TXN-OPEN-<id>). No
+// app flow writes that pair: the 2026-04 ledger backfill (mig 038) used
+// reference_module 'purchase'/'milling_batch', and that data was reset anyway.
+async function isOpeningStockLot(trx, lot) {
+  const row = await trx('lot_transactions')
+    .where({ lot_id: lot.id, transaction_type: 'opening_balance', reference_module: 'opening_balance' })
+    .first('id');
+  return !!row;
+}
+
+// Re-pricing opening stock restates the OPENING balance, so the counterpart is
+// the same 3000 Owner's Equity the load credited — not a supplier, not this
+// period's P&L (owner decision 2026-10-07). Signed delta, Posted: an increase is
+// Dr inventory / Cr 3000, a decrease the reverse. The inventory account follows
+// the lot type exactly as the load chose it (raw 1210, finished 1220/1230,
+// by-product 1240).
+async function postOpeningStockDelta(trx, { lot, delta, userId }) {
+  const d = uc.round2(delta);
+  if (Math.abs(d) <= 0.01) return null;
+  const stockCode = inventoryAccountForLot(lot);
+  const [stockAcc, eqAcc] = await Promise.all([
+    trx('chart_of_accounts').where({ code: stockCode }).first(),
+    trx('chart_of_accounts').where({ code: '3000' }).first(),
+  ]);
+  if (!stockAcc || !eqAcc) {
+    const e = new Error(`Chart of accounts is missing ${!stockAcc ? stockCode : '3000'} — cannot restate opening stock ${lot.lot_no}.`);
+    e.status = 500; throw e;
+  }
+  const amt = Math.abs(d);
+  const up = d > 0;
+  const narration = `Opening stock revaluation ${lot.lot_no}`;
+  const lines = [
+    { account_id: stockAcc.id, account: stockAcc.name,
+      debit: up ? amt : 0, credit: up ? 0 : amt,
+      narration: `${up ? 'DR' : 'CR'} ${stockAcc.code} ${stockAcc.name} — ${narration}` },
+    { account_id: eqAcc.id, account: eqAcc.name,
+      debit: up ? 0 : amt, credit: up ? amt : 0,
+      narration: `${up ? 'CR' : 'DR'} ${eqAcc.code} ${eqAcc.name} — ${narration}` },
+  ];
+  const j = await accountingService.createJournal(trx, {
+    date: new Date().toISOString().slice(0, 10), entity: lot.entity || 'mill',
+    refType: 'Opening Stock Revaluation', refNo: lot.lot_no,
+    description: `${narration} (Rs ${up ? '+' : '-'}${amt})`,
+    lines, currency: 'PKR', isAuto: true, userId,
+  });
+  if (j?.id) await accountingService.postJournal(trx, j.id);
+  return j;
+}
+
 // Re-price the RICE on a lot (purchase-rate or received-qty edit). Only the
 // purchase amount changes: landed cost, the rice payable and the GL each move by
 // exactly that change. Freight, commission, extras and bags — and their own
 // payables — are untouched (repriceLotPurchase).
+//
+// The GL counterpart: the rice payable (2010) when there is one; 3000 equity for
+// opening stock; otherwise the edit is REFUSED (409) — moving stock value with
+// no journal is what the old glDelta = 0 branch silently did.
 async function applyRicePurchaseChange(trx, lot, { newPurchaseAmount, kg, lotFields = {}, description, narration, userId }) {
   const pay = await findRicePayable(trx, lot);
-  const r = repriceLotPurchase(lot, newPurchaseAmount, kg, pay);
+  const isOpeningStock = !pay && await isOpeningStockLot(trx, lot);
+  const r = repriceLotPurchase(lot, newPurchaseAmount, kg, pay, { isOpeningStock });
+  if (!pay && !isOpeningStock && Math.abs(r.purchaseDelta) > 0.01) {
+    const e = new Error(`Lot ${lot.lot_no} has no supplier bill and is not opening stock, so changing its price or quantity would move stock value with nothing on the other side of the books. Correct it through a stock adjustment instead.`);
+    e.status = 409; throw e;
+  }
   await trx('inventory_lots').where({ id: lot.id }).update({
     ...lotFields,
     purchase_amount: uc.round2(newPurchaseAmount),
     landed_cost_total: r.landedTotal, landed_cost_per_kg: r.perKg,
     total_value: r.landedTotal, cost_per_unit: r.perKg, updated_at: trx.fn.now(),
+    // Opening stock was loaded fully paid (paid = landed, nothing due): there is
+    // no bill, so a restatement must not make it look like money is owed.
+    ...(isOpeningStock ? { paid_amount: r.landedTotal, due_amount: 0, payment_status: 'Paid' } : {}),
   });
   if (pay) {
     await trx('payables').where({ id: pay.id }).update({ ...r.payable, updated_at: trx.fn.now() });
@@ -425,7 +490,10 @@ async function applyRicePurchaseChange(trx, lot, { newPurchaseAmount, kg, lotFie
       partyType: 'supplier', partyId: lot.supplier_id, userId,
     });
   }
-  return { payableUpdated: !!pay, ...r };
+  if (Math.abs(r.equityDelta) > 0.01) {
+    await postOpeningStockDelta(trx, { lot, delta: r.equityDelta, userId });
+  }
+  return { payableUpdated: !!pay, isOpeningStock, ...r };
 }
 
 module.exports = {
@@ -2229,7 +2297,7 @@ module.exports = {
         // landed total onto the rice payable while the extras' own payables
         // still stood — the supplier was owed the extras twice.
         const newPurchaseAmount = uc.round2(receivedKg * newRate);
-        const { payableUpdated } = await applyRicePurchaseChange(trx, lot, {
+        const { payableUpdated, isOpeningStock } = await applyRicePurchaseChange(trx, lot, {
           newPurchaseAmount, kg: receivedKg,
           lotFields: { rate_per_kg: newRate },
           description: (d) => `Lot ${lot.lot_no} price adjustment to Rs ${Math.round(newRate)}/kg (Rs ${d >= 0 ? '+' : ''}${d})`,
@@ -2240,10 +2308,10 @@ module.exports = {
         // cost pool, output-lot costs, non-locked COGS / derived payables).
         const propagation = await inventoryService.propagateLotCostToBatches(trx, parseInt(id, 10), { userId: req.user?.id });
         const updated = await trx('inventory_lots').where({ id }).first();
-        return { updated, payableUpdated, propagation };
+        return { updated, payableUpdated, isOpeningStock, propagation };
       });
 
-      return res.json({ success: true, data: { lot: await redactForUser(req, enrichLot(result.updated)), payableUpdated: result.payableUpdated, propagation: result.propagation } });
+      return res.json({ success: true, data: { lot: await redactForUser(req, enrichLot(result.updated)), payableUpdated: result.payableUpdated, openingStockRestated: result.isOpeningStock, propagation: result.propagation } });
     } catch (err) {
       const status = err.status || 500;
       if (status === 500) console.error('setLotPurchaseRate error:', err);
@@ -2333,7 +2401,7 @@ module.exports = {
         // Re-bill the rice only (same as setLotPurchaseRate): landed cost keeps
         // freight + commission + extras; the rice payable and the GL move by the
         // change in purchase amount — signed delta, never reverse+repost.
-        const { payableUpdated } = await applyRicePurchaseChange(trx, lot, {
+        const { payableUpdated, isOpeningStock } = await applyRicePurchaseChange(trx, lot, {
           newPurchaseAmount, kg: newReceivedKg,
           lotFields: {
             received_net_weight_kg: newReceivedKg,
@@ -2347,9 +2415,9 @@ module.exports = {
 
         const propagation = await inventoryService.propagateLotCostToBatches(trx, parseInt(id, 10), { userId: req.user?.id });
         const updated = await trx('inventory_lots').where({ id }).first();
-        return { updated, payableUpdated, propagation };
+        return { updated, payableUpdated, isOpeningStock, propagation };
       });
-      return res.json({ success: true, data: { lot: await redactForUser(req, enrichLot(result.updated)), payableUpdated: result.payableUpdated, propagation: result.propagation } });
+      return res.json({ success: true, data: { lot: await redactForUser(req, enrichLot(result.updated)), payableUpdated: result.payableUpdated, openingStockRestated: result.isOpeningStock, propagation: result.propagation } });
     } catch (err) {
       const status = err.status || 500;
       if (status === 500) console.error('setLotReceivedQty error:', err);

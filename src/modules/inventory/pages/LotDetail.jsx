@@ -1579,6 +1579,7 @@ function PriceEditModal({ isOpen, onClose, lot, addToast, refetch }) {
       const prop = res?.data?.propagation;
       const parts = [`Price set to Rs ${(newRate).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/kg`];
       if (res?.data?.payableUpdated) parts.push('payable adjusted');
+      if (res?.data?.openingStockRestated) parts.push('opening stock restated against equity');
       if (prop?.affectedBatches > 0) parts.push(`${prop.affectedBatches} batch(es) re-costed`);
       if (prop?.cogsLockedSkipped) parts.push(`${prop.cogsLockedSkipped} locked left as-is`);
       addToast(parts.join(' · '), 'success'); refetch(); onClose();
@@ -1641,6 +1642,7 @@ function ReceivedQtyModal({ isOpen, onClose, lot, showCost = true, addToast, ref
       const prop = res?.data?.propagation;
       const parts = [`Received set to ${Math.round(newReceived).toLocaleString()} kg`];
       if (res?.data?.payableUpdated) parts.push('bill adjusted');
+      if (res?.data?.openingStockRestated) parts.push('opening stock restated against equity');
       if (prop?.affectedBatches > 0) parts.push(`${prop.affectedBatches} batch(es) re-costed`);
       addToast(parts.join(' · '), 'success'); refetch(); onClose();
     } catch (err) { addToast(err?.data?.message || err.message || 'Failed', 'error'); } finally { setSaving(false); }

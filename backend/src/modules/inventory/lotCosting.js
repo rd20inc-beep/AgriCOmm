@@ -140,10 +140,20 @@ function computeLotLanded({
  * @param {object} lot                inventory_lots row (purchase_amount, landed_cost_total)
  * @param {number} newPurchaseAmount
  * @param {number} kg                 divisor for the per-kg landed cost (received kg)
+ * Where the GL counterpart goes depends on how the lot was booked:
+ *   - a rice payable → glDelta (Dr/Cr inventory vs 2010 AP, with the payable);
+ *   - OPENING STOCK (no payable; loaded at go-live against 3000 Owner's Equity)
+ *     → equityDelta (Dr/Cr inventory vs 3000), a restatement of the opening
+ *     balance rather than a supplier bill (owner decision 2026-10-07);
+ *   - neither → both zero. The caller must refuse such an edit rather than
+ *     move stock value with no journal.
+ *
  * @param {object|null} ricePayable   the lot's rice payable (original_amount, paid_amount)
- * @returns {{ purchaseDelta, landedTotal, perKg, payable, glDelta }}
+ * @param {object} [opts]
+ * @param {boolean} [opts.isOpeningStock]  lot was created by the opening-balance load
+ * @returns {{ purchaseDelta, landedTotal, perKg, payable, glDelta, equityDelta }}
  */
-function repriceLotPurchase(lot, newPurchaseAmount, kg, ricePayable = null) {
+function repriceLotPurchase(lot, newPurchaseAmount, kg, ricePayable = null, { isOpeningStock = false } = {}) {
   const purchaseDelta = round2(num(newPurchaseAmount) - num(lot.purchase_amount));
   const landedTotal = round2(num(lot.landed_cost_total) + purchaseDelta);
   const perKg = num(kg) > 0 ? round4(landedTotal / num(kg)) : 0;
@@ -160,7 +170,9 @@ function repriceLotPurchase(lot, newPurchaseAmount, kg, ricePayable = null) {
   }
   // The GL moves with the payable document: no rice payable → no AP journal.
   const glDelta = ricePayable ? purchaseDelta : 0;
-  return { purchaseDelta, landedTotal, perKg, payable, glDelta };
+  // A payable wins: an opening lot that later took an added purchase bills it.
+  const equityDelta = (!ricePayable && isOpeningStock) ? purchaseDelta : 0;
+  return { purchaseDelta, landedTotal, perKg, payable, glDelta, equityDelta };
 }
 
 module.exports = {
