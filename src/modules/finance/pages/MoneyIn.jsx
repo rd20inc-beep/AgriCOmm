@@ -16,20 +16,12 @@ import { bucketize, BUCKET_KEYS } from '../utils/aging';
 import { shortenRef } from '../utils/refs';
 import { favStar, isFavorite } from '../../../shared/utils/favorites';
 import { localToday, defaultBankAccountId } from '../../localSales/utils/saleStatus';
+import FieldError from '../../../shared/components/FieldError';
+import { fmtMoney, fmtDate, fmtDateTime } from '../../../shared/utils/format';
 
-// Currency-aware formatter — picks $ / Rs / € / £ from the row's currency.
-function fmtCur(n, currency = 'USD') {
-  const symbol = currency === 'PKR' ? 'Rs '
-    : currency === 'EUR' ? '€'
-    : currency === 'GBP' ? '£'
-    : currency === 'AED' ? 'AED '
-    : '$';
-  if (n == null || isNaN(n)) return `${symbol}0`;
-  if (Math.abs(n) >= 1_000_000) return `${symbol}${(n / 1_000_000).toFixed(2)}M`;
-  if (Math.abs(n) >= 100_000) return `${symbol}${(n / 100_000).toFixed(2)}L`;
-  if (Math.abs(n) >= 1_000) return `${symbol}${(n / 1_000).toFixed(1)}K`;
-  return `${symbol}${(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
+// Exact amount in the row's own currency (receivables default to USD).
+const fmtCur = (n, currency = 'USD') => fmtMoney(parseFloat(n) || 0, currency || 'USD');
+const REQ = <span className="text-red-500">*</span>;
 // PKR equivalent of any row — prefers locked base_amount_pkr, falls back
 // to amount × fx_rate, finally amount as-is for PKR rows. Falls back
 // to DEFAULT_FX_RATE only when neither a stamped base PKR nor a row
@@ -42,9 +34,6 @@ function pkrOf(row, key = 'outstanding') {
   if (base > 0 && key === 'expectedAmount') return base;
   return toPkr(amount, row?.currency, row?.fxRate);
 }
-// Backwards-compat helper kept for existing call sites that don't yet
-// pass a currency (treats input as already-formatted number in PKR).
-function fmt(n) { return fmtCur(n, 'USD'); }
 // Human-readable payment method label.
 function methodLabel(m) {
   const map = { bank_transfer: 'Bank Transfer / TT', cash: 'Cash', cheque: 'Cheque', lc: 'Letter of Credit', online: 'Online' };
@@ -117,7 +106,7 @@ export default function MoneyIn() {
       if (row.orderId) return <Link to={`/export/${row.orderId}`} className="text-blue-600 hover:text-blue-800 font-medium hover:underline whitespace-nowrap" onClick={e => e.stopPropagation()}>{inner}</Link>;
       return inner;
     }},
-    { key: 'customerName', label: 'Customer', sortable: true, render: (v, row) => <PartyLink type="customer" id={row.customerId} name={v} /> },
+    { key: 'customerName', label: 'Customer', sortable: true, render: (v, row) => <span className="block max-w-[14rem] truncate" title={v || ''}><PartyLink type="customer" id={row.customerId} name={v} /></span> },
     { key: 'type', label: 'Type', sortable: true, render: (v, row) => (
       <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${v === 'Advance' ? 'bg-blue-50 text-blue-700' : 'bg-purple-50 text-purple-700'}`}>
         {v}{row.kind === 'local_sale' && row.lineCount > 1 ? ` · ${row.lineCount} items` : ''}
@@ -145,7 +134,7 @@ export default function MoneyIn() {
         </div>
       );
     }},
-    { key: 'dueDate', label: 'Due', sortable: true, render: (v) => v ? new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : '—' },
+    { key: 'dueDate', label: 'Due', sortable: true, render: (v) => <span className="whitespace-nowrap">{fmtDate(v)}</span> },
     { key: 'status', label: 'Status', sortable: true },
   ];
 
@@ -158,9 +147,11 @@ export default function MoneyIn() {
   );
   const [recvForm, setRecvForm] = useState({ amount: '', bankAccountId: '', paymentMethod: 'bank_transfer', paymentDate: localToday(), chequeNo: '', dueDate: '', notes: '', collectionLocation: 'Mill' });
   const nonCashAccounts = bankAccounts.filter(a => a.type !== 'cash');
+  const [recvErrors, setRecvErrors] = useState({});
 
   function openDrawer(row) {
     setDrawer(row);
+    setRecvErrors({});
     setRecvForm({
       amount: String(parseFloat(row.outstanding) || 0),
       // Starts on the starred bank account (favorites.js).
@@ -178,9 +169,11 @@ export default function MoneyIn() {
 
   async function handleRecordPayment(e) {
     e.preventDefault();
+    if (recordPaymentMut.isPending || acceptLocalSaleMut.isPending) return;
     const recv = drawer;
     const amount = parseFloat(recvForm.amount);
-    if (!amount || amount <= 0) { addToast('Enter a valid amount', 'error'); return; }
+    if (!amount || amount <= 0) { setRecvErrors({ amount: 'Enter a valid amount' }); return; }
+    setRecvErrors({});
     try {
       if (recv.kind === 'local_sale') {
         // Local-sale rows carry a local_sales id (NOT a receivables id), so they
@@ -238,7 +231,7 @@ export default function MoneyIn() {
           <div className="border-b-2 border-gray-900 pb-2 flex items-end justify-between mb-4">
             <div>
               <div className="text-base font-bold uppercase tracking-wider">{companyName}</div>
-              <div className="text-xs text-gray-500">Generated {new Date().toLocaleString()}</div>
+              <div className="text-xs text-gray-500">Generated {fmtDateTime(new Date())}</div>
             </div>
             <div className="text-right">
               <div className="text-lg font-bold">Money In — Receivables</div>
@@ -262,7 +255,7 @@ export default function MoneyIn() {
       </div>
 
       {/* Aging Chart */}
-      <FinanceChart title="Aging Breakdown" type="bar" data={agingData} xKey="name"
+      <FinanceChart title="Aging Breakdown" type="bar" data={agingData} xKey="name" currency="Rs "
         series={[{ key: 'value', name: 'Outstanding', color: '#3b82f6' }]} height={200} loading={isLoading} />
 
       {/* Filters */}
@@ -307,11 +300,11 @@ export default function MoneyIn() {
           <div className="fixed inset-0 bg-black/30" onClick={() => setDrawer(null)} />
           <div className="relative w-full max-w-md bg-white shadow-xl overflow-y-auto">
             <div className="px-6 py-4 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
-              <div>
+              <div className="min-w-0">
                 <h2 className="text-lg font-semibold text-gray-900">{drawer.recvNo}</h2>
-                <p className="text-sm text-gray-500"><PartyLink type="customer" id={drawer.customerId} name={drawer.customerName} /> &middot; <StatusBadge status={drawer.status} /></p>
+                <p className="text-sm text-gray-500 break-words"><PartyLink type="customer" id={drawer.customerId} name={drawer.customerName} /> &middot; <StatusBadge status={drawer.status} /></p>
               </div>
-              <button onClick={() => setDrawer(null)} className="p-2 rounded-md hover:bg-gray-200"><X size={18} /></button>
+              <button onClick={() => setDrawer(null)} aria-label="Close" title="Close" className="p-2 rounded-md hover:bg-gray-200"><X size={18} /></button>
             </div>
             <div className="px-6 py-4 space-y-4">
               <div className="grid grid-cols-3 gap-3">
@@ -330,7 +323,7 @@ export default function MoneyIn() {
               </div>
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div><p className="text-xs text-gray-500">Type</p><p>{drawer.type}</p></div>
-                <div><p className="text-xs text-gray-500">Due Date</p><p>{drawer.dueDate ? new Date(drawer.dueDate).toLocaleDateString() : '—'}</p></div>
+                <div><p className="text-xs text-gray-500">Due Date</p><p>{fmtDate(drawer.dueDate)}</p></div>
                 <div><p className="text-xs text-gray-500">Currency</p><p>{drawer.currency || 'USD'}</p></div>
                 <div><p className="text-xs text-gray-500">Order</p>{drawer.orderId ? <Link to={`/export/${drawer.orderId}`} className="text-blue-600 hover:underline font-medium">View Order →</Link> : <p>—</p>}</div>
               </div>
@@ -354,11 +347,11 @@ export default function MoneyIn() {
                         <div key={p.id} className="border border-gray-200 rounded-lg px-3 py-2">
                           <div className="flex items-center justify-between">
                             <span className="text-sm font-semibold text-emerald-700">{fmtCur(p.amount, p.currency || drawer.currency)}</span>
-                            <span className="text-xs text-gray-500">{p.paymentDate ? new Date(p.paymentDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}</span>
+                            <span className="text-xs text-gray-500">{fmtDate(p.paymentDate)}</span>
                           </div>
                           <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-gray-500">
                             <span>Method: <span className="font-medium text-gray-700">{methodLabel(p.paymentMethod)}</span></span>
-                            <span>Into: <span className="font-medium text-gray-700">{into || '—'}</span></span>
+                            <span className="min-w-0 break-words">Into: <span className="font-medium text-gray-700">{into || '—'}</span></span>
                             {p.bankReference && <span>Ref/Cheque: <span className="font-medium text-gray-700">{p.bankReference}</span></span>}
                           </div>
                           {p.notes && <p className="mt-0.5 text-[11px] text-gray-400 truncate" title={p.notes}>{p.notes}</p>}
@@ -435,13 +428,13 @@ export default function MoneyIn() {
                 )}
                 {!isLocalCash && (
                   <div>
-                    <label className="text-xs text-gray-500 block mb-1">{isUnclearedCheque(recvForm) ? 'Bank account it will clear into (optional)' : 'Receive Into Account'}</label>
+                    <label className="text-xs text-gray-500 block mb-1">{isUnclearedCheque(recvForm) ? 'Bank account it will clear into (optional)' : <>Receive Into Account {REQ}</>}</label>
                     <select required={!isUnclearedCheque(recvForm)} value={recvForm.bankAccountId} onChange={e => setRecvForm({ ...recvForm, bankAccountId: e.target.value })}
                       className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
                       <option value="">{recvForm.paymentMethod === 'cash' ? 'Select cash account...' : 'Select bank account...'}</option>
                       {bankAccounts.filter(a => (a.type === 'cash') === (recvForm.paymentMethod === 'cash')).map(a => (
                         <option key={a.id} value={a.id}>
-                          {favStar(a)}{a.name} — {a.bankName || ''} ({a.currency || 'PKR'} {(parseFloat(a.currentBalance) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
+                          {favStar(a)}{a.name} — {a.bankName || ''} ({fmtMoney(parseFloat(a.currentBalance) || 0, a.currency || 'PKR', { decimals: 2 })})
                         </option>
                       ))}
                     </select>
@@ -451,13 +444,14 @@ export default function MoneyIn() {
                 {/* Amount + Date */}
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="text-xs text-gray-500 block mb-1">Amount ({drawer.currency || 'USD'})</label>
+                    <label className="text-xs text-gray-500 block mb-1">Amount ({drawer.currency || 'USD'}) {REQ}</label>
                     <input type="number" step="0.01" required value={recvForm.amount}
-                      onChange={e => setRecvForm({ ...recvForm, amount: e.target.value })}
+                      onChange={e => { setRecvForm({ ...recvForm, amount: e.target.value }); setRecvErrors({}); }}
                       className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    <FieldError error={recvErrors.amount} />
                   </div>
                   <div>
-                    <label className="text-xs text-gray-500 block mb-1">Date</label>
+                    <label className="text-xs text-gray-500 block mb-1">Date {REQ}</label>
                     <input type="date" required value={recvForm.paymentDate}
                       onChange={e => setRecvForm({ ...recvForm, paymentDate: e.target.value })}
                       className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />

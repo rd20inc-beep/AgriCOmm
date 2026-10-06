@@ -14,27 +14,13 @@ import { favStar, isFavorite } from '../../../shared/utils/favorites';
 import { paymentWord, defaultBankAccountId } from '../../localSales/utils/saleStatus';
 import { CHEQUE_DATE_LABEL } from '../../../components/payments/paymentPayload';
 import { ChequeHint } from '../../../components/payments/PaymentFields';
-import { todayLocalISO } from '../../../shared/utils/format';
+import { todayLocalISO, fmtPKR, fmtKg, fmtNum, fmtPct, fmtDate, fmtDateTime } from '../../../shared/utils/format';
+import StatusBadge from '../../../shared/components/StatusBadge';
+import FieldError from '../../../shared/components/FieldError';
 
-function fmtPKR(n) {
-  const v = parseFloat(n) || 0;
-  if (Math.abs(v) >= 10_000_000) return `Rs ${(v / 10_000_000).toFixed(2)}Cr`;
-  if (Math.abs(v) >= 100_000) return `Rs ${(v / 100_000).toFixed(2)}L`;
-  if (Math.abs(v) >= 1_000) return `Rs ${(v / 1_000).toFixed(0)}K`;
-  return `Rs ${(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-const fmtFull = (n) => `Rs ${(parseFloat(n) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const fmtDate = (s) => s ? new Date(s).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }) : '—';
+// Exact to the paisa — sale totals are reconciled line by line.
+const fmtFull = (n) => fmtPKR(parseFloat(n) || 0, { decimals: 2 });
 const methodLabel = (m) => ({ cash: 'Cash', bank_transfer: 'Bank Transfer', cheque: 'Cheque', lc: 'Letter of Credit', online: 'Online' }[m] || (m ? m.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : '—'));
-
-const STATUS_TONE = {
-  Paid:     'bg-emerald-50 text-emerald-700 border-emerald-200',
-  Partial:  'bg-amber-50 text-amber-700 border-amber-200',
-  Pending:  'bg-gray-50 text-gray-600 border-gray-200',
-  Credit:   'bg-blue-50 text-blue-700 border-blue-200',
-  Refunded: 'bg-red-50 text-red-700 border-red-200',
-  Rejected: 'bg-red-50 text-red-700 border-red-200',
-};
 
 export default function LocalSalesFinance() {
   const { queryParams: rangeParams } = useFinanceDateRange();
@@ -47,12 +33,14 @@ export default function LocalSalesFinance() {
   const [searchTerm, setSearchTerm] = useState('');
   const [detailSale, setDetailSale] = useState(null);
   const [payForm, setPayForm] = useState({ amount: '', method: 'cash', bankAccountId: '', reference: '', dueDate: '', collectionLocation: 'Mill' });
+  const [payErrors, setPayErrors] = useState({});
   const nonCashAccounts = bankAccounts.filter(a => a.type !== 'cash');
   // Where each payment was received (account/cash) + type, for the open sale.
   const { data: receiptData, isLoading: receiptsLoading } = useReceivableReceipts(detailSale?.id, 'local_sale', !!detailSale);
 
   function openDetail(s) {
     setDetailSale(s);
+    setPayErrors({});
     setPayForm({
       amount: String(parseFloat(s.dueAmount) || 0), method: 'cash',
       bankAccountId: defaultBankAccountId(nonCashAccounts, isFavorite), reference: '', dueDate: '',
@@ -60,8 +48,10 @@ export default function LocalSalesFinance() {
     });
   }
   async function recordPayment() {
+    if (acceptPay.isPending) return;
     const amount = parseFloat(payForm.amount);
-    if (!amount || amount <= 0) { addToast?.('Enter a valid amount', 'error'); return; }
+    if (!amount || amount <= 0) { setPayErrors({ amount: 'Enter a valid amount' }); return; }
+    setPayErrors({});
     try {
       await acceptPay.mutateAsync({
         saleId: detailSale.id,
@@ -150,16 +140,16 @@ export default function LocalSalesFinance() {
               <Store size={14} /> Local sales — Booked profit
             </div>
             <div className="text-3xl sm:text-4xl font-bold leading-tight tabular-nums">
-              {fmtPKR(filteredTotals.profit)}
+              {fmtFull(filteredTotals.profit)}
             </div>
             <div className="text-xs opacity-90 mt-1">
-              Revenue {fmtPKR(filteredTotals.revenue)} · Collected {fmtPKR(filteredTotals.collected)}
-              {filteredTotals.outstanding > 0 && <> · Outstanding {fmtPKR(filteredTotals.outstanding)}</>}
+              Revenue {fmtFull(filteredTotals.revenue)} · Collected {fmtFull(filteredTotals.collected)}
+              {filteredTotals.outstanding > 0 && <> · Outstanding {fmtFull(filteredTotals.outstanding)}</>}
             </div>
           </div>
           <div className="flex flex-col items-start sm:items-end gap-1.5 text-[11px]">
             <span className="inline-flex items-center gap-1.5 font-semibold uppercase tracking-wider px-3 py-1.5 rounded-full bg-white/15 ring-1 ring-white/30">
-              <TrendingUp size={12} /> Margin {marginPct == null ? '—' : `${marginPct.toFixed(1)}%`}
+              <TrendingUp size={12} /> Margin {marginPct == null ? '—' : fmtPct(marginPct)}
             </span>
             <div className="opacity-80 text-right">
               {filteredTotals.count} {filteredTotals.count === 1 ? 'sale' : 'sales'} in view
@@ -170,16 +160,16 @@ export default function LocalSalesFinance() {
 
       {/* ─── KPIs ──────────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <FinanceKPI icon={Store} title="Revenue" value={fmtPKR(filteredTotals.revenue)}
-          subtitle={`This month: ${fmtPKR(summary?.month?.total || 0)}`} status="info" loading={isLoading} />
-        <FinanceKPI icon={CheckCircle2} title="Collected" value={fmtPKR(filteredTotals.collected)}
+        <FinanceKPI icon={Store} title="Revenue" value={fmtFull(filteredTotals.revenue)}
+          subtitle={`This month: ${fmtFull(summary?.month?.total || 0)}`} status="info" loading={isLoading} />
+        <FinanceKPI icon={CheckCircle2} title="Collected" value={fmtFull(filteredTotals.collected)}
           subtitle={filteredTotals.revenue > 0 ? `${Math.round(filteredTotals.collected / filteredTotals.revenue * 100)}% of revenue` : '—'}
           status="good" loading={isLoading} />
-        <FinanceKPI icon={Clock} title="Outstanding" value={fmtPKR(filteredTotals.outstanding)}
+        <FinanceKPI icon={Clock} title="Outstanding" value={fmtFull(filteredTotals.outstanding)}
           subtitle={filteredTotals.outstanding > 0 ? 'Partial / Credit' : 'Fully collected'}
           status={filteredTotals.outstanding > 0 ? 'warning' : 'good'} loading={isLoading} />
-        <FinanceKPI icon={TrendingUp} title="Gross Profit" value={fmtPKR(filteredTotals.profit)}
-          subtitle={marginPct == null ? '—' : `${marginPct.toFixed(1)}% margin`}
+        <FinanceKPI icon={TrendingUp} title="Gross Profit" value={fmtFull(filteredTotals.profit)}
+          subtitle={marginPct == null ? '—' : `${fmtPct(marginPct)} margin`}
           status={filteredTotals.profit >= 0 ? 'good' : 'danger'} loading={isLoading} />
       </div>
 
@@ -241,19 +231,18 @@ export default function LocalSalesFinance() {
                 </td></tr>
               ) : filtered.map(s => {
                 const word = paymentWord(s);
-                const tone = STATUS_TONE[word] || STATUS_TONE.Pending;
                 return (
                   <tr key={s.id} className="hover:bg-gray-50">
                     <td data-label="Sale" className="px-4 py-2.5 font-medium text-gray-900">
                       <Link to={`/local-sales/${s.id}`} className="text-blue-600 hover:underline">{s.saleNo}</Link>
                     </td>
                     <td data-label="Date" className="mob-hide px-4 py-2.5 text-gray-700 whitespace-nowrap">{fmtDate(s.saleDate)}</td>
-                    <td data-label="Buyer" className="px-4 py-2.5 text-gray-700 truncate max-w-[180px]">{s.buyerName || '—'}</td>
+                    <td data-label="Buyer" className="px-4 py-2.5 text-gray-700 truncate max-w-[180px]" title={s.buyerName || undefined}>{s.buyerName || '—'}</td>
                     <td data-label="Item / Lot" className="px-4 py-2.5 text-xs">
                       <div className="font-medium text-gray-900">{s.itemName || '—'}</div>
                       {s.lotNo && <div className="text-gray-400">{s.lotNo}</div>}
                     </td>
-                    <td data-label="Qty (kg)" className="mob-hide px-4 py-2.5 text-right tabular-nums text-gray-700">{Math.round(parseFloat(s.quantityKg) || 0).toLocaleString()}</td>
+                    <td data-label="Qty (kg)" className="mob-hide px-4 py-2.5 text-right tabular-nums text-gray-700">{fmtNum(Math.round(parseFloat(s.quantityKg) || 0))}</td>
                     <td data-label="Revenue" className="px-4 py-2.5 text-right tabular-nums font-medium text-gray-900">{fmtFull(s.totalAmount)}</td>
                     <td data-label="Collected" className="mob-hide px-4 py-2.5 text-right tabular-nums text-emerald-700">{fmtFull(s.paidAmount)}</td>
                     <td data-label="Profit" className="mob-hide px-4 py-2.5 text-right tabular-nums">
@@ -262,12 +251,10 @@ export default function LocalSalesFinance() {
                       </span>
                     </td>
                     <td data-label="Status" className="px-4 py-2.5">
-                      <span className={`inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full border ${tone}`}>
-                        {word}
-                      </span>
+                      <StatusBadge status={word} />
                     </td>
                     <td data-label="Actions" className="px-4 py-2.5 text-center">
-                      <button onClick={() => openDetail(s)} className="text-blue-600 hover:text-blue-800" title="View details">
+                      <button onClick={() => openDetail(s)} className="text-blue-600 hover:text-blue-800" title="View details" aria-label="View details">
                         <Eye size={15} />
                       </button>
                     </td>
@@ -300,7 +287,8 @@ export default function LocalSalesFinance() {
                 <div className="flex gap-2">
                   <input type="number" min="0" step="0.01" value={payForm.amount}
                     onChange={(e) => setPayForm({ ...payForm, amount: e.target.value })}
-                    className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm" placeholder="Amount" />
+                    aria-label="Amount" aria-required="true"
+                    className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm" placeholder="Amount *" />
                   <select value={payForm.method} onChange={(e) => setPayForm({ ...payForm, method: e.target.value })}
                     className="border border-gray-200 rounded-lg px-2 py-2 text-sm bg-white">
                     <option value="cash">Cash</option>
@@ -308,6 +296,7 @@ export default function LocalSalesFinance() {
                     <option value="cheque">Cheque</option>
                   </select>
                 </div>
+                <FieldError error={payErrors.amount} />
                 {payForm.method === 'cash' && (
                   <div className="grid grid-cols-2 gap-2">
                     {['Mill', 'Head Office'].map(loc => (
@@ -355,12 +344,12 @@ export default function LocalSalesFinance() {
                 <Row label="Buyer" value={s.buyerName || s.customerName} />
                 <Row label="Item" value={s.itemName} />
                 {s.lotNo && <Row label="Lot" value={s.lotNo} />}
-                <Row label="Qty" value={`${Math.round(parseFloat(s.quantityKg) || 0).toLocaleString()} kg`} />
+                <Row label="Qty" value={fmtKg(Math.round(parseFloat(s.quantityKg) || 0))} />
                 <Row label="Rate" value={s.ratePerKg ? `${fmtFull(s.ratePerKg)}/kg` : '—'} />
                 <Row label="Profit" value={fmtFull(s.grossProfit || s.grossProfitPkr)} />
-                <Row label="Status" value={paymentWord(s)} />
+                <Row label="Status" value={<StatusBadge status={paymentWord(s)} />} />
                 <Row label="Created by" value={<span className="inline-flex items-center gap-1.5"><User size={13} className="text-gray-400" />{s.createdByName || '—'}</span>} />
-                <Row label="Created at" value={s.createdAt ? new Date(s.createdAt).toLocaleString('en-GB') : '—'} />
+                <Row label="Created at" value={fmtDateTime(s.createdAt)} />
               </div>
 
               {/* Payments received — where & how each came in. */}
@@ -382,7 +371,8 @@ export default function LocalSalesFinance() {
                         <div key={p.id} className="border border-gray-200 rounded-lg px-3 py-2">
                           <div className="flex items-center justify-between">
                             <span className="text-sm font-semibold text-emerald-700">{fmtFull(p.amount)}</span>
-                            <span className="text-xs text-gray-500">{p.paymentDate ? new Date(p.paymentDate).toLocaleDateString('en-GB') : '—'}</span>
+                            <span className="text-xs text-gray-500">{fmtDate(p.paymentDate)}</span>
+
                           </div>
                           <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-gray-500">
                             <span>Type: <span className="font-medium text-gray-700">{methodLabel(p.paymentMethod)}</span></span>

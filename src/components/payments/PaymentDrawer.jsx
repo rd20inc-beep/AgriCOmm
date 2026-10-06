@@ -3,7 +3,7 @@ import { Banknote } from 'lucide-react';
 import SlideDrawer from '../SlideDrawer';
 import PaymentFields from './PaymentFields';
 import PaymentHistory from './PaymentHistory';
-import { blankPaymentForm, paymentPayload, validatePayment } from './paymentPayload';
+import { blankPaymentForm, paymentPayload, paymentFieldError } from './paymentPayload';
 
 /**
  * One drawer for settling a payable or a receivable.
@@ -55,16 +55,27 @@ export default function PaymentDrawer({
     : (outstanding != null ? String(outstanding) : '');
   const [form, setForm] = useState(() => blankPaymentForm({ amount: prefill, method: defaultMethod }));
   const [saving, setSaving] = useState(false);
-  const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
+  const [errors, setErrors] = useState({});
+  // Editing a field clears the message shown under it.
+  const set = (k, v) => {
+    setForm((p) => ({ ...p, [k]: v }));
+    setErrors((e) => (e[k] ? { ...e, [k]: undefined } : e));
+  };
 
   async function submit(e) {
     e?.preventDefault?.();
-    const problem = validatePayment(form, {
+    if (saving) return;
+    const problem = paymentFieldError(form, {
       outstanding: capAmount ? outstanding : null,
       requireAccount: fixedAccountId === undefined,
       currency,
     });
-    if (problem) { addToast?.(problem, 'error'); return; }
+    if (problem) {
+      setErrors({ [problem.field]: problem.message });
+      addToast?.(problem.message, 'error');
+      return;
+    }
+    setErrors({});
     setSaving(true);
     try {
       await onSubmit(paymentPayload(form, {
@@ -108,6 +119,7 @@ export default function PaymentDrawer({
           extras={extras}
           hideAccount={fixedAccountId !== undefined}
           filterAccountsByMethod={filterAccountsByMethod}
+          errors={errors}
         />
         {children}
         {(history !== undefined || historyLoading) && (

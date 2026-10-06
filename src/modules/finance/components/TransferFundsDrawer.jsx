@@ -3,10 +3,12 @@ import { ArrowLeftRight, Building2, Factory } from 'lucide-react';
 import SlideDrawer from '../../../components/SlideDrawer';
 import { useBankAccounts, useCreateFundTransfer } from '../../../api/queries';
 import { favStar } from '../../../shared/utils/favorites';
-import { todayLocalISO } from '../../../shared/utils/format';
+import FieldError from '../../../shared/components/FieldError';
+import { todayLocalISO, fmtPKR } from '../../../shared/utils/format';
 
 const TODAY = () => todayLocalISO();
-const fmt = (n) => `Rs ${(parseFloat(n) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const fmt = (n) => fmtPKR(parseFloat(n) || 0, { decimals: 2 });
+const REQ = <span className="text-red-500">*</span>;
 
 // Reusable Head Office ⇄ Mill money-transfer drawer. Moves cash between two real
 // accounts AND records the inter-company GL; used from both Finance (Cash) and
@@ -26,6 +28,8 @@ export default function TransferFundsDrawer({ open, onClose, defaultDirection = 
   const [reference, setReference] = useState('');
   const [notes, setNotes] = useState('');
   const [error, setError] = useState('');
+  // Required-field problems, shown under the field they belong to.
+  const [fieldErrors, setFieldErrors] = useState({});
 
   const pkr = useMemo(() => accounts.filter((a) => (a.currency || 'PKR') === 'PKR' && a.isActive !== false), [accounts]);
   const hoAccts = useMemo(() => pkr.filter((a) => (a.entity || 'general') !== 'mill'), [pkr]);
@@ -41,6 +45,7 @@ export default function TransferFundsDrawer({ open, onClose, defaultDirection = 
   useEffect(() => {
     if (!open) return;
     setError('');
+    setFieldErrors({});
     const f = (direction === 'ho_to_mill' ? hoAccts : millAccts);
     const t = (direction === 'ho_to_mill' ? millAccts : hoAccts);
     setFromId(f[0] ? String(f[0].id) : '');
@@ -54,10 +59,15 @@ export default function TransferFundsDrawer({ open, onClose, defaultDirection = 
   const amt = parseFloat(amount) || 0;
 
   async function submit() {
+    if (createMut.isPending) return;
     setError('');
-    if (!fromId || !toId) { setError('Pick both a source and destination account.'); return; }
-    if (String(fromId) === String(toId)) { setError('Source and destination must be different.'); return; }
-    if (!(amt > 0)) { setError('Enter an amount greater than zero.'); return; }
+    const fe = {};
+    if (!fromId) fe.from = 'Pick a source account.';
+    if (!toId) fe.to = 'Pick a destination account.';
+    if (fromId && toId && String(fromId) === String(toId)) fe.to = 'Source and destination must be different.';
+    if (!(amt > 0)) fe.amount = 'Enter an amount greater than zero.';
+    setFieldErrors(fe);
+    if (Object.keys(fe).length) return;
     try {
       await createMut.mutateAsync({
         direction, from_account_id: Number(fromId), to_account_id: Number(toId),
@@ -114,27 +124,30 @@ export default function TransferFundsDrawer({ open, onClose, defaultDirection = 
 
         {/* From */}
         <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">From account ({direction === 'ho_to_mill' ? 'Head Office' : 'Mill'})</label>
+          <label className="block text-xs font-medium text-gray-600 mb-1">From account ({direction === 'ho_to_mill' ? 'Head Office' : 'Mill'}) {REQ}</label>
           <select value={fromId} onChange={(e) => setFromId(e.target.value)} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900">
             <option value="">Select account…</option>
             {fromOptions.map((a) => <option key={a.id} value={a.id}>{favStar(a)}{a.name} — {fmt(a.currentBalance)}</option>)}
           </select>
+          <FieldError error={fieldErrors.from} />
         </div>
 
         {/* To */}
         <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">To account ({direction === 'ho_to_mill' ? 'Mill' : 'Head Office'})</label>
+          <label className="block text-xs font-medium text-gray-600 mb-1">To account ({direction === 'ho_to_mill' ? 'Mill' : 'Head Office'}) {REQ}</label>
           <select value={toId} onChange={(e) => setToId(e.target.value)} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900">
             <option value="">Select account…</option>
             {toOptions.map((a) => <option key={a.id} value={a.id}>{favStar(a)}{a.name}{hideToBalance ? '' : ` — ${fmt(a.currentBalance)}`}</option>)}
           </select>
+          <FieldError error={fieldErrors.to} />
         </div>
 
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Amount (PKR)</label>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Amount (PKR) {REQ}</label>
             <input type="number" min="0" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0"
               className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900" />
+            <FieldError error={fieldErrors.amount} />
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">Date</label>
@@ -167,9 +180,9 @@ export default function TransferFundsDrawer({ open, onClose, defaultDirection = 
 
         {amt > 0 && fromAcct && toAcct && (
           <div className="text-xs text-gray-600 border border-gray-200 rounded-lg p-3 bg-gray-50">
-            <span className="font-medium">{fmt(amt)}</span> leaves <span className="font-medium">{fromAcct.name}</span> now. The
+            <span className="font-medium">{fmt(amt)}</span> leaves <span className="font-medium break-words">{fromAcct.name}</span> now. The
             <span className="font-medium"> {direction === 'ho_to_mill' ? 'Mill' : 'Head Office'}</span> must <span className="font-medium">accept</span> it before it lands in
-            <span className="font-medium"> {toAcct.name}</span> and can be used.
+            <span className="font-medium break-words"> {toAcct.name}</span> and can be used.
           </div>
         )}
         {error && <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded p-2">{error}</div>}

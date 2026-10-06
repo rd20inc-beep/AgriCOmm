@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Percent, Paperclip, FileText, X } from 'lucide-react';
 import api from '../../api/client';
 import { favStar } from '../../shared/utils/favorites';
+import FieldError from '../../shared/components/FieldError';
 import { PAYMENT_METHODS, money, netCash, pickAccountForMethod, CHEQUE_DATE_LABEL, CHEQUE_HINT } from './paymentPayload';
 
 /**
@@ -18,6 +19,15 @@ const inp = 'w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ri
 const lbl = 'block text-xs font-medium text-gray-600 mb-1';
 
 /**
+ * A label string ending in " *" (the convention callers pass, e.g.
+ * 'Amount to pay *') renders its asterisk in the house required-field red.
+ */
+export function RequiredLabel({ text }) {
+  if (typeof text !== 'string' || !text.endsWith(' *')) return text;
+  return <>{text.slice(0, -2)} <span className="text-red-500">*</span></>;
+}
+
+/**
  * What recording a cheque does — nothing, until it is cleared in Due Dates.
  * Shown wherever a cheque can be recorded, in the same words.
  */
@@ -26,10 +36,10 @@ export function ChequeHint({ className = '' }) {
 }
 
 /** Cash / bank account picker. Favourites first, cash accounts marked. */
-export function AccountSelect({ accounts = [], value, onChange, label = 'Cash / Bank account *', id }) {
+export function AccountSelect({ accounts = [], value, onChange, label = 'Cash / Bank account *', id, error }) {
   return (
     <div>
-      <label className={lbl} htmlFor={id}>{label}</label>
+      <label className={lbl} htmlFor={id}><RequiredLabel text={label} /></label>
       <select id={id} value={value} onChange={(e) => onChange(e.target.value)} className={inp}>
         <option value="">Select account…</option>
         {accounts.map((a) => (
@@ -38,6 +48,7 @@ export function AccountSelect({ accounts = [], value, onChange, label = 'Cash / 
           </option>
         ))}
       </select>
+      <FieldError error={error} />
     </div>
   );
 }
@@ -50,7 +61,7 @@ export function AccountSelect({ accounts = [], value, onChange, label = 'Cash / 
  * income. The net is shown so whoever is paying can check it against the cheque
  * they are about to write.
  */
-export function PaymentExtras({ form, set, gross, currency = 'PKR', addToast }) {
+export function PaymentExtras({ form, set, gross, currency = 'PKR', addToast, errors = {} }) {
   const [uploading, setUploading] = useState(false);
 
   const onRate = (v) => {
@@ -87,6 +98,7 @@ export function PaymentExtras({ form, set, gross, currency = 'PKR', addToast }) 
         <div>
           <label className="block text-[11px] font-medium text-gray-500 mb-1">WHT amount</label>
           <input type="number" step="0.01" min="0" value={form.whtAmount || ''} onChange={(e) => set('whtAmount', e.target.value)} placeholder="0" className={inp} />
+          <FieldError error={errors.whtAmount} />
         </div>
         <div>
           <label className="block text-[11px] font-medium text-gray-500 mb-1">Discount</label>
@@ -102,7 +114,7 @@ export function PaymentExtras({ form, set, gross, currency = 'PKR', addToast }) 
         {form.attachmentUrl ? (
           <div className="flex items-center justify-between text-xs bg-white rounded-md border border-gray-200 px-3 py-2">
             <span className="text-gray-700 truncate inline-flex items-center gap-1.5"><FileText size={13} className="text-emerald-600" /> {form.attachmentName || 'Attached'}</span>
-            <button type="button" onClick={() => { set('attachmentUrl', ''); set('attachmentName', ''); }} className="text-red-500 hover:text-red-600"><X size={14} /></button>
+            <button type="button" onClick={() => { set('attachmentUrl', ''); set('attachmentName', ''); }} aria-label="Remove attachment" title="Remove attachment" className="text-red-500 hover:text-red-600"><X size={14} /></button>
           </div>
         ) : (
           <input type="file" onChange={onFile} disabled={uploading}
@@ -128,6 +140,9 @@ export default function PaymentFields({
   // screen already enforced that, it keeps doing so; elsewhere every account is
   // offered with the cash ones marked, as before.
   filterAccountsByMethod = false,
+  // { amount, whtAmount, bankAccountId } → message, shown under that field
+  // (see paymentErrors in paymentPayload.js).
+  errors = {},
 }) {
   const accountOptions = filterAccountsByMethod
     ? accounts.filter((a) => (form.method === 'cash' ? a.type === 'cash' : a.type !== 'cash'))
@@ -156,9 +171,10 @@ export default function PaymentFields({
   return (
     <>
       <div>
-        <label className={lbl} htmlFor={`${idPrefix}-amount`}>{amountLabel}</label>
+        <label className={lbl} htmlFor={`${idPrefix}-amount`}><RequiredLabel text={amountLabel} /></label>
         <input id={`${idPrefix}-amount`} type="number" step="0.01" min="0" max={max}
           value={form.amount} onChange={(e) => set('amount', e.target.value)} className={inp} />
+        <FieldError error={errors.amount} />
       </div>
       <div className="grid grid-cols-2 gap-3">
         <div>
@@ -176,7 +192,7 @@ export default function PaymentFields({
         <AccountSelect id={`${idPrefix}-account`} accounts={accountOptions}
           label={form.method === 'cheque' ? 'Bank account it will clear through (optional)'
             : filterAccountsByMethod && form.method === 'cash' ? 'Cash account *' : 'Cash / Bank account *'}
-          value={form.bankAccountId} onChange={(v) => set('bankAccountId', v)} />
+          value={form.bankAccountId} onChange={(v) => set('bankAccountId', v)} error={errors.bankAccountId} />
       )}
       <div>
         <label className={lbl} htmlFor={`${idPrefix}-ref`}>
@@ -193,7 +209,7 @@ export default function PaymentFields({
           <ChequeHint />
         </div>
       )}
-      {extras && <PaymentExtras form={form} set={set} gross={parseFloat(form.amount) || 0} currency={currency} addToast={addToast} />}
+      {extras && <PaymentExtras form={form} set={set} gross={parseFloat(form.amount) || 0} currency={currency} addToast={addToast} errors={errors} />}
       {remarks && (
         <div>
           <label className={lbl} htmlFor={`${idPrefix}-notes`}>Remarks</label>

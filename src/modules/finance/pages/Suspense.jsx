@@ -10,16 +10,12 @@ import SearchSelect from '../../../components/SearchSelect';
 import { financeApi } from '../api/services';
 import { useApp } from '../../../context/AppContext';
 import { favStar } from '../../../shared/utils/favorites';
-import { todayLocalISO } from '../../../shared/utils/format';
+import { todayLocalISO, fmtPKR, fmtDate, toNumber } from '../../../shared/utils/format';
+import StatusBadge from '../../../shared/components/StatusBadge';
+import FieldError from '../../../shared/components/FieldError';
 
-const PKR = (v) => 'Rs ' + Math.round(parseFloat(v) || 0).toLocaleString();
-const STATUS_META = {
-  'Open': 'bg-blue-50 text-blue-700 border-blue-200',
-  'Under Review': 'bg-amber-50 text-amber-700 border-amber-200',
-  'Partially Resolved': 'bg-indigo-50 text-indigo-700 border-indigo-200',
-  'Resolved': 'bg-emerald-50 text-emerald-700 border-emerald-200',
-  'Reversed': 'bg-gray-100 text-gray-500 border-gray-200',
-};
+// Missing amounts read Rs 0 here (a suspense entry always has an amount).
+const PKR = (v) => fmtPKR(toNumber(v) ?? 0);
 const STATUS_TABS = ['All', 'Open', 'Under Review', 'Partially Resolved', 'Resolved', 'Reversed'];
 
 function Kpi({ label, value, tone }) {
@@ -100,7 +96,7 @@ export default function Suspense() {
         </div>
         <div className="relative flex-1 min-w-[12rem] max-w-xs">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search entry, payer, reason…"
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search entry, payer, reason…" aria-label="Search suspense entries"
             className="w-full border border-gray-300 rounded-lg pl-8 pr-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
         </div>
       </div>
@@ -131,13 +127,13 @@ export default function Suspense() {
                   return (
                     <tr key={e.id} className="hover:bg-gray-50">
                       <td data-label="Entry" className="px-3 py-2 font-mono text-blue-600">{e.entry_no}</td>
-                      <td data-label="Date" className="mob-hide px-3 py-2 text-gray-600">{String(e.date).slice(0, 10)}</td>
+                      <td data-label="Date" className="mob-hide px-3 py-2 text-gray-600 whitespace-nowrap">{fmtDate(e.date)}</td>
                       <td data-label="Type" className="mob-hide px-3 py-2">{e.direction === 'receipt' ? <span className="text-emerald-700">Receipt</span> : <span className="text-red-600">Payment</span>}</td>
                       <td data-label="Payer / Payee" className="px-3 py-2 text-gray-700 max-w-[12rem] truncate" title={e.party_details || ''}>{e.party_details || '—'}</td>
-                      <td data-label="Account" className="mob-hide px-3 py-2 text-gray-500 text-xs">{e.bank_account_name || '—'}</td>
+                      <td data-label="Account" className="mob-hide px-3 py-2 text-gray-500 text-xs max-w-[10rem] truncate" title={e.bank_account_name || ''}>{e.bank_account_name || '—'}</td>
                       <td data-label="Amount" className="px-3 py-2 text-right tabular-nums">{PKR(e.amount)}</td>
                       <td data-label="Outstanding" className="mob-hide px-3 py-2 text-right tabular-nums font-medium">{outstanding > 0.01 ? PKR(outstanding) : '—'}</td>
-                      <td data-label="Status" className="px-3 py-2 text-center"><span className={`inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium border ${STATUS_META[e.status] || ''}`}>{e.status}</span></td>
+                      <td data-label="Status" className="px-3 py-2 text-center"><StatusBadge status={e.status} /></td>
                       <td data-label="Actions" className="px-3 py-2 text-right whitespace-nowrap">
                         {canResolve && <button onClick={() => setResolveFor(e)} className="text-xs font-medium text-emerald-700 hover:underline mr-2">Resolve</button>}
                         {e.status === 'Open' && <button onClick={() => reviewMut.mutate(e.id)} className="text-xs text-amber-600 hover:underline mr-2">Review</button>}
@@ -174,12 +170,20 @@ function RecordDrawer({ bankAccounts, onClose, onDone, addToast }) {
     onSuccess: () => { addToast('Suspense entry recorded', 'success'); onDone(); },
     onError: (e) => addToast(e?.data?.message || e?.message || 'Failed to record', 'error'),
   });
-  const valid = parseFloat(form.amount) > 0 && form.bank_account_id;
+  const [errors, setErrors] = useState({});
+  const submit = () => {
+    const errs = {};
+    if (!(parseFloat(form.amount) > 0)) errs.amount = 'Enter an amount greater than 0';
+    if (!form.bank_account_id) errs.bank_account_id = 'Select the account the money sits in';
+    setErrors(errs);
+    if (Object.keys(errs).length) return;
+    mut.mutate();
+  };
 
   const footer = (
     <div className="flex justify-end gap-3">
       <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
-      <button disabled={!valid || mut.isPending} onClick={() => mut.mutate()} className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">Record</button>
+      <button disabled={mut.isPending} onClick={submit} className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">{mut.isPending ? 'Recording…' : 'Record'}</button>
     </div>
   );
   return (
@@ -193,8 +197,8 @@ function RecordDrawer({ bankAccounts, onClose, onDone, addToast }) {
             ))}
           </div>
         </div>
-        <Field label="Amount (PKR)"><input type="number" value={form.amount} onChange={(e) => set('amount', e.target.value)} className="form-input" min="0" step="0.01" /></Field>
-        <Field label="Bank / Cash Account">
+        <Field label="Amount (PKR)" required error={errors.amount}><input type="number" value={form.amount} onChange={(e) => set('amount', e.target.value)} className="form-input" min="0" step="0.01" /></Field>
+        <Field label="Bank / Cash Account" required error={errors.bank_account_id}>
           <select value={form.bank_account_id} onChange={(e) => set('bank_account_id', e.target.value)} className="form-input">
             <option value="">Select account…</option>
             {(bankAccounts || []).map((a) => <option key={a.id} value={a.id}>{favStar(a)}{a.name} ({a.currency})</option>)}
@@ -230,13 +234,23 @@ function ResolveDrawer({ entry, onClose, onDone, addToast }) {
     onError: (e) => addToast(e?.data?.message || e?.message || 'Failed to resolve', 'error'),
   });
   const amt = parseFloat(alloc.amount) || 0;
-  const valid = amt > 0 && amt - outstanding <= 0.01 && alloc.account_id;
+  const [errors, setErrors] = useState({});
+  const overOutstanding = amt > outstanding + 0.01;
+  const submit = () => {
+    const errs = {};
+    if (!(amt > 0)) errs.amount = 'Enter an amount greater than 0';
+    else if (overOutstanding) errs.amount = `Amount exceeds outstanding ${PKR(outstanding)}.`;
+    if (!alloc.account_id) errs.account_id = 'Select the target GL account';
+    setErrors(errs);
+    if (Object.keys(errs).length) return;
+    mut.mutate();
+  };
   const accountOpts = (accounts || []).map((a) => ({ value: a.id, label: `${a.code} ${a.name}`, sub: a.type }));
 
   const footer = (
     <div className="flex justify-end gap-3">
       <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
-      <button disabled={!valid || mut.isPending} onClick={() => mut.mutate()} className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">Post Reclassification</button>
+      <button disabled={mut.isPending || overOutstanding} onClick={submit} className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">{mut.isPending ? 'Posting…' : 'Post Reclassification'}</button>
     </div>
   );
   return (
@@ -246,7 +260,7 @@ function ResolveDrawer({ entry, onClose, onDone, addToast }) {
           <div className="flex justify-between"><span className="text-gray-500">Amount</span><span className="font-medium">{PKR(entry.amount)}</span></div>
           <div className="flex justify-between"><span className="text-gray-500">Already resolved</span><span className="font-medium">{PKR(entry.resolved_amount)}</span></div>
           <div className="flex justify-between"><span className="text-gray-500">Outstanding</span><span className="font-bold text-emerald-700">{PKR(outstanding)}</span></div>
-          {entry.party_details && <div className="text-xs text-gray-400 mt-1">Payer/Payee: {entry.party_details}</div>}
+          {entry.party_details && <div className="text-xs text-gray-400 mt-1 break-words">Payer/Payee: {entry.party_details}</div>}
         </div>
 
         {full?.resolutions?.length > 0 && (
@@ -259,8 +273,8 @@ function ResolveDrawer({ entry, onClose, onDone, addToast }) {
         )}
 
         <p className="text-sm font-medium text-gray-800">Reclassify to</p>
-        <Field label="Amount (PKR)"><input type="number" value={alloc.amount} onChange={(e) => set('amount', e.target.value)} className="form-input" min="0" max={outstanding} step="0.01" placeholder={String(Math.round(outstanding))} /></Field>
-        <Field label="Target Account (GL)"><SearchSelect value={alloc.account_id} onChange={(v) => set('account_id', v)} options={accountOpts} placeholder="Search chart of accounts…" /></Field>
+        <Field label="Amount (PKR)" required error={errors.amount || (overOutstanding ? `Amount exceeds outstanding ${PKR(outstanding)}.` : null)}><input type="number" value={alloc.amount} onChange={(e) => set('amount', e.target.value)} className="form-input" min="0" max={outstanding} step="0.01" placeholder={String(Math.round(outstanding))} /></Field>
+        <Field label="Target Account (GL)" required error={errors.account_id}><SearchSelect value={alloc.account_id} onChange={(v) => set('account_id', v)} options={accountOpts} placeholder="Search chart of accounts…" /></Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Linked to">
             <select value={alloc.target_type} onChange={(e) => set('target_type', e.target.value)} className="form-input">
@@ -270,18 +284,18 @@ function ResolveDrawer({ entry, onClose, onDone, addToast }) {
           <Field label="Reference"><input value={alloc.target_ref} onChange={(e) => set('target_ref', e.target.value)} className="form-input" placeholder="e.g. EXP-2026-003" /></Field>
         </div>
         <Field label="Narration"><input value={alloc.narration} onChange={(e) => set('narration', e.target.value)} className="form-input" placeholder="Optional note" /></Field>
-        {amt > outstanding + 0.01 && <p className="text-xs text-red-600">Amount exceeds outstanding {PKR(outstanding)}.</p>}
         <p className="text-[11px] text-gray-400">Posts a balancing journal ({entry.direction === 'receipt' ? 'DR Suspense / CR target' : 'DR target / CR Suspense'}). The original entry is kept for audit.</p>
       </div>
     </SlideDrawer>
   );
 }
 
-function Field({ label, children }) {
+function Field({ label, required, error, children }) {
   return (
     <div>
-      <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
+      <label className="block text-sm font-medium text-gray-700 mb-1">{label}{required && <span className="text-red-500"> *</span>}</label>
       {children}
+      <FieldError error={error} />
     </div>
   );
 }

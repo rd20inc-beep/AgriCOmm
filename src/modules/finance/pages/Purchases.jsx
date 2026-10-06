@@ -17,16 +17,12 @@ import PartyLink from '../../../shared/components/PartyLink';
 import { favStar } from '../../../shared/utils/favorites';
 import { CHEQUE_DATE_LABEL } from '../../../components/payments/paymentPayload';
 import { ChequeHint } from '../../../components/payments/PaymentFields';
-import { todayLocalISO } from '../../../shared/utils/format';
+import { todayLocalISO, fmtPKR, fmtMoney, fmtDate, fmtDateTime } from '../../../shared/utils/format';
+import StatusBadge from '../../../shared/components/StatusBadge';
+import FieldError from '../../../shared/components/FieldError';
 
-function fmtPKR(n) {
-  const v = Number(n) || 0;
-  if (Math.abs(v) >= 1_00_00_000) return `Rs ${(v / 1_00_00_000).toFixed(2)}Cr`;
-  if (Math.abs(v) >= 1_00_000) return `Rs ${(v / 1_00_000).toFixed(2)}L`;
-  if (Math.abs(v) >= 1_000) return `Rs ${(v / 1_000).toFixed(0)}K`;
-  return `Rs ${(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-const fmtFull = (n) => `Rs ${(parseFloat(n) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+// Exact to the paisa (purchase totals are reconciled line by line).
+const fmtFull = (n) => fmtPKR(parseFloat(n) || 0, { decimals: 2 });
 const methodLabel = (m) => ({ cash: 'Cash', bank_transfer: 'Bank Transfer', bank: 'Bank Transfer', cheque: 'Cheque', lc: 'Letter of Credit', online: 'Online' }[m] || (m ? String(m).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : '—'));
 
 const SOURCES = [
@@ -39,15 +35,11 @@ const SOURCES = [
 
 const SOURCE_META = Object.fromEntries(SOURCES.map(s => [s.value, s]));
 
-const STATUS_TONE = {
-  paid:    'bg-emerald-50 text-emerald-700 border-emerald-200',
-  partial: 'bg-amber-50 text-amber-700 border-amber-200',
-  pending: 'bg-gray-50 text-gray-600 border-gray-200',
-  unpaid:  'bg-red-50 text-red-700 border-red-200',
-};
-function statusTone(s) {
-  const k = String(s || 'pending').toLowerCase();
-  return STATUS_TONE[k] || STATUS_TONE.pending;
+// The API sends payment status in either case ('paid' / 'Paid'); StatusBadge
+// keys on the title-cased word.
+function statusLabel(s) {
+  const t = String(s || 'Pending');
+  return t.charAt(0).toUpperCase() + t.slice(1).toLowerCase();
 }
 
 const ADD_OPTIONS = [
@@ -238,7 +230,7 @@ export default function Purchases() {
           <button onClick={exportCsv} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-700 bg-white hover:bg-gray-50 border border-gray-200 rounded-lg">
             <Download size={14} /> CSV
           </button>
-          <button onClick={() => refetch()} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-700 bg-white hover:bg-gray-50 border border-gray-200 rounded-lg">
+          <button onClick={() => refetch()} aria-label="Refresh" title="Refresh" className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-700 bg-white hover:bg-gray-50 border border-gray-200 rounded-lg">
             <RefreshCw size={14} />
           </button>
         </div>
@@ -252,12 +244,12 @@ export default function Purchases() {
               <div className="text-base font-bold uppercase tracking-wider">
                 {companyProfileData?.legalName || companyProfileData?.name || 'AGRI COMMODITIES'}
               </div>
-              <div className="text-xs text-gray-500">Generated {new Date().toLocaleString()}</div>
+              <div className="text-xs text-gray-500">Generated {fmtDateTime(new Date())}</div>
             </div>
             <div className="text-right">
               <div className="text-lg font-bold">Purchases</div>
               <div className="text-xs text-gray-600">
-                {filteredTotals.count} purchases · Total {fmtPKR(filteredTotals.totalPkr)} · Paid {fmtPKR(filteredTotals.paidPkr)} · Open {fmtPKR(filteredTotals.openPkr)}
+                {filteredTotals.count} purchases · Total {fmtFull(filteredTotals.totalPkr)} · Paid {fmtFull(filteredTotals.paidPkr)} · Open {fmtFull(filteredTotals.openPkr)}
               </div>
             </div>
           </div>
@@ -265,10 +257,10 @@ export default function Purchases() {
 
       {/* KPIs — recompute from filtered */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <KpiTile label="Total Spend" primary={fmtPKR(filteredTotals.totalPkr)} secondary={`${filteredTotals.count} purchases`} tone="gray" />
-        <KpiTile label="Paid" primary={fmtPKR(filteredTotals.paidPkr)} secondary="Settled" tone="emerald" />
-        <KpiTile label="Open" primary={fmtPKR(filteredTotals.openPkr)} secondary="Pending / Unpaid / Partial" tone="rose" />
-        <KpiTile label="Avg per purchase" primary={fmtPKR(filteredTotals.count > 0 ? filteredTotals.totalPkr / filteredTotals.count : 0)} secondary="In current view" tone="blue" />
+        <KpiTile label="Total Spend" primary={fmtFull(filteredTotals.totalPkr)} secondary={`${filteredTotals.count} purchases`} tone="gray" />
+        <KpiTile label="Paid" primary={fmtFull(filteredTotals.paidPkr)} secondary="Settled" tone="emerald" />
+        <KpiTile label="Open" primary={fmtFull(filteredTotals.openPkr)} secondary="Pending / Unpaid / Partial" tone="rose" />
+        <KpiTile label="Avg per purchase" primary={fmtFull(filteredTotals.count > 0 ? filteredTotals.totalPkr / filteredTotals.count : 0)} secondary="In current view" tone="blue" />
       </div>
 
       {/* Active filter chips — surface every constraint that could be hiding rows,
@@ -331,7 +323,7 @@ export default function Purchases() {
               {s.label}
               {s.value !== 'all' && sourceTotal != null && (
                 <span className={`text-[10px] ${isActive ? 'text-gray-300' : 'text-gray-400'}`}>
-                  {fmtPKR(sourceTotal)}
+                  {fmtFull(sourceTotal)}
                 </span>
               )}
             </button>
@@ -411,7 +403,7 @@ export default function Purchases() {
                 const SrcIcon = meta?.icon || Receipt;
                 return (
                   <tr key={`${p.source}-${p.refId}`} className="hover:bg-gray-50">
-                    <td data-label="Date" className="mob-hide px-4 py-2.5 text-gray-700 whitespace-nowrap">{p.date ? new Date(p.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }) : '—'}</td>
+                    <td data-label="Date" className="mob-hide px-4 py-2.5 text-gray-700 whitespace-nowrap">{fmtDate(p.date)}</td>
                     <td data-label="Ref" className="px-4 py-2.5 font-medium text-gray-900">
                       <RefLink p={p} />
                     </td>
@@ -421,31 +413,30 @@ export default function Purchases() {
                         {meta?.label || p.source}
                       </span>
                     </td>
-                    <td data-label="Supplier" className="px-4 py-2.5 text-gray-700 truncate max-w-[180px]"><PartyLink type="supplier" id={p.supplierId} name={p.supplierName} /></td>
+                    <td data-label="Supplier" className="px-4 py-2.5 text-gray-700 truncate max-w-[180px]" title={p.supplierName || undefined}><PartyLink type="supplier" id={p.supplierId} name={p.supplierName} /></td>
                     <td data-label="Category" className="mob-hide px-4 py-2.5 text-gray-600 capitalize text-xs">{p.category ? String(p.category).replace(/_/g, ' ') : '—'}</td>
                     <td data-label="Amount" className="px-4 py-2.5 text-right tabular-nums">
                       <span className="font-medium text-gray-900">{fmtFull(p.amountPkr)}</span>
                       {(p.currency || 'PKR') !== 'PKR' && parseFloat(p.amount) > 0 && (
-                        <div className="text-[10px] text-gray-400">{p.currency} {Math.round(parseFloat(p.amount)).toLocaleString()}</div>
+                        <div className="text-[10px] text-gray-400">{fmtMoney(p.amount, p.currency)}</div>
                       )}
                     </td>
                     <td data-label="Status" className="px-4 py-2.5">
                       {String(p.paymentStatus || 'pending').toLowerCase() === 'paid' ? (
-                        <span className={`inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full border ${statusTone(p.paymentStatus)}`}>
-                          {String(p.paymentStatus)}
-                        </span>
+                        <StatusBadge status={statusLabel(p.paymentStatus)} />
                       ) : (
                         <button
                           onClick={() => setPayTarget(p)}
-                          className={`inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full border hover:shadow-sm hover:scale-105 transition-transform cursor-pointer ${statusTone(p.paymentStatus)}`}
+                          className="inline-flex items-center gap-1 text-[11px] text-gray-400 hover:shadow-sm hover:scale-105 transition-transform cursor-pointer rounded-md"
                           title="Record payment"
+                          aria-label={`${statusLabel(p.paymentStatus)} — record payment`}
                         >
-                          {String(p.paymentStatus || 'Pending')} →
+                          <StatusBadge status={statusLabel(p.paymentStatus)} /> →
                         </button>
                       )}
                     </td>
-                    <td data-label="Created" className="mob-hide px-4 py-2.5 text-gray-600 text-xs truncate max-w-[140px]">{p.createdByName || '—'}</td>
-                    <td data-label="Approved" className="mob-hide px-4 py-2.5 text-gray-600 text-xs truncate max-w-[140px]">
+                    <td data-label="Created" className="mob-hide px-4 py-2.5 text-gray-600 text-xs truncate max-w-[140px]" title={p.createdByName || undefined}>{p.createdByName || '—'}</td>
+                    <td data-label="Approved" className="mob-hide px-4 py-2.5 text-gray-600 text-xs truncate max-w-[140px]" title={p.approvedByName || undefined}>
                       {p.approvedByName ? (
                         <span className="inline-flex items-center gap-1 text-emerald-700">
                           <CheckCircle size={11} /> {p.approvedByName}
@@ -466,7 +457,7 @@ export default function Purchases() {
                             <DollarSign size={12} /> Pay
                           </button>
                         )}
-                        <button onClick={() => setDetailPurchase(p)} className="text-blue-600 hover:text-blue-800 p-1" title="View details">
+                        <button onClick={() => setDetailPurchase(p)} className="text-blue-600 hover:text-blue-800 p-1" title="View details" aria-label="View details">
                           <Eye size={15} />
                         </button>
                       </div>
@@ -487,6 +478,7 @@ export default function Purchases() {
           isPending={payMut.isPending}
           onClose={() => setPayTarget(null)}
           onSubmit={async (form) => {
+            if (payMut.isPending) return;
             try {
               await payMut.mutateAsync({
                 source: payTarget.source,
@@ -499,7 +491,7 @@ export default function Purchases() {
                 due_date: form.dueDate || null,
                 notes: form.notes || null,
               });
-              addToast(`Payment of Rs ${Number(form.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} recorded`, 'success');
+              addToast(`Payment of ${fmtFull(form.amount)} recorded`, 'success');
               setPayTarget(null);
             } catch (err) {
               addToast(err?.message || 'Failed to record payment', 'error');
@@ -535,16 +527,16 @@ export default function Purchases() {
                 <p className="text-xs text-gray-500">Amount</p>
                 <p className="text-xl font-bold text-gray-900">{fmtFull(p.amountPkr)}</p>
                 {(p.currency || 'PKR') !== 'PKR' && parseFloat(p.amount) > 0 && (
-                  <p className="text-xs text-gray-400">{p.currency} {Math.round(parseFloat(p.amount)).toLocaleString()}</p>
+                  <p className="text-xs text-gray-400">{fmtMoney(p.amount, p.currency)}</p>
                 )}
               </div>
               <div>
                 <Row label="Source" value={SOURCE_META[p.source]?.label || p.source} />
-                <Row label="Date" value={p.date ? new Date(p.date).toLocaleDateString('en-GB') : '—'} />
+                <Row label="Date" value={fmtDate(p.date)} />
                 <Row label="Supplier" value={p.supplierName} />
                 <Row label="Category" value={p.category ? <span className="capitalize">{String(p.category).replace(/_/g, ' ')}</span> : '—'} />
                 <Row label="Reference" value={p.ref} />
-                <Row label="Payment status" value={p.paymentStatus || 'Pending'} />
+                <Row label="Payment status" value={<StatusBadge status={statusLabel(p.paymentStatus)} />} />
                 <Row label="Created by" value={<span className="inline-flex items-center gap-1.5"><User size={13} className="text-gray-400" />{p.createdByName || '—'}</span>} />
                 <Row label="Approved by" value={p.approvedByName} />
               </div>
@@ -564,7 +556,7 @@ export default function Purchases() {
                         <div key={i} className="border border-gray-200 rounded-lg px-3 py-2">
                           <div className="flex items-center justify-between">
                             <span className="text-sm font-semibold text-emerald-700">{fmtFull(pm.amount)}</span>
-                            <span className="text-xs text-gray-500">{pm.date ? new Date(pm.date).toLocaleDateString('en-GB') : '—'}</span>
+                            <span className="text-xs text-gray-500">{fmtDate(pm.date)}</span>
                           </div>
                           <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-gray-500">
                             {noDetail ? (
@@ -610,68 +602,69 @@ function PayPurchaseDrawer({ purchase, bankAccounts, isPending, onClose, onSubmi
   const [reference, setReference] = useState('');
   const [dueDate, setDueDate] = useState('');
   const [notes, setNotes] = useState('');
-
-  useEffect(() => {
-    const handler = (e) => { if (e.key === 'Escape') onClose(); };
-    document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
-  }, [onClose]);
+  const [errors, setErrors] = useState({});
 
   const sourceMeta = SOURCE_META[purchase.source] || { label: purchase.source };
   const SrcIcon = sourceMeta.icon || Receipt;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/30 backdrop-blur-sm flex items-stretch justify-end" onClick={onClose}>
-      <div className="bg-white w-full max-w-md h-full shadow-xl flex flex-col" onClick={e => e.stopPropagation()}>
-        <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
-          <div>
-            <h2 className="text-base font-bold text-gray-900">Record Payment</h2>
-            <p className="text-xs text-gray-500 mt-0.5 inline-flex items-center gap-1">
-              <SrcIcon size={12} /> {sourceMeta.label} · {purchase.ref || '—'}
-            </p>
-          </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-700">
-            <X size={18} />
+    <SlideDrawer open onClose={onClose} title="Record Payment"
+      subtitle={`${sourceMeta.label} · ${purchase.ref || '—'}`} icon={SrcIcon} size="md"
+      footer={
+        <div className="flex items-center justify-end gap-2">
+          <button type="button" onClick={onClose} disabled={isPending}
+            className="px-3 py-2 text-sm text-gray-700 hover:text-gray-900">Cancel</button>
+          <button type="submit" form="pay-purchase-form" disabled={isPending}
+            className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 rounded-lg">
+            <CheckCircle size={14} />
+            {isPending ? 'Recording…' : 'Record payment'}
           </button>
         </div>
-
+      }>
         <form
+          id="pay-purchase-form"
+          noValidate
           onSubmit={(e) => {
             e.preventDefault();
+            if (isPending) return;
             const n = parseFloat(amount);
-            if (!n || n <= 0) return;
+            const errs = {};
+            if (!n || n <= 0) errs.amount = 'Enter the amount being paid';
+            else if (n > outstanding + 0.005) errs.amount = `Cannot exceed the outstanding ${fmtFull(outstanding)}`;
+            if (paymentMethod !== 'cash' && paymentMethod !== 'cheque' && !bankAccountId) errs.bankAccountId = 'Select a bank account';
+            setErrors(errs);
+            if (Object.keys(errs).length) return;
             onSubmit({ amount: n, paymentMethod, bankAccountId, paymentDate, reference, dueDate, notes });
           }}
-          className="flex-1 overflow-y-auto p-5 space-y-4"
+          className="space-y-4"
         >
           <div className="bg-gray-50 rounded-lg p-3 text-xs space-y-1">
             <div className="flex justify-between">
               <span className="text-gray-500">Supplier</span>
-              <span className="font-medium"><PartyLink type="supplier" id={purchase.supplierId} name={purchase.supplierName} /></span>
+              <span className="font-medium truncate min-w-0" title={purchase.supplierName || undefined}><PartyLink type="supplier" id={purchase.supplierId} name={purchase.supplierName} /></span>
             </div>
             <div className="flex justify-between">
               <span className="text-gray-500">Total</span>
-              <span className="font-medium text-gray-900">Rs {total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              <span className="font-medium text-gray-900">{fmtFull(total)}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-gray-500">Outstanding</span>
-              <span className="font-medium text-red-600">Rs {outstanding.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              <span className="font-medium text-red-600">{fmtFull(outstanding)}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-gray-500">Current status</span>
-              <span className={`px-2 py-0.5 rounded-full border ${statusTone(purchase.paymentStatus)}`}>
-                {purchase.paymentStatus || 'Pending'}
-              </span>
+              <StatusBadge status={statusLabel(purchase.paymentStatus)} />
             </div>
           </div>
 
           <div>
-            <label className="text-xs font-medium text-gray-600 block mb-1">Amount paying (PKR)</label>
+            <label className="text-xs font-medium text-gray-600 block mb-1">Amount paying (PKR) <span className="text-red-500">*</span></label>
             <input
               type="number" min="0" step="0.01" max={outstanding} required
               value={amount} onChange={e => setAmount(e.target.value)}
               className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900"
             />
+            <FieldError error={errors.amount} />
             <p className="text-[11px] text-gray-400 mt-1">Defaults to the outstanding balance. Lower it for a partial payment.</p>
           </div>
 
@@ -694,11 +687,12 @@ function PayPurchaseDrawer({ purchase, bankAccounts, isPending, onClose, onSubmi
                 <option value="">{paymentMethod === 'cheque' ? 'Bank account it will clear through (optional)…' : 'Select a bank account…'}</option>
                 {bankAccounts.map(a => (
                   <option key={a.id} value={a.id}>
-                    {favStar(a)}{a.name} · {a.bankName || '—'} ({a.currency || 'PKR'} {(parseFloat(a.currentBalance) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
+                    {favStar(a)}{a.name} · {a.bankName || '—'} ({fmtMoney(parseFloat(a.currentBalance) || 0, a.currency || 'PKR', { decimals: 2 })})
                   </option>
                 ))}
               </select>
             )}
+            <FieldError error={errors.bankAccountId} />
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -729,23 +723,10 @@ function PayPurchaseDrawer({ purchase, bankAccounts, isPending, onClose, onSubmi
               className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
           </div>
         </form>
-
-        <div className="px-5 py-4 border-t border-gray-100 flex items-center justify-end gap-2">
-          <button onClick={onClose} disabled={isPending}
-            className="px-3 py-2 text-sm text-gray-700 hover:text-gray-900">Cancel</button>
-          <button onClick={(e) => {
-              const form = e.currentTarget.closest('.bg-white').querySelector('form');
-              form.requestSubmit();
-            }} disabled={isPending}
-            className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 rounded-lg">
-            <CheckCircle size={14} />
-            {isPending ? 'Recording…' : 'Record payment'}
-          </button>
-        </div>
-      </div>
-    </div>
+    </SlideDrawer>
   );
 }
+
 
 function RefLink({ p }) {
   const short = shortenRef(p.ref) || p.ref || '—';

@@ -13,11 +13,10 @@ import {
 } from 'lucide-react';
 import { useFinanceAlerts } from '../../../api/queries';
 import { useApp } from '../../../context/AppContext';
-
-function formatRisk(value) {
-  if (!value) return '--';
-  return value.toLocaleString('en-US');
-}
+import StatusBadge from '../../../shared/components/StatusBadge';
+// Amount at risk mixes currencies (USD contracts, PKR payables) and carries
+// no currency code, so it is shown as a plain exact number.
+import { fmtNum } from '../../../shared/utils/format';
 
 const severityConfig = {
   critical: {
@@ -164,7 +163,7 @@ export default function FinanceAlerts() {
             <DollarSign size={16} className="text-red-500" />
             <span className="text-sm text-gray-500">Total Amount at Risk:</span>
             <span className="text-sm font-bold text-red-600">
-              {formatRisk(summary.totalAtRisk)}
+              {fmtNum(summary.totalAtRisk)}
             </span>
           </div>
         </div>
@@ -244,11 +243,11 @@ export default function FinanceAlerts() {
               <div className="pl-6 pr-5 py-5">
                 <div className="flex items-start justify-between gap-4">
                   {/* Left content */}
-                  <div className="flex-1 space-y-3">
+                  <div className="flex-1 min-w-0 space-y-3">
                     {/* Title row */}
                     <div className="flex items-center gap-3 flex-wrap">
                       <SevIcon size={18} className={config.iconColor} />
-                      <h3 className="text-sm font-semibold text-gray-900">{alert.title}</h3>
+                      <h3 className="text-sm font-semibold text-gray-900 break-words min-w-0">{alert.title}</h3>
                       <span
                         className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${config.labelBg}`}
                       >
@@ -266,15 +265,7 @@ export default function FinanceAlerts() {
                         {alert.entity}
                       </span>
                       {alert.status !== 'Open' && (
-                        <span
-                          className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                            alert.status === 'Snoozed'
-                              ? 'bg-yellow-100 text-yellow-700'
-                              : 'bg-emerald-100 text-emerald-700'
-                          }`}
-                        >
-                          {alert.status}
-                        </span>
+                        <StatusBadge status={alert.status} />
                       )}
                     </div>
 
@@ -288,7 +279,7 @@ export default function FinanceAlerts() {
                           <DollarSign size={14} className="text-red-500" />
                           <span className="text-sm text-gray-500">Amount at Risk:</span>
                           <span className="text-sm font-bold text-gray-900">
-                            {formatRisk(alert.amountAtRisk)}
+                            {fmtNum(alert.amountAtRisk)}
                           </span>
                         </div>
                       )}

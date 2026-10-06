@@ -5,7 +5,7 @@ import { FinanceTable, FinanceKPI } from '../../../components/finance';
 import { useFxRates, useCommodityRates, useProducts } from '../../../api/queries';
 import { financeApi } from '../../../api/services';
 import { useApp } from '../../../context/AppContext';
-import { todayLocalISO } from '../../../shared/utils/format';
+import { todayLocalISO, fmtDate, fmtNum, fmtMoney, fmtPKR } from '../../../shared/utils/format';
 
 // By-product grades a rate can be scoped to; blank means the product as a whole.
 // Finished rice and raw are priced per product, so they leave this empty.
@@ -41,8 +41,14 @@ export default function RatesCenter() {
     return (Array.isArray(raw) ? raw : []).map((p) => ({ id: p.id, name: p.name })).sort((a, b) => String(a.name).localeCompare(String(b.name)));
   }, [productsData]);
 
+  // Disable Save while a request is in flight so a double-click can't post twice.
+  const [savingFx, setSavingFx] = useState(false);
+  const [savingCr, setSavingCr] = useState(false);
+
   async function handleAddFxRate(e) {
     e.preventDefault();
+    if (savingFx) return;
+    setSavingFx(true);
     try {
       await financeApi.addFxRate(fxForm);
       addToast('FX rate added successfully', 'success');
@@ -52,11 +58,15 @@ export default function RatesCenter() {
       qc.invalidateQueries({ queryKey: ['finance-overview-summary'] });
     } catch (err) {
       addToast(`Failed: ${err.message}`, 'error');
+    } finally {
+      setSavingFx(false);
     }
   }
 
   async function handleAddCommodityRate(e) {
     e.preventDefault();
+    if (savingCr) return;
+    setSavingCr(true);
     try {
       await financeApi.addCommodityRate(crForm);
       addToast('Commodity rate added', 'success');
@@ -65,6 +75,8 @@ export default function RatesCenter() {
       qc.invalidateQueries({ queryKey: ['finance-commodity-rates'] });
     } catch (err) {
       addToast(`Failed: ${err.message}`, 'error');
+    } finally {
+      setSavingCr(false);
     }
   }
 
@@ -82,8 +94,8 @@ export default function RatesCenter() {
   const fxColumns = [
     { key: 'from_currency', label: 'From', sortable: true },
     { key: 'to_currency', label: 'To', sortable: true },
-    { key: 'rate', label: 'Rate', sortable: true, align: 'right', render: (v) => parseFloat(v).toFixed(2) },
-    { key: 'effective_date', label: 'Effective Date', sortable: true, render: (v) => v ? new Date(v).toLocaleDateString('en-GB') : '—' },
+    { key: 'rate', label: 'Rate', sortable: true, align: 'right', render: (v) => fmtNum(v, 2) },
+    { key: 'effective_date', label: 'Effective Date', sortable: true, render: (v) => fmtDate(v) },
     { key: 'source_type', label: 'Source', render: (v) => (
       <span className={`text-xs px-2 py-0.5 rounded-full ${v === 'manual' ? 'bg-blue-50 text-blue-700' : v === 'market' ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-50 text-gray-600'}`}>{v || 'manual'}</span>
     )},
@@ -96,8 +108,8 @@ export default function RatesCenter() {
     { key: 'productType', label: 'Grade', sortable: true, render: (v) => v || <span className="text-gray-300">all</span> },
     { key: 'unit', label: 'Unit', render: (v) => v || 'per_mt' },
     { key: 'currency', label: 'Currency', render: (v) => v || 'PKR' },
-    { key: 'rateValue', label: 'Rate', sortable: true, align: 'right', render: (v) => `Rs ${parseFloat(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` },
-    { key: 'effectiveDate', label: 'Effective', sortable: true, render: (v) => v ? new Date(v).toLocaleDateString('en-GB') : '—' },
+    { key: 'rateValue', label: 'Rate', sortable: true, align: 'right', render: (v, row) => fmtMoney(v, row.currency || 'PKR', { decimals: 2 }) },
+    { key: 'effectiveDate', label: 'Effective', sortable: true, render: (v) => fmtDate(v) },
     { key: 'isLocked', label: 'Locked', render: (v) => v ? <Check size={14} className="text-emerald-500" /> : '—' },
   ];
 
@@ -119,10 +131,10 @@ export default function RatesCenter() {
               <DollarSign size={14} /> Current USD / PKR
             </div>
             <div className="text-3xl sm:text-4xl font-bold leading-tight tabular-nums">
-              {latestFx.rate ? `Rs ${parseFloat(latestFx.rate).toFixed(2)}` : 'Not set'}
+              {latestFx.rate ? fmtPKR(latestFx.rate, { decimals: 2 }) : 'Not set'}
             </div>
             <div className="text-xs opacity-90 mt-1">
-              {latestFx.effectiveDate ? <>Effective {new Date(latestFx.effectiveDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</> : 'No FX history yet'}
+              {latestFx.effectiveDate ? <>Effective {fmtDate(latestFx.effectiveDate)}</> : 'No FX history yet'}
               {' · '}{fxRates.length} historical {fxRates.length === 1 ? 'entry' : 'entries'}
               {' · '}{commodityRates.length} commodity {commodityRates.length === 1 ? 'rate' : 'rates'}
             </div>
@@ -176,12 +188,12 @@ export default function RatesCenter() {
                 </select>
               </div>
               <div>
-                <label className="text-xs text-gray-500 block mb-1">Rate (to PKR)</label>
+                <label className="text-xs text-gray-500 block mb-1">Rate (to PKR) <span className="text-red-500">*</span></label>
                 <input type="number" step="0.01" required value={fxForm.rate} onChange={e => setFxForm({ ...fxForm, rate: e.target.value })}
                   className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm" placeholder="280.00" />
               </div>
               <div>
-                <label className="text-xs text-gray-500 block mb-1">Effective Date</label>
+                <label className="text-xs text-gray-500 block mb-1">Effective Date <span className="text-red-500">*</span></label>
                 <input type="date" required value={fxForm.effective_date} onChange={e => setFxForm({ ...fxForm, effective_date: e.target.value })}
                   className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
               </div>
@@ -192,7 +204,7 @@ export default function RatesCenter() {
                   <option value="manual">Manual</option><option value="market">Market</option><option value="imported">Imported</option>
                 </select>
               </div>
-              <button type="submit" className="bg-blue-600 text-white rounded-lg px-4 py-1.5 text-sm font-medium hover:bg-blue-700">Save</button>
+              <button type="submit" disabled={savingFx} className="bg-blue-600 text-white rounded-lg px-4 py-1.5 text-sm font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed">{savingFx ? 'Saving…' : 'Save'}</button>
             </form>
           )}
 
@@ -222,7 +234,7 @@ export default function RatesCenter() {
           {showCrForm && (
             <form onSubmit={handleAddCommodityRate} className="bg-gray-50 rounded-xl border border-gray-200 p-4 grid grid-cols-2 md:grid-cols-4 gap-3 items-end">
               <div>
-                <label className="text-xs text-gray-500 block mb-1">Rate Type</label>
+                <label className="text-xs text-gray-500 block mb-1">Rate Type <span className="text-red-500">*</span></label>
                 <select value={crForm.rateType} onChange={e => setCrForm({ ...crForm, rateType: e.target.value })}
                   className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm" required>
                   <option value="">Select...</option>
@@ -248,7 +260,7 @@ export default function RatesCenter() {
                 </select>
               </div>
               <div>
-                <label className="text-xs text-gray-500 block mb-1">Unit</label>
+                <label className="text-xs text-gray-500 block mb-1">Unit <span className="text-red-500">*</span></label>
                 <select value={crForm.unit} onChange={e => setCrForm({ ...crForm, unit: e.target.value })}
                   className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm" required>
                   <option value="per_kg">per KG</option>
@@ -256,7 +268,7 @@ export default function RatesCenter() {
                 </select>
               </div>
               <div>
-                <label className="text-xs text-gray-500 block mb-1">Rate ({crForm.currency})</label>
+                <label className="text-xs text-gray-500 block mb-1">Rate ({crForm.currency}) <span className="text-red-500">*</span></label>
                 <input type="number" step="0.01" required value={crForm.rateValue} onChange={e => setCrForm({ ...crForm, rateValue: e.target.value })}
                   className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm"
                   placeholder={crForm.unit === 'per_kg' ? '115.00' : '115000'} />
@@ -265,11 +277,11 @@ export default function RatesCenter() {
                 </p>
               </div>
               <div>
-                <label className="text-xs text-gray-500 block mb-1">Effective From</label>
+                <label className="text-xs text-gray-500 block mb-1">Effective From <span className="text-red-500">*</span></label>
                 <input type="date" required value={crForm.effectiveDate} onChange={e => setCrForm({ ...crForm, effectiveDate: e.target.value })}
                   className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
               </div>
-              <button type="submit" className="bg-blue-600 text-white rounded-lg px-4 py-1.5 text-sm font-medium hover:bg-blue-700">Save</button>
+              <button type="submit" disabled={savingCr} className="bg-blue-600 text-white rounded-lg px-4 py-1.5 text-sm font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed">{savingCr ? 'Saving…' : 'Save'}</button>
             </form>
           )}
 

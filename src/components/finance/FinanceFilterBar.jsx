@@ -18,6 +18,7 @@ export default function FinanceFilterBar({ filters = [], onReset, children }) {
           key={f.key}
           value={f.value}
           onChange={e => f.onChange(e.target.value)}
+          aria-label={f.label}
           className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
         >
           {f.options.map(opt => (

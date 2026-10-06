@@ -8,18 +8,11 @@ import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import { shortenRef } from '../utils/refs';
-import { toLocalISODate } from '../../../shared/utils/format';
-
-function fmtPKR(n) {
-  if (n == null || isNaN(n)) return 'Rs 0';
-  if (Math.abs(n) >= 10_000_000) return `Rs ${(n / 10_000_000).toFixed(2)}Cr`;
-  if (Math.abs(n) >= 100_000) return `Rs ${(n / 100_000).toFixed(2)}L`;
-  if (Math.abs(n) >= 1_000) return `Rs ${(n / 1_000).toFixed(0)}K`;
-  return `Rs ${(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
+import StatusBadge from '../../../shared/components/StatusBadge';
+import { toLocalISODate, fmtPKR, fmtUSD, fmtMoney, fmtDate, fmtDateTime } from '../../../shared/utils/format';
 
 export default function Cash() {
-  const { companyProfileData } = useApp();
+  const { companyProfileData, addToast } = useApp();
   const { queryParams: rangeParams } = useFinanceDateRange();
   const { data: accounts = [], isLoading: loadingAccounts } = useBankAccounts();
   const { data: txData, isLoading: loadingTx } = useBankTransactions(rangeParams);
@@ -40,19 +33,19 @@ export default function Cash() {
       consequence: accepted
         ? 'The money goes back to the sending account and comes out of the receiving one. Equal-and-opposite journals are posted; the transfer stays on record as Reversed.'
         : 'The money goes back to the sending account (the receiver never accepted it). An equal-and-opposite journal is posted; the transfer stays on record as Reversed.',
-      amount: t.amount != null ? `Rs ${Math.round(parseFloat(t.amount) || 0).toLocaleString()}` : undefined,
+      amount: t.amount != null ? fmtPKR(t.amount) : undefined,
       reason: 'optional',
       confirmLabel: 'Reverse transfer',
       cancelLabel: 'Go back',
     });
     if (!ok) return;
     try { await reverseTransfer.mutateAsync({ id: t.id, reason: ok?.reason }); }
-    catch (e) { window.alert(e?.response?.data?.message || e?.data?.message || e?.message || 'Could not reverse the transfer.'); }
+    catch (e) { addToast(e?.response?.data?.message || e?.data?.message || e?.message || 'Could not reverse the transfer.', 'error'); }
   }
   async function handleAcceptTransfer(t) {
     // No Owner step: the receiving side's permission is the whole check.
     try { await acceptTransfer.mutateAsync(t.id); }
-    catch (e) { window.alert(e?.response?.data?.message || e?.data?.message || e?.message || 'Could not accept the transfer.'); }
+    catch (e) { addToast(e?.response?.data?.message || e?.data?.message || e?.message || 'Could not accept the transfer.', 'error'); }
   }
 
   function handlePrint() {
@@ -78,32 +71,30 @@ export default function Cash() {
   const usdBalance = usdAccounts.reduce((s, a) => s + (parseFloat(a.currentBalance) || 0), 0);
 
   const accountColumns = [
-    { key: 'name', label: 'Account', sortable: true },
+    { key: 'name', label: 'Account', sortable: true, render: (v) => <span className="block max-w-[16rem] truncate" title={v || ''}>{v || '—'}</span> },
     { key: 'bankName', label: 'Bank', sortable: true, render: (v) => v || '—' },
     { key: 'accountNumber', label: 'Account #', render: (v) => v || '—' },
     { key: 'currency', label: 'Currency', render: (v) => v || 'PKR' },
-    { key: 'currentBalance', label: 'Balance', sortable: true, align: 'right', render: (v, row) => {
-      const cur = row.currency || 'PKR';
-      const prefix = cur === 'USD' ? '$' : 'Rs ';
-      return <span className="font-medium">{prefix}{Math.round(parseFloat(v) || 0).toLocaleString()}</span>;
-    }},
+    { key: 'currentBalance', label: 'Balance', sortable: true, align: 'right', render: (v, row) => (
+      <span className="font-medium">{fmtMoney(parseFloat(v) || 0, row.currency || 'PKR', { decimals: 0 })}</span>
+    )},
   ];
 
   const txColumns = [
-    { key: 'transactionDate', label: 'Date', sortable: true, render: (v) => v ? new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : '—' },
+    { key: 'transactionDate', label: 'Date', sortable: true, render: (v) => fmtDate(v) },
     { key: 'type', label: 'Type', sortable: true, render: (v) => (
       <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${v === 'credit' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>
         {v === 'credit' ? 'In' : 'Out'}
       </span>
     )},
     { key: 'amount', label: 'Amount', sortable: true, align: 'right', render: (v, row) => (
-      <span className={row.type === 'credit' ? 'text-emerald-600' : 'text-red-600'}>{fmtPKR(Math.abs(v))}</span>
+      <span className={row.type === 'credit' ? 'text-emerald-600' : 'text-red-600'}>{fmtMoney(Math.abs(parseFloat(v) || 0), row.currency || 'PKR')}</span>
     )},
     { key: 'accountName', label: 'Account' },
     { key: 'reference', label: 'Reference', render: (v) => (
       <span title={v || ''}>{shortenRef(v) || '—'}</span>
     )},
-    { key: 'counterparty', label: 'Counterparty', render: (v) => v || '—' },
+    { key: 'counterparty', label: 'Counterparty', render: (v) => <span className="block max-w-[16rem] truncate" title={v || ''}>{v || '—'}</span> },
   ];
 
   // Last-30-days net flow chart bucketed by day, computed from real
@@ -149,13 +140,13 @@ export default function Cash() {
           <div className="border-b-2 border-gray-900 pb-2 flex items-end justify-between mb-4">
             <div>
               <div className="text-base font-bold uppercase tracking-wider">{companyName}</div>
-              <div className="text-xs text-gray-500">Generated {new Date().toLocaleString()}</div>
+              <div className="text-xs text-gray-500">Generated {fmtDateTime(new Date())}</div>
             </div>
             <div className="text-right">
               <div className="text-lg font-bold">Cash Position</div>
               <div className="text-xs text-gray-600">
                 {accounts.length} accounts · Total {fmtPKR(totalBalance)}
-                {usdAccounts.length > 0 && <> · USD ${Math.round(usdBalance).toLocaleString()}</>}
+                {usdAccounts.length > 0 && <> · USD {fmtUSD(usdBalance, { decimals: 0 })}</>}
               </div>
             </div>
           </div>
@@ -174,7 +165,7 @@ export default function Cash() {
             </div>
             <div className="text-xs opacity-90 mt-1">
               {pkrAccounts.length > 0 && <>PKR {fmtPKR(pkrBalance)}</>}
-              {usdAccounts.length > 0 && <> · USD ${Math.round(usdBalance).toLocaleString()}</>}
+              {usdAccounts.length > 0 && <> · USD {fmtUSD(usdBalance, { decimals: 0 })}</>}
               {' · '}{accounts.length} {accounts.length === 1 ? 'account' : 'accounts'}
             </div>
           </div>
@@ -198,7 +189,7 @@ export default function Cash() {
           subtitle={`${accounts.length} accounts`} status={totalBalance > 0 ? 'good' : 'danger'} loading={loadingAccounts} />
         <FinanceKPI icon={Wallet} title="PKR Accounts" value={fmtPKR(pkrBalance)}
           subtitle={`${pkrAccounts.length} accounts`} status="info" loading={loadingAccounts} />
-        <FinanceKPI icon={Wallet} title="USD Accounts" value={`$${(usdBalance).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+        <FinanceKPI icon={Wallet} title="USD Accounts" value={fmtUSD(usdBalance)}
           subtitle={`${usdAccounts.length} accounts`} status="info" loading={loadingAccounts} />
         <FinanceKPI icon={Landmark} title="Active Accounts" value={String(accounts.filter(a => a.isActive !== false).length)}
           subtitle="In use" status="neutral" loading={loadingAccounts} />
@@ -249,22 +240,20 @@ export default function Cash() {
                   return (
                   <tr key={t.id} className={`border-t border-gray-100 ${t.status === 'reversed' ? 'text-gray-400' : ''}`}>
                     <td className="px-3 py-2 font-medium text-gray-700">{t.transferNo}</td>
-                    <td className="px-3 py-2">{t.transferDate ? new Date(t.transferDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : '—'}</td>
+                    <td className="px-3 py-2 whitespace-nowrap">{fmtDate(t.transferDate)}</td>
                     <td className="px-3 py-2">
                       <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${t.direction === 'ho_to_mill' ? 'bg-blue-50 text-blue-700' : 'bg-violet-50 text-violet-700'}`}>
                         {t.direction === 'ho_to_mill' ? 'HO → Mill' : 'Mill → HO'}
                       </span>
                     </td>
-                    <td className="px-3 py-2 text-gray-600">{t.fromAccountName || '—'}</td>
-                    <td className="px-3 py-2 text-gray-600">{t.toAccountName || '—'}</td>
+                    <td className="px-3 py-2 text-gray-600 max-w-[12rem] truncate" title={t.fromAccountName || ''}>{t.fromAccountName || '—'}</td>
+                    <td className="px-3 py-2 text-gray-600 max-w-[12rem] truncate" title={t.toAccountName || ''}>{t.toAccountName || '—'}</td>
                     <td className="px-3 py-2 text-gray-500 capitalize">{(t.method || '').replace('_', ' ')}</td>
                     <td className={`px-3 py-2 text-right font-semibold tabular-nums ${t.status === 'reversed' ? 'line-through' : ''}`}>{fmtPKR(t.amount)}</td>
                     <td className="px-3 py-2">
-                      {t.status === 'reversed'
-                        ? <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-gray-100 text-gray-600">Reversed</span>
-                        : t.status === 'completed'
-                          ? <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-50 text-emerald-700">Received</span>
-                          : <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-50 text-amber-700">{hoIsReceiver ? 'Awaiting you' : 'Awaiting mill'}</span>}
+                      <StatusBadge status={t.status === 'reversed' ? 'Reversed'
+                        : t.status === 'completed' ? 'Received'
+                          : hoIsReceiver ? 'Awaiting you' : 'Awaiting mill'} />
                     </td>
                     <td className="px-3 py-2 text-right whitespace-nowrap">
                       {t.status === 'pending' && hoIsReceiver && (

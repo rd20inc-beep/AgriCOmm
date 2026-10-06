@@ -5,26 +5,16 @@ import { FinanceKPI } from '../../../components/finance';
 import { useJournalEntries } from '../../../api/queries';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { useApp } from '../../../context/AppContext';
+import StatusBadge from '../../../shared/components/StatusBadge';
+import { fmtPKR, fmtMoney, fmtDate, fmtDateTime } from '../../../shared/utils/format';
 
-function fmtPkr(v) {
-  if (!v || Number(v) === 0) return '—';
-  return `Rs ${(parseFloat(v)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
-function fmtOriginal(v, currency) {
+// A non-PKR journal's original-currency amount, shown under the PKR figure.
+// null for PKR / zero so the caller can skip the line.
+function originalAmount(v, currency) {
   if (!v || Number(v) === 0) return null;
   const cur = (currency || 'PKR').toUpperCase();
   if (cur === 'PKR') return null;
-  const sym = cur === 'USD' ? '$' : cur === 'EUR' ? '€' : cur === 'GBP' ? '£' : cur + ' ';
-  return `${sym}${Math.round(parseFloat(v)).toLocaleString()}`;
-}
-
-function fmtPkrCompact(n) {
-  const v = parseFloat(n) || 0;
-  if (Math.abs(v) >= 10_000_000) return `Rs ${(v / 10_000_000).toFixed(2)}Cr`;
-  if (Math.abs(v) >= 100_000) return `Rs ${(v / 100_000).toFixed(2)}L`;
-  if (Math.abs(v) >= 1_000) return `Rs ${(v / 1_000).toFixed(0)}K`;
-  return `Rs ${(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return fmtMoney(v, cur);
 }
 
 const ENTITY_TONE = {
@@ -139,7 +129,7 @@ export default function Accounting() {
               <BookOpen size={14} /> Journal — Posted activity
             </div>
             <div className="text-3xl sm:text-4xl font-bold leading-tight tabular-nums">
-              {fmtPkrCompact(totalDebit)}
+              {fmtPKR(totalDebit, { decimals: 2 })}
             </div>
             <div className="text-xs opacity-90 mt-1">
               {filtered.length} {filtered.length === 1 ? 'entry' : 'entries'}{entityFilter !== 'all' ? ` · ${entityFilter} only` : ' in selected period'}
@@ -151,10 +141,10 @@ export default function Accounting() {
           <div className="flex flex-col items-start sm:items-end gap-1.5">
             <span className={`inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider px-3 py-1.5 rounded-full ${isBalanced ? 'bg-emerald-500/20 text-emerald-50 ring-1 ring-emerald-300/30' : 'bg-white/15 text-white ring-1 ring-white/30'}`}>
               {isBalanced ? <CheckCircle2 size={13} /> : <AlertTriangle size={13} />}
-              {isBalanced ? 'Books balanced' : `Imbalance ${fmtPkrCompact(imbalance)}`}
+              {isBalanced ? 'Books balanced' : `Imbalance ${fmtPKR(imbalance, { decimals: 2 })}`}
             </span>
             <div className="text-[11px] opacity-80 text-right">
-              DR {fmtPkrCompact(totalDebit)} · CR {fmtPkrCompact(totalCredit)}
+              DR {fmtPKR(totalDebit, { decimals: 2 })} · CR {fmtPKR(totalCredit, { decimals: 2 })}
             </div>
           </div>
         </div>
@@ -170,7 +160,7 @@ export default function Accounting() {
         <FinanceKPI icon={AlertTriangle} title="Reversed / Draft" value={String(reversedCount + draftCount)}
           subtitle={`${reversedCount} reversed · ${draftCount} draft`}
           status={reversedCount + draftCount > 0 ? 'warning' : 'good'} loading={isLoading} />
-        <FinanceKPI icon={Scale} title="Net Movement" value={fmtPkrCompact(totalDebit)}
+        <FinanceKPI icon={Scale} title="Net Movement" value={fmtPKR(totalDebit, { decimals: 2 })}
           subtitle={isBalanced ? 'DR equals CR ✓' : 'Out of balance'}
           status={isBalanced ? 'good' : 'danger'} loading={isLoading} />
       </div>
@@ -230,13 +220,13 @@ export default function Accounting() {
               <div className="text-base font-bold uppercase tracking-wider">
                 {companyProfileData?.legalName || companyProfileData?.name || 'AGRI COMMODITIES'}
               </div>
-              <div className="text-xs text-gray-500">Generated {new Date().toLocaleString()}</div>
+              <div className="text-xs text-gray-500">Generated {fmtDateTime(new Date())}</div>
             </div>
             <div className="text-right">
               <div className="text-lg font-bold">Journal Entries</div>
               <div className="text-xs text-gray-600">
-                {entityFilter !== 'all' ? `${entityFilter} · ` : ''}{filtered.length} entries · Total {fmtPkrCompact(totalDebit)}
-                {isBalanced ? ' · Balanced ✓' : ` · Imbalance ${fmtPkrCompact(imbalance)}`}
+                {entityFilter !== 'all' ? `${entityFilter} · ` : ''}{filtered.length} entries · Total {fmtPKR(totalDebit, { decimals: 2 })}
+                {isBalanced ? ' · Balanced ✓' : ` · Imbalance ${fmtPKR(imbalance, { decimals: 2 })}`}
               </div>
             </div>
           </div>
@@ -288,8 +278,8 @@ export default function Accounting() {
                       </td>
                       <td data-label="Journal #" className="py-2.5 px-3 font-mono text-xs text-gray-700 whitespace-nowrap" title={fullJournalNo}>{shortJournalNo}</td>
                       <td data-label="Date" className="mob-hide py-2.5 px-3 text-gray-600 whitespace-nowrap text-xs"
-                          title={j.date ? new Date(j.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : ''}>
-                        {j.date ? new Date(j.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }) : '—'}
+                          title={j.date ? fmtDate(j.date) : ''}>
+                        {fmtDate(j.date)}
                       </td>
                       <td data-label="Entity" className="mob-hide py-2.5 px-3">
                         <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${ENTITY_TONE[j.entity] || 'bg-gray-100 text-gray-600'}`}>
@@ -321,23 +311,18 @@ export default function Accounting() {
                         const crPkr = toPkr(j, 'totalCredit');
                         const drift = Math.abs(drPkr - crPkr);
                         const balanced = drift < 1;
-                        const orig = fmtOriginal(j.totalDebit || j.total_debit, j.currency);
+                        const orig = originalAmount(j.totalDebit || j.total_debit, j.currency);
                         return (
                           <td data-label="Amount" className={`py-2.5 px-3 text-right font-medium whitespace-nowrap ${balanced ? 'text-gray-900' : 'text-red-700'}`}
-                              title={balanced ? '' : `Imbalanced — DR ${fmtPkr(drPkr)} · CR ${fmtPkr(crPkr)}`}>
-                            {fmtPkr(drPkr)}
+                              title={balanced ? '' : `Imbalanced — DR ${fmtPKR(drPkr, { decimals: 2 })} · CR ${fmtPKR(crPkr, { decimals: 2 })}`}>
+                            {fmtPKR(drPkr, { decimals: 2 })}
                             {!balanced && <span className="ml-1 text-[10px]">⚠</span>}
                             {orig && <div className="text-[10px] text-gray-400 font-normal">{orig}</div>}
                           </td>
                         );
                       })()}
                       <td data-label="Status" className="py-2.5 px-3">
-                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                          j.status === 'Posted' ? 'bg-emerald-50 text-emerald-700'
-                          : j.status === 'Reversed' ? 'bg-red-50 text-red-700'
-                          : 'bg-gray-100 text-gray-600'}`}>
-                          {j.status || 'Draft'}
-                        </span>
+                        <StatusBadge status={j.status || 'Draft'} />
                       </td>
                     </tr>
                     {isOpen && (
@@ -372,15 +357,15 @@ export default function Accounting() {
                                       <td data-label="Account" className="py-1.5 pr-3 font-medium">{l.account || `#${l.account_id}`}</td>
                                       <td data-label="Narration" className="mob-hide py-1.5 pr-3 text-gray-500">{l.narration || '—'}</td>
                                       <td data-label="Debit" className="py-1.5 pr-3 text-right whitespace-nowrap">
-                                        {dr > 0 ? fmtPkr(drPkr) : '—'}
-                                        {dr > 0 && fmtOriginal(dr, j.currency) && (
-                                          <div className="text-[10px] text-gray-400 font-normal">{fmtOriginal(dr, j.currency)}</div>
+                                        {dr > 0 ? fmtPKR(drPkr, { decimals: 2 }) : '—'}
+                                        {dr > 0 && originalAmount(dr, j.currency) && (
+                                          <div className="text-[10px] text-gray-400 font-normal">{originalAmount(dr, j.currency)}</div>
                                         )}
                                       </td>
                                       <td data-label="Credit" className="py-1.5 text-right whitespace-nowrap">
-                                        {cr > 0 ? fmtPkr(crPkr) : '—'}
-                                        {cr > 0 && fmtOriginal(cr, j.currency) && (
-                                          <div className="text-[10px] text-gray-400 font-normal">{fmtOriginal(cr, j.currency)}</div>
+                                        {cr > 0 ? fmtPKR(crPkr, { decimals: 2 }) : '—'}
+                                        {cr > 0 && originalAmount(cr, j.currency) && (
+                                          <div className="text-[10px] text-gray-400 font-normal">{originalAmount(cr, j.currency)}</div>
                                         )}
                                       </td>
                                     </tr>
@@ -388,8 +373,8 @@ export default function Accounting() {
                                 })}
                                 <tr className="font-semibold border-t-2 border-blue-200">
                                   <td colSpan={2} className="mob-full pt-1.5 text-gray-500 uppercase text-[10px]">Totals</td>
-                                  <td data-label="Total debit" className="pt-1.5 pr-3 text-right">{fmtPkr(toPkr(j, 'totalDebit'))}</td>
-                                  <td data-label="Total credit" className="pt-1.5 text-right">{fmtPkr(toPkr(j, 'totalCredit'))}</td>
+                                  <td data-label="Total debit" className="pt-1.5 pr-3 text-right">{fmtPKR(toPkr(j, 'totalDebit'), { decimals: 2 })}</td>
+                                  <td data-label="Total credit" className="pt-1.5 text-right">{fmtPKR(toPkr(j, 'totalCredit'), { decimals: 2 })}</td>
                                 </tr>
                               </tbody>
                             </table>

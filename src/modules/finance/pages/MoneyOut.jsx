@@ -14,25 +14,13 @@ import PartyLink from '../../../shared/components/PartyLink';
 import { toPkr } from '../utils/fx';
 import { shortenRef } from '../utils/refs';
 import { favStar } from '../../../shared/utils/favorites';
-import { todayLocalISO } from '../../../shared/utils/format';
+import FieldError from '../../../shared/components/FieldError';
+import { todayLocalISO, fmtMoney, fmtPKR, fmtDate, fmtDateTime } from '../../../shared/utils/format';
 
-// Currency-aware formatter — picks Rs / $ / € / £ / AED based on the row's currency
-function fmtCur(n, currency = 'PKR') {
-  const symbol = currency === 'PKR' ? 'Rs '
-    : currency === 'USD' ? '$'
-    : currency === 'EUR' ? '€'
-    : currency === 'GBP' ? '£'
-    : currency === 'AED' ? 'AED '
-    : 'Rs ';
-  if (n == null || isNaN(n)) return `${symbol}0`;
-  if (Math.abs(n) >= 1_000_000) return `${symbol}${(n / 1_000_000).toFixed(2)}M`;
-  if (Math.abs(n) >= 100_000) return `${symbol}${(n / 100_000).toFixed(2)}L`;
-  if (Math.abs(n) >= 1_000) return `${symbol}${(n / 1_000).toFixed(1)}K`;
-  return `${symbol}${(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-// Backwards-compat helpers
-function fmtPKR(n) { return fmtCur(n, 'PKR'); }
-function fmtAmount(v, currency) { return fmtCur(v, currency || 'PKR'); }
+// Exact amount in the row's own currency (payables default to PKR).
+const fmtCur = (n, currency = 'PKR') => fmtMoney(parseFloat(n) || 0, currency || 'PKR');
+const fmtAmount = (v, currency) => fmtCur(v, currency || 'PKR');
+const REQ = <span className="text-red-500">*</span>;
 // Human-readable payment method label.
 function methodLabel(m) {
   const map = { bank_transfer: 'Bank Transfer / TT', cash: 'Cash', cheque: 'Cheque', lc: 'Letter of Credit', online: 'Online' };
@@ -68,7 +56,7 @@ export default function MoneyOut() {
     const ok = await confirm({
       title: `Reverse payment ${p.paymentNo || p.payment_no || ''}?`.trim(),
       consequence: 'The payable goes back to outstanding, the bank balance is restored, and the ledger entries are reversed.',
-      amount: p.amount != null ? fmtPKR(p.amount) : undefined,
+      amount: p.amount != null ? fmtAmount(p.amount, p.currency || drawer?.currency) : undefined,
       reason: 'optional',
       confirmLabel: 'Reverse payment',
     });
@@ -107,9 +95,11 @@ export default function MoneyOut() {
     whtRate: '', whtAmount: '', discountAmount: '', attachmentUrl: '', attachmentName: '',
   });
   const setPay = (k, v) => setPayForm((f) => ({ ...f, [k]: v }));
+  const [payErrors, setPayErrors] = useState({});
 
   function openDrawer(row) {
     setDrawer(row);
+    setPayErrors({});
     setPayForm({
       amount: String(parseFloat(row.outstanding) || 0),
       bankAccountId: '',
@@ -181,9 +171,9 @@ export default function MoneyOut() {
     // #14 — party is the supplier, or the transporter (hauler) for transport payables.
     { key: 'supplierName', label: 'Supplier / Transporter', sortable: true, render: (v, row) => (
       v
-        ? <PartyLink type="supplier" id={row.supplierId} name={v} />
+        ? <span className="block max-w-[14rem] truncate" title={v}><PartyLink type="supplier" id={row.supplierId} name={v} /></span>
         : (row.haulerName
-            ? <span className="inline-flex items-center gap-1 text-gray-800"><span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-600 font-medium">Transporter</span>{row.haulerName}</span>
+            ? <span className="inline-flex items-center gap-1 text-gray-800 max-w-[16rem] min-w-0" title={row.haulerName}><span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-600 font-medium">Transporter</span><span className="truncate">{row.haulerName}</span></span>
             : <span className="text-gray-400">—</span>)
     ) },
     { key: 'linkedRef', label: 'Linked To', sortable: true, render: (v) => {
@@ -214,16 +204,18 @@ export default function MoneyOut() {
 
   async function handleRecordPayment(e) {
     e.preventDefault();
+    if (recordPaymentMut.isPending) return;
     const pay = drawer;
     const amount = parseFloat(payForm.amount);
-    if (!amount || amount <= 0) { addToast('Enter a valid amount', 'error'); return; }
+    if (!amount || amount <= 0) { setPayErrors({ amount: 'Enter a valid amount' }); return; }
     // Withholding tax is a PKR obligation remitted to FBR; the server's WHT
     // arithmetic is in PKR, so the block is only offered on a PKR payable and
     // the figures are only sent for one.
     const whtApplies = (pay.currency || 'PKR') === 'PKR';
     const wht = whtApplies ? parseFloat(payForm.whtAmount) || 0 : 0;
     const disc = whtApplies ? parseFloat(payForm.discountAmount) || 0 : 0;
-    if (wht + disc - amount > 0.01) { addToast('WHT + discount cannot exceed the amount.', 'error'); return; }
+    if (wht + disc - amount > 0.01) { setPayErrors({ whtAmount: 'WHT + discount cannot exceed the amount.' }); return; }
+    setPayErrors({});
 
     try {
       await recordPaymentMut.mutateAsync({
@@ -264,7 +256,7 @@ export default function MoneyOut() {
           <div className="border-b-2 border-gray-900 pb-2 flex items-end justify-between mb-4">
             <div>
               <div className="text-base font-bold uppercase tracking-wider">{companyName}</div>
-              <div className="text-xs text-gray-500">Generated {new Date().toLocaleString()}</div>
+              <div className="text-xs text-gray-500">Generated {fmtDateTime(new Date())}</div>
             </div>
             <div className="text-right">
               <div className="text-lg font-bold">Money Out — Payables</div>
@@ -341,16 +333,16 @@ export default function MoneyOut() {
           <div className="relative w-full max-w-lg bg-white shadow-xl overflow-y-auto">
             {/* Header */}
             <div className="px-6 py-4 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
-              <div>
+              <div className="min-w-0">
                 <h2 className="text-lg font-semibold text-gray-900">{drawer.payNo}</h2>
-                <p className="text-sm text-gray-500">
+                <p className="text-sm text-gray-500 break-words">
                   {drawer.category} &middot;
                   <span className={`ml-1 text-xs px-2 py-0.5 rounded-full ${drawer.entity === 'mill' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}`}>
                     {drawer.entity === 'mill' ? 'Mill' : 'Export'}
                   </span>
                 </p>
               </div>
-              <button onClick={() => setDrawer(null)} className="p-2 rounded-md hover:bg-gray-200"><X size={18} /></button>
+              <button onClick={() => setDrawer(null)} aria-label="Close" title="Close" className="p-2 rounded-md hover:bg-gray-200"><X size={18} /></button>
             </div>
 
             {/* Amount Summary */}
@@ -372,7 +364,7 @@ export default function MoneyOut() {
 
               {/* Details */}
               <div className="grid grid-cols-2 gap-3 text-sm">
-                <div><p className="text-xs text-gray-500">Supplier</p><p><PartyLink type="supplier" id={drawer.supplierId} name={drawer.supplierName} /></p></div>
+                <div className="min-w-0"><p className="text-xs text-gray-500">Supplier</p><p className="break-words"><PartyLink type="supplier" id={drawer.supplierId} name={drawer.supplierName} /></p></div>
                 <div><p className="text-xs text-gray-500">Linked To</p>{drawer.linkedRef ? (
                   <OrderRefLink
                     to={drawer.linkedRef.startsWith('EX-') ? `/export/${drawer.linkedRef}` : drawer.linkedRef.startsWith('M-') ? `/milling/${drawer.linkedRef}` : null}
@@ -397,17 +389,17 @@ export default function MoneyOut() {
                         <div key={p.id || idx} className={`border border-gray-200 rounded-lg px-3 py-2 ${p.status === 'Reversed' ? 'opacity-60' : ''}`}>
                           <div className="flex items-center justify-between">
                             <span className={`text-sm font-semibold ${p.status === 'Reversed' ? 'text-gray-500 line-through' : 'text-emerald-700'}`}>{fmtAmount(p.amount, p.currency || drawer.currency)}</span>
-                            <span className="text-xs text-gray-500">{p.paymentDate ? new Date(p.paymentDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}</span>
+                            <span className="text-xs text-gray-500">{fmtDate(p.paymentDate)}</span>
                           </div>
                           <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-gray-500">
                             <span>Method: <span className="font-medium text-gray-700">{methodLabel(p.paymentMethod)}</span></span>
-                            <span>From: <span className="font-medium text-gray-700">{from}</span></span>
+                            <span className="min-w-0 break-words">From: <span className="font-medium text-gray-700">{from}</span></span>
                             {p.bankReference && <span>Ref/Cheque: <span className="font-medium text-gray-700">{p.bankReference}</span></span>}
                           </div>
                           {p.notes && <p className="mt-0.5 text-[11px] text-gray-400 truncate" title={p.notes}>{p.notes}</p>}
                           <div className="mt-1 flex items-center justify-between">
                             {p.status === 'Reversed'
-                              ? <span className="text-[11px] font-medium text-red-500">Reversed</span>
+                              ? <StatusBadge status="Reversed" />
                               : <span />}
                             {p.status !== 'Reversed' && p.id && (
                               <button type="button" onClick={() => handleReversePayment(p)} disabled={reversePaymentMut.isPending}
@@ -474,13 +466,13 @@ export default function MoneyOut() {
                     cash account for cash, a bank account otherwise. Only a
                     cheque waits; it moves money when it is cleared. */}
                 <div>
-                    <label className="text-xs text-gray-500 block mb-1">{isUnclearedCheque(payForm) ? 'Bank account it will clear through (optional)' : 'Pay From Account'}</label>
+                    <label className="text-xs text-gray-500 block mb-1">{isUnclearedCheque(payForm) ? 'Bank account it will clear through (optional)' : <>Pay From Account {REQ}</>}</label>
                     <select required={!isUnclearedCheque(payForm)} value={payForm.bankAccountId} onChange={e => setPayForm({ ...payForm, bankAccountId: e.target.value })}
                       className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
                       <option value="">{payForm.paymentMethod === 'cash' ? 'Select cash account...' : 'Select account...'}</option>
                       {(payForm.paymentMethod === 'cash' ? cashAccounts : bankOnlyAccounts).map(a => (
                         <option key={a.id} value={a.id}>
-                          {favStar(a)}{a.name} — {a.bankName || ''} ({a.currency || 'PKR'} {(parseFloat(a.currentBalance) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
+                          {favStar(a)}{a.name} — {a.bankName || ''} ({fmtMoney(parseFloat(a.currentBalance) || 0, a.currency || 'PKR', { decimals: 2 })})
                         </option>
                       ))}
                     </select>
@@ -489,14 +481,15 @@ export default function MoneyOut() {
                 {/* Amount + Date */}
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="text-xs text-gray-500 block mb-1">Amount ({drawer.currency || 'PKR'})</label>
+                    <label className="text-xs text-gray-500 block mb-1">Amount ({drawer.currency || 'PKR'}) {REQ}</label>
                     <input type="number" step="0.01" required value={payForm.amount}
-                      onChange={e => setPayForm({ ...payForm, amount: e.target.value })}
+                      onChange={e => { setPayForm({ ...payForm, amount: e.target.value }); setPayErrors({}); }}
                       max={parseFloat(drawer.outstanding)}
                       className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    <FieldError error={payErrors.amount} />
                   </div>
                   <div>
-                    <label className="text-xs text-gray-500 block mb-1">Payment Date</label>
+                    <label className="text-xs text-gray-500 block mb-1">Payment Date {REQ}</label>
                     <input type="date" required value={payForm.paymentDate}
                       onChange={e => setPayForm({ ...payForm, paymentDate: e.target.value })}
                       className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
@@ -509,7 +502,7 @@ export default function MoneyOut() {
                     properly from one screen. PKR only: the server's WHT
                     arithmetic is in PKR. */}
                 {(drawer.currency || 'PKR') === 'PKR' && (
-                  <PaymentExtras form={payForm} set={setPay} gross={parseFloat(payForm.amount) || 0} addToast={addToast} />
+                  <PaymentExtras form={payForm} set={setPay} gross={parseFloat(payForm.amount) || 0} addToast={addToast} errors={payErrors} />
                 )}
 
                 {/* Notes */}

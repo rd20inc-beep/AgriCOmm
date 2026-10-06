@@ -2,14 +2,10 @@ import {
   ResponsiveContainer, BarChart, Bar, LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, PieChart, Pie, Cell,
 } from 'recharts';
+import { formatTick, formatTooltip } from './chartFormat';
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ef4444', '#06b6d4'];
 
-function formatTick(v) {
-  if (Math.abs(v) >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
-  if (Math.abs(v) >= 1_000) return `${(v / 1_000).toFixed(0)}K`;
-  return v.toLocaleString();
-}
 
 /**
  * Chart card wrapper for finance pages.
@@ -38,7 +34,7 @@ export default function FinanceChart({
     );
   }
 
-  const fmtTooltip = (v) => `${currency}${Number(v).toLocaleString()}`;
+  const fmtTooltip = (v) => formatTooltip(v, currency);
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-5">

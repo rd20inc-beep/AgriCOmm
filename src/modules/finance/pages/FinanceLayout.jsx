@@ -98,6 +98,7 @@ export default function FinanceLayout({ children }) {
               <select
                 value={dateRange}
                 onChange={e => setDateRange(e.target.value)}
+                aria-label="Date range"
                 className="text-xs bg-transparent border-none focus:outline-none text-gray-600 font-medium cursor-pointer pr-4"
               >
                 {DATE_PRESETS.map(p => (

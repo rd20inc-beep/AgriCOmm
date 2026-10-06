@@ -47,7 +47,7 @@ export default function FinanceKPI({
       }`}
     >
       <div className="flex items-center justify-between mb-2">
-        <p className="text-xs font-medium text-gray-500 uppercase tracking-wide truncate">{title}</p>
+        <p className="text-xs font-medium text-gray-500 uppercase tracking-wide truncate" title={typeof title === 'string' ? title : undefined}>{title}</p>
         {Icon && (
           <div className={`flex items-center justify-center w-8 h-8 rounded-lg ${s.bg} ring-1 ${s.ring} flex-shrink-0`}>
             <Icon size={16} className={s.icon} />
@@ -55,11 +55,11 @@ export default function FinanceKPI({
         )}
       </div>
 
-      <p className="text-2xl font-bold text-gray-900 tabular-nums truncate">{value}</p>
+      <p className="text-2xl font-bold text-gray-900 tabular-nums truncate" title={typeof value === 'string' ? value : undefined}>{value}</p>
 
       <div className="flex items-center justify-between mt-1.5 min-h-[20px]">
         {subtitle && (
-          <p className="text-xs text-gray-400 truncate">{subtitle}</p>
+          <p className="text-xs text-gray-400 truncate" title={typeof subtitle === 'string' ? subtitle : undefined}>{subtitle}</p>
         )}
         {change && (
           <span className={`inline-flex items-center gap-0.5 text-xs font-medium px-1.5 py-0.5 rounded-full ${
