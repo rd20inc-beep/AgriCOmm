@@ -4,6 +4,7 @@ import { Shield, Search, Filter, Clock, User, FileText, Eye, ChevronDown, Chevro
 import { useAuditLogs } from '../../../api/queries';
 import { LoadingSpinner, ErrorState } from '../../../components/LoadingState';
 import Modal from '../../../components/Modal';
+import { todayLocalISO } from '../../../shared/utils/format';
 
 // Build + download a CSV of the currently-filtered audit rows.
 function exportAuditCsv(rows) {
@@ -25,7 +26,7 @@ function exportAuditCsv(rows) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `audit-trail-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.download = `audit-trail-${todayLocalISO()}.csv`;
   a.click();
   URL.revokeObjectURL(url);
 }

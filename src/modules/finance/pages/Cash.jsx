@@ -8,6 +8,7 @@ import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import { shortenRef } from '../utils/refs';
+import { toLocalISODate } from '../../../shared/utils/format';
 
 function fmtPKR(n) {
   if (n == null || isNaN(n)) return 'Rs 0';
@@ -115,7 +116,7 @@ export default function Cash() {
     for (let i = 29; i >= 0; i--) {
       const d = new Date(now);
       d.setDate(now.getDate() - i);
-      const key = d.toISOString().slice(0, 10);
+      const key = toLocalISODate(d);
       dayBuckets.set(key, { day: key.slice(5), In: 0, Out: 0, Net: 0 });
     }
     for (const t of txs) {

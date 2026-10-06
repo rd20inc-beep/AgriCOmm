@@ -17,6 +17,7 @@ import PartyLink from '../../../shared/components/PartyLink';
 import { favStar } from '../../../shared/utils/favorites';
 import { CHEQUE_DATE_LABEL } from '../../../components/payments/paymentPayload';
 import { ChequeHint } from '../../../components/payments/PaymentFields';
+import { todayLocalISO } from '../../../shared/utils/format';
 
 function fmtPKR(n) {
   const v = Number(n) || 0;
@@ -168,7 +169,7 @@ export default function Purchases() {
       Created_By: p.createdByName || '',
       Approved_By: p.approvedByName || '',
     }));
-    downloadCSV(rows, `purchases-${new Date().toISOString().slice(0, 10)}.csv`);
+    downloadCSV(rows, `purchases-${todayLocalISO()}.csv`);
   }
 
   if (isLoading) return <LoadingSpinner message="Loading purchases…" />;
@@ -605,7 +606,7 @@ function PayPurchaseDrawer({ purchase, bankAccounts, isPending, onClose, onSubmi
   const [amount, setAmount] = useState(outstanding.toFixed(2));
   const [paymentMethod, setPaymentMethod] = useState('bank_transfer');
   const [bankAccountId, setBankAccountId] = useState(bankAccounts.find(a => (a.currency || 'PKR') === 'PKR')?.id || '');
-  const [paymentDate, setPaymentDate] = useState(new Date().toISOString().slice(0, 10));
+  const [paymentDate, setPaymentDate] = useState(todayLocalISO());
   const [reference, setReference] = useState('');
   const [dueDate, setDueDate] = useState('');
   const [notes, setNotes] = useState('');

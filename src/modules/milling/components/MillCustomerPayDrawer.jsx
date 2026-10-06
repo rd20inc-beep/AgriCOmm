@@ -5,6 +5,7 @@ import { useApp } from '../../../context/AppContext';
 import { useLocalSales, useAcceptLocalSalePayment } from '../../../api/queries';
 import { CHEQUE_DATE_LABEL } from '../../../components/payments/paymentPayload';
 import { ChequeHint } from '../../../components/payments/PaymentFields';
+import { todayLocalISO } from '../../../shared/utils/format';
 
 const PKR = (v) => `Rs ${(parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const fmtDate = (d) => { const dt = new Date(d); return Number.isNaN(dt.getTime()) ? '' : dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }); };
@@ -26,7 +27,7 @@ export default function MillCustomerPayDrawer({ customer, onClose }) {
   [sales]);
 
   const [saleId, setSaleId] = useState('');
-  const [form, setForm] = useState({ amount: '', payment_method: 'cash', payment_date: new Date().toISOString().split('T')[0], collection_location: 'Mill', bank_account_id: '', reference: '', due_date: '' });
+  const [form, setForm] = useState({ amount: '', payment_method: 'cash', payment_date: todayLocalISO(), collection_location: 'Mill', bank_account_id: '', reference: '', due_date: '' });
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
   // Default to the oldest open invoice and its full due.

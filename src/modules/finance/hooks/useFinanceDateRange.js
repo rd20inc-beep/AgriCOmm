@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { toLocalISODate } from '../../../shared/utils/format';
 
 // Reads the global ?range= param set by FinanceLayout's date dropdown
 // (today / week / month / quarter / year / '' for all-time) and
@@ -28,7 +29,7 @@ function endOfDay(d) {
   return x;
 }
 function isoDateOnly(d) {
-  return d.toISOString().slice(0, 10);
+  return toLocalISODate(d);
 }
 
 function resolveRange(key) {

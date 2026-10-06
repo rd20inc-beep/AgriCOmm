@@ -12,6 +12,7 @@ import { localSalesApi, lotInventoryApi } from '../../../api/services';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import { exportLedgerCSV, printLedger } from '../utils/ledgerExport';
+import { todayLocalISO } from '../../../shared/utils/format';
 
 // Roles allowed to see internal by-product pricing (mirrors the invoice gates).
 const ADMIN_PRICING_ROLES = ['Super Admin', 'Owner', 'Finance Manager', 'Mill Manager'];
@@ -98,7 +99,7 @@ export default function InvoiceLedger() {
 
   const rows = data?.rows || [];
   const totals = data?.totals || {};
-  const stamp = new Date().toISOString().slice(0, 10);
+  const stamp = todayLocalISO();
   const exportMeta = useMemo(() => [
     `${rows.length} invoices`, q ? `Search: ${q}` : null, status ? `Status: ${status}` : null, outstanding ? 'Outstanding only' : null,
   ].filter(Boolean), [rows.length, q, status, outstanding]);

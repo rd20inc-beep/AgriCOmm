@@ -16,6 +16,7 @@ import { useAuth } from '../../../context/AuthContext';
 import { useAcceptLocalSalePayment } from '../../../api/queries';
 import SlideDrawer from '../../../components/SlideDrawer';
 import { printCustomerInvoice, printAdminInvoice, printGatePass } from '../utils/invoicePrint';
+import { todayLocalISO } from '../../../shared/utils/format';
 
 // Roles allowed to view the admin invoice copy (mirrors the backend route gate).
 const ADMIN_INVOICE_ROLES = ['Super Admin', 'Owner', 'Finance Manager', 'Mill Manager'];
@@ -70,7 +71,7 @@ export default function InvoiceView() {
   });
 
   const [payOpen, setPayOpen] = useState(false);
-  const [payForm, setPayForm] = useState({ amount: '', payment_method: 'cash', reference: '', payment_date: new Date().toISOString().slice(0, 10), due_date: '', collection_location: 'Mill' });
+  const [payForm, setPayForm] = useState({ amount: '', payment_method: 'cash', reference: '', payment_date: todayLocalISO(), due_date: '', collection_location: 'Mill' });
   const [template, setTemplate] = useState('standard'); // print template: standard | compact
   const [emailOpen, setEmailOpen] = useState(false);
   const [emailTo, setEmailTo] = useState('');

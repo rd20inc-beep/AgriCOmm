@@ -8,6 +8,7 @@ import { reportingApi } from '../api/services';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import { exportLedgerCSV, printLedger } from '../utils/ledgerExport';
+import { todayLocalISO } from '../../../shared/utils/format';
 
 const pkr = (v) => `Rs ${(parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const dt = (v) => v ? new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
@@ -49,7 +50,7 @@ export default function PayrollLedger() {
   const roles = data?.roles || [];
   const departments = data?.departments || [];
   const set = (patch) => setFilters(f => ({ ...f, ...patch }));
-  const stamp = new Date().toISOString().slice(0, 10);
+  const stamp = todayLocalISO();
   const exportMeta = useMemo(() => [`${rows.length} salary lines`, filters.month ? `Month: ${filters.month}` : null, filters.role ? `Role: ${filters.role}` : null].filter(Boolean), [rows.length, filters]);
 
   if (error) return (

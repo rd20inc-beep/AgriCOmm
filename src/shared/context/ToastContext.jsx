@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useCallback } from 'react';
+import { todayLocalISO } from '../utils/format';
 
 const ToastContext = createContext();
 
@@ -17,7 +18,7 @@ export function ToastProvider({ children }) {
   }, []);
 
   const addAlert = useCallback((alert) => {
-    setAlerts(prev => [{ id: Date.now(), date: new Date().toISOString().split('T')[0], ...alert }, ...prev]);
+    setAlerts(prev => [{ id: Date.now(), date: todayLocalISO(), ...alert }, ...prev]);
   }, []);
 
   return (

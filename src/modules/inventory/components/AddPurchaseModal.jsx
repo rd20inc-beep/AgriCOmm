@@ -4,6 +4,7 @@ import { Loader2, CheckCircle2, PlusCircle, Package, Wrench, Warehouse, Boxes, D
 import SlideDrawer from '../../../components/SlideDrawer';
 import { useApp } from '../../../context/AppContext';
 import { useAddPurchaseToLot } from '../../../api/queries';
+import { todayLocalISO } from '../../../shared/utils/format';
 
 const fmtPKR = (v) => 'Rs ' + (Math.round((parseFloat(v) || 0) * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const num = (v) => parseFloat(v) || 0;
@@ -21,7 +22,7 @@ const BLANK = {
   weight_kg: '', total_bags: '', price_per_kg: '',
   labor_cost: '', unloading_cost: '', packing_cost: '', other_cost: '',
   bag_cost_per_bag: '', bag_cost_included: true,
-  purchase_date: new Date().toISOString().slice(0, 10),
+  purchase_date: todayLocalISO(),
   notes: '',
 };
 
@@ -38,7 +39,7 @@ export default function AddPurchaseModal({ isOpen, lot, onClose, onSuccess }) {
   const addMut = useAddPurchaseToLot();
   const [form, setForm] = useState(BLANK);
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
-  useEffect(() => { if (isOpen) setForm({ ...BLANK, purchase_date: new Date().toISOString().slice(0, 10) }); }, [isOpen]);
+  useEffect(() => { if (isOpen) setForm({ ...BLANK, purchase_date: todayLocalISO() }); }, [isOpen]);
 
   const calc = useMemo(() => {
     const addKg = num(form.weight_kg);

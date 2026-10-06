@@ -12,6 +12,7 @@ import {
   PurchaseLedgerView, SalesLedgerView, StockDetailView, PnlAccrualView, PnlCompareView,
   AuditReportView, FreightRecoveryView,
 } from './PrintableReportsViews';
+import { toLocalISODate } from '../../../shared/utils/format';
 
 // ─── Period helpers ────────────────────────────────────────────────────
 // Each preset returns ISO strings for { from, to } and a label for
@@ -46,7 +47,7 @@ function presetRange(preset) {
 
 // Compact figures (no big arrays) for the AI narrative, per report type.
 function buildSummaryFigures(reportType, data, range) {
-  const rng = range ? `${new Date(range.from).toISOString().slice(0, 10)} to ${new Date(range.to).toISOString().slice(0, 10)}` : undefined;
+  const rng = range ? `${toLocalISODate(range.from)} to ${toLocalISODate(range.to)}` : undefined;
   if (reportType === 'pnl_accrual') {
     return { range: rng, basis: 'accrual', revenue: data.revenue?.totalPkr, cogs: data.cogs?.totalPkr, grossProfit: data.grossProfitPkr, grossMarginPct: data.grossMarginPct, operatingExpenses: data.opex?.totalPkr, netProfit: data.netProfitPkr, netMarginPct: data.netMarginPct, inventoryOnHand: data.inventoryOnHandPkr, topExpenseCategories: (data.opex?.byCategory || []).slice(0, 5) };
   }

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { Truck, Search, Filter, Download } from 'lucide-react';
 import api from '../../../api/client';
 import { favStar } from '../../../shared/utils/favorites';
+import { toLocalISODate, todayLocalISO } from '../../../shared/utils/format';
 
 function formatPKR(value) {
   if (!value) return '—';
@@ -16,13 +17,13 @@ function formatMT(value) {
 }
 
 function todayISO() {
-  return new Date().toISOString().split('T')[0];
+  return todayLocalISO();
 }
 
 function daysAgoISO(days) {
   const d = new Date();
   d.setDate(d.getDate() - days);
-  return d.toISOString().split('T')[0];
+  return toLocalISODate(d);
 }
 
 export default function RicePurchasesLedger() {

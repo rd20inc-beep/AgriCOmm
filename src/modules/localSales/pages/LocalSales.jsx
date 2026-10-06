@@ -24,6 +24,7 @@ import { lotCategory, CAT_ORDER, CAT_COLOR } from '../../../utils/lotCategory';
 import { favStar, isFavorite } from '../../../shared/utils/favorites';
 import useConfirm from '../../../hooks/useConfirm';
 import { paymentWord, groupPaymentWord, payableDue, localToday, readLastCustomerId, rememberLastCustomerId, defaultBankAccountId } from '../utils/saleStatus';
+import { todayLocalISO } from '../../../shared/utils/format';
 
 function fmtPKR(v) { return 'Rs ' + (parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 
@@ -179,7 +180,7 @@ export default function LocalSales() {
             { key: 'ratePerKg', label: 'Rate/KG' },
             { key: 'totalAmount', label: 'Total (PKR)' },
             { key: 'paymentStatus', label: 'Payment' },
-          ], `local-sales-${new Date().toISOString().split('T')[0]}.csv`)}
+          ], `local-sales-${todayLocalISO()}.csv`)}
             className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200">
             <Download size={14} /> CSV
           </button>

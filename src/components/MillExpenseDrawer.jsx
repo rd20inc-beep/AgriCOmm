@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { TrendingDown } from 'lucide-react';
 import SlideDrawer from './SlideDrawer';
 import { useCreateMillExpense, useExpenseVendors } from '../api/queries';
+import { todayLocalISO } from '../shared/utils/format';
 
 const EXPENSE_CATS = [
   'salaries', 'utilities', 'rent', 'maintenance', 'insurance',
@@ -30,7 +31,7 @@ export default function MillExpenseDrawer({ open, onClose, addToast, prefill, on
 
   const [form, setForm] = useState({
     category: 'salaries', vendor_preset: '', vendor_name: '', description: '',
-    amount: '', expense_date: new Date().toISOString().split('T')[0], reference: '', notes: '',
+    amount: '', expense_date: todayLocalISO(), reference: '', notes: '',
   });
 
   // Reset (and apply any prefill) each time the drawer opens.
@@ -41,7 +42,7 @@ export default function MillExpenseDrawer({ open, onClose, addToast, prefill, on
       vendor_preset: '', vendor_name: '',
       description: prefill?.description || '',
       amount: prefill?.amount != null ? String(prefill.amount) : '',
-      expense_date: new Date().toISOString().split('T')[0],
+      expense_date: todayLocalISO(),
       reference: '', notes: '',
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps

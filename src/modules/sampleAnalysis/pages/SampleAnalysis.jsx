@@ -13,6 +13,7 @@ import { useSuppliers, useProducts } from '../../../api/queries';
 import { useApp } from '../../../context/AppContext';
 import { sampleApi } from '../api/services';
 import { documentsApi } from '../../documents/api/services';
+import { todayLocalISO } from '../../../shared/utils/format';
 
 const ANALYSIS_FIELDS = [
   { k: 'moisture', l: 'Moisture %' }, { k: 'broken', l: 'Broken %' }, { k: 'foreign_matter', l: 'Foreign Matter %' },
@@ -240,7 +241,7 @@ function QualityGrid({ values, onChange }) {
 function SampleDrawer({ onClose, onDone, addToast }) {
   const { data: suppliers = [] } = useSuppliers();
   const { data: products = [] } = useProducts();
-  const [form, setForm] = useState({ sample_no: '', supplier_id: '', product_id: '', variety: '', claimed_grade: '', origin_area: '', crop_year: '', offered_qty_kg: '', offered_rate_per_kg: '', bags: '', bag_weight_kg: 50, supplier_sample_ref: '', remarks: '', sample_date: new Date().toISOString().slice(0, 10) });
+  const [form, setForm] = useState({ sample_no: '', supplier_id: '', product_id: '', variety: '', claimed_grade: '', origin_area: '', crop_year: '', offered_qty_kg: '', offered_rate_per_kg: '', bags: '', bag_weight_kg: 50, supplier_sample_ref: '', remarks: '', sample_date: todayLocalISO() });
   const [analysis, setAnalysis] = useState({});
   const [file, setFile] = useState(null);
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));

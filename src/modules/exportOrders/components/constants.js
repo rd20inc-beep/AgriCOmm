@@ -1,3 +1,4 @@
+import { todayLocalISO } from '../../../shared/utils/format';
 // Workflow steps — static config. Ship on the advance (2026-10-07): the order
 // ships once the advance is confirmed and the pre-shipment documents approved;
 // the balance (and BL Final) are collected after sailing, before Close.
@@ -101,7 +102,7 @@ export function getVisibleTabs(status) {
   return tabList.filter(t => visible.includes(t.key));
 }
 
-export const today = () => new Date().toISOString().split('T')[0];
+export const today = () => todayLocalISO();
 
 // Helper: check if all required documents are approved
 export function allDocsApproved(docs) {

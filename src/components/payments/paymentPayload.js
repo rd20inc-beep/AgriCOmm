@@ -13,6 +13,7 @@
  */
 
 import { isFavorite } from '../../shared/utils/favorites';
+import { todayLocalISO } from '../../shared/utils/format';
 
 export const PAYMENT_METHODS = [
   { value: 'bank_transfer', label: 'Bank Transfer' },
@@ -37,7 +38,7 @@ export function blankPaymentForm({ amount = '', method = 'bank_transfer', date }
     amount: amount === null || amount === undefined ? '' : String(amount),
     method,
     bankAccountId: '',
-    date: date || new Date().toISOString().slice(0, 10),
+    date: date || todayLocalISO(),
     reference: '',
     dueDate: '',
     notes: '',

@@ -10,6 +10,7 @@ import SearchSelect from '../../../components/SearchSelect';
 import { financeApi } from '../api/services';
 import { useApp } from '../../../context/AppContext';
 import { favStar } from '../../../shared/utils/favorites';
+import { todayLocalISO } from '../../../shared/utils/format';
 
 const PKR = (v) => 'Rs ' + Math.round(parseFloat(v) || 0).toLocaleString();
 const STATUS_META = {
@@ -166,7 +167,7 @@ export default function Suspense() {
 }
 
 function RecordDrawer({ bankAccounts, onClose, onDone, addToast }) {
-  const [form, setForm] = useState({ direction: 'receipt', amount: '', bank_account_id: '', payment_method: 'bank_transfer', reference_no: '', party_details: '', reason: '', date: new Date().toISOString().slice(0, 10) });
+  const [form, setForm] = useState({ direction: 'receipt', amount: '', bank_account_id: '', payment_method: 'bank_transfer', reference_no: '', party_details: '', reason: '', date: todayLocalISO() });
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   const mut = useMutation({
     mutationFn: () => financeApi.suspenseCreate({ ...form, amount: parseFloat(form.amount) }),

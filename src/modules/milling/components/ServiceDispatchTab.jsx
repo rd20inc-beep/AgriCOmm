@@ -6,6 +6,7 @@ import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import SlideDrawer from '../../../components/SlideDrawer';
 import useConfirm from '../../../hooks/useConfirm';
+import { todayLocalISO } from '../../../shared/utils/format';
 
 const num = (v) => parseFloat(v) || 0;
 const kg = (v) => `${Math.round(num(v)).toLocaleString()} kg`;
@@ -31,7 +32,7 @@ export default function ServiceDispatchTab({ routeId, onChanged }) {
   const summary = data?.summary || { producedKg: 0, remainingKg: 0, dispatchedKg: 0 };
 
   const [lot, setLot] = useState(null); // lot being dispatched
-  const [form, setForm] = useState({ qtyKg: '', bagCount: '', vehicleNo: '', driverName: '', dispatchDate: new Date().toISOString().split('T')[0], notes: '' });
+  const [form, setForm] = useState({ qtyKg: '', bagCount: '', vehicleNo: '', driverName: '', dispatchDate: todayLocalISO(), notes: '' });
 
   const createMut = useMutation({
     mutationFn: (payload) => serviceMillingApi.createDispatch(routeId, payload),
@@ -50,7 +51,7 @@ export default function ServiceDispatchTab({ routeId, onChanged }) {
     setForm({
       qtyKg: avail > 0 ? String(Math.round(avail)) : '',
       bagCount: avail > 0 && bagW > 0 ? String(Math.round(avail / bagW)) : '',
-      vehicleNo: '', driverName: '', dispatchDate: new Date().toISOString().split('T')[0], notes: '',
+      vehicleNo: '', driverName: '', dispatchDate: todayLocalISO(), notes: '',
     });
     setLot(l);
   }

@@ -5,6 +5,7 @@ import { FinanceTable, FinanceKPI } from '../../../components/finance';
 import { useFxRates, useCommodityRates, useProducts } from '../../../api/queries';
 import { financeApi } from '../../../api/services';
 import { useApp } from '../../../context/AppContext';
+import { todayLocalISO } from '../../../shared/utils/format';
 
 // By-product grades a rate can be scoped to; blank means the product as a whole.
 // Finished rice and raw are priced per product, so they leave this empty.
@@ -27,11 +28,11 @@ export default function RatesCenter() {
 
   // Add FX Rate form
   const [showFxForm, setShowFxForm] = useState(false);
-  const [fxForm, setFxForm] = useState({ currency_code: 'USD', rate: '', effective_date: new Date().toISOString().split('T')[0], source_type: 'manual', notes: '' });
+  const [fxForm, setFxForm] = useState({ currency_code: 'USD', rate: '', effective_date: todayLocalISO(), source_type: 'manual', notes: '' });
 
   // Add Commodity Rate form
   const [showCrForm, setShowCrForm] = useState(false);
-  const [crForm, setCrForm] = useState({ rateType: '', productId: '', productType: '', unit: 'per_kg', currency: 'PKR', rateValue: '', effectiveDate: new Date().toISOString().split('T')[0], notes: '' });
+  const [crForm, setCrForm] = useState({ rateType: '', productId: '', productType: '', unit: 'per_kg', currency: 'PKR', rateValue: '', effectiveDate: todayLocalISO(), notes: '' });
   // Products for the picker — a rate is keyed by product (+ grade for by-products),
   // which is how held-stock profit finds the selling price for each lot.
   const { data: productsData } = useProducts({ limit: 500 });

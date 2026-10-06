@@ -11,6 +11,7 @@ import {
 // Company profile — static defaults; any field can be overridden by
 // the companyProfile object saved in system_settings.
 import companyProfileDefaults from '../data/companyProfile.json';
+import { todayLocalISO } from '../shared/utils/format';
 
 const AppContext = createContext();
 
@@ -134,7 +135,7 @@ export function AppProvider({ children }) {
   }, []);
 
   const addAlert = useCallback((alert) => {
-    setAlerts(prev => [{ id: Date.now(), date: new Date().toISOString().split('T')[0], ...alert }, ...prev]);
+    setAlerts(prev => [{ id: Date.now(), date: todayLocalISO(), ...alert }, ...prev]);
   }, []);
 
   const updateSettings = useCallback((newSettings) => {
