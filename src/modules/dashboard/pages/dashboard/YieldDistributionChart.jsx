@@ -16,6 +16,9 @@ export default function YieldDistributionChart({ data }) {
         </h2>
         <Link to="/milling" className="text-xs text-blue-600 hover:text-blue-800 font-medium">View All &rarr;</Link>
       </div>
+      {data.length === 0 ? (
+        <p className="text-sm text-gray-400 text-center py-16">No completed batches yet</p>
+      ) : (<>
       <div className="h-48 sm:h-52">
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
@@ -55,6 +58,7 @@ export default function YieldDistributionChart({ data }) {
           </div>
         ))}
       </div>
+      </>)}
     </div>
   );
 }

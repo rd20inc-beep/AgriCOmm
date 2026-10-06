@@ -7,6 +7,8 @@ import { useCalling } from '../modules/chat/useCalling';
 import { useAcceptFundTransfer } from '../api/queries';
 import { isChatHidden, setChatHidden, getChatPos, setChatPos, clampToViewport, onChatPrefsChange } from './chatBubblePrefs';
 import { useAuth } from '../context/AuthContext';
+import { useApp } from '../context/AppContext';
+import { fmtDate } from '../shared/utils/format';
 
 const unwrap = (res) => res?.data || res || {};
 const EMOJIS = '😀 😁 😂 🤣 😊 😍 😘 😎 🤩 🥳 🤔 😐 😴 😢 😭 😡 🤯 😱 🙄 😅 😉 🙂 🤗 🤝 🙏 👍 👎 👌 ✌️ 🤞 💪 👏 🙌 👋 💯 🔥 ✨ 🎉 ⭐ 💡 ✅ ❌ ⚠️ ❓ ❗ 💰 💵 📈 📉 📊 📦 🚚 🌾 🏭 📝 📌 📅 ⏰ 📞 📧 ❤️ 🎯 🚀'.split(' ');
@@ -14,8 +16,9 @@ function fmtTime(iso) {
   if (!iso) return '';
   const d = new Date(iso); const now = new Date();
   const sameDay = d.toDateString() === now.toDateString();
+  if (Number.isNaN(d.getTime())) return '';
   return sameDay ? d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
-    : d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+    : fmtDate(d).slice(0, 6); // "05 Oct" — the house date without the year
 }
 const initials = (name) => (name || 'U').split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase();
 
@@ -34,7 +37,7 @@ function Attachment({ m, mine }) {
     <a href={url} download={m.attachment_name} target="_blank" rel="noreferrer"
       className={`flex items-center gap-2 mb-1 px-2 py-1.5 rounded-lg ${mine ? 'bg-blue-500/40' : 'bg-gray-100'} max-w-full`}>
       <FileText className="w-4 h-4 flex-shrink-0" />
-      <span className="text-xs truncate flex-1">{m.attachment_name}</span>
+      <span className="text-xs truncate flex-1" title={m.attachment_name}>{m.attachment_name}</span>
       <Download className="w-3.5 h-3.5 flex-shrink-0 opacity-70" />
     </a>
   );
@@ -44,7 +47,8 @@ export default function ChatWidget() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const calling = useCalling(user);
+  const { addToast } = useApp();
+  const calling = useCalling(user, { onError: (msg) => addToast(msg, 'error') });
   const acceptTransfer = useAcceptFundTransfer();
   const [open, setOpen] = useState(false);
   // The bubble floats above everything, so it covers whatever is underneath.
@@ -126,7 +130,7 @@ export default function ChatWidget() {
       try {
         await acceptTransfer.mutateAsync(item.transferId);
         qc.invalidateQueries({ queryKey: ['chat-approvals'] });
-      } catch (e) { window.alert(e?.response?.data?.message || e?.message || 'Could not accept.'); }
+      } catch (e) { addToast(e?.response?.data?.message || e?.message || 'Could not accept.', 'error'); }
     } else if (item.link) { setOpen(false); navigate(item.link); }
   }
 
@@ -174,6 +178,7 @@ export default function ChatWidget() {
       qc.invalidateQueries({ queryKey: ['chat-conversations'] });
       qc.invalidateQueries({ queryKey: ['chat-unread'] });
     },
+    onError: (e) => addToast(e?.response?.data?.message || e?.message || 'Message not sent.', 'error'),
   });
 
   function openThread(target) { setActive(target); setView('thread'); setDraft(''); setFile(null); setShowEmoji(false); setShowAttach(false); }
@@ -220,7 +225,8 @@ export default function ChatWidget() {
             onPointerMove={onDrag}
             onPointerUp={endDrag}
             className="w-12 h-12 lg:w-14 lg:h-14 rounded-full bg-blue-600 hover:bg-blue-700 text-white shadow-lg flex items-center justify-center transition-colors touch-none cursor-grab active:cursor-grabbing"
-            title="Team chat — drag to move">
+            title="Team chat — drag to move"
+            aria-label={totalBadge > 0 ? `Open team chat (${totalBadge} unread)` : 'Open team chat'}>
             <MessageCircle className="w-6 h-6" />
             {totalBadge > 0 && (
               <span className="absolute -top-1 -right-1 min-w-[20px] h-5 px-1 rounded-full bg-red-500 text-white text-[11px] font-bold flex items-center justify-center ring-2 ring-white">
@@ -249,19 +255,19 @@ export default function ChatWidget() {
           {/* Header */}
           <div className="px-4 py-3 bg-blue-600 text-white flex items-center gap-2">
             {(view === 'thread' || view === 'new' || view === 'approvals') && (
-              <button onClick={() => setView('list')} className="p-1 -ml-1 hover:bg-white/15 rounded"><ArrowLeft className="w-4 h-4" /></button>
+              <button onClick={() => setView('list')} aria-label="Back" title="Back" className="p-1 -ml-1 hover:bg-white/15 rounded"><ArrowLeft className="w-4 h-4" /></button>
             )}
             <div className="flex items-center gap-2 min-w-0 flex-1">
               {view === 'thread' && active?.type === 'broadcast' && <Megaphone className="w-4 h-4" />}
-              <span className="font-semibold text-sm truncate">{headerTitle}</span>
+              <span className="font-semibold text-sm truncate" title={headerTitle}>{headerTitle}</span>
             </div>
             {view === 'thread' && active?.type === 'peer' && !calling.call && (
               <>
-                <button onClick={() => calling.startCall({ id: active.id, name: active.name }, 'audio')} title="Audio call" className="p-1 hover:bg-white/15 rounded"><Phone className="w-4 h-4" /></button>
-                <button onClick={() => calling.startCall({ id: active.id, name: active.name }, 'video')} title="Video call" className="p-1 hover:bg-white/15 rounded"><Video className="w-4 h-4" /></button>
+                <button onClick={() => calling.startCall({ id: active.id, name: active.name }, 'audio')} title="Audio call" aria-label="Audio call" className="p-1 hover:bg-white/15 rounded"><Phone className="w-4 h-4" /></button>
+                <button onClick={() => calling.startCall({ id: active.id, name: active.name }, 'video')} title="Video call" aria-label="Video call" className="p-1 hover:bg-white/15 rounded"><Video className="w-4 h-4" /></button>
               </>
             )}
-            <button onClick={() => setOpen(false)} className="p-1 hover:bg-white/15 rounded"><X className="w-4 h-4" /></button>
+            <button onClick={() => setOpen(false)} aria-label="Close chat" title="Close" className="p-1 hover:bg-white/15 rounded"><X className="w-4 h-4" /></button>
           </div>
 
           {/* LIST */}
@@ -296,7 +302,7 @@ export default function ChatWidget() {
                   <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center flex-shrink-0 text-xs font-semibold">{initials(u.name)}</div>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center justify-between">
-                      <span className="font-medium text-sm text-gray-900 truncate">{u.name}</span>
+                      <span className="font-medium text-sm text-gray-900 truncate" title={u.name}>{u.name}</span>
                       {u.conv && <span className="text-[10px] text-gray-400 flex-shrink-0 ml-1">{fmtTime(u.conv.lastAt)}</span>}
                     </div>
                     <p className="text-xs text-gray-500 truncate">{u.conv ? `${u.conv.fromMe ? 'You: ' : ''}${u.conv.lastBody}` : <span className="text-gray-400">{u.email || 'Tap to start a chat'}</span>}</p>
@@ -379,32 +385,32 @@ export default function ChatWidget() {
                 {file && (
                   <div className="px-2.5 pt-2 flex items-center gap-2 text-xs">
                     <span className="inline-flex items-center gap-1.5 max-w-[80%] px-2 py-1 rounded bg-blue-50 text-blue-700 truncate">
-                      <Paperclip className="w-3 h-3 flex-shrink-0" /> <span className="truncate">{file.name}</span>
+                      <Paperclip className="w-3 h-3 flex-shrink-0" /> <span className="truncate" title={file.name}>{file.name}</span>
                     </span>
-                    <button onClick={() => { setFile(null); if (fileRef.current) fileRef.current.value = ''; }} className="text-gray-400 hover:text-red-500"><X className="w-3.5 h-3.5" /></button>
+                    <button onClick={() => { setFile(null); if (fileRef.current) fileRef.current.value = ''; }} aria-label="Remove attachment" title="Remove attachment" className="text-gray-400 hover:text-red-500"><X className="w-3.5 h-3.5" /></button>
                   </div>
                 )}
                 {/* Emoji picker */}
                 {showEmoji && (
                   <div className="px-2 pb-1 max-h-28 overflow-y-auto grid grid-cols-8 gap-0.5 border-t border-gray-100 pt-1.5">
                     {EMOJIS.map((e) => (
-                      <button key={e} onClick={() => setDraft((d) => d + e)} className="text-lg hover:bg-gray-100 rounded leading-none py-1">{e}</button>
+                      <button key={e} onClick={() => setDraft((d) => d + e)} aria-label={`Insert ${e}`} className="text-lg hover:bg-gray-100 rounded leading-none py-1">{e}</button>
                     ))}
                   </div>
                 )}
                 <div className="p-2.5 flex items-end gap-1.5 relative">
                   <input ref={fileRef} type="file" className="hidden"
-                    onChange={(e) => { const f = e.target.files?.[0]; if (f) { if (f.size > 25 * 1024 * 1024) { window.alert('File too large (max 25MB).'); return; } setFile(f); } }} />
+                    onChange={(e) => { const f = e.target.files?.[0]; if (f) { if (f.size > 25 * 1024 * 1024) { addToast('File too large (max 25MB).', 'error'); return; } setFile(f); } }} />
 
                   {/* Emoji button */}
-                  <button onClick={() => { setShowEmoji((v) => !v); setShowAttach(false); }} title="Emoji"
+                  <button onClick={() => { setShowEmoji((v) => !v); setShowAttach(false); }} title="Emoji" aria-label="Emoji" aria-expanded={showEmoji}
                     className={`w-9 h-9 rounded-lg border flex items-center justify-center flex-shrink-0 ${showEmoji ? 'border-blue-400 text-blue-600 bg-blue-50' : 'border-gray-200 text-gray-500 hover:bg-gray-50'}`}>
                     <Smile className="w-4 h-4" />
                   </button>
 
                   {/* Attach with options menu */}
                   <div className="relative flex-shrink-0">
-                    <button onClick={() => { setShowAttach((v) => !v); setShowEmoji(false); }} title="Attach"
+                    <button onClick={() => { setShowAttach((v) => !v); setShowEmoji(false); }} title="Attach" aria-label="Attach a file" aria-expanded={showAttach}
                       className={`w-9 h-9 rounded-lg border flex items-center justify-center ${showAttach ? 'border-blue-400 text-blue-600 bg-blue-50' : 'border-gray-200 text-gray-500 hover:bg-gray-50'}`}>
                       <Paperclip className="w-4 h-4" />
                     </button>
@@ -422,6 +428,7 @@ export default function ChatWidget() {
                     placeholder={active.type === 'broadcast' ? 'Announce to everyone…' : 'Type a message…'}
                     className="flex-1 min-w-0 resize-none max-h-24 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-blue-400" />
                   <button onClick={handleSend} disabled={(!draft.trim() && !file) || sendMut.isPending}
+                    aria-label="Send message" title="Send"
                     className="w-9 h-9 rounded-lg bg-blue-600 text-white flex items-center justify-center hover:bg-blue-700 disabled:opacity-40 flex-shrink-0">
                     <Send className="w-4 h-4" />
                   </button>
@@ -463,11 +470,11 @@ function CallOverlay({ calling }) {
           <div className="flex items-center justify-center gap-4 mt-6">
             {call.status === 'incoming' ? (
               <>
-                <button onClick={declineCall} className="w-14 h-14 rounded-full bg-red-500 hover:bg-red-600 text-white flex items-center justify-center"><PhoneOff className="w-6 h-6" /></button>
-                <button onClick={acceptCall} className="w-14 h-14 rounded-full bg-emerald-500 hover:bg-emerald-600 text-white flex items-center justify-center">{isVideo ? <Video className="w-6 h-6" /> : <Phone className="w-6 h-6" />}</button>
+                <button onClick={declineCall} aria-label="Decline call" title="Decline" className="w-14 h-14 rounded-full bg-red-500 hover:bg-red-600 text-white flex items-center justify-center"><PhoneOff className="w-6 h-6" /></button>
+                <button onClick={acceptCall} aria-label="Accept call" title="Accept" className="w-14 h-14 rounded-full bg-emerald-500 hover:bg-emerald-600 text-white flex items-center justify-center">{isVideo ? <Video className="w-6 h-6" /> : <Phone className="w-6 h-6" />}</button>
               </>
             ) : (
-              <button onClick={hangup} className="w-14 h-14 rounded-full bg-red-500 hover:bg-red-600 text-white flex items-center justify-center"><PhoneOff className="w-6 h-6" /></button>
+              <button onClick={hangup} aria-label="Cancel call" title="Cancel call" className="w-14 h-14 rounded-full bg-red-500 hover:bg-red-600 text-white flex items-center justify-center"><PhoneOff className="w-6 h-6" /></button>
             )}
           </div>
         </div>
@@ -497,15 +504,15 @@ function CallOverlay({ calling }) {
         <div className="absolute top-4 left-4 text-white/80 text-sm font-medium">{call.peerName}</div>
       </div>
       <div className="py-5 flex items-center justify-center gap-5 bg-black/30">
-        <button onClick={toggleMute} title={muted ? 'Unmute' : 'Mute'} className={`w-12 h-12 rounded-full flex items-center justify-center ${muted ? 'bg-white text-gray-900' : 'bg-white/15 text-white hover:bg-white/25'}`}>
+        <button onClick={toggleMute} title={muted ? 'Unmute' : 'Mute'} aria-label={muted ? 'Unmute' : 'Mute'} className={`w-12 h-12 rounded-full flex items-center justify-center ${muted ? 'bg-white text-gray-900' : 'bg-white/15 text-white hover:bg-white/25'}`}>
           {muted ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
         </button>
         {isVideo && (
-          <button onClick={toggleCam} title={camOff ? 'Camera on' : 'Camera off'} className={`w-12 h-12 rounded-full flex items-center justify-center ${camOff ? 'bg-white text-gray-900' : 'bg-white/15 text-white hover:bg-white/25'}`}>
+          <button onClick={toggleCam} title={camOff ? 'Camera on' : 'Camera off'} aria-label={camOff ? 'Camera on' : 'Camera off'} className={`w-12 h-12 rounded-full flex items-center justify-center ${camOff ? 'bg-white text-gray-900' : 'bg-white/15 text-white hover:bg-white/25'}`}>
             {camOff ? <VideoOff className="w-5 h-5" /> : <Video className="w-5 h-5" />}
           </button>
         )}
-        <button onClick={hangup} title="Hang up" className="w-14 h-14 rounded-full bg-red-500 hover:bg-red-600 text-white flex items-center justify-center"><PhoneOff className="w-6 h-6" /></button>
+        <button onClick={hangup} title="Hang up" aria-label="Hang up" className="w-14 h-14 rounded-full bg-red-500 hover:bg-red-600 text-white flex items-center justify-center"><PhoneOff className="w-6 h-6" /></button>
       </div>
     </div>
   );

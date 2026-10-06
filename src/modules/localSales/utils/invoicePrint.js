@@ -4,12 +4,16 @@
 //   printCustomerInvoice — clean commercial document, NO cost/margin.
 //   printAdminInvoice    — internal copy with traceability + financials.
 // No new dependency; browser print → Save as PDF.
+import { fmtPKR, fmtNum, fmtPct, fmtDate } from '../../../shared/utils/format';
 
 const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-const pkr = (v) => `Rs ${(parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const dt = (v) => v ? new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
-const n0 = (v) => `${Math.round(parseFloat(v) || 0).toLocaleString()}`;
-const pct = (v) => `${(parseFloat(v) || 0).toFixed(1)}%`;
+// Same printed shapes as before ("Rs 1,234.00", "05 Oct 2026", "1,234",
+// "12.3%"), now from the shared formatter so the locale is fixed (en-PK).
+const pkr = (v) => fmtPKR(parseFloat(v) || 0, { decimals: 2 });
+const dt = (v) => (v ? fmtDate(v) : '—');
+const n0 = (v) => fmtNum(Math.round(parseFloat(v) || 0));
+const pct = (v) => fmtPct(parseFloat(v) || 0);
+const mt2 = (v) => fmtNum(parseFloat(v) || 0, 2);
 // Distinct inbound/purchase vehicle numbers for the invoice's source lots.
 const inVehNos = (dispatch) => (dispatch?.intakeVehicles || []).map(v => v.vehicleNo).filter(Boolean).join(', ');
 
@@ -82,7 +86,7 @@ function itemsRows(items, admin) {
   return items.map(it => `<tr>
     <td>${esc(it.riceType)}</td>
     <td>${esc(it.gradeProduct)}</td>
-    <td class="r">${n0(it.quantityKg)} kg<div class="muted">${(it.quantityMt || 0).toFixed(2)} MT</div></td>
+    <td class="r">${n0(it.quantityKg)} kg<div class="muted">${mt2(it.quantityMt)} MT</div></td>
     <td class="r">${it.bags != null ? n0(it.bags) : '—'}${it.bagWeightKg ? `<div class="muted">${it.bagWeightKg} kg</div>` : ''}</td>
     <td class="r">${it.ratePerKg > 0 ? pkr(it.ratePerKg) + '/kg' : '—'}</td>
     <td class="r">${pkr(it.amount)}</td>
@@ -232,7 +236,7 @@ export function printAdminInvoice(data, company) {
     </div>
     ${(dispatch.intakeVehicles || []).length ? `<div class="sec"><h4>Purchase / Intake Vehicles</h4>
       <table><thead><tr><th>Vehicle</th><th>Driver</th><th class="r">Weight (MT)</th><th class="r">Bags</th><th>Arrived</th></tr></thead>
-        <tbody>${dispatch.intakeVehicles.map(v => `<tr><td>${esc(v.vehicleNo)}</td><td>${esc(v.driverName || '—')}</td><td class="r">${(v.weightMt || 0).toFixed(2)}</td><td class="r">${v.totalBags != null ? v.totalBags : '—'}</td><td>${dt(v.arrivalDate)}</td></tr>`).join('')}</tbody></table>
+        <tbody>${dispatch.intakeVehicles.map(v => `<tr><td>${esc(v.vehicleNo)}</td><td>${esc(v.driverName || '—')}</td><td class="r">${mt2(v.weightMt)}</td><td class="r">${v.totalBags != null ? v.totalBags : '—'}</td><td>${dt(v.arrivalDate)}</td></tr>`).join('')}</tbody></table>
     </div>` : ''}
     <div class="sign"><div>Prepared By</div><div>Checked By</div><div>Approved By</div></div>
   `;
@@ -245,7 +249,7 @@ export function printPurchaseInvoice(data, company) {
   const { purchase: p, costs = {}, intakeVehicles = [], payments = [], producedByproducts = [] } = data;
   const vehRows = (intakeVehicles || []).map(v => `<tr>
     <td>${esc(v.vehicleNo)}</td><td>${esc(v.gatePassNo || '—')}</td><td>${esc(v.driverName || '—')}</td><td>${esc(v.haulerName || '—')}</td>
-    <td class="r">${((v.weightKg || 0) / 1000).toFixed(2)}</td><td class="r">${v.totalBags != null ? v.totalBags : '—'}</td><td>${dt(v.arrivalDate)}</td>
+    <td class="r">${mt2((v.weightKg || 0) / 1000)}</td><td class="r">${v.totalBags != null ? v.totalBags : '—'}</td><td>${dt(v.arrivalDate)}</td>
   </tr>`).join('');
   const payRows = (payments || []).map(e => `<tr>
     <td>${dt(e.date)}</td><td>${e.kind === 'created' ? 'Purchase recorded' : esc(e.paymentNo || 'Payment')}</td>
@@ -270,7 +274,7 @@ export function printPurchaseInvoice(data, company) {
       <thead><tr><th>Rice Type</th><th>Grade</th><th class="r">Quantity</th><th class="r">Bags</th><th class="r">Rate</th><th class="r">Amount</th></tr></thead>
       <tbody><tr>
         <td>${esc(p.riceType)}</td><td>${esc(p.grade || '—')}</td>
-        <td class="r">${n0(p.quantityKg)} kg<div class="muted">${(p.quantityMt || 0).toFixed(2)} MT</div></td>
+        <td class="r">${n0(p.quantityKg)} kg<div class="muted">${mt2(p.quantityMt)} MT</div></td>
         <td class="r">${p.bags != null ? n0(p.bags) : '—'}${p.bagWeightKg ? `<div class="muted">${p.bagWeightKg} kg</div>` : ''}</td>
         <td class="r">${p.ratePerKg > 0 ? pkr(p.ratePerKg) + '/kg' : '—'}</td>
         <td class="r">${pkr(p.amount)}</td>

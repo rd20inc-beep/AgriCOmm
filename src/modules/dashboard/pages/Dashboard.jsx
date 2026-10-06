@@ -22,11 +22,15 @@ import PendingApprovalsCard from '../components/PendingApprovalsCard';
 import { useOwnerAuth } from '../../../context/OwnerAuthContext';
 import { canSeeCost } from '../../../hooks/useCanSeeCost';
 import { isBalanceDue } from '../../exportOrders/components/constants';
+import StatusBadge from '../../../shared/components/StatusBadge';
+import useConfirm from '../../../hooks/useConfirm';
+import { fmtUSD, fmtMT, fmtKg, fmtPct, fmtDate } from '../../../shared/utils/format';
 
 // ─── Formatting ────────────────────────────────────────────────────────
-const fmt = (v) => '$' + (Number(v) || 0).toLocaleString('en-US', { maximumFractionDigits: 0 });
-const fmtMt = (v) => `${(Number(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} MT`;
-const fmtPctSafe = (v) => v == null || isNaN(v) ? '—' : `${Number(v).toFixed(1)}%`;
+// Exact figures from the shared formatter (en-PK locale, no abbreviation).
+const fmt = (v) => fmtUSD(Number(v) || 0, { decimals: 0 });
+// Milling quantities are stored as MT on the batch; the mill reads kg.
+const fmtMtAsKg = (v) => fmtKg((Number(v) || 0) * 1000);
 
 // ─── Pipeline phase grouping ───────────────────────────────────────────
 const PHASES = [
@@ -43,6 +47,7 @@ export default function Dashboard() {
   const { requestOwnerApproval } = useOwnerAuth();
   const { exportOrders, millingBatches, dataLoading, refreshFromApi, addToast } = useApp();
   const { user, hasPermission } = useAuth();
+  const [confirm, confirmDialog] = useConfirm();
   const isOwnerOrAdmin = user?.role === 'Owner' || user?.role === 'Super Admin';
   // This "Operations Overview" is an export/mill operations dashboard (order
   // pipeline, shipments, export customers…). A payments-only role (Finance) can't
@@ -154,11 +159,9 @@ export default function Dashboard() {
   // ─── Yield distribution ───
   const yieldDistribution = useMemo(() => {
     const completed = safeBatches.filter(b => b.status === 'Completed' && Number(b.rawQtyMT) > 0);
-    if (completed.length === 0) return [
-      { name: 'Finished', value: 65, fill: '#3b82f6' },
-      { name: 'Broken', value: 33, fill: '#f59e0b' },
-      { name: 'Wastage', value: 2, fill: '#ef4444' },
-    ];
+    // No completed batch yet → no distribution (the chart shows an empty
+    // state). It used to fall back to a made-up 65 / 33 / 2 split.
+    if (completed.length === 0) return [];
     const t = completed.reduce((a, b) => ({
       f: a.f + (Number(b.actualFinishedMT) || 0), br: a.br + (Number(b.brokenMT) || 0),
       w: a.w + (Number(b.wastageMT) || 0), r: a.r + (Number(b.rawQtyMT) || 0),
@@ -174,11 +177,11 @@ export default function Dashboard() {
   // ─── Recent activity ───
   const recentActivities = useMemo(() => {
     const items = safeOrders.slice(0, 5).map((o, i) => ({
-      id: i + 1, type: 'finance',
+      id: i + 1, type: 'shipment',
       action: `${o.status} — ${o.id} (${o.customerName})`,
-      by: 'System', time: o.createdAt ? new Date(o.createdAt).toLocaleDateString() : '',
+      by: '', time: o.createdAt ? fmtDate(o.createdAt) : '',
     }));
-    return items.length > 0 ? items : [{ id: 1, type: 'finance', action: 'No recent activity', by: '', time: '' }];
+    return items;
   }, [safeOrders]);
 
   // ─── Recent shipments (top 5 most recently shipped/arrived) ───
@@ -189,7 +192,7 @@ export default function Dashboard() {
       .slice(0, 4);
   }, [safeOrders]);
 
-  const today = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+  const today = new Date().toLocaleDateString('en-GB', { weekday: 'long', month: 'long', day: 'numeric' });
 
   // All hooks are above this point — these guards are safe to early-return on.
   // Payments-only Finance has no business on the export/mill Operations Overview
@@ -199,6 +202,7 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-5 pb-4">
+      {confirmDialog}
       {/* ─── HERO BAND ────────────────────────────────────────────── */}
       <div className="rounded-2xl bg-gradient-to-r from-slate-900 via-slate-800 to-blue-900 p-4 sm:p-6 text-white shadow-sm relative overflow-hidden">
         <div className="absolute inset-0 opacity-20" style={{ backgroundImage: 'radial-gradient(circle at 80% 30%, white 0%, transparent 60%)' }} />
@@ -224,6 +228,7 @@ export default function Dashboard() {
               onClick={() => refreshFromApi('orders')}
               className="bg-white/15 hover:bg-white/25 backdrop-blur-sm px-3 py-2 rounded-lg text-xs font-medium inline-flex items-center gap-1 transition-colors"
               title="Refresh"
+              aria-label="Refresh dashboard"
             >
               <RefreshCw size={12} className={dataLoading ? 'animate-spin' : ''} /> Refresh
             </button>
@@ -259,7 +264,7 @@ export default function Dashboard() {
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold text-gray-900">{b.id}</p>
                     <p className="text-xs text-gray-600">
-                      <PartyLink type="supplier" id={b.supplierId} name={b.supplierName} fallback="No supplier" /> · {Number(b.rawQtyMT || 0).toFixed(1)} MT
+                      <PartyLink type="supplier" id={b.supplierId} name={b.supplierName} fallback="No supplier" /> · {fmtMtAsKg(b.rawQtyMT)}
                       {b.linkedExportOrder && <span> · Order: {b.linkedExportOrder}</span>}
                     </p>
                   </div>
@@ -277,10 +282,15 @@ export default function Dashboard() {
                       Approve
                     </button>
                     <button
-                      onClick={() => {
-                        const reason = prompt('Rejection reason:');
-                        if (!reason?.trim()) return;
-                        millingApi.rejectBatch(b.dbId || b.id, { reason: reason.trim() })
+                      onClick={async () => {
+                        const ok = await confirm({
+                          title: `Reject batch ${b.id}?`,
+                          consequence: 'The batch goes back without being approved. Give the reason so the operator can correct it.',
+                          reason: 'required',
+                          confirmLabel: 'Reject',
+                        });
+                        if (!ok || !ok.reason?.trim()) return;
+                        millingApi.rejectBatch(b.dbId || b.id, { reason: ok.reason.trim() })
                           .then(() => { addToast(`Batch ${b.id} rejected`, 'success'); refreshFromApi('batches'); })
                           .catch(err => addToast(err?.response?.data?.message || 'Failed', 'error'));
                       }}
@@ -425,7 +435,7 @@ export default function Dashboard() {
           <div className="flex items-center justify-between text-xs pt-3 border-t border-gray-100">
             <span className="text-gray-500">Avg yield (this week)</span>
             <span className={`font-bold ${yieldWeek != null && yieldWeek >= 65 ? 'text-emerald-600' : yieldWeek != null && yieldWeek >= 60 ? 'text-amber-600' : 'text-gray-700'}`}>
-              {fmtPctSafe(yieldWeek)}
+              {fmtPct(yieldWeek)}
             </span>
           </div>
         </div>
@@ -443,9 +453,6 @@ export default function Dashboard() {
           ) : (
             <ul className="space-y-2">
               {recentShipments.map(o => {
-                const statusTone = o.status === 'Shipped' ? 'bg-cyan-100 text-cyan-700'
-                  : o.status === 'Arrived' ? 'bg-emerald-100 text-emerald-700'
-                  : 'bg-slate-100 text-slate-700';
                 return (
                   <li key={o.id}>
                     <Link to={`/export/${o.id}`} className="flex items-center gap-3 p-2.5 rounded-lg bg-gray-50 hover:bg-gray-100 transition-colors">
@@ -453,12 +460,12 @@ export default function Dashboard() {
                         <Ship size={14} className="text-cyan-500" />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-gray-900 truncate">{o.id} · <PartyLink type="customer" id={o.customerId} name={o.customerName} /></p>
+                        <p className="text-sm font-medium text-gray-900 truncate" title={`${o.id} · ${o.customerName || ''}`}>{o.id} · <PartyLink type="customer" id={o.customerId} name={o.customerName} /></p>
                         <p className="text-[11px] text-gray-500 truncate">
-                          {o.qtyMT} MT to {o.country}{o.vesselName ? ` · ${o.vesselName}` : ''}
+                          {fmtMT(o.qtyMT)} to {o.country}{o.vesselName ? ` · ${o.vesselName}` : ''}
                         </p>
                       </div>
-                      <span className={`px-2 py-0.5 rounded-full text-[11px] font-medium ${statusTone} flex-shrink-0`}>{o.status}</span>
+                      <span className="flex-shrink-0"><StatusBadge status={o.status} /></span>
                     </Link>
                   </li>
                 );
@@ -474,7 +481,7 @@ export default function Dashboard() {
           <YieldDistributionChart data={yieldDistribution} />
         </div>
         <div className="lg:col-span-2">
-          <RecentActivity activities={recentActivities} />
+          <RecentActivity activities={recentActivities} viewAllTo={canExport ? '/export' : null} />
         </div>
       </div>
 
@@ -485,7 +492,7 @@ export default function Dashboard() {
           {canExport && <QuickAction icon={Plus} label="New Export Order" onClick={() => navigate("/export?new=1")} tone="blue" />}
           {canMill && <QuickAction icon={Factory} label="New Milling Batch" onClick={() => navigate("/milling?new=1")} tone="amber" />}
           {canFinance && <QuickAction icon={ArrowDownLeft} label="Record Receipt" onClick={() => navigate('/finance/money-in')} tone="emerald" />}
-          <QuickAction icon={ArrowUpRight}    label="Make Payment"      onClick={() => navigate('/finance/money-out')} tone="rose" />
+          {canFinance && <QuickAction icon={ArrowUpRight} label="Make Payment" onClick={() => navigate('/finance/money-out')} tone="rose" />}
           {canReports && <QuickAction icon={BarChart3} label="Print Reports" onClick={() => navigate('/reports/print')} tone="violet" />}
         </div>
       </div>
@@ -572,11 +579,11 @@ function ProductionCell({ label, batches, rawMt, finishedMt }) {
         <span className="text-[11px] text-gray-500">batches</span>
       </div>
       <div className="text-[11px] text-gray-600 mt-1">
-        Raw {fmtMt(rawMt)} → Output {fmtMt(finishedMt)}
+        Raw {fmtMtAsKg(rawMt)} → Output {fmtMtAsKg(finishedMt)}
       </div>
       {yieldPct != null && (
         <div className="text-[11px] text-gray-500 mt-0.5">
-          Yield <span className="font-semibold text-gray-700">{yieldPct.toFixed(1)}%</span>
+          Yield <span className="font-semibold text-gray-700">{fmtPct(yieldPct)}</span>
         </div>
       )}
     </div>
