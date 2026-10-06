@@ -4,6 +4,9 @@
 // file keeps the two entry points in lockstep.
 import { useState, Fragment } from 'react';
 import { Link } from 'react-router-dom';
+import {
+  fmtNum, fmtPKR, fmtUSD, fmtPct as houseFmtPct, fmtDate as houseFmtDate, fmtDateTime as fmtStamp,
+} from '../../../shared/utils/format';
 
 // A reference that's a clickable link on screen but prints as plain text.
 export function RefLink({ to, children }) {
@@ -21,14 +24,17 @@ export function TagChip({ label, count, active, onClick }) {
   );
 }
 
+// Printed-report formatters, built on the shared format.js (fixed en-PK
+// locale, exact figures). A missing value prints as 0 here, as it always has on
+// these reports.
 export function fmtMt(v) {
-  return (parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return fmtNum(parseFloat(v) || 0, 2);
 }
 export function fmtKg(v) {
-  return (parseFloat(v) || 0).toLocaleString(undefined, { maximumFractionDigits: 0 });
+  return fmtNum(parseFloat(v) || 0, 0);
 }
 export function fmtPkr(v) {
-  return 'Rs ' + (parseFloat(v) || 0).toLocaleString(undefined, { maximumFractionDigits: 0 });
+  return fmtPKR(parseFloat(v) || 0);
 }
 // Cost columns (per kg, value) are dropped for viewers without
 // reports.view_cost — the API already nulls them; this removes the column
@@ -38,12 +44,10 @@ export function costCols(showCost, drop) {
 }
 
 export function fmtPct(v) {
-  const n = parseFloat(v) || 0;
-  return n.toFixed(1) + '%';
+  return houseFmtPct(parseFloat(v) || 0);
 }
 export function fmtDate(iso) {
-  if (!iso) return '—';
-  return new Date(iso).toLocaleDateString();
+  return houseFmtDate(iso);
 }
 
 // ─── Production report view ────────────────────────────────────────────
@@ -153,7 +157,7 @@ export function StockReportView({ data, companyName, groupLabel, showCost = true
   };
   return (
     <div className="print-report space-y-6 text-sm text-gray-900">
-      <Header companyName={companyName} title="Stock Report" subtitle={`As of ${new Date(asOf).toLocaleString()} · ${groupLabel || ''}`} />
+      <Header companyName={companyName} title="Stock Report" subtitle={`As of ${fmtStamp(asOf)} · ${groupLabel || ''}`} />
 
       <SummaryRow items={[
         { label: 'Lots', value: grand.lotCount },
@@ -348,7 +352,7 @@ export function AgingReportView({ data, companyName, kind }) {
   const BUCKETS = ['0-30', '31-60', '61-90', '90+'];
   return (
     <div className="print-report space-y-6 text-sm text-gray-900">
-      <Header companyName={companyName} title={title} subtitle={`As of ${new Date(asOf).toLocaleString()}`} />
+      <Header companyName={companyName} title={title} subtitle={`As of ${fmtStamp(asOf)}`} />
       <SummaryRow items={[
         ...BUCKETS.map(b => ({ label: `${b} days`, value: fmtPkr(buckets[b]?.totalPkr || 0) })),
         { label: 'Total Outstanding', value: fmtPkr(totalPkr) },
@@ -419,7 +423,7 @@ export function Header({ companyName, title, subtitle }) {
       <div className="flex items-end justify-between">
         <div>
           <div className="text-base font-bold uppercase tracking-wider">{companyName}</div>
-          <div className="text-xs text-gray-500">Generated {new Date().toLocaleString()}</div>
+          <div className="text-xs text-gray-500">Generated {fmtStamp(new Date())}</div>
         </div>
         <div className="text-right">
           <h1 className="text-xl font-bold">{title}</h1>
@@ -497,7 +501,7 @@ export function Footer() {
   return (
     <div className="text-[11px] text-gray-400 pt-4 border-t border-gray-200 flex justify-between">
       <span>AgriCOmm ERP · Printable Report</span>
-      <span>Page printed {new Date().toLocaleString()}</span>
+      <span>Page printed {fmtStamp(new Date())}</span>
     </div>
   );
 }
@@ -652,7 +656,7 @@ export function SalesLedgerView({ data, companyName, range }) {
         { label: 'Local Qty', value: `${fmtMt(totals.localMt)} MT` },
         { label: 'Local Value', value: fmtPkr(totals.localPkr) },
         { label: 'Export Orders', value: totals.exportCount },
-        { label: 'Export Value', value: `$${(totals.exportUsd || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` },
+        { label: 'Export Value', value: fmtUSD(totals.exportUsd || 0) },
       ]} />
       <Section title="Local Sales">
         <Table
@@ -681,10 +685,10 @@ export function SalesLedgerView({ data, companyName, range }) {
             fmtDate(r.date),
             r.customerId ? <RefLink to={`/finance/statements?type=customer&id=${r.customerId}`}>{r.customer}</RefLink> : (r.customer || '—'),
             r.item || '—',
-            fmtMt(r.mt), fmtKg(r.mt * 1000), `$${(r.ratePerMt || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, `$${((r.ratePerMt || 0) / 1000).toFixed(3)}`, fmtKg(r.bags), `$${(r.valueUsd || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, r.status || '—',
+            fmtMt(r.mt), fmtKg(r.mt * 1000), fmtUSD(r.ratePerMt || 0), fmtUSD((r.ratePerMt || 0) / 1000, { decimals: 3 }), fmtKg(r.bags), fmtUSD(r.valueUsd || 0), r.status || '—',
           ])}
           empty="No export orders."
-          totalRow={['', '', '', 'TOTAL', fmtMt(totals.exportMt), fmtKg(totals.exportMt * 1000), '', '', fmtKg(exp.reduce((s, r) => s + (parseFloat(r.bags) || 0), 0)), `$${(totals.exportUsd || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, '']}
+          totalRow={['', '', '', 'TOTAL', fmtMt(totals.exportMt), fmtKg(totals.exportMt * 1000), '', '', fmtKg(exp.reduce((s, r) => s + (parseFloat(r.bags) || 0), 0)), fmtUSD(totals.exportUsd || 0), '']}
         />
       </Section>
       <Footer />
@@ -776,7 +780,7 @@ export function StockDetailView({ data, companyName, showCost = true }) {
 
   return (
     <div className="print-report space-y-6 text-sm text-gray-900">
-      <Header companyName={companyName} title="Stock — Detailed & Traceable" subtitle={`As of ${new Date().toLocaleString()}${tag !== 'all' ? ` · ${tag}` : ''}`} />
+      <Header companyName={companyName} title="Stock — Detailed & Traceable" subtitle={`As of ${fmtStamp(new Date())}${tag !== 'all' ? ` · ${tag}` : ''}`} />
       {/* The summary must describe the rows actually being reported. It used to
           read `totals`, the whole warehouse, so picking CSR still showed every
           category's quantity and value at the top — the figure people read
@@ -914,7 +918,7 @@ export function SweepingReportView({ data, companyName }) {
   const { rows, totals } = data;
   return (
     <div className="print-report space-y-6 text-sm text-gray-900">
-      <Header companyName={companyName} title="Sweeping Output" subtitle={`As of ${new Date().toLocaleString()}`} />
+      <Header companyName={companyName} title="Sweeping Output" subtitle={`As of ${fmtStamp(new Date())}`} />
       <SummaryRow items={[
         { label: 'Sweeping Lots', value: totals.lots },
         { label: 'From Batches', value: totals.batches },
@@ -1125,8 +1129,8 @@ export function AuditReportView({ data, companyName, range }) {
   const cat = data.byCategory || {};
   const rows = data.rows || [];
   const summary = [
-    { label: 'Total entries', value: (data.total || 0).toLocaleString() },
-    ...AUDIT_CAT_ORDER.filter((c) => cat[c]).map((c) => ({ label: AUDIT_CAT_LABEL[c], value: (cat[c] || 0).toLocaleString() })),
+    { label: 'Total entries', value: fmtNum(data.total || 0) },
+    ...AUDIT_CAT_ORDER.filter((c) => cat[c]).map((c) => ({ label: AUDIT_CAT_LABEL[c], value: fmtNum(cat[c] || 0) })),
   ];
   return (
     <div className="print-report space-y-5 text-gray-900">
@@ -1137,22 +1141,22 @@ export function AuditReportView({ data, companyName, range }) {
         <Section title="Activity by action">
           <Table
             head={['Action', 'Count']} align={['left', 'right']}
-            rows={(data.topActions || []).map((a) => [a.action, a.count.toLocaleString()])}
+            rows={(data.topActions || []).map((a) => [a.action, fmtNum(a.count)])}
             empty="No activity in this period."
           />
         </Section>
         <Section title="Activity by user">
           <Table
             head={['User', 'Count']} align={['left', 'right']}
-            rows={(data.topUsers || []).map((u) => [u.user, u.count.toLocaleString()])}
+            rows={(data.topUsers || []).map((u) => [u.user, fmtNum(u.count)])}
             empty="No activity in this period."
           />
         </Section>
       </div>
 
-      <Section title={`Detail — ${rows.length.toLocaleString()} ${data.truncated ? `of ${(data.total || 0).toLocaleString()} ` : ''}entries`}>
+      <Section title={`Detail — ${fmtNum(rows.length)} ${data.truncated ? `of ${fmtNum(data.total || 0)} ` : ''}entries`}>
         {data.truncated && (
-          <p className="text-[11px] text-amber-700 mb-2">Showing the most recent {rows.length.toLocaleString()} entries. Narrow the date range or filters to see the rest.</p>
+          <p className="text-[11px] text-amber-700 mb-2">Showing the most recent {fmtNum(rows.length)} entries. Narrow the date range or filters to see the rest.</p>
         )}
         <Table
           head={['Time', 'User', 'Action', 'Entity', 'Ref', 'Details']}

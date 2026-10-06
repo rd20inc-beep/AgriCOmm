@@ -12,11 +12,12 @@ import { reportingApi } from '../api/services';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import { exportLedgerCSV, printProcessingLossLedger } from '../utils/ledgerExport';
+import { fmtDate, fmtMT, fmtPct } from '../../../shared/utils/format';
 
-const mt = (v) => `${(parseFloat(v) || 0).toFixed(2)} MT`;
-const kgMt = (v) => `${((parseFloat(v) || 0) / 1000).toFixed(2)} MT`;
-const pc = (v) => `${(parseFloat(v) || 0).toFixed(2)}%`;
-const dt = (v) => v ? new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+const mt = (v) => fmtMT(v, { decimals: 2 });
+const kgMt = (v) => fmtMT((parseFloat(v) || 0) / 1000, { decimals: 2 });
+const pc = (v) => fmtPct(v, { decimals: 2 });
+const dt = (v) => fmtDate(v);
 
 export default function ProcessingLossLedger() {
   const navigate = useNavigate();

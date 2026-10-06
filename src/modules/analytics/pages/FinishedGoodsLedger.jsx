@@ -11,9 +11,10 @@ import { reportingApi } from '../api/services';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import { exportLedgerCSV, printFinishedGoodsLedger } from '../utils/ledgerExport';
+import { fmtKg, fmtPKR } from '../../../shared/utils/format';
 
-const pkr = (v) => (v == null ? '—' : `Rs ${(parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
-const kg = (v) => `${Math.round(parseFloat(v) || 0).toLocaleString()} kg`;
+const pkr = (v) => fmtPKR(v, { decimals: 2 });
+const kg = (v) => fmtKg(v);
 
 export default function FinishedGoodsLedger() {
   const navigate = useNavigate();

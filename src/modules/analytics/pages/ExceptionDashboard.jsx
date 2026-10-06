@@ -9,6 +9,7 @@ import { useExceptions, useExceptionStats, useScanExceptions, useResolveExceptio
 import { useApp } from '../../../context/AppContext';
 import { LoadingSpinner, ErrorState } from '../../../components/LoadingState';
 import Modal from '../../../components/Modal';
+import { fmtDateTime, fmtUSD } from '../../../shared/utils/format';
 
 const SEVERITY_CONFIG = {
   critical: { color: 'bg-red-500', bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-700', icon: AlertCircle },
@@ -26,10 +27,7 @@ const TYPE_ICONS = {
 
 const STATUS_TABS = ['Open', 'Acknowledged', 'Resolved'];
 
-function formatDate(d) {
-  if (!d) return '—';
-  return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-}
+const formatDate = (d) => fmtDateTime(d);
 
 export default function ExceptionDashboard() {
   const { addToast } = useApp();
@@ -193,16 +191,16 @@ export default function ExceptionDashboard() {
                     <span>{formatDate(ex.detectedAt || ex.createdAt)}</span>
                     {ex.assignedToName && <span>Assigned: {ex.assignedToName}</span>}
                     {ex.amountAtRisk > 0 && (
-                      <span className="font-medium text-red-600">${parseFloat(ex.amountAtRisk).toLocaleString()} at risk</span>
+                      <span className="font-medium text-red-600">{fmtUSD(ex.amountAtRisk)} at risk</span>
                     )}
                   </div>
                 </div>
                 <div className="flex items-center gap-1.5 flex-shrink-0">
-                  <button onClick={() => setSelectedEx(ex)} className="btn btn-ghost btn-sm"><Eye className="w-4 h-4" /></button>
+                  <button onClick={() => setSelectedEx(ex)} className="btn btn-ghost btn-sm" aria-label="View exception" title="View"><Eye className="w-4 h-4" /></button>
                   {ex.status === 'Open' && (
                     <>
                       <button onClick={() => { setSelectedEx(ex); }} className="btn btn-sm btn-secondary">Resolve</button>
-                      <button onClick={() => handleEscalate(ex)} className="btn btn-sm btn-danger" title="Escalate">
+                      <button onClick={() => handleEscalate(ex)} className="btn btn-sm btn-danger" title="Escalate" aria-label="Escalate">
                         <AlertCircle className="w-3.5 h-3.5" />
                       </button>
                     </>
@@ -240,7 +238,7 @@ export default function ExceptionDashboard() {
               {selectedEx.amountAtRisk > 0 && (
                 <div>
                   <p className="text-xs font-medium text-gray-500 uppercase">Amount at Risk</p>
-                  <p className="text-sm font-semibold text-red-600 mt-1">${parseFloat(selectedEx.amountAtRisk).toLocaleString()}</p>
+                  <p className="text-sm font-semibold text-red-600 mt-1">{fmtUSD(selectedEx.amountAtRisk)}</p>
                 </div>
               )}
             </div>

@@ -9,10 +9,11 @@ import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, Printer } from 'lucide-react';
 import { reportingApi } from '../api/services';
 import { useApp } from '../../../context/AppContext';
+import { fmtDate, fmtNum } from '../../../shared/utils/format';
 
-const n0 = (v) => Math.round(parseFloat(v) || 0).toLocaleString();
+const n0 = (v) => fmtNum(v, 0);
 const cell = (v) => (parseFloat(v) > 0 ? n0(v) : '—');
-const dt = (v) => (v ? new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—');
+const dt = (v) => fmtDate(v);
 const DIM_LABEL = { variety: 'Variety', grade: 'Grade', byproduct: 'By-Product', product: 'Rice Type' };
 
 export default function StockLedger() {

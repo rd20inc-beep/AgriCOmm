@@ -7,7 +7,7 @@ import {
   BarChart3, TrendingUp, Users, Globe, Package, Award, Coins, Printer, RefreshCw,
   ArrowUpRight, ArrowDownLeft, Activity, Calendar, ExternalLink, AlertTriangle, FileText,
   ShoppingCart, Truck, Receipt, Scale, ChevronDown, ChevronRight, Layers,
-  Factory, Gauge, Wallet, Star, Plus, Trash2, Hash, Search, Download, Mail, Send,
+  Factory, Gauge, Wallet, Star, Plus, Trash2, Search, Download, Mail, Send,
   BookOpen, Wrench, Boxes, Clock,
 } from 'lucide-react';
 import {
@@ -28,36 +28,16 @@ import { reportingApi, aiApi } from '../api/services';
 import { exportLedgerCSV, printLedger } from '../utils/ledgerExport';
 import SlideDrawer from '../../../components/SlideDrawer';
 import TransactionDocument from '../../../components/TransactionDocument';
-import { toLocalISODate, todayLocalISO } from '../../../shared/utils/format';
+import StatusBadge from '../../../shared/components/StatusBadge';
+import {
+  fmtPKR as baseFmtPKR, fmtNum, fmtPct, fmtMT, fmtMoney, fmtDate, toLocalISODate, todayLocalISO,
+} from '../../../shared/utils/format';
 
 // ─── Formatting ────────────────────────────────────────────────────────
-// When the "Exact numbers" toggle is on, money is shown in full digits
-// instead of Cr/L/K/M shorthand. The flag is module-scoped and set by the
-// Reports component at the top of each render (synchronously, before any
-// formatter runs in JSX), so call sites don't need to thread a param.
-let EXACT_NUMBERS = false;
-export function setExactNumbers(on) { EXACT_NUMBERS = !!on; }
-function fmtPKR(n) {
-  if (n == null || isNaN(n)) return 'Rs 0';
-  if (EXACT_NUMBERS) return `Rs ${(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  if (Math.abs(n) >= 10_000_000) return `Rs ${(n / 10_000_000).toFixed(2)}Cr`;
-  if (Math.abs(n) >= 100_000) return `Rs ${(n / 100_000).toFixed(2)}L`;
-  if (Math.abs(n) >= 1_000) return `Rs ${(n / 1_000).toFixed(0)}K`;
-  return `Rs ${(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-function fmtUSD(n) {
-  if (n == null || isNaN(n)) return '$0';
-  if (EXACT_NUMBERS) return `$${(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  if (Math.abs(n) >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`;
-  if (Math.abs(n) >= 1_000) return `$${(n / 1_000).toFixed(1)}K`;
-  return `$${(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-// Exact value for a title tooltip — always full digits regardless of toggle.
-function exactPKR(n) { return (n == null || isNaN(n)) ? 'Rs 0' : `Rs ${(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; }
-function fmtPct(n) {
-  if (n == null || isNaN(n)) return '—';
-  return `${Number(n).toFixed(1)}%`;
-}
+// Reports are reconciled line by line, so money is always shown in full —
+// never Cr/L/K shorthand — to the paisa. Everything else comes straight from
+// shared/utils/format.js.
+const fmtPKR = (n, opts) => baseFmtPKR(n, { decimals: 2, ...opts });
 
 // ─── Range presets ────────────────────────────────────────────────────
 const RANGES = [
@@ -296,7 +276,7 @@ function ScheduledEmailsManager() {
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-gray-800">{r.reportLabel} <span className="text-gray-400 font-normal">· {r.frequency}</span></p>
                     <p className="text-[11px] text-gray-500 truncate">{(r.recipients || []).join(', ')}</p>
-                    <p className="text-[11px] text-gray-400">Next: {r.nextRun ? new Date(r.nextRun).toLocaleDateString('en-GB') : '—'}{r.lastStatus ? ` · last: ${r.lastStatus}` : ''}</p>
+                    <p className="text-[11px] text-gray-400">Next: {r.nextRun ? fmtDate(r.nextRun) : '—'}{r.lastStatus ? ` · last: ${r.lastStatus}` : ''}</p>
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
                     <button onClick={() => runNow(r.id)} disabled={busy} title="Send now" className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg disabled:opacity-50"><Send size={14} /></button>
@@ -400,12 +380,28 @@ function AiAnalystDrawer() {
   );
 }
 
+// Inline "name this" field — replaces window.prompt for naming a saved layout
+// or view. Enter saves, Escape cancels; an empty name does nothing.
+function NameInput({ initial = '', placeholder, onSave, onCancel, className = '' }) {
+  const [name, setName] = useState(initial);
+  const submit = () => { const n = name.trim(); if (n) onSave(n); };
+  return (
+    <div className={`flex items-center gap-1.5 ${className}`}>
+      <input autoFocus value={name} onChange={e => setName(e.target.value)} placeholder={placeholder} aria-label={placeholder}
+        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); submit(); } else if (e.key === 'Escape') { e.preventDefault(); onCancel(); } }}
+        className="min-w-0 flex-1 text-xs border border-gray-300 rounded-lg px-2 py-1.5 outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-800" />
+      <button type="button" onClick={submit} disabled={!name.trim()} className="px-2 py-1.5 text-xs font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-40">Save</button>
+      <button type="button" onClick={onCancel} className="px-2 py-1.5 text-xs font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
+    </div>
+  );
+}
+
 // ─── Self-serve report builder ──────────────────────────────────────────
 // Pick a dataset, choose columns, filter + sort, preview, then export / print
 // (reuses LedgerExportBar) or save the layout (localStorage). Bounded — it
 // composes existing report datasets rather than being a full BI query tool
 // (the "Ask AI" analyst covers free-form questions).
-const RB_NUM = (v) => { const n = parseFloat(v); return isNaN(n) ? '' : Math.round(n).toLocaleString(); };
+const RB_NUM = (v) => { const n = parseFloat(v); return isNaN(n) ? '' : fmtNum(Math.round(n)); };
 const RB_DATE = (v) => v ? new Date(v).toLocaleDateString('en-GB') : '';
 const REPORT_DATASETS = {
   lots: {
@@ -511,7 +507,8 @@ function ReportBuilderDrawer() {
   const switchDataset = (k) => { setDatasetKey(k); setSelected(REPORT_DATASETS[k].columns.map(c => c.key)); setSortKey(''); setFilterText(''); };
 
   const persist = (next) => { setLayouts(next); try { localStorage.setItem(RB_LAYOUTS_KEY, JSON.stringify(next)); } catch (e) { /* ignore */ } };
-  const saveLayout = () => { const name = window.prompt('Save this layout as:'); if (!name) return; persist({ ...layouts, [name]: { datasetKey, selected, sortKey, sortDir } }); };
+  const [namingLayout, setNamingLayout] = useState(false);
+  const saveLayout = (name) => { setNamingLayout(false); persist({ ...layouts, [name]: { datasetKey, selected, sortKey, sortDir } }); };
   const loadLayout = (name) => { const l = layouts[name]; if (!l) return; setDatasetKey(l.datasetKey); setSelected(l.selected); setSortKey(l.sortKey || ''); setSortDir(l.sortDir || 'asc'); };
   const delLayout = (name) => { const n = { ...layouts }; delete n[name]; persist(n); };
 
@@ -558,7 +555,9 @@ function ReportBuilderDrawer() {
             className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-700 disabled:opacity-40">{sortDir === 'asc' ? '↑ Asc' : '↓ Desc'}</button>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={saveLayout} className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50"><Star size={13} /> Save layout</button>
+          {namingLayout
+            ? <NameInput placeholder="Save this layout as" onSave={saveLayout} onCancel={() => setNamingLayout(false)} className="w-64" />
+            : <button onClick={() => setNamingLayout(true)} className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50"><Star size={13} /> Save layout</button>}
           <LedgerExportBar title={`Custom Report — ${ds.label}`} subtitle={filterText ? `Filtered: "${filterText}"` : null}
             meta={[`${view.length} rows`]} fileBase={`custom-${datasetKey}`} rows={view} columns={cols} />
         </div>
@@ -569,8 +568,8 @@ function ReportBuilderDrawer() {
         <div className="flex flex-wrap gap-1.5">
           {Object.keys(layouts).map(name => (
             <span key={name} className="inline-flex items-center gap-1 text-[11px] bg-gray-100 rounded-full pl-2.5 pr-1 py-0.5">
-              <button onClick={() => loadLayout(name)} className="text-gray-700 hover:text-blue-600">{name}</button>
-              <button onClick={() => delLayout(name)} className="text-gray-300 hover:text-red-500"><Trash2 size={11} /></button>
+              <button onClick={() => loadLayout(name)} title={name} className="max-w-[12rem] truncate text-gray-700 hover:text-blue-600">{name}</button>
+              <button onClick={() => delLayout(name)} aria-label={`Delete layout ${name}`} title="Delete" className="text-gray-300 hover:text-red-500"><Trash2 size={11} /></button>
             </span>
           ))}
         </div>
@@ -653,10 +652,6 @@ export default function Reports() {
   const setTab = (key) => { const p = new URLSearchParams(searchParams); p.set('tab', key); setSearchParams(p); };
   const [openGroup, setOpenGroup] = useState(null);
   const setRange = (val) => { const p = new URLSearchParams(searchParams); if (val) p.set('range', val); else p.delete('range'); setSearchParams(p); };
-  // Exact-number toggle (?exact=1): show full digits instead of Cr/L/K shorthand.
-  const exactMode = searchParams.get('exact') === '1';
-  const setExactMode = (on) => { const p = new URLSearchParams(searchParams); if (on) p.set('exact', '1'); else p.delete('exact'); setSearchParams(p); };
-  setExactNumbers(exactMode); // applied synchronously before formatters run in JSX below
   const params = useMemo(
     () => ({ ...rangeToParams(range), ...(millEntity ? { entity: 'mill' } : {}) }),
     [range, millEntity],
@@ -687,9 +682,10 @@ export default function Reports() {
     { to: '/reports/lots',                     icon: FileText,label: 'Lot Reports' },
   ].filter(l => !(operatorScoped && l.companyFinance));
   const tabKeys = TABS.map(t => t.key);
-  const saveCurrentView = async () => {
-    const name = window.prompt('Name this view (tab + date range):', `${(TABS.find(t => t.key === tab) || {}).label || tab} — ${(RANGES.find(r => r.value === range) || {}).label || 'All Time'}`);
-    if (!name) return;
+  const [namingView, setNamingView] = useState(false);
+  const defaultViewName = `${(TABS.find(t => t.key === tab) || {}).label || tab} — ${(RANGES.find(r => r.value === range) || {}).label || 'All Time'}`;
+  const saveCurrentView = async (name) => {
+    setNamingView(false);
     try {
       await saveMut.mutateAsync({ name, reportType: tab, entity: millEntity ? 'mill' : 'all', filters: { range }, isShared: false });
     } catch { /* surfaced by the mutation */ }
@@ -738,11 +734,6 @@ export default function Reports() {
                 {RANGES.map(r => <option key={r.value} value={r.value} className="text-gray-900">{r.label}</option>)}
               </select>
             </div>
-            <button onClick={() => setExactMode(!exactMode)}
-              title={exactMode ? 'Showing full numbers — click for Cr/L/K shorthand' : 'Showing Cr/L/K shorthand — click for full numbers'}
-              className={`backdrop-blur-sm px-3 py-2 rounded-lg text-xs font-medium inline-flex items-center gap-1 transition-colors ${exactMode ? 'bg-white text-slate-900' : 'bg-white/15 hover:bg-white/25 text-white'}`}>
-              <Hash size={12} /> Exact
-            </button>
             <button onClick={refetchAll}
               className="bg-white/15 hover:bg-white/25 backdrop-blur-sm px-3 py-2 rounded-lg text-xs font-medium inline-flex items-center gap-1 transition-colors">
               <RefreshCw size={12} /> Refresh
@@ -804,9 +795,13 @@ export default function Reports() {
               </button>
               {savedOpen && (
                 <div className="absolute right-0 mt-1 w-72 bg-white text-gray-800 rounded-lg shadow-xl border border-gray-200 z-30 overflow-hidden">
-                  <button onClick={saveCurrentView} className="w-full text-left px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50 border-b border-gray-100 inline-flex items-center gap-1.5">
-                    <Plus size={14} /> Save current view
-                  </button>
+                  {namingView ? (
+                    <NameInput initial={defaultViewName} placeholder="Name this view (tab + date range)" onSave={saveCurrentView} onCancel={() => setNamingView(false)} className="px-3 py-2 border-b border-gray-100" />
+                  ) : (
+                    <button onClick={() => setNamingView(true)} className="w-full text-left px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50 border-b border-gray-100 inline-flex items-center gap-1.5">
+                      <Plus size={14} /> Save current view
+                    </button>
+                  )}
                   <div className="max-h-72 overflow-y-auto">
                     {savedReports.length === 0 ? (
                       <p className="px-3 py-3 text-xs text-gray-400">No saved views yet.</p>
@@ -816,10 +811,10 @@ export default function Reports() {
                       return (
                         <div key={r.id} className="flex items-center justify-between gap-2 px-3 py-2 hover:bg-gray-50 border-b border-gray-50">
                           <button onClick={() => loadView(r)} className="min-w-0 text-left">
-                            <span className="block text-sm font-medium truncate">{r.name}</span>
+                            <span className="block text-sm font-medium truncate" title={r.name}>{r.name}</span>
                             <span className="block text-[11px] text-gray-400">{(TABS.find(t => t.key === rt) || {}).label || rt}{!known ? ' · (not a dashboard tab)' : ''}{r.isShared || r.is_shared ? ' · shared' : ''}</span>
                           </button>
-                          <button onClick={() => delMut.mutate(r.id)} title="Delete" className="shrink-0 text-gray-300 hover:text-red-500"><Trash2 size={14} /></button>
+                          <button onClick={() => delMut.mutate(r.id)} title="Delete" aria-label={`Delete saved view ${r.name}`} className="shrink-0 text-gray-300 hover:text-red-500"><Trash2 size={14} /></button>
                         </div>
                       );
                     })}
@@ -1063,7 +1058,7 @@ function MoneyFlowTab({ kind, params, totalLabel, statementHref, openDoc }) {
             const amountCell = isForeign ? (
               <div className="text-right">
                 <div className="font-semibold text-gray-900">{fmtPKR(pkr)}</div>
-                <div className="text-[11px] text-gray-400">{p.currency} {Number(p.amount).toLocaleString()} @ {p.fxRate}</div>
+                <div className="text-[11px] text-gray-400">{fmtMoney(p.amount, p.currency)} @ {p.fxRate}</div>
               </div>
             ) : <span className="font-semibold text-gray-900">{fmtPKR(pkr)}</span>;
             const href = statementHref?.(p.counterpartyType, p.counterpartyId);
@@ -1168,7 +1163,7 @@ function SaleTrackerPanel({ sale, statementHref, companyProfile }) {
       <div className="grid grid-cols-2 gap-3">
         <Cell label="Sale" value={<span className="font-mono">{sale.saleNo}</span>} />
         <Cell label="Customer" value={custHref ? <Link to={custHref} className="text-blue-600 hover:underline">{sale.customerName}</Link> : (sale.customerName || '—')} />
-        <Cell label="Date" value={sale.saleDate ? new Date(sale.saleDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'} />
+        <Cell label="Date" value={sale.saleDate ? fmtDate(sale.saleDate) : '—'} />
         <Cell label="Payment" value={<><StatusBadgeMini s={sale.paymentStatus} /> {sale.dueAmount > 0 ? <span className="text-xs text-red-600">{fmtPKR(sale.dueAmount)} due</span> : <span className="text-xs text-emerald-600">received</span>}</>} />
       </div>
 
@@ -1178,7 +1173,7 @@ function SaleTrackerPanel({ sale, statementHref, companyProfile }) {
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           <Cell label="Item" value={`${sale.itemName || '—'}${sale.itemType ? ` (${sale.itemType})` : ''}`} />
           <Cell label="Quantity" value={`${mt2(sale.quantityKg)}${sale.quantityBags ? ` · ${sale.quantityBags} bags` : ''}`} />
-          <Cell label="Rate / kg" value={sale.ratePerKg > 0 ? `Rs ${(sale.ratePerKg).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'} />
+          <Cell label="Rate / kg" value={sale.ratePerKg > 0 ? fmtPKR(sale.ratePerKg, { decimals: 2 }) : '—'} />
           <Cell label="From lot" value={sale.lotId ? <Link to={`/lot-inventory/${sale.lotId}`} className="text-blue-600 hover:underline font-mono text-xs">{sale.lotNo || '—'}</Link> : (sale.lotNo || '—')} />
           {sale.collectionLocation && <Cell label="Collected at" value={sale.collectionLocation} />}
         </div>
@@ -1218,7 +1213,7 @@ function SaleTrackerPanel({ sale, statementHref, companyProfile }) {
               <tr><td className="px-3 py-2 text-gray-600">Cost of goods (landed)</td><td className="px-3 py-2 text-right tabular-nums">{sale.soldCostPerKg > 0 ? fmtPKR(sale.cost) : '—'}</td></tr>
               <tr className="bg-gray-50">
                 <td className="px-3 py-2 font-semibold text-gray-800">Gross margin</td>
-                <td className={`px-3 py-2 text-right tabular-nums font-bold ${sale.margin >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{sale.soldCostPerKg > 0 ? <>{fmtPKR(sale.margin)} ({(parseFloat(sale.marginPct) || 0).toFixed(1)}%)</> : '—'}</td>
+                <td className={`px-3 py-2 text-right tabular-nums font-bold ${sale.margin >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{sale.soldCostPerKg > 0 ? <>{fmtPKR(sale.margin)} ({fmtPct(parseFloat(sale.marginPct) || 0)})</> : '—'}</td>
               </tr>
             </tbody>
           </table>
@@ -1285,9 +1280,9 @@ function SaleDetailSection({ saleId }) {
               <thead className="bg-gray-50 text-gray-500"><tr><th className="px-2 py-1.5 text-left font-medium">Item</th><th className="px-2 py-1.5 text-left font-medium">Lot</th><th className="px-2 py-1.5 text-right font-medium">kg</th><th className="px-2 py-1.5 text-right font-medium">Rate/kg</th><th className="px-2 py-1.5 text-right font-medium">Value</th></tr></thead>
               <tbody className="divide-y divide-gray-100">
                 {items.map(it => (
-                  <tr key={it.id}><td data-label="Value" data-label="Rate/kg" data-label="kg" data-label="Lot" data-label="Item" className="px-2 py-1.5">{it.item || '—'}</td><td className="px-2 py-1.5">{it.href ? <Link to={it.href} className="font-mono text-blue-600 hover:underline">{it.lotNo}</Link> : (it.lotNo || '—')}</td><td className="px-2 py-1.5 text-right tabular-nums">{(it.quantityKg).toLocaleString()}</td><td className="px-2 py-1.5 text-right tabular-nums">{it.ratePerKg > 0 ? `Rs ${(it.ratePerKg).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</td><td className="px-2 py-1.5 text-right tabular-nums">{fmtPKR(it.totalAmount)}</td></tr>
+                  <tr key={it.id}><td data-label="Value" data-label="Rate/kg" data-label="kg" data-label="Lot" data-label="Item" className="px-2 py-1.5">{it.item || '—'}</td><td className="px-2 py-1.5">{it.href ? <Link to={it.href} className="font-mono text-blue-600 hover:underline">{it.lotNo}</Link> : (it.lotNo || '—')}</td><td className="px-2 py-1.5 text-right tabular-nums">{fmtNum(it.quantityKg)}</td><td className="px-2 py-1.5 text-right tabular-nums">{it.ratePerKg > 0 ? fmtPKR(it.ratePerKg, { decimals: 2 }) : '—'}</td><td className="px-2 py-1.5 text-right tabular-nums">{fmtPKR(it.totalAmount)}</td></tr>
                 ))}
-                <tr className="mob-full bg-gray-50 font-semibold"><td className="px-2 py-1.5" colSpan={2}>Total</td><td className="px-2 py-1.5 text-right tabular-nums">{Math.round(t.quantityKg).toLocaleString()}</td><td className="px-2 py-1.5" /><td className="px-2 py-1.5 text-right tabular-nums">{fmtPKR(t.totalAmount)}</td></tr>
+                <tr className="mob-full bg-gray-50 font-semibold"><td className="px-2 py-1.5" colSpan={2}>Total</td><td className="px-2 py-1.5 text-right tabular-nums">{fmtNum(Math.round(t.quantityKg))}</td><td className="px-2 py-1.5" /><td className="px-2 py-1.5 text-right tabular-nums">{fmtPKR(t.totalAmount)}</td></tr>
               </tbody>
             </table>
           </div>
@@ -1300,7 +1295,7 @@ function SaleDetailSection({ saleId }) {
           <div className="rounded-lg border border-gray-200 divide-y divide-gray-100 text-xs">
             {payments.map(p => (
               <div key={p.id} className="flex items-center justify-between px-3 py-1.5">
-                <span className="text-gray-600">{p.date ? new Date(p.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'} · <span className="capitalize">{p.method || 'payment'}</span>{p.reference ? ` · ${p.reference}` : ''}</span>
+                <span className="text-gray-600">{p.date ? fmtDate(p.date) : '—'} · <span className="capitalize">{p.method || 'payment'}</span>{p.reference ? ` · ${p.reference}` : ''}</span>
                 <span className="tabular-nums font-medium text-emerald-700">{fmtPKR(p.amount)}</span>
               </div>
             ))}
@@ -1314,7 +1309,7 @@ function SaleDetailSection({ saleId }) {
           <h4 className="text-sm font-semibold text-gray-700 mb-2">Dispatch</h4>
           <div className="flex flex-wrap gap-2 text-xs">
             <span className={`px-2.5 py-1 rounded-lg border ${dispatch.dispatched ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-gray-50 border-gray-200 text-gray-500'}`}>{dispatch.dispatched ? 'Dispatched' : 'Not dispatched'}</span>
-            {dispatch.dispatchDate && <span className="px-2.5 py-1 rounded-lg bg-gray-50 border border-gray-200">{new Date(dispatch.dispatchDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</span>}
+            {dispatch.dispatchDate && <span className="px-2.5 py-1 rounded-lg bg-gray-50 border border-gray-200">{fmtDate(dispatch.dispatchDate)}</span>}
             {dispatch.vehicleNo && <span className="px-2.5 py-1 rounded-lg bg-gray-50 border border-gray-200">Vehicle {dispatch.vehicleNo}</span>}
             {dispatch.driverName && <span className="px-2.5 py-1 rounded-lg bg-gray-50 border border-gray-200">{dispatch.driverName}</span>}
             {dispatch.collectionLocation && <span className="px-2.5 py-1 rounded-lg bg-gray-50 border border-gray-200">Collected at {dispatch.collectionLocation}</span>}
@@ -1411,14 +1406,14 @@ function PurchaseDetail({ r, openDoc }) {
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-3 space-y-3">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        {isLot && <Cell label="Quantity" value={qtyKg > 0 ? `${Math.round(qtyKg).toLocaleString()} kg (${(qtyKg / 1000).toFixed(2)} MT)` : '—'} />}
-        {isLot && <Cell label="Rate / kg" value={ratePerKg > 0 ? `Rs ${ratePerKg.toLocaleString(undefined, { maximumFractionDigits: 2 })}` : <span className="text-amber-600">Not recorded</span>} />}
-        {isLot && <Cell label="Katta (bags)" value={bags != null ? `${bags.toLocaleString()}${r.bagWeightKg ? ` × ${parseFloat(r.bagWeightKg)} kg` : ''}` : <span className="text-amber-600">Not recorded</span>} />}
+        {isLot && <Cell label="Quantity" value={qtyKg > 0 ? `${fmtNum(Math.round(qtyKg))} kg (${fmtMT(qtyKg / 1000, { decimals: 2 })})` : '—'} />}
+        {isLot && <Cell label="Rate / kg" value={ratePerKg > 0 ? fmtPKR(ratePerKg, { decimals: 2 }) : <span className="text-amber-600">Not recorded</span>} />}
+        {isLot && <Cell label="Katta (bags)" value={bags != null ? `${fmtNum(bags)}${r.bagWeightKg ? ` × ${parseFloat(r.bagWeightKg)} kg` : ''}` : <span className="text-amber-600">Not recorded</span>} />}
         <Cell label="Supplier" value={r.supplierName || '—'} />
         <Cell label="Total amount" value={fmtPKR(amount)} />
         <Cell label="Payment" value={<StatusChip s={r.paymentStatus} />} />
         {r.createdByName && <Cell label="Recorded by" value={r.createdByName} />}
-        {r.date && <Cell label="Date" value={new Date(r.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })} />}
+        {r.date && <Cell label="Date" value={fmtDate(r.date)} />}
       </div>
 
       {!paid && (
@@ -1525,13 +1520,13 @@ function MarginBySale({ params, openDoc }) {
               ? <Link to={`/lot-inventory/${s.lotId}`} onClick={(ev) => ev.stopPropagation()} className="text-blue-600 hover:underline text-xs">{s.lotRef || '—'}</Link>
               : <span className="text-xs text-gray-500">{s.lotRef || '—'}</span>,
             <span className="text-xs">{s.itemName || '—'}</span>,
-            `${Math.round(e.soldKg).toLocaleString()} kg`,
-            e.hasCost ? `Rs ${(e.costPerKg).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—',
-            `Rs ${(e.salePerKg).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+            `${fmtNum(Math.round(e.soldKg))} kg`,
+            e.hasCost ? fmtPKR(e.costPerKg, { decimals: 2 }) : '—',
+            fmtPKR(e.salePerKg, { decimals: 2 }),
             e.hasCost ? fmtPKR(e.cost) : '—',
             <span className="font-semibold text-gray-900">{fmtPKR(e.sale)}</span>,
             e.hasCost ? <ProfitCell v={e.margin} /> : <span className="text-gray-400">—</span>,
-            e.hasCost ? <span className={`font-medium ${e.marginPct >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{e.marginPct.toFixed(1)}%</span> : '—',
+            e.hasCost ? <span className={`font-medium ${e.marginPct >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{fmtPct(e.marginPct)}</span> : '—',
           ];
         })}
       />
@@ -1550,7 +1545,7 @@ function MarginBreakdown({ e, companyProfile }) {
         <div><p className="text-xs text-gray-500">Sale</p><p className="font-medium">{s.saleNo}</p></div>
         <div><p className="text-xs text-gray-500">Lot</p><p className="font-medium">{s.lotRef || '—'}</p></div>
         <div><p className="text-xs text-gray-500">Item</p><p>{s.itemName || '—'}</p></div>
-        <div><p className="text-xs text-gray-500">Sold</p><p>{Math.round(e.soldKg).toLocaleString()} kg</p></div>
+        <div><p className="text-xs text-gray-500">Sold</p><p>{fmtNum(Math.round(e.soldKg))} kg</p></div>
       </div>
 
       <div className="rounded-lg border border-gray-200 overflow-hidden">
@@ -1563,12 +1558,12 @@ function MarginBreakdown({ e, companyProfile }) {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            <tr><td className="px-3 py-2 text-gray-600">Buying price + expenses</td><td className="px-3 py-2 text-right tabular-nums">Rs {(e.costPerKg).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td><td className="px-3 py-2 text-right tabular-nums font-medium">{fmtPKR(e.cost)}</td></tr>
-            <tr><td className="px-3 py-2 text-gray-600">Selling price</td><td className="px-3 py-2 text-right tabular-nums">Rs {(e.salePerKg).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td><td className="px-3 py-2 text-right tabular-nums font-medium">{fmtPKR(e.sale)}</td></tr>
+            <tr><td className="px-3 py-2 text-gray-600">Buying price + expenses</td><td className="px-3 py-2 text-right tabular-nums">{fmtPKR(e.costPerKg, { decimals: 2 })}</td><td className="px-3 py-2 text-right tabular-nums font-medium">{fmtPKR(e.cost)}</td></tr>
+            <tr><td className="px-3 py-2 text-gray-600">Selling price</td><td className="px-3 py-2 text-right tabular-nums">{fmtPKR(e.salePerKg, { decimals: 2 })}</td><td className="px-3 py-2 text-right tabular-nums font-medium">{fmtPKR(e.sale)}</td></tr>
             <tr className="bg-gray-50">
               <td className="px-3 py-2 font-semibold text-gray-800">Gross margin</td>
-              <td className={`px-3 py-2 text-right tabular-nums font-semibold ${perKgMargin >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{perKgMargin >= 0 ? '+' : ''}Rs {(perKgMargin).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-              <td className={`px-3 py-2 text-right tabular-nums font-bold ${e.margin >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{fmtPKR(e.margin)} ({e.marginPct.toFixed(1)}%)</td>
+              <td className={`px-3 py-2 text-right tabular-nums font-semibold ${perKgMargin >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{perKgMargin >= 0 ? '+' : ''}{fmtPKR(perKgMargin, { decimals: 2 })}</td>
+              <td className={`px-3 py-2 text-right tabular-nums font-bold ${e.margin >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{fmtPKR(e.margin)} ({fmtPct(e.marginPct)})</td>
             </tr>
           </tbody>
         </table>
@@ -1629,13 +1624,13 @@ function MarginByBatch({ params, openDoc }) {
           return [
             <span className="font-mono text-xs">{b.batchNo}</span>,
             <span className="text-xs">{b.supplierName || '—'}</span>,
-            `${(parseFloat(b.rawQtyMT) || 0).toFixed(1)} MT`,
-            `${(parseFloat(b.finishedMT) || 0).toFixed(1)} MT`,
+            `${fmtMT(parseFloat(b.rawQtyMT) || 0, { decimals: 1 })}`,
+            `${fmtMT(parseFloat(b.finishedMT) || 0, { decimals: 1 })}`,
             fmtPKR(b.inputCost),
             <span className="font-semibold text-gray-900">{fmtPKR(sold)}</span>,
             hasSales ? fmtPKR(b.costOfSold) : '—',
             hasSales ? <ProfitCell v={b.realizedMargin} /> : <span className="text-gray-400">—</span>,
-            hasSales ? <span className={`font-medium ${(parseFloat(b.realizedMarginPct) || 0) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{(parseFloat(b.realizedMarginPct) || 0).toFixed(1)}%</span> : '—',
+            hasSales ? <span className={`font-medium ${(parseFloat(b.realizedMarginPct) || 0) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{fmtPct(parseFloat(b.realizedMarginPct) || 0)}</span> : '—',
             <Link to={`/reports/batch-ledger/${b.id}`} onClick={(ev) => ev.stopPropagation()}
               className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-blue-700 bg-blue-50 rounded hover:bg-blue-100 whitespace-nowrap">
               <Factory size={12} /> Batch 360
@@ -1662,8 +1657,8 @@ function BatchMarginBreakdown({ b }) {
       <div className="grid grid-cols-2 gap-3 text-sm">
         <div><p className="text-xs text-gray-500">Batch</p><p className="font-medium">{b.batchNo}</p></div>
         <div><p className="text-xs text-gray-500">Supplier</p><p>{b.supplierName || '—'}</p></div>
-        <div><p className="text-xs text-gray-500">Input</p><p>{(parseFloat(b.rawQtyMT) || 0).toFixed(2)} MT</p></div>
-        <div><p className="text-xs text-gray-500">Finished</p><p>{(parseFloat(b.finishedMT) || 0).toFixed(2)} MT · yield {(parseFloat(b.yieldPct) || 0).toFixed(1)}%</p></div>
+        <div><p className="text-xs text-gray-500">Input</p><p>{fmtMT(parseFloat(b.rawQtyMT) || 0, { decimals: 2 })}</p></div>
+        <div><p className="text-xs text-gray-500">Finished</p><p>{fmtMT(parseFloat(b.finishedMT) || 0, { decimals: 2 })} · yield {fmtPct(parseFloat(b.yieldPct) || 0)}</p></div>
       </div>
 
       <div className="rounded-lg border border-gray-200 overflow-hidden">
@@ -1674,7 +1669,7 @@ function BatchMarginBreakdown({ b }) {
             <tr><td className="px-3 py-2 text-gray-600">Cost of sold output</td><td className="px-3 py-2 text-right tabular-nums">{fmtPKR(costOfSold)}</td></tr>
             <tr className="bg-gray-50">
               <td className="px-3 py-2 font-semibold text-gray-800">Realised margin</td>
-              <td className={`px-3 py-2 text-right tabular-nums font-bold ${margin >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{fmtPKR(margin)} ({marginPct.toFixed(1)}%)</td>
+              <td className={`px-3 py-2 text-right tabular-nums font-bold ${margin >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{fmtPKR(margin)} ({fmtPct(marginPct)})</td>
             </tr>
             <tr><td className="px-3 py-2 text-gray-500">Unsold output on hand (at cost)</td><td className="px-3 py-2 text-right tabular-nums text-gray-600">{fmtPKR(onHand)}</td></tr>
           </tbody>
@@ -1705,8 +1700,8 @@ function BatchMarginBreakdown({ b }) {
                   return (
                     <tr key={i}>
                       <td data-label="Grade" className="px-2 py-1.5 font-medium text-gray-800">{gradeLabel(g.grade)}</td>
-                      <td data-label="Produced" className="px-2 py-1.5 text-right tabular-nums">{Math.round(parseFloat(g.producedKg) || 0).toLocaleString()} kg</td>
-                      <td data-label="Price/kg" className="mob-hide px-2 py-1.5 text-right tabular-nums">Rs {(parseFloat(g.valuationPerKg) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                      <td data-label="Produced" className="px-2 py-1.5 text-right tabular-nums">{fmtNum(Math.round(parseFloat(g.producedKg) || 0))} kg</td>
+                      <td data-label="Price/kg" className="mob-hide px-2 py-1.5 text-right tabular-nums">{fmtPKR(parseFloat(g.valuationPerKg) || 0, { decimals: 2 })}</td>
                       <td data-label="Value" className="px-2 py-1.5 text-right tabular-nums font-medium">{fmtPKR(g.valuationValue)}</td>
                       <td data-label="Sold" className="px-2 py-1.5 text-right tabular-nums">{soldV > 0 ? fmtPKR(soldV) : '—'}</td>
                       <td data-label="Margin" className="px-2 py-1.5 text-right tabular-nums">{soldV > 0 ? <span className={m >= 0 ? 'text-emerald-700' : 'text-red-700'}>{fmtPKR(m)}</span> : '—'}</td>
@@ -1785,7 +1780,7 @@ function BatchLedgerSection({ batchId }) {
           <LedgerExportBar
             title="Batch Processing Ledger"
             subtitle={`Batch ${data?.batch?.batchNo || ''}${data?.batch?.product ? ` · ${data.batch.product}` : ''}${data?.batch?.isBlend ? ' · blend' : ''}`}
-            meta={[`Input ${(t.inputMt || 0).toFixed(2)} MT`, `Output ${(t.outputMt || 0).toFixed(2)} MT`, `Loss ${(t.lossMt || 0).toFixed(2)} MT`]}
+            meta={[`Input ${fmtMT(t.inputMt || 0, { decimals: 2 })}`, `Output ${fmtMT(t.outputMt || 0, { decimals: 2 })}`, `Loss ${fmtMT(t.lossMt || 0, { decimals: 2 })}`]}
             fileBase={`batch-ledger-${data?.batch?.batchNo || batchId}`}
             rows={outputs} columns={BATCH_OUTPUT_COLS}
             footerNote="Output lots from this batch (finished + by-product), valued at residual cost. Inputs &amp; costs shown on screen." />
@@ -1796,7 +1791,7 @@ function BatchLedgerSection({ batchId }) {
                 <thead className="bg-gray-50 text-gray-500"><tr><th className="px-2 py-1.5 text-left font-medium">Lot</th><th className="px-2 py-1.5 text-left font-medium">Rice</th><th className="px-2 py-1.5 text-left font-medium">Supplier</th><th className="px-2 py-1.5 text-right font-medium">MT</th><th className="px-2 py-1.5 text-right font-medium">Cost</th></tr></thead>
                 <tbody className="divide-y divide-gray-100">
                   {inputs.map((r, i) => (
-                    <tr key={i}><td data-label="Cost" data-label="MT" data-label="Supplier" data-label="Rice" data-label="Lot" className="px-2 py-1.5 font-mono">{r.href ? <Link to={r.href} className="text-blue-600 hover:underline">{r.lotNo}</Link> : r.lotNo}</td><td className="px-2 py-1.5">{r.item}{r.variety ? ` · ${r.variety}` : ''}</td><td className="px-2 py-1.5 text-gray-600">{r.supplier}</td><td className="px-2 py-1.5 text-right tabular-nums">{r.qtyMt.toFixed(2)}</td><td className="px-2 py-1.5 text-right tabular-nums">{fmtPKR(r.costTotalPkr)}</td></tr>
+                    <tr key={i}><td data-label="Cost" data-label="MT" data-label="Supplier" data-label="Rice" data-label="Lot" className="px-2 py-1.5 font-mono">{r.href ? <Link to={r.href} className="text-blue-600 hover:underline">{r.lotNo}</Link> : r.lotNo}</td><td className="px-2 py-1.5">{r.item}{r.variety ? ` · ${r.variety}` : ''}</td><td className="px-2 py-1.5 text-gray-600 max-w-[10rem] truncate" title={r.supplier || undefined}>{r.supplier}</td><td className="px-2 py-1.5 text-right tabular-nums">{fmtNum(r.qtyMt, 2)}</td><td className="px-2 py-1.5 text-right tabular-nums">{fmtPKR(r.costTotalPkr)}</td></tr>
                   ))}
                   {inputs.length === 0 && <tr><td colSpan={5} className="px-2 py-1.5 text-gray-400">No source lots recorded.</td></tr>}
                 </tbody>
@@ -1822,7 +1817,7 @@ function BatchLedgerSection({ batchId }) {
                 <thead className="bg-gray-50 text-gray-500"><tr><th className="px-2 py-1.5 text-left font-medium">Lot</th><th className="px-2 py-1.5 text-left font-medium">Output</th><th className="px-2 py-1.5 text-right font-medium">kg</th><th className="px-2 py-1.5 text-right font-medium">Cost/kg</th><th className="px-2 py-1.5 text-right font-medium">Value</th></tr></thead>
                 <tbody className="divide-y divide-gray-100">
                   {outputs.map((o, i) => (
-                    <tr key={i}><td data-label="Value" data-label="Cost/kg" data-label="kg" data-label="Output" data-label="Lot" className="px-2 py-1.5 font-mono">{o.href ? <Link to={o.href} className="text-blue-600 hover:underline">{o.lotNo}</Link> : o.lotNo}</td><td className="px-2 py-1.5">{o.item}<span className="text-gray-400"> · {o.type === 'byproduct' ? 'by-product' : 'finished'}</span></td><td className="px-2 py-1.5 text-right tabular-nums">{(o.kg).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td><td className="px-2 py-1.5 text-right tabular-nums">{o.costPerKg > 0 ? `Rs ${(o.costPerKg).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</td><td className="px-2 py-1.5 text-right tabular-nums">{fmtPKR(o.valuePkr)}</td></tr>
+                    <tr key={i}><td data-label="Value" data-label="Cost/kg" data-label="kg" data-label="Output" data-label="Lot" className="px-2 py-1.5 font-mono">{o.href ? <Link to={o.href} className="text-blue-600 hover:underline">{o.lotNo}</Link> : o.lotNo}</td><td className="px-2 py-1.5">{o.item}<span className="text-gray-400"> · {o.type === 'byproduct' ? 'by-product' : 'finished'}</span></td><td className="px-2 py-1.5 text-right tabular-nums">{fmtNum(o.kg, 2)}</td><td className="px-2 py-1.5 text-right tabular-nums">{o.costPerKg > 0 ? fmtPKR(o.costPerKg, { decimals: 2 }) : '—'}</td><td className="px-2 py-1.5 text-right tabular-nums">{fmtPKR(o.valuePkr)}</td></tr>
                   ))}
                   {outputs.length === 0 && <tr><td colSpan={5} className="px-2 py-1.5 text-gray-400">No output lots yet.</td></tr>}
                 </tbody>
@@ -1831,9 +1826,9 @@ function BatchLedgerSection({ batchId }) {
           </div>
 
           <div className="grid grid-cols-3 gap-2 text-center">
-            <div className="bg-slate-50 rounded-lg p-2"><p className="text-[11px] text-slate-500">Input</p><p className="text-sm font-bold text-slate-700">{(t.inputMt || 0).toFixed(2)} MT</p></div>
-            <div className="bg-blue-50 rounded-lg p-2"><p className="text-[11px] text-blue-600">Output</p><p className="text-sm font-bold text-blue-700">{(t.outputMt || 0).toFixed(2)} MT</p></div>
-            <div className="bg-amber-50 rounded-lg p-2"><p className="text-[11px] text-amber-600">Processing loss</p><p className="text-sm font-bold text-amber-700">{(t.lossMt || 0).toFixed(2)} MT</p></div>
+            <div className="bg-slate-50 rounded-lg p-2"><p className="text-[11px] text-slate-500">Input</p><p className="text-sm font-bold text-slate-700">{fmtMT(t.inputMt || 0, { decimals: 2 })}</p></div>
+            <div className="bg-blue-50 rounded-lg p-2"><p className="text-[11px] text-blue-600">Output</p><p className="text-sm font-bold text-blue-700">{fmtMT(t.outputMt || 0, { decimals: 2 })}</p></div>
+            <div className="bg-amber-50 rounded-lg p-2"><p className="text-[11px] text-amber-600">Processing loss</p><p className="text-sm font-bold text-amber-700">{fmtMT(t.lossMt || 0, { decimals: 2 })}</p></div>
           </div>
         </div>
       ))}
@@ -1846,7 +1841,7 @@ const LOT_STATUS_TONE = {
   'In stock': 'bg-emerald-100 text-emerald-700', 'Milled': 'bg-blue-100 text-blue-700',
   'Sold': 'bg-slate-100 text-slate-700', 'Part-sold': 'bg-amber-100 text-amber-700', 'Empty': 'bg-gray-100 text-gray-500',
 };
-const mt2 = (kg) => `${((parseFloat(kg) || 0) / 1000).toLocaleString(undefined, { maximumFractionDigits: 2 })} MT`;
+const mt2 = (kg) => fmtMT((parseFloat(kg) || 0) / 1000, { decimals: 2 });
 
 function LotsTab({ params, statementHref, openDoc }) {
   const { from_date, to_date, entity } = params || {};
@@ -1885,7 +1880,7 @@ function LotsTab({ params, statementHref, openDoc }) {
             <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${LOT_STATUS_TONE[r.status] || 'bg-gray-100 text-gray-600'}`}>{r.status}</span>,
             <span className="font-semibold text-gray-900">{fmtPKR(r.landedTotal)}</span>,
             r.hasSales
-              ? <span className="inline-flex flex-col items-end leading-tight"><ProfitCell v={r.realizedMargin} /><span className={`text-[10px] ${(parseFloat(r.realizedMarginPct) || 0) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{(parseFloat(r.realizedMarginPct) || 0).toFixed(1)}%</span></span>
+              ? <span className="inline-flex flex-col items-end leading-tight"><ProfitCell v={r.realizedMargin} /><span className={`text-[10px] ${(parseFloat(r.realizedMarginPct) || 0) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{fmtPct(parseFloat(r.realizedMarginPct) || 0)}</span></span>
               : <span className="text-gray-400">—</span>,
             <Link to={`/reports/lot-ledger/${r.lotId}`} onClick={(e) => e.stopPropagation()}
               className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-blue-700 bg-blue-50 rounded hover:bg-blue-100 whitespace-nowrap">
@@ -1919,7 +1914,7 @@ function LotTrackerPanel({ lot, statementHref }) {
         <Cell label="Lot" value={<span className="font-mono">{lot.lotNo}</span>} />
         <Cell label="Supplier" value={supHref ? <Link to={supHref} className="text-blue-600 hover:underline">{lot.supplier}</Link> : (lot.supplier || '—')} />
         <Cell label="Rice type" value={`${lot.riceType || '—'}${lot.grade ? ` · ${lot.grade}` : ''}`} />
-        <Cell label="Purchased" value={lot.date ? new Date(lot.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'} />
+        <Cell label="Purchased" value={lot.date ? fmtDate(lot.date) : '—'} />
         <Cell label="Status" value={<span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${LOT_STATUS_TONE[lot.status] || 'bg-gray-100 text-gray-600'}`}>{lot.status}</span>} />
         <Cell label="Warehouse" value={lot.warehouse || '—'} />
       </div>
@@ -1928,10 +1923,10 @@ function LotTrackerPanel({ lot, statementHref }) {
       <div>
         <h4 className="text-sm font-semibold text-gray-700 mb-2">Purchase & cost</h4>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-          <Cell label="Received" value={`${mt2(lot.receivedKg)} · ${Math.round(lot.receivedKg).toLocaleString()} kg`} />
-          <Cell label="Katta (bags)" value={lot.bags != null ? `${Number(lot.bags).toLocaleString()}${lot.bagWeightKg ? ` × ${lot.bagWeightKg} kg` : ''}` : '—'} />
-          <Cell label="Rate / kg" value={lot.ratePerKg > 0 ? `Rs ${(lot.ratePerKg).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'} />
-          <Cell label="Landed / kg" value={lot.landedCostPerKg > 0 ? `Rs ${(lot.landedCostPerKg).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'} />
+          <Cell label="Received" value={`${mt2(lot.receivedKg)} · ${fmtNum(Math.round(lot.receivedKg))} kg`} />
+          <Cell label="Katta (bags)" value={lot.bags != null ? `${fmtNum(lot.bags)}${lot.bagWeightKg ? ` × ${lot.bagWeightKg} kg` : ''}` : '—'} />
+          <Cell label="Rate / kg" value={lot.ratePerKg > 0 ? fmtPKR(lot.ratePerKg, { decimals: 2 }) : '—'} />
+          <Cell label="Landed / kg" value={lot.landedCostPerKg > 0 ? fmtPKR(lot.landedCostPerKg, { decimals: 2 }) : '—'} />
           <Cell label="Landed total" value={fmtPKR(lot.landedTotal)} />
           <Cell label="Payment" value={<><StatusBadgeMini s={lot.paymentStatus} /> {lot.dueAmount > 0 ? <span className="text-xs text-red-600">{fmtPKR(lot.dueAmount)} due</span> : <span className="text-xs text-emerald-600">paid</span>}</>} />
         </div>
@@ -1961,7 +1956,7 @@ function LotTrackerPanel({ lot, statementHref }) {
                     <span className="font-medium">{v.vehicleNo}{v.driverName ? <span className="text-gray-500 font-normal"> · {v.driverName}</span> : ''}</span>
                     <span className="text-xs text-gray-500">{v.weightMt ? `${v.weightMt} MT` : ''}{v.totalBags ? ` · ${v.totalBags} bags` : ''}</span>
                   </div>
-                  {qbits.length > 0 && <div className="mt-1 flex flex-wrap gap-x-3 text-[11px] text-gray-500">{qbits.map(([k, x, u]) => <span key={k}>{k}: <span className="font-medium text-gray-700">{u === '' ? `Rs ${(x).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : `${x}${u}`}</span></span>)}</div>}
+                  {qbits.length > 0 && <div className="mt-1 flex flex-wrap gap-x-3 text-[11px] text-gray-500">{qbits.map(([k, x, u]) => <span key={k}>{k}: <span className="font-medium text-gray-700">{u === '' ? fmtPKR(x, { decimals: 2 }) : `${x}${u}`}</span></span>)}</div>}
                 </div>
               );
             })}
@@ -2017,7 +2012,7 @@ function LotTrackerPanel({ lot, statementHref }) {
                 <tr><td className="px-3 py-2 text-gray-600">Cost of goods sold</td><td className="px-3 py-2 text-right tabular-nums">{fmtPKR(lot.realizedCost)}</td></tr>
                 <tr className="bg-gray-50">
                   <td className="px-3 py-2 font-semibold text-gray-800">Gross margin</td>
-                  <td className={`px-3 py-2 text-right tabular-nums font-bold ${lot.realizedMargin >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{fmtPKR(lot.realizedMargin)} ({(parseFloat(lot.realizedMarginPct) || 0).toFixed(1)}%)</td>
+                  <td className={`px-3 py-2 text-right tabular-nums font-bold ${lot.realizedMargin >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{fmtPKR(lot.realizedMargin)} ({fmtPct(parseFloat(lot.realizedMarginPct) || 0)})</td>
                 </tr>
               </tbody>
             </table>
@@ -2097,9 +2092,9 @@ function LotLedgerSection({ lotId }) {
                     <td data-label="Date" className="px-2 py-1.5 whitespace-nowrap text-gray-600">{e.date ? new Date(e.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : '—'}</td>
                     <td data-label="Activity" className="px-2 py-1.5 font-medium text-gray-800">{e.label}</td>
                     <td data-label="Counterparty" className="mob-hide px-2 py-1.5 text-gray-600 max-w-[10rem] truncate">{e.href ? <Link to={e.href} className="text-blue-600 hover:underline">{e.counterparty || '—'}</Link> : (e.counterparty || '—')}</td>
-                    <td data-label="In (kg)" className="px-2 py-1.5 text-right tabular-nums text-emerald-700">{e.inKg ? Math.round(e.inKg).toLocaleString() : ''}</td>
-                    <td data-label="Out (kg)" className="px-2 py-1.5 text-right tabular-nums text-red-700">{e.outKg ? Math.round(e.outKg).toLocaleString() : ''}</td>
-                    <td data-label="Balance" className="px-2 py-1.5 text-right tabular-nums font-medium">{Math.round(e.balanceKg).toLocaleString()}</td>
+                    <td data-label="In (kg)" className="px-2 py-1.5 text-right tabular-nums text-emerald-700">{e.inKg ? fmtNum(Math.round(e.inKg)) : ''}</td>
+                    <td data-label="Out (kg)" className="px-2 py-1.5 text-right tabular-nums text-red-700">{e.outKg ? fmtNum(Math.round(e.outKg)) : ''}</td>
+                    <td data-label="Balance" className="px-2 py-1.5 text-right tabular-nums font-medium">{fmtNum(Math.round(e.balanceKg))}</td>
                   </tr>
                 ))}
               </tbody>
@@ -2166,8 +2161,8 @@ function ProductionTab({ params }) {
     <div className="space-y-6">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <SummaryCell label="Mills" value={String(millRows.length)} />
-        <SummaryCell label="Input" value={`${totIn.toLocaleString(undefined, { maximumFractionDigits: 1 })} MT`} />
-        <SummaryCell label="Finished output" value={`${totOut.toLocaleString(undefined, { maximumFractionDigits: 1 })} MT`} />
+        <SummaryCell label="Input" value={fmtMT(totIn, { decimals: 1 })} />
+        <SummaryCell label="Finished output" value={fmtMT(totOut, { decimals: 1 })} />
         <SummaryCell label="Avg yield" value={fmtPct(avgYield)} />
       </div>
 
@@ -2180,11 +2175,11 @@ function ProductionTab({ params }) {
             m.millName || '—',
             `${parseFloat(m.capacityMtPerDay ?? m.capacityMTPerDay) || 0} MT`,
             m.batchesProcessed || 0,
-            (parseFloat(m.totalInputMt ?? m.totalInputMT) || 0).toFixed(1),
-            (parseFloat(m.totalOutputMt ?? m.totalOutputMT) || 0).toFixed(1),
+            fmtNum(parseFloat(m.totalInputMt ?? m.totalInputMT) || 0, 1),
+            fmtNum(parseFloat(m.totalOutputMt ?? m.totalOutputMT) || 0, 1),
             fmtPct(m.avgYield),
             fmtPct((parseFloat(m.utilization) || 0) * (parseFloat(m.utilization) <= 1 ? 100 : 1)),
-            (parseFloat(m.downtimeHours) || 0).toFixed(1),
+            fmtNum(parseFloat(m.downtimeHours) || 0, 1),
           ])}
         />
       </div>
@@ -2199,8 +2194,8 @@ function ProductionTab({ params }) {
             <span className="font-mono text-xs text-blue-600">{b.batchNo}</span>,
             b.supplierName || '—',
             <span className="text-xs">{b.productName || '—'}</span>,
-            (parseFloat(b.rawQtyMt ?? b.rawQtyMT) || 0).toFixed(1),
-            (parseFloat(b.finishedQtyMt ?? b.finishedQtyMT) || 0).toFixed(1),
+            fmtNum(parseFloat(b.rawQtyMt ?? b.rawQtyMT) || 0, 1),
+            fmtNum(parseFloat(b.finishedQtyMt ?? b.finishedQtyMT) || 0, 1),
             <span className="font-medium">{fmtPct(b.yieldPct)}</span>,
             fmtPct(b.brokenPct),
           ])}
@@ -2218,10 +2213,10 @@ function ProductionTab({ params }) {
             align={['left', 'right', 'right', 'right', 'right', 'right']}
             rows={operators.map(o => [
               o.operatorName || '—', o.batches || 0,
-              (parseFloat(o.totalOutputMt ?? o.totalOutputMT) || 0).toFixed(1),
+              fmtNum(parseFloat(o.totalOutputMt ?? o.totalOutputMT) || 0, 1),
               fmtPct(o.avgYield),
-              (parseFloat(o.totalHours) || 0).toFixed(1),
-              (parseFloat(o.outputPerHour) || 0).toFixed(2),
+              fmtNum(parseFloat(o.totalHours) || 0, 1),
+              fmtNum(parseFloat(o.outputPerHour) || 0, 2),
             ])}
           />
         )}
@@ -2229,7 +2224,7 @@ function ProductionTab({ params }) {
 
       {/* Utility consumption */}
       <div className="space-y-2">
-        <SectionHeader title="Utility consumption" subtitle={`Cost per MT processed${utility.totalProcessedMt ?? utility.totalProcessedMT ? ` — ${(parseFloat(utility.totalProcessedMt ?? utility.totalProcessedMT) || 0).toFixed(1)} MT processed` : ''}`} />
+        <SectionHeader title="Utility consumption" subtitle={`Cost per MT processed${utility.totalProcessedMt ?? utility.totalProcessedMT ? ` — ${fmtMT(parseFloat(utility.totalProcessedMt ?? utility.totalProcessedMT) || 0, { decimals: 1 })} processed` : ''}`} />
         {(Array.isArray(utility.byType) ? utility.byType : []).length === 0 ? (
           <Empty msg="No utility records — log electricity/fuel/etc. to populate this." />
         ) : (
@@ -2238,7 +2233,7 @@ function ProductionTab({ params }) {
             align={['left', 'left', 'right', 'right', 'right']}
             rows={utility.byType.map(u => [
               <span className="capitalize">{u.utilityType || '—'}</span>, u.unit || '—',
-              (parseFloat(u.totalConsumption) || 0).toLocaleString(),
+              fmtNum(parseFloat(u.totalConsumption) || 0),
               fmtPKR(u.totalCost), fmtPKR(u.costPerMt ?? u.costPerMT),
             ])}
           />
@@ -2305,7 +2300,7 @@ function KpiTab({ millScoped }) {
   const met = list.filter(k => k.status === 'Met').length;
   const missed = list.filter(k => k.status === 'Missed').length;
   const tone = (s) => s === 'Met' ? 'bg-emerald-100 text-emerald-700' : s === 'Missed' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-500';
-  const fmtVal = (v, unit) => unit === '%' ? `${(parseFloat(v) || 0).toFixed(1)}%` : (parseFloat(v) || 0).toLocaleString();
+  const fmtVal = (v, unit) => unit === '%' ? fmtPct(parseFloat(v) || 0) : fmtNum(parseFloat(v) || 0);
   return (
     <div className="space-y-5">
       <SectionHeader title="KPI Scorecard" subtitle="Target vs actual against configured benchmarks" />
@@ -2362,7 +2357,7 @@ function OrdersTab({ params }) {
           <Link to={`/export/${r.orderNo || r.id}`} className="text-blue-600 hover:underline font-medium">{r.orderNo}</Link>,
           r.customerName || '—',
           <StatusChip s={r.status} />,
-          <span className="text-xs text-gray-600">{(r.currency || 'PKR')} {Number(r.contractValue || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>,
+          <span className="text-xs text-gray-600">{fmtMoney(Number(r.contractValue || 0), r.currency || 'PKR', { decimals: 2 })}</span>,
           fmtPKR(r.revenuePkr),
           fmtPKR(r.costs),
           <ProfitCell v={r.grossProfit} />,
@@ -2424,7 +2419,7 @@ function CountriesTab({ params }) {
         rows={sorted.map(r => [
           r.country || '—',
           r.orderCount || 0,
-          (parseFloat(r.totalQtyMT) || 0).toFixed(1),
+          fmtNum(parseFloat(r.totalQtyMT) || 0, 1),
           fmtPKR(r.totalRevenuePkr),
           <ProfitCell v={r.totalProfitPkr} />,
           fmtPct(r.avgMarginPct),
@@ -2435,7 +2430,7 @@ function CountriesTab({ params }) {
 }
 
 // ─── Tab: Inventory ───────────────────────────────────────────────────
-const fmtMT = (kg) => `${((parseFloat(kg) || 0) / 1000).toLocaleString(undefined, { maximumFractionDigits: 2 })} MT`;
+const kgAsMT = (kg) => fmtMT((parseFloat(kg) || 0) / 1000, { decimals: 2 });
 
 // Aging buckets derived from each lot's days-in-stock.
 const AGE_BUCKETS = [
@@ -2463,13 +2458,13 @@ function StockBreakdown({ title, subtitle, query, groupHead, hideValue }) {
         align={align}
         rows={[
           ...rows.map((r) => {
-            const base = [r.name || '—', r.lotCount || 0, fmtMT(r.totalKg), fmtMT(r.availableKg), fmtMT(r.reservedKg)];
+            const base = [r.name || '—', r.lotCount || 0, kgAsMT(r.totalKg), kgAsMT(r.availableKg), kgAsMT(r.reservedKg)];
             return hideValue ? base : [...base, fmtPKR(r.valuePkr)];
           }),
           ...(grand.lotCount != null
             ? [(hideValue
-                ? ['TOTAL', grand.lotCount, fmtMT(grand.totalKg), fmtMT(grand.availableKg), fmtMT(grand.reservedKg)]
-                : ['TOTAL', grand.lotCount, fmtMT(grand.totalKg), fmtMT(grand.availableKg), fmtMT(grand.reservedKg), fmtPKR(grand.valuePkr)])
+                ? ['TOTAL', grand.lotCount, kgAsMT(grand.totalKg), kgAsMT(grand.availableKg), kgAsMT(grand.reservedKg)]
+                : ['TOTAL', grand.lotCount, kgAsMT(grand.totalKg), kgAsMT(grand.availableKg), kgAsMT(grand.reservedKg), fmtPKR(grand.valuePkr)])
                 .map((c, i) => <span key={i} className="font-semibold text-gray-900">{c}</span>)]
             : []),
         ]}
@@ -2518,8 +2513,8 @@ function InventoryTab({ millScoped, hideValue }) {
     const kg = ls.reduce((s, l) => s + (parseFloat(l.qty) || 0), 0);
     const val = ls.reduce((s, l) => s + (parseFloat(l.totalValue) || 0), 0);
     return hideValue
-      ? [label, ls.length, fmtMT(kg)]
-      : [label, ls.length, fmtMT(kg), fmtPKR(val), totalValue > 0 ? `${(val / totalValue * 100).toFixed(1)}%` : '—'];
+      ? [label, ls.length, kgAsMT(kg)]
+      : [label, ls.length, kgAsMT(kg), fmtPKR(val), totalValue > 0 ? `${fmtPct(val / totalValue * 100)}` : '—'];
   });
 
   // Oldest lots — the 8 longest-held, most useful for spotting stale stock.
@@ -2530,9 +2525,9 @@ function InventoryTab({ millScoped, hideValue }) {
       {/* Headline numbers */}
       <div className={`grid grid-cols-2 sm:grid-cols-3 ${hideValue ? 'xl:grid-cols-5' : 'xl:grid-cols-6'} gap-3`}>
         <SummaryCell label="Total lots" value={String(grand.lotCount ?? lotsArr.length)} />
-        <SummaryCell label="Total weight" value={fmtMT(totalKg)} />
-        <SummaryCell label="Available" value={availKg != null ? fmtMT(availKg) : '—'} />
-        <SummaryCell label="Reserved" value={reservedKg != null ? fmtMT(reservedKg) : '—'} />
+        <SummaryCell label="Total weight" value={kgAsMT(totalKg)} />
+        <SummaryCell label="Available" value={availKg != null ? kgAsMT(availKg) : '—'} />
+        <SummaryCell label="Reserved" value={reservedKg != null ? kgAsMT(reservedKg) : '—'} />
         {!hideValue && <SummaryCell label="Total value" value={fmtPKR(totalValue)} />}
         <SummaryCell
           label="Dead stock (90+d)"
@@ -2556,7 +2551,7 @@ function InventoryTab({ millScoped, hideValue }) {
             <Table head={['Type', 'Lots', 'Qty (MT)', 'Value (PKR)']} align={['left', 'right', 'right', 'right']}
               rows={valuation.byType.map(v => [
                 <span className="capitalize">{v.type || '—'}</span>, v.lotCount || 0,
-                (parseFloat(v.totalQty) || 0).toLocaleString(undefined, { maximumFractionDigits: 1 }), fmtPKR(v.totalValue),
+                fmtNum(parseFloat(v.totalQty) || 0), fmtPKR(v.totalValue),
               ])} />
           </div>
           <div className="space-y-2">
@@ -2564,19 +2559,19 @@ function InventoryTab({ millScoped, hideValue }) {
             <Table head={['Warehouse', 'Lots', 'Qty (MT)', 'Value (PKR)']} align={['left', 'right', 'right', 'right']}
               rows={(valuation.byWarehouse || []).map(v => [
                 v.warehouseName || '—', v.lotCount || 0,
-                (parseFloat(v.totalQty) || 0).toLocaleString(undefined, { maximumFractionDigits: 1 }), fmtPKR(v.totalValue),
+                fmtNum(parseFloat(v.totalQty) || 0), fmtPKR(v.totalValue),
               ])} />
           </div>
         </div>
       )}
       {Array.isArray(turnover.byType) && turnover.byType.length > 0 && (
         <div className="space-y-2">
-          <SectionHeader title="Stock turnover" subtitle={`How long stock sits before it moves — overall avg ${(parseFloat(turnover.overallAvgDays) || 0).toFixed(0)} days`} />
+          <SectionHeader title="Stock turnover" subtitle={`How long stock sits before it moves — overall avg ${fmtNum(parseFloat(turnover.overallAvgDays) || 0, 0)} days`} />
           <Table head={['Type', 'Lots', 'Qty (MT)', 'Avg days held']} align={['left', 'right', 'right', 'right']}
             rows={turnover.byType.map(t => [
               <span className="capitalize">{t.type || '—'}</span>, t.lotCount || 0,
-              (parseFloat(t.totalQty) || 0).toLocaleString(undefined, { maximumFractionDigits: 1 }),
-              (parseFloat(t.avgDays) || 0).toFixed(0),
+              fmtNum(parseFloat(t.totalQty) || 0),
+              fmtNum(parseFloat(t.avgDays) || 0, 0),
             ])} />
         </div>
       )}
@@ -2607,7 +2602,7 @@ function InventoryTab({ millScoped, hideValue }) {
                 const base = [
                   <span className="font-medium text-blue-600">{l.lotNo || '—'}</span>,
                   l.itemName || '—', l.type || '—', l.warehouseName || '—',
-                  `${(parseFloat(l.qty) || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })} ${l.unit || 'MT'}`,
+                  `${fmtNum(parseFloat(l.qty) || 0)} ${l.unit || 'MT'}`,
                 ];
                 return hideValue ? [...base, daysCell] : [...base, fmtPKR(l.totalValue), daysCell];
               })}
@@ -2674,7 +2669,7 @@ function FinishedGoodsLedgerSection({ entity, hideValue }) {
   const g = data?.grand || {};
   if (loading) return <Skeleton />;
   if (rows.length === 0 && !type) return null;
-  const kg = (v) => `${Math.round(v || 0).toLocaleString()} kg`;
+  const kg = (v) => `${fmtNum(Math.round(v || 0))} kg`;
   return (
     <div className="space-y-2">
       <div className="flex items-start justify-between gap-2 flex-wrap">
@@ -2794,7 +2789,7 @@ function InventoryMovementLedgerSection({ entity, hideValue }) {
                   <td data-label="Movement" className="px-3 py-1.5 font-medium text-gray-800">{r.label}</td>
                   <td data-label="Lot" className="px-3 py-1.5">{r.lotId ? <Link to={r.href || `/lot-inventory/${r.lotId}`} className="font-mono text-blue-600 hover:underline">{r.lotNo || `#${r.lotId}`}</Link> : (r.batchNo ? <Link to={r.href} className="text-blue-600 hover:underline">{r.batchNo}</Link> : '—')}</td>
                   <td data-label="Where" className="mob-hide px-3 py-1.5 text-gray-500 text-xs">{[r.fromWh, r.toWh].filter(Boolean).join(' → ') || r.reference || '—'}</td>
-                  <td data-label="Qty (kg)" className={`px-3 py-1.5 text-right tabular-nums ${r.direction === 'out' ? 'text-red-700' : 'text-emerald-700'}`}>{r.direction === 'out' ? '−' : '+'}{Math.round(r.qtyKg).toLocaleString()}</td>
+                  <td data-label="Qty (kg)" className={`px-3 py-1.5 text-right tabular-nums ${r.direction === 'out' ? 'text-red-700' : 'text-emerald-700'}`}>{r.direction === 'out' ? '−' : '+'}{fmtNum(Math.round(r.qtyKg))}</td>
                   {!hideValue && <td data-label="Cost" className="px-3 py-1.5 text-right tabular-nums text-gray-600">{r.costPkr > 0 ? fmtPKR(r.costPkr) : '—'}</td>}
                 </tr>
               ))}
@@ -2810,7 +2805,7 @@ function InventoryMovementLedgerSection({ entity, hideValue }) {
 function QualityScoreChip({ v }) {
   const n = parseFloat(v) || 0;
   const tone = n >= 70 ? 'bg-emerald-100 text-emerald-700' : n >= 50 ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700';
-  return <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-semibold ${tone}`}>{n.toFixed(1)}</span>;
+  return <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-semibold ${tone}`}>{fmtNum(n, 1)}</span>;
 }
 
 function QualityTab({ params }) {
@@ -2838,13 +2833,13 @@ function QualityTab({ params }) {
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <SummaryCell label="Suppliers" value={String(rows.length)} />
         <SummaryCell label="Milled batches" value={String(totalBatches)} />
-        <SummaryCell label="Input" value={`${totalQty.toLocaleString(undefined, { maximumFractionDigits: 1 })} MT`} />
+        <SummaryCell label="Input" value={fmtMT(totalQty, { decimals: 1 })} />
         <SummaryCell label="Avg yield" value={fmtPct(avgYieldAll)} />
       </div>
 
       {best && (parseFloat(best.avgYield) || 0) > 0 && (
         <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3 text-sm text-emerald-900">
-          <span className="font-semibold">Top supplier:</span> {best.supplierName} — {fmtPct(best.avgYield)} avg yield across {best.totalBatches} batch{best.totalBatches === 1 ? '' : 'es'} (quality score {(parseFloat(best.qualityScore) || 0).toFixed(1)}).
+          <span className="font-semibold">Top supplier:</span> {best.supplierName} — {fmtPct(best.avgYield)} avg yield across {best.totalBatches} batch{best.totalBatches === 1 ? '' : 'es'} (quality score {fmtNum(parseFloat(best.qualityScore) || 0, 1)}).
         </div>
       )}
 
@@ -2857,11 +2852,11 @@ function QualityTab({ params }) {
             i + 1,
             r.supplierName || '—',
             parseInt(r.totalBatches, 10) || 0,
-            (parseFloat(r.totalQtyMT) || 0).toLocaleString(undefined, { maximumFractionDigits: 1 }),
+            fmtNum(parseFloat(r.totalQtyMT) || 0),
             (parseFloat(r.avgYield) || 0) > 0 ? fmtPct(r.avgYield) : '—',
             (parseFloat(r.avgMoisture) || 0) > 0 ? fmtPct(r.avgMoisture) : '—',
             (parseFloat(r.avgBroken) || 0) > 0 ? fmtPct(r.avgBroken) : '—',
-            `${(parseFloat(r.rejectionRate) || 0).toFixed(1)}%`,
+            `${fmtPct(parseFloat(r.rejectionRate) || 0)}`,
             <QualityScoreChip v={r.qualityScore} />,
           ])}
         />
@@ -2956,13 +2951,9 @@ function ChartBlock({ data }) {
   );
 }
 
+// Export-order statuses — the shared StatusBadge already maps every one.
 function StatusChip({ s }) {
-  const tone =
-    s === 'Closed' || s === 'Arrived' ? 'bg-slate-100 text-slate-700'
-    : s === 'Shipped' ? 'bg-cyan-100 text-cyan-700'
-    : s === 'Cancelled' ? 'bg-red-100 text-red-700'
-    : 'bg-blue-100 text-blue-700';
-  return <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${tone}`}>{s || '—'}</span>;
+  return s ? <StatusBadge status={s} /> : <span className="text-xs text-gray-400">—</span>;
 }
 
 function ProfitCell({ v }) {

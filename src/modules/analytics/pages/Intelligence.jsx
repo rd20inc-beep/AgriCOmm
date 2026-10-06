@@ -15,6 +15,7 @@ import {
   usePredictiveAlerts, useTopRiskOrders, useTopRiskCustomers,
 } from '../../../api/queries';
 import { LoadingSpinner, ErrorState } from '../../../components/LoadingState';
+import { fmtMoney, fmtUSD, fmtMT } from '../../../shared/utils/format';
 
 const TABS = ['Profitability', 'Customer Scoring', 'Supplier Scoring', 'Risk Monitor', 'Smart Alerts'];
 
@@ -35,9 +36,7 @@ function ScoreBar({ score, label, maxScore = 100 }) {
 }
 
 function formatCurrency(v, currency = 'USD') {
-  if (!v && v !== 0) return '—';
-  if (currency === 'PKR') return 'Rs ' + (v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  return '$' + parseFloat(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return fmtMoney(v, currency, { decimals: 2 });
 }
 
 function ProfitabilityTab() {
@@ -126,7 +125,7 @@ function ProfitabilityTab() {
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={chartData}><CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
                   <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#94a3b8' }} /><YAxis tick={{ fontSize: 11 }} tickFormatter={v => `$${(v/1000).toFixed(0)}k`} />
-                  <Tooltip formatter={v => [`$${v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 'Profit']} /><Bar dataKey="profit" fill="#3b82f6" radius={[4,4,0,0]} />
+                  <Tooltip formatter={v => [fmtUSD(v), 'Profit']} /><Bar dataKey="profit" fill="#3b82f6" radius={[4,4,0,0]} />
                 </BarChart>
               </ResponsiveContainer>
             ) : <div className="flex items-center justify-center h-full text-sm text-gray-400">No cost data yet</div>}
@@ -272,7 +271,7 @@ function ScoringTab({ type }) {
                     <div className="flex items-center gap-3 mb-2 text-[11px] text-gray-500">
                       {entity.avgYield != null && <span>Yield <span className="font-semibold text-gray-700">{entity.avgYield}%</span></span>}
                       {entity.avgRatePerKg != null && <span>Rate <span className="font-semibold text-gray-700">Rs {entity.avgRatePerKg}/kg</span></span>}
-                      {entity.totalQtyKg > 0 && <span>Supplied <span className="font-semibold text-gray-700">{(entity.totalQtyKg / 1000).toLocaleString(undefined, { maximumFractionDigits: 1 })} MT</span></span>}
+                      {entity.totalQtyKg > 0 && <span>Supplied <span className="font-semibold text-gray-700">{fmtMT(entity.totalQtyKg / 1000, { decimals: 1 })}</span></span>}
                       {entity.rejectionPct != null && entity.rejectionPct > 0 && <span>Reject <span className="font-semibold text-amber-600">{entity.rejectionPct}%</span></span>}
                     </div>
                   )}

@@ -71,7 +71,7 @@ export default function DraftEmailDrawer({ partyType, partyId, partyName, onClos
             <div className="text-xs text-gray-500">To: {res.party}{res.to ? ` <${res.to}>` : ' · no email on file'}</div>
             <div className="flex items-center gap-2">
               <input readOnly value={res.subject} className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm font-medium bg-gray-50" />
-              <button onClick={() => copy(res.subject)} title="Copy subject" className="p-2 text-gray-400 hover:text-gray-700"><Copy className="w-4 h-4" /></button>
+              <button onClick={() => copy(res.subject)} title="Copy subject" aria-label="Copy subject" className="p-2 text-gray-400 hover:text-gray-700"><Copy className="w-4 h-4" /></button>
             </div>
             <div className="relative">
               <textarea readOnly value={res.body} rows={14} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-gray-50 whitespace-pre-wrap" />

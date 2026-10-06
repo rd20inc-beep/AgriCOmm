@@ -10,8 +10,9 @@ import { reportingApi } from '../api/services';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import { exportLedgerCSV, printLedger } from '../utils/ledgerExport';
+import { fmtKg } from '../../../shared/utils/format';
 
-const kg = (v) => `${Math.round(parseFloat(v) || 0).toLocaleString()} kg`;
+const kg = (v) => fmtKg(v);
 const BUCKETS = ['0–30', '31–60', '61–90', '90+'];
 
 function Kpi({ label, value, tone = 'gray' }) {

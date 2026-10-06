@@ -29,7 +29,7 @@ export default function AnomalyWatchCard() {
         </div>
         <div className="flex items-center gap-2">
           <Link to="/ai" className="text-[11px] text-blue-600 hover:underline inline-flex items-center gap-0.5">Open <ExternalLink className="w-3 h-3" /></Link>
-          <button onClick={() => refetch()} disabled={isFetching || aiOff} title="Re-scan" className="p-1 text-gray-400 hover:text-gray-700 disabled:opacity-40">
+          <button onClick={() => refetch()} disabled={isFetching || aiOff} title="Re-scan" aria-label="Re-scan" className="p-1 text-gray-400 hover:text-gray-700 disabled:opacity-40">
             <RefreshCw className={`w-3.5 h-3.5 ${isFetching ? 'animate-spin' : ''}`} />
           </button>
         </div>

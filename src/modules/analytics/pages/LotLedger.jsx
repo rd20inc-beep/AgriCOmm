@@ -10,10 +10,11 @@ import { reportingApi } from '../api/services';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import { exportLedgerCSV, printLotLedger } from '../utils/ledgerExport';
+import { fmtDate, fmtKg, fmtPKR, fmtNum, fmtPct } from '../../../shared/utils/format';
 
-const pkr = (v) => (v == null ? '—' : `Rs ${(parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
-const kg = (v) => `${Math.round(parseFloat(v) || 0).toLocaleString()} kg`;
-const dt = (v) => v ? new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+const pkr = (v) => fmtPKR(v, { decimals: 2 });
+const kg = (v) => fmtKg(v);
+const dt = (v) => fmtDate(v);
 
 export default function LotLedger() {
   const { id } = useParams();
@@ -181,7 +182,7 @@ export default function LotLedger() {
           <Cell label="Total revenue" value={pkr(fs.totalRevenue)} />
           <Cell label="Payment received" value={pkr(fs.paymentReceived)} tone="emerald" />
           <Cell label="Outstanding" value={pkr(fs.outstanding)} tone={fs.outstanding > 0 ? 'rose' : 'gray'} />
-          <Cell label="Realized profit" value={`${pkr(fs.realizedProfit)} (${(parseFloat(fs.realizedProfitPct) || 0).toFixed(1)}%)`} tone={fs.realizedProfit >= 0 ? 'emerald' : 'rose'} />
+          <Cell label="Realized profit" value={`${pkr(fs.realizedProfit)} (${fmtPct(fs.realizedProfitPct ?? 0)})`} tone={fs.realizedProfit >= 0 ? 'emerald' : 'rose'} />
           <Cell label="Remaining stock value" value={pkr(fs.remainingStockValue)} />
           <Cell label="Expected profit on remaining" value={pkr(fs.expectedProfitRemaining)} />
           {fs.byproductRecovery > 0 && <Cell label="By-product recovery (valued)" value={pkr(fs.byproductRecovery)} tone="emerald" />}
@@ -234,7 +235,7 @@ export default function LotLedger() {
       {/* Activity ledger */}
       <Section icon={Truck} title="Lot activity ledger">
         <Tbl head={['Date', 'Activity', 'Reference', 'Counterparty', { t: 'In', r: 1 }, { t: 'Out', r: 1 }, { t: 'Balance', r: 1 }]}
-          rows={events.map(e => [dt(e.date), e.label, e.reference || e.txnNo || '—', e.href ? <Link to={e.href} className="text-blue-600 hover:underline">{e.counterparty || '—'}</Link> : (e.counterparty || '—'), e.inKg ? <span className="text-emerald-700">{Math.round(e.inKg).toLocaleString()}</span> : '', e.outKg ? <span className="text-red-700">{Math.round(e.outKg).toLocaleString()}</span> : '', Math.round(e.balanceKg).toLocaleString()])}
+          rows={events.map(e => [dt(e.date), e.label, e.reference || e.txnNo || '—', e.href ? <Link to={e.href} className="text-blue-600 hover:underline">{e.counterparty || '—'}</Link> : (e.counterparty || '—'), e.inKg ? <span className="text-emerald-700">{fmtNum(e.inKg, 0)}</span> : '', e.outKg ? <span className="text-red-700">{fmtNum(e.outKg, 0)}</span> : '', fmtNum(e.balanceKg, 0)])}
           empty="No recorded movements." />
       </Section>
 

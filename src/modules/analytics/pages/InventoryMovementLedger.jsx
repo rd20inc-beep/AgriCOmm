@@ -12,10 +12,11 @@ import { useWarehouses } from '../../../api/queries';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import { exportLedgerCSV, printInventoryMovementLedger } from '../utils/ledgerExport';
+import { fmtDate, fmtNum, fmtPKR } from '../../../shared/utils/format';
 
-const pkr = (v) => (v == null ? '—' : `Rs ${(parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
-const n0 = (v) => Math.round(parseFloat(v) || 0).toLocaleString();
-const dt = (v) => v ? new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+const pkr = (v) => fmtPKR(v, { decimals: 2 });
+const n0 = (v) => fmtNum(v, 0);
+const dt = (v) => fmtDate(v);
 
 const MOVEMENT_TYPES = [
   ['', 'All movements'], ['purchase_receipt', 'Purchase received'], ['production_issue', 'Issued to milling'],

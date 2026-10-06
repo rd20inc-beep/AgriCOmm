@@ -4,6 +4,7 @@ import { Printer, RefreshCw, Search, FileText, CheckSquare, Square, ArrowLeft } 
 import api from '../../../api/client';
 import { useApp } from '../../../context/AppContext';
 import { LotReportView } from './LotReportViews';
+import { fmtNum } from '../../../shared/utils/format';
 
 const TYPE_OPTIONS = [
   { k: '', l: 'All types' },
@@ -13,7 +14,7 @@ const TYPE_OPTIONS = [
 ];
 
 const typeLabel = (t) => (t === 'raw' ? 'Unprocessed Rice' : t === 'finished' ? 'Finished Rice' : t === 'byproduct' ? 'Byproduct' : t || '—');
-const fmtMt = (v) => (parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtMt = (v) => fmtNum(parseFloat(v) || 0, 2);
 
 export default function LotReport() {
   const { addToast, companyProfileData } = useApp();

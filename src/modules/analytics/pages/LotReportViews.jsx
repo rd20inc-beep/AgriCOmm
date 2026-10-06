@@ -14,6 +14,7 @@ import {
   Header, Section, Table, Footer, SummaryRow,
   fmtMt, fmtKg, fmtPkr, fmtDate,
 } from './PrintableReportsViews';
+import { fmtDateTime } from '../../../shared/utils/format';
 
 const num = (v) => (v == null || v === '' ? null : parseFloat(v));
 const show = (v, suffix = '') => (v == null || v === '' ? '—' : `${v}${suffix}`);
@@ -123,13 +124,13 @@ function LotCard({ bundle }) {
       </div>
 
       {blendRecipe && Array.isArray(blendRecipe.inputs) && blendRecipe.inputs.length > 0 && (
-        <Section title={`Blend recipe — batch ${blendRecipe.batch_no} (${Math.round(num(blendRecipe.raw_qty_kg) || 0).toLocaleString()} kg raw)`}>
+        <Section title={`Blend recipe — batch ${blendRecipe.batch_no} (${fmtKg(num(blendRecipe.raw_qty_kg))} kg raw)`}>
           <Table
             head={['Variety', 'Source Lot', 'Supplier', 'Qty kg', 'Ratio', 'Moisture', 'Broken', 'Grade']}
             align={['left', 'left', 'left', 'right', 'right', 'right', 'right', 'left']}
             rows={blendRecipe.inputs.map((i) => [
               i.variety || '—', i.source_lot_no || '—', i.supplier_name || '—',
-              Math.round(num(i.qty_kg) || 0).toLocaleString(), i.ratio_pct != null ? `${i.ratio_pct}%` : '—',
+              fmtKg(num(i.qty_kg)), i.ratio_pct != null ? `${i.ratio_pct}%` : '—',
               pct(i.moisture), pct(i.broken), i.grade || '—',
             ])}
             empty=""
@@ -196,7 +197,7 @@ function CombinedReport({ lots }) {
     .filter((b) => b.blendRecipe && Array.isArray(b.blendRecipe.inputs) && b.blendRecipe.inputs.length)
     .flatMap((b) => b.blendRecipe.inputs.map((i) => [
       lotName(b.lot), i.variety || '—', i.source_lot_no || '—', i.supplier_name || '—',
-      Math.round(num(i.qty_kg) || 0).toLocaleString(), i.ratio_pct != null ? `${i.ratio_pct}%` : '—', pct(i.moisture), i.grade || '—',
+      fmtKg(num(i.qty_kg)), i.ratio_pct != null ? `${i.ratio_pct}%` : '—', pct(i.moisture), i.grade || '—',
     ]));
 
   const yieldRows = lots
@@ -313,7 +314,7 @@ export function LotReportView({ lots = [], companyName, detail = 'full', generat
       <Header
         companyName={companyName}
         title={single ? 'Lot Report' : 'Combined Lot Report'}
-        subtitle={`${lots.length} lot${single ? '' : 's'}${generatedAt ? ` · ${new Date(generatedAt).toLocaleString()}` : ''}`}
+        subtitle={`${lots.length} lot${single ? '' : 's'}${generatedAt ? ` · ${fmtDateTime(generatedAt)}` : ''}`}
       />
 
       {single ? (

@@ -7,6 +7,7 @@ import { useQuery } from '@tanstack/react-query';
 import { X } from 'lucide-react';
 import { conflictsApi } from '../sync/syncApi';
 import { CONFLICT_LABELS } from '../sync/conflicts';
+import { fmtDateTime } from '../shared/utils/format';
 
 export default function SyncConflictsDrawer() {
   const [open, setOpen] = useState(false);
@@ -39,7 +40,7 @@ export default function SyncConflictsDrawer() {
       <div className="h-full w-full max-w-md overflow-y-auto bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between border-b px-4 py-3">
           <h2 className="text-base font-semibold text-gray-900">Sync conflicts</h2>
-          <button onClick={() => setOpen(false)} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
+          <button onClick={() => setOpen(false)} className="text-gray-400 hover:text-gray-600" aria-label="Close"><X size={18} /></button>
         </div>
         <div className="space-y-3 p-4">
           {isLoading ? <p className="text-sm text-gray-400">Loading…</p>
@@ -51,7 +52,7 @@ export default function SyncConflictsDrawer() {
                       <span className="rounded border border-red-200 bg-red-50 px-1.5 py-0.5 text-[10px] font-semibold text-red-700">
                         {CONFLICT_LABELS[c.conflict_code] || c.conflict_code || 'Rejected'}
                       </span>
-                      <span className="text-[10px] text-gray-400">{c.created_at ? new Date(c.created_at).toLocaleString('en-GB') : ''}</span>
+                      <span className="text-[10px] text-gray-400">{c.created_at ? fmtDateTime(c.created_at) : ''}</span>
                     </div>
                     <p className="mt-1 text-sm font-medium text-gray-800">{c.label || c.endpoint}</p>
                     {c.message && <p className="text-xs text-gray-500">{c.message}</p>}
