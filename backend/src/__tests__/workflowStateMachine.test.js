@@ -48,7 +48,9 @@ describe('Workflow State Machine', () => {
       ['Advance Received', 'In Milling'],
       ['Procurement Pending', 'In Milling'],
       ['In Milling', 'Docs In Preparation'],
-      ['Docs In Preparation', 'Awaiting Balance'],
+      // Ship on the advance: documents lead straight to Ready to Ship.
+      ['Docs In Preparation', 'Ready to Ship'],
+      // Legacy orders parked in Awaiting Balance still move forward.
       ['Awaiting Balance', 'Ready to Ship'],
       ['Ready to Ship', 'Shipped'],
       ['Shipped', 'Arrived'],
@@ -71,6 +73,8 @@ describe('Workflow State Machine', () => {
       ['Cancelled', 'Draft'],
       ['Ready to Ship', 'In Milling'],
       ['Arrived', 'Shipped'],
+      // No new order enters the pre-shipment balance stage.
+      ['Docs In Preparation', 'Awaiting Balance'],
     ];
 
     invalidTransitions.forEach(([from, to]) => {

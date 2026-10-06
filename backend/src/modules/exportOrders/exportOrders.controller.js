@@ -1952,10 +1952,13 @@ const exportOrderController = {
         return res.status(404).json({ success: false, message: 'Export order not found.' });
       }
 
-      if (order.status !== 'Awaiting Balance') {
+      // Ship on the advance: the balance is collected after sailing, so a
+      // reminder goes out from any live stage it is owed in (most often
+      // Shipped / Arrived), not only the legacy 'Awaiting Balance'.
+      if (['Draft', 'Closed', 'Cancelled'].includes(order.status)) {
         return res.status(400).json({
           success: false,
-          message: `Balance can only be requested while order is in 'Awaiting Balance', not '${order.status}'.`,
+          message: `Balance cannot be requested for an order in '${order.status}'.`,
         });
       }
 

@@ -1,4 +1,5 @@
 const db = require('../../config/database');
+const { BALANCE_COLLECTION_STATUSES, BALANCE_OUTSTANDING_SQL } = require('../exportOrders/balanceCollection');
 const auditService = require('../admin/audit.service');
 const { companyStock } = require('../inventory/stockSql');
 
@@ -131,11 +132,11 @@ const intelligenceService = {
   },
 
   async scanOverdueBalances() {
-    // Find export_orders where status='Awaiting Balance' and balance outstanding > 0
-    // and it's been > 30 days since the order reached that status
+    // Export orders with a balance still owed where it is collected (after
+    // sailing under ship-on-advance, or the legacy 'Awaiting Balance' stage).
     const rows = await db('export_orders')
-      .where('status', 'Awaiting Balance')
-      .whereRaw('balance_expected - COALESCE(balance_received, 0) > 0')
+      .whereIn('status', BALANCE_COLLECTION_STATUSES)
+      .whereRaw(BALANCE_OUTSTANDING_SQL)
       .select('id', 'order_no', 'balance_expected', 'balance_received', 'currency', 'updated_at', 'created_at');
 
     return rows.map((r) => {
@@ -613,14 +614,14 @@ const intelligenceService = {
     let totalScore = 0;
 
     // Factor 1: Payment delay
-    if (order.status === 'Awaiting Advance' || order.status === 'Awaiting Balance') {
+    if (order.status === 'Awaiting Advance' || BALANCE_COLLECTION_STATUSES.includes(order.status)) {
       const daysCreated = Math.floor((Date.now() - new Date(order.created_at).getTime()) / (1000 * 60 * 60 * 24));
       if (order.status === 'Awaiting Advance' && daysCreated > 14) {
         const score = 30;
         factors.push({ factor: 'Advance Payment Overdue', score, weight: 0.3, detail: `${daysCreated} days since order created, advance not received` });
         totalScore += score;
       }
-      if (order.status === 'Awaiting Balance') {
+      if (BALANCE_COLLECTION_STATUSES.includes(order.status)) {
         const outstanding = parseFloat(order.balance_expected) - parseFloat(order.balance_received || 0);
         if (outstanding > 0) {
           const score = 25;
@@ -1422,7 +1423,7 @@ const intelligenceService = {
       ? { total: 0 }
       : await advancePendingQ.select(db.raw('COALESCE(SUM(advance_expected - COALESCE(advance_received, 0)), 0) as total')).first();
 
-    const balancePendingQ = db('export_orders').where('status', 'Awaiting Balance');
+    const balancePendingQ = db('export_orders').whereIn('status', BALANCE_COLLECTION_STATUSES).whereRaw(BALANCE_OUTSTANDING_SQL);
     dateFilter(balancePendingQ, 'created_at');
     const balancePending = entity === 'mill'
       ? { total: 0 }
@@ -1649,7 +1650,8 @@ const intelligenceService = {
       case 'balancePending':
         query = db('export_orders as eo')
           .leftJoin('customers as c', 'c.id', 'eo.customer_id')
-          .where('eo.status', 'Awaiting Balance')
+          .whereIn('eo.status', BALANCE_COLLECTION_STATUSES)
+          .whereRaw('COALESCE(eo.balance_expected, 0) - COALESCE(eo.balance_received, 0) > 0.01')
           .select(
             'eo.id', 'eo.order_no', 'eo.balance_expected', 'eo.balance_received',
             db.raw('eo.balance_expected - COALESCE(eo.balance_received, 0) as outstanding'),
