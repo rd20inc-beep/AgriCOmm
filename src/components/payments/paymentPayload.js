@@ -46,15 +46,20 @@ export function blankPaymentForm({ amount = '', method = 'bank_transfer', date }
 }
 
 /**
- * A cheque dated after today. It is recorded but moves no money (and settles
- * nothing) until it is cleared, so it is the one payment that needs no account
- * yet. Every other payment must name the cash or bank account it moves through.
- * `form` carries `method`/`paymentMethod` and `dueDate`.
+ * A cheque is never money in the bank until it is cleared — same-day cheques
+ * included (owner decision, 2026-10-07). Recording one settles nothing, moves
+ * no account and posts nothing to the ledger; clearing it in Due Dates does all
+ * three, and asks for the bank account then. So a cheque is the one payment
+ * that needs no account when it is recorded. `form` carries `method` or
+ * `paymentMethod`.
  */
-export function isPostDatedCheque(form, today = new Date().toISOString().slice(0, 10)) {
-  const method = form.method ?? form.paymentMethod;
-  return method === 'cheque' && !!form.dueDate && String(form.dueDate).slice(0, 10) > today;
+export function isUnclearedCheque(form) {
+  return (form.method ?? form.paymentMethod) === 'cheque';
 }
+
+/** The one wording for a cheque's clearing date and what recording one does. */
+export const CHEQUE_DATE_LABEL = 'Cheque clears on';
+export const CHEQUE_HINT = 'Cheques settle when you clear them in Due Dates.';
 
 /** The accounts a method draws on: cash from a cash account, anything else from a bank one. */
 export function accountsForMethod(accounts = [], method) {
@@ -104,7 +109,8 @@ export function validatePayment(form, { outstanding = null, requireAccount = tru
   if (num(form.whtAmount) + num(form.discountAmount) - amt > 0.01) {
     return 'WHT + discount cannot exceed the amount.';
   }
-  if (requireAccount && !form.bankAccountId) return 'Select a cash or bank account';
+  // A cheque picks its account when it is cleared.
+  if (requireAccount && !form.bankAccountId && !isUnclearedCheque(form)) return 'Select a cash or bank account';
   return null;
 }
 
@@ -162,9 +168,8 @@ export function purchasePayPayload(form, { source, sourceId }) {
     bank_account_id: form.bankAccountId || null,
     payment_reference: form.reference || null,
     payment_date: form.date,
-    // A post-dated cheque is recorded but does NOT settle the purchase until it
-    // clears — the server branches on this, so dropping it (as two screens did)
-    // settles a cheque that has not been presented.
+    // A cheque's clearing date, for Due Dates. A cheque is recorded but does
+    // NOT settle the purchase until it is cleared there.
     due_date: form.dueDate || null,
     notes: form.notes || null,
   };

@@ -15,6 +15,8 @@ import { useApp } from '../../../context/AppContext';
 import { shortenRef } from '../utils/refs';
 import PartyLink from '../../../shared/components/PartyLink';
 import { favStar } from '../../../shared/utils/favorites';
+import { CHEQUE_DATE_LABEL } from '../../../components/payments/paymentPayload';
+import { ChequeHint } from '../../../components/payments/PaymentFields';
 
 function fmtPKR(n) {
   const v = Number(n) || 0;
@@ -685,10 +687,10 @@ function PayPurchaseDrawer({ purchase, bankAccounts, isPending, onClose, onSubmi
             {paymentMethod !== 'cash' && (
               <select
                 value={bankAccountId} onChange={e => setBankAccountId(e.target.value)}
-                required
+                required={paymentMethod !== 'cheque'}
                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900"
               >
-                <option value="">Select a bank account…</option>
+                <option value="">{paymentMethod === 'cheque' ? 'Bank account it will clear through (optional)…' : 'Select a bank account…'}</option>
                 {bankAccounts.map(a => (
                   <option key={a.id} value={a.id}>
                     {favStar(a)}{a.name} · {a.bankName || '—'} ({a.currency || 'PKR'} {(parseFloat(a.currentBalance) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
@@ -713,9 +715,10 @@ function PayPurchaseDrawer({ purchase, bankAccounts, isPending, onClose, onSubmi
 
           {paymentMethod === 'cheque' && (
             <div>
-              <label className="text-xs font-medium text-gray-600 block mb-1">Cheque date <span className="text-gray-400">(when it clears)</span></label>
+              <label className="text-xs font-medium text-gray-600 block mb-1">{CHEQUE_DATE_LABEL} <span className="text-gray-400">(optional)</span></label>
               <input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)}
                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+              <ChequeHint />
             </div>
           )}
 

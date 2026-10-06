@@ -14,6 +14,8 @@ import api from '../../../api/client';
 import { useExpenseVendors } from '../../../api/queries';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { favStar } from '../../../shared/utils/favorites';
+import { CHEQUE_DATE_LABEL } from '../../../components/payments/paymentPayload';
+import { ChequeHint } from '../../../components/payments/PaymentFields';
 
 // ─── Formatting ──────────────────────────────────────────────────────
 function fmtPKR(n) {
@@ -621,10 +623,11 @@ export default function Expenses() {
                       className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="e.g. 004512" />
                   </div>
                   <div>
-                    <label className="text-xs text-gray-500 block mb-1">Cheque date</label>
+                    <label className="text-xs text-gray-500 block mb-1">{CHEQUE_DATE_LABEL}</label>
                     <input type="date" value={payForm.due_date} onChange={e => setPayForm(p => ({ ...p, due_date: e.target.value }))}
                       className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                   </div>
+                  <ChequeHint className="col-span-2 -mt-1" />
                 </div>
               )}
 
@@ -870,6 +873,11 @@ function ExpenseForm({
                 <option value="online">Online</option>
               </select>
             </div>
+            {form.payment_method === 'cheque' && (
+              <p className="sm:col-span-2 text-[11px] text-amber-700">
+                Cheques settle when you clear them in Due Dates — this expense stays unpaid until then. The due date above is when the cheque clears.
+              </p>
+            )}
           </div>
         )}
         {!form.pay_now && <p className="text-[11px] text-gray-400 mt-1">Will be saved as unpaid — mark it paid later.</p>}

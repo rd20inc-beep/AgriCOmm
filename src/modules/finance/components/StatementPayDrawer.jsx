@@ -5,6 +5,8 @@ import SlideDrawer from '../../../components/SlideDrawer';
 import { useReceivables, usePayables, useBankAccounts, useRecordPayment } from '../../../api/queries';
 import { useApp } from '../../../context/AppContext';
 import { favStar } from '../../../shared/utils/favorites';
+import { CHEQUE_DATE_LABEL } from '../../../components/payments/paymentPayload';
+import { ChequeHint } from '../../../components/payments/PaymentFields';
 
 // Small currency formatter — mirrors the symbols used across the finance pages.
 function curSymbol(cur) {
@@ -101,6 +103,7 @@ export default function StatementPayDrawer({ mode, party, onClose }) {
     bankAccountId: '',
     method: 'bank_transfer',
     date: new Date().toISOString().split('T')[0],
+    dueDate: '',
     notes: '',
   });
 
@@ -151,6 +154,7 @@ export default function StatementPayDrawer({ mode, party, onClose }) {
           payment_method: form.method,
           payment_date: form.date,
           bank_account_id: form.bankAccountId || null,
+          ...(form.method === 'cheque' && form.dueDate ? { due_date: form.dueDate } : {}),
           ...(isCustomer
             ? { linked_receivable_id: item.dbId || item.id }
             : { linked_payable_id: item.dbId || item.id }),
@@ -314,6 +318,15 @@ export default function StatementPayDrawer({ mode, party, onClose }) {
               {isCustomer && <option value="lc">Letter of Credit</option>}
             </select>
           </div>
+
+          {form.method === 'cheque' && (
+            <div>
+              <label className="text-xs text-gray-500 block mb-1">{CHEQUE_DATE_LABEL} <span className="text-gray-400">(optional)</span></label>
+              <input type="date" value={form.dueDate} onChange={(e) => setForm((f) => ({ ...f, dueDate: e.target.value }))}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              <ChequeHint />
+            </div>
+          )}
 
           {/* Notes */}
           <div>

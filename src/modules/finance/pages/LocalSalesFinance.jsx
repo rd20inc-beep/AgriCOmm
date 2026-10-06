@@ -12,6 +12,8 @@ import { useApp } from '../../../context/AppContext';
 import SlideDrawer from '../../../components/SlideDrawer';
 import { favStar, isFavorite } from '../../../shared/utils/favorites';
 import { paymentWord, defaultBankAccountId } from '../../localSales/utils/saleStatus';
+import { CHEQUE_DATE_LABEL } from '../../../components/payments/paymentPayload';
+import { ChequeHint } from '../../../components/payments/PaymentFields';
 
 function fmtPKR(n) {
   const v = parseFloat(n) || 0;
@@ -323,11 +325,14 @@ export default function LocalSalesFinance() {
                   </select>
                 )}
                 {payForm.method === 'cheque' && (
-                  <div className="flex gap-2">
-                    <input type="text" value={payForm.reference} onChange={(e) => setPayForm({ ...payForm, reference: e.target.value })}
-                      className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm" placeholder="Cheque # (optional)" />
-                    <input type="date" value={payForm.dueDate} onChange={(e) => setPayForm({ ...payForm, dueDate: e.target.value })}
-                      className="border border-gray-200 rounded-lg px-2 py-2 text-sm" title="Cheque date" />
+                  <div>
+                    <div className="flex gap-2">
+                      <input type="text" value={payForm.reference} onChange={(e) => setPayForm({ ...payForm, reference: e.target.value })}
+                        className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm" placeholder="Cheque # (optional)" />
+                      <input type="date" value={payForm.dueDate} onChange={(e) => setPayForm({ ...payForm, dueDate: e.target.value })}
+                        className="border border-gray-200 rounded-lg px-2 py-2 text-sm" title={CHEQUE_DATE_LABEL} aria-label={CHEQUE_DATE_LABEL} />
+                    </div>
+                    <ChequeHint />
                   </div>
                 )}
                 <button onClick={recordPayment} disabled={acceptPay.isPending}

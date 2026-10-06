@@ -153,7 +153,8 @@ describe('reversePayment', () => {
       payables: [{ id: 21, original_amount: 500, paid_amount: 100, source_table: 'business_expenses', source_id: 4 }],
       business_expenses: [{ id: 4, amount_pkr: 500, paid_amount: 100, payment_status: 'Partial' }],
       bank_accounts: [{ id: 8, currency: 'PKR', current_balance: 1000 }],
-      // recordPayment journals a cheque when it is recorded.
+      // A cheque recorded under the old rules, when a post-dated cheque was
+      // journalled at recording (today none is until it clears).
       journal_entries: [{ id: 70, ref_no: 'PAY-009', ref_type: 'Payment', status: 'Posted', entity: 'mill', party_type: 'supplier', party_id: 3 }],
       journal_lines: [
         { id: 1, journal_id: 70, account_id: 14, account: 'Acct 2010', debit: 200, credit: 0 },

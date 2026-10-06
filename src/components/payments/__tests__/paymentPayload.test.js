@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 import {
   PAYMENT_METHODS, blankPaymentForm, netCash, validatePayment, paymentPayload, purchasePayPayload, money,
-  pickAccountForMethod,
+  pickAccountForMethod, isUnclearedCheque,
 } from '../paymentPayload';
 
 /**
@@ -139,6 +139,13 @@ describe('validatePayment', () => {
   it('requires an account unless the screen pays from a fixed one', () => {
     expect(validatePayment({ ...ok, bankAccountId: '' }, {})).toBe('Select a cash or bank account');
     expect(validatePayment({ ...ok, bankAccountId: '' }, { requireAccount: false })).toBeNull();
+  });
+
+  it('lets any cheque — same-day included — be recorded without an account (it is picked at clearing)', () => {
+    expect(validatePayment({ ...ok, method: 'cheque', bankAccountId: '', dueDate: '' }, {})).toBeNull();
+    expect(isUnclearedCheque({ method: 'cheque', dueDate: '' })).toBe(true);
+    expect(isUnclearedCheque({ paymentMethod: 'cheque' })).toBe(true);
+    expect(isUnclearedCheque({ method: 'bank_transfer' })).toBe(false);
   });
 });
 

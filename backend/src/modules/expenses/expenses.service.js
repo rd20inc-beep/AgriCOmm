@@ -5,7 +5,7 @@ const accountingService = require('../accounting/accounting.service');
 const { resolveCashAccountId } = require('../../shared/cashAccounts');
 const { normalizePaymentMethod } = require('../../shared/constants/paymentMethods');
 const { ledgerFailure, missingAccounts } = require('../../shared/ledgerFailure');
-const { pendingChequeTotal, round2 } = require('../finance/paymentSettlement');
+const { pendingChequeTotal, round2, isCheque } = require('../finance/paymentSettlement');
 
 // Settlement journal posted when an expense is PAID: DR Supplier Payable (2010)
 // CR Cash & Bank (1000). The obligation was booked at create (CR 2010 via the
@@ -100,6 +100,10 @@ const expensesService = {
     if (!expense_date) throw new ValidationError('Expense date is required.');
 
     const amountNum = Number(amount);
+    // Paying by cheque at create records the cheque but settles nothing: the
+    // expense stays unpaid until the cheque clears in Due Dates.
+    const payByCheque = !!pay_now && isCheque(payment_method);
+    const settledNow = !!pay_now && !payByCheque;
     const rate = Number(fx_rate) || (currency === 'PKR' ? 1 : 280);
     const amountPkr = currency === 'PKR' ? amountNum : Number((amountNum * rate).toFixed(2));
 
@@ -153,11 +157,11 @@ const expensesService = {
         employee_id: employee_id || null,
         is_recurring: !!is_recurring,
         recurrence: is_recurring ? (recurrence || 'monthly') : null,
-        payment_status: pay_now ? 'Paid' : 'Pending',
+        payment_status: settledNow ? 'Paid' : 'Pending',
         // Same figure the payable records, so the two never disagree.
-        paid_amount: pay_now ? amountPkr : 0,
-        bank_account_id: pay_now ? resolvedAccountId : null,
-        paid_date: pay_now ? expense_date : null,
+        paid_amount: settledNow ? amountPkr : 0,
+        bank_account_id: settledNow ? resolvedAccountId : null,
+        paid_date: settledNow ? expense_date : null,
         payment_method: pay_now ? normalizePaymentMethod(payment_method) : null,
         payment_reference: pay_now ? (payment_reference || null) : null,
         created_by: userId,
@@ -221,11 +225,11 @@ const expensesService = {
         supplier_id: supplier_id || null,
         linked_ref: vendorLabel,
         original_amount: amountPkr,
-        paid_amount: pay_now ? amountPkr : 0,
-        outstanding: pay_now ? 0 : amountPkr,
+        paid_amount: settledNow ? amountPkr : 0,
+        outstanding: settledNow ? 0 : amountPkr,
         currency: 'PKR',
         due_date: due_date || expense_date,
-        status: pay_now ? 'Paid' : 'Pending',
+        status: settledNow ? 'Paid' : 'Pending',
         source_table: 'business_expenses',
         source_id: expense.id,
         payable_type: 'expense',
@@ -235,7 +239,19 @@ const expensesService = {
       // ─── If paid now: record the payment row, debit the bank, and post the
       // settlement journal — so a pay-at-create expense is fully consistent
       // with the pay-later (markPaid) flow (payment trail + GL both move). ───
-      if (pay_now) {
+      if (payByCheque) {
+        const payDate = (expense_date instanceof Date ? expense_date.toISOString().slice(0, 10) : expense_date) || new Date().toISOString().split('T')[0];
+        const clearsOn = due_date ? (due_date instanceof Date ? due_date.toISOString().slice(0, 10) : due_date) : payDate;
+        await trx('payments').insert({
+          payment_no: await nextDocNo(trx, { table: 'payments', column: 'payment_no', prefix: 'EXP-PAY-', pad: 0 }),
+          type: 'payment', amount: amountPkr, currency: 'PKR', fx_rate: 1, base_amount_pkr: amountPkr,
+          payment_method: 'cheque', bank_account_id: bank_account_id || null,
+          bank_reference: payment_reference || null, due_date: clearsOn, cleared: false,
+          linked_payable_id: payableRow?.id || null,
+          source_table: 'business_expenses', source_id: expense.id,
+          payment_date: payDate, notes: `Pending cheque for ${expenseNo}`, created_by: userId || null,
+        });
+      } else if (pay_now) {
         const payDate = (expense_date instanceof Date ? expense_date.toISOString().slice(0, 10) : expense_date) || new Date().toISOString().split('T')[0];
         const paymentNo = await nextDocNo(trx, { table: 'payments', column: 'payment_no', prefix: 'EXP-PAY-', pad: 0 });
         // Canonical on BOTH columns. This used to normalise only the payments
@@ -464,7 +480,8 @@ const expensesService = {
     // GL journal's date math (createJournal does string ops) doesn't choke.
     const rawPayDate = paid_date || new Date().toISOString().split('T')[0];
     const payDate = rawPayDate instanceof Date ? rawPayDate.toISOString().slice(0, 10) : rawPayDate;
-    const isPostDated = payment_method === 'cheque' && due_date && new Date(due_date) > new Date(new Date().toDateString());
+    // A cheque — same-day included — is not money in the bank until it clears.
+    const isPostDated = isCheque(payment_method);
 
     return db.transaction(async (trx) => {
       // The expense and its payable are read UNDER A LOCK inside the same
@@ -494,15 +511,16 @@ const expensesService = {
       const newPaid = round2(alreadyPaid + payAmt);
       const fullyPaid = newPaid >= totalPkr - 0.01;
 
-      // A post-dated cheque records but does NOT settle until it clears — insert
-      // the uncleared payment (for this installment) and stop.
+      // A cheque records but does NOT settle, move the bank or journal until it
+      // clears — insert the uncleared payment (for this installment), carrying
+      // the expense as its source, and stop. Clear Cheque does the rest.
       if (isPostDated) {
         await trx('payments').insert({
           payment_no: await nextDocNo(trx, { table: 'payments', column: 'payment_no', prefix: 'EXP-PAY-', pad: 0 }),
           type: 'payment', amount: payAmt, currency: 'PKR', fx_rate: 1, base_amount_pkr: payAmt,
           payment_method: normalizePaymentMethod(payment_method), bank_account_id: bank_account_id || null,
           bank_reference: payment_reference || null,
-          due_date: due_date || null, cleared: false,
+          due_date: due_date || payDate, cleared: false,
           linked_payable_id: payable ? payable.id : null,
           source_table: 'business_expenses', source_id: parseInt(id, 10), payment_date: payDate,
           notes: notes || `Pending cheque for ${expense.expense_no}`, created_by: userId || null,

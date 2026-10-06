@@ -3,6 +3,8 @@ import { Landmark, FileText } from 'lucide-react';
 import SlideDrawer from '../../../components/SlideDrawer';
 import { useApp } from '../../../context/AppContext';
 import { useLocalSales, useAcceptLocalSalePayment } from '../../../api/queries';
+import { CHEQUE_DATE_LABEL } from '../../../components/payments/paymentPayload';
+import { ChequeHint } from '../../../components/payments/PaymentFields';
 
 const PKR = (v) => `Rs ${(parseFloat(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const fmtDate = (d) => { const dt = new Date(d); return Number.isNaN(dt.getTime()) ? '' : dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }); };
@@ -141,9 +143,10 @@ export default function MillCustomerPayDrawer({ customer, onClose }) {
 
             {form.payment_method === 'cheque' && (
               <div>
-                <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Cheque clears on <span className="text-gray-400 font-normal">(optional)</span></label>
+                <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">{CHEQUE_DATE_LABEL} <span className="text-gray-400 font-normal">(optional)</span></label>
                 <input type="date" value={form.due_date} onChange={(e) => set('due_date', e.target.value)}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-emerald-500" />
+                <ChequeHint />
               </div>
             )}
 
