@@ -1,7 +1,7 @@
 /**
  * Local-sales workflow (LS-07 … LS-12):
  *   - one payment for a multi-item sale splits oldest-line-first, all or nothing
- *   - a walk-in credit buyer only reuses a LOCAL customer with the same phone
+ *   - a walk-in credit buyer is identified by PHONE among LOCAL customers
  *   - Money In's local rows use COALESCE(due_date, sale_date) for due/aging/overdue
  *   - a typed sale date must be real and not in the future
  *   - a duplicate gate pass is refused before anything is saved
@@ -14,7 +14,7 @@
 const mockState = { rows: {}, first: {}, committed: [], failPaymentInsertNo: 0, paymentInserts: 0 };
 function mockBuilder(table, log) {
   const b = {};
-  ['whereNot', 'whereIn', 'whereNull', 'whereRaw', 'orWhere', 'orderBy', 'select', 'forUpdate', 'leftJoin']
+  ['whereNot', 'whereIn', 'whereNotIn', 'whereNull', 'whereRaw', 'orWhere', 'orderBy', 'select', 'forUpdate', 'leftJoin']
     .forEach((m) => { b[m] = () => b; });
   b.where = (...args) => { b._where = args; return b; };
   b.first = async () => mockState.first[table];
@@ -149,38 +149,39 @@ describe('LS-11b walk-in credit buyer matching', () => {
     const calls = [];
     const trx = (table) => {
       const b = {};
-      ['where', 'whereRaw'].forEach((m) => { b[m] = (...args) => { calls.push({ table, m, args }); return b; }; });
+      ['where', 'whereRaw', 'orderBy'].forEach((m) => { b[m] = (...args) => { calls.push({ table, m, args }); return b; }; });
       b.first = async () => found;
       b.insert = (row) => { calls.push({ table, m: 'insert', args: [row] }); return { returning: async () => [{ id: 55, ...row }] }; };
+      b.update = async (patch) => { calls.push({ table, m: 'update', args: [patch] }); return 1; };
       return b;
     };
     trx.fn = { now: () => 'now()' };
     return { trx, calls };
   }
 
-  test('with a phone, reuses only a LOCAL customer matching name AND phone digits', async () => {
-    const { trx, calls } = recordingTrx({ id: 12, name: 'Ali Traders' });
-    const c = await controller.resolveWalkInCustomer(trx, { name: 'Ali Traders', phone: '0300-123 4567', userId: 1 });
-    expect(c.id).toBe(12);
+  test('matches a LOCAL customer on phone digits alone — a different name keeps the existing customer, untouched', async () => {
+    const { trx, calls } = recordingTrx({ id: 12, name: 'Ali Traders', phone: '0300 1234567' });
+    const c = await controller.resolveWalkInCustomer(trx, { name: 'Ali Bhai', phone: '0300-123 4567', userId: 1 });
+    expect(c).toMatchObject({ id: 12, name: 'Ali Traders' });
     expect(calls).toContainEqual({ table: 'customers', m: 'where', args: ['customer_type', 'local'] });
     const raws = calls.filter((x) => x.m === 'whereRaw');
-    expect(raws[0].args[1]).toEqual(['Ali Traders']);
-    expect(raws[1].args[1]).toEqual(['03001234567']);
-    expect(calls.some((x) => x.m === 'insert')).toBe(false);
+    expect(raws).toHaveLength(1); // phone only — the name is not part of the match
+    expect(raws[0].args[1]).toEqual(['03001234567']);
+    expect(calls.some((x) => x.m === 'insert' || x.m === 'update')).toBe(false);
   });
 
-  test('with a phone and no local match, creates a new local customer', async () => {
+  test('no local match → a new local customer carrying the phone', async () => {
     const { trx, calls } = recordingTrx(undefined);
-    const c = await controller.resolveWalkInCustomer(trx, { name: 'Ali Traders', phone: '03001234567', userId: 1 });
+    const c = await controller.resolveWalkInCustomer(trx, { name: 'Ali Traders', phone: ' 0300-1234567 ', userId: 1 });
     expect(c.id).toBe(55);
-    expect(calls.find((x) => x.m === 'insert').args[0]).toMatchObject({ name: 'Ali Traders', customer_type: 'local', approval_status: 'pending' });
+    expect(calls.find((x) => x.m === 'insert').args[0]).toMatchObject({ name: 'Ali Traders', phone: '0300-1234567', customer_type: 'local', approval_status: 'pending' });
   });
 
-  test('without a phone, never attaches to a same-named customer — always a new local one', async () => {
-    const { trx, calls } = recordingTrx({ id: 12, name: 'Ali Traders' }); // would match by name
-    const c = await controller.resolveWalkInCustomer(trx, { name: 'Ali Traders', phone: '', userId: 1 });
-    expect(c.id).toBe(55);
-    expect(calls.filter((x) => x.m !== 'insert')).toHaveLength(0); // no lookup at all
+  test('without a phone it refuses (400) and looks nothing up', async () => {
+    const { trx, calls } = recordingTrx({ id: 12, name: 'Ali Traders' });
+    await expect(controller.resolveWalkInCustomer(trx, { name: 'Ali Traders', phone: '--', userId: 1 }))
+      .rejects.toMatchObject({ status: 400, message: expect.stringMatching(/phone/) });
+    expect(calls).toHaveLength(0);
   });
 });
 

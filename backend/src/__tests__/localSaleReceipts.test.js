@@ -12,12 +12,14 @@
 const mockState = { rows: {}, updates: [], inserts: [] };
 function mockBuilder(table) {
   const b = {
-    where: () => b, whereNot: () => b, whereIn: () => b, forUpdate: () => b,
+    where: () => b, whereNot: () => b, whereIn: () => b, whereNotIn: () => b, forUpdate: () => b,
     orderBy: () => b, select: () => b, returning: async () => [{ id: 99 }],
     first: async () => mockState.rows[table],
     update: async (patch) => { mockState.updates.push({ table, patch }); return 1; },
     increment: async () => 1,
     insert: (row) => { mockState.inserts.push({ table, row }); return b; },
+    // Awaiting a list query (e.g. uncleared cheques on a sale) → the table's list.
+    then: (res, rej) => Promise.resolve((mockState.lists || {})[table] || []).then(res, rej),
   };
   return b;
 }
@@ -49,7 +51,7 @@ function res() {
 }
 
 beforeEach(() => {
-  mockState.rows = {}; mockState.updates = []; mockState.inserts = [];
+  mockState.rows = {}; mockState.updates = []; mockState.inserts = []; mockState.lists = {};
   jest.clearAllMocks();
 });
 
@@ -86,14 +88,33 @@ describe('acceptPayment only settles a confirmed sale', () => {
     expect(accountingService.postJournal).toHaveBeenCalledWith(expect.anything(), 501);
   });
 
-  test('a post-dated cheque is recorded but not journaled until it clears', async () => {
+  test.each([
+    ['post-dated', new Date(Date.now() + 10 * 86400000).toISOString().slice(0, 10)],
+    ['same-day', new Date().toISOString().slice(0, 10)],
+    ['undated', undefined],
+  ])('a %s cheque is recorded uncleared: no settlement, no bank move, no journal', async (_label, dueDate) => {
     mockState.rows.local_sales = { id: 5, sale_no: 'LS-0005', customer_id: 42, status: 'Completed', total_amount: 1000, paid_amount: 0, due_amount: 1000 };
-    const future = new Date(Date.now() + 10 * 86400000).toISOString().slice(0, 10);
     const r = res();
-    await controller.acceptPayment({ params: { id: '5' }, body: { amount: 400, payment_method: 'cheque', due_date: future }, user: { id: 1 } }, r);
+    await controller.acceptPayment({ params: { id: '5' }, body: { amount: 400, payment_method: 'cheque', due_date: dueDate, reference: 'CHQ-1' }, user: { id: 1 } }, r);
     expect(r.statusCode).toBe(200);
-    expect(mockState.inserts.find((i) => i.table === 'payments').row.cleared).toBe(false);
+    const pay = mockState.inserts.find((i) => i.table === 'payments').row;
+    expect(pay).toMatchObject({ cleared: false, payment_method: 'cheque', local_sale_id: 5, amount: 400 });
+    // Always dated, so Due Dates (which lists dated uncleared cheques) shows it.
+    expect(pay.due_date).toBe(dueDate || new Date().toISOString().split('T')[0]);
+    // The sale is not settled, no account moves, nothing reaches the GL.
+    expect(mockState.updates.filter((u) => u.table === 'local_sales' || u.table === 'receivables')).toHaveLength(0);
+    expect(mockState.inserts.find((i) => i.table === 'bank_transactions')).toBeUndefined();
     expect(accountingService.createJournal).not.toHaveBeenCalled();
+  });
+
+  test('uncleared cheques already on the sale leave room — the sale cannot be collected twice', async () => {
+    mockState.rows.local_sales = { id: 5, sale_no: 'LS-0005', customer_id: 42, status: 'Completed', total_amount: 1000, paid_amount: 0, due_amount: 1000 };
+    mockState.lists.payments = [{ local_sale_id: 5, amount: '700' }];
+    const r = res();
+    await controller.acceptPayment({ params: { id: '5' }, body: { amount: 500, payment_method: 'cash' }, user: { id: 1 } }, r);
+    expect(r.statusCode).toBe(400);
+    expect(r.body.message).toMatch(/cheques waiting to clear/);
+    expect(mockState.inserts).toHaveLength(0);
   });
 });
 
