@@ -55,6 +55,20 @@ export default function InvoiceView() {
     },
   });
 
+  // Gate pass — issued by the server only once a manager has confirmed the
+  // sale (409 "Awaiting manager confirmation" while it is Pending). Fetched
+  // ahead so the print opens straight from the click (pop-up blockers).
+  const awaitingConfirmation = data?.sale?.status === 'Pending';
+  const { data: gatePassData, error: gatePassError } = useQuery({
+    queryKey: ['local-sales', 'gate-pass', id],
+    enabled: !!id && !!data?.sale?.gatePassNo && !awaitingConfirmation,
+    retry: false,
+    queryFn: async () => {
+      const res = await localSalesApi.getGatePass(id);
+      return res?.data || res;
+    },
+  });
+
   const [payOpen, setPayOpen] = useState(false);
   const [payForm, setPayForm] = useState({ amount: '', payment_method: 'cash', reference: '', payment_date: new Date().toISOString().slice(0, 10), due_date: '', collection_location: 'Mill' });
   const [template, setTemplate] = useState('standard'); // print template: standard | compact
@@ -75,6 +89,11 @@ export default function InvoiceView() {
 
   const onPrintCustomer = () => {
     if (!printCustomerInvoice(data, companyProfileData, { template })) addToast?.('Pop-up blocked — allow pop-ups to print.', 'error');
+  };
+  const onPrintGatePass = () => {
+    if (awaitingConfirmation) { addToast?.('Awaiting manager confirmation — a gate pass is issued once a Mill Manager or Owner confirms this sale.', 'error'); return; }
+    if (gatePassError || !gatePassData) { addToast?.(gatePassError?.message || 'Gate pass is not ready yet.', 'error'); return; }
+    if (!printGatePass(gatePassData, companyProfileData)) addToast?.('Pop-up blocked — allow pop-ups to print.', 'error');
   };
   const onEmailInvoice = async () => {
     setEmailBusy(true);
@@ -146,6 +165,7 @@ export default function InvoiceView() {
             Invoice {sale.invoiceNo}
             <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_TONE[sale.paymentStatus] || 'bg-gray-100 text-gray-600'}`}>{sale.paymentStatus}</span>
             {sale.overdue && <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-red-100 text-red-700 inline-flex items-center gap-1"><AlertTriangle size={11} /> Overdue</span>}
+            {awaitingConfirmation && <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-amber-100 text-amber-800 inline-flex items-center gap-1"><Truck size={11} /> Not yet dispatched — awaiting confirmation</span>}
           </h1>
           {sale.saleGroupNo && sale.saleGroupNo !== sale.invoiceNo && <p className="text-xs text-gray-400">Group {sale.saleGroupNo}</p>}
         </div>
@@ -156,7 +176,7 @@ export default function InvoiceView() {
             <option value="compact">Compact template</option>
           </select>
           <ActionBtn icon={Printer} label="Print customer invoice" tone="primary" onClick={onPrintCustomer} />
-          {sale.gatePassNo && <ActionBtn icon={FileText} label="Print gate pass" onClick={() => { if (!printGatePass(data, companyProfileData)) addToast?.('Pop-up blocked — allow pop-ups to print.', 'error'); }} />}
+          {sale.gatePassNo && <ActionBtn icon={FileText} label="Print gate pass" onClick={onPrintGatePass} disabled={!awaitingConfirmation && !gatePassData && !gatePassError} />}
           {canSeeAdminCopy && <ActionBtn icon={ShieldCheck} label={adminBusy ? 'Preparing…' : 'Print admin copy'} onClick={onPrintAdmin} disabled={adminBusy} />}
           <ActionBtn icon={Mail} label="Email invoice" onClick={() => { setEmailTo(sale.customerEmail || ''); setEmailOpen(true); }} />
           <ActionBtn icon={MessageCircle} label="WhatsApp" onClick={onWhatsApp} />
@@ -311,7 +331,7 @@ export default function InvoiceView() {
         <h3 className="text-sm font-semibold text-gray-700 mb-3 inline-flex items-center gap-1.5"><Truck size={15} /> Vehicles &amp; dispatch</h3>
         <p className="text-[11px] uppercase tracking-wider text-gray-400 mb-1">Outbound (sold / dispatch)</p>
         <div className="flex flex-wrap gap-2 text-xs mb-3">
-          <Chip tone={dispatch.dispatched ? 'emerald' : 'gray'}>{dispatch.deliveryStatus}</Chip>
+          <Chip tone={dispatch.awaitingConfirmation ? 'amber' : dispatch.dispatched ? 'emerald' : 'gray'}>{dispatch.deliveryStatus}</Chip>
           {sale.gatePassNo && <Chip tone="blue">Gate Pass {sale.gatePassNo}</Chip>}
           {dispatch.dispatchDate && <Chip>{dt(dispatch.dispatchDate)}</Chip>}
           {dispatch.vehicleNo && <Chip>Truck {dispatch.vehicleNo}</Chip>}
@@ -374,6 +394,7 @@ export default function InvoiceView() {
             <Lbl text="Reference (cheque / bank ref)"><input value={payForm.reference} onChange={e => setPayForm(f => ({ ...f, reference: e.target.value }))} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none" /></Lbl>
             <Lbl text="Payment date"><input type="date" value={payForm.payment_date} onChange={e => setPayForm(f => ({ ...f, payment_date: e.target.value }))} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none" /></Lbl>
             {payForm.payment_method === 'cheque' && <Lbl text="Cheque due/clearing date"><input type="date" value={payForm.due_date} onChange={e => setPayForm(f => ({ ...f, due_date: e.target.value }))} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none" /></Lbl>}
+            {payForm.payment_method === 'cheque' && <p className="text-[11px] text-amber-700">Cheques settle when cleared in Due Dates — until then the balance stays owed.</p>}
             <button onClick={submitPayment} disabled={payMutation.isPending} className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">
               <Wallet size={14} /> {payMutation.isPending ? 'Recording…' : 'Record payment'}
             </button>
@@ -447,6 +468,7 @@ function Field({ label, value, sub, tone = 'gray' }) {
 function Chip({ children, tone = 'gray' }) {
   const cls = tone === 'emerald' ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
     : tone === 'blue' ? 'bg-blue-50 border-blue-200 text-blue-700'
+      : tone === 'amber' ? 'bg-amber-50 border-amber-200 text-amber-800'
       : 'bg-gray-50 border-gray-200 text-gray-600';
   return <span className={`px-2.5 py-1 rounded-lg border ${cls}`}>{children}</span>;
 }

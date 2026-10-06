@@ -191,7 +191,9 @@ export default function LocalSaleDetail() {
         <Card icon={Receipt} label="Collected" value={fmtPkr(sale.paidAmount)}
           sub={parseFloat(sale.dueAmount) > 0 ? `Due ${fmtPkr(sale.dueAmount)}` : 'Fully collected'} />
         <Card icon={Truck} label="Dispatch"
-          value={sale.dispatched ? 'Dispatched' : 'Pending dispatch'}
+          value={sale.status === 'Pending'
+            ? <span className="inline-block text-xs px-2 py-0.5 rounded-full font-medium bg-amber-100 text-amber-800">Not yet dispatched — awaiting confirmation</span>
+            : (sale.dispatched ? 'Dispatched' : 'Pending dispatch')}
           sub={sale.dispatchDate ? fmtDate(sale.dispatchDate) : null} />
       </div>
 

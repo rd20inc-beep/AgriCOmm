@@ -15,6 +15,7 @@ export const localSalesApi = {
   reject: (id, data) => api.post(`/api/local-sales/${id}/reject`, data || {}),
   getPayments: (id) => api.get(`/api/local-sales/${id}/payments`),
   getInvoice: (id) => api.get(`/api/local-sales/${id}/invoice`),
+  getGatePass: (id) => api.get(`/api/local-sales/${id}/gate-pass`),
   getInvoiceAdmin: (id) => api.get(`/api/local-sales/${id}/invoice-admin`),
   emailInvoice: (id, data) => api.post(`/api/local-sales/${id}/email-invoice`, data),
 };
