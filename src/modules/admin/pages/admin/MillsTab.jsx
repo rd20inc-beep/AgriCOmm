@@ -3,6 +3,8 @@ import { Factory, Plus, Pencil, Trash2 } from 'lucide-react';
 import { useApp } from '../../../../context/AppContext';
 import { useMills, useCreateMill, useUpdateMill, useDeleteMill } from '../../../../api/queries';
 import Modal from '../../components/AdminDrawer';
+import FieldError from '../../../../shared/components/FieldError';
+import useConfirm from '../../../../hooks/useConfirm';
 
 const EMPTY = { name: '', location: '', capacityMtPerDay: '', status: 'Active', contactPerson: '', phone: '', notes: '' };
 
@@ -12,15 +14,19 @@ export default function MillsTab() {
   const createMut = useCreateMill();
   const updateMut = useUpdateMill();
   const deleteMut = useDeleteMill();
+  const [confirm, confirmDialog] = useConfirm();
+  const saving = createMut.isPending || updateMut.isPending;
 
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(EMPTY);
-  const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
+  const [errors, setErrors] = useState({});
+  const set = (k, v) => { setForm(p => ({ ...p, [k]: v })); setErrors(e => (e[k] ? { ...e, [k]: null } : e)); };
 
-  const openCreate = () => { setEditingId(null); setForm(EMPTY); setOpen(true); };
+  const openCreate = () => { setEditingId(null); setForm(EMPTY); setErrors({}); setOpen(true); };
   const openEdit = (m) => {
     setEditingId(m.id);
+    setErrors({});
     // Postgres numeric → string trap (see BagTypesTab note)
     const cap = parseFloat(m.capacityMtPerDay);
     setForm({
@@ -36,8 +42,9 @@ export default function MillsTab() {
   };
 
   const handleSave = async () => {
+    if (saving) return;
     const name = form.name.trim();
-    if (!name) { addToast('Mill name is required', 'error'); return; }
+    if (!name) { setErrors({ name: 'Mill name is required' }); return; }
     const payload = {
       name,
       location: form.location.trim() || null,
@@ -62,7 +69,11 @@ export default function MillsTab() {
   };
 
   const handleDelete = async (m) => {
-    if (!window.confirm(`Delete mill "${m.name}"? This cannot be undone.`)) return;
+    if (!await confirm({
+      title: `Delete mill "${m.name}"?`,
+      consequence: 'This cannot be undone.',
+      confirmLabel: 'Delete',
+    })) return;
     try {
       await deleteMut.mutateAsync(m.id);
       addToast(`Mill "${m.name}" deleted`, 'success');
@@ -73,6 +84,7 @@ export default function MillsTab() {
 
   return (
     <div className="space-y-6">
+      {confirmDialog}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
@@ -118,10 +130,10 @@ export default function MillsTab() {
                   </td>
                   <td data-label="Actions" className="py-3 px-4 text-right">
                     <div className="inline-flex gap-1">
-                      <button onClick={() => openEdit(mill)} className="p-1.5 rounded hover:bg-blue-50 text-blue-600" title="Edit">
+                      <button onClick={() => openEdit(mill)} className="p-1.5 rounded hover:bg-blue-50 text-blue-600" title="Edit" aria-label={`Edit ${mill.name}`}>
                         <Pencil className="w-4 h-4" />
                       </button>
-                      <button onClick={() => handleDelete(mill)} className="p-1.5 rounded hover:bg-red-50 text-red-600" title="Delete">
+                      <button onClick={() => handleDelete(mill)} className="p-1.5 rounded hover:bg-red-50 text-red-600" title="Delete" aria-label={`Delete ${mill.name}`}>
                         <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
@@ -136,8 +148,9 @@ export default function MillsTab() {
       <Modal isOpen={open} onClose={() => setOpen(false)} title={editingId ? 'Edit Mill' : 'Add Mill'} size="md">
         <div className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Mill Name *</label>
-            <input type="text" value={form.name} onChange={e => set('name', e.target.value)} placeholder="e.g. Agri Rice Mill" className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+            <label className="block text-sm font-medium text-gray-700 mb-1">Mill Name <span className="text-red-500">*</span></label>
+            <input type="text" value={form.name} onChange={e => set('name', e.target.value)} placeholder="e.g. Agri Rice Mill" aria-invalid={!!errors.name} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+            <FieldError error={errors.name} />
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -173,7 +186,7 @@ export default function MillsTab() {
           </div>
           <div className="flex justify-end gap-2 pt-2 border-t border-gray-200">
             <button onClick={() => setOpen(false)} className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">Cancel</button>
-            <button onClick={handleSave} className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors">{editingId ? 'Save Changes' : 'Add Mill'}</button>
+            <button onClick={handleSave} disabled={saving} className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">{saving ? 'Saving…' : editingId ? 'Save Changes' : 'Add Mill'}</button>
           </div>
         </div>
       </Modal>

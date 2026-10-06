@@ -3,6 +3,8 @@ import { Smartphone, Monitor, Globe, ShieldOff, ShieldCheck, RotateCcw } from 'l
 import { useApp } from '../../../../context/AppContext';
 import { useAuth } from '../../../../context/AuthContext';
 import { useDevices, useRevokeDevice, useReactivateDevice } from '../../api/queries';
+import useConfirm from '../../../../hooks/useConfirm';
+import { fmtDateTime } from '../../../../shared/utils/format';
 
 // Only owners can flip a device's active/revoked state (mirrors the server gate).
 const MANAGE_ROLES = ['Super Admin', 'Owner'];
@@ -13,11 +15,6 @@ const PLATFORM = {
   capacitor: { icon: Smartphone, label: 'Android app' },
 };
 
-function fmt(ts) {
-  if (!ts) return '—';
-  try { return new Date(ts).toLocaleString(); } catch { return String(ts); }
-}
-
 export default function DevicesTab() {
   const { addToast } = useApp();
   const { user } = useAuth();
@@ -27,12 +24,17 @@ export default function DevicesTab() {
   const revokeMut = useRevokeDevice();
   const reactivateMut = useReactivateDevice();
   const [busyId, setBusyId] = useState(null);
+  const [confirm, confirmDialog] = useConfirm();
 
   const devices = data?.devices || [];
   const currentUuid = data?.currentDeviceUuid || null;
 
   const revoke = async (dev) => {
-    if (!window.confirm(`Revoke "${dev.label || dev.platform || 'this device'}"?\n\nIts next action while online will be refused and its offline data wiped. It can reconnect only after you reactivate it.`)) return;
+    if (!await confirm({
+      title: `Revoke "${dev.label || dev.platform || 'this device'}"?`,
+      consequence: 'Its next action while online will be refused and its offline data wiped. It can reconnect only after you reactivate it.',
+      confirmLabel: 'Revoke',
+    })) return;
     setBusyId(dev.id);
     try {
       await revokeMut.mutateAsync(dev.id);
@@ -54,6 +56,7 @@ export default function DevicesTab() {
 
   return (
     <div className="bg-white rounded-lg border border-gray-200">
+      {confirmDialog}
       <div className="px-5 py-4 border-b border-gray-200">
         <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
           <Smartphone className="w-5 h-5 text-gray-500" /> Devices
@@ -123,8 +126,8 @@ export default function DevicesTab() {
                         </span>
                       )}
                     </td>
-                    <td data-label="Last seen" className="mob-hide px-5 py-3 text-gray-600">{fmt(dev.last_seen_at)}</td>
-                    <td data-label="Registered" className="mob-hide px-5 py-3 text-gray-600">{fmt(dev.registered_at)}</td>
+                    <td data-label="Last seen" className="mob-hide px-5 py-3 text-gray-600">{fmtDateTime(dev.last_seen_at)}</td>
+                    <td data-label="Registered" className="mob-hide px-5 py-3 text-gray-600">{fmtDateTime(dev.registered_at)}</td>
                     {canManage && (
                       <td data-label="Actions" className="px-5 py-3 text-right">
                         {revoked ? (

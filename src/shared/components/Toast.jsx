@@ -54,6 +54,7 @@ export default function Toast() {
             </p>
             <button
               onClick={() => removeToast(toast.id)}
+              aria-label="Dismiss notification"
               className={`flex-shrink-0 p-0.5 rounded-md hover:bg-black/5 transition-colors ${config.text}`}
             >
               <X size={14} />

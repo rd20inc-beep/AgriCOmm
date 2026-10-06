@@ -5,6 +5,7 @@ import { useLotInventory } from '../../../../api/queries';
 import { adminApi } from '../../api/services';
 import { favStar } from '../../../../shared/utils/favorites';
 import useConfirm from '../../../../hooks/useConfirm';
+import { fmtPKR, fmtMoney, fmtKg } from '../../../../shared/utils/format';
 
 const TXN_TYPES = [
   { value: 'local_sale',     label: 'Local Sale',     hint: 'restocks the lot, deletes its payment/receivable/journal' },
@@ -138,7 +139,7 @@ export default function DangerZoneTab() {
       consequence: mode === 'set'
         ? 'The account balance is overwritten with this figure and the difference is posted as an adjustment. Nothing reconciles it back to a bank statement.'
         : 'This amount is posted to the account as a manual adjustment, outside any payment or receipt.',
-      amount: `Rs ${(Number(amount) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      amount: fmtPKR(Number(amount) || 0, { decimals: 2 }),
       confirmLabel: mode === 'set' ? 'Set balance' : 'Post adjustment',
     })) return;
     setBankBusy(true);
@@ -167,7 +168,7 @@ export default function DangerZoneTab() {
           <select className={INPUT} value={lotId} onChange={e => previewLot(e.target.value)}>
             <option value="">Select a lot…</option>
             {lots.map(l => (
-              <option key={l.id} value={l.id}>{l.lotNo} — {l.itemName} ({(Number(l.qty || 0) / 1000).toFixed(2)} MT, {l.status})</option>
+              <option key={l.id} value={l.id}>{l.lotNo} — {l.itemName} ({fmtKg(l.qty || 0)}, {l.status})</option>
             ))}
           </select>
         </div>
@@ -224,7 +225,7 @@ export default function DangerZoneTab() {
             <select className={INPUT} value={bankId} onChange={e => setBankId(e.target.value)}>
               <option value="">Select an account…</option>
               {bankAccountsList.map(b => (
-                <option key={b.id} value={b.id}>{favStar(b)}{b.name} ({b.currency || 'PKR'} {Number(b.current_balance ?? b.currentBalance ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})</option>
+                <option key={b.id} value={b.id}>{favStar(b)}{b.name} ({fmtMoney(b.current_balance ?? b.currentBalance ?? 0, b.currency || 'PKR', { decimals: 2 })})</option>
               ))}
             </select>
           </div>

@@ -213,6 +213,8 @@ function SidebarSection({ item, collapsed, onNavigate, badge = 0, childBadges = 
       <button
         onClick={() => setOpen((prev) => !prev)}
         title={collapsed ? item.label : undefined}
+        aria-label={collapsed ? item.label : undefined}
+        aria-expanded={open}
         className={`group flex w-full items-center gap-3 px-3 py-2 text-[13px] font-medium rounded-lg mx-2 transition-all ${
           isChildActive
             ? 'text-blue-400 bg-white/[0.04]'
@@ -383,6 +385,7 @@ export default function Layout({ children }) {
         <button
           className="lg:hidden absolute top-3.5 right-3 text-white/50 hover:text-white p-1 rounded-lg hover:bg-white/10 z-10"
           onClick={() => setSidebarOpen(false)}
+          aria-label="Close menu"
         >
           <X size={18} />
         </button>
@@ -418,6 +421,7 @@ export default function Layout({ children }) {
           onClick={() => setSidebarCollapsed(prev => !prev)}
           className="hidden lg:flex items-center justify-center h-10 border-t border-white/[0.08] text-slate-500 hover:text-slate-300 hover:bg-white/[0.04] transition-colors"
           title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         >
           {sidebarCollapsed ? <ChevronsRight size={16} /> : <ChevronsLeft size={16} />}
         </button>
@@ -430,13 +434,14 @@ export default function Layout({ children }) {
                 {userInitials}
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-[13px] font-medium text-white truncate">{userFullName}</p>
-                <p className="text-[11px] text-slate-500 truncate">{userEmail}</p>
+                <p className="text-[13px] font-medium text-white truncate" title={userFullName}>{userFullName}</p>
+                <p className="text-[11px] text-slate-500 truncate" title={userEmail}>{userEmail}</p>
               </div>
               <button
                 onClick={handleSignOut}
                 className="p-1.5 text-slate-500 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
                 title="Sign out"
+                aria-label="Sign out"
               >
                 <LogOut size={15} />
               </button>
@@ -458,6 +463,7 @@ export default function Layout({ children }) {
           <button
             className="lg:hidden p-2 -ml-1 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg"
             onClick={() => setSidebarOpen(true)}
+            aria-label="Open menu"
           >
             <Menu size={20} />
           </button>
@@ -468,6 +474,7 @@ export default function Layout({ children }) {
             <input
               type="text"
               placeholder="Search orders, batches..."
+              aria-label="Search orders and batches"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyDown={handleSearch}
@@ -484,6 +491,7 @@ export default function Layout({ children }) {
           <button
             onClick={() => window.dispatchEvent(new Event('riceflow:open-scanner'))}
             title="Scan a code"
+            aria-label="Scan a code"
             className="hidden sm:inline-flex items-center justify-center rounded-lg p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
           >
             <ScanLine size={18} />
@@ -494,6 +502,7 @@ export default function Layout({ children }) {
             <select
               value={entityFilter}
               onChange={(e) => setEntityFilter(e.target.value)}
+              aria-label="Entity filter"
               className="form-input py-1.5 pr-8 text-sm cursor-pointer"
             >
               <option value="All">All Entities</option>
@@ -506,6 +515,8 @@ export default function Layout({ children }) {
           <div className="relative" ref={notifRef}>
             <button
               onClick={() => setNotifOpen((prev) => !prev)}
+              aria-label={unreadAlerts > 0 ? `Notifications (${unreadAlerts})` : 'Notifications'}
+              aria-expanded={notifOpen}
               className="relative p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
             >
               <Bell size={18} />
@@ -556,6 +567,8 @@ export default function Layout({ children }) {
           <div className="relative" ref={userMenuRef}>
             <button
               onClick={() => setUserMenuOpen((prev) => !prev)}
+              aria-label="Account menu"
+              aria-expanded={userMenuOpen}
               className="flex items-center gap-2 p-1 hover:bg-gray-100 rounded-lg transition-colors"
             >
               <div className="flex items-center justify-center w-8 h-8 rounded-full bg-blue-600 text-white text-[11px] font-bold">

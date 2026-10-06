@@ -74,7 +74,7 @@ export default function PendingSyncTray() {
                 title={online ? 'Sync now' : 'Offline — will sync when connected'}>
                 <RefreshCw size={13} /> Sync now
               </button>
-              <button onClick={() => setOpen(false)} className="text-gray-400 hover:text-gray-600"><X size={15} /></button>
+              <button onClick={() => setOpen(false)} className="text-gray-400 hover:text-gray-600" aria-label="Close"><X size={15} /></button>
             </div>
           </div>
           <div className="max-h-72 overflow-y-auto divide-y divide-gray-50">

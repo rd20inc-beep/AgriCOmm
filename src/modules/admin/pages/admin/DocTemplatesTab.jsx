@@ -8,6 +8,8 @@ import {
   useDeleteDocumentTemplate,
 } from '../../../../api/queries';
 import Modal from '../../components/AdminDrawer';
+import FieldError from '../../../../shared/components/FieldError';
+import useConfirm from '../../../../hooks/useConfirm';
 
 const EMPTY = {
   name: '',
@@ -50,15 +52,19 @@ export default function DocTemplatesTab() {
   const createMut = useCreateDocumentTemplate();
   const updateMut = useUpdateDocumentTemplate();
   const deleteMut = useDeleteDocumentTemplate();
+  const [confirm, confirmDialog] = useConfirm();
+  const saving = createMut.isPending || updateMut.isPending;
 
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(EMPTY);
-  const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
+  const [errors, setErrors] = useState({});
+  const set = (k, v) => { setForm(p => ({ ...p, [k]: v })); setErrors(e => (e[k] ? { ...e, [k]: null } : e)); };
 
-  const openCreate = () => { setEditingId(null); setForm(EMPTY); setOpen(true); };
+  const openCreate = () => { setEditingId(null); setForm(EMPTY); setErrors({}); setOpen(true); };
   const openEdit = (t) => {
     setEditingId(t.id);
+    setErrors({});
     setForm({
       name: t.name || '',
       doc_type: t.docType || t.doc_type || 'proforma_invoice',
@@ -71,8 +77,9 @@ export default function DocTemplatesTab() {
   };
 
   const handleSave = async () => {
+    if (saving) return;
     const name = form.name.trim();
-    if (!name) { addToast('Template name is required', 'error'); return; }
+    if (!name) { setErrors({ name: 'Template name is required' }); return; }
     const payload = {
       name,
       doc_type: form.doc_type,
@@ -96,7 +103,11 @@ export default function DocTemplatesTab() {
   };
 
   const handleDelete = async (t) => {
-    if (!window.confirm(`Delete template "${t.name}"? This cannot be undone.`)) return;
+    if (!await confirm({
+      title: `Delete template "${t.name}"?`,
+      consequence: 'This cannot be undone.',
+      confirmLabel: 'Delete',
+    })) return;
     try {
       await deleteMut.mutateAsync(t.id);
       addToast(`Template "${t.name}" deleted`, 'success');
@@ -107,6 +118,7 @@ export default function DocTemplatesTab() {
 
   return (
     <div className="space-y-6">
+      {confirmDialog}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
@@ -156,10 +168,10 @@ export default function DocTemplatesTab() {
                     </td>
                     <td data-label="Actions" className="py-3 px-4 text-right">
                       <div className="inline-flex gap-1">
-                        <button onClick={() => openEdit(t)} className="p-1.5 rounded hover:bg-blue-50 text-blue-600" title="Edit">
+                        <button onClick={() => openEdit(t)} className="p-1.5 rounded hover:bg-blue-50 text-blue-600" title="Edit" aria-label={`Edit ${t.name}`}>
                           <Pencil className="w-4 h-4" />
                         </button>
-                        <button onClick={() => handleDelete(t)} className="p-1.5 rounded hover:bg-red-50 text-red-600" title="Delete">
+                        <button onClick={() => handleDelete(t)} className="p-1.5 rounded hover:bg-red-50 text-red-600" title="Delete" aria-label={`Delete ${t.name}`}>
                           <Trash2 className="w-4 h-4" />
                         </button>
                       </div>
@@ -178,12 +190,13 @@ export default function DocTemplatesTab() {
       <Modal isOpen={open} onClose={() => setOpen(false)} title={editingId ? 'Edit Template' : 'Add Template'} size="md">
         <div className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Template Name *</label>
-            <input type="text" value={form.name} onChange={e => set('name', e.target.value)} placeholder="e.g. Proforma Invoice — Default" className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+            <label className="block text-sm font-medium text-gray-700 mb-1">Template Name <span className="text-red-500">*</span></label>
+            <input type="text" value={form.name} onChange={e => set('name', e.target.value)} placeholder="e.g. Proforma Invoice — Default" aria-invalid={!!errors.name} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+            <FieldError error={errors.name} />
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Document Type *</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Document Type <span className="text-red-500">*</span></label>
               <select value={form.doc_type} onChange={e => set('doc_type', e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white">
                 {DOC_TYPES.map(d => <option key={d.value} value={d.value}>{d.label}</option>)}
               </select>
@@ -214,7 +227,7 @@ export default function DocTemplatesTab() {
           </div>
           <div className="flex justify-end gap-2 pt-2 border-t border-gray-200">
             <button onClick={() => setOpen(false)} className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">Cancel</button>
-            <button onClick={handleSave} className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors">{editingId ? 'Save Changes' : 'Add Template'}</button>
+            <button onClick={handleSave} disabled={saving} className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">{saving ? 'Saving…' : editingId ? 'Save Changes' : 'Add Template'}</button>
           </div>
         </div>
       </Modal>

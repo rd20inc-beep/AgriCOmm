@@ -73,7 +73,7 @@ export default function ScanDrawer() {
       <div className="w-full max-w-sm rounded-xl bg-white p-4" onClick={(e) => e.stopPropagation()}>
         <div className="mb-3 flex items-center justify-between">
           <h2 className="inline-flex items-center gap-2 text-base font-semibold text-gray-900"><ScanLine size={18} /> Scan code</h2>
-          <button onClick={close} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
+          <button onClick={close} className="text-gray-400 hover:text-gray-600" aria-label="Close"><X size={18} /></button>
         </div>
         {supported ? (
           <div className="relative mb-3 aspect-square overflow-hidden rounded-lg bg-black">
