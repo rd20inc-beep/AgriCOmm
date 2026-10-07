@@ -64,7 +64,8 @@ export default function Cash() {
     return allTransactions.filter(t => String(t.bankAccountId || t.bank_account_id) === id);
   }, [allTransactions, accountFilter]);
 
-  const totalBalance = accounts.reduce((s, a) => s + (parseFloat(a.currentBalance) || 0), 0);
+  // Balances are kept per currency and never added together: a USD balance
+  // is not a rupee figure, and no FX conversion is applied here.
   const pkrAccounts = accounts.filter(a => (a.currency || 'PKR') === 'PKR');
   const usdAccounts = accounts.filter(a => a.currency === 'USD');
   const pkrBalance = pkrAccounts.reduce((s, a) => s + (parseFloat(a.currentBalance) || 0), 0);
@@ -100,8 +101,12 @@ export default function Cash() {
   // Last-30-days net flow chart bucketed by day, computed from real
   // bank_transactions (was previously a fabricated curve based on
   // current-balance × i*0.06).
-  const cashFlowData = useMemo(() => {
-    const txs = Array.isArray(transactions) ? transactions : [];
+  // PKR accounts only — summing USD movements into rupee buckets would mix
+  // currencies, so the chart (and the 30-day net) is labelled PKR.
+  const cashFlowData = (() => {
+    const pkrAccountIds = new Set(accounts.filter(a => (a.currency || 'PKR') === 'PKR').map(a => String(a.id)));
+    const txs = (Array.isArray(transactions) ? transactions : [])
+      .filter(t => pkrAccountIds.has(String(t.bankAccountId ?? t.bank_account_id)));
     const dayBuckets = new Map();
     const now = new Date();
     for (let i = 29; i >= 0; i--) {
@@ -121,12 +126,12 @@ export default function Cash() {
       bucket.Net = bucket.In - bucket.Out;
     }
     return Array.from(dayBuckets.values());
-  }, [transactions]);
+  })();
 
   const hasFlow = cashFlowData.some(b => b.In > 0 || b.Out > 0);
 
   const netFlow30d = cashFlowData.reduce((s, b) => s + b.In - b.Out, 0);
-  const heroGradient = totalBalance > 0
+  const heroGradient = (pkrBalance > 0 || usdBalance > 0)
     ? 'from-blue-700 via-blue-600 to-cyan-500'
     : 'from-slate-700 via-slate-600 to-slate-500';
   const FlowIcon = netFlow30d >= 0 ? TrendingUp : TrendingDown;
@@ -145,7 +150,7 @@ export default function Cash() {
             <div className="text-right">
               <div className="text-lg font-bold">Cash Position</div>
               <div className="text-xs text-gray-600">
-                {accounts.length} accounts · Total {fmtPKR(totalBalance)}
+                {accounts.length} accounts · PKR {fmtPKR(pkrBalance)}
                 {usdAccounts.length > 0 && <> · USD {fmtUSD(usdBalance, { decimals: 0 })}</>}
               </div>
             </div>
@@ -161,17 +166,21 @@ export default function Cash() {
               <Landmark size={14} /> Cash on hand
             </div>
             <div className="text-3xl sm:text-4xl font-bold leading-tight tabular-nums">
-              {fmtPKR(totalBalance)}
+              {fmtPKR(pkrBalance)}
             </div>
+            {usdAccounts.length > 0 && (
+              <div className="text-xl sm:text-2xl font-semibold leading-tight tabular-nums opacity-95">
+                + {fmtUSD(usdBalance, { decimals: 0 })}
+              </div>
+            )}
             <div className="text-xs opacity-90 mt-1">
-              {pkrAccounts.length > 0 && <>PKR {fmtPKR(pkrBalance)}</>}
-              {usdAccounts.length > 0 && <> · USD {fmtUSD(usdBalance, { decimals: 0 })}</>}
+              {pkrAccounts.length} PKR · {usdAccounts.length} USD
               {' · '}{accounts.length} {accounts.length === 1 ? 'account' : 'accounts'}
             </div>
           </div>
           <div className="flex flex-col items-start sm:items-end gap-1.5 text-[11px]">
             <span className="inline-flex items-center gap-1.5 font-semibold uppercase tracking-wider px-3 py-1.5 rounded-full bg-white/15 ring-1 ring-white/30">
-              <FlowIcon size={12} /> 30-day net {netFlow30d >= 0 ? '+' : ''}{fmtPKR(netFlow30d)}
+              <FlowIcon size={12} /> 30-day net (PKR) {netFlow30d >= 0 ? '+' : ''}{fmtPKR(netFlow30d)}
             </span>
             <div className="opacity-80 text-right">
               {hasFlow ? `${transactions.length} transactions` : 'No recent activity'}
@@ -185,8 +194,11 @@ export default function Cash() {
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <FinanceKPI icon={Landmark} title="Total Cash" value={fmtPKR(totalBalance)}
-          subtitle={`${accounts.length} accounts`} status={totalBalance > 0 ? 'good' : 'danger'} loading={loadingAccounts} />
+        <FinanceKPI icon={Landmark} title="Total Cash" value={fmtPKR(pkrBalance)}
+          subtitle={usdAccounts.length > 0
+            ? `+ ${fmtUSD(usdBalance, { decimals: 0 })} · ${accounts.length} accounts`
+            : `${accounts.length} accounts`}
+          status={(pkrBalance > 0 || usdBalance > 0) ? 'good' : 'danger'} loading={loadingAccounts} />
         <FinanceKPI icon={Wallet} title="PKR Accounts" value={fmtPKR(pkrBalance)}
           subtitle={`${pkrAccounts.length} accounts`} status="info" loading={loadingAccounts} />
         <FinanceKPI icon={Wallet} title="USD Accounts" value={fmtUSD(usdBalance)}
@@ -197,7 +209,7 @@ export default function Cash() {
 
       {hasFlow ? (
         <FinanceChart
-          title="Cash Flow — Last 30 Days"
+          title="Cash Flow (PKR accounts) — Last 30 Days"
           type="bar"
           data={cashFlowData}
           xKey="day"
@@ -211,7 +223,7 @@ export default function Cash() {
         />
       ) : (
         <div className="bg-white rounded-xl border border-gray-200 p-6 text-center text-sm text-gray-400">
-          No bank transactions in the last 30 days yet — record receipts or payments to populate this chart.
+          No PKR bank transactions in the last 30 days yet — record receipts or payments to populate this chart.
         </div>
       )}
 

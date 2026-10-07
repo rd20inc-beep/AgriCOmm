@@ -176,8 +176,22 @@ const financeService = {
     const totalPayPKR = parseFloat(payStats?.total_outstanding) || 0;
 
     // ── Bank ──
-    const bankTotal = await db('bank_accounts').sum('current_balance as total').first();
-    const bankBalancePKR = parseFloat(bankTotal?.total) || 0;
+    // Per-currency totals — a USD balance is not a rupee figure, so the two are
+    // never added together (no FX conversion here). Inactive accounts are
+    // still counted, matching Finance ▸ Cash, since they can hold money.
+    const bankRows = await db('bank_accounts')
+      .select(db.raw("COALESCE(currency, 'PKR') as currency"))
+      .sum('current_balance as total')
+      .count('id as count')
+      .groupByRaw("COALESCE(currency, 'PKR')");
+    const bankByCurrency = {};
+    let bankAccountCount = 0;
+    for (const r of bankRows || []) {
+      bankByCurrency[r.currency] = parseFloat(r.total) || 0;
+      bankAccountCount += parseInt(r.count, 10) || 0;
+    }
+    const bankBalancePKR = bankByCurrency.PKR || 0;
+    const bankBalanceUSD = bankByCurrency.USD || 0;
 
     // ── Collection rate ──
     const totalExpected = await db('receivables').sum('expected_amount as total').first();
@@ -259,6 +273,10 @@ const financeService = {
       },
       cashPosition: {
         bankBalancePkr: bankBalancePKR,
+        bankBalanceUsd: bankBalanceUSD,
+        // Every currency's own total (PKR, USD, any other) — never summed.
+        byCurrency: bankByCurrency,
+        accountCount: bankAccountCount,
         currency: 'PKR',
       },
       collectionRate: parseFloat(collectionRate.toFixed(1)),
