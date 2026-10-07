@@ -69,6 +69,7 @@ function fakeKnex(seed = {}) {
       orWhere() { return b; }, // OR branches are not evaluated — they add no filter
       forUpdate() { locked = true; return b; },
       select() { return b; },
+      distinct() { return b; }, // de-duplication is not applied
       orderBy() { return b; },
       orderByRaw() { return b; },
       // count('id as n') → first() gives { n: <rows> }; awaited directly, [{ n }].

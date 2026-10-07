@@ -49,6 +49,47 @@ function statutoryForWorker(rules, { gross, basicPay, payType }) {
   return { total, lines };
 }
 
+// The most an advance may recover this period: pay left after statutory and
+// other deductions, never below 0 (Rs, rounded).
+function advanceCap({ gross, bonusTotal = 0, deductionTotal = 0, statutoryTotal = 0 }) {
+  return Math.max(0, Math.round((gross || 0) + (bonusTotal || 0) - (deductionTotal || 0) - (statutoryTotal || 0)));
+}
+
+// Net pay is always derived on the server: gross + bonus − advance − deductions
+// − statutory, clamped at 0. A client never supplies it.
+function computeNetPay({ grossPay, bonusTotal = 0, advanceDeduction = 0, deductionTotal = 0, statutoryTotal = 0 }) {
+  return Math.max(0, Math.round((grossPay || 0) + (bonusTotal || 0) - (advanceDeduction || 0) - (deductionTotal || 0) - (statutoryTotal || 0)));
+}
+
+// Resolve one requested prepare line against the worker's computed summary row.
+// The advance is clamped to what is outstanding AND to what pay can cover after
+// statutory/deductions. Net is recomputed here; a client `net_pay` is only
+// accepted when it is not above the computed net (+ Rs 1 rounding tolerance) —
+// a LOWER figure is the drawer's "Paying now" reduce-the-amount override and is
+// kept as entered. Anything above is rejected (400) rather than trusted.
+function resolvePrepareLine(w, ln = {}) {
+  const requested = ln.advance_deducted != null && ln.advance_deducted !== ''
+    ? parseFloat(ln.advance_deducted) : w.advanceDeduction;
+  const cap = advanceCap({ gross: w.grossPay, bonusTotal: w.bonusTotal, deductionTotal: w.deductionTotal, statutoryTotal: w.statutoryTotal });
+  const advanceDeduction = Math.round(Math.max(0, Math.min(Number.isFinite(requested) ? requested : 0, w.advanceOutstanding || 0, cap)));
+  const computedNet = computeNetPay({ ...w, advanceDeduction });
+  let netPay = computedNet;
+  if (ln.net_pay != null && ln.net_pay !== '') {
+    const asked = parseFloat(ln.net_pay);
+    if (!Number.isFinite(asked) || asked < 0) {
+      const e = new Error(`Net pay for ${w.name} must be a number of 0 or more.`); e.httpStatus = 400; throw e;
+    }
+    if (asked > computedNet + 1) {
+      const e = new Error(`Net pay for ${w.name} (Rs ${Math.round(asked)}) is more than the computed net (Rs ${computedNet}). Net pay is gross + bonus − advance − deductions − tax; change those, not the net.`);
+      e.httpStatus = 400; throw e;
+    }
+    if (asked < computedNet - 1) netPay = Math.round(asked);
+  }
+  const scheduled = Math.round(w.advanceScheduled != null ? w.advanceScheduled : w.advanceDeduction);
+  const changed = advanceDeduction !== scheduled;
+  return { advanceDeduction, netPay, computedNet, skipReason: changed ? (ln.skip_reason || ln.reason || null) : null };
+}
+
 // Compute the month's payroll for every ACTIVE employee — the single source of
 // truth shared by GET /payroll/summary and the prepare flow (so a run can never
 // post a figure that disagrees with what the screen showed).
@@ -175,15 +216,19 @@ async function computePayrollSummary(month, entity = 'mill') {
       const applied = Math.min(due, out, remainingGross);
       scheduled += applied; remainingGross -= applied;
     }
-    const advanceDeduction = Math.min(scheduled, gross);
-    // Bonuses add to pay; deductions subtract from net (after advance recovery).
+    // Bonuses add to pay; deductions subtract from net.
     const adj = adjByWorker.get(w.id) || { bonus: 0, deduction: 0 };
     const bonusTotal = Math.round(adj.bonus);
     const deductionTotal = Math.round(adj.deduction);
 
-    // Statutory deductions (tax/EOBI) — withheld AFTER advances + adjustments.
-    // Clamp the total (scaling the breakdown) so net pay can't go negative.
+    // Statutory deductions (tax/EOBI) are a formula on gross. The advance can
+    // only recover what is left AFTER statutory and other deductions — capping
+    // it at gross let it over-recover (advance + deductions + tax > pay, net
+    // clamped to 0, and the advance marked recovered with money never withheld).
     const stat = statutoryForWorker(statRules, { gross, basicPay, payType: w.pay_type });
+    const advanceDeduction = Math.min(scheduled, advanceCap({ gross, bonusTotal, deductionTotal, statutoryTotal: stat.total }));
+    // Only when deductions alone exceed pay does statutory need scaling down —
+    // clamp the total (scaling the breakdown) so net pay can't go negative.
     const beforeStat = Math.round(gross + bonusTotal - advanceDeduction - deductionTotal);
     let statutoryTotal = stat.total;
     let statutoryLines = stat.lines;
@@ -223,13 +268,13 @@ async function computePayrollSummary(month, entity = 'mill') {
 // posted run (or a salary expense), or 'committed' if already in a Prepared/
 // Approved run for the month (so they can't be added to a second run). Voided
 // runs free their workers. Returns Map(workerId → 'paid' | 'committed').
-async function committedWorkerStatus(month, entity = 'mill') {
+async function committedWorkerStatus(month, entity = 'mill', conn = db) {
   const ent = entity === 'general' ? 'general' : 'mill';
-  const lineRows = await db('mill_payroll_lines as pl')
+  const lineRows = await conn('mill_payroll_lines as pl')
     .join('mill_payroll_runs as r', 'pl.run_id', 'r.id')
     .where('r.period', month).where('r.entity', ent).whereNot('r.status', 'voided').whereNotNull('pl.worker_id')
     .select('pl.worker_id', 'r.status');
-  const expRows = await db('business_expenses')
+  const expRows = await conn('business_expenses')
     .where('expense_type', ent).where('category', 'salaries').whereNotNull('employee_id')
     .whereRaw("TO_CHAR(expense_date, 'YYYY-MM') = ?", [month])
     .distinct('employee_id').select('employee_id as worker_id');
@@ -254,34 +299,19 @@ async function preparePayrollRun({ month, lines, pay_method, bank_account_id, pa
 
   const { summary } = await computePayrollSummary(month, ent);
   const byId = new Map(summary.map((w) => [w.id, w]));
-  const committed = await committedWorkerStatus(month, ent);
 
-  let toPay;
+  // Resolve the requested lines up front (validation needs no lock): the server
+  // recomputes the advance cap and the net for every line.
+  let requested = null;
   if (Array.isArray(lines) && lines.length) {
-    toPay = [];
+    requested = [];
     for (const ln of lines) {
       const w = byId.get(ln.worker_id);
       if (!w) continue;
-      if (committed.has(w.id)) { const e = new Error(`${w.name} is already in a payroll run for ${month}.`); e.httpStatus = 409; throw e; }
-      const requested = ln.advance_deducted != null && ln.advance_deducted !== ''
-        ? parseFloat(ln.advance_deducted) : w.advanceDeduction;
-      const advanceDeducted = Math.max(0, Math.min(requested || 0, w.advanceOutstanding, w.grossPay));
-      const netPay = ln.net_pay != null && ln.net_pay !== ''
-        ? Math.max(0, Math.round(parseFloat(ln.net_pay)))
-        : Math.max(0, w.grossPay + (w.bonusTotal || 0) - advanceDeducted - (w.deductionTotal || 0) - (w.statutoryTotal || 0));
-      const changed = Math.round(advanceDeducted) !== Math.round(w.advanceScheduled != null ? w.advanceScheduled : w.advanceDeduction);
-      toPay.push({ ...w, advanceDeduction: advanceDeducted, netPay, skipReason: changed ? (ln.skip_reason || ln.reason || null) : null });
+      const r = resolvePrepareLine(w, ln);
+      requested.push({ ...w, advanceDeduction: r.advanceDeduction, netPay: r.netPay, skipReason: r.skipReason });
     }
-  } else {
-    // All not-yet-committed active employees with pay due.
-    toPay = summary.filter((w) => !committed.has(w.id) && w.grossPay > 0);
   }
-  if (!toPay.length) { const e = new Error('No employees to prepare (everyone is already in a run for this month).'); e.httpStatus = 400; e.code = 'NONE'; throw e; }
-
-  const grossTotal = toPay.reduce((s, w) => s + w.grossPay, 0);
-  const advanceTotal = toPay.reduce((s, w) => s + w.advanceDeduction, 0);
-  const netTotal = toPay.reduce((s, w) => s + w.netPay, 0);
-  const statutoryTotal = toPay.reduce((s, w) => s + (w.statutoryTotal || 0), 0);
 
   const method = pay_method === 'bank' ? 'bank' : 'cash';
   const payDate = pay_date || new Date().toISOString().split('T')[0];
@@ -289,6 +319,30 @@ async function preparePayrollRun({ month, lines, pay_method, bank_account_id, pa
   if (method === 'cash' && !acctId) acctId = await resolveCashAccountId(db, { entity: ent });
 
   return db.transaction(async (trx) => {
+    // Serialise prepares for the same entity + month. Without this, two
+    // concurrent prepares both read "nobody committed yet" and each insert a
+    // run for the same employees (a duplicate payroll for the month). The
+    // transaction-scoped advisory lock is released on commit/rollback; the
+    // committed check below then runs inside the lock and sees the other run.
+    await trx.raw('SELECT pg_advisory_xact_lock(hashtext(?))', [`mill_payroll_prepare:${ent}:${month}`]);
+    const committed = await committedWorkerStatus(month, ent, trx);
+
+    let toPay;
+    if (requested) {
+      for (const w of requested) {
+        if (committed.has(w.id)) { const e = new Error(`${w.name} is already in a payroll run for ${month}.`); e.httpStatus = 409; throw e; }
+      }
+      toPay = requested;
+    } else {
+      // All not-yet-committed active employees with pay due.
+      toPay = summary.filter((w) => !committed.has(w.id) && w.grossPay > 0);
+    }
+    if (!toPay.length) { const e = new Error('No employees to prepare (everyone is already in a run for this month).'); e.httpStatus = 400; e.code = 'NONE'; throw e; }
+
+    const grossTotal = toPay.reduce((s, w) => s + w.grossPay, 0);
+    const advanceTotal = toPay.reduce((s, w) => s + w.advanceDeduction, 0);
+    const netTotal = toPay.reduce((s, w) => s + w.netPay, 0);
+
     const [r] = await trx('mill_payroll_runs').insert({
       period: month, pay_date: payDate, pay_method: method, bank_account_id: acctId,
       gross_total: grossTotal, advance_total: advanceTotal, net_total: netTotal,
@@ -379,4 +433,4 @@ async function computeLeaveBalances(workerId, year, asOf = null) {
   });
 }
 
-module.exports = { computePayrollSummary, committedWorkerStatus, preparePayrollRun, nextPrepareDate, computeLeaveBalances };
+module.exports = { computePayrollSummary, committedWorkerStatus, preparePayrollRun, nextPrepareDate, computeLeaveBalances, resolvePrepareLine, computeNetPay, advanceCap };
