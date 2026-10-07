@@ -27,16 +27,6 @@ import { todayLocalISO, fmtKg, fmtNum } from '../../../shared/utils/format';
 const num = (v) => parseFloat(v) || 0;
 const kg = (v) => fmtKg(num(v));
 
-const LOT_STATUS_STYLE = {
-  'Received': 'bg-slate-100 text-slate-700',
-  'In Milling': 'bg-blue-100 text-blue-700',
-  'Milled': 'bg-indigo-100 text-indigo-700',
-  'In Stock': 'bg-amber-100 text-amber-800',
-  'Partially Dispatched': 'bg-amber-100 text-amber-800',
-  'Fully Dispatched': 'bg-emerald-100 text-emerald-700',
-  'Closed': 'bg-gray-200 text-gray-600',
-};
-
 const TABS = [
   { key: 'intake', label: 'Intake', icon: Package },
   { key: 'quality', label: 'Quality', icon: FlaskConical },
@@ -411,9 +401,7 @@ export default function ServiceMillingBatchDetail() {
                 <Package size={12} /> Service Milling
               </span>
               {batch.serviceLotStatus && (
-                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold ${LOT_STATUS_STYLE[batch.serviceLotStatus] || 'bg-gray-100 text-gray-600'}`}>
-                  {batch.serviceLotStatus}
-                </span>
+                <StatusBadge status={batch.serviceLotStatus} />
               )}
             </div>
             {/* Rename the service lot — custom name, like regular lots.

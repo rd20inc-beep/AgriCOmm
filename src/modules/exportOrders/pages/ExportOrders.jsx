@@ -231,14 +231,7 @@ export default function ExportOrders() {
                       <StatusBadge status={balanceStatus === 'received' ? 'Received' : 'Pending'} />
                     </td>
                     <td data-label="Shipment" className="px-4 py-3 text-center">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                        shipmentStatus === 'Arrived' ? 'bg-emerald-100 text-emerald-700' :
-                        shipmentStatus === 'In Transit' ? 'bg-blue-100 text-blue-700' :
-                        shipmentStatus === 'Booked' ? 'bg-cyan-100 text-cyan-700' :
-                        'bg-gray-100 text-gray-600'
-                      }`}>
-                        {shipmentStatus}
-                      </span>
+                      <StatusBadge status={shipmentStatus} />
                     </td>
                     <td data-label="Margin %" className="mob-hide px-4 py-3 text-right font-medium text-gray-700">{margin}</td>
                     <td data-label="Stage" className="px-4 py-3 text-center">

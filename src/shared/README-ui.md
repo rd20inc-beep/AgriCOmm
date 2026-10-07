@@ -8,7 +8,7 @@ something close to it, extend the primitive rather than copying it locally.
 | A form (more than ~3 fields), detail panel, payment entry | `SlideDrawer` (right side, accessible modal) | `src/components/SlideDrawer.jsx` |
 | "Are you sure?" | `useConfirm()` → `const ok = await confirm({ title, consequence, reason })` and render `{confirmDialog}` | `src/hooks/useConfirm.jsx` |
 | Feedback after an action | `addToast(message, 'success' \| 'error' \| 'warning' \| 'info')` | `const { addToast } = useApp()` |
-| A status chip | `StatusBadge status="Paid"` | `src/shared/components/StatusBadge.jsx` |
+| A status chip (any case; `partially_paid` shows as "Partially Paid") — add new words to `statusStyle.js`, never a local colour map | `StatusBadge status="Paid"` | `src/shared/components/StatusBadge.jsx`, `src/shared/utils/statusStyle.js` |
 | Pick from a long list (with search, favourites first, inline +Add) | `SupplierPicker`, `CustomerPicker`, `ItemPicker`, `RiceTypePicker`, `HaulerPicker`, `BagTypePicker` | `src/components/*Picker.jsx` |
 | Inline validation message under a field | `FieldError error={errors.qty}` | `src/shared/components/FieldError.jsx` |
 | Any number, money, weight or date shown to a user | `format.js` (below) | `src/shared/utils/format.js` |

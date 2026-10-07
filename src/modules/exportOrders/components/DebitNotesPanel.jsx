@@ -4,6 +4,7 @@ import SlideDrawer from '../../../components/SlideDrawer';
 import useConfirm from '../../../hooks/useConfirm';
 import { useDebitNotes, useIssueDebitNote, useCancelDebitNote } from '../../../api/queries';
 import { todayLocalISO, fmtMoney, fmtNum, fmtDate } from '../../../shared/utils/format';
+import StatusBadge from '../../../shared/components/StatusBadge';
 
 // Freight escalation debit notes.
 //
@@ -154,7 +155,7 @@ export default function DebitNotesPanel({ order, addToast, canIssue = true }) {
                       {money(n.amount, n.currency)}
                     </td>
                     <td data-label="Status" className="py-1.5 pr-3">
-                      <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${n.status === 'Issued' ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-500'}`}>{n.status}</span>
+                      <StatusBadge status={n.status} />
                     </td>
                     <td className="py-1.5 text-right">
                       {canIssue && n.status === 'Issued' && (
