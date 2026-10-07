@@ -292,6 +292,11 @@ const reportingService = {
           .select('order_id', 'category', 'amount')
       : [];
 
+    // Each order's line prices: on a multi-line order price_per_mt is the
+    // weighted AVERAGE of the lines, and is labelled as one (with the range).
+    const { linePricesByOrder, priceSummary } = require('../exportOrders/orderLines');
+    const linePrices = await linePricesByOrder(db, orderIds);
+
     // Group costs by order
     const costMap = {};
     for (const cost of costs) {
@@ -314,6 +319,7 @@ const reportingService = {
       const grossProfit = revenuePkr - totalCost;
       const margin = revenuePkr > 0 ? parseFloat(((grossProfit / revenuePkr) * 100).toFixed(2)) : 0;
       const costPerMT = parseFloat(o.qty_mt) > 0 ? parseFloat((totalCost / parseFloat(o.qty_mt)).toFixed(2)) : 0;
+      const ps = priceSummary(o, linePrices[o.id] || []);
 
       return {
         id: o.id,
@@ -323,6 +329,10 @@ const reportingService = {
         productName: o.product_name,
         qtyMT: parseFloat(o.qty_mt),
         pricePerMT: parseFloat(o.price_per_mt),
+        priceLabel: ps.label,          // 'Price per MT' | 'Avg price per MT'
+        priceMixed: ps.mixed,          // true when the lines carry different prices
+        priceMin: ps.min,
+        priceMax: ps.max,
         currency: o.currency,
         contractValue: contractCur,   // original-currency contract value (for display)
         revenue: revenuePkr,          // PKR (kept name for back-compat)
