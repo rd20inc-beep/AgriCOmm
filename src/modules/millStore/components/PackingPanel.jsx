@@ -1,8 +1,16 @@
 import { useMemo, useState } from 'react';
-import { Boxes, Package, Plus, Loader2, ClipboardList } from 'lucide-react';
-import { usePackingHistory, usePackBatch, useMillStoreItems, useBatchKatta } from '../api/queries';
+import { Boxes, Package, Plus, Loader2, ClipboardList, Pencil, Trash2, Lock } from 'lucide-react';
+import {
+  usePackingHistory, usePackBatch, useMillStoreItems, useBatchKatta,
+  useUpdatePackingRun, useDeletePackingRun, useSetBatchPackSpec,
+} from '../api/queries';
 import { useExportOrder } from '../../../api/queries';
 import useCanSeeCost from '../../../hooks/useCanSeeCost';
+import useConfirm from '../../../hooks/useConfirm';
+import { useAuth } from '../../../context/AuthContext';
+import PackSpecCard from './PackSpecCard';
+import EditPackingRunDrawer from './EditPackingRunDrawer';
+import { packingPermissions, isSpecLine } from '../utils/packingAccess';
 import { fmtPKR, fmtNum, fmtDate, fmtKg as fmtKgBase } from '../../../shared/utils/format';
 
 const num = (v) => Number(v) || 0;
@@ -21,6 +29,23 @@ export default function PackingPanel({ batchId, batchStatus, addToast, exportOrd
   // When the batch is for an export order, show the buyer's packing requirement.
   const { data: exportOrder } = useExportOrder(exportOrderId || null);
   const pack = usePackBatch();
+  const updateRun = useUpdatePackingRun();
+  const deleteRun = useDeletePackingRun();
+  const setSpec = useSetBatchPackSpec();
+  const [confirm, confirmDialog] = useConfirm();
+  const { user, hasPermission } = useAuth();
+  const [editing, setEditing] = useState(null); // the run being corrected
+
+  // Who may correct runs / change the spec — the server's decision for this
+  // user (same rule the edit routes enforce), with a status-only fallback.
+  const perms = packingPermissions({
+    history: data,
+    batchStatus,
+    role: user?.role,
+    canRecordPacking: hasPermission?.('mill_store', 'record_consumption'),
+    canEditBatch: hasPermission?.('milling', 'edit'),
+  });
+  const packSpec = data.packSpec || null;
 
   const [bagItemId, setBagItemId] = useState('');
   const [bags, setBags] = useState('');
@@ -95,7 +120,7 @@ export default function PackingPanel({ batchId, batchStatus, addToast, exportOrd
   const hasShortage = bagShort || masterShort || polyShort;
 
   const canPack =
-    !!selected && capacity > 0 && bagsN > 0 && batchStatus !== 'Closed'
+    !!selected && capacity > 0 && bagsN > 0 && !perms.packLocked
     && (!mpActive || !masterId || masterQty > 0) && (!mpActive || !polyId || polyQty > 0);
 
   async function submit() {
@@ -122,10 +147,71 @@ export default function PackingPanel({ batchId, batchStatus, addToast, exportOrd
     }
   }
 
+  const errText = (err, fallback) => err?.data?.errors?.[0]?.message || err?.data?.message || err?.message || fallback;
+
+  async function saveRun(payload) {
+    if (!editing) return;
+    try {
+      const res = await updateRun.mutateAsync({ batchId, logId: editing.id, data: payload });
+      const d = res?.data?.data || res?.data || res || {};
+      const delta = Number(d.costDelta) || 0;
+      addToast?.(showCost && Math.abs(delta) > 0.01
+        ? `Packing run corrected — packaging cost ${delta > 0 ? '+' : '−'}${fmtPKR(Math.abs(delta), { decimals: 2 })}`
+        : 'Packing run corrected — stock adjusted by the difference', 'success');
+      setEditing(null);
+    } catch (err) {
+      addToast?.(errText(err, 'Could not correct the packing run'), 'error');
+    }
+  }
+
+  async function removeRun(run) {
+    const ok = await confirm({
+      title: `Delete packing run #${run.id}?`,
+      consequence: `${num(run.bags_count)} × ${run.bag_item_name || 'bag'}${num(run.master_bags_count) ? ` + ${num(run.master_bags_count)} master` : ''}${num(run.poly_count) ? ` + ${num(run.poly_count)} polythene` : ''} go back to store and the packaging cost is reversed. Katta is re-counted by the katta reconcile.`,
+      confirmLabel: 'Delete run',
+    });
+    if (!ok) return;
+    try {
+      await deleteRun.mutateAsync({ batchId, logId: run.id });
+      addToast?.('Packing run deleted — materials returned to store, cost reversed', 'success');
+    } catch (err) {
+      addToast?.(errText(err, 'Could not delete the packing run'), 'error');
+    }
+  }
+
+  async function saveSpec(payload) {
+    try {
+      await setSpec.mutateAsync({ batchId, data: payload });
+      addToast?.('Packing spec saved for this batch', 'success');
+      return true;
+    } catch (err) {
+      addToast?.(errText(err, 'Could not save the packing spec'), 'error');
+      return false;
+    }
+  }
+
+  async function clearSpec() {
+    const ok = await confirm({
+      title: 'Clear the batch override?',
+      consequence: 'The batch goes back to the export order\'s bag for its product (or no spec, if it has no order).',
+      confirmLabel: 'Clear override',
+      danger: false,
+    });
+    if (!ok) return;
+    await saveSpec({ pack_bag_size_kg: null, pack_bag_type: null, pack_master_bag_size_kg: null });
+  }
+
   if (isLoading) return <div className="text-sm text-gray-400 py-8 text-center">Loading packing…</div>;
 
   return (
     <div className="space-y-5">
+      {confirmDialog}
+      <EditPackingRunDrawer open={!!editing} run={editing} bagItems={bagItems}
+        onClose={() => setEditing(null)} onSave={saveRun} saving={updateRun.isPending} />
+
+      {/* What this batch packs into — override, else the order line. */}
+      <PackSpecCard spec={packSpec} access={perms.spec} onSave={saveSpec} onClear={clearSpec} saving={setSpec.isPending} />
+
       {/* Katta accounting — auto at yield: empty bags freed from the milled raw
           vs katta used to pack the outputs. */}
       {katta && (
@@ -223,9 +309,14 @@ export default function PackingPanel({ batchId, batchStatus, addToast, exportOrd
                       const t = it.bagType || it.bag_type || oType;
                       const s = it.bagSizeKg || it.bag_size_kg || oSize;
                       const q = it.qtyMT || it.qty_mt;
+                      const mine = isSpecLine(packSpec, it);
                       return (
-                        <tr key={it.id || i} className="border-t border-blue-100">
-                          <td data-label="Product" className="py-1 pr-3 font-medium text-blue-900">{it.productName || it.product_name || '—'}</td>
+                        <tr key={it.id || i} data-spec-line={mine ? 'true' : undefined}
+                          className={`border-t border-blue-100 ${mine ? 'bg-blue-100/70 font-semibold' : ''}`}>
+                          <td data-label="Product" className="py-1 pr-3 font-medium text-blue-900">
+                            {it.productName || it.product_name || '—'}
+                            {mine && <span className="ml-1.5 px-1.5 py-0.5 rounded bg-blue-600 text-white text-[10px] font-medium">this batch</span>}
+                          </td>
                           <td data-label="Bag Type" className="py-1 pr-3">{t || '—'}</td>
                           <td data-label="Bag Size" className="py-1 pr-3 text-right">{s ? `${s} kg` : '—'}</td>
                           <td data-label="Qty" className="py-1 pr-3 text-right">{q ? `${q} MT` : '—'}</td>
@@ -256,8 +347,8 @@ export default function PackingPanel({ batchId, batchStatus, addToast, exportOrd
       </div>
 
       {/* Pack form */}
-      {batchStatus === 'Closed' ? (
-        <p className="text-xs text-gray-400">Batch is closed — packing is locked.</p>
+      {perms.packLocked ? (
+        <p className="text-xs text-gray-400 inline-flex items-center gap-1"><Lock size={12} /> {perms.packLockedReason}</p>
       ) : (
         <div className="bg-gray-50 border border-gray-200 rounded-xl p-4">
           <div className="flex items-center gap-2 mb-3 text-sm font-semibold text-gray-700">
@@ -403,7 +494,14 @@ export default function PackingPanel({ batchId, batchStatus, addToast, exportOrd
 
       {/* History */}
       <div>
-        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Packing history</p>
+        <div className="flex items-center justify-between gap-3 flex-wrap mb-2">
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Packing history</p>
+          {logs.length > 0 && !perms.runs.allowed && perms.runs.reason && (
+            <span data-testid="runs-lock" className="inline-flex items-center gap-1 text-[11px] text-gray-500">
+              <Lock size={12} /> {perms.runs.reason}
+            </span>
+          )}
+        </div>
         {logs.length === 0 ? (
           <p className="text-sm text-gray-400 py-4 text-center">No packing recorded yet.</p>
         ) : (
@@ -418,6 +516,7 @@ export default function PackingPanel({ batchId, batchStatus, addToast, exportOrd
                   <th className="text-right py-2 px-3">Tare</th>
                   <th className="text-right py-2 px-3">Gross</th>
                   <th className="text-left py-2 px-3">By</th>
+                  {perms.runs.allowed && <th className="text-right py-2 px-3"><span className="sr-only">Actions</span></th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -441,6 +540,18 @@ export default function PackingPanel({ batchId, batchStatus, addToast, exportOrd
                     <td data-label="Tare" className="mob-hide py-2 px-3 text-right text-gray-500">{fmtKg(l.tare_weight_kg)}</td>
                     <td data-label="Gross" className="py-2 px-3 text-right font-medium">{fmtKg(l.gross_weight_kg)}</td>
                     <td data-label="By" className="mob-hide py-2 px-3 text-gray-600">{l.packed_by_name || '—'}</td>
+                    {perms.runs.allowed && (
+                      <td data-label="" className="py-2 px-3 text-right whitespace-nowrap">
+                        <button type="button" onClick={() => setEditing(l)} title="Correct this run"
+                          className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-50 rounded-md">
+                          <Pencil size={13} /> Edit
+                        </button>
+                        <button type="button" onClick={() => removeRun(l)} disabled={deleteRun.isPending} title="Delete this run"
+                          className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 rounded-md disabled:opacity-50">
+                          <Trash2 size={13} /> Delete
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
