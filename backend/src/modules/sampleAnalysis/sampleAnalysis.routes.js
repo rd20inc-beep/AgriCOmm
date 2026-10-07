@@ -3,6 +3,8 @@ const router = express.Router();
 const { authorizeAny } = require('../../middleware/rbac');
 const auditAction = require('../../middleware/audit');
 const service = require('./sampleAnalysis.service');
+const validate = require('../../middleware/validate');
+const schemas = require('../../middleware/schemas');
 
 // Sample Analysis & Purchase Shortlisting (#7). Procurement activity — gated on
 // inventory/milling perms (Owner/Super Admin bypass).
@@ -37,9 +39,16 @@ router.patch('/:id/sample-no', canEdit,
   auditAction('rename_sample', 'rice_samples', (req) => req.params.id),
   wrap((req) => service.rename(req.params.id, req.body?.sample_no)));
 
-router.post('/:id/convert', canEdit,
+// Convert creates a purchase lot, so it takes the purchase-lot permission
+// (inventory.create) — or milling.edit, because the Mill Operator holds full
+// mill access but not inventory.create (it never had it: mig 200/224/314). The
+// body is validated like any other purchase; the lot itself goes through
+// createPurchaseLot's own checks and cost-visibility rule.
+const canConvert = authorizeAny(['inventory', 'create'], ['milling', 'edit']);
+router.post('/:id/convert', canConvert,
+  validate(schemas.convertSampleToLot),
   auditAction('convert_sample', 'rice_samples', (req) => req.params.id),
-  wrap((req) => service.convertToLot(req.params.id, req.body, req.user?.id)));
+  wrap((req) => service.convertToLot(req.params.id, req.body, req.user)));
 
 router.delete('/:id', canDelete,
   auditAction('delete_sample', 'rice_samples', (req) => req.params.id),

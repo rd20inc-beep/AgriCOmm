@@ -125,6 +125,64 @@ describe('sample → purchase lot convert (PRC-P10)', () => {
   });
 });
 
+describe('sample → purchase lot convert: one transaction, purchase rules', () => {
+  const SAMPLE = {
+    id: 1, sample_no: 'SMP-1', status: 'Approved for Purchase', supplier_id: 7, product_id: 3,
+    offered_qty_kg: 10000, offered_rate_per_kg: null, converted_lot_id: null,
+  };
+  // Pre-loaded permission sets (rbac.userHasPermission reads these first).
+  const costUser = () => ({ id: 1, role_id: 50, _permissionsLoaded: true, permissions: new Set(['inventory.create', 'reports.view_cost']) });
+  const blindUser = () => ({ id: 2, role_id: 51, _permissionsLoaded: true, permissions: new Set(['inventory.create']) });
+  let seen;
+  beforeEach(() => {
+    reset({ rice_samples: [SAMPLE], products: [{ id: 3, name: 'Super Basmati' }] });
+    withRowLocks();
+    seen = null;
+    lotController.createPurchaseLot.mockReset();
+    lotController.createPurchaseLot.mockImplementation(async (req, res) => {
+      seen = req;
+      res.status(201).json({ data: { lot: { id: 88, lot_no: 'L-88' } } });
+    });
+  });
+
+  test('the lot is created INSIDE the convert transaction (req.outerTrx), as the caller', async () => {
+    let convertTrx = null;
+    db.transaction = async (cb) => {
+      const trx = (table) => { const b = db(table); b.forNoKeyUpdate = () => b; return b; };
+      Object.assign(trx, { fn: db.fn, raw: db.raw, tables: db.tables });
+      convertTrx = trx;
+      return cb(trx);
+    };
+    await sampleService.convertToLot(1, { rate_per_kg: 100 }, costUser());
+    expect(seen.outerTrx).toBe(convertTrx);
+    expect(seen.user.id).toBe(1);
+    expect(seen.body).toMatchObject({ sample_id: 1, rate_input: 100, quantity_input: 10000 });
+    expect(db.tables.rice_samples[0]).toMatchObject({ status: 'Converted', converted_lot_id: 88 });
+  });
+
+  test('a user who can see cost must give a positive rate', async () => {
+    await expect(sampleService.convertToLot(1, {}, costUser())).rejects.toThrow(/positive rate/i);
+    expect(lotController.createPurchaseLot).not.toHaveBeenCalled();
+  });
+
+  test('a cost-blind user converts without a rate; any rate they send is ignored', async () => {
+    await sampleService.convertToLot(1, { rate_per_kg: 150 }, blindUser());
+    expect(seen.body.rate_input).toBe(0);
+    expect(db.tables.rice_samples[0].status).toBe('Converted');
+  });
+
+  test('the convert body schema keeps the fields the service reads and drops the rest', () => {
+    const schemas = require('../middleware/schemas');
+    const { value, error } = schemas.convertSampleToLot.validate(
+      { qty_kg: 5000, rate_per_kg: 99, supplier_id: 7, status: 'Converted', converted_lot_id: 5 },
+      { stripUnknown: true },
+    );
+    expect(error).toBeUndefined();
+    expect(value).toEqual({ qty_kg: 5000, rate_per_kg: 99, supplier_id: 7 });
+    expect(schemas.convertSampleToLot.validate({ qty_kg: -1 }).error).toBeTruthy();
+  });
+});
+
 describe('purchase requirement mark-purchased (PRC-P12)', () => {
   beforeEach(() => reset({
     purchase_requirements: [

@@ -183,6 +183,9 @@ describe('money-only routes are cost-gated', () => {
     ['lot-inventory', 'get', '/lots/:id/purchase-invoice'],
     ['lot-inventory', 'get', '/valuation-history'],
     ['lot-inventory', 'post', '/valuation-snapshot'],
+    // Edit Price + Edit Costs change what the rice cost — same rule as seeing it.
+    ['lot-inventory', 'put', '/lots/:id/purchase-rate'],
+    ['lot-inventory', 'put', '/lots/:id/costs'],
     ['milling', 'get', '/expenses'],
     ['milling', 'get', '/expenses/recurring'],
     ['milling', 'get', '/rice-purchases'],
@@ -204,6 +207,21 @@ describe('money-only routes are cost-gated', () => {
     expect(r.statusCode).toBe(200);
     expect(r.body.success).toBe(true);
     expect(r.body.data.lots[0].cost_per_unit).toBe(120);
+  });
+
+  test('PUT /lots/:id/purchase-rate answers 403 to the Inventory Officer before the price is touched', async () => {
+    db.__set({ inventory_lots: [lotRow()] });
+    const r = await runRoute(lotRoutes, 'put', '/lots/:id/purchase-rate',
+      reqAs('inventoryOfficer', { params: { id: 3 }, body: { rate_per_kg: 1 } }));
+    expect(r.statusCode).toBe(403);
+    expect(db.__updates).toHaveLength(0);
+  });
+
+  test('PUT /lots/:id/purchase-rate validates its body: rate_per_kg is required', async () => {
+    const r = await runRoute(lotRoutes, 'put', '/lots/:id/purchase-rate',
+      reqAs('millOperator', { params: { id: 3 }, body: { rate: 110 } }));
+    expect(r.statusCode).toBe(400);
+    expect(r.body.message).toMatch(/validation/i);
   });
 
   test('GET /expenses answers 403 to the QC Analyst', async () => {

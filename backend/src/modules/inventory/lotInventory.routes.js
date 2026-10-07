@@ -77,18 +77,25 @@ router.post(
 );
 
 // Update lot costs
+// Money-only: the cost-blind roles never see these figures (the Costing tab is
+// hidden for them), so they may not change them either.
 router.put(
   '/lots/:id/costs',
   authorize('inventory', 'edit'),
+  requireCostVisibility,
   validate(schemas.updateLotCosts),
   auditAction('update_lot_costs', 'inventory_lot'),
   controller.updateLotCosts
 );
 
 // Edit a raw lot's purchase rate (price differs at payment time)
+// Edit Price is a purchase rate — needs reports.view_cost like every other
+// money endpoint (LotDetail only shows the button to those who hold it).
 router.put(
   '/lots/:id/purchase-rate',
   authorize('inventory', 'edit'),
+  requireCostVisibility,
+  validate(schemas.setLotPurchaseRate),
   auditAction('update_lot_purchase_rate', 'inventory_lot'),
   controller.setLotPurchaseRate
 );
