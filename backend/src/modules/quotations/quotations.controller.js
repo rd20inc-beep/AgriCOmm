@@ -36,11 +36,53 @@ function normalizeItems(items) {
         bag_size_kg: it.bag_size_kg != null && it.bag_size_kg !== '' ? parseFloat(it.bag_size_kg) : null,
         bag_count: it.bag_count != null && it.bag_count !== '' ? parseInt(it.bag_count) : null,
         bag_type: it.bag_type || null,
+        // Each line its own master bag (mig 317) — a 2 kg line and a 5 kg line
+        // on one quote ship in different masters, so it is never the quote's.
+        master_bag_size_kg: it.master_bag_size_kg != null && it.master_bag_size_kg !== '' ? parseFloat(it.master_bag_size_kg) || null : null,
+        master_bag_type: it.master_bag_type || null,
         quality_description: it.quality_description || null,
         broken_pct_target: it.broken_pct_target != null && it.broken_pct_target !== '' ? parseFloat(it.broken_pct_target) : null,
         notes: it.notes || null,
       };
     });
+}
+
+// Quotation lines → export order lines. Every line keeps its OWN packing — bag
+// size, bag type, bag count, master bag size and type — so the order's documents
+// read each line's real bag (orderLines.js) instead of finding none.
+// `perMtBump` folds the quote's packing/freight/other charges into the price.
+function quotationLinesToOrderItems(items, perMtBump = 0) {
+  return (items || []).map((it) => ({
+    product_id: it.product_id,
+    product_name: it.product_name,
+    qty_mt: num(it.qty_mt),
+    price_per_mt: round2(num(it.price_per_mt) + perMtBump),
+    hs_code: it.hs_code,
+    packing: it.packing,
+    bag_size_kg: it.bag_size_kg,
+    bag_count: it.bag_count,
+    bag_type: it.bag_type,
+    master_bag_size_kg: it.master_bag_size_kg != null ? it.master_bag_size_kg : null,
+    master_bag_type: it.master_bag_type || null,
+    quality_description: it.quality_description,
+    broken_pct_target: it.broken_pct_target,
+    notes: it.notes,
+  }));
+}
+
+// The order header's bag fields. A one-line order's line IS the order, so the
+// header mirrors it. With several lines the header holds ONE spec, and taking
+// line 1's is how a 5 kg line printed as 2 kg bags — so it gets none and each
+// line speaks for itself.
+function headerBagFromLines(orderItems) {
+  if (!Array.isArray(orderItems) || orderItems.length !== 1) return {};
+  const l = orderItems[0];
+  const out = {};
+  if (num(l.bag_size_kg) > 0) out.bag_size_kg = l.bag_size_kg;
+  if (l.bag_type) out.bag_type = l.bag_type;
+  if (num(l.master_bag_size_kg) > 0) out.master_bag_size_kg = l.master_bag_size_kg;
+  if (l.master_bag_type) out.master_bag_type = l.master_bag_type;
+  return out;
 }
 
 // Fill in product_name for items that carry a product_id but no name — happens
@@ -318,23 +360,7 @@ const quotationsController = {
         const chargesTotal = round2(num(quote.packing_cost) + num(quote.freight_cost) + num(quote.other_charges));
         const totalQty = items.reduce((s, it) => s + num(it.qty_mt), 0);
         const perMtBump = chargesTotal > 0 && totalQty > 0 ? chargesTotal / totalQty : 0;
-        const orderItems = items.map((it) => {
-          const price = round2(num(it.price_per_mt) + perMtBump);
-          return {
-            product_id: it.product_id,
-            product_name: it.product_name,
-            qty_mt: num(it.qty_mt),
-            price_per_mt: price,
-            hs_code: it.hs_code,
-            packing: it.packing,
-            bag_size_kg: it.bag_size_kg,
-            bag_count: it.bag_count,
-            bag_type: it.bag_type,
-            quality_description: it.quality_description,
-            broken_pct_target: it.broken_pct_target,
-            notes: it.notes,
-          };
-        });
+        const orderItems = quotationLinesToOrderItems(items, perMtBump);
         // Correct any per-line rounding drift so the order total is exactly the quote total.
         if (chargesTotal > 0 && orderItems.length) {
           const built = round2(orderItems.reduce((s, it) => s + num(it.qty_mt) * num(it.price_per_mt), 0));
@@ -360,6 +386,7 @@ const quotationsController = {
           source: 'Quotation',
           status: 'Awaiting Advance',
           bank_account_id: bankAccountId,
+          ...headerBagFromLines(orderItems),
           items: orderItems,
         };
 
@@ -414,3 +441,7 @@ const quotationsController = {
 };
 
 module.exports = quotationsController;
+// Pure helpers, exported for tests.
+module.exports.normalizeItems = normalizeItems;
+module.exports.quotationLinesToOrderItems = quotationLinesToOrderItems;
+module.exports.headerBagFromLines = headerBagFromLines;
