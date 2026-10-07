@@ -57,3 +57,14 @@ export function splitOnHand(row) {
   const unexplained = Math.round((onHand - free - committed - milling) * 1000) / 1000;
   return { onHand, free, committed, milling, unexplained };
 }
+
+/**
+ * KG on an internal transfer. internal_transfers stores qty_kg (mig 228), which
+ * arrives as qtyKg after transformKeys; qtyMt is only a legacy fallback.
+ */
+export function transferKg(t) {
+  if (!t) return 0;
+  const kg = t.qtyKg ?? t.qty_kg;
+  if (kg != null && kg !== '') return n(kg);
+  return n(t.qtyMt ?? t.qty_mt) * 1000;
+}

@@ -14,6 +14,7 @@ const ORDER_LINK_ROLES = ['Super Admin', 'Owner', 'Finance Manager'];
 import StatusBadge from '../../../components/StatusBadge';
 import SlideDrawer from '../../../components/SlideDrawer';
 import { fmtPKR, fmtUSD, fmtNum, fmtPct, fmtDate, fmtDateTime } from '../../../shared/utils/format';
+import { transferKg } from '../utils/stockMath';
 
 const PKR_RATE = 280; // PKR per USD
 const formatPKR = (value) => fmtPKR(parseFloat(value) || 0, { decimals: 2 });
@@ -38,7 +39,7 @@ export default function InternalTransfer() {
     if (t.status === 'Cancelled') continue;
     const bid = t.batchId;
     if (bid == null) continue;
-    transferredKgByBatch[bid] = (transferredKgByBatch[bid] || 0) + (parseFloat(t.qtyMt) || 0) * 1000;
+    transferredKgByBatch[bid] = (transferredKgByBatch[bid] || 0) + transferKg(t);
   }
 
   // Any batch with finished output still to transfer is a candidate — not only
@@ -379,7 +380,7 @@ export default function InternalTransfer() {
                     <td data-label="Batch No" className="px-4 py-3 text-gray-900">{t.batchNo || `B-${t.batchId}`}</td>
                     {canLinkOrder && <td data-label="Export Order" className="mob-hide px-4 py-3 text-gray-900">{t.exportOrderNo || `#${t.exportOrderId}`}</td>}
                     <td data-label="Product" className="px-4 py-3 text-gray-600 max-w-[14rem] truncate" title={t.productName || undefined}>{t.productName}</td>
-                    <td data-label="Qty kg" className="px-4 py-3 text-right text-gray-900 font-medium">{fmtNum(Math.round((parseFloat(t.qtyMt) || 0) * 1000))}</td>
+                    <td data-label="Qty kg" className="px-4 py-3 text-right text-gray-900 font-medium">{fmtNum(Math.round(transferKg(t)))}</td>
                     <td data-label="Price/kg" className="mob-hide px-4 py-3 text-right text-gray-900">{formatPKR((parseFloat(t.transferPricePkr) || 0) / 1000)}</td>
                     <td data-label="Total" className="px-4 py-3 text-right text-gray-900 font-medium">{formatPKR(t.totalValuePkr)}</td>
                     <td data-label="Dispatch" className="mob-hide px-4 py-3 text-gray-600">{fmtDate(t.dispatchDate)}</td>
@@ -435,7 +436,7 @@ function TransferDetailDrawer({ transferId, onClose, canLinkOrder = true }) {
         <div className="space-y-5">
           <div className="flex items-center gap-2">
             <StatusBadge status={t.status} />
-            <span className="text-xs text-gray-500">{fmtNum(Math.round((parseFloat(t.qtyMt) || 0) * 1000))} kg · {t.productName || 'Finished Rice'}</span>
+            <span className="text-xs text-gray-500">{fmtNum(Math.round(transferKg(t)))} kg · {t.productName || 'Finished Rice'}</span>
           </div>
 
           {/* Key facts */}
@@ -444,7 +445,7 @@ function TransferDetailDrawer({ transferId, onClose, canLinkOrder = true }) {
             {canLinkOrder && <Fact label="Export order" value={t.exportOrderNo || (t.exportOrderId ? `#${t.exportOrderId}` : '—')} />}
             <Fact label="Customer" value={t.exportCustomerName || '—'} />
             <Fact label="Dispatch date" value={fmtDate(t.dispatchDate)} />
-            <Fact label="Qty" value={`${fmtNum(Math.round((parseFloat(t.qtyMt) || 0) * 1000))} kg`} />
+            <Fact label="Qty" value={`${fmtNum(Math.round(transferKg(t)))} kg`} />
             <Fact label="Price / kg" value={formatPKR((parseFloat(t.transferPricePkr) || 0) / 1000)} />
             <Fact label="Total (PKR)" value={formatPKR(t.totalValuePkr)} />
             <Fact label="Total (USD)" value={formatUSD(t.usdEquivalent)} />

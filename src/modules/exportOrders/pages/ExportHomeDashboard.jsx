@@ -10,6 +10,7 @@ import { useExportOrders, useCustomers, useInternalTransfers, useConfirmTransfer
 import { useApp } from '../../../context/AppContext';
 import { workflowSteps, isBalanceDue } from '../components/constants';
 import { fmtUSD, fmtKg, fmtDate } from '../../../shared/utils/format';
+import { transferKg } from '../../inventory/utils/stockMath';
 
 // Exact figures — money is never abbreviated to K/M (see shared/utils/format.js).
 const formatUSD = (value) => fmtUSD(Number(value) || 0);
@@ -78,7 +79,7 @@ export default function ExportHomeDashboard() {
   const acceptTransfer = async (t) => {
     try {
       await confirmTransfer.mutateAsync(t.id);
-      addToast?.(`Accepted transfer ${t.transferNo || ''} — ${fmtKg((Number(t.qtyMt) || 0) * 1000)} received into export`, 'success');
+      addToast?.(`Accepted transfer ${t.transferNo || ''} — ${fmtKg(transferKg(t))} received into export`, 'success');
     } catch (err) {
       addToast?.(err?.response?.data?.message || err?.message || 'Failed to accept transfer', 'error');
     }
@@ -220,7 +221,7 @@ export default function ExportHomeDashboard() {
               <div key={t.id} className="flex items-center justify-between gap-3 py-2.5">
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-gray-900 truncate">
-                    {t.productName || 'Finished Rice'} · <span className="tabular-nums">{fmtKg((Number(t.qtyMt) || 0) * 1000)}</span>
+                    {t.productName || 'Finished Rice'} · <span className="tabular-nums">{fmtKg(transferKg(t))}</span>
                   </p>
                   <p className="text-[11px] text-gray-400">
                     {t.transferNo || `IT-${t.id}`} · from batch {t.batchNo || `#${t.batchId}`}

@@ -1,5 +1,20 @@
 import { describe, test, expect } from 'vitest';
-import { splitOnHand, unitsOnHand, onHandKg, formatUnits } from '../stockMath';
+import { splitOnHand, unitsOnHand, onHandKg, formatUnits, transferKg } from '../stockMath';
+
+describe('Internal transfer quantity', () => {
+  test('reads qtyKg (internal_transfers.qty_kg after transformKeys)', () => {
+    expect(transferKg({ qtyKg: '2500.000' })).toBe(2500);
+    expect(transferKg({ qty_kg: 1200 })).toBe(1200);
+  });
+  test('falls back to legacy qtyMt × 1000 only when no KG field exists', () => {
+    expect(transferKg({ qtyMt: 2.5 })).toBe(2500);
+    expect(transferKg({ qtyKg: 0, qtyMt: 9 })).toBe(0);
+  });
+  test('missing transfer counts as 0', () => {
+    expect(transferKg(null)).toBe(0);
+    expect(transferKg({})).toBe(0);
+  });
+});
 
 describe('Stock Summary row math', () => {
   test('free + committed + reserved for milling = on hand', () => {
