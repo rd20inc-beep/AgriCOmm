@@ -654,9 +654,10 @@ const millingController = {
           ? vehicles.filter((v) => v && (numOrNull(v.weight_kg) || intOrNull(v.total_bags) || v.vehicle_no))
           : [];
         let vehicleWeightTotal = 0;
-        // A cost-blind creator (Mill Operator / QC Analyst) cannot set a price:
-        // any price they send is ignored and the truck is received unpriced
-        // (yield does not require a cost for them — #535).
+        // A cost-blind creator (no reports.view_cost — QC Analyst, Inventory
+        // Officer, Documentation Officer) cannot set a price: any price they send
+        // is ignored and the truck is received unpriced. The batch then can't be
+        // yielded until someone with cost visibility prices it (#427).
         const mayPrice = vehicleList.some((v) => v && v.quality) && !isService
           ? await canSeeCost(req)
           : false;
@@ -1020,7 +1021,14 @@ const millingController = {
         }
 
         // If arrival type with a price, auto-calculate raw rice cost (per KG × KG).
-        if (analysis_type === 'arrival' && (price_per_kg != null || price_per_mt != null)) {
+        // Not for a batch milled from priced purchase lot(s): its raw cost is the
+        // lots' landed cost × committed qty (what the GL holds), and the arrival
+        // price prefilled from the lot is its bare rate — re-saving the Quality
+        // tab must not swap one for the other. Re-price such a lot with Edit
+        // Price, which cascades into the batch.
+        const pricedFromLots = analysis_type === 'arrival'
+          && (await inventoryService.getSourceLotPricing(trx, id)).pricedCount > 0;
+        if (analysis_type === 'arrival' && !pricedFromLots && (price_per_kg != null || price_per_mt != null)) {
           const perKg = price_per_kg != null ? parseFloat(price_per_kg) : parseFloat(price_per_mt) / 1000;
           const rawRiceCost = perKg * parseFloat(batch.raw_qty_kg);
 
@@ -1354,13 +1362,12 @@ const millingController = {
             (await trx('milling_costs').where({ batch_id: batch.id })
               .where('category', 'raw_rice').sum('amount as total').first())?.total
           ) || 0;
-          // Guard: a company (non-service) batch must have a raw-material cost before
+          // Guard (#427): a company (non-service) batch must be fully priced before
           // yield — otherwise the finished/by-product lots inherit Rs 0 cost and any
-          // later sale books 100% "profit". The cost comes from the source lot's
-          // purchase price, so this means: price the raw lot before milling it.
-          if (finished + broken + bran + husk + sortex + powder + sweeping + choba > 0 && rawCostTotal <= 0.01) {
-            const e = new Error('This batch has no recorded raw-material cost. Set the source lot\'s purchase price before recording yield — otherwise the finished rice would be costed at Rs 0.');
-            e.status = 400; throw e;
+          // later sale books 100% "profit". Checked per source lot, so a blend with
+          // one unpriced lot is refused and the error names the lot to price.
+          if (finished + broken + bran + husk + sortex + powder + sweeping + choba > 0) {
+            await inventoryService.assertBatchRawPriced(trx, batch.id, rawCostTotal);
           }
           const processingCosts = parseFloat(
             (await trx('milling_costs').where({ batch_id: batch.id })
