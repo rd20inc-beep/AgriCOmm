@@ -182,7 +182,7 @@ export default function PackingWeightCard({ order, onUpdated }) {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             {[
               ['approve_extra', 'Approve extra (free)', 'Ship it; customer not charged; deduct actual from stock.'],
-              ['update_invoice', 'Update invoice qty', 'Re-price the order to the actual packed qty; customer charged.'],
+              ['update_invoice', 'Update invoice qty', 'Re-price to the actual packed qty — every line scaled by the same factor at its own price; customer charged.'],
               ['remove_extra', 'Remove extra', 'Pull the extra from the shipment; it returns to export-ready stock.'],
               ['adjustment', 'Adjustment / loss', 'Book the extra as a packing adjustment; deduct from stock.'],
             ].map(([val, label, desc]) => (
