@@ -1826,6 +1826,40 @@ const financeController = {
       }
 
       const transfer = await db.transaction(async (trx) => {
+        // Per-batch cap: everything transferred from this batch (non-cancelled)
+        // may not exceed the batch's finished output. The FIFO draw below only
+        // checks TOTAL mill stock, so without this a batch could be transferred
+        // twice (once from its own lots, again from other batches' stock). Lock
+        // the batch row so two concurrent transfers can't both pass the check.
+        const capBatch = await trx('milling_batches')
+          .where('id', batch_id)
+          .select('id', 'batch_no', 'actual_finished_kg')
+          .forUpdate()
+          .first();
+        if (!capBatch) {
+          const err = new Error('Milling batch not found.');
+          err.status = 404;
+          throw err;
+        }
+        const requestedKg = parseFloat(qty_mt) * 1000;
+        const finishedKg = parseFloat(capBatch.actual_finished_kg) || 0;
+        const prior = await trx('internal_transfers')
+          .where('batch_id', batch_id)
+          .where(function () { this.whereNot('status', 'Cancelled').orWhereNull('status'); })
+          .sum('qty_kg as kg')
+          .first();
+        const alreadyKg = parseFloat(prior?.kg) || 0;
+        const remainingBatchKg = Math.max(0, finishedKg - alreadyKg);
+        if (requestedKg > remainingBatchKg + 1e-3) {
+          const err = new Error(
+            `Batch ${capBatch.batch_no || batch_id} has only ${Math.round(remainingBatchKg).toLocaleString()} kg of finished output `
+            + `left to transfer (finished ${Math.round(finishedKg).toLocaleString()} kg, already transferred `
+            + `${Math.round(alreadyKg).toLocaleString()} kg); requested ${Math.round(requestedKg).toLocaleString()} kg.`
+          );
+          err.status = 422;
+          throw err;
+        }
+
         const transferNo = await generateTransferNo(trx);
 
         const [t] = await trx('internal_transfers')
