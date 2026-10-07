@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Search, Plus, Truck, Package, DollarSign, CheckCircle2, AlertCircle, Loader2, Star } from 'lucide-react';
-import Drawer from '../../../components/Drawer';
+import SlideDrawer from '../../../components/SlideDrawer';
 import SupplierPicker from '../../../components/SupplierPicker';
 import { isFavorite, byFavoriteThenName } from '../../../shared/utils/favorites';
 import HaulerPicker from '../../../components/HaulerPicker';
@@ -537,12 +537,12 @@ export default function PurchaseLotDrawer({
   }
 
   return (
-    <Drawer
-      isOpen={isOpen}
+    <SlideDrawer
+      open={isOpen}
       onClose={onClose}
       title="New Rice Purchase"
       subtitle="Record a rice lot received from a supplier"
-      width="xl"
+      size="xl"
       footer={
         <div className="flex justify-between items-center gap-3">
           <div className="text-xs text-gray-500">
@@ -1134,7 +1134,7 @@ export default function PurchaseLotDrawer({
           )}
         </div>
       </div>
-    </Drawer>
+    </SlideDrawer>
   );
 }
 
