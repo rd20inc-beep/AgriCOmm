@@ -8,6 +8,7 @@ import { lotInventoryApi } from '../api/services';
 import { useCreatePurchaseLot } from '../../../api/queries';
 import { STANDARD_BAG_SIZES, snapBagSizeKg, isStandardBagSize, DEFAULT_BAG_SIZE_KG } from '../../../utils/bagSize';
 import { todayLocalISO, fmtKg, fmtNum, fmtPKR, fmtPct } from '../../../shared/utils/format';
+import useCanSeeCost from '../../../hooks/useCanSeeCost';
 
 /**
  * Modern slide-from-right drawer for recording a rice purchase lot.
@@ -108,7 +109,15 @@ export default function PurchaseLotDrawer({
   onSuccess,
 }) {
   const createMut = useCreatePurchaseLot();
+  // Cost-blind roles (no reports.view_cost) record the rice without its money:
+  // no price, commission or freight fields and no value lines. The server
+  // ignores any price they send and creates the lot unpriced (no rice payable,
+  // no GL); it can't be milled to yield until someone who sees cost prices it.
+  const showCost = useCanSeeCost();
   const [form, setForm] = useState(defaultForm);
+  // "Keep N kg" on the bag-size mismatch prompt: the operator confirmed their
+  // size for this weight/bags combination, so the prompt stays dismissed.
+  const [keptBagSize, setKeptBagSize] = useState(null);
   const [showMore, setShowMore] = useState(false);
   const [showVehicles, setShowVehicles] = useState(false);
   const [vehQualityOpen, setVehQualityOpen] = useState({}); // { [vehicleIndex]: bool }
@@ -142,7 +151,7 @@ export default function PurchaseLotDrawer({
   useEffect(() => {
     if (bagsTouched.current) return;
     const wk = parseFloat(form.weight_kg) || 0;
-    const bs = parseInt(form.bag_size_kg, 10) || 0;
+    const bs = parseFloat(form.bag_size_kg) || 0;
     if (wk > 0 && bs > 0) {
       const raw = wk / bs;
       const val = Number.isInteger(raw) ? raw : Math.ceil(raw);
@@ -153,6 +162,7 @@ export default function PurchaseLotDrawer({
   useEffect(() => {
     if (isOpen) {
       setForm(defaultForm());
+      setKeptBagSize(null);
       setLotNoTouched(false);
       brokerTouched.current = false;
       bagsTouched.current = false;
@@ -267,9 +277,10 @@ export default function PurchaseLotDrawer({
   const avgBagKg = bags > 0 && weightKg > 0 ? weightKg / bags : 0;
   // Nominal sack size the operator picked vs what the weight÷bags implies (snapped
   // to the nearest standard). When they disagree, prompt an inline confirm.
-  const bagSize = parseInt(form.bag_size_kg, 10) || 0;
+  const bagSize = parseFloat(form.bag_size_kg) || 0;
   const detectedBagSize = snapBagSizeKg(avgBagKg); // 49.3 → 50, 24.5 → 25, 45 → 45
-  const bagSizeMismatch = avgBagKg > 0 && detectedBagSize > 0 && detectedBagSize !== bagSize;
+  const bagSizeMismatch = avgBagKg > 0 && detectedBagSize > 0 && detectedBagSize !== bagSize
+    && keptBagSize !== `${bagSize}|${detectedBagSize}`;
   // Item 2: bags implied by received weight ÷ bag size. A whole result is
   // "exact"; a fractional one means the last bag is partially filled, so the
   // suggested physical count rounds up.
@@ -319,7 +330,7 @@ export default function PurchaseLotDrawer({
       addToast?.('Please enter a weight greater than zero', 'error');
       return;
     }
-    if (!ratePerKg || ratePerKg <= 0) {
+    if (showCost && (!ratePerKg || ratePerKg <= 0)) {
       addToast?.('Please enter a price per KG', 'error');
       return;
     }
@@ -366,10 +377,10 @@ export default function PurchaseLotDrawer({
         lot_no: lotNoTouched ? (form.lot_no?.trim() || null) : null,
         // Commission (broker payable) + transport (hauler payable) — both fold
         // into the landed cost per KG server-side.
-        commission_per_bag: commissionPerBag > 0 ? commissionPerBag : null,
-        commission_total: totalCommission > 0 ? totalCommission : null,
-        broker_id: form.broker_id ? parseInt(form.broker_id, 10) : null,
-        transport_cost: transportCost > 0 ? transportCost : null,
+        commission_per_bag: showCost && commissionPerBag > 0 ? commissionPerBag : null,
+        commission_total: showCost && totalCommission > 0 ? totalCommission : null,
+        broker_id: showCost && form.broker_id ? parseInt(form.broker_id, 10) : null,
+        transport_cost: showCost && transportCost > 0 ? transportCost : null,
         hauler_id: form.hauler_id ? parseInt(form.hauler_id, 10) : null,
         transport_paid_by: form.transport_paid_by || 'company', // #14
 
@@ -392,8 +403,8 @@ export default function PurchaseLotDrawer({
         // bag_weight_kg (the actual avg rice weight per bag used for conversions).
         bag_size_kg: bagSize > 0 ? bagSize : (detectedBagSize || DEFAULT_BAG_SIZE_KG),
         total_bags: bags || null,
-        // Rate per kilogram
-        rate_input: ratePerKg,
+        // Rate per kilogram (none from a cost-blind user — the lot is unpriced)
+        rate_input: showCost ? ratePerKg : null,
         rate_unit: 'kg',
         notes: form.notes || null,
         // Optional vehicle arrival(s) — only rows where a vehicle number was entered.
@@ -406,6 +417,7 @@ export default function PurchaseLotDrawer({
               const val = v.quality?.[f.key];
               if (val === '' || val == null || Number.isNaN(parseFloat(val))) continue;
               // Price is typed per kg; stored per MT (price_per_mt).
+              if (f.key === 'price_per_kg' && !showCost) continue;
               if (f.key === 'price_per_kg') q.price_per_mt = Math.round(parseFloat(val) * 1000 * 100) / 100;
               else q[f.key] = parseFloat(val);
             }
@@ -546,7 +558,7 @@ export default function PurchaseLotDrawer({
       footer={
         <div className="flex justify-between items-center gap-3">
           <div className="text-xs text-gray-500">
-            {weightKg > 0 && ratePerKg > 0 && (
+            {showCost && weightKg > 0 && ratePerKg > 0 && (
               <span>
                 <span className="font-medium text-gray-700">{fmtKg(Math.round(weightKg))}</span>
                 {' × '}
@@ -791,7 +803,7 @@ export default function PurchaseLotDrawer({
               </button>
             ))}
             <input
-              type="number" step="1" min="0"
+              type="number" step="any" min="0"
               value={form.bag_size_kg}
               onChange={(e) => setForm(prev => ({ ...prev, bag_size_kg: e.target.value }))}
               className="w-24 px-2 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
@@ -825,10 +837,10 @@ export default function PurchaseLotDrawer({
                 </button>
                 <button
                   type="button"
-                  onClick={() => setForm(prev => ({ ...prev, bag_size_kg: DEFAULT_BAG_SIZE_KG }))}
+                  onClick={() => setKeptBagSize(`${bagSize}|${detectedBagSize}`)}
                   className="px-2.5 py-1 rounded-md bg-white border border-amber-300 text-amber-800 text-[11px] font-medium hover:bg-amber-100"
                 >
-                  Keep {DEFAULT_BAG_SIZE_KG} kg
+                  Keep {fmtNum(bagSize)} kg
                 </button>
               </div>
             </div>
@@ -836,6 +848,7 @@ export default function PurchaseLotDrawer({
         </div>
 
         {/* ─────────── Price ─────────── */}
+        {showCost && (
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1.5 flex items-center gap-1.5">
             <DollarSign size={14} className="text-emerald-500" />
@@ -852,6 +865,7 @@ export default function PurchaseLotDrawer({
             <p className="text-[11px] text-gray-500 mt-1">≈ {fmtPKR(pricePerMT, { decimals: 2 })}/MT</p>
           )}
         </div>
+        )}
 
         {/* ─────────── Lot number (editable) ─────────── */}
         <div>
@@ -878,8 +892,9 @@ export default function PurchaseLotDrawer({
 
         {/* ─────────── Purchase costs: commission + transport ─────────── */}
         <div className="rounded-lg border border-gray-200 p-3 space-y-3">
-          <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Purchase Costs (fold into cost/kg)</p>
+          <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">{showCost ? 'Purchase Costs (fold into cost/kg)' : 'Transport'}</p>
           <div className="grid grid-cols-2 gap-3">
+            {showCost && (<>
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Commission per bag/katta (PKR)</label>
               <input type="number" step="0.01" min="0" value={form.commission_per_bag}
@@ -906,6 +921,7 @@ export default function PurchaseLotDrawer({
                 onChange={(e) => setForm(prev => ({ ...prev, transport_cost: e.target.value }))}
                 placeholder="0" className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
             </div>
+            </>)}
             <div>
               <HaulerPicker
                 label={<span className="text-xs font-medium text-gray-600">Transporter / hauler</span>}
@@ -920,6 +936,7 @@ export default function PurchaseLotDrawer({
             {/* #14 — who bears the freight. 'Company' creates a transporter
                 payable (Finance → Accounts Payable); other options record the
                 charge without a company payable. */}
+            {showCost && (
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Transport paid by</label>
               <select value={form.transport_paid_by}
@@ -934,8 +951,9 @@ export default function PurchaseLotDrawer({
                 <p className="text-[11px] text-amber-600 mt-0.5">The supplier bears this freight — no company payable; recorded for tracking.</p>
               )}
             </div>
+            )}
           </div>
-          {finalCostPerKg > 0 && (
+          {showCost && finalCostPerKg > 0 && (
             <p className="text-xs text-gray-700">Final Cost per KG: <b>{fmtPKR(finalCostPerKg, { decimals: 2 })}</b>
               <span className="text-gray-400"> (raw {fmtNum(ratePerKg, 2)}{totalCommission > 0 ? ' + commission' : ''}{capitalisedTransport > 0 ? ' + transport' : ''})</span></p>
           )}
@@ -1059,11 +1077,11 @@ export default function PurchaseLotDrawer({
                         className="text-xs font-medium text-gray-600 hover:text-blue-600 flex items-center gap-1">
                         <span>{vehQualityOpen[idx] ? '▾' : '▸'}</span>
                         Quality for this truck
-                        <span className="text-[11px] text-gray-400 font-normal">— moisture, broken, price… (optional)</span>
+                        <span className="text-[11px] text-gray-400 font-normal">— moisture, broken{showCost ? ', price' : ''}… (optional)</span>
                       </button>
                       {vehQualityOpen[idx] && (
                         <div className="mt-2 grid grid-cols-3 gap-2">
-                          {VEHICLE_QUALITY_FIELDS.map(f => (
+                          {VEHICLE_QUALITY_FIELDS.filter(f => showCost || f.key !== 'price_per_kg').map(f => (
                             <Input key={f.key} label={f.label} type="number"
                               value={v.quality?.[f.key] ?? ''}
                               onChange={(val) => setV('quality', { ...(v.quality || {}), [f.key]: val })}
