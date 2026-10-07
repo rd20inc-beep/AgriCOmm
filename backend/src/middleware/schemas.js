@@ -787,6 +787,30 @@ const downloadDocumentPdf = Joi.object({
   filename: Joi.string().max(160).allow('', null),
 });
 
+// ===================== MILLING — BATCH PACKING =====================
+
+// Correct a packing run (PUT /milling/batches/:id/packing/:logId). Send only
+// what changes: an absent field keeps the run's value, null clears the master
+// bag / polythene. updateRun in millStore/packing.service reads exactly these.
+const updatePackingRun = Joi.object({
+  bag_item_id: Joi.number().integer().positive().optional(),
+  bags_count: Joi.number().greater(0).optional(),
+  notes: Joi.string().trim().max(500).allow(null, '').optional(),
+  master_bag_item_id: Joi.number().integer().positive().allow(null).optional(),
+  master_bags_count: Joi.number().min(0).allow(null).optional(),
+  poly_item_id: Joi.number().integer().positive().allow(null).optional(),
+  poly_count: Joi.number().min(0).allow(null).optional(),
+  poly_applies_to: Joi.string().valid('bag', 'master', 'both').allow(null, '').optional(),
+});
+
+// A batch's packing-spec override (PUT /milling/batches/:id/packing-spec).
+// pack_bag_size_kg null (with the rest null) clears the override.
+const batchPackSpec = Joi.object({
+  pack_bag_size_kg: Joi.number().greater(0).max(5000).allow(null).required(),
+  pack_bag_type: Joi.string().trim().max(100).allow(null, '').optional(),
+  pack_master_bag_size_kg: Joi.number().greater(0).max(5000).allow(null).optional(),
+});
+
 module.exports = {
   bundleDocuments,
   createExportOrder,
@@ -829,4 +853,6 @@ module.exports = {
   sendDocumentWhatsApp,
   sendDocumentEmail,
   downloadDocumentPdf,
+  updatePackingRun,
+  batchPackSpec,
 };

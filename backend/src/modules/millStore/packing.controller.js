@@ -15,7 +15,30 @@ const packingController = {
 
   async history(req, res, next) {
     try {
-      const result = await packingService.history(req.params.id);
+      const result = await packingService.history(req.params.id, req.user || null);
+      res.json({ success: true, data: result });
+    } catch (err) { next(err); }
+  },
+
+  // Body already validated by schemas.updatePackingRun (validate middleware).
+  async updateRun(req, res, next) {
+    try {
+      const result = await packingService.updateRun(req.params.id, req.params.logId, req.body, req.user);
+      res.json({ success: true, data: result });
+    } catch (err) { next(err); }
+  },
+
+  async deleteRun(req, res, next) {
+    try {
+      const result = await packingService.deleteRun(req.params.id, req.params.logId, req.user);
+      res.json({ success: true, data: result });
+    } catch (err) { next(err); }
+  },
+
+  // Body already validated by schemas.batchPackSpec.
+  async setPackSpec(req, res, next) {
+    try {
+      const result = await packingService.setPackSpec(req.params.id, req.body, req.user);
       res.json({ success: true, data: result });
     } catch (err) { next(err); }
   },

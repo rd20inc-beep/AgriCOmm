@@ -5,6 +5,7 @@ const { isKattaItem } = require('../../shared/packagingTypes');
 // movement/posting function in this file — scoping a write would corrupt stock.
 const { applyWarehouseScope } = require('../../utils/warehouseScope');
 const { isReservedSource } = require('../milling/batchLifecycle');
+const { resolveBatchPackSpec } = require('../milling/batchPackSpec');
 
 // Milling consumption may fall short of what the batch committed by at most
 // this much (scale rounding) before yield is refused.
@@ -3285,30 +3286,22 @@ const inventoryService = {
     let predSize = 0, predBags = -1;
     for (const [s, b] of bySize) if (b > predBags) { predBags = b; predSize = s; }
 
-    // Export-aware packing: a batch linked to an export order packs its FINISHED
-    // rice into the customer's spec instead of the predominant raw katta —
-    // retail → the order's bag_size_kg, jumbo → 1,200kg FIBC, container → bulk
-    // (no bags). Byproducts + non-export batches keep the predominant-size logic.
+    // Spec-aware packing: a batch with a packing spec packs its FINISHED rice
+    // into that bag instead of the predominant raw katta. The spec is the
+    // batch's own override (mig 318) when set, else the linked export order's
+    // line for the batch product — retail → its bag_size_kg, jumbo → 1,200kg
+    // FIBC, container → bulk (no bags). See milling/batchPackSpec.js.
+    // Byproducts + batches with no spec keep the predominant-size logic.
     let exportPack = null; // { packSize:number|null }
-    const batchRow = await trx('milling_batches').where('id', batchId).first('linked_export_order_id', 'product_id');
-    if (batchRow && batchRow.linked_export_order_id) {
-      const eo = await trx('export_orders').where('id', batchRow.linked_export_order_id).first('packing_type', 'bag_size_kg', 'order_no');
-      if (eo) {
-        const pt = eo.packing_type || 'retail';
-        // A multi-line order packs each line in its own bag: take the size of
-        // the line(s) for this batch's product when they agree on one, rather
-        // than the header's single size for every line.
-        let orderBagKg = num(eo.bag_size_kg);
-        const lines = await trx('export_order_items').where('order_id', batchRow.linked_export_order_id)
-          .select('product_id', 'bag_size_kg');
-        if (lines.length > 1) {
-          const mine = lines.filter((l) => batchRow.product_id && l.product_id === batchRow.product_id);
-          const sizes = [...new Set((mine.length ? mine : lines).map((l) => num(l.bag_size_kg)).filter((v) => v > 0))];
-          if (sizes.length === 1) orderBagKg = sizes[0];
-        }
-        const packSize = pt === 'container' ? null : (pt === 'jumbo' ? 1200 : (orderBagKg || null));
-        // Only override when we actually have a distinct target size (or container bulk).
-        if (pt === 'container' || packSize) exportPack = { packSize, orderNo: eo.order_no, packingType: pt };
+    const batchRow = await trx('milling_batches').where('id', batchId).first();
+    if (batchRow) {
+      const spec = await resolveBatchPackSpec(trx, batchRow);
+      // Only override when we actually have a distinct target size (or container bulk).
+      if (spec.active && (spec.packingType === 'container' || spec.bagSizeKg)) {
+        exportPack = {
+          packSize: spec.packingType === 'container' ? null : spec.bagSizeKg,
+          orderNo: spec.orderNo, packingType: spec.packingType, source: spec.source,
+        };
       }
     }
 
