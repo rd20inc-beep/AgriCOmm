@@ -180,7 +180,10 @@ export default function FinanceOverview() {
           tone="indigo"
           label="Cash Position"
           primary={fmtPKR(cash.bankBalancePkr || 0)}
-          secondary={cash.accountCount ? `${cash.accountCount} accounts` : 'All bank accounts'}
+          secondary={[
+            (cash.bankBalanceUsd || 0) !== 0 ? `+ ${fmtUSD(cash.bankBalanceUsd, { decimals: 0 })}` : null,
+            cash.accountCount ? `${cash.accountCount} accounts` : 'All bank accounts',
+          ].filter(Boolean).join(' · ')}
           hint={cash.bankBalancePkr > 0 ? 'Available' : 'Below zero'}
           hintBad={(cash.bankBalancePkr || 0) <= 0}
           onClick={() => navigate('/finance/cash')}
