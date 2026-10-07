@@ -206,6 +206,26 @@ const reportingService = {
       .select(db.raw('COALESCE(SUM(current_balance), 0) as total'))
       .first();
 
+    // Outstanding A/R in PKR (Reports ▸ Executive tile). PKR rows count their
+    // own outstanding; a foreign-currency row uses the PKR amount booked on it
+    // (base_amount_pkr) scaled by the share still outstanding. No live FX is
+    // applied — a foreign row with no booked PKR figure is counted in
+    // openReceivablesUnpriced instead of being guessed.
+    const arStats = await db('receivables')
+      .whereNotIn('status', ['Paid', 'Received', 'Written Off'])
+      .where('outstanding', '>', 0)
+      .select(
+        db.raw('COUNT(id) as open_count'),
+        db.raw(`COALESCE(SUM(CASE
+          WHEN COALESCE(currency, 'PKR') = 'PKR' THEN outstanding
+          WHEN base_amount_pkr > 0 AND expected_amount > 0 THEN base_amount_pkr * outstanding / expected_amount
+          ELSE 0 END), 0) as outstanding_pkr`),
+        db.raw(`COUNT(CASE
+          WHEN COALESCE(currency, 'PKR') <> 'PKR' AND NOT (base_amount_pkr > 0 AND expected_amount > 0) THEN 1
+          END) as unpriced_count`)
+      )
+      .first();
+
     return {
       totalOrders: parseInt(orderStats.total_orders, 10),
       totalRevenue,
@@ -220,6 +240,9 @@ const reportingService = {
       avgYield: parseFloat(parseFloat(avgYield.avg_yield || 0).toFixed(1)),
       workingCapitalLocked: parseFloat(outstandingRecv.total) + parseFloat(inventoryValue.total) - parseFloat(outstandingPay.total),
       cashPosition: parseFloat(cashPosition.total),
+      totalOutstandingPkr: parseFloat(parseFloat(arStats?.outstanding_pkr || 0).toFixed(2)),
+      openReceivables: parseInt(arStats?.open_count, 10) || 0,
+      openReceivablesUnpriced: parseInt(arStats?.unpriced_count, 10) || 0,
     };
   },
 
