@@ -602,12 +602,16 @@ const smartService = {
       wastageMT: residueMT(worstYield, worstBroken),
     };
 
-    // Get average selling price for this variety
+    // Average selling price for this variety, weighted by quantity. Each
+    // order's price_per_mt is already an average of its lines, so AVG() of it
+    // was an unweighted average of averages (a 5 MT order counted as much as a
+    // 500 MT one); Σ(qty × price) ÷ Σ qty is the real average.
     const priceData = await db('export_orders as eo')
       .join('products as p', 'eo.product_id', 'p.id')
       .where('p.name', 'ilike', `%${productVariety || ''}%`)
       .where('eo.price_per_mt', '>', 0)
-      .select(db.raw('AVG(eo.price_per_mt) as avg_price'))
+      .where('eo.qty_mt', '>', 0)
+      .select(db.raw('SUM(eo.qty_mt * eo.price_per_mt) / NULLIF(SUM(eo.qty_mt), 0) as avg_price'))
       .first();
 
     const avgSellPrice = priceData && parseFloat(priceData.avg_price) > 0
@@ -1014,7 +1018,26 @@ const smartService = {
       case 'invoice': {
         docData.invoiceNo = `INV-${order.order_no}`;
         docData.currency = order.currency || 'USD';
-        docData.pricePerMT = parseFloat(order.price_per_mt || 0);
+        // price_per_mt is contract value ÷ total qty — on a multi-line order an
+        // AVERAGE, nobody's rate. The lines carry the unit prices; the header
+        // figure is labelled for what it is, with the range.
+        {
+          const { priceSummary } = require('../exportOrders/orderLines');
+          const lines = await db('export_order_items').where({ order_id: order.id }).orderBy('line_no');
+          const ps = priceSummary(order, lines);
+          docData.pricePerMT = parseFloat(order.price_per_mt || 0);
+          docData.priceLabel = ps.label;
+          docData.priceMixed = ps.mixed;
+          docData.priceMin = ps.min;
+          docData.priceMax = ps.max;
+          docData.lines = lines.map((l) => ({
+            lineNo: l.line_no,
+            productName: l.product_name || null,
+            qtyMT: parseFloat(l.qty_mt) || 0,
+            pricePerMT: parseFloat(l.price_per_mt) || 0,
+            amount: parseFloat(l.line_total) || (parseFloat(l.qty_mt) || 0) * (parseFloat(l.price_per_mt) || 0),
+          }));
+        }
         docData.totalValue = parseFloat(order.contract_value || 0);
         docData.paymentTerms = `${order.advance_pct || 20}% advance, balance against documents`;
         if (customer) {
