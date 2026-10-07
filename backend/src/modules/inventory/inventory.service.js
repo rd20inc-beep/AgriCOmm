@@ -3290,12 +3290,23 @@ const inventoryService = {
     // retail → the order's bag_size_kg, jumbo → 1,200kg FIBC, container → bulk
     // (no bags). Byproducts + non-export batches keep the predominant-size logic.
     let exportPack = null; // { packSize:number|null }
-    const batchRow = await trx('milling_batches').where('id', batchId).first('linked_export_order_id');
+    const batchRow = await trx('milling_batches').where('id', batchId).first('linked_export_order_id', 'product_id');
     if (batchRow && batchRow.linked_export_order_id) {
       const eo = await trx('export_orders').where('id', batchRow.linked_export_order_id).first('packing_type', 'bag_size_kg', 'order_no');
       if (eo) {
         const pt = eo.packing_type || 'retail';
-        const packSize = pt === 'container' ? null : (pt === 'jumbo' ? 1200 : (num(eo.bag_size_kg) || null));
+        // A multi-line order packs each line in its own bag: take the size of
+        // the line(s) for this batch's product when they agree on one, rather
+        // than the header's single size for every line.
+        let orderBagKg = num(eo.bag_size_kg);
+        const lines = await trx('export_order_items').where('order_id', batchRow.linked_export_order_id)
+          .select('product_id', 'bag_size_kg');
+        if (lines.length > 1) {
+          const mine = lines.filter((l) => batchRow.product_id && l.product_id === batchRow.product_id);
+          const sizes = [...new Set((mine.length ? mine : lines).map((l) => num(l.bag_size_kg)).filter((v) => v > 0))];
+          if (sizes.length === 1) orderBagKg = sizes[0];
+        }
+        const packSize = pt === 'container' ? null : (pt === 'jumbo' ? 1200 : (orderBagKg || null));
         // Only override when we actually have a distinct target size (or container bulk).
         if (pt === 'container' || packSize) exportPack = { packSize, orderNo: eo.order_no, packingType: pt };
       }

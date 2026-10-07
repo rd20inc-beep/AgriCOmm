@@ -1206,14 +1206,16 @@ const accountingService = {
       : [];
     const exByNo = Object.fromEntries(exOrders.map((o) => [o.order_no, o]));
     const exById = Object.fromEntries(exOrders.map((o) => [o.id, o]));
+    // A multi-line order's header price is an AVERAGE of different line prices,
+    // so it is stated as one ("@ avg 1,270/MT (1,250–1,290)"), never as a rate.
+    const { linePricesByOrder, priceText } = require('../exportOrders/orderLines');
+    const exLinePrices = await linePricesByOrder(db, exOrders.map((o) => o.id));
     const orderSummary = (o) => {
       const qty = parseFloat(o.qty_mt) || 0;
-      const price = parseFloat(o.price_per_mt) || 0;
-      const perKg = price > 0 ? price / 1000 : 0;
       return [
         o.product_name,
         qty > 0 ? `${qty} ${o.quantity_unit || 'MT'}` : '',
-        price > 0 ? `@ ${price.toLocaleString()}/MT (${perKg.toLocaleString(undefined, { maximumFractionDigits: 3 })}/kg)` : '',
+        priceText(o, exLinePrices[o.id] || []),
         o.incoterm,
         o.total_bags ? `${o.total_bags} bags` : '',
       ].filter(Boolean).join(' · ');
@@ -1316,14 +1318,14 @@ const accountingService = {
       .orderBy('r.due_date')
       .select('r.recv_no', 'r.type', 'r.outstanding', 'r.expected_amount', 'r.received_amount',
         'r.currency', 'r.due_date', 'r.status', 'o.order_no', 'o.product_name', 'o.qty_mt',
-        'o.quantity_unit', 'o.price_per_mt', 'o.incoterm', 'o.total_bags');
+        'o.quantity_unit', 'o.price_per_mt', 'o.incoterm', 'o.total_bags', 'r.order_id');
+    const openLinePrices = await linePricesByOrder(db, openRecv.map((r) => r.order_id));
     const openItems = openRecv.map((r) => {
       const qty = parseFloat(r.qty_mt) || 0;
-      const price = parseFloat(r.price_per_mt) || 0;
       const detail = [
         r.product_name,
         qty > 0 ? `${qty} ${r.quantity_unit || 'MT'}` : '',
-        price > 0 ? `@ ${price.toLocaleString()}/MT (${(price / 1000).toLocaleString(undefined, { maximumFractionDigits: 3 })}/kg)` : '',
+        priceText(r, openLinePrices[r.order_id] || []),
         r.incoterm,
         r.total_bags ? `${r.total_bags} bags` : '',
       ].filter(Boolean).join(' · ') || null;
