@@ -3784,7 +3784,7 @@ const reportingService = {
                 if (periodStart) qb.where('created_at', '>=', periodStart);
                 if (periodEnd) qb.where('created_at', '<=', periodEnd);
               })
-              .sum('qty_kg as total_qty')
+              .sum('qty_mt as total_qty') // export orders stay MT (document boundary)
               .first();
             const totalQty = parseFloat(qtyData.total_qty) || 0;
             actual = totalQty > 0 ? parseFloat((parseFloat(costData.total_costs) / totalQty).toFixed(2)) : 0;
@@ -3808,7 +3808,7 @@ const reportingService = {
               })
               .sum('raw_qty_kg as total')
               .first();
-            const totalMT = parseFloat(millQty.total) || 0;
+            const totalMT = (parseFloat(millQty.total) || 0) / 1000; // raw_qty_kg is KG → MT
             actual = totalMT > 0 ? parseFloat((parseFloat(millCostData.total) / totalMT).toFixed(2)) : 0;
             break;
           }

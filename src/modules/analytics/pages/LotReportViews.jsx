@@ -304,9 +304,9 @@ function CombinedReport({ lots }) {
 // ─── Entry point ───────────────────────────────────────────────────────
 export function LotReportView({ lots = [], companyName, detail = 'full', generatedAt }) {
   const single = lots.length === 1;
-  const totalMt = lots.reduce((s, b) => s + (num(b.lot.qty) || 0), 0);
-  const availMt = lots.reduce((s, b) => s + (num(b.lot.available_qty) || 0), 0);
-  const reservedMt = lots.reduce((s, b) => s + (num(b.lot.reserved_qty) || 0), 0);
+  const totalKg = lots.reduce((s, b) => s + (num(b.lot.qty) || 0), 0);
+  const availKg = lots.reduce((s, b) => s + (num(b.lot.available_qty) || 0), 0);
+  const reservedKg = lots.reduce((s, b) => s + (num(b.lot.reserved_qty) || 0), 0);
   const totalValue = lots.reduce((s, b) => s + lotValuePkr(b.lot), 0);
 
   return (
@@ -325,8 +325,8 @@ export function LotReportView({ lots = [], companyName, detail = 'full', generat
             <SummaryRow items={[
               { label: 'Lot', value: lotName(lots[0].lot) },
               { label: 'Type', value: typeLabel(lots[0].lot.type) },
-              { label: 'Total', value: `${fmtKg(totalMt)} kg` },
-              { label: 'Available', value: `${fmtKg(availMt)} kg` },
+              { label: 'Total', value: `${fmtKg(totalKg)} kg` },
+              { label: 'Available', value: `${fmtKg(availKg)} kg` },
               { label: 'Value', value: fmtPkr(totalValue) },
             ]} />
           )
@@ -335,9 +335,9 @@ export function LotReportView({ lots = [], companyName, detail = 'full', generat
         <>
           <SummaryRow items={[
             { label: 'Lots', value: lots.length },
-            { label: 'Total', value: `${fmtKg(totalMt)} kg` },
-            { label: 'Available', value: `${fmtKg(availMt)} kg` },
-            { label: 'Reserved', value: `${fmtKg(reservedMt)} kg` },
+            { label: 'Total', value: `${fmtKg(totalKg)} kg` },
+            { label: 'Available', value: `${fmtKg(availKg)} kg` },
+            { label: 'Reserved', value: `${fmtKg(reservedKg)} kg` },
             { label: 'Value', value: fmtPkr(totalValue) },
           ]} />
 
@@ -349,7 +349,7 @@ export function LotReportView({ lots = [], companyName, detail = 'full', generat
                 lotName(lot), typeLabel(lot.type), lot.variety || lot.item_name || lot.product_name || '—',
                 lot.supplier_name || '—', fmtKg(lot.qty), fmtKg(lot.available_qty), fmtPkr(lot.rate_per_kg), fmtPkr(lotValuePkr(lot)),
               ])}
-              totalRow={['TOTAL', '', '', '', fmtKg(totalMt), fmtKg(availMt), '', fmtPkr(totalValue)]}
+              totalRow={['TOTAL', '', '', '', fmtKg(totalKg), fmtKg(availKg), '', fmtPkr(totalValue)]}
               empty="No lots selected."
             />
           </Section>
