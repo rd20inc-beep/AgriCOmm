@@ -55,10 +55,11 @@ describe('blendPurchaseIntoLot', () => {
     expect(out.newPaymentStatus).toBe('Partial');
   });
 
-  test('falls back to qty (MT) when net_weight_kg is absent', () => {
-    const lot = { qty: 5, total_bags: 100, landed_cost_total: 500000, purchase_amount: 500000, paid_amount: 0 };
+  test('falls back to qty (KG since mig 228) when net_weight_kg is absent', () => {
+    const lot = { qty: 5000, total_bags: 100, landed_cost_total: 500000, purchase_amount: 500000, paid_amount: 0 };
     const out = blendPurchaseIntoLot(lot, { netKg: 2500, bags: 50, landedTotal: 300000, purchaseAmount: 300000, paid: 0 });
-    expect(out.newNetKg).toBe(7500); // 5 MT -> 5000 kg + 2500
+    expect(out.newNetKg).toBe(7500); // 5000 kg + 2500 kg — qty is NOT re-multiplied by 1000
+    expect(out.newLandedPerKg).toBeCloseTo(106.6667, 4);
   });
 });
 
