@@ -14,6 +14,7 @@ import api from '../../../api/client';
 import { useExpenseVendors } from '../../../api/queries';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { favStar } from '../../../shared/utils/favorites';
+import { accountsForCurrency } from '../../../shared/utils/accountCurrency';
 import { CHEQUE_DATE_LABEL } from '../../../components/payments/paymentPayload';
 import { ChequeHint } from '../../../components/payments/PaymentFields';
 import { todayLocalISO, fmtPKR, fmtMoney, fmtDate, fmtDateTime } from '../../../shared/utils/format';
@@ -648,7 +649,8 @@ export default function Expenses() {
                   <select value={payForm.bank_account_id} onChange={e => setPayForm(p => ({ ...p, bank_account_id: e.target.value }))}
                     className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
                     <option value="">Select bank account…</option>
-                    {(bankAccountsList || []).map(b => (
+                    {/* Expenses are paid in PKR — a USD account cannot carry them. */}
+                    {accountsForCurrency(bankAccountsList, 'PKR').map(b => (
                       <option key={b.id} value={b.id}>{favStar(b)}{b.name} — {b.bankName || ''} ({fmtMoney(parseFloat(b.currentBalance) || 0, b.currency || 'PKR', { decimals: 2 })})</option>
                     ))}
                   </select>
@@ -874,7 +876,7 @@ function ExpenseForm({
               <select value={form.bank_account_id} onChange={e => setF('bank_account_id', e.target.value)}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none bg-white">
                 <option value="">Select bank</option>
-                {bankAccountsList.map(b => <option key={b.id} value={b.id}>{favStar(b)}{b.name} ({b.currency})</option>)}
+                {accountsForCurrency(bankAccountsList, 'PKR').map(b => <option key={b.id} value={b.id}>{favStar(b)}{b.name} ({b.currency})</option>)}
               </select>
             </div>
             <div>

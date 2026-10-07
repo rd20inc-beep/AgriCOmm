@@ -7,6 +7,7 @@ const accountingService = require('../accounting/accounting.service');
 const inventoryService = require('../../services/inventoryService');
 const { resolveCashAccountId } = require('../../shared/cashAccounts');
 const { nextDocNo } = require('../../utils/docNumber');
+const { assertAccountCurrency } = require('../../shared/accountCurrency');
 
 const num = (v) => parseFloat(v) || 0;
 const round2 = (v) => Math.round((num(v) + Number.EPSILON) * 100) / 100;
@@ -54,6 +55,8 @@ async function recomputeServiceLotStatus(trx, batchId) {
 // (mirrors the local-sale receipt helper so a delete can reverse it).
 async function postReceiptToAccount(trx, { accountId, amount, paymentId, reference, notes, date, userId }) {
   if (!accountId || !(amount > 0)) return;
+  // A PKR receipt: a non-PKR (e.g. USD) account must not be moved by a rupee figure.
+  assertAccountCurrency(await trx('bank_accounts').where({ id: accountId }).first(), 'PKR');
   await trx('bank_accounts').where({ id: accountId }).increment('current_balance', amount);
   const btNo = await nextDocNo(trx, { table: 'bank_transactions', column: 'transaction_no', prefix: 'BT-', pad: 4 });
   await trx('bank_transactions').insert({

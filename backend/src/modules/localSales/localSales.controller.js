@@ -13,6 +13,7 @@ const { isPartyMasked } = require('../../shared/partyMask');
 const { isMillOnlyPayer, assertMillEntity, assertMillReceipt } = require('../../shared/millPayer');
 const { inventoryAccountForLot } = require('./inventoryAccount');
 const { postLocalReceiptJournal } = require('./receiptJournal');
+const { assertAccountCurrency } = require('../../shared/accountCurrency');
 const { resolveLineCost, priceSaleLine, salePaymentStatus } = require('./salePricing');
 const { buildRateIndex, rateForLot } = require('../inventory/stockValuation');
 
@@ -56,6 +57,8 @@ async function unclearedChequesBySale(trx, saleIds) {
 // Bank sub-ledger row (linked to the payment so a delete can reverse it).
 async function postReceiptToAccount(trx, { accountId, amount, paymentId, reference, notes, date, userId }) {
   if (!accountId || !(amount > 0)) return;
+  // A PKR receipt: a non-PKR (e.g. USD) account must not be moved by a rupee figure.
+  assertAccountCurrency(await trx('bank_accounts').where({ id: accountId }).first(), 'PKR');
   await trx('bank_accounts').where({ id: accountId }).increment('current_balance', amount);
   // Collision-safe BT- number (MAX trailing-digit + 1) — the hand-rolled
   // orderBy-id-desc + parse could regenerate an existing number under concurrent

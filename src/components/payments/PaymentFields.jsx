@@ -4,6 +4,7 @@ import api from '../../api/client';
 import { favStar } from '../../shared/utils/favorites';
 import FieldError from '../../shared/components/FieldError';
 import { PAYMENT_METHODS, money, netCash, pickAccountForMethod, CHEQUE_DATE_LABEL, CHEQUE_HINT } from './paymentPayload';
+import { accountsForCurrency } from '../../shared/utils/accountCurrency';
 
 /**
  * The payment form body: amount, method, date, account, reference, and the
@@ -131,7 +132,7 @@ export function PaymentExtras({ form, set, gross, currency = 'PKR', addToast, er
  * when the method is a cheque — the due date the Due Dates dashboard reads.
  */
 export default function PaymentFields({
-  form, set, accounts = [], currency = 'PKR', addToast,
+  form, set, accounts: allAccounts = [], currency = 'PKR', addToast,
   amountLabel = 'Amount to pay *', max, extras = true, remarks = true, idPrefix = 'pay',
   // A screen that pays from a fixed account (Mill Cash, say) has nothing to
   // pick, so it says so rather than rendering an empty picker.
@@ -144,6 +145,9 @@ export default function PaymentFields({
   // (see paymentErrors in paymentPayload.js).
   errors = {},
 }) {
+  // A non-PKR (e.g. USD) account carries only its own currency; a PKR account
+  // takes any (the server refuses the rest).
+  const accounts = accountsForCurrency(allAccounts, currency);
   const accountOptions = filterAccountsByMethod
     ? accounts.filter((a) => (form.method === 'cash' ? a.type === 'cash' : a.type !== 'cash'))
     : accounts;

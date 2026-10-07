@@ -10,6 +10,7 @@ const { resolveShipmentField, resolveRequiredField } = require('./shipmentField'
 const { billableFreight, balanceExpectedFor, freightChanges } = require('./billableFreight');
 const debitNoteService = require('./debitNote.service');
 const { unwindOrderReceipts } = require('./unwindReceipts');
+const { assertAccountCurrency } = require('../../shared/accountCurrency');
 const notificationService = require('../../services/notificationService');
 // #9-scoping: per-user warehouse restriction, applied to stock READ paths only
 // (the dispatch/reservation engine is never scoped).
@@ -2378,6 +2379,9 @@ const exportOrderController = {
         // #6 — the receipt settles into the bank chosen for this payment; if none
         // was supplied it defaults to the order's bank account (preselected).
         const advBankId = bank_account_id || order.bank_account_id || null;
+        // A non-PKR account banks only its own currency (a PKR account takes the
+        // converted PKR figure). Refused before the payment row is written.
+        if (advBankId) assertAccountCurrency(await trx('bank_accounts').where({ id: advBankId }).first(), orderCurrency);
         await trx('payments').insert({
           payment_no: advPayNo,
           type: 'receipt',
@@ -2602,6 +2606,7 @@ const exportOrderController = {
         const balPayNo = await generatePaymentNo(trx, 'PAY');
         // #6 — default the receipt's bank to the order's when not overridden.
         const balBankId = bank_account_id || order.bank_account_id || null;
+        if (balBankId) assertAccountCurrency(await trx('bank_accounts').where({ id: balBankId }).first(), balanceCurrency);
         await trx('payments').insert({
           payment_no: balPayNo,
           type: 'receipt',
@@ -2630,11 +2635,18 @@ const exportOrderController = {
           });
         }
 
-        // Credit bank account balance if a bank account was selected
+        // Credit bank account balance if a bank account was selected — in the
+        // account's own currency, exactly as confirmAdvance does (and as
+        // unwindOrderReceipts reverses it): a foreign account matching the
+        // order currency gets the native amount, a PKR account the PKR figure
+        // stamped on this payment. It used to add the raw foreign amount to a
+        // PKR account.
         if (balBankId) {
+          const bank = await trx('bank_accounts').where({ id: balBankId }).first();
+          const credit = bank && bank.currency === balanceCurrency ? confirmedAmount : balancePkr;
           await trx('bank_accounts')
             .where({ id: balBankId })
-            .increment('current_balance', confirmedAmount);
+            .increment('current_balance', credit);
         }
 
         await workflowService.maybePromoteAfterBalance(trx, {

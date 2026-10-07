@@ -3,6 +3,7 @@ const { NotFoundError, ValidationError } = require('../../shared/errors');
 const { nextDocNo } = require('../../utils/docNumber');
 const accountingService = require('../accounting/accounting.service');
 const { resolveCashAccountId } = require('../../shared/cashAccounts');
+const { assertAccountCurrency } = require('../../shared/accountCurrency');
 const { normalizePaymentMethod } = require('../../shared/constants/paymentMethods');
 const { ledgerFailure, missingAccounts } = require('../../shared/ledgerFailure');
 const { pendingChequeTotal, round2, isCheque } = require('../finance/paymentSettlement');
@@ -259,6 +260,8 @@ const expensesService = {
         // (cash/bank_transfer/cheque/...); the UI shorthand 'bank' maps to
         // 'bank_transfer' so a bank-paid expense doesn't violate the CHECK.
         const payMethod = normalizePaymentMethod(payment_method);
+        // Expenses are paid in PKR — a non-PKR account cannot be moved by it.
+        if (resolvedAccountId) assertAccountCurrency(await trx('bank_accounts').where('id', resolvedAccountId).first(), 'PKR');
         await trx('payments').insert({
           payment_no: paymentNo,
           type: 'payment', amount: amountPkr, currency: 'PKR', fx_rate: 1, base_amount_pkr: amountPkr,
@@ -531,6 +534,8 @@ const expensesService = {
       // Cash with no explicit account → the paying entity's cash float (Mill Cash
       // for mill expenses, Office Petty Cash for Head Office / general).
       const acctId = bank_account_id || (payment_method === 'cash' ? await resolveCashAccountId(trx, { entity: expense.expense_type || 'general' }) : null);
+      // Expenses are paid in PKR — a non-PKR account cannot be moved by it.
+      if (acctId) assertAccountCurrency(await trx('bank_accounts').where('id', acctId).first(), 'PKR');
       const payMethod = normalizePaymentMethod(payment_method);
       // paid_amount moves with the payable: the Expenses tab and the Purchases
       // tab both read it, and it used to stay at 0 here while the payable said

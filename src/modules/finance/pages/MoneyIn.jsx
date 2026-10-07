@@ -15,6 +15,7 @@ import { toPkr } from '../utils/fx';
 import { bucketize, BUCKET_KEYS } from '../utils/aging';
 import { shortenRef } from '../utils/refs';
 import { favStar, isFavorite } from '../../../shared/utils/favorites';
+import { accountsForCurrency } from '../../../shared/utils/accountCurrency';
 import { localToday, defaultBankAccountId } from '../../localSales/utils/saleStatus';
 import FieldError from '../../../shared/components/FieldError';
 import { fmtMoney, fmtDate, fmtDateTime } from '../../../shared/utils/format';
@@ -147,6 +148,10 @@ export default function MoneyIn() {
   );
   const [recvForm, setRecvForm] = useState({ amount: '', bankAccountId: '', paymentMethod: 'bank_transfer', paymentDate: localToday(), chequeNo: '', dueDate: '', notes: '', collectionLocation: 'Mill' });
   const nonCashAccounts = bankAccounts.filter(a => a.type !== 'cash');
+  // The currency a receipt is taken in: local sales are PKR, receivables carry
+  // their own (USD by default). A non-PKR account is offered only for its own
+  // currency — the server refuses the rest.
+  const recvCurrencyOf = (row) => (row?.kind === 'local_sale' ? 'PKR' : (row?.currency || 'USD'));
   const [recvErrors, setRecvErrors] = useState({});
 
   function openDrawer(row) {
@@ -155,7 +160,7 @@ export default function MoneyIn() {
     setRecvForm({
       amount: String(parseFloat(row.outstanding) || 0),
       // Starts on the starred bank account (favorites.js).
-      bankAccountId: defaultBankAccountId(nonCashAccounts, isFavorite),
+      bankAccountId: defaultBankAccountId(accountsForCurrency(nonCashAccounts, recvCurrencyOf(row)), isFavorite),
       paymentMethod: 'bank_transfer',
       paymentDate: localToday(),
       chequeNo: '', dueDate: '',
@@ -380,7 +385,7 @@ export default function MoneyIn() {
                     onChange={e => {
                       const m = e.target.value;
                       const switchedKind = (m === 'cash') !== (recvForm.paymentMethod === 'cash');
-                      const pool = bankAccounts.filter(a => (a.type === 'cash') === (m === 'cash'));
+                      const pool = accountsForCurrency(bankAccounts.filter(a => (a.type === 'cash') === (m === 'cash')), recvCurrencyOf(drawer));
                       setRecvForm({ ...recvForm, paymentMethod: m, bankAccountId: switchedKind ? defaultBankAccountId(pool, isFavorite) : recvForm.bankAccountId });
                     }}
                     className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
@@ -432,7 +437,7 @@ export default function MoneyIn() {
                     <select required={!isUnclearedCheque(recvForm)} value={recvForm.bankAccountId} onChange={e => setRecvForm({ ...recvForm, bankAccountId: e.target.value })}
                       className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
                       <option value="">{recvForm.paymentMethod === 'cash' ? 'Select cash account...' : 'Select bank account...'}</option>
-                      {bankAccounts.filter(a => (a.type === 'cash') === (recvForm.paymentMethod === 'cash')).map(a => (
+                      {accountsForCurrency(bankAccounts.filter(a => (a.type === 'cash') === (recvForm.paymentMethod === 'cash')), recvCurrencyOf(drawer)).map(a => (
                         <option key={a.id} value={a.id}>
                           {favStar(a)}{a.name} — {a.bankName || ''} ({fmtMoney(parseFloat(a.currentBalance) || 0, a.currency || 'PKR', { decimals: 2 })})
                         </option>
