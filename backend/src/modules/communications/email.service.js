@@ -146,8 +146,10 @@ const emailService = {
         orderNo: order.order_no,
         customerName: order.customer_name,
         amount: order.advance_expected,
-        currency: 'USD',
-        totalValue: order.total_value,
+        // export_orders has no total_value column — the order total is
+        // contract_value — and an order is priced in its own currency.
+        currency: order.currency || 'USD',
+        totalValue: order.contract_value,
         advancePct: order.advance_pct,
       },
       linkedType: 'export_order',
@@ -174,8 +176,10 @@ const emailService = {
         orderNo: order.order_no,
         customerName: order.customer_name,
         amount: balanceDue,
-        currency: 'USD',
-        totalValue: order.total_value,
+        // export_orders has no total_value column — the order total is
+        // contract_value — and an order is priced in its own currency.
+        currency: order.currency || 'USD',
+        totalValue: order.contract_value,
       },
       linkedType: 'export_order',
       linkedId: orderId,
