@@ -2668,6 +2668,48 @@ const inventoryService = {
     return rawTotal;
   },
 
+  // Which of a batch's source lots (batch_source_lots) carry a purchase cost.
+  // A lot is priced when it has a landed cost or a purchase rate, or the batch
+  // snapshot (unit_cost_pkr) recorded one. Returns every source lot plus the
+  // unpriced subset, so callers can name the lots that still need a price.
+  async getSourceLotPricing(trx, batchId) {
+    const rows = await trx('batch_source_lots as bsl')
+      .leftJoin('inventory_lots as il', 'bsl.lot_id', 'il.id')
+      .where('bsl.batch_id', batchId)
+      .select('bsl.lot_id', 'bsl.unit_cost_pkr', 'il.lot_no', 'il.landed_cost_per_kg', 'il.rate_per_kg');
+    const isPriced = (r) => (parseFloat(r.landed_cost_per_kg) || 0) > 0
+      || (parseFloat(r.rate_per_kg) || 0) > 0
+      || (parseFloat(r.unit_cost_pkr) || 0) > 0;
+    const unpriced = rows.filter((r) => !isPriced(r));
+    return { sourceLots: rows, unpriced, pricedCount: rows.length - unpriced.length };
+  },
+
+  // #427: no milling yield until the raw rice is priced — for everyone — so no
+  // output lot is ever costed at Rs 0. Rules:
+  //   - A batch with source lots (Start Milling on a lot, a blend): EVERY source
+  //     lot must be priced. A blend with one unpriced lot is refused even though
+  //     the priced lots give the batch a non-zero total — that total would cost
+  //     the unpriced lot's rice at Rs 0.
+  //     The one exception: NO source lot is priced but the batch carries a raw
+  //     cost of its own (per-truck prices or the arrival price on the Quality
+  //     tab). That batch-level price covers the whole batch.
+  //   - A batch without source lots (direct truck intake): its raw cost (from
+  //     the trucks / arrival price) must be non-zero.
+  async assertBatchRawPriced(trx, batchId, rawCostTotal) {
+    const { sourceLots, unpriced, pricedCount } = await inventoryService.getSourceLotPricing(trx, batchId);
+    const hasBatchCost = (parseFloat(rawCostTotal) || 0) > 0.01;
+    if (sourceLots.length > 0 && unpriced.length > 0 && !(pricedCount === 0 && hasBatchCost)) {
+      const names = unpriced.map((r) => r.lot_no || `#${r.lot_id}`).join(', ');
+      const e = new Error(`Raw rice lot${unpriced.length > 1 ? 's' : ''} ${names} ${unpriced.length > 1 ? 'have' : 'has'} no purchase price. Set the price on ${unpriced.length > 1 ? 'each lot' : 'the lot'} (Edit Price) before recording yield — otherwise that rice would be costed at Rs 0.`);
+      e.status = 400; e.statusCode = 400; e.unpricedLots = unpriced.map((r) => ({ lot_id: r.lot_id, lot_no: r.lot_no }));
+      throw e;
+    }
+    if (!hasBatchCost) {
+      const e = new Error('This batch has no recorded raw-material cost. Set the source lot\'s purchase price before recording yield — otherwise the finished rice would be costed at Rs 0.');
+      e.status = 400; e.statusCode = 400; throw e;
+    }
+  },
+
   // Recompute a batch's raw_rice milling_cost from its vehicle arrivals:
   // Σ(weight_mt × the per-truck price in quality_json.price_per_mt). Trucks
   // without a price use the weighted-average price of the priced trucks. No-op
@@ -2676,6 +2718,13 @@ const inventoryService = {
   // Cascades into already-yielded output lots so their costing stays correct.
   // Shared by the batch add/remove-vehicle handlers and start-milling so an
   // intake-captured per-truck price flows into the batch raw cost on milling.
+  //
+  // Truck prices are only the price source when nothing better exists. A batch
+  // milled FROM A PRICED PURCHASE LOT (batch_source_lots) takes its raw cost
+  // from the lot — landed cost (freight, commission, bags) × the qty actually
+  // committed — which is also what the GL was posted at. Σ truck weight × truck
+  // price ignores both, so for such a batch the trucks only refresh yield %,
+  // and a raw cost an earlier truck recompute wrote is replaced by the lot cost.
   async recomputeRawRiceCostFromVehicles(trx, batchId, userId) {
     const vrows = await trx('milling_vehicle_arrivals').where({ batch_id: batchId });
     if (!vrows.length) return;
@@ -2695,6 +2744,22 @@ const inventoryService = {
         await trx('milling_batches').where({ id: batchId })
           .update({ yield_pct: Math.round((fin / totalW) * 1000) / 10, updated_at: trx.fn.now() });
       }
+    }
+    const { pricedCount } = await inventoryService.getSourceLotPricing(trx, batchId);
+    if (pricedCount > 0) {
+      // Priced source lot(s): the lot is the price source, never the trucks.
+      const truckCost = await trx('milling_costs')
+        .where({ batch_id: batchId, category: 'raw_rice' })
+        .where('notes', 'like', 'Auto from %vehicle(s)%')
+        .select('id');
+      if (truckCost.length) {
+        await trx('milling_costs').whereIn('id', truckCost.map((r) => r.id)).del();
+        await inventoryService.ensureRawCostFromSourceLots(trx, batchId);
+        const yieldedOut = await trx('inventory_lots')
+          .where({ batch_ref: `batch-${batchId}` }).whereIn('type', ['finished', 'byproduct']).first('id');
+        if (yieldedOut) await inventoryService.recomputeBatchOutputsAfterPriceChange(trx, batchId, { userId });
+      }
+      return;
     }
     if (pricedW <= 0) return; // no per-truck price anywhere — leave any existing cost alone
     const avg = pricedCost / pricedW; // per KG
@@ -3423,6 +3488,10 @@ const inventoryService = {
     // 3. Residual allocation from the batch's current state (same as fresh yield).
     await inventoryService.ensureRawCostFromSourceLots(trx, batchId);
     const rawCostTotal = p((await trx('milling_costs').where({ batch_id: batchId }).where('category', 'raw_rice').sum('amount as t').first())?.t);
+    // Same #427 guard as a fresh yield: no re-recorded output costed at Rs 0.
+    if (!batch.is_service_milling && finished + broken + bran + husk + sortex + powder + sweeping + choba > 0) {
+      await inventoryService.assertBatchRawPriced(trx, batchId, rawCostTotal);
+    }
     const processingCosts = p((await trx('milling_costs').where({ batch_id: batchId }).whereNotIn('category', ['raw_rice', 'packaging']).sum('amount as t').first())?.t);
     const packingCost = p((await trx('milling_costs').where({ batch_id: batchId, category: 'packaging' }).sum('amount as t').first())?.t);
     // The "Milling / Processing" category on its own, so the engine can let the
