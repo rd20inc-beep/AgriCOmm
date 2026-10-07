@@ -1062,8 +1062,8 @@ module.exports = {
           entity,
           warehouse_id: resolvedWarehouseId,
           product_id: resolvedProductId,
-          qty: netWeightKg, // legacy field in MT
-          unit: 'MT',
+          qty: netWeightKg, // KG since mig 228
+          unit: 'KG', // qty is KG; unit is a display label only (nothing converts on it)
           status: 'Available',
           // #7 back-link to the originating rice sample (when converted).
           sample_id: req.body.sample_id || null,
