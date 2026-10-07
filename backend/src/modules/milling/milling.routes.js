@@ -2541,8 +2541,11 @@ router.post('/payroll/runs/:id/approve', authorize('payroll', 'approve'),
     const run = await db('mill_payroll_runs').where('id', req.params.id).first();
     if (!run) return res.status(404).json({ success: false, message: 'Payroll run not found.' });
     if (run.status !== 'prepared') return res.status(409).json({ success: false, message: `Only a Prepared run can be approved (this run is ${run.status}).` });
-    const [updated] = await db('mill_payroll_runs').where('id', run.id)
+    // Conditional on the status still being 'prepared' so a racing void/approve
+    // can't be overwritten after the check above.
+    const [updated] = await db('mill_payroll_runs').where('id', run.id).where('status', 'prepared')
       .update({ status: 'approved', approved_by: req.user?.id || null, approved_at: db.fn.now(), updated_at: db.fn.now() }).returning('*');
+    if (!updated) return res.status(409).json({ success: false, message: 'This run changed while you were approving it — refresh and try again.' });
     return res.json({ success: true, data: { run: updated } });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
@@ -2635,16 +2638,27 @@ router.post('/payroll/runs/:id/settle', authorize('payroll', 'pay'),
     if (!run) return res.status(404).json({ success: false, message: 'Payroll run not found.' });
     if (run.status !== 'accrued') return res.status(409).json({ success: false, message: `Only an Accrued run can be settled (this run is ${run.status}).` });
 
-    // Settle the accrued payable (no-op if a zero-net run had no expense).
-    if (run.expense_id) {
-      await expensesService.markPaid(run.expense_id, {
-        bank_account_id: run.bank_account_id || null,
-        payment_method: run.pay_method || 'cash',
-        paid_date: run.pay_date,
-      }, req.user?.id);
-    }
-    const [updated] = await db('mill_payroll_runs').where('id', run.id)
-      .update({ status: 'paid', paid_by: req.user?.id || null, paid_at: db.fn.now(), updated_at: db.fn.now() }).returning('*');
+    // ONE locked transaction: the cash-out and the status flip commit together.
+    // They used to be separate, so a second concurrent settle could pass the
+    // 'accrued' check above and pay again, or a failed flip left the expense
+    // paid while the run still read 'accrued'.
+    const updated = await db.transaction(async (trx) => {
+      const locked = await trx('mill_payroll_runs').where('id', run.id).forUpdate().first();
+      if (!locked || locked.status !== 'accrued') {
+        const e = new Error(`Only an Accrued run can be settled (status ${locked?.status || 'missing'}).`); e.statusCode = 409; throw e;
+      }
+      // Settle the accrued payable (no-op if a zero-net run had no expense).
+      if (locked.expense_id) {
+        await expensesService.markPaid(locked.expense_id, {
+          bank_account_id: locked.bank_account_id || null,
+          payment_method: locked.pay_method || 'cash',
+          paid_date: locked.pay_date,
+        }, req.user?.id, trx);
+      }
+      const [r] = await trx('mill_payroll_runs').where('id', locked.id)
+        .update({ status: 'paid', paid_by: req.user?.id || null, paid_at: trx.fn.now(), updated_at: trx.fn.now() }).returning('*');
+      return r;
+    });
     return res.json({ success: true, data: { run: updated } });
   } catch (err) { return res.status(err.statusCode || 500).json({ success: false, message: err.message }); }
 });
@@ -2658,8 +2672,11 @@ router.post('/payroll/runs/:id/void', authorize('payroll', 'approve'),
     const run = await db('mill_payroll_runs').where('id', req.params.id).first();
     if (!run) return res.status(404).json({ success: false, message: 'Payroll run not found.' });
     if (!['prepared', 'approved'].includes(run.status)) return res.status(409).json({ success: false, message: `Only a Prepared/Approved run can be voided (this run is ${run.status}). Use delete to reverse a paid run.` });
-    const [updated] = await db('mill_payroll_runs').where('id', run.id)
-      .update({ status: 'voided', voided_by: req.user?.id || null, voided_at: db.fn.now(), void_reason: req.body?.reason || null, updated_at: db.fn.now() }).returning('*');
+    // Conditional on the status so a void can't land on a run that a concurrent
+    // Pay/Accrue has just moved on (that would hide posted money behind 'voided').
+    const [updated] = await db('mill_payroll_runs').where('id', run.id).whereIn('status', ['prepared', 'approved'])
+      .update({ status: 'voided', voided_by: req.user?.id || null, voided_at: db.fn.now(), void_reason: (typeof req.body?.reason === 'string' && req.body.reason.trim()) || null, updated_at: db.fn.now() }).returning('*');
+    if (!updated) return res.status(409).json({ success: false, message: 'This run changed while you were voiding it — refresh and try again.' });
     return res.json({ success: true, data: { run: updated } });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });

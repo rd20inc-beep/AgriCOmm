@@ -475,7 +475,9 @@ const expensesService = {
     });
   },
 
-  async markPaid(id, { amount, bank_account_id, payment_method, payment_reference, paid_date, due_date, notes }, userId) {
+  // `existingTrx` lets a caller (payroll settle) commit the payment atomically
+  // with its own writes, as create() already allows.
+  async markPaid(id, { amount, bank_account_id, payment_method, payment_reference, paid_date, due_date, notes }, userId, existingTrx = null) {
     // Joi parses paid_date into a Date; normalize to a YYYY-MM-DD string so the
     // GL journal's date math (createJournal does string ops) doesn't choke.
     const rawPayDate = paid_date || new Date().toISOString().split('T')[0];
@@ -483,7 +485,7 @@ const expensesService = {
     // A cheque — same-day included — is not money in the bank until it clears.
     const isPostDated = isCheque(payment_method);
 
-    return db.transaction(async (trx) => {
+    const run = async (trx) => {
       // The expense and its payable are read UNDER A LOCK inside the same
       // transaction that writes them. They used to be read before it opened,
       // so two installments submitted together both saw the same remaining
@@ -599,7 +601,8 @@ const expensesService = {
       await postExpenseSettlement(trx, { expense: { ...expense, amount_pkr: payAmt }, paymentNo, payDate, userId });
 
       return updated;
-    });
+    };
+    return existingTrx ? run(existingTrx) : db.transaction(run);
   },
 
   async getSummary() {
