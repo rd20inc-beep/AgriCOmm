@@ -790,6 +790,8 @@ COL export_quotation_items.hs_code:character varying:NULL
 COL export_quotation_items.id:integer:NOT NULL
 COL export_quotation_items.line_no:integer:NOT NULL
 COL export_quotation_items.line_total:numeric:NOT NULL
+COL export_quotation_items.master_bag_size_kg:numeric:NULL
+COL export_quotation_items.master_bag_type:character varying:NULL
 COL export_quotation_items.notes:text:NULL
 COL export_quotation_items.packing:character varying:NULL
 COL export_quotation_items.price_per_mt:numeric:NOT NULL
