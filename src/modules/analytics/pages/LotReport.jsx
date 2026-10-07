@@ -14,7 +14,8 @@ const TYPE_OPTIONS = [
 ];
 
 const typeLabel = (t) => (t === 'raw' ? 'Unprocessed Rice' : t === 'finished' ? 'Finished Rice' : t === 'byproduct' ? 'Byproduct' : t || '—');
-const fmtMt = (v) => fmtNum(parseFloat(v) || 0, 2);
+// inventory_lots.qty / available_qty are KG (mig 228); the picker columns are MT.
+const fmtMt = (kg) => fmtNum((parseFloat(kg) || 0) / 1000, 3);
 
 export default function LotReport() {
   const { addToast, companyProfileData } = useApp();

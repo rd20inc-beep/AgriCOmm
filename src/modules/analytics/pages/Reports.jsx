@@ -2548,18 +2548,18 @@ function InventoryTab({ millScoped, hideValue }) {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div className="space-y-2">
             <SectionHeader title="Valuation by type" subtitle="On-hand value at cost" />
-            <Table head={['Type', 'Lots', 'Qty (MT)', 'Value (PKR)']} align={['left', 'right', 'right', 'right']}
+            <Table head={['Type', 'Lots', 'Qty', 'Value (PKR)']} align={['left', 'right', 'right', 'right']}
               rows={valuation.byType.map(v => [
                 <span className="capitalize">{v.type || '—'}</span>, v.lotCount || 0,
-                fmtNum(parseFloat(v.totalQty) || 0), fmtPKR(v.totalValue),
+                kgAsMT(v.totalQty), fmtPKR(v.totalValue),
               ])} />
           </div>
           <div className="space-y-2">
             <SectionHeader title="Valuation by warehouse" subtitle="Where the value sits" />
-            <Table head={['Warehouse', 'Lots', 'Qty (MT)', 'Value (PKR)']} align={['left', 'right', 'right', 'right']}
+            <Table head={['Warehouse', 'Lots', 'Qty', 'Value (PKR)']} align={['left', 'right', 'right', 'right']}
               rows={(valuation.byWarehouse || []).map(v => [
                 v.warehouseName || '—', v.lotCount || 0,
-                fmtNum(parseFloat(v.totalQty) || 0), fmtPKR(v.totalValue),
+                kgAsMT(v.totalQty), fmtPKR(v.totalValue),
               ])} />
           </div>
         </div>
@@ -2567,10 +2567,10 @@ function InventoryTab({ millScoped, hideValue }) {
       {Array.isArray(turnover.byType) && turnover.byType.length > 0 && (
         <div className="space-y-2">
           <SectionHeader title="Stock turnover" subtitle={`How long stock sits before it moves — overall avg ${fmtNum(parseFloat(turnover.overallAvgDays) || 0, 0)} days`} />
-          <Table head={['Type', 'Lots', 'Qty (MT)', 'Avg days held']} align={['left', 'right', 'right', 'right']}
+          <Table head={['Type', 'Lots', 'Qty', 'Avg days held']} align={['left', 'right', 'right', 'right']}
             rows={turnover.byType.map(t => [
               <span className="capitalize">{t.type || '—'}</span>, t.lotCount || 0,
-              fmtNum(parseFloat(t.totalQty) || 0),
+              kgAsMT(t.totalQty),
               fmtNum(parseFloat(t.avgDays) || 0, 0),
             ])} />
         </div>
@@ -2602,7 +2602,7 @@ function InventoryTab({ millScoped, hideValue }) {
                 const base = [
                   <span className="font-medium text-blue-600">{l.lotNo || '—'}</span>,
                   l.itemName || '—', l.type || '—', l.warehouseName || '—',
-                  `${fmtNum(parseFloat(l.qty) || 0)} ${l.unit || 'MT'}`,
+                  kgAsMT(l.qty), // qty is KG (mig 228); legacy lots still carry unit 'MT'
                 ];
                 return hideValue ? [...base, daysCell] : [...base, fmtPKR(l.totalValue), daysCell];
               })}
