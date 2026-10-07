@@ -1943,7 +1943,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
               <div className="flex flex-wrap gap-2">
                 {pendingRuns.map(r => (
                   <div key={r.id} className="inline-flex items-center gap-2 bg-white border border-amber-200 rounded-lg px-2.5 py-1 text-xs">
-                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${RUN_STATUS_TONE[r.status] || 'bg-amber-100 text-amber-700'}`}>{String(r.status).replace('_', ' ')}</span>
+                    <StatusBadge status={r.status} />
                     <span className="text-gray-600">{r.employeeCount} emp · <span className="font-semibold tabular-nums">{PKR(r.netTotal)}</span> · {fmtDate(r.payDate)}</span>
                     <button onClick={() => setPayslipsRunId(r.id)} className="text-blue-700 font-medium hover:underline">{r.status === 'accrued' ? 'settle' : r.status === 'partially_paid' ? 'continue' : 'review'}</button>
                   </div>
@@ -5168,7 +5168,6 @@ function PayrollScheduleDrawer({ canManage, canPrepare, onClose, onRunNow, runNo
 
 // Run panel: review a run's payslip lines, see its approval status, and (for
 // Finance/Owner) Approve → Pay → or Void. Paid runs can be Undone (reversed).
-const RUN_STATUS_TONE = { prepared: 'bg-amber-100 text-amber-700', approved: 'bg-blue-100 text-blue-700', accrued: 'bg-violet-100 text-violet-700', partially_paid: 'bg-amber-100 text-amber-700', paid: 'bg-emerald-100 text-emerald-700', posted: 'bg-emerald-100 text-emerald-700', voided: 'bg-gray-100 text-gray-500' };
 function PayslipsPanel({ runId, companyProfile, canApprove, canPay, canDelete, addToast, onClose, onUndo, onApprove, onPay, onVoid, onAccrue, onSettle, deleteRunMut, approveRunMut, payRunMut, voidRunMut, accrueRunMut, settleRunMut }) {
   const { data, isLoading } = usePayrollRun(runId);
   const run = data?.run;
@@ -5216,7 +5215,7 @@ function PayslipsPanel({ runId, companyProfile, canApprove, canPay, canDelete, a
         <div className="space-y-3">
           {/* Status + workflow trail */}
           <div className="flex items-center justify-between flex-wrap gap-2">
-            <span className={`px-2 py-0.5 rounded-full text-xs font-semibold capitalize ${RUN_STATUS_TONE[st] || 'bg-gray-100 text-gray-600'}`}>{st}</span>
+            <StatusBadge status={st} />
             <div className="text-[11px] text-gray-400">
               {run.preparedByName ? `Prepared by ${run.preparedByName}` : ''}
               {run.approvedByName ? ` · Approved by ${run.approvedByName}` : ''}

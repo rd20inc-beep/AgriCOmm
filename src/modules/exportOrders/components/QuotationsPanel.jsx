@@ -8,16 +8,10 @@ import QuotationDrawer from './QuotationDrawer';
 import { quotationsApi } from '../api/services';
 import useConfirm from '../../../hooks/useConfirm';
 import { fmtNum, fmtDate } from '../../../shared/utils/format';
+import StatusBadge from '../../../shared/components/StatusBadge';
 
 const num = (v) => parseFloat(v) || 0;
 const STATUS_TABS = ['All', 'Draft', 'Sent', 'Accepted', 'Rejected', 'Expired'];
-const STATUS_STYLE = {
-  Draft: 'bg-gray-100 text-gray-600',
-  Sent: 'bg-blue-100 text-blue-700',
-  Accepted: 'bg-emerald-100 text-emerald-700',
-  Rejected: 'bg-rose-100 text-rose-700',
-  Expired: 'bg-amber-100 text-amber-800',
-};
 
 // Map a full quotation (snake_case, with items + joined customer fields) into the
 // camelCase `order` shape the ProformaInvoice component reads, so a quote reuses
@@ -203,7 +197,7 @@ export default function QuotationsPanel() {
                     <td data-label="Total" className="px-4 py-3 text-right font-medium text-gray-900">{r.currency} {fmtNum(num(r.total_amount), 2)}</td>
                     <td data-label="Valid Until" className="mob-hide px-4 py-3 text-center text-gray-600">{fmtDate(r.valid_until)}</td>
                     <td data-label="Status" className="px-4 py-3 text-center">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[r.status] || 'bg-gray-100 text-gray-600'}`}>{r.status}</span>
+                      <StatusBadge status={r.status} />
                       {converted && r.converted_order_no && (
                         <button onClick={() => navigate(`/export/${r.converted_order_no}`)} className="ml-1 inline-flex items-center text-emerald-600 hover:text-emerald-800" title={`Order ${r.converted_order_no}`} aria-label={`Open order ${r.converted_order_no}`}>
                           <ExternalLink className="w-3 h-3" />

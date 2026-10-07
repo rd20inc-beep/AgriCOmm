@@ -14,20 +14,6 @@ const num = (v) => parseFloat(v) || 0;
 const pkr = (v) => fmtPKR(num(v), { decimals: 2 });
 const kg = (v) => fmtKg(num(v));
 
-const LOT_STATUS_STYLE = {
-  'Received': 'bg-slate-100 text-slate-700',
-  'In Milling': 'bg-blue-100 text-blue-700',
-  'Milled': 'bg-indigo-100 text-indigo-700',
-  'In Stock': 'bg-amber-100 text-amber-800',
-  'Partially Dispatched': 'bg-amber-100 text-amber-800',
-  'Fully Dispatched': 'bg-emerald-100 text-emerald-700',
-  'Closed': 'bg-gray-200 text-gray-600',
-  'Draft': 'bg-gray-100 text-gray-500',
-};
-
-function Chip({ text, map }) {
-  return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold ${map[text] || 'bg-gray-100 text-gray-600'}`}>{text || '—'}</span>;
-}
 
 function Kpi({ icon: Icon, tone, label, value, sub }) {
   return (
@@ -178,7 +164,7 @@ export default function ServiceMilling() {
                   <td data-label="Finished" className="px-4 py-2.5 text-right font-medium text-indigo-700">{kg(finished)}</td>
                   <td data-label="By-product" className="mob-hide px-4 py-2.5 text-right text-gray-600">{byproduct > 0 ? kg(byproduct) : '—'}</td>
                   <td data-label="In Stock" className="px-4 py-2.5 text-right font-medium text-emerald-700">{kg(inStock)}</td>
-                  <td data-label="Lot Status" className="px-4 py-2.5"><Chip text={b.service_lot_status} map={LOT_STATUS_STYLE} /></td>
+                  <td data-label="Lot Status" className="px-4 py-2.5">{b.service_lot_status ? <StatusBadge status={b.service_lot_status} /> : '—'}</td>
                   {showCost && <td data-label="Service Amt" className="px-4 py-2.5 text-right font-medium text-gray-900">{pkr(b.service_total_amount)}</td>}
                   <td data-label="Billing" className="px-4 py-2.5">{b.billing_status ? <StatusBadge status={b.billing_status} /> : '—'}</td>
                   <td data-label="Actions" className="px-4 py-2.5 text-right whitespace-nowrap">
