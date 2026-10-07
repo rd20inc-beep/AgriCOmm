@@ -280,6 +280,32 @@ function normalizeItems(items) {
   });
 }
 
+// Scale an order's lines to a new total quantity (packed-weight re-pricing).
+// Every line moves by the same factor and keeps its own price; quantities are
+// rounded to the kg and the last line absorbs the rounding so they sum exactly.
+// A stored bag count follows the line's bag size. With no lines the header
+// price stands in, as before.
+function rescaleLinesToQty(lines, newQtyMt, headerPrice) {
+  const r3 = (n) => Math.round(n * 1000) / 1000;
+  const r2 = (n) => Math.round(n * 100) / 100;
+  const rows = Array.isArray(lines) ? lines : [];
+  const oldQty = rows.reduce((s, l) => s + (parseFloat(l.qty_mt) || 0), 0);
+  if (rows.length === 0 || !(oldQty > 0)) {
+    return { lines: [], contractValue: r2(newQtyMt * (parseFloat(headerPrice) || 0)) };
+  }
+  const factor = newQtyMt / oldQty;
+  let assigned = 0;
+  const out = rows.map((l, i) => {
+    const qty = i === rows.length - 1 ? r3(newQtyMt - assigned) : r3((parseFloat(l.qty_mt) || 0) * factor);
+    assigned = r3(assigned + qty);
+    const price = parseFloat(l.price_per_mt) || 0;
+    const bagKg = parseFloat(l.bag_size_kg) || 0;
+    const bagCount = l.bag_count != null && bagKg > 0 ? Math.round((qty * 1000) / bagKg) : (l.bag_count ?? null);
+    return { id: l.id, qty_mt: qty, price_per_mt: price, line_total: r2(qty * price), bag_count: bagCount };
+  });
+  return { lines: out, contractValue: r2(out.reduce((s, l) => s + l.line_total, 0)) };
+}
+
 // Aggregate normalized items into the summary fields stored on `export_orders`.
 // First item defines the order-level product/HS-code summary for backwards
 // compatibility with milling, document renderers, and dashboards.
@@ -3318,9 +3344,21 @@ const exportOrderController = {
             const e = new Error('Cannot re-price the order after money has been received or it has shipped/closed.'); e.statusCode = 400; throw e;
           }
           const newQtyMt = (parseFloat(row.packed_net_rice_kg) || 0) / 1000;
-          const price = parseFloat(order.price_per_mt) || 0;
           const advPct = parseFloat(order.advance_pct) || 0;
-          const contractValue = newQtyMt * price;
+          // The packed weight is recorded per order, so every line moves by the
+          // same factor and keeps its OWN price; the contract value is the sum
+          // of the lines. Re-pricing qty × the header price was wrong on a
+          // multi-line order — the header price is only the average — and it
+          // left the lines (which the documents print) at the old quantities.
+          const lines = await lockRow(trx('export_order_items').where({ order_id: id }).orderBy('line_no'));
+          const { lines: rescaled, contractValue } = rescaleLinesToQty(lines, newQtyMt, parseFloat(order.price_per_mt) || 0);
+          for (const ln of rescaled) {
+            // eslint-disable-next-line no-await-in-loop
+            await trx('export_order_items').where({ id: ln.id }).update({
+              qty_mt: ln.qty_mt, line_total: ln.line_total, bag_count: ln.bag_count, updated_at: trx.fn.now(),
+            });
+          }
+          const price = newQtyMt > 0 ? contractValue / newQtyMt : (parseFloat(order.price_per_mt) || 0);
           const advanceExpected = contractValue * (advPct / 100);
           // Re-pricing to the packed quantity re-rates the freight with it —
           // freight is quoted per MT, so fewer tons is less freight.
@@ -3330,7 +3368,7 @@ const exportOrderController = {
           const bookedRate = parseFloat(order.booked_fx_rate)
             || (parseFloat(order.contract_value) > 0 ? (parseFloat(order.contract_value_pkr_locked) || 0) / parseFloat(order.contract_value) : 0) || 280;
           await trx('export_orders').where({ id }).update({
-            qty_mt: newQtyMt, contract_value: contractValue, advance_expected: advanceExpected,
+            qty_mt: newQtyMt, price_per_mt: price, contract_value: contractValue, advance_expected: advanceExpected,
             balance_expected: balanceExpected, contract_value_pkr_locked: contractValue * bookedRate, updated_at: trx.fn.now(),
           });
           await trx('receivables').where({ order_id: id, type: 'Advance' })
@@ -3556,3 +3594,5 @@ const exportOrderController = {
 };
 
 module.exports = exportOrderController;
+// Exposed for tests.
+module.exports.rescaleLinesToQty = rescaleLinesToQty;
