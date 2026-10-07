@@ -165,4 +165,54 @@ describe('quotation convert', () => {
     await quotations.convert({ params: { id: '5' }, user: { id: 1 } }, second);
     expect(second.code).toBe(201);
   });
+
+  it("carries each line's own bag and master bag onto the order; the header borrows none", async () => {
+    seed();
+    mockState.tables.export_quotation_items = [
+      { quotation_id: 5, line_no: 1, product_id: 9, product_name: 'Super Basmati', qty_mt: 10, price_per_mt: 600,
+        bag_size_kg: '2.00', bag_type: 'BOPP', master_bag_size_kg: '10.00', master_bag_type: 'PP Master' },
+      { quotation_id: 5, line_no: 2, product_id: 9, product_name: 'Super Basmati', qty_mt: 10, price_per_mt: 600,
+        bag_size_kg: '5.00', bag_type: 'PP', master_bag_size_kg: '20.00', master_bag_type: 'Carton' },
+    ];
+    const res = resStub();
+    await quotations.convert({ params: { id: '5' }, user: { id: 1 } }, res);
+    expect(res.code).toBe(201);
+    const { body } = exportOrderController.create.mock.calls[0][0];
+    expect(body.items.map((it) => [it.bag_size_kg, it.bag_type, it.master_bag_size_kg, it.master_bag_type])).toEqual([
+      ['2.00', 'BOPP', '10.00', 'PP Master'],
+      ['5.00', 'PP', '20.00', 'Carton'],
+    ]);
+    // Several lines: line 1's bag is NOT lent to the order header.
+    expect(body.bag_size_kg).toBeUndefined();
+    expect(body.bag_type).toBeUndefined();
+    expect(body.master_bag_size_kg).toBeUndefined();
+    expect(body.master_bag_type).toBeUndefined();
+  });
+
+  it("a one-line quotation's order header mirrors its line's bag", async () => {
+    seed();
+    Object.assign(mockState.tables.export_quotation_items[0], {
+      bag_size_kg: '5.00', bag_type: 'PP', master_bag_size_kg: '20.00', master_bag_type: 'Carton',
+    });
+    const res = resStub();
+    await quotations.convert({ params: { id: '5' }, user: { id: 1 } }, res);
+    const { body } = exportOrderController.create.mock.calls[0][0];
+    expect(body.items[0]).toMatchObject({ bag_size_kg: '5.00', master_bag_size_kg: '20.00', master_bag_type: 'Carton' });
+    expect(body).toMatchObject({ bag_size_kg: '5.00', bag_type: 'PP', master_bag_size_kg: '20.00', master_bag_type: 'Carton' });
+  });
+});
+
+describe('quotation normalizeItems', () => {
+  it("keeps each line's master bag size and type", () => {
+    const rows = quotations.normalizeItems([
+      { product_id: '9', qty_mt: '10', price_per_mt: '600', bag_size_kg: '2', master_bag_size_kg: '10', master_bag_type: 'PP Master' },
+      { product_id: '9', qty_mt: '10', price_per_mt: '600', bag_size_kg: '5', master_bag_size_kg: 20, master_bag_type: 'Carton' },
+      { product_id: '9', qty_mt: '5', price_per_mt: '600', bag_size_kg: '50', master_bag_size_kg: '' },
+    ]);
+    expect(rows.map((r) => [r.bag_size_kg, r.master_bag_size_kg, r.master_bag_type])).toEqual([
+      [2, 10, 'PP Master'],
+      [5, 20, 'Carton'],
+      [50, null, null],
+    ]);
+  });
 });
