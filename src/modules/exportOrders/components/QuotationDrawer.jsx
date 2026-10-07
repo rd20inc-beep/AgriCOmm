@@ -10,11 +10,14 @@ import { millStoreApi } from '../../millStore/api/services';
 import { quotationsApi } from '../api/services';
 import { fmtNum, LOCALE } from '../../../shared/utils/format';
 import FieldError from '../../../shared/components/FieldError';
+import { requiresMasterBag, masterOptionsFor } from '../utils/createOrderForm';
 
 const nf4 = new Intl.NumberFormat(LOCALE, { maximumFractionDigits: 4 });
 
 const num = (v) => parseFloat(v) || 0;
-const emptyItem = () => ({ productId: '', productName: '', qtyMT: '', pricePerMT: '', hsCode: '', bagSizeKg: '', bagType: 'PP' });
+const emptyItem = () => ({ productId: '', productName: '', qtyMT: '', pricePerMT: '', hsCode: '', bagSizeKg: '', bagType: 'PP', masterBagSizeKg: '', masterBagType: '' });
+// A stored numeric ('20.00') as the select's option value ('20').
+const sizeStr = (v) => (v != null && v !== '' && parseFloat(v) > 0 ? String(parseFloat(v)) : '');
 // Below this retail-bag size (kg) a shipment needs an outer master bag + a
 // polythene liner per bag — same ≤15kg rule as the mill packing flow.
 const SMALL_BAG_KG = 15;
@@ -82,6 +85,7 @@ export default function QuotationDrawer({ open, onClose, quotation, onSaved }) {
             productId: it.product_id || '', productName: it.product_name || '',
             qtyMT: it.qty_mt != null ? String(it.qty_mt) : '', pricePerMT: it.price_per_mt != null ? String(it.price_per_mt) : '',
             hsCode: it.hs_code || '', bagSizeKg: it.bag_size_kg != null ? String(it.bag_size_kg) : '', bagType: it.bag_type || 'PP',
+            masterBagSizeKg: sizeStr(it.master_bag_size_kg), masterBagType: it.master_bag_type || '',
           }))
         : [emptyItem()]);
       const pl = Array.isArray(quotation.packing_lines) ? quotation.packing_lines : [];
@@ -106,6 +110,16 @@ export default function QuotationDrawer({ open, onClose, quotation, onSaved }) {
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
   const setItem = (i, k, v) => setItems((prev) => prev.map((it, idx) => (idx === i ? { ...it, [k]: v } : it)));
   const addItem = () => setItems((prev) => [...prev, emptyItem()]);
+  // A line's bag size decides whether it needs a master bag — same rule as the
+  // export-order form: a retail size defaults to a 20 kg master when none is
+  // set, any other size ships as-is (its master is cleared).
+  const setItemBagSize = (i, v) => setItems((prev) => prev.map((it, idx) => {
+    if (idx !== i) return it;
+    if (!requiresMasterBag(v)) return { ...it, bagSizeKg: v, masterBagSizeKg: '', masterBagType: '' };
+    const opts = masterOptionsFor(v).map(String);
+    const keep = it.masterBagSizeKg && opts.includes(String(it.masterBagSizeKg));
+    return { ...it, bagSizeKg: v, masterBagSizeKg: keep ? it.masterBagSizeKg : (opts.includes('20') ? '20' : (opts[0] || '')) };
+  }));
   const removeItem = (i) => setItems((prev) => (prev.length > 1 ? prev.filter((_, idx) => idx !== i) : prev));
 
   const onPickCustomer = (id) => {
@@ -145,7 +159,11 @@ export default function QuotationDrawer({ open, onClose, quotation, onSaved }) {
   const bagAmt = round2(bagCount * bagCost);
 
   const masterItem = findPkg(pack.masterItemId);
-  const masterSize = eff(pack.masterSize, num(masterItem?.capacity_kg) || 25) || 0;
+  // The lines' own master bag, when they all name the same one, is the
+  // costing's default master size.
+  const lineMasters = [...new Set(items.filter((it) => requiresMasterBag(it.bagSizeKg)).map((it) => num(it.masterBagSizeKg)).filter((m) => m > 0))];
+  const lineMasterDefault = lineMasters.length === 1 ? lineMasters[0] : 0;
+  const masterSize = eff(pack.masterSize, num(masterItem?.capacity_kg) || lineMasterDefault || 25) || 0;
   const masterCount = smallBag && masterSize > 0 && totalRiceKg > 0 ? Math.ceil(totalRiceKg / masterSize) : 0;
   const masterCost = eff(pack.masterUnitCost, num(masterItem?.avg_cost_per_unit));
   const masterAmt = round2(masterCount * masterCost);
@@ -194,6 +212,11 @@ export default function QuotationDrawer({ open, onClose, quotation, onSaved }) {
     if (!form.customerId) { setCustomerError('Select a customer'); addToast('Select a customer', 'error'); return; }
     const cleanItems = items.filter((it) => (it.productId || it.productName) && num(it.qtyMT) > 0);
     if (!cleanItems.length) { addToast('Add at least one line item with a quantity', 'error'); return; }
+    const missingMaster = cleanItems.find((it) => requiresMasterBag(it.bagSizeKg) && !it.masterBagSizeKg);
+    if (missingMaster) {
+      addToast(`Line ${items.indexOf(missingMaster) + 1}: select a master bag size for retail bags`, 'error');
+      return;
+    }
     setSaving(true);
     try {
       const payload = {
@@ -219,6 +242,9 @@ export default function QuotationDrawer({ open, onClose, quotation, onSaved }) {
           hs_code: it.hsCode || null,
           bag_size_kg: it.bagSizeKg || null,
           bag_type: it.bagType || null,
+          // Each line its own master bag — only when its bag size needs one.
+          master_bag_size_kg: requiresMasterBag(it.bagSizeKg) && it.masterBagSizeKg ? parseFloat(it.masterBagSizeKg) : null,
+          master_bag_type: requiresMasterBag(it.bagSizeKg) ? (it.masterBagType || null) : null,
         })),
       };
       let res;
@@ -320,6 +346,16 @@ export default function QuotationDrawer({ open, onClose, quotation, onSaved }) {
           <div className="space-y-2">
             {items.map((it, i) => (
               <div key={i} className="rounded-lg border border-gray-200 p-2.5 space-y-2">
+                {/* Two lines of the same rice read identically by name alone, so
+                    each line also says which it is (qty @ price) — as on the order form. */}
+                <div className="flex items-baseline justify-between gap-2 text-xs min-w-0">
+                  <span className="font-medium text-gray-700 truncate">
+                    <span className="text-gray-400">Line {i + 1} · </span>{it.productName || productsList.find((p) => String(p.id) === String(it.productId))?.name || 'Rice'}
+                  </span>
+                  {(num(it.qtyMT) > 0 || num(it.pricePerMT) > 0) && (
+                    <span className="text-gray-500 tabular-nums shrink-0">{fmtNum(num(it.qtyMT))} MT @ {fmt2(it.pricePerMT)}/MT</span>
+                  )}
+                </div>
                 <div className="grid grid-cols-12 gap-2 items-end">
                   <div className="col-span-5">
                     <label className="block text-[10px] text-gray-500 mb-0.5">Rice Type</label>
@@ -351,12 +387,32 @@ export default function QuotationDrawer({ open, onClose, quotation, onSaved }) {
                     <input value={it.hsCode} onChange={(e) => setItem(i, 'hsCode', e.target.value)} className={inputCls} placeholder="HS code (e.g. 1006.30.10)" />
                   </div>
                   <div className="col-span-3">
-                    <input type="number" min="0" step="0.001" value={it.bagSizeKg} onChange={(e) => setItem(i, 'bagSizeKg', e.target.value)} className={inputCls} placeholder="Bag kg" />
+                    <input type="number" min="0" step="0.001" value={it.bagSizeKg} onChange={(e) => setItemBagSize(i, e.target.value)} className={inputCls} placeholder="Bag kg" aria-label={`Line ${i + 1} bag size (kg)`} />
                   </div>
                   <div className="col-span-4">
                     <input value={it.bagType} onChange={(e) => setItem(i, 'bagType', e.target.value)} className={inputCls} placeholder="Bag type (PP)" />
                   </div>
                 </div>
+                {requiresMasterBag(it.bagSizeKg) && (
+                  <div className="grid grid-cols-12 gap-2 items-end">
+                    <div className="col-span-5">
+                      <label className="block text-[10px] text-gray-500 mb-0.5">Master Bag</label>
+                      <select value={it.masterBagSizeKg} onChange={(e) => setItem(i, 'masterBagSizeKg', e.target.value)} className={inputCls} aria-label={`Line ${i + 1} master bag`}>
+                        <option value="">Select…</option>
+                        {masterOptionsFor(it.bagSizeKg).map((s) => <option key={s} value={String(s)}>{s} KG</option>)}
+                      </select>
+                    </div>
+                    <div className="col-span-4">
+                      <label className="block text-[10px] text-gray-500 mb-0.5">Master type</label>
+                      <input value={it.masterBagType} onChange={(e) => setItem(i, 'masterBagType', e.target.value)} className={inputCls} placeholder="e.g. Carton" />
+                    </div>
+                    <div className="col-span-3 pb-1.5 text-[11px] text-gray-500">
+                      {num(it.masterBagSizeKg) > 0 && num(it.bagSizeKg) > 0
+                        ? <>{Math.floor(num(it.masterBagSizeKg) / num(it.bagSizeKg))} × {fmtN(it.bagSizeKg)} kg per master</>
+                        : 'Retail bags ship in a master bag'}
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -408,7 +464,7 @@ export default function QuotationDrawer({ open, onClose, quotation, onSaved }) {
                   </div>
                   <div className="col-span-3">
                     <label className="block text-[10px] text-gray-500 mb-0.5">Master size (kg)</label>
-                    <input type="number" min="0" step="0.001" value={pack.masterSize} onChange={(e) => setPackF('masterSize', e.target.value)} placeholder="25" className={inputCls} />
+                    <input type="number" min="0" step="0.001" value={pack.masterSize} onChange={(e) => setPackF('masterSize', e.target.value)} placeholder={lineMasterDefault ? String(lineMasterDefault) : '25'} className={inputCls} />
                   </div>
                   <div className="col-span-3">
                     <label className="block text-[10px] text-gray-500 mb-0.5">Unit cost / master ({form.currency})</label>
