@@ -23,7 +23,7 @@ import { DEFAULT_FX_RATE } from '../utils/fx';
 
 // Page-level fallback — real rate comes from finance overview / fx_rates
 // elsewhere. Kept aliased so the rest of the file reads unchanged.
-const PKR_RATE_DEFAULT_DEFAULT = DEFAULT_FX_RATE;
+const PKR_RATE_DEFAULT = DEFAULT_FX_RATE;
 
 // Exact, per-row currency (USD export costs, PKR mill costs).
 const formatAmount = (value, currency) => fmtMoney(value, currency || 'USD', { decimals: 2 });
