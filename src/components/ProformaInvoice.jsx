@@ -1,6 +1,7 @@
 import React, { useRef } from 'react';
 import { Printer, Download } from 'lucide-react';
 import { lineBagSpec, fmtSizeKg, packingTextFits } from '../modules/exportOrders/utils/orderLines';
+import { describePaymentTerms } from '../modules/exportOrders/utils/paymentTerms';
 
 /**
  * Number-to-words converter for currency amounts (USD).
@@ -57,9 +58,8 @@ export default function ProformaInvoice({ order, companyProfile, title, docNo, c
   const balanceAmount = Math.max(0, totalAmount - advanceAmount);
   // Payment terms are derived from the order — advance %, method (TT vs L/C) and
   // any custom payment_terms — so the clause changes with the deal, not hardcoded.
-  const customPaymentTerms = (order.paymentTerms || '').trim();
-  const isLC = /l\/?c|letter of credit/i.test(customPaymentTerms);
-  const payMethod = isLC ? 'an irrevocable Letter of Credit (L/C) at sight' : 'TT (Telegraphic Transfer)';
+  // Box and Payment clause both come from describePaymentTerms, so they agree.
+  const payment = describePaymentTerms(order);
   // Incoterm-driven responsibilities (freight / insurance) reused across the terms.
   const incoterm = (order.incoterm || 'FOB').toUpperCase();
   const portOfLoading = order.portOfLoading || 'Karachi, Pakistan';
@@ -322,8 +322,8 @@ export default function ProformaInvoice({ order, companyProfile, title, docNo, c
         <div className="mx-8 rounded-lg grid grid-cols-5 text-center text-white text-xs" style={{ backgroundColor: '#2d5a87' }}>
           <div className="py-3 px-2 border-r border-white border-opacity-20">
             <p className="uppercase tracking-wider font-medium opacity-80 mb-1">Payment Terms</p>
-            <p className="font-bold text-sm">{advancePct}% Advance</p>
-            <p className="opacity-80">{balancePct}% Against BL</p>
+            <p className="font-bold text-sm">{payment.boxTitle}</p>
+            <p className="opacity-80">{payment.boxSubtitle}</p>
           </div>
           <div className="py-3 px-2 border-r border-white border-opacity-20">
             <p className="uppercase tracking-wider font-medium opacity-80 mb-1">Loading Port</p>
@@ -417,7 +417,8 @@ export default function ProformaInvoice({ order, companyProfile, title, docNo, c
                 </tr>
               )}
 
-              {/* Advance Payment Row */}
+              {/* Advance Payment Row — only when an advance is asked for. */}
+              {advanceAmount > 0 && (
               <tr>
                 <td colSpan={6} />
                 <td
@@ -433,6 +434,7 @@ export default function ProformaInvoice({ order, companyProfile, title, docNo, c
                   {formatCurrency(advanceAmount)}
                 </td>
               </tr>
+              )}
             </tbody>
           </table>
 
@@ -522,11 +524,7 @@ export default function ProformaInvoice({ order, companyProfile, title, docNo, c
               </li>
               <li>
                 <span className="font-medium">Payment:</span>{' '}
-                {advancePct >= 100
-                  ? `100% advance payment via ${payMethod} before shipment.`
-                  : advancePct <= 0
-                    ? (customPaymentTerms || `100% against presentation of shipping documents on sight, unless otherwise agreed.`)
-                    : `${advancePct}% advance via ${payMethod} before production; balance ${balancePct}% against presentation of a scanned copy of the Bill of Lading.`}
+                {payment.clause}
                 {advancePct > 0 && (
                   <> Advance of <span className="font-bold" style={{ color: '#1e3a5f' }}>{formatCurrency(advanceAmount)}</span>
                   {balancePct > 0 && <> and balance of <span className="font-bold" style={{ color: '#1e3a5f' }}>{formatCurrency(balanceAmount)}</span></>}.</>
