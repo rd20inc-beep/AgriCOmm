@@ -156,6 +156,37 @@ export function usePackBatch() {
   });
 }
 
+// Correcting / deleting a packing run or the batch's packing spec moves store
+// stock, the batch cost and (after yield) the output lots' bag size.
+function invalidatePacking(qc) {
+  qc.invalidateQueries({ queryKey: ['mill-store'] });
+  qc.invalidateQueries({ queryKey: ['milling-batches'] });
+}
+
+export function useUpdatePackingRun() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ batchId, logId, data }) => millStoreApi.updatePackingRun(batchId, logId, data),
+    onSuccess: () => invalidatePacking(qc),
+  });
+}
+
+export function useDeletePackingRun() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ batchId, logId }) => millStoreApi.deletePackingRun(batchId, logId),
+    onSuccess: () => invalidatePacking(qc),
+  });
+}
+
+export function useSetBatchPackSpec() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ batchId, data }) => millStoreApi.setBatchPackSpec(batchId, data),
+    onSuccess: () => invalidatePacking(qc),
+  });
+}
+
 export function useCreatePurchase() {
   const qc = useQueryClient();
   return useMutation({
