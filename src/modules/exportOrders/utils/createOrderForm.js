@@ -178,6 +178,28 @@ export function buildCreateOrderPayload({ form, items, products = [], packingLin
       ? Math.floor(parseFloat(form.masterBagSizeKg) / (parseFloat(form.bagSizeKg) || 1)) : null;
   }
 
+  // Several lines: each carries its own bag (the per-item Bag Specification);
+  // the order-level bag fields on the form are hidden then and still hold
+  // whatever the single-item form last had. The header takes the lines' bag
+  // only when they all agree — otherwise none — and its bag count is the sum
+  // of each line's bags, not the whole quantity in one size.
+  // (A line left without a bag falls back to the order's, so then the order's
+  // stays as entered.)
+  if (needsBagWidget && items.length > 1 && items.every((it) => parseFloat(it.bagSizeKg) > 0)) {
+    const uniform = (vals) => {
+      const set = [...new Set(vals.map((v) => parseFloat(v) || 0))];
+      return set.length === 1 && set[0] > 0 ? set[0] : null;
+    };
+    const size = uniform(items.map((it) => it.bagSizeKg));
+    const master = uniform(items.map((it) => it.masterBagSizeKg));
+    payload.bag_size_kg = size;
+    payload.master_bag_size_kg = master;
+    payload.units_per_bag = size && master && requiresMasterBag(size) ? Math.floor(master / size) : null;
+    payload.total_bags = items.reduce(
+      (s, it) => s + Math.round((num(it.qtyMT) * 1000) / parseFloat(it.bagSizeKg)), 0,
+    ) || null;
+  }
+
   // Packing-type cascade: null the retail "kg-bag" info that jumbo/container
   // don't use, regardless of receiving mode, so the stored row stays clean.
   if (form.packingType === 'container') {

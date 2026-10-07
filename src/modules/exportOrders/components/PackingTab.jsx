@@ -6,6 +6,7 @@ const nf3 = new Intl.NumberFormat(LOCALE, { maximumFractionDigits: 3 });
 import api from '../../../api/client';
 import PackingWeightCard from './PackingWeightCard';
 import MaterialRequirementsCard from './MaterialRequirementsCard';
+import { packingSummary, fmtSizeKg, lineNeedsMaster } from '../utils/orderLines';
 
 const BAG_TYPE_OPTIONS = ['PP Bag', 'BOPP Bag', 'Jute Bag', 'Non-Woven', 'Paper Bag', 'Custom'];
 
@@ -14,6 +15,9 @@ const BAG_TYPE_OPTIONS = ['PP Bag', 'BOPP Bag', 'Jute Bag', 'Non-Woven', 'Paper 
 // so every field must be sent or it would be lost on save.
 function itemToPayload(it) {
   return {
+    // The line's id lets the server update it in place — stock reservations
+    // point at export_order_items.id, and a delete + re-insert orphans them.
+    id: it.id ?? null,
     product_id: it.productId ?? it.product_id ?? null,
     product_name: it.productName || it.product_name || null,
     qty_mt: it.qtyMT ?? it.qty_mt ?? 0,
@@ -52,11 +56,17 @@ export default function PackingTab({ order, onUpdated }) {
     masterWeightGm: order.masterBagWeightGm || order.master_bag_weight_gm || '',
   };
   const receivingMode = order.receivingMode || order.receiving_mode || '';
-  const totalBags = order.totalBags || order.total_bags || 0;
+  // Lines in different bags (a 2 KG line and a 5 KG line): the order-level card
+  // states "Mixed" and counts bags per line, rather than the header's single
+  // spec standing in for every line. One line (or one bag) reads as before.
+  const multiLine = (order.items || []).length > 1;
+  const packSum = packingSummary(order);
+  const mixedPack = multiLine && (packSum.sizes.length > 1 || packSum.masterSizes.length > 1);
+  const totalBags = mixedPack ? packSum.totalBags : (order.totalBags || order.total_bags || 0);
   // Master-bag math: how many master bags the order ships in (total kg ÷ master kg).
   const orderKg = (parseFloat(order.qtyMT ?? order.qty_mt) || 0) * 1000;
-  const masterKg = parseFloat(bagSpec.masterKg) || 0;
-  const masterBagCount = masterKg > 0 ? Math.ceil(orderKg / masterKg) : 0;
+  const masterKg = mixedPack ? 0 : (parseFloat(bagSpec.masterKg) || 0);
+  const masterBagCount = mixedPack ? packSum.masterBags : (masterKg > 0 ? Math.ceil(orderKg / masterKg) : 0);
   const retailPerMaster = (masterKg > 0 && parseFloat(bagSpec.sizeKg) > 0) ? Math.floor(masterKg / parseFloat(bagSpec.sizeKg)) : 0;
   // What the documents add to net to reach gross: every retail bag plus every
   // master bag it travels inside. Mirrors the server's totals.packagingTareKg
@@ -119,7 +129,26 @@ export default function PackingTab({ order, onUpdated }) {
   async function handleSave() {
     setSaving(true);
     try {
-      await api.put(`/api/export-orders/${order.id}`, form);
+      // A ONE-line order's line is the order: the bag edited here goes onto the
+      // line too, since the documents print the line. Several lines keep their
+      // own bags (edited per line below).
+      let body = form;
+      if (Array.isArray(form.items) && form.items.length === 1) {
+        body = {
+          ...form,
+          items: [{
+            ...form.items[0],
+            bag_size_kg: form.bag_size_kg === '' ? null : form.bag_size_kg,
+            master_bag_size_kg: form.master_bag_size_kg === '' ? null : form.master_bag_size_kg,
+            bag_type: form.bag_type || form.items[0].bag_type || null,
+            bag_quality: form.bag_quality || form.items[0].bag_quality || null,
+            bag_brand: form.bag_brand || form.items[0].bag_brand || null,
+            bag_color: form.bag_color || form.items[0].bag_color || null,
+            bag_printing: form.bag_printing || form.items[0].bag_printing || null,
+          }],
+        };
+      }
+      await api.put(`/api/export-orders/${order.id}`, body);
       setEditing(false);
       onUpdated?.();
     } catch (err) {
@@ -134,10 +163,11 @@ export default function PackingTab({ order, onUpdated }) {
   // follows the rice onto the documents.
   const actualPacking = order.actualPacking || order.actual_packing || [];
   const specSizeKg = parseFloat(bagSpec.sizeKg) || 0;
-  const packedDiffers = actualPacking.length > 0 && specSizeKg > 0
-    && !actualPacking.some((p) => Math.abs((parseFloat(p.bagSizeKg) || 0) - specSizeKg) < 0.01);
+  const specSizes = mixedPack ? packSum.sizes : (specSizeKg > 0 ? [specSizeKg] : []);
+  const packedDiffers = actualPacking.length > 0 && specSizes.length > 0
+    && !actualPacking.some((p) => specSizes.some((sz) => Math.abs((parseFloat(p.bagSizeKg) || 0) - sz) < 0.01));
 
-  const hasBagSpec = bagSpec.type || bagSpec.sizeKg || bagSpec.printing;
+  const hasBagSpec = bagSpec.type || bagSpec.sizeKg || bagSpec.printing || (mixedPack && packSum.label);
   const hasLines = packingLines.length > 0;
   const isEmpty = !hasBagSpec && !hasLines && !hasItemPacking && !receivingMode && !packingNotes;
 
@@ -174,7 +204,7 @@ export default function PackingTab({ order, onUpdated }) {
           </div>
           {packedDiffers && (
             <p className="text-[11px] text-amber-800 mt-2">
-              The order is specified at {specSizeKg}kg. The documents are built from the specification,
+              The order is specified at {specSizes.map((sz) => `${fmtSizeKg(sz)}kg`).join(' / ')}. The documents are built from the specification,
               so update it above if the mill&apos;s packing is what the buyer is getting.
             </p>
           )}
@@ -211,7 +241,10 @@ export default function PackingTab({ order, onUpdated }) {
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                     {bagSpec.type && <div><p className="text-xs text-gray-500">Bag Type</p><p className="text-sm font-medium">{bagSpec.type}</p></div>}
                     {bagSpec.quality && <div><p className="text-xs text-gray-500">Quality</p><p className="text-sm font-medium">{bagSpec.quality}</p></div>}
-                    {bagSpec.sizeKg && <div><p className="text-xs text-gray-500">Bag Size</p><p className="text-sm font-medium">{bagSpec.sizeKg} KG</p></div>}
+                    {mixedPack
+                      ? (packSum.label && <div><p className="text-xs text-gray-500">Bag Size</p><p className="text-sm font-medium">{packSum.label}</p></div>)
+                      : (bagSpec.sizeKg && <div><p className="text-xs text-gray-500">Bag Size</p><p className="text-sm font-medium">{bagSpec.sizeKg} KG</p></div>)}
+                    {mixedPack && packSum.masterLabel && <div><p className="text-xs text-gray-500">Master Bag</p><p className="text-sm font-medium">{packSum.masterLabel}</p></div>}
                     {masterKg > 0 && <div><p className="text-xs text-gray-500">Master Bag</p><p className="text-sm font-medium">{masterKg} KG{retailPerMaster > 0 ? ` (${retailPerMaster} × ${bagSpec.sizeKg}kg)` : ''}</p></div>}
                     {masterBagCount > 0 && <div><p className="text-xs text-gray-500">Master Bags</p><p className="text-sm font-medium text-amber-700">{fmtNum(masterBagCount)}</p></div>}
                     {bagSpec.weightGm && <div><p className="text-xs text-gray-500">Bag Weight (empty)</p><p className="text-sm font-medium">{bagSpec.weightGm} gm</p></div>}
@@ -251,8 +284,11 @@ export default function PackingTab({ order, onUpdated }) {
                             <td data-label="Product" className="px-4 py-2.5 text-sm font-medium text-gray-900">{b.product || '—'}</td>
                             <td data-label="Bag Type" className="px-4 py-2.5 text-sm">{b.type || '—'}</td>
                             <td data-label="Bag Size" className="px-4 py-2.5 text-sm whitespace-nowrap">
-                              {b.sizeKg ? `${b.sizeKg} KG` : '—'}
+                              {b.sizeKg ? `${b.sizeKg} KG` : <span className="text-amber-700" title="This line has no bag of its own — set it with Edit; the order's bag is not used for it">— not set</span>}
                               {b.masterKg ? <span className="text-amber-700"> · master {b.masterKg} KG</span> : ''}
+                              {!b.masterKg && lineNeedsMaster({ bagSizeKg: b.sizeKg, masterBagSizeKg: 0 }, order.packingType || order.packing_type || 'retail') && (
+                                <span className="text-amber-700" title="Retail bags this small ship inside a master bag"> · no master bag set</span>
+                              )}
                             </td>
                             <td data-label="Brand / Marking" className="px-4 py-2.5 text-sm text-gray-700">{b.brand || '—'}</td>
                           </tr>
@@ -350,12 +386,12 @@ export default function PackingTab({ order, onUpdated }) {
                 </select>
               </div>
               <div>
-                <label className="text-xs text-gray-500 block mb-1">Size (KG)</label>
+                <label className="text-xs text-gray-500 block mb-1">{multiLine ? 'Default size (KG) — lines below use their own' : 'Size (KG)'}</label>
                 <input type="number" value={form.bag_size_kg} onChange={e => setForm({ ...form, bag_size_kg: e.target.value })}
                   placeholder="25" className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
               </div>
               <div>
-                <label className="text-xs text-gray-500 block mb-1">Master Bag (KG)</label>
+                <label className="text-xs text-gray-500 block mb-1">{multiLine ? 'Default master (KG)' : 'Master Bag (KG)'}</label>
                 <input type="number" value={form.master_bag_size_kg} onChange={e => setForm({ ...form, master_bag_size_kg: e.target.value })}
                   placeholder="20" className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
               </div>
@@ -416,15 +452,30 @@ export default function PackingTab({ order, onUpdated }) {
           {/* Per-item Bag Type — operator picks the bag type for each P.I. line */}
           {form.items && form.items.length > 0 && (
             <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-3">
-              <h4 className="text-sm font-semibold text-gray-700">Per-item Bag Type</h4>
-              <p className="text-xs text-gray-500">Choose the bag type for each line. Size & master bag are shown for context.</p>
+              <h4 className="text-sm font-semibold text-gray-700">{form.items.length > 1 ? 'Per-item Bag' : 'Per-item Bag Type'}</h4>
+              <p className="text-xs text-gray-500">{form.items.length > 1
+                ? 'Each line ships in its own bag: set its bag size, master bag and bag type here.'
+                : 'Choose the bag type for each line. Size & master bag are shown for context.'}</p>
               <div className="space-y-2">
                 {form.items.map((it, i) => (
                   <div key={i} className="grid grid-cols-12 gap-2 items-center">
                     <div className="col-span-5 text-sm text-gray-800 truncate">{it.product_name || `Item ${i + 1}`}</div>
-                    <div className="col-span-3 text-xs text-gray-500">
-                      {it.bag_size_kg ? `${it.bag_size_kg} KG` : '—'}{it.master_bag_size_kg ? ` · master ${it.master_bag_size_kg} KG` : ''}
-                    </div>
+                    {form.items.length > 1 ? (
+                      // Each line's own bag and master bag — the order-level size
+                      // above does not apply to a multi-line order.
+                      <div className="col-span-3 flex gap-1">
+                        <input type="number" min="0" step="0.001" aria-label="Bag size (KG)" title="Bag size (KG)"
+                          value={it.bag_size_kg ?? ''} onChange={e => updateItem(i, 'bag_size_kg', e.target.value === '' ? null : e.target.value)}
+                          placeholder="Bag kg" className="w-1/2 border border-gray-200 rounded-lg px-2 py-1.5 text-sm" />
+                        <input type="number" min="0" step="0.01" aria-label="Master bag (KG)" title="Master bag (KG)"
+                          value={it.master_bag_size_kg ?? ''} onChange={e => updateItem(i, 'master_bag_size_kg', e.target.value === '' ? null : e.target.value)}
+                          placeholder="Master kg" className="w-1/2 border border-gray-200 rounded-lg px-2 py-1.5 text-sm" />
+                      </div>
+                    ) : (
+                      <div className="col-span-3 text-xs text-gray-500">
+                        {it.bag_size_kg ? `${it.bag_size_kg} KG` : '—'}{it.master_bag_size_kg ? ` · master ${it.master_bag_size_kg} KG` : ''}
+                      </div>
+                    )}
                     <div className="col-span-4">
                       <select value={it.bag_type || ''} onChange={e => updateItem(i, 'bag_type', e.target.value)}
                         className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm">

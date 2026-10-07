@@ -118,7 +118,8 @@ export default function ExportOrders() {
               { key: 'country', label: 'Country' },
               { key: 'productName', label: 'Product' },
               { key: 'qtyMT', label: 'Qty (MT)' },
-              { key: 'pricePerMT', label: 'Price/MT' },
+              // Contract value ÷ qty: an average when the lines are priced differently.
+              { key: 'pricePerMT', label: 'Avg Price/MT' },
               { key: 'contractValue', label: 'Contract Value' },
               { key: 'status', label: 'Status' },
               { key: 'createdAt', label: 'Created' },

@@ -6,12 +6,15 @@ import { financeApi } from '../../../api/services';
 import { useApp } from '../../../context/AppContext';
 import { Package, Plus, ExternalLink, Warehouse, Scale, FileText, Truck, ArrowRight } from 'lucide-react';
 import StockAllocationPicker from './StockAllocationPicker';
+import { packingSummary, fmtSizeKg } from '../utils/orderLines';
 import { todayLocalISO, fmtKg, fmtNum, fmtPKR, fmtUSD, fmtPct } from '../../../shared/utils/format';
 
 export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], onCreateMilling, onStartDocsPreparation, onLinkExternalPurchase, canCreateMilling, canStartDocs, onStockAllocated }) {
   // Supplier privacy: Export users see the Supplier Code, not the name/ledger link.
   const canSeeSupplierName = order?.canSeeSupplierName !== false;
   const { addToast } = useApp();
+  // Bag size and bag count from the LINES — each line can ship in its own bag.
+  const packing = packingSummary(order);
   const estimatedRawQty = Math.round(order.qtyMT / 0.75);
 
   // Split lots into finished (main product) and byproducts
@@ -109,10 +112,11 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
                 <span className="font-medium text-gray-900">{order.bagQuality}</span>
               </div>
             )}
-            {order.bagSizeKg && (
+            {packing.label && (
               <div className="flex justify-between text-sm">
                 <span className="text-gray-500">Bag Size</span>
-                <span className="font-medium text-gray-900">{order.bagSizeKg} KG</span>
+                {/* One size → "2 KG"; lines in different bags → "Mixed (2 kg, 5 kg)". */}
+                <span className="font-medium text-gray-900">{packing.mixed ? packing.label : `${fmtSizeKg(packing.sizes[0])} KG`}</span>
               </div>
             )}
             {order.bagWeightGm && (
@@ -141,7 +145,7 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
             )}
             <div className="flex justify-between text-sm">
               <span className="text-gray-500">Total Bags</span>
-              <span className="font-medium text-gray-900">{fmtNum(Math.round((order.qtyMT * 1000) / (order.bagSizeKg || 25)))}</span>
+              <span className="font-medium text-gray-900">{fmtNum(packing.totalBags || Math.round((order.qtyMT * 1000) / (order.bagSizeKg || 25)))}</span>
             </div>
           </div>
           {order.bagNotes && (
