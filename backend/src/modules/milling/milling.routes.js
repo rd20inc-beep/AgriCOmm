@@ -2809,6 +2809,32 @@ router.get(
   authorize('mill_store', 'view'),
   packingCtrl.history
 );
+// Correct / delete a packing run. The route needs the permission that records
+// packing; the service then applies the batch-status rule (packingGate):
+// Completed → Owner / Super Admin / Mill Manager only, Cancelled/Rejected →
+// nobody. The audit entry carries the run's before → after image.
+router.put(
+  '/batches/:id/packing/:logId',
+  authorize('mill_store', 'record_consumption'),
+  validate(schemas.updatePackingRun),
+  auditAction('edit_packing_run', 'mill_packing_log', (req) => req.params.logId),
+  packingCtrl.updateRun
+);
+router.delete(
+  '/batches/:id/packing/:logId',
+  authorize('mill_store', 'record_consumption'),
+  auditAction('delete_packing_run', 'mill_packing_log', (req) => req.params.logId),
+  packingCtrl.deleteRun
+);
+// The bag this batch packs into — set or clear the batch's own override of
+// the export order's line spec. Same status rule, with milling.edit.
+router.put(
+  '/batches/:id/packing-spec',
+  authorize('milling', 'edit'),
+  validate(schemas.batchPackSpec),
+  auditAction('set_packing_spec', 'milling_batch', (req) => req.params.id),
+  packingCtrl.setPackSpec
+);
 router.get('/batches/:id/katta', authorize('milling', 'view'), controller.getBatchKatta);
 
 // ── Packaging recorded on a batch, line by line (mig 307) ──

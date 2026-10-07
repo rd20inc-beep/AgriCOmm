@@ -1773,6 +1773,9 @@ COL milling_batches.moisture_loss_pct:numeric:NOT NULL
 COL milling_batches.notes:text:NULL
 COL milling_batches.operator_name:character varying:NULL
 COL milling_batches.ov_kg:numeric:NOT NULL
+COL milling_batches.pack_bag_size_kg:numeric:NULL
+COL milling_batches.pack_bag_type:character varying:NULL
+COL milling_batches.pack_master_bag_size_kg:numeric:NULL
 COL milling_batches.parent_batch_id:integer:NULL
 COL milling_batches.pass_number:integer:NOT NULL
 COL milling_batches.planned_finished_kg:numeric:NULL
