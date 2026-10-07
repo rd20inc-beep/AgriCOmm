@@ -4,6 +4,9 @@ import { useQuery } from '@tanstack/react-query';
 import { reportingApi } from '../../analytics/api/services';
 import { useAuth } from '../../../context/AuthContext';
 import { useApprovePayrollRun, usePayPayrollRun } from '../../../api/queries';
+import { useApp } from '../../../context/AppContext';
+import useConfirm from '../../../hooks/useConfirm';
+import StatusBadge from '../../../shared/components/StatusBadge';
 import {
   Landmark, ArrowDownLeft, ArrowUpRight,
   TrendingUp, TrendingDown, AlertTriangle,
@@ -698,6 +701,33 @@ function PayrollApprovalsCard({ fmtPKR }) {
   const canPay = hasPermission('payroll', 'pay');
   const approveMut = useApprovePayrollRun();
   const payMut = usePayPayrollRun();
+  const { addToast } = useApp();
+  const [confirm, confirmDialog] = useConfirm();
+  const errMsg = (e, fallback) => e?.response?.data?.message || e?.message || fallback;
+  async function approve(r) {
+    const ok = await confirm({
+      title: `Approve the ${r.period} payroll run?`,
+      consequence: `${r.employeeCount} employee(s), prepared by ${r.preparedBy || '—'}. No money moves yet — the run then waits for Pay.`,
+      amount: fmtPKR(r.net), confirmLabel: 'Approve', cancelLabel: 'Go back', danger: false,
+    });
+    if (!ok) return;
+    approveMut.mutate(r.id, {
+      onSuccess: () => addToast(`Payroll run for ${r.period} approved`, 'success'),
+      onError: (e) => addToast(errMsg(e, 'Could not approve the payroll run.'), 'error'),
+    });
+  }
+  async function pay(r) {
+    const ok = await confirm({
+      title: `Pay the ${r.period} payroll?`,
+      consequence: `Pays ${r.employeeCount} employee(s): posts the salary expense to Money Out and the GL, moves the cash/bank balance and recovers scheduled advances.`,
+      amount: fmtPKR(r.net), confirmLabel: 'Pay', cancelLabel: 'Go back',
+    });
+    if (!ok) return;
+    payMut.mutate(r.id, {
+      onSuccess: () => { addToast(`Payroll for ${r.period} paid — ${fmtPKR(r.net)}`, 'success'); refetch(); },
+      onError: (e) => addToast(errMsg(e, 'Could not pay the payroll run.'), 'error'),
+    });
+  }
   const { data, isError, refetch } = useQuery({
     queryKey: ['payroll-pending'],
     enabled: canApprove || canPay,
@@ -718,17 +748,18 @@ function PayrollApprovalsCard({ fmtPKR }) {
         {runs.map((r) => (
           <div key={r.id} className="flex items-center justify-between flex-wrap gap-2 rounded-lg border border-gray-100 bg-gray-50/50 px-3 py-2">
             <div className="text-sm text-gray-700">
-              <span className={`mr-2 px-1.5 py-0.5 rounded text-[10px] font-semibold capitalize ${r.status === 'approved' ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}`}>{r.status}</span>
+              <span className="mr-2"><StatusBadge status={r.status} /></span>
               <span className="font-medium">{r.period}</span> · {r.employeeCount} emp · <span className="tabular-nums font-semibold">{fmtPKR(r.net)}</span>
               <span className="text-[11px] text-gray-400"> · prepared by {r.preparedBy || '—'}</span>
             </div>
             <div className="flex gap-2">
-              {r.status === 'prepared' && canApprove && <button disabled={busy} onClick={() => approveMut.mutate(r.id)} className="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">Approve</button>}
-              {r.status === 'approved' && canPay && <button disabled={busy} onClick={() => payMut.mutate(r.id, { onSuccess: () => refetch() })} className="px-3 py-1.5 text-xs font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">Pay {fmtPKR(r.net)}</button>}
+              {r.status === 'prepared' && canApprove && <button disabled={busy} onClick={() => approve(r)} className="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">Approve</button>}
+              {r.status === 'approved' && canPay && <button disabled={busy} onClick={() => pay(r)} className="px-3 py-1.5 text-xs font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">Pay {fmtPKR(r.net)}</button>}
             </div>
           </div>
         ))}
       </div>
+      {confirmDialog}
       <p className="text-[11px] text-gray-400 mt-2">Approving has no financial effect; paying posts the salary expense to Money Out / GL and recovers scheduled advances. Prepare runs in Mill Finance → Payroll.</p>
     </div>
   );
