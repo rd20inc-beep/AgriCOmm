@@ -141,12 +141,13 @@ export default function MoneyOut() {
     .filter(p => !eqStatus(p.status, 'Paid') && (p.currency || 'PKR') !== 'PKR')
     .reduce((s, p) => s + (parseFloat(p.outstanding) || 0), 0);
 
-  // Category breakdown
+  // Category breakdown — same row filter and per-row PKR figure as the
+  // Total Outstanding tile above, so the chips add up to that tile.
   const byCategory = useMemo(() => {
     const cats = {};
-    payables.filter(p => p.status !== 'Paid').forEach(p => {
+    payables.filter(p => !eqStatus(p.status, 'Paid')).forEach(p => {
       const cat = p.category || 'Other';
-      cats[cat] = (cats[cat] || 0) + (parseFloat(p.outstanding) || 0);
+      cats[cat] = (cats[cat] || 0) + pkrOf(p, 'outstanding');
     });
     return Object.entries(cats).map(([name, value]) => ({ name, value: Math.round(value) })).sort((a, b) => b.value - a.value);
   }, [payables]);
