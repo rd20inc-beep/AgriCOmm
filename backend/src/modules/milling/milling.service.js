@@ -454,24 +454,29 @@ const millingService = {
       })
       .returning('*');
 
-    // Consume from original batch output — find applicable finished/byproduct lot
+    // Consume from original batch output — find applicable finished/byproduct lot.
+    // reprocessing_batches keeps MT (document boundary) but inventory_lots
+    // quantities and postMovement qty are KG (mig 228) — convert here.
+    const inputQtyKg = (parseFloat(inputQtyMT) || 0) * 1000;
     const lotType = (inputProduct || '').toLowerCase().includes('broken') ? 'byproduct' : 'finished';
-    const sourceLot = await trx('inventory_lots')
-      .where({ batch_ref: `batch-${originalBatchId}`, type: lotType, entity: 'mill' })
-      .where('available_qty', '>=', parseFloat(inputQtyMT))
-      .first();
+    const sourceLot = inputQtyKg > 0
+      ? await trx('inventory_lots')
+        .where({ batch_ref: `batch-${originalBatchId}`, type: lotType, entity: 'mill' })
+        .where('available_qty', '>=', inputQtyKg)
+        .first()
+      : null;
 
     let movement = null;
     if (sourceLot) {
       movement = await inventoryService.postMovement(trx, {
         movementType: inventoryService.MOVEMENT_TYPES.PRODUCTION_ISSUE,
         lotId: sourceLot.id,
-        qty: parseFloat(inputQtyMT),
+        qty: inputQtyKg,
         fromWarehouseId: sourceLot.warehouse_id,
         sourceEntity: 'mill',
         linkedRef: `reprocess-${reprocessNo}`,
         notes: `Consumed for reprocessing ${reprocessNo} from batch ${batch.batch_no}`,
-        costPerUnit: parseFloat(sourceLot.cost_per_unit) || 0,
+        costPerUnit: parseFloat(sourceLot.cost_per_unit) || 0, // lot cost is already per KG
         currency: sourceLot.cost_currency || 'PKR',
         batchId: originalBatchId,
         userId,
