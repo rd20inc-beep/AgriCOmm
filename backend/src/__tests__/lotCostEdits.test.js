@@ -156,9 +156,15 @@ const BASE = {
   purchase_date: '2026-10-01',
 };
 
-async function createLot(body = BASE) {
+// rbac.userHasPermission reads a pre-loaded permission set, so these users need
+// no users/role_permissions rows. COST_USER holds reports.view_cost (sees and
+// enters prices); BLIND_USER is a cost-blind role such as the Inventory Officer.
+const COST_USER = () => ({ id: 1, role_id: 50, _permissionsLoaded: true, permissions: new Set(['inventory.create', 'reports.view_cost']) });
+const BLIND_USER = () => ({ id: 2, role_id: 51, _permissionsLoaded: true, permissions: new Set(['inventory.create']) });
+
+async function createLot(body = BASE, user = COST_USER()) {
   const res = mockRes();
-  await controller.createPurchaseLot({ body, user: { id: 1 } }, res);
+  await controller.createPurchaseLot({ body, user }, res);
   return res;
 }
 const lotRow = () => mockTables.inventory_lots[0];
@@ -523,5 +529,67 @@ describe('renameLot honours the Mill Operator scope (PRC-P6)', () => {
     expect(mockTables.inventory_lots[0].lot_no).toBe('NEW-1');
     expect((await rename({ id: 9, role_id: 2 }, 'NEW-2')).statusCode).toBe(200);
     expect(mockTables.inventory_lots[0].lot_no).toBe('NEW-2');
+  });
+});
+
+// Cost visibility (owner decision 2026-10-05): the QC Analyst, Inventory
+// Officer and Documentation Officer never see or set a purchase price. They can
+// still record the rice — unpriced — and someone who sees cost prices it later.
+describe('purchase by a cost-blind user', () => {
+  test('price and every cost they send are ignored: an unpriced lot, no payable, no GL', async () => {
+    const res = await createLot({
+      ...BASE,
+      quality_json: { moisture: 12, price_per_kg: 100, price_per_mt: 100000 },
+      vehicles: [{ vehicle_no: 'TRK-1', weight_kg: 10000, quality_json: { moisture: 11, price_per_mt: 120000 } }],
+    }, BLIND_USER());
+    expect(res.statusCode).toBe(201);
+    const lot = lotRow();
+    expect(lot.rate_per_kg).toBe(0);
+    expect(lot.purchase_amount).toBe(0);
+    expect(lot.landed_cost_total).toBe(0);
+    expect(lot.landed_cost_per_kg).toBe(0);
+    expect(lot.quality_json).toEqual({ moisture: 12 });
+    expect(mockTables.milling_vehicle_arrivals[0].quality_json).toEqual({ moisture: 11 });
+    expect(mockTables.payables || []).toHaveLength(0);
+    expect(mockJournals).toHaveLength(0);
+  });
+
+  test('a user who can see cost still has to give a price', async () => {
+    const res = await createLot({ ...BASE, rate_input: null });
+    expect(res.statusCode).toBe(400);
+    expect(res.body.missing).toContain('price');
+  });
+
+  test('a moisture or broken reading of 0 is kept, not saved as blank', async () => {
+    await createLot({ ...BASE, moisture_pct: 0, broken_pct: 0 });
+    expect(lotRow().moisture_pct).toBe(0);
+    expect(lotRow().broken_pct).toBe(0);
+  });
+
+  test('Edit Price on the unpriced lot raises the rice payable and posts the GL delta', async () => {
+    await createLot({ ...BASE, transport_cost: 0, commission_per_bag: 0, labor_cost: 0, unloading_cost: 0, bag_cost_per_bag: 0 }, BLIND_USER());
+    expect(mockTables.payables || []).toHaveLength(0);
+    const res = mockRes();
+    await controller.setLotPurchaseRate({ params: { id: lotRow().id }, body: { rate_per_kg: 100 }, user: COST_USER() }, res);
+    expect(res.statusCode).toBe(200);
+    expect(lotRow().purchase_amount).toBe(1000000);
+    expect(lotRow().landed_cost_per_kg).toBe(100);
+    expect(payable('Raw Material')).toMatchObject({ supplier_id: SUPPLIER, original_amount: 1000000, outstanding: 1000000, status: 'Pending' });
+    expect(mockJournals).toHaveLength(1);
+    expect(sumLines(mockJournals[0], 11, 'debit')).toBe(1000000);
+    expect(sumLines(mockJournals[0], 22, 'credit')).toBe(1000000);
+  });
+});
+
+describe('Edit Price / Edit Costs request validation', () => {
+  test('setLotPurchaseRate keeps rate_per_kg and rejects a missing or zero rate', () => {
+    expect(schemas.setLotPurchaseRate.validate({ rate_per_kg: 110 }, { stripUnknown: true }).value).toEqual({ rate_per_kg: 110 });
+    expect(schemas.setLotPurchaseRate.validate({}).error).toBeTruthy();
+    expect(schemas.setLotPurchaseRate.validate({ rate_per_kg: 0 }).error).toBeTruthy();
+  });
+
+  test('createPurchaseLot accepts a purchase without a rate (cost-blind user)', () => {
+    const { error } = schemas.createPurchaseLot.validate({ ...BASE, rate_input: null });
+    expect(error).toBeUndefined();
   });
 });

@@ -2,6 +2,7 @@ const db = require('../../config/database');
 const { nextDocNo } = require('../../utils/docNumber');
 const { NotFoundError, ValidationError } = require('../../shared/errors');
 const inventoryService = require('../inventory/inventory.service');
+const { canSeeCost } = require('../../utils/costVisibility');
 
 // Sample Analysis & Purchase Shortlisting (#7). Samples carry a quality analysis
 // stored as jsonb using the SAME key set as inventory_lots.quality_json (plus a
@@ -169,15 +170,24 @@ async function setStatus(sampleId, status, notes, userId) {
 // Convert an approved sample into a purchase lot (reuses createPurchaseLot so the
 // lot gets its payable / ledger / GL exactly like a normal purchase).
 //
-// The sample is CLAIMED first: a transaction locks its row (SELECT ... FOR NO
-// KEY UPDATE — not FOR UPDATE, which would block the new lot's own
-// inventory_lots.sample_id foreign-key check and deadlock) and holds the lock while the lot is created, then marks it Converted and
-// commits. A second convert of the same sample waits on that lock and, once it
-// gets it, re-reads the status and finds Converted — so two clicks (or two
-// users) can no longer make two lots. ('Converting' would be a cleaner claim
-// marker, but the status CHECK constraint doesn't allow it.) If creating the
-// lot fails the transaction rolls back and the lock is released untouched.
-async function convertToLot(sampleId, overrides, userId) {
+// ONE transaction: the sample row is locked (SELECT ... FOR NO KEY UPDATE), the
+// lot is created inside the same transaction (createPurchaseLot runs as a
+// savepoint of it via req.outerTrx) and the sample is marked Converted before
+// it commits. A second convert of the same sample waits on the lock and then
+// finds it Converted, so two clicks (or two users) can't make two lots; and if
+// marking the sample fails the lot is rolled back with it — a lot can no longer
+// exist without its sample saying so. FOR NO KEY UPDATE (not FOR UPDATE) keeps
+// the new lot's inventory_lots.sample_id foreign-key check from conflicting
+// with the lock.
+//
+// `user` is the caller (req.user) so the purchase applies the same cost
+// visibility as the New Rice Purchase drawer: a cost-blind user converts
+// without a rate (the lot is created unpriced and #427 blocks its yield until
+// it is priced); anyone who can see cost must give a positive rate.
+async function convertToLot(sampleId, overrides, userOrId) {
+  const user = userOrId && typeof userOrId === 'object' ? userOrId : { id: userOrId };
+  const userId = user.id || null;
+  const mayPrice = await canSeeCost({ user });
   return db.transaction(async (trx) => {
     const sample = await trx('rice_samples').where({ id: sampleId }).forNoKeyUpdate().first();
     if (!sample) throw new NotFoundError('Sample not found.');
@@ -193,7 +203,7 @@ async function convertToLot(sampleId, overrides, userId) {
     const qtyKg = num(o.qty_kg) || num(sample.offered_qty_kg);
     const rateKg = num(o.rate_per_kg) || num(sample.offered_rate_per_kg);
     if (!(qtyKg > 0)) throw new ValidationError('A positive quantity is required.');
-    if (!(rateKg > 0)) throw new ValidationError('A positive rate is required.');
+    if (mayPrice && !(rateKg > 0)) throw new ValidationError('A positive rate is required.');
 
     // Carry the analysis forward into the lot's quality_json (pass-through subset).
     const analysis = sample.final_analysis_json || sample.analysis_json || {};
@@ -213,7 +223,7 @@ async function convertToLot(sampleId, overrides, userId) {
       quality_json: Object.keys(qualityJson).length ? qualityJson : null,
       quality_notes: sample.remarks || null,
       quantity_input: qtyKg, quantity_unit: 'kg',
-      rate_input: rateKg, rate_unit: 'kg',
+      rate_input: mayPrice ? rateKg : 0, rate_unit: 'kg',
       bag_weight_kg: num(sample.bag_weight_kg) || 50,
       total_bags: sample.bags || null,
       purchase_date: o.purchase_date || new Date().toISOString().slice(0, 10),
@@ -221,11 +231,11 @@ async function convertToLot(sampleId, overrides, userId) {
       notes: `Converted from sample ${sample.sample_no}`,
     };
 
-    // Invoke the existing purchase-lot creator with a synthetic req/res. It runs
-    // its own transaction (on another connection); this one only holds the
-    // sample's row lock until the lot exists and the sample says so.
+    // Invoke the existing purchase-lot creator with a synthetic req/res, inside
+    // THIS transaction (req.outerTrx) so the lot and the Converted mark commit
+    // or roll back together.
     const lotController = require('../inventory/lotInventory.controller');
-    const innerReq = { body: payload, user: { id: userId } };
+    const innerReq = { body: payload, user: { ...user }, outerTrx: trx };
     const cap = { _status: 200, status(c) { this._status = c; return this; }, json(b) { this._body = b; return this; } };
     await lotController.createPurchaseLot(innerReq, cap);
     if (cap._status >= 400) {

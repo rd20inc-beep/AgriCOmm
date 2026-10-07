@@ -464,7 +464,33 @@ async function postOpeningStockDelta(trx, { lot, delta, userId }) {
 // opening stock; otherwise the edit is REFUSED (409) — moving stock value with
 // no journal is what the old glDelta = 0 branch silently did.
 async function applyRicePurchaseChange(trx, lot, { newPurchaseAmount, kg, lotFields = {}, description, narration, userId }) {
-  const pay = await findRicePayable(trx, lot);
+  let pay = await findRicePayable(trx, lot);
+  // A supplier purchase recorded WITHOUT a price (by a cost-blind user) has no
+  // rice payable yet: createPurchaseLot raises none for a Rs 0 rice line. The
+  // first price set on it raises that payable — at 0 here, so the signed delta
+  // below moves it, the lot and the GL (Dr 1210 / Cr 2010 supplier) together,
+  // exactly as for any other re-price.
+  if (!pay && lot.supplier_id && lot.type === 'raw' && (parseFloat(lot.purchase_amount) || 0) <= 0.01
+      && (parseFloat(newPurchaseAmount) || 0) > 0.01 && !(await isOpeningStockLot(trx, lot))) {
+    const [created] = await trx('payables').insert({
+      pay_no: await generatePayNo(trx),
+      entity: 'mill',
+      payable_type: 'vendor',
+      category: 'Raw Material',
+      supplier_id: lot.supplier_id,
+      linked_ref: lot.lot_no,
+      source_table: null,
+      source_id: lot.id,
+      original_amount: 0,
+      paid_amount: 0,
+      outstanding: 0,
+      due_date: addDays(lot.purchase_date, 30),
+      status: 'Pending',
+      currency: 'PKR',
+      notes: `Rice purchase — purchase lot ${lot.lot_no} (priced after receipt)`,
+    }).returning('*');
+    pay = created;
+  }
   const isOpeningStock = !pay && await isOpeningStockLot(trx, lot);
   const r = repriceLotPurchase(lot, newPurchaseAmount, kg, pay, { isOpeningStock });
   if (!pay && !isOpeningStock && Math.abs(r.purchaseDelta) > 0.01) {
@@ -856,8 +882,36 @@ module.exports = {
     }
   },
 
+  // req.outerTrx (internal callers only, e.g. sample → lot convert): create the
+  // lot inside the caller's transaction (as a savepoint, so a lot-number
+  // collision can still retry) instead of a transaction of its own.
   async createPurchaseLot(req, res) {
     try {
+      // Cost visibility (owner decision 2026-10-05): a cost-blind user (QC
+      // Analyst, Inventory Officer, Documentation Officer) records the rice
+      // without its money. Any price or cost they send is ignored — the same
+      // rule as batch creation drops truck prices from them — and the lot is
+      // created unpriced: no rice payable and no GL (purchaseAmount is 0), and
+      // #427 blocks its milling yield until someone with cost visibility sets
+      // the price through Edit Price, which raises the payable and the GL then.
+      const mayPrice = await canSeeCost(req);
+      if (!mayPrice) {
+        const MONEY = ['rate_input', 'commission_per_bag', 'commission_total', 'transport_cost',
+          'labor_cost', 'unloading_cost', 'packing_cost', 'other_cost', 'bag_cost_per_bag'];
+        const stripPrice = (q) => {
+          if (!q || typeof q !== 'object') return q;
+          const c = { ...q };
+          delete c.price_per_kg; delete c.price_per_mt;
+          return c;
+        };
+        req.body = { ...req.body, quality_json: stripPrice(req.body.quality_json), quality: stripPrice(req.body.quality) };
+        for (const k of MONEY) req.body[k] = 0;
+        if (Array.isArray(req.body.vehicles)) {
+          req.body.vehicles = req.body.vehicles.map((v) => (v && typeof v === 'object'
+            ? { ...v, quality_json: stripPrice(v.quality_json), quality: stripPrice(v.quality) }
+            : v));
+        }
+      }
       const {
         item_name, type = 'raw', entity = 'mill', warehouse_id, product_id,
         lot_no: customLotNo,
@@ -889,7 +943,7 @@ module.exports = {
       const missing = [];
       if (!item_name)               missing.push('rice type');
       if (quantity_input == null || quantity_input === '' || !(parseFloat(quantity_input) > 0)) missing.push('weight');
-      if (rate_input == null || rate_input === '' || !(parseFloat(rate_input) > 0))             missing.push('price');
+      if (mayPrice && (rate_input == null || rate_input === '' || !(parseFloat(rate_input) > 0))) missing.push('price');
       // Rice purchase lots must record who they came from — otherwise the
       // ledger and supplier payables can't reconcile.
       if (type === 'raw' && entity === 'mill' && !supplier_id) missing.push('supplier');
@@ -1075,8 +1129,9 @@ module.exports = {
           // Quality
           variety: variety || null,
           grade: grade || null,
-          moisture_pct: moisture_pct || null,
-          broken_pct: broken_pct || null,
+          // A 0 reading is a real value (bone-dry / no broken) — keep it.
+          moisture_pct: moisture_pct != null && moisture_pct !== '' ? moisture_pct : null,
+          broken_pct: broken_pct != null && broken_pct !== '' ? broken_pct : null,
           sortex_status: sortex_status || null,
           whiteness: whiteness || null,
           quality_notes: quality_notes || null,
@@ -1102,7 +1157,7 @@ module.exports = {
           ordered_net_weight_kg: orderedKg,    // what was ordered (for the short/over variance)
           // Pricing
           rate_input_unit: rate_unit,
-          rate_input_value: parseFloat(rate_input),
+          rate_input_value: parseFloat(rate_input) || 0,
           rate_per_kg: ratePerKg,
           purchase_amount: purchaseAmount,
           // Costs
@@ -1147,13 +1202,15 @@ module.exports = {
           quantity_kg: netWeightKg,
           quantity_bags: totalBags,
           rate_input_unit: rate_unit,
-          rate_input_value: parseFloat(rate_input),
+          rate_input_value: parseFloat(rate_input) || 0,
           rate_per_kg: ratePerKg,
           cost_impact: landedCostTotal,
           currency: 'PKR',
           balance_kg: netWeightKg,
           balance_bags: totalBags,
-          remarks: `Purchase: ${parseFloat(quantity_input)} ${quantity_unit} @ ${parseFloat(rate_input)}/${rate_unit}`,
+          remarks: ratePerKg > 0
+            ? `Purchase: ${parseFloat(quantity_input)} ${quantity_unit} @ ${parseFloat(rate_input)}/${rate_unit}`
+            : `Purchase: ${parseFloat(quantity_input)} ${quantity_unit} (price not yet set)`,
           created_by: req.user?.id || null,
           performed_by: req.user?.id || null,
           performed_at: new Date(),
@@ -1395,7 +1452,7 @@ module.exports = {
       let result;
       for (let attempt = 1; ; attempt += 1) {
         try {
-          result = await db.transaction(createInTrx);
+          result = await (req.outerTrx ? req.outerTrx.transaction(createInTrx) : db.transaction(createInTrx));
           break;
         } catch (err) {
           if (autoLotNo && attempt < 4 && isLotNoCollision(err)) continue;
@@ -3361,10 +3418,10 @@ module.exports = {
           .returning('id');
         const inheritedVehicles = Array.isArray(inheritedRows) ? inheritedRows.length : 0;
 
-        // If any carried-over truck has a per-truck price (quality_json.price_per_mt
-        // captured at intake), drive the batch raw_rice cost from the trucks
-        // (Σ weight × price). No-op when no truck is priced — the raw cost then
-        // falls back to the lot's landed cost via ensureRawCostFromSourceLots.
+        // Carried-over trucks refresh yield %. Their per-truck price
+        // (quality_json.price_per_mt) only drives the raw cost when the lot
+        // itself is unpriced — a priced lot's landed cost × the committed qty
+        // (ensureRawCostFromSourceLots) is the raw cost, matching the GL.
         if (inheritedVehicles > 0) {
           await inventoryService.recomputeRawRiceCostFromVehicles(trx, batch.id, req.user?.id);
         }

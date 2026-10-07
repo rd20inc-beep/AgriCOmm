@@ -394,7 +394,9 @@ const createPurchaseLot = Joi.object({
   ordered_quantity_input: Joi.number().positive().allow(null, ''),
   ordered_quantity_unit: Joi.string().valid('katta', 'bag', 'kg', 'maund', 'ton', 'mt').allow(null, ''),
   bag_weight_kg: Joi.number().positive().default(50),
-  rate_input: Joi.number().positive().required(),
+  // Required (> 0) for a user who can see cost — the controller enforces it.
+  // A cost-blind user records the lot unpriced: whatever they send is ignored.
+  rate_input: Joi.number().min(0).allow(null, ''),
   rate_unit: Joi.string().valid('katta', 'bag', 'kg', 'maund', 'ton', 'mt').default('katta'),
   transport_cost: Joi.number().min(0).allow(null, '').default(0),
   labor_cost: Joi.number().min(0).default(0),
@@ -477,6 +479,24 @@ const updateLotCosts = Joi.object({
   bag_cost_per_bag: Joi.number().min(0).allow(null),
   transport_vendor_id: Joi.number().integer().positive().allow(null, ''),
   hauler_id: Joi.number().integer().positive().allow(null, ''),
+});
+
+// Convert a shortlisted rice sample into a purchase lot. Everything optional —
+// the service falls back to the sample's own supplier / rice type / offered qty
+// and rate. rate_per_kg is ignored for a cost-blind user.
+const convertSampleToLot = Joi.object({
+  supplier_id: Joi.number().integer().positive().allow(null, ''),
+  product_id: Joi.number().integer().positive().allow(null, ''),
+  qty_kg: Joi.number().positive().allow(null, ''),
+  rate_per_kg: Joi.number().min(0).allow(null, ''),
+  purchase_date: Joi.date().iso().allow(null, ''),
+  warehouse_id: Joi.number().integer().positive().allow(null, ''),
+  item_name: Joi.string().max(255).allow(null, ''),
+});
+
+// Edit Price on a raw lot (LotDetail sends { rate_per_kg }).
+const setLotPurchaseRate = Joi.object({
+  rate_per_kg: Joi.number().positive().required(),
 });
 
 // Edit a lot's recorded quality after creation. moisture/broken come through
@@ -788,6 +808,8 @@ module.exports = {
   addPurchaseToLot,
   recordLotTransaction,
   updateLotCosts,
+  setLotPurchaseRate,
+  convertSampleToLot,
   updateLotQuality,
   createAdvance,
   allocateAdvance,
