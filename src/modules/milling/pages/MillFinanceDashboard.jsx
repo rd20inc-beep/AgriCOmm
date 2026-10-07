@@ -790,11 +790,23 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
   }
 
   async function handleDeleteRun(run) {
-    if (!run) return;
+    if (!run) return false;
+    const posted = ['paid', 'posted', 'accrued', 'partially_paid'].includes(run.status);
+    const ok = await confirm({
+      title: posted ? `Undo the ${run.period} payroll run?` : `Delete the ${run.period} payroll run?`,
+      consequence: posted
+        ? 'The salary payment and its GL entries are reversed, the cash/bank balance is restored, recovered advances go back to outstanding, and the run and its payslips are deleted. This cannot be undone.'
+        : 'The run and its payslip lines are deleted. Nothing was posted, so no money moves.',
+      amount: PKR(run.netTotal),
+      confirmLabel: posted ? 'Undo run' : 'Delete run',
+      cancelLabel: 'Go back',
+    });
+    if (!ok) return false;
     try {
       await deleteRunMut.mutateAsync(run.id);
-      addToast(`Payroll run for ${run.period} undone — payment reversed, advances restored`, 'success');
+      addToast(posted ? `Payroll run for ${run.period} undone — payment reversed, advances restored` : `Payroll run for ${run.period} deleted`, 'success');
     } catch (e) { addToast(e.message, 'error'); }
+    return true;
   }
 
   function handlePrint() {
@@ -1960,7 +1972,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
               <div className="flex flex-wrap gap-2">
                 {monthRuns.filter(r => isPaidStatus(r.status)).map(r => (
                   <div key={r.id} className="inline-flex items-center gap-2 bg-white border border-emerald-200 rounded-lg px-2.5 py-1 text-xs">
-                    <StatusBadge status="Paid" />
+                    <StatusBadge status={r.status} />
                     <span className="text-gray-600">{r.employeeCount} emp · <span className="font-semibold tabular-nums">{PKR(r.netTotal)}</span> · {r.payMethod === 'bank' ? (r.bankName || 'bank') : 'cash'} · {fmtDate(r.payDate)}</span>
                     <button onClick={() => setPayslipsRunId(r.id)} className="text-emerald-700 font-medium hover:underline">payslips</button>
                     {canDeletePayroll && <button onClick={() => handleDeleteRun(r)} disabled={deleteRunMut.isPending} className="text-red-500 hover:text-red-700 disabled:opacity-50">undo</button>}
@@ -2818,12 +2830,39 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
           canDelete={canDeletePayroll}
           addToast={addToast}
           onClose={() => setPayslipsRunId(null)}
-          onUndo={(run) => { setPayslipsRunId(null); handleDeleteRun(run); }}
+          onUndo={async (run) => { if (await handleDeleteRun(run)) setPayslipsRunId(null); }}
           onApprove={async (run) => { try { await approveRunMut.mutateAsync(run.id); addToast('Payroll run approved', 'success'); } catch (e) { addToast(e.message, 'error'); } }}
-          onPay={async (run, lineIds) => { try { const res = await payRunMut.mutateAsync(lineIds && lineIds.length ? { id: run.id, lineIds } : run.id); const st = res?.data?.run?.status; addToast(st === 'partially_paid' ? 'Selected employees paid — run partially paid' : `Payroll paid — ${PKR(run.netTotal)}`, 'success'); } catch (e) { addToast(e.message, 'error'); } }}
-          onVoid={async (run) => { try { await voidRunMut.mutateAsync({ id: run.id, reason: null }); addToast('Payroll run voided', 'success'); setPayslipsRunId(null); } catch (e) { addToast(e.message, 'error'); } }}
-          onAccrue={async (run) => { try { await accrueRunMut.mutateAsync(run.id); addToast(`Payroll accrued — ${PKR(run.netTotal)} booked to Salaries Payable`, 'success'); } catch (e) { addToast(e.message, 'error'); } }}
-          onSettle={async (run) => { try { await settleRunMut.mutateAsync(run.id); addToast(`Accrued payroll settled — ${PKR(run.netTotal)} paid`, 'success'); } catch (e) { addToast(e.message, 'error'); } }}
+          onPay={async (run, lineIds, amount, count) => {
+            const partial = !!(lineIds && lineIds.length);
+            const ok = await confirm({
+              title: partial ? `Pay ${count} selected employee(s) for ${run.period}?` : `Pay the ${run.period} payroll${run.status === 'partially_paid' ? ' (remaining employees)' : ''}?`,
+              consequence: `Pays ${count} employee(s) from ${run.payMethod === 'bank' ? (run.bankName || 'the bank account') : 'cash'}: posts the salary expense to Money Out and the GL, and recovers their scheduled advances.`,
+              amount: PKR(amount),
+              confirmLabel: 'Pay',
+              cancelLabel: 'Go back',
+            });
+            if (!ok) return;
+            try {
+              const res = await payRunMut.mutateAsync(partial ? { id: run.id, lineIds } : run.id);
+              const st = res?.data?.run?.status;
+              addToast(st === 'partially_paid' ? `${PKR(amount)} paid — run partially paid` : `Payroll paid — ${PKR(amount)}`, 'success');
+            } catch (e) { addToast(e.message, 'error'); }
+          }}
+          onVoid={async (run) => {
+            const ok = await confirm({ title: `Void the ${run.period} payroll run?`, consequence: 'The run is cancelled and its employees are freed to be prepared again. Nothing was posted, so no money moves.', amount: PKR(run.netTotal), reason: 'required', confirmLabel: 'Void run', cancelLabel: 'Go back' });
+            if (!ok) return;
+            try { await voidRunMut.mutateAsync({ id: run.id, reason: ok.reason }); addToast('Payroll run voided', 'success'); setPayslipsRunId(null); } catch (e) { addToast(e.message, 'error'); }
+          }}
+          onAccrue={async (run) => {
+            const ok = await confirm({ title: `Accrue the ${run.period} payroll?`, consequence: 'Books the salary expense and a Salaries Payable liability and recovers scheduled advances now. No cash moves until the run is Settled.', amount: PKR(run.netTotal), confirmLabel: 'Accrue', cancelLabel: 'Go back' });
+            if (!ok) return;
+            try { await accrueRunMut.mutateAsync(run.id); addToast(`Payroll accrued — ${PKR(run.netTotal)} booked to Salaries Payable`, 'success'); } catch (e) { addToast(e.message, 'error'); }
+          }}
+          onSettle={async (run) => {
+            const ok = await confirm({ title: `Settle the accrued ${run.period} payroll?`, consequence: `Pays the Salaries Payable from ${run.payMethod === 'bank' ? (run.bankName || 'the bank account') : 'cash'} and clears the liability.`, amount: PKR(run.netTotal), confirmLabel: 'Settle', cancelLabel: 'Go back' });
+            if (!ok) return;
+            try { await settleRunMut.mutateAsync(run.id); addToast(`Accrued payroll settled — ${PKR(run.netTotal)} paid`, 'success'); } catch (e) { addToast(e.message, 'error'); }
+          }}
           deleteRunMut={deleteRunMut}
           approveRunMut={approveRunMut}
           payRunMut={payRunMut}
@@ -4125,15 +4164,19 @@ function PayrollRunDrawer({ month, entity = 'mill', employees, preselectId, bank
   // Banks the mill can pay salaries from (cash is the dedicated Mill Cash float).
   const payBanks = (bankAccounts || []).filter(a => a.type !== 'cash');
   // One editable row per unpaid employee: include, advance-to-clear, and the
-  // amount actually being paid (defaults to gross − advance, both overridable).
+  // amount actually being paid. Net is DERIVED (gross + bonus − advance −
+  // deductions − tax); "Paying now" can only be lowered from it, never raised —
+  // the server recomputes the net and rejects anything above it.
   const [rows, setRows] = useState(() => employees.map(w => {
     // Default deduction = the SCHEDULED amount for this month (recovery plan),
     // not the full outstanding. Admin can still reduce / skip / enter manually.
     const scheduled = Math.round(w.advanceScheduled != null ? w.advanceScheduled : Math.min(w.advanceOutstanding || 0, w.grossPay || 0));
     const bonus = Math.round(w.bonusTotal || 0); const deduction = Math.round(w.deductionTotal || 0);
     const statutory = Math.round(w.statutoryTotal || 0);
+    // Most the advance can recover: pay left after tax and other deductions.
+    const cap = Math.max(0, (w.grossPay || 0) + bonus - deduction - statutory);
     return {
-      id: w.id, name: w.name, role: w.role, gross: w.grossPay || 0, bonus, deduction, statutory,
+      id: w.id, name: w.name, role: w.role, gross: w.grossPay || 0, bonus, deduction, statutory, cap,
       prorated: !!w.prorated, employedDays: w.employedDays, daysInMonth: w.daysInMonth,
       outstanding: Math.round(w.advanceOutstanding || 0),
       scheduled,
@@ -4144,12 +4187,12 @@ function PayrollRunDrawer({ month, entity = 'mill', employees, preselectId, bank
 
   const netOf = (r, advance) => Math.max(0, r.gross + r.bonus - advance - r.deduction - (r.statutory || 0));
   const setRow = (id, patch) => setRows(rs => rs.map(r => r.id === id ? { ...r, ...patch } : r));
-  // Changing the advance-to-clear re-derives the net (still editable afterwards).
+  // Changing the advance-to-clear re-derives the net (which can then only be lowered).
   const onAdvance = (r, raw) => {
-    const advance = Math.max(0, Math.min(Math.round(parseFloat(raw) || 0), r.outstanding, r.gross));
+    const advance = Math.max(0, Math.min(Math.round(parseFloat(raw) || 0), r.outstanding, r.cap));
     setRow(r.id, { advance, net: netOf(r, advance) });
   };
-  const onNet = (r, raw) => setRow(r.id, { net: Math.max(0, Math.round(parseFloat(raw) || 0)) });
+  const onNet = (r, raw) => setRow(r.id, { net: Math.min(netOf(r, r.advance), Math.max(0, Math.round(parseFloat(raw) || 0))) });
   const useScheduled = (r) => setRow(r.id, { advance: r.scheduled, net: netOf(r, r.scheduled), reason: '' });
   const skipRow = (r) => setRow(r.id, { advance: 0, net: netOf(r, 0) });
 
@@ -4272,15 +4315,20 @@ function PayrollRunDrawer({ month, entity = 'mill', employees, preselectId, bank
                     <td data-label="Scheduled" className="px-3 py-1.5 text-right tabular-nums text-gray-500">{r.outstanding > 0 ? PKR(r.scheduled) : '—'}</td>
                     <td data-label="Deducting" className="px-3 py-1.5 text-right">
                       {r.outstanding > 0 ? (
-                        <input type="number" min="0" max={Math.min(r.outstanding, r.gross)} value={r.advance} disabled={!r.include}
+                        <input type="number" min="0" max={Math.min(r.outstanding, r.cap)} value={r.advance} disabled={!r.include}
                           onChange={e => onAdvance(r, e.target.value)}
                           className={`w-24 border rounded px-2 py-1 text-right tabular-nums focus:outline-none focus:border-gray-900 disabled:bg-gray-50 ${changed ? 'border-amber-400 bg-amber-50' : 'border-gray-200'}`} />
                       ) : <span className="text-gray-300">—</span>}
                     </td>
                     <td data-label="Paying now" className="px-3 py-1.5 text-right">
-                      <input type="number" min="0" value={r.net} disabled={!r.include}
+                      <input type="number" min="0" max={netOf(r, r.advance)} value={r.net} disabled={!r.include}
                         onChange={e => onNet(r, e.target.value)}
-                        className="w-28 border border-gray-200 rounded px-2 py-1 text-right tabular-nums font-medium focus:outline-none focus:border-gray-900 disabled:bg-gray-50" />
+                        aria-label={`Paying now for ${r.name} (at most ${PKR(netOf(r, r.advance))})`}
+                        title="Net pay = gross + bonus − advance − deductions − tax. You can pay less, not more."
+                        className={`w-28 border rounded px-2 py-1 text-right tabular-nums font-medium focus:outline-none focus:border-gray-900 disabled:bg-gray-50 ${r.include && r.net < netOf(r, r.advance) ? 'border-amber-400 bg-amber-50' : 'border-gray-200'}`} />
+                      {r.include && r.net < netOf(r, r.advance) && (
+                        <div className="text-[10px] text-amber-700 mt-0.5">of net {PKR(netOf(r, r.advance))}</div>
+                      )}
                     </td>
                   </tr>
                   {r.include && changed && (
@@ -4310,7 +4358,7 @@ function PayrollRunDrawer({ month, entity = 'mill', employees, preselectId, bank
             </table>
           </div>
         </div>
-        <p className="text-[11px] text-gray-400">Prepares a payroll run for the ticked employees — it must then be <span className="font-medium">Approved</span> and <span className="font-medium">Paid</span> (by Finance/Owner) before any cash/GL posts. Advances are only recovered when the run is paid.</p>
+        <p className="text-[11px] text-gray-400">Prepares a payroll run for the ticked employees — it must then be <span className="font-medium">Approved</span> and <span className="font-medium">Paid</span> (by Finance/Owner) before any cash/GL posts. Advances are only recovered when the run is paid. "Paying now" can be lowered but not raised above the net; a lowered amount is not carried forward — the employee counts as paid for the month.</p>
       </div>
     </SlideDrawer>
   );
@@ -5200,8 +5248,8 @@ function PayslipsPanel({ runId, companyProfile, canApprove, canPay, canDelete, a
           <div className="flex gap-2">
             {/* Workflow actions (Finance/Owner only) */}
             {canApprove && st === 'prepared' && <button onClick={() => onApprove(run)} disabled={busy} className="px-4 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">Approve</button>}
-            {canSelectPay && selected.size > 0 && <button onClick={() => onPay(run, [...selected])} disabled={busy} className="px-4 py-2 text-sm text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">Pay selected {PKR(selectedTotal)}</button>}
-            {canSelectPay && selected.size === 0 && unpaidLines.length > 0 && <button onClick={() => onPay(run)} disabled={busy} className="px-4 py-2 text-sm text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">{isPartial ? 'Pay remaining' : 'Pay all'} {PKR(unpaidTotal)}</button>}
+            {canSelectPay && selected.size > 0 && <button onClick={() => onPay(run, selectedUnpaid.map(l => l.id), selectedTotal, selectedUnpaid.length)} disabled={busy || !selectedUnpaid.length} className="px-4 py-2 text-sm text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">Pay selected {PKR(selectedTotal)}</button>}
+            {canSelectPay && selected.size === 0 && unpaidLines.length > 0 && <button onClick={() => onPay(run, null, unpaidTotal, unpaidLines.length)} disabled={busy} className="px-4 py-2 text-sm text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">{isPartial ? 'Pay remaining' : 'Pay all'} {PKR(unpaidTotal)}</button>}
             {canApprove && st === 'approved' && <button onClick={() => onAccrue(run)} disabled={busy} className="px-4 py-2 text-sm text-violet-700 bg-violet-50 rounded-lg hover:bg-violet-100 disabled:opacity-50">Accrue (pay later)</button>}
             {canPay && isAccrued && <button onClick={() => onSettle(run)} disabled={busy} className="px-4 py-2 text-sm text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">Settle {PKR(run.netTotal)}</button>}
             {canApprove && (st === 'prepared' || st === 'approved') && <button onClick={() => onVoid(run)} disabled={busy} className="px-4 py-2 text-sm text-red-600 bg-red-50 rounded-lg hover:bg-red-100 disabled:opacity-50">Void</button>}
