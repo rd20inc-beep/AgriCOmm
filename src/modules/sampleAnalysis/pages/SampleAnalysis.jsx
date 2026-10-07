@@ -9,6 +9,7 @@ import SlideDrawer from '../../../components/SlideDrawer';
 import StatusBadge from '../../../shared/components/StatusBadge';
 import FieldError from '../../../shared/components/FieldError';
 import useConfirm from '../../../hooks/useConfirm';
+import useCanSeeCost from '../../../hooks/useCanSeeCost';
 import SupplierPicker from '../../../components/SupplierPicker';
 import RiceTypePicker from '../../../components/RiceTypePicker';
 import { useSuppliers, useProducts } from '../../../api/queries';
@@ -384,14 +385,19 @@ function AnalysisDrawer({ sampleId, onClose, onDone, addToast }) {
 }
 
 function ConvertDrawer({ sample, onClose, onDone, addToast }) {
+  // A cost-blind user converts without a rate: the server creates the lot
+  // unpriced and it can't be milled to yield until someone who sees cost prices it.
+  const showCost = useCanSeeCost();
   const [form, setForm] = useState({ qty_kg: sample.offered_qty_kg || '', rate_per_kg: sample.offered_rate_per_kg || '' });
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   const mut = useMutation({
-    mutationFn: () => sampleApi.convert(sample.id, { qty_kg: parseFloat(form.qty_kg), rate_per_kg: parseFloat(form.rate_per_kg) }),
+    mutationFn: () => sampleApi.convert(sample.id, showCost
+      ? { qty_kg: parseFloat(form.qty_kg), rate_per_kg: parseFloat(form.rate_per_kg) }
+      : { qty_kg: parseFloat(form.qty_kg) }),
     onSuccess: (res) => { addToast(`Purchase lot ${res?.data?.lot?.lot_no || ''} created`, 'success'); onDone(); },
     onError: (e) => addToast(e?.data?.message || e?.message || 'Failed to convert', 'error'),
   });
-  const valid = parseFloat(form.qty_kg) > 0 && parseFloat(form.rate_per_kg) > 0;
+  const valid = parseFloat(form.qty_kg) > 0 && (!showCost || parseFloat(form.rate_per_kg) > 0);
   const footer = (
     <div className="flex justify-end gap-3">
       <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
@@ -407,7 +413,7 @@ function ConvertDrawer({ sample, onClose, onDone, addToast }) {
           <p className="text-[11px] text-gray-400 pt-1">Supplier, variety, grade and the analysis carry forward automatically. The lot links back to this sample.</p>
         </div>
         <Field label="Quantity (kg)" required error={form.qty_kg !== '' && !(parseFloat(form.qty_kg) > 0) ? 'Enter a quantity greater than zero' : null}><input type="number" value={form.qty_kg} onChange={(e) => set('qty_kg', e.target.value)} className="form-input" /></Field>
-        <Field label="Rate (Rs/kg)" required error={form.rate_per_kg !== '' && !(parseFloat(form.rate_per_kg) > 0) ? 'Enter a rate greater than zero' : null}><input type="number" value={form.rate_per_kg} onChange={(e) => set('rate_per_kg', e.target.value)} className="form-input" /></Field>
+        {showCost && <Field label="Rate (Rs/kg)" required error={form.rate_per_kg !== '' && !(parseFloat(form.rate_per_kg) > 0) ? 'Enter a rate greater than zero' : null}><input type="number" value={form.rate_per_kg} onChange={(e) => set('rate_per_kg', e.target.value)} className="form-input" /></Field>}
       </div>
     </SlideDrawer>
   );
