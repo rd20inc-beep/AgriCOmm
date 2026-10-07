@@ -1,5 +1,6 @@
 import React, { useRef } from 'react';
 import { Printer, Download } from 'lucide-react';
+import { lineBagSpec, fmtSizeKg, packingTextFits } from '../modules/exportOrders/utils/orderLines';
 
 /**
  * Number-to-words converter for currency amounts (USD).
@@ -88,16 +89,27 @@ export default function ProformaInvoice({ order, companyProfile, title, docNo, c
     ? order.items.map((it, idx) => {
         const itemQty = parseFloat(it.qtyMT) || 0;
         const itemPrice = parseFloat(it.pricePerMT) || 0;
-        const itemBagSize = parseFloat(it.bagSizeKg) || bagSizeKg;
-        const itemBagType = it.bagType || order.bagType || 'PP';
-        const itemMaster = parseFloat(it.masterBagSizeKg) || parseFloat(order.masterBagSizeKg) || 0;
+        // Each line's own bag (and its own master bag, if any). The order's
+        // bag is only a fallback for a line saved without one — never a second
+        // line borrowing the first line's 2 KG bag and 10 KG master.
+        const spec = lineBagSpec(it, { ...order, bagSizeKg }, { single: order.items.length === 1 });
+        // Several lines: a line with no bag of its own shows '—', not line 1's.
+        const itemBagSize = spec.bagSizeKg || (spec.missing ? 0 : bagSizeKg);
+        const itemBagType = spec.bagType || 'PP';
+        const itemMaster = spec.masterBagSizeKg || 0;
         const itemBags = parseInt(it.bagCount, 10)
           || (itemQty > 0 && itemBagSize > 0 ? Math.round((itemQty * 1000) / itemBagSize) : 0);
+        // A stored packing text stands only when it states this line's own bag.
+        const packingText = spec.missing
+          ? (it.packing || '—')
+          : ((it.packing && packingTextFits(it.packing, itemBagSize)) ? it.packing : composePacking(itemBagSize, itemBagType, itemMaster));
         return {
           sno: idx + 1,
           description: it.productName || `Item ${idx + 1}`,
-          packing: it.packing || composePacking(itemBagSize, itemBagType, itemMaster),
+          packing: packingText,
           bagSizeKg: itemBagSize,
+          bagType: itemBagType,
+          masterBagSizeKg: itemMaster,
           bags: itemBags,
           qtyMT: itemQty,
           pricePerMT: itemPrice,
@@ -109,11 +121,30 @@ export default function ProformaInvoice({ order, companyProfile, title, docNo, c
         description: order.productName || '',
         packing: order.packing || composePacking(bagSizeKg, order.bagType, parseFloat(order.masterBagSizeKg) || 0),
         bagSizeKg,
+        bagType: order.bagType || 'PP',
+        masterBagSizeKg: parseFloat(order.masterBagSizeKg) || 0,
         bags,
         qtyMT,
         pricePerMT,
         amount: totalAmount,
       }];
+
+  // Order-level packing, from the lines: one size reads as before ("2 KG"),
+  // several read "2 KG and 5 KG" — the header holds only one spec and must not
+  // stand in for every line.
+  const lineSizes = [...new Set(lineRows.map((r) => parseFloat(r.bagSizeKg) || 0).filter((v) => v > 0))];
+  const lineMasters = [...new Set(lineRows.map((r) => parseFloat(r.masterBagSizeKg) || 0).filter((v) => v > 0))];
+  const mixedPacking = lineSizes.length > 1;
+  const joinKg = (list) => list.map((v) => `${fmtSizeKg(v)} KG`).join(' and ');
+  const bagSizeText = mixedPacking ? joinKg(lineSizes) : `${lineSizes[0] || bagSizeKg} KG`;
+  const totalBagsAllLines = lineRows.reduce((s, r) => s + (r.bags || 0), 0) || bags;
+  const masterText = lineMasters.length ? `, in ${joinKg(lineMasters)} master (outer) bags` : '';
+  const lineBagTypes = [...new Set(lineRows.map((r) => r.bagType).filter(Boolean))];
+  const packingClause = mixedPacking
+    ? `${bagSizeText} ${lineBagTypes.length === 1 ? lineBagTypes[0] : 'PP'} bags${masterText}, as per the line items above; marked as per Buyer's instructions.`
+    : (order.bagType
+      ? `${bagSizeText} ${order.bagType}${order.bagQuality ? ` (${order.bagQuality})` : ''}${order.bagPrinting ? ` — ${order.bagPrinting}` : ''} bags${masterText}, marked as per Buyer's instructions.`
+      : `New ${bagSizeText} ${lineBagTypes[0] && !/^pp\b/i.test(lineBagTypes[0]) ? lineBagTypes[0] : 'polypropylene (PP)'} bags${masterText}, food-grade, marked as per Buyer's instructions.`);
 
   const computedSubtotal = lineRows.reduce((s, r) => s + (r.amount || 0), 0);
   const subtotal = computedSubtotal > 0 ? computedSubtotal : totalAmount;
@@ -337,7 +368,7 @@ export default function ProformaInvoice({ order, companyProfile, title, docNo, c
                     {row.description}
                   </td>
                   <td className="py-3 px-4 border-b text-xs" style={{ borderColor: '#e2e8f0', color: '#334155' }}>{row.packing}</td>
-                  <td className="py-3 px-4 border-b text-center" style={{ borderColor: '#e2e8f0', color: '#334155' }}>{row.bagSizeKg} KG</td>
+                  <td className="py-3 px-4 border-b text-center" style={{ borderColor: '#e2e8f0', color: '#334155' }}>{row.bagSizeKg > 0 ? `${row.bagSizeKg} KG` : '—'}</td>
                   <td className="py-3 px-4 border-b text-center font-medium" style={{ borderColor: '#e2e8f0', color: '#334155' }}>
                     {row.bags.toLocaleString()}
                   </td>
@@ -436,7 +467,7 @@ export default function ProformaInvoice({ order, companyProfile, title, docNo, c
                 )}
                 <div>
                   <p className="text-xs font-medium" style={{ color: '#92400e' }}>Bag Size</p>
-                  <p className="text-sm font-semibold" style={{ color: '#1e3a5f' }}>{bagSizeKg} KG</p>
+                  <p className="text-sm font-semibold" style={{ color: '#1e3a5f' }}>{bagSizeText}</p>
                 </div>
                 {order.bagWeightGm && (
                   <div>
@@ -464,7 +495,7 @@ export default function ProformaInvoice({ order, companyProfile, title, docNo, c
                 )}
                 <div>
                   <p className="text-xs font-medium" style={{ color: '#92400e' }}>Total Bags</p>
-                  <p className="text-sm font-semibold" style={{ color: '#1e3a5f' }}>{bags.toLocaleString()}</p>
+                  <p className="text-sm font-semibold" style={{ color: '#1e3a5f' }}>{totalBagsAllLines.toLocaleString()}</p>
                 </div>
               </div>
               {order.bagNotes && (
@@ -534,9 +565,7 @@ export default function ProformaInvoice({ order, companyProfile, title, docNo, c
               </li>
               <li>
                 <span className="font-medium">Packing:</span>{' '}
-                {order.bagType
-                  ? `${bagSizeKg} KG ${order.bagType}${order.bagQuality ? ` (${order.bagQuality})` : ''}${order.bagPrinting ? ` — ${order.bagPrinting}` : ''} bags, marked as per Buyer's instructions.`
-                  : `New ${bagSizeKg} KG polypropylene (PP) bags, food-grade, marked as per Buyer's instructions.`}
+                {packingClause}
               </li>
               <li>
                 <span className="font-medium">Origin &amp; Product:</span> Product of Pakistan, latest crop. GMO-free and fit for human consumption at any stage, free from live and dead weevils/insects, and compliant with international food-safety standards.

@@ -12,6 +12,7 @@ import { WEIGHT_UNITS, weightUnit } from '../../../shared/constants/weightUnits'
 import { FREIGHT_DISPLAYS, incotermCarriesFreight, receivableFreight } from '../../../shared/constants/exportFreight';
 import { PAYMENT_TERMS } from '../../../shared/constants/paymentTerms';
 import { contractEditPayload, lineItemsPayload, orderHasReceipts, isMultiLine } from '../utils/orderEdits';
+import { priceSummary } from '../utils/orderLines';
 
 // Statuses where ANY contract field is fully editable.
 // After milling starts, qty/price changes can desync downstream artifacts —
@@ -196,10 +197,26 @@ export default function OverviewTab({ order, formatCurrency, formatPKR, totalCos
               <span className="text-gray-500">Quantity</span>
               <span className="font-medium text-gray-900">{order.qtyMT} MT</span>
             </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-500">Price per MT</span>
-              <span className="font-medium text-gray-900">{formatCurrency(order.pricePerMT)} {order.currency}</span>
-            </div>
+            {(() => {
+              // Lines at different prices: the order figure is contract value ÷
+              // quantity — an AVERAGE (1290 & 1250 → 1270), not anyone's unit
+              // price. Say so and show the range; each line's own rate is in
+              // the Line Items card.
+              const ps = priceSummary(order);
+              return (
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-500">{ps.label}</span>
+                  <span className="font-medium text-gray-900 text-right">
+                    {formatCurrency(ps.value)} {order.currency}
+                    {ps.mixed && (
+                      <span className="block text-xs font-normal text-gray-500">
+                        lines {formatCurrency(ps.min)} – {formatCurrency(ps.max)}
+                      </span>
+                    )}
+                  </span>
+                </div>
+              );
+            })()}
             <div className="flex justify-between text-sm">
               <span className="text-gray-500">Advance %</span>
               <span className="font-medium text-gray-900">{order.advancePct ?? 0}%</span>
@@ -255,7 +272,7 @@ export default function OverviewTab({ order, formatCurrency, formatPKR, totalCos
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">
-                  Price per MT
+                  {isMultiLine(order) ? 'Avg price per MT' : 'Price per MT'}
                   {qtyPriceLockNote && <span className="ml-1 text-amber-600 text-[10px]">(locked)</span>}
                 </label>
                 <input type="number" min="0" step="0.01" value={contract.price_per_mt} disabled={!qtyPriceInputEditable} onChange={e => setContract(c => ({ ...c, price_per_mt: e.target.value }))} className={`w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none ${!qtyPriceInputEditable ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : ''}`} />

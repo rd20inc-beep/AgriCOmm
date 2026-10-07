@@ -11,6 +11,7 @@ import { formatWeight, formatPackSize, weightUnit } from '../../../shared/consta
 import { freightBreakdown } from '../../../shared/constants/exportFreight';
 import { useDocumentTemplates } from '../../../api/queries';
 import useConfirm from '../../../hooks/useConfirm';
+import { lineBagSpec, packingTextFits, lineNeedsMaster } from '../utils/orderLines';
 
 // ─── Weights on export documents ───
 // Shipments to the USA and Canada state their weights in POUNDS; everywhere
@@ -33,6 +34,43 @@ const wtNum = (kg, doc, decimals = 2) => formatWeight(kg, unitOf(doc), { decimal
 // A bag or pack size, which people say as a whole number — "50 KGS", "8 LBS".
 const packSize = (kg, doc) => formatPackSize(kg, unitOf(doc));
 const packSizeNum = (kg, doc) => formatPackSize(kg, unitOf(doc), { withUnit: false });
+
+// ─── Per-line bag ───
+// Each P.I. line ships in its OWN bag (and its own master bag, if any). The
+// order header carries one bag spec and an AVERAGE price, so it is only a
+// fallback for a line saved without a bag of its own — never a second line
+// borrowing the first line's 2 KG bag and 10 KG master. See utils/orderLines.js.
+// On a multi-line order a line with no bag of its own comes back with
+// bagSize 0 and `missing` — the renderers print '—' and validateExportDoc
+// flags it — rather than borrowing the header's (line 1's) bag.
+function lineBag(it, order, lineCount = 1) {
+  const single = lineCount <= 1;
+  const spec = lineBagSpec(it, order || {}, { single });
+  return {
+    bagSize: spec.bagSizeKg || (single ? (parseFloat(order && order.bagSizeKg) || 50) : 0),
+    bagType: spec.bagType || 'PP',
+    masterBagSize: spec.masterBagSizeKg || 0,
+    missing: !!spec.missing,
+  };
+}
+
+// A bag size for a cell — '—' when the line has none.
+const packCell = (kg, doc) => ((parseFloat(kg) || 0) > 0 ? packSize(kg, doc) : '—');
+
+// The order's packs across its lines, for the order-level phrases ("PACKED IN
+// 2 KGS & 5 KGS ..."): one size reads exactly as before, several are listed.
+function docPacks(doc) {
+  const lines = buildLineItems(doc);
+  const sizes = [...new Set(lines.map((l) => parseFloat(l.bagSizeKg) || 0).filter((v) => v > 0))];
+  const masters = [...new Set(lines.map((l) => parseFloat(l.masterBagSizeKg) || 0).filter((v) => v > 0))];
+  const types = [...new Set(lines.map((l) => l.bagType).filter(Boolean))];
+  return {
+    lines, sizes, masters, types,
+    mixed: sizes.length > 1,
+    sizeText: sizes.map((v) => packSize(v, doc)).join(' & '),
+    masterText: masters.map((v) => packSize(v, doc)).join(' & '),
+  };
+}
 
 // ─── Document Templates ───
 // Each function takes the document JSON and returns printable HTML
@@ -76,15 +114,17 @@ function buildLineItems(doc) {
     return items.map((it, idx) => {
       const qty = parseFloat(it.qtyMT) || 0;
       const price = parseFloat(it.pricePerMT) || 0;
-      const bagSize = parseFloat(it.bagSizeKg) || orderBagSize;
-      const bagType = it.bagType || orderBagType;
-      const masterBagSize = parseFloat(it.masterBagSizeKg) || orderMasterBag || 0;
+      const { bagSize, bagType, masterBagSize, missing } = lineBag(it, { ...order, bagSizeKg: orderBagSize, bagType: orderBagType }, items.length);
       const bagCount = parseInt(it.bagCount, 10)
         || (qty > 0 && bagSize > 0 ? Math.round((qty * 1000) / bagSize) : 0);
       const masterBagCount = masterBagSize > 0 ? Math.ceil((qty * 1000) / masterBagSize) : 0;
       const description = it.qualityDescription
         || `${it.productName || 'Rice'} max 0-${it.brokenPctTarget != null ? it.brokenPctTarget : (order.brokenPctTarget || 2)}% broken, double (silky) polished and sortexed. Sound, loyal and merchantable, fit for human consumption at any stage. Free from alive and dead weevils/insects. GMO Free. Latest crop.${it.hsCode ? `<br/><strong>HS CODE ${it.hsCode}</strong>` : ''}`;
-      const packing = it.packing || composePacking(bagSize, bagType, masterBagSize);
+      // The line's stored packing text is kept only when it states the line's
+      // own bag; otherwise it is composed from the line's real bag + master.
+      const packing = missing
+        ? (it.packing || '—')
+        : (packingTextFits(it.packing, bagSize) && it.packing ? it.packing : composePacking(bagSize, bagType, masterBagSize));
       return {
         sno: idx + 1,
         brand: it.bagBrand || it.productName || orderBrand || '—',
@@ -97,6 +137,7 @@ function buildLineItems(doc) {
         masterBagCount,
         packing,
         bagCount,
+        bagMissing: missing,
         qtyMT: qty,
         pricePerMT: price,
         amount: parseFloat(it.lineTotal) || qty * price,
@@ -297,6 +338,15 @@ function validateExportDoc(doc) {
     // Rule 4: every invoice line must carry an HS code.
     const lineHs = l.hsCode || (doc.order && doc.order.hsCodes && doc.order.hsCodes.single);
     if (!lineHs) warnings.push(`Line ${i + 1}: HS code missing.`);
+    // Rule 5: every line states its own bag. On a multi-line order a line with
+    // none is NOT given the order's (line 1's) bag, so it is flagged here; and a
+    // retail-sized bag (≤10 kg) with no master bag is flagged rather than lent
+    // another line's master.
+    if (l.bagMissing) {
+      warnings.push(`Line ${i + 1}: no bag size set on this line — set it in the Packing tab.`);
+    } else if (lines.length > 1 && lineNeedsMaster({ bagSizeKg: l.bagSizeKg, masterBagSizeKg: l.masterBagSizeKg }, (doc.order && doc.order.packingType) || 'retail')) {
+      warnings.push(`Line ${i + 1}: ${l.bagSizeKg} kg retail bags have no master bag set — set it in the Packing tab.`);
+    }
   });
   const stated = parseFloat(doc.order && doc.order.contractValue) || sum;
   if (sum > 0 && stated > 0 && Math.abs(sum - stated) > 1 && !(parseFloat(doc.order && doc.order.advancePct) > 0)) {
@@ -370,8 +420,8 @@ function docSummaryBlock(doc, opts = {}) {
   // inside them, with the retail count as the make-up. Same rule as the
   // Commercial Invoice's own totals block.
   const masterCount = (totals && parseInt(totals.masterBagCount, 10)) || 0;
-  const masterSize = parseFloat(order.masterBagSizeKg) || 0;
-  const lines = buildLineItems(doc);
+  const packs = docPacks(doc);
+  const lines = packs.lines;
   const totalAmt = opts.amount != null ? opts.amount
     : (lines.reduce((s, l) => s + (l.amount || 0), 0) || parseFloat(order.contractValue) || 0);
   const mt = (kg) => `${((parseFloat(kg) || 0) / 1000).toFixed(3)} MT`;
@@ -387,7 +437,7 @@ function docSummaryBlock(doc, opts = {}) {
   }
   const packLabel = opts.packLabel || order.packagesLabel || 'Bags';
   const packagesText = masterCount > 0
-    ? `${masterCount.toLocaleString()} Master Bags of ${packSize(masterSize, doc)} (${pkgs.toLocaleString()} retail ${packLabel.toLowerCase()})`
+    ? `${masterCount.toLocaleString()} Master Bags of ${packs.masterText || packSize(order.masterBagSizeKg, doc)} (${pkgs.toLocaleString()} retail ${packLabel.toLowerCase()})`
     : `${pkgs.toLocaleString()} ${packLabel}`;
   const L = 'border:1px solid #333;padding:3px 7px;font-weight:bold;white-space:nowrap;background:#f7f7f7;';
   const V = 'border:1px solid #333;padding:3px 7px;';
@@ -501,7 +551,7 @@ function renderProformaInvoice(doc) {
               <td style="border:1px solid #333; padding:6px; text-align:center; font-weight:bold; color:#d4a017;">${l.brand}</td>
               <td style="${CELL}">${l.description}</td>
               <td style="${CELL_C}">${l.packing || '—'}</td>
-              <td style="${CELL_C}">${packSizeNum(l.bagSizeKg, doc)}</td>
+              <td style="${CELL_C}">${(parseFloat(l.bagSizeKg) || 0) > 0 ? packSizeNum(l.bagSizeKg, doc) : '—'}</td>
               <td style="${CELL_C}">${(l.bagCount || 0).toLocaleString()}</td>
               <td style="${CELL_C}">${fmtMt(l.qtyMT)}</td>
               <td style="${CELL_C}">${fmtMoney(l.pricePerMT)}</td>
@@ -527,8 +577,10 @@ function renderProformaInvoice(doc) {
         const inc = doc.incotermInfo || {};
         const pol = inc.portOfLoading || order.portOfLoading || 'Karachi, Pakistan';
         const pod = inc.portOfDischarge || order.destinationPort || '—';
-        const bagSize = (buildLineItems(doc)[0] && buildLineItems(doc)[0].bagSizeKg) || order.bagSizeKg || 50;
-        const bagType = (buildLineItems(doc)[0] && buildLineItems(doc)[0].bagType) || order.bagType || 'PP';
+        // Packing as the LINES state it: "2 KGS & 5 KGS PP bags, in 10 KGS & 20
+        // KGS master bags, as per the line items" — not line 1's bag for all.
+        const packs = docPacks(doc);
+        const packingTerm = `${packs.sizeText || packSize(order.bagSizeKg || 50, doc)} ${packs.types.length === 1 ? packs.types[0] : (packs.types.length ? packs.types.join(' / ') : (order.bagType || 'PP'))} bags${packs.masters.length ? `, in ${packs.masterText} master (outer) bags` : ''}${packs.mixed ? ', as per the line items above' : ''}`;
         return `
       <div style="margin-top:16px; font-size:12px;">
         <div style="font-weight:bold; text-decoration:underline; margin-bottom:6px;">Terms &amp; Conditions</div>
@@ -537,7 +589,7 @@ function renderProformaInvoice(doc) {
           <li><b>Delivery / Incoterms:</b> ${inc.text || `As per the agreed Incoterms® rule ${order.incoterm || 'FOB'}.`}</li>
           <li><b>Payment:</b> ${order.paymentTerms || 'As mutually agreed.'}</li>
           <li><b>Shipment:</b> From ${pol} to ${pod}. Partial shipment and transhipment permitted unless otherwise agreed in writing.</li>
-          <li><b>Packing:</b> ${packSize(bagSize, doc)} ${bagType} bags — new, food-grade and suitable for export by sea.</li>
+          <li><b>Packing:</b> ${packingTerm} — new, food-grade and suitable for export by sea.</li>
           <li><b>Quality &amp; Weight:</b> As per the agreed specification. Quality and weight as ascertained at the port of loading shall be final; independent inspection (e.g. SGS) at buyer's cost, if required.</li>
           <li><b>Documents:</b> Commercial Invoice, Packing List, Certificate of Origin, Bill of Lading and any other documents required under the L/C / contract.</li>
           <li><b>Origin:</b> Pakistan.</li>
@@ -612,9 +664,9 @@ function commercialInvoiceHtml(doc, opts = {}) {
   // already on every item line, so it is shown as the make-up rather than as
   // the headline figure.
   const masterBagCount = (totals && parseInt(totals.masterBagCount, 10)) || 0;
-  const masterBagSizeKg = parseFloat(order.masterBagSizeKg) || 0;
+  const masterSizesText = docPacks(doc).masterText || packSize(parseFloat(order.masterBagSizeKg) || 0, doc);
   const packagesText = masterBagCount > 0
-    ? `${masterBagCount.toLocaleString()} Master Bags of ${packSize(masterBagSizeKg, doc)} (${(totalPackages || 0).toLocaleString()} retail bags)`
+    ? `${masterBagCount.toLocaleString()} Master Bags of ${masterSizesText} (${(totalPackages || 0).toLocaleString()} retail bags)`
     : `${(totalPackages || 0).toLocaleString()} Bags`;
   // Ordered quantity vs packed net: equal on a normal shipment, so only worth
   // printing separately when they actually differ (tolerance = 1 kg).
@@ -821,7 +873,7 @@ function renderPackingList(doc) {
     const netKg = netKgOverride != null ? netKgOverride : qtyMT * 1000;
     const grossKg = grossKgOverride != null ? grossKgOverride : netKg + bagCount * tarePerBagKg(bagSize);
     const packing = masterBagSize > 0
-      ? `${packingBase}<br/><span style="color:#92400e">Master pack: ${masterBagCount.toLocaleString()} × ${packSize(masterBagSize, doc)} outer (${Math.floor(masterBagSize / bagSize)} retail bags per master)</span>`
+      ? `${packingBase}<br/><span style="color:#92400e">Master pack: ${masterBagCount.toLocaleString()} × ${packSize(masterBagSize, doc)} outer${bagSize > 0 ? ` (${Math.floor(masterBagSize / bagSize)} retail bags per master)` : ''}</span>`
       : packingBase;
     const quantity = masterBagSize > 0
       ? `${bagCount.toLocaleString()} retail bags<br/>${masterBagCount.toLocaleString()} master bags`
@@ -831,8 +883,7 @@ function renderPackingList(doc) {
 
   const rows = (items && items.length > 0)
     ? items.map((it) => {
-        const bagSize = it.bagSizeKg || order.bagSizeKg || 50;
-        const bagType = it.bagType || order.bagType || 'PP';
+        const { bagSize, bagType, masterBagSize } = lineBag(it, order, items.length);
         return makeRow({
           label: (it.productName || order.product || '').toUpperCase(),
           description: withHsCode(
@@ -841,10 +892,11 @@ function renderPackingList(doc) {
             it.hsCode,
           ),
           bagSize,
-          masterBagSize: parseFloat(it.masterBagSizeKg) || parseFloat(order.masterBagSizeKg) || 0,
+          masterBagSize,
           bagCount: it.bagCount || (it.qtyMT && bagSize ? Math.round((it.qtyMT * 1000) / bagSize) : 0),
           qtyMT: parseFloat(it.qtyMT) || 0,
-          packingBase: it.packing || `PACKED IN ${packSize(bagSize, doc)} ${bagType} BAG`,
+          packingBase: (it.packing && packingTextFits(it.packing, bagSize)) ? it.packing
+            : (bagSize > 0 ? `PACKED IN ${packSize(bagSize, doc)} ${bagType} BAG` : '—'),
         });
       })
     : [(() => {
@@ -981,7 +1033,7 @@ function renderPackingList(doc) {
                    on this very row already print them, and the old recap
                    restated both in MT alongside. Bags stay - no column has them. -->
               <div style="font-weight:bold;">TOTAL BAGS &nbsp;:&nbsp; ${totalBags.toLocaleString()} Bags</div>
-              <div style="margin-top:4px;">${masterBagTotal > 0 ? `MASTER BAGS &nbsp;:&nbsp; ${masterBagTotal.toLocaleString()} × ${packSize(order.masterBagSizeKg, doc)}` : ''}</div>
+              <div style="margin-top:4px;">${masterBagTotal > 0 ? `MASTER BAGS &nbsp;:&nbsp; ${masterBagTotal.toLocaleString()} × ${docPacks(doc).masterText || packSize(order.masterBagSizeKg, doc)}` : ''}</div>
             </td>
             <td style="border:1px solid #333; padding:8px; text-align:center; font-weight:bold;" rowspan="3">Total</td>
             <td class="agri-num" style="border:1px solid #333; padding:8px; text-align:right; font-weight:bold;" rowspan="3">${fmtKg(totalGrossKg)}</td>
@@ -1228,7 +1280,7 @@ function renderProductionPlan(doc) {
             <div style="border:1px solid #333; padding:12px; font-size:12px;">
               <h4 style="text-align:center; font-weight:bold; margin:0 0 8px 0;">${lines.map((l) => l.productName).filter(Boolean).join(' / ') || order.product || 'BASMATI WHITE RICE'}</h4>
               <table style="width:100%;">
-                <tr><td style="font-weight:bold; width:55%;">WEIGHT</td><td>: ${order.bagSizeKg || 50}KG</td></tr>
+                <tr><td style="font-weight:bold; width:55%;">WEIGHT</td><td>: ${docPacks(doc).sizes.map((v) => `${v}KG`).join(' / ') || `${order.bagSizeKg || 50}KG`}</td></tr>
                 <tr><td style="font-weight:bold;">COUNTRY OF ORIGIN</td><td>: PAKISTAN</td></tr>
                 <tr><td style="font-weight:bold;">DATE OF PRODUCTION</td><td>: ${packing?.productionDate || '—'}</td></tr>
                 <tr><td style="font-weight:bold;">DATE OF EXPIRY</td><td>: ${packing?.expiryDate || '—'}</td></tr>
@@ -1611,14 +1663,13 @@ function renderBillOfLading(doc) {
   // Description cell so each line's HS code, packing, and quality clauses
   // appear correctly. Falls back to the single-product summary text.
   // Master bag for a line: its own, else the order's.
-  const masterOf = (it) => parseFloat(it.masterBagSizeKg) || parseFloat(order.masterBagSizeKg) || 0;
+  const masterOf = (it) => lineBag(it, order, items.length).masterBagSize;
   const descriptionItemsHtml = (items && items.length > 0)
     ? items.map((it) => {
-        const bagSize = it.bagSizeKg || order.bagSizeKg || 50;
-        const bagType = it.bagType || order.bagType || 'PP';
+        const { bagSize, bagType } = lineBag(it, order, items.length);
         const bagCount = it.bagCount || (it.qtyMT && bagSize ? Math.round((it.qtyMT * 1000) / bagSize) : 0);
         const qualityText = it.qualityDescription
-          || `Pakistani ${it.productName || 'Rice'} - ${it.brokenPctTarget != null ? it.brokenPctTarget : (order.brokenPctTarget || 2)}% Broken - Double (silky) polished & color sorted, Latest Crop - PACKED IN ${packSize(bagSize, doc)} ${bagType} BAG${masterOf(it) > 0 ? ` IN ${packSize(masterOf(it), doc)} MASTER BAG` : ''}${it.hsCode ? ` - HS CODE: ${it.hsCode}` : ''} - GMO FREE, FIT FOR HUMAN CONSUMPTION AT ANY STAGE, FREE FROM ALIVE AND DEAD WEEVILS/INSECTS`;
+          || `Pakistani ${it.productName || 'Rice'} - ${it.brokenPctTarget != null ? it.brokenPctTarget : (order.brokenPctTarget || 2)}% Broken - Double (silky) polished & color sorted, Latest Crop - PACKED IN ${packCell(bagSize, doc)} ${bagType} BAG${masterOf(it) > 0 ? ` IN ${packSize(masterOf(it), doc)} MASTER BAG` : ''}${it.hsCode ? ` - HS CODE: ${it.hsCode}` : ''} - GMO FREE, FIT FOR HUMAN CONSUMPTION AT ANY STAGE, FREE FROM ALIVE AND DEAD WEEVILS/INSECTS`;
         // withHsCode, not a blind append: the default quality text above already
         // carries "- HS CODE: x -" mid-sentence, so appending unconditionally
         // printed the same code twice on adjacent lines.
@@ -1750,11 +1801,16 @@ function renderPackingCertificate(doc) {
 
   // Master (outer) bag, when the retail bags ship inside one. Stated here
   // because the certificate is what the buyer reads for how the pallet arrives.
-  const masterKg = parseFloat(order.masterBagSizeKg) || 0;
-  const retailPerMaster = (masterKg > 0 && order.bagSizeKg) ? Math.floor(masterKg / order.bagSizeKg) : 0;
-  const masterBagLine = masterKg > 0
-    ? `, PACKED INTO ${(totals?.masterBagCount || 0).toLocaleString()} MASTER BAGS OF ${packSize(masterKg, doc)}${retailPerMaster > 0 ? ` (${retailPerMaster} RETAIL BAGS PER MASTER)` : ''}`
+  // Per line on a multi-line order: a 2 KG line and a 5 KG line are two
+  // packings, not the first line's twice.
+  const packs = docPacks(doc);
+  const masterKg = packs.masters.length === 1 ? packs.masters[0] : 0;
+  const retailSize = packs.sizes.length === 1 ? packs.sizes[0] : 0;
+  const retailPerMaster = (masterKg > 0 && retailSize > 0) ? Math.floor(masterKg / retailSize) : 0;
+  const masterBagLine = packs.masters.length > 0
+    ? `, PACKED INTO ${(totals?.masterBagCount || 0).toLocaleString()} MASTER BAGS OF ${packs.masterText}${retailPerMaster > 0 ? ` (${retailPerMaster} RETAIL BAGS PER MASTER)` : ''}`
     : '';
+  const certPackSize = packs.sizeText || packSize(order.bagSizeKg || 50, doc);
 
   return `
     <div style="${DOC_PAGE}">
@@ -1776,7 +1832,7 @@ function renderPackingCertificate(doc) {
       <table style="width:100%; font-size:12px; line-height:1.8;">
         ${containers.map(c => `<tr><td style="width:130px;"></td><td>${c.lotNumber || '—'},</td></tr>`).join('')}
         <tr><td style="font-weight:bold;">BUYER</td><td>${buyer.name}<br/>${buyer.address}, ${buyer.country}</td></tr>
-        <tr><td style="font-weight:bold;">PACKING:</td><td>PACKED IN ${packSize(order.bagSizeKg || 50, doc)} IN NEW DOUBLE WOVEN (OUTER) POLYPROPYLENE BAGS OF ${packSize(order.bagSizeKg || 50, doc)} NET EACH${masterBagLine}</td></tr>
+        <tr><td style="font-weight:bold;">PACKING:</td><td>PACKED IN ${certPackSize} IN NEW DOUBLE WOVEN (OUTER) POLYPROPYLENE BAGS OF ${certPackSize} NET EACH${masterBagLine}</td></tr>
         <tr><td style="font-weight:bold;">PRODUCT ORIGIN:</td><td>PAKISTAN</td></tr>
         ${shipment.blNumber ? `<tr><td style="font-weight:bold;">BL #</td><td>${shipment.blNumber} DATED: ${shipment.blDate || '—'}</td></tr>` : ''}
         ${shipment.vesselName ? `<tr><td style="font-weight:bold;">VESSEL NAME:</td><td>${shipment.vesselName}</td></tr>` : ''}
@@ -1891,7 +1947,7 @@ function renderCertificateOfOrigin(doc) {
   const bagSize = order.bagSizeKg || firstItem.bagSizeKg || 50;
   const totalBags = order.totalBags
     || ((items && items.length > 0)
-        ? items.reduce((s, it) => s + (it.bagCount || (it.qtyMT ? Math.round((it.qtyMT * 1000) / (it.bagSizeKg || bagSize)) : 0)), 0)
+        ? items.reduce((s, it) => s + (it.bagCount || (it.qtyMT ? Math.round((it.qtyMT * 1000) / (lineBag(it, order, items.length).bagSize || Infinity)) : 0)), 0)
         : (order.qtyMT ? Math.round((order.qtyMT * 1000) / bagSize) : 0));
   // Weights come from the backend totals, which already add the retail-bag and
   // master-bag tare. This used to re-derive its own tare from bagWeightGm alone
@@ -2426,7 +2482,7 @@ const STATUS_BADGE = {
 // Exported so the Documents tab can render the SAME html when bundling several
 // documents into one download — a bundled copy must match a singly-downloaded
 // one, which means one renderer, not a second implementation.
-export { renderDocument, buildDocHtml, resolveOrientation };
+export { renderDocument, buildDocHtml, resolveOrientation, validateExportDoc };
 
 // `request` ({ docType, action: 'email', nonce }) lets the order header ask for
 // a document to be opened and its email dialog shown — the real, server-side
