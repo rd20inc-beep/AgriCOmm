@@ -646,6 +646,22 @@ export function PurchaseLedgerView({ data, companyName, range }) {
 }
 
 // ─── Sales ledger (local + export) ─────────────────────────────────────
+// The $/MT and $/kg cells of an export order. One price across the order's
+// lines prints as before; several lines make the order figure an AVERAGE
+// (24 MT @ 1290 + 24 MT @ 1250 → 1270), so it reads "avg $1,270" with the
+// line range under it, never as a unit rate.
+export function exportRateCells(r) {
+  const rate = parseFloat(r?.ratePerMt) || 0;
+  if (!r?.rateMixed) return [fmtUSD(rate), fmtUSD(rate / 1000, { decimals: 3 })];
+  return [
+    <span className="whitespace-nowrap">
+      avg {fmtUSD(rate)}
+      <span className="block text-[10px] text-gray-500">{fmtUSD(r.rateMin)}–{fmtUSD(r.rateMax)}</span>
+    </span>,
+    `avg ${fmtUSD(rate / 1000, { decimals: 3 })}`,
+  ];
+}
+
 export function SalesLedgerView({ data, companyName, range }) {
   const { local, export: exp, totals } = data;
   return (
@@ -685,7 +701,7 @@ export function SalesLedgerView({ data, companyName, range }) {
             fmtDate(r.date),
             r.customerId ? <RefLink to={`/finance/statements?type=customer&id=${r.customerId}`}>{r.customer}</RefLink> : (r.customer || '—'),
             r.item || '—',
-            fmtMt(r.mt), fmtKg(r.mt * 1000), fmtUSD(r.ratePerMt || 0), fmtUSD((r.ratePerMt || 0) / 1000, { decimals: 3 }), fmtKg(r.bags), fmtUSD(r.valueUsd || 0), r.status || '—',
+            fmtMt(r.mt), fmtKg(r.mt * 1000), ...exportRateCells(r), fmtKg(r.bags), fmtUSD(r.valueUsd || 0), r.status || '—',
           ])}
           empty="No export orders."
           totalRow={['', '', '', 'TOTAL', fmtMt(totals.exportMt), fmtKg(totals.exportMt * 1000), '', '', fmtKg(exp.reduce((s, r) => s + (parseFloat(r.bags) || 0), 0)), fmtUSD(totals.exportUsd || 0), '']}

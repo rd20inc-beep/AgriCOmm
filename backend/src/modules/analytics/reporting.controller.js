@@ -1894,12 +1894,20 @@ const reportingController = {
         for (const r of localRows) { if (r.batch_ref) { const id = parseInt(String(r.batch_ref).replace(/^batch-/, ''), 10); if (byId[id]) lsBatchByRef[r.batch_ref] = byId[id]; if (nameById[id]) lsBatchNameByRef[r.batch_ref] = nameById[id]; } }
       }
       let eo = db('export_orders as o').leftJoin('customers as c', 'o.customer_id', 'c.id')
-        .select('o.id', 'o.order_no', 'o.created_at', 'o.product_name', 'o.qty_kg', 'o.price_per_mt', 'o.total_bags', 'o.status', 'o.customer_id', db.raw("COALESCE(c.name, '—') as customer"));
+        .select('o.id', 'o.order_no', 'o.created_at', 'o.product_name', 'o.qty_mt', 'o.price_per_mt', 'o.total_bags', 'o.status', 'o.customer_id', db.raw("COALESCE(c.name, '—') as customer"));
       if (from) eo = eo.where('o.created_at', '>=', from);
       if (to) eo = eo.where('o.created_at', '<=', to);
       const exportRows = await eo.orderBy('o.created_at', 'desc');
+      // A multi-line order's price_per_mt is the AVERAGE of its lines (24 MT @
+      // 1290 + 24 MT @ 1250 → 1270) — nobody's rate. Flag it with the range so
+      // the ledger prints "avg 1,270 (1,250–1,290)", not 1,270 as a unit price.
+      const { linePricesByOrder, priceSummary } = require('../exportOrders/orderLines');
+      const exLinePrices = await linePricesByOrder(db, exportRows.map((r) => r.id));
       const local = localRows.map((r) => ({ id: r.id, ref: r.sale_no, date: r.sale_date, customer: r.customer, customerId: r.customer_id || null, item: r.item_name, itemType: r.item_type, mt: (parseFloat(r.quantity_kg) || 0) / 1000, bags: r.quantity_bags || 0, ratePerKg: parseFloat(r.rate_per_kg) || 0, valuePkr: parseFloat(r.total_amount) || 0, lotNo: r.lot_no, lotId: r.lot_id, batchNo: r.batch_ref ? (lsBatchByRef[r.batch_ref] || null) : null, batchName: r.batch_ref ? (lsBatchNameByRef[r.batch_ref] || null) : null, warehouse: r.warehouse_name || null, paymentStatus: r.payment_status }));
-      const exp = exportRows.map((r) => ({ id: r.id, ref: r.order_no, date: r.created_at, customer: r.customer, customerId: r.customer_id || null, item: r.product_name, mt: parseFloat(r.qty_kg) || 0, bags: r.total_bags || 0, ratePerMt: parseFloat(r.price_per_mt) || 0, valueUsd: (parseFloat(r.qty_kg) || 0) * (parseFloat(r.price_per_mt) || 0), status: r.status }));
+      const exp = exportRows.map((r) => {
+        const ps = priceSummary(r, exLinePrices[r.id] || []);
+        return { id: r.id, ref: r.order_no, date: r.created_at, customer: r.customer, customerId: r.customer_id || null, item: r.product_name, mt: parseFloat(r.qty_mt) || 0, bags: r.total_bags || 0, ratePerMt: parseFloat(r.price_per_mt) || 0, rateLabel: ps.label, rateMixed: ps.mixed, rateMin: ps.min, rateMax: ps.max, valueUsd: (parseFloat(r.qty_mt) || 0) * (parseFloat(r.price_per_mt) || 0), status: r.status };
+      });
       return res.json({ success: true, data: { local, export: exp, totals: { localCount: local.length, localMt: local.reduce((s, d) => s + d.mt, 0), localPkr: local.reduce((s, d) => s + d.valuePkr, 0), exportCount: exp.length, exportMt: exp.reduce((s, d) => s + d.mt, 0), exportUsd: exp.reduce((s, d) => s + d.valueUsd, 0) }, period: { from, to } } });
     } catch (err) { console.error('Sales ledger error:', err); return res.status(500).json({ success: false, message: 'Internal server error.' }); }
   },
