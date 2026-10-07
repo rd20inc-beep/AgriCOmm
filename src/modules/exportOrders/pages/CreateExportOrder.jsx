@@ -944,8 +944,17 @@ export default function CreateExportOrder() {
                 const p = products.find(pp => String(pp.id) === String(it.productId));
                 return (
                   <div key={idx} className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
-                    <div className="md:col-span-3 text-sm font-medium text-gray-700 truncate md:pb-2">
-                      {p?.name || it.productName || `Item ${idx + 1}`}
+                    {/* Two lines of the same rice read identically by name alone, so
+                        each packing row also says which line it is (qty @ price). */}
+                    <div className="md:col-span-3 md:pb-1 min-w-0">
+                      <div className="text-sm font-medium text-gray-700 truncate">
+                        <span className="text-gray-400">Line {idx + 1} · </span>{p?.name || it.productName || 'Item'}
+                      </div>
+                      {(parseFloat(it.qtyMT) > 0 || parseFloat(it.pricePerMT) > 0) && (
+                        <div className="text-xs text-gray-500 tabular-nums">
+                          {fmtNum(parseFloat(it.qtyMT) || 0)} MT @ {fmtNum(parseFloat(it.pricePerMT) || 0, 2)}/MT
+                        </div>
+                      )}
                     </div>
                     <div className="md:col-span-3">
                       <BagTypePicker
