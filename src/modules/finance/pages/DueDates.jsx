@@ -5,6 +5,7 @@ import { useUpcoming, useClearCheque, useBankAccounts } from '../../../api/queri
 import { useApp } from '../../../context/AppContext';
 import { AccountSelect } from '../../../components/payments/PaymentFields';
 import { accountsForMethod, pickAccountForMethod } from '../../../components/payments/paymentPayload';
+import { accountsForCurrency } from '../../../shared/utils/accountCurrency';
 import { fmtPKR as fmtPKRBase, fmtMoney as fmtMoneyBase, fmtDate } from '../../../shared/utils/format';
 
 // Exact, two decimals; each amount in its own currency (USD export receivables vs PKR dues).
@@ -77,7 +78,9 @@ function List({ title, icon: Icon, tone, items, total, onClear, clearing }) {
  * account the cheque cleared through — preselected with the one named when the
  * cheque was recorded, else the only / starred bank account.
  */
-function ClearChequeDialog({ item, accounts, busy, onCancel, onConfirm }) {
+function ClearChequeDialog({ item, accounts: allAccounts, busy, onCancel, onConfirm }) {
+  // A non-PKR account clears only cheques in its own currency.
+  const accounts = accountsForCurrency(allAccounts, item?.currency);
   // null = not touched yet → show the default; a choice the user makes wins.
   // (Remounted per cheque via `key`, so a new cheque starts untouched.)
   const [picked, setPicked] = useState(null);

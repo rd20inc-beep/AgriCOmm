@@ -44,6 +44,7 @@ import StatementPayDrawer from '../../finance/components/StatementPayDrawer';
 import TransferFundsDrawer from '../../finance/components/TransferFundsDrawer';
 import AnomalyWatchCard from '../../ai/components/AnomalyWatchCard';
 import { favStar } from '../../../shared/utils/favorites';
+import { accountsForCurrency } from '../../../shared/utils/accountCurrency';
 import { valueInventory } from '../utils/inventoryValue';
 import useConfirm from '../../../hooks/useConfirm';
 import PaymentDrawer from '../../../components/payments/PaymentDrawer';
@@ -4123,7 +4124,8 @@ function downloadBankTransferFile(run, lines, addToast) {
 function PayrollRunDrawer({ month, entity = 'mill', employees, preselectId, bankAccounts = [], onClose, onPosted, postRunMut, addToast }) {
   const [form, setForm] = useState({ pay_method: 'cash', bank_account_id: '', pay_date: todayLocalISO() });
   // Banks the mill can pay salaries from (cash is the dedicated Mill Cash float).
-  const payBanks = (bankAccounts || []).filter(a => a.type !== 'cash');
+  // Mill payments are PKR — a non-PKR (e.g. USD) account cannot carry them.
+  const payBanks = accountsForCurrency((bankAccounts || []).filter(a => a.type !== 'cash'), 'PKR');
   // One editable row per unpaid employee: include, advance-to-clear, and the
   // amount actually being paid (defaults to gross − advance, both overridable).
   const [rows, setRows] = useState(() => employees.map(w => {
@@ -4687,7 +4689,8 @@ function printSettlement(w, s, company) { return openPayslipWindow(`Final Settle
 function FinalSettlementDrawer({ worker, bankAccounts = [], company, onClose, addToast }) {
   const { data: calc, isLoading } = useFinalSettlement(worker.id);
   const finalizeMut = useFinalizeSettlement();
-  const payBanks = (bankAccounts || []).filter((a) => a.type !== 'cash');
+  // Mill payments are PKR — a non-PKR (e.g. USD) account cannot carry them.
+  const payBanks = accountsForCurrency((bankAccounts || []).filter((a) => a.type !== 'cash'), 'PKR');
   const [confirm, confirmDialog] = useConfirm();
   const [form, setForm] = useState(null);
   useEffect(() => {
@@ -4981,7 +4984,8 @@ function StatutoryRemittancePanel({ canPay, entity = 'mill', bankAccounts = [], 
   const { data: history = [], isLoading: loadingHist } = useStatutoryRemittances({ entity });
   const createMut = useCreateStatutoryRemittance();
   const deleteMut = useDeleteStatutoryRemittance();
-  const payBanks = (bankAccounts || []).filter((a) => a.type !== 'cash');
+  // Mill payments are PKR — a non-PKR (e.g. USD) account cannot carry them.
+  const payBanks = accountsForCurrency((bankAccounts || []).filter((a) => a.type !== 'cash'), 'PKR');
   const owed = liabilities.filter((l) => parseFloat(l.outstanding) > 0);
   const blank = { liability_account_code: '', amount: '', pay_method: 'cash', bank_account_id: '', remit_date: todayLocalISO(), reference: '', authority: '', period_from: '', period_to: '', notes: '' };
   const [form, setForm] = useState(blank);

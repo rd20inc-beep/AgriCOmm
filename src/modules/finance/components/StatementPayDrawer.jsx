@@ -5,6 +5,7 @@ import SlideDrawer from '../../../components/SlideDrawer';
 import { useReceivables, usePayables, useBankAccounts, useRecordPayment } from '../../../api/queries';
 import { useApp } from '../../../context/AppContext';
 import { favStar } from '../../../shared/utils/favorites';
+import { accountsForCurrency } from '../../../shared/utils/accountCurrency';
 import { CHEQUE_DATE_LABEL } from '../../../components/payments/paymentPayload';
 import { ChequeHint } from '../../../components/payments/PaymentFields';
 import StatusBadge from '../../../shared/components/StatusBadge';
@@ -273,7 +274,7 @@ export default function StatementPayDrawer({ mode, party, onClose }) {
               }}
               className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
               <option value="">Select bank account…</option>
-              {bankAccounts.map((a) => (
+              {accountsForCurrency(bankAccounts, activeCur).map((a) => (
                 <option key={a.id} value={a.id}>
                   {favStar(a)}{a.name} — {a.bankName || ''} ({fmt(a.currentBalance, a.currency || 'PKR')})
                 </option>

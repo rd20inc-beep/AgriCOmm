@@ -26,6 +26,7 @@ import { favStar, isFavorite } from '../../../shared/utils/favorites';
 import useConfirm from '../../../hooks/useConfirm';
 import { paymentWord, groupPaymentWord, payableDue, localToday, readLastCustomerId, rememberLastCustomerId, defaultBankAccountId } from '../utils/saleStatus';
 import { todayLocalISO, fmtPKR as fmtPKRExact, fmtNum, fmtDate, fmtDateTime } from '../../../shared/utils/format';
+import { accountTakesCurrency } from '../../../shared/utils/accountCurrency';
 
 // Local-sale money is shown to the paisa (2 dp), exact, en-PK grouping.
 const fmtPKR = (v) => fmtPKRExact(parseFloat(v) || 0, { decimals: 2 });
@@ -49,7 +50,8 @@ const LABEL = "block text-xs font-semibold text-gray-600 uppercase mb-1";
 
 export default function LocalSales() {
   const { addToast, customersList, refreshFromApi, bankAccountsList = [], companyProfileData } = useApp();
-  const bankOpts = (Array.isArray(bankAccountsList) ? bankAccountsList : []).filter(b => (b.type || '') !== 'cash' && (b.isActive ?? b.is_active ?? true));
+  // Local sales are PKR — a non-PKR (e.g. USD) account cannot take the receipt.
+  const bankOpts = (Array.isArray(bankAccountsList) ? bankAccountsList : []).filter(b => (b.type || '') !== 'cash' && (b.isActive ?? b.is_active ?? true) && accountTakesCurrency(b, 'PKR'));
   const [showSaleModal, setShowSaleModal] = useState(false);
   const [invoiceSale, setInvoiceSale] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -619,7 +621,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
   const safeLots = useMemo(() => (Array.isArray(lots) ? lots : []).filter(l => (parseFloat(l.availableQty) || 0) > 0), [lots]);
   const { bankAccountsList = [] } = useApp();
   const bankOptions = useMemo(() => (Array.isArray(bankAccountsList) ? bankAccountsList : [])
-    .filter(b => (b.type || '') !== 'cash' && (b.isActive ?? b.is_active ?? true)), [bankAccountsList]);
+    .filter(b => (b.type || '') !== 'cash' && (b.isActive ?? b.is_active ?? true) && accountTakesCurrency(b, 'PKR')), [bankAccountsList]);
   // Mill-store packaging items (e.g. empty katta) are sellable too — count-based.
   const { data: pkgItemsRaw = [] } = useMillStoreItems({ category: 'packaging', limit: 200 });
   const pkgItems = useMemo(() => (Array.isArray(pkgItemsRaw) ? pkgItemsRaw : []).filter(i => Number(i.quantity_available) > 0), [pkgItemsRaw]);

@@ -14,6 +14,7 @@ import PartyLink from '../../../shared/components/PartyLink';
 import { toPkr } from '../utils/fx';
 import { shortenRef } from '../utils/refs';
 import { favStar } from '../../../shared/utils/favorites';
+import { accountsForCurrency } from '../../../shared/utils/accountCurrency';
 import FieldError from '../../../shared/components/FieldError';
 import { todayLocalISO, fmtMoney, fmtPKR, fmtDate, fmtDateTime } from '../../../shared/utils/format';
 
@@ -471,7 +472,7 @@ export default function MoneyOut() {
                     <select required={!isUnclearedCheque(payForm)} value={payForm.bankAccountId} onChange={e => setPayForm({ ...payForm, bankAccountId: e.target.value })}
                       className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
                       <option value="">{payForm.paymentMethod === 'cash' ? 'Select cash account...' : 'Select account...'}</option>
-                      {(payForm.paymentMethod === 'cash' ? cashAccounts : bankOnlyAccounts).map(a => (
+                      {accountsForCurrency(payForm.paymentMethod === 'cash' ? cashAccounts : bankOnlyAccounts, drawer.currency).map(a => (
                         <option key={a.id} value={a.id}>
                           {favStar(a)}{a.name} — {a.bankName || ''} ({fmtMoney(parseFloat(a.currentBalance) || 0, a.currency || 'PKR', { decimals: 2 })})
                         </option>

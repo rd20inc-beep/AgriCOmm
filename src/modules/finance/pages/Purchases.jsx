@@ -15,6 +15,7 @@ import { useApp } from '../../../context/AppContext';
 import { shortenRef } from '../utils/refs';
 import PartyLink from '../../../shared/components/PartyLink';
 import { favStar } from '../../../shared/utils/favorites';
+import { accountsForCurrency } from '../../../shared/utils/accountCurrency';
 import { CHEQUE_DATE_LABEL } from '../../../components/payments/paymentPayload';
 import { ChequeHint } from '../../../components/payments/PaymentFields';
 import { todayLocalISO, fmtPKR, fmtMoney, fmtDate, fmtDateTime } from '../../../shared/utils/format';
@@ -685,7 +686,8 @@ function PayPurchaseDrawer({ purchase, bankAccounts, isPending, onClose, onSubmi
                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900"
               >
                 <option value="">{paymentMethod === 'cheque' ? 'Bank account it will clear through (optional)…' : 'Select a bank account…'}</option>
-                {bankAccounts.map(a => (
+                {/* Purchases are paid in PKR — a USD account cannot carry them. */}
+                {accountsForCurrency(bankAccounts, 'PKR').map(a => (
                   <option key={a.id} value={a.id}>
                     {favStar(a)}{a.name} · {a.bankName || '—'} ({fmtMoney(parseFloat(a.currentBalance) || 0, a.currency || 'PKR', { decimals: 2 })})
                   </option>

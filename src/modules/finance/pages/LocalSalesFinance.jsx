@@ -11,6 +11,7 @@ import { downloadCSV } from '../../../utils/csvExport';
 import { useApp } from '../../../context/AppContext';
 import SlideDrawer from '../../../components/SlideDrawer';
 import { favStar, isFavorite } from '../../../shared/utils/favorites';
+import { accountsForCurrency } from '../../../shared/utils/accountCurrency';
 import { paymentWord, defaultBankAccountId } from '../../localSales/utils/saleStatus';
 import { CHEQUE_DATE_LABEL } from '../../../components/payments/paymentPayload';
 import { ChequeHint } from '../../../components/payments/PaymentFields';
@@ -34,7 +35,8 @@ export default function LocalSalesFinance() {
   const [detailSale, setDetailSale] = useState(null);
   const [payForm, setPayForm] = useState({ amount: '', method: 'cash', bankAccountId: '', reference: '', dueDate: '', collectionLocation: 'Mill' });
   const [payErrors, setPayErrors] = useState({});
-  const nonCashAccounts = bankAccounts.filter(a => a.type !== 'cash');
+  // Local sales are PKR: a non-PKR (e.g. USD) account cannot take the receipt.
+  const nonCashAccounts = accountsForCurrency(bankAccounts.filter(a => a.type !== 'cash'), 'PKR');
   // Where each payment was received (account/cash) + type, for the open sale.
   const { data: receiptData, isLoading: receiptsLoading } = useReceivableReceipts(detailSale?.id, 'local_sale', !!detailSale);
 
@@ -311,7 +313,7 @@ export default function LocalSalesFinance() {
                   <select value={payForm.bankAccountId} onChange={(e) => setPayForm({ ...payForm, bankAccountId: e.target.value })}
                     className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white">
                     <option value="">Select bank account…</option>
-                    {bankAccounts.filter(a => a.type !== 'cash').map(a => <option key={a.id} value={a.id}>{favStar(a)}{a.name}{a.bankName ? ` — ${a.bankName}` : ''}</option>)}
+                    {nonCashAccounts.map(a => <option key={a.id} value={a.id}>{favStar(a)}{a.name}{a.bankName ? ` — ${a.bankName}` : ''}</option>)}
                   </select>
                 )}
                 {payForm.method === 'cheque' && (

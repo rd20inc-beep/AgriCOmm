@@ -19,6 +19,7 @@ const { isPartyMasked } = require('../../shared/partyMask');
 const { isMillOnlyPayer, assertMillEntity, assertMillAccount } = require('../../shared/millPayer');
 const { canSeeCost } = require('../../utils/costVisibility');
 const { resolvePaymentAccountId } = require('../../shared/cashAccounts');
+const { assertAccountCurrency } = require('../../shared/accountCurrency');
 const { normalizePaymentMethod } = require('../../shared/constants/paymentMethods');
 const { ledgerFailure, missingAccounts } = require('../../shared/ledgerFailure');
 const {
@@ -637,6 +638,7 @@ const financeController = {
         if (!acctId) throw fail('Choose the bank account this cheque cleared through.', 400);
         const acctRow = await trx('bank_accounts').where({ id: acctId }).first();
         if (!acctRow) throw fail('Bank account not found.', 400);
+        assertAccountCurrency(acctRow, p.currency);
         await trx('payments').where({ id }).update({ cleared: true, bank_account_id: acctId, updated_at: trx.fn.now() });
         const clearedPayment = { ...p, cleared: true, bank_account_id: acctId };
 
@@ -1289,6 +1291,12 @@ const financeController = {
           isPostDated,
         });
         if (millOnly) await assertMillAccount(trx, accountId || bank_account_id);
+        // A non-PKR account moves only its own currency (a PKR account takes any
+        // currency at the stamped PKR figure). Checked before anything is written.
+        if (accountId) {
+          const acctForCur = await trx('bank_accounts').where({ id: accountId }).first();
+          assertAccountCurrency(acctForCur, currency);
+        }
 
         const paymentNo = await generatePaymentNo(trx);
 
@@ -2499,6 +2507,8 @@ financeController.payPurchase = async (req, res) => {
       // (POST /payments/:id/clear) settles, moves the bank and journals it.
       if (isCheque(payMethod)) {
         if (millOnly) await assertMillAccount(trx, bank_account_id);
+        // Purchases are paid in PKR — a USD account cannot carry the cheque.
+        if (bank_account_id) assertAccountCurrency(await trx('bank_accounts').where({ id: bank_account_id }).first(), 'PKR');
         const natRef = row.lot_no || row.purchase_no || row.expense_no || null;
         // The payable read under lock above is the one this purchase settles;
         // the natural-key match is only for a legacy payable with no source.
@@ -2532,6 +2542,9 @@ financeController.payPurchase = async (req, res) => {
           : 'general',
       });
       if (millOnly) await assertMillAccount(trx, accountId || bank_account_id);
+      // Purchases are paid in PKR: the account moves by amountPkr below, so a
+      // non-PKR account would be debited a rupee figure in its own currency.
+      if (accountId) assertAccountCurrency(await trx('bank_accounts').where({ id: accountId }).first(), 'PKR');
 
       const commonUpdate = {
         payment_status: status,
