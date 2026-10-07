@@ -4,6 +4,7 @@ import { fmtNum, LOCALE } from '../../../shared/utils/format';
 
 const nf3 = new Intl.NumberFormat(LOCALE, { maximumFractionDigits: 3 });
 import api from '../../../api/client';
+import { useApp } from '../../../context/AppContext';
 import PackingWeightCard from './PackingWeightCard';
 import MaterialRequirementsCard from './MaterialRequirementsCard';
 import { packingSummary, fmtSizeKg, lineNeedsMaster } from '../utils/orderLines';
@@ -40,6 +41,7 @@ function itemToPayload(it) {
 }
 
 export default function PackingTab({ order, onUpdated }) {
+  const { addToast } = useApp();
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(null);
@@ -151,8 +153,12 @@ export default function PackingTab({ order, onUpdated }) {
       await api.put(`/api/export-orders/${order.id}`, body);
       setEditing(false);
       onUpdated?.();
+      addToast('Packing saved');
     } catch (err) {
+      // A rejected save used to go only to the console, so the form just sat
+      // there as if Save did nothing. Say why, and keep the edits on screen.
       console.error('Save packing error:', err);
+      addToast(err?.response?.data?.message || err?.message || 'Could not save the packing details', 'error');
     }
     setSaving(false);
   }
