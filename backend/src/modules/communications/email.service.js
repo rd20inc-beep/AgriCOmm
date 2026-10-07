@@ -199,15 +199,22 @@ const emailService = {
     let finalBody = '';
 
     if (template) {
+      // The template prints "Price/MT: {{currency}} {{pricePerMT}}". On a
+      // multi-line order price_per_mt is the AVERAGE of the lines (24 MT @ 1290
+      // + 24 MT @ 1250 → 1270), so it goes out as "avg 1,270 (1,250–1,290)".
+      const { priceSummary } = require('../exportOrders/orderLines');
+      const lines = await db('export_order_items').where({ order_id: order.id }).select('price_per_mt');
+      const ps = priceSummary(order, lines);
+      const fmt = (v) => Number(v).toLocaleString('en-US', { maximumFractionDigits: 2 });
       const rendered = this.renderTemplate(template, {
         piNumber: order.order_no,
         customerName: order.customer_name,
         orderNo: order.order_no,
         productName: order.product_name,
         qtyMT: order.qty_mt,
-        currency: 'USD',
-        pricePerMT: order.price_per_mt,
-        totalValue: order.total_value,
+        currency: order.currency || 'USD',
+        pricePerMT: ps.mixed ? `avg ${fmt(ps.value)} (${fmt(ps.min)}–${fmt(ps.max)})` : order.price_per_mt,
+        totalValue: order.contract_value,
       });
       finalSubject = rendered.subject;
       finalBody = rendered.body;

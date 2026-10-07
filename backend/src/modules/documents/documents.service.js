@@ -575,6 +575,20 @@ const documentService = {
       const invoiceType = docType === 'proforma_invoice' ? 'Proforma Invoice' : 'Commercial Invoice';
       title = `${invoiceType} - ${order.order_no}`;
 
+      // price_per_mt is contract value ÷ total qty. On a multi-line order that
+      // is an AVERAGE (24 MT @ 1290 + 24 MT @ 1250 → 1270), so each line prints
+      // its own rate and the header figure is labelled "Avg price/MT" with the range.
+      const { priceSummary } = require('../exportOrders/orderLines');
+      const lines = await conn('export_order_items').where({ order_id: order.id }).orderBy('line_no');
+      const ps = priceSummary(order, lines);
+      const priceHtml = ps.mixed
+        ? `  <p><strong>Lines:</strong></p>
+  <ul>
+${lines.map((l) => `    <li>${l.product_name || order.product_name || ''} — ${l.qty_mt} MT @ ${order.currency} ${l.price_per_mt}/MT</li>`).join('\n')}
+  </ul>
+  <p><strong>Avg price/MT:</strong> ${order.currency} ${Number(ps.value).toFixed(2)} (${ps.min}–${ps.max})</p>`
+        : `  <p><strong>Price/MT:</strong> ${order.currency} ${order.price_per_mt}</p>`;
+
       htmlContent = `
 <!DOCTYPE html>
 <html>
@@ -586,7 +600,7 @@ const documentService = {
   <p><strong>Country:</strong> ${order.customer_country || order.country}</p>
   <p><strong>Product:</strong> ${order.product_name}</p>
   <p><strong>Quantity:</strong> ${order.qty_mt} MT</p>
-  <p><strong>Price/MT:</strong> ${order.currency} ${order.price_per_mt}</p>
+${priceHtml}
   <p><strong>Total Value:</strong> ${order.currency} ${order.contract_value || order.total_value}</p>
   <p><strong>Incoterm:</strong> ${order.incoterm || 'N/A'}</p>
   <p><strong>Destination:</strong> ${order.destination_port || 'N/A'}</p>
