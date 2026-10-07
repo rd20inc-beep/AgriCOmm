@@ -10,6 +10,7 @@ const { resolveShipmentField, resolveRequiredField } = require('./shipmentField'
 const { billableFreight, balanceExpectedFor, freightChanges } = require('./billableFreight');
 const debitNoteService = require('./debitNote.service');
 const { unwindOrderReceipts } = require('./unwindReceipts');
+const { fillSingleLineBagSpec, linePackaging } = require('./orderLines');
 const { assertAccountCurrency } = require('../../shared/accountCurrency');
 const notificationService = require('../../services/notificationService');
 // #9-scoping: per-user warehouse restriction, applied to stock READ paths only
@@ -396,6 +397,12 @@ const DATE_UPDATE_FIELDS = new Set([
   'freight_basis_date', 'freight_valid_until',
 ]);
 
+// Bag fields the order header and a P.I. line both carry.
+const BAG_SPEC_FIELDS = [
+  'bag_size_kg', 'master_bag_size_kg', 'bag_type', 'bag_quality',
+  'bag_brand', 'bag_color', 'bag_printing', 'master_bag_type',
+];
+
 // Routes accept either the numeric id or the order number, so a debit-note
 // handler has to resolve the same way its neighbours do.
 async function resolveOrderId(raw) {
@@ -503,6 +510,26 @@ const exportOrderController = {
       ]);
 
       const total = parseInt(countResult.total);
+
+      // Each order's P.I. lines. Without them a list row (and the Proforma
+      // printed from the list) only had the header: the AVERAGE price
+      // (10 MT @ 1290 + 10 MT @ 1250 → 1270) and one bag size for every line.
+      const ids = orders.map((o) => o.id);
+      if (ids.length) {
+        const lineRows = await db('export_order_items as i')
+          .leftJoin('products as p', 'i.product_id', 'p.id')
+          .whereIn('i.order_id', ids)
+          .select('i.*', 'p.name as product_name_lookup')
+          .orderBy([{ column: 'i.order_id' }, { column: 'i.line_no' }]);
+        const byOrder = {};
+        lineRows.forEach((it) => {
+          (byOrder[it.order_id] = byOrder[it.order_id] || []).push({
+            ...it,
+            product_name: it.product_name || it.product_name_lookup || null,
+          });
+        });
+        orders.forEach((o) => { o.items = byOrder[o.id] || []; });
+      }
 
       return res.json({
         success: true,
@@ -1151,8 +1178,16 @@ const exportOrderController = {
         // single line from the order's summary fields so every order has at
         // least one row in export_order_items going forward.
         if (itemRows && itemRows.length > 0) {
+          // A one-line order's line IS the order: when the form captured the bag
+          // on the order only, the line takes it, so documents reading the line
+          // print the right bag. Several lines keep their own (never the header's).
+          const rowsToInsert = fillSingleLineBagSpec(itemRows, {
+            bag_size_kg: bag_size_kg ? parseFloat(bag_size_kg) : null,
+            master_bag_size_kg: master_bag_size_kg ? parseFloat(master_bag_size_kg) : null,
+            bag_type, bag_quality, bag_brand, bag_color, bag_printing,
+          });
           await trx('export_order_items').insert(
-            itemRows.map((r) => ({ ...r, order_id: order.id }))
+            rowsToInsert.map((r) => ({ ...r, order_id: order.id }))
           );
         } else {
           await trx('export_order_items').insert({
@@ -1168,6 +1203,7 @@ const exportOrderController = {
               ? `Packed in ${parseFloat(bag_size_kg)} KG ${bag_type || 'PP'} BAG`
               : null,
             bag_size_kg: bag_size_kg ? parseFloat(bag_size_kg) : null,
+            master_bag_size_kg: master_bag_size_kg ? parseFloat(master_bag_size_kg) : null,
             bag_count: input_total_bags ? parseInt(input_total_bags) : null,
             bag_type: bag_type || null,
             bag_quality: bag_quality || null,
@@ -1413,7 +1449,18 @@ const exportOrderController = {
               itemRowsForUpdate.map((r) => ({ ...r, order_id: parseInt(id) }))
             );
           }
-        } else if (rescaleItem) {
+        } else if (!itemRowsForUpdate && BAG_SPEC_FIELDS.some((f) => safeUpdates[f] !== undefined)) {
+          // The bag edited on the order (Packing tab, single spec) without the
+          // lines: a ONE-line order's line follows it, so the documents — which
+          // print the line — show the new bag. Several lines each keep their own.
+          const lines = await trx('export_order_items').where({ order_id: id });
+          if (lines.length === 1) {
+            const patch = {};
+            BAG_SPEC_FIELDS.forEach((f) => { if (safeUpdates[f] !== undefined) patch[f] = safeUpdates[f]; });
+            await trx('export_order_items').where({ id: lines[0].id }).update({ ...patch, updated_at: trx.fn.now() });
+          }
+        }
+        if (!itemRowsForUpdate && rescaleItem) {
           await trx('export_order_items').where({ id: rescaleItem.id }).update({
             qty_mt: rescaleItem.qty_mt,
             price_per_mt: rescaleItem.price_per_mt,
@@ -3319,7 +3366,7 @@ const exportOrderController = {
   // ── Proactive material requirements (calculate BEFORE packing) ─────────────
   // From an order's packing spec + qty, compute the bags / master bags / polythene
   // / pallets needed, match them to mill_stock, and surface the shortage per item.
-  async _materialLines(order) {
+  async _materialLines(order, itemsIn) {
     const orderKg = (parseFloat(order.qty_mt) || 0) * 1000;
     const pt = order.packing_type || 'retail';
     if (pt === 'container' || orderKg <= 0) return [];
@@ -3339,19 +3386,51 @@ const exportOrderController = {
       est_unit_cost: m.cost, est_amount: m.cost != null ? Math.round(Math.max(0, required - m.available) * m.cost) : null,
     });
 
-    const bagSize = pt === 'jumbo' ? 1200 : (parseFloat(order.bag_size_kg) || 0);
-    if (bagSize > 0) {
-      const req = Math.ceil(orderKg / bagSize);
-      const m = await matchStock({ capacityKg: bagSize, materialHint: order.bag_material || order.bag_type || null });
+    // Packaging is needed PER LINE: each P.I. line's quantity in that line's own
+    // bag (and master bag). One header bag size × the whole order is what turned
+    // a 2 KG line plus a 5 KG line into 2 KG bags for both. Lines sharing a bag
+    // are summed so the same item is not listed twice.
+    const items = itemsIn || await db('export_order_items').where({ order_id: order.id }).orderBy('line_no');
+    const packs = linePackaging(order, items);
+    const material = order.bag_material || null;
+    const retail = new Map(); // size → { kg, hint }
+    const masters = new Map(); // master size → kg
+    let polyKg = 0;
+    for (const l of packs) {
+      const kg = l.kg;
+      if (!(kg > 0)) continue;
+      const size = pt === 'jumbo' ? 1200 : l.bagSizeKg;
+      if (size > 0) {
+        const cur = retail.get(size) || { kg: 0, hint: material || l.bagType || order.bag_type || null };
+        cur.kg += kg;
+        retail.set(size, cur);
+      }
+      if (pt === 'retail' && l.masterBagSizeKg > 0) {
+        masters.set(l.masterBagSizeKg, (masters.get(l.masterBagSizeKg) || 0) + kg);
+        if (l.bagSizeKg <= 15) polyKg += kg;
+      }
+    }
+
+    for (const [bagSize, { kg, hint }] of retail) {
+      const req = Math.ceil(kg / bagSize);
+      // eslint-disable-next-line no-await-in-loop
+      const m = await matchStock({ capacityKg: bagSize, materialHint: hint });
       lines.push(mk(`${bagSize} kg ${order.bag_material || 'bag'}`, req, m));
     }
-    if (pt === 'retail' && parseFloat(order.master_bag_size_kg) > 0) {
-      const ms = parseFloat(order.master_bag_size_kg);
-      const req = Math.ceil(orderKg / ms);
+    let masterBagsTotal = 0;
+    for (const [ms, kg] of masters) {
+      const req = Math.ceil(kg / ms);
+      masterBagsTotal += req;
+      // eslint-disable-next-line no-await-in-loop
       lines.push(mk(`${ms} kg master bag`, req, await matchStock({ code: `MASTER-${ms}`, capacityKg: ms })));
-      if (parseFloat(order.bag_size_kg) <= 15) {
-        lines.push(mk('Polythene sheet', req, await matchStock({ code: 'POLY-SHEET' })));
-      }
+    }
+    // One polythene sheet per master bag that holds small (≤15 kg) retail bags.
+    if (polyKg > 0) {
+      const req = [...masters.keys()].length === 1
+        ? Math.ceil(polyKg / [...masters.keys()][0])
+        : packs.filter((l) => pt === 'retail' && l.masterBagSizeKg > 0 && l.bagSizeKg <= 15)
+          .reduce((s, l) => s + l.masterBags, 0);
+      lines.push(mk('Polythene sheet', req || masterBagsTotal, await matchStock({ code: 'POLY-SHEET' })));
     }
     if (order.palletized) {
       const req = Math.min(20, Math.ceil(orderKg / 1000)); // 20 pallets × 1,000 kg cap

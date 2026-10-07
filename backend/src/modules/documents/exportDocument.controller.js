@@ -216,8 +216,18 @@ const exportDocumentController = {
       const netWeightKg = containerNetKg
         || (packingWeight && parseFloat(packingWeight.packed_net_rice_kg))
         || (parseFloat(order.qty_mt) || 0) * 1000;
+      // Each P.I. line ships in its own bag. On a multi-line order the header's
+      // total_bags was worked out from ONE bag size for the whole quantity, so
+      // the per-line sum is the figure; a single-line order reads as before.
+      const { linePackaging, packingSummary, priceSummary } = require('../exportOrders/orderLines');
+      const packLines = linePackaging(order, items);
+      const multiLine = (items || []).length > 1;
+      const lineBagsTotal = packLines.reduce((s, l) => s + l.bags, 0);
+      const orderTotalBags = multiLine
+        ? (lineBagsTotal || order.total_bags || 0)
+        : order.total_bags;
       const totalPackages = containers.reduce((s, c) => s + (c.bags_count || 0), 0)
-        || order.total_bags
+        || orderTotalBags
         || (items || []).reduce((s, it) => s + (parseInt(it.bag_count) || 0), 0)
         || 0;
 
@@ -228,9 +238,11 @@ const exportDocumentController = {
       // gross used to count neither. Weighed containers or a packing-weight
       // record still win over this estimate.
       const masterBagSizeKg = parseFloat(order.master_bag_size_kg) || 0;
-      const masterBagCount = masterBagSizeKg > 0
-        ? Math.ceil(netWeightKg / masterBagSizeKg)
-        : 0;
+      // Master bags per line (a 2 KG line in 10 KG masters, a 5 KG line in 20 KG
+      // masters, a 25 KG line in none) — never one master size for the lot.
+      const masterBagCount = multiLine
+        ? packLines.reduce((s, l) => s + l.masterBags, 0)
+        : (masterBagSizeKg > 0 ? Math.ceil(netWeightKg / masterBagSizeKg) : 0);
       // Per-bag tare, in KG. The order's own gram fields win when set, but the
       // weights normally live ONCE on the mill-store item (mill_items.
       // tare_weight_kg, in kg - where the mill already records them and where
@@ -245,8 +257,22 @@ const exportDocumentController = {
       const masterTarePerUnitKg = order.master_bag_weight_gm != null
         ? (parseFloat(order.master_bag_weight_gm) || 0) / 1000
         : (packagingItems.master.tareKg || 0);
-      const bagTareKg = bagTarePerUnitKg * totalPackages;
-      const masterBagTareKg = masterTarePerUnitKg * masterBagCount;
+      let bagTareKg = bagTarePerUnitKg * totalPackages;
+      let masterBagTareKg = masterTarePerUnitKg * masterBagCount;
+      // A multi-line order weighs each line's bags at that line's own bag (a
+      // 2 KG retail bag and a 5 KG one are different items with different
+      // tares). The order's gram overrides still win when set.
+      if (multiLine && !containers.some((c) => c.bags_count)) {
+        bagTareKg = 0; masterBagTareKg = 0;
+        for (const l of packLines) {
+          // eslint-disable-next-line no-await-in-loop
+          const p = await resolveOrderPackaging({ ...order, bag_size_kg: l.bagSizeKg, master_bag_size_kg: l.masterBagSizeKg, bag_type: l.bagType || order.bag_type });
+          const bagTare = order.bag_weight_gm != null ? (parseFloat(order.bag_weight_gm) || 0) / 1000 : (p.retail.tareKg || 0);
+          const masterTare = order.master_bag_weight_gm != null ? (parseFloat(order.master_bag_weight_gm) || 0) / 1000 : (p.master.tareKg || 0);
+          bagTareKg += bagTare * l.bags;
+          masterBagTareKg += masterTare * l.masterBags;
+        }
+      }
       const packagingTareKg = bagTareKg + masterBagTareKg;
 
       // Bag sizes are stored in KG; the generated description prints them in the
@@ -259,6 +285,11 @@ const exportDocumentController = {
         const n = Math.abs(v - Math.round(v)) < 0.005 ? String(Math.round(v)) : v.toFixed(2);
         return `${n} ${docUnit === 'lb' ? 'LBS' : 'KGS'}`;
       };
+
+      // "PACKED IN 2 KGS & 5 KGS PP BAG" on a multi-line order, not line 1's bag.
+      const packedInText = multiLine
+        ? [...new Set(packLines.map((l) => l.bagSizeKg).filter((v) => v > 0))].map(packLabel).join(' & ') || packLabel(order.bag_size_kg)
+        : packLabel(order.bag_size_kg);
 
       const grossWeightKg = containerGrossKg
         || (packingWeight && parseFloat(packingWeight.gross_weight_kg))
@@ -324,8 +355,16 @@ const exportDocumentController = {
           product: order.product_name || '',
           brandMarking: order.brand_marking || '',
           qtyMT: parseFloat(order.qty_mt) || 0,
-          totalBags: order.total_bags || Math.round((parseFloat(order.qty_mt) || 0) * 1000 / (parseFloat(order.bag_size_kg) || 50)),
-          bagSizeKg: parseFloat(order.bag_size_kg) || 50,
+          totalBags: orderTotalBags || Math.round((parseFloat(order.qty_mt) || 0) * 1000 / (parseFloat(order.bag_size_kg) || 50)),
+          // The header's ONE bag spec. Only a fallback for a line with none of
+          // its own; renderers read each line's bag from items[].
+          bagSizeKg: parseFloat(order.bag_size_kg) || (packLines[0] && packLines[0].bagSizeKg) || 50,
+          // Multi-line orders: the distinct sizes ("Mixed (2 kg, 5 kg)") and
+          // whether the order-level price is an average of different line prices.
+          multiLine,
+          packingType: order.packing_type || 'retail',
+          packingLabel: packingSummary(order, items).label,
+          priceIsAverage: priceSummary(order, items).mixed,
           bagType: order.bag_type || 'PP',
           bagQuality: order.bag_quality || '',
           // Master (outer) bag — retail packing sends 5 KG bags inside 20 KG
@@ -337,6 +376,9 @@ const exportDocumentController = {
           unitsPerBag: parseInt(order.units_per_bag, 10) || 0,
           bagWeightGm: parseFloat(order.bag_weight_gm) || 0,
           masterBagWeightGm: parseFloat(order.master_bag_weight_gm) || 0,
+          // contract value ÷ total qty — a weighted AVERAGE on a multi-line order
+          // (10 MT @ 1290 + 10 MT @ 1250 → 1270). Never print it as a line's
+          // unit price; items[].pricePerMT is that.
           pricePerMT: parseFloat(order.price_per_mt) || 0,
           currency: order.currency || 'USD',
           contractValue: parseFloat(order.contract_value) || 0,
@@ -376,8 +418,8 @@ const exportDocumentController = {
           hsCodes: hsCodes,
           brokenPctTarget: order.broken_pct_target || 2,
           qualityDescription: orderQualityDescription || (orderHsCode
-            ? `Pakistani ${order.product_name || 'Rice'} - ${order.broken_pct_target || 2}% Broken - Double (silky) polished & color sorted, Latest Crop - PACKED IN ${packLabel(order.bag_size_kg)} ${order.bag_type || 'PP'} BAG - HS CODE: ${orderHsCode} - GMO FREE, FIT FOR HUMAN CONSUMPTION AT ANY STAGE, FREE FROM ALIVE AND DEAD WEEVILS/INSECTS`
-            : `Pakistani ${order.product_name || 'Rice'} - ${order.broken_pct_target || 2}% Broken - Double (silky) polished & color sorted, Latest Crop - PACKED IN ${packLabel(order.bag_size_kg)} ${order.bag_type || 'PP'} BAG - GMO FREE, FIT FOR HUMAN CONSUMPTION AT ANY STAGE, FREE FROM ALIVE AND DEAD WEEVILS/INSECTS`),
+            ? `Pakistani ${order.product_name || 'Rice'} - ${order.broken_pct_target || 2}% Broken - Double (silky) polished & color sorted, Latest Crop - PACKED IN ${packedInText} ${order.bag_type || 'PP'} BAG - HS CODE: ${orderHsCode} - GMO FREE, FIT FOR HUMAN CONSUMPTION AT ANY STAGE, FREE FROM ALIVE AND DEAD WEEVILS/INSECTS`
+            : `Pakistani ${order.product_name || 'Rice'} - ${order.broken_pct_target || 2}% Broken - Double (silky) polished & color sorted, Latest Crop - PACKED IN ${packedInText} ${order.bag_type || 'PP'} BAG - GMO FREE, FIT FOR HUMAN CONSUMPTION AT ANY STAGE, FREE FROM ALIVE AND DEAD WEEVILS/INSECTS`),
         },
 
         // Incoterm-aware delivery/freight terms — available to every document
@@ -446,7 +488,7 @@ const exportDocumentController = {
 
         // Totals
         totals: {
-          totalBags: containers.reduce((s, c) => s + (c.bags_count || 0), 0) || order.total_bags || 0,
+          totalBags: containers.reduce((s, c) => s + (c.bags_count || 0), 0) || orderTotalBags || 0,
           totalPackages,
           netWeightKg,
           grossWeightKg,
@@ -474,7 +516,9 @@ const exportDocumentController = {
           productionRemarks: order.production_remarks || '',
           bagMarking: {
             product: order.product_name || 'BASMATI WHITE RICE',
-            weight: `${parseFloat(order.bag_size_kg) || 50}KG`,
+            weight: multiLine
+              ? ([...new Set(packLines.map((l) => l.bagSizeKg).filter((v) => v > 0))].map((v) => `${v}KG`).join(' / ') || `${parseFloat(order.bag_size_kg) || 50}KG`)
+              : `${parseFloat(order.bag_size_kg) || 50}KG`,
             origin: 'PAKISTAN',
             brand: order.brand_marking || '',
           },
