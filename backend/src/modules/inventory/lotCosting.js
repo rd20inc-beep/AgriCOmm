@@ -16,12 +16,13 @@ const { round2, round4 } = require('../../services/unitConversion');
 
 /**
  * @param {object} lot  current inventory_lots row (net_weight_kg, landed_cost_total,
- *                       purchase_amount, paid_amount, total_bags, qty)
+ *                       purchase_amount, paid_amount, total_bags, qty; qty is KG)
  * @param {object} add  the added purchase: { netKg, bags, landedTotal, purchaseAmount, paid }
  * @returns {object} new column values for the lot
  */
 function blendPurchaseIntoLot(lot, add) {
-  const oldNetKg = parseFloat(lot.net_weight_kg) || (parseFloat(lot.qty) || 0) * 1000;
+  // qty is KG since mig 228 — no ×1000.
+  const oldNetKg = parseFloat(lot.net_weight_kg) || parseFloat(lot.qty) || 0;
   const oldLandedTotal = parseFloat(lot.landed_cost_total) || 0;
   const oldPurchaseAmount = parseFloat(lot.purchase_amount) || 0;
   const oldPaid = parseFloat(lot.paid_amount) || 0;
