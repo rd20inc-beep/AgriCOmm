@@ -13,11 +13,16 @@
  * Creating an account with an opening balance books it the way the go-live
  * opening balances were booked (2026-09-24): one bank_transactions row
  * (source 'opening_balance', category 'Opening Balance') plus a Posted journal
- * Dr 1000 Cash & Bank / Cr 3000 Owner's Equity, all in the same transaction.
+ * Dr the account's own GL / Cr 3000 Owner's Equity, all in the same transaction.
+ *
+ * Every account gets its own GL account under 1000 Cash & Bank when it is
+ * created (G-8, shared/accountGl.js); an edit keeps that GL account's name,
+ * currency and entity in step with the account.
  */
 const accounting = require('../accounting/accounting.service');
 const fxRates = require('../finance/fxRate.service');
 const { nextDocNo } = require('../../utils/docNumber');
+const { ensureAccountGl } = require('../../shared/accountGl');
 
 // Descriptive columns an edit may change (schema.baseline.txt bank_accounts).
 // Never: id, uid, created_at, updated_at, current_balance.
@@ -84,12 +89,22 @@ async function updateBankAccount(trx, id, body = {}) {
       .where('is_export_default', true).whereNot('id', id);
   }
   const [row] = await trx('bank_accounts').where({ id }).update(updates).returning('*');
+  if (row && row.gl_account_id) {
+    // Keep the account's own GL line readable: same name / currency / entity.
+    const glUpd = {};
+    if (updates.name !== undefined && updates.name) glUpd.name = String(updates.name).slice(0, 255);
+    if (updates.currency !== undefined) glUpd.currency = String(updates.currency || 'PKR').toUpperCase();
+    if (updates.entity !== undefined) glUpd.entity = ['general', 'mill', 'export'].includes(updates.entity) ? updates.entity : null;
+    if (Object.keys(glUpd).length) {
+      await trx('chart_of_accounts').where({ id: row.gl_account_id }).update({ ...glUpd, updated_at: trx.fn.now() });
+    }
+  }
   return row;
 }
 
 /**
  * Create an account. `opening_balance` (or the legacy `current_balance` the old
- * form sent) is booked as an opening balance: BT row + Posted Dr 1000 / Cr 3000.
+ * form sent) is booked as an opening balance: BT row + Posted Dr account GL / Cr 3000.
  * Non-PKR openings post the PKR equivalent at `opening_fx_rate` (or the rate on file).
  */
 async function createBankAccount(trx, body = {}, userId = null) {
@@ -102,7 +117,9 @@ async function createBankAccount(trx, body = {}, userId = null) {
   if (row.is_export_default) {
     await trx('bank_accounts').update({ is_export_default: false }).where('is_export_default', true);
   }
-  const [acct] = await trx('bank_accounts').insert(row).returning('*');
+  const [inserted] = await trx('bank_accounts').insert(row).returning('*');
+  const gl = await ensureAccountGl(trx, inserted);
+  const acct = { ...inserted, gl_account_id: gl ? gl.id : inserted.gl_account_id };
   if (Math.abs(opening) < 0.005) return { bank_account: acct, journal: null };
 
   const today = new Date().toISOString().slice(0, 10);
@@ -118,10 +135,8 @@ async function createBankAccount(trx, body = {}, userId = null) {
   }
   const pkr = r2(opening * fxRate);
 
-  const [cashCoa, equityCoa] = await Promise.all([
-    trx('chart_of_accounts').where({ code: '1000' }).first(),
-    trx('chart_of_accounts').where({ code: '3000' }).first(),
-  ]);
+  const cashCoa = gl;
+  const equityCoa = await trx('chart_of_accounts').where({ code: '3000' }).first();
   if (!cashCoa || !equityCoa) throw httpError(500, "COA 1000 Cash & Bank / 3000 Owner's Equity missing — cannot book the opening balance.");
 
   const btNo = await nextDocNo(trx, { table: 'bank_transactions', column: 'transaction_no', prefix: 'BT-', pad: 4 });
@@ -159,7 +174,7 @@ async function createBankAccount(trx, body = {}, userId = null) {
       {
         account_id: cashCoa.id, account: cashCoa.name,
         debit: pkr > 0 ? pkr : 0, credit: pkr < 0 ? -pkr : 0,
-        narration: `1000 ${cashCoa.name} — opening balance ${acct.name}${fxNote}`,
+        narration: `${cashCoa.code} ${cashCoa.name} — opening balance ${acct.name}${fxNote}`,
       },
       {
         account_id: equityCoa.id, account: equityCoa.name,

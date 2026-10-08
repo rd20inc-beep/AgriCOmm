@@ -12,7 +12,8 @@
  *   - stale form (a payment moved the balance after the form loaded) → stored
  *     balance survives, whether the old client re-sends it or the new one omits it
  *   - currency / entity change on an account with transactions → 409
- *   - create with an opening balance writes the BT row + a Posted Dr 1000 / Cr 3000
+ *   - create gives the account its own GL account under 1000 (G-8) and an
+ *     opening balance writes the BT row + a Posted Dr account GL / Cr 3000
  *   - the Joi schemas keep every field the service reads; the routes validate
  */
 jest.mock('../config/database', () => require('./helpers/fakeKnex').fakeKnex());
@@ -143,7 +144,7 @@ describe('updateBankAccount — balance is never written', () => {
 });
 
 describe('createBankAccount — an opening balance is booked, not just written', () => {
-  test('opening balance → account at that balance + BT "Opening Balance" row + Posted Dr 1000 / Cr 3000', async () => {
+  test('opening balance → account at that balance + its own GL account + BT "Opening Balance" row + Posted Dr account GL / Cr 3000', async () => {
     const res = await call('createBankAccount', { body: { name: 'Meezan Ops', type: 'bank', currency: 'PKR', entity: 'mill', opening_balance: 250000 } });
     expect(res.statusCode).toBe(201);
     const a = res.body.data.bank_account;
@@ -156,8 +157,12 @@ describe('createBankAccount — an opening balance is booked, not just written',
     expect(T.journal_entries).toHaveLength(1);
     const je = T.journal_entries[0];
     expect(je).toMatchObject({ status: 'Posted', ref_type: 'opening_balance', ref_no: `OPEN-BANK-${a.id}`, entity: 'mill' });
+    // Its own GL account: next free code under 1000, named after the account.
+    const gl = T.chart_of_accounts.find((c) => c.id === acct(a.id).gl_account_id);
+    expect(gl).toMatchObject({ code: '1011', name: 'Meezan Ops', type: 'Asset', parent_id: 10, currency: 'PKR', entity: 'mill' });
     const lines = T.journal_lines.filter((l) => l.journal_id === je.id);
-    expect(lines.find((l) => l.account_id === 10)).toMatchObject({ debit: 250000, credit: 0 });
+    expect(lines.find((l) => l.account_id === 10)).toBeUndefined();
+    expect(lines.find((l) => l.account_id === gl.id)).toMatchObject({ debit: 250000, credit: 0 });
     expect(lines.find((l) => l.account_id === 30)).toMatchObject({ debit: 0, credit: 250000 });
   });
 
@@ -166,7 +171,9 @@ describe('createBankAccount — an opening balance is booked, not just written',
     const a = res.body.data.bank_account;
     expect(T.bank_transactions.find((t) => t.bank_account_id === a.id)).toMatchObject({ amount: 1000, currency: 'USD' });
     const lines = T.journal_lines;
-    expect(lines.find((l) => l.account_id === 10).debit).toBe(281500);
+    const gl = T.chart_of_accounts.find((c) => c.id === acct(a.id).gl_account_id);
+    expect(gl).toMatchObject({ currency: 'USD', parent_id: 10 });
+    expect(lines.find((l) => l.account_id === gl.id).debit).toBe(281500);
     expect(lines.find((l) => l.account_id === 30).credit).toBe(281500);
   });
 
