@@ -4076,10 +4076,10 @@ const reportingService = {
       .select(db.raw('COALESCE(SUM(amount - recovered_amount),0) as outstanding')).first();
     const activeWorkers = await db('mill_workers').where('is_active', true).count('* as c').first();
     // Salary expense vs all business expenses this month (for % of expenses).
-    const salaryExp = await db('business_expenses').where('category', 'salaries')
+    const salaryExp = await db('business_expenses').where('category', 'salaries').whereNot('payment_status', 'Reversed')
       .whereRaw("TO_CHAR(expense_date, 'YYYY-MM') = ?", [period])
       .select(db.raw('COALESCE(SUM(COALESCE(amount_pkr, amount)),0) as total')).first();
-    const allExp = await db('business_expenses')
+    const allExp = await db('business_expenses').whereNot('payment_status', 'Reversed')
       .whereRaw("TO_CHAR(expense_date, 'YYYY-MM') = ?", [period])
       .select(db.raw('COALESCE(SUM(COALESCE(amount_pkr, amount)),0) as total')).first();
     // 6-month net payroll trend.

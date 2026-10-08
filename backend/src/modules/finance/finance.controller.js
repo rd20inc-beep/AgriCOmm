@@ -85,6 +85,8 @@ async function loadPayablesFeed(query = {}) {
     .leftJoin('suppliers as s', 'p.supplier_id', 's.id')
     .leftJoin('haulers as h', 'p.hauler_id', 'h.id')  // #14 transporter payables
     .select('p.*', 's.name as supplier_name', db.raw('h.name as hauler_name'))
+    // A Reversed payable (its expense was undone) is owed by no one.
+    .whereNot('p.status', 'Reversed')
     .where(function() {
       this.whereIn('p.payable_type', ['vendor', 'expense', 'purchase'])
           .orWhereNull('p.payable_type');
@@ -2360,6 +2362,7 @@ financeController.listPurchases = async (req, res) => {
         .leftJoin('users as creator', 'be.created_by', 'creator.id')
         .leftJoin('users as approver', 'be.approved_by', 'approver.id');
       if (millOnly) q = q.where('be.expense_type', 'mill');
+      q = q.whereNot('be.payment_status', 'Reversed'); // undone payroll / advances
       q = q
         .select(
           db.raw("'expense' AS source"),

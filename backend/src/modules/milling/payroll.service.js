@@ -272,10 +272,11 @@ async function committedWorkerStatus(month, entity = 'mill', conn = db) {
   const ent = entity === 'general' ? 'general' : 'mill';
   const lineRows = await conn('mill_payroll_lines as pl')
     .join('mill_payroll_runs as r', 'pl.run_id', 'r.id')
-    .where('r.period', month).where('r.entity', ent).whereNot('r.status', 'voided').whereNotNull('pl.worker_id')
+    .where('r.period', month).where('r.entity', ent).whereNotIn('r.status', ['voided', 'reversed']).whereNotNull('pl.worker_id')
     .select('pl.worker_id', 'r.status');
   const expRows = await conn('business_expenses')
     .where('expense_type', ent).where('category', 'salaries').whereNotNull('employee_id')
+    .whereNot('payment_status', 'Reversed')
     .whereRaw("TO_CHAR(expense_date, 'YYYY-MM') = ?", [month])
     .distinct('employee_id').select('employee_id as worker_id');
   const map = new Map();

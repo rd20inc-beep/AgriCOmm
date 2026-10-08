@@ -475,7 +475,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
   const advancesOutstandingTotal = workers.reduce((s, w) => s + (parseFloat(w.advanceOutstanding) || 0), 0);
   // Multiple runs per month are allowed (pay employees separately) — track this
   // month's runs, who's still unpaid, and how much was already paid out.
-  const monthRuns = payrollRuns.filter(r => r.period === payrollMonth && r.status !== 'voided');
+  const monthRuns = payrollRuns.filter(r => r.period === payrollMonth && r.status !== 'voided' && r.status !== 'reversed');
   const isPaidStatus = (s) => s === 'paid' || s === 'posted';
   const paidThisMonth = monthRuns.filter(r => isPaidStatus(r.status)).reduce((s, r) => s + (parseFloat(r.netTotal) || 0), 0);
   const pendingRuns = monthRuns.filter(r => r.status === 'prepared' || r.status === 'approved' || r.status === 'accrued' || r.status === 'partially_paid');
@@ -801,7 +801,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
     const ok = await confirm({
       title: posted ? `Undo the ${run.period} payroll run?` : `Delete the ${run.period} payroll run?`,
       consequence: posted
-        ? 'The salary payment and its GL entries are reversed, the cash/bank balance is restored, recovered advances go back to outstanding, and the run and its payslips are deleted. This cannot be undone.'
+        ? 'Reversing entries cancel the salary payment and its GL entries (the originals stay on record), the cash/bank balance is restored, recovered advances go back to outstanding, and the run is kept marked Reversed. Refused if its withheld tax/EOBI has already been remitted. This cannot be undone.'
         : 'The run and its payslip lines are deleted. Nothing was posted, so no money moves.',
       amount: PKR(run.netTotal),
       confirmLabel: posted ? 'Undo run' : 'Delete run',
@@ -810,7 +810,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
     if (!ok) return false;
     try {
       await deleteRunMut.mutateAsync(run.id);
-      addToast(posted ? `Payroll run for ${run.period} undone — payment reversed, advances restored` : `Payroll run for ${run.period} deleted`, 'success');
+      addToast(posted ? `Payroll run for ${run.period} reversed — payment reversed, advances restored` : `Payroll run for ${run.period} deleted`, 'success');
     } catch (e) { addToast(e.message, 'error'); }
     return true;
   }

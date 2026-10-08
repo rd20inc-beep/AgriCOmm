@@ -1050,6 +1050,7 @@ const reportingController = {
       // Business expenses (utilities, salaries, etc.)
       const expenseRow = await db('business_expenses')
         .whereBetween('expense_date', [fromDate, toDate])
+        .whereNot('payment_status', 'Reversed') // undone payroll / advances
         .sum({ totalPkr: 'amount_pkr' })
         .count({ cnt: 'id' })
         .first();
@@ -1096,6 +1097,7 @@ const reportingController = {
         .orderBy('l.landed_cost_total', 'desc').limit(200);
       const expenseLines = await db('business_expenses')
         .whereBetween('expense_date', [fromDate, toDate]).where('amount_pkr', '>', 0)
+        .whereNot('payment_status', 'Reversed')
         .select('id', 'expense_no', 'category', 'vendor_name', 'supplier_id', 'amount_pkr', 'expense_type').orderBy('amount_pkr', 'desc').limit(200);
 
       const detail = {
@@ -2349,12 +2351,15 @@ const reportingController = {
       // Operating expenses (period costs — NOT inventory). Direct export selling
       // costs not already booked as a business_expense (avoid double-count).
       const opexRow = await db('business_expenses').whereBetween('expense_date', [fromDate, toDate]).where('amount_pkr', '>', 0)
+        .whereNot('payment_status', 'Reversed') // undone payroll / advances
         .sum({ total: 'amount_pkr' }).count({ cnt: 'id' }).first();
       const opexByCat = await db('business_expenses').whereBetween('expense_date', [fromDate, toDate]).where('amount_pkr', '>', 0)
+        .whereNot('payment_status', 'Reversed')
         .select('category').sum({ total: 'amount_pkr' }).count({ cnt: 'id' }).groupBy('category').orderByRaw('SUM(amount_pkr) DESC');
       // Individual expenses so the FE can expand a category to its line items.
       const opexLines = await db('business_expenses as e').leftJoin('suppliers as s', 'e.supplier_id', 's.id')
         .whereBetween('e.expense_date', [fromDate, toDate]).where('e.amount_pkr', '>', 0)
+        .whereNot('e.payment_status', 'Reversed')
         .select('e.expense_no', 'e.category', 'e.vendor_name', 'e.supplier_id', 'e.amount_pkr', 'e.expense_date', db.raw("COALESCE(s.name, e.vendor_name, '—') as payee"))
         .orderBy('e.amount_pkr', 'desc').limit(500);
       // Export selling costs are matched to the SHIPPED export revenue (recognized

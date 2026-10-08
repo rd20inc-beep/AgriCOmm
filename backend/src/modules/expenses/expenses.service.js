@@ -611,16 +611,19 @@ const expensesService = {
   },
 
   async getSummary() {
+    // A Reversed expense (payroll undo / advance delete / settlement reversal)
+    // stays listed for the audit trail but is not spending.
+    const live = () => db('business_expenses').whereNot('payment_status', 'Reversed');
     const [totals, byType, byCategory, unpaid] = await Promise.all([
-      db('business_expenses')
+      live()
         .select(db.raw('COUNT(*) as count, COALESCE(SUM(amount_pkr),0) as total_pkr'))
         .first(),
-      db('business_expenses')
+      live()
         .select('expense_type')
         .count({ count: 'id' })
         .sum({ total_pkr: 'amount_pkr' })
         .groupBy('expense_type'),
-      db('business_expenses')
+      live()
         .select('category')
         .count({ count: 'id' })
         .sum({ total_pkr: 'amount_pkr' })
