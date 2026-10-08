@@ -13,6 +13,17 @@
 const db = require('../../config/database');
 const fxRateService = require('./fxRate.service');
 const { profitDefinitions, millBatchRows } = require('./profitDefinitions');
+const { collectionRate: computeCollectionRate } = require('./collectionRate');
+const { dayOf } = require('../exportOrders/balanceDueDate');
+
+// PKR equivalent of an open receivable's OUTSTANDING at its own booked rate
+// (C5): the booked base_amount_pkr scaled by the share still outstanding, else
+// outstanding × the row's booked fx_rate. A PKR row is itself.
+const RECV_PKR_EQUIV_SQL = `CASE
+  WHEN COALESCE(currency, 'PKR') = 'PKR' THEN outstanding
+  WHEN base_amount_pkr > 0 AND expected_amount > 0 THEN base_amount_pkr * outstanding / expected_amount
+  WHEN fx_rate > 0 THEN outstanding * fx_rate
+  ELSE NULL END`;
 
 const financeService = {
 
@@ -47,7 +58,8 @@ const financeService = {
       db.raw("COALESCE(SUM(contract_value), 0) as total_revenue_foreign"),
     ).first();
     const revenueForeign = parseFloat(exportStats.total_revenue_foreign) || 0;
-    const confirmedRevenuePkr = defs.exportRows.reduce((s, r) => s + (r.revenuePkr || 0), 0);
+    const confirmedRevenuePkr = defs.exportRows.filter((r) => r.inBookedPeriod)
+      .reduce((s, r) => s + (r.revenuePkr || 0), 0);
 
     // ── Mill: completed batches in the period (count only — mill PROFIT is
     // sales of mill output − their COGS, from profitDefinitions) ──
@@ -64,13 +76,6 @@ const financeService = {
       .whereRaw("COALESCE(ownership, 'company') <> 'client'")
       .select(db.raw('COALESCE(SUM(qty * COALESCE(NULLIF(landed_cost_per_kg, 0), cost_per_unit, 0)), 0) as value'))
       .first();
-
-    // Mill overheads (mill_expenses) in the period — a period expense the GL
-    // P&L carries; reported here for reference, NOT deducted from mill profit.
-    let ohQuery = db('mill_expenses');
-    if (startDate || endDate) ohQuery = dateFilter(ohQuery, 'expense_date');
-    const overheads = await ohQuery.sum('amount as total').first();
-    const overheadTotal = parseFloat(overheads?.total) || 0;
 
     // ── Local sales: collection figures over ALL local sales; profit over the
     // sales that are not mill output (those are in the mill segment). ──
@@ -98,10 +103,13 @@ const financeService = {
         db.raw('COALESCE(SUM(outstanding), 0) as outstanding'),
         db.raw('COUNT(CASE WHEN due_date < CURRENT_DATE THEN 1 END) as overdue_count'),
         db.raw('COALESCE(SUM(CASE WHEN due_date < CURRENT_DATE THEN outstanding END), 0) as overdue_amount'),
+        db.raw(`COALESCE(SUM(${RECV_PKR_EQUIV_SQL}), 0) as pkr_equiv`),
+        db.raw(`COUNT(*) FILTER (WHERE (${RECV_PKR_EQUIV_SQL}) IS NULL) as pkr_equiv_missing`),
       )
       .groupByRaw("COALESCE(currency, 'PKR')");
     const recvByCurrency = {};
     let recvCount = 0; let recvOverdueCount = 0;
+    let recvPkrEquiv = 0; let recvPkrEquivMissing = 0;
     for (const r of Array.isArray(recvRows) ? recvRows : []) {
       const cur = String(r.currency || 'PKR').toUpperCase();
       recvByCurrency[cur] = {
@@ -112,6 +120,8 @@ const financeService = {
       };
       recvCount += recvByCurrency[cur].count;
       recvOverdueCount += recvByCurrency[cur].overdueCount;
+      recvPkrEquiv += parseFloat(r.pkr_equiv) || 0;
+      recvPkrEquivMissing += parseInt(r.pkr_equiv_missing, 10) || 0;
     }
     const recvCur = (c) => recvByCurrency[c] || { count: 0, outstanding: 0, overdueCount: 0, overdueAmount: 0 };
 
@@ -144,22 +154,24 @@ const financeService = {
     }
     const bankBalancePKR = bankByCurrency.PKR || 0;
     const bankBalanceUSD = bankByCurrency.USD || 0;
-
-    // ── Collection rate ──
-    // Received ÷ expected, per currency — dollars and rupees are never summed.
-    // The single `collectionRate` is only given when one currency is present;
-    // with more than one it is null and the per-currency rates stand.
-    const collRows = await db('receivables')
-      .select(db.raw("COALESCE(currency, 'PKR') as currency"))
-      .sum('expected_amount as expected')
-      .sum('received_amount as received')
-      .groupByRaw("COALESCE(currency, 'PKR')");
-    const collectionRateByCurrency = {};
-    for (const r of Array.isArray(collRows) ? collRows : []) {
-      const exp = parseFloat(r.expected) || 0;
-      if (exp <= 0) continue;
-      collectionRateByCurrency[String(r.currency || 'PKR').toUpperCase()] = parseFloat(((parseFloat(r.received) || 0) / exp * 100).toFixed(1));
+    // C5: a foreign balance carries no booked PKR figure (bank_accounts holds
+    // only the native balance), so its equivalent is at TODAY's rate, dated —
+    // a secondary line, never added into the PKR balance.
+    let cashForeignPkr = 0; let cashUnconverted = 0;
+    for (const [cur, bal] of Object.entries(bankByCurrency)) {
+      if (String(cur).toUpperCase() === 'PKR' || !bal) continue;
+      if (String(cur).toUpperCase() === 'USD' && pkrRate > 0) cashForeignPkr += bal * pkrRate;
+      else cashUnconverted += 1;
     }
+
+    // ── Collection rate (C6) ──
+    // Received ÷ amounts DUE (due date passed; a balance is due a term after
+    // sailing), per currency — dollars and rupees are never summed. The single
+    // `collectionRate` is only given when one currency is present; with more
+    // than one it is null and the per-currency rates stand.
+    const collection = await computeCollectionRate(db);
+    const collectionRateByCurrency = {};
+    for (const [cur, c] of Object.entries(collection.byCurrency)) collectionRateByCurrency[cur] = c.ratePct;
     const collCurrencies = Object.keys(collectionRateByCurrency);
     const collectionRate = collCurrencies.length === 1 ? collectionRateByCurrency[collCurrencies[0]]
       : collCurrencies.length === 0 ? 0 : null;
@@ -186,8 +198,12 @@ const financeService = {
         totalCostPkr: et.opCostsPkr + et.riceCostPkr,
         // G-2: Booked / Realised / Pipeline / FX — see profitDefinitions.js.
         bookedProfitPkr: et.bookedPkr,
+        // C4: Realised by SHIPMENT date; Pipeline = booked orders not yet realised.
         realisedProfitPkr: et.realisedPkr,
+        realisedBasis: et.realisedBasis,
         pipelineProfitPkr: et.pipelinePkr,
+        pipelineCount: et.pipelineCount,
+        rateMasterCount: et.rateMasterCount,
         fxGainLossPkr: et.fxRealisedPkr,
         fxOpenRevaluationPkr: et.fxOpenRevaluationPkr,
         unpricedCount: et.unpricedCount,
@@ -211,7 +227,6 @@ const financeService = {
         batchCount,
         revenue: defs.mill.revenuePkr,
         cogs: defs.mill.cogsPkr,
-        grossProfit: defs.mill.profitPkr,
         marginPct: defs.mill.marginPct,
         saleCount: defs.mill.saleCount,
         soldKg: defs.mill.soldKg,
@@ -220,8 +235,15 @@ const financeService = {
         uncostedCount: defs.mill.uncostedCount,
         uncostedRevenuePkr: defs.mill.uncostedRevenuePkr,
         unsoldStockAtCostPkr: parseFloat(millStock?.value) || 0,
-        overheads: overheadTotal,
-        overheadsDeducted: false,
+        // C3: gross (sales − COGS) − the period's mill overheads = net, the
+        // mill's realised profit (the figure consolidated uses).
+        grossProfit: defs.mill.grossProfitPkr,
+        grossMarginPct: defs.mill.grossMarginPct,
+        overheads: defs.mill.overheadsPkr,
+        overheadCount: defs.mill.overheadCount,
+        overheadsUnconvertedCount: defs.mill.overheadsUnconvertedCount,
+        netProfit: defs.mill.profitPkr,
+        overheadsDeducted: true,
         currency: 'PKR',
       },
       local: {
@@ -241,8 +263,11 @@ const financeService = {
         outstanding: parseFloat(localStats.outstanding_pkr) || 0,
         currency: 'PKR',
       },
+      // C1: the books — GL P&L net profit, Posted journals, company-wide.
+      books: defs.books,
       consolidated: {
-        // export Booked + mill realised + local other (each sale counted once).
+        // OPERATIONAL: export Booked + mill realised (net of overheads) + local
+        // other (each sale counted once). Not the books — see `books`.
         profitPkr: defs.consolidated.bookedPkr,
         bookedPkr: defs.consolidated.bookedPkr,
         realisedPkr: defs.consolidated.realisedPkr,
@@ -260,6 +285,9 @@ const financeService = {
         // PKR receivables only, in rupees — outstanding, not the booked total.
         totalOutstandingPkr: recvCur('PKR').outstanding,
         overdueAmountPkr: recvCur('PKR').overdueAmount,
+        // C5: ≈ PKR equivalent of everything outstanding, each row at its OWN
+        // booked rate. A secondary figure — never cash, never the headline.
+        pkrEquiv: { pkr: Math.round(recvPkrEquiv * 100) / 100, basis: 'booked', missingCount: recvPkrEquivMissing },
       },
       payables: {
         count: parseInt(payStats.count),
@@ -274,18 +302,31 @@ const financeService = {
         byCurrency: bankByCurrency,
         accountCount: bankAccountCount,
         currency: 'PKR',
+        // C5: PKR balance + foreign balances at TODAY's rate (no booked PKR is
+        // kept for a bank balance). Labelled with the rate's date.
+        pkrEquiv: {
+          pkr: Math.round((bankBalancePKR + cashForeignPkr) * 100) / 100,
+          basis: 'today',
+          rate: pkrRate,
+          rateDate: dayOf(currentFx.effectiveDate),
+          unconvertedCount: cashUnconverted,
+        },
       },
       collectionRate,
       collectionRateByCurrency,
+      // C6 detail: per currency { ratePct, targetPct, onTarget, dueAmount,
+      // receivedAmount, overdueAmount, overdueCount }, plus notYetDue.
+      collection,
       warnings: (() => {
         const out = [];
         const shippedMissing = parseInt(exportStats.shipped_missing_cogs);
 
         if (et.unpricedCount > 0) {
-          out.push(`${et.unpricedCount} confirmed export order${et.unpricedCount === 1 ? '' : 's'} have no rice cost yet (nothing locked, reserved or allocated, and no stock of that product to estimate from) — left out of Booked Profit until costed.`);
+          out.push(`${et.unpricedCount} confirmed export order${et.unpricedCount === 1 ? '' : 's'} have no rice cost yet (nothing locked, reserved or allocated, no stock of that product to estimate from, and no Finished Rice rate in Finance → Rates) — left out of Booked Profit until costed.`);
         }
         if (et.estimatedCount > 0) {
-          out.push(`${et.estimatedCount} export order${et.estimatedCount === 1 ? '' : 's'} in Booked Profit use an ESTIMATED rice cost (current stock cost of the product) — reserve stock for an exact figure.`);
+          const viaMaster = et.rateMasterCount > 0 ? ` (${et.rateMasterCount} priced from the commodity rate master)` : '';
+          out.push(`${et.estimatedCount} export order${et.estimatedCount === 1 ? '' : 's'} in Booked Profit use an ESTIMATED rice cost (current stock cost of the product, or the commodity rate master)${viaMaster} — reserve stock for an exact figure.`);
         }
         const uncosted = (defs.mill.uncostedCount || 0) + (defs.local.uncostedCount || 0);
         if (uncosted > 0) {

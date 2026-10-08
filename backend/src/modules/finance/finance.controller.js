@@ -552,7 +552,7 @@ const financeController = {
       const recv = await db('receivables as r').leftJoin('customers as c', 'c.id', 'r.customer_id')
         .whereNot('r.status', 'Paid').whereNotNull('r.due_date').where('r.outstanding', '>', 0)
         .whereNull('r.local_sale_id')
-        .select('r.outstanding as amount', 'r.currency', 'r.fx_rate', 'r.due_date', 'r.customer_id', db.raw("COALESCE(c.name, 'Customer') as party"), 'r.recv_no as ref');
+        .select('r.outstanding as amount', 'r.currency', 'r.fx_rate', 'r.base_amount_pkr', 'r.expected_amount', 'r.due_date', 'r.customer_id', db.raw("COALESCE(c.name, 'Customer') as party"), 'r.recv_no as ref');
       const salesWithCheque = new Set(cheques
         .map((x) => x.local_sale_id || x.recv_local_sale_id)
         .filter(Boolean).map(String));
@@ -585,8 +585,20 @@ const financeController = {
       // Payables have no stored fx_rate column, so a foreign payable converts at
       // the LIVE USD rate (not a stale flat 280) — receivables/cheques still use
       // their own stored rate.
-      const liveUsd = (await fxRateService.getLatestRate('USD')).rate || 280;
+      const live = await fxRateService.getLatestRate('USD');
+      const liveUsd = live.rate || 280;
       const toPkr = (amt, cur, fx) => ((cur || 'PKR').toUpperCase() === 'PKR' ? amt : amt * (parseFloat(fx) || liveUsd));
+      // C5: which rate each row's amountPkr used — 'booked' (the row's own
+      // booked figure / rate), 'today' (the live rate, for rows with none) or
+      // 'native' (a PKR row). The UI labels the equivalent accordingly.
+      const basisOf = (cur, fx) => ((cur || 'PKR').toUpperCase() === 'PKR' ? 'native' : (parseFloat(fx) > 0 ? 'booked' : 'today'));
+      // A receivable's booked PKR scaled to what is still outstanding.
+      const recvPkr = (x, amount, currency) => {
+        if (currency === 'PKR') return { amountPkr: amount, pkrBasis: 'native' };
+        const base = parseFloat(x.base_amount_pkr) || 0; const exp = parseFloat(x.expected_amount) || 0;
+        if (base > 0 && exp > 0) return { amountPkr: Math.round((base * amount / exp) * 100) / 100, pkrBasis: 'booked' };
+        return { amountPkr: toPkr(amount, currency, x.fx_rate), pkrBasis: basisOf(currency, x.fx_rate) };
+      };
 
       // A cheque receipt is against a customer, a cheque payment against a supplier.
       const chq = (t) => cheques.filter((x) => x.type === t).map((x) => {
@@ -595,6 +607,7 @@ const financeController = {
         return {
           kind: 'cheque', label: 'Cheque (pending)', dueDate: x.due_date || x.payment_date, amount, currency,
           amountPkr: parseFloat(x.base_amount_pkr) || toPkr(amount, currency, x.fx_rate),
+          pkrBasis: currency === 'PKR' ? 'native' : (parseFloat(x.base_amount_pkr) > 0 ? 'booked' : basisOf(currency, x.fx_rate)),
           party: x.party, reference: x.bank_reference, paymentId: x.id,
           paymentNo: x.payment_no, bankAccountId: x.bank_account_id || null,
           partyType: t === 'receipt' ? 'customer' : 'supplier',
@@ -603,19 +616,22 @@ const financeController = {
       });
       const receiving = [
         ...chq('receipt'),
-        ...recv.map((x) => { const amount = parseFloat(x.amount) || 0; const currency = (x.currency || 'PKR').toUpperCase(); return { kind: 'credit', label: 'Receivable', dueDate: x.due_date, amount, currency, amountPkr: toPkr(amount, currency, x.fx_rate), party: x.party, reference: x.ref, partyType: 'customer', partyId: x.customer_id || null }; }),
-        ...lsCredit.map((x) => ({ kind: 'credit', label: 'Local sale (credit)', dueDate: x.due_date, amount: parseFloat(x.amount) || 0, currency: 'PKR', amountPkr: parseFloat(x.amount) || 0, party: x.party, reference: x.ref, partyType: 'customer', partyId: x.customer_id || null })),
+        ...recv.map((x) => { const amount = parseFloat(x.amount) || 0; const currency = (x.currency || 'PKR').toUpperCase(); return { kind: 'credit', label: 'Receivable', dueDate: x.due_date, amount, currency, ...recvPkr(x, amount, currency), party: x.party, reference: x.ref, partyType: 'customer', partyId: x.customer_id || null }; }),
+        ...lsCredit.map((x) => ({ kind: 'credit', label: 'Local sale (credit)', dueDate: x.due_date, amount: parseFloat(x.amount) || 0, currency: 'PKR', amountPkr: parseFloat(x.amount) || 0, pkrBasis: 'native', party: x.party, reference: x.ref, partyType: 'customer', partyId: x.customer_id || null })),
       ].sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
       const giving = [
         ...chq('payment'),
-        ...pay.map((x) => { const amount = parseFloat(x.amount) || 0; const currency = (x.currency || 'PKR').toUpperCase(); return { kind: 'credit', label: 'Payable', dueDate: x.due_date, amount, currency, amountPkr: toPkr(amount, currency, liveUsd), party: x.party, reference: x.ref, partyType: 'supplier', partyId: x.supplier_id || null }; }),
+        ...pay.map((x) => { const amount = parseFloat(x.amount) || 0; const currency = (x.currency || 'PKR').toUpperCase(); return { kind: 'credit', label: 'Payable', dueDate: x.due_date, amount, currency, amountPkr: toPkr(amount, currency, liveUsd), pkrBasis: currency === 'PKR' ? 'native' : 'today', party: x.party, reference: x.ref, partyType: 'supplier', partyId: x.supplier_id || null }; }),
       ].sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
 
       return res.json({ success: true, data: {
         receiving, giving,
-        // Totals are PKR-equivalent (the lists can mix PKR + USD rows).
+        // Totals are PKR-equivalent (the lists can mix PKR + USD rows) — a
+        // secondary "≈ PKR equiv." figure; each row's pkrBasis says which rate.
         totalReceiving: receiving.reduce((s, x) => s + (x.amountPkr || 0), 0),
         totalGiving: giving.reduce((s, x) => s + (x.amountPkr || 0), 0),
+        todayRate: liveUsd,
+        todayRateDate: require('../exportOrders/balanceDueDate').dayOf(live.effectiveDate),
       } });
     } catch (err) {
       console.error('getUpcoming error:', err);

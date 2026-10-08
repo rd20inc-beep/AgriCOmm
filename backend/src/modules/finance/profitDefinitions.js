@@ -1,10 +1,14 @@
 /**
  * Profit definitions — the ONE place every profit tile reads from (owner
- * decisions G-2 and G-3, 2026-10-09). All figures are PKR. No live FX rate is
- * ever used to price revenue or cost.
+ * decisions G-2 and G-3, 2026-10-09; package C, 2026-10-09). All figures are
+ * PKR. No live FX rate is ever used to price revenue or cost.
  *
- * EXPORT (G-2) — per export order whose status is not Draft / Cancelled, in the
- * period by ORDER DATE (export_orders.created_at):
+ * BOOKS (C1) — the Home headline is the GL P&L net profit: Posted journals,
+ * company-wide, for the period (accounting statements profit-loss, the same
+ * figure Accounting ▸ Profit & Loss shows). The operational figures below sit
+ * underneath it, labelled "Operational"; they are not the books.
+ *
+ * EXPORT (G-2) — per export order whose status is not Draft / Cancelled:
  *
  *   revenue   = contract_value_pkr_locked, else contract_value × booked_fx_rate
  *               (a PKR order: contract_value). No booked figure → unpriced.
@@ -14,29 +18,46 @@
  *     'locked'    inventory_cogs_total_pkr, once shipped / cost_locked_at_dispatch
  *     'reserved'  Active inventory_reservations × the lot's landed cost per kg
  *                 (any un-reserved remainder of the order's kg is estimated as
- *                 below → 'reserved+estimate', flagged estimated)
+ *                 below → 'reserved+estimate' / 'reserved+rate_master', flagged)
  *     'allocated' the internal rice/milling rows a linked batch or transfer put
  *                 on export_order_costs
  *     'estimate'  each line's kg × the weighted landed cost per kg of the
  *                 company's finished stock of that product — FLAGGED estimated
+ *     'rate_master' (C2) a line with no stock of its product is priced at the
+ *                 COMMODITY RATE MASTER (Accounting ▸ Rates): the latest
+ *                 finished_rice rate effective today for that product, else the
+ *                 latest "any product" finished_rice rate. per_mt ÷ 1000, per_kg
+ *                 as is; a rate in the order's own currency converts at the
+ *                 order's BOOKED rate. FLAGGED estimated. Lines mixing stock and
+ *                 rate-master bases → 'estimate+rate_master'.
  *     unpriced    none of the above: left OUT of Booked and counted. Missing
  *                 cost is never read as 100% profit.
  *
- *   Booked    = Σ (revenue − op costs − rice cost) over priced orders.
+ *   Booked    = Σ (revenue − op costs − rice cost) over priced orders whose
+ *               ORDER DATE (created_at) is in the period.
  *   Realised  = Σ (revenue − op costs − locked COGS) over Shipped / Arrived /
- *               Closed orders with a locked COGS — the same amounts the GL posts
- *               at shipment (4xxx revenue, 5020 COGS). A shipped order with no
- *               locked COGS is counted in realisedUnpricedCount, not guessed.
- *               Same order-date period as Booked, so Pipeline = Booked − Realised
- *               (the GL dates the shipment journal by shipment date instead).
+ *               Closed orders with a locked COGS whose SHIPMENT DATE is in the
+ *               period (C4) — the same amounts the GL posts at shipment (4xxx
+ *               revenue, 5020 COGS). Shipment date, first that is recorded:
+ *                 1. the day the order moved to Shipped (status history) — the
+ *                    day COGS locked and the shipment journal is dated;
+ *                 2. atd (actual departure);
+ *                 3. bl_date;
+ *                 4. the order date (legacy rows with none of the above).
+ *               A shipped order with no locked COGS is counted in
+ *               realisedUnpricedCount, not guessed.
+ *   Pipeline  = per order (C4): Σ Booked profit of the period's booked orders
+ *               that are NOT yet realised. Booked and Realised now use
+ *               different dates, so Booked − Realised is no longer Pipeline.
  *   FX        = PKR actually received (advance_received_pkr + balance_received_pkr)
- *               − the same foreign amounts at the booked rate. Realised FX only;
- *               the open balance revalued at today's rate is returned apart as
- *               fxOpenRevaluationPkr and is never added to profit.
- *   Pipeline  = Booked − Realised.
+ *               − the same foreign amounts at the booked rate, over the period's
+ *               booked orders. Realised FX only; the open balance revalued at
+ *               today's rate is returned apart as fxOpenRevaluationPkr and is
+ *               never added to profit.
  *
- * MILL (G-3) — mill profit = sales of mill output − the cost of those sales.
- * Unsold output is stock, not profit. In the period by sale / movement date:
+ * MILL (G-3, C3) — mill profit = sales of mill output − the cost of those
+ * sales − the period's mill OVERHEADS. Unsold output is stock, not profit. In
+ * the period by sale / movement / expense date:
  *
  *   - local sales of a company mill-output lot (entity 'mill', type finished or
  *     byproduct): revenue total_amount, cost cogs_total_pkr (the COGS the sale
@@ -44,6 +65,13 @@
  *   - transfers of mill output to export (lot_transactions warehouse_transfer_out
  *     tied to internal_transfers): revenue = kg × the transfer price, cost =
  *     kg × the moved lot's cost per kg.
+ *   - overheads: mill expenses NOT tied to a batch or an order —
+ *     business_expenses with expense_type 'mill' and no batch_id / order_id
+ *     (where Mill ▸ Expenses has written since the cut-over), plus the legacy
+ *     mill_expenses table (no batch link exists there). A batch-linked expense
+ *     is already in that batch's cost, so in COGS; it is not deducted twice.
+ *   grossProfitPkr = sales − COGS; overheadsPkr; profitPkr = gross − overheads
+ *   (the mill's realised profit, used in the consolidated figure).
  *
  * LOCAL (other) — every other local sale: raw-rice lots, service / labour /
  * packaging lines. A lot sale with no COGS is left out and counted; a line with
@@ -54,7 +82,7 @@
  * rice is carried at the transfer price) add up to contract − true cost, so
  * the consolidated figure doesn't double count across mill and export either.
  *
- * CONSOLIDATED: booked = export Booked + mill realised + local other;
+ * CONSOLIDATED (operational): booked = export Booked + mill realised + local other;
  *               realised = export Realised + mill realised + local other.
  *               FX is shown beside them, never inside.
  */
@@ -92,7 +120,43 @@ function dateClause(col, { from, to }, params) {
   return parts.length ? ` AND ${parts.join(' AND ')}` : '';
 }
 
+// "col::date between from and to" as a stand-alone condition (TRUE when open).
+function rangeCond(col, { from, to }, params) {
+  const parts = [];
+  if (from) { parts.push(`(${col})::date >= ?::date`); params.push(from); }
+  if (to) { parts.push(`(${col})::date <= ?::date`); params.push(to); }
+  return parts.length ? parts.join(' AND ') : 'TRUE';
+}
+
 const rowsOf = (res) => (Array.isArray(res) ? res : (res && res.rows) || []);
+
+// C4: the day an order shipped — the day it moved to Shipped (when COGS locked
+// and the shipment journal is dated), else atd, else bl_date.
+const SHIPPED_ON_SQL = `COALESCE(
+  (SELECT MIN(h.created_at) FROM export_order_status_history h
+    WHERE h.order_id = eo.id AND h.to_status = 'Shipped')::date,
+  eo.atd, eo.bl_date)`;
+
+/**
+ * C2: a commodity-rate-master row → PKR per kg, or null when it can't be used.
+ * per_mt (and a blank unit, which the Rates page shows as per MT) ÷ 1000;
+ * per_kg as is. A PKR rate is used as is; a rate in the order's own currency
+ * converts at the order's BOOKED rate (never today's).
+ */
+function rateMasterPerKg(row, { currency = 'PKR', bookedRate = 0 } = {}) {
+  if (!row) return null;
+  const value = num(row.rate_value);
+  if (!(value > 0)) return null;
+  const unit = String(row.unit || 'per_mt').toLowerCase();
+  let perKg;
+  if (unit === 'per_kg') perKg = value;
+  else if (unit === 'per_mt') perKg = value / 1000;
+  else return null;
+  const rc = String(row.rate_currency || 'PKR').toUpperCase();
+  if (rc === 'PKR') return perKg;
+  if (rc === String(currency || '').toUpperCase() && num(bookedRate) > 0) return perKg * num(bookedRate);
+  return null;
+}
 
 // A cost row in PKR. Operational costs are PKR by rule (mig 079); the internal
 // allocation rows are in the order's currency with base_amount_pkr beside them.
@@ -113,18 +177,33 @@ function costRowPkr(c, orderRate) {
  */
 async function exportProfit(conn, { startDate, endDate, currentFxRate } = {}) {
   const p = period({ startDate, endDate });
-  const params = [EXCLUDED_ORDER_STATUSES];
+  // The period's booked orders (by order date) AND the period's shipments (by
+  // shipment date) — an order can be in one, the other, or both.
+  const params = [];
+  const bookedCond = rangeCond('o.created_at', p, params);
+  params.push(SHIPPED_STATUSES);
+  const shippedCond = rangeCond('COALESCE(o.shipped_on, o.created_at::date)', p, params);
+  params.push(EXCLUDED_ORDER_STATUSES);
+  // Days come back as text so no driver / timezone shift can move them.
   const orders = rowsOf(await conn.raw(`
-    SELECT id, order_no, status, currency, contract_value, booked_fx_rate,
-           contract_value_pkr_locked, inventory_cogs_total_pkr, cost_locked_at_dispatch,
-           advance_received, advance_received_pkr, balance_received, balance_received_pkr,
-           product_id, qty_mt, created_at
-      FROM export_orders
-     WHERE status <> ALL(?)${dateClause('created_at', p, params)}
-     ORDER BY id`, params));
+    SELECT x.* FROM (
+      SELECT o.*, o.created_at::date::text AS order_day, o.shipped_on::text AS shipped_day,
+             (${bookedCond}) AS in_booked,
+             (o.status = ANY(?) AND ${shippedCond}) AS in_shipped
+        FROM (
+          SELECT eo.id, eo.order_no, eo.status, eo.currency, eo.contract_value, eo.booked_fx_rate,
+                 eo.contract_value_pkr_locked, eo.inventory_cogs_total_pkr, eo.cost_locked_at_dispatch,
+                 eo.advance_received, eo.advance_received_pkr, eo.balance_received, eo.balance_received_pkr,
+                 eo.product_id, eo.qty_mt, eo.created_at, ${SHIPPED_ON_SQL} AS shipped_on
+            FROM export_orders eo
+           WHERE eo.status <> ALL(?)
+        ) o
+    ) x
+     WHERE x.in_booked OR x.in_shipped
+     ORDER BY x.id`, params));
 
   const ids = orders.map((o) => o.id);
-  let costs = []; let reserved = []; let lines = []; let rates = [];
+  let costs = []; let reserved = []; let lines = []; let rates = []; let masterRates = [];
   if (ids.length) {
     costs = rowsOf(await conn.raw(`
       SELECT order_id, category, amount, currency, base_amount_pkr, fx_rate
@@ -151,8 +230,23 @@ async function exportProfit(conn, { startDate, endDate, currentFxRate } = {}) {
          AND COALESCE(ownership, 'company') <> 'client' AND status <> 'Closed'
          AND COALESCE(NULLIF(landed_cost_per_kg, 0), NULLIF(cost_per_unit, 0)) IS NOT NULL
        GROUP BY product_id`));
+    // C2 fallback: the latest finished_rice rate effective today, per product.
+    // The generic rate is product_id NULL with NO type / grade text ("Any
+    // product · All grades" on the Rates page); a NULL-product row naming a
+    // type (e.g. a seeded "IRRI-6 White") is for that type only and is never
+    // applied to other products. A product's own rate without a grade wins a
+    // same-day tie.
+    masterRates = rowsOf(await conn.raw(`
+      SELECT DISTINCT ON (COALESCE(product_id, 0))
+             product_id, rate_value, unit, rate_currency, effective_date
+        FROM commodity_rate_master
+       WHERE rate_type = 'finished_rice' AND effective_date <= CURRENT_DATE AND rate_value > 0
+         AND (product_id IS NOT NULL OR NULLIF(TRIM(product_type), '') IS NULL)
+       ORDER BY COALESCE(product_id, 0), effective_date DESC, (NULLIF(product_type, '') IS NULL) DESC, id DESC`));
   }
   const rateByProduct = new Map(rates.map((r) => [Number(r.product_id), num(r.per_kg)]));
+  const masterByProduct = new Map(masterRates.filter((r) => r.product_id != null).map((r) => [Number(r.product_id), r]));
+  const masterAny = masterRates.find((r) => r.product_id == null) || null;
   const resByOrder = new Map(reserved.map((r) => [Number(r.order_id), r]));
 
   const fxNow = num(currentFxRate);
@@ -174,16 +268,25 @@ async function exportProfit(conn, { startDate, endDate, currentFxRate } = {}) {
     const kgLines = (orderLines.length ? orderLines : [{ product_id: o.product_id, qty_mt: o.qty_mt }])
       .map((l) => ({ productId: l.product_id ? Number(l.product_id) : null, kg: num(l.qty_mt) * 1000 }));
     const orderKg = kgLines.reduce((s, l) => s + l.kg, 0);
-    // kg × stock cost per kg for every line, or null when any line has no basis.
+    // Per line: stock cost per kg, else the rate master (C2). null when any
+    // line has neither.
+    const lineRate = (productId) => {
+      const stock = productId ? rateByProduct.get(productId) : null;
+      if (stock) return { perKg: stock, source: 'stock' };
+      const m = rateMasterPerKg((productId && masterByProduct.get(productId)) || masterAny, { currency, bookedRate });
+      return m ? { perKg: m, source: 'rate_master' } : null;
+    };
     const estimateFor = (shareKg) => {
       if (!orderKg) return null;
-      let total = 0;
+      let total = 0; const sources = new Set();
       for (const l of kgLines) {
-        const rate = l.productId ? rateByProduct.get(l.productId) : null;
+        const rate = lineRate(l.productId);
         if (!rate) return null;
-        total += (shareKg * (l.kg / orderKg)) * rate;
+        sources.add(rate.source);
+        total += (shareKg * (l.kg / orderKg)) * rate.perKg;
       }
-      return total;
+      const basis = sources.size > 1 ? 'estimate+rate_master' : (sources.has('rate_master') ? 'rate_master' : 'estimate');
+      return { total, basis };
     };
 
     const shipped = SHIPPED_STATUSES.includes(o.status);
@@ -196,8 +299,9 @@ async function exportProfit(conn, { startDate, endDate, currentFxRate } = {}) {
       const remainder = Math.max(0, orderKg - num(res.costed_kg));
       if (orderKg > 0 && remainder > orderKg * COVERAGE_TOLERANCE) {
         const est = estimateFor(remainder);
-        if (est != null) {
-          riceCostPkr = num(res.cost_pkr) + est; riceCostBasis = 'reserved+estimate'; estimated = true;
+        if (est) {
+          riceCostPkr = num(res.cost_pkr) + est.total; estimated = true;
+          riceCostBasis = est.basis === 'estimate' ? 'reserved+estimate' : 'reserved+rate_master';
         }
       } else {
         riceCostPkr = num(res.cost_pkr); riceCostBasis = 'reserved';
@@ -206,7 +310,7 @@ async function exportProfit(conn, { startDate, endDate, currentFxRate } = {}) {
       riceCostPkr = allocatedPkr; riceCostBasis = 'allocated';
     } else {
       const est = estimateFor(orderKg);
-      if (est != null) { riceCostPkr = est; riceCostBasis = 'estimate'; estimated = true; }
+      if (est) { riceCostPkr = est.total; riceCostBasis = est.basis; estimated = true; }
     }
 
     const priced = revenuePkr != null && riceCostPkr != null;
@@ -224,11 +328,18 @@ async function exportProfit(conn, { startDate, endDate, currentFxRate } = {}) {
     const fxOpenRevaluationPkr = (currency !== 'PKR' && bookedRate > 0 && fxNow > 0)
       ? openForeign * (fxNow - bookedRate) : 0;
 
+    const orderDate = toDay(o.order_day) || toDay(o.created_at);
+    const shippedOn = shipped ? (toDay(o.shipped_day) || orderDate) : null;
+
     return {
       id: o.id,
       orderNo: o.order_no,
       status: o.status,
-      orderDate: toDay(o.created_at),
+      orderDate,
+      shippedOn,
+      // Booked counts the order by its order date; Realised by its shipment date.
+      inBookedPeriod: o.in_booked === true,
+      inRealisedPeriod: o.in_shipped === true,
       currency,
       contractValueForeign: contract,
       bookedFxRate: bookedRate || null,
@@ -249,35 +360,43 @@ async function exportProfit(conn, { startDate, endDate, currentFxRate } = {}) {
     };
   });
 
+  return { rows, totals: exportTotals(rows) };
+}
+
+// Pure (unit-tested): per-order rows → the period's export totals.
+function exportTotals(rows = []) {
   const sum = (list, k) => r2(list.reduce((s, r) => s + num(r[k]), 0));
-  const priced = rows.filter((r) => r.priced);
-  const realisedRows = rows.filter((r) => r.realised);
-  const unpriced = rows.filter((r) => !r.priced);
-  const booked = sum(priced, 'bookedProfitPkr');
+  const booked = rows.filter((r) => r.inBookedPeriod !== false);
+  const priced = booked.filter((r) => r.priced);
+  const unpriced = booked.filter((r) => !r.priced);
+  const realisedRows = rows.filter((r) => r.realised && r.inRealisedPeriod !== false);
+  const bookedTotal = sum(priced, 'bookedProfitPkr');
   const realisedTotal = sum(realisedRows, 'realisedProfitPkr');
   const bookedRevenue = sum(priced, 'revenuePkr');
   return {
-    rows,
-    totals: {
-      orderCount: rows.length,
-      bookedPkr: booked,
-      bookedRevenuePkr: bookedRevenue,
-      bookedMarginPct: bookedRevenue > 0 ? parseFloat(((booked / bookedRevenue) * 100).toFixed(1)) : null,
-      pricedCount: priced.length,
-      estimatedCount: rows.filter((r) => r.estimated).length,
-      estimatedRiceCostPkr: sum(rows.filter((r) => r.estimated), 'riceCostPkr'),
-      unpricedCount: unpriced.length,
-      unpricedRevenuePkr: sum(unpriced, 'revenuePkr'),
-      realisedPkr: realisedTotal,
-      realisedCount: realisedRows.length,
-      realisedRevenuePkr: sum(realisedRows, 'revenuePkr'),
-      realisedUnpricedCount: rows.filter((r) => r.shippedMissingCogs).length,
-      pipelinePkr: r2(booked - realisedTotal),
-      fxRealisedPkr: sum(rows, 'fxRealisedPkr'),
-      fxOpenRevaluationPkr: sum(rows, 'fxOpenRevaluationPkr'),
-      opCostsPkr: sum(rows, 'opCostsPkr'),
-      riceCostPkr: sum(priced, 'riceCostPkr'),
-    },
+    orderCount: booked.length,
+    bookedPkr: bookedTotal,
+    bookedRevenuePkr: bookedRevenue,
+    bookedMarginPct: bookedRevenue > 0 ? parseFloat(((bookedTotal / bookedRevenue) * 100).toFixed(1)) : null,
+    pricedCount: priced.length,
+    estimatedCount: booked.filter((r) => r.estimated).length,
+    rateMasterCount: booked.filter((r) => String(r.riceCostBasis || '').includes('rate_master')).length,
+    estimatedRiceCostPkr: sum(booked.filter((r) => r.estimated), 'riceCostPkr'),
+    unpricedCount: unpriced.length,
+    unpricedRevenuePkr: sum(unpriced, 'revenuePkr'),
+    realisedPkr: realisedTotal,
+    realisedCount: realisedRows.length,
+    realisedRevenuePkr: sum(realisedRows, 'revenuePkr'),
+    realisedBasis: 'shipment_date',
+    realisedUnpricedCount: rows.filter((r) => r.shippedMissingCogs && r.inRealisedPeriod !== false).length,
+    // Per order: the period's booked orders not yet realised (C4).
+    pipelinePkr: sum(priced.filter((r) => !r.realised), 'bookedProfitPkr'),
+    pipelineCount: priced.filter((r) => !r.realised).length,
+    pipelineBasis: 'booked_not_realised',
+    fxRealisedPkr: sum(booked, 'fxRealisedPkr'),
+    fxOpenRevaluationPkr: sum(booked, 'fxOpenRevaluationPkr'),
+    opCostsPkr: sum(booked, 'opCostsPkr'),
+    riceCostPkr: sum(priced, 'riceCostPkr'),
   };
 }
 
@@ -311,7 +430,39 @@ async function millAndLocalProfit(conn, { startDate, endDate } = {}) {
        AND l.type IN ('finished', 'byproduct')
        AND COALESCE(l.ownership, 'company') <> 'client'${dateClause('COALESCE(t.transaction_date, t.created_at::date)', p, tParams)}`, tParams));
 
-  return foldMillAndLocal(sales, transfers);
+  const overheads = await millOverheads(conn, { startDate, endDate });
+  return foldMillAndLocal(sales, transfers, overheads);
+}
+
+// Mill overheads that hit no batch's cost (C3). PKR only: a foreign-currency
+// expense with no PKR figure is counted, not converted at today's rate.
+const EXPENSE_EXCLUDED = ['Cancelled', 'Void', 'Voided', 'Rejected', 'Reversed'];
+async function millOverheads(conn, { startDate, endDate } = {}) {
+  const p = period({ startDate, endDate });
+  const bParams = [EXPENSE_EXCLUDED];
+  const [biz] = rowsOf(await conn.raw(`
+    SELECT COALESCE(SUM(CASE WHEN batch_id IS NULL AND order_id IS NULL
+                             THEN COALESCE(amount_pkr, CASE WHEN COALESCE(currency, 'PKR') = 'PKR' THEN amount END) END), 0) AS pkr,
+           COUNT(*) FILTER (WHERE batch_id IS NULL AND order_id IS NULL) AS n,
+           COUNT(*) FILTER (WHERE batch_id IS NULL AND order_id IS NULL
+                              AND amount_pkr IS NULL AND COALESCE(currency, 'PKR') <> 'PKR') AS unconverted,
+           COALESCE(SUM(CASE WHEN batch_id IS NOT NULL OR order_id IS NOT NULL
+                             THEN COALESCE(amount_pkr, amount) END), 0) AS linked_pkr
+      FROM business_expenses
+     WHERE expense_type = 'mill' AND COALESCE(payment_status, '') <> ALL(?)${dateClause('expense_date', p, bParams)}`, bParams));
+  const lParams = [];
+  const [legacy] = rowsOf(await conn.raw(`
+    SELECT COALESCE(SUM(CASE WHEN COALESCE(currency, 'PKR') = 'PKR' THEN amount END), 0) AS pkr,
+           COUNT(*) AS n,
+           COUNT(*) FILTER (WHERE COALESCE(currency, 'PKR') <> 'PKR') AS unconverted
+      FROM mill_expenses
+     WHERE TRUE${dateClause('expense_date', p, lParams)}`, lParams));
+  return {
+    pkr: r2(num(biz && biz.pkr) + num(legacy && legacy.pkr)),
+    count: (parseInt(biz && biz.n, 10) || 0) + (parseInt(legacy && legacy.n, 10) || 0),
+    unconvertedCount: (parseInt(biz && biz.unconverted, 10) || 0) + (parseInt(legacy && legacy.unconverted, 10) || 0),
+    batchLinkedPkr: r2(num(biz && biz.linked_pkr)),
+  };
 }
 
 const isMillOutputLot = (s) => s.lot_id != null
@@ -319,8 +470,9 @@ const isMillOutputLot = (s) => s.lot_id != null
   && ['finished', 'byproduct'].includes(s.lot_type)
   && s.ownership !== 'client';
 
-// Pure fold (unit-tested): sales + transfer movements → mill / local totals.
-function foldMillAndLocal(sales = [], transfers = []) {
+// Pure fold (unit-tested): sales + transfer movements (+ the period's mill
+// overheads) → mill / local totals. mill.profitPkr is NET of overheads.
+function foldMillAndLocal(sales = [], transfers = [], overheads = {}) {
   const mill = { revenuePkr: 0, cogsPkr: 0, profitPkr: 0, saleCount: 0, soldKg: 0, uncostedCount: 0, uncostedRevenuePkr: 0,
     localSalesRevenuePkr: 0, transferRevenuePkr: 0, transferCostPkr: 0, transferKg: 0, transferCount: 0 };
   const local = { revenuePkr: 0, cogsPkr: 0, profitPkr: 0, saleCount: 0, uncostedCount: 0, uncostedRevenuePkr: 0 };
@@ -360,10 +512,21 @@ function foldMillAndLocal(sales = [], transfers = []) {
   }
   mill.transferCount = seen.size;
 
+  // C3: gross (sales − COGS) less the period's overheads = the mill's profit.
+  mill.grossProfitPkr = mill.profitPkr;
+  mill.overheadsPkr = num(overheads.pkr);
+  mill.overheadCount = parseInt(overheads.count, 10) || 0;
+  mill.overheadsUnconvertedCount = parseInt(overheads.unconvertedCount, 10) || 0;
+  mill.overheadsBatchLinkedPkr = num(overheads.batchLinkedPkr);
+  mill.profitPkr = mill.grossProfitPkr - mill.overheadsPkr;
+  mill.netProfitPkr = mill.profitPkr;
+  mill.overheadsDeducted = true;
+
   for (const seg of [mill, local]) {
     for (const k of Object.keys(seg)) if (k.endsWith('Pkr') || k.endsWith('Kg')) seg[k] = r2(seg[k]);
     seg.marginPct = seg.revenuePkr > 0 ? parseFloat(((seg.profitPkr / seg.revenuePkr) * 100).toFixed(1)) : null;
   }
+  mill.grossMarginPct = mill.revenuePkr > 0 ? parseFloat(((mill.grossProfitPkr / mill.revenuePkr) * 100).toFixed(1)) : null;
   return { mill, local, saleSegments };
 }
 
@@ -456,17 +619,40 @@ async function millBatchRows(conn, { startDate, endDate } = {}) {
 }
 
 /**
+ * C1: the books' profit — the GL P&L (Posted journals, company-wide) for the
+ * period, from the same service as Accounting ▸ Profit & Loss
+ * (GET /api/accounting/statements/profit-loss). PKR.
+ */
+async function booksProfit({ startDate, endDate } = {}) {
+  // Lazy: the accounting service is only needed here.
+  // eslint-disable-next-line global-require
+  const accountingService = require('../accounting/accounting.service');
+  const p = period({ startDate, endDate });
+  const pl = await accountingService.getProfitAndLoss({ periodStart: p.from, periodEnd: p.to, entity: null });
+  return {
+    basis: 'gl_posted',
+    netProfitPkr: r2(pl.net_profit),
+    revenuePkr: r2(pl.revenue && pl.revenue.total),
+    cogsPkr: r2(pl.cogs && pl.cogs.total),
+    grossProfitPkr: r2(pl.gross_profit),
+    expensesPkr: r2(pl.expenses && pl.expenses.total),
+  };
+}
+
+/**
  * Everything at once — the shape every tile reads.
  */
 async function profitDefinitions(conn, { startDate, endDate, currentFxRate } = {}) {
-  const [exp, ml] = await Promise.all([
+  const [exp, ml, books] = await Promise.all([
     exportProfit(conn, { startDate, endDate, currentFxRate }),
     millAndLocalProfit(conn, { startDate, endDate }),
+    booksProfit({ startDate, endDate }),
   ]);
   const t = exp.totals;
   return {
     period: period({ startDate, endDate }),
     currency: 'PKR',
+    books,
     export: t,
     exportRows: exp.rows,
     mill: ml.mill,
@@ -481,7 +667,11 @@ async function profitDefinitions(conn, { startDate, endDate, currentFxRate } = {
 
 module.exports = {
   profitDefinitions,
+  booksProfit,
   exportProfit,
+  exportTotals,
+  rateMasterPerKg,
+  millOverheads,
   millAndLocalProfit,
   millBatchRows,
   foldMillAndLocal,
