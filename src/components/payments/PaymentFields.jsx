@@ -62,7 +62,7 @@ export function AccountSelect({ accounts = [], value, onChange, label = 'Cash / 
  * income. The net is shown so whoever is paying can check it against the cheque
  * they are about to write.
  */
-export function PaymentExtras({ form, set, gross, currency = 'PKR', addToast, errors = {} }) {
+export function PaymentExtras({ form, set, gross, currency = 'PKR', addToast, errors = {}, taxes = true, attach = true }) {
   const [uploading, setUploading] = useState(false);
 
   const onRate = (v) => {
@@ -88,9 +88,11 @@ export function PaymentExtras({ form, set, gross, currency = 'PKR', addToast, er
     } finally { setUploading(false); }
   }
 
+  if (!taxes && !attach) return null;
   return (
     <div className="rounded-lg border border-gray-200 p-3 space-y-3 bg-gray-50/60">
-      <div className="text-xs font-semibold text-gray-600">Tax, discount &amp; document <span className="font-normal text-gray-400">(optional)</span></div>
+      <div className="text-xs font-semibold text-gray-600">{taxes ? <>Tax, discount &amp; document</> : 'Supporting document'} <span className="font-normal text-gray-400">(optional)</span></div>
+      {taxes && (<>
       <div className="grid grid-cols-3 gap-3">
         <div>
           <label className="block text-[11px] font-medium text-gray-500 mb-1 inline-flex items-center gap-1"><Percent size={11} /> WHT rate</label>
@@ -110,6 +112,8 @@ export function PaymentExtras({ form, set, gross, currency = 'PKR', addToast, er
         <span className="text-gray-500">Net cash to pay</span>
         <span className="font-semibold text-gray-800 tabular-nums">{money(netCash(form), currency)}</span>
       </div>
+      </>)}
+      {attach && (
       <div>
         <label className="block text-[11px] font-medium text-gray-500 mb-1 inline-flex items-center gap-1"><Paperclip size={11} /> Supporting document</label>
         {form.attachmentUrl ? (
@@ -123,6 +127,7 @@ export function PaymentExtras({ form, set, gross, currency = 'PKR', addToast, er
         )}
         {uploading && <p className="text-[11px] text-gray-400 mt-1">Uploading…</p>}
       </div>
+      )}
     </div>
   );
 }
@@ -144,6 +149,13 @@ export default function PaymentFields({
   // { amount, whtAmount, bankAccountId } → message, shown under that field
   // (see paymentErrors in paymentPayload.js).
   errors = {},
+  // The methods this path accepts (paymentVariants.js); defaults to the four.
+  methods = PAYMENT_METHODS,
+  // Cash on a local sale / service invoice lands by WHERE it was collected
+  // (Mill Cash / Office Petty Cash): the account pick becomes that choice.
+  cashLocation = false,
+  // Which parts of the optional block this path's endpoint reads.
+  taxes = true, attach = true,
 }) {
   // A non-PKR (e.g. USD) account carries only its own currency; a PKR account
   // takes any (the server refuses the rest).
@@ -184,7 +196,7 @@ export default function PaymentFields({
         <div>
           <label className={lbl} htmlFor={`${idPrefix}-method`}>Method</label>
           <select id={`${idPrefix}-method`} value={form.method} onChange={(e) => onMethod(e.target.value)} className={inp}>
-            {PAYMENT_METHODS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+            {methods.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
           </select>
         </div>
         <div>
@@ -192,7 +204,20 @@ export default function PaymentFields({
           <input id={`${idPrefix}-date`} type="date" value={form.date} onChange={(e) => set('date', e.target.value)} className={inp} />
         </div>
       </div>
-      {!hideAccount && (
+      {cashLocation && form.method === 'cash' && (
+        <div>
+          <span className={lbl}>Cash collected at</span>
+          <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Cash collected at">
+            {['Mill', 'Head Office'].map((loc) => (
+              <button key={loc} type="button" role="radio" aria-checked={(form.collectionLocation || 'Mill') === loc}
+                onClick={() => set('collectionLocation', loc)}
+                className={`px-3 py-2 text-sm font-medium rounded-lg border ${(form.collectionLocation || 'Mill') === loc ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-gray-200 text-gray-600 hover:border-gray-300'}`}>{loc}</button>
+            ))}
+          </div>
+          <p className="text-[11px] text-gray-400 mt-1">{(form.collectionLocation || 'Mill') === 'Head Office' ? 'Lands in Office Petty Cash.' : 'Lands in Mill Cash.'}</p>
+        </div>
+      )}
+      {!hideAccount && !(cashLocation && form.method === 'cash') && (
         <AccountSelect id={`${idPrefix}-account`} accounts={accountOptions}
           label={form.method === 'cheque' ? 'Bank account it will clear through (optional)'
             : filterAccountsByMethod && form.method === 'cash' ? 'Cash account *' : 'Cash / Bank account *'}
@@ -213,7 +238,7 @@ export default function PaymentFields({
           <ChequeHint />
         </div>
       )}
-      {extras && <PaymentExtras form={form} set={set} gross={parseFloat(form.amount) || 0} currency={currency} addToast={addToast} errors={errors} />}
+      {extras && <PaymentExtras form={form} set={set} gross={parseFloat(form.amount) || 0} currency={currency} addToast={addToast} errors={errors} taxes={taxes} attach={attach} />}
       {remarks && (
         <div>
           <label className={lbl} htmlFor={`${idPrefix}-notes`}>Remarks</label>

@@ -32,7 +32,7 @@ const num = (v) => parseFloat(v) || 0;
 // not "—": this labels an amount being paid, which is never "unknown".
 export const money = (v, currency = 'PKR') => fmtMoney(num(v), currency || 'PKR', { decimals: 2 });
 
-export function blankPaymentForm({ amount = '', method = 'bank_transfer', date } = {}) {
+export function blankPaymentForm({ amount = '', method = 'bank_transfer', date, ...inherited } = {}) {
   return {
     amount: amount === null || amount === undefined ? '' : String(amount),
     method,
@@ -42,6 +42,12 @@ export function blankPaymentForm({ amount = '', method = 'bank_transfer', date }
     dueDate: '',
     notes: '',
     whtRate: '', whtAmount: '', discountAmount: '', attachmentUrl: '', attachmentName: '',
+    // Local-sale / service-invoice cash: where it was collected. Export
+    // receipt: the rate estimate Finance confirms.
+    collectionLocation: 'Mill', fxRate: '',
+    // Anything the context hands down (an inherited account, the order's
+    // rate, the collection point) — every one still editable.
+    ...Object.fromEntries(Object.entries(inherited).filter(([, v]) => v !== undefined && v !== null)),
   };
 }
 

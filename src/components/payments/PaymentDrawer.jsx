@@ -49,11 +49,21 @@ export default function PaymentDrawer({
   capAmount = true,               // refuse more than the outstanding
   history, historyLoading, historyCompact = true,
   onSubmit, onDone,
+  // Contextual variants (paymentVariants.js). `buildBody(form)` replaces the
+  // recordPayment body for an endpoint that reads other fields; `methods`,
+  // `cashLocation`, `taxes`, `attach` shape the form to what that endpoint
+  // accepts; `requireAccountFor(form)` says when an account must be picked;
+  // `initial` seeds inherited values (account, rate, collection point);
+  // `renderExtra({ form, set })` adds a variant's own field.
+  buildBody = null,
+  methods, cashLocation = false, taxes = true, attach = true,
+  requireAccountFor = null, initial = {}, renderExtra = null,
+  formId = 'payment-drawer-form',
 }) {
   const prefill = defaultAmount !== undefined
     ? defaultAmount
     : (outstanding != null ? String(outstanding) : '');
-  const [form, setForm] = useState(() => blankPaymentForm({ amount: prefill, method: defaultMethod }));
+  const [form, setForm] = useState(() => blankPaymentForm({ ...initial, amount: prefill, method: defaultMethod }));
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState({});
   // Editing a field clears the message shown under it.
@@ -67,7 +77,7 @@ export default function PaymentDrawer({
     if (saving) return;
     const problem = paymentFieldError(form, {
       outstanding: capAmount ? outstanding : null,
-      requireAccount: fixedAccountId === undefined,
+      requireAccount: fixedAccountId === undefined && (requireAccountFor ? requireAccountFor(form) : true),
       currency,
     });
     if (problem) {
@@ -78,10 +88,11 @@ export default function PaymentDrawer({
     setErrors({});
     setSaving(true);
     try {
-      await onSubmit(paymentPayload(form, {
+      const body = buildBody ? buildBody(form) : paymentPayload(form, {
         type, currency, payableId, receivableId, notes: defaultNotes,
         ...(fixedAccountId !== undefined ? { bankAccountId: fixedAccountId } : {}),
-      }), form);
+      });
+      await onSubmit(body, form);
       onDone?.(form);
     } catch (err) {
       addToast?.(err?.data?.message || err?.message || 'Payment failed', 'error');
@@ -94,13 +105,13 @@ export default function PaymentDrawer({
       footer={(
         <div className="flex justify-end gap-2">
           <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
-          <button type="submit" form="payment-drawer-form" disabled={saving}
+          <button type="submit" form={formId} disabled={saving}
             className="px-4 py-2 text-sm text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-60">
             {saving ? 'Processing…' : label}
           </button>
         </div>
       )}>
-      <form id="payment-drawer-form" onSubmit={submit} className="space-y-4">
+      <form id={formId} onSubmit={submit} className="space-y-4">
         {summary.length > 0 && (
           <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm space-y-1">
             {summary.filter(Boolean).map(([k, v], i) => (
@@ -120,7 +131,10 @@ export default function PaymentDrawer({
           hideAccount={fixedAccountId !== undefined}
           filterAccountsByMethod={filterAccountsByMethod}
           errors={errors}
+          {...(methods ? { methods } : {})}
+          cashLocation={cashLocation} taxes={taxes} attach={attach}
         />
+        {renderExtra && renderExtra({ form, set })}
         {children}
         {(history !== undefined || historyLoading) && (
           <PaymentHistory payments={history} loading={historyLoading} currency={currency} compact={historyCompact} />
