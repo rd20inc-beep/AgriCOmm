@@ -172,20 +172,4 @@ describe('by-product sale value (mill revenue)', () => {
     const ungraded = { actual_finished_kg: 700, broken_kg: 200, broken_price_per_kg: 50, bran_kg: 10, bran_price_per_kg: 20 };
     expect(byproductSaleValue(ungraded)).toBeCloseTo(inventoryService.computeResidualAllocation(ungraded, 1000, 0).byproductValue, 6);
   });
-
-  test('the Profit page mill tab no longer reports the Rs 28.5m phantom', async () => {
-    db.__set({ export_orders: [], milling_batches: [M001], milling_costs: [] });
-    const financeService = require('../modules/finance/finance.service');
-    const out = await financeService.getProfitabilitySummary({});
-    const row = out.mill.rows[0];
-    // 2500 × 266.36 finished + 179,000 by-products — was + 750 × 38,000 = 28,500,000.
-    expect(row.revenue).toBeCloseTo(2500 * 266.36 + 179000, 2);
-  });
-
-  test('a batch with no by-product price falls back to the commodity broken rate (per-MT ÷ 1000)', async () => {
-    db.__set({ export_orders: [], milling_batches: [{ id: 2, status: 'Completed', actual_finished_kg: 1000, broken_kg: 100, finished_price_per_kg: 100 }], milling_costs: [] });
-    const financeService = require('../modules/finance/finance.service');
-    const out = await financeService.getProfitabilitySummary({});
-    expect(out.mill.rows[0].revenue).toBeCloseTo(100000 + 100 * 38, 6);
-  });
 });

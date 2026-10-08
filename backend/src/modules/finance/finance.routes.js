@@ -279,6 +279,23 @@ router.get('/profitability-summary', authorize('finance', 'view'), async (req, r
   }
 });
 
+// The headline profit figures (Booked / Realised / Pipeline / FX for export,
+// mill realised, local other, consolidated) — the operations Dashboard tile
+// reads this. Anyone who may see profit: finance.view or reports.view_profit.
+router.get('/profit-headline', authorizeAny(['finance', 'view'], ['reports', 'view_profit']), async (req, res) => {
+  try {
+    const { start_date, end_date } = req.query;
+    const { profitDefinitions } = require('./profitDefinitions');
+    const fx = await require('./fxRate.service').getLatestRate('USD');
+    const defs = await profitDefinitions(db, { startDate: start_date, endDate: end_date, currentFxRate: fx.rate });
+    // Totals only — the per-order rows stay on /profitability-summary.
+    return res.json({ success: true, data: { ...defs, exportRows: undefined } });
+  } catch (err) {
+    console.error('Finance profit-headline error:', err);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 // Cost Allocations
 router.get('/cost-allocations', authorize('finance', 'view'), controller.listCostAllocations);
 router.post(

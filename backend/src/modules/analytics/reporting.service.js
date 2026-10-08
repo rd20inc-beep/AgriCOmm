@@ -5,6 +5,7 @@ const db = require('../../config/database');
 // touches req/rbac itself.
 const { applyWarehouseScope, isWarehouseInScope } = require('../../utils/warehouseScope');
 const { companyStock } = require('../inventory/stockSql');
+const { exportProfit } = require('../finance/profitDefinitions');
 
 // Parse a milling_batches.custom_tags jsonb value into a plain array. The pg
 // driver usually returns jsonb already parsed (array/object), but a string may
@@ -226,8 +227,21 @@ const reportingService = {
       )
       .first();
 
+    // Booked / Realised / Pipeline export profit — the one definition every
+    // profit tile reads (finance/profitDefinitions.js, owner decision G-2),
+    // in the same period (by order date). PKR only.
+    const exportDefs = (await exportProfit(db, { startDate: dateFrom, endDate: dateTo })).totals;
+
     return {
       totalOrders: parseInt(orderStats.total_orders, 10),
+      bookedProfitPkr: exportDefs.bookedPkr,
+      realisedProfitPkr: exportDefs.realisedPkr,
+      pipelineProfitPkr: exportDefs.pipelinePkr,
+      avgMarginPct: exportDefs.bookedMarginPct,
+      bookedOrderCount: exportDefs.pricedCount,
+      bookedEstimatedCount: exportDefs.estimatedCount,
+      bookedUnpricedCount: exportDefs.unpricedCount,
+      fxRealisedPkr: exportDefs.fxRealisedPkr,
       totalRevenue,
       totalCosts,
       grossProfit,
