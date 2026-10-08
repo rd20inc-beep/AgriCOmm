@@ -69,6 +69,19 @@ function resolveRange(key) {
   }
 }
 
+// GET /api/finance/overview-summary names its window start_date / end_date
+// (the list endpoints use from_date / to_date). {} = all time.
+// It compares end_date with `<=` against timestamp columns too (export
+// created_at, batch completed_at), so a bare date would drop everything after
+// midnight of the last day — "Today" would show nothing. Send the end of that
+// day; date columns (sale_date, expense_date) cast it back to the same day.
+export function overviewSummaryParams(queryParams = {}) {
+  const out = {};
+  if (queryParams.from_date) out.start_date = queryParams.from_date;
+  if (queryParams.to_date) out.end_date = `${queryParams.to_date} 23:59:59.999`;
+  return out;
+}
+
 export function useFinanceDateRange() {
   const [params] = useSearchParams();
   const rangeKey = params.get('range') || '';

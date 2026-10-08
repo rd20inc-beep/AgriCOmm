@@ -3,6 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { Bell, AlertTriangle, AlertCircle, Info, Clock, ArrowUpRight } from 'lucide-react';
 import { FinanceKPI } from '../../../components/finance';
 import { useFinanceAlerts } from '../../../api/queries';
+import { alertSeverity } from '../utils/alerts';
+import { financeHref } from '../financeNav';
+import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 
 const SEVERITY_CONFIG = {
   danger:  { bg: 'bg-red-50',   border: 'border-red-200',   dot: 'bg-red-500',   icon: AlertTriangle, iconColor: 'text-red-500' },
@@ -17,6 +20,7 @@ const FILTER_TABS = ['All', 'Critical', 'Warning', 'Info'];
 
 export default function Alerts() {
   const navigate = useNavigate();
+  const { rangeKey } = useFinanceDateRange();
   const { data: alertsData = [], isLoading } = useFinanceAlerts();
   const [filter, setFilter] = useState('All');
   // Local-only dismiss set so the user can hide a noisy alert this
@@ -24,21 +28,10 @@ export default function Alerts() {
   // recomputed from live conditions on each refresh.
   const [dismissed, setDismissed] = useState(new Set());
 
-  // Backend emits both `type` and `severity`. Normalise so 'critical'
-  // and 'high' map to danger; 'medium' to warning; everything else
-  // (info, low, default) to info. Otherwise critical alerts collapse
-  // to blue info badges and disappear from the Critical filter.
-  const toSeverity = (a) => {
-    const raw = String(a.severity || a.type || '').toLowerCase();
-    if (['danger', 'critical', 'high', 'urgent'].includes(raw)) return 'danger';
-    if (['warning', 'medium', 'warn'].includes(raw)) return 'warning';
-    return 'info';
-  };
-
   const alerts = useMemo(() => {
     return alertsData
       .filter(a => !dismissed.has(a.id))
-      .map(a => ({ ...a, severity: toSeverity(a) }));
+      .map(a => ({ ...a, severity: alertSeverity(a) }));
   }, [alertsData, dismissed]);
 
   const filtered = useMemo(() => {
@@ -100,7 +93,7 @@ export default function Alerts() {
           const Icon = config.icon;
           return (
             <div key={alert.id || i}
-              onClick={() => alert.link && navigate(alert.link)}
+              onClick={() => alert.link && navigate(financeHref(alert.link, rangeKey))}
               className={`${config.bg} border ${config.border} rounded-xl p-4 ${alert.link ? 'cursor-pointer hover:shadow-sm transition-shadow' : ''}`}>
               <div className="flex items-start gap-3">
                 <Icon size={18} className={`${config.iconColor} mt-0.5 flex-shrink-0`} />
