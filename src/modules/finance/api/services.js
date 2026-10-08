@@ -36,6 +36,13 @@ export const financeApi = {
   createFundTransfer: (data) => api.post('/api/finance/fund-transfers', data),
   acceptFundTransfer: (id, body = {}) => api.post(`/api/finance/fund-transfers/${id}/accept`, body),
   reverseFundTransfer: (id, body = {}) => api.post(`/api/finance/fund-transfers/${id}/reverse`, body),
+  fundTransfer: (id) => api.get(`/api/finance/fund-transfers/${id}`),
+  // Contra transfer: money between the company's own accounts. Same entity →
+  // settles now; Head Office ⇄ Mill → a transfer the receiver accepts.
+  createContraTransfer: (data) => api.post('/api/finance/contra-transfers', data),
+  // Edit = reverse the original + create the corrected one (Owner / Super Admin).
+  replaceFundTransfer: (id, data) => api.post(`/api/finance/fund-transfers/${id}/replace`, data),
+  contraRate: (currency, date) => api.get('/api/finance/contra-transfers/rate', { currency, date }),
   costAllocations: (params) => api.get('/api/finance/cost-allocations', params),
   createCostAllocation: (data) => api.post('/api/finance/cost-allocations', data),
   addAllocationLine: (id, data) => api.post(`/api/finance/cost-allocations/${id}/lines`, data),

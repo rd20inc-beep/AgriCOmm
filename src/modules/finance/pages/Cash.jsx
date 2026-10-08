@@ -4,6 +4,9 @@ import { Landmark, Wallet, TrendingUp, TrendingDown, Activity, Printer, ArrowLef
 import { FinanceKPI, FinanceTable, FinanceChart } from '../../../components/finance';
 import { useBankAccounts, useBankTransactions, useFundTransfers, useReverseFundTransfer, useAcceptFundTransfer } from '../../../api/queries';
 import TransferFundsDrawer from '../components/TransferFundsDrawer';
+import ContraTransferDrawer from '../components/ContraTransferDrawer';
+import FundTransferDetailDrawer from '../components/FundTransferDetailDrawer';
+import { transferRowLabel, transferStatusLabel, DIRECTION_LABEL } from '../utils/contraTransfer';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
@@ -19,22 +22,29 @@ export default function Cash() {
   const allTransactions = txData?.transactions || txData || [];
   const [accountFilter, setAccountFilter] = useState('all');
   const [showTransfer, setShowTransfer] = useState(false);
+  // Contra transfer drawer (new, or editing = reverse + replace) and the
+  // transfer detail drawer.
+  const [contra, setContra] = useState({ open: false, editing: null });
+  const [detailId, setDetailId] = useState(null);
   const { data: fundTransfers = [] } = useFundTransfers();
   const reverseTransfer = useReverseFundTransfer();
   const acceptTransfer = useAcceptFundTransfer();
-  const { user } = useAuth();
-  // Reversal is Owner / Super Admin only (the server enforces the same).
+  const { user, hasPermission } = useAuth();
+  // Reversal / edit is Owner / Super Admin only (the server enforces the same).
   const canReverse = user?.role === 'Owner' || user?.role === 'Super Admin';
+  const canCreateContra = hasPermission('finance', 'confirm_payment') || hasPermission('milling', 'edit');
   const [confirm, confirmDialog] = useConfirm();
   async function handleReverseTransfer(t) {
     const accepted = t.status === 'completed';
     const ok = await confirm({
       title: `Reverse transfer ${t.transferNo}?`,
-      consequence: accepted
-        ? 'The money goes back to the sending account and comes out of the receiving one. Equal-and-opposite journals are posted; the transfer stays on record as Reversed.'
-        : 'The money goes back to the sending account (the receiver never accepted it). An equal-and-opposite journal is posted; the transfer stays on record as Reversed.',
-      amount: t.amount != null ? fmtPKR(t.amount) : undefined,
-      reason: 'optional',
+      consequence: t.direction === 'internal'
+        ? 'The money goes back to the sending account and comes out of the receiving one (bank charges too, if any). The transfer stays on record as Reversed.'
+        : accepted
+          ? 'The money goes back to the sending account and comes out of the receiving one. Equal-and-opposite journals are posted; the transfer stays on record as Reversed.'
+          : 'The money goes back to the sending account (the receiver never accepted it). An equal-and-opposite journal is posted; the transfer stays on record as Reversed.',
+      amount: t.amount != null ? fmtMoney(parseFloat(t.amount) || 0, t.currency || 'PKR') : undefined,
+      reason: 'required',
       confirmLabel: 'Reverse transfer',
       cancelLabel: 'Go back',
     });
@@ -92,10 +102,17 @@ export default function Cash() {
       <span className={row.type === 'credit' ? 'text-emerald-600' : 'text-red-600'}>{fmtMoney(Math.abs(parseFloat(v) || 0), row.currency || 'PKR')}</span>
     )},
     { key: 'accountName', label: 'Account' },
+    // What kind of movement this is. A row written by a transfer between the
+    // company's own accounts reads "CONTRA · From → To" (or HO → MILL …).
+    { key: 'category', label: 'Kind', render: (v, row) => <TxKind row={row} /> },
     { key: 'reference', label: 'Reference', render: (v) => (
       <span title={v || ''}>{shortenRef(v) || '—'}</span>
     )},
-    { key: 'counterparty', label: 'Counterparty', render: (v) => <span className="block max-w-[16rem] truncate" title={v || ''}>{v || '—'}</span> },
+    { key: 'counterparty', label: 'Counterparty', render: (v, row) => {
+      const label = transferRowLabel(row);
+      const text = label || v || '—';
+      return <span className="block max-w-[18rem] truncate" title={text}>{text}</span>;
+    } },
   ];
 
   // Last-30-days net flow chart bucketed by day, computed from real
@@ -105,8 +122,11 @@ export default function Cash() {
   // currencies, so the chart (and the 30-day net) is labelled PKR.
   const cashFlowData = (() => {
     const pkrAccountIds = new Set(accounts.filter(a => (a.currency || 'PKR') === 'PKR').map(a => String(a.id)));
+    // Contra transfers between the company's own accounts are not cash flow —
+    // they are left out (their bank charges, a real expense, stay in).
     const txs = (Array.isArray(transactions) ? transactions : [])
-      .filter(t => pkrAccountIds.has(String(t.bankAccountId ?? t.bank_account_id)));
+      .filter(t => pkrAccountIds.has(String(t.bankAccountId ?? t.bank_account_id)))
+      .filter(t => !(t.ftDirection === 'internal' && !/charges/i.test(t.category || '')));
     const dayBuckets = new Map();
     const now = new Date();
     for (let i = 29; i >= 0; i--) {
@@ -185,10 +205,18 @@ export default function Cash() {
             <div className="opacity-80 text-right">
               {hasFlow ? `${transactions.length} transactions` : 'No recent activity'}
             </div>
-            <button onClick={() => setShowTransfer(true)}
-              className="no-print inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white text-blue-700 text-xs font-semibold hover:bg-blue-50 shadow-sm">
-              <ArrowLeftRight size={13} /> Transfer Funds
-            </button>
+            <div className="no-print flex items-center gap-1.5 flex-wrap justify-end">
+              {canCreateContra && (
+                <button onClick={() => setContra({ open: true, editing: null })}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white text-blue-700 text-xs font-semibold hover:bg-blue-50 shadow-sm">
+                  <ArrowLeftRight size={13} /> + Contra Transfer
+                </button>
+              )}
+              <button onClick={() => setShowTransfer(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/15 ring-1 ring-white/40 text-white text-xs font-semibold hover:bg-white/25">
+                HO ⇄ Mill
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -233,11 +261,14 @@ export default function Cash() {
       {/* Head Office ⇄ Mill fund transfers */}
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-gray-800 inline-flex items-center gap-1.5"><ArrowLeftRight size={14} className="text-blue-500" /> Head Office ⇄ Mill Transfers</h3>
-          <button onClick={() => setShowTransfer(true)} className="no-print text-xs font-medium text-blue-600 hover:text-blue-700">+ New transfer</button>
+          <h3 className="text-sm font-semibold text-gray-800 inline-flex items-center gap-1.5"><ArrowLeftRight size={14} className="text-blue-500" /> Transfers between your accounts</h3>
+          <div className="no-print flex items-center gap-3">
+            {canCreateContra && <button onClick={() => setContra({ open: true, editing: null })} className="text-xs font-medium text-blue-600 hover:text-blue-700">+ Contra transfer</button>}
+            <button onClick={() => setShowTransfer(true)} className="text-xs font-medium text-gray-500 hover:text-gray-700">+ HO ⇄ Mill</button>
+          </div>
         </div>
         {fundTransfers.length === 0 ? (
-          <div className="px-4 py-8 text-center text-sm text-gray-400">No fund transfers yet. Use <span className="font-medium">Transfer Funds</span> to move money between Head Office and the Mill.</div>
+          <div className="px-4 py-8 text-center text-sm text-gray-400">No transfers yet. Use <span className="font-medium">+ Contra Transfer</span> to move money between your own accounts (Cash ⇄ Bank, Bank ⇄ Bank, Head Office ⇄ Mill).</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
@@ -250,24 +281,30 @@ export default function Cash() {
                 {fundTransfers.map((t) => {
                   const hoIsReceiver = t.toEntity === 'general'; // Mill → HO awaits HO acceptance here
                   return (
-                  <tr key={t.id} className={`border-t border-gray-100 ${t.status === 'reversed' ? 'text-gray-400' : ''}`}>
+                  <tr key={t.id} onClick={() => setDetailId(t.id)} className={`border-t border-gray-100 cursor-pointer hover:bg-blue-50/30 ${t.status === 'reversed' ? 'text-gray-400' : ''}`}>
                     <td className="px-3 py-2 font-medium text-gray-700">{t.transferNo}</td>
                     <td className="px-3 py-2 whitespace-nowrap">{fmtDate(t.transferDate)}</td>
                     <td className="px-3 py-2">
-                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${t.direction === 'ho_to_mill' ? 'bg-blue-50 text-blue-700' : 'bg-violet-50 text-violet-700'}`}>
-                        {t.direction === 'ho_to_mill' ? 'HO → Mill' : 'Mill → HO'}
+                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${t.direction === 'internal' ? 'bg-emerald-50 text-emerald-700' : t.direction === 'ho_to_mill' ? 'bg-blue-50 text-blue-700' : 'bg-violet-50 text-violet-700'}`}>
+                        {DIRECTION_LABEL[t.direction] || t.direction}
                       </span>
+                      {t.fxUnbooked && <span className="ml-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-50 text-amber-800" title="FX difference not booked — review">FX</span>}
                     </td>
                     <td className="px-3 py-2 text-gray-600 max-w-[12rem] truncate" title={t.fromAccountName || ''}>{t.fromAccountName || '—'}</td>
                     <td className="px-3 py-2 text-gray-600 max-w-[12rem] truncate" title={t.toAccountName || ''}>{t.toAccountName || '—'}</td>
                     <td className="px-3 py-2 text-gray-500 capitalize">{(t.method || '').replace('_', ' ')}</td>
-                    <td className={`px-3 py-2 text-right font-semibold tabular-nums ${t.status === 'reversed' ? 'line-through' : ''}`}>{fmtPKR(t.amount)}</td>
-                    <td className="px-3 py-2">
-                      <StatusBadge status={t.status === 'reversed' ? 'Reversed'
-                        : t.status === 'completed' ? 'Received'
-                          : hoIsReceiver ? 'Awaiting you' : 'Awaiting mill'} />
+                    <td className={`px-3 py-2 text-right font-semibold tabular-nums ${t.status === 'reversed' ? 'line-through' : ''}`}>
+                      {fmtMoney(parseFloat(t.amount) || 0, t.currency || 'PKR')}
+                      {t.toCurrency && t.toCurrency !== t.currency && (
+                        <div className="text-[10px] font-normal text-gray-500">→ {fmtMoney(parseFloat(t.toAmount) || 0, t.toCurrency)}</div>
+                      )}
                     </td>
-                    <td className="px-3 py-2 text-right whitespace-nowrap">
+                    <td className="px-3 py-2">
+                      <StatusBadge status={t.status === 'pending'
+                        ? (hoIsReceiver ? 'Awaiting you' : 'Awaiting mill')
+                        : transferStatusLabel(t)} />
+                    </td>
+                    <td className="px-3 py-2 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                       {t.status === 'pending' && hoIsReceiver && (
                         <button onClick={() => handleAcceptTransfer(t)} disabled={acceptTransfer.isPending} title="Accept funds"
                           className="no-print inline-flex items-center gap-1 px-2 py-1 mr-1 text-[11px] font-medium rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"><Check size={12} /> Accept</button>
@@ -307,12 +344,38 @@ export default function Cash() {
             })}
           </div>
           <FinanceTable title="Recent Transactions" columns={txColumns} data={transactions}
-            searchKeys={['reference', 'counterparty', 'accountName']} exportFilename="bank-transactions" loading={loadingTx} />
+            onRowClick={(row) => { if (row.fundTransferId) setDetailId(row.fundTransferId); }}
+            searchKeys={['reference', 'counterparty', 'accountName', 'category', 'ftFromAccountName', 'ftToAccountName']} exportFilename="bank-transactions" loading={loadingTx} />
         </div>
       )}
       </div>{/* /.print-report */}
       <TransferFundsDrawer open={showTransfer} onClose={() => setShowTransfer(false)} defaultDirection="ho_to_mill" />
+      <ContraTransferDrawer open={contra.open} editing={contra.editing}
+        onClose={() => setContra({ open: false, editing: null })}
+        onDone={(data) => { const id = data?.transfer?.id; if (id && contra.editing) setDetailId(id); }} />
+      <FundTransferDetailDrawer open={!!detailId && !contra.open} transferId={detailId} canManage={canReverse}
+        onClose={() => setDetailId(null)} onNavigate={setDetailId}
+        onEdit={(t) => setContra({ open: true, editing: t })} />
       {confirmDialog}
     </div>
   );
+}
+
+// Type badge for a bank-transaction row. Transfer rows (fund_transfer_id set)
+// say which kind; everything else shows its category.
+function TxKind({ row }) {
+  const dir = row?.ftDirection;
+  const cat = row?.category || '';
+  if (dir) {
+    const charges = /charges/i.test(cat);
+    const reversal = /reversal/i.test(cat);
+    const text = charges ? 'Bank charges' : dir === 'internal' ? 'CONTRA' : (dir === 'ho_to_mill' ? 'HO → Mill' : 'Mill → HO');
+    const cls = charges ? 'bg-orange-50 text-orange-700' : dir === 'internal' ? 'bg-emerald-50 text-emerald-700' : 'bg-blue-50 text-blue-700';
+    return (
+      <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold whitespace-nowrap ${cls}`} title={transferRowLabel(row) || ''}>
+        {text}{reversal ? ' · reversal' : ''}
+      </span>
+    );
+  }
+  return cat ? <span className="text-[11px] text-gray-500 capitalize">{String(cat).replace(/_/g, ' ')}</span> : <span className="text-gray-300">—</span>;
 }

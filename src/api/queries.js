@@ -902,7 +902,46 @@ export function useReverseFundTransfer() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, reason } = {}) => financeApi.reverseFundTransfer(id, reason ? { reason } : {}),
+    onSuccess: () => { invalidateMoneyCaches(qc); qc.invalidateQueries({ queryKey: queryKeys.journals.all }); qc.invalidateQueries({ queryKey: ['fund-transfer'] }); },
+  });
+}
+// One transfer with both sides' bank rows, journals and audit fields.
+export function useFundTransfer(id) {
+  return useQuery({
+    queryKey: ['fund-transfer', id],
+    enabled: !!id,
+    queryFn: async () => {
+      const res = await financeApi.fundTransfer(id);
+      return transformKeys(unwrap(res, 'transfer') || null);
+    },
+  });
+}
+// Contra transfer (money between the company's own accounts).
+export function useCreateContraTransfer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data) => financeApi.createContraTransfer(data),
     onSuccess: () => { invalidateMoneyCaches(qc); qc.invalidateQueries({ queryKey: queryKeys.journals.all }); },
+  });
+}
+// Edit = reverse + replace (Owner / Super Admin).
+export function useReplaceFundTransfer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...data }) => financeApi.replaceFundTransfer(id, data),
+    onSuccess: () => { invalidateMoneyCaches(qc); qc.invalidateQueries({ queryKey: queryKeys.journals.all }); qc.invalidateQueries({ queryKey: ['fund-transfer'] }); },
+  });
+}
+// Default rate for a foreign currency on a date (fx_rates, else the system default).
+export function useContraRate(currency, date) {
+  return useQuery({
+    queryKey: ['contra-rate', currency, date],
+    enabled: !!currency && currency !== 'PKR',
+    staleTime: 5 * 60 * 1000,
+    queryFn: async () => {
+      const res = await financeApi.contraRate(currency, date);
+      return res?.data || res || null;
+    },
   });
 }
 
