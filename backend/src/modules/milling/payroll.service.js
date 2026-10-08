@@ -66,7 +66,8 @@ function computeNetPay({ grossPay, bonusTotal = 0, advanceDeduction = 0, deducti
 // statutory/deductions. Net is recomputed here; a client `net_pay` is only
 // accepted when it is not above the computed net (+ Rs 1 rounding tolerance) —
 // a LOWER figure is the drawer's "Paying now" reduce-the-amount override and is
-// kept as entered. Anything above is rejected (400) rather than trusted.
+// kept as entered, and needs a reason (`net_override_reason`, B3). Anything
+// above is rejected (400) rather than trusted.
 function resolvePrepareLine(w, ln = {}) {
   const requested = ln.advance_deducted != null && ln.advance_deducted !== ''
     ? parseFloat(ln.advance_deducted) : w.advanceDeduction;
@@ -85,9 +86,19 @@ function resolvePrepareLine(w, ln = {}) {
     }
     if (asked < computedNet - 1) netPay = Math.round(asked);
   }
+  // Owner decision B3: paying LESS than the computed net needs a reason, kept
+  // on the line (the shortfall itself is not tracked).
+  let netOverrideReason = null;
+  if (netPay < computedNet) {
+    netOverrideReason = String(ln.net_override_reason || '').trim() || null;
+    if (!netOverrideReason) {
+      const e = new Error(`Paying ${w.name} Rs ${netPay} instead of the computed Rs ${computedNet} needs a reason.`);
+      e.httpStatus = 400; throw e;
+    }
+  }
   const scheduled = Math.round(w.advanceScheduled != null ? w.advanceScheduled : w.advanceDeduction);
   const changed = advanceDeduction !== scheduled;
-  return { advanceDeduction, netPay, computedNet, skipReason: changed ? (ln.skip_reason || ln.reason || null) : null };
+  return { advanceDeduction, netPay, computedNet, netOverrideReason, skipReason: changed ? (ln.skip_reason || ln.reason || null) : null };
 }
 
 // Compute the month's payroll for every ACTIVE employee — the single source of
@@ -310,7 +321,7 @@ async function preparePayrollRun({ month, lines, pay_method, bank_account_id, pa
       const w = byId.get(ln.worker_id);
       if (!w) continue;
       const r = resolvePrepareLine(w, ln);
-      requested.push({ ...w, advanceDeduction: r.advanceDeduction, netPay: r.netPay, skipReason: r.skipReason });
+      requested.push({ ...w, advanceDeduction: r.advanceDeduction, netPay: r.netPay, skipReason: r.skipReason, netOverrideReason: r.netOverrideReason });
     }
   }
 
@@ -361,6 +372,7 @@ async function preparePayrollRun({ month, lines, pay_method, bank_account_id, pa
         statutory_total: w.statutoryTotal || 0,
         statutory_json: JSON.stringify(w.statutoryLines || []),
         advance_deducted: w.advanceDeduction, net_pay: w.netPay, skip_reason: w.skipReason || null,
+        net_override_reason: w.netOverrideReason || null,
       });
     }
     return r;
