@@ -2,7 +2,8 @@ import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { FileText, ChevronRight, ChevronDown, BookOpen, Scale, CheckCircle2, AlertTriangle, Layers, Printer, Search } from 'lucide-react';
 import { FinanceKPI } from '../../../components/finance';
-import { useJournalEntries } from '../../../api/queries';
+import { useJournalEntries, useTrialBalance } from '../../../api/queries';
+import { withRange } from '../financeNav';
 import ListCapHint from '../../../shared/components/ListCapHint';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { useApp } from '../../../context/AppContext';
@@ -24,7 +25,7 @@ const ENTITY_TONE = {
 };
 
 export default function Accounting() {
-  const { queryParams: rangeParams } = useFinanceDateRange();
+  const { queryParams: rangeParams, rangeKey } = useFinanceDateRange();
   const { companyProfileData } = useApp();
   const { data: journalData = [], isLoading } = useJournalEntries(rangeParams);
   const [expanded, setExpanded] = useState(() => new Set());
@@ -101,9 +102,16 @@ export default function Accounting() {
   const totalDebit  = filtered.reduce((s, j) => s + toPkr(j, 'totalDebit'),  0);
   const totalCredit = filtered.reduce((s, j) => s + toPkr(j, 'totalCredit'), 0);
 
-  // Book health — DR and CR should match within a tiny rounding tolerance.
-  const imbalance = Math.abs(totalDebit - totalCredit);
-  const isBalanced = imbalance < 1;
+  // Book health comes from the trial balance (every Posted journal up to the
+  // end of the period), not from this page's list — the list is capped and
+  // mixes Draft / Reversed entries, so its DR/CR say nothing about the books.
+  const { data: tb, isLoading: tbLoading } = useTrialBalance(rangeParams.to_date ? { as_of_date: rangeParams.to_date } : {});
+  const ledgerKnown = !!tb && tb.isBalanced != null;
+  const isBalanced = ledgerKnown ? !!tb.isBalanced : true;
+  const imbalance = ledgerKnown ? Math.abs((Number(tb.grandDebit) || 0) - (Number(tb.grandCredit) || 0)) : 0;
+  const balanceLabel = !ledgerKnown
+    ? (tbLoading ? 'Checking books…' : 'Books not checked')
+    : (isBalanced ? 'Books balanced' : `Books out by ${fmtPKR(imbalance, { decimals: 2 })}`);
 
   const { postedCount, reversedCount, draftCount, entityMix } = useMemo(() => {
     let p = 0, r = 0, d = 0;
@@ -140,12 +148,13 @@ export default function Accounting() {
             </div>
           </div>
           <div className="flex flex-col items-start sm:items-end gap-1.5">
-            <span className={`inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider px-3 py-1.5 rounded-full ${isBalanced ? 'bg-emerald-500/20 text-emerald-50 ring-1 ring-emerald-300/30' : 'bg-white/15 text-white ring-1 ring-white/30'}`}>
+            <Link to={withRange('/finance/accounting/trial-balance', rangeKey)} title="From the trial balance — open it"
+              className={`inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider px-3 py-1.5 rounded-full hover:opacity-90 ${isBalanced ? 'bg-emerald-500/20 text-emerald-50 ring-1 ring-emerald-300/30' : 'bg-white/15 text-white ring-1 ring-white/30'}`}>
               {isBalanced ? <CheckCircle2 size={13} /> : <AlertTriangle size={13} />}
-              {isBalanced ? 'Books balanced' : `Imbalance ${fmtPKR(imbalance, { decimals: 2 })}`}
-            </span>
+              {balanceLabel}
+            </Link>
             <div className="text-[11px] opacity-80 text-right">
-              DR {fmtPKR(totalDebit, { decimals: 2 })} · CR {fmtPKR(totalCredit, { decimals: 2 })}
+              This list: DR {fmtPKR(totalDebit, { decimals: 2 })} · CR {fmtPKR(totalCredit, { decimals: 2 })}
             </div>
           </div>
         </div>
@@ -162,7 +171,7 @@ export default function Accounting() {
           subtitle={`${reversedCount} reversed · ${draftCount} draft`}
           status={reversedCount + draftCount > 0 ? 'warning' : 'good'} loading={isLoading} />
         <FinanceKPI icon={Scale} title="Net Movement" value={fmtPKR(totalDebit, { decimals: 2 })}
-          subtitle={isBalanced ? 'DR equals CR ✓' : 'Out of balance'}
+          subtitle={ledgerKnown ? (isBalanced ? 'Books balanced (trial balance)' : 'Books out of balance') : '—'}
           status={isBalanced ? 'good' : 'danger'} loading={isLoading} />
       </div>
 
@@ -227,7 +236,7 @@ export default function Accounting() {
               <div className="text-lg font-bold">Journal Entries</div>
               <div className="text-xs text-gray-600">
                 {entityFilter !== 'all' ? `${entityFilter} · ` : ''}{filtered.length} entries · Total {fmtPKR(totalDebit, { decimals: 2 })}
-                {isBalanced ? ' · Balanced ✓' : ` · Imbalance ${fmtPKR(imbalance, { decimals: 2 })}`}
+                {ledgerKnown ? ` · ${balanceLabel}` : ''}
               </div>
             </div>
           </div>
