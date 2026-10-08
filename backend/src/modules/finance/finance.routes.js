@@ -224,6 +224,11 @@ router.get('/payments/attachment/:file', authorize('finance', 'view'), (req, res
   return res.sendFile(full);
 });
 router.get('/payments', authorize('finance', 'view'), controller.listPayments);
+// Read-only views behind the Finance drawers (transactionDetail.js): one
+// movement with its payment, bank rows and journals; and the header search.
+const transactionDetail = require('./transactionDetail');
+router.get('/transactions/:kind/:id', authorize('finance', 'view'), transactionDetail.getTransactionDetail);
+router.get('/search', authorize('finance', 'view'), transactionDetail.search);
 router.get('/purchases', authorize('finance', 'view'), controller.listPurchases);
 // Batch/order reference options for the Expenses link pickers (no party names) —
 // so payments-only roles that can't load /milling|/export can still link.
