@@ -12,11 +12,11 @@ import {
 export default function BalanceSheet() {
   const { queryParams: range } = useFinanceDateRange();
   const { entity, setEntity, apiEntity } = useGlEntity();
-  const { data, isLoading, error } = useBalanceSheet(glParams('asOf', range, apiEntity));
-  return <BalanceSheetView data={data} isLoading={isLoading} error={error} entity={entity} onEntity={setEntity} asOf={range.to_date} />;
+  const { data, isLoading, error, refetch } = useBalanceSheet(glParams('asOf', range, apiEntity));
+  return <BalanceSheetView data={data} isLoading={isLoading} error={error} onRetry={refetch} entity={entity} onEntity={setEntity} asOf={range.to_date} />;
 }
 
-export function BalanceSheetView({ data, isLoading, error, entity, onEntity, asOf }) {
+export function BalanceSheetView({ data, isLoading, error, onRetry, entity, onEntity, asOf }) {
   const assets = data?.assets || {};
   const liabilities = data?.liabilities || {};
   const equity = data?.equity || {};
@@ -35,7 +35,7 @@ export function BalanceSheetView({ data, isLoading, error, entity, onEntity, asO
             label="Assets = Liabilities + Equity" />
         )}
       </div>
-      <StateBox isLoading={isLoading} error={error} empty={empty}>
+      <StateBox isLoading={isLoading} error={error} onRetry={onRetry} empty={empty}>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div className="space-y-3">
             <AccountSection title="Assets" accounts={assets.accounts} valueKey="balance" total={totalAssets} />
@@ -43,11 +43,11 @@ export function BalanceSheetView({ data, isLoading, error, entity, onEntity, asO
           <div className="space-y-3">
             <AccountSection title="Liabilities" accounts={liabilities.accounts} valueKey="balance" total={liabilities.total} />
             <AccountSection title="Equity" accounts={equity.accounts} valueKey="balance" total={equity.total} />
-            <div className="flex items-center justify-between px-4 py-2.5 rounded-xl bg-gray-50 border border-gray-200 text-sm">
+            <div className="flex items-center justify-between gap-3 px-4 py-2.5 rounded-xl bg-gray-50 border border-gray-200 text-sm">
               <span>Current earnings (not yet closed to equity)</span>
               <span className="tabular-nums font-semibold">{pkr(data?.netIncome)}</span>
             </div>
-            <div className="flex items-center justify-between px-4 py-2.5 rounded-xl border border-gray-300 text-sm font-bold">
+            <div className="flex items-center justify-between gap-3 px-4 py-2.5 rounded-xl bg-white border-2 border-gray-300 text-sm font-bold">
               <span>Total liabilities + equity</span>
               <span className="tabular-nums" data-testid="bs-le">{pkr(totalLE)}</span>
             </div>

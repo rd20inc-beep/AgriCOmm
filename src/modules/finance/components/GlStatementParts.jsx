@@ -1,23 +1,24 @@
 // Shared pieces of the read-only GL statement views (Trial balance, P&L,
 // Balance sheet). The general ledger is kept in PKR only, so every figure
 // here is rupees, from Posted journals only.
-import { CheckCircle2, AlertTriangle } from 'lucide-react';
+import { CheckCircle2, AlertTriangle, BookOpen } from 'lucide-react';
+import { EmptyLine, InlineError } from './FinanceUI';
 import { fmtDate } from '../../../shared/utils/format';
 import { ENTITIES, pkr } from '../utils/glStatements';
 
 export function EntityFilter({ entity, onChange }) {
   return (
     <div className="flex flex-wrap items-center gap-2 no-print">
-      <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-0.5 text-sm" role="group" aria-label="Entity">
+      <div className="inline-flex flex-wrap rounded-lg border border-gray-200 bg-gray-50 p-0.5 text-sm" role="group" aria-label="Entity">
         {ENTITIES.map(([k, label]) => (
           <button key={k} type="button" onClick={() => onChange(k)} aria-pressed={entity === k}
-            className={`px-3 py-1.5 rounded-md font-medium transition-colors ${entity === k ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+            className={`px-3 min-h-10 sm:min-h-8 rounded-md font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${entity === k ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
             {label}
           </button>
         ))}
       </div>
       {entity !== 'all' && (
-        <span className="text-[11px] text-gray-400">Includes journals with no entity tag.</span>
+        <span className="text-xs text-gray-500">Includes journals with no entity tag.</span>
       )}
     </div>
   );
@@ -55,16 +56,20 @@ export function BalancedBadge({ balanced, difference, label = 'Books balanced' }
   );
 }
 
-export function StateBox({ isLoading, error, empty, children }) {
-  if (isLoading) return <p className="text-sm text-gray-400 py-8 text-center">Loading…</p>;
-  if (error) {
+// Loading → skeleton; error → the message with Try again; empty → one line.
+export function StateBox({ isLoading, error, empty, onRetry, children }) {
+  if (isLoading) {
     return (
-      <p className="text-sm text-red-600 py-8 text-center">
-        Could not load this statement{error?.message ? `: ${error.message}` : '.'}
-      </p>
+      <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-2 animate-pulse" aria-busy="true">
+        <span className="sr-only">Loading…</span>
+        {[0, 1, 2, 3, 4].map((i) => <div key={i} className="h-8 bg-gray-100 rounded" />)}
+      </div>
     );
   }
-  if (empty) return <p className="text-sm text-gray-400 py-8 text-center">No posted journals in this period.</p>;
+  if (error) {
+    return <InlineError message={`Could not load this statement${error?.message ? `: ${error.message}` : '.'}`} onRetry={onRetry} />;
+  }
+  if (empty) return <div className="bg-white rounded-xl border border-gray-200"><EmptyLine icon={BookOpen}>No posted journals in this period.</EmptyLine></div>;
   return children;
 }
 
@@ -73,9 +78,9 @@ export function StateBox({ isLoading, error, empty, children }) {
 export function AccountSection({ title, accounts = [], valueKey, total, totalLabel }) {
   return (
     <section className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-      <h3 className="px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500 bg-gray-50 border-b border-gray-100">{title}</h3>
+      <h3 className="px-4 py-2.5 text-xs font-medium uppercase tracking-wider text-gray-500 bg-gray-50 border-b border-gray-100">{title}</h3>
       {accounts.length === 0 ? (
-        <p className="px-4 py-3 text-sm text-gray-400">No activity.</p>
+        <p className="px-4 py-3 text-sm text-gray-500">No activity.</p>
       ) : (
         <table className="w-full text-sm">
           <tbody className="divide-y divide-gray-50">
@@ -83,7 +88,7 @@ export function AccountSection({ title, accounts = [], valueKey, total, totalLab
               <tr key={a.accountId || a.code}>
                 <td className="px-4 py-2 text-gray-500 tabular-nums w-20">{a.code}</td>
                 <td className="px-2 py-2 text-gray-800">{a.name}</td>
-                <td className="px-4 py-2 text-right tabular-nums text-gray-900">{pkr(a[valueKey])}</td>
+                <td className="px-4 py-2 text-right tabular-nums whitespace-nowrap text-gray-900">{pkr(a[valueKey])}</td>
               </tr>
             ))}
           </tbody>
