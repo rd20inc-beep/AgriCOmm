@@ -852,7 +852,46 @@ const batchPackSpec = Joi.object({
   pack_master_bag_size_kg: Joi.number().greater(0).max(5000).allow(null).optional(),
 });
 
+// ===================== BANK ACCOUNTS (Admin master) =====================
+// Descriptive columns only — bankAccounts.service decides what a save may touch.
+// current_balance is declared so the service can SEE it and refuse a changed
+// balance (400) rather than have stripUnknown hide the attempt; it is never written
+// on update. On create it is the legacy name for opening_balance.
+const optStr = (max) => Joi.string().trim().max(max).allow('', null);
+const bankAccountFields = {
+  bank_name: optStr(255),
+  account_number: optStr(255),
+  branch: optStr(255),
+  type: Joi.string().valid('bank', 'cash', 'lc', 'mobile_money'),
+  currency: Joi.string().trim().uppercase().length(3),
+  entity: Joi.string().valid('general', 'mill', 'export'),
+  account_title: optStr(255),
+  iban: optStr(255),
+  swift_bic: optStr(255),
+  bank_address: Joi.string().allow('', null),
+  correspondent_bank_name: optStr(255),
+  correspondent_swift: optStr(255),
+  correspondent_account: optStr(255),
+  is_active: Joi.boolean(),
+  is_export_default: Joi.boolean(),
+  approved_for_customer: Joi.boolean(),
+  is_favorite: Joi.boolean(),
+  current_balance: Joi.number().allow(null, ''),
+};
+const createBankAccount = Joi.object({
+  ...bankAccountFields,
+  name: Joi.string().trim().max(255).required(),
+  opening_balance: Joi.number().allow(null, ''),
+  opening_fx_rate: Joi.number().greater(0).allow(null, ''),
+});
+const updateBankAccount = Joi.object({
+  ...bankAccountFields,
+  name: Joi.string().trim().max(255),
+});
+
 module.exports = {
+  createBankAccount,
+  updateBankAccount,
   bundleDocuments,
   createExportOrder,
   createExportOrderDraft,

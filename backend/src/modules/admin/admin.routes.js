@@ -5,6 +5,8 @@ const approvalsCtrl = require('./approvals.controller');
 const authorize = require('../../middleware/rbac');
 const { authorizeRole, authorizeAny } = require('../../middleware/rbac');
 const auditAction = require('../../middleware/audit');
+const validate = require('../../middleware/validate');
+const schemas = require('../../middleware/schemas');
 const ownerApproval = require('../../middleware/ownerApproval');
 
 // ─────────── Master-data approvals (quick-add + admin review) ───────────
@@ -215,12 +217,14 @@ router.delete(
 router.post(
   '/bank-accounts',
   authorize('admin', 'manage_master_data'),
-  auditAction('create', 'bank_account', (req, data) => data.data && data.data.id ? data.data.id : null),
+  validate(schemas.createBankAccount),
+  auditAction('create', 'bank_account', (req, data) => (data.data && data.data.bank_account ? data.data.bank_account.id : null)),
   controller.createBankAccount
 );
 router.put(
   '/bank-accounts/:id',
   authorize('admin', 'manage_master_data'),
+  validate(schemas.updateBankAccount),
   auditAction('update', 'bank_account', (req) => req.params.id),
   controller.updateBankAccount
 );

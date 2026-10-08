@@ -1,6 +1,7 @@
 const db = require('../../config/database');
 const { nextDocNo } = require('../../utils/docNumber');
 const whScope = require('../../utils/warehouseScope');
+const bankAccountsService = require('./bankAccounts.service');
 
 // Generic CRUD factory
 //
@@ -180,19 +181,19 @@ const adminController = {
   // Bank Accounts
   listBankAccounts: bankAccountsCrud.list,
   getBankAccount: bankAccountsCrud.getById,
-  // Only one account may be the export default (enforced by a partial-unique
-  // index). Clear the flag on every other account first so the save doesn't
-  // collide, rather than surfacing a raw unique-violation 500 to the user.
+  // Field whitelist, export-default flag and balance rules live in
+  // bankAccounts.service: an edit never writes current_balance (a different one
+  // is refused), currency/entity freeze once the account has money history, and
+  // an opening balance on create is booked (BT row + Posted Dr 1000 / Cr 3000).
   async createBankAccount(req, res) {
     try {
-      const [row] = await db.transaction(async (trx) => {
-        if (req.body && req.body.is_export_default) {
-          await trx('bank_accounts').update({ is_export_default: false }).where('is_export_default', true);
-        }
-        return trx('bank_accounts').insert({ ...req.body }).returning('*');
+      const result = await db.transaction((trx) => bankAccountsService.createBankAccount(trx, req.body || {}, req.user?.id || null));
+      return res.status(201).json({
+        success: true,
+        data: { bank_account: result.bank_account, journal_no: result.journal ? result.journal.journal_no : null },
       });
-      return res.status(201).json({ success: true, data: { bank_account: row } });
     } catch (err) {
+      if (err.status && err.status < 500) return res.status(err.status).json({ success: false, message: err.message });
       console.error('Create bank_account error:', err);
       if (err.code === '23505') return res.status(409).json({ success: false, message: 'bank account already exists.' });
       return res.status(500).json({ success: false, message: 'Internal server error.' });
@@ -200,20 +201,10 @@ const adminController = {
   },
   async updateBankAccount(req, res) {
     try {
-      const updates = { ...req.body };
-      delete updates.id;
-      delete updates.created_at;
-      updates.updated_at = db.fn.now();
-      const [row] = await db.transaction(async (trx) => {
-        if (updates.is_export_default) {
-          await trx('bank_accounts').update({ is_export_default: false })
-            .where('is_export_default', true).whereNot('id', req.params.id);
-        }
-        return trx('bank_accounts').where({ id: req.params.id }).update(updates).returning('*');
-      });
-      if (!row) return res.status(404).json({ success: false, message: 'bank account not found.' });
+      const row = await db.transaction((trx) => bankAccountsService.updateBankAccount(trx, req.params.id, req.body || {}));
       return res.json({ success: true, data: { bank_account: row } });
     } catch (err) {
+      if (err.status && err.status < 500) return res.status(err.status).json({ success: false, message: err.message });
       console.error('Update bank_account error:', err);
       return res.status(500).json({ success: false, message: 'Internal server error.' });
     }
