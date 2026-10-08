@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Pencil, Loader2 } from 'lucide-react';
 import SlideDrawer from '../../../components/SlideDrawer';
 import { fmtKg as fmtKgBase } from '../../../shared/utils/format';
+import { bagOptionLabel } from '../utils/packingItemLabel';
 
 const num = (v) => Number(v) || 0;
 const fmtKg = (v) => fmtKgBase(num(v), { decimals: 1 });
@@ -70,7 +71,7 @@ function RunEditor({ open, run, bagItems = [], onClose, onSave, saving = false }
           <select value={bagItemId} onChange={(e) => setBagItemId(e.target.value)} className={select}>
             <option value="">Select a bag…</option>
             {bagItems.map((b) => (
-              <option key={b.id} value={b.id}>{b.name} {b.capacity_kg ? `(${Number(b.capacity_kg)}kg)` : '(no capacity set)'}</option>
+              <option key={b.id} value={b.id}>{bagOptionLabel(b)}</option>
             ))}
           </select>
         </label>
