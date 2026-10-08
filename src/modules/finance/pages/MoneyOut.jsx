@@ -1,166 +1,63 @@
 import { useState, useMemo } from 'react';
-import useConfirm from '../../../hooks/useConfirm';
-import { PaymentExtras, ChequeHint } from '../../../components/payments/PaymentFields';
-import { isUnclearedCheque, CHEQUE_DATE_LABEL } from '../../../components/payments/paymentPayload';
 import OrderRefLink from '../../../shared/components/OrderRefLink';
-import { ArrowUpRight, AlertTriangle, CheckCircle, Clock, Eye, X, DollarSign, Landmark, Printer } from 'lucide-react';
+import { ArrowUpRight, AlertTriangle, CheckCircle, Eye, DollarSign, Users } from 'lucide-react';
 import { FinanceKPI, FinanceTable, FinanceFilterBar } from '../../../components/finance';
 import ListCapHint from '../../../shared/components/ListCapHint';
-import { usePayables, useRecordPayment, useBankAccounts, useReceivables, usePayablePayments, useReversePayment } from '../../../api/queries';
+import { usePayables } from '../../../api/queries';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { useApp } from '../../../context/AppContext';
-import TransactionDocument from '../../../components/TransactionDocument';
-import StatusBadge from '../../../components/StatusBadge';
+import { useAuth } from '../../../context/AuthContext';
 import PartyLink from '../../../shared/components/PartyLink';
-import { toPkr } from '../utils/fx';
 import { shortenRef } from '../utils/refs';
-import { favStar } from '../../../shared/utils/favorites';
-import { accountsForCurrency } from '../../../shared/utils/accountCurrency';
+import { moneyOutTiles } from '../utils/moneyTiles';
 import { isDerivedPayable, derivedPayableHint } from '../../../shared/utils/derivedPayables';
-import FieldError from '../../../shared/components/FieldError';
-import { todayLocalISO, fmtMoney, fmtPKR, fmtDate, fmtDateTime } from '../../../shared/utils/format';
+import { isSettleable, canRecordVariant, contextForDocument } from '../../../components/payments/paymentVariants';
+import { useFinanceDrawers } from '../drawers/drawersContext';
+import { fmtAmt, totalsByCurrency } from '../drawers/drawerLogic';
+import { PerCurrency } from '../drawers/drawerParts';
+import { fmtDateTime } from '../../../shared/utils/format';
 
-// Exact amount in the row's own currency (payables default to PKR).
-const fmtCur = (n, currency = 'PKR') => fmtMoney(parseFloat(n) || 0, currency || 'PKR');
-const fmtAmount = (v, currency) => fmtCur(v, currency || 'PKR');
-const REQ = <span className="text-red-500">*</span>;
-// Human-readable payment method label.
-function methodLabel(m) {
-  const map = { bank_transfer: 'Bank Transfer / TT', cash: 'Cash', cheque: 'Cheque', lc: 'Letter of Credit', online: 'Online' };
-  return map[m] || (m ? m.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : '—');
-}
-// PKR equivalent of any payable row — prefers locked base_amount_pkr, falls back to amount × fx_rate, finally amount as-is for PKR rows.
-function pkrOf(row, key = 'outstanding') {
-  const amount = parseFloat(row?.[key]) || 0;
-  if (!amount) return 0;
-  if ((row?.currency || 'PKR') === 'PKR') return amount;
-  const base = parseFloat(row?.baseAmountPkr) || 0;
-  if (base > 0 && key === 'originalAmount') return base;
-  return toPkr(amount, row?.currency, row?.fxRate);
-}
+const docOf = (row) => ({ docKind: 'payable', row });
+const eqStatus = (a, b) => String(a || '').toLowerCase() === String(b || '').toLowerCase();
 
+// Money Out ▸ Payables. A row opens its Document drawer (what is owed, every
+// payment — each opens the Transaction drawer, where Reverse lives — and Pay);
+// Pay opens the shared Payment form directly (WHT / discount / document on a
+// PKR payable, as before). A cost-derived row (MC- / EC- / ME-) has no payable
+// to settle, so it says where it is settled instead of offering Pay.
 export default function MoneyOut() {
-  const { addToast, companyProfileData } = useApp();
+  const { companyProfileData } = useApp() || {};
+  const { hasPermission } = useAuth();
+  const drawers = useFinanceDrawers();
   const { queryParams: rangeParams } = useFinanceDateRange();
   const { data: payables = [], isLoading } = usePayables(rangeParams);
-  const { data: bankAccounts = [] } = useBankAccounts();
-  const { data: receivables = [] } = useReceivables();
-  const recordPaymentMut = useRecordPayment();
-  const reversePaymentMut = useReversePayment();
-  // Was window.prompt, which could show neither the amount being reversed nor
-  // what the reversal unwinds — on an action that restores a bank balance and
-  // reverses GL entries.
-  const [confirm, confirmDialog] = useConfirm();
-
-  // #14 — reverse an incorrect payment (finance): confirm, capture a reason,
-  // then restore the payable / bank / GL and stamp the payment Reversed.
-  async function handleReversePayment(p) {
-    if (!p?.id) { addToast('This payment cannot be reversed (no id captured).', 'error'); return; }
-    const ok = await confirm({
-      title: `Reverse payment ${p.paymentNo || p.payment_no || ''}?`.trim(),
-      consequence: 'The payable goes back to outstanding, the bank balance is restored, and the ledger entries are reversed.',
-      amount: p.amount != null ? fmtAmount(p.amount, p.currency || drawer?.currency) : undefined,
-      reason: 'optional',
-      confirmLabel: 'Reverse payment',
-    });
-    if (!ok) return;
-    try {
-      await reversePaymentMut.mutateAsync({ id: p.id, reason: ok.reason || null });
-      addToast('Payment reversed — payable, bank and ledger restored.', 'success');
-    } catch (err) {
-      addToast(err?.data?.message || err?.message || 'Reversal failed', 'error');
-    }
-  }
   const [entityFilter, setEntityFilter] = useState('All');
   const [categoryFilter, setCategoryFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState('All');
-  const [drawer, setDrawer] = useState(null);
-  // Payment history for the open drawer row — where/how each partial was paid.
-  const { data: payHistory, isLoading: payHistLoading } = usePayablePayments(drawer?.id, !!drawer);
 
-  function handlePrint() {
-    document.body.classList.add('app-print-mask');
-    const cleanup = () => {
-      document.body.classList.remove('app-print-mask');
-      window.removeEventListener('afterprint', cleanup);
-    };
-    window.addEventListener('afterprint', cleanup);
-    setTimeout(cleanup, 60_000);
-    window.print();
-  }
+  const filtered = useMemo(() => payables.filter((p) => {
+    if (entityFilter !== 'All' && p.entity !== entityFilter.toLowerCase()) return false;
+    if (categoryFilter !== 'All' && p.category !== categoryFilter) return false;
+    if (statusFilter !== 'All' && !eqStatus(p.status, statusFilter)) return false;
+    return true;
+  }), [payables, entityFilter, categoryFilter, statusFilter]);
 
-  // Payment form state. The wht/discount/attachment keys are the ones
-  // PaymentExtras reads and writes; they only reach the server on a PKR payable
-  // (see the Tax & discount block below).
-  const [payForm, setPayForm] = useState({
-    amount: '', bankAccountId: '', paymentMethod: 'bank_transfer', paymentDate: todayLocalISO(),
-    chequeNo: '', dueDate: '', notes: '', fundSource: 'bank',
-    whtRate: '', whtAmount: '', discountAmount: '', attachmentUrl: '', attachmentName: '',
-  });
-  const setPay = (k, v) => setPayForm((f) => ({ ...f, [k]: v }));
-  const [payErrors, setPayErrors] = useState({});
-
-  function openDrawer(row) {
-    setDrawer(row);
-    setPayErrors({});
-    setPayForm({
-      amount: String(parseFloat(row.outstanding) || 0),
-      bankAccountId: '',
-      paymentMethod: 'bank_transfer',
-      paymentDate: todayLocalISO(),
-      chequeNo: '', dueDate: '',
-      notes: '',
-      fundSource: 'bank',
-      whtRate: '', whtAmount: '', discountAmount: '', attachmentUrl: '', attachmentName: '',
-    });
-  }
-
-  const categories = useMemo(() => {
-    const cats = new Set(payables.map(p => p.category));
-    return ['All', ...Array.from(cats).sort()];
-  }, [payables]);
-
-  // Case-insensitive status compare so off-canon writes (e.g. legacy
-  // 'pending') don't silently drop out of filters and KPIs.
-  const eqStatus = (a, b) => String(a || '').toLowerCase() === String(b || '').toLowerCase();
-
-  const filtered = useMemo(() => {
-    return payables.filter(p => {
-      if (entityFilter !== 'All' && p.entity !== entityFilter.toLowerCase()) return false;
-      if (categoryFilter !== 'All' && p.category !== categoryFilter) return false;
-      if (statusFilter !== 'All' && !eqStatus(p.status, statusFilter)) return false;
-      return true;
-    });
-  }, [payables, entityFilter, categoryFilter, statusFilter]);
-
-  // KPIs — totals in PKR so foreign-currency rows aggregate correctly
-  const totalOutstandingPkr = payables.filter(p => !eqStatus(p.status, 'Paid')).reduce((s, p) => s + pkrOf(p, 'outstanding'), 0);
-  const overdueAmountPkr = payables.filter(p => eqStatus(p.status, 'Overdue') || (p.dueDate && new Date(p.dueDate) < new Date() && !eqStatus(p.status, 'Paid')))
-    .reduce((s, p) => s + pkrOf(p, 'outstanding'), 0);
-  const paidTotalPkr = payables.reduce((s, p) => s + pkrOf(p, 'paidAmount'), 0);
-  const supplierCount = new Set(payables.filter(p => p.supplierName).map(p => p.supplierName)).size;
-  // Foreign-currency exposure (rare on payables — mostly PKR vendor invoices) for the Total tile sub-line
-  const totalOutstandingForeign = payables
-    .filter(p => !eqStatus(p.status, 'Paid') && (p.currency || 'PKR') !== 'PKR')
-    .reduce((s, p) => s + (parseFloat(p.outstanding) || 0), 0);
-
-  // Category breakdown — same row filter and per-row PKR figure as the
-  // Total Outstanding tile above, so the chips add up to that tile.
+  const tiles = useMemo(() => moneyOutTiles(payables), [payables]);
+  // Category chips — outstanding per category, per currency (never summed).
   const byCategory = useMemo(() => {
     const cats = {};
-    payables.filter(p => !eqStatus(p.status, 'Paid')).forEach(p => {
+    payables.filter((p) => !eqStatus(p.status, 'Paid')).forEach((p) => {
       const cat = p.category || 'Other';
-      cats[cat] = (cats[cat] || 0) + pkrOf(p, 'outstanding');
+      (cats[cat] ||= []).push({ currency: p.currency || 'PKR', outstanding: p.outstanding });
     });
-    return Object.entries(cats).map(([name, value]) => ({ name, value: Math.round(value) })).sort((a, b) => b.value - a.value);
+    return Object.entries(cats).map(([name, rows]) => ({ name, totals: totalsByCurrency(rows), n: rows.length }))
+      .sort((a, b) => b.n - a.n);
   }, [payables]);
 
-  // Cash accounts vs bank accounts (split bank_accounts by type so the
-  // payment form's tab buttons map to real selectable accounts —
-  // previously "Received Funds" sent `recv-${id}` as bank_account_id
-  // which the backend rejects as a non-integer).
-  const bankOnlyAccounts = bankAccounts.filter(a => a.type !== 'cash');
-  const cashAccounts = bankAccounts.filter(a => a.type === 'cash');
+  const canPay = (row) => {
+    const d = docOf(row);
+    return isSettleable(d) && canRecordVariant(contextForDocument(d)?.variant, hasPermission);
+  };
 
   const columns = [
     { key: 'payNo', label: 'Ref', sortable: true, width: '110px', render: (v) => (
@@ -172,7 +69,6 @@ export default function MoneyOut() {
       </span>
     )},
     { key: 'category', label: 'Category', sortable: true },
-    // #14 — party is the supplier, or the transporter (hauler) for transport payables.
     { key: 'supplierName', label: 'Supplier / Transporter', sortable: true, render: (v, row) => (
       v
         ? <span className="block max-w-[14rem] truncate" title={v}><PartyLink type="supplier" id={row.supplierId} name={v} /></span>
@@ -184,78 +80,21 @@ export default function MoneyOut() {
       if (!v) return '—';
       const isEx = v.startsWith('EX-'), isMill = v.startsWith('M-');
       const href = isEx ? `/export/${v}` : isMill ? `/milling/${v}` : null;
-      if (href) return <OrderRefLink to={href} module={isEx ? 'export_orders' : 'milling'} onClick={e => e.stopPropagation()}>{v}</OrderRefLink>;
+      if (href) return <OrderRefLink to={href} module={isEx ? 'export_orders' : 'milling'} onClick={(e) => e.stopPropagation()}>{v}</OrderRefLink>;
       return <span className="text-gray-700 font-medium">{v}</span>;
     }},
-    { key: 'originalAmount', label: 'Amount', sortable: true, align: 'right', render: (v, row) => (
-      <div className="flex flex-col items-end">
-        <span className="text-gray-900">{fmtCur(v, row.currency)}</span>
-        {(row.currency || 'PKR') !== 'PKR' && <span className="text-[10px] text-gray-400">{fmtCur(pkrOf(row, 'originalAmount'), 'PKR')}</span>}
-      </div>
+    { key: 'originalAmount', label: 'Amount', sortable: true, align: 'right', render: (v, row) => <span className="text-gray-900 tabular-nums">{fmtAmt(v, row.currency)}</span> },
+    { key: 'outstanding', label: 'Outstanding', sortable: true, align: 'right', render: (v, row) => (
+      (parseFloat(v) || 0) <= 0 ? <span className="text-gray-400">—</span>
+        : <span className="text-red-600 font-medium tabular-nums">{fmtAmt(v, row.currency)}</span>
     )},
-    { key: 'outstanding', label: 'Outstanding', sortable: true, align: 'right', render: (v, row) => {
-      const n = parseFloat(v) || 0;
-      if (n <= 0) return <span className="text-gray-400">—</span>;
-      return (
-        <div className="flex flex-col items-end">
-          <span className="text-red-600 font-medium">{fmtCur(v, row.currency)}</span>
-          {(row.currency || 'PKR') !== 'PKR' && <span className="text-[10px] text-gray-400">{fmtCur(pkrOf(row, 'outstanding'), 'PKR')}</span>}
-        </div>
-      );
-    }},
     { key: 'status', label: 'Status', sortable: true },
   ];
-
-  async function handleRecordPayment(e) {
-    e.preventDefault();
-    if (recordPaymentMut.isPending) return;
-    const pay = drawer;
-    const amount = parseFloat(payForm.amount);
-    if (!amount || amount <= 0) { setPayErrors({ amount: 'Enter a valid amount' }); return; }
-    // Withholding tax is a PKR obligation remitted to FBR; the server's WHT
-    // arithmetic is in PKR, so the block is only offered on a PKR payable and
-    // the figures are only sent for one.
-    const whtApplies = (pay.currency || 'PKR') === 'PKR';
-    const wht = whtApplies ? parseFloat(payForm.whtAmount) || 0 : 0;
-    const disc = whtApplies ? parseFloat(payForm.discountAmount) || 0 : 0;
-    if (wht + disc - amount > 0.01) { setPayErrors({ whtAmount: 'WHT + discount cannot exceed the amount.' }); return; }
-    setPayErrors({});
-
-    try {
-      await recordPaymentMut.mutateAsync({
-        type: 'payment',
-        amount,
-        currency: pay.currency || 'PKR',
-        payment_method: payForm.paymentMethod,
-        payment_date: payForm.paymentDate,
-        // A cheque may name the account it will clear through (kept for the
-        // clear); it moves nothing until it is cleared in Due Dates.
-        bank_account_id: payForm.bankAccountId || null,
-        bank_reference: payForm.chequeNo || null,
-        due_date: payForm.dueDate || null,
-        linked_payable_id: pay.dbId || pay.id,
-        notes: payForm.notes || `Payment for ${pay.payNo} - ${pay.supplierName || pay.haulerName || pay.category}`,
-        // WHT and the discount reduce the CASH that leaves the account but not
-        // the amount cleared against the payable: the supplier's claim settles
-        // in full, the tax goes to FBR and the discount is income.
-        wht_amount: wht,
-        wht_rate: whtApplies && payForm.whtRate ? parseFloat(payForm.whtRate) : null,
-        discount_amount: disc,
-        attachment_url: whtApplies ? (payForm.attachmentUrl || null) : null,
-        attachment_name: whtApplies ? (payForm.attachmentName || null) : null,
-      });
-      addToast(`Payment of ${fmtAmount(amount, pay.currency)} recorded for ${pay.payNo}`, 'success');
-      setDrawer(null);
-    } catch (err) {
-      addToast(`Failed: ${err.message}`, 'error');
-    }
-  }
 
   const companyName = companyProfileData?.legalName || companyProfileData?.name || 'AGRI COMMODITIES';
   return (
     <div className="space-y-6">
       <div className="print-report space-y-6">
-        {/* Print-only header */}
         <div className="hidden print:block">
           <div className="border-b-2 border-gray-900 pb-2 flex items-end justify-between mb-4">
             <div>
@@ -265,296 +104,74 @@ export default function MoneyOut() {
             <div className="text-right">
               <div className="text-lg font-bold">Money Out — Payables</div>
               <div className="text-xs text-gray-600">
-                {payables.length} entries · Outstanding {fmtPKR(totalOutstandingPkr)} · Overdue {fmtPKR(overdueAmountPkr)}
+                {payables.length} entries · Outstanding <PerCurrency totals={tiles.outstanding} /> · Overdue <PerCurrency totals={tiles.overdue} />
               </div>
             </div>
           </div>
         </div>
 
-      {/* Summary KPIs — totals in PKR; foreign-currency exposure shown when present */}
-      <div className="grid grid-cols-4 gap-3">
-        <FinanceKPI icon={ArrowUpRight} title="Total Payables" value={fmtPKR(totalOutstandingPkr)}
-          subtitle={totalOutstandingForeign > 0 ? `${fmtCur(totalOutstandingForeign, 'USD')} · ${payables.filter(p => p.status !== 'Paid').length} outstanding` : `${payables.filter(p => p.status !== 'Paid').length} outstanding`} status="neutral" loading={isLoading} />
-        <FinanceKPI icon={AlertTriangle} title="Overdue" value={fmtPKR(overdueAmountPkr)}
-          subtitle="Past due date" status={overdueAmountPkr > 0 ? 'danger' : 'good'} loading={isLoading} />
-        <FinanceKPI icon={CheckCircle} title="Paid" value={fmtPKR(paidTotalPkr)}
-          subtitle="Total paid" status="good" loading={isLoading} />
-        <FinanceKPI icon={DollarSign} title="Suppliers" value={String(supplierCount)}
-          subtitle="Active vendors" status="info" loading={isLoading} />
-      </div>
-
-      {/* Category chips */}
-      {byCategory.length > 0 && (
-        <div className="flex gap-2 flex-wrap">
-          {byCategory.slice(0, 6).map(cat => (
-            <button key={cat.name} onClick={() => setCategoryFilter(cat.name === categoryFilter ? 'All' : cat.name)}
-              className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${
-                categoryFilter === cat.name ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
-              }`}>
-              {cat.name} <span className="font-semibold ml-1">{fmtPKR(cat.value)}</span>
-            </button>
-          ))}
-          {categoryFilter !== 'All' && (
-            <button onClick={() => setCategoryFilter('All')} className="text-xs px-2 py-1.5 text-gray-400 hover:text-gray-600">Clear</button>
-          )}
+        {/* Tiles — one figure per currency, never summed across currencies */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <FinanceKPI icon={ArrowUpRight} title="Outstanding" value={<PerCurrency totals={tiles.outstanding} empty="Nothing owed" className="flex-col" />}
+            subtitle={`${tiles.openCount} outstanding`} status="neutral" loading={isLoading} />
+          <FinanceKPI icon={AlertTriangle} title="Overdue" value={<PerCurrency totals={tiles.overdue} empty="None" className="flex-col" />}
+            subtitle="Past due date" status={Object.keys(tiles.overdue).length ? 'danger' : 'good'} loading={isLoading} />
+          <FinanceKPI icon={CheckCircle} title="Paid" value={<PerCurrency totals={tiles.paid} empty="—" className="flex-col" />}
+            subtitle="Paid so far" status="good" loading={isLoading} />
+          <FinanceKPI icon={Users} title="Payees" value={String(tiles.payeeCount)}
+            subtitle="Suppliers & transporters" status="info" loading={isLoading} />
         </div>
-      )}
 
-      {/* Filters */}
-      <FinanceFilterBar
-        filters={[
-          { key: 'entity', value: entityFilter, onChange: setEntityFilter,
-            options: [{ value: 'All', label: 'All Entities' }, { value: 'Mill', label: 'Mill' }, { value: 'Export', label: 'Export Ops' }] },
-          { key: 'status', value: statusFilter, onChange: setStatusFilter,
-            options: [{ value: 'All', label: 'All Status' }, { value: 'Pending', label: 'Pending' }, { value: 'Partial', label: 'Partial' }, { value: 'Overdue', label: 'Overdue' }, { value: 'Paid', label: 'Paid' }] },
-        ]}
-        onReset={() => { setEntityFilter('All'); setCategoryFilter('All'); setStatusFilter('All'); }}
-      />
-
-      {/* Table */}
-      <ListCapHint rows={payables} />
-      <FinanceTable
-        columns={columns} data={filtered}
-        searchKeys={['supplierName', 'haulerName', 'payNo', 'category', 'linkedRef']}
-        onRowClick={openDrawer} exportFilename="payables" emptyText="No payables found" loading={isLoading}
-        actions={(row) => (
-          <div className="inline-flex items-center gap-1.5">
-            {row.status !== 'Paid' && parseFloat(row.outstanding) > 0 && isDerivedPayable(row) && (
-              <span title={derivedPayableHint(row)}
-                className="px-2.5 py-1 bg-gray-50 text-gray-400 text-xs font-medium rounded inline-flex items-center gap-1 cursor-help">
-                <DollarSign size={12} /> Settled elsewhere
-              </span>
-            )}
-            {row.status !== 'Paid' && parseFloat(row.outstanding) > 0 && !isDerivedPayable(row) && (
-              <button onClick={(e) => { e.stopPropagation(); openDrawer(row); }}
-                className="px-2.5 py-1 bg-emerald-50 text-emerald-700 text-xs font-medium rounded hover:bg-emerald-100 inline-flex items-center gap-1">
-                <DollarSign size={12} /> Pay
+        {byCategory.length > 0 && (
+          <div className="flex gap-2 flex-wrap">
+            {byCategory.slice(0, 6).map((cat) => (
+              <button key={cat.name} onClick={() => setCategoryFilter(cat.name === categoryFilter ? 'All' : cat.name)}
+                className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${
+                  categoryFilter === cat.name ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                }`}>
+                {cat.name} <PerCurrency totals={cat.totals} className="font-semibold ml-1" />
               </button>
+            ))}
+            {categoryFilter !== 'All' && (
+              <button onClick={() => setCategoryFilter('All')} className="text-xs px-2 py-1.5 text-gray-400 hover:text-gray-600">Clear</button>
             )}
-            <button onClick={(e) => { e.stopPropagation(); openDrawer(row); }} className="text-blue-600 hover:text-blue-800 p-1" title="View details"><Eye size={15} /></button>
           </div>
         )}
-      />
-      </div>{/* /.print-report */}
 
-      {/* Detail + Payment Drawer */}
-      {drawer && (
-        <div className="fixed inset-0 z-50 flex justify-end">
-          <div className="fixed inset-0 bg-black/30" onClick={() => setDrawer(null)} />
-          <div className="relative w-full max-w-lg bg-white shadow-xl overflow-y-auto">
-            {/* Header */}
-            <div className="px-6 py-4 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
-              <div className="min-w-0">
-                <h2 className="text-lg font-semibold text-gray-900">{drawer.payNo}</h2>
-                <p className="text-sm text-gray-500 break-words">
-                  {drawer.category} &middot;
-                  <span className={`ml-1 text-xs px-2 py-0.5 rounded-full ${drawer.entity === 'mill' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}`}>
-                    {drawer.entity === 'mill' ? 'Mill' : 'Export'}
-                  </span>
-                </p>
-              </div>
-              <button onClick={() => setDrawer(null)} aria-label="Close" title="Close" className="p-2 rounded-md hover:bg-gray-200"><X size={18} /></button>
-            </div>
+        <FinanceFilterBar
+          filters={[
+            { key: 'entity', value: entityFilter, onChange: setEntityFilter,
+              options: [{ value: 'All', label: 'All Entities' }, { value: 'Mill', label: 'Mill' }, { value: 'Export', label: 'Export Ops' }] },
+            { key: 'status', value: statusFilter, onChange: setStatusFilter,
+              options: [{ value: 'All', label: 'All Status' }, { value: 'Pending', label: 'Pending' }, { value: 'Partial', label: 'Partial' }, { value: 'Overdue', label: 'Overdue' }, { value: 'Paid', label: 'Paid' }] },
+          ]}
+          onReset={() => { setEntityFilter('All'); setCategoryFilter('All'); setStatusFilter('All'); }}
+        />
 
-            {/* Amount Summary */}
-            <div className="px-6 py-4 space-y-4">
-              <div className="grid grid-cols-3 gap-3">
-                <div className="bg-gray-50 rounded-lg p-3 text-center">
-                  <p className="text-xs text-gray-500">Original</p>
-                  <p className="text-sm font-semibold">{fmtAmount(drawer.originalAmount, drawer.currency)}</p>
-                </div>
-                <div className="bg-emerald-50 rounded-lg p-3 text-center">
-                  <p className="text-xs text-emerald-600">Paid</p>
-                  <p className="text-sm font-semibold text-emerald-700">{fmtAmount(drawer.paidAmount, drawer.currency)}</p>
-                </div>
-                <div className="bg-red-50 rounded-lg p-3 text-center">
-                  <p className="text-xs text-red-600">Outstanding</p>
-                  <p className="text-sm font-semibold text-red-700">{fmtAmount(drawer.outstanding, drawer.currency)}</p>
-                </div>
-              </div>
-
-              {/* Details */}
-              <div className="grid grid-cols-2 gap-3 text-sm">
-                <div className="min-w-0"><p className="text-xs text-gray-500">Supplier</p><p className="break-words"><PartyLink type="supplier" id={drawer.supplierId} name={drawer.supplierName} /></p></div>
-                <div><p className="text-xs text-gray-500">Linked To</p>{drawer.linkedRef ? (
-                  <OrderRefLink
-                    to={drawer.linkedRef.startsWith('EX-') ? `/export/${drawer.linkedRef}` : drawer.linkedRef.startsWith('M-') ? `/milling/${drawer.linkedRef}` : null}
-                    module={drawer.linkedRef.startsWith('M-') ? 'milling' : 'export_orders'}
-                    className="text-blue-600 hover:underline font-medium">{drawer.linkedRef} →</OrderRefLink>
-                ) : <p>—</p>}</div>
-                <div><p className="text-xs text-gray-500">Currency</p><p>{drawer.currency || 'PKR'}</p></div>
-                <div><p className="text-xs text-gray-500">Status</p><StatusBadge status={drawer.status} /></div>
-              </div>
-
-              {/* Payments Made — where & how each partial payment went out. */}
-              <div>
-                <h3 className="text-sm font-semibold text-gray-700 mb-2">Payments Made</h3>
-                {payHistLoading ? (
-                  <p className="text-xs text-gray-400 py-2">Loading payments…</p>
-                ) : (payHistory?.payments?.length ? (
-                  <div className="space-y-2">
-                    {payHistory.payments.map((p, idx) => {
-                      let from = [p.accountName, p.bankName].filter(Boolean).join(' · ');
-                      if (!from) from = p.paymentMethod === 'cash' ? 'Cash (in hand)' : (p.synthesized ? 'Recorded — account not captured' : '—');
-                      return (
-                        <div key={p.id || idx} className={`border border-gray-200 rounded-lg px-3 py-2 ${p.status === 'Reversed' ? 'opacity-60' : ''}`}>
-                          <div className="flex items-center justify-between">
-                            <span className={`text-sm font-semibold ${p.status === 'Reversed' ? 'text-gray-500 line-through' : 'text-emerald-700'}`}>{fmtAmount(p.amount, p.currency || drawer.currency)}</span>
-                            <span className="text-xs text-gray-500">{fmtDate(p.paymentDate)}</span>
-                          </div>
-                          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-gray-500">
-                            <span>Method: <span className="font-medium text-gray-700">{methodLabel(p.paymentMethod)}</span></span>
-                            <span className="min-w-0 break-words">From: <span className="font-medium text-gray-700">{from}</span></span>
-                            {p.bankReference && <span>Ref/Cheque: <span className="font-medium text-gray-700">{p.bankReference}</span></span>}
-                          </div>
-                          {p.notes && <p className="mt-0.5 text-[11px] text-gray-400 truncate" title={p.notes}>{p.notes}</p>}
-                          <div className="mt-1 flex items-center justify-between">
-                            {p.status === 'Reversed'
-                              ? <StatusBadge status="Reversed" />
-                              : <span />}
-                            {p.status !== 'Reversed' && p.id && (
-                              <button type="button" onClick={() => handleReversePayment(p)} disabled={reversePaymentMut.isPending}
-                                className="text-[11px] text-red-600 hover:text-red-700 hover:underline disabled:opacity-50">
-                                Reverse payment
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <p className="text-xs text-gray-400 py-2">No payments recorded yet.</p>
-                ))}
-              </div>
-
-              {/* Downloadable / printable payment voucher */}
-              <div className="pt-2 border-t border-gray-100">
-                <TransactionDocument kind="voucher" data={drawer} companyProfile={companyProfileData} />
-              </div>
-            </div>
-
-            {/* A cost-derived row has no payable behind it — say where it is settled. */}
-            {drawer.status !== 'Paid' && parseFloat(drawer.outstanding) > 0 && isDerivedPayable(drawer) && (
-              <div className="px-6 py-4 border-t border-gray-200">
-                <p className="text-sm text-gray-600 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">{derivedPayableHint(drawer)}</p>
-              </div>
-            )}
-
-            {/* Payment Form */}
-            {drawer.status !== 'Paid' && parseFloat(drawer.outstanding) > 0 && !isDerivedPayable(drawer) && (
-              <form onSubmit={handleRecordPayment} className="px-6 py-4 border-t border-gray-200 space-y-4">
-                <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-                  <Landmark size={15} /> Record Payment
-                </h3>
-
-                {/* Payment Method — first; it drives whether an account is needed. */}
-                <div>
-                  <label className="text-xs text-gray-500 block mb-1">Payment Method</label>
-                  <select value={payForm.paymentMethod}
-                    onChange={e => { const m = e.target.value; setPayForm({ ...payForm, paymentMethod: m, bankAccountId: (m === 'cash') !== (payForm.paymentMethod === 'cash') ? '' : payForm.bankAccountId }); }}
-                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                    <option value="bank_transfer">Bank Transfer</option>
-                    <option value="cheque">Cheque</option>
-                    <option value="cash">Cash</option>
-                    <option value="online">Online Payment</option>
-                    <option value="mobile">Mobile Transfer</option>
-                  </select>
-                </div>
-
-                {/* Cheque details — number (optional) + clearing date for Due Dates.
-                    A cheque needs no account until it is cleared there. */}
-                {payForm.paymentMethod === 'cheque' && (
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="text-xs text-gray-500 block mb-1">Cheque # <span className="text-gray-300">(optional)</span></label>
-                      <input type="text" value={payForm.chequeNo} onChange={e => setPayForm({ ...payForm, chequeNo: e.target.value })}
-                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" placeholder="e.g. 004512" />
-                    </div>
-                    <div>
-                      <label className="text-xs text-gray-500 block mb-1">{CHEQUE_DATE_LABEL}</label>
-                      <input type="date" value={payForm.dueDate} onChange={e => setPayForm({ ...payForm, dueDate: e.target.value })}
-                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
-                    </div>
-                    <ChequeHint className="col-span-2 -mt-1" />
-                  </div>
-                )}
-
-                {/* Pay From Account — every payment moves money through one: a
-                    cash account for cash, a bank account otherwise. Only a
-                    cheque waits; it moves money when it is cleared. */}
-                <div>
-                    <label className="text-xs text-gray-500 block mb-1">{isUnclearedCheque(payForm) ? 'Bank account it will clear through (optional)' : <>Pay From Account {REQ}</>}</label>
-                    <select required={!isUnclearedCheque(payForm)} value={payForm.bankAccountId} onChange={e => setPayForm({ ...payForm, bankAccountId: e.target.value })}
-                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                      <option value="">{payForm.paymentMethod === 'cash' ? 'Select cash account...' : 'Select account...'}</option>
-                      {accountsForCurrency(payForm.paymentMethod === 'cash' ? cashAccounts : bankOnlyAccounts, drawer.currency).map(a => (
-                        <option key={a.id} value={a.id}>
-                          {favStar(a)}{a.name} — {a.bankName || ''} ({fmtMoney(parseFloat(a.currentBalance) || 0, a.currency || 'PKR', { decimals: 2 })})
-                        </option>
-                      ))}
-                    </select>
-                </div>
-
-                {/* Amount + Date */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-xs text-gray-500 block mb-1">Amount ({drawer.currency || 'PKR'}) {REQ}</label>
-                    <input type="number" step="0.01" required value={payForm.amount}
-                      onChange={e => { setPayForm({ ...payForm, amount: e.target.value }); setPayErrors({}); }}
-                      max={parseFloat(drawer.outstanding)}
-                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                    <FieldError error={payErrors.amount} />
-                  </div>
-                  <div>
-                    <label className="text-xs text-gray-500 block mb-1">Payment Date {REQ}</label>
-                    <input type="date" required value={payForm.paymentDate}
-                      onChange={e => setPayForm({ ...payForm, paymentDate: e.target.value })}
-                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                  </div>
-                </div>
-
-                {/* Tax, discount & supporting document — the same block the Mill
-                    Finance drawers have had since #14 1e, which Money Out never
-                    did, so a payable with withholding could only be settled
-                    properly from one screen. PKR only: the server's WHT
-                    arithmetic is in PKR. */}
-                {(drawer.currency || 'PKR') === 'PKR' && (
-                  <PaymentExtras form={payForm} set={setPay} gross={parseFloat(payForm.amount) || 0} addToast={addToast} errors={payErrors} />
-                )}
-
-                {/* Notes */}
-                <div>
-                  <label className="text-xs text-gray-500 block mb-1">Notes (optional)</label>
-                  <input type="text" value={payForm.notes}
-                    onChange={e => setPayForm({ ...payForm, notes: e.target.value })}
-                    placeholder={`Payment for ${drawer.supplierName || drawer.haulerName || drawer.category}`}
-                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                </div>
-
-                {/* Quick amount buttons */}
-                <div className="flex gap-2">
-                  <button type="button" onClick={() => setPayForm({ ...payForm, amount: String(parseFloat(drawer.outstanding)) })}
-                    className="text-xs px-3 py-1 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">Full Amount</button>
-                  <button type="button" onClick={() => setPayForm({ ...payForm, amount: String(Math.round(parseFloat(drawer.outstanding) / 2)) })}
-                    className="text-xs px-3 py-1 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">Half</button>
-                  <button type="button" onClick={() => setPayForm({ ...payForm, amount: '' })}
-                    className="text-xs px-3 py-1 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">Custom</button>
-                </div>
-
-                {/* Submit */}
-                <button type="submit" disabled={recordPaymentMut.isPending}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-medium text-sm disabled:opacity-50">
-                  <CheckCircle size={16} />
-                  {recordPaymentMut.isPending ? 'Processing...' : `Record Payment — ${fmtAmount(parseFloat(payForm.amount) || 0, drawer.currency)}`}
+        <ListCapHint rows={payables} />
+        <FinanceTable
+          columns={columns} data={filtered}
+          searchKeys={['supplierName', 'haulerName', 'payNo', 'category', 'linkedRef']}
+          onRowClick={(row) => drawers?.openDocument(docOf(row))} exportFilename="payables" emptyText="No payables found" loading={isLoading}
+          actions={(row) => (
+            <div className="inline-flex items-center gap-1.5">
+              {row.status !== 'Paid' && parseFloat(row.outstanding) > 0 && isDerivedPayable(row) && (
+                <span title={derivedPayableHint(row)}
+                  className="px-2.5 py-1 bg-gray-50 text-gray-400 text-xs font-medium rounded inline-flex items-center gap-1 cursor-help">
+                  <DollarSign size={12} /> Settled elsewhere
+                </span>
+              )}
+              {canPay(row) && (
+                <button onClick={(e) => { e.stopPropagation(); drawers?.openPayment(docOf(row)); }} data-action="pay"
+                  className="px-2.5 py-1 bg-emerald-50 text-emerald-700 text-xs font-medium rounded hover:bg-emerald-100 inline-flex items-center gap-1">
+                  <DollarSign size={12} /> Pay
                 </button>
-              </form>
-            )}
-          </div>
-        </div>
-      )}
-
-      {confirmDialog}
+              )}
+              <button onClick={(e) => { e.stopPropagation(); drawers?.openDocument(docOf(row)); }} className="text-blue-600 hover:text-blue-800 p-1" title="View details" aria-label="View details"><Eye size={15} /></button>
+            </div>
+          )}
+        />
+      </div>
     </div>
   );
 }

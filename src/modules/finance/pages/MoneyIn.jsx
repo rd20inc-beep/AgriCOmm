@@ -1,111 +1,56 @@
 import { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { useQueryClient } from '@tanstack/react-query';
-import { ArrowDownLeft, DollarSign, AlertTriangle, CheckCircle, Clock, Eye, X, Printer } from 'lucide-react';
-import { FinanceKPI, FinanceTable, FinanceChart, FinanceFilterBar } from '../../../components/finance';
+import { ArrowDownLeft, DollarSign, AlertTriangle, CheckCircle, Clock, Eye } from 'lucide-react';
+import { FinanceKPI, FinanceTable, FinanceFilterBar } from '../../../components/finance';
 import ListCapHint from '../../../shared/components/ListCapHint';
-import { useReceivables, useRecordPayment, useBankAccounts, useReceivableReceipts, useAcceptLocalSaleGroupPayment } from '../../../api/queries';
-import { isUnclearedCheque, CHEQUE_DATE_LABEL } from '../../../components/payments/paymentPayload';
-import { ChequeHint } from '../../../components/payments/PaymentFields';
+import { useReceivables } from '../../../api/queries';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { useApp } from '../../../context/AppContext';
-import TransactionDocument from '../../../components/TransactionDocument';
-import StatusBadge from '../../../components/StatusBadge';
+import { useAuth } from '../../../context/AuthContext';
 import PartyLink from '../../../shared/components/PartyLink';
-import { toPkr } from '../utils/fx';
-import { bucketize, BUCKET_KEYS } from '../utils/aging';
+import { BUCKET_KEYS } from '../utils/aging';
+import { moneyInTiles, agingByCurrency, curOf } from '../utils/moneyTiles';
 import { shortenRef } from '../utils/refs';
-import { favStar, isFavorite } from '../../../shared/utils/favorites';
-import { accountsForCurrency } from '../../../shared/utils/accountCurrency';
-import { localToday, defaultBankAccountId } from '../../localSales/utils/saleStatus';
-import FieldError from '../../../shared/components/FieldError';
-import { fmtMoney, fmtDate, fmtDateTime } from '../../../shared/utils/format';
+import { isSettleable, canRecordVariant, contextForDocument } from '../../../components/payments/paymentVariants';
+import { useFinanceDrawers } from '../drawers/drawersContext';
+import { fmtAmt } from '../drawers/drawerLogic';
+import { PerCurrency } from '../drawers/drawerParts';
+import { fmtDate, fmtDateTime } from '../../../shared/utils/format';
 
-// Exact amount in the row's own currency (receivables default to USD).
-const fmtCur = (n, currency = 'USD') => fmtMoney(parseFloat(n) || 0, currency || 'USD');
-const REQ = <span className="text-red-500">*</span>;
-// PKR equivalent of any row — prefers locked base_amount_pkr, falls back
-// to amount × fx_rate, finally amount as-is for PKR rows. Falls back
-// to DEFAULT_FX_RATE only when neither a stamped base PKR nor a row
-// fx_rate is present.
-function pkrOf(row, key = 'outstanding') {
-  const amount = parseFloat(row?.[key]) || 0;
-  if (!amount) return 0;
-  if ((row?.currency || 'USD') === 'PKR') return amount;
-  const base = parseFloat(row?.baseAmountPkr) || 0;
-  if (base > 0 && key === 'expectedAmount') return base;
-  return toPkr(amount, row?.currency, row?.fxRate);
-}
-// Human-readable payment method label.
-function methodLabel(m) {
-  const map = { bank_transfer: 'Bank Transfer / TT', cash: 'Cash', cheque: 'Cheque', lc: 'Letter of Credit', online: 'Online' };
-  return map[m] || (m ? m.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : '—');
-}
+const eqStatus = (a, b) => String(a || '').toLowerCase() === String(b || '').toLowerCase();
+const docOf = (row) => ({ docKind: row.kind === 'local_sale' ? 'local_sale' : 'receivable', row });
 
+// Money In ▸ Receivables. A row opens its Document drawer (what is owed,
+// every receipt, Receive); Receive opens the shared Payment form directly —
+// an export order's advance / balance is recorded for Finance to confirm,
+// exactly as on the order. The button shows only to a role whose route
+// guard would take the receipt.
 export default function MoneyIn() {
-  const { addToast, companyProfileData } = useApp();
-  const qc = useQueryClient();
+  const { companyProfileData } = useApp() || {};
+  const { hasPermission } = useAuth();
+  const drawers = useFinanceDrawers();
   const { queryParams: rangeParams } = useFinanceDateRange();
   const { data: receivables = [], isLoading } = useReceivables(rangeParams);
-  const recordPaymentMut = useRecordPayment();
-  // A local-sale row is a whole sale (one row per sale_group_no) — one receipt
-  // settles it, split across its lines server-side.
-  const acceptLocalSaleMut = useAcceptLocalSaleGroupPayment();
   const [statusFilter, setStatusFilter] = useState('All');
   const [typeFilter, setTypeFilter] = useState('All');
-  const [drawer, setDrawer] = useState(null);
 
-  function handlePrint() {
-    document.body.classList.add('app-print-mask');
-    const cleanup = () => {
-      document.body.classList.remove('app-print-mask');
-      window.removeEventListener('afterprint', cleanup);
-    };
-    window.addEventListener('afterprint', cleanup);
-    setTimeout(cleanup, 60_000);
-    window.print();
-  }
+  const filtered = useMemo(() => receivables.filter((r) => {
+    if (statusFilter !== 'All' && !eqStatus(r.status, statusFilter)) return false;
+    if (typeFilter !== 'All' && r.type !== typeFilter) return false;
+    return true;
+  }).map((r) => ({ ...r, _highlight: eqStatus(r.status, 'Overdue') ? 'danger' : undefined })), [receivables, statusFilter, typeFilter]);
 
-  // Status comparisons are case-insensitive — the CHECK constraint
-  // forces capitalised values today, but Local Sales / future writers
-  // could drift. eqStatus normalises the comparison.
-  const eqStatus = (a, b) => String(a || '').toLowerCase() === String(b || '').toLowerCase();
-
-  const filtered = useMemo(() => {
-    return receivables.filter(r => {
-      if (statusFilter !== 'All' && !eqStatus(r.status, statusFilter)) return false;
-      if (typeFilter !== 'All' && r.type !== typeFilter) return false;
-      return true;
-    }).map(r => ({
-      ...r,
-      _highlight: eqStatus(r.status, 'Overdue') ? 'danger' : undefined,
-    }));
-  }, [receivables, statusFilter, typeFilter]);
-
-  // KPI calculations — totals in PKR so USD and local currency rows aggregate correctly
-  const totalOutstandingPkr = receivables.filter(r => !eqStatus(r.status, 'Paid')).reduce((s, r) => s + pkrOf(r, 'outstanding'), 0);
-  const overdueAmountPkr = receivables.filter(r => eqStatus(r.status, 'Overdue')).reduce((s, r) => s + pkrOf(r, 'outstanding'), 0);
-  const collectedThisMonthPkr = receivables.reduce((s, r) => s + pkrOf(r, 'receivedAmount'), 0);
-  const pendingCount = receivables.filter(r => eqStatus(r.status, 'Pending')).length;
-  // Foreign-currency exposure (USD/EUR/GBP) for the "$ also" sub-line on KPIs
-  const totalOutstandingForeign = receivables
-    .filter(r => !eqStatus(r.status, 'Paid') && (r.currency || 'USD') !== 'PKR')
-    .reduce((s, r) => s + (parseFloat(r.outstanding) || 0), 0);
-
-  // Aging data — bucket edges live in ../utils/aging so they can't
-  // drift away from the Overview's aging chart.
-  const agingData = useMemo(() => {
-    // Bucket by real days-overdue (from due_date) via the shared helper — the
-    // stored r.aging column is always 0, which put every receivable in "0-30".
-    const b = bucketize(receivables, { mode: 'mixed' });
-    return BUCKET_KEYS.map(name => ({ name, value: Math.round(b[name].totalPkr) }));
-  }, [receivables]);
+  const tiles = useMemo(() => moneyInTiles(receivables), [receivables]);
+  const aging = useMemo(() => agingByCurrency(receivables), [receivables]);
+  const canReceive = (row) => {
+    const d = docOf(row);
+    return isSettleable(d) && canRecordVariant(contextForDocument(d)?.variant, hasPermission);
+  };
 
   const columns = [
     { key: 'recvNo', label: 'Ref', sortable: true, width: '110px', render: (v, row) => {
-      const short = shortenRef(v);
-      const inner = <span title={v || ''}>{short || '—'}</span>;
-      if (row.orderId) return <Link to={`/export/${row.orderId}`} className="text-blue-600 hover:text-blue-800 font-medium hover:underline whitespace-nowrap" onClick={e => e.stopPropagation()}>{inner}</Link>;
+      const inner = <span title={v || ''}>{shortenRef(v) || '—'}</span>;
+      if (row.orderId && hasPermission('export_orders', 'view')) return <Link to={`/export/${row.orderId}`} className="text-blue-600 hover:text-blue-800 font-medium hover:underline whitespace-nowrap" onClick={(e) => e.stopPropagation()}>{inner}</Link>;
       return inner;
     }},
     { key: 'customerName', label: 'Customer', sortable: true, render: (v, row) => <span className="block max-w-[14rem] truncate" title={v || ''}><PartyLink type="customer" id={row.customerId} name={v} /></span> },
@@ -114,133 +59,21 @@ export default function MoneyIn() {
         {v}{row.kind === 'local_sale' && row.lineCount > 1 ? ` · ${row.lineCount} items` : ''}
       </span>
     )},
-    { key: 'expectedAmount', label: 'Amount', sortable: true, align: 'right', render: (v, row) => (
-      <div className="flex flex-col items-end">
-        <span className="text-gray-900">{fmtCur(v, row.currency)}</span>
-        {(row.currency || 'USD') !== 'PKR' && <span className="text-[10px] text-gray-400">{fmtCur(pkrOf(row, 'expectedAmount'), 'PKR')}</span>}
-      </div>
+    { key: 'expectedAmount', label: 'Amount', sortable: true, align: 'right', render: (v, row) => <span className="text-gray-900 tabular-nums">{fmtAmt(v, curOf(row))}</span> },
+    { key: 'receivedAmount', label: 'Received', sortable: true, align: 'right', render: (v, row) => <span className="text-emerald-600 tabular-nums">{fmtAmt(v, curOf(row))}</span> },
+    { key: 'outstanding', label: 'Outstanding', sortable: true, align: 'right', render: (v, row) => (
+      (parseFloat(v) || 0) <= 0 ? <span className="text-gray-400">—</span>
+        : <span className="text-red-600 font-medium tabular-nums">{fmtAmt(v, curOf(row))}</span>
     )},
-    { key: 'receivedAmount', label: 'Received', sortable: true, align: 'right', render: (v, row) => (
-      <div className="flex flex-col items-end">
-        <span className="text-emerald-600">{fmtCur(v, row.currency)}</span>
-        {(row.currency || 'USD') !== 'PKR' && parseFloat(v) > 0 && <span className="text-[10px] text-gray-400">{fmtCur(pkrOf(row, 'receivedAmount'), 'PKR')}</span>}
-      </div>
-    )},
-    { key: 'outstanding', label: 'Outstanding', sortable: true, align: 'right', render: (v, row) => {
-      const n = parseFloat(v) || 0;
-      if (n <= 0) return <span className="text-gray-400">—</span>;
-      return (
-        <div className="flex flex-col items-end">
-          <span className="text-red-600 font-medium">{fmtCur(v, row.currency)}</span>
-          {(row.currency || 'USD') !== 'PKR' && <span className="text-[10px] text-gray-400">{fmtCur(pkrOf(row, 'outstanding'), 'PKR')}</span>}
-        </div>
-      );
-    }},
     { key: 'dueDate', label: 'Due', sortable: true, render: (v) => <span className="whitespace-nowrap">{fmtDate(v)}</span> },
     { key: 'status', label: 'Status', sortable: true },
   ];
 
-  const { data: bankAccounts = [] } = useBankAccounts();
-  // Receipt history for the open drawer row — where/how each partial was received.
-  const { data: receiptData, isLoading: receiptsLoading } = useReceivableReceipts(
-    drawer?.id,
-    drawer?.kind === 'local_sale' ? 'local_sale_group' : 'export',
-    !!drawer,
-  );
-  const [recvForm, setRecvForm] = useState({ amount: '', bankAccountId: '', paymentMethod: 'bank_transfer', paymentDate: localToday(), chequeNo: '', dueDate: '', notes: '', collectionLocation: 'Mill' });
-  const nonCashAccounts = bankAccounts.filter(a => a.type !== 'cash');
-  // The currency a receipt is taken in: local sales are PKR, receivables carry
-  // their own (USD by default). A non-PKR account is offered only for its own
-  // currency — the server refuses the rest.
-  const recvCurrencyOf = (row) => (row?.kind === 'local_sale' ? 'PKR' : (row?.currency || 'USD'));
-  const [recvErrors, setRecvErrors] = useState({});
-
-  function openDrawer(row) {
-    setDrawer(row);
-    setRecvErrors({});
-    setRecvForm({
-      amount: String(parseFloat(row.outstanding) || 0),
-      // Starts on the starred bank account (favorites.js).
-      bankAccountId: defaultBankAccountId(accountsForCurrency(nonCashAccounts, recvCurrencyOf(row)), isFavorite),
-      paymentMethod: 'bank_transfer',
-      paymentDate: localToday(),
-      chequeNo: '', dueDate: '',
-      notes: '',
-      // Local-sale cash lands in Mill Cash or Office Petty Cash by WHERE it was
-      // collected — the same Mill / Head Office choice as the Local Sales drawer.
-      collectionLocation: row.collectionLocation || 'Mill',
-    });
-  }
-  const isLocalCash = drawer?.kind === 'local_sale' && recvForm.paymentMethod === 'cash';
-
-  async function handleRecordPayment(e) {
-    e.preventDefault();
-    if (recordPaymentMut.isPending || acceptLocalSaleMut.isPending) return;
-    const recv = drawer;
-    const amount = parseFloat(recvForm.amount);
-    if (!amount || amount <= 0) { setRecvErrors({ amount: 'Enter a valid amount' }); return; }
-    setRecvErrors({});
-    try {
-      if (recv.kind === 'local_sale') {
-        // Local-sale rows carry a local_sales id (NOT a receivables id), so they
-        // settle via the local-sale accept-payment endpoint, not recordPayment.
-        // (A derived receivable RCV-LS-N has type 'Local Sale' but kind
-        // 'receivable' + a receivables id — it goes the recordPayment route.)
-        await acceptLocalSaleMut.mutateAsync({
-          groupNo: recv.saleGroupNo || recv.recvNo,
-          data: {
-            amount,
-            payment_method: recvForm.paymentMethod,
-            payment_date: recvForm.paymentDate,
-            // Cash is routed by collection_location (Mill Cash / Office Petty
-            // Cash), not by an account pick.
-            bank_account_id: recvForm.paymentMethod === 'cash' ? null : (recvForm.bankAccountId || null),
-            collection_location: recvForm.paymentMethod === 'cash' ? (recvForm.collectionLocation || 'Mill') : null,
-            reference: recvForm.chequeNo || null,
-            due_date: recvForm.dueDate || null,
-            notes: recvForm.notes || null,
-          },
-        });
-      } else {
-        const body = await recordPaymentMut.mutateAsync({
-          type: 'receipt', amount,
-          currency: recv.currency || 'USD',
-          payment_method: recvForm.paymentMethod,
-          payment_date: recvForm.paymentDate,
-          // A cheque may name the account it will clear into (kept for the
-          // clear); it moves nothing until it is cleared in Due Dates.
-          bank_account_id: recvForm.bankAccountId || null,
-          bank_reference: recvForm.chequeNo || null,
-          due_date: recvForm.dueDate || null,
-          linked_receivable_id: recv.dbId || recv.id,
-          notes: recvForm.notes || `Payment for ${recv.recvNo}`,
-        });
-        // An export order's advance / balance is recorded for Finance to
-        // confirm (maker ≠ checker), exactly as on the order itself.
-        if (body?.data?.pending_confirmation) {
-          addToast(`${fmtCur(amount, recv.currency)} recorded for ${recv.recvNo} — pending Finance confirmation (Finance ▸ Confirmations)`, 'success');
-          setDrawer(null);
-          qc.invalidateQueries({ queryKey: ['receivables'] });
-          return;
-        }
-      }
-      addToast(`Payment of ${fmtCur(amount, recv.currency)} recorded for ${recv.recvNo}`, 'success');
-      setDrawer(null);
-      // Force the list (and Due Dates / overview) to refresh so a now-settled
-      // row drops out immediately.
-      qc.invalidateQueries({ queryKey: ['receivables'] });
-      qc.invalidateQueries({ queryKey: ['local-sales'] });
-      qc.invalidateQueries({ queryKey: ['finance'] });
-    } catch (err) {
-      addToast(`Failed: ${err?.data?.message || err.message}`, 'error');
-    }
-  }
-
   const companyName = companyProfileData?.legalName || companyProfileData?.name || 'AGRI COMMODITIES';
+  const agingCurrencies = Object.keys(aging);
   return (
     <div className="space-y-6">
       <div className="print-report space-y-6">
-        {/* Print-only header */}
         <div className="hidden print:block">
           <div className="border-b-2 border-gray-900 pb-2 flex items-end justify-between mb-4">
             <div>
@@ -250,257 +83,78 @@ export default function MoneyIn() {
             <div className="text-right">
               <div className="text-lg font-bold">Money In — Receivables</div>
               <div className="text-xs text-gray-600">
-                {receivables.length} entries · Outstanding {fmtCur(totalOutstandingPkr, 'PKR')} · Overdue {fmtCur(overdueAmountPkr, 'PKR')}
+                {receivables.length} entries · Outstanding <PerCurrency totals={tiles.outstanding} /> · Overdue <PerCurrency totals={tiles.overdue} />
               </div>
             </div>
           </div>
         </div>
 
-      {/* Summary KPIs — totals in PKR; foreign equivalent shown when present */}
-      <div className="grid grid-cols-4 gap-3">
-        <FinanceKPI icon={ArrowDownLeft} title="Total Receivables" value={fmtCur(totalOutstandingPkr, 'PKR')}
-          subtitle={totalOutstandingForeign > 0 ? `${fmtCur(totalOutstandingForeign, 'USD')} · ${receivables.filter(r => r.status !== 'Paid').length} open` : `${receivables.filter(r => r.status !== 'Paid').length} open`} status="info" loading={isLoading} />
-        <FinanceKPI icon={AlertTriangle} title="Overdue" value={fmtCur(overdueAmountPkr, 'PKR')}
-          subtitle="Past due date" status={overdueAmountPkr > 0 ? 'danger' : 'good'} loading={isLoading} />
-        <FinanceKPI icon={CheckCircle} title="Collected" value={fmtCur(collectedThisMonthPkr, 'PKR')}
-          subtitle="Total received" status="good" loading={isLoading} />
-        <FinanceKPI icon={Clock} title="Pending" value={String(pendingCount)}
-          subtitle="Awaiting payment" status={pendingCount > 0 ? 'warning' : 'good'} loading={isLoading} />
-      </div>
+        {/* Tiles — one figure per currency, never summed across currencies */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <FinanceKPI icon={ArrowDownLeft} title="Outstanding" value={<PerCurrency totals={tiles.outstanding} empty="Nothing open" className="flex-col" />}
+            subtitle={`${tiles.openCount} open`} status="info" loading={isLoading} />
+          <FinanceKPI icon={AlertTriangle} title="Overdue" value={<PerCurrency totals={tiles.overdue} empty="None" className="flex-col" />}
+            subtitle="Past due date" status={Object.keys(tiles.overdue).length ? 'danger' : 'good'} loading={isLoading} />
+          <FinanceKPI icon={CheckCircle} title="Collected" value={<PerCurrency totals={tiles.collected} empty="—" className="flex-col" />}
+            subtitle="Received so far" status="good" loading={isLoading} />
+          <FinanceKPI icon={Clock} title="Pending" value={String(tiles.pendingCount)}
+            subtitle="Awaiting payment" status={tiles.pendingCount > 0 ? 'warning' : 'good'} loading={isLoading} />
+        </div>
 
-      {/* Aging Chart */}
-      <FinanceChart title="Aging Breakdown" type="bar" data={agingData} xKey="name" currency="Rs "
-        series={[{ key: 'value', name: 'Outstanding', color: '#3b82f6' }]} height={200} loading={isLoading} />
-
-      {/* Filters */}
-      <FinanceFilterBar
-        filters={[
-          { key: 'status', label: 'Status', value: statusFilter, onChange: setStatusFilter,
-            options: [{ value: 'All', label: 'All Status' }, { value: 'Pending', label: 'Pending' }, { value: 'Credit', label: 'Credit' }, { value: 'Partial', label: 'Partial' }, { value: 'Overdue', label: 'Overdue' }, { value: 'Paid', label: 'Paid' }] },
-          { key: 'type', label: 'Type', value: typeFilter, onChange: setTypeFilter,
-            options: [{ value: 'All', label: 'All Types' }, { value: 'Advance', label: 'Advance' }, { value: 'Balance', label: 'Balance' }] },
-        ]}
-        onReset={() => { setStatusFilter('All'); setTypeFilter('All'); }}
-      />
-
-      {/* Table */}
-      <ListCapHint rows={receivables} />
-      <FinanceTable
-        columns={columns}
-        data={filtered}
-        searchKeys={['customerName', 'recvNo', 'orderId']}
-        onRowClick={openDrawer}
-        exportFilename="receivables"
-        emptyText="No receivables found"
-        loading={isLoading}
-        actions={(row) => (
-          <div className="inline-flex items-center gap-1.5">
-            {row.status !== 'Paid' && parseFloat(row.outstanding) > 0 && (
-              <button onClick={(e) => { e.stopPropagation(); openDrawer(row); }}
-                className="px-2.5 py-1 bg-emerald-50 text-emerald-700 text-xs font-medium rounded hover:bg-emerald-100 inline-flex items-center gap-1">
-                <DollarSign size={12} /> Receive
-              </button>
-            )}
-            <button onClick={(e) => { e.stopPropagation(); openDrawer(row); }} className="text-blue-600 hover:text-blue-800 p-1" title="View details">
-              <Eye size={15} />
-            </button>
+        {/* Aging — days past due, one row per currency */}
+        {agingCurrencies.length > 0 && (
+          <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto" data-testid="aging-by-currency">
+            <table className="w-full text-sm">
+              <thead><tr className="bg-gray-50 text-xs text-gray-500">
+                <th className="text-left px-4 py-2 font-medium">Aging</th>
+                {BUCKET_KEYS.map((k) => <th key={k} className="text-right px-4 py-2 font-medium">{k} days</th>)}
+              </tr></thead>
+              <tbody>
+                {agingCurrencies.map((c) => (
+                  <tr key={c} className="border-t border-gray-100">
+                    <td className="px-4 py-2 font-medium text-gray-700">{c}</td>
+                    {BUCKET_KEYS.map((k) => <td key={k} className="px-4 py-2 text-right tabular-nums">{aging[c][k] ? fmtAmt(aging[c][k], c) : '—'}</td>)}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
-      />
-      </div>{/* /.print-report */}
 
-      {/* Detail Drawer */}
-      {drawer && (
-        <div className="fixed inset-0 z-50 flex justify-end">
-          <div className="fixed inset-0 bg-black/30" onClick={() => setDrawer(null)} />
-          <div className="relative w-full max-w-md bg-white shadow-xl overflow-y-auto">
-            <div className="px-6 py-4 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
-              <div className="min-w-0">
-                <h2 className="text-lg font-semibold text-gray-900">{drawer.recvNo}</h2>
-                <p className="text-sm text-gray-500 break-words"><PartyLink type="customer" id={drawer.customerId} name={drawer.customerName} /> &middot; <StatusBadge status={drawer.status} /></p>
-              </div>
-              <button onClick={() => setDrawer(null)} aria-label="Close" title="Close" className="p-2 rounded-md hover:bg-gray-200"><X size={18} /></button>
-            </div>
-            <div className="px-6 py-4 space-y-4">
-              <div className="grid grid-cols-3 gap-3">
-                <div className="bg-gray-50 rounded-lg p-3 text-center">
-                  <p className="text-xs text-gray-500">Expected</p>
-                  <p className="text-sm font-semibold">{fmtCur(drawer.expectedAmount, drawer.currency)}</p>
-                </div>
-                <div className="bg-emerald-50 rounded-lg p-3 text-center">
-                  <p className="text-xs text-emerald-600">Received</p>
-                  <p className="text-sm font-semibold text-emerald-700">{fmtCur(drawer.receivedAmount, drawer.currency)}</p>
-                </div>
-                <div className="bg-red-50 rounded-lg p-3 text-center">
-                  <p className="text-xs text-red-600">Outstanding</p>
-                  <p className="text-sm font-semibold text-red-700">{fmtCur(drawer.outstanding, drawer.currency)}</p>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3 text-sm">
-                <div><p className="text-xs text-gray-500">Type</p><p>{drawer.type}</p></div>
-                <div><p className="text-xs text-gray-500">Due Date</p><p>{fmtDate(drawer.dueDate)}</p></div>
-                <div><p className="text-xs text-gray-500">Currency</p><p>{drawer.currency || 'USD'}</p></div>
-                <div><p className="text-xs text-gray-500">Order</p>{drawer.orderId ? <Link to={`/export/${drawer.orderId}`} className="text-blue-600 hover:underline font-medium">View Order →</Link> : <p>—</p>}</div>
-              </div>
+        <FinanceFilterBar
+          filters={[
+            { key: 'status', label: 'Status', value: statusFilter, onChange: setStatusFilter,
+              options: [{ value: 'All', label: 'All Status' }, { value: 'Pending', label: 'Pending' }, { value: 'Credit', label: 'Credit' }, { value: 'Partial', label: 'Partial' }, { value: 'Overdue', label: 'Overdue' }, { value: 'Paid', label: 'Paid' }] },
+            { key: 'type', label: 'Type', value: typeFilter, onChange: setTypeFilter,
+              options: [{ value: 'All', label: 'All Types' }, { value: 'Advance', label: 'Advance' }, { value: 'Balance', label: 'Balance' }, { value: 'Local Sale', label: 'Local sale' }] },
+          ]}
+          onReset={() => { setStatusFilter('All'); setTypeFilter('All'); }}
+        />
 
-              {/* Receipts received — where & how each partial payment came in. */}
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <h3 className="text-sm font-semibold text-gray-700">Receipts Received</h3>
-                  {receiptData?.collectionLocation && (
-                    <span className="text-xs text-gray-500">Collection: <span className="font-medium text-gray-700 capitalize">{receiptData.collectionLocation}</span></span>
-                  )}
-                </div>
-                {receiptsLoading ? (
-                  <p className="text-xs text-gray-400 py-2">Loading receipts…</p>
-                ) : (receiptData?.payments?.length ? (
-                  <div className="space-y-2">
-                    {receiptData.payments.map((p) => {
-                      let into = [p.accountName, p.bankName].filter(Boolean).join(' · ');
-                      if (!into) into = p.paymentMethod === 'cash' ? 'Cash (in hand)' : '—';
-                      return (
-                        <div key={p.id} className="border border-gray-200 rounded-lg px-3 py-2">
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm font-semibold text-emerald-700">{fmtCur(p.amount, p.currency || drawer.currency)}</span>
-                            <span className="text-xs text-gray-500">{fmtDate(p.paymentDate)}</span>
-                          </div>
-                          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-gray-500">
-                            <span>Method: <span className="font-medium text-gray-700">{methodLabel(p.paymentMethod)}</span></span>
-                            <span className="min-w-0 break-words">Into: <span className="font-medium text-gray-700">{into || '—'}</span></span>
-                            {p.bankReference && <span>Ref/Cheque: <span className="font-medium text-gray-700">{p.bankReference}</span></span>}
-                          </div>
-                          {p.notes && <p className="mt-0.5 text-[11px] text-gray-400 truncate" title={p.notes}>{p.notes}</p>}
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <p className="text-xs text-gray-400 py-2">No receipts recorded yet.</p>
-                ))}
-              </div>
-
-              {/* Downloadable / printable payment receipt */}
-              <div className="pt-2 border-t border-gray-100">
-                <TransactionDocument kind="receipt" data={drawer} companyProfile={companyProfileData} />
-              </div>
-            </div>
-            {drawer.status !== 'Paid' && parseFloat(drawer.outstanding) > 0 && (
-              <form onSubmit={handleRecordPayment} className="px-6 py-4 border-t border-gray-200 space-y-3">
-                <h3 className="text-sm font-semibold text-gray-700">Record Receipt</h3>
-
-                {/* Payment Method — first; it drives whether an account is needed. */}
-                <div>
-                  <label className="text-xs text-gray-500 block mb-1">Payment Method</label>
-                  <select value={recvForm.paymentMethod}
-                    onChange={e => {
-                      const m = e.target.value;
-                      const switchedKind = (m === 'cash') !== (recvForm.paymentMethod === 'cash');
-                      const pool = accountsForCurrency(bankAccounts.filter(a => (a.type === 'cash') === (m === 'cash')), recvCurrencyOf(drawer));
-                      setRecvForm({ ...recvForm, paymentMethod: m, bankAccountId: switchedKind ? defaultBankAccountId(pool, isFavorite) : recvForm.bankAccountId });
-                    }}
-                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                    <option value="bank_transfer">Bank Transfer / TT</option>
-                    <option value="lc">Letter of Credit</option>
-                    <option value="cheque">Cheque</option>
-                    <option value="cash">Cash</option>
-                    <option value="online">Online</option>
-                  </select>
-                </div>
-
-                {/* Cheque details — number (optional) + the date it clears, so
-                    Due Dates knows when to expect the money. A cheque needs no
-                    account until it is cleared there. */}
-                {recvForm.paymentMethod === 'cheque' && (
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="text-xs text-gray-500 block mb-1">Cheque # <span className="text-gray-300">(optional)</span></label>
-                      <input type="text" value={recvForm.chequeNo} onChange={e => setRecvForm({ ...recvForm, chequeNo: e.target.value })}
-                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" placeholder="e.g. 004512" />
-                    </div>
-                    <div>
-                      <label className="text-xs text-gray-500 block mb-1">{CHEQUE_DATE_LABEL}</label>
-                      <input type="date" value={recvForm.dueDate} onChange={e => setRecvForm({ ...recvForm, dueDate: e.target.value })}
-                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
-                    </div>
-                    <ChequeHint className="col-span-2 -mt-1" />
-                  </div>
-                )}
-
-                {/* Receive Into Account — every receipt lands in one: a cash
-                    account for cash, a bank account otherwise. Only a cheque
-                    waits; it moves money when it is cleared. */}
-                {isLocalCash && (
-                  <div>
-                    <label className="text-xs text-gray-500 block mb-1">Cash collected at</label>
-                    <div className="grid grid-cols-2 gap-2">
-                      {['Mill', 'Head Office'].map(loc => (
-                        <button key={loc} type="button" onClick={() => setRecvForm({ ...recvForm, collectionLocation: loc })}
-                          className={`px-3 py-2 text-sm font-medium rounded-lg border ${recvForm.collectionLocation === loc ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600 hover:border-gray-300'}`}>{loc}</button>
-                      ))}
-                    </div>
-                    <p className="text-[11px] text-gray-400 mt-1">{recvForm.collectionLocation === 'Head Office' ? 'Lands in Office Petty Cash.' : 'Lands in Mill Cash.'}</p>
-                  </div>
-                )}
-                {!isLocalCash && (
-                  <div>
-                    <label className="text-xs text-gray-500 block mb-1">{isUnclearedCheque(recvForm) ? 'Bank account it will clear into (optional)' : <>Receive Into Account {REQ}</>}</label>
-                    <select required={!isUnclearedCheque(recvForm)} value={recvForm.bankAccountId} onChange={e => setRecvForm({ ...recvForm, bankAccountId: e.target.value })}
-                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                      <option value="">{recvForm.paymentMethod === 'cash' ? 'Select cash account...' : 'Select bank account...'}</option>
-                      {accountsForCurrency(bankAccounts.filter(a => (a.type === 'cash') === (recvForm.paymentMethod === 'cash')), recvCurrencyOf(drawer)).map(a => (
-                        <option key={a.id} value={a.id}>
-                          {favStar(a)}{a.name} — {a.bankName || ''} ({fmtMoney(parseFloat(a.currentBalance) || 0, a.currency || 'PKR', { decimals: 2 })})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-
-                {/* Amount + Date */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-xs text-gray-500 block mb-1">Amount ({drawer.currency || 'USD'}) {REQ}</label>
-                    <input type="number" step="0.01" required value={recvForm.amount}
-                      onChange={e => { setRecvForm({ ...recvForm, amount: e.target.value }); setRecvErrors({}); }}
-                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                    <FieldError error={recvErrors.amount} />
-                  </div>
-                  <div>
-                    <label className="text-xs text-gray-500 block mb-1">Date {REQ}</label>
-                    <input type="date" required value={recvForm.paymentDate}
-                      onChange={e => setRecvForm({ ...recvForm, paymentDate: e.target.value })}
-                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                  </div>
-                </div>
-
-                {/* Notes */}
-                <div>
-                  <label className="text-xs text-gray-500 block mb-1">Notes</label>
-                  <input type="text" value={recvForm.notes} onChange={e => setRecvForm({ ...recvForm, notes: e.target.value })}
-                    placeholder={`Receipt for ${drawer.recvNo}`}
-                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                </div>
-
-                {/* Quick amounts */}
-                <div className="flex gap-2">
-                  <button type="button" onClick={() => setRecvForm({ ...recvForm, amount: String(parseFloat(drawer.outstanding)) })}
-                    className="text-xs px-3 py-1 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">Full Amount</button>
-                  <button type="button" onClick={() => setRecvForm({ ...recvForm, amount: String(Math.round(parseFloat(drawer.outstanding) / 2)) })}
-                    className="text-xs px-3 py-1 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">Half</button>
-                  <button type="button" onClick={() => setRecvForm({ ...recvForm, amount: '' })}
-                    className="text-xs px-3 py-1 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">Custom</button>
-                </div>
-
-                <button type="submit" disabled={recordPaymentMut.isPending || acceptLocalSaleMut.isPending}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-medium text-sm disabled:opacity-50">
-                  <CheckCircle size={16} />
-                  {(recordPaymentMut.isPending || acceptLocalSaleMut.isPending) ? 'Processing...' : `Record Receipt — ${fmtCur(parseFloat(recvForm.amount) || 0, drawer.currency)}`}
+        <ListCapHint rows={receivables} />
+        <FinanceTable
+          columns={columns}
+          data={filtered}
+          searchKeys={['customerName', 'recvNo', 'orderId']}
+          onRowClick={(row) => drawers?.openDocument(docOf(row))}
+          exportFilename="receivables"
+          emptyText="No receivables found"
+          loading={isLoading}
+          actions={(row) => (
+            <div className="inline-flex items-center gap-1.5">
+              {canReceive(row) && (
+                <button onClick={(e) => { e.stopPropagation(); drawers?.openPayment(docOf(row)); }} data-action="receive"
+                  className="px-2.5 py-1 bg-emerald-50 text-emerald-700 text-xs font-medium rounded hover:bg-emerald-100 inline-flex items-center gap-1">
+                  <DollarSign size={12} /> Receive
                 </button>
-              </form>
-            )}
-          </div>
-        </div>
-      )}
+              )}
+              <button onClick={(e) => { e.stopPropagation(); drawers?.openDocument(docOf(row)); }} className="text-blue-600 hover:text-blue-800 p-1" title="View details" aria-label="View details">
+                <Eye size={15} />
+              </button>
+            </div>
+          )}
+        />
+      </div>
     </div>
   );
 }
