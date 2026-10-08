@@ -10,6 +10,7 @@
 
 const accountingService = require('../accounting/accounting.service');
 const { nextDocNo } = require('../../utils/docNumber');
+const { remapControlLines } = require('../../shared/accountGl');
 
 const num = (v) => parseFloat(v) || 0;
 const r2 = (n) => Math.round(num(n) * 100) / 100;
@@ -21,7 +22,7 @@ const today = () => new Date().toISOString().slice(0, 10);
  * journal_entries.reversal_of, which is also the idempotency key: an original
  * that already has a Posted delta is left alone. Returns the delta numbers.
  */
-async function mirrorJournals(trx, { refNo, refTypes, refType, description, userId, date }) {
+async function mirrorJournals(trx, { refNo, refTypes, refType, description, userId, date, cashAccountId = null }) {
   if (!refNo) return [];
   const originals = await trx('journal_entries')
     .where({ ref_no: refNo, status: 'Posted' })
@@ -32,8 +33,11 @@ async function mirrorJournals(trx, { refNo, refTypes, refType, description, user
   for (const j of originals) {
     const done = await trx('journal_entries').where({ reversal_of: j.id, status: 'Posted' }).first('id');
     if (done) continue;
-    const lines = await trx('journal_lines').where({ journal_id: j.id }).orderBy('id');
+    let lines = await trx('journal_lines').where({ journal_id: j.id }).orderBy('id');
     if (!lines.length) continue;
+    // Posted on the 1000 control account before per-account GL: the delta
+    // comes off the paying account's own GL (shared/accountGl.js).
+    if (cashAccountId) lines = await remapControlLines(trx, lines, () => cashAccountId);
     const delta = await accountingService.createJournal(trx, {
       date: date || today(),
       entity: j.entity || 'mill',
@@ -121,6 +125,7 @@ async function reverseExpenseTrail(trx, expenseId, { userId = null, reason = nul
     journals.push(...await mirrorJournals(trx, {
       refNo: p.payment_no, refTypes: ['Payment'], refType: 'Payment Reversal',
       description: `Reversal of payment ${p.payment_no} (${exp.expense_no})${why}`, userId, date: when,
+      cashAccountId: p.bank_account_id || null,
     }));
     await trx('payments').where('id', p.id).update({
       status: 'Reversed', reversed_at: trx.fn.now(), reversed_by: userId,

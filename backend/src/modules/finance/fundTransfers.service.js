@@ -3,6 +3,7 @@ const accountingService = require('../accounting/accounting.service');
 const { NotFoundError, ValidationError, ConflictError } = require('../../shared/errors');
 const { nextDocNo } = require('../../utils/docNumber');
 const { assertMillAccount } = require('../../shared/millPayer');
+const { glAccountFor, remapControlLines } = require('../../shared/accountGl');
 
 // Money moved between the company's OWN accounts. One table, fund_transfers,
 // carries both kinds:
@@ -13,7 +14,8 @@ const { assertMillAccount } = require('../../shared/millPayer');
 //   accept()  : the RECEIVER confirms; their account is credited (balance up +
 //               bank_txn + the receiver entity's journal). status = 'completed'.
 //   Each entity's journal balances on its own and is linked by 1130
-//   Inter-Company Receivable — Mill, with cash on 1000. So between send and
+//   Inter-Company Receivable — Mill, with cash on each account's own GL
+//   (G-8: every cash / bank account has one, under 1000). So between send and
 //   accept the funds sit "in transit" (the sender's 1130 advance), and the
 //   receiver only sees the cash once it accepts.
 //
@@ -22,17 +24,22 @@ const { assertMillAccount } = require('../../shared/millPayer');
 //   bank → PKR cash ...). It settles at once: one transaction locks both
 //   accounts, debits the source and credits the destination, each in its OWN
 //   currency, and the transfer is 'completed' (no accept step).
-//   NO GL journal is posted for the transfer itself: every cash and bank account
-//   sits on the single GL control account 1000, so the entry would be
-//   Dr 1000 / Cr 1000 — noise. The record of the move is the fund_transfers row
-//   plus its two bank_transactions rows (source 'fund_transfer', reference =
+//   Each account has its own GL account (G-8), so the transfer posts ONE journal
+//   Dr destination-account GL / Cr source-account GL, in PKR (amount_pkr),
+//   ref_type 'Fund Transfer', ref_no = transfer_no — reverse() mirrors it by
+//   signed delta like any other transfer journal. (Two accounts still sharing
+//   one GL — an unmapped pair on the 1000 fallback — post nothing: Dr X / Cr X
+//   is noise.) The operational record is the fund_transfers row plus its two
+//   bank_transactions rows (source 'fund_transfer', reference =
 //   transfer_no, fund_transfer_id = the transfer). Nothing is written to
 //   `payments`, so Money In / Money Out, payment history and the printable
 //   cash flow never see it — it is not a receipt or a payment.
 //   A cross-currency contra (USD → PKR) moves each account by its own amount
-//   and posts NO FX gain/loss: fx_unbooked = true flags it for review.
-//   Optional bank charges are a real expense: an extra debit row on the SOURCE
-//   account (category 'Bank Charges') and a journal Dr 6200 / Cr 1000 in PKR.
+//   and posts NO FX gain/loss: fx_unbooked = true flags it for review (the
+//   journal moves the PKR received; month-end revaluation restates the USD
+//   account). Optional bank charges are a real expense: an extra debit row on
+//   the SOURCE account (category 'Bank Charges') and a journal Dr 6200 / Cr the
+//   source account's GL, in PKR.
 //
 //   createContra() picks the kind from the two accounts: same entity →
 //   internal; Head Office ⇄ Mill → the two-phase flow above (awaits the
@@ -132,9 +139,10 @@ function conflict(message, existing) {
 
 // Post ONE entity's half of a Head Office ⇄ Mill transfer. cashIn ⇒ DR cash /
 // CR inter-company; otherwise CR cash / DR inter-company (the sender advanced funds).
-async function postEntityBook(trx, { transferNo, entity, cashIn, amount, date, userId, description }) {
+// `account` is the bank account that moved — its own GL carries the cash line.
+async function postEntityBook(trx, { transferNo, entity, cashIn, amount, date, userId, description, account }) {
   const [cash, ic] = await Promise.all([
-    trx('chart_of_accounts').where({ code: '1000' }).first(),
+    glAccountFor(trx, account || null),
     trx('chart_of_accounts').where({ code: '1130' }).first(),
   ]);
   if (!cash || !ic) throw new ValidationError('GL accounts 1000 / 1130 are missing — cannot post the fund transfer.');
@@ -147,14 +155,14 @@ async function postEntityBook(trx, { transferNo, entity, cashIn, amount, date, u
   if (j?.id) await accountingService.postJournal(trx, j.id);
 }
 
-// Bank charges on a transfer: Dr 6200 Bank Charges / Cr 1000 Cash & Bank, in
-// PKR. ref_type 'Fund Transfer' + ref_no transfer_no so reverse() finds it with
+// Bank charges on a transfer: Dr 6200 Bank Charges / Cr the source account's
+// GL, in PKR. ref_type 'Fund Transfer' + ref_no transfer_no so reverse() finds it with
 // the transfer's other journals and mirrors it by signed delta. A foreign
 // source keeps its native figure as orig_currency / orig_fx_rate.
-async function postBankChargesJournal(trx, { transferNo, entity, amountPkr, origCurrency, origFxRate, date, userId, description }) {
+async function postBankChargesJournal(trx, { transferNo, entity, amountPkr, origCurrency, origFxRate, date, userId, description, account }) {
   const [fee, cash] = await Promise.all([
     trx('chart_of_accounts').where({ code: '6200' }).first(),
-    trx('chart_of_accounts').where({ code: '1000' }).first(),
+    glAccountFor(trx, account || null),
   ]);
   if (!fee || !cash) throw new ValidationError('GL accounts 6200 / 1000 are missing — cannot post the bank charges.');
   const j = await accountingService.createJournal(trx, {
@@ -165,6 +173,29 @@ async function postBankChargesJournal(trx, { transferNo, entity, amountPkr, orig
     lines: [
       { account_id: fee.id, account: fee.name, debit: amountPkr, credit: 0, narration: `DR ${fee.code} ${fee.name} — ${transferNo}` },
       { account_id: cash.id, account: cash.name, debit: 0, credit: amountPkr, narration: `CR ${cash.code} ${cash.name} — ${transferNo}` },
+    ],
+  });
+  if (j?.id) await accountingService.postJournal(trx, j.id);
+  return j;
+}
+
+// The contra itself: Dr the destination account's GL / Cr the source
+// account's GL, in PKR (amount_pkr: the PKR moved, or the foreign amount at the
+// transfer rate). Nothing when both accounts share one GL (both unmapped).
+async function postContraJournal(trx, { transferNo, entity, fromAcc, toAcc, amountPkr, origCurrency, origFxRate, date, userId, description }) {
+  const [src, dst] = await Promise.all([glAccountFor(trx, fromAcc), glAccountFor(trx, toAcc)]);
+  if (!src || !dst) throw new ValidationError('GL account 1000 Cash & Bank is missing — cannot post the contra transfer.');
+  if (String(src.id) === String(dst.id)) return null;
+  const pkr = round2(amountPkr);
+  if (!(pkr > 0)) throw new ValidationError(`An exchange rate is needed to book this ${curOf(fromAcc)} transfer in PKR.`);
+  const j = await accountingService.createJournal(trx, {
+    date, entity, refType: 'Fund Transfer', refNo: transferNo, description,
+    currency: 'PKR', fxRate: 1, isAuto: true, userId,
+    origCurrency: origCurrency && origCurrency !== 'PKR' ? origCurrency : null,
+    origFxRate: origCurrency && origCurrency !== 'PKR' ? origFxRate : null,
+    lines: [
+      { account_id: dst.id, account: dst.name, debit: pkr, credit: 0, narration: `DR ${dst.code} ${dst.name} — ${transferNo}` },
+      { account_id: src.id, account: src.name, debit: 0, credit: pkr, narration: `CR ${src.code} ${src.name} — ${transferNo}` },
     ],
   });
   if (j?.id) await accountingService.postJournal(trx, j.id);
@@ -198,7 +229,7 @@ async function takeBankCharges(trx, { fromAcc, charges, chargesPkr, rate, transf
   });
   await postBankChargesJournal(trx, {
     transferNo: transfer.transfer_no, entity: entityOf(fromAcc), amountPkr: chargesPkr,
-    origCurrency: curOf(fromAcc), origFxRate: rate, date, userId, description: desc,
+    origCurrency: curOf(fromAcc), origFxRate: rate, date, userId, description: desc, account: fromAcc,
   });
 }
 
@@ -233,7 +264,7 @@ async function createCrossEntityInTrx(trx, { direction, fromAcc, toAcc, amt, dat
   // SENDER side only — money leaves now; the receiver accepts to take it in.
   await trx('bank_accounts').where({ id: fromAcc.id }).decrement('current_balance', amt);
   await writeBankTxn(trx, { account: fromAcc, type: 'debit', amount: amt, date, transferNo, counterpartyName: toAcc.name, noteLine, userId, fundTransferId: row.id });
-  await postEntityBook(trx, { transferNo, entity: fromEntity, cashIn: false, amount: amt, date, userId, description: desc });
+  await postEntityBook(trx, { transferNo, entity: fromEntity, cashIn: false, amount: amt, date, userId, description: desc, account: fromAcc });
   return row;
 }
 
@@ -379,6 +410,15 @@ async function createContraInTrx(trx, payload, userId, { millOnly = false, repla
     userId, category: CATEGORY.contra, currency: dstCur, fundTransferId: row.id,
   });
 
+  const journal = await postContraJournal(trx, {
+    transferNo, entity: fromEntity, fromAcc, toAcc, amountPkr: calc.amountPkr,
+    origCurrency: calc.foreign, origFxRate: calc.fxRate, date, userId, description: desc,
+  });
+  let out = row;
+  if (journal) {
+    [out] = await trx('fund_transfers').where({ id: row.id }).update({ je_ref_no: transferNo }).returning('*');
+  }
+
   if (charges > 0) {
     let chargeRate = srcCur === 'PKR' ? 1 : calc.fxRate;
     if (!chargeRate && defaultRate) {
@@ -388,7 +428,7 @@ async function createContraInTrx(trx, payload, userId, { millOnly = false, repla
     if (!chargeRate) throw new ValidationError(`An exchange rate is needed to book ${srcCur} bank charges in PKR.`);
     await takeBankCharges(trx, { fromAcc, charges, chargesPkr: round2(charges * chargeRate), rate: srcCur === 'PKR' ? null : chargeRate, transfer: row, date, userId });
   }
-  return row;
+  return out;
 }
 
 function systemRate(currency, date) {
@@ -426,7 +466,7 @@ async function accept(id, userId) {
 
     await trx('bank_accounts').where({ id: toAcc.id }).increment('current_balance', amt);
     await writeBankTxn(trx, { account: toAcc, type: 'credit', amount: amt, date: todayIso(), transferNo: t.transfer_no, counterpartyName: fromAcc ? fromAcc.name : ENTITY_LABEL[t.from_entity], noteLine, userId, fundTransferId: t.id });
-    await postEntityBook(trx, { transferNo: t.transfer_no, entity: t.to_entity, cashIn: true, amount: amt, date: todayIso(), userId, description: desc });
+    await postEntityBook(trx, { transferNo: t.transfer_no, entity: t.to_entity, cashIn: true, amount: amt, date: todayIso(), userId, description: desc, account: toAcc });
 
     const [row] = await trx('fund_transfers').where({ id }).update({
       status: 'completed', accepted_at: trx.fn.now(), accepted_by: userId || null, updated_at: trx.fn.now(),
@@ -444,8 +484,8 @@ async function accept(id, userId) {
 //          Reversal', ref_no = transfer_no. The originals stay Posted: the TB
 //          is Posted-only, so original + delta nets to zero. (Never
 //          reverse+repost, and never also flip the original to 'Reversed':
-//          that would move the books by -2x.) An internal contra has no
-//          transfer journal, so only a bank-charges journal (if any) is mirrored.
+//          that would move the books by -2x.) An internal contra's own journal
+//          (Dr destination GL / Cr source GL) is mirrored the same way.
 //   Bank : the sender gets the money back (balance up + a 'credit' row, in its
 //          own currency) plus any bank charges (a separate 'Bank Charges
 //          Reversal' credit); if the receiver had been credited (completed),
@@ -508,9 +548,12 @@ async function reverseInTrx(trx, id, userId, { reason } = {}) {
     .select('id', 'journal_no', 'entity', 'orig_currency', 'orig_fx_rate');
   const reversalJournalIds = [];
   for (const j of posted) {
-    const lines = await trx('journal_lines').where({ journal_id: j.id }).orderBy('id', 'asc')
+    let lines = await trx('journal_lines').where({ journal_id: j.id }).orderBy('id', 'asc')
       .select('account_id', 'account', 'debit', 'credit');
     if (!lines.length) continue;
+    // A journal posted on the 1000 control account before per-account GL:
+    // money out (credit) was the source account's, money in the destination's.
+    lines = await remapControlLines(trx, lines, (l) => ((parseFloat(l.credit) || 0) > 0 ? t.from_account_id : t.to_account_id));
     const delta = await accountingService.createJournal(trx, {
       date, entity: j.entity, refType: 'Fund Transfer Reversal', refNo: t.transfer_no,
       description: `${desc} (reverses ${j.journal_no || `journal #${j.id}`})`,

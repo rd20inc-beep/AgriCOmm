@@ -236,7 +236,7 @@ async function postSaleSideEffects(trx, saleRows, { userId } = {}) {
         date: sale.sale_date, userId,
       });
       // Clear the receivable this sale just raised: Dr 1000 / Cr 1120.
-      await postLocalReceiptJournal(trx, { paymentNo, amount: paid, sale, date: sale.sale_date, userId });
+      await postLocalReceiptJournal(trx, { paymentNo, amount: paid, sale, date: sale.sale_date, userId, bankAccountId: receiptAccountId || sale.bank_account_id || null });
     }
 
     if (dueAmt > 0) {
@@ -687,7 +687,7 @@ async function applyReceiptToSale(trx, sale, {
     });
     // …and into the GL: Dr 1000 Cash & Bank / Cr 1120 Local AR. A cheque
     // journals when it clears (finance clearCheque).
-    await postLocalReceiptJournal(trx, { paymentNo, amount: payAmount, sale, date: paymentDate, userId });
+    await postLocalReceiptJournal(trx, { paymentNo, amount: payAmount, sale, date: paymentDate, userId, bankAccountId: receiptAccountId || bankAccountId || null });
 
     // Update linked receivable — prefer FK, fall back to notes search
     const receivable = await trx('receivables')

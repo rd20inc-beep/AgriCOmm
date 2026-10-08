@@ -28,6 +28,7 @@ d('payment engine convergence (DB-gated)', () => {
   const run = `${Date.now()}`.slice(-7);
   const tok = {};
   const acc = {};
+  const glCode = {};
   const ids = {};
   const TODAY = new Date().toISOString().slice(0, 10);
 
@@ -68,7 +69,10 @@ d('payment engine convergence (DB-gated)', () => {
     }
     const mk = async (key, row) => {
       const [a] = await db('bank_accounts').insert({ name: `ZZ ${key} ${run}`, is_active: true, ...row }).returning('*');
-      acc[key] = a;
+      // Its own GL account under 1000 (G-8): every writer posts the cash side there.
+      const gl = await require('../shared/accountGl').ensureAccountGl(db, a);
+      acc[key] = { ...a, gl_account_id: gl.id };
+      glCode[key] = gl.code;
     };
     await mk('pkr', { type: 'bank', entity: 'general', currency: 'PKR', current_balance: 5000000 });
     await mk('usd', { type: 'bank', entity: 'export', currency: 'USD', current_balance: 0 });
@@ -135,7 +139,7 @@ d('payment engine convergence (DB-gated)', () => {
     const bts = await btFor(posted.id);
     expect(bts.map((b) => [b.type, Number(b.amount), b.currency, b.source])).toEqual([['credit', 1000, 'USD', 'export_receipt']]);
     expect((await glLines(orderNo, 'Export Order')).map((l) => [l.code, l.debit, l.credit, l.entity]))
-      .toEqual([['1000', 281000, 0, 'export'], ['1310', 0, 281000, 'export']]);
+      .toEqual([[glCode.usd, 281000, 0, 'export'], ['1310', 0, 281000, 'export']]);
   });
 
   // ── R7 ──
@@ -158,7 +162,7 @@ d('payment engine convergence (DB-gated)', () => {
     expect(await bal(acc.millCash.id)).toBe(before - 12000);
     expect(await btFor(p.id)).toHaveLength(1);
     expect((await glLines(p.payment_no)).map((l) => [l.code, l.debit, l.credit, l.entity]))
-      .toEqual([['2040', 12000, 0, 'mill'], ['1000', 0, 12000, 'mill']]);
+      .toEqual([['2040', 12000, 0, 'mill'], [glCode.millCash, 0, 12000, 'mill']]);
     expect((await db('business_expenses').where({ id: exp.id }).first()).payment_status).toBe('Paid');
   });
 
@@ -190,7 +194,7 @@ d('payment engine convergence (DB-gated)', () => {
     expect(await bal(acc.pkr.id)).toBe(before - 60000);
     expect(await btFor(p.id)).toHaveLength(1);
     const gl = await glLines(p.payment_no, 'Payment');
-    expect(gl.map((l) => [l.code, l.debit, l.credit])).toEqual([['2010', 60000, 0], ['1000', 0, 60000]]);
+    expect(gl.map((l) => [l.code, l.debit, l.credit])).toEqual([['2010', 60000, 0], [glCode.pkr, 0, 60000]]);
     expect(gl[0]).toMatchObject({ party_type: 'supplier', party_id: ids.sup });
 
     const rev = await post('sa', `/api/finance/payments/${p.id}/reverse`, { reason: 'test' });
@@ -199,11 +203,11 @@ d('payment engine convergence (DB-gated)', () => {
     expect(Number((await db('inventory_lots').where({ id: lot.id }).first()).paid_amount)).toBe(0);
     expect(await bal(acc.pkr.id)).toBe(before);
     const net = (await glLines(p.payment_no)).reduce((m, l) => ({ ...m, [l.code]: (m[l.code] || 0) + l.debit - l.credit }), {});
-    expect(net).toEqual({ 2010: 0, 1000: 0 });
+    expect(net).toEqual({ 2010: 0, [glCode.pkr]: 0 });
   });
 
   // ── A4 ──
-  test('a service-milling receipt posts Dr 1000 / Cr 1120 into the picked account; a ledger failure rolls it back', async () => {
+  test('a service-milling receipt posts Dr account GL / Cr 1120 into the picked account; a ledger failure rolls it back', async () => {
     const [inv] = await db('service_milling_invoices').insert({
       invoice_no: `ZZSMI-${run}`, client_customer_id: ids.client, invoice_date: TODAY, total_amount: 20000,
       received_amount: 0, balance_amount: 20000, payment_status: 'Unpaid',
@@ -228,7 +232,7 @@ d('payment engine convergence (DB-gated)', () => {
     expect(await bal(acc.pkr.id)).toBe(before + 5000);
     expect(await btFor(p.id)).toHaveLength(1);
     expect((await glLines(p.payment_no)).map((l) => [l.code, l.debit, l.credit, l.entity]))
-      .toEqual([['1000', 5000, 0, 'mill'], ['1120', 0, 5000, 'mill']]);
+      .toEqual([[glCode.pkr, 5000, 0, 'mill'], ['1120', 0, 5000, 'mill']]);
     expect((await db('service_milling_invoices').where({ id: inv.id }).first()).payment_status).toBe('Partial');
     expect((await db('receivables').where({ id: rcv.id }).first()).status).toBe('Partial');
   });
@@ -287,6 +291,12 @@ d('payment engine convergence (DB-gated)', () => {
     expect(await bal(acc.pkr.id)).toBe(before - 300);
     const bt = await db('bank_transactions').where({ reference: ok.body.data.remittance_no, source: 'statutory_remittance' });
     expect(bt.map((b) => [b.bank_account_id, b.type, Number(b.amount)])).toEqual([[acc.pkr.id, 'debit', 300]]);
-    expect((await glLines(ok.body.data.remittance_no)).map((l) => [l.code, l.debit, l.credit])).toEqual([['2050', 300, 0], ['1000', 0, 300]]);
+    expect((await glLines(ok.body.data.remittance_no)).map((l) => [l.code, l.debit, l.credit])).toEqual([['2050', 300, 0], [glCode.pkr, 0, 300]]);
+
+    // Voiding it mirrors the journal off the same account GL.
+    const del = await request(app).delete(`/api/milling/payroll/statutory-remittances/${ok.body.data.id}`).set(auth('sa'));
+    expect(del.status).toBe(200);
+    const net = (await glLines(ok.body.data.remittance_no)).reduce((m, l) => ({ ...m, [l.code]: (m[l.code] || 0) + l.debit - l.credit }), {});
+    expect(net).toEqual({ 2050: 0, [glCode.pkr]: 0 });
   });
 });

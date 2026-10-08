@@ -556,6 +556,7 @@ const automationService = require('../admin/automation.service');
 const { resolvePaymentAccountId } = require('../../shared/cashAccounts');
 const { assertAccountCurrency } = require('../../shared/accountCurrency');
 const { postAccountMovement } = require('../finance/paymentEngine');
+const { glAccountFor, controlAccount } = require('../../shared/accountGl');
 // Shared payroll logic (also used by the scheduler) — compute + prepare.
 const payrollService = require('./payroll.service');
 const { computePayrollSummary, committedWorkerStatus, preparePayrollRun, nextPrepareDate, computeLeaveBalances } = payrollService;
@@ -1925,8 +1926,7 @@ router.post('/payroll/statutory-remittances', authorize('payroll', 'pay'),
     if (!(amount > 0)) return res.status(400).json({ success: false, message: 'Amount must be greater than zero.' });
     const acc = await db('chart_of_accounts').where('code', code).first();
     if (!acc) return res.status(400).json({ success: false, message: `Unknown liability account ${code}.` });
-    const cash = await db('chart_of_accounts').where('code', '1000').first();
-    if (!cash) return res.status(400).json({ success: false, message: 'Cash & Bank control account (1000) missing.' });
+    if (!(await controlAccount(db))) return res.status(400).json({ success: false, message: 'Cash & Bank control account (1000) missing.' });
     const method = b.pay_method === 'bank' ? 'bank' : 'cash';
     const remitDate = b.remit_date || new Date().toISOString().slice(0, 10);
 
@@ -1953,6 +1953,8 @@ router.post('/payroll/statutory-remittances', authorize('payroll', 'pay'),
       const acctRow = await trx('bank_accounts').where('id', acctId).first();
       if (!acctRow) { const e = new Error('Bank account not found.'); e.statusCode = 400; throw e; }
       assertAccountCurrency(acctRow, 'PKR');
+      // The cash line posts to the paying account's own GL (G-8).
+      const cash = await glAccountFor(trx, acctRow);
       // Collision-safe STR number (M3): MAX trailing-digit + 1, not MAX(id)+1 —
       // the latter regenerates an existing number after a delete (see nextDocNo).
       // A reversed remittance's row is removed but its journals stay (signed-
@@ -2022,6 +2024,7 @@ router.delete('/payroll/statutory-remittances/:id', authorize('payroll', 'pay'),
       await mirrorJournals(trx, {
         refNo: row.remittance_no, refTypes: ['Statutory Remittance'], refType: 'Statutory Remittance Reversal',
         description: `Reversal of statutory remittance ${row.remittance_no}`, userId: req.user?.id || null,
+        cashAccountId: row.bank_account_id || null,
       });
       await trx('mill_statutory_remittances').where('id', row.id).del();
     });

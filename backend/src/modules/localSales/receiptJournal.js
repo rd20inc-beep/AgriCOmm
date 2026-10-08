@@ -2,8 +2,8 @@
  * Local-sale receipt → General Ledger.
  *
  * A confirmed local sale posts Dr 1120 Local AR / Cr 4020 (local_sale_recorded).
- * The money that later settles it has to clear that receivable: Dr 1000 Cash &
- * Bank / Cr 1120 Local AR — the same codes, entity and party stamp the Finance
+ * The money that later settles it has to clear that receivable: Dr the receiving
+ * account's own GL (under 1000 Cash & Bank, G-8) / Cr 1120 Local AR — the same codes, entity and party stamp the Finance
  * receipt path (recordPayment) uses for a receipt against a local-sale
  * receivable. Without it every local receipt moved the bank balance and the
  * sub-ledger but never reached the GL, so 1120 only ever grew and 1000 never saw
@@ -15,6 +15,7 @@
  * the same receipt twice — once from the journal and once from the payments row.
  */
 const accountingService = require('../accounting/accounting.service');
+const { glAccountFor } = require('../../shared/accountGl');
 
 const CASH_CODE = '1000';
 const LOCAL_AR_CODE = '1120';
@@ -54,12 +55,13 @@ function buildLocalReceiptJournal({ cashAcc, arAcc, amount, paymentNo, sale, dat
 // Post the receipt journal inside the caller's transaction. Idempotent per
 // payment: a receipt that already has a journal (e.g. a Finance-path cheque,
 // which journals when it is recorded) is left alone.
-async function postLocalReceiptJournal(trx, { paymentNo, amount, sale, date, userId }) {
+// `bankAccountId`: the account the money landed in — its own GL is debited.
+async function postLocalReceiptJournal(trx, { paymentNo, amount, sale, date, userId, bankAccountId = null }) {
   if (!paymentNo || !((parseFloat(amount) || 0) > 0)) return null;
   const existing = await trx('journal_entries').where({ ref_no: paymentNo }).first('id');
   if (existing) return null;
   const [cashAcc, arAcc] = await Promise.all([
-    trx('chart_of_accounts').where({ code: CASH_CODE }).first(),
+    glAccountFor(trx, bankAccountId),
     trx('chart_of_accounts').where({ code: LOCAL_AR_CODE }).first(),
   ]);
   if (!cashAcc || !arAcc) {

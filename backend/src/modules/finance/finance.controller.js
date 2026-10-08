@@ -22,6 +22,7 @@ const { canSeeCost } = require('../../utils/costVisibility');
 const { assertAccountCurrency } = require('../../shared/accountCurrency');
 const { normalizePaymentMethod } = require('../../shared/constants/paymentMethods');
 const { ledgerFailure, missingAccounts } = require('../../shared/ledgerFailure');
+const { glAccountFor } = require('../../shared/accountGl');
 const {
   applyReceivableDelta, pendingChequeTotal, nextBtNo, postDeltaOf, round2,
   isCheque, hasPaymentJournal, postPaymentJournal, settleDocuments, SOURCES, LOT_SUPPLIER_LINES,
@@ -684,7 +685,7 @@ const financeController = {
             // Dr 1000 / Cr 1120. Idempotent — a receipt already journaled when it
             // was recorded (the Finance path) is left alone.
             if (p.type === 'receipt') {
-              await postLocalReceiptJournal(trx, { paymentNo: p.payment_no, amount, sale: s, date: new Date(), userId: req.user?.id });
+              await postLocalReceiptJournal(trx, { paymentNo: p.payment_no, amount, sale: s, date: new Date(), userId: req.user?.id, bankAccountId: acctId });
             }
           }
         } else if (p.linked_receivable_id || p.service_invoice_id) {
@@ -1429,11 +1430,12 @@ const financeController = {
           const mirrored = await postDeltaOf(trx, {
             refNo: pay.payment_no, refTypes: ownJournalTypes,
             refType: 'Payment Reversal', description: label, userId: req.user?.id, date: today,
+            cashAccountId: pay.bank_account_id || null,
           });
           if (!mirrored && wasCleared && isPayment) {
             // A Purchases-tab payment (journalled under the lot / purchase
             // label): Dr net Cash (+ Dr WHT + Dr Discount) / Cr Payable (gross).
-            const cashAndBank = await trx('chart_of_accounts').where({ code: '1000' }).first();
+            const cashAndBank = await glAccountFor(trx, pay.bank_account_id || null);
             const counterAcc = await trx('chart_of_accounts').where({ code: '2010' }).first();
             if (!cashAndBank || !counterAcc) throw missingAccounts(['1000', '2010'], 'The reversal');
             let partyType = null, partyId = null;
