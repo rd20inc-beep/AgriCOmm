@@ -18,7 +18,7 @@ const batchPackagingService = require('./batchPackaging.service');
 const {
   yieldMode, batchHasOutputLots, checkTransition, releaseBatchSources, commitLotToBatch, TRANSITIONS,
 } = require('./batchLifecycle');
-const { postMillingCompletion, hasPostedCompletion } = require('./millingCompletionJournal');
+const { postMillingCompletion, hasPostedCompletion, sourceLotValuesByAccount, proportionalInputSplit } = require('./millingCompletionJournal');
 
 // Can this inventory lot be fed into a milling/blend batch? Mirrors the
 // frontend NON_MILLABLE_CATEGORIES (src/utils/lotCategory.js): any rice form is
@@ -1795,7 +1795,7 @@ const millingController = {
         // If this batch already capitalized its costs into finished inventory at
         // yield (a milling_completion journal was posted), keep the GL in step with
         // the cost sheet by posting a SIGNED-DELTA journal for the change — same
-        // accounts as milling_completion (DR 1220 Finished / CR 1210 Raw), reversed
+        // accounts as milling_completion (DR 1220 Finished / CR the input's account), reversed
         // for a reduction. Never reverse+repost. Pre-yield changes need no journal
         // (recordYield posts the whole sum). Skipped silently if the chart isn't seeded.
         const delta = newAmt - oldAmt;
@@ -1803,22 +1803,33 @@ const millingController = {
           const posted = await trx('journal_entries')
             .where({ ref_type: 'Milling Batch', ref_no: batch.batch_no, status: 'Posted' }).first();
           if (posted) {
+            const absDelta = Math.round(Math.abs(delta) * 100) / 100;
+            // The counter-account is where the cost came from: 1210 for
+            // processing costs; for the raw-rice cost, the input lots' own
+            // accounts (a blend of finished lots is carried in 1220, by-products
+            // in 1240), split by source-lot value.
+            const parts = category === 'raw_rice'
+              ? proportionalInputSplit(absDelta, await sourceLotValuesByAccount(trx, batch.id))
+              : [{ code: '1210', amount: absDelta }];
             const fin = await trx('chart_of_accounts').where({ code: '1220' }).first();
-            const raw = await trx('chart_of_accounts').where({ code: '1210' }).first();
-            if (fin && raw) {
-              const absDelta = Math.abs(delta);
-              const drAcc = delta > 0 ? fin : raw;
-              const crAcc = delta > 0 ? raw : fin;
+            const accs = await trx('chart_of_accounts').whereIn('code', parts.map((p) => p.code));
+            const byCode = Object.fromEntries(accs.map((a) => [a.code, a]));
+            if (fin && parts.every((p) => byCode[p.code])) {
+              const up = delta > 0;
               const label = `${batch.batch_no} ${category}`;
+              const lines = [
+                { account_id: fin.id, account: fin.name, debit: up ? absDelta : 0, credit: up ? 0 : absDelta, narration: `${up ? 'DR' : 'CR'} ${fin.code} ${fin.name} — cost adj ${label}` },
+                ...parts.map((p) => {
+                  const acc = byCode[p.code];
+                  return { account_id: acc.id, account: acc.name, debit: up ? 0 : p.amount, credit: up ? p.amount : 0, narration: `${up ? 'CR' : 'DR'} ${acc.code} ${acc.name} — cost adj ${label}` };
+                }),
+              ];
               const journal = await accountingService.createJournal(trx, {
                 date: new Date().toISOString().slice(0, 10), entity: 'mill',
                 refType: 'Milling Batch', refNo: batch.batch_no,
                 description: `Cost adjustment Rs ${Math.round(absDelta).toLocaleString()} for ${label}${delta < 0 ? ' (reduced)' : ''}`,
                 currency: 'PKR', fxRate: 1, isAuto: true, userId: req.user?.id || null,
-                lines: [
-                  { account_id: drAcc.id, account: drAcc.name, debit: absDelta, credit: 0, narration: `DR ${drAcc.code} ${drAcc.name} — cost adj ${label}` },
-                  { account_id: crAcc.id, account: crAcc.name, debit: 0, credit: absDelta, narration: `CR ${crAcc.code} ${crAcc.name} — cost adj ${label}` },
-                ],
+                lines,
               });
               if (journal?.id) await accountingService.postJournal(trx, journal.id);
             }
