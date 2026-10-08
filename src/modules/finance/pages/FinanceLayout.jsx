@@ -8,13 +8,27 @@ import { SkeletonPage } from '../../../shared/components/Skeleton';
 import {
   visibleWorkspaces, matchFinanceLocation, withRange, visibleHeaderActions, PERIOD_PRESETS,
 } from '../financeNav';
+import { FinanceDrawersProvider } from '../drawers/FinanceDrawers';
+import { useFinanceDrawers } from '../drawers/drawersContext';
+import { headerActionDrawer } from '../drawers/drawerLogic';
+import FinanceSearch from '../drawers/FinanceSearch';
 
-// Finance shell: one header (actions + period + print), six workspaces, and
-// a row of views for the workspace you are in. Workspaces and views are
-// plain links, so every view has its own URL and Back works. See
-// ../financeNav.js for the map.
+// Finance shell: one header (actions + search + period + print), six
+// workspaces, and a row of views for the workspace you are in. Workspaces and
+// views are plain links, so every view has its own URL and Back works. See
+// ../financeNav.js for the map. The header actions and the search open the
+// Finance drawers in place (../drawers) — no page change.
 
 export default function FinanceLayout({ children }) {
+  return (
+    <FinanceDrawersProvider>
+      <FinanceShell>{children}</FinanceShell>
+    </FinanceDrawersProvider>
+  );
+}
+
+function FinanceShell({ children }) {
+  const drawers = useFinanceDrawers();
   const [params, setParams] = useSearchParams();
   const { hasPermission } = useAuth();
   const location = useLocation();
@@ -58,14 +72,20 @@ export default function FinanceLayout({ children }) {
           <div className="flex flex-wrap items-center gap-2 no-print">
             {actions.length > 0 && (
               <div className="flex items-center gap-1.5" data-testid="finance-actions">
-                {actions.map((a) => (
+                {actions.map((a) => (drawers ? (
+                  <button key={a.key} type="button" data-action={a.key} onClick={() => drawers.open(headerActionDrawer(a.key))}
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg">
+                    <Plus size={12} /> {a.label}
+                  </button>
+                ) : (
                   <Link key={a.key} to={withRange(a.path, rangeKey)} data-action={a.key}
                     className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg">
                     <Plus size={12} /> {a.label}
                   </Link>
-                ))}
+                )))}
               </div>
             )}
+            <FinanceSearch />
             <PeriodControl period={currentView.period} value={rangeKey} onChange={setDateRange} />
             <button onClick={handlePrint}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm">

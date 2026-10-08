@@ -78,7 +78,7 @@ function List({ title, icon: Icon, tone, items, total, onClear, clearing }) {
  * account the cheque cleared through — preselected with the one named when the
  * cheque was recorded, else the only / starred bank account.
  */
-function ClearChequeDialog({ item, accounts: allAccounts, busy, onCancel, onConfirm }) {
+export function ClearChequeDialog({ item, accounts: allAccounts, busy, onCancel, onConfirm }) {
   // A non-PKR account clears only cheques in its own currency.
   const accounts = accountsForCurrency(allAccounts, item?.currency);
   // null = not touched yet → show the default; a choice the user makes wins.

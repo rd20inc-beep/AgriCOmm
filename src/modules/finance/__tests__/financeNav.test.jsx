@@ -24,11 +24,14 @@ vi.mock('../../../context/AuthContext', () => ({ useAuth: () => ({ hasPermission
 vi.mock('../../../api/queries', () => ({ usePendingExportReceipts: () => ({ data: mockPending }) }));
 vi.mock('../../../components/ErrorBoundary', () => ({ RouteErrorBoundary: ({ children }) => children }));
 vi.mock('../../../shared/components/Skeleton', () => ({ SkeletonPage: () => null }));
+// The header search reads /api/finance/search; the drawer host renders nothing until opened.
+vi.mock('../drawers/FinanceSearch', () => ({ default: () => <div data-testid="finance-search" /> }));
 const { default: FinanceLayout } = await import('../pages/FinanceLayout');
 
 const renderAt = (url) => renderToStaticMarkup(
   <MemoryRouter initialEntries={[url]}><FinanceLayout><div>page</div></FinanceLayout></MemoryRouter>,
 );
+const buttonsOf = (html, attr) => [...html.matchAll(new RegExp(`<button [^>]*?${attr}="([^"]+)"`, 'g'))].map((m) => m[1]);
 const hrefsOf = (html, attr) =>
   [...html.matchAll(new RegExp(`<a [^>]*?href="([^"]*)"[^>]*?${attr}="([^"]+)"|<a [^>]*?${attr}="([^"]+)"[^>]*?href="([^"]*)"`, 'g'))]
     .map((m) => ({ key: m[2] || m[3], href: (m[1] ?? m[4]).replace(/&amp;/g, '&') }));
@@ -99,11 +102,12 @@ describe('six workspaces', () => {
 });
 
 describe('period travels with every link', () => {
-  it('workspace, view and header-action links carry ?range=', () => {
+  it('workspace and view links carry ?range=; header actions open drawers in place (no link to lose it)', () => {
     const html = renderAt('/finance/money-out/expenses?range=month');
     for (const { href } of hrefsOf(html, 'data-workspace')) expect(href).toContain('range=month');
     for (const { key, href } of hrefsOf(html, 'data-view')) expect([key, href.includes('range=month')]).toEqual([key, true]);
-    for (const { href } of hrefsOf(html, 'data-action')) expect(href).toContain('range=month');
+    expect(hrefsOf(html, 'data-action')).toEqual([]);
+    expect(buttonsOf(html, 'data-action')).toEqual(['receive', 'pay', 'transfer', 'expense']);
   });
 
   it('no range → bare paths', () => {
@@ -206,8 +210,11 @@ describe('header actions', () => {
     expect(keys(allow('finance.view', 'finance.allocate_cost'))).toEqual(['expense']);
   });
 
-  it('renders the permitted actions in the header', () => {
+  it('renders the permitted actions in the header as drawer buttons, next to the search', () => {
     const html = renderAt('/finance');
-    expect(hrefsOf(html, 'data-action').map((a) => a.key)).toEqual(['receive', 'pay', 'transfer', 'expense']);
+    expect(buttonsOf(html, 'data-action')).toEqual(['receive', 'pay', 'transfer', 'expense']);
+    expect(html).toContain('data-testid="finance-search"');
+    mockPerms = allow('finance.view', 'milling.edit');
+    expect(buttonsOf(renderAt('/finance'), 'data-action')).toEqual(['receive', 'pay', 'transfer']);
   });
 });
