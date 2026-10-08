@@ -50,6 +50,18 @@ export default function SlideDrawer({ open, onClose, title, subtitle, icon: Icon
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
 
+  // While any drawer is open, <body data-drawers="n"> lets floating widgets
+  // (the chat bubble) step aside so they never cover the drawer's footer buttons.
+  useEffect(() => {
+    if (!open || typeof document === 'undefined') return undefined;
+    const body = document.body;
+    body.dataset.drawers = String((parseInt(body.dataset.drawers, 10) || 0) + 1);
+    return () => {
+      const n = (parseInt(body.dataset.drawers, 10) || 1) - 1;
+      if (n > 0) body.dataset.drawers = String(n); else delete body.dataset.drawers;
+    };
+  }, [open]);
+
   useEffect(() => {
     if (!open) return undefined;
     const opener = document.activeElement;

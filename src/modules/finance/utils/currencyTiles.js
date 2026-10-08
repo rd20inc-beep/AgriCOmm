@@ -1,7 +1,7 @@
 // Finance Overview tile text, one figure per currency. USD and PKR are shown
 // side by side and never added together (owner decision: no consolidated
 // figure across currencies).
-import { fmtPKR, fmtUSD } from '../../../shared/utils/format';
+import { fmtPKR, fmtUSD, fmtMoney } from '../../../shared/utils/format';
 
 // Receivables tile text — one figure per currency (USD and PKR side by side,
 // never summed). Falls back to the legacy single-currency fields.
@@ -40,4 +40,17 @@ export function collectionTile(summary = {}) {
     hint: below.length ? `Below 80%${order.length > 1 ? ` (${below.join(', ')})` : ''}` : 'On target',
     bad: below.length > 0,
   };
+}
+
+// Upcoming cheques & dues mix USD receivables with PKR ones: show each
+// currency's own total ("Rs 821,395 · $121,621.10"), never one converted figure.
+export function nativeTotals(items) {
+  const by = {};
+  for (const x of items || []) {
+    const cur = (x.currency || 'PKR').toUpperCase();
+    by[cur] = (by[cur] || 0) + (parseFloat(x.amount) || 0);
+  }
+  const parts = Object.keys(by).sort((a, b) => (a === 'PKR' ? -1 : b === 'PKR' ? 1 : a.localeCompare(b)))
+    .map((cur) => fmtMoney(by[cur], cur, { decimals: 0 }));
+  return parts.length ? parts.join(' · ') : fmtPKR(0);
 }
