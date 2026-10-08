@@ -14,7 +14,8 @@ vi.mock('../../../api/queries', () => ({
   useTrialBalance: vi.fn(), useProfitLoss: vi.fn(), useBalanceSheet: vi.fn(),
 }));
 const queries = await import('../../../api/queries');
-const { default: TrialBalance, TrialBalanceView, groupCashRows } = await import('../pages/TrialBalance');
+const { default: TrialBalance, TrialBalanceView } = await import('../pages/TrialBalance');
+const { groupCashRows } = await import('../utils/ledgerStructure');
 const { default: GlProfitLoss, ProfitLossView } = await import('../pages/GlProfitLoss');
 const { default: BalanceSheet, BalanceSheetView } = await import('../pages/BalanceSheet');
 
