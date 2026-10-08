@@ -20,11 +20,8 @@ export function totalsByCurrency(rows = [], key = 'outstanding', fallback = 'PKR
   return out;
 }
 
-export const btnPrimary = 'inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50';
-
-export const btnSecondary = 'inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-50';
-
-export const btnDanger = 'inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-red-700 bg-white border border-red-200 rounded-lg hover:bg-red-50 disabled:opacity-50';
+// Button styles are the Finance-wide ones (../utils/uiClasses.js).
+export { btnPrimary, btnSecondary, btnDanger } from '../utils/uiClasses';
 
 /** Uncleared cheques that name this account (Due Dates' list, filtered). */
 export function chequesForAccount(upcoming, accountId) {
