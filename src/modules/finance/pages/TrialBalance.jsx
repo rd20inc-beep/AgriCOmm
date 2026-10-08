@@ -9,6 +9,31 @@ import {
 } from '../components/GlStatementParts';
 import { th, tdMoney } from '../utils/uiClasses';
 
+/**
+ * Every cash / bank account has its own GL account under 1000 Cash & Bank
+ * (G-8). Show them as one group: a Cash & Bank subtotal row, then each
+ * account indented (1000 itself, if it still carries lines, as "unassigned").
+ * Pure; exported for tests.
+ */
+export function groupCashRows(accounts) {
+  const isCash = (a) => a.parentCode === '1000' || a.code === '1000';
+  const cash = accounts.filter(isCash);
+  if (!cash.some((a) => a.parentCode === '1000')) return accounts.map((a) => ({ kind: 'row', a }));
+  const sum = (k) => cash.reduce((t, a) => t + (Number(a[k]) || 0), 0);
+  const group = { kind: 'group', code: '1000', name: 'Cash & Bank', debitTotal: sum('debitTotal'), creditTotal: sum('creditTotal'), balance: sum('balance') };
+  const out = [];
+  let placed = false;
+  for (const a of accounts) {
+    if (!isCash(a)) { out.push({ kind: 'row', a }); continue; }
+    if (!placed) {
+      out.push(group);
+      for (const c of cash) out.push({ kind: 'row', a: c.code === '1000' ? { ...c, name: `${c.name} (unassigned)` } : c, child: true });
+      placed = true;
+    }
+  }
+  return out;
+}
+
 export default function TrialBalance() {
   const { queryParams: range } = useFinanceDateRange();
   const { entity, setEntity, apiEntity } = useGlEntity();
@@ -43,12 +68,28 @@ export function TrialBalanceView({ data, isLoading, error, onRetry, entity, onEn
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
-              {accounts.map((a) => {
+              {groupCashRows(accounts).map((r) => {
+                if (r.kind === 'group') {
+                  const gb = Number(r.balance) || 0;
+                  return (
+                    <tr key="group-1000" className="bg-gray-50 font-semibold" data-testid="tb-cash-group">
+                      <td data-label="Code" className="px-4 py-2 text-gray-500 tabular-nums">{r.code}</td>
+                      <td data-label="Account" className="px-4 py-2 text-gray-900">{r.name}</td>
+                      <td data-label="Type" className="mob-hide px-4 py-2 text-gray-500">Asset</td>
+                      <td data-label="Debit" className={`px-4 py-2 ${tdMoney}`}>{pkr(r.debitTotal)}</td>
+                      <td data-label="Credit" className={`px-4 py-2 ${tdMoney}`}>{pkr(r.creditTotal)}</td>
+                      <td data-label="Balance" className={`px-4 py-2 ${tdMoney} text-gray-900`}>
+                        {pkr(Math.abs(gb))} <span className="text-xs text-gray-500">{gb >= 0 ? 'Dr' : 'Cr'}</span>
+                      </td>
+                    </tr>
+                  );
+                }
+                const { a } = r;
                 const bal = Number(a.balance) || 0;
                 return (
                   <tr key={a.accountId || a.code}>
-                    <td data-label="Code" className="px-4 py-2 text-gray-500 tabular-nums">{a.code}</td>
-                    <td data-label="Account" className="px-4 py-2 text-gray-800">{a.name}</td>
+                    <td data-label="Code" className={`px-4 py-2 text-gray-500 tabular-nums${r.child ? ' md:pl-8' : ''}`}>{a.code}</td>
+                    <td data-label="Account" className={`px-4 py-2 text-gray-800${r.child ? ' md:pl-8' : ''}`}>{a.name}</td>
                     <td data-label="Type" className="mob-hide px-4 py-2 text-gray-500">{a.type}</td>
                     <td data-label="Debit" className={`px-4 py-2 ${tdMoney}`}>{pkr(a.debitTotal)}</td>
                     <td data-label="Credit" className={`px-4 py-2 ${tdMoney}`}>{pkr(a.creditTotal)}</td>
