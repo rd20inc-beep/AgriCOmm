@@ -21,7 +21,8 @@ import RecentActivity from './dashboard/RecentActivity';
 import PendingApprovalsCard from '../components/PendingApprovalsCard';
 import { useOwnerAuth } from '../../../context/OwnerAuthContext';
 import { canSeeCost, canSeeProfit } from '../../../hooks/useCanSeeCost';
-import { useProfitHeadline } from '../../../api/queries';
+import { useProfitHeadline, useCollectionRate } from '../../../api/queries';
+import { collectionTile } from '../../finance/utils/currencyTiles';
 import { isBalanceDue } from '../../exportOrders/components/constants';
 import StatusBadge from '../../../shared/components/StatusBadge';
 import useConfirm from '../../../hooks/useConfirm';
@@ -74,6 +75,10 @@ export default function Dashboard() {
   // out and counted. All time — the tile says so.
   const canProfit = canSeeProfit(hasPermission);
   const { data: profitHeadline = {}, isLoading: profitLoading } = useProfitHeadline({}, { enabled: canProfit });
+  // C6: received ÷ amounts DUE against the configurable target (server), not
+  // received ÷ contract value against a fixed 80%.
+  const { data: collectionData } = useCollectionRate({ enabled: showMoney });
+  const collection = collectionTile({ collection: collectionData || { byCurrency: {}, targetPct: 95 } });
   const bookedExport = profitHeadline.export || {};
   const bookedHint = [
     (bookedExport.estimatedCount || 0) > 0 ? `${bookedExport.estimatedCount} estimated` : null,
@@ -160,9 +165,6 @@ export default function Dashboard() {
     },
     { received: 0, outstanding: 0 }
   );
-  const collectionRate = (moneyFlow.received + moneyFlow.outstanding) > 0
-    ? Math.round((moneyFlow.received / (moneyFlow.received + moneyFlow.outstanding)) * 100)
-    : 0;
 
   // ─── Yield distribution ───
   const yieldDistribution = useMemo(() => {
@@ -354,9 +356,9 @@ export default function Dashboard() {
           tone="emerald"
           label="Money Received"
           primary={fmt(moneyFlow.received)}
-          secondary={`${collectionRate}% of expected`}
-          hint={collectionRate >= 80 ? 'On target' : 'Below 80%'}
-          hintBad={collectionRate < 80}
+          secondary={`Collection ${collection.primary} of amounts due`}
+          hint={collection.hint}
+          hintBad={collection.bad}
           onClick={canFinance ? () => navigate('/finance/money-in') : undefined}
         />
         <KpiTile

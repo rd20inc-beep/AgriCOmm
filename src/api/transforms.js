@@ -194,6 +194,8 @@ export function transformOrder(dbOrder) {
     createdAt: dbOrder.created_at,
     notes: dbOrder.notes,
     paymentTerms: dbOrder.payment_terms || '',
+    // Days after sailing (BL / departure) the balance falls due — C6.
+    balanceTermDays: dbOrder.balance_term_days == null ? null : Number(dbOrder.balance_term_days),
     // Bag specification
     bagType: dbOrder.bag_type || '',
     bagQuality: dbOrder.bag_quality || '',
