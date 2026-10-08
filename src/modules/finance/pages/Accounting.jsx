@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { FileText, ChevronRight, ChevronDown, BookOpen, Scale, CheckCircle2, AlertTriangle, Layers, Printer, Search } from 'lucide-react';
 import { FinanceKPI } from '../../../components/finance';
 import { useJournalEntries } from '../../../api/queries';
+import ListCapHint from '../../../shared/components/ListCapHint';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { useApp } from '../../../context/AppContext';
 import StatusBadge from '../../../shared/components/StatusBadge';
@@ -232,6 +233,7 @@ export default function Accounting() {
           </div>
         </div>
 
+      <ListCapHint rows={journalData} />
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         {isLoading ? (
           <div className="p-10 text-center text-sm text-gray-400">Loading journal entries…</div>
