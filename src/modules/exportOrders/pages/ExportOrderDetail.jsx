@@ -711,7 +711,7 @@ export default function ExportOrderDetail() {
         <div className="bg-violet-50 border border-violet-300 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <p className="text-sm font-semibold text-violet-800">Prepare Pre-Shipment Documents</p>
-            <p className="text-xs text-violet-600">Approve the phyto, BL draft, commercial invoice, packing list, certificate of origin and fumigation certificate. With the advance confirmed the order is then Ready to Ship; the balance and the BL Final are collected after sailing.</p>
+            <p className="text-xs text-violet-600">Approve the phyto, BL draft, commercial invoice, packing list and fumigation certificate. With the advance confirmed the order is then Ready to Ship; the balance, the BL Final and the certificate of origin are collected after sailing.</p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <button onClick={() => setActiveTab('documents')} className="px-4 py-2 bg-violet-600 text-white rounded-lg text-sm font-medium hover:bg-violet-700">Go to Documents</button>
@@ -733,7 +733,7 @@ export default function ExportOrderDetail() {
           <div>
             <p className="text-sm font-semibold text-amber-800">Balance due — record when the buyer pays</p>
             <p className="text-xs text-amber-700">Expected: {formatCurrency(order.balanceExpected)} | Received: {formatCurrency(order.balanceReceived)} | Outstanding: {formatCurrency(order.balanceExpected - order.balanceReceived)}</p>
-            <p className="text-xs text-amber-700 mt-1">The order shipped on the advance. It closes once the balance is received and the BL Final is approved.</p>
+            <p className="text-xs text-amber-700 mt-1">The order shipped on the advance. It closes once the balance is received and the BL Final and certificate of origin are approved.</p>
           </div>
           <button onClick={openBalanceModal} className="shrink-0 px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700">Record Balance</button>
         </div>
@@ -757,7 +757,7 @@ export default function ExportOrderDetail() {
         <div className="bg-teal-50 border border-teal-300 rounded-xl p-4 flex items-center justify-between">
           <div>
             <p className="text-sm font-semibold text-teal-800">Shipment Arrived</p>
-            <p className="text-xs text-teal-600">Balance received. Close the order once the BL Final is approved.</p>
+            <p className="text-xs text-teal-600">Balance received. Close the order once the BL Final and certificate of origin are approved.</p>
           </div>
           <button onClick={handleCloseOrder} className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700">Close Order</button>
         </div>

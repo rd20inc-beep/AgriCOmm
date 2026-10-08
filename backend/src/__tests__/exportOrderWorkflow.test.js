@@ -416,7 +416,7 @@ describe('Export order workflow', () => {
     );
   });
 
-  it('ships on the advance, then collects the balance and BL Final before closing', async () => {
+  it('ships on the advance, then collects the balance, BL Final and CoO before closing', async () => {
     const { order } = await createAwaitingAdvanceOrder();
 
     let req = makeReq({
@@ -445,9 +445,10 @@ describe('Export order workflow', () => {
     persistedOrder.status = 'Docs In Preparation';
     persistedOrder.current_step = 6;
 
-    // Ship on the advance: the six PRE-shipment documents take the order to
-    // Ready to Ship; the BL Final only exists once the vessel has sailed.
-    const preShipmentDocs = ['phyto', 'bl_draft', 'commercial_invoice', 'packing_list', 'coo', 'fumigation'];
+    // Ship on the advance: the five PRE-shipment documents take the order to
+    // Ready to Ship; the BL Final and the Certificate of Origin only exist once
+    // the vessel has sailed.
+    const preShipmentDocs = ['phyto', 'bl_draft', 'commercial_invoice', 'packing_list', 'fumigation'];
     for (const docType of preShipmentDocs) {
       req = makeReq({
         params: { id: String(order.id) },
@@ -535,7 +536,7 @@ describe('Export order workflow', () => {
       })
     );
 
-    // ... and for the post-shipment BL Final.
+    // ... and for the post-shipment BL Final and Certificate of Origin.
     req = makeReq({
       params: { id: String(order.id) },
       body: { status: 'Closed', notes: 'Settled and closed' },
@@ -544,8 +545,25 @@ describe('Export order workflow', () => {
     await controller.updateStatus(req, res);
     expect(res.statusCode).toBe(400);
     expect(res.body.message).toMatch(/BL Final/);
+    expect(res.body.message).toMatch(/Certificate of Origin/);
 
     req = makeReq({ params: { id: String(order.id) }, body: { doc_type: 'bl_final' } });
+    res = makeRes();
+    await controller.approveDocument(req, res);
+    expect(res.statusCode).toBe(200);
+
+    // The BL Final alone is not enough: the CoO still holds Close.
+    req = makeReq({
+      params: { id: String(order.id) },
+      body: { status: 'Closed', notes: 'Settled and closed' },
+    });
+    res = makeRes();
+    await controller.updateStatus(req, res);
+    expect(res.statusCode).toBe(400);
+    expect(res.body.message).toMatch(/Cannot close: .*Certificate of Origin/);
+    expect(res.body.message).not.toMatch(/BL Final/);
+
+    req = makeReq({ params: { id: String(order.id) }, body: { doc_type: 'coo' } });
     res = makeRes();
     await controller.approveDocument(req, res);
     expect(res.statusCode).toBe(200);

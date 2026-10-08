@@ -27,7 +27,7 @@ const STATUS_TRANSITIONS = {
   'Ready to Ship': ['Shipped'],
   'Shipped': ['Arrived'],
   // Close requires the balance fully received and the post-shipment documents
-  // (BL Final) approved; see closeProblems.
+  // (BL Final, Certificate of Origin) approved; see closeProblems.
   'Arrived': ['Closed'],
   'Closed': [],
   'Cancelled': [],
@@ -244,7 +244,7 @@ async function readyToShipProblems(conn, order, toStatus = 'Shipped') {
 }
 
 // Close: the balance fully received and every required document, including the
-// post-shipment ones (BL Final), approved.
+// post-shipment ones (BL Final, Certificate of Origin), approved.
 async function closeProblems(conn, order) {
   const problems = [];
   const expected = settledAmount(order.balance_expected);
@@ -498,9 +498,11 @@ const DOC_TYPE_ALIASES = {
   'fumigation': ['fumigation', 'Fumigation Certificate'],
 };
 const REQUIRED_DOCS = Object.keys(DOC_TYPE_ALIASES);
-// Issued by the carrier only once the vessel has sailed, so it can't hold up
-// the shipment it evidences. Still required, for Close.
-const POST_SHIPMENT_DOCS = ['blFinal'];
+// Issued only once the vessel has sailed, so they can't hold up the shipment
+// they evidence: the BL Final comes from the carrier, and the Certificate of
+// Origin is endorsed by the chamber against the shipped BL. Both are still
+// required, for Close.
+const POST_SHIPMENT_DOCS = ['blFinal', 'coo'];
 const PRE_SHIPMENT_DOCS = REQUIRED_DOCS.filter((k) => !POST_SHIPMENT_DOCS.includes(k));
 const POST_SHIPMENT_DOC_TYPES = new Set(POST_SHIPMENT_DOCS.flatMap((k) => DOC_TYPE_ALIASES[k]));
 const DOC_APPROVED_STATUSES = new Set(['Approved', 'Final']);
