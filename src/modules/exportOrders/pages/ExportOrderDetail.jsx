@@ -21,7 +21,7 @@ import { realtimeRepo } from '../../../data/repositories/realtime';
 import api from '../../../api/client';
 import { queryKeys } from '../../../api/queryClient';
 import {
-  useExportOrder, useConfirmAdvance, useConfirmBalance, useRecordExportReceipt,
+  useExportOrder, useConfirmAdvance, useConfirmBalance,
   useUpdateOrderStatus, useAddOrderCost, useUpdateShipment, useCancelOrder,
   useStartDocs, useUploadDocument, useApproveDocument,
 } from '../../../api/queries';
@@ -29,6 +29,8 @@ import { useCreateMillingBatch } from '../../../api/queries';
 import { exportOrdersApi } from '../api/services';
 import { duplicateStateFromOrder } from '../utils/createOrderForm';
 import useConfirm from '../../../hooks/useConfirm';
+import PaymentFormDrawer from '../../../components/payments/PaymentFormDrawer';
+import { FinanceDrawersProvider } from '../../finance/drawers/FinanceDrawers';
 import { fmtPKR, fmtUSD, fmtNum, fmtMoney } from '../../../shared/utils/format';
 import {
   OrderHeader,
@@ -42,14 +44,11 @@ import {
   PackingTab,
   PrintedBagsTab,
   TimelineTab,
-  AdvancePaymentModal,
-  BalancePaymentModal,
   MillingDemandModal,
   ShipmentModal,
   ExpenseModal,
   InvoicePreviewModal,
   getVisibleTabs,
-  today,
   documentLabels,
 } from '../components';
 
@@ -68,7 +67,6 @@ export default function ExportOrderDetail() {
   // Mutations
   const confirmAdvanceMut = useConfirmAdvance();
   const confirmBalanceMut = useConfirmBalance();
-  const recordReceiptMut = useRecordExportReceipt();
   const updateStatusMut = useUpdateOrderStatus();
   const cancelOrderMut = useCancelOrder();
   const addCostMut = useAddOrderCost();
@@ -84,8 +82,6 @@ export default function ExportOrderDetail() {
   const [showInvoicePreview, setShowInvoicePreview] = useState(false);
 
   // Modal visibility states
-  const [showAdvanceModal, setShowAdvanceModal] = useState(false);
-  const [showBalanceModal, setShowBalanceModal] = useState(false);
   const [showMillingModal, setShowMillingModal] = useState(false);
   const [showShipmentModal, setShowShipmentModal] = useState(false);
   const [showExpenseModal, setShowExpenseModal] = useState(false);
@@ -108,23 +104,10 @@ export default function ExportOrderDetail() {
     setSearchParams(next, { replace: true });
   }, [searchParams, setSearchParams, requestProformaEmail]);
 
-  // Advance Payment form state
-  const [advanceAmount, setAdvanceAmount] = useState('');
-  const [advanceDate, setAdvanceDate] = useState('');
-  const [advanceMethod, setAdvanceMethod] = useState('bank_transfer');
-  const [advanceBankAccountId, setAdvanceBankAccountId] = useState('');
-  const [advanceBankRef, setAdvanceBankRef] = useState('');
-  const [advanceNotes, setAdvanceNotes] = useState('');
-  const [advanceFxRate, setAdvanceFxRate] = useState('');
-
-  // Balance Payment form state
-  const [balanceAmount, setBalanceAmount] = useState('');
-  const [balanceDate, setBalanceDate] = useState('');
-  const [balanceMethod, setBalanceMethod] = useState('bank_transfer');
-  const [balanceBankAccountId, setBalanceBankAccountId] = useState('');
-  const [balanceBankRef, setBalanceBankRef] = useState('');
-  const [balanceNotes, setBalanceNotes] = useState('');
-  const [balanceFxRate, setBalanceFxRate] = useState('');
+  // Recording an advance / balance: the shared Payment form (variant
+  // receive_export → POST /export-orders/:id/record-receipt), a PENDING
+  // receipt Finance confirms. 'advance' | 'balance' | null.
+  const [receiptKind, setReceiptKind] = useState(null);
 
   // Milling Demand form state
   const [millingRawQty, setMillingRawQty] = useState('');
@@ -271,30 +254,8 @@ export default function ExportOrderDetail() {
       : [],
   });
 
-  const openAdvanceModal = () => {
-    setAdvanceAmount(Math.max(0, (order.advanceExpected || 0) - (order.advanceReceived || 0)));
-    setAdvanceDate(today());
-    setAdvanceMethod('bank_transfer');
-    // #6 — preselect the order's bank account (still changeable per-payment).
-    setAdvanceBankAccountId(order.bankAccountId ? String(order.bankAccountId) : '');
-    setAdvanceBankRef('');
-    setAdvanceNotes('');
-    // Pre-fill FX rate from the order's booked rate so the user just
-    // tweaks if the bank applied something different.
-    setAdvanceFxRate(order?.bookedFxRate ? String(order.bookedFxRate) : '');
-    setShowAdvanceModal(true);
-  };
-
-  const openBalanceModal = () => {
-    setBalanceAmount(Math.max(0, (order.balanceExpected || 0) - (order.balanceReceived || 0)));
-    setBalanceDate(today());
-    setBalanceMethod('bank_transfer');
-    // #6 — preselect the order's bank account (still changeable per-payment).
-    setBalanceBankAccountId(order.bankAccountId ? String(order.bankAccountId) : '');
-    setBalanceBankRef('');
-    setBalanceNotes('');
-    setShowBalanceModal(true);
-  };
+  const openAdvanceModal = () => setReceiptKind('advance');
+  const openBalanceModal = () => setReceiptKind('balance');
 
   const openMillingModal = () => {
     // The modal defaults raw qty to the SHORTFALL (order − already reserved); this
@@ -368,62 +329,6 @@ export default function ExportOrderDetail() {
   // --- Handlers ---
 
   const orderId = order?.dbId || order?.id;
-
-  // Item 14: recording an advance/balance no longer posts — it submits a PENDING
-  // receipt for Finance to verify + set the actual FX rate + confirm.
-  const handleConfirmAdvance = async () => {
-    const amount = parseFloat(advanceAmount) || 0;
-    if (!amount || amount <= 0) {
-      addToast('Please enter a valid amount', 'error');
-      return;
-    }
-    setShowAdvanceModal(false);
-    try {
-      await recordReceiptMut.mutateAsync({
-        id: orderId,
-        data: {
-          kind: 'advance',
-          amount,
-          fx_rate: parseFloat(advanceFxRate) || null, // estimate; Finance sets the real one
-          payment_date: advanceDate,
-          payment_method: advanceMethod,
-          bank_account_id: advanceBankAccountId || null,
-          notes: advanceNotes,
-        },
-      });
-      addToast(`Advance of ${formatCurrency(amount)} submitted — pending Finance confirmation`);
-      invalidateFinance();
-    } catch (err) {
-      addToast(err?.data?.message || err?.message || 'Failed to submit advance', 'error');
-    }
-  };
-
-  const handleConfirmBalance = async () => {
-    const amount = parseFloat(balanceAmount) || 0;
-    if (!amount || amount <= 0) {
-      addToast('Please enter a valid amount', 'error');
-      return;
-    }
-    setShowBalanceModal(false);
-    try {
-      await recordReceiptMut.mutateAsync({
-        id: orderId,
-        data: {
-          kind: 'balance',
-          amount,
-          fx_rate: parseFloat(balanceFxRate) || null,
-          payment_date: balanceDate,
-          payment_method: balanceMethod,
-          bank_account_id: balanceBankAccountId || null,
-          notes: balanceNotes,
-        },
-      });
-      addToast(`Balance of ${formatCurrency(amount)} submitted — pending Finance confirmation`);
-      invalidateFinance();
-    } catch (err) {
-      addToast(err?.data?.message || err?.message || 'Failed to submit balance', 'error');
-    }
-  };
 
   const handleStartDocsPreparation = async () => {
     try {
@@ -927,6 +832,9 @@ export default function ExportOrderDetail() {
       <div>
         {activeTab === 'overview' && <OverviewTab order={order} formatCurrency={formatCurrency} formatPKR={formatPKR} totalCosts={totalCosts} grossProfit={grossProfit} marginPct={marginPct} exportCostCategories={exportCostCategories} />}
         {activeTab === 'financials' && (
+          // The receipts list opens the Finance drawers; idempotent, so it
+          // shares the app shell's stack when there is one.
+          <FinanceDrawersProvider>
           <FinancialsTab
             order={order}
             formatCurrency={formatCurrency}
@@ -937,12 +845,12 @@ export default function ExportOrderDetail() {
             onConfirmAdvance={openAdvanceModal}
             onRequestBalance={openBalanceModal}
             onAddExpense={openExpenseModal}
-            onAddReceivable={() => addToast('Receivable recorded')}
             canConfirmAdvance={canConfirmAdvance}
             canRequestBalance={canRequestBalance}
             exportCostCategories={exportCostCategories}
             addToast={addToast}
           />
+          </FinanceDrawersProvider>
         )}
         {activeTab === 'procurement' && (
           <ProcurementTab
@@ -983,53 +891,27 @@ export default function ExportOrderDetail() {
 
       {/* ====== MODALS ====== */}
 
-      <AdvancePaymentModal
-        isOpen={showAdvanceModal}
-        onClose={() => setShowAdvanceModal(false)}
-        order={order}
-        formatCurrency={formatCurrency}
-        advanceAmount={advanceAmount}
-        setAdvanceAmount={setAdvanceAmount}
-        advanceDate={advanceDate}
-        setAdvanceDate={setAdvanceDate}
-        advanceMethod={advanceMethod}
-        setAdvanceMethod={setAdvanceMethod}
-        advanceBankAccountId={advanceBankAccountId}
-        setAdvanceBankAccountId={setAdvanceBankAccountId}
-        advanceBankRef={advanceBankRef}
-        setAdvanceBankRef={setAdvanceBankRef}
-        advanceFxRate={advanceFxRate}
-        setAdvanceFxRate={setAdvanceFxRate}
-        advanceNotes={advanceNotes}
-        setAdvanceNotes={setAdvanceNotes}
-        bankAccountsList={bankAccountsList}
-        onConfirm={handleConfirmAdvance}
-        pending={recordReceiptMut.isPending}
-      />
-
-      <BalancePaymentModal
-        isOpen={showBalanceModal}
-        onClose={() => setShowBalanceModal(false)}
-        order={order}
-        formatCurrency={formatCurrency}
-        balanceAmount={balanceAmount}
-        setBalanceAmount={setBalanceAmount}
-        balanceDate={balanceDate}
-        setBalanceDate={setBalanceDate}
-        balanceMethod={balanceMethod}
-        setBalanceMethod={setBalanceMethod}
-        balanceBankAccountId={balanceBankAccountId}
-        setBalanceBankAccountId={setBalanceBankAccountId}
-        balanceBankRef={balanceBankRef}
-        setBalanceBankRef={setBalanceBankRef}
-        balanceNotes={balanceNotes}
-        setBalanceNotes={setBalanceNotes}
-        balanceFxRate={balanceFxRate}
-        setBalanceFxRate={setBalanceFxRate}
-        bankAccountsList={bankAccountsList}
-        onConfirm={handleConfirmBalance}
-        pending={recordReceiptMut.isPending}
-      />
+      {receiptKind && (
+        <PaymentFormDrawer
+          variant="receive_export"
+          ctx={{
+            orderId,
+            kind: receiptKind,
+            currency: order.currency || 'USD',
+            outstanding: Math.max(0, receiptKind === 'advance'
+              ? (order.advanceExpected || 0) - (order.advanceReceived || 0)
+              : (order.balanceExpected || 0) - (order.balanceReceived || 0)),
+            // #6 — the order's bank account and booked rate, still changeable.
+            bankAccountId: order.bankAccountId || null,
+            fxRate: order.bookedFxRate || null,
+            party: { type: 'customer', id: order.customerId, name: order.customerName },
+            ref: `${order.id} · ${receiptKind === 'advance' ? 'Advance' : 'Balance'}`,
+            notes: `${receiptKind === 'advance' ? 'Advance' : 'Balance'} payment for ${order.id}`,
+          }}
+          onClose={() => setReceiptKind(null)}
+          onDone={() => { invalidateOrder(); invalidateFinance(); }}
+        />
+      )}
 
       <MillingDemandModal
         isOpen={showMillingModal}

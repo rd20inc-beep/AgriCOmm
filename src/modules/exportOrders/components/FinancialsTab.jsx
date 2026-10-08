@@ -2,8 +2,9 @@ import React from 'react';
 import { DollarSign, Plus, Factory } from 'lucide-react';
 import { fmtKg } from '../../../shared/utils/format';
 import DebitNotesPanel from './DebitNotesPanel';
+import OrderReceipts from '../../finance/drawers/OrderReceipts';
 
-export default function FinancialsTab({ order, formatCurrency, formatPKR, totalCosts, grossProfit, marginPct, onConfirmAdvance, onRequestBalance, onAddExpense, onAddReceivable, canConfirmAdvance, canRequestBalance, exportCostCategories, addToast }) {
+export default function FinancialsTab({ order, formatCurrency, formatPKR, totalCosts, grossProfit, marginPct, onConfirmAdvance, onRequestBalance, onAddExpense, canConfirmAdvance, canRequestBalance, exportCostCategories, addToast }) {
   const formatCost = formatPKR || formatCurrency;
   const totalReceivables = order.advanceExpected + order.balanceExpected;
   const totalReceived = order.advanceReceived + order.balanceReceived;
@@ -171,6 +172,9 @@ export default function FinancialsTab({ order, formatCurrency, formatPKR, totalC
         </div>
       )}
 
+      {/* Receipts — each opens the Transaction drawer */}
+      <OrderReceipts orderDbId={order.dbId || order.id} />
+
       {/* Action Buttons */}
       <div className="flex items-center gap-3">
         <button
@@ -195,13 +199,6 @@ export default function FinancialsTab({ order, formatCurrency, formatPKR, totalC
         >
           <Plus className="w-4 h-4" />
           Add Expense
-        </button>
-        <button
-          onClick={onAddReceivable}
-          className="inline-flex items-center gap-2 px-4 py-2.5 border border-emerald-300 rounded-lg text-sm font-medium text-emerald-700 bg-white hover:bg-emerald-50 transition-colors"
-        >
-          <Plus className="w-4 h-4" />
-          Add Receivable
         </button>
       </div>
     </div>
