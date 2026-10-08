@@ -6,9 +6,9 @@ import { AlertCircle, ChevronDown, Inbox, RefreshCw } from 'lucide-react';
 import { card, cardPad, sectionTitle, btnSecondary } from '../utils/uiClasses';
 
 /** A titled card. `action` sits at the right of the title (a link or one button). */
-export function Section({ title, icon: Icon, count, action, children, flush = false, className = '', testId, as: Tag = 'section' }) {
+export function Section({ title, icon: Icon, count, action, children, flush = false, className = '', testId }) {
   return (
-    <Tag className={`${card} ${flush ? 'overflow-hidden' : ''} ${className}`} data-testid={testId}>
+    <section className={`${card} ${flush ? 'overflow-hidden' : ''} ${className}`} data-testid={testId}>
       {(title || action) && (
         <div className={`flex flex-wrap items-center justify-between gap-2 ${flush ? 'px-4 sm:px-5 py-3 border-b border-gray-100' : 'px-4 sm:px-5 pt-4 pb-3'}`}>
           <h2 className={`${sectionTitle} inline-flex items-center gap-2 min-w-0`}>
@@ -20,7 +20,7 @@ export function Section({ title, icon: Icon, count, action, children, flush = fa
         </div>
       )}
       <div className={flush ? '' : 'px-4 sm:px-5 pb-4'}>{children}</div>
-    </Tag>
+    </section>
   );
 }
 
@@ -61,7 +61,8 @@ export function TypeChip({ icon: Icon, children, title, className = '' }) {
 }
 
 /** Nothing to show: an icon, one line, and the action when the user can act. */
-export function EmptyLine({ icon: Icon = Inbox, children, action, className = '' }) {
+export function EmptyLine({ icon, children, action, className = '' }) {
+  const Icon = icon || Inbox;
   return (
     <div className={`flex flex-col items-center justify-center gap-2 py-8 px-4 text-center ${className}`} data-testid="empty-state">
       <Icon size={20} className="text-gray-300" aria-hidden="true" />
@@ -84,9 +85,6 @@ export function InlineError({ message = 'This could not be loaded.', onRetry, cl
     </div>
   );
 }
-
-/** The message of a failed query, for InlineError. */
-export const errorText = (error, what = 'This') => `${what} could not be loaded${error?.message ? ` — ${error.message}` : '.'}`;
 
 /**
  * Secondary content, collapsed by default and styled quieter than the main

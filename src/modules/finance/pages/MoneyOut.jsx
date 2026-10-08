@@ -16,6 +16,8 @@ import { useFinanceDrawers } from '../drawers/drawersContext';
 import { fmtAmt, totalsByCurrency } from '../drawers/drawerLogic';
 import { PerCurrency } from '../drawers/drawerParts';
 import { fmtDateTime } from '../../../shared/utils/format';
+import { TypeChip } from '../components/FinanceUI';
+import { btnRowSecondary, btnIcon } from '../utils/uiClasses';
 
 const docOf = (row) => ({ docKind: 'payable', row });
 const eqStatus = (a, b) => String(a || '').toLowerCase() === String(b || '').toLowerCase();
@@ -30,7 +32,7 @@ export default function MoneyOut() {
   const { hasPermission } = useAuth();
   const drawers = useFinanceDrawers();
   const { queryParams: rangeParams } = useFinanceDateRange();
-  const { data: payables = [], isLoading } = usePayables(rangeParams);
+  const { data: payables = [], isLoading, error, refetch } = usePayables(rangeParams);
   const [entityFilter, setEntityFilter] = useState('All');
   const [categoryFilter, setCategoryFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState('All');
@@ -64,16 +66,14 @@ export default function MoneyOut() {
       <span className="whitespace-nowrap" title={v || ''}>{shortenRef(v) || '—'}</span>
     )},
     { key: 'entity', label: 'Entity', sortable: true, render: (v) => (
-      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${v === 'mill' ? 'bg-amber-50 text-amber-700' : 'bg-blue-50 text-blue-700'}`}>
-        {v === 'mill' ? 'Mill' : 'Export'}
-      </span>
+      <TypeChip>{v === 'mill' ? 'Mill' : 'Export'}</TypeChip>
     )},
     { key: 'category', label: 'Category', sortable: true },
     { key: 'supplierName', label: 'Supplier / Transporter', sortable: true, render: (v, row) => (
       v
         ? <span className="block max-w-[14rem] truncate" title={v}><PartyLink type="supplier" id={row.supplierId} name={v} /></span>
         : (row.haulerName
-            ? <span className="inline-flex items-center gap-1 text-gray-800 max-w-[16rem] min-w-0" title={row.haulerName}><span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-600 font-medium">Transporter</span><span className="truncate">{row.haulerName}</span></span>
+            ? <span className="inline-flex items-center gap-1 text-gray-800 max-w-[16rem] min-w-0" title={row.haulerName}><TypeChip>Transporter</TypeChip><span className="truncate">{row.haulerName}</span></span>
             : <span className="text-gray-400">—</span>)
     ) },
     { key: 'linkedRef', label: 'Linked To', sortable: true, render: (v) => {
@@ -125,24 +125,24 @@ export default function MoneyOut() {
         {byCategory.length > 0 && (
           <div className="flex gap-2 flex-wrap">
             {byCategory.slice(0, 6).map((cat) => (
-              <button key={cat.name} onClick={() => setCategoryFilter(cat.name === categoryFilter ? 'All' : cat.name)}
-                className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${
+              <button key={cat.name} type="button" aria-pressed={categoryFilter === cat.name} onClick={() => setCategoryFilter(cat.name === categoryFilter ? 'All' : cat.name)}
+                className={`text-xs px-3 min-h-10 sm:min-h-8 rounded-lg border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
                   categoryFilter === cat.name ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
                 }`}>
                 {cat.name} <PerCurrency totals={cat.totals} className="font-semibold ml-1" />
               </button>
             ))}
             {categoryFilter !== 'All' && (
-              <button onClick={() => setCategoryFilter('All')} className="text-xs px-2 py-1.5 text-gray-400 hover:text-gray-600">Clear</button>
+              <button type="button" onClick={() => setCategoryFilter('All')} className="text-xs px-3 min-h-10 sm:min-h-8 rounded-lg text-gray-600 hover:bg-gray-100">Clear category</button>
             )}
           </div>
         )}
 
         <FinanceFilterBar
           filters={[
-            { key: 'entity', value: entityFilter, onChange: setEntityFilter,
+            { key: 'entity', label: 'Entity', value: entityFilter, onChange: setEntityFilter,
               options: [{ value: 'All', label: 'All Entities' }, { value: 'Mill', label: 'Mill' }, { value: 'Export', label: 'Export Ops' }] },
-            { key: 'status', value: statusFilter, onChange: setStatusFilter,
+            { key: 'status', label: 'Status', value: statusFilter, onChange: setStatusFilter,
               options: [{ value: 'All', label: 'All Status' }, { value: 'Pending', label: 'Pending' }, { value: 'Partial', label: 'Partial' }, { value: 'Overdue', label: 'Overdue' }, { value: 'Paid', label: 'Paid' }] },
           ]}
           onReset={() => { setEntityFilter('All'); setCategoryFilter('All'); setStatusFilter('All'); }}
@@ -152,22 +152,22 @@ export default function MoneyOut() {
         <FinanceTable
           columns={columns} data={filtered}
           searchKeys={['supplierName', 'haulerName', 'payNo', 'category', 'linkedRef']}
-          onRowClick={(row) => drawers?.openDocument(docOf(row))} exportFilename="payables" emptyText="No payables found" loading={isLoading}
+          onRowClick={(row) => drawers?.openDocument(docOf(row))} exportFilename="payables" emptyText="No payables in this period." loading={isLoading} error={error} onRetry={refetch}
           actions={(row) => (
             <div className="inline-flex items-center gap-1.5">
               {row.status !== 'Paid' && parseFloat(row.outstanding) > 0 && isDerivedPayable(row) && (
                 <span title={derivedPayableHint(row)}
-                  className="px-2.5 py-1 bg-gray-50 text-gray-400 text-xs font-medium rounded inline-flex items-center gap-1 cursor-help">
-                  <DollarSign size={12} /> Settled elsewhere
+                  className="px-2 py-1 text-gray-500 text-xs font-medium inline-flex items-center gap-1 cursor-help">
+                  Settled elsewhere
                 </span>
               )}
               {canPay(row) && (
                 <button onClick={(e) => { e.stopPropagation(); drawers?.openPayment(docOf(row)); }} data-action="pay"
-                  className="px-2.5 py-1 bg-emerald-50 text-emerald-700 text-xs font-medium rounded hover:bg-emerald-100 inline-flex items-center gap-1">
-                  <DollarSign size={12} /> Pay
+                  className={btnRowSecondary}>
+                  <DollarSign size={12} aria-hidden="true" /> Pay
                 </button>
               )}
-              <button onClick={(e) => { e.stopPropagation(); drawers?.openDocument(docOf(row)); }} className="text-blue-600 hover:text-blue-800 p-1" title="View details" aria-label="View details"><Eye size={15} /></button>
+              <button onClick={(e) => { e.stopPropagation(); drawers?.openDocument(docOf(row)); }} className={btnIcon} title="View details" aria-label={`View ${row.payNo || 'payable'}`}><Eye size={15} aria-hidden="true" /></button>
             </div>
           )}
         />

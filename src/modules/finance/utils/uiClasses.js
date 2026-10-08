@@ -41,5 +41,8 @@ export const th = 'px-4 py-2.5 text-xs font-medium uppercase tracking-wider text
 // A money cell: right-aligned, figures line up.
 export const tdMoney = 'text-right tabular-nums whitespace-nowrap';
 
+// The message of a failed query, for InlineError.
+export const errorText = (error, what = 'This') => `${what} could not be loaded${error?.message ? ` — ${error.message}` : '.'}`;
+
 // Sign of a figure: colour plus a word, never colour alone.
 export const signTone = (n) => ((Number(n) || 0) < 0 ? 'text-red-700' : 'text-emerald-700');
