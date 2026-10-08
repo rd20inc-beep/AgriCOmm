@@ -3,24 +3,21 @@ import { useNavigate, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { reportingApi } from '../../analytics/api/services';
 import { useAuth } from '../../../context/AuthContext';
-import { useApprovePayrollRun, usePayPayrollRun } from '../../../api/queries';
-import { useApp } from '../../../context/AppContext';
-import useConfirm from '../../../hooks/useConfirm';
-import StatusBadge from '../../../shared/components/StatusBadge';
+import NeedsAttention from '../components/NeedsAttention';
+import RecentActivity from '../components/RecentActivity';
 import {
   ArrowDownLeft, ArrowUpRight,
   TrendingUp, AlertTriangle,
-  Bell, Clock, Lock, Wallet, Activity,
+  Clock, Lock, Wallet, Activity,
   Receipt, RefreshCw, ExternalLink,
-  CheckCircle2, AlertCircle, CalendarClock,
+  CheckCircle2, CalendarClock,
 } from 'lucide-react';
 import {
-  useReceivables, usePayables, useFinanceAlerts, useJournalEntries,
+  useReceivables, usePayables, useJournalEntries,
   useFinanceOverviewSummary, useUpcoming,
 } from '../../../api/queries';
 import { useFinanceDateRange, overviewSummaryParams } from '../hooks/useFinanceDateRange';
-import { withRange, financeHref, rangeLabel } from '../financeNav';
-import { alertSeverity } from '../utils/alerts';
+import { withRange, rangeLabel } from '../financeNav';
 import {
   BUCKET_KEYS, BUCKET_COLORS, ageDays, ageBucket, bucketize, isOpenAR,
 } from '../utils/aging';
@@ -53,7 +50,6 @@ export default function FinanceOverview() {
   const { data: summary = {}, isLoading, refetch } = useFinanceOverviewSummary(overviewSummaryParams(rangeParams));
   const { data: receivables = [] } = useReceivables(rangeParams);
   const { data: payables = [] } = usePayables(rangeParams);
-  const { data: alertsData = [] } = useFinanceAlerts();
   const { data: journalData = [] } = useJournalEntries(rangeParams);
 
   const exp = summary.export || {};
@@ -88,7 +84,6 @@ export default function FinanceOverview() {
     [payables]
   );
 
-  const topAlerts = useMemo(() => (Array.isArray(alertsData) ? alertsData : []).slice(0, 4), [alertsData]);
   const recentJournals = useMemo(() => (Array.isArray(journalData) ? journalData : []).slice(0, 6), [journalData]);
 
   if (isLoading) return <Skeleton />;
@@ -222,8 +217,9 @@ export default function FinanceOverview() {
         />
       </div>
 
-      {/* ─── PAYROLL APPROVALS (Finance/Owner only, when pending) ──── */}
-      <PayrollApprovalsCard fmtPKR={fmtPKR} />
+      {/* ─── NEEDS ATTENTION (actionable queue; replaces the alerts panel
+           and the payroll-approvals card) ───────────────────────────── */}
+      <NeedsAttention summary={summary} rangeKey={rangeKey} />
 
       {/* ─── PAYROLL SUMMARY (consolidated from mill payroll) ──────── */}
       <PayrollSummaryStrip navigate={navigate} fmtPKR={fmtPKR} />
@@ -333,50 +329,9 @@ export default function FinanceOverview() {
         <CogsLifecyclePanel data={exp.cogsStatus} />
       )}
 
-      {/* ─── ACTIVITY + ALERTS ────────────────────────────────────── */}
+      {/* ─── RECENT ACTIVITY + JOURNALS ───────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <Panel
-          title="Alerts"
-          icon={Bell}
-          iconColor="text-amber-500"
-          onSeeAll={() => navigate(fl('/finance/alerts'))}
-        >
-          {topAlerts.length === 0 ? (
-            <div className="text-center text-sm text-gray-400 py-6 flex items-center justify-center gap-2">
-              <CheckCircle2 size={16} className="text-emerald-500" /> All clear
-            </div>
-          ) : (
-            <div className="space-y-1.5">
-              {topAlerts.map((a, i) => {
-                const tone = { danger: 'red', warning: 'amber', info: 'blue' }[alertSeverity(a)];
-                const cls = {
-                  red: 'bg-red-50 border-l-red-500',
-                  amber: 'bg-amber-50 border-l-amber-500',
-                  blue: 'bg-blue-50 border-l-blue-500',
-                }[tone];
-                const iconCls = { red: 'text-red-500', amber: 'text-amber-500', blue: 'text-blue-500' }[tone];
-                const body = (
-                  <div className="flex items-start gap-2">
-                    <AlertCircle size={14} className={`mt-0.5 flex-shrink-0 ${iconCls}`} />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm text-gray-900 font-medium line-clamp-1">{a.title || a.message}</p>
-                      {a.title && a.message && <p className="text-xs text-gray-600 mt-0.5 line-clamp-2">{a.message}</p>}
-                    </div>
-                  </div>
-                );
-                return a.link ? (
-                  <button key={a.id || i} type="button" data-severity={alertSeverity(a)}
-                    onClick={() => navigate(financeHref(a.link, rangeKey))}
-                    className={`block w-full text-left p-2.5 rounded-lg border-l-4 hover:shadow-sm transition-shadow ${cls}`}>
-                    {body}
-                  </button>
-                ) : (
-                  <div key={a.id || i} data-severity={alertSeverity(a)} className={`p-2.5 rounded-lg border-l-4 ${cls}`}>{body}</div>
-                );
-              })}
-            </div>
-          )}
-        </Panel>
+        <RecentActivity rangeParams={rangeParams} />
 
         <Panel
           title="Recent Journal Entries"
@@ -699,79 +654,6 @@ function PayrollSummaryStrip({ navigate, fmtPKR }) {
         ))}
       </div>
       <p className="text-[11px] text-gray-400 mt-2">Operational payroll (employees, attendance, runs, advances) lives in Mill Finance → Payroll.</p>
-    </div>
-  );
-}
-
-// Pending payroll approvals — Finance/Owner can Approve a Prepared run or Pay an
-// Approved one without leaving the Finance dashboard. Hidden for non-approvers /
-// when nothing is pending. Calls the role-gated milling approve/pay endpoints.
-function PayrollApprovalsCard({ fmtPKR }) {
-  const { hasPermission } = useAuth();
-  const canApprove = hasPermission('payroll', 'approve');
-  const canPay = hasPermission('payroll', 'pay');
-  const approveMut = useApprovePayrollRun();
-  const payMut = usePayPayrollRun();
-  const { addToast } = useApp();
-  const [confirm, confirmDialog] = useConfirm();
-  const errMsg = (e, fallback) => e?.response?.data?.message || e?.message || fallback;
-  async function approve(r) {
-    const ok = await confirm({
-      title: `Approve the ${r.period} payroll run?`,
-      consequence: `${r.employeeCount} employee(s), prepared by ${r.preparedBy || '—'}. No money moves yet — the run then waits for Pay.`,
-      amount: fmtPKR(r.net), confirmLabel: 'Approve', cancelLabel: 'Go back', danger: false,
-    });
-    if (!ok) return;
-    approveMut.mutate(r.id, {
-      onSuccess: () => addToast(`Payroll run for ${r.period} approved`, 'success'),
-      onError: (e) => addToast(errMsg(e, 'Could not approve the payroll run.'), 'error'),
-    });
-  }
-  async function pay(r) {
-    const ok = await confirm({
-      title: `Pay the ${r.period} payroll?`,
-      consequence: `Pays ${r.employeeCount} employee(s): posts the salary expense to Money Out and the GL, moves the cash/bank balance and recovers scheduled advances.`,
-      amount: fmtPKR(r.net), confirmLabel: 'Pay', cancelLabel: 'Go back',
-    });
-    if (!ok) return;
-    payMut.mutate(r.id, {
-      onSuccess: () => { addToast(`Payroll for ${r.period} paid — ${fmtPKR(r.net)}`, 'success'); refetch(); },
-      onError: (e) => addToast(errMsg(e, 'Could not pay the payroll run.'), 'error'),
-    });
-  }
-  const { data, isError, refetch } = useQuery({
-    queryKey: ['payroll-pending'],
-    enabled: canApprove || canPay,
-    queryFn: async () => { const res = await reportingApi.payrollPending(); return res?.runs ? res : (res?.data || res); },
-    retry: false,
-  });
-  if ((!canApprove && !canPay) || isError) return null;
-  const runs = data?.runs || [];
-  if (!runs.length) return null;
-  const busy = approveMut.isPending || payMut.isPending;
-  return (
-    <div className="bg-white rounded-xl border border-amber-200 p-4">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-semibold text-gray-900 inline-flex items-center gap-2"><Clock size={16} className="text-amber-600" /> Payroll awaiting approval</h3>
-        <span className="text-xs text-amber-700 font-medium">{fmtPKR(data?.netPending || 0)} pending</span>
-      </div>
-      <div className="space-y-2">
-        {runs.map((r) => (
-          <div key={r.id} className="flex items-center justify-between flex-wrap gap-2 rounded-lg border border-gray-100 bg-gray-50/50 px-3 py-2">
-            <div className="text-sm text-gray-700">
-              <span className="mr-2"><StatusBadge status={r.status} /></span>
-              <span className="font-medium">{r.period}</span> · {r.employeeCount} emp · <span className="tabular-nums font-semibold">{fmtPKR(r.net)}</span>
-              <span className="text-[11px] text-gray-400"> · prepared by {r.preparedBy || '—'}</span>
-            </div>
-            <div className="flex gap-2">
-              {r.status === 'prepared' && canApprove && <button disabled={busy} onClick={() => approve(r)} className="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">Approve</button>}
-              {r.status === 'approved' && canPay && <button disabled={busy} onClick={() => pay(r)} className="px-3 py-1.5 text-xs font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">Pay {fmtPKR(r.net)}</button>}
-            </div>
-          </div>
-        ))}
-      </div>
-      {confirmDialog}
-      <p className="text-[11px] text-gray-400 mt-2">Approving has no financial effect; paying posts the salary expense to Money Out / GL and recovers scheduled advances. Prepare runs in Mill Finance → Payroll.</p>
     </div>
   );
 }
