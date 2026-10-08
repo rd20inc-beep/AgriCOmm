@@ -78,7 +78,7 @@ export function PaymentExtras({ form, set, gross, currency = 'PKR', addToast, er
     try {
       const fd = new FormData();
       fd.append('file', file);
-      const res = await api.upload('/finance/payments/attachment', fd);
+      const res = await api.upload('/api/finance/payments/attachment', fd);
       const d = res?.data || res;
       if (d?.url) { set('attachmentUrl', d.url); set('attachmentName', d.name || file.name); }
       else if (res?._offlineQueued) addToast?.('Offline — the document will upload when the connection returns.', 'info');
