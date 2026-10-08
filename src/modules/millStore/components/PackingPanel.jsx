@@ -11,6 +11,7 @@ import { useAuth } from '../../../context/AuthContext';
 import PackSpecCard from './PackSpecCard';
 import EditPackingRunDrawer from './EditPackingRunDrawer';
 import { packingPermissions, isSpecLine } from '../utils/packingAccess';
+import { bagOptionLabel } from '../utils/packingItemLabel';
 import { fmtPKR, fmtNum, fmtDate, fmtKg as fmtKgBase } from '../../../shared/utils/format';
 
 const num = (v) => Number(v) || 0;
@@ -361,9 +362,7 @@ export default function PackingPanel({ batchId, batchStatus, addToast, exportOrd
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white">
                 <option value="">Select a bag…</option>
                 {bagItems.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.name} {b.capacity_kg ? `(${Number(b.capacity_kg)}kg)` : '(no capacity set)'}
-                  </option>
+                  <option key={b.id} value={b.id}>{bagOptionLabel(b)}</option>
                 ))}
               </select>
             </div>

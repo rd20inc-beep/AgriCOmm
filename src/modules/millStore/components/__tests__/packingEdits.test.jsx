@@ -2,6 +2,7 @@ import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { packingPermissions, packSpecSourceLabel, isSpecLine, COMPLETED_LOCK_REASON } from '../../utils/packingAccess';
+import { bagOptionLabel } from '../../utils/packingItemLabel';
 
 /**
  * Packing runs can be corrected / deleted and a batch shows (and can override)
@@ -17,11 +18,12 @@ vi.mock('../../../../components/SlideDrawer', () => ({
 let mockHistory = {};
 let mockUser = { role: 'Mill Operator' };
 let mockPerms = new Set(['mill_store.record_consumption', 'milling.edit']);
+let mockItems = [];
 const mutation = () => ({ mutateAsync: vi.fn(), isPending: false });
 vi.mock('../../api/queries', () => ({
   usePackingHistory: () => ({ data: mockHistory, isLoading: false }),
   useBatchKatta: () => ({ data: null }),
-  useMillStoreItems: () => ({ data: [] }),
+  useMillStoreItems: () => ({ data: mockItems }),
   usePackBatch: mutation,
   useUpdatePackingRun: mutation,
   useDeletePackingRun: mutation,
@@ -112,6 +114,20 @@ describe('PackingPanel', () => {
   beforeEach(() => {
     mockUser = { role: 'Mill Operator' };
     mockPerms = new Set(['mill_store.record_consumption', 'milling.edit']);
+    mockItems = [];
+  });
+
+  it('the bag picker shows each item\'s stock, so an empty look-alike is visible', () => {
+    // M-007 run #7: "5KG NON WOVEN BAGS" (never stocked) was picked over
+    // "5KG NWB SINDBAD" (1,870 in store).
+    mockItems = [
+      { id: 59, name: '5KG NON WOVEN BAGS', capacity_kg: '5.000', quantity_available: '0' },
+      { id: 77, name: '5KG NWB SINDBAD', capacity_kg: '5.000', quantity_available: '1870.000' },
+    ];
+    mockHistory = { logs: [], batchStatus: 'Queued', access: { runs: { allowed: true }, spec: { allowed: true } }, packSpec: { source: 'none' } };
+    const html = renderToStaticMarkup(<PackingPanel batchId={7} batchStatus="Queued" />);
+    expect(html).toContain('5KG NON WOVEN BAGS (5kg) · none in stock');
+    expect(html).toContain('5KG NWB SINDBAD (5kg) · 1,870 in stock');
   });
 
   it('offers Edit / Delete on each run before the batch is Completed', () => {
@@ -144,5 +160,14 @@ describe('PackingPanel', () => {
     expect(html).toContain('This batch is Cancelled — packing is locked.');
     expect(html).not.toContain('Pack into bags');
     expect(html).not.toContain('title="Correct this run"');
+  });
+});
+
+describe('bag option label', () => {
+  it('names the item, its capacity and what the store holds', () => {
+    expect(bagOptionLabel({ name: 'AENOS 25KG', capacity_kg: '25.000', quantity_available: '92.000' })).toBe('AENOS 25KG (25kg) · 92 in stock');
+    expect(bagOptionLabel({ name: 'PP Bag', capacity_kg: null, quantity_available: null })).toBe('PP Bag (no capacity set) · none in stock');
+    expect(bagOptionLabel({ name: 'Master 20', capacity_kg: 20, quantity_available: 3500 }, { capacity: false })).toBe('Master 20 · 3,500 in stock');
+    expect(bagOptionLabel(null)).toBe('');
   });
 });
