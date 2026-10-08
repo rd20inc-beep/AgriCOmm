@@ -11,6 +11,10 @@ export const accountingApi = {
   partyAllocation: (type, id) => api.get(`/api/accounting/statements/allocation/${type}/${id}`),
   fxRates: () => api.get('/api/accounting/fx-rates'),
   setFxRate: (data) => api.post('/api/accounting/fx-rates', data),
+  // Month-end FX revaluation (G-7): preview, post (rerun replaces), history.
+  fxRevaluationPreview: (params) => api.get('/api/accounting/fx-revaluation/preview', params),
+  fxRevaluate: (data) => api.post('/api/accounting/fx-revaluation', data),
+  fxRevaluations: (params) => api.get('/api/accounting/fx-revaluation', params),
   createReconciliation: (data) => api.post('/api/accounting/reconciliations', data),
   matchReconciliation: (id, data) => api.put(`/api/accounting/reconciliations/${id}/match`, data),
 };

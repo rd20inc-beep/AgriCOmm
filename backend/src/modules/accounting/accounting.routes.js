@@ -3,6 +3,9 @@ const router = express.Router();
 const controller = require('../../controllers/accountingController');
 const authorize = require('../../middleware/rbac');
 const auditAction = require('../../middleware/audit');
+const validate = require('../../middleware/validate');
+const schemas = require('../../middleware/schemas');
+const fxRevaluation = require('./fxRevaluation');
 
 // ═══════════════════════════════════════════════════════════════════
 // Chart of Accounts
@@ -127,6 +130,37 @@ router.post(
   authorize('finance', 'post_journal'),
   auditAction('set_fx_rate', 'fx_rates'),
   controller.setFxRate
+);
+
+// Month-end FX revaluation (G-7): open USD AR + USD bank GL at the month's
+// closing rate → 6210, dated month-end, auto-reversed on the 1st. Idempotent
+// per month; preview: true computes without posting; rerun: true replaces.
+router.get('/fx-revaluation', authorize('finance', 'view'), async (req, res) => {
+  try {
+    return res.json({ success: true, data: { revaluations: await fxRevaluation.list(req.query) } });
+  } catch (err) { return res.status(err.statusCode || 500).json({ success: false, message: err.message }); }
+});
+router.get('/fx-revaluation/preview', authorize('finance', 'post_journal'), async (req, res) => {
+  try {
+    const data = await fxRevaluation.revalue({ monthEnd: req.query.month_end, currency: req.query.currency || 'USD', preview: true });
+    return res.json({ success: true, data });
+  } catch (err) { return res.status(err.statusCode || 500).json({ success: false, message: err.message }); }
+});
+router.post(
+  '/fx-revaluation',
+  authorize('finance', 'post_journal'),
+  validate(schemas.fxRevaluation),
+  auditAction('fx_revaluation', 'fx_revaluations', (req, data) => data?.data?.revaluation?.id),
+  async (req, res) => {
+    try {
+      const { month_end: monthEnd, currency, rerun, preview } = req.body;
+      const data = await fxRevaluation.revalue({ monthEnd, currency: currency || 'USD', rerun: !!rerun, preview: !!preview, userId: req.user?.id || null });
+      return res.status(preview ? 200 : 201).json({ success: true, data });
+    } catch (err) {
+      const period = /Accounting period .* is /.test(String(err.message));
+      return res.status(err.statusCode || (period ? 400 : 500)).json({ success: false, message: err.message });
+    }
+  },
 );
 
 // ═══════════════════════════════════════════════════════════════════

@@ -9,6 +9,7 @@ import PermissionGate from '../../../shared/components/PermissionGate';
 import { todayLocalISO, fmtDate, fmtNum, fmtMoney, fmtPKR } from '../../../shared/utils/format';
 import { HeadlineCard, TypeChip } from '../components/FinanceUI';
 import { btnPrimary, btnSecondary } from '../utils/uiClasses';
+import FxRevaluationPanel from '../components/FxRevaluationPanel';
 
 // By-product grades a rate can be scoped to; blank means the product as a whole.
 // Finished rice and raw are priced per product, so they leave this empty.
@@ -209,6 +210,11 @@ export default function RatesCenter() {
 
           <FinanceTable title="FX Rate History" columns={fxColumns} data={fxRates}
             searchKeys={['from_currency']} exportFilename="fx-rates" loading={fxLoading} />
+
+          {/* Month-end revaluation posts a journal: finance.post_journal. */}
+          <PermissionGate module="finance" action="post_journal">
+            <FxRevaluationPanel />
+          </PermissionGate>
         </>
       )}
 

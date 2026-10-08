@@ -24,6 +24,8 @@ function isQueueable(method, endpoint, body) {
   if (/^\/api\/(auth|portal|streams|sync)\b/.test(endpoint)) return false;
   if (/^\/api\/(ai|smart|intelligence|reporting)\b/.test(endpoint)) return false;
   if (/(search|preview|export|download|login|refresh|logout)/i.test(endpoint)) return false;
+  // A month-end FX revaluation posts against that day's books — never replayed later.
+  if (/\/fx-revaluation\b/.test(endpoint)) return false;
   return true;
 }
 

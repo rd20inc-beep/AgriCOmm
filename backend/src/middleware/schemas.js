@@ -901,7 +901,16 @@ const updateBankAccount = Joi.object({
   name: Joi.string().trim().max(255),
 });
 
+// POST /api/accounting/fx-revaluation — month-end FX revaluation (G-7).
+const fxRevaluation = Joi.object({
+  month_end: Joi.string().trim().pattern(/^\d{4}-\d{2}(-\d{2})?$/).required(),
+  currency: Joi.string().trim().uppercase().length(3).default('USD'),
+  rerun: Joi.boolean().default(false),
+  preview: Joi.boolean().default(false),
+});
+
 module.exports = {
+  fxRevaluation,
   attachPaymentDocument,
   createBankAccount,
   updateBankAccount,
