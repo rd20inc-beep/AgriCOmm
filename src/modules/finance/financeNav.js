@@ -58,6 +58,11 @@ export const WORKSPACES = [
       { key: 'cash', label: 'Cash & bank', path: '/finance/accounts', period: 'range' },
       { key: 'cheques', label: 'Cheques', path: '/finance/accounts/cheques', period: false },
       { key: 'suspense', label: 'Suspense', path: '/finance/accounts/suspense', period: false },
+      // B5: one account against its bank statement. Reading is finance.view
+      // (GET /api/accounting/reconciliations); the actions are
+      // finance.post_journal, gated on the page.
+      { key: 'reconcile', label: 'Reconcile', path: '/finance/accounts/reconcile', period: false,
+        permission: { module: 'finance', action: 'view' } },
     ],
   },
   {

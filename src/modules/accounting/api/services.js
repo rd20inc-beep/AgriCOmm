@@ -15,6 +15,13 @@ export const accountingApi = {
   fxRevaluationPreview: (params) => api.get('/api/accounting/fx-revaluation/preview', params),
   fxRevaluate: (data) => api.post('/api/accounting/fx-revaluation', data),
   fxRevaluations: (params) => api.get('/api/accounting/fx-revaluation', params),
+  // Bank reconciliation (B5): list (?bank_account_id=), start, workspace,
+  // save ticks, import statement lines, complete.
+  reconciliations: (params) => api.get('/api/accounting/reconciliations', params),
   createReconciliation: (data) => api.post('/api/accounting/reconciliations', data),
+  reconciliation: (id) => api.get(`/api/accounting/reconciliations/${id}`),
+  saveReconciliationTicks: (id, data) => api.put(`/api/accounting/reconciliations/${id}/ticks`, data),
+  addReconciliationLines: (id, items) => api.post(`/api/accounting/reconciliations/${id}/items`, { items }),
+  completeReconciliation: (id) => api.put(`/api/accounting/reconciliations/${id}/complete`, {}),
   matchReconciliation: (id, data) => api.put(`/api/accounting/reconciliations/${id}/match`, data),
 };
