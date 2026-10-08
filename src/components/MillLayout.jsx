@@ -58,6 +58,10 @@ const millNav = [
   },
   { section: 'Finance & Reports' },
   { label: 'Mill Finance', icon: DollarSign, to: '/milling/finance' },
+  // The company Finance screens (owner decision G-9): same routes and the same
+  // finance.view gate as every other role; the server's permissions decide
+  // what each screen lets this role do.
+  { label: 'Finance Dashboard', icon: DollarSign, to: '/finance', permission: { module: 'finance', action: 'view' } },
   {
     label: 'Reports',
     icon: BarChart3,
@@ -155,7 +159,7 @@ function AlertTypeIcon({ type }) {
 
 export default function MillLayout({ children }) {
   const { alerts, dismissAlert, dataLoading } = useApp();
-  const { user, logout } = useAuth();
+  const { user, logout, hasPermission } = useAuth();
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -272,7 +276,7 @@ export default function MillLayout({ children }) {
         </div>
 
         <nav className="flex-1 py-3 space-y-0.5 overflow-y-auto sidebar-scroll">
-          {millNav.map((item, idx) => {
+          {millNav.filter((item) => !item.permission || hasPermission(item.permission.module, item.permission.action)).map((item, idx) => {
             if (item.section) {
               if (sidebarCollapsed) return <div key={idx} className="my-2 mx-3 border-t border-white/[0.06]" />;
               return (

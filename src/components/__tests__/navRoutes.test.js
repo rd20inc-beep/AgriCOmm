@@ -97,3 +97,32 @@ describe('sidebar labels', () => {
     expect(missing).toEqual([]);
   });
 });
+
+// Owner decisions G-9 / G-10: Mill and Export Managers get the Finance screens
+// in their own shells — the same /finance/* tree and finance.view gate as the
+// standard shell, so a finance link (and the detail pages it points at) never
+// bounces them back to their dashboard. Backend permissions are unchanged.
+describe('Mill and Export shells carry the Finance screens', () => {
+  const app = src('App.jsx');
+  const financeRoute = '<Route path="/finance/*" element={<ProtectedRoute module="finance" action="view"><FinanceRoutes /></ProtectedRoute>} />';
+
+  it.each(['MillRoutes', 'ExportRoutes', 'StandardRoutes'])('%s mounts /finance/* behind finance.view', (shell) => {
+    const start = app.indexOf(`function ${shell}()`);
+    const body = app.slice(start, app.indexOf('\nfunction ', start + 1));
+    expect(body).toContain(financeRoute);
+  });
+
+  it.each([
+    ['MillRoutes', ['/finance', '/finance/accounting/profit', '/finance/money-in/local-sales', '/export', '/export/7', '/milling/3', '/local-sales/5', '/lot-inventory/9']],
+    ['ExportRoutes', ['/finance', '/finance/money-out', '/finance/accounting/statements', '/export/7', '/milling/3', '/local-sales/5', '/lot-inventory/9']],
+  ])('%s resolves every finance link without the catch-all', (shell, urls) => {
+    const paths = shellPaths(shell);
+    for (const url of urls) expect([url, matchedPath(paths, url)]).not.toEqual([url, '*']);
+  });
+
+  it.each(['components/MillLayout.jsx', 'components/ExportLayout.jsx'])('%s lists Finance Dashboard behind finance.view', (file) => {
+    const text = src(file);
+    expect(text).toMatch(/label: 'Finance Dashboard', icon: DollarSign, to: '\/finance', permission: \{ module: 'finance', action: 'view' \}/);
+    expect(text).toMatch(/\.filter\(\(item\) => !item\.permission \|\| hasPermission\(item\.permission\.module, item\.permission\.action\)\)/);
+  });
+});
