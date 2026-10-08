@@ -1,6 +1,6 @@
 /**
  * Bank-account master over HTTP against a real, fully-migrated Postgres:
- * create books an opening balance (BT row + Posted Dr 1000 / Cr 3000), and an
+ * create books an opening balance (BT row + Posted Dr account GL / Cr 3000), and an
  * edit never moves the balance. The DB-less version is bankAccountBalanceGuard.test.js.
  *
  * DB-gated: skipped unless DB_HOST is set. Local run (throwaway container):
@@ -44,7 +44,7 @@ d('bank-account balance guard (DB-gated)', () => {
     .where({ 'je.ref_no': refNo, 'je.status': 'Posted' })
     .select('c.code', 'jl.debit', 'jl.credit');
 
-  test('create with an opening balance books BT + Posted Dr 1000 / Cr 3000; edits never move the balance', async () => {
+  test('create with an opening balance books BT + Posted Dr account GL / Cr 3000; edits never move the balance', async () => {
     const created = await request(app).post('/api/admin/bank-accounts').set(auth()).send({
       name: `ZZ Meezan ${run}`, bank_name: 'Meezan', type: 'bank', currency: 'PKR', opening_balance: 250000,
     });
@@ -57,9 +57,19 @@ d('bank-account balance guard (DB-gated)', () => {
     expect(bt[0]).toMatchObject({ type: 'credit', source: 'opening_balance', category: 'Opening Balance', status: 'posted' });
     expect(Number(bt[0].amount)).toBe(250000);
 
+    // The account got its own GL account under 1000 Cash & Bank (G-8).
+    const acctRow = await db('bank_accounts').where({ id }).first();
+    const gl = await db('chart_of_accounts').where({ id: acctRow.gl_account_id }).first();
+    const parent = await db('chart_of_accounts').where({ code: '1000' }).first();
+    expect(gl).toMatchObject({ name: `ZZ Meezan ${run}`, type: 'Asset', parent_id: parent.id });
     const lines = await glPosted(`OPEN-BANK-${id}`);
     expect(lines.map((l) => [l.code, Number(l.debit), Number(l.credit)]).sort())
-      .toEqual([['1000', 250000, 0], ['3000', 0, 250000]]);
+      .toEqual([[gl.code, 250000, 0], ['3000', 0, 250000]].sort());
+
+    // Renaming the account renames its GL account.
+    const renamed = await request(app).put(`/api/admin/bank-accounts/${id}`).set(auth()).send({ name: `ZZ Meezan Ops ${run}` });
+    expect(renamed.status).toBe(200);
+    expect((await db('chart_of_accounts').where({ id: gl.id }).first()).name).toBe(`ZZ Meezan Ops ${run}`);
 
     // A payment lands after the edit form loaded.
     await db('bank_accounts').where({ id }).update({ current_balance: 310000 });
