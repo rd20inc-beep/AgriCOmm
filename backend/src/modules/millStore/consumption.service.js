@@ -1,5 +1,6 @@
 const db = require('../../config/database');
 const accountingService = require('../accounting/accounting.service');
+const { postProcessingDelta } = require('../milling/millingCompletionJournal');
 const { NotFoundError, ValidationError } = require('../../shared/errors');
 
 const CATEGORY_MAP = {
@@ -255,6 +256,15 @@ const consumptionService = {
         } catch (jeErr) {
           console.error('Consumption journal post failed (consumption still recorded):', jeErr.message);
         }
+      }
+
+      // After the batch's completion the issued stock is absorbed into its
+      // finished goods straight away (Dr 1220 / Cr 6000); before it, the
+      // completion absorbs the whole cost sheet (A3b).
+      if (totalConsumed > 0) {
+        await postProcessingDelta(trx, accountingService, {
+          batch, delta: totalConsumed, label: 'mill store consumption', userId,
+        });
       }
 
       return {

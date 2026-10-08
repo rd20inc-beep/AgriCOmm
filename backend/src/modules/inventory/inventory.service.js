@@ -7,6 +7,15 @@ const { applyWarehouseScope } = require('../../utils/warehouseScope');
 const { isReservedSource } = require('../milling/batchLifecycle');
 const { resolveBatchPackSpec } = require('../milling/batchPackSpec');
 
+// The GL's by-product output split for a batch (millingCompletionJournal) —
+// required lazily: the milling module requires this service.
+async function syncBatchOutputSplit(trx, batchId, userId) {
+  const batch = await trx('milling_batches').where({ id: batchId }).first();
+  if (!batch) return null;
+  const { syncOutputSplit } = require('../milling/millingCompletionJournal');
+  return syncOutputSplit(trx, require('../accounting/accounting.service'), { batch, userId: userId || null });
+}
+
 // Milling consumption may fall short of what the batch committed by at most
 // this much (scale rounding) before yield is refused.
 const CONSUME_TOLERANCE_KG = 1;
@@ -3052,6 +3061,9 @@ const inventoryService = {
       repaired_by: userId || null,
       repaired_at: new Date(),
     });
+    // The by-products' re-costed value moved between finished and by-product
+    // lots: keep the GL's 1220 / 1240 split in step (signed delta, A3a).
+    summary.outputSplit = await syncBatchOutputSplit(trx, batchId, userId);
     return summary;
   },
 
@@ -3590,7 +3602,10 @@ const inventoryService = {
       }
     }
 
-    return { resynced: true, updatedInPlace: outIds.length, retired, finishedCostPerKg: a.finishedCostPerKg, netPurchase: a.netPurchase, byproductValue: a.byproductValue, katta };
+    // A re-recorded yield can move value between finished and by-product lots:
+    // post the 1220 ↔ 1240 signed delta (A3a).
+    const outputSplit = await syncBatchOutputSplit(trx, batchId, userId);
+    return { resynced: true, updatedInPlace: outIds.length, retired, finishedCostPerKg: a.finishedCostPerKg, netPurchase: a.netPurchase, byproductValue: a.byproductValue, katta, outputSplit };
   },
 };
 
