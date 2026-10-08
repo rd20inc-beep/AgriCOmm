@@ -300,6 +300,8 @@ async function runTransitionSideEffects(trx, order, toStatus, userId) {
   // Phase 5: Lock COGS at dispatch — value the contract in PKR at the order's
   // BOOKED rate (the same rate revenue recognition uses below), not a flat 280,
   // so gross profit isn't computed on a different FX rate than revenue.
+  // The reservations above are Consumed by now; calculateOrderCOGS counts
+  // Consumed + Active, so this is Σ dispatched kg × lot cost/kg, locked once.
   try {
     await inventoryService.lockOrderCOGS(trx, order.id, parseFloat(order.booked_fx_rate) || null);
   } catch (e) {
