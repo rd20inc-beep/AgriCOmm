@@ -11,7 +11,7 @@ import { favStar } from '../../../shared/utils/favorites';
 import { todayLocalISO, fmtMoney } from '../../../shared/utils/format';
 import {
   cur, ent, entityLabel, classifyTransfer, isCrossCurrency, foreignCurrency,
-  convertAmount, rateFromConverted, validateContra, newClientRef,
+  convertAmount, rateFromConverted, validateContra, contraOverdraft, newClientRef,
 } from '../utils/contraTransfer';
 
 const REQ = <span className="text-red-500">*</span>;
@@ -121,12 +121,20 @@ export default function ContraTransferDrawer({ open, onClose, editing = null, on
   // amount + charges back before the new one leaves.
   const returning = editing && String(editing.fromAccountId) === String(form.fromId)
     ? (Number(editing.amount) || 0) + (Number(editing.bankCharges) || 0) : 0;
+  // B2: more than the source holds still goes through — warned, not blocked.
+  const overdraft = contraOverdraft({ fromAcct, amount: form.amount, charges: form.charges, returning });
+  const overdraftNote = overdraft && (
+    <div role="status" data-testid="contra-overdraft" className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+      <AlertTriangle size={14} className="shrink-0 mt-0.5" aria-hidden="true" />
+      <span>{overdraft.message} The transfer still goes through; {fromAcct?.name} shows as overdrawn until it is funded.</span>
+    </div>
+  );
 
   function review() {
     setError('');
     const fe = validateContra({
       fromAcct, toAcct, amount: form.amount, rate: form.rate, converted: form.converted,
-      reference: form.reference, charges: form.charges, returning,
+      reference: form.reference, charges: form.charges,
     });
     if (editing && !String(form.reason || '').trim()) fe.reason = 'Say why the transfer is being changed.';
     setFieldErrors(fe);
@@ -159,6 +167,9 @@ export default function ContraTransferDrawer({ open, onClose, editing = null, on
         addToast?.(kind === 'cross_entity'
           ? `${t?.transfer_no || 'Transfer'} sent — it lands once the ${entityLabel(ent(toAcct))} accepts it.`
           : `${t?.transfer_no || 'Contra transfer'} ${editing ? 'replaces the original' : 'recorded'}.`, 'success');
+        // B2: the server's overdraft warning, after the fact.
+        const w = res?.data?.warning;
+        if (w?.account_name) addToast?.(`${w.account_name} is now overdrawn by ${fmtMoney(w.overdrawn_by, w.currency, { decimals: 2 })}.`, 'warning');
       }
       onClose?.();
       onDone?.(res?.data);
@@ -293,6 +304,7 @@ export default function ContraTransferDrawer({ open, onClose, editing = null, on
                 <FieldError error={fieldErrors.charges} />
               </div>
             </div>
+            {overdraftNote}
 
             <div>
               <label className={lbl}>Notes <span className="text-gray-400 font-normal">· optional</span></label>
@@ -327,6 +339,7 @@ export default function ContraTransferDrawer({ open, onClose, editing = null, on
             rate={fx ? Number(form.rate) : null} kind={kind} fx={fx} pkrEquivalent={pkrEquivalent}
             reference={form.reference} date={form.date} editing={editing} />
         )}
+        {step === 'review' && overdraftNote}
         {error && <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded p-2">{error}</div>}
       </div>
     </SlideDrawer>

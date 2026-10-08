@@ -2,7 +2,7 @@ import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import {
-  convertAmount, rateFromConverted, classifyTransfer, isCrossCurrency, validateContra,
+  convertAmount, rateFromConverted, classifyTransfer, isCrossCurrency, validateContra, contraOverdraft,
   transferRowLabel, transferStatusLabel, foreignCurrency,
 } from '../utils/contraTransfer';
 
@@ -105,15 +105,24 @@ describe('converted amount ↔ rate', () => {
 
 describe('validation before submit', () => {
   const base = { amount: 100, reference: 'R1' };
-  it('blocks the same account, missing fields and over-balance amounts', () => {
+  it('blocks the same account and missing fields; more than the balance is NOT blocked (B2)', () => {
     expect(classifyTransfer(byId(1), byId(1))).toBe('same');
     expect(validateContra({ ...base, fromAcct: byId(1), toAcct: byId(1) }).to).toMatch(/different accounts/);
     expect(validateContra({ fromAcct: byId(1), toAcct: byId(2), amount: 0, reference: '' })).toMatchObject({
       amount: expect.any(String), reference: expect.any(String),
     });
-    expect(validateContra({ ...base, fromAcct: byId(2), toAcct: byId(1) }).amount).toMatch(/available/);
+    expect(validateContra({ ...base, fromAcct: byId(2), toAcct: byId(1) })).toEqual({});
+  });
+  it('B2: an overdraft is a warning — amount + charges past the balance, net of what an edit returns', () => {
+    expect(contraOverdraft({ fromAcct: byId(2), amount: 100 })).toMatchObject({ overdrawnBy: 100, currency: 'PKR' });
+    expect(contraOverdraft({ fromAcct: byId(2), amount: 100 }).message).toBe('This will overdraw HO Bank by Rs 100.00.');
+    expect(contraOverdraft({ fromAcct: byId(4), amount: 9000, charges: 50 })).toMatchObject({ overdrawnBy: 50 });
+    expect(contraOverdraft({ fromAcct: byId(4), amount: 9000 })).toBeNull();
     // On an edit the original comes back first.
-    expect(validateContra({ ...base, fromAcct: byId(2), toAcct: byId(1), returning: 100 }).amount).toBeUndefined();
+    expect(contraOverdraft({ fromAcct: byId(2), amount: 100, returning: 100 })).toBeNull();
+    expect(contraOverdraft({ fromAcct: byId(3), amount: 50001 }).message).toMatch(/USD Bank by \$1\.00/);
+    // A balance this role cannot see gives no warning (the server still answers).
+    expect(contraOverdraft({ fromAcct: { ...byId(2), currentBalance: null }, amount: 100 })).toBeNull();
   });
   it('needs a rate across currencies; refuses two foreign currencies and FX across entities', () => {
     expect(isCrossCurrency(byId(3), byId(1))).toBe(true);
