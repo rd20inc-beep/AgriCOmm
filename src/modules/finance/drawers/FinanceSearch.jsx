@@ -50,14 +50,14 @@ export default function FinanceSearch() {
 
   return (
     <div ref={box} className="relative" data-testid="finance-search">
-      <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+      <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" aria-hidden="true" />
       <input value={q} onChange={(e) => { setQ(e.target.value); setOpen(true); }} onFocus={() => setOpen(true)}
         onKeyDown={(e) => { if (e.key === 'Escape') setOpen(false); }}
         aria-label="Search Finance — party, document or transaction"
         placeholder="Party, document, transaction…"
-        className="w-44 sm:w-56 pl-7 pr-2 py-1.5 text-xs border border-gray-200 rounded-lg bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none" />
+        className="w-full sm:w-60 pl-8 pr-2 min-h-10 sm:min-h-9 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none" />
       {open && debounced.length >= 2 && (
-        <div className="absolute right-0 mt-1 w-80 max-h-96 overflow-y-auto bg-white border border-gray-200 rounded-xl shadow-lg z-30 p-1" role="listbox">
+        <div className="absolute left-0 sm:left-auto right-0 mt-1 w-full sm:w-80 max-h-96 overflow-y-auto bg-white border border-gray-200 rounded-xl shadow-lg z-30 p-1" role="listbox">
           {isFetching && !data ? <p className="text-xs text-gray-400 px-3 py-2">Searching…</p>
             : !groups.length ? <p className="text-xs text-gray-400 px-3 py-2">No match.</p>
             : groups.map(([label, list]) => (
@@ -65,7 +65,7 @@ export default function FinanceSearch() {
                 <p className="px-3 py-1 text-[10px] uppercase tracking-wide text-gray-400">{label}</p>
                 {list.map((h) => (
                   <button key={`${h._type}-${h.kind || h.type}-${h.id}`} type="button" role="option" onClick={() => pick(h)}
-                    className="w-full flex items-center justify-between gap-2 px-3 py-1.5 text-left text-xs rounded-lg hover:bg-blue-50">
+                    className="w-full flex items-center justify-between gap-2 px-3 py-2 min-h-11 sm:min-h-0 text-left text-sm sm:text-xs rounded-lg hover:bg-blue-50 focus-visible:outline-none focus-visible:bg-blue-50">
                     <span className="flex items-center gap-1.5 min-w-0">
                       {h._type === 'party' ? (h.type === 'customer' ? <Users size={12} className="text-gray-400" /> : <Truck size={12} className="text-gray-400" />)
                         : h._type === 'document' ? <FileText size={12} className="text-gray-400" />
