@@ -198,7 +198,9 @@ export default function NeedsAttention({ summary, rangeKey = '' }) {
                 <div className="flex items-start gap-2 min-w-0 flex-1">
                   <tone.Icon size={14} className={`mt-0.5 shrink-0 ${tone.icon}`} />
                   <div className="min-w-0">
-                    <p className="text-sm text-gray-900 font-medium truncate">{item.title}</p>
+                    {item.kind === 'receive' && drawers?.openDocument
+                      ? <button type="button" onClick={() => drawers.openDocument(p)} className="block max-w-full text-sm text-gray-900 font-medium truncate text-left hover:text-blue-700 hover:underline">{item.title}</button>
+                      : <p className="text-sm text-gray-900 font-medium truncate">{item.title}</p>}
                     {item.sub && <p className="text-[11px] text-gray-500 truncate">{item.sub}</p>}
                   </div>
                 </div>
