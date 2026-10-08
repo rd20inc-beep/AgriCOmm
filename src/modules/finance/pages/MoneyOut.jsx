@@ -16,6 +16,7 @@ import { toPkr } from '../utils/fx';
 import { shortenRef } from '../utils/refs';
 import { favStar } from '../../../shared/utils/favorites';
 import { accountsForCurrency } from '../../../shared/utils/accountCurrency';
+import { isDerivedPayable, derivedPayableHint } from '../../../shared/utils/derivedPayables';
 import FieldError from '../../../shared/components/FieldError';
 import { todayLocalISO, fmtMoney, fmtPKR, fmtDate, fmtDateTime } from '../../../shared/utils/format';
 
@@ -318,7 +319,13 @@ export default function MoneyOut() {
         onRowClick={openDrawer} exportFilename="payables" emptyText="No payables found" loading={isLoading}
         actions={(row) => (
           <div className="inline-flex items-center gap-1.5">
-            {row.status !== 'Paid' && parseFloat(row.outstanding) > 0 && (
+            {row.status !== 'Paid' && parseFloat(row.outstanding) > 0 && isDerivedPayable(row) && (
+              <span title={derivedPayableHint(row)}
+                className="px-2.5 py-1 bg-gray-50 text-gray-400 text-xs font-medium rounded inline-flex items-center gap-1 cursor-help">
+                <DollarSign size={12} /> Settled elsewhere
+              </span>
+            )}
+            {row.status !== 'Paid' && parseFloat(row.outstanding) > 0 && !isDerivedPayable(row) && (
               <button onClick={(e) => { e.stopPropagation(); openDrawer(row); }}
                 className="px-2.5 py-1 bg-emerald-50 text-emerald-700 text-xs font-medium rounded hover:bg-emerald-100 inline-flex items-center gap-1">
                 <DollarSign size={12} /> Pay
@@ -427,8 +434,15 @@ export default function MoneyOut() {
               </div>
             </div>
 
+            {/* A cost-derived row has no payable behind it — say where it is settled. */}
+            {drawer.status !== 'Paid' && parseFloat(drawer.outstanding) > 0 && isDerivedPayable(drawer) && (
+              <div className="px-6 py-4 border-t border-gray-200">
+                <p className="text-sm text-gray-600 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">{derivedPayableHint(drawer)}</p>
+              </div>
+            )}
+
             {/* Payment Form */}
-            {drawer.status !== 'Paid' && parseFloat(drawer.outstanding) > 0 && (
+            {drawer.status !== 'Paid' && parseFloat(drawer.outstanding) > 0 && !isDerivedPayable(drawer) && (
               <form onSubmit={handleRecordPayment} className="px-6 py-4 border-t border-gray-200 space-y-4">
                 <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
                   <Landmark size={15} /> Record Payment

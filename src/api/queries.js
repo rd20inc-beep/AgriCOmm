@@ -851,6 +851,9 @@ export function useRecordPayment() {
       qc.invalidateQueries({ queryKey: ['mill-expenses'] });
       qc.invalidateQueries({ queryKey: ['mill-cash-flow'] });
       qc.invalidateQueries({ queryKey: ['finance-bank-transactions'] });
+      // A receipt on an export order's receivable is recorded for Finance to
+      // confirm (Confirmations inbox).
+      qc.invalidateQueries({ queryKey: ['export', 'pending-receipts'] });
     },
   });
 }

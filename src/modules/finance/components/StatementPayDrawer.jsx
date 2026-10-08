@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { CheckCircle, Wallet, HandCoins, Info } from 'lucide-react';
 import SlideDrawer from '../../../components/SlideDrawer';
-import { useReceivables, usePayables, useBankAccounts, useRecordPayment } from '../../../api/queries';
+import { useReceivables, usePayables, useBankAccounts, useRecordPayment, useAcceptLocalSaleGroupPayment } from '../../../api/queries';
 import { useApp } from '../../../context/AppContext';
 import { favStar } from '../../../shared/utils/favorites';
 import { accountsForCurrency } from '../../../shared/utils/accountCurrency';
@@ -34,6 +34,7 @@ export default function StatementPayDrawer({ mode, party, onClose }) {
   const { addToast } = useApp();
   const qc = useQueryClient();
   const recordPaymentMut = useRecordPayment();
+  const acceptLocalSaleMut = useAcceptLocalSaleGroupPayment();
   const { data: bankAccounts = [] } = useBankAccounts();
   // Only one side is ever relevant; React Query caches both cheaply.
   const { data: receivables = [], isLoading: rLoading } = useReceivables();
@@ -152,6 +153,27 @@ export default function StatementPayDrawer({ mode, party, onClose }) {
     try {
       // Sequential so each invoice's outstanding is read fresh by the backend.
       for (const { item, chunk } of allocation) {
+        if (isCustomer && item.kind === 'local_sale') {
+          // A local-sale row is a sale GROUP, and its id is a local_sales id —
+          // not a receivables id. Sending it as linked_receivable_id settled
+          // whichever receivable happened to share the number. It is paid
+          // through the local-sale receipt endpoint, as Money In does.
+          const acct = bankAccounts.find((b) => String(b.id) === String(form.bankAccountId));
+          await acceptLocalSaleMut.mutateAsync({
+            groupNo: item.saleGroupNo || item.recvNo,
+            data: {
+              amount: Number(chunk.toFixed(2)),
+              payment_method: form.method,
+              payment_date: form.date,
+              // Cash lands in the cash float of where it was collected.
+              bank_account_id: form.method === 'cash' ? null : (form.bankAccountId || null),
+              collection_location: form.method === 'cash' ? ((acct?.entity || 'mill') === 'mill' ? 'Mill' : 'Head Office') : null,
+              due_date: form.method === 'cheque' && form.dueDate ? form.dueDate : null,
+              notes: form.notes || `${verb} for ${refOf(item)} — ${party.name}`,
+            },
+          });
+          continue;
+        }
         await recordPaymentMut.mutateAsync({
           type: isCustomer ? 'receipt' : 'payment',
           amount: Number(chunk.toFixed(2)),
