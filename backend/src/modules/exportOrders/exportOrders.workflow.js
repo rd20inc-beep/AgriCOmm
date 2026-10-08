@@ -325,8 +325,9 @@ async function runTransitionSideEffects(trx, order, toStatus, userId) {
         if (!o || o.revenue_posted) return;
 
         // Revenue is the contract value in PKR at the booked (locked) rate.
-        // Any difference vs the actual receipt-date rates is a legitimate FX
-        // gain/loss that surfaces as a residual on the customer ledger.
+        // Each receipt (and the advance, below) clears AR at this same booked
+        // rate; the difference to what the bank received is realised FX on
+        // 6210 (G-7), so AR nets to zero once the order is paid.
         const contractVal = parseFloat(o.contract_value) || 0;
         const bookedRate = parseFloat(o.booked_fx_rate) || 0;
         const revenuePkr = parseFloat(o.contract_value_pkr_locked)
@@ -407,10 +408,10 @@ async function runTransitionSideEffects(trx, order, toStatus, userId) {
         // Received); revenue above just debited the FULL contract to AR (1110).
         // Without this reclassification AR stays overstated by the advance and
         // 1310 lingers on the books forever. Reclassify the banked advance (PKR)
-        // 1310 → 1110. Any gap between the receipt-date rate (what's banked) and
-        // the booked rate (what AR was recognized at) stays as a residual on the
-        // customer ledger — the legitimate FX gain/loss the revenue note above
-        // describes. Inside the same revenue_posted SAVEPOINT, so it posts once.
+        // 1310 → 1110. A foreign advance clears AR at the BOOKED rate (what AR
+        // was recognised at) while 1310 is released at what was banked; the gap
+        // is realised FX gain / loss on 6210 (G-7), in the same journal.
+        // Inside the same revenue_posted SAVEPOINT, so it posts once.
         const advanceAppliedPkr = parseFloat(o.advance_received_pkr)
           || (parseFloat(o.advance_received) || 0) * ((o.currency || 'PKR') === 'PKR' ? 1 : (bookedRate || 0));
         if (advanceAppliedPkr > 0.01) {
@@ -420,6 +421,21 @@ async function runTransitionSideEffects(trx, order, toStatus, userId) {
           ]);
           if (advLiab && exportAR) {
             const applied = parseFloat(advanceAppliedPkr.toFixed(2));
+            const advForeign = parseFloat(o.advance_received) || 0;
+            const arCredit = foreign && bookedRate > 0 && advForeign > 0
+              ? parseFloat((advForeign * bookedRate).toFixed(2))
+              : applied;
+            const fxDiff = parseFloat((applied - arCredit).toFixed(2)); // > 0 gain
+            const fxLines = [];
+            if (Math.abs(fxDiff) >= 0.01) {
+              const fxAcc = await sp('chart_of_accounts').where({ code: '6210' }).first();
+              if (!fxAcc) throw new Error('chart_of_accounts missing 6210 FX Gain/Loss');
+              fxLines.push({
+                account_id: fxAcc.id, account: fxAcc.name,
+                debit: fxDiff < 0 ? -fxDiff : 0, credit: fxDiff > 0 ? fxDiff : 0,
+                narration: `${fxDiff > 0 ? 'CR' : 'DR'} 6210 ${fxAcc.name} — realised FX on advance ${o.order_no} (${o.currency} ${advForeign} banked ${applied} vs booked @ ${bookedRate})`,
+              });
+            }
             const jrnl = await accountingService.createJournal(sp, {
               date: new Date().toISOString().slice(0, 10),
               entity: 'export',
@@ -429,8 +445,9 @@ async function runTransitionSideEffects(trx, order, toStatus, userId) {
               partyType: o.customer_id ? 'customer' : null,
               partyId: o.customer_id || null,
               lines: [
-                { account_id: advLiab.id,  account: advLiab.name,  debit: applied, credit: 0,       narration: `DR ${advLiab.code} ${advLiab.name} — advance applied ${o.order_no}` },
-                { account_id: exportAR.id, account: exportAR.name, debit: 0,       credit: applied, narration: `CR ${exportAR.code} ${exportAR.name} — advance applied ${o.order_no}` },
+                { account_id: advLiab.id,  account: advLiab.name,  debit: applied, credit: 0,        narration: `DR ${advLiab.code} ${advLiab.name} — advance applied ${o.order_no}` },
+                { account_id: exportAR.id, account: exportAR.name, debit: 0,       credit: arCredit, narration: `CR ${exportAR.code} ${exportAR.name} — advance applied ${o.order_no}` },
+                ...fxLines,
               ],
             });
             if (jrnl?.id) await accountingService.postJournal(sp, jrnl.id);

@@ -258,15 +258,48 @@ async function hasPaymentJournal(trx, paymentNo) {
   return !!j;
 }
 
+// Receivables booked in PKR at a locked rate, settled in foreign currency:
+// the realised difference goes to 6210 (G-7). 1310 (advances) is booked at
+// the receipt rate itself — its difference realises when the advance is
+// applied to 1110 at shipment.
+const FX_BOOKED_COUNTERS = ['1110'];
+const FX_CODE = '6210';
+
+/**
+ * The PKR-per-unit rate a foreign receivable was booked at: the receivable's
+ * own base_amount_pkr / expected_amount (what 1110 was debited with), else its
+ * fx_rate, else the export order's booked_fx_rate. 0 when unknowable (then no
+ * FX split is posted and the receivable is credited at the receipt's PKR).
+ */
+async function bookedRateFor(trx, { payment, receivable, override }) {
+  if (Number(override) > 0) return Number(override);
+  const r = receivable || (payment.linked_receivable_id ? await trx('receivables').where({ id: payment.linked_receivable_id }).first() : null);
+  if (r) {
+    const exp = num(r.expected_amount);
+    const base = num(r.base_amount_pkr);
+    if (exp > 0 && base > 0 && String(r.currency || '').toUpperCase() !== 'PKR') return base / exp;
+    if (num(r.fx_rate) > 1) return num(r.fx_rate);
+  }
+  const orderId = r?.order_id || (payment.source_table === 'export_orders' ? payment.source_id : null);
+  if (orderId) {
+    const o = await trx('export_orders').where({ id: orderId }).first('booked_fx_rate');
+    if (num(o?.booked_fx_rate) > 0) return num(o.booked_fx_rate);
+  }
+  return 0;
+}
+
 const expenseEntity = (t) => (t === 'mill' ? 'mill' : t === 'export' ? 'export' : 'general');
 
 /**
  * The settlement journal for one payment row, posted under its payment_no:
- *  - a receipt: Dr 1000 / Cr 1120 (local sale), 1310 (advance), 1110 (export
- *    balance) or 1100, stamped to the receivable's customer;
+ *  - a receipt: Dr the account's own GL (G-8; 1000 if unmapped) / Cr 1120
+ *    (local sale), 1310 (advance), 1110 (export balance) or 1100, stamped to
+ *    the receivable's customer. A foreign receipt on 1110 credits it at the
+ *    BOOKED rate and posts the difference to 6210 (realised FX, G-7);
  *  - a payment: Dr the payable (2010; 2040 for a salaries expense) for the
- *    gross / Cr 1000 for the net cash, Cr 2060 for WHT, Cr 4060 for the
- *    discount, stamped to the supplier.
+ *    gross / Cr the account's GL for the net cash, Cr 2060 for WHT, Cr 4060
+ *    for the discount, stamped to the supplier. (Payables carry no booked
+ *    rate, so a foreign payment posts no FX line.)
  * This is what recordPayment posts for a settled payment, and what Clear Cheque
  * posts for a cheque recorded on any screen (Money In/Out, Purchases,
  * Expenses). Throws through ledgerFailure so the caller's transaction rolls back.
@@ -287,8 +320,9 @@ async function postPaymentJournal(trx, { payment, userId, date, description, ove
     let entity = isReceivable ? 'export' : 'mill';
     let partyType = null; let partyId = null;
     let what = isReceivable ? `receivable #${payment.linked_receivable_id || ''}` : `payable #${payment.linked_payable_id || ''}`;
+    let r = null;
     if (isReceivable && (payment.linked_receivable_id || payment.service_invoice_id)) {
-      const r = payment.linked_receivable_id ? await trx('receivables').where({ id: payment.linked_receivable_id }).first() : null;
+      r = payment.linked_receivable_id ? await trx('receivables').where({ id: payment.linked_receivable_id }).first() : null;
       const invoiceId = payment.service_invoice_id || r?.service_invoice_id;
       // Credit the receivable account the document was booked to:
       //  - a local sale, a service-milling invoice (Dr 1120 / Cr 4050) and any
@@ -365,12 +399,27 @@ async function postPaymentJournal(trx, { payment, userId, date, description, ove
         if (discAcc) lines.push({ account_id: discAcc.id, account: discAcc.name, debit: 0, credit: round2(disc), narration: `CR ${discAcc.code} ${discAcc.name} — discount ${paymentNo}` });
       }
     } else {
-      const dr = isReceivable ? cash : counter;
-      const cr = isReceivable ? counter : cash;
-      lines = [
-        { account_id: dr.id, account: dr.name, debit: amtPkr, credit: 0, narration: `DR ${dr.code} ${dr.name} — ${paymentNo}` },
-        { account_id: cr.id, account: cr.name, debit: 0, credit: amtPkr, narration: `CR ${cr.code} ${cr.name} — ${paymentNo}` },
-      ];
+      // G-7 realised FX: a foreign receipt settles Export AR (1110) at the
+      // rate the receivable was BOOKED at, while the bank takes the PKR the
+      // receipt actually fetched; the difference is gain / loss on 6210, in
+      // the same journal.
+      const booked = isReceivable && cur !== 'PKR' && FX_BOOKED_COUNTERS.includes(counterCode)
+        ? await bookedRateFor(trx, { payment, receivable: r, override: overrides.bookedFxRate })
+        : 0;
+      const counterPkr = booked > 0 ? round2(amtNum * booked) : amtPkr;
+      const fxDiff = round2(amtPkr - counterPkr); // > 0 gain, < 0 loss
+      const cashLine = { account_id: cash.id, account: cash.name, debit: isReceivable ? amtPkr : 0, credit: isReceivable ? 0 : amtPkr, narration: `${isReceivable ? 'DR' : 'CR'} ${cash.code} ${cash.name} — ${paymentNo}` };
+      const counterLine = { account_id: counter.id, account: counter.name, debit: isReceivable ? 0 : counterPkr, credit: isReceivable ? counterPkr : 0, narration: `${isReceivable ? 'CR' : 'DR'} ${counter.code} ${counter.name} — ${paymentNo}${booked > 0 ? ` (${cur} ${amtNum} @ booked ${booked})` : ''}` };
+      lines = isReceivable ? [cashLine, counterLine] : [counterLine, cashLine];
+      if (Math.abs(fxDiff) >= 0.01) {
+        const fxAcc = await trx('chart_of_accounts').where({ code: FX_CODE }).first();
+        if (!fxAcc) throw missingAccounts([FX_CODE]);
+        lines.push({
+          account_id: fxAcc.id, account: fxAcc.name,
+          debit: fxDiff < 0 ? -fxDiff : 0, credit: fxDiff > 0 ? fxDiff : 0,
+          narration: `${fxDiff > 0 ? 'CR' : 'DR'} ${fxAcc.code} ${fxAcc.name} — realised FX ${fxDiff > 0 ? 'gain' : 'loss'} ${paymentNo} (${cur} ${amtNum} @ ${fx} vs booked ${booked})`,
+        });
+      }
     }
     const noteOriginal = cur !== 'PKR' ? ` (orig ${cur} ${amtNum.toLocaleString()} @ ${fx})` : '';
     const d = date ? new Date(date) : new Date();
@@ -400,7 +449,7 @@ async function postPaymentJournal(trx, { payment, userId, date, description, ove
 }
 
 module.exports = {
-  isCheque, hasPaymentJournal, postPaymentJournal,
+  isCheque, hasPaymentJournal, postPaymentJournal, bookedRateFor, FX_BOOKED_COUNTERS,
   SOURCES, LOT_SUPPLIER_LINES, round2, resolveSource, mirrorSourcePaid, applyPayableDelta, applyReceivableDelta,
   mirrorLocalSale, mirrorServiceInvoice, settleDocuments,
   pendingChequeTotal, nextBtNo, postDeltaOf,
