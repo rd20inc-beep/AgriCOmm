@@ -9,8 +9,8 @@ import {
   ArrowDownLeft, ArrowUpRight,
   TrendingUp, AlertTriangle,
   Clock, Lock, Wallet, Activity,
-  Receipt, RefreshCw, ExternalLink,
-  CheckCircle2, CalendarClock,
+  Receipt, RefreshCw, ChevronRight,
+  CheckCircle2, CalendarClock, Users,
 } from 'lucide-react';
 import {
   useReceivables, usePayables, useJournalEntries,
@@ -27,6 +27,8 @@ import PurchaseRequirementsPanel from '../../purchaseRequirements/components/Pur
 import { fmtPKR, fmtUSD, fmtMoney, fmtDate, fmtPct } from '../../../shared/utils/format';
 import { nativeTotals } from '../utils/currencyTiles';
 import { receivablesTile, collectionTile } from '../utils/currencyTiles';
+import { Section, HeadlineCard, TypeChip, EmptyLine, MoreSection } from '../components/FinanceUI';
+import { btnQuiet, kpiLabel, kpiValue, kpiSub, sectionTitle } from '../utils/uiClasses';
 
 // Aging helpers + bucket palette moved to ../utils/aging so MoneyIn and
 // any future caller render the same buckets. See useFxRate() too for
@@ -90,89 +92,15 @@ export default function FinanceOverview() {
   if (isLoading) return <Skeleton />;
 
   const consolidatedProfit = consolidated.profitPkr || 0;
-  const consolidatedColor = consolidatedProfit >= 0
-    ? 'from-emerald-600 via-emerald-500 to-teal-500'
-    : 'from-red-600 via-red-500 to-red-500';
+  const profitTone = consolidatedProfit < 0 ? 'negative' : consolidatedProfit > 0 ? 'positive' : 'neutral';
+  const warnings = summary.warnings || [];
 
   return (
     <div className="space-y-5 pb-4">
-      {/* ─── HERO BAND ────────────────────────────────────────────── */}
-      <div className={`rounded-2xl bg-gradient-to-r ${consolidatedColor} p-5 sm:p-6 text-white shadow-sm relative overflow-hidden`}>
-        <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(circle at 30% 20%, white 0%, transparent 60%)' }} />
-        <div className="relative flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
-          <div>
-            <div className="flex items-center gap-2 text-xs uppercase tracking-wider opacity-80 mb-1">
-              <Activity size={14} /> Consolidated profit (booked) · {rangeKey ? rangeLabel(rangeKey) : 'All time'}
-            </div>
-            <div className="text-3xl sm:text-4xl font-bold leading-tight">
-              {fmtPKR(consolidatedProfit)}
-            </div>
-            <div className="text-xs opacity-90 mt-1">
-              Export booked {fmtPKR(exp.bookedProfitPkr || 0)} · Mill realised {fmtPKR(mill.grossProfit || 0)}
-              {(local.grossProfit || 0) !== 0 && <> · Local other {fmtPKR(local.grossProfit || 0)}</>}
-              {(exp.fxGainLossPkr || 0) !== 0 && (
-                <> · FX realised {(exp.fxGainLossPkr || 0) >= 0 ? '+' : ''}{fmtPKR(exp.fxGainLossPkr || 0)} (not included)</>
-              )}
-            </div>
-            <div className="text-[11px] opacity-80 mt-0.5">
-              Realised basis {fmtPKR(consolidated.realisedPkr || 0)}
-              {(exp.unpricedCount || 0) > 0 && <> · {exp.unpricedCount} export order{exp.unpricedCount === 1 ? '' : 's'} not costed yet — excluded</>}
-            </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            {summary.currentFxRate && (
-              <span className="bg-white/15 backdrop-blur-sm px-3 py-1.5 rounded-full text-xs font-medium">
-                1 USD = {summary.currentFxRate} PKR
-              </span>
-            )}
-            <span className="bg-white/15 backdrop-blur-sm px-3 py-1.5 rounded-full text-xs font-medium">Base PKR</span>
-            <button onClick={() => refetch()} className="bg-white/15 backdrop-blur-sm hover:bg-white/25 px-3 py-1.5 rounded-full text-xs font-medium inline-flex items-center gap-1 transition-colors">
-              <RefreshCw size={12} /> Refresh
-            </button>
-          </div>
-        </div>
-
-        {(summary.warnings || []).length > 0 && (
-          <div className="relative mt-3 pt-3 border-t border-white/20 space-y-1">
-            {summary.warnings.slice(0, 2).map((w, i) => (
-              <div key={i} className="flex items-center gap-2 text-xs">
-                <AlertTriangle size={12} /> <WarningText text={w} ratesHref={fl('/finance/accounting/rates')} />
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* ─── UPCOMING CHEQUES & DUES ──────────────────────────────── */}
-      {((upcoming?.receiving?.length || 0) + (upcoming?.giving?.length || 0)) > 0 && (
-        <Link to={fl('/finance/accounts/cheques')} className="block bg-white rounded-xl border border-gray-200 p-4 hover:border-blue-300 transition-colors">
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2">
-              <CalendarClock size={16} className="text-blue-600" />
-              <h2 className="text-sm font-semibold text-gray-900">Upcoming Cheques &amp; Dues</h2>
-            </div>
-            <span className="text-xs text-blue-600 inline-flex items-center gap-1">View all <ExternalLink size={12} /></span>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="bg-emerald-50 rounded-lg p-3">
-              <p className="text-[11px] text-emerald-600 uppercase tracking-wide flex items-center gap-1"><ArrowDownLeft size={11} /> Receiving</p>
-              <p className="text-lg font-bold text-emerald-700">{nativeTotals(upcoming?.receiving)}</p>
-              <p className="text-[11px] text-emerald-600/80">{upcoming?.receiving?.length || 0} cheque(s) / due(s)</p>
-            </div>
-            <div className="bg-red-50 rounded-lg p-3">
-              <p className="text-[11px] text-red-600 uppercase tracking-wide flex items-center gap-1"><ArrowUpRight size={11} /> Giving</p>
-              <p className="text-lg font-bold text-red-700">{nativeTotals(upcoming?.giving)}</p>
-              <p className="text-[11px] text-red-600/80">{upcoming?.giving?.length || 0} cheque(s) / due(s)</p>
-            </div>
-          </div>
-        </Link>
-      )}
-
-      {/* ─── PRIMARY KPI ROW ──────────────────────────────────────── */}
-      <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+      {/* ─── 1. POSITION STRIP — where the money stands ─────────────── */}
+      <div className="grid grid-cols-2 xl:grid-cols-4 gap-3" data-testid="position-strip">
         <KpiTile
           icon={ArrowDownLeft}
-          tone="emerald"
           label="Receivables"
           basis="all open"
           primary={recvSplit.primary}
@@ -183,7 +111,6 @@ export default function FinanceOverview() {
         />
         <KpiTile
           icon={ArrowUpRight}
-          tone="rose"
           label="Payables"
           basis="all open"
           primary={fmtPKR(pay.totalOutstandingPkr || 0)}
@@ -194,7 +121,6 @@ export default function FinanceOverview() {
         />
         <KpiTile
           icon={Wallet}
-          tone="indigo"
           label="Cash Position"
           basis="now"
           primary={fmtPKR(cash.bankBalancePkr || 0)}
@@ -208,7 +134,6 @@ export default function FinanceOverview() {
         />
         <KpiTile
           icon={TrendingUp}
-          tone="violet"
           label="Collection Rate"
           basis="all time"
           primary={collection.primary}
@@ -218,20 +143,102 @@ export default function FinanceOverview() {
         />
       </div>
 
-      {/* ─── NEEDS ATTENTION (actionable queue; replaces the alerts panel
-           and the payroll-approvals card) ───────────────────────────── */}
+      {/* ─── 2. NEEDS ATTENTION — the actionable queue (replaces the alerts
+           panel and the payroll-approvals card) ───────────────────────── */}
       <NeedsAttention summary={summary} rangeKey={rangeKey} />
 
-      {/* ─── PAYROLL SUMMARY (consolidated from mill payroll) ──────── */}
-      <PayrollSummaryStrip navigate={navigate} fmtPKR={fmtPKR} />
+      {/* ─── 3. PROFIT — a calm card; only the figure carries the sign colour,
+           and the word (profit / loss) says it too ─────────────────────── */}
+      <HeadlineCard
+        testId="profit-card"
+        icon={Activity}
+        label={<>Consolidated profit (booked) · {rangeKey ? rangeLabel(rangeKey) : 'All time'}</>}
+        value={<>{fmtPKR(consolidatedProfit)}{profitTone === 'negative' && <span className="ml-2 align-middle text-sm font-semibold">(loss)</span>}</>}
+        tone={profitTone}
+        sub={<>
+          Export booked {fmtPKR(exp.bookedProfitPkr || 0)} · Mill realised {fmtPKR(mill.grossProfit || 0)}
+          {(local.grossProfit || 0) !== 0 && <> · Local other {fmtPKR(local.grossProfit || 0)}</>}
+          {(exp.fxGainLossPkr || 0) !== 0 && (
+            <> · FX realised {(exp.fxGainLossPkr || 0) >= 0 ? '+' : ''}{fmtPKR(exp.fxGainLossPkr || 0)} (not included)</>
+          )}
+        </>}
+        meta={<>
+          Realised basis {fmtPKR(consolidated.realisedPkr || 0)}
+          {(exp.unpricedCount || 0) > 0 && <> · {exp.unpricedCount} export order{exp.unpricedCount === 1 ? '' : 's'} not costed yet — excluded</>}
+        </>}
+        right={<>
+          {summary.currentFxRate && <TypeChip>1 USD = {summary.currentFxRate} PKR</TypeChip>}
+          <TypeChip>Base PKR</TypeChip>
+          <button type="button" onClick={() => refetch()} className={btnQuiet}>
+            <RefreshCw size={14} aria-hidden="true" /> Refresh
+          </button>
+        </>}
+      >
+        {warnings.length > 0 && (
+          <ul className="mt-4 space-y-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5" data-testid="profit-warnings">
+            {warnings.slice(0, 2).map((w, i) => (
+              <li key={i} className="flex items-start gap-2 text-xs text-amber-900">
+                <AlertTriangle size={13} className="mt-0.5 shrink-0" aria-hidden="true" />
+                <WarningText text={w} ratesHref={fl('/finance/accounting/rates')} />
+              </li>
+            ))}
+          </ul>
+        )}
+      </HeadlineCard>
 
-      {/* ─── AI ANOMALY WATCH ─────────────────────────────────────── */}
-      <AnomalyWatchCard />
+      {/* ─── 4. RECENT ACTIVITY + JOURNALS ───────────────────────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <RecentActivity rangeParams={rangeParams} />
 
-      {/* ─── BUSINESS SEGMENTS ────────────────────────────────────── */}
+        <Section
+          title="Recent journal entries"
+          icon={Clock}
+          action={<ViewAll onClick={() => navigate(fl('/finance/accounting'))} />}
+        >
+          {recentJournals.length === 0 ? (
+            <EmptyLine icon={Receipt}>No journal entries in this period.</EmptyLine>
+          ) : (
+            <ul className="divide-y divide-gray-100">
+              {recentJournals.map((j, i) => (
+                <li key={j.id || i} className="py-2.5 flex items-center gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm text-gray-800 truncate" title={j.description || j.narration || 'Journal entry'}>{j.description || j.narration || 'Journal entry'}</p>
+                    {(j.journalNo || j.refNo) && (
+                      <p className="text-xs text-gray-500 truncate">
+                        {[j.journalNo, j.refNo].filter(Boolean).join(' · ')}
+                      </p>
+                    )}
+                  </div>
+                  <span className="text-xs text-gray-500 flex-shrink-0 tabular-nums">{j.date ? fmtDate(j.date) : ''}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Section>
+      </div>
+
+      {/* ─── 5. UPCOMING CHEQUES & DUES ──────────────────────────────── */}
+      {((upcoming?.receiving?.length || 0) + (upcoming?.giving?.length || 0)) > 0 && (
+        <Section title="Upcoming cheques & dues" icon={CalendarClock}
+          action={<Link to={fl('/finance/accounts/cheques')} className={btnQuiet}>View all <ChevronRight size={14} aria-hidden="true" /></Link>}>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-lg border border-gray-100 bg-gray-50 p-3">
+              <p className="text-xs font-medium uppercase tracking-wide text-gray-500 flex items-center gap-1"><ArrowDownLeft size={12} className="text-emerald-600" aria-hidden="true" /> Receiving</p>
+              <p className="text-lg font-bold text-gray-900 tabular-nums break-words">{nativeTotals(upcoming?.receiving)}</p>
+              <p className="text-xs text-gray-500">{upcoming?.receiving?.length || 0} cheque(s) / due(s)</p>
+            </div>
+            <div className="rounded-lg border border-gray-100 bg-gray-50 p-3">
+              <p className="text-xs font-medium uppercase tracking-wide text-gray-500 flex items-center gap-1"><ArrowUpRight size={12} className="text-red-600" aria-hidden="true" /> Giving</p>
+              <p className="text-lg font-bold text-gray-900 tabular-nums break-words">{nativeTotals(upcoming?.giving)}</p>
+              <p className="text-xs text-gray-500">{upcoming?.giving?.length || 0} cheque(s) / due(s)</p>
+            </div>
+          </div>
+        </Section>
+      )}
+
+      {/* ─── 6. BUSINESS SEGMENTS ────────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
         <SegmentCard
-          tone="blue"
           title="Export Operations"
           subtitle={`${exp.activeOrders || 0} active · ${exp.totalOrders || 0} total`}
           revenueLabel="Revenue (PKR)"
@@ -249,7 +256,6 @@ export default function FinanceOverview() {
           onClick={goExport}
         />
         <SegmentCard
-          tone="amber"
           title="Mill Operations"
           subtitle={`Sales of mill output (local sales + transfers to export) · ${mill.batchCount || 0} batches completed`}
           revenueLabel="Sales (PKR)"
@@ -262,7 +268,6 @@ export default function FinanceOverview() {
           onClick={goMill}
         />
         <SegmentCard
-          tone="emerald"
           title="Local Sales (other)"
           subtitle={`${local.completedCount || 0} completed · ${local.saleCount || 0} total${(local.outstanding || 0) > 0 ? ` · ${fmtPKR(local.outstanding)} due` : ''} · profit excludes mill-output sales (in Mill)`}
           revenueLabel="Revenue (PKR)"
@@ -275,96 +280,69 @@ export default function FinanceOverview() {
         />
       </div>
 
-      {/* ─── PURCHASE REQUESTS (approved material buys awaiting payment) ── */}
-      <PurchaseRequirementsPanel embedded />
+      {/* ─── 7. PAYROLL SUMMARY (consolidated from mill payroll) ──────── */}
+      <PayrollSummaryStrip navigate={navigate} fmtPKR={fmtPKR} />
 
-      {/* ─── AGING STRIPS ─────────────────────────────────────────── */}
+      {/* ─── 8. AGING ────────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <AgingPanel
-          title="Receivables Aging"
+          title="Receivables aging"
           icon={ArrowDownLeft}
-          tone="emerald"
           data={recvAging}
           totalLabel={fmtUSD(recvAging.totalForeign)}
           totalSubLabel={fmtPKR(recvAging.totalPkr)}
           onClickAll={() => navigate(fl('/finance/money-in'))}
         />
         <AgingPanel
-          title="Payables Aging"
+          title="Payables aging"
           icon={ArrowUpRight}
-          tone="rose"
           data={payAging}
           totalLabel={fmtPKR(payAging.totalPkr)}
           onClickAll={() => navigate(fl('/finance/money-out'))}
         />
       </div>
 
-      {/* ─── TOP COUNTERPARTIES ───────────────────────────────────── */}
+      {/* ─── 9. TOP COUNTERPARTIES ───────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <CounterpartyList
-          title="Top Overdue Customers"
-          icon={AlertTriangle}
+          title="Top overdue customers"
           empty="No overdue receivables"
           rows={topOverdueRecv}
           itemLabel={(r) => r.customerName || r.party || `#${r.id}`}
           itemAmount={(r) => fmtMoney(parseFloat(r.outstanding) || 0, (r.currency || 'PKR').toUpperCase())}
           itemAge={(r) => ageDays(r.dueDate || r.due_date)}
           itemHref={(r) => r.orderId ? `/export/${r.orderId}` : fl('/finance/money-in')}
-          tone="rose"
         />
         <CounterpartyList
-          title="Top Overdue Suppliers"
-          icon={AlertTriangle}
+          title="Top overdue suppliers"
           empty="No overdue payables"
           rows={topOverduePay}
           itemLabel={(p) => p.supplierName || p.supplier_name || p.party || p.linkedRef || p.linked_ref || `#${p.id}`}
           itemAmount={(p) => fmtPKR(parseFloat(p.outstanding) || 0)}
           itemAge={(p) => ageDays(p.dueDate || p.due_date)}
           itemHref={() => fl('/finance/money-out')}
-          tone="amber"
         />
       </div>
 
-      {/* ─── COGS LIFECYCLE (kept from previous design — useful) ─── */}
-      {exp.cogsStatus && (exp.cogsStatus.preShipment > 0 || exp.cogsStatus.shippedMissingCogs > 0) && (
-        <CogsLifecyclePanel data={exp.cogsStatus} />
-      )}
-
-      {/* ─── RECENT ACTIVITY + JOURNALS ───────────────────────────── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <RecentActivity rangeParams={rangeParams} />
-
-        <Panel
-          title="Recent Journal Entries"
-          icon={Clock}
-          iconColor="text-indigo-500"
-          onSeeAll={() => navigate(fl('/finance/accounting'))}
-        >
-          {recentJournals.length === 0 ? (
-            <p className="text-sm text-gray-400 text-center py-6">No recent entries</p>
-          ) : (
-            <ul className="divide-y divide-gray-100">
-              {recentJournals.map((j, i) => (
-                <li key={j.id || i} className="py-2 flex items-center gap-2">
-                  <div className="w-7 h-7 rounded-full bg-indigo-50 flex items-center justify-center flex-shrink-0">
-                    <Receipt size={13} className="text-indigo-500" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm text-gray-800 truncate" title={j.description || j.narration || 'Journal entry'}>{j.description || j.narration || 'Journal entry'}</p>
-                    {(j.journalNo || j.refNo) && (
-                      <p className="text-[11px] text-gray-400 truncate">
-                        {[j.journalNo, j.refNo].filter(Boolean).join(' · ')}
-                      </p>
-                    )}
-                  </div>
-                  <span className="text-[10px] text-gray-400 flex-shrink-0">{j.date ? fmtDate(j.date) : ''}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Panel>
-      </div>
-
+      {/* ─── 10. MORE INSIGHTS — lower-priority blocks, collapsed and quieter.
+           Everything still renders (and fetches) as before; it is only
+           folded away so the queue above stays the focus. ─────────────── */}
+      <MoreSection
+        testId="more-insights"
+        title="More insights"
+        summary={[
+          'AI anomaly watch',
+          'purchase requests',
+          exp.cogsStatus && (exp.cogsStatus.preShipment > 0 || exp.cogsStatus.shippedMissingCogs > 0) ? 'export COGS lifecycle' : null,
+        ].filter(Boolean).join(' · ')}
+      >
+        <AnomalyWatchCard />
+        {/* Approved material buys awaiting payment */}
+        <PurchaseRequirementsPanel embedded />
+        {exp.cogsStatus && (exp.cogsStatus.preShipment > 0 || exp.cogsStatus.shippedMissingCogs > 0) && (
+          <CogsLifecyclePanel data={exp.cogsStatus} />
+        )}
+      </MoreSection>
     </div>
   );
 }
@@ -372,47 +350,47 @@ export default function FinanceOverview() {
 // ─── Skeleton ──────────────────────────────────────────────────────────
 function Skeleton() {
   return (
-    <div className="space-y-4 animate-pulse">
-      <div className="h-32 bg-gray-100 rounded-2xl" />
+    <div className="space-y-5 animate-pulse" aria-busy="true">
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
         {[0,1,2,3].map(i => <div key={i} className="h-28 bg-gray-100 rounded-xl" />)}
       </div>
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="h-44 bg-gray-100 rounded-xl" />
-        <div className="h-44 bg-gray-100 rounded-xl" />
-      </div>
+      <div className="h-40 bg-gray-100 rounded-xl" />
+      <div className="h-32 bg-gray-100 rounded-xl" />
     </div>
   );
 }
 
+// "View all" — the quiet link every Home section uses.
+function ViewAll({ onClick }) {
+  return (
+    <button type="button" onClick={onClick} className={btnQuiet}>
+      View all <ChevronRight size={14} aria-hidden="true" />
+    </button>
+  );
+}
+
 // ─── KPI Tile ──────────────────────────────────────────────────────────
-function KpiTile({ icon: Icon, tone = 'gray', label, basis, primary, secondary, hint, hintBad, onClick }) {
-  const tones = {
-    emerald: { ring: 'ring-emerald-100', icon: 'text-emerald-500 bg-emerald-50', accent: 'text-emerald-600' },
-    rose:    { ring: 'ring-red-100',    icon: 'text-red-500 bg-red-50',       accent: 'text-red-600' },
-    indigo:  { ring: 'ring-indigo-100',  icon: 'text-indigo-500 bg-indigo-50',   accent: 'text-indigo-600' },
-    violet:  { ring: 'ring-violet-100',  icon: 'text-violet-500 bg-violet-50',   accent: 'text-violet-600' },
-    amber:   { ring: 'ring-amber-100',   icon: 'text-amber-500 bg-amber-50',     accent: 'text-amber-600' },
-    gray:    { ring: 'ring-gray-100',    icon: 'text-gray-500 bg-gray-50',       accent: 'text-gray-600' },
-  };
-  const t = tones[tone] || tones.gray;
+// Same anatomy as FinanceKPI: small label · big figure · small sub-line. The
+// hint carries a symbol and words as well as its colour.
+function KpiTile({ icon: Icon, label, basis, primary, secondary, hint, hintBad, onClick }) {
   const Cmp = onClick ? 'button' : 'div';
   return (
     <Cmp
+      type={onClick ? 'button' : undefined}
       onClick={onClick}
-      className={`bg-white rounded-xl border border-gray-200 ${onClick ? 'hover:border-gray-300 cursor-pointer hover:shadow-sm' : ''} transition-all p-4 text-left ring-1 ${t.ring}`}
+      className={`w-full min-w-0 bg-white rounded-xl border border-gray-200 p-4 text-left transition-colors ${onClick ? 'hover:border-gray-300 hover:bg-gray-50/60 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500' : ''}`}
     >
       <div className="flex items-start justify-between gap-2 mb-2">
-        <span className="text-[11px] uppercase tracking-wider text-gray-500 font-medium min-w-0 truncate">
-          {label}{basis && <span className="normal-case tracking-normal font-normal text-gray-400"> · {basis}</span>}
+        <span className={`${kpiLabel} min-w-0`}>
+          {label}{basis && <span className="normal-case tracking-normal font-normal text-gray-500"> · {basis}</span>}
         </span>
-        {Icon && <span className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${t.icon}`}><Icon size={14} /></span>}
+        {Icon && <span className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-gray-50 text-gray-500" aria-hidden="true"><Icon size={16} /></span>}
       </div>
-      <div className="text-xl font-bold text-gray-900 leading-tight break-words tabular-nums">{primary}</div>
-      {secondary && <div className="text-[11px] text-gray-500 mt-1">{secondary}</div>}
+      <div className={`${kpiValue} break-words`}>{primary}</div>
+      {secondary && <div className={`${kpiSub} mt-1`}>{secondary}</div>}
       {hint && (
-        <div className={`text-[11px] mt-2 ${hintBad ? 'text-red-600' : 'text-emerald-600'} font-medium`}>
-          {hintBad ? '● ' : '✓ '}{hint}
+        <div className={`text-xs mt-2 font-medium ${hintBad ? 'text-red-700' : 'text-emerald-700'}`}>
+          <span aria-hidden="true">{hintBad ? '● ' : '✓ '}</span>{hint}
         </div>
       )}
     </Cmp>
@@ -420,43 +398,34 @@ function KpiTile({ icon: Icon, tone = 'gray', label, basis, primary, secondary, 
 }
 
 // ─── Segment card (Export / Mill / Local Sales) ───────────────────────
-function SegmentCard({ tone = 'gray', title, subtitle, revenueLabel, revenue, revenueSub, profitLabel, profit, profitSub, marginPct, onClick }) {
-  const tones = {
-    blue:    { bar: 'bg-blue-500',    accent: 'text-blue-600',    ring: 'ring-blue-100' },
-    amber:   { bar: 'bg-amber-500',   accent: 'text-amber-600',   ring: 'ring-amber-100' },
-    emerald: { bar: 'bg-emerald-500', accent: 'text-emerald-600', ring: 'ring-emerald-100' },
-    gray:    { bar: 'bg-gray-400',    accent: 'text-gray-600',    ring: 'ring-gray-100' },
-  };
-  const t = tones[tone] || tones.gray;
+function SegmentCard({ title, subtitle, revenueLabel, revenue, revenueSub, profitLabel, profit, profitSub, marginPct, onClick }) {
   const margin = parseFloat(marginPct) || 0;
   const profitNum = typeof profit === 'string' ? parseFloat(profit.replace(/[^0-9.-]/g, '')) : profit;
-  const profitColor = profitNum >= 0 ? 'text-emerald-700' : 'text-red-600';
+  const profitColor = profitNum >= 0 ? 'text-emerald-700' : 'text-red-700';
   const Cmp = onClick ? 'button' : 'div';
   return (
     <Cmp
+      type={onClick ? 'button' : undefined}
       onClick={onClick}
-      className={`bg-white rounded-xl border border-gray-200 ${onClick ? 'hover:border-gray-300 cursor-pointer hover:shadow-sm' : ''} transition-all p-5 text-left ring-1 ${t.ring} relative overflow-hidden`}
+      className={`w-full min-w-0 bg-white rounded-xl border border-gray-200 p-4 sm:p-5 text-left transition-colors ${onClick ? 'hover:border-gray-300 hover:bg-gray-50/60 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500' : ''}`}
     >
-      <div className={`absolute top-0 left-0 right-0 h-0.5 ${t.bar}`} />
-      <div className="flex items-center justify-between mb-3">
-        <h3 className={`text-sm font-semibold ${t.accent}`}>{title}</h3>
+      <div className="flex items-center justify-between gap-2 mb-1">
+        <h3 className={sectionTitle}>{title}</h3>
         {margin !== 0 && (
-          <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${margin >= 15 ? 'bg-emerald-50 text-emerald-700' : margin >= 5 ? 'bg-amber-50 text-amber-700' : 'bg-red-50 text-red-700'}`}>
-            {fmtPct(margin)} margin
-          </span>
+          <span className="text-xs font-medium text-gray-600 tabular-nums">{fmtPct(margin)} margin</span>
         )}
       </div>
-      {subtitle && <p className="text-[11px] text-gray-500 mb-3">{subtitle}</p>}
-      <div className="grid grid-cols-2 gap-3 pt-2 border-t border-gray-100">
-        <div>
-          <p className="text-[10px] uppercase tracking-wider text-gray-400 font-medium">{revenueLabel}</p>
-          <p className="text-base font-bold text-gray-900 mt-0.5">{revenue}</p>
-          {revenueSub && <p className="text-[10px] text-gray-400 mt-0.5">{revenueSub}</p>}
+      {subtitle && <p className="text-xs text-gray-500 mb-3">{subtitle}</p>}
+      <div className="grid grid-cols-2 gap-3 pt-3 border-t border-gray-100">
+        <div className="min-w-0">
+          <p className={kpiLabel}>{revenueLabel}</p>
+          <p className="text-base font-bold text-gray-900 mt-0.5 tabular-nums break-words">{revenue}</p>
+          {revenueSub && <p className="text-xs text-gray-500 mt-0.5">{revenueSub}</p>}
         </div>
-        <div>
-          <p className="text-[10px] uppercase tracking-wider text-gray-400 font-medium">{profitLabel}</p>
-          <p className={`text-base font-bold mt-0.5 ${profitColor}`}>{profit}</p>
-          {profitSub && <p className="text-[10px] text-gray-400 mt-0.5">{profitSub}</p>}
+        <div className="min-w-0">
+          <p className={kpiLabel}>{profitLabel}</p>
+          <p className={`text-base font-bold mt-0.5 tabular-nums break-words ${profitColor}`}>{profit}</p>
+          {profitSub && <p className="text-xs text-gray-500 mt-0.5">{profitSub}</p>}
         </div>
       </div>
     </Cmp>
@@ -464,139 +433,93 @@ function SegmentCard({ tone = 'gray', title, subtitle, revenueLabel, revenue, re
 }
 
 // ─── Aging panel ───────────────────────────────────────────────────────
-function AgingPanel({ title, icon: Icon, tone, data, totalLabel, totalSubLabel, onClickAll }) {
+function AgingPanel({ title, icon, data, totalLabel, totalSubLabel, onClickAll }) {
   const total = data.totalPkr || 0;
   return (
-    <div className="bg-white rounded-xl border border-gray-200 p-5">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-          <Icon size={14} className={tone === 'emerald' ? 'text-emerald-500' : 'text-red-500'} />
-          {title}
-        </h3>
-        <button onClick={onClickAll} className="text-xs text-blue-600 hover:underline inline-flex items-center gap-1">
-          View all <ExternalLink size={11} />
-        </button>
-      </div>
-
+    <Section title={title} icon={icon} action={<ViewAll onClick={onClickAll} />}>
       <div className="mb-3">
-        <div className="text-2xl font-bold text-gray-900">{totalLabel}</div>
-        {totalSubLabel && <div className="text-xs text-gray-500 mt-0.5">{totalSubLabel}</div>}
+        <div className="text-2xl font-bold text-gray-900 tabular-nums">{totalLabel}</div>
+        {totalSubLabel && <div className="text-xs text-gray-500 mt-0.5 tabular-nums">{totalSubLabel}</div>}
       </div>
 
       {/* Stacked bar */}
       {total === 0 ? (
-        <div className="text-xs text-gray-400 text-center py-3">No outstanding balances</div>
+        <EmptyLine icon={CheckCircle2} className="!py-4">No outstanding balances</EmptyLine>
       ) : (
         <>
-          <div className="flex h-3 rounded-full overflow-hidden bg-gray-100">
+          <div className="flex h-3 rounded-full overflow-hidden bg-gray-100" aria-hidden="true">
             {BUCKET_KEYS.map(k => {
               const pct = total > 0 ? (data[k].totalPkr / total) * 100 : 0;
               if (pct === 0) return null;
               return <div key={k} className={BUCKET_COLORS[k].bar} style={{ width: `${pct}%` }} title={`${k}: ${pct.toFixed(0)}%`} />;
             })}
           </div>
-          <div className="grid grid-cols-4 gap-1.5 mt-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 mt-3">
             {BUCKET_KEYS.map(k => (
               <div key={k} className={`text-center px-1.5 py-2 rounded-md ${BUCKET_COLORS[k].tag}`}>
-                <div className="text-[10px] uppercase tracking-wider font-medium">{k}d</div>
-                <div className="text-sm font-bold mt-0.5">{data[k].count}</div>
-                <div className="text-[10px] mt-0.5 truncate" title={fmtPKR(data[k].totalPkr)}>{fmtPKR(data[k].totalPkr)}</div>
+                <div className="text-[11px] uppercase tracking-wider font-medium">{k} days</div>
+                <div className="text-sm font-bold mt-0.5 tabular-nums">{data[k].count}</div>
+                <div className="text-[11px] mt-0.5 truncate tabular-nums" title={fmtPKR(data[k].totalPkr)}>{fmtPKR(data[k].totalPkr)}</div>
               </div>
             ))}
           </div>
         </>
       )}
-    </div>
+    </Section>
   );
 }
 
 // ─── Counterparty list ────────────────────────────────────────────────
-function CounterpartyList({ title, icon: Icon, rows, itemLabel, itemAmount, itemAge, itemHref, empty }) {
+function CounterpartyList({ title, rows, itemLabel, itemAmount, itemAge, itemHref, empty }) {
   return (
-    <div className="bg-white rounded-xl border border-gray-200 p-5">
-      <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2 mb-3">
-        <Icon size={14} className="text-red-500" /> {title}
-      </h3>
+    <Section title={title} icon={AlertTriangle}>
       {rows.length === 0 ? (
-        <div className="text-center text-sm text-gray-400 py-6 flex items-center justify-center gap-2">
-          <CheckCircle2 size={16} className="text-emerald-500" /> {empty}
-        </div>
+        <EmptyLine icon={CheckCircle2}>{empty}</EmptyLine>
       ) : (
-        <ul className="space-y-1.5">
+        <ul className="divide-y divide-gray-100">
           {rows.map((r, i) => {
             const days = itemAge(r);
             return (
               <li key={r.id || i}>
-                <Link to={itemHref(r)} className="flex items-center gap-3 p-2.5 rounded-lg bg-gray-50 hover:bg-gray-100 transition-colors">
-                  <span className="w-7 h-7 rounded-full bg-white flex items-center justify-center text-xs font-bold text-gray-500 flex-shrink-0">{i + 1}</span>
+                <Link to={itemHref(r)} className="flex items-center gap-3 py-2.5 min-h-11 rounded-lg hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+                  <span className="w-6 text-xs font-semibold text-gray-400 text-center tabular-nums flex-shrink-0">{i + 1}</span>
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-medium text-gray-900 truncate" title={itemLabel(r)}>{itemLabel(r)}</div>
-                    {days != null && <div className="text-[11px] text-gray-500">{days} days overdue</div>}
+                    {days != null && <div className="text-xs text-red-700">{days} days overdue</div>}
                   </div>
-                  <span className="text-sm font-bold text-gray-900 flex-shrink-0">{itemAmount(r)}</span>
+                  <span className="text-sm font-semibold text-gray-900 flex-shrink-0 tabular-nums">{itemAmount(r)}</span>
                 </Link>
               </li>
             );
           })}
         </ul>
       )}
-    </div>
-  );
-}
-
-// ─── Generic panel ────────────────────────────────────────────────────
-function Panel({ title, icon: Icon, iconColor, children, onSeeAll }) {
-  return (
-    <div className="bg-white rounded-xl border border-gray-200 p-5">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-          <Icon size={14} className={iconColor} /> {title}
-        </h3>
-        {onSeeAll && (
-          <button onClick={onSeeAll} className="text-xs text-blue-600 hover:underline inline-flex items-center gap-1">
-            View all <ExternalLink size={11} />
-          </button>
-        )}
-      </div>
-      {children}
-    </div>
+    </Section>
   );
 }
 
 // ─── COGS lifecycle panel ─────────────────────────────────────────────
 function CogsLifecyclePanel({ data }) {
   return (
-    <div className="bg-white rounded-xl border border-gray-200 p-5">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-          <Lock size={14} className="text-indigo-500" /> Export COGS Lifecycle
-        </h3>
-        <span className="text-[11px] text-gray-400">COGS locks at dispatch</span>
-      </div>
+    <Section title="Export COGS lifecycle" icon={Lock}
+      action={<span className="text-xs text-gray-500">COGS locks at dispatch</span>}>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <CogsCell tone="amber" label="Pre-shipment" value={data.preShipment || 0} sub="Operational margin only" />
-        <CogsCell tone="emerald" label="Shipped (with COGS)" value={Math.max(0, (data.shipped || 0) - (data.shippedMissingCogs || 0))} sub="Exact profit available" />
-        <CogsCell tone={data.shippedMissingCogs > 0 ? 'rose' : 'gray'} label="Shipped (missing COGS)" value={data.shippedMissingCogs || 0} sub={data.shippedMissingCogs > 0 ? 'Needs investigation' : 'All clear'} />
+        <CogsCell label="Pre-shipment" value={data.preShipment || 0} sub="Operational margin only" />
+        <CogsCell label="Shipped (with COGS)" value={Math.max(0, (data.shipped || 0) - (data.shippedMissingCogs || 0))} sub="Exact profit available" />
+        <CogsCell bad={data.shippedMissingCogs > 0} label="Shipped (missing COGS)" value={data.shippedMissingCogs || 0} sub={data.shippedMissingCogs > 0 ? 'Needs investigation' : 'All clear'} />
       </div>
-    </div>
+    </Section>
   );
 }
-function CogsCell({ tone, label, value, sub }) {
-  const t = {
-    amber:   'bg-amber-50 border-amber-100 text-amber-800',
-    emerald: 'bg-emerald-50 border-emerald-100 text-emerald-800',
-    rose:    'bg-red-50 border-red-100 text-red-800',
-    gray:    'bg-gray-50 border-gray-100 text-gray-700',
-  }[tone];
+function CogsCell({ bad = false, label, value, sub }) {
   return (
-    <div className={`rounded-lg border p-3 ${t}`}>
-      <p className="text-[11px] uppercase tracking-wide font-medium opacity-80">{label}</p>
-      <p className="text-2xl font-bold mt-1">{value}</p>
-      <p className="text-[11px] mt-1 opacity-90">{sub}</p>
+    <div className={`rounded-lg border p-3 ${bad ? 'border-red-200 bg-red-50' : 'border-gray-100 bg-gray-50'}`}>
+      <p className={kpiLabel}>{label}</p>
+      <p className={`text-2xl font-bold mt-1 tabular-nums ${bad ? 'text-red-700' : 'text-gray-900'}`}>{value}</p>
+      <p className={`text-xs mt-1 ${bad ? 'text-red-700' : 'text-gray-500'}`}>{sub}</p>
     </div>
   );
 }
-
 // ─── Helpers ──────────────────────────────────────────────────────────
 function onlyOpen(rows) {
   return (Array.isArray(rows) ? rows : [])
@@ -637,25 +560,25 @@ function PayrollSummaryStrip({ navigate, fmtPKR }) {
     { label: 'Payroll % of expenses', value: `${data.payrollPctOfExpenses || 0}%`, sub: 'this month' },
   ];
   return (
-    <div className="bg-white rounded-xl border border-gray-200 p-4">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-semibold text-gray-700">Payroll summary · {month}</h3>
-        <div className="flex items-center gap-3">
-          <Link to="/reports/payroll-analytics" className="text-xs text-blue-600 hover:underline">Analytics →</Link>
-          <Link to="/reports/payroll" className="text-xs text-blue-600 hover:underline">Ledger →</Link>
+    <Section title={`Payroll summary · ${month}`} icon={Users}
+      action={(
+        <div className="flex items-center gap-1">
+          <Link to="/reports/payroll-analytics" className={btnQuiet}>Analytics</Link>
+          <Link to="/reports/payroll" className={btnQuiet}>Ledger <ChevronRight size={14} aria-hidden="true" /></Link>
         </div>
-      </div>
+      )}>
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         {cards.map((c, i) => (
-          <button key={i} onClick={() => navigate('/reports/payroll')} className="text-left rounded-lg border border-gray-100 bg-gray-50/50 p-3 hover:bg-gray-50">
-            <p className="text-[11px] uppercase tracking-wider text-gray-400">{c.label}</p>
-            <p className={`text-base font-bold ${c.tone === 'amber' ? 'text-amber-700' : 'text-gray-900'}`}>{c.value}</p>
-            <p className="text-[10px] text-gray-400">{c.sub}</p>
+          <button key={i} type="button" onClick={() => navigate('/reports/payroll')}
+            className="min-w-0 text-left rounded-lg border border-gray-100 bg-gray-50 p-3 hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+            <p className={kpiLabel}>{c.label}</p>
+            <p className={`text-base font-bold tabular-nums break-words ${c.tone === 'amber' ? 'text-amber-700' : 'text-gray-900'}`}>{c.value}</p>
+            <p className="text-xs text-gray-500">{c.sub}</p>
           </button>
         ))}
       </div>
-      <p className="text-[11px] text-gray-400 mt-2">Operational payroll (employees, attendance, runs, advances) lives in Mill Finance → Payroll.</p>
-    </div>
+      <p className="text-xs text-gray-500 mt-3">Operational payroll (employees, attendance, runs, advances) lives in Mill Finance → Payroll.</p>
+    </Section>
   );
 }
 

@@ -23,6 +23,7 @@ const rowSize = 'px-2.5 min-h-10 md:min-h-8 text-xs';
 export const btnRowPrimary = `${base} ${rowSize} text-white bg-blue-600 hover:bg-blue-700`;
 export const btnRowSecondary = `${base} ${rowSize} text-gray-700 bg-white border border-gray-200 hover:bg-gray-50`;
 export const btnRowDanger = `${base} ${rowSize} text-red-700 bg-white border border-red-200 hover:bg-red-50`;
+export const btnRowQuiet = `${base} ${rowSize} text-gray-600 hover:text-red-700 hover:bg-gray-100`;
 // An icon-only button (always give it an aria-label).
 export const btnIcon = `${base} w-10 h-10 md:w-8 md:h-8 text-gray-500 hover:text-blue-700 hover:bg-blue-50`;
 
