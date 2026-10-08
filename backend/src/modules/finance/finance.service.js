@@ -11,6 +11,21 @@
 const db = require('../../config/database');
 const fxRateService = require('./fxRate.service');
 const commodityRateService = require('./commodityRate.service');
+const { byproductSaleValue } = require('../milling/byproductPrices');
+
+// A completed batch's by-product revenue: each by-product at the batch's own
+// per-kg price, per broken GRADE when the batch recorded the grade split (the
+// residual engine's credit). The aggregate broken_kg × broken_price_per_kg used
+// before ignored the grade prices the operator actually set and valued the
+// whole broken tier at the aggregate price — which on prod still held a per-MT
+// default (Rs 38,000 "per kg"), inflating mill revenue by ~Rs 87m. Only a
+// batch with no by-product price at all falls back to the commodity broken
+// rate (per-MT → ÷1000).
+function millByproductRevenue(b, millRates) {
+  const own = byproductSaleValue(b);
+  if (own > 0) return own;
+  return (parseFloat(b.broken_kg) || 0) * ((millRates.broken_rice || 0) / 1000);
+}
 
 // Categories in export_order_costs that are INTERNAL ALLOCATIONS (COGS), not vendor costs
 const INTERNAL_COST_CATS = ['rice', 'raw_rice', 'milling'];
@@ -109,12 +124,9 @@ const financeService = {
       // Prices are per-KG and quantities are KG (Phase 5c) — qty×price = PKR is
       // invariant. Commodity-rate fallbacks are per-MT, so ÷1000 to per-KG.
       const fp = parseFloat(b.finished_price_per_kg) || (millRates.finished_rice || 0) / 1000;
-      const bp = parseFloat(b.broken_price_per_kg) || (millRates.broken_rice || 0) / 1000;
       const usedConfirmed = !!b.prices_confirmed;
-      const usedFallback = !usedConfirmed && (fp > 0 || bp > 0);
 
-      millRevenue += (parseFloat(b.actual_finished_kg) || 0) * fp
-        + (parseFloat(b.broken_kg) || 0) * bp;
+      millRevenue += (parseFloat(b.actual_finished_kg) || 0) * fp + millByproductRevenue(b, millRates);
       if (usedConfirmed) millPricesConfirmed++;
 
       const bCosts = batchCosts.filter(c => c.batch_id === b.id);
@@ -389,8 +401,7 @@ const financeService = {
       const costs = batchCosts.filter(c => c.batch_id === b.id).reduce((s, c) => s + (parseFloat(c.amount) || 0), 0);
       // per-KG prices × KG qty = PKR (invariant); fallbacks per-MT → ÷1000.
       const fp = parseFloat(b.finished_price_per_kg) || (millRates.finished_rice || 0) / 1000;
-      const bp = parseFloat(b.broken_price_per_kg) || (millRates.broken_rice || 0) / 1000;
-      const revenue = (parseFloat(b.actual_finished_kg) || 0) * fp + (parseFloat(b.broken_kg) || 0) * bp;
+      const revenue = (parseFloat(b.actual_finished_kg) || 0) * fp + millByproductRevenue(b, millRates);
       const profit = revenue - costs;
       return {
         id: b.id, batchNo: b.batch_no, status: b.status,
