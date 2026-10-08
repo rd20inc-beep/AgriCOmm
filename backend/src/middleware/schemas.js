@@ -909,7 +909,21 @@ const fxRevaluation = Joi.object({
   preview: Joi.boolean().default(false),
 });
 
+// POST /api/finance/payments/:id/bounce — an uncleared cheque bounced (B1).
+// The bank's return charge is optional; it is in the charged account's own
+// currency and taken from charge_account_id (default: the cheque's account).
+const bounceCheque = Joi.object({
+  reason: Joi.string().trim().min(1).max(2000).required().messages({
+    'any.required': 'A reason is required to mark a cheque bounced',
+    'string.empty': 'A reason is required to mark a cheque bounced',
+  }),
+  bank_charge: Joi.number().min(0).allow(null, ''),
+  charge_date: Joi.date().iso().raw().allow(null, ''),
+  charge_account_id: Joi.number().integer().positive().allow(null, ''),
+});
+
 module.exports = {
+  bounceCheque,
   fxRevaluation,
   attachPaymentDocument,
   createBankAccount,

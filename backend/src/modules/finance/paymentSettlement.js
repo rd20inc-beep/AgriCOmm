@@ -189,7 +189,8 @@ async function pendingChequeTotal(trx, { payableId, receivableId, sourceTable, s
       : { source_table: sourceTable, source_id: sourceId };
   const rows = await trx('payments').where({ ...where, cleared: false }).select('id', 'amount', 'status');
   return round2((Array.isArray(rows) ? rows : [])
-    .filter((p) => p.status !== 'Reversed' && p.status !== 'Rejected' && String(p.id) !== String(excludeId))
+    // A bounced cheque is not coming: the document is open again (B1).
+    .filter((p) => !['Reversed', 'Rejected', 'Bounced'].includes(p.status) && String(p.id) !== String(excludeId))
     .reduce((s, p) => s + num(p.amount), 0));
 }
 

@@ -94,7 +94,8 @@ d('payments feed totals (DB-gated)', () => {
 describe('payments feed totals — the rules (no DB)', () => {
   const { SETTLED, PENDING_CHEQUE, NEVER_MONEY } = require('../modules/finance/paymentsFeedTotals');
   test('a total counts neither reversed payments nor uncleared cheques', () => {
-    expect(SETTLED).toMatch(/p\.status <> 'Reversed'/);
+    expect(SETTLED).toMatch(/p\.status NOT IN \('Reversed', 'Bounced'\)/);
+    expect(PENDING_CHEQUE).toMatch(/'Bounced'/);
     expect(SETTLED).toMatch(/p\.cleared IS NOT FALSE/);
     expect(PENDING_CHEQUE).toMatch(/p\.cleared IS FALSE/);
     expect(NEVER_MONEY).toEqual(['Pending Finance Confirmation', 'Rejected']);

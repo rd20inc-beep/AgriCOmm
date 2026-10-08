@@ -22,6 +22,7 @@
 const db = require('../../config/database');
 const { isPartyMasked } = require('../../shared/partyMask');
 const { SOURCES } = require('./paymentSettlement');
+const { bounceBlockedReason } = require('./chequeBounce');
 
 // The source documents a payment may name (never an arbitrary table).
 const SOURCE_TABLES = Object.keys(SOURCES);
@@ -36,6 +37,7 @@ const NOT_MONEY = ['Pending Finance Confirmation', 'Rejected'];
 // hasOwnPaymentJournal: a Posted 'Payment' one (the export-receivable check).
 async function reversalFor(p, { receivable, hasAnyJournal, hasOwnPaymentJournal }) {
   if (p.status === 'Reversed') return { allowed: false, reason: 'Already reversed.' };
+  if (p.status === 'Bounced') return { allowed: false, reason: 'This cheque bounced — it never moved any money.' };
   if (NOT_MONEY.includes(p.status)) return { allowed: false, reason: 'Only a confirmed payment can be reversed — this one never moved any money.' };
   const isPayment = p.type === 'payment' && (p.linked_payable_id || (p.source_table && p.source_id));
   const isReceipt = p.type === 'receipt' && (p.linked_receivable_id || p.local_sale_id || p.service_invoice_id);
@@ -164,7 +166,7 @@ async function paymentDetail(id, req) {
   const journals = await journalsFor({ refNos: [p.payment_no], narrationSuffix: p.payment_no });
   const hasAnyJournal = journals.some((j) => j.ref_no === p.payment_no);
   const hasOwnPaymentJournal = journals.some((j) => j.ref_no === p.payment_no && j.ref_type === 'Payment' && j.status === 'Posted');
-  const names = await userNames([p.created_by, p.confirmed_by, p.reversed_by]);
+  const names = await userNames([p.created_by, p.confirmed_by, p.reversed_by, p.bounced_by]);
 
   let maskedParty = party;
   if (party && await isPartyMasked(req)) {
@@ -185,6 +187,7 @@ async function paymentDetail(id, req) {
       confirmed_at: p.confirmed_at || null, confirmed_by_name: names[p.confirmed_by] || null,
       reversed_at: p.reversed_at || null, reversed_by_name: names[p.reversed_by] || null,
       reversal_reason: p.reversal_reason || null, reject_reason: p.reject_reason || null,
+      bounced_at: p.bounced_at || null, bounced_by_name: names[p.bounced_by] || null, bounce_reason: p.bounce_reason || null,
       bank_account_id: p.bank_account_id || null,
       account: p.bank_account_id ? {
         id: p.bank_account_id, name: p.account_name, bank_name: p.account_bank_name,
@@ -196,7 +199,9 @@ async function paymentDetail(id, req) {
     bank_transactions: bankRows.map((b) => ({ ...b, amount: num(b.amount) })),
     journals,
     reversal: await reversalFor(p, { receivable, hasAnyJournal, hasOwnPaymentJournal }),
-    clearable: isCheque && p.cleared === false && !['Reversed', 'Rejected'].includes(p.status),
+    clearable: isCheque && p.cleared === false && !['Reversed', 'Rejected', 'Bounced'].includes(p.status),
+    // B1: an uncleared, confirmed cheque can be marked bounced (chequeBounce.js).
+    bounceable: isCheque && !bounceBlockedReason(p),
   };
 }
 
