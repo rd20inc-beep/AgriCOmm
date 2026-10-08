@@ -9,6 +9,8 @@
 //   * same entity → settles now ('internal'); Head Office ⇄ Mill → the
 //     two-phase transfer the receiving side must accept.
 
+import { overdraftWarning } from '../../../shared/utils/overdraft';
+
 const ENTITY_LABEL = { general: 'Head Office', mill: 'Mill', export: 'Export' };
 
 export const cur = (a) => String(a?.currency || 'PKR').toUpperCase();
@@ -58,9 +60,7 @@ export function rateFromConverted(amount, converted, fromCur, toCur) {
 }
 
 /** Field problems before the request is sent (the server checks again). */
-// `returning` — on an edit, what the reversal gives back to the source account
-// first (the original amount + charges when the source is unchanged).
-export function validateContra({ fromAcct, toAcct, amount, rate, converted, reference, charges, returning = 0 }) {
+export function validateContra({ fromAcct, toAcct, amount, rate, converted, reference, charges }) {
   const fe = {};
   if (!fromAcct) fe.from = 'Pick the account the money leaves.';
   if (!toAcct) fe.to = 'Pick the account the money goes to.';
@@ -80,13 +80,24 @@ export function validateContra({ fromAcct, toAcct, amount, rate, converted, refe
       else if (!(Number(rate) > 0)) fe.rate = 'Enter the exchange rate.';
       else if (!(Number(converted) > 0)) fe.converted = 'Enter the converted amount.';
     }
-    // A balance the user may not see arrives as null — leave that check to the server.
-    const bal = fromAcct.currentBalance == null ? NaN : Number(fromAcct.currentBalance) + (Number(returning) || 0);
-    if (Number.isFinite(bal) && a > 0 && a + (ch > 0 ? ch : 0) > bal + 0.005) {
-      fe.amount = `More than the ${fc} ${bal.toLocaleString('en-US', { maximumFractionDigits: 2 })} available in ${fromAcct.name}.`;
-    }
+    // More than the source holds is NOT an error (B2: overdraft is allowed
+    // with a warning) — see contraOverdraft.
   }
   return fe;
+}
+
+/**
+ * The non-blocking warning when the transfer (amount + bank charges) takes
+ * the source below zero, or null. `returning` — on an edit, what the reversal
+ * gives back first. A balance this role may not see (null) gives no warning.
+ */
+export function contraOverdraft({ fromAcct, amount, charges, returning = 0 }) {
+  if (!fromAcct || fromAcct.currentBalance == null) return null;
+  const ch = Number(charges) > 0 ? Number(charges) : 0;
+  return overdraftWarning({
+    account: { ...fromAcct, currentBalance: Number(fromAcct.currentBalance) + (Number(returning) || 0) },
+    amount: (Number(amount) || 0) + ch,
+  });
 }
 
 /** "CONTRA · HO Cash → HO Bank" for a bank-transaction row of a transfer. */

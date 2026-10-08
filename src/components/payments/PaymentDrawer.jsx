@@ -4,6 +4,7 @@ import SlideDrawer from '../SlideDrawer';
 import PaymentFields from './PaymentFields';
 import PaymentHistory from './PaymentHistory';
 import { blankPaymentForm, paymentPayload, paymentFieldError } from './paymentPayload';
+import { overdraftWarning } from '../../shared/utils/overdraft';
 
 // The Finance-wide button styles (one filled primary at the right).
 const btnBase = 'inline-flex items-center justify-center gap-1.5 rounded-lg text-sm font-medium whitespace-nowrap px-3.5 min-h-10 sm:min-h-9 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1';
@@ -105,6 +106,17 @@ export default function PaymentDrawer({
   }
 
   const label = submitLabel || (type === 'receipt' ? 'Record Receipt' : 'Record Payment');
+  // B2: overdraft is allowed, with a warning before submit. Only the net
+  // (after WHT + discount) leaves the account; a cheque moves nothing until
+  // it clears, so it warns then, not now.
+  const payingAccountId = fixedAccountId !== undefined ? fixedAccountId : form.bankAccountId;
+  const overdraft = type === 'payment' && String(form.method || '').toLowerCase() !== 'cheque'
+    ? overdraftWarning({
+      account: accounts.find((a) => String(a.id) === String(payingAccountId)),
+      amount: (parseFloat(form.amount) || 0) - (parseFloat(form.whtAmount) || 0) - (parseFloat(form.discountAmount) || 0),
+      currency,
+    })
+    : null;
   return (
     <SlideDrawer open={open} onClose={onClose} title={title} subtitle={subtitle} icon={icon} size={size}
       footer={(
@@ -139,6 +151,12 @@ export default function PaymentDrawer({
           cashLocation={cashLocation} taxes={taxes} attach={attach}
         />
         {renderExtra && renderExtra({ form, set })}
+        {overdraft && (
+          <p role="status" data-testid="overdraft-warning"
+            className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            {overdraft.message} The payment still goes through; the account shows as overdrawn until it is funded.
+          </p>
+        )}
         {children}
         {(history !== undefined || historyLoading) && (
           <PaymentHistory payments={history} loading={historyLoading} currency={currency} compact={historyCompact} />
