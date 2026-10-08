@@ -23,6 +23,7 @@ const schemas = require('../../middleware/schemas');
 const ownerApproval = require('../../middleware/ownerApproval');
 const aiService = require('../ai/ai.service');
 const { pickBatchEdits } = require('./batchLifecycle');
+const { reverseExpenseTrail, reverseStatutoryJournal, remittedStatutoryForRun, mirrorJournals } = require('./payrollReversal');
 const { buildLastPrices, findImplausiblePrices, implausiblePriceMessage } = require('./byproductPrices');
 
 // =============================================================================
@@ -708,6 +709,7 @@ router.post('/expenses', authorize('milling', 'create'),
           .where('expense_type', 'mill')
           .where('category', 'salaries')
           .where('description', 'like', `Mill payroll for ${month}%`)
+          .whereNot('payment_status', 'Reversed')
           .first('expense_no');
         if (dup) {
           return res.status(409).json({
@@ -723,10 +725,12 @@ router.post('/expenses', authorize('milling', 'create'),
         const month = String(expense_date).slice(0, 7);
         const dupExp = await db('business_expenses')
           .where('expense_type', 'mill').where('category', 'salaries').where('employee_id', employee_id)
-          .whereRaw("TO_CHAR(expense_date, 'YYYY-MM') = ?", [month]).first('expense_no');
+          .whereRaw("TO_CHAR(expense_date, 'YYYY-MM') = ?", [month])
+          .whereNot('payment_status', 'Reversed').first('expense_no');
         const runLine = await db('mill_payroll_lines as pl')
           .join('mill_payroll_runs as r', 'r.id', 'pl.run_id')
-          .where('r.period', month).where('pl.worker_id', employee_id).first('pl.id');
+          .where('r.period', month).where('pl.worker_id', employee_id)
+          .whereNotIn('r.status', ['voided', 'reversed']).first('pl.id');
         if (dupExp || runLine) {
           const w = await db('mill_workers').where('id', employee_id).first('name');
           return res.status(409).json({
@@ -1148,26 +1152,11 @@ async function payLineBatch(run, lineRows, userId) {
   });
 }
 
-async function unwindAdvanceExpense(trx, expenseId) {
-  if (!expenseId) return;
-  const exp = await trx('business_expenses').where('id', expenseId).first();
-  if (!exp) return;
-  const payables = await trx('payables').where({ source_table: 'business_expenses', source_id: expenseId }).select('id');
-  const payableIds = payables.map((p) => p.id);
-  if (payableIds.length) {
-    const pays = await trx('payments').whereIn('linked_payable_id', payableIds).select('id', 'payment_no', 'bank_account_id', 'amount');
-    for (const p of pays) {
-      if (p.bank_account_id) await trx('bank_accounts').where('id', p.bank_account_id).increment('current_balance', parseFloat(p.amount) || 0);
-      await trx('bank_transactions').where('linked_payment_id', p.id).del();
-      await trx('journal_lines').whereIn('journal_id', trx('journal_entries').where('ref_no', p.payment_no).select('id')).del();
-      await trx('journal_entries').where('ref_no', p.payment_no).del();
-    }
-    await trx('payments').whereIn('linked_payable_id', payableIds).del();
-    await trx('payables').whereIn('id', payableIds).del();
-  }
-  await trx('journal_lines').whereIn('journal_id', trx('journal_entries').where('ref_no', exp.expense_no).select('id')).del();
-  await trx('journal_entries').where('ref_no', exp.expense_no).del();
-  await trx('business_expenses').where('id', expenseId).del();
+// Reverse the money an advance / salaries / settlement expense moved — signed-
+// delta journals, a reversing bank row, rows kept as 'Reversed' (see
+// payrollReversal.js). Nothing posted is deleted.
+function unwindAdvanceExpense(trx, expenseId, opts = {}) {
+  return reverseExpenseTrail(trx, expenseId, opts);
 }
 
 // Set / reset / disable a worker's self-service portal PIN (Phase 19). A 4+ digit
@@ -1517,7 +1506,7 @@ router.delete('/payroll/final-settlements/:id', authorize('payroll', 'pay'),
       for (const a of (bd?.advancesCleared || [])) {
         await trx('mill_worker_advances').where('id', a.id).update({ recovered_amount: a.prior_recovered, status: a.prior_status || 'outstanding', updated_at: trx.fn.now() });
       }
-      if (s.expense_id) await unwindAdvanceExpense(trx, s.expense_id); // reverse cash-out + GL + payable
+      if (s.expense_id) await unwindAdvanceExpense(trx, s.expense_id, { userId: req.user?.id || null, reason: `Final settlement #${s.id} reversed` }); // signed-delta GL + bank reversal; rows kept as Reversed
       await trx('mill_workers').where('id', s.worker_id).update({ is_active: true, updated_at: trx.fn.now() });
       await trx('mill_final_settlements').where('id', s.id).del();
     });
@@ -1533,7 +1522,7 @@ router.delete('/workers/:id', authorize('payroll', 'delete'), auditAction('delet
     if (!worker) return res.status(404).json({ success: false, message: 'Worker not found.' });
     await db.transaction(async (trx) => {
       const advances = await trx('mill_worker_advances').where('worker_id', worker.id).select('expense_id');
-      for (const a of advances) await unwindAdvanceExpense(trx, a.expense_id);
+      for (const a of advances) await unwindAdvanceExpense(trx, a.expense_id, { userId: req.user?.id || null, reason: `Worker #${worker.id} deleted` });
       await trx('mill_workers').where('id', worker.id).del(); // attendance + advances cascade
     });
     return res.json({ success: true, data: { deleted: worker.id } });
@@ -1569,9 +1558,10 @@ router.get('/workers/:id/ledger', authorize('payroll', 'view'), async (req, res)
     const payLines = await db('mill_payroll_lines as l')
       .join('mill_payroll_runs as r', 'r.id', 'l.run_id')
       .where('l.worker_id', workerId)
+      .whereNotIn('r.status', ['voided', 'reversed']) // never paid / undone
       .select('l.id', 'r.period', 'r.pay_date', 'r.pay_method', 'l.gross_pay', 'l.advance_deducted', 'l.net_pay');
 
-    let otherExpQ = db('business_expenses').where('employee_id', workerId);
+    let otherExpQ = db('business_expenses').where('employee_id', workerId).whereNot('payment_status', 'Reversed');
     if (advanceExpenseIds.length) otherExpQ = otherExpQ.whereNotIn('id', advanceExpenseIds);
     const otherExp = await otherExpQ.select('id', 'expense_no', 'expense_date', 'amount', 'amount_pkr', 'description', 'category');
 
@@ -1764,7 +1754,7 @@ router.delete('/advances/:id', authorize('payroll', 'delete'), auditAction('adva
     const advance = await db('mill_worker_advances').where('id', req.params.id).first();
     if (!advance) return res.status(404).json({ success: false, message: 'Advance not found.' });
     await db.transaction(async (trx) => {
-      await unwindAdvanceExpense(trx, advance.expense_id);
+      await unwindAdvanceExpense(trx, advance.expense_id, { userId: req.user?.id || null, reason: `Advance #${advance.id} deleted` });
       await trx('mill_worker_advances').where('id', advance.id).del();
     });
     return res.json({ success: true, data: { deleted: advance.id } });
@@ -1952,7 +1942,12 @@ router.post('/payroll/statutory-remittances', authorize('payroll', 'pay'),
       const acctId = method === 'bank' ? (b.bank_account_id || null) : await resolveCashAccountId(trx, { entity });
       // Collision-safe STR number (M3): MAX trailing-digit + 1, not MAX(id)+1 —
       // the latter regenerates an existing number after a delete (see nextDocNo).
-      const remitNo = await nextDocNo(trx, { table: 'mill_statutory_remittances', column: 'remittance_no', prefix: 'STR-', pad: 4 });
+      // A reversed remittance's row is removed but its journals stay (signed-
+      // delta reversal), so the number must also clear the journal refs.
+      const remitNo = [
+        await nextDocNo(trx, { table: 'mill_statutory_remittances', column: 'remittance_no', prefix: 'STR-', pad: 4 }),
+        await nextDocNo(trx, { table: 'journal_entries', column: 'ref_no', prefix: 'STR-', pad: 4 }),
+      ].sort((x, y) => parseInt(x.slice(4), 10) - parseInt(y.slice(4), 10)).pop();
       const [r] = await trx('mill_statutory_remittances').insert({
         remittance_no: remitNo, liability_account_code: code, account_id: acc.id, amount, entity,
         pay_method: method, bank_account_id: acctId, remit_date: remitDate,
@@ -1993,8 +1988,9 @@ router.post('/payroll/statutory-remittances', authorize('payroll', 'pay'),
   } catch (err) { return res.status(err.statusCode || 500).json({ success: false, message: err.message }); }
 });
 
-// Reverse a remittance — undo the GL, restore the bank balance, drop the bank
-// transaction, and delete the record.
+// Reverse a remittance — net its GL with a signed-delta journal, restore the
+// bank with a reversing bank row (both kept), and remove the remittance record
+// so the liability shows as owed again.
 router.delete('/payroll/statutory-remittances/:id', authorize('payroll', 'pay'),
   auditAction('void', 'statutory_remittance', (req) => req.params.id),
   async (req, res) => {
@@ -2002,10 +1998,23 @@ router.delete('/payroll/statutory-remittances/:id', authorize('payroll', 'pay'),
     const row = await db('mill_statutory_remittances').where('id', req.params.id).first();
     if (!row) return res.status(404).json({ success: false, message: 'Remittance not found.' });
     await db.transaction(async (trx) => {
-      if (row.bank_account_id) await trx('bank_accounts').where('id', row.bank_account_id).increment('current_balance', parseFloat(row.amount) || 0);
-      await trx('bank_transactions').where({ reference: row.remittance_no, source: 'statutory_remittance' }).del();
-      await trx('journal_lines').whereIn('journal_id', trx('journal_entries').where('ref_no', row.remittance_no).select('id')).del();
-      await trx('journal_entries').where('ref_no', row.remittance_no).del();
+      const amt = parseFloat(row.amount) || 0;
+      const moved = await trx('bank_transactions').where({ reference: row.remittance_no, source: 'statutory_remittance' }).first('id');
+      if (row.bank_account_id && moved && amt > 0) {
+        await trx('bank_accounts').where('id', row.bank_account_id).increment('current_balance', amt);
+        const acct = await trx('bank_accounts').where('id', row.bank_account_id).first();
+        await trx('bank_transactions').insert({
+          transaction_no: await nextDocNo(trx, { table: 'bank_transactions', column: 'transaction_no', prefix: 'BT-', pad: 4 }),
+          bank_account_id: row.bank_account_id, type: 'credit', amount: amt, currency: acct?.currency || 'PKR',
+          status: 'posted', transaction_date: new Date().toISOString().slice(0, 10), reference: row.remittance_no,
+          notes: `Reversal of statutory remittance ${row.remittance_no}`, source: 'statutory_remittance_reversal',
+          running_balance: acct ? acct.current_balance : null, category: 'statutory', created_by: req.user?.id || null,
+        });
+      }
+      await mirrorJournals(trx, {
+        refNo: row.remittance_no, refTypes: ['Statutory Remittance'], refType: 'Statutory Remittance Reversal',
+        description: `Reversal of statutory remittance ${row.remittance_no}`, userId: req.user?.id || null,
+      });
       await trx('mill_statutory_remittances').where('id', row.id).del();
     });
     return res.json({ success: true, data: { deleted: row.id } });
@@ -2670,20 +2679,49 @@ router.post('/payroll/runs/:id/void', authorize('payroll', 'approve'),
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 
-// Undo a payroll run — reverse its cash-out (+ GL), restore the advances it
-// recovered to outstanding, and delete the run (lines cascade).
-router.delete('/payroll/runs/:id', authorize('payroll', 'delete'), async (req, res) => {
+// Undo a payroll run — reverse its cash-out (+ GL) with signed-delta journals
+// and reversing bank rows, restore the advances it recovered to outstanding,
+// and keep the run as 'reversed' (nothing posted is deleted). Refused while a
+// statutory liability the run withheld has been remitted since.
+router.delete('/payroll/runs/:id', authorize('payroll', 'delete'),
+  auditAction('reverse', 'mill_payroll_run', (req) => req.params.id),
+  async (req, res) => {
   try {
     const run = await db('mill_payroll_runs').where('id', req.params.id).first();
     if (!run) return res.status(404).json({ success: false, message: 'Payroll run not found.' });
+    if (run.status === 'reversed') {
+      return res.status(409).json({ success: false, message: 'This payroll run has already been reversed.' });
+    }
     // A Prepared/Approved/Voided run never posted money or recovered advances —
     // just delete it (lines cascade). Paid/posted/accrued AND partially_paid
     // (one or more cash batches) runs need full reversal.
-    if (!['paid', 'posted', 'accrued', 'partially_paid'].includes(run.status)) {
+    const MONEY_STATUSES = ['paid', 'posted', 'accrued', 'partially_paid'];
+    if (!MONEY_STATUSES.includes(run.status)) {
       await db('mill_payroll_runs').where('id', run.id).del();
       return res.json({ success: true, data: { deleted: run.id } });
     }
-    await db.transaction(async (trx) => {
+    const userId = req.user?.id || null;
+    const reason = (typeof req.body?.reason === 'string' && req.body.reason.trim()) || null;
+    const out = await db.transaction(async (trx) => {
+      const locked = await trx('mill_payroll_runs').where('id', run.id).forUpdate().first();
+      if (!locked || !MONEY_STATUSES.includes(locked.status)) {
+        const e = new Error(`This run changed while it was being reversed (now ${locked?.status || 'missing'}) — refresh and try again.`);
+        e.statusCode = 409; throw e;
+      }
+      // Every salaries expense the run created (one per pay batch + run.expense_id
+      // for accrued/legacy single-batch runs) and each batch's statutory ref.
+      const expIds = new Set();
+      if (locked.expense_id) expIds.add(locked.expense_id);
+      const lineExp = await trx('mill_payroll_lines').where('run_id', locked.id).whereNotNull('expense_id').distinct('expense_id');
+      for (const r of lineExp) expIds.add(r.expense_id);
+      const statRefs = [...[...expIds].map((id) => `STAT-EXP-${id}`), `STAT-RUN-${locked.id}`];
+      // Withheld tax / EOBI already paid over to the authority can't be pulled
+      // back by undoing the run — refuse rather than leave 2050/2055 owing us.
+      const remitted = await remittedStatutoryForRun(trx, locked, statRefs);
+      if (remitted.length) {
+        const e = new Error(`Statutory deductions withheld by this run have been remitted since (${remitted.join(', ')}). Reverse those remittances first, or correct the run with an adjustment instead of undoing it.`);
+        e.statusCode = 409; throw e;
+      }
       // Precise reversal via the schedule rows this run recovered (new runs);
       // fall back to amount-based reversal for legacy runs without schedule rows.
       const schedRows = await trx('mill_worker_advance_recovery_schedule').where('payroll_run_id', run.id);
@@ -2717,31 +2755,32 @@ router.delete('/payroll/runs/:id', authorize('payroll', 'delete'), async (req, r
           // status 'paid' (stamping paid_at on the RUN, not the lines), so an
           // accrued→settled run reads as 'paid' with line.paid_at NULL — include
           // 'paid' here so voiding it still un-recovers (was the dead 'settled').
-          const wasRecovered = l.paid_at || ['accrued', 'paid', 'posted'].includes(run.status);
+          const wasRecovered = l.paid_at || ['accrued', 'paid', 'posted'].includes(locked.status);
           if (parseFloat(l.advance_deducted) > 0 && l.worker_id && wasRecovered) {
             await unrecoverAdvancesForWorker(trx, l.worker_id, l.advance_deducted);
           }
         }
       }
-      // Reverse EVERY salaries expense the run created (one per pay batch +
-      // run.expense_id for accrued/legacy single-batch runs) and each batch's
-      // statutory journal (ref STAT-EXP-<expenseId>).
-      const expIds = new Set();
-      if (run.expense_id) expIds.add(run.expense_id);
-      const lineExp = await trx('mill_payroll_lines').where('run_id', run.id).whereNotNull('expense_id').distinct('expense_id');
-      for (const r of lineExp) expIds.add(r.expense_id);
-      for (const expId of expIds) {
-        await unwindAdvanceExpense(trx, expId); // reverse cash-out + GL + payable
-        await trx('journal_lines').whereIn('journal_id', trx('journal_entries').where('ref_no', `STAT-EXP-${expId}`).select('id')).del();
-        await trx('journal_entries').where('ref_no', `STAT-EXP-${expId}`).del();
-      }
-      // Legacy / accrued statutory journal (DR 6135 / CR liabilities).
-      await trx('journal_lines').whereIn('journal_id', trx('journal_entries').where('ref_no', `STAT-RUN-${run.id}`).select('id')).del();
-      await trx('journal_entries').where('ref_no', `STAT-RUN-${run.id}`).del();
-      await trx('mill_payroll_runs').where('id', run.id).del(); // lines cascade
+      // Reverse every salaries expense (cash-out, accrual, payable) and every
+      // statutory journal — signed deltas, never deletes.
+      const opts = { userId, reason: reason || `Payroll run ${locked.period} (#${locked.id}) reversed` };
+      const reversed = [];
+      for (const expId of expIds) reversed.push(await unwindAdvanceExpense(trx, expId, opts));
+      const statJournals = [];
+      for (const ref of statRefs) statJournals.push(...await reverseStatutoryJournal(trx, ref, opts));
+      // The lines no longer count as paid anywhere (payslips, tax statements,
+      // YTD all read paid_at / paid runs); expense_id stays for the trail.
+      await trx('mill_payroll_lines').where('run_id', locked.id).update({ paid_at: null, paid_by: null, updated_at: trx.fn.now() });
+      const [updated] = await trx('mill_payroll_runs').where('id', locked.id).update({
+        status: 'reversed', reversed_at: trx.fn.now(), reversed_by: userId, reversal_reason: reason, updated_at: trx.fn.now(),
+      }).returning('*');
+      return { run: updated, expenses: reversed, statutoryJournals: statJournals };
     });
-    return res.json({ success: true, data: { deleted: run.id } });
-  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+    return res.json({ success: true, data: { reversed: run.id, ...out } });
+  } catch (err) {
+    const code = err.statusCode || 500;
+    return res.status(code).json({ success: false, message: err.message });
+  }
 });
 
 // =============================================================================

@@ -1517,6 +1517,9 @@ COL mill_payroll_runs.paid_by:integer:NULL
 COL mill_payroll_runs.pay_date:date:NOT NULL
 COL mill_payroll_runs.pay_method:character varying:NOT NULL
 COL mill_payroll_runs.period:character varying:NOT NULL
+COL mill_payroll_runs.reversal_reason:text:NULL
+COL mill_payroll_runs.reversed_at:timestamp with time zone:NULL
+COL mill_payroll_runs.reversed_by:integer:NULL
 COL mill_payroll_runs.status:character varying:NOT NULL
 COL mill_payroll_runs.updated_at:timestamp with time zone:NOT NULL
 COL mill_payroll_runs.void_reason:text:NULL
@@ -3321,6 +3324,7 @@ CON mill_payroll_runs.chk_mill_payroll_runs_status_valid(c)
 CON mill_payroll_runs.mill_payroll_runs_bank_account_id_foreign(f)
 CON mill_payroll_runs.mill_payroll_runs_expense_id_foreign(f)
 CON mill_payroll_runs.mill_payroll_runs_pkey(p)
+CON mill_payroll_runs.mill_payroll_runs_reversed_by_foreign(f)
 CON mill_performance.chk_mill_performance_avg_bran_pct_range(c)
 CON mill_performance.chk_mill_performance_avg_broken_pct_range(c)
 CON mill_performance.chk_mill_performance_avg_cost_per_mt_nn(c)
