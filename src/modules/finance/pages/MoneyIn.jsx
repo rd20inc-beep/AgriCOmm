@@ -16,6 +16,8 @@ import { useFinanceDrawers } from '../drawers/drawersContext';
 import { fmtAmt } from '../drawers/drawerLogic';
 import { PerCurrency } from '../drawers/drawerParts';
 import { fmtDate, fmtDateTime } from '../../../shared/utils/format';
+import { TypeChip } from '../components/FinanceUI';
+import { btnRowSecondary, btnIcon, th, tdMoney } from '../utils/uiClasses';
 
 const eqStatus = (a, b) => String(a || '').toLowerCase() === String(b || '').toLowerCase();
 const docOf = (row) => ({ docKind: row.kind === 'local_sale' ? 'local_sale' : 'receivable', row });
@@ -30,7 +32,7 @@ export default function MoneyIn() {
   const { hasPermission } = useAuth();
   const drawers = useFinanceDrawers();
   const { queryParams: rangeParams } = useFinanceDateRange();
-  const { data: receivables = [], isLoading } = useReceivables(rangeParams);
+  const { data: receivables = [], isLoading, error, refetch } = useReceivables(rangeParams);
   const [statusFilter, setStatusFilter] = useState('All');
   const [typeFilter, setTypeFilter] = useState('All');
 
@@ -55,9 +57,7 @@ export default function MoneyIn() {
     }},
     { key: 'customerName', label: 'Customer', sortable: true, render: (v, row) => <span className="block max-w-[14rem] truncate" title={v || ''}><PartyLink type="customer" id={row.customerId} name={v} /></span> },
     { key: 'type', label: 'Type', sortable: true, render: (v, row) => (
-      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${v === 'Advance' ? 'bg-blue-50 text-blue-700' : 'bg-purple-50 text-purple-700'}`}>
-        {v}{row.kind === 'local_sale' && row.lineCount > 1 ? ` · ${row.lineCount} items` : ''}
-      </span>
+      <TypeChip>{v}{row.kind === 'local_sale' && row.lineCount > 1 ? ` · ${row.lineCount} items` : ''}</TypeChip>
     )},
     { key: 'expectedAmount', label: 'Amount', sortable: true, align: 'right', render: (v, row) => <span className="text-gray-900 tabular-nums">{fmtAmt(v, curOf(row))}</span> },
     { key: 'receivedAmount', label: 'Received', sortable: true, align: 'right', render: (v, row) => <span className="text-emerald-600 tabular-nums">{fmtAmt(v, curOf(row))}</span> },
@@ -103,17 +103,17 @@ export default function MoneyIn() {
 
         {/* Aging — days past due, one row per currency */}
         {agingCurrencies.length > 0 && (
-          <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto" data-testid="aging-by-currency">
+          <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto mobile-cards" data-testid="aging-by-currency">
             <table className="w-full text-sm">
-              <thead><tr className="bg-gray-50 text-xs text-gray-500">
-                <th className="text-left px-4 py-2 font-medium">Aging</th>
-                {BUCKET_KEYS.map((k) => <th key={k} className="text-right px-4 py-2 font-medium">{k} days</th>)}
+              <thead><tr>
+                <th className={`${th} text-left`}>Aging · days past due</th>
+                {BUCKET_KEYS.map((k) => <th key={k} className={`${th} text-right`}>{k} days</th>)}
               </tr></thead>
               <tbody>
                 {agingCurrencies.map((c) => (
                   <tr key={c} className="border-t border-gray-100">
-                    <td className="px-4 py-2 font-medium text-gray-700">{c}</td>
-                    {BUCKET_KEYS.map((k) => <td key={k} className="px-4 py-2 text-right tabular-nums">{aging[c][k] ? fmtAmt(aging[c][k], c) : '—'}</td>)}
+                    <td data-label="Currency" className="px-4 py-2.5 font-medium text-gray-700">{c}</td>
+                    {BUCKET_KEYS.map((k) => <td key={k} data-label={`${k} days`} className={`px-4 py-2.5 ${tdMoney}`}>{aging[c][k] ? fmtAmt(aging[c][k], c) : '—'}</td>)}
                   </tr>
                 ))}
               </tbody>
@@ -138,18 +138,20 @@ export default function MoneyIn() {
           searchKeys={['customerName', 'recvNo', 'orderId']}
           onRowClick={(row) => drawers?.openDocument(docOf(row))}
           exportFilename="receivables"
-          emptyText="No receivables found"
+          emptyText="No receivables in this period."
           loading={isLoading}
+          error={error}
+          onRetry={refetch}
           actions={(row) => (
             <div className="inline-flex items-center gap-1.5">
               {canReceive(row) && (
                 <button onClick={(e) => { e.stopPropagation(); drawers?.openPayment(docOf(row)); }} data-action="receive"
-                  className="px-2.5 py-1 bg-emerald-50 text-emerald-700 text-xs font-medium rounded hover:bg-emerald-100 inline-flex items-center gap-1">
-                  <DollarSign size={12} /> Receive
+                  className={btnRowSecondary}>
+                  <DollarSign size={12} aria-hidden="true" /> Receive
                 </button>
               )}
-              <button onClick={(e) => { e.stopPropagation(); drawers?.openDocument(docOf(row)); }} className="text-blue-600 hover:text-blue-800 p-1" title="View details" aria-label="View details">
-                <Eye size={15} />
+              <button onClick={(e) => { e.stopPropagation(); drawers?.openDocument(docOf(row)); }} className={btnIcon} title="View details" aria-label={`View ${row.recvNo || 'receivable'}`}>
+                <Eye size={15} aria-hidden="true" />
               </button>
             </div>
           )}
