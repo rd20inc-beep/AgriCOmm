@@ -3,28 +3,24 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import OrderRefLink from '../../../shared/components/OrderRefLink';
 import {
   ShoppingCart, Package, Factory, Ship, Receipt,
-  Search, Download, RefreshCw, CheckCircle, Clock, X, Plus, ChevronDown, Printer, Eye, User, DollarSign,
+  Search, Download, RefreshCw, CheckCircle, Clock, X, Plus, ChevronDown, Printer, Eye, DollarSign,
 } from 'lucide-react';
-import SlideDrawer from '../../../components/SlideDrawer';
 import NewPurchaseDrawer from '../../../components/NewPurchaseDrawer';
-import { usePurchases, usePayPurchase, useBankAccounts, usePurchasePaymentTrail } from '../../../api/queries';
+import { usePurchases } from '../../../api/queries';
+import { useAuth } from '../../../context/AuthContext';
+import { useFinanceDrawers } from '../drawers/drawersContext';
+import { isSettleable, canRecordVariant } from '../../../components/payments/paymentVariants';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { LoadingSpinner, ErrorState } from '../../../components/LoadingState';
 import { downloadCSV } from '../../../utils/csvExport';
 import { useApp } from '../../../context/AppContext';
 import { shortenRef } from '../utils/refs';
 import PartyLink from '../../../shared/components/PartyLink';
-import { favStar } from '../../../shared/utils/favorites';
-import { accountsForCurrency } from '../../../shared/utils/accountCurrency';
-import { CHEQUE_DATE_LABEL } from '../../../components/payments/paymentPayload';
-import { ChequeHint } from '../../../components/payments/PaymentFields';
 import { todayLocalISO, fmtPKR, fmtMoney, fmtDate, fmtDateTime } from '../../../shared/utils/format';
 import StatusBadge from '../../../shared/components/StatusBadge';
-import FieldError from '../../../shared/components/FieldError';
 
 // Exact to the paisa (purchase totals are reconciled line by line).
 const fmtFull = (n) => fmtPKR(parseFloat(n) || 0, { decimals: 2 });
-const methodLabel = (m) => ({ cash: 'Cash', bank_transfer: 'Bank Transfer', bank: 'Bank Transfer', cheque: 'Cheque', lc: 'Letter of Credit', online: 'Online' }[m] || (m ? String(m).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : '—'));
 
 const SOURCES = [
   { value: 'all',         label: 'All',        icon: ShoppingCart, accent: 'gray' },
@@ -60,7 +56,7 @@ const RANGE_LABEL = {
 
 export default function Purchases() {
   const navigate = useNavigate();
-  const { addToast, companyProfileData } = useApp();
+  const { companyProfileData } = useApp();
   const { queryParams: rangeParams, rangeKey } = useFinanceDateRange();
   const [source, setSource] = useState('all');
   const [statusFilter, setStatusFilter] = useState('All');
@@ -81,12 +77,13 @@ export default function Purchases() {
     window.print();
   }
 
-  // Payment drawer state — opens when user clicks the status pill on a row.
-  const [payTarget, setPayTarget] = useState(null);
-  const [detailPurchase, setDetailPurchase] = useState(null);
-  const { data: payTrail, isLoading: payTrailLoading } = usePurchasePaymentTrail(detailPurchase?.source, detailPurchase?.refId, !!detailPurchase);
-  const { data: bankAccounts = [] } = useBankAccounts();
-  const payMut = usePayPurchase();
+  // A row opens its Document drawer (payments made, Pay); Pay opens the
+  // shared Payment form (POST /api/finance/purchases/pay), shown only to a
+  // role that route admits. The status is a status, not a button.
+  const drawers = useFinanceDrawers();
+  const { hasPermission } = useAuth();
+  const docOf = (p) => ({ docKind: 'purchase', row: p, id: p.refId, source: p.source });
+  const canPay = (p) => isSettleable(docOf(p)) && canRecordVariant('pay_purchase', hasPermission);
 
   function clearDateRange() {
     setUrlParams(prev => {
@@ -419,18 +416,7 @@ export default function Purchases() {
                       )}
                     </td>
                     <td data-label="Status" className="px-4 py-2.5">
-                      {String(p.paymentStatus || 'pending').toLowerCase() === 'paid' ? (
-                        <StatusBadge status={statusLabel(p.paymentStatus)} />
-                      ) : (
-                        <button
-                          onClick={() => setPayTarget(p)}
-                          className="inline-flex items-center gap-1 text-[11px] text-gray-400 hover:shadow-sm hover:scale-105 transition-transform cursor-pointer rounded-md"
-                          title="Record payment"
-                          aria-label={`${statusLabel(p.paymentStatus)} — record payment`}
-                        >
-                          <StatusBadge status={statusLabel(p.paymentStatus)} /> →
-                        </button>
-                      )}
+                      <StatusBadge status={statusLabel(p.paymentStatus)} />
                     </td>
                     <td data-label="Created" className="mob-hide px-4 py-2.5 text-gray-600 text-xs truncate max-w-[140px]" title={p.createdByName || undefined}>{p.createdByName || '—'}</td>
                     <td data-label="Approved" className="mob-hide px-4 py-2.5 text-gray-600 text-xs truncate max-w-[140px]" title={p.approvedByName || undefined}>
@@ -448,13 +434,13 @@ export default function Purchases() {
                     </td>
                     <td data-label="Actions" className="px-4 py-2.5 text-center">
                       <div className="inline-flex items-center gap-1.5">
-                        {String(p.paymentStatus || 'pending').toLowerCase() !== 'paid' && (
-                          <button onClick={() => setPayTarget(p)}
+                        {canPay(p) && (
+                          <button onClick={() => drawers?.openPayment(docOf(p))} data-action="pay"
                             className="px-2.5 py-1 bg-emerald-50 text-emerald-700 text-xs font-medium rounded hover:bg-emerald-100 inline-flex items-center gap-1">
                             <DollarSign size={12} /> Pay
                           </button>
                         )}
-                        <button onClick={() => setDetailPurchase(p)} className="text-blue-600 hover:text-blue-800 p-1" title="View details" aria-label="View details">
+                        <button onClick={() => drawers?.openDocument(docOf(p))} className="text-blue-600 hover:text-blue-800 p-1" title="View details" aria-label="View details">
                           <Eye size={15} />
                         </button>
                       </div>
@@ -468,263 +454,10 @@ export default function Purchases() {
       </div>
       </div>{/* /.print-report */}
 
-      {payTarget && (
-        <PayPurchaseDrawer
-          purchase={payTarget}
-          bankAccounts={bankAccounts}
-          isPending={payMut.isPending}
-          onClose={() => setPayTarget(null)}
-          onSubmit={async (form) => {
-            if (payMut.isPending) return;
-            try {
-              await payMut.mutateAsync({
-                source: payTarget.source,
-                source_id: payTarget.refId,
-                amount: form.amount,
-                bank_account_id: form.paymentMethod === 'cash' ? null : (form.bankAccountId || null),
-                payment_method: form.paymentMethod,
-                payment_date: form.paymentDate,
-                payment_reference: form.reference || null,
-                due_date: form.dueDate || null,
-                notes: form.notes || null,
-              });
-              addToast(`Payment of ${fmtFull(form.amount)} recorded`, 'success');
-              setPayTarget(null);
-            } catch (err) {
-              addToast(err?.message || 'Failed to record payment', 'error');
-            }
-          }}
-        />
-      )}
-
-      {/* Purchase detail — right slide-over */}
-      {detailPurchase && (() => {
-        const p = detailPurchase;
-        const Row = ({ label, value }) => (
-          <div className="flex justify-between gap-3 py-1.5 border-b border-gray-50 last:border-0">
-            <span className="text-xs text-gray-500">{label}</span>
-            <span className="text-sm font-medium text-gray-900 text-right">{value || '—'}</span>
-          </div>
-        );
-        const isPaid = String(p.paymentStatus || 'pending').toLowerCase() === 'paid';
-        return (
-          <SlideDrawer open={!!detailPurchase} onClose={() => setDetailPurchase(null)}
-            title={shortenRef(p.ref) || p.ref || p.refId || 'Purchase'}
-            subtitle={p.createdByName ? `Created by ${p.createdByName}` : undefined} icon={Receipt} size="md"
-            footer={!isPaid ? (
-              <button onClick={() => { setDetailPurchase(null); setPayTarget(p); }}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700">
-                <DollarSign size={16} /> Record Payment
-              </button>
-            ) : (
-              <p className="w-full text-center text-sm text-gray-500 inline-flex items-center justify-center gap-1.5"><CheckCircle size={15} className="text-emerald-600" /> Paid in full</p>
-            )}>
-            <div className="space-y-4">
-              <div className="bg-gray-50 rounded-lg p-3 text-center">
-                <p className="text-xs text-gray-500">Amount</p>
-                <p className="text-xl font-bold text-gray-900">{fmtFull(p.amountPkr)}</p>
-                {(p.currency || 'PKR') !== 'PKR' && parseFloat(p.amount) > 0 && (
-                  <p className="text-xs text-gray-400">{fmtMoney(p.amount, p.currency)}</p>
-                )}
-              </div>
-              <div>
-                <Row label="Source" value={SOURCE_META[p.source]?.label || p.source} />
-                <Row label="Date" value={fmtDate(p.date)} />
-                <Row label="Supplier" value={p.supplierName} />
-                <Row label="Category" value={p.category ? <span className="capitalize">{String(p.category).replace(/_/g, ' ')}</span> : '—'} />
-                <Row label="Reference" value={p.ref} />
-                <Row label="Payment status" value={<StatusBadge status={statusLabel(p.paymentStatus)} />} />
-                <Row label="Created by" value={<span className="inline-flex items-center gap-1.5"><User size={13} className="text-gray-400" />{p.createdByName || '—'}</span>} />
-                <Row label="Approved by" value={p.approvedByName} />
-              </div>
-
-              {/* Payments made — where & how each was given. */}
-              <div>
-                <h3 className="text-sm font-semibold text-gray-700 mb-2">Payments Made</h3>
-                {payTrailLoading ? (
-                  <p className="text-xs text-gray-400 py-1">Loading…</p>
-                ) : (payTrail?.payments?.length ? (
-                  <div className="space-y-2">
-                    {payTrail.payments.map((pm, i) => {
-                      let from = [pm.accountName, pm.bankName].filter(Boolean).join(' · ');
-                      if (!from) from = pm.method === 'cash' ? 'Cash (in hand)' : '—';
-                      const noDetail = pm.synthesized && !pm.method && !pm.accountName;
-                      return (
-                        <div key={i} className="border border-gray-200 rounded-lg px-3 py-2">
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm font-semibold text-emerald-700">{fmtFull(pm.amount)}</span>
-                            <span className="text-xs text-gray-500">{fmtDate(pm.date)}</span>
-                          </div>
-                          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-gray-500">
-                            {noDetail ? (
-                              <span className="italic text-gray-400">Settled — payment account/method not recorded</span>
-                            ) : (
-                              <>
-                                <span>Type: <span className="font-medium text-gray-700">{methodLabel(pm.method)}</span></span>
-                                <span>From: <span className="font-medium text-gray-700">{from}</span></span>
-                                {pm.reference && <span>Ref: <span className="font-medium text-gray-700">{pm.reference}</span></span>}
-                              </>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <p className="text-xs text-gray-400 py-1">No payments recorded yet.</p>
-                ))}
-              </div>
-            </div>
-          </SlideDrawer>
-        );
-      })()}
       <NewPurchaseDrawer open={showStorePurchase} onClose={() => setShowStorePurchase(false)} onSaved={() => refetch()} />
     </div>
   );
 }
-
-function PayPurchaseDrawer({ purchase, bankAccounts, isPending, onClose, onSubmit }) {
-  const total = parseFloat(purchase.amountPkr) || 0;
-  // What is still owed, to the paisa. The server refuses more than this, so
-  // prefilling the full total on a part-paid purchase would just fail.
-  const outstanding = useMemo(
-    () => Math.max(0, Number((total - (parseFloat(purchase.paidAmount) || 0)).toFixed(2))),
-    [total, purchase.paidAmount],
-  );
-
-  const [amount, setAmount] = useState(outstanding.toFixed(2));
-  const [paymentMethod, setPaymentMethod] = useState('bank_transfer');
-  const [bankAccountId, setBankAccountId] = useState(bankAccounts.find(a => (a.currency || 'PKR') === 'PKR')?.id || '');
-  const [paymentDate, setPaymentDate] = useState(todayLocalISO());
-  const [reference, setReference] = useState('');
-  const [dueDate, setDueDate] = useState('');
-  const [notes, setNotes] = useState('');
-  const [errors, setErrors] = useState({});
-
-  const sourceMeta = SOURCE_META[purchase.source] || { label: purchase.source };
-  const SrcIcon = sourceMeta.icon || Receipt;
-
-  return (
-    <SlideDrawer open onClose={onClose} title="Record Payment"
-      subtitle={`${sourceMeta.label} · ${purchase.ref || '—'}`} icon={SrcIcon} size="md"
-      footer={
-        <div className="flex items-center justify-end gap-2">
-          <button type="button" onClick={onClose} disabled={isPending}
-            className="px-3 py-2 text-sm text-gray-700 hover:text-gray-900">Cancel</button>
-          <button type="submit" form="pay-purchase-form" disabled={isPending}
-            className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 rounded-lg">
-            <CheckCircle size={14} />
-            {isPending ? 'Recording…' : 'Record payment'}
-          </button>
-        </div>
-      }>
-        <form
-          id="pay-purchase-form"
-          noValidate
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (isPending) return;
-            const n = parseFloat(amount);
-            const errs = {};
-            if (!n || n <= 0) errs.amount = 'Enter the amount being paid';
-            else if (n > outstanding + 0.005) errs.amount = `Cannot exceed the outstanding ${fmtFull(outstanding)}`;
-            if (paymentMethod !== 'cash' && paymentMethod !== 'cheque' && !bankAccountId) errs.bankAccountId = 'Select a bank account';
-            setErrors(errs);
-            if (Object.keys(errs).length) return;
-            onSubmit({ amount: n, paymentMethod, bankAccountId, paymentDate, reference, dueDate, notes });
-          }}
-          className="space-y-4"
-        >
-          <div className="bg-gray-50 rounded-lg p-3 text-xs space-y-1">
-            <div className="flex justify-between">
-              <span className="text-gray-500">Supplier</span>
-              <span className="font-medium truncate min-w-0" title={purchase.supplierName || undefined}><PartyLink type="supplier" id={purchase.supplierId} name={purchase.supplierName} /></span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-500">Total</span>
-              <span className="font-medium text-gray-900">{fmtFull(total)}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-500">Outstanding</span>
-              <span className="font-medium text-red-600">{fmtFull(outstanding)}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-500">Current status</span>
-              <StatusBadge status={statusLabel(purchase.paymentStatus)} />
-            </div>
-          </div>
-
-          <div>
-            <label className="text-xs font-medium text-gray-600 block mb-1">Amount paying (PKR) <span className="text-red-500">*</span></label>
-            <input
-              type="number" min="0" step="0.01" max={outstanding} required
-              value={amount} onChange={e => setAmount(e.target.value)}
-              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900"
-            />
-            <FieldError error={errors.amount} />
-            <p className="text-[11px] text-gray-400 mt-1">Defaults to the outstanding balance. Lower it for a partial payment.</p>
-          </div>
-
-          <div>
-            <label className="text-xs font-medium text-gray-600 block mb-1">Paid from</label>
-            <div className="inline-flex bg-gray-100 rounded-lg p-0.5 mb-2">
-              {[['bank_transfer', 'Bank'], ['cash', 'Cash'], ['cheque', 'Cheque']].map(([m, label]) => (
-                <button key={m} type="button" onClick={() => setPaymentMethod(m)}
-                  className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${paymentMethod === m ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}>
-                  {label}
-                </button>
-              ))}
-            </div>
-            {paymentMethod !== 'cash' && (
-              <select
-                value={bankAccountId} onChange={e => setBankAccountId(e.target.value)}
-                required={paymentMethod !== 'cheque'}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900"
-              >
-                <option value="">{paymentMethod === 'cheque' ? 'Bank account it will clear through (optional)…' : 'Select a bank account…'}</option>
-                {/* Purchases are paid in PKR — a USD account cannot carry them. */}
-                {accountsForCurrency(bankAccounts, 'PKR').map(a => (
-                  <option key={a.id} value={a.id}>
-                    {favStar(a)}{a.name} · {a.bankName || '—'} ({fmtMoney(parseFloat(a.currentBalance) || 0, a.currency || 'PKR', { decimals: 2 })})
-                  </option>
-                ))}
-              </select>
-            )}
-            <FieldError error={errors.bankAccountId} />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs font-medium text-gray-600 block mb-1">Payment date</label>
-              <input type="date" value={paymentDate} onChange={e => setPaymentDate(e.target.value)}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-gray-600 block mb-1">Reference</label>
-              <input type="text" value={reference} onChange={e => setReference(e.target.value)}
-                placeholder="Cheque/TXN #" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
-            </div>
-          </div>
-
-          {paymentMethod === 'cheque' && (
-            <div>
-              <label className="text-xs font-medium text-gray-600 block mb-1">{CHEQUE_DATE_LABEL} <span className="text-gray-400">(optional)</span></label>
-              <input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
-              <ChequeHint />
-            </div>
-          )}
-
-          <div>
-            <label className="text-xs font-medium text-gray-600 block mb-1">Notes</label>
-            <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2}
-              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
-          </div>
-        </form>
-    </SlideDrawer>
-  );
-}
-
 
 function RefLink({ p }) {
   const short = shortenRef(p.ref) || p.ref || '—';
