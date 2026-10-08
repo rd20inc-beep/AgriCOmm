@@ -11,6 +11,7 @@ const { nextDocNo } = require('../../utils/docNumber');
 // rates are hidden from roles without reports.view_cost (QC Analyst / Inventory
 // Officer / Documentation Officer) — same rule as the lot and report endpoints.
 const { redactForUser, canSeeCost } = require('../../utils/costVisibility');
+const { batchOutputValues } = require('./batchOutputValues');
 // Packing-cost subtotals carry no "cost" in their names.
 const BATCH_EXTRA_COST_KEYS = ['bagsTotal', 'mastersTotal', 'polytheneTotal'];
 const batchPackagingService = require('./batchPackaging.service');
@@ -153,7 +154,7 @@ const millingController = {
       // so the dashboard board can compute "Pending QC" (arrivals with no
       // arrival analysis) without needing a per-batch detail fetch.
       const batchIds = batches.map(b => b.id);
-      const [allCosts, allArrivals, allArrivalSamples, consumedRows] = batchIds.length > 0
+      const [allCosts, allArrivals, allArrivalSamples, consumedRows, storedOutput] = batchIds.length > 0
         ? await Promise.all([
             db('milling_costs').whereIn('batch_id', batchIds),
             db('milling_vehicle_arrivals').whereIn('batch_id', batchIds),
@@ -171,8 +172,12 @@ const millingController = {
               .whereIn('il.batch_ref', batchIds.map(id => `batch-${id}`))
               .groupBy('il.batch_ref')
               .select('il.batch_ref', db.raw('SUM(bsl.qty_kg) as consumed')),
+            // What each batch's yield booked on its output lots — the dashboard
+            // reads by-product revenue from this instead of re-multiplying the
+            // batch's kg × price columns.
+            batchOutputValues(db, batchIds),
           ])
-        : [[], [], [], []];
+        : [[], [], [], [], new Map()];
 
       const consumedByRef = {};
       consumedRows.forEach(r => { consumedByRef[r.batch_ref] = parseFloat(r.consumed) || 0; });
@@ -186,6 +191,9 @@ const millingController = {
         return {
           ...b, costs, vehicleArrivals, arrivalAnalysis: arrivalSample,
           finished_consumed_kg: consumedByRef[`batch-${b.id}`] || 0,
+          // null = no stored output (not yielded / legacy). 'outputValue' is a
+          // cost key, so cost-blind roles get null here too.
+          output_value: storedOutput.get(b.id) || null,
         };
       });
 

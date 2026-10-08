@@ -12,6 +12,7 @@ const db = require('../../config/database');
 const fxRateService = require('./fxRate.service');
 const commodityRateService = require('./commodityRate.service');
 const { byproductSaleValue } = require('../milling/byproductPrices');
+const { batchOutputValues } = require('../milling/batchOutputValues');
 
 // A completed batch's by-product revenue: each by-product at the batch's own
 // per-kg price, per broken GRADE when the batch recorded the grade split (the
@@ -25,6 +26,17 @@ function millByproductRevenue(b, millRates) {
   const own = byproductSaleValue(b);
   if (own > 0) return own;
   return (parseFloat(b.broken_kg) || 0) * ((millRates.broken_rice || 0) / 1000);
+}
+
+// The by-product value a report shows for a batch: what its yield BOOKED on the
+// output lots (batchOutputValues — qty yielded × the lot's carried per-kg), so
+// a price edited on the batch after yield can't make the report drift from the
+// books. Only a batch with no stored output (not yielded / legacy / toll) is
+// recomputed from its price columns, and says so.
+function millByproductValue(b, millRates, stored) {
+  const s = stored && stored.get(b.id);
+  if (s) return { value: s.byproductValue, source: 'yield_lots' };
+  return { value: millByproductRevenue(b, millRates), source: 'computed' };
 }
 
 // Categories in export_order_costs that are INTERNAL ALLOCATIONS (COGS), not vendor costs
@@ -119,14 +131,18 @@ const financeService = {
     // Get commodity rates for mill revenue when prices not confirmed
     const millRates = await commodityRateService.getMillProductRates();
 
-    let millRevenue = 0, millCost = 0, millPricesConfirmed = 0;
+    const millStoredOutput = await batchOutputValues(db, batchIds);
+
+    let millRevenue = 0, millCost = 0, millPricesConfirmed = 0, millByproductFromLots = 0;
     for (const b of batches) {
       // Prices are per-KG and quantities are KG (Phase 5c) — qty×price = PKR is
       // invariant. Commodity-rate fallbacks are per-MT, so ÷1000 to per-KG.
       const fp = parseFloat(b.finished_price_per_kg) || (millRates.finished_rice || 0) / 1000;
       const usedConfirmed = !!b.prices_confirmed;
 
-      millRevenue += (parseFloat(b.actual_finished_kg) || 0) * fp + millByproductRevenue(b, millRates);
+      const bp = millByproductValue(b, millRates, millStoredOutput);
+      if (bp.source === 'yield_lots') millByproductFromLots++;
+      millRevenue += (parseFloat(b.actual_finished_kg) || 0) * fp + bp.value;
       if (usedConfirmed) millPricesConfirmed++;
 
       const bCosts = batchCosts.filter(c => c.batch_id === b.id);
@@ -247,6 +263,9 @@ const financeService = {
         batchCount: batches.length,
         pricesConfirmed: millPricesConfirmed,
         priceSource: millPricesConfirmed === batches.length ? 'confirmed' : (millRates.finished_rice ? 'commodity_rate_master' : 'none'),
+        // How many batches' by-product value came from the lots booked at yield
+        // (the rest were recomputed from batch prices).
+        byproductFromYieldLots: millByproductFromLots,
         revenue: millRevenue,
         directCosts: millCost,
         overheads: overheadTotal,
@@ -396,12 +415,14 @@ const financeService = {
     const batches = await db('milling_batches').where('status', 'Completed').select('*');
     const batchIds = batches.map(b => b.id);
     const batchCosts = batchIds.length > 0 ? await db('milling_costs').whereIn('batch_id', batchIds) : [];
+    const millStoredOutput = await batchOutputValues(db, batchIds);
 
     const millRows = batches.map(b => {
       const costs = batchCosts.filter(c => c.batch_id === b.id).reduce((s, c) => s + (parseFloat(c.amount) || 0), 0);
       // per-KG prices × KG qty = PKR (invariant); fallbacks per-MT → ÷1000.
       const fp = parseFloat(b.finished_price_per_kg) || (millRates.finished_rice || 0) / 1000;
-      const revenue = (parseFloat(b.actual_finished_kg) || 0) * fp + millByproductRevenue(b, millRates);
+      const bp = millByproductValue(b, millRates, millStoredOutput);
+      const revenue = (parseFloat(b.actual_finished_kg) || 0) * fp + bp.value;
       const profit = revenue - costs;
       return {
         id: b.id, batchNo: b.batch_no, status: b.status,
@@ -409,6 +430,10 @@ const financeService = {
         yieldPct: parseFloat(b.yield_pct), revenue, costs, grossProfit: profit,
         marginPct: revenue > 0 ? parseFloat((profit / revenue * 100).toFixed(1)) : 0,
         pricesConfirmed: !!b.prices_confirmed,
+        byproductValue: bp.value,
+        // 'yield_lots' = as booked on the output lots at yield; 'computed' = no
+        // stored output, recomputed from the batch's by-product prices.
+        byproductValueSource: bp.source,
         priceSource: b.prices_confirmed ? 'confirmed' : (millRates.finished_rice ? 'commodity_rates' : 'none'),
         calculationStatus: b.prices_confirmed ? 'exact' : (millRates.finished_rice ? 'estimated' : 'missing_prices'),
         currency: 'PKR',
