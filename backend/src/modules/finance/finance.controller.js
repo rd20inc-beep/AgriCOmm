@@ -773,7 +773,7 @@ const financeController = {
         viaPayments = await db('payments as p')
           .leftJoin('bank_accounts as ba', 'ba.id', 'p.bank_account_id')
           .whereIn('p.linked_payable_id', payableIds)
-          .select('p.amount', 'p.payment_method', 'p.payment_date', 'p.bank_reference',
+          .select('p.id', 'p.payment_no', 'p.status', 'p.amount', 'p.payment_method', 'p.payment_date', 'p.bank_reference',
             'ba.name as account_name', 'ba.bank_name', 'ba.type as account_type');
       }
 
@@ -789,7 +789,9 @@ const financeController = {
       }
 
       const norm = [];
+      // id / payment_no let the row open the Transaction drawer.
       for (const p of viaPayments) norm.push({
+        id: p.id, payment_no: p.payment_no, status: p.status,
         amount: parseFloat(p.amount) || 0, date: p.payment_date, method: p.payment_method,
         account_name: p.account_name, bank_name: p.bank_name, account_type: p.account_type, reference: p.bank_reference,
       });
