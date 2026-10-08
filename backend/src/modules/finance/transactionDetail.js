@@ -231,9 +231,16 @@ async function bankDetail(id, req) {
 async function getTransactionDetail(req, res) {
   try {
     const { kind } = req.params;
-    const id = parseInt(req.params.id, 10);
-    if (!id) return res.status(400).json({ success: false, message: 'Invalid id.' });
     if (!['payment', 'bank'].includes(kind)) return res.status(400).json({ success: false, message: 'kind must be payment or bank.' });
+    // A payment may also be named by its number (a statement line carries the
+    // payment number, not the id).
+    let id = /^\d+$/.test(String(req.params.id)) ? parseInt(req.params.id, 10) : null;
+    if (!id && kind === 'payment' && req.params.id) {
+      const byNo = await db('payments').where({ payment_no: String(req.params.id) }).first('id');
+      id = byNo ? byNo.id : null;
+      if (!id) return res.status(404).json({ success: false, message: 'Transaction not found.' });
+    }
+    if (!id) return res.status(400).json({ success: false, message: 'Invalid id.' });
     const data = kind === 'payment' ? await paymentDetail(id, req) : await bankDetail(id, req);
     if (!data) return res.status(404).json({ success: false, message: 'Transaction not found.' });
     return res.json({ success: true, data });

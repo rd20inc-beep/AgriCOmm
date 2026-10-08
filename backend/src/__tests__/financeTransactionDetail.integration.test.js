@@ -85,6 +85,11 @@ d('finance transaction detail + search (DB-gated)', () => {
     expect(dt.reversal).toEqual({ allowed: true, reason: null });
     expect(dt.clearable).toBe(false);
 
+    // A statement line names the payment by its number.
+    const byNo = await get('fm', `/api/finance/transactions/payment/${pay.payment_no}`);
+    expect(byNo.body.data.payment.id).toBe(pay.id);
+    expect((await get('fm', '/api/finance/transactions/payment/PAY-NOPE')).status).toBe(404);
+
     // The bank row opens the same detail, focused on itself.
     const bt = await db('bank_transactions').where({ linked_payment_id: pay.id }).first();
     const viaBank = await get('fm', `/api/finance/transactions/bank/${bt.id}`);
