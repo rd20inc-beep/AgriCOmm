@@ -220,7 +220,7 @@ function RecordDrawer({ bankAccounts, onClose, onDone, addToast }) {
   );
 }
 
-function ResolveDrawer({ entry, onClose, onDone, addToast }) {
+export function ResolveDrawer({ entry, onClose, onDone, addToast }) {
   const { data: accounts = [] } = useQuery({ queryKey: ['coa'], queryFn: async () => { const r = await financeApi.chartOfAccounts(); return r?.data?.accounts || r?.accounts || r?.data || []; } });
   const { data: full } = useQuery({ queryKey: ['suspense', 'get', entry.id], queryFn: async () => (await financeApi.suspenseGet(entry.id))?.data || entry });
   const outstanding = parseFloat((full || entry).outstanding ?? ((full || entry).amount - (full || entry).resolved_amount)) || 0;

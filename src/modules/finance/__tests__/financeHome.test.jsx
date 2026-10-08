@@ -39,6 +39,9 @@ vi.mock('../../../context/AppContext', () => ({ useApp: () => ({ addToast: vi.fn
 vi.mock('../../../hooks/useConfirm', () => ({ default: () => [vi.fn(), null] }));
 vi.mock('../../ai/components/AnomalyWatchCard', () => ({ default: () => null }));
 vi.mock('../../purchaseRequirements/components/PurchaseRequirementsPanel', () => ({ default: () => null }));
+// Needs Attention and Recent activity have their own tests (needsAttention.test.jsx).
+vi.mock('../components/NeedsAttention', () => ({ default: () => <div data-testid="needs-attention" /> }));
+vi.mock('../components/RecentActivity', () => ({ default: () => <div data-testid="recent-activity" /> }));
 
 const { default: FinanceOverview } = await import('../pages/FinanceOverview');
 const renderAt = (url) => renderToStaticMarkup(<MemoryRouter initialEntries={[url]}><FinanceOverview /></MemoryRouter>);
@@ -76,17 +79,14 @@ describe('Home honours the period', () => {
 });
 
 describe('Home defects', () => {
-  it('colours alerts by severity (danger payable is red, not blue) and shows the message', () => {
-    mockAlerts = [
-      { id: 'overdue_payables', type: 'payable', severity: 'danger', title: 'Overdue payables', message: '3 bill(s) past due', link: '/finance/money-out' },
-      { id: 'overdue_cheques', type: 'cheque', severity: 'warning', title: 'Cheques awaiting clearance', message: '2 cheque(s)', link: '/finance/due-dates' },
-    ];
+  it('the alerts panel is replaced by Needs Attention and Recent activity (the Alerts page stays)', () => {
+    mockAlerts = [{ id: 'overdue_payables', type: 'payable', severity: 'danger', title: 'Overdue payables', message: '3 bill(s) past due', link: '/finance/money-out' }];
     const html = renderAt('/finance');
-    expect(html).toMatch(/data-severity="danger"[^>]*bg-red-50/);
-    expect(html).toMatch(/data-severity="warning"[^>]*bg-amber-50/);
-    expect(text(html)).toContain('3 bill(s) past due');
-    // clickable (button), not inert
-    expect(html).toMatch(/<button type="button" data-severity="danger"/);
+    expect(html).toContain('data-testid="needs-attention"');
+    expect(html).toContain('data-testid="recent-activity"');
+    expect(html).not.toContain('data-severity=');
+    // Payroll approvals are Needs Attention items now, not a separate card.
+    expect(text(html)).not.toContain('Payroll awaiting approval');
   });
 
   it('alertSeverity reads severity before type', () => {
