@@ -202,7 +202,7 @@ export default function MoneyIn() {
           },
         });
       } else {
-        await recordPaymentMut.mutateAsync({
+        const body = await recordPaymentMut.mutateAsync({
           type: 'receipt', amount,
           currency: recv.currency || 'USD',
           payment_method: recvForm.paymentMethod,
@@ -215,6 +215,14 @@ export default function MoneyIn() {
           linked_receivable_id: recv.dbId || recv.id,
           notes: recvForm.notes || `Payment for ${recv.recvNo}`,
         });
+        // An export order's advance / balance is recorded for Finance to
+        // confirm (maker ≠ checker), exactly as on the order itself.
+        if (body?.data?.pending_confirmation) {
+          addToast(`${fmtCur(amount, recv.currency)} recorded for ${recv.recvNo} — pending Finance confirmation (Finance ▸ Confirmations)`, 'success');
+          setDrawer(null);
+          qc.invalidateQueries({ queryKey: ['receivables'] });
+          return;
+        }
       }
       addToast(`Payment of ${fmtCur(amount, recv.currency)} recorded for ${recv.recvNo}`, 'success');
       setDrawer(null);
