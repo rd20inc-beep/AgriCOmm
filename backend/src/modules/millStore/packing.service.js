@@ -1,5 +1,6 @@
 const db = require('../../config/database');
 const accountingService = require('../accounting/accounting.service');
+const { postProcessingDelta } = require('../milling/millingCompletionJournal');
 const inventoryService = require('../inventory/inventory.service');
 const { NotFoundError, ValidationError, ConflictError, ForbiddenError } = require('../../shared/errors');
 const { isKattaItem } = require('../../shared/packagingTypes');
@@ -285,14 +286,18 @@ const packingService = {
 
       // Fold the full packing cost into the batch as a 'packaging' milling_cost so
       // it shows in Mill Finance (Operating / Costs) and rolls into the residual
-      // finished-rice cost. This is OPERATIONAL only (milling_costs is not a GL
-      // posting): the GL recognises the expense once via the 6000/1250 journal
-      // above, and local-sale COGS isn't GL-posted, so there's no GL double-count.
+      // finished-rice cost. The GL expenses the bags when they are drawn (the
+      // 6000/1250 journal above) and ABSORBS them into finished stock once:
+      // the batch's completion credits 6000 for its packaging (A3b), and a run
+      // after the completion absorbs its own cost here — Dr 1220 / Cr 6000.
       if (grandTotal > 0) {
         await trx('milling_costs').insert({
           batch_id: batchId, category: 'packaging', amount: grandTotal, currency: 'PKR',
           notes: `Packing: ${breakdown} (log #${log.id})`,
           created_by: userId || null,
+        });
+        await postProcessingDelta(trx, accountingService, {
+          batch, delta: grandTotal, label: `packaging (packing run #${log.id})`, userId,
         });
         // Re-cost the batch's outputs so the finished cost/kg includes the bags
         // (no-op if the batch hasn't yielded yet).
@@ -690,6 +695,10 @@ async function postPackingDelta(trx, { batch, delta, userId, what }) {
 // katta reconcile — it re-reads the runs (katta counts, the packed bag size)
 // and is idempotent, so a corrected katta count moves katta exactly once.
 async function afterRunChange(trx, batch, userId, costDelta) {
+  // A corrected / deleted run after the completion: absorb the change into
+  // (or back out of) finished stock — the 6000/1250 delta above moved the
+  // expense side.
+  await postProcessingDelta(trx, accountingService, { batch, delta: num(costDelta), label: 'packaging (packing run corrected)', userId });
   if (!(num(batch.actual_finished_kg) > 0)) return;
   if (Math.abs(num(costDelta)) > 0.01) {
     await inventoryService.recomputeBatchOutputsAfterPriceChange(trx, batch.id, { userId });

@@ -9,8 +9,25 @@
 // cost sheet is split by the batch's source lots (batch_source_lots — the same
 // per-lot cost_total_pkr the raw_rice cost sheet row was built from):
 //   raw lot → 1210 · finished lot → 1220 (1230 export) · by-product → 1240.
-// Processing costs (labour, transport, packaging, ...) and any raw cost not
-// covered by a source lot (truck intake) stay on 1210 as before.
+// Any raw cost not covered by a source lot (truck intake) stays on 1210.
+//
+// Processing costs (labour, transport, packaging, unloading, other ...) are
+// credited to the account they were accrued to (owner decision A3b,
+// 2026-10-09) — they never went into 1210, so crediting it drove Raw Rice
+// down by every batch's processing (prod M-001..M-006: 381,045.60):
+//   - freight owed to a transporter was accrued Dr 1210 / Cr 2010 ('Batch
+//     Transport') — that much comes off 1210;
+//   - everything else is an operating expense when it is incurred (the Mill
+//     Packing run posts Dr 6000 / Cr 1250 for bags drawn from store, business
+//     expenses post Dr 6000) and is ABSORBED into finished stock here: Cr 6000.
+//     Capitalised once, never expensed twice (M-002's 42,163.20 of bags sat
+//     in 6000 AND 1220).
+//
+// The OUTPUTS are debited where the yield lots carry them (A3a): by-product
+// lots at their booked value → 1240, the rest → 1220. The split is its own
+// journal ('Milling Output Split': Dr 1240 / Cr 1220), kept equal to the
+// by-product lots' value by syncOutputSplit — a re-yield or re-price that
+// moves value between finished and by-products posts the signed delta.
 //
 // Every Posted journal a batch writes under ref_type 'Milling Batch' moves value
 // into 1220: the completion itself and each later cost-sheet edit (addCost
@@ -27,6 +44,12 @@ const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 const { inventoryAccountForLot } = require('../localSales/inventoryAccount');
 
 const RAW_ACCOUNT = '1210';
+const FINISHED_ACCOUNT = '1220';
+const BYPRODUCT_ACCOUNT = '1240';
+const ABSORBED_ACCOUNT = '6000';
+const OUTPUT_SPLIT_REF_TYPE = 'Milling Output Split';
+// Journals that accrue a batch's processing cost INTO 1210 before the yield.
+const STAGED_REF_TYPES = ['Batch Transport'];
 
 /**
  * Value of the batch's source lots by the inventory account each was carried
@@ -101,13 +124,57 @@ function proportionalInputSplit(amount, valuesByAccount) {
   return out;
 }
 
-/** Credit lines for a batch: reads its raw_rice cost and source lots. */
-async function completionCredits(trx, batchId, amount) {
+/** Net Dr 1210 the batch's accrual journals staged there (transport owed to a hauler). */
+async function stagedRawForBatch(trx, batchNo) {
+  if (!batchNo) return 0;
+  const row = await trx('journal_lines as jl')
+    .join('journal_entries as je', 'je.id', 'jl.journal_id')
+    .join('chart_of_accounts as c', 'c.id', 'jl.account_id')
+    .where({ 'je.ref_no': batchNo, 'je.status': 'Posted', 'c.code': RAW_ACCOUNT })
+    .whereIn('je.ref_type', STAGED_REF_TYPES)
+    .select(trx.raw('COALESCE(SUM(jl.debit - jl.credit), 0) as net'))
+    .first();
+  return Math.max(0, r2(row && row.net));
+}
+
+/**
+ * Credit lines for the processing part of a capitalisation: the part staged
+ * in 1210 (capped at `staged`) comes off 1210, the rest is absorbed from 6000.
+ * Pure; exported for tests.
+ */
+function processingCredits(processing, staged) {
+  const p = r2(processing);
+  if (p <= 0) return [];
+  const from1210 = r2(Math.min(p, Math.max(0, r2(staged))));
+  const out = [];
+  if (from1210 > 0) out.push({ code: RAW_ACCOUNT, amount: from1210 });
+  if (r2(p - from1210) > 0) out.push({ code: ABSORBED_ACCOUNT, amount: r2(p - from1210) });
+  return out;
+}
+
+/** Merge [{code, amount}] lines by code (order of first appearance). Pure. */
+function mergeCredits(lines) {
+  const out = [];
+  for (const l of lines) {
+    const hit = out.find((x) => x.code === l.code);
+    if (hit) hit.amount = r2(hit.amount + l.amount); else out.push({ ...l });
+  }
+  return out.filter((l) => l.amount > 0);
+}
+
+/**
+ * Credit lines for a batch's completion: the raw-rice cost split by source
+ * lot (1210 / 1220 / 1240), the processing costs by where they were accrued
+ * (1210 for staged transport, else 6000).
+ */
+async function completionCredits(trx, batchId, amount, batchNo = null) {
   if (batchId == null) return [{ code: RAW_ACCOUNT, amount: r2(amount) }];
   const rawRow = await trx('milling_costs').where({ batch_id: batchId, category: 'raw_rice' })
     .sum('amount as t').first();
-  const rawCost = Number(rawRow && rawRow.t) || 0;
-  return splitInputCredits(amount, rawCost, await sourceLotValuesByAccount(trx, batchId));
+  const rawCost = Math.min(r2(amount), Number(rawRow && rawRow.t) || 0);
+  const raw = rawCost > 0 ? splitInputCredits(rawCost, rawCost, await sourceLotValuesByAccount(trx, batchId)) : [];
+  const staged = await stagedRawForBatch(trx, batchNo);
+  return mergeCredits([...raw, ...processingCredits(r2(amount - rawCost), staged)]);
 }
 
 /**
@@ -141,9 +208,10 @@ async function postMillingCompletion(trx, accountingService, { batch, amount, fi
   }
   if (target <= 0) return { posted: 'none', amount: 0, alreadyPosted: 0 };
   const qty = `${Number(finishedKg || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })} kg finished`;
-  const credits = await completionCredits(trx, batch.id, target);
+  const credits = await completionCredits(trx, batch.id, target, batch.batch_no);
   if (credits.some((c) => c.code !== RAW_ACCOUNT)) {
     await postSplitCompletion(trx, accountingService, { batch, target, credits, qty, userId });
+    await syncOutputSplit(trx, accountingService, { batch, userId });
     return { posted: 'full', amount: target, alreadyPosted: 0, credits };
   }
   await accountingService.autoPost(trx, {
@@ -156,7 +224,90 @@ async function postMillingCompletion(trx, accountingService, { batch, amount, fi
     description: `Milling completed for batch ${batch.batch_no} — ${qty}`,
     userId,
   });
+  await syncOutputSplit(trx, accountingService, { batch, userId });
   return { posted: 'full', amount: target, alreadyPosted: 0, credits };
+}
+
+/** Net Dr 1240 the batch's 'Milling Output Split' journals have booked. */
+async function bookedOutputSplit(trx, batchNo) {
+  const row = await trx('journal_lines as jl')
+    .join('journal_entries as je', 'je.id', 'jl.journal_id')
+    .join('chart_of_accounts as c', 'c.id', 'jl.account_id')
+    .where({ 'je.ref_type': OUTPUT_SPLIT_REF_TYPE, 'je.ref_no': batchNo, 'je.status': 'Posted', 'c.code': BYPRODUCT_ACCOUNT })
+    .select(trx.raw('COALESCE(SUM(jl.debit - jl.credit), 0) as net'))
+    .first();
+  return r2(row && row.net);
+}
+
+/**
+ * Keep the GL's by-product output for a batch equal to what its yield lots
+ * carry (batchOutputValues): post the signed delta Dr 1240 / Cr 1220 (or the
+ * reverse). Only for a company batch whose completion is on the books;
+ * idempotent — a second call with nothing changed posts nothing. `date`
+ * dates the journal (default today). Returns { target, booked, delta }.
+ */
+async function syncOutputSplit(trx, accountingService, { batch, userId = null, date = null }) {
+  if (!batch || batch.is_service_milling || !batch.batch_no) return null;
+  if (!(await hasPostedCompletion(trx, batch.batch_no))) return null;
+  const { batchOutputValues } = require('./batchOutputValues');
+  const v = (await batchOutputValues(trx, [batch.id])).get(Number(batch.id));
+  const target = r2(v ? v.byproductValue : 0);
+  const booked = await bookedOutputSplit(trx, batch.batch_no);
+  const delta = r2(target - booked);
+  if (Math.abs(delta) < 0.01) return { target, booked, delta: 0 };
+  const [fin, byp] = await Promise.all([
+    trx('chart_of_accounts').where({ code: FINISHED_ACCOUNT }).first(),
+    trx('chart_of_accounts').where({ code: BYPRODUCT_ACCOUNT }).first(),
+  ]);
+  if (!fin || !byp) throw new Error(`Chart of accounts has no ${FINISHED_ACCOUNT} / ${BYPRODUCT_ACCOUNT} for the output split of ${batch.batch_no}.`);
+  const amt = Math.abs(delta);
+  const up = delta > 0;
+  const dr = up ? byp : fin;
+  const cr = up ? fin : byp;
+  const j = await accountingService.createJournal(trx, {
+    date: date || new Date().toISOString().slice(0, 10), entity: 'mill',
+    refType: OUTPUT_SPLIT_REF_TYPE, refNo: batch.batch_no,
+    description: `By-product output ${up ? 'to' : 'back from'} 1240 — batch ${batch.batch_no} (lots carry ${target.toLocaleString()})`,
+    currency: 'PKR', fxRate: 1, isAuto: true, userId: userId || null,
+    lines: [
+      { account_id: dr.id, account: dr.name, debit: amt, credit: 0, narration: `DR ${dr.code} ${dr.name} — by-product output ${batch.batch_no}` },
+      { account_id: cr.id, account: cr.name, debit: 0, credit: amt, narration: `CR ${cr.code} ${cr.name} — by-product output ${batch.batch_no}` },
+    ],
+  });
+  if (j && j.id) await accountingService.postJournal(trx, j.id);
+  return { target, booked, delta };
+}
+
+/**
+ * A processing cost that changed AFTER the batch's completion (a packing run
+ * after the yield, store consumption, a cost-sheet edit): absorb the signed
+ * delta into finished stock — Dr 1220 / Cr `counterCode` (6000 by default:
+ * the cost was expensed when it was incurred), reversed for a cut. Posts
+ * nothing before the completion (the completion capitalises the whole sheet).
+ */
+async function postProcessingDelta(trx, accountingService, { batch, delta, label, userId = null, counterCode = ABSORBED_ACCOUNT }) {
+  const d = r2(delta);
+  if (!batch || batch.is_service_milling || Math.abs(d) < 0.01) return null;
+  if (!(await hasPostedCompletion(trx, batch.batch_no))) return null;
+  const [fin, counter] = await Promise.all([
+    trx('chart_of_accounts').where({ code: FINISHED_ACCOUNT }).first(),
+    trx('chart_of_accounts').where({ code: counterCode }).first(),
+  ]);
+  if (!fin || !counter) return null;
+  const amt = Math.abs(d);
+  const up = d > 0;
+  const j = await accountingService.createJournal(trx, {
+    date: new Date().toISOString().slice(0, 10), entity: 'mill',
+    refType: MILLING_REF_TYPE, refNo: batch.batch_no,
+    description: `Cost adjustment Rs ${Math.round(amt).toLocaleString()} for ${batch.batch_no} ${label}${up ? '' : ' (reduced)'}`,
+    currency: 'PKR', fxRate: 1, isAuto: true, userId: userId || null,
+    lines: [
+      { account_id: fin.id, account: fin.name, debit: up ? amt : 0, credit: up ? 0 : amt, narration: `${up ? 'DR' : 'CR'} ${fin.code} ${fin.name} — cost adj ${batch.batch_no} ${label}` },
+      { account_id: counter.id, account: counter.name, debit: up ? 0 : amt, credit: up ? amt : 0, narration: `${up ? 'CR' : 'DR'} ${counter.code} ${counter.name} — cost adj ${batch.batch_no} ${label}` },
+    ],
+  });
+  if (j && j.id) await accountingService.postJournal(trx, j.id);
+  return j;
 }
 
 // The completion with inputs from more than one account: one journal, DR the
@@ -206,4 +357,6 @@ async function hasPostedCompletion(q, batchNo) {
 module.exports = {
   postMillingCompletion, postedMillingTransfer, hasPostedCompletion, MILLING_REF_TYPE,
   sourceLotValuesByAccount, splitInputCredits, completionCredits, proportionalInputSplit,
+  processingCredits, mergeCredits, stagedRawForBatch, syncOutputSplit, bookedOutputSplit,
+  postProcessingDelta, OUTPUT_SPLIT_REF_TYPE, ABSORBED_ACCOUNT, STAGED_REF_TYPES,
 };

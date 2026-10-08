@@ -1795,7 +1795,7 @@ const millingController = {
         // If this batch already capitalized its costs into finished inventory at
         // yield (a milling_completion journal was posted), keep the GL in step with
         // the cost sheet by posting a SIGNED-DELTA journal for the change — same
-        // accounts as milling_completion (DR 1220 Finished / CR the input's account), reversed
+        // accounts as milling_completion (DR 1220 Finished / CR the input's or the processing cost's account), reversed
         // for a reduction. Never reverse+repost. Pre-yield changes need no journal
         // (recordYield posts the whole sum). Skipped silently if the chart isn't seeded.
         const delta = newAmt - oldAmt;
@@ -1804,13 +1804,18 @@ const millingController = {
             .where({ ref_type: 'Milling Batch', ref_no: batch.batch_no, status: 'Posted' }).first();
           if (posted) {
             const absDelta = Math.round(Math.abs(delta) * 100) / 100;
-            // The counter-account is where the cost came from: 1210 for
-            // processing costs; for the raw-rice cost, the input lots' own
-            // accounts (a blend of finished lots is carried in 1220, by-products
-            // in 1240), split by source-lot value.
+            // The counter-account is where the cost came from: for the raw-rice
+            // cost, the input lots' own accounts (a blend of finished lots is
+            // carried in 1220, by-products in 1240), split by source-lot value;
+            // freight owed to a transporter is accrued Dr 1210 / Cr 2010 just
+            // below, so it comes off 1210; every other processing cost is an
+            // operating expense absorbed into finished stock — Cr 6000 (A3b).
+            const owedToHauler = category === 'transport'
+              && (transport_paid_by == null || transport_paid_by === '' || transport_paid_by === 'company')
+              && hauler_id != null && hauler_id !== '' && newAmt > 0;
             const parts = category === 'raw_rice'
               ? proportionalInputSplit(absDelta, await sourceLotValuesByAccount(trx, batch.id))
-              : [{ code: '1210', amount: absDelta }];
+              : [{ code: owedToHauler ? '1210' : '6000', amount: absDelta }];
             const fin = await trx('chart_of_accounts').where({ code: '1220' }).first();
             const accs = await trx('chart_of_accounts').whereIn('code', parts.map((p) => p.code));
             const byCode = Object.fromEntries(accs.map((a) => [a.code, a]));
