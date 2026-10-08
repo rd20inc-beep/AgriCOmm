@@ -165,6 +165,7 @@ COL bank_reconciliation.statement_date:date:NOT NULL
 COL bank_reconciliation.status:character varying:NOT NULL
 COL bank_reconciliation.updated_at:timestamp with time zone:NOT NULL
 COL bank_reconciliation_items.amount:numeric:NULL
+COL bank_reconciliation_items.bank_transaction_id:integer:NULL
 COL bank_reconciliation_items.created_at:timestamp with time zone:NULL
 COL bank_reconciliation_items.date:date:NULL
 COL bank_reconciliation_items.id:integer:NOT NULL
@@ -1504,6 +1505,7 @@ COL mill_payroll_lines.employed_days:integer:NULL
 COL mill_payroll_lines.expense_id:integer:NULL
 COL mill_payroll_lines.gross_pay:numeric:NOT NULL
 COL mill_payroll_lines.id:integer:NOT NULL
+COL mill_payroll_lines.net_override_reason:text:NULL
 COL mill_payroll_lines.net_pay:numeric:NOT NULL
 COL mill_payroll_lines.ot_hours:numeric:NOT NULL
 COL mill_payroll_lines.ot_pay:numeric:NOT NULL
@@ -2022,6 +2024,9 @@ COL payments.attachment_url:text:NULL
 COL payments.bank_account_id:integer:NULL
 COL payments.bank_reference:character varying:NULL
 COL payments.base_amount_pkr:numeric:NOT NULL
+COL payments.bounce_reason:text:NULL
+COL payments.bounced_at:timestamp with time zone:NULL
+COL payments.bounced_by:integer:NULL
 COL payments.cleared:boolean:NOT NULL
 COL payments.confirmed_at:timestamp with time zone:NULL
 COL payments.confirmed_by:integer:NULL
@@ -2878,6 +2883,7 @@ CON bank_reconciliation.bank_reconciliation_bank_account_id_foreign(f)
 CON bank_reconciliation.bank_reconciliation_pkey(p)
 CON bank_reconciliation.bank_reconciliation_reconciled_by_foreign(f)
 CON bank_reconciliation.bank_reconciliation_status_check(c)
+CON bank_reconciliation_items.bank_reconciliation_items_bank_transaction_id_foreign(f)
 CON bank_reconciliation_items.bank_reconciliation_items_pkey(p)
 CON bank_reconciliation_items.bank_reconciliation_items_reconciliation_id_foreign(f)
 CON bank_transactions.bank_transactions_bank_account_id_foreign(f)
@@ -3565,6 +3571,7 @@ CON payments.chk_payments_currency_valid(c)
 CON payments.chk_payments_payment_method_valid(c)
 CON payments.chk_payments_status_valid(c)
 CON payments.payments_bank_account_id_foreign(f)
+CON payments.payments_bounced_by_foreign(f)
 CON payments.payments_confirmed_by_foreign(f)
 CON payments.payments_created_by_foreign(f)
 CON payments.payments_linked_payable_id_foreign(f)
