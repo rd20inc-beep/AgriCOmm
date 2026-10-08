@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 // Cost allocations computed from real export orders and milling batches
 import { useApp } from '../../../context/AppContext';
+import { useAuth } from '../../../context/AuthContext';
 import { financeApi } from '../../../api/services';
 import StatusBadge from '../../../shared/components/StatusBadge';
 import FieldError from '../../../shared/components/FieldError';
@@ -34,6 +35,9 @@ const entityColors = {
 };
 
 export default function CostAllocation() {
+  // Allocating is finance.confirm_payment (POST/DELETE /finance/cost-allocations…).
+  const { hasPermission } = useAuth();
+  const canAllocate = hasPermission('finance', 'confirm_payment');
   const { exportOrders, millingBatches, addToast } = useApp();
 
   // Compute cost allocations from real order/batch data
@@ -433,7 +437,7 @@ export default function CostAllocation() {
                       className={`hover:bg-gray-50 transition-colors cursor-pointer ${
                         isExpanded ? 'bg-blue-50/50' : ''
                       }`}
-                      onClick={() => handleToggleRow(cost.id)}
+                      onClick={() => { if (canAllocate) handleToggleRow(cost.id); }}
                     >
                       <td data-label="" className="mob-hide px-2 py-2.5">
                         {isExpanded ? <ChevronUp size={14} className="text-gray-400" /> : <ChevronDown size={14} className="text-gray-400" />}
@@ -460,13 +464,13 @@ export default function CostAllocation() {
                         <StatusBadge status={cost.status} />
                       </td>
                       <td data-label="Action" className="px-2 py-2.5 text-center">
-                        <button
+                        {canAllocate && <button
                           onClick={(e) => { e.stopPropagation(); handleToggleRow(cost.id); }}
                           className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-medium text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded transition-colors"
                         >
                           <Target size={10} />
                           {isExpanded ? 'Close' : 'Alloc'}
-                        </button>
+                        </button>}
                       </td>
                     </tr>
 

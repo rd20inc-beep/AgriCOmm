@@ -10,6 +10,7 @@
  *   receive_export       POST /api/export-orders/:id/record-receipt          any(export_orders.confirm_advance, finance.confirm_payment)
  *                        → a PENDING receipt Finance confirms (maker ≠ checker)
  *   receive_local_sale   POST /api/local-sales/group/:groupNo/payments       any(inventory.create, finance.confirm_payment, milling.edit)
+ *   receive_local_sale_line POST /api/local-sales/:id/payments (one line)   (same guard)
  *   receive_service      POST /api/service-milling/invoices/:id/payments     service_milling.record_payment
  *   pay_payable          POST /api/finance/payments            type=payment  any(finance.confirm_payment, milling.edit)
  *   pay_transporter      (same as pay_payable — a hauler's payable)
@@ -44,6 +45,11 @@ export const VARIANTS = {
     methods: EXPORT_METHODS, taxes: false, attach: false, fxEstimate: true, pending: true,
   },
   receive_local_sale: {
+    side: 'receipt', title: 'Receive local-sale payment', submit: 'Record receipt',
+    anyOf: [['inventory', 'create'], ['finance', 'confirm_payment'], ['milling', 'edit']],
+    methods: STANDARD, taxes: false, attach: false, cashLocation: true,
+  },
+  receive_local_sale_line: {
     side: 'receipt', title: 'Receive local-sale payment', submit: 'Record receipt',
     anyOf: [['inventory', 'create'], ['finance', 'confirm_payment'], ['milling', 'edit']],
     methods: STANDARD, taxes: false, attach: false, cashLocation: true,
@@ -146,10 +152,14 @@ export function paymentRequest(variant, ctx = {}, form) {
           notes: form.notes || ctx.notes || null,
         },
       };
-    case 'receive_local_sale': {
+    case 'receive_local_sale':
+    case 'receive_local_sale_line': {
       const cash = form.method === 'cash';
       return {
-        method: 'post', url: `/api/local-sales/group/${encodeURIComponent(ctx.groupNo)}/payments`,
+        method: 'post',
+        url: variant === 'receive_local_sale_line'
+          ? `/api/local-sales/${ctx.saleId}/payments`
+          : `/api/local-sales/group/${encodeURIComponent(ctx.groupNo)}/payments`,
         body: {
           amount: num(form.amount),
           payment_method: form.method,
