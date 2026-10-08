@@ -831,11 +831,12 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
   return (
     <div className="space-y-5 pb-4 print-report">
       {payrollOnly && (
-        <div className="rounded-2xl bg-gradient-to-r from-slate-900 via-indigo-900 to-blue-700 p-5 sm:p-6 text-white shadow-sm">
-          <div className="flex items-center gap-2 text-[11px] uppercase tracking-wider opacity-80 mb-1"><Users size={13} /> Head Office · Payroll</div>
-          <div className="text-2xl sm:text-3xl font-bold">Payroll Management</div>
-          <div className="text-xs opacity-90 mt-1">Workers, runs, attendance, advances &amp; settlements — the same mill payroll, managed here.</div>
-        </div>
+        // Inside Finance the header already titles this "Payroll"; a one-line
+        // intro replaces the old gradient banner (a second, bigger title).
+        <p className="flex items-center gap-2 text-sm text-gray-600" data-testid="payroll-intro">
+          <Users size={15} className="text-gray-400 shrink-0" aria-hidden="true" />
+          <span>Head Office · Payroll — workers, runs, attendance, advances &amp; settlements; the same mill payroll, managed here.</span>
+        </p>
       )}
       {!payrollOnly && (<>
       {/* ─── HERO BAND ─────────────────────────────────────────────── */}
