@@ -69,12 +69,12 @@ describe('Home honours the period', () => {
 
   it('labels the hero with the period and the tiles that are not period-filtered', () => {
     const t = text(renderAt('/finance?range=month'));
-    expect(t).toContain('Consolidated profit (booked) · This Month');
+    expect(t).toContain('Net profit (books) · This Month');
     expect(t).toContain('Receivables · all open');
     expect(t).toContain('Payables · all open');
     expect(t).toContain('Cash Position · now');
-    expect(t).toContain('Collection Rate · all time');
-    expect(text(renderAt('/finance'))).toContain('Consolidated profit (booked) · All time');
+    expect(t).toContain('Collection Rate · due to date');
+    expect(text(renderAt('/finance'))).toContain('Net profit (books) · All time');
   });
 });
 

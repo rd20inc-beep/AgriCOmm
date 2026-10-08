@@ -8,7 +8,8 @@ import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import PartyLink from '../../../shared/components/PartyLink';
-import { BUCKET_KEYS } from '../utils/aging';
+import { BUCKET_KEYS, bucketize } from '../utils/aging';
+import { receivablesPkrEquiv, pkrEquivText } from '../utils/currencyTiles';
 import { moneyInTiles, agingByCurrency, curOf } from '../utils/moneyTiles';
 import { shortenRef } from '../utils/refs';
 import { isSettleable, canRecordVariant, contextForDocument } from '../../../components/payments/paymentVariants';
@@ -16,7 +17,7 @@ import { useFinanceDrawers } from '../drawers/drawersContext';
 import { fmtAmt } from '../drawers/drawerLogic';
 import { PerCurrency } from '../drawers/drawerParts';
 import { fmtDate, fmtDateTime } from '../../../shared/utils/format';
-import { TypeChip } from '../components/FinanceUI';
+import { TypeChip, PkrEquivLine } from '../components/FinanceUI';
 import { btnRowSecondary, btnIcon, th, tdMoney } from '../utils/uiClasses';
 
 const eqStatus = (a, b) => String(a || '').toLowerCase() === String(b || '').toLowerCase();
@@ -44,6 +45,18 @@ export default function MoneyIn() {
 
   const tiles = useMemo(() => moneyInTiles(receivables), [receivables]);
   const aging = useMemo(() => agingByCurrency(receivables), [receivables]);
+  // C5: ≈ PKR equivalents at each row's own booked rate — a secondary line
+  // under figures that span currencies, never the figure itself.
+  const equiv = useMemo(() => {
+    const withCur = receivables.map((r) => ({ ...r, currency: curOf(r) }));
+    const open = withCur.filter((r) => !eqStatus(r.status, 'Paid'));
+    return {
+      outstanding: pkrEquivText(receivablesPkrEquiv(open, 'outstanding')),
+      overdue: pkrEquivText(receivablesPkrEquiv(open.filter((r) => eqStatus(r.status, 'Overdue')), 'outstanding')),
+      collected: pkrEquivText(receivablesPkrEquiv(withCur, 'receivedAmount')),
+      aging: bucketize(withCur, { mode: 'mixed' }),
+    };
+  }, [receivables]);
   const canReceive = (row) => {
     const d = docOf(row);
     return isSettleable(d) && canRecordVariant(contextForDocument(d)?.variant, hasPermission);
@@ -92,11 +105,11 @@ export default function MoneyIn() {
         {/* Tiles — one figure per currency, never summed across currencies */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <FinanceKPI icon={ArrowDownLeft} title="Outstanding" value={<PerCurrency totals={tiles.outstanding} empty="Nothing open" className="flex-col" />}
-            subtitle={`${tiles.openCount} open`} status="info" loading={isLoading} />
+            subtitle={`${tiles.openCount} open`} status="info" loading={isLoading} footnote={<PkrEquivLine text={equiv.outstanding} />} />
           <FinanceKPI icon={AlertTriangle} title="Overdue" value={<PerCurrency totals={tiles.overdue} empty="None" className="flex-col" />}
-            subtitle="Past due date" status={Object.keys(tiles.overdue).length ? 'danger' : 'good'} loading={isLoading} />
+            subtitle="Past due date" status={Object.keys(tiles.overdue).length ? 'danger' : 'good'} loading={isLoading} footnote={<PkrEquivLine text={equiv.overdue} />} />
           <FinanceKPI icon={CheckCircle} title="Collected" value={<PerCurrency totals={tiles.collected} empty="—" className="flex-col" />}
-            subtitle="Received so far" status="good" loading={isLoading} />
+            subtitle="Received so far" status="good" loading={isLoading} footnote={<PkrEquivLine text={equiv.collected} />} />
           <FinanceKPI icon={Clock} title="Pending" value={String(tiles.pendingCount)}
             subtitle="Awaiting payment" status={tiles.pendingCount > 0 ? 'warning' : 'good'} loading={isLoading} />
         </div>
@@ -116,6 +129,12 @@ export default function MoneyIn() {
                     {BUCKET_KEYS.map((k) => <td key={k} data-label={`${k} days`} className={`px-4 py-2.5 ${tdMoney}`}>{aging[c][k] ? fmtAmt(aging[c][k], c) : '—'}</td>)}
                   </tr>
                 ))}
+                {equiv.aging.foreign && (
+                  <tr className="border-t border-gray-100 text-gray-500" data-testid="pkr-equiv">
+                    <td data-label="Equivalent" className="px-4 py-2 text-xs">≈ PKR equiv. (booked rates){equiv.aging.missingCount > 0 ? ` · ${equiv.aging.missingCount} without a rate left out` : ''}</td>
+                    {BUCKET_KEYS.map((k) => <td key={k} data-label={`${k} days`} className={`px-4 py-2 text-xs ${tdMoney}`}>{equiv.aging[k].totalPkr ? `≈ ${fmtAmt(equiv.aging[k].totalPkr, 'PKR')}` : '—'}</td>)}
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>

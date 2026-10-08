@@ -25,7 +25,7 @@ const statusColors = {
  */
 export default function FinanceKPI({
   icon: Icon, title, value, subtitle, change, changeDir,
-  status = 'neutral', onClick, loading,
+  status = 'neutral', onClick, loading, footnote,
 }) {
   const s = statusColors[status] || statusColors.neutral;
   const isClickable = !!onClick;
@@ -77,6 +77,8 @@ export default function FinanceKPI({
           )}
         </div>
       )}
+      {/* A secondary line under the figure (e.g. the ≈ PKR equivalent) — never the figure. */}
+      {footnote && <div className="mt-1">{footnote}</div>}
     </Cmp>
   );
 }
