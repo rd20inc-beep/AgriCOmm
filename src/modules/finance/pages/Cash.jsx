@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import useConfirm from '../../../hooks/useConfirm';
 import { Landmark, Wallet, TrendingUp, TrendingDown, Activity, Printer, ArrowLeftRight, Undo2, Check } from 'lucide-react';
 import { FinanceKPI, FinanceTable, FinanceChart } from '../../../components/finance';
@@ -35,6 +36,20 @@ export default function Cash() {
   const canReverse = user?.role === 'Owner' || user?.role === 'Super Admin';
   const canCreateContra = hasPermission('finance', 'confirm_payment') || hasPermission('milling', 'edit');
   const [confirm, confirmDialog] = useConfirm();
+
+  // ?action=transfer (the Finance header's + Transfer) opens a new contra
+  // transfer; closing the drawer drops the param.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const transferRequested = canCreateContra && searchParams.get('action') === 'transfer';
+  const contraOpen = contra.open || transferRequested;
+  function closeContra() {
+    setContra({ open: false, editing: null });
+    if (searchParams.has('action')) {
+      const next = new URLSearchParams(searchParams);
+      next.delete('action');
+      setSearchParams(next, { replace: true });
+    }
+  }
   async function handleReverseTransfer(t) {
     const accepted = t.status === 'completed';
     const ok = await confirm({
@@ -206,18 +221,6 @@ export default function Cash() {
             <div className="opacity-80 text-right">
               {hasFlow ? `${transactions.length} transactions` : 'No recent activity'}
             </div>
-            <div className="no-print flex items-center gap-1.5 flex-wrap justify-end">
-              {canCreateContra && (
-                <button onClick={() => setContra({ open: true, editing: null })}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white text-blue-700 text-xs font-semibold hover:bg-blue-50 shadow-sm">
-                  <ArrowLeftRight size={13} /> + Contra Transfer
-                </button>
-              )}
-              <button onClick={() => setShowTransfer(true)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/15 ring-1 ring-white/40 text-white text-xs font-semibold hover:bg-white/25">
-                HO ⇄ Mill
-              </button>
-            </div>
           </div>
         </div>
       </div>
@@ -352,10 +355,10 @@ export default function Cash() {
       )}
       </div>{/* /.print-report */}
       <TransferFundsDrawer open={showTransfer} onClose={() => setShowTransfer(false)} defaultDirection="ho_to_mill" />
-      <ContraTransferDrawer open={contra.open} editing={contra.editing}
-        onClose={() => setContra({ open: false, editing: null })}
+      <ContraTransferDrawer open={contraOpen} editing={contra.editing}
+        onClose={closeContra}
         onDone={(data) => { const id = data?.transfer?.id; if (id && contra.editing) setDetailId(id); }} />
-      <FundTransferDetailDrawer open={!!detailId && !contra.open} transferId={detailId} canManage={canReverse}
+      <FundTransferDetailDrawer open={!!detailId && !contraOpen} transferId={detailId} canManage={canReverse}
         onClose={() => setDetailId(null)} onNavigate={setDetailId}
         onEdit={(t) => setContra({ open: true, editing: t })} />
       {confirmDialog}
