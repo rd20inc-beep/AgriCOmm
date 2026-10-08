@@ -13,8 +13,9 @@ import { fmtMoney } from '../../../../shared/utils/format';
 
 // Form state uses camelCase for ergonomics, but the bank_accounts table
 // columns are: name, type, account_number, bank_name, branch, currency,
-// current_balance. There is no `account_name` or `opening_balance` —
-// before this fix, both saves 500'd with "column does not exist".
+// current_balance. There is no `account_name` column. `opening_balance` is a
+// create-only API field (booked to the GL server-side); edits never send a
+// balance — it moves only through payments, transfers or the Danger Zone.
 // Export-document fields (mig 271): account_title, iban, swift_bic,
 // bank_address, correspondent_*, is_export_default, approved_for_customer.
 const EMPTY = {
@@ -90,7 +91,6 @@ export default function BankAccountsTab() {
       branch: form.branch.trim() || null,
       type: form.type,
       currency: form.currency,
-      current_balance: parseFloat(form.currentBalance) || 0,
       // Export-document banking (mig 271)
       account_title: form.accountTitle.trim() || null,
       iban: form.iban.trim() || null,
@@ -102,6 +102,10 @@ export default function BankAccountsTab() {
       is_export_default: !!form.isExportDefault,
       approved_for_customer: !!form.approvedForCustomer,
     };
+    // The balance is never part of an edit — it moves only through payments,
+    // transfers or a Danger Zone adjustment (the server refuses a changed one).
+    // On create it is the opening balance, which the server books to the GL.
+    if (!editingId) payload.opening_balance = parseFloat(form.currentBalance) || 0;
     try {
       if (editingId) {
         await updateMut.mutateAsync({ id: editingId, data: payload });
@@ -283,7 +287,17 @@ export default function BankAccountsTab() {
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">{editingId ? 'Current Balance' : 'Opening Balance'}</label>
-            <input type="number" value={form.currentBalance} onChange={e => set('currentBalance', e.target.value)} placeholder="0.00" className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+            {editingId ? (
+              <>
+                <input type="text" readOnly disabled value={fmtMoney(parseFloat(form.currentBalance) || 0, form.currency, { decimals: 2 })} className="w-full border border-gray-200 bg-gray-50 text-gray-600 rounded-lg px-3 py-2.5 text-sm outline-none cursor-not-allowed" />
+                <p className="text-xs text-gray-500 mt-1">Changes only through payments / transfers.</p>
+              </>
+            ) : (
+              <>
+                <input type="number" value={form.currentBalance} onChange={e => set('currentBalance', e.target.value)} placeholder="0.00" className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                <p className="text-xs text-gray-500 mt-1">Booked as an opening balance (Cash &amp; Bank against Owner&apos;s Equity).</p>
+              </>
+            )}
           </div>
 
           {/* Documentary / SWIFT details — printed on the Commercial Invoice and
