@@ -29,6 +29,7 @@ export const financeApi = {
   overviewSummary: (params) => api.get('/api/finance/overview-summary', params),
   profitabilitySummary: (params) => api.get('/api/finance/profitability-summary', params),
   profitHeadline: (params) => api.get('/api/finance/profit-headline', params),
+  collectionRate: () => api.get('/api/finance/collection-rate'),
   internalTransfers: (params) => api.get('/api/finance/internal-transfers', params),
   internalTransfer: (id) => api.get(`/api/finance/internal-transfers/${id}`),
   createTransfer: (data) => api.post('/api/finance/internal-transfers', data),

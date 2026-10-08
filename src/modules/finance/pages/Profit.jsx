@@ -19,6 +19,10 @@ const RICE_BASIS = {
   'reserved+estimate': 'reserved + estimate',
   allocated: 'allocated',
   estimate: 'estimate',
+  // C2: no stock to estimate from — priced at the commodity rate master.
+  rate_master: 'rate master (est.)',
+  'estimate+rate_master': 'estimate + rate master',
+  'reserved+rate_master': 'reserved + rate master',
   unpriced: 'not costed',
 };
 
@@ -89,11 +93,21 @@ export default function Profit() {
         <span className="text-xs text-gray-500">{RICE_BASIS[row.riceCostBasis] || row.riceCostBasis}</span>
       </span>
     )},
-    { key: 'bookedProfitPkr', label: 'Booked Profit', sortable: true, align: 'right', render: (v) => (
-      v == null ? <span className="text-gray-400">excluded</span>
+    { key: 'bookedProfitPkr', label: 'Booked Profit', sortable: true, align: 'right', render: (v, row) => (
+      row.inBookedPeriod === false ? <span className="text-xs text-gray-400" title="Ordered before this period — in Booked for its order date">booked earlier</span>
+        : v == null ? <span className="text-gray-400">excluded</span>
         : <span className={v >= 0 ? 'text-emerald-600 font-medium' : 'text-red-600 font-medium'}>{fmtPKR(v)}</span>
     )},
-    { key: 'realisedProfitPkr', label: 'Realised', sortable: true, align: 'right', render: (v) => (v == null ? '—' : fmtPKR(v)) },
+    // C4: an order counts in Booked by its order date and in Realised by its
+    // shipment date, so a row can belong to the period for one and not the other.
+    { key: 'realisedProfitPkr', label: 'Realised', sortable: true, align: 'right', render: (v, row) => (
+      v == null ? '—' : (
+        <span className="inline-flex flex-col items-end">
+          <span>{fmtPKR(v)}</span>
+          {row.shippedOn && <span className="text-xs text-gray-500">shipped {row.shippedOn}{row.inRealisedPeriod === false ? ' · other period' : ''}</span>}
+        </span>
+      )
+    )},
     { key: 'fxGainLossPkr', label: 'FX realised', sortable: true, align: 'right', render: (v) => (
       <span className={v >= 0 ? 'text-blue-600' : 'text-amber-600'}>{fmtPKR(v)}</span>
     )},
@@ -225,13 +239,13 @@ export default function Profit() {
         <FinanceKPI icon={DollarSign} title="Export Booked" value={fmtPKR(exportBookedProfitPkr)}
           subtitle={`${exp.pricedCount || 0} confirmed orders costed${(exp.unpricedCount || 0) > 0 ? ` · ${exp.unpricedCount} excluded` : ''}`} status={exportBookedProfitPkr >= 0 ? 'good' : 'danger'} loading={isLoading} />
         <FinanceKPI icon={CheckCircle} title="Export Realised" value={fmtPKR(exportRealisedPkr)}
-          subtitle={`${exp.realisedCount || 0} shipped · locked COGS`} status={exportRealisedPkr >= 0 ? 'good' : 'danger'} loading={isLoading} />
+          subtitle={`${exp.realisedCount || 0} shipped in period · locked COGS`} status={exportRealisedPkr >= 0 ? 'good' : 'danger'} loading={isLoading} />
         <FinanceKPI icon={Activity} title="Export Pipeline" value={fmtPKR(exportPipelinePkr)}
-          subtitle="Booked − Realised" status={exportPipelinePkr >= 0 ? 'good' : 'warning'} loading={isLoading} />
+          subtitle={`${exp.pipelineCount || 0} booked, not yet shipped`} status={exportPipelinePkr >= 0 ? 'good' : 'warning'} loading={isLoading} />
         <FinanceKPI icon={RefreshCw} title="FX Realised" value={fmtPKR(exportFxGainLoss)}
           subtitle="PKR received vs booked rate" status={exportFxGainLoss >= 0 ? 'good' : 'warning'} loading={isLoading} />
-        <FinanceKPI icon={Factory} title="Mill Realised" value={fmtPKR(millProfitPkr)}
-          subtitle="Sales of mill output − COGS" status={millProfitPkr >= 0 ? 'good' : 'danger'} loading={isLoading} />
+        <FinanceKPI icon={Factory} title="Mill Realised (net)" value={fmtPKR(millProfitPkr)}
+          subtitle={`Sales − COGS ${fmtPKR(summary.mill?.grossProfitPkr || 0)} − overheads ${fmtPKR(summary.mill?.overheadsPkr || 0)}`} status={millProfitPkr >= 0 ? 'good' : 'danger'} loading={isLoading} />
         <FinanceKPI icon={Store} title="Local (other)" value={fmtPKR(localProfitPkr)}
           subtitle={`${summary.local?.saleCount || 0} non-mill sales`} status={localProfitPkr >= 0 ? 'good' : 'danger'} loading={isLoading} />
       </div>

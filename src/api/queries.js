@@ -625,6 +625,20 @@ export function useProfitHeadline(params = {}, options = {}) {
   });
 }
 
+// Collection rate (C6): received ÷ amounts due, per currency, with the
+// configurable target and the overdue amounts. Point in time.
+export function useCollectionRate(options = {}) {
+  return useQuery({
+    queryKey: ['finance-collection-rate'],
+    queryFn: async () => {
+      const res = await financeApi.collectionRate();
+      return unwrap(res) || {};
+    },
+    staleTime: 60 * 1000,
+    ...options,
+  });
+}
+
 export function useFxRates(params = {}) {
   return useQuery({
     queryKey: ['finance-fx-rates', params],

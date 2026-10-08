@@ -87,6 +87,7 @@ export default function OverviewTab({ order, formatCurrency, formatPKR, totalCos
       production_date: order.productionDate || '',
       expiry_date: order.expiryDate || '',
       payment_terms: order.paymentTerms || '',
+      balance_term_days: order.balanceTermDays ?? '',
       quality_description: order.qualityDescription || '',
       production_remarks: order.productionRemarks || '',
     });
@@ -97,7 +98,7 @@ export default function OverviewTab({ order, formatCurrency, formatPKR, totalCos
     try {
       // Send null instead of '' for numeric/date fields so Postgres doesn't
       // reject the update with "invalid input syntax for type numeric".
-      const NUMERIC = new Set(['broken_pct_target']);
+      const NUMERIC = new Set(['broken_pct_target', 'balance_term_days']);
       const DATE = new Set(['production_date', 'expiry_date']);
       const payload = Object.fromEntries(
         Object.entries(specs).map(([k, v]) => {
@@ -575,6 +576,7 @@ export default function OverviewTab({ order, formatCurrency, formatPKR, totalCos
               ['Production Date', order.productionDate || '\u2014'],
               ['Expiry Date', order.expiryDate || '\u2014'],
               ['Payment Terms', order.paymentTerms || `${order.advancePct || 0}% advance, balance against documents`],
+              ['Balance due', order.balanceTermDays != null ? `${order.balanceTermDays} days after BL / sailing` : '\u2014'],
             ].map(([label, value]) => (
               <div key={label} className="flex justify-between text-sm">
                 <span className="text-gray-500">{label}</span>
@@ -642,6 +644,17 @@ export default function OverviewTab({ order, formatCurrency, formatPKR, totalCos
                 {PAYMENT_TERMS.map(t => <option key={t} value={t} />)}
               </datalist>
               <p className="text-[11px] text-gray-500 mt-1">Pick a standard term or type a custom one. Appears on Proforma Invoice and Bank docs.</p>
+            </div>
+            <div>
+              <label htmlFor="balance-term-days" className="block text-xs font-medium text-gray-600 mb-1">Balance due (days after BL / sailing)</label>
+              <input
+                id="balance-term-days"
+                type="number" min="0" max="365" step="1" inputMode="numeric"
+                value={specs.balance_term_days}
+                onChange={e => setSpecs(s => ({ ...s, balance_term_days: e.target.value }))}
+                className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+              />
+              <p className="text-[11px] text-gray-500 mt-1">The balance receivable falls due this many days after the BL date (or departure). Blank uses the company default. Drives the collection rate.</p>
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Quality Description</label>
