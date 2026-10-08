@@ -6,6 +6,7 @@ const db = require('../../config/database');
 const { applyWarehouseScope, isWarehouseInScope } = require('../../utils/warehouseScope');
 const { companyStock } = require('../inventory/stockSql');
 const { exportProfit } = require('../finance/profitDefinitions');
+const { kgToMt, KG_PER_MT } = require('../../shared/units');
 
 // Parse a milling_batches.custom_tags jsonb value into a plain array. The pg
 // driver usually returns jsonb already parsed (array/object), but a string may
@@ -432,9 +433,9 @@ const reportingService = {
         batchName: b.batch_name || null,
         customTags: parseCustomTags(b.custom_tags),
         supplierName: b.supplier_name,
-        rawQtyMT: (parseFloat(b.raw_qty_kg) || 0) / 1000,
-        finishedMT: (parseFloat(b.actual_finished_kg) || 0) / 1000,
-        brokenMT: (parseFloat(b.broken_kg) || 0) / 1000,
+        rawQtyMT: kgToMt(b.raw_qty_kg),
+        finishedMT: kgToMt(b.actual_finished_kg),
+        brokenMT: kgToMt(b.broken_kg),
         yieldPct: parseFloat(b.yield_pct) || 0,
         revenue: totalRevenue,
         costs: totalCost,
@@ -567,7 +568,7 @@ const reportingService = {
       const byproducts = (bpByBatch[b.id] || []).sort((x, y) => y.valuationValue - x.valuationValue);
       return {
         id: b.id, batchNo: b.batch_no, batchName: b.batch_name || null, customTags: parseCustomTags(b.custom_tags), supplierName: b.supplier_name, status: b.status, createdAt: b.created_at,
-        rawQtyMT: num(b.raw_qty_kg)/1000, finishedMT: num(b.actual_finished_kg)/1000, yieldPct: num(b.yield_pct),
+        rawQtyMT: kgToMt(b.raw_qty_kg), finishedMT: kgToMt(b.actual_finished_kg), yieldPct: num(b.yield_pct),
         inputCost, soldValue, costOfSold, realizedMargin, realizedMarginPct,
         soldKg: soldKg[b.id] || 0, onHandValue: onHand[b.id] || 0,
         byproductRecovery: byproducts.reduce((s, x) => s + x.valuationValue, 0),
@@ -849,7 +850,7 @@ const reportingService = {
         's.id as supplier_id',
         's.name as supplier_name',
         db.raw('COUNT(mb.id) as total_batches'),
-        db.raw('COALESCE(SUM(mb.raw_qty_kg), 0)/1000 as total_qty_mt'),
+        db.raw(`COALESCE(SUM(mb.raw_qty_kg), 0)/${KG_PER_MT} as total_qty_mt`),
         db.raw('COALESCE(AVG(mb.yield_pct), 0) as avg_yield')
       )
       .groupBy('s.id', 's.name')
@@ -1006,7 +1007,7 @@ const reportingService = {
         supplierName: b.supplier_name,
         productName: b.product_name,
         rawQtyMT: rawQty,
-        finishedQtyMT: (parseFloat(b.actual_finished_kg) || 0) / 1000,
+        finishedQtyMT: kgToMt(b.actual_finished_kg),
         yieldPct: parseFloat(b.yield_pct) || 0,
         brokenPct,
       };
@@ -1927,7 +1928,7 @@ const reportingService = {
     return {
       summary: {
         batchCount: core.length, blendCount: rows.length - core.length,
-        inputMt: tot.input / 1000, outputMt: tot.output / 1000, lossMt: tot.loss / 1000,
+        inputMt: kgToMt(tot.input), outputMt: kgToMt(tot.output), lossMt: kgToMt(tot.loss),
         avgLossPct: tot.input > 0 ? (tot.loss / tot.input) * 100 : 0,
         costBasis: 'Processing loss = raw input − total recorded output (finished + by-products). Blends (re-milled finished rice) are flagged and excluded from totals/breakdowns.',
       },
@@ -1993,7 +1994,7 @@ const reportingService = {
     }
     const outById = Object.fromEntries(outputs.map(o => [o.id, o]));
 
-    const inputMt = sources.reduce((s, r) => s + num(r.qty_kg) / 1000, 0);
+    const inputMt = sources.reduce((s, r) => s + kgToMt(r.qty_kg), 0);
     // Prefer per-source-lot cost; fall back to the batch's raw_cost_total when
     // source rows carry no cost (older/backfilled lineage).
     const rawCostFromSources = sources.reduce((s, r) => s + num(r.cost_total_pkr), 0);
@@ -2048,9 +2049,9 @@ const reportingService = {
     });
 
     // Yield summary.
-    const finishedMt = outputRows.filter(o => o.type === 'finished').reduce((s, o) => s + o.producedKg, 0) / 1000;
-    const byproductMt = outputRows.filter(o => o.type === 'byproduct').reduce((s, o) => s + o.producedKg, 0) / 1000;
-    const totalOutputMt = outputKg / 1000;
+    const finishedMt = kgToMt(outputRows.filter(o => o.type === 'finished').reduce((s, o) => s + o.producedKg, 0));
+    const byproductMt = kgToMt(outputRows.filter(o => o.type === 'byproduct').reduce((s, o) => s + o.producedKg, 0));
+    const totalOutputMt = kgToMt(outputKg);
     const lossMt = Math.max(0, inputMt - totalOutputMt);
 
     // Financial summary.
@@ -2075,13 +2076,13 @@ const reportingService = {
         isBlend: batch.processing_type === 'blended',
         product: batch.product_name || batch.order_product, supplier: batch.supplier_name, supplierId: batch.supplier_id,
         suppliers,
-        rawQtyMt: num(batch.raw_qty_kg)/1000, finishedMt: num(batch.actual_finished_kg)/1000, yieldPct: num(batch.yield_pct),
+        rawQtyMt: kgToMt(batch.raw_qty_kg), finishedMt: kgToMt(batch.actual_finished_kg), yieldPct: num(batch.yield_pct),
         operator: batch.operator_name, machineLine: batch.machine_line, shift: batch.shift,
         processingHours: num(batch.processing_hours), createdAt: batch.created_at, completedAt: batch.completed_at,
         totalCostPerKgFinished: num(batch.total_cost_per_kg_finished),
         href: `/milling/${batch.id}`,
       },
-      inputs: sources.map(r => ({ lotId: r.lot_id, lotNo: r.lot_no, item: r.item_name, variety: r.variety, supplier: r.supplier, supplierId: r.supplier_id || null, qtyMt: num(r.qty_kg) / 1000, unitCostPkr: num(r.unit_cost_pkr), costTotalPkr: num(r.cost_total_pkr), ratioPct: num(r.ratio_pct), href: r.lot_id ? `/lot-inventory/${r.lot_id}` : null, supplierHref: r.supplier_id ? `/finance/statements?type=supplier&id=${r.supplier_id}` : null })),
+      inputs: sources.map(r => ({ lotId: r.lot_id, lotNo: r.lot_no, item: r.item_name, variety: r.variety, supplier: r.supplier, supplierId: r.supplier_id || null, qtyMt: kgToMt(r.qty_kg), unitCostPkr: num(r.unit_cost_pkr), costTotalPkr: num(r.cost_total_pkr), ratioPct: num(r.ratio_pct), href: r.lot_id ? `/lot-inventory/${r.lot_id}` : null, supplierHref: r.supplier_id ? `/finance/statements?type=supplier&id=${r.supplier_id}` : null })),
       costs: costs.map(c => ({ id: c.id, category: c.category, amount: num(c.amount), notes: c.notes })),
       manualCosts: { milling: num(batch.manual_milling_cost_pkr), other: num(batch.manual_other_expenses_pkr) },
       outputs: outputRows,
@@ -3510,8 +3511,8 @@ const reportingService = {
         'm.name as mill_name',
         'm.capacity_mt_per_day',
         db.raw('COUNT(mb.id) as batches_processed'),
-        db.raw('COALESCE(SUM(mb.raw_qty_kg), 0)/1000 as total_input_mt'),
-        db.raw('COALESCE(SUM(mb.actual_finished_kg), 0)/1000 as total_output_mt'),
+        db.raw(`COALESCE(SUM(mb.raw_qty_kg), 0)/${KG_PER_MT} as total_input_mt`),
+        db.raw(`COALESCE(SUM(mb.actual_finished_kg), 0)/${KG_PER_MT} as total_output_mt`),
         db.raw('COALESCE(AVG(mb.yield_pct), 0) as avg_yield'),
         db.raw('COALESCE(SUM(mb.processing_hours), 0) as total_processing_hours')
       )
@@ -3585,7 +3586,7 @@ const reportingService = {
       .select(
         'operator_name',
         db.raw('COUNT(id) as batches'),
-        db.raw('COALESCE(SUM(actual_finished_kg), 0)/1000 as total_output_mt'),
+        db.raw(`COALESCE(SUM(actual_finished_kg), 0)/${KG_PER_MT} as total_output_mt`),
         db.raw('COALESCE(AVG(yield_pct), 0) as avg_yield'),
         db.raw('COALESCE(SUM(processing_hours), 0) as total_hours')
       )
@@ -3633,7 +3634,7 @@ const reportingService = {
     // Total MT processed for cost/MT calculation
     const processedQuery = db('milling_batches')
       .where('status', 'Completed')
-      .select(db.raw('COALESCE(SUM(raw_qty_kg), 0)/1000 as total_processed'));
+      .select(db.raw(`COALESCE(SUM(raw_qty_kg), 0)/${KG_PER_MT} as total_processed`));
     if (millId) processedQuery.where('mill_id', millId);
     if (dateFrom) processedQuery.where('created_at', '>=', dateFrom);
     if (dateTo) processedQuery.where('created_at', '<=', dateTo);
@@ -3855,7 +3856,7 @@ const reportingService = {
               })
               .sum('raw_qty_kg as total')
               .first();
-            const totalMT = (parseFloat(millQty.total) || 0) / 1000; // raw_qty_kg is KG → MT
+            const totalMT = kgToMt(millQty.total); // raw_qty_kg is KG → MT
             actual = totalMT > 0 ? parseFloat((parseFloat(millCostData.total) / totalMT).toFixed(2)) : 0;
             break;
           }

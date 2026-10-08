@@ -263,6 +263,8 @@ describe('allocating stock', () => {
     ]);
     expect(r.statusCode).toBe(400);
     expect(r.body.message).toMatch(/at most 20\.000 MT more/);
+    // Every MT figure in the message crosses the KG→MT boundary (shared/units).
+    expect(r.body.message).toBe('That would allocate 110.000 MT to an order for 100.000 MT. 80.000 MT is already allocated; at most 20.000 MT more can be.');
     expect(mockInventory.reserveStock).not.toHaveBeenCalled();
   });
 

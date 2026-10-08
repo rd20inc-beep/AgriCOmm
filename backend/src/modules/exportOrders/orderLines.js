@@ -11,6 +11,8 @@
 // carried the spec) falls back to the header's, so single-line orders read
 // exactly as they always did.
 
+const { mtToKg, perMtToPerKg } = require('../../shared/units');
+
 const num = (v) => {
   const n = parseFloat(v);
   return Number.isFinite(n) ? n : 0;
@@ -58,7 +60,7 @@ function linePackaging(order = {}, items = []) {
   const single = lines.length <= 1;
   return lines.map((line) => {
     const spec = lineBagSpec(line, order, { single });
-    const kg = num(line.qty_mt) * 1000;
+    const kg = mtToKg(num(line.qty_mt));
     const bags = num(line.bag_count) > 0
       ? Math.round(num(line.bag_count))
       : (spec.bagSizeKg > 0 && kg > 0 ? Math.round(kg / spec.bagSizeKg) : 0);
@@ -129,7 +131,7 @@ function priceText(order, items) {
   const ps = priceSummary(order, items);
   if (!(ps.value > 0)) return '';
   if (!ps.mixed) {
-    return `@ ${ps.value.toLocaleString()}/MT (${(ps.value / 1000).toLocaleString(undefined, { maximumFractionDigits: 3 })}/kg)`;
+    return `@ ${ps.value.toLocaleString()}/MT (${perMtToPerKg(ps.value).toLocaleString(undefined, { maximumFractionDigits: 3 })}/kg)`;
   }
   return `@ avg ${ps.value.toLocaleString(undefined, { maximumFractionDigits: 2 })}/MT (${ps.min.toLocaleString()}–${ps.max.toLocaleString()})`;
 }
