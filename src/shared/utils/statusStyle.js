@@ -103,6 +103,7 @@ const statusStyles = {
   // Cheques
   'Cleared': GREEN,
   'Uncleared': AMBER,
+  'Bounced': RED,
   // Profit accuracy (Accounting › Profit)
   'Exact': GREEN,
   'Estimated': BLUE,

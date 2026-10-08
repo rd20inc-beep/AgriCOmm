@@ -68,6 +68,8 @@ export function transactionActions(data, hasPermission) {
     reverse: !!p && canWrite && !!data.reversal?.allowed,
     reverseBlockedReason: p && !data.reversal?.allowed ? data.reversal?.reason : null,
     clear: !!p && canWrite && !!data.clearable,
+    // B1: an uncleared, confirmed cheque can be marked bounced.
+    bounce: !!p && canWrite && !!data.bounceable,
     attach: !!p && canWrite && !p.attachment_url && !['Reversed', 'Rejected'].includes(p.status),
   };
 }

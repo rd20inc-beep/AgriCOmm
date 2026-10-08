@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowDownLeft, ArrowUpRight, AlertTriangle, CheckCircle, Loader2, X } from 'lucide-react';
+import { ArrowDownLeft, ArrowUpRight, AlertTriangle, Ban, CheckCircle, Loader2, X } from 'lucide-react';
 import { useUpcoming, useClearCheque, useBankAccounts } from '../../../api/queries';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
@@ -11,13 +11,16 @@ import { accountsForMethod, pickAccountForMethod } from '../../../components/pay
 import { accountsForCurrency } from '../../../shared/utils/accountCurrency';
 import { fmtMoney as fmtMoneyBase, fmtDate } from '../../../shared/utils/format';
 import { TypeChip, EmptyLine, InlineError } from '../components/FinanceUI';
-import { btnPrimary, btnSecondary, btnRowSecondary, th, tdMoney, errorText } from '../utils/uiClasses';
+import { btnPrimary, btnSecondary, btnRowSecondary, btnRowDanger, th, tdMoney, errorText } from '../utils/uiClasses';
+import PermissionGate from '../../../shared/components/PermissionGate';
+import useChequeBounce from '../hooks/useChequeBounce';
+import { canBounceItem } from '../utils/chequeBounce';
 
 // Exact, two decimals; each amount in its own currency (USD export receivables vs PKR dues).
 const fmtMoney = (n, cur) => fmtMoneyBase(parseFloat(n) || 0, cur || 'PKR', { decimals: 2 });
 const isOverdue = (s) => s && new Date(s) < new Date(new Date().toDateString());
 
-function List({ title, icon: Icon, tone, items, onClear, clearing, canClear }) {
+function List({ title, icon: Icon, tone, items, onClear, clearing, canClear, onBounce, bouncing }) {
   // Each currency on its own — a USD cheque and a rupee due are never added.
   const totals = totalsByCurrency(items, 'amount');
   return (
@@ -57,11 +60,20 @@ function List({ title, icon: Icon, tone, items, onClear, clearing, canClear }) {
                     {fmtMoney(x.amount, x.currency)}
                   </td>
                   <td data-label="" className="py-2 px-4 text-right">
-                    {x.paymentId && canClear && (
-                      <button type="button" onClick={() => onClear(x)} disabled={clearing} className={btnRowSecondary}>
-                        <CheckCircle size={12} aria-hidden="true" /> Mark cleared
-                      </button>
-                    )}
+                    <span className="inline-flex flex-wrap justify-end gap-1.5">
+                      {x.paymentId && canClear && (
+                        <button type="button" onClick={() => onClear(x)} disabled={clearing} className={btnRowSecondary}>
+                          <CheckCircle size={12} aria-hidden="true" /> Mark cleared
+                        </button>
+                      )}
+                      {canBounceItem(x) && (
+                        <PermissionGate module="finance" action="confirm_payment">
+                          <button type="button" onClick={() => onBounce(x)} disabled={bouncing} className={btnRowDanger} data-action="bounce-cheque">
+                            <Ban size={12} aria-hidden="true" /> Bounced
+                          </button>
+                        </PermissionGate>
+                      )}
+                    </span>
                   </td>
                 </tr>
               ))}
@@ -154,6 +166,8 @@ export default function DueDates() {
   const giving = data?.giving || [];
   // A cheque clears through a bank account, never a cash float.
   const bankAccounts = useMemo(() => accountsForMethod(allAccounts || [], 'cheque'), [allAccounts]);
+  // B1: a cheque the bank returned — the bill / receivable reopens.
+  const bounce = useChequeBounce({ accounts: bankAccounts });
 
   async function onConfirmClear(accountId) {
     const x = clearing;
@@ -169,7 +183,7 @@ export default function DueDates() {
 
   return (
     <div className="space-y-6">
-      <p className="text-sm text-gray-600 max-w-3xl">Uncleared cheques &amp; credit (udhaar) dues — when money is expected or due. A cheque settles only when you mark it cleared here.</p>
+      <p className="text-sm text-gray-600 max-w-3xl">Uncleared cheques &amp; credit (udhaar) dues — when money is expected or due. A cheque settles only when you mark it cleared here; one the bank returns is marked bounced, which reopens what it was paying.</p>
       {isLoading ? (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 animate-pulse" aria-busy="true">
           <div className="h-48 bg-gray-100 rounded-xl" /><div className="h-48 bg-gray-100 rounded-xl" />
@@ -178,12 +192,13 @@ export default function DueDates() {
         <InlineError message={errorText(error, 'Cheques and dues')} onRetry={refetch} />
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-          <List title="Receiving (money in)" icon={ArrowDownLeft} tone="in" items={receiving} onClear={setClearing} clearing={clearMut.isPending} canClear={canClear} />
-          <List title="Giving (money out)" icon={ArrowUpRight} tone="out" items={giving} onClear={setClearing} clearing={clearMut.isPending} canClear={canClear} />
+          <List title="Receiving (money in)" icon={ArrowDownLeft} tone="in" items={receiving} onClear={setClearing} clearing={clearMut.isPending} canClear={canClear} onBounce={bounce.start} bouncing={bounce.busy} />
+          <List title="Giving (money out)" icon={ArrowUpRight} tone="out" items={giving} onClear={setClearing} clearing={clearMut.isPending} canClear={canClear} onBounce={bounce.start} bouncing={bounce.busy} />
         </div>
       )}
       <ClearChequeDialog key={clearing?.paymentId || 'none'} item={clearing} accounts={bankAccounts} busy={clearMut.isPending}
         onCancel={() => setClearing(null)} onConfirm={onConfirmClear} />
+      {bounce.dialog}
     </div>
   );
 }

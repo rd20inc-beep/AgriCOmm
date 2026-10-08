@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { ArrowDownLeft, ArrowUpRight, Paperclip, FileText, Undo2, CheckCircle, Landmark } from 'lucide-react';
+import { ArrowDownLeft, ArrowUpRight, Paperclip, FileText, Undo2, CheckCircle, Landmark, Ban } from 'lucide-react';
 import SlideDrawer from '../../../components/SlideDrawer';
 import StatusBadge from '../../../shared/components/StatusBadge';
 import api from '../../../api/client';
@@ -12,6 +12,8 @@ import { useBankAccounts, useClearCheque, useReversePayment } from '../../../api
 import { accountsForMethod, METHOD_LABEL } from '../../../components/payments/paymentPayload';
 import { invalidateMoney } from '../../../components/payments/invalidateMoney';
 import { ClearChequeDialog } from '../pages/DueDates';
+import PermissionGate from '../../../shared/components/PermissionGate';
+import useChequeBounce from '../hooks/useChequeBounce';
 import { fmtDate, fmtDateTime } from '../../../shared/utils/format';
 import { useFinanceDrawers } from './drawersContext';
 import { Section, Row, LinkButton, DrawerActions } from './drawerParts';
@@ -44,6 +46,8 @@ export default function TransactionDrawer({ txKind, id, onClose }) {
   const { data: allAccounts = [] } = useBankAccounts();
   const [clearing, setClearing] = useState(null);
   const [uploading, setUploading] = useState(false);
+  // B1: an uncleared cheque the bank returned.
+  const bounce = useChequeBounce({ accounts: accountsForMethod(allAccounts, 'cheque'), onDone: () => refresh() });
 
   // A transfer row belongs to the transfer drawer.
   useEffect(() => {
@@ -112,16 +116,25 @@ export default function TransactionDrawer({ txKind, id, onClose }) {
   const subtitle = p ? `${p.type === 'receipt' ? 'Money in' : 'Money out'} · ${fmtDate(p.payment_date)}`
     : bt ? `${bt.type === 'credit' ? 'Money in' : 'Money out'} · ${fmtDate(bt.transaction_date)}` : undefined;
 
-  const footer = p && (acts.reverse || acts.clear) ? (
+  const chequeItem = p ? { paymentId: p.id, paymentNo: p.payment_no, reference: p.bank_reference, amount: p.amount, currency: p.currency, bankAccountId: p.bank_account_id, party: data.party?.name, partyType: p.type === 'receipt' ? 'customer' : 'supplier' } : null;
+
+  const footer = p && (acts.reverse || acts.clear || acts.bounce) ? (
     <DrawerActions>
       {acts.reverse && (
         <button type="button" className={btnDanger} disabled={reverseMut.isPending} onClick={reverse} data-action="reverse">
           <Undo2 size={14} aria-hidden="true" /> Reverse
         </button>
       )}
+      {acts.bounce && (
+        <PermissionGate module="finance" action="confirm_payment">
+          <button type="button" className={btnDanger} disabled={bounce.busy} data-action="bounce-cheque" onClick={() => bounce.start(chequeItem)}>
+            <Ban size={14} aria-hidden="true" /> Bounced
+          </button>
+        </PermissionGate>
+      )}
       {acts.clear && (
         <button type="button" className={btnPrimary} disabled={clearMut.isPending} data-action="clear-cheque"
-          onClick={() => setClearing({ paymentId: p.id, paymentNo: p.payment_no, reference: p.bank_reference, amount: p.amount, currency: p.currency, bankAccountId: p.bank_account_id, party: data.party?.name, partyType: p.type === 'receipt' ? 'customer' : 'supplier' })}>
+          onClick={() => setClearing(chequeItem)}>
           <CheckCircle size={14} aria-hidden="true" /> Clear cheque
         </button>
       )}
@@ -148,7 +161,7 @@ export default function TransactionDrawer({ txKind, id, onClose }) {
               )}
               <div className="mt-1.5 flex justify-center gap-1.5">
                 <StatusBadge status={p ? p.status : (bt.status || 'posted')} />
-                {p?.payment_method === 'cheque' && <StatusBadge status={p.cleared ? 'Cleared' : 'Uncleared'} />}
+                {p?.payment_method === 'cheque' && p.status !== 'Bounced' && <StatusBadge status={p.cleared ? 'Cleared' : 'Uncleared'} />}
               </div>
             </div>
 
@@ -221,6 +234,9 @@ export default function TransactionDrawer({ txKind, id, onClose }) {
                   {p.status === 'Reversed' && (
                     <Row label="Reversed">{p.reversed_by_name || '—'}{p.reversed_at ? ` · ${fmtDateTime(p.reversed_at)}` : ''}{p.reversal_reason ? ` — ${p.reversal_reason}` : ''}</Row>
                   )}
+                  {p.status === 'Bounced' && (
+                    <Row label="Bounced">{p.bounced_by_name || '—'}{p.bounced_at ? ` · ${fmtDateTime(p.bounced_at)}` : ''}{p.bounce_reason ? ` — ${p.bounce_reason}` : ''}</Row>
+                  )}
                   {p.reject_reason && <Row label="Rejected">{p.reject_reason}</Row>}
                 </div>
               </Section>
@@ -288,6 +304,7 @@ export default function TransactionDrawer({ txKind, id, onClose }) {
         <ClearChequeDialog key={clearing.paymentId} item={clearing} accounts={accountsForMethod(allAccounts, 'cheque')}
           busy={clearMut.isPending} onCancel={() => setClearing(null)} onConfirm={onClearConfirm} />
       )}
+      {bounce.dialog}
       {confirmDialog}
     </SlideDrawer>
   );

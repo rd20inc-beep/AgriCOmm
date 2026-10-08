@@ -8,7 +8,7 @@
 //   source                                   item                       action (guard)
 //   GET /export-orders/pending-receipts      receipt awaiting confirm   Confirm / Reject (finance.confirm_payment)
 //   GET /finance/receivables                 overdue / due soon / part  Receive (the Payment form variant's guard)
-//   GET /finance/upcoming (cheques)          cheque due or overdue      Clear (finance.confirm_payment)
+//   GET /finance/upcoming (cheques)          cheque due or overdue      Clear / Bounced (finance.confirm_payment)
 //   GET /finance/fund-transfers              transfer awaiting you      Accept (receiving side: finance.confirm_payment | milling.edit)
 //   GET /reporting/payroll-pending           run prepared / approved    Approve (payroll.approve) / Pay (payroll.pay)
 //   GET /purchase-requirements?approved      approved purchase request  Mark purchased (any of finance.confirm_payment,
@@ -89,6 +89,8 @@ export function buildNeedsAttention(sources = {}, hasPermission = () => false, t
       sub: `${c.partyType === 'customer' ? 'From' : 'To'} ${c.party || '—'} · clears ${String(c.dueDate).slice(0, 10)}`,
       amount: num(c.amount), currency: (c.currency || 'PKR').toUpperCase(), due: c.dueDate,
       action: { type: 'clearCheque', label: 'Clear' },
+      // B1: or the bank returned it — same permission as clearing.
+      secondary: { type: 'bounceCheque', label: 'Bounced' },
       payload: c,
     }, hasPermission('finance', 'confirm_payment'));
   }
