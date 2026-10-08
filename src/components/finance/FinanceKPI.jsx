@@ -51,7 +51,7 @@ export default function FinanceKPI({
       }`}
     >
       <div className="flex items-center justify-between gap-2 mb-2">
-        <p className="text-xs font-medium text-gray-500 uppercase tracking-wide truncate" title={typeof title === 'string' ? title : undefined}>{title}</p>
+        <p className="min-w-0 text-xs font-medium text-gray-500 uppercase tracking-wide line-clamp-2 break-words" title={typeof title === 'string' ? title : undefined}>{title}</p>
         {Icon && (
           <span className={`flex items-center justify-center w-8 h-8 rounded-lg ${s.bg} flex-shrink-0`} aria-hidden="true">
             <Icon size={16} className={s.icon} />

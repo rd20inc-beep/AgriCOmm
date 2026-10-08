@@ -76,11 +76,11 @@ describe('header: one title, one primary action, a phone overflow', () => {
     expect(primary[0]).toContain('data-action="pay"');
     expect(classOf(primary[0])).toContain('bg-blue-600');
     for (const t of tags.filter((x) => !x.includes('data-primary'))) {
-      expect(classOf(t)).toMatch(/\bhidden\b.*\bsm:inline-flex\b/);
+      expect(classOf(t)).toContain('max-sm:hidden');
       expect(classOf(t)).not.toContain('bg-blue-600');
     }
     // Print is outlined and phone-hidden; the overflow toggle is phone-only and named.
-    expect(classOf(tagWith(html, 'data-testid="finance-print"')[0])).toMatch(/\bhidden\b.*\bsm:inline-flex\b/);
+    expect(classOf(tagWith(html, 'data-testid="finance-print"')[0])).toContain('max-sm:hidden');
     expect(html).toMatch(/data-testid="finance-overflow"[^>]*class="[^"]*sm:hidden|class="[^"]*sm:hidden[^"]*"[^>]*data-testid="finance-overflow"/);
     expect(html).toContain('aria-label="More actions"');
     expect(html).toContain('aria-expanded="false"');

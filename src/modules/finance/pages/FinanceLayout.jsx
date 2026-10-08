@@ -86,9 +86,9 @@ function FinanceShell({ children }) {
               <div className="flex items-center gap-2" data-testid="finance-actions">
                 {actions.map((a) => {
                   const primary = a.key === primaryKey;
-                  // On a phone only the primary action stays in the row; the
+                  // On a phone (max-sm:hidden — beats the button's own inline-flex) only the primary action stays; the
                   // others are in the overflow menu.
-                  const cls = primary ? btnPrimary : `${btnSecondary} hidden sm:inline-flex`;
+                  const cls = primary ? btnPrimary : `${btnSecondary} max-sm:hidden`;
                   return drawers ? (
                     <button key={a.key} type="button" data-action={a.key} data-primary={primary ? 'true' : undefined}
                       onClick={() => openAction(a)} className={cls}>
@@ -102,7 +102,7 @@ function FinanceShell({ children }) {
                 })}
               </div>
             )}
-            <button type="button" onClick={handlePrint} className={`${btnSecondary} hidden sm:inline-flex`} data-testid="finance-print">
+            <button type="button" onClick={handlePrint} className={`${btnSecondary} max-sm:hidden`} data-testid="finance-print">
               <Printer size={14} aria-hidden="true" /> Print
             </button>
             <OverflowMenu
