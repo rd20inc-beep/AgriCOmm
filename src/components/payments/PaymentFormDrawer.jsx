@@ -36,7 +36,11 @@ export default function PaymentFormDrawer({ doc, variant: variantIn, ctx: ctxIn,
   // A mill role that pays only through milling.edit reads (and may use) the
   // mill's own accounts; its cash defaults to Mill Cash.
   const millOnly = !hasPermission('finance', 'confirm_payment') && hasPermission('milling', 'edit');
-  const { data: accounts = [] } = useBankAccounts({ millOnly: millOnly && !hasPermission('finance', 'view') });
+  // The account list every payment screen reads (as AppContext does): the
+  // finance list, or the mill's own for a role without finance.view. A
+  // mill-only payer is offered only mill accounts (the server refuses others).
+  const { data: allAccounts = [] } = useBankAccounts({ millOnly: !hasPermission('finance', 'view') });
+  const accounts = millOnly ? allAccounts.filter((a) => String(a.entity || '').toLowerCase() === 'mill') : allAccounts;
   // What the endpoint answered — an export order's receivable recorded through
   // POST /finance/payments comes back pending Finance's confirmation.
   const lastResponse = useRef(null);

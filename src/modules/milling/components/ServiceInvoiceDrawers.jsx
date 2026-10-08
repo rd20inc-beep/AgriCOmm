@@ -1,12 +1,10 @@
 import { useState, useMemo } from 'react';
-import { FileText, Wallet } from 'lucide-react';
+import { FileText } from 'lucide-react';
+import PaymentFormDrawer from '../../../components/payments/PaymentFormDrawer';
 import SlideDrawer from '../../../components/SlideDrawer';
 import { serviceMillingApi } from '../api/services';
 import { useHaulers } from '../../../api/queries';
 import HaulerPicker from '../../../components/HaulerPicker';
-import PaymentFields from '../../../components/payments/PaymentFields';
-import { blankPaymentForm, paymentErrors } from '../../../components/payments/paymentPayload';
-import { useApp } from '../../../context/AppContext';
 import { fmtPKR, fmtKg, fmtNum } from '../../../shared/utils/format';
 
 const num = (v) => parseFloat(v) || 0;
@@ -220,51 +218,21 @@ export function CreateInvoiceDrawer({ open, batch, onClose, onCreated, addToast 
  * (cash pre-selects the cash float), and the server posts Dr 1000 / Cr 1120 with
  * a bank_transactions row through the one payment engine.
  */
-export function RecordPaymentDrawer({ open, invoice, onClose, onPaid, addToast }) {
-  const { bankAccountsList = [] } = useApp();
-  const [form, setForm] = useState(() => blankPaymentForm({ method: 'cash' }));
-  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
-  const [errors, setErrors] = useState({});
-  const [saving, setSaving] = useState(false);
-  const balance = invoice ? num(invoice.balance_amount) : 0;
-
-  async function submit() {
-    const errs = paymentErrors(form, { outstanding: balance, currency: 'PKR' });
-    setErrors(errs);
-    if (Object.keys(errs).length) return;
-    setSaving(true);
-    try {
-      await serviceMillingApi.recordPayment(invoice.id, {
-        amount: num(form.amount),
-        payment_method: form.method,
-        bank_account_id: form.bankAccountId ? parseInt(form.bankAccountId, 10) : null,
-        payment_date: form.date,
-        due_date: form.method === 'cheque' ? (form.dueDate || null) : null,
-        reference: form.reference || null,
-      });
-      addToast?.('Payment recorded', 'success');
-      setForm(blankPaymentForm({ method: 'cash' }));
-      onPaid?.();
-      onClose?.();
-    } catch (err) {
-      addToast?.(err?.response?.data?.message || err?.data?.message || err.message || 'Failed to record payment', 'error');
-    } finally { setSaving(false); }
-  }
-
+// Record a service-milling invoice payment: the shared Payment form, variant
+// receive_service (POST /service-milling/invoices/:id/payments — the same
+// endpoint and body as before; service_milling.record_payment).
+export function RecordPaymentDrawer({ open, invoice, onClose, onPaid }) {
+  if (!open || !invoice) return null;
   return (
-    <SlideDrawer open={open} onClose={onClose} title="Record Payment" subtitle={invoice ? `${invoice.invoice_no} · ${invoice.client_name || ''}` : ''} icon={Wallet} size="md"
-      footer={<button onClick={submit} disabled={saving} className="w-full px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-50">{saving ? 'Recording…' : 'Record Payment'}</button>}>
-      <div className="space-y-4">
-        <div className="grid grid-cols-3 gap-2 text-center">
-          <div className="rounded-lg border border-gray-200 p-2"><p className="text-[10px] uppercase text-gray-400">Total</p><p className="font-bold text-gray-800">{pkr(invoice?.total_amount)}</p></div>
-          <div className="rounded-lg border border-gray-200 p-2"><p className="text-[10px] uppercase text-gray-400">Received</p><p className="font-bold text-emerald-700">{pkr(invoice?.received_amount)}</p></div>
-          <div className="rounded-lg border border-gray-200 p-2"><p className="text-[10px] uppercase text-gray-400">Balance</p><p className="font-bold text-rose-600">{pkr(balance)}</p></div>
-        </div>
-        <PaymentFields form={form} set={set} accounts={bankAccountsList} currency="PKR" addToast={addToast}
-          amountLabel="Amount received (PKR) *" max={balance} extras={false} remarks={false} idPrefix="svc-pay"
-          filterAccountsByMethod errors={errors} />
-        <button type="button" onClick={() => set('amount', String(balance))} className="text-xs text-blue-600 -mt-2">Pay full balance</button>
-      </div>
-    </SlideDrawer>
+    <PaymentFormDrawer
+      variant="receive_service"
+      ctx={{
+        invoiceId: invoice.id, currency: 'PKR', outstanding: num(invoice.balance_amount),
+        party: { type: 'customer', id: invoice.client_customer_id || null, name: invoice.client_name || null },
+        ref: invoice.invoice_no,
+      }}
+      onClose={onClose}
+      onDone={() => onPaid?.()}
+    />
   );
 }
