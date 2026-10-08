@@ -199,3 +199,15 @@ export const HEADER_ACTIONS = [
 export function visibleHeaderActions(hasPermission) {
   return HEADER_ACTIONS.filter((a) => hasAny(hasPermission, a.anyOf));
 }
+
+// The one header action shown filled (primary) in a workspace: the action
+// that belongs to it — Receive in Money In, Pay in Money Out (Expense on its
+// Expenses view), Transfer in Accounts — else Receive, else the first one.
+// Presentation only: every visible action stays available.
+export function primaryHeaderAction(actions, workspaceKey, viewKey) {
+  const keys = actions.map((a) => a.key);
+  const want = viewKey === 'expenses' ? 'expense'
+    : { 'money-in': 'receive', 'money-out': 'pay', accounts: 'transfer' }[workspaceKey] || 'receive';
+  if (keys.includes(want)) return want;
+  return keys.includes('receive') ? 'receive' : (keys[0] || null);
+}
