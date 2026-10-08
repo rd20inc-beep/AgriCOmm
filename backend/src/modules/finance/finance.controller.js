@@ -17,17 +17,17 @@ const { feedBase, feedTotals } = require('./paymentsFeedTotals');
 // actually masks payables carried on with the old list — so the policy now has a
 // single home in shared/partyMask.js.
 const { isPartyMasked } = require('../../shared/partyMask');
-const { isMillOnlyPayer, assertMillEntity, assertMillAccount } = require('../../shared/millPayer');
+const { isMillOnlyPayer, assertMillEntity } = require('../../shared/millPayer');
 const { canSeeCost } = require('../../utils/costVisibility');
-const { resolvePaymentAccountId } = require('../../shared/cashAccounts');
 const { assertAccountCurrency } = require('../../shared/accountCurrency');
 const { normalizePaymentMethod } = require('../../shared/constants/paymentMethods');
 const { ledgerFailure, missingAccounts } = require('../../shared/ledgerFailure');
 const {
-  resolveSource, mirrorSourcePaid, applyPayableDelta, applyReceivableDelta,
-  pendingChequeTotal, nextBtNo, postDeltaOf, round2,
-  isCheque, hasPaymentJournal, postPaymentJournal,
+  applyReceivableDelta, pendingChequeTotal, nextBtNo, postDeltaOf, round2,
+  isCheque, hasPaymentJournal, postPaymentJournal, settleDocuments, SOURCES, LOT_SUPPLIER_LINES,
 } = require('./paymentSettlement');
+const { recordMoneyMovement } = require('./paymentEngine');
+const { recordPendingExportReceipt } = require('../exportOrders/exportReceipts');
 
 // Resolve a payment row to its PKR equivalent using the strongest
 // signal we have: stored base_amount_pkr first, then amount × fx_rate
@@ -49,23 +49,6 @@ function paymentToPkr(p) {
 // insert then collides on the unique transfer_no.
 function generateTransferNo(trx) {
   return nextDocNo(trx || db, { table: 'internal_transfers', column: 'transfer_no', prefix: 'IT-', pad: 3 });
-}
-
-async function generatePaymentNo(trx) {
-  // Scope the lookup to the PAY-NNN namespace only. Other payment_no
-  // shapes can exist alongside (e.g. PAY-MS001, PAY-EOC0001) and
-  // sorting by created_at picked them up — parseInt returned NaN and
-  // the generator fell back to PAY-001, which already exists. Regex-
-  // scope so we only see this generator's own sequence.
-  const last = await (trx || db)('payments')
-    .whereRaw("payment_no ~ '^PAY-[0-9]+$'")
-    .orderByRaw("CAST(REPLACE(payment_no, 'PAY-', '') AS INTEGER) DESC")
-    .first('payment_no');
-
-  const num = last?.payment_no
-    ? (parseInt(last.payment_no.replace('PAY-', ''), 10) || 0)
-    : 0;
-  return `PAY-${String(num + 1).padStart(3, '0')}`;
 }
 
 /**
@@ -105,6 +88,13 @@ async function loadPayablesFeed(query = {}) {
     storedRows.filter((r) => r.source_table === 'batch_transport' && r.source_id != null)
       .map((r) => r.source_id),
   );
+  // Export costs mirror into a real payable (PAY-EOC…, source_table
+  // 'export_order_costs') when they are recorded — that row is the one to pay,
+  // so its derived EC- twin is not listed again.
+  const storedExportCostIds = new Set(
+    storedRows.filter((r) => r.source_table === 'export_order_costs' && r.source_id != null)
+      .map((r) => String(r.source_id)),
+  );
   // A batch fed by source LOTS (lot-started or blend) gets its raw cost from
   // those lots — whose own purchase payables already capture the supplier debt.
   // Deriving a raw_rice payable for such a batch would double-count, so skip it.
@@ -130,7 +120,8 @@ async function loadPayablesFeed(query = {}) {
     .join('export_orders as eo', 'eoc.order_id', 'eo.id')
     .leftJoin('customers as c', 'eo.customer_id', 'c.id')
     .select(
-      'eoc.id', 'eoc.order_id', 'eoc.category', 'eoc.amount',
+      'eoc.id', 'eoc.order_id', 'eoc.category', 'eoc.amount', 'eoc.currency', 'eoc.fx_rate',
+      'eoc.base_amount_pkr', 'eoc.paid_amount', 'eoc.payment_status',
       'eoc.created_at', 'eo.order_no', 'c.name as customer_name',
     )
     .where('eoc.amount', '>', 0)
@@ -147,6 +138,14 @@ async function loadPayablesFeed(query = {}) {
   const categoryLabel = (cat) => {
     const map = { raw_rice: 'Raw Rice', transport: 'Transport', electricity: 'Electricity', rent: 'Rent', labor: 'Labor', maintenance: 'Maintenance' };
     return map[cat] || cat.charAt(0).toUpperCase() + cat.slice(1);
+  };
+
+  // A derived row is a cost allocation, not a bill: no payment endpoint can
+  // settle it (there is no payable id), so it carries where it IS settled.
+  const DERIVED_HINT = {
+    milling_costs: 'Cost from the batch cost sheet — there is no bill to pay against here. Settle it with the supplier or transporter (Mill Finance ▸ Suppliers, or their statement).',
+    export_order_costs: 'Export cost with no bill yet — pay it from Finance ▸ Purchases (Export cost).',
+    mill_expenses: 'Legacy mill expense with no payable — record it as an expense to pay it.',
   };
 
   millingCosts.forEach(mc => {
@@ -182,6 +181,8 @@ async function loadPayablesFeed(query = {}) {
       notes: `${categoryLabel(mc.category)} cost for batch ${mc.batch_no}`,
       created_at: mc.created_at,
       source: 'milling_costs',
+      derived: true,
+      settle_hint: DERIVED_HINT.milling_costs,
     });
   });
 
@@ -190,6 +191,12 @@ async function loadPayablesFeed(query = {}) {
   // must NOT see the export CUSTOMER — party names are masked uniformly after
   // paging (see below); here we carry the real values.
   exportCosts.forEach(ec => {
+    if (storedExportCostIds.has(String(ec.id))) return; // its real payable is listed
+    // export_order_costs are stored in PKR (migration 079): the amount is the
+    // PKR figure, never USD. What has been paid comes from the row itself
+    // (Purchases ▸ Export cost settles it there).
+    const total = parseFloat(ec.base_amount_pkr) || (parseFloat(ec.amount) || 0) * (parseFloat(ec.fx_rate) || 1);
+    const paid = parseFloat(ec.paid_amount) || 0;
     derived.push({
       id: `EC-${ec.id}`,
       pay_no: `EC-${ec.id}`,
@@ -197,16 +204,18 @@ async function loadPayablesFeed(query = {}) {
       category: categoryLabel(ec.category),
       supplier_name: ec.customer_name || null, // the export customer
       linked_ref: ec.order_no,
-      original_amount: parseFloat(ec.amount),
-      paid_amount: 0,
-      outstanding: parseFloat(ec.amount),
+      original_amount: total,
+      paid_amount: paid,
+      outstanding: Math.max(0, round2(total - paid)),
       due_date: ec.created_at,
-      status: 'Pending',
-      currency: 'USD',
+      status: paid <= 0.01 ? 'Pending' : (total - paid <= 0.01 ? 'Paid' : 'Partial'),
+      currency: 'PKR',
       aging: 0,
       notes: `${categoryLabel(ec.category)} cost for order ${ec.order_no}`,
       created_at: ec.created_at,
       source: 'export_order_costs',
+      derived: true,
+      settle_hint: DERIVED_HINT.export_order_costs,
     });
   });
 
@@ -228,6 +237,8 @@ async function loadPayablesFeed(query = {}) {
       notes: me.description || `Mill expense: ${me.category}`,
       created_at: me.created_at,
       source: 'mill_expenses',
+      derived: true,
+      settle_hint: DERIVED_HINT.mill_expenses,
     });
   });
 
@@ -660,21 +671,20 @@ const financeController = {
               await postLocalReceiptJournal(trx, { paymentNo: p.payment_no, amount, sale: s, date: new Date(), userId: req.user?.id });
             }
           }
-        } else if (p.linked_receivable_id) {
-          const r = await trx('receivables').where({ id: p.linked_receivable_id }).forUpdate().first();
-          if (r) await applyReceivableDelta(trx, r, amount);
+        } else if (p.linked_receivable_id || p.service_invoice_id) {
+          // The receivable and the service-milling invoice behind it — the
+          // same helper recording and reversing use.
+          const r = p.linked_receivable_id ? await trx('receivables').where({ id: p.linked_receivable_id }).forUpdate().first() : null;
+          await settleDocuments(trx, { payment: clearedPayment, receivable: r, delta: amount, deltaPkr: amountPkr });
         } else if (p.linked_payable_id || (p.source_table && p.source_id)) {
           // Settle the payable (and its transport_costs record), then the
           // source row (Purchases / Mill Store / Expenses / export cost /
-          // printed bags) — the same helpers recordPayment uses.
+          // printed bags / lot) — the same helper recording and reversing use.
           const pa = p.linked_payable_id ? await trx('payables').where({ id: p.linked_payable_id }).forUpdate().first() : null;
-          if (pa) await applyPayableDelta(trx, pa, amount);
-          const source = await resolveSource(trx, { payment: p, payable: pa });
-          // Rows that record how they were paid hear which account it was.
-          const stamp = source && ['business_expenses', 'export_order_costs', 'mill_purchases'].includes(source.table)
-            ? { bank_account_id: acctId, payment_method: 'cheque', payment_reference: p.bank_reference || null }
-            : {};
-          await mirrorSourcePaid(trx, source, amountPkr, stamp);
+          await settleDocuments(trx, {
+            payment: clearedPayment, payable: pa, delta: amount, deltaPkr: amountPkr,
+            stamp: { bank_account_id: acctId, payment_method: 'cheque', payment_reference: p.bank_reference || null },
+          });
         }
 
         // The GL: the settlement journal recordPayment would have posted, under
@@ -682,7 +692,7 @@ const financeController = {
         // cheque recorded under the old rules (a post-dated one journalled when
         // it was recorded) already has its journal and gets no second one.
         // Local-sale receipts journalled above (Dr 1000 / Cr 1120).
-        if (!p.local_sale_id && (p.linked_receivable_id || p.linked_payable_id || (p.source_table && p.source_id))
+        if (!p.local_sale_id && (p.linked_receivable_id || p.linked_payable_id || p.service_invoice_id || (p.source_table && p.source_id))
           && !(await hasPaymentJournal(trx, p.payment_no))) {
           await postPaymentJournal(trx, { payment: clearedPayment, userId: req.user?.id, date: new Date() });
         }
@@ -1207,267 +1217,87 @@ const financeController = {
         attachment_name,
       } = req.body;
 
-      const entity_type = type === 'receipt' ? 'receivable' : 'payable';
       const entity_id = linked_receivable_id || linked_payable_id;
-
       if (!type || !entity_id || !amount || parseFloat(amount) <= 0) {
         return res.status(400).json({
           success: false,
           message: 'type, linked_receivable_id or linked_payable_id, and a positive amount are required.',
         });
       }
-
-      // #14 Phase 1e — WHT + early-payment discount (payments only). Both reduce the
-      // CASH paid out but NOT the amount cleared against the payable: the vendor's
-      // claim is settled in full (net cash to them + tax remitted to FBR on their
-      // behalf + discount they granted). netCash = amount − wht − discount.
-      const whtNum = type === 'payment' ? Math.max(0, parseFloat(wht_amount) || 0) : 0;
-      const discNum = type === 'payment' ? Math.max(0, parseFloat(discount_amount) || 0) : 0;
-      if (whtNum + discNum - parseFloat(amount) > 0.01) {
-        return res.status(400).json({
-          success: false,
-          message: 'Withholding tax + discount cannot exceed the payment amount.',
-        });
-      }
-
-      // A cheque — any cheque, same-day included — is not money in the bank
-      // until it clears: it records but does NOT settle the receivable/payable,
-      // move the account or reach the GL. Clear Cheque (Due Dates) does all
-      // three. Without a clearing date it is due the day it was recorded.
-      const isPostDated = isCheque(payment_method);
-      const chequeDue = isPostDated ? (due_date || payment_date || new Date().toISOString().slice(0, 10)) : (due_date || null);
       // Without finance.confirm_payment (the Mill Operator, via milling.edit)
       // only mill payables / receivables, through a mill account.
       const millOnly = await isMillOnlyPayer(req);
+      const isReceipt = type === 'receipt';
 
       const result = await db.transaction(async (trx) => {
-        // Guard: don't let a receipt over-apply or double-settle a receivable.
-        // Mirror of confirmAdvance's receivable check — together they stop an
-        // advance (or any receivable) being received twice across the two screens
-        // (this is how EX-001 got two receipts on 2026-06-26). Skipped for
-        // post-dated cheques only insofar as they still can't target a settled
-        // receivable — the check below applies to both.
-        // A receivable derived from a local sale carries local_sale_id — settling
-        // it must also draw down the parent local_sales row (else the sale stays
-        // "unpaid" and keeps surfacing in Money-In). Captured here so it's stamped
-        // on the payment (for clearCheque + receipt history) and mirrored below.
-        //
-        // The row is read UNDER A LOCK and the same row is what gets written
-        // below: two payments racing on one payable used to both pass the check
-        // and each write its own absolute paid_amount, so one was lost. A
-        // payable now gets the same over-payment guard a receivable always had,
-        // and both count cheques already written against the row but not yet
-        // cleared — they have not touched paid_amount, yet the money is spoken for.
-        const isReceipt = type === 'receipt';
+        // The document, read UNDER A LOCK; the engine checks it against the
+        // outstanding (net of uncleared cheques) and settles it.
         const linkedRow = await trx(isReceipt ? 'receivables' : 'payables').where({ id: entity_id }).forUpdate().first();
-        const localSaleId = isReceipt ? (linkedRow?.local_sale_id || null) : null;
-        if (millOnly) {
-          if (!linkedRow) { const e = new Error(`${isReceipt ? 'Receivable' : 'Payable'} not found.`); e.statusCode = 404; throw e; }
-          // A receivable raised from a local sale is the mill's (it posts to 1120).
-          assertMillEntity(linkedRow.local_sale_id ? 'mill' : linkedRow.entity, isReceipt ? 'receivables' : 'payables');
-        }
-        if (linkedRow) {
-          const pendingCheques = await pendingChequeTotal(trx, isReceipt ? { receivableId: linkedRow.id } : { payableId: linkedRow.id });
-          const total = parseFloat(isReceipt ? linkedRow.expected_amount : linkedRow.original_amount) || 0;
-          const settled = parseFloat(isReceipt ? linkedRow.received_amount : linkedRow.paid_amount) || 0;
-          const outstanding = Math.max(0, total - settled - pendingCheques);
-          const chequeNote = pendingCheques > 0.01 ? ` (after ${pendingCheques.toFixed(2)} in uncleared cheques)` : '';
-          if (outstanding <= 0.01) {
-            const e = new Error(`This ${isReceipt ? 'receivable' : 'payable'} is already fully settled — no payment is due${chequeNote}.`);
-            e.statusCode = 400; throw e;
-          }
-          if (parseFloat(amount) - outstanding > 0.01) {
-            const e = new Error(`Amount exceeds the outstanding balance of ${outstanding.toFixed(2)}${chequeNote}.`);
-            e.statusCode = 400; throw e;
-          }
+        if (!linkedRow) {
+          const e = new Error(`${isReceipt ? 'Receivable' : 'Payable'} not found.`); e.statusCode = 404; throw e;
         }
 
-        // The account the money moves through. Cash with none picked lands in
-        // the owning entity's cash float (Mill Cash / Office Petty Cash); any
-        // other method must name one, except a cheque, which moves money only
-        // when it clears (an account named now is kept for the clear).
-        const accountId = await resolvePaymentAccountId(trx, {
-          bankAccountId: bank_account_id,
-          method: payment_method,
-          entity: linkedRow?.local_sale_id ? 'mill' : (linkedRow?.entity || 'general'),
-          isPostDated,
-        });
-        if (millOnly) await assertMillAccount(trx, accountId || bank_account_id);
-        // A non-PKR account moves only its own currency (a PKR account takes any
-        // currency at the stamped PKR figure). Checked before anything is written.
-        if (accountId) {
-          const acctForCur = await trx('bank_accounts').where({ id: accountId }).first();
-          assertAccountCurrency(acctForCur, currency);
-        }
-
-        const paymentNo = await generatePaymentNo(trx);
-
-        // Resolve fx_rate + base_amount_pkr at write time so the
-        // payment row carries its own PKR equivalent forever, no
-        // matter what the linked source rates do later.
-        const amtNum = parseFloat(amount);
-        const cur = (currency || 'PKR').toUpperCase();
-        let stampedFxRate = 1;
-        if (cur !== 'PKR') {
-          // Pull the linked order's booked rate when available so the
-          // ledger inherits the same rate as the order it pays against.
-          let orderRate = null;
-          if (linked_receivable_id) {
-            const r = await trx('receivables').where({ id: linked_receivable_id }).first();
-            if (r?.order_id) {
-              const eo = await trx('export_orders').where({ id: r.order_id }).first();
-              orderRate = parseFloat(eo?.advance_fx_rate) || parseFloat(eo?.booked_fx_rate) || null;
-            }
-          }
-          // No order rate → today's rate for that currency, not a flat 280.
-          stampedFxRate = orderRate || (await fxRateService.getLatestRate(cur)).rate;
-        }
-        const stampedPkr = cur === 'PKR' ? amtNum : amtNum * stampedFxRate;
-
-        // Create payment record
-        const [payment] = await trx('payments')
-          .insert({
-            payment_no: paymentNo,
-            type,
-            linked_receivable_id: linked_receivable_id || null,
-            linked_payable_id: linked_payable_id || null,
-            amount: amtNum,
-            currency: cur,
-            fx_rate: stampedFxRate,
-            base_amount_pkr: Number(stampedPkr.toFixed(2)),
-            payment_method: payment_method || null,
-            bank_account_id: accountId || null,
-            bank_reference: bank_reference || null,
-            due_date: chequeDue,
-            cleared: !isPostDated,
-            payment_date: payment_date || trx.fn.now(),
+        // An export order's advance / balance receivable is settled by the
+        // order's own maker-checker flow: Money In records it as 'Pending
+        // Finance Confirmation' exactly like the order's Financials tab, and
+        // Finance ▸ Confirmations posts it (order advance/balance, workflow,
+        // 1310 / 1110). Settling only the receivable left the order showing
+        // money still owed and 1310 never reclassified at shipment.
+        if (isReceipt && linkedRow.order_id) {
+          if (millOnly) assertMillEntity(linkedRow.entity, 'receivables');
+          const order = await trx('export_orders').where({ id: linkedRow.order_id }).first();
+          if (!order) { const e = new Error('Export order not found for this receivable.'); e.statusCode = 404; throw e; }
+          const pending = await recordPendingExportReceipt(trx, {
+            order,
+            kind: String(linkedRow.type || '').toLowerCase() === 'balance' ? 'balance' : 'advance',
+            amount,
+            bankAccountId: bank_account_id || null,
+            fxRate: null,
+            paymentDate: payment_date || null,
+            paymentMethod: payment_method || null,
+            bankReference: bank_reference || null,
             notes: notes || null,
-            local_sale_id: localSaleId,
-            wht_amount: whtNum,
-            wht_rate: (type === 'payment' && wht_rate != null && wht_rate !== '') ? parseFloat(wht_rate) : null,
-            discount_amount: discNum,
-            attachment_url: attachment_url || null,
-            attachment_name: attachment_name || null,
-            created_by: req.user.id,
-          })
-          .returning('*');
-
-        // Update receivable or payable (skipped for an uncleared post-dated
-        // cheque, which settles when it clears). Both are signed deltas on the
-        // row locked above.
-        if (!isPostDated && type === 'receipt' && linked_receivable_id) {
-          if (linkedRow) {
-            await applyReceivableDelta(trx, linkedRow, amtNum);
-            // Mirror the receipt onto the parent local sale so it stops showing
-            // as due in Money-In / Local Sales (matches clearCheque's behaviour).
-            if (linkedRow.local_sale_id) {
-              const sale = await trx('local_sales').where({ id: linkedRow.local_sale_id }).forUpdate().first();
-              if (sale) {
-                const salePaid = (parseFloat(sale.paid_amount) || 0) + amtNum;
-                const saleDue = Math.max(0, (parseFloat(sale.total_amount) || 0) - salePaid);
-                await trx('local_sales').where({ id: sale.id }).update({
-                  paid_amount: salePaid,
-                  due_amount: saleDue,
-                  payment_status: saleDue <= 0.01 ? 'Paid' : 'Partial',
-                  updated_at: trx.fn.now(),
-                });
-              }
-            }
-          }
-          if (accountId) {
-            // Move the balance in the ACCOUNT's own currency: a PKR account
-            // banks the PKR equivalent, a foreign account matching the payment
-            // currency banks the native amount. Writing the SAME figure to
-            // bank_transactions keeps the Cash tab's balance = Σ(transactions)
-            // (previously the balance moved by the raw amount while the txn row
-            // stored PKR — they never reconciled for a foreign receipt).
-            const acct = await trx('bank_accounts').where({ id: accountId }).first();
-            const bankMove = acct && acct.currency === cur ? amtNum : stampedPkr;
-            await trx('bank_accounts')
-              .where({ id: accountId })
-              .increment('current_balance', bankMove);
-            // Audit-trail row in the Cash & Bank sub-ledger so the Cash
-            // tab can attribute the inflow. Pattern mirrors payPurchase.
-            const tableExists = await trx.schema.hasTable('bank_transactions');
-            if (tableExists) {
-              await trx('bank_transactions').insert({
-                transaction_no: await nextBtNo(trx),
-                bank_account_id: accountId,
-                type: 'credit',
-                amount: bankMove,
-                currency: acct?.currency || 'PKR',
-                transaction_date: payment_date || new Date(),
-                reference: bank_reference || paymentNo,
-                counterparty: null,
-                notes: `Receipt ${paymentNo} for receivable #${entity_id}`,
-                source: 'record_payment',
-                linked_payment_id: payment.id,
-                created_by: req.user?.id || null,
-              });
-            }
-          }
-        } else if (!isPostDated && type === 'payment' && linked_payable_id) {
-          if (linkedRow) {
-            await applyPayableDelta(trx, linkedRow, amtNum);
-            // Mirror the PKR paid onto the source row (expense, mill purchase,
-            // export cost, printed-bag order, lot) so the tab that reads the
-            // source's own paid_amount agrees with the payable. Only expenses
-            // and mill purchases were mirrored before, so a Money-Out payment
-            // on a printed-bag or export-cost payable left the Purchases tab
-            // offering to pay it again.
-            const source = await resolveSource(trx, { payable: linkedRow });
-            const stamp = source && ['business_expenses', 'export_order_costs'].includes(source.table)
-              ? { bank_account_id: accountId || null, payment_method: payment_method || null, payment_reference: bank_reference || null }
-              : {};
-            await mirrorSourcePaid(trx, source, stampedPkr, stamp);
-          }
-          if (accountId) {
-            // Currency-aware bank move (see the receipt block): a foreign account
-            // matching the payment currency moves natively, else PKR — and the
-            // bank_transactions row carries the same figure so it reconciles.
-            // #14 1e — only the NET cash (after WHT + discount) leaves the bank.
-            const acct = await trx('bank_accounts').where({ id: accountId }).first();
-            const bankMove = (acct && acct.currency === cur ? amtNum : stampedPkr) - whtNum - discNum;
-            await trx('bank_accounts')
-              .where({ id: accountId })
-              .increment('current_balance', bankMove * -1);
-            const tableExists = await trx.schema.hasTable('bank_transactions');
-            if (tableExists) {
-              await trx('bank_transactions').insert({
-                transaction_no: await nextBtNo(trx),
-                bank_account_id: accountId,
-                type: 'debit',
-                amount: bankMove,
-                currency: acct?.currency || 'PKR',
-                transaction_date: payment_date || new Date(),
-                reference: bank_reference || paymentNo,
-                counterparty: null,
-                notes: `Payment ${paymentNo} for payable #${entity_id}`,
-                source: 'record_payment',
-                linked_payment_id: payment.id,
-                created_by: req.user?.id || null,
-              });
-            }
-          }
+            userId: req.user.id,
+          });
+          return { payment: pending, pendingConfirmation: true };
         }
 
-        // ── Journal entry — direct post (codes 1000 / 1110·1120·1310 / 2010,
-        // party-stamped, WHT + discount split). A cheque posts nothing here:
-        // its journal is posted by Clear Cheque, the day the money moves.
-        if (!isPostDated) {
-          await postPaymentJournal(trx, { payment, userId: req.user.id, date: payment_date || new Date() });
-        }
+        // A foreign amount converts at today's rate for its currency (the
+        // engine's default; export-order receipts never reach here).
+        const cur = (currency || 'PKR').toUpperCase();
 
-        return payment;
+        const { payment } = await recordMoneyMovement(trx, {
+          type,
+          payable: isReceipt ? null : linkedRow,
+          receivable: isReceipt ? linkedRow : null,
+          amount,
+          currency: cur,
+          method: payment_method || null,
+          bankAccountId: bank_account_id || null,
+          paymentDate: payment_date || null,
+          dueDate: due_date || null,
+          bankReference: bank_reference || null,
+          notes: notes || null,
+          wht: wht_amount,
+          whtRate: wht_rate,
+          discount: discount_amount,
+          attachmentUrl: attachment_url || null,
+          attachmentName: attachment_name || null,
+          userId: req.user.id,
+          millOnly,
+          bt: { notes: `${isReceipt ? 'Receipt' : 'Payment'} for ${isReceipt ? 'receivable' : 'payable'} ${linkedRow.recv_no || linkedRow.pay_no || `#${entity_id}`}` },
+        });
+        return { payment, pendingConfirmation: false };
       });
 
       return res.status(201).json({
         success: true,
-        data: { payment: result },
+        data: { payment: result.payment, pending_confirmation: result.pendingConfirmation },
+        ...(result.pendingConfirmation ? { message: 'Recorded — pending Finance confirmation.' } : {}),
       });
     } catch (err) {
-      console.error('Record payment error:', err);
-      const code = err.statusCode || 500;
+      const code = err.statusCode || err.status || 500;
+      if (code === 500) console.error('Record payment error:', err);
       return res.status(code).json({ success: false, message: code === 500 ? 'Internal server error.' : err.message });
     }
   },
@@ -1504,9 +1334,17 @@ const financeController = {
           throw fail('Only a confirmed payment can be reversed — this one never moved any money.');
         }
         const isPayment = pay.type === 'payment' && (pay.linked_payable_id || (pay.source_table && pay.source_id));
-        const isReceipt = pay.type === 'receipt' && (pay.linked_receivable_id || pay.local_sale_id) && !pay.service_invoice_id;
+        const isReceipt = pay.type === 'receipt' && (pay.linked_receivable_id || pay.local_sale_id || pay.service_invoice_id);
+        if (pay.type === 'receipt' && pay.source_table === 'export_orders') {
+          throw fail('This receipt was confirmed on its export order, which also recorded it against the order\'s advance/balance. Reverse it from the export order instead.');
+        }
         if (!isPayment && !isReceipt) {
           throw fail('Only a payment against a payable, or a receipt against a receivable or local sale, can be reversed here.');
+        }
+        if (isReceipt && pay.service_invoice_id && !(await hasPaymentJournal(trx, pay.payment_no))) {
+          // An older service-milling receipt posted no journal: voiding the
+          // invoice is what undoes it.
+          throw fail('This service-milling receipt is undone by voiding its invoice.');
         }
 
         const amt = parseFloat(pay.amount) || 0;
@@ -1522,9 +1360,9 @@ const financeController = {
 
         let receivable = null;
         if (isReceipt) {
-          receivable = pay.linked_receivable_id
-            ? await trx('receivables').where({ id: pay.linked_receivable_id }).forUpdate().first()
-            : await trx('receivables').where({ local_sale_id: pay.local_sale_id }).forUpdate().first();
+          if (pay.linked_receivable_id) receivable = await trx('receivables').where({ id: pay.linked_receivable_id }).forUpdate().first();
+          else if (pay.local_sale_id) receivable = await trx('receivables').where({ local_sale_id: pay.local_sale_id }).forUpdate().first();
+          else if (pay.service_invoice_id) receivable = await trx('receivables').where({ service_invoice_id: pay.service_invoice_id }).forUpdate().first();
           if (receivable?.order_id) {
             const own = await trx('journal_entries')
               .where({ ref_no: pay.payment_no, ref_type: 'Payment', status: 'Posted' }).first('id');
@@ -1540,25 +1378,10 @@ const financeController = {
           payable = pay.linked_payable_id
             ? await trx('payables').where({ id: pay.linked_payable_id }).forUpdate().first()
             : null;
-          if (wasCleared) {
-            if (payable) await applyPayableDelta(trx, payable, -amt);
-            const source = await resolveSource(trx, { payment: pay, payable });
-            await mirrorSourcePaid(trx, source, -amtPkr);
-          }
+          if (wasCleared) await settleDocuments(trx, { payment: pay, payable, delta: -amt, deltaPkr: -amtPkr });
         } else if (wasCleared) {
-          if (receivable) await applyReceivableDelta(trx, receivable, -amt);
-          const saleId = pay.local_sale_id || receivable?.local_sale_id;
-          if (saleId) {
-            const sale = await trx('local_sales').where({ id: saleId }).forUpdate().first();
-            if (sale) {
-              const paid = Math.max(0, round2((parseFloat(sale.paid_amount) || 0) - amt));
-              const due = Math.max(0, round2((parseFloat(sale.total_amount) || 0) - paid));
-              const status = due <= 0.01 ? 'Paid' : paid > 0.01 ? 'Partial' : (sale.payment_mode === 'credit' ? 'Credit' : 'Pending');
-              await trx('local_sales').where({ id: sale.id }).update({
-                paid_amount: paid, due_amount: due, payment_status: status, updated_at: trx.fn.now(),
-              });
-            }
-          }
+          // The receivable, the local sale and the service invoice behind it.
+          await settleDocuments(trx, { payment: pay, receivable, delta: -amt, deltaPkr: -amtPkr });
         }
 
         // 2) Restore the bank by the NET that moved, plus a reversing sub-ledger row.
@@ -2461,11 +2284,54 @@ financeController.getExpenseLinkOptions = async (req, res) => {
 };
 
 // ─── Unified "Mark Purchase Paid" ──────────────────────────────────────
-// /finance/purchases aggregates four source tables (inventory_lots,
-// mill_purchases, export_order_costs, business_expenses). Each has its
-// own payment columns; this endpoint exposes a single way to settle
-// any one of them from the dashboard. Optionally records which bank
-// account the money came out of, decrementing its balance.
+// /finance/purchases aggregates five source tables (inventory_lots,
+// mill_purchases, export_order_costs, business_expenses, printed_bag_orders).
+// Paying one here is the same event as paying its payable on Money Out, so it
+// goes through the same engine: the payable the source raised is resolved and
+// settled (a lot's rice + itemised supplier lines, FIFO), each settlement is a
+// PAY- payment row stamped with the source (so it can be reversed), the bank
+// moves with a bank_transactions row, and the journal Dr 2010 (2040 for a
+// salaries expense) / Cr 1000 posts in the same transaction. A source with no
+// payable at all (a legacy row) is paid against the source row itself.
+const PURCHASE_SOURCES = {
+  lot: { table: 'inventory_lots', notFound: 'Inventory lot not found.', label: (r) => r.lot_no },
+  mill_store: { table: 'mill_purchases', notFound: 'Mill store purchase not found.', label: (r) => r.purchase_no },
+  export_cost: { table: 'export_order_costs', notFound: 'Export-order cost not found.', label: (r) => `EXP-COST #${r.id}` },
+  expense: { table: 'business_expenses', notFound: 'Business expense not found.', label: (r) => r.expense_no },
+  printed_bag: { table: 'printed_bag_orders', notFound: 'Printed bag order not found.', label: (r) => r.pbo_no },
+};
+
+/**
+ * The open payables a purchase-tab payment settles, oldest obligation first,
+ * read under lock. A lot's are the ones owed to its supplier: the rice line
+ * ('Raw Material', keyed by source_id or — legacy — by lot number) and the
+ * itemised lot_* supplier lines. Its transport (hauler) and commission (broker)
+ * are other parties' bills, paid from Money Out. Every other source has one
+ * payable keyed (source_table, source_id).
+ */
+async function purchasePayables(trx, source, row) {
+  const { table } = PURCHASE_SOURCES[source];
+  if (source !== 'lot') {
+    const p = await trx('payables').where({ source_table: table, source_id: row.id }).forUpdate().first();
+    return p ? [p] : [];
+  }
+  const byLot = await trx('payables').where({ source_id: row.id }).forUpdate().select('*');
+  const byLotNo = row.lot_no
+    ? await trx('payables').where({ linked_ref: row.lot_no, category: 'Raw Material' }).forUpdate().select('*')
+    : [];
+  const isRice = (p) => !p.source_table && p.category === 'Raw Material';
+  const seen = new Set();
+  const rows = [
+    ...(Array.isArray(byLot) ? byLot : []).filter((p) => isRice(p) || p.source_table === 'inventory_lots' || LOT_SUPPLIER_LINES.includes(p.source_table)),
+    ...(Array.isArray(byLotNo) ? byLotNo : []).filter(isRice),
+  ].filter((p) => (seen.has(p.id) ? false : seen.add(p.id)));
+  const list = (Array.isArray(rows) ? rows : [])
+    .filter((p) => !row.supplier_id || !p.supplier_id || String(p.supplier_id) === String(row.supplier_id))
+    .filter((p) => !p.hauler_id);
+  // The rice line first, then the itemised lines in the order they were raised.
+  return list.sort((a, b) => (a.category === 'Raw Material' ? 0 : 1) - (b.category === 'Raw Material' ? 0 : 1) || a.id - b.id);
+}
+
 financeController.payPurchase = async (req, res) => {
   try {
     const { source, source_id, amount, bank_account_id, payment_method, payment_date, payment_reference, due_date, notes } = req.body;
@@ -2474,288 +2340,114 @@ financeController.payPurchase = async (req, res) => {
     }
     const id = parseInt(source_id, 10);
     if (!id) return res.status(400).json({ success: false, message: 'source_id must be numeric.' });
+    const spec = PURCHASE_SOURCES[source];
+    if (!spec) return res.status(400).json({ success: false, message: `Unknown source "${source}". Use lot | mill_store | export_cost | expense | printed_bag.` });
     // payments.payment_method is CHECK-constrained to the canonical set; the
-    // Purchases drawer used to send 'bank', which died on that constraint.
-    // Throws on an unknown value, which the catch below turns into a 400.
+    // Purchases drawer used to send 'bank'. Throws on an unknown value (→ 400).
     const payMethod = normalizePaymentMethod(payment_method);
     // Without finance.confirm_payment (the Mill Operator, via milling.edit)
     // only mill purchases, through a mill account.
     const millOnly = await isMillOnlyPayer(req);
+    const fail = (msg) => { const e = new Error(msg); e.statusCode = 400; return e; };
 
     const result = await db.transaction(async (trx) => {
-      const SOURCE_TABLE = {
-        lot: 'inventory_lots', mill_store: 'mill_purchases', export_cost: 'export_order_costs',
-        expense: 'business_expenses', printed_bag: 'printed_bag_orders',
-      };
-      const NOT_FOUND = {
-        lot: 'Inventory lot not found.', mill_store: 'Mill store purchase not found.',
-        export_cost: 'Export-order cost not found.', expense: 'Business expense not found.',
-        printed_bag: 'Printed bag order not found.',
-      };
-      const sourceTable = SOURCE_TABLE[source];
-      if (!sourceTable) throw new Error(`Unknown source "${source}". Use lot | mill_store | export_cost | expense | printed_bag.`);
+      const row = await trx(spec.table).where({ id }).forUpdate().first();
+      if (!row) { const e = new Error(spec.notFound); e.statusCode = 404; throw e; }
+      const payables = await purchasePayables(trx, source, row);
+      // The paying side of the business: the payable's when there is one, else
+      // the source's own (a lot carries its entity, a mill-store purchase is
+      // the mill's, an expense its expense_type; export costs / bags never are).
+      const ownEntity = source === 'lot' ? (row.entity || 'mill')
+        : source === 'mill_store' ? 'mill'
+        : source === 'expense' ? (row.expense_type || 'general')
+        : 'export';
+      if (millOnly) assertMillEntity(payables[0]?.entity || ownEntity, 'purchases');
 
-      // The source row and its payable are read under a lock, and the payable
-      // — when there is one — is the truth for what is still owed. Reading the
-      // source row's own paid_amount let a payment already booked against the
-      // payable on Money Out (which the source row did not always hear about)
-      // be paid a second time here. Cheques already written and not yet
-      // cleared count as spoken for.
-      const row = await trx(sourceTable).where({ id }).forUpdate().first();
-      if (!row) throw new Error(NOT_FOUND[source]);
-      const linkedPayable = await trx('payables')
-        .where({ source_table: sourceTable, source_id: id })
-        .forUpdate()
-        .first();
-      if (millOnly) {
-        // The payable's entity when there is one; otherwise the source's own:
-        // a lot carries its entity, a mill-store purchase is the mill's, an
-        // expense its expense_type; export costs and printed bags never are.
-        const ownEntity = source === 'lot' ? row.entity
-          : source === 'mill_store' ? 'mill'
-          : source === 'expense' ? row.expense_type
-          : 'export';
-        assertMillEntity(linkedPayable?.entity || ownEntity, 'purchases');
+      // What is still owed: the payables when there are any (net of uncleared
+      // cheques), else the source row's own figure.
+      const open = [];
+      for (const p of payables) {
+        const pending = await pendingChequeTotal(trx, { payableId: p.id });
+        const owed = Math.max(0, round2((parseFloat(p.original_amount) || 0) - (parseFloat(p.paid_amount) || 0) - pending));
+        if (owed > 0.01) open.push({ payable: p, owed });
       }
       let outstanding;
-      if (linkedPayable) {
-        const pending = await pendingChequeTotal(trx, { payableId: linkedPayable.id });
-        outstanding = Math.max(0, round2((parseFloat(linkedPayable.original_amount) || 0) - (parseFloat(linkedPayable.paid_amount) || 0) - pending));
+      if (payables.length) {
+        outstanding = round2(open.reduce((s, o) => s + o.owed, 0));
       } else {
-        const total = sourceTable === 'inventory_lots' ? (parseFloat(row.landed_cost_total) || 0)
-          : sourceTable === 'export_order_costs' ? (parseFloat(row.base_amount_pkr) || (parseFloat(row.amount) || 0) * (parseFloat(row.fx_rate) || 1))
-          : sourceTable === 'business_expenses' ? (parseFloat(row.amount_pkr) || 0)
-          : (parseFloat(row.total_amount) || 0);
-        const pending = await pendingChequeTotal(trx, { sourceTable, sourceId: id });
+        const total = SOURCES[spec.table].total(row);
+        const pending = await pendingChequeTotal(trx, { sourceTable: spec.table, sourceId: id });
         outstanding = Math.max(0, round2(total - (parseFloat(row.paid_amount) || 0) - pending));
       }
-
-      // Default to settling the whole outstanding amount when the caller
-      // didn't specify. An amount over the outstanding is refused, not
-      // clamped: clamping recorded less than the user typed while the screen
-      // reported the typed figure as paid.
-      const payNum = amount == null ? outstanding : parseFloat(amount);
-      if (!payNum || payNum <= 0) throw new Error('Amount must be greater than zero.');
-      if (outstanding <= 0.01) throw new Error('This purchase is already fully paid.');
+      // Default: settle the whole outstanding. An amount over it is refused,
+      // not clamped.
+      const payNum = amount == null || amount === '' ? outstanding : parseFloat(amount);
+      if (!payNum || payNum <= 0) throw fail('Amount must be greater than zero.');
+      if (outstanding <= 0.01) throw fail('This purchase is already fully paid.');
       if (payNum - outstanding > 0.01) {
-        throw new Error(`Amount ${payNum.toFixed(2)} exceeds the outstanding balance of ${outstanding.toFixed(2)}.`);
-      }
-      const amountPkr = Math.min(payNum, outstanding); // only trims sub-cent float slop
-      const newPaid = (parseFloat(row.paid_amount) || 0) + amountPkr;
-      const fullyPaid = outstanding - amountPkr <= 0.01;
-      const paidAt = payment_date ? new Date(payment_date) : new Date();
-      const status = fullyPaid ? 'Paid' : 'Partial';
-
-      // A cheque — same-day included — records but does NOT settle the purchase
-      // (source row, payable, bank, journal) until it clears: insert the
-      // uncleared payment, carrying its source document, and stop. Clear Cheque
-      // (POST /payments/:id/clear) settles, moves the bank and journals it.
-      if (isCheque(payMethod)) {
-        if (millOnly) await assertMillAccount(trx, bank_account_id);
-        // Purchases are paid in PKR — a USD account cannot carry the cheque.
-        if (bank_account_id) assertAccountCurrency(await trx('bank_accounts').where({ id: bank_account_id }).first(), 'PKR');
-        const natRef = row.lot_no || row.purchase_no || row.expense_no || null;
-        // The payable read under lock above is the one this purchase settles;
-        // the natural-key match is only for a legacy payable with no source.
-        const payable = linkedPayable || await trx('payables').where(function () {
-          this.where({ source_table: sourceTable, source_id: id });
-          if (natRef) this.orWhere(function () { this.where('linked_ref', natRef).andWhere(function () { this.whereNull('source_table').orWhereNot('source_table', 'lot_transport'); }); });
-        }).first();
-        await trx('payments').insert({
-          payment_no: await nextDocNo(trx, { table: 'payments', column: 'payment_no', prefix: 'PP-', pad: 0 }),
-          type: 'payment', amount: amountPkr, currency: 'PKR', fx_rate: 1, base_amount_pkr: amountPkr,
-          payment_method: payMethod, bank_account_id: bank_account_id || null,
-          bank_reference: payment_reference || null,
-          due_date: due_date || paidAt.toISOString().slice(0, 10), cleared: false,
-          linked_payable_id: payable ? payable.id : null,
-          source_table: sourceTable, source_id: id, payment_date: paidAt,
-          notes: `Pending cheque for ${source} ${row.lot_no || row.purchase_no || row.expense_no || `#${id}`}`,
-          created_by: req.user?.id || null,
-        });
-        return { postDated: true, uncleared: true, source, source_id: id, amount: amountPkr };
+        const whose = source === 'lot' && payables.length ? ' owed to the supplier on this lot (transport and commission are paid to the transporter / broker from Money Out)' : '';
+        throw fail(`Amount ${payNum.toFixed(2)} exceeds the outstanding balance${whose} of ${outstanding.toFixed(2)}.`);
       }
 
-      // The account the money leaves. Cash with none picked comes out of the
-      // paying entity's cash float (Mill Cash for mill purchases, Office Petty
-      // Cash for head office), as expenses do; any other method must name one.
-      const accountId = await resolvePaymentAccountId(trx, {
-        bankAccountId: bank_account_id,
+      const label = spec.label(row) || `#${id}`;
+      const common = {
+        type: 'payment',
+        source: { table: spec.table, id },
+        currency: 'PKR', // purchases are paid in PKR
         method: payMethod,
-        entity: source === 'lot' ? row.entity
-          : source === 'mill_store' ? 'mill'
-          : source === 'expense' ? row.expense_type
-          : 'general',
-      });
-      if (millOnly) await assertMillAccount(trx, accountId || bank_account_id);
-      // Purchases are paid in PKR: the account moves by amountPkr below, so a
-      // non-PKR account would be debited a rupee figure in its own currency.
-      if (accountId) assertAccountCurrency(await trx('bank_accounts').where({ id: accountId }).first(), 'PKR');
-
-      const commonUpdate = {
-        payment_status: status,
-        paid_amount: newPaid,
-        updated_at: trx.fn.now(),
+        bankAccountId: bank_account_id || null,
+        accountEntity: ownEntity,
+        paymentDate: payment_date || null,
+        dueDate: due_date || null,
+        bankReference: payment_reference || null,
+        userId: req.user?.id || null,
+        millOnly,
+        bt: {
+          counterparty: row.supplier_id ? null : (row.vendor_name || null),
+          notes: `Payment for ${source} ${label}${notes ? ` — ${notes}` : ''}`,
+        },
       };
-
-      if (source === 'lot') {
-        const total = parseFloat(row.landed_cost_total) || 0;
-        await trx('inventory_lots').where({ id }).update({
-          ...commonUpdate,
-          due_amount: Math.max(0, total - newPaid),
+      const payments = [];
+      if (!payables.length) {
+        const { payment } = await recordMoneyMovement(trx, {
+          ...common, amount: payNum, notes: notes || `Payment for ${source} ${label}`,
         });
-      } else if (source === 'mill_store') {
-        // Stamp where/how it was paid, as the mill-store pay route did before
-        // Store Overview was pointed here.
-        await trx('mill_purchases').where({ id }).update({
-          ...commonUpdate,
-          paid_date: fullyPaid ? paidAt : null,
-          bank_account_id: accountId,
-          payment_method: payMethod,
-          payment_reference: payment_reference || null,
-        });
-      } else if (source === 'export_cost') {
-        await trx('export_order_costs').where({ id }).update({
-          ...commonUpdate,
-          paid_at: fullyPaid ? paidAt : null,
-          bank_account_id: accountId,
-          payment_method: payMethod,
-          payment_reference: payment_reference || null,
-        });
-      } else if (source === 'expense') {
-        await trx('business_expenses').where({ id }).update({
-          ...commonUpdate,
-          paid_date: fullyPaid ? paidAt : null,
-          bank_account_id: accountId,
-          payment_method: payMethod,
-          payment_reference: payment_reference || null,
-        });
-      } else if (source === 'printed_bag') {
-        await trx('printed_bag_orders').where({ id }).update(commonUpdate);
-      }
-
-      // Mirror payment state to the linked payables row so /finance/money-out
-      // reflects the same paid_amount / outstanding / status. Pairs are keyed
-      // by (source_table, source_id) — see the addCost / createPurchaseLot
-      // controllers that create them. Resolved per source because the table
-      // names map differently (lots / mill_purchases / export_order_costs /
-      // business_expenses).
-      // (linkedPayable was read under lock at the top.)
-      let payRowForBank = null; // the canonical PP- payment row, linked to the bank txn below
-      if (linkedPayable) {
-        const newPayablePaid = (parseFloat(linkedPayable.paid_amount) || 0) + amountPkr;
-        const original = parseFloat(linkedPayable.original_amount) || 0;
-        await trx('payables').where({ id: linkedPayable.id }).update({
-          paid_amount: newPayablePaid,
-          outstanding: Math.max(0, original - newPayablePaid),
-          status: newPayablePaid >= original - 0.01 ? 'Paid' : 'Partial',
-          updated_at: trx.fn.now(),
-        });
-        // Canonical payment row (so the payment-trail + dashboard cheque view
-        // see it uniformly). Deduped against the bank_transaction by the trail.
-        [payRowForBank] = await trx('payments').insert({
-          payment_no: await nextDocNo(trx, { table: 'payments', column: 'payment_no', prefix: 'PP-', pad: 0 }),
-          type: 'payment', amount: amountPkr, currency: 'PKR', fx_rate: 1, base_amount_pkr: amountPkr,
-          payment_method: payMethod, bank_account_id: accountId,
-          bank_reference: payment_reference || null, due_date: due_date || null,
-          linked_payable_id: linkedPayable.id, payment_date: paidAt,
-          notes: `Payment for ${source} ${row.lot_no || row.purchase_no || row.expense_no || `#${id}`}`,
-          created_by: req.user?.id || null,
-        }).returning('id');
-      }
-
-      // Decrement the cash/bank account the money left.
-      if (accountId) {
-        await trx('bank_accounts').where({ id: accountId }).decrement('current_balance', amountPkr);
-        const tableExists = await trx.schema.hasTable('bank_transactions');
-        if (tableExists) {
-          // transaction_no is NOT NULL + unique. Generate as BT-NNNN.
-          const txnNo = await nextBtNo(trx);
-          await trx('bank_transactions').insert({
-            transaction_no: txnNo,
-            bank_account_id: accountId,
-            type: 'debit',
-            amount: amountPkr,
-            transaction_date: paidAt,
-            reference: payment_reference || null,
-            counterparty: row.supplier_id ? null : (row.vendor_name || null),
-            notes: `Payment for ${source} ${row.lot_no || row.purchase_no || row.expense_no || row.category || `#${id}`}${notes ? ' — ' + notes : ''}`,
-            source: 'pay_purchase',
-            linked_payment_id: payRowForBank?.id || null,
-            created_by: req.user?.id || null,
+        payments.push(payment);
+      } else {
+        // FIFO across the open payables, one payment row per payable.
+        let left = round2(payNum);
+        for (const o of open) {
+          if (left <= 0.01) break;
+          const part = round2(Math.min(left, o.owed));
+          const { payment } = await recordMoneyMovement(trx, {
+            ...common, payable: o.payable, amount: part, checkOutstanding: false,
+            notes: notes || `Payment for ${source} ${label}${o.payable.category && source === 'lot' ? ` — ${o.payable.category}` : ''}`,
           });
+          payments.push(payment);
+          left = round2(left - part);
         }
       }
 
-      // ─── Journal entry — DR payable / expense, CR Cash & Bank ──────
-      // Match the convention used by recordPayment for Money In/Out so
-      // the Accounting page shows every settlement, not just the ones
-      // booked through Money Out's drawer. Skip silently if the GL
-      // accounts aren't seeded yet — the payment itself already
-      // succeeded and we don't want to roll it back over a bookkeeping
-      // miss.
-      try {
-        const refLabel = row.lot_no || row.purchase_no || row.expense_no || row.pbo_no
-          || (source === 'export_cost' ? `EXP-COST #${id}` : `#${id}`);
-        const refType =
-          source === 'lot'         ? 'Purchase Lot'
-          : source === 'mill_store' ? 'Mill Purchase'
-          : source === 'export_cost'? 'Export Order Cost'
-          : source === 'printed_bag'? 'Printed Bags'
-          :                           'Business Expense';
-        const entity = (source === 'export_cost' || source === 'printed_bag') ? 'export' : 'mill';
-
-        // Debit side: clear the same payable that was credited at expense /
-        // purchase recording. The `expense_recorded` posting rule credits
-        // 2010 Supplier Payable (verified on prod), and lot/mill/export
-        // cost flows do the same, so DR 2010 for every source — otherwise
-        // 2010 keeps a phantom credit balance and 2110 grows a phantom
-        // debit balance, which is what the earlier `source==='expense'`
-        // branch produced before this fix.
-        // Credit side: Cash & Bank umbrella (1000) — bank-level detail
-        // already lives in bank_transactions written above.
-        const supplierPayable = await trx('chart_of_accounts').where({ code: '2010' }).first();
-        const cashAndBank     = await trx('chart_of_accounts').where({ code: '1000' }).first();
-
-        const debitAcc = supplierPayable;
-        // Stamp the supplier (from the source row or its mirrored payable) so
-        // this settlement appears on the supplier's ledger even when refLabel
-        // is a lot/purchase/expense label that doesn't match payables.linked_ref.
-        const paySupplierId = row.supplier_id || linkedPayable?.supplier_id || null;
-        if (debitAcc && cashAndBank) {
-          await accountingService.createJournal(trx, {
-            date: paidAt.toISOString().slice(0, 10),
-            entity,
-            refType,
-            refNo: refLabel,
-            description: `Payment of Rs ${Math.round(amountPkr).toLocaleString()} for ${refType.toLowerCase()} ${refLabel}${notes ? ` — ${notes}` : ''}`,
-            currency: 'PKR',
-            fxRate: 1,
-            isAuto: true,
-            userId: req.user?.id || null,
-            partyType: paySupplierId ? 'supplier' : null,
-            partyId: paySupplierId,
-            lines: [
-              { account_id: debitAcc.id,    account: debitAcc.name,    debit: amountPkr, credit: 0,         narration: `DR ${debitAcc.code} ${debitAcc.name} — settled ${refLabel}` },
-              { account_id: cashAndBank.id, account: cashAndBank.name, debit: 0,         credit: amountPkr, narration: `CR ${cashAndBank.code} ${cashAndBank.name} — paid ${refLabel}` },
-            ],
-          }).then(async (journal) => {
-            if (journal?.id) await accountingService.postJournal(trx, journal.id);
-          });
-        } else {
-          throw missingAccounts(['1000', '2010']);
-        }
-      } catch (jeErr) {
-        // The payment and its journal commit together or not at all.
-        throw ledgerFailure(jeErr);
-      }
-
-      return { source, source_id: id, amount_paid_pkr: amountPkr, status, fully_paid: fullyPaid };
+      const after = await trx(spec.table).where({ id }).first();
+      const fullyPaid = round2(outstanding - payNum) <= 0.01;
+      const uncleared = isCheque(payMethod);
+      return {
+        source,
+        source_id: id,
+        amount_paid_pkr: round2(payNum),
+        status: uncleared ? (after?.payment_status || null) : (fullyPaid ? 'Paid' : 'Partial'),
+        fully_paid: !uncleared && fullyPaid,
+        uncleared,
+        postDated: uncleared,
+        payments: payments.map((p) => ({ id: p.id, payment_no: p.payment_no, amount: parseFloat(p.amount) || 0, payable_id: p.linked_payable_id || null })),
+      };
     });
 
     return res.json({ success: true, data: result });
   } catch (err) {
-    console.error('Pay purchase error:', err);
-    return res.status(err.statusCode || 400).json({ success: false, message: err.message || 'Failed to record purchase payment.' });
+    const code = err.statusCode || err.status;
+    if (!code) console.error('Pay purchase error:', err);
+    return res.status(code || 400).json({ success: false, message: err.message || 'Failed to record purchase payment.' });
   }
 };
 
