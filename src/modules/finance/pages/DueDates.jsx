@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowDownLeft, ArrowUpRight, CalendarClock, AlertTriangle, CheckCircle, Loader2, X } from 'lucide-react';
+import { ArrowDownLeft, ArrowUpRight, AlertTriangle, CheckCircle, Loader2, X } from 'lucide-react';
 import { useUpcoming, useClearCheque, useBankAccounts } from '../../../api/queries';
 import { useApp } from '../../../context/AppContext';
 import { AccountSelect } from '../../../components/payments/PaymentFields';
@@ -42,7 +42,7 @@ function List({ title, icon: Icon, tone, items, total, onClear, clearing }) {
                   </td>
                   <td data-label="Party" className="py-2 px-4 text-gray-900 break-words">
                     {x.partyId ? (
-                      <Link to={`/finance/statements?type=${x.partyType}&id=${x.partyId}`}
+                      <Link to={`/finance/accounting/statements?type=${x.partyType}&id=${x.partyId}`}
                         className="text-blue-600 hover:underline font-medium">{x.party}</Link>
                     ) : x.party}
                   </td>
@@ -165,13 +165,7 @@ export default function DueDates() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-2">
-        <CalendarClock size={20} className="text-blue-600" />
-        <div>
-          <h1 className="text-xl font-bold text-gray-900">Due Dates</h1>
-          <p className="text-sm text-gray-500">Uncleared cheques &amp; credit (udhaar) dues — when money is expected or due. A cheque settles only when you mark it cleared here.</p>
-        </div>
-      </div>
+      <p className="text-sm text-gray-500">Uncleared cheques &amp; credit (udhaar) dues — when money is expected or due. A cheque settles only when you mark it cleared here.</p>
       {isLoading ? (
         <p className="text-sm text-gray-400">Loading…</p>
       ) : (

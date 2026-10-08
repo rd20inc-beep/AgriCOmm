@@ -354,14 +354,11 @@ export default function FinanceConfirmations() {
   return (
     <div className="space-y-6">
       {/* Page Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Finance & Collections</h1>
-          <p className="text-sm text-gray-500 mt-0.5">
-            Manage advance, balance payments and accounts receivable
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm text-gray-500">
+          Export receipts waiting for Finance to confirm, and advances / balances still to collect.
+        </p>
+        <div className="flex flex-wrap items-center gap-3">
           {canViewExport && (
           <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-50 rounded-lg border border-amber-200">
             <Clock size={14} className="text-amber-600" />

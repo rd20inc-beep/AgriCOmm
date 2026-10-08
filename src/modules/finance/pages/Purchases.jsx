@@ -47,7 +47,7 @@ const ADD_OPTIONS = [
   { label: 'Raw / Stock Lot',     description: 'Raw rice, finished rice, byproduct lots', icon: Package, to: '/lot-inventory?action=new' },
   { label: 'Mill Store Purchase', description: 'Spare parts, packaging, fuel',          icon: Factory,  drawer: 'store' },
   { label: 'Export Cost',         description: 'Freight, commission, certificates — pick an order', icon: Ship, to: '/export' },
-  { label: 'Business Expense',    description: 'Utilities, salaries, admin',            icon: Receipt,  to: '/finance/expenses?action=new' },
+  { label: 'Business Expense',    description: 'Utilities, salaries, admin',            icon: Receipt,  to: '/finance/money-out/expenses?action=new' },
 ];
 
 const RANGE_LABEL = {
@@ -171,13 +171,9 @@ export default function Purchases() {
   return (
     <div className="space-y-5 pb-4">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-            <ShoppingCart className="w-6 h-6 text-gray-700" />
-            Purchases
-          </h1>
-          <p className="text-sm text-gray-500 mt-0.5">Every purchase recorded across the company — raw rice, mill store, export costs, and expenses.</p>
+          <p className="text-sm text-gray-500">Every purchase recorded across the company — raw rice, mill store, export costs, and expenses.</p>
         </div>
         <div className="flex items-center gap-2">
           {/* Add purchase — opens a dropdown that routes to the right creator,

@@ -14,6 +14,8 @@ import { useAuth } from './context/AuthContext';
 import Toast from './components/Toast';
 import QueryErrorHandler from './components/QueryErrorHandler';
 import { LoadingSpinner } from './components/LoadingState';
+import { LEGACY_FINANCE_REDIRECTS } from './modules/finance/financeNav';
+import { LegacyFinanceRedirect, FinanceCatchAll } from './modules/finance/components/LegacyFinanceRedirect';
 
 // Lazy import that self-heals stale chunks after a deploy. A new build replaces
 // every hashed chunk, so an already-open tab still pointing at an old chunk hash
@@ -126,36 +128,50 @@ const Purchases = lazyWithReload(() => import('./modules/finance/pages/Purchases
 const LocalSalesFinance = lazyWithReload(() => import('./modules/finance/pages/LocalSalesFinance'));
 const FinancePayroll = lazyWithReload(() => import('./modules/finance/pages/FinancePayroll'));
 const FinanceSuspense = lazyWithReload(() => import('./modules/finance/pages/Suspense'));
+const TrialBalance = lazyWithReload(() => import('./modules/finance/pages/TrialBalance'));
+const GlProfitLoss = lazyWithReload(() => import('./modules/finance/pages/GlProfitLoss'));
+const BalanceSheet = lazyWithReload(() => import('./modules/finance/pages/BalanceSheet'));
 
 function FinanceRoutes() {
   return (
     <FinanceLayout>
       <Routes>
-        {/* Primary money-flow tabs */}
+        {/* Six workspaces; a workspace's default view is its own path, the
+            other views are nested paths (map: modules/finance/financeNav.js). */}
         <Route index element={<FinanceOverview />} />
-        <Route path="expenses" element={<Expenses />} />
+        {/* Money In */}
         <Route path="money-in" element={<MoneyIn />} />
+        <Route path="money-in/to-confirm" element={<FinanceConfirmations />} />
+        <Route path="money-in/local-sales" element={<LocalSalesFinance />} />
+        {/* Money Out */}
         <Route path="money-out" element={<MoneyOut />} />
-        <Route path="due-dates" element={<DueDates />} />
-        <Route path="purchases" element={<Purchases />} />
-        <Route path="local-sales" element={<LocalSalesFinance />} />
-        <Route path="cash" element={<Cash />} />
-        <Route path="profit" element={<Profit />} />
-        <Route path="rates" element={<RatesCenter />} />
+        <Route path="money-out/purchases" element={<Purchases />} />
+        <Route path="money-out/expenses" element={<Expenses />} />
+        {/* Accounts */}
+        <Route path="accounts" element={<Cash />} />
+        <Route path="accounts/cheques" element={<DueDates />} />
+        <Route path="accounts/suspense" element={<FinanceSuspense />} />
+        {/* Accounting */}
         <Route path="accounting" element={<Accounting />} />
-        <Route path="statements" element={<PartyLedger />} />
+        <Route path="accounting/trial-balance" element={<ProtectedRoute module="finance" action="view"><TrialBalance /></ProtectedRoute>} />
+        <Route path="accounting/pnl" element={<ProtectedRoute module="finance" action="view"><GlProfitLoss /></ProtectedRoute>} />
+        <Route path="accounting/balance-sheet" element={<ProtectedRoute module="finance" action="view"><BalanceSheet /></ProtectedRoute>} />
+        <Route path="accounting/profit" element={<Profit />} />
+        <Route path="accounting/statements" element={<PartyLedger />} />
+        <Route path="accounting/rates" element={<RatesCenter />} />
+        {/* Payroll */}
         <Route path="payroll" element={<ProtectedRoute module="payroll" action="view"><FinancePayroll /></ProtectedRoute>} />
+        {/* Reached from Home's alerts panel (Needs Attention replaces it later). */}
         <Route path="alerts" element={<FinanceAlerts />} />
-        {/* Legacy routes — redirect-compatible */}
-        <Route path="receivables" element={<Navigate to="/finance/money-in" replace />} />
-        <Route path="payables" element={<Navigate to="/finance/money-out" replace />} />
-        <Route path="confirmations" element={<FinanceConfirmations />} />
+        {/* URL-only pages, kept until their removal is proven safe. */}
         <Route path="costs" element={<CostAllocation />} />
         <Route path="transfers" element={<FinanceTransfers />} />
-        <Route path="profitability" element={<Navigate to="/finance/profit" replace />} />
-        <Route path="ledger" element={<Navigate to="/finance/accounting" replace />} />
         <Route path="reconciliation" element={<Reconciliation />} />
-        <Route path="suspense" element={<FinanceSuspense />} />
+        {/* Every pre-redesign path → its new view, query string kept. */}
+        {Object.keys(LEGACY_FINANCE_REDIRECTS).map((seg) => (
+          <Route key={seg} path={seg} element={<LegacyFinanceRedirect />} />
+        ))}
+        <Route path="*" element={<FinanceCatchAll />} />
       </Routes>
     </FinanceLayout>
   );
