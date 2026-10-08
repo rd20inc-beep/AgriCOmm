@@ -59,7 +59,9 @@ describe('postMillingCompletion (no DB)', () => {
   const fakeTrx = ({ posted, net = 0 }) => {
     const t = (table) => {
       const b = {
-        join: () => b, where: () => b, select: () => b,
+        join: () => b, leftJoin: () => b, where: () => b, select: () => b, sum: () => b,
+        // A batch with no source lots (direct truck intake): all CR 1210.
+        then: (resolve) => resolve([]),
         first: async () => {
           if (table === 'journal_entries') return posted ? { id: 55 } : undefined;
           if (table === 'journal_lines as jl') return { net };
