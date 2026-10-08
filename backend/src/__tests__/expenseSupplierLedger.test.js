@@ -30,7 +30,10 @@ const read = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
 const ACCT = read('modules/accounting/accounting.service.js');
 const SVC = read('modules/expenses/expenses.service.js');
 const ROUTES = read('modules/expenses/expenses.routes.js');
-const FORM = fs.readFileSync(path.join(__dirname, '../../../src/modules/finance/pages/Expenses.jsx'), 'utf8');
+// The new-expense form moved into a drawer (Expenses view + the Finance
+// header's + Expense); its payload builder lives with the catalogue.
+const FORM = ['components/ExpenseCreateDrawer.jsx', 'utils/expenseCatalogue.js']
+  .map((f) => fs.readFileSync(path.join(__dirname, '../../../src/modules/finance', f), 'utf8')).join('\n');
 
 describe('the statement no longer counts an expense twice', () => {
   it('a payable is covered by its SOURCE document reference too', () => {
