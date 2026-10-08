@@ -12,11 +12,11 @@ import {
 export default function GlProfitLoss() {
   const { queryParams: range } = useFinanceDateRange();
   const { entity, setEntity, apiEntity } = useGlEntity();
-  const { data, isLoading, error } = useProfitLoss(glParams('period', range, apiEntity));
-  return <ProfitLossView data={data} isLoading={isLoading} error={error} entity={entity} onEntity={setEntity} from={range.from_date} to={range.to_date} />;
+  const { data, isLoading, error, refetch } = useProfitLoss(glParams('period', range, apiEntity));
+  return <ProfitLossView data={data} isLoading={isLoading} error={error} onRetry={refetch} entity={entity} onEntity={setEntity} from={range.from_date} to={range.to_date} />;
 }
 
-export function ProfitLossView({ data, isLoading, error, entity, onEntity, from, to }) {
+export function ProfitLossView({ data, isLoading, error, onRetry, entity, onEntity, from, to }) {
   const revenue = data?.revenue || {};
   const cogs = data?.cogs || {};
   const expenses = data?.expenses || {};
@@ -28,18 +28,19 @@ export function ProfitLossView({ data, isLoading, error, entity, onEntity, from,
         <PeriodLine mode="period" from={from} to={to} /> · PKR · Posted journals only
       </StatementHeader>
       <EntityFilter entity={entity} onChange={onEntity} />
-      <StateBox isLoading={isLoading} error={error} empty={empty}>
+      <StateBox isLoading={isLoading} error={error} onRetry={onRetry} empty={empty}>
         <div className="space-y-3 max-w-3xl">
           <AccountSection title="Revenue" accounts={revenue.accounts} valueKey="amount" total={revenue.total} />
           <AccountSection title="Cost of goods sold" accounts={cogs.accounts} valueKey="amount" total={cogs.total} />
-          <div className="flex items-center justify-between px-4 py-2.5 rounded-xl bg-gray-50 border border-gray-200 text-sm font-semibold">
+          <div className="flex items-center justify-between gap-3 px-4 py-2.5 rounded-xl bg-gray-50 border border-gray-200 text-sm font-semibold">
             <span>Gross profit</span>
             <span className="tabular-nums" data-testid="pnl-gross">{pkr(data?.grossProfit)}</span>
           </div>
           <AccountSection title="Expenses" accounts={expenses.accounts} valueKey="amount" total={expenses.total} />
-          <div className={`flex items-center justify-between px-4 py-3 rounded-xl border text-base font-bold ${net >= 0 ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-red-50 border-red-200 text-red-800'}`}>
+          {/* Calm row: the words say profit / loss, only the figure is coloured. */}
+          <div className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl bg-white border-2 border-gray-300 text-base font-bold text-gray-900">
             <span>{net >= 0 ? 'Net profit' : 'Net loss'}</span>
-            <span className="tabular-nums" data-testid="pnl-net">{pkr(net)}</span>
+            <span className={`tabular-nums ${net >= 0 ? 'text-emerald-700' : 'text-red-700'}`} data-testid="pnl-net">{pkr(net)}</span>
           </div>
         </div>
       </StateBox>

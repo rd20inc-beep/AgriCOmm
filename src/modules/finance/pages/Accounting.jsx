@@ -1,6 +1,8 @@
-import { useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { FileText, ChevronRight, ChevronDown, BookOpen, Scale, CheckCircle2, AlertTriangle, Layers, Printer, Search } from 'lucide-react';
+import { TypeChip, EmptyLine, InlineError } from '../components/FinanceUI';
+import { btnSecondary, th, errorText } from '../utils/uiClasses';
 import { FinanceKPI } from '../../../components/finance';
 import { useJournalEntries, useTrialBalance } from '../../../api/queries';
 import { withRange } from '../financeNav';
@@ -19,15 +21,10 @@ function originalAmount(v, currency) {
   return fmtMoney(v, cur);
 }
 
-const ENTITY_TONE = {
-  mill:   'bg-amber-50 text-amber-700',
-  export: 'bg-blue-50 text-blue-700',
-};
-
 export default function Accounting() {
   const { queryParams: rangeParams, rangeKey } = useFinanceDateRange();
   const { companyProfileData } = useApp();
-  const { data: journalData = [], isLoading } = useJournalEntries(rangeParams);
+  const { data: journalData = [], isLoading, error, refetch } = useJournalEntries(rangeParams);
   const [expanded, setExpanded] = useState(() => new Set());
 
   const [forceExpandForPrint, setForceExpandForPrint] = useState(false);
@@ -129,41 +126,13 @@ export default function Accounting() {
 
   return (
     <div className="space-y-5 pb-4">
-      {/* ─── HERO BAND ──────────────────────────────────────────── */}
-      <div className={`rounded-2xl bg-gradient-to-r ${isBalanced ? 'from-slate-800 via-slate-700 to-slate-600' : 'from-red-700 via-red-600 to-amber-500'} p-5 sm:p-6 text-white shadow-sm relative overflow-hidden`}>
-        <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(circle at 80% 20%, white 0%, transparent 60%)' }} />
-        <div className="relative flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 text-xs uppercase tracking-wider opacity-80 mb-1">
-              <BookOpen size={14} /> Journal — Posted activity
-            </div>
-            <div className="text-3xl sm:text-4xl font-bold leading-tight tabular-nums">
-              {fmtPKR(totalDebit, { decimals: 2 })}
-            </div>
-            <div className="text-xs opacity-90 mt-1">
-              {filtered.length} {filtered.length === 1 ? 'entry' : 'entries'}{entityFilter !== 'all' ? ` · ${entityFilter} only` : ' in selected period'}
-              {entityFilter === 'all' && entityMix.size > 0 && (
-                <> · {Array.from(entityMix.entries()).map(([e, n]) => `${n} ${e}`).join(' · ')}</>
-              )}
-            </div>
-          </div>
-          <div className="flex flex-col items-start sm:items-end gap-1.5">
-            <Link to={withRange('/finance/accounting/trial-balance', rangeKey)} title="From the trial balance — open it"
-              className={`inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider px-3 py-1.5 rounded-full hover:opacity-90 ${isBalanced ? 'bg-emerald-500/20 text-emerald-50 ring-1 ring-emerald-300/30' : 'bg-white/15 text-white ring-1 ring-white/30'}`}>
-              {isBalanced ? <CheckCircle2 size={13} /> : <AlertTriangle size={13} />}
-              {balanceLabel}
-            </Link>
-            <div className="text-[11px] opacity-80 text-right">
-              This list: DR {fmtPKR(totalDebit, { decimals: 2 })} · CR {fmtPKR(totalCredit, { decimals: 2 })}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* ─── KPI tiles ──────────────────────────────────────────── */}
+      {/* ─── KPI tiles (one row; the book-health check sits by the list) ── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <FinanceKPI icon={Layers} title="Total Entries" value={String(filtered.length)}
-          subtitle={isLoading ? 'Loading…' : (entityFilter !== 'all' || statusFilter !== 'all' || search ? 'Filtered' : 'In selected period')} status="neutral" loading={isLoading} />
+          subtitle={isLoading ? 'Loading…' : (entityFilter !== 'all' || statusFilter !== 'all' || search
+            ? `Filtered${entityFilter !== 'all' ? ` · ${entityFilter} only` : ''}`
+            : ['In selected period', ...Array.from(entityMix.entries()).map(([e, n]) => `${n} ${e}`)].join(' · '))}
+          status="neutral" loading={isLoading} />
         <FinanceKPI icon={CheckCircle2} title="Posted" value={String(postedCount)}
           subtitle={filtered.length > 0 ? `${Math.round(postedCount / filtered.length * 100)}% of total` : '—'}
           status={postedCount > 0 ? 'good' : 'neutral'} loading={isLoading} />
@@ -171,50 +140,58 @@ export default function Accounting() {
           subtitle={`${reversedCount} reversed · ${draftCount} draft`}
           status={reversedCount + draftCount > 0 ? 'warning' : 'good'} loading={isLoading} />
         <FinanceKPI icon={Scale} title="Net Movement" value={fmtPKR(totalDebit, { decimals: 2 })}
-          subtitle={ledgerKnown ? (isBalanced ? 'Books balanced (trial balance)' : 'Books out of balance') : '—'}
+          subtitle={`This list: DR ${fmtPKR(totalDebit, { decimals: 2 })} · CR ${fmtPKR(totalCredit, { decimals: 2 })}`}
           status={isBalanced ? 'good' : 'danger'} loading={isLoading} />
       </div>
 
-      {/* ─── Section heading ────────────────────────────────────── */}
-      <div className="flex items-center justify-between pt-1">
-        <div className="flex items-center gap-2 text-sm text-gray-700">
-          <FileText size={15} className="text-blue-500" />
-          <span className="font-semibold">Journal Entries</span>
-          <span className="text-xs text-gray-400 hidden sm:inline">— click a row to see the DR/CR account split.</span>
+      {/* ─── Section heading: title · book health (from the trial balance) · print ── */}
+      <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+        <div className="min-w-0">
+          <h2 className="text-sm font-semibold text-gray-900 inline-flex items-center gap-2">
+            <FileText size={16} className="text-gray-400" aria-hidden="true" /> Journal entries
+          </h2>
+          <p className="text-xs text-gray-500 hidden sm:block">Click a row to see the DR/CR account split.</p>
         </div>
-        <button onClick={handlePrint}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm">
-          <Printer size={14} /> Print
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Link to={withRange('/finance/accounting/trial-balance', rangeKey)} title="From the trial balance — open it" data-testid="book-health"
+            className={`inline-flex items-center gap-1.5 px-2.5 min-h-10 sm:min-h-8 rounded-lg text-xs font-semibold ring-1 ring-inset hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
+              !ledgerKnown ? 'bg-gray-50 text-gray-600 ring-gray-200' : isBalanced ? 'bg-emerald-50 text-emerald-700 ring-emerald-200' : 'bg-red-50 text-red-700 ring-red-200'}`}>
+            {isBalanced ? <CheckCircle2 size={14} aria-hidden="true" /> : <AlertTriangle size={14} aria-hidden="true" />}
+            {balanceLabel}
+          </Link>
+          <button type="button" onClick={handlePrint} className={btnSecondary}>
+            <Printer size={14} aria-hidden="true" /> Print with lines
+          </button>
+        </div>
       </div>
 
       {/* ─── Filters (no-print) ─────────────────────────────────── */}
       <div className="flex flex-col lg:flex-row lg:items-center gap-3 no-print">
         {/* Entity */}
-        <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-0.5 text-sm">
+        <div className="inline-flex flex-wrap rounded-lg border border-gray-200 bg-gray-50 p-0.5 text-sm" role="group" aria-label="Entity">
           {[['all', 'All'], ['mill', 'Mill'], ['export', 'Export'], ['general', 'General']].map(([k, label]) => (
-            <button key={k} onClick={() => setEntityFilter(k)}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium transition-colors ${entityFilter === k ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
-              {label}<span className="text-[10px] text-gray-400">{entityCounts[k] || 0}</span>
+            <button key={k} type="button" aria-pressed={entityFilter === k} onClick={() => setEntityFilter(k)}
+              className={`inline-flex items-center gap-1.5 px-3 min-h-10 sm:min-h-8 rounded-md font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${entityFilter === k ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+              {label}<span className="text-xs text-gray-500 tabular-nums">{entityCounts[k] || 0}</span>
             </button>
           ))}
         </div>
         {/* Status */}
-        <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-0.5 text-sm">
+        <div className="inline-flex flex-wrap rounded-lg border border-gray-200 bg-gray-50 p-0.5 text-sm" role="group" aria-label="Status">
           {[['all', 'All'], ['Posted', 'Posted'], ['Reversed', 'Reversed'], ['Draft', 'Draft']].map(([k, label]) => (
-            <button key={k} onClick={() => setStatusFilter(k)}
-              className={`px-3 py-1.5 rounded-md font-medium transition-colors ${statusFilter === k ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>{label}</button>
+            <button key={k} type="button" aria-pressed={statusFilter === k} onClick={() => setStatusFilter(k)}
+              className={`px-3 min-h-10 sm:min-h-8 rounded-md font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${statusFilter === k ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>{label}</button>
           ))}
         </div>
         {/* Search */}
-        <div className="relative flex-1 min-w-0 max-w-xs">
-          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search journal / ref / description…"
-            className="w-full border border-gray-200 rounded-lg pl-8 pr-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+        <div className="relative flex-1 min-w-0 lg:max-w-xs">
+          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" aria-hidden="true" />
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search journal / ref / description…" aria-label="Search journal entries"
+            className="w-full border border-gray-200 rounded-lg pl-8 pr-3 min-h-10 sm:min-h-9 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
         </div>
         {(entityFilter !== 'all' || statusFilter !== 'all' || search) && (
-          <button onClick={() => { setEntityFilter('all'); setStatusFilter('all'); setSearch(''); }}
-            className="text-xs text-gray-400 hover:text-gray-600">Clear</button>
+          <button type="button" onClick={() => { setEntityFilter('all'); setStatusFilter('all'); setSearch(''); }}
+            className="self-start text-sm text-gray-600 px-3 min-h-10 sm:min-h-9 rounded-lg hover:bg-gray-100">Clear filters</button>
         )}
       </div>
 
@@ -245,24 +222,23 @@ export default function Accounting() {
       <ListCapHint rows={journalData} />
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         {isLoading ? (
-          <div className="p-10 text-center text-sm text-gray-400">Loading journal entries…</div>
-        ) : filtered.length === 0 ? (
-          <div className="p-10 text-center text-sm text-gray-400">
-            {journalData.length === 0 ? 'No journal entries posted in this date range.' : 'No entries match the current filters.'}
+          <div className="p-4 space-y-2 animate-pulse" aria-busy="true">
+            {[0, 1, 2, 3, 4].map((i) => <div key={i} className="h-10 bg-gray-100 rounded" />)}
           </div>
+        ) : error ? (
+          <div className="p-4"><InlineError message={errorText(error, 'Journal entries')} onRetry={refetch} /></div>
+        ) : filtered.length === 0 ? (
+          <EmptyLine icon={BookOpen}>
+            {journalData.length === 0 ? 'No journal entries posted in this date range.' : 'No entries match the current filters.'}
+          </EmptyLine>
         ) : (
-          <div className="overflow-x-auto mobile-cards">
+          <div className="overflow-x-auto mobile-cards md:max-h-[75vh] md:overflow-y-auto">
           <table className="w-full text-sm min-w-[760px]">
             <thead>
-              <tr className="border-b border-gray-200 bg-gray-50 text-xs uppercase text-gray-500">
-                <th className="text-left py-2.5 px-2 w-8"></th>
-                <th className="text-left py-2.5 px-3 font-semibold">Journal #</th>
-                <th className="text-left py-2.5 px-3 font-semibold">Date</th>
-                <th className="text-left py-2.5 px-3 font-semibold">Entity</th>
-                <th className="text-left py-2.5 px-3 font-semibold">Reference</th>
-                <th className="text-left py-2.5 px-3 font-semibold">Description</th>
-                <th className="text-right py-2.5 px-3 font-semibold">Amount</th>
-                <th className="text-left py-2.5 px-3 font-semibold">Status</th>
+              <tr>
+                {[['', 'w-8'], ['Journal #'], ['Date'], ['Entity'], ['Reference'], ['Description'], ['Amount', 'text-right'], ['Status']].map(([label, extra = 'text-left'], i) => (
+                  <th key={i} className={`${th} ${extra} md:sticky md:top-0 md:z-[1]`}>{label}</th>
+                ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -280,8 +256,8 @@ export default function Accounting() {
                   ? `JE-${(fullJournalNo.split('-')[2] || '').replace(/^0+/, '') || '0'}`
                   : fullJournalNo;
                 return (
-                  <>
-                    <tr key={id}
+                  <Fragment key={id}>
+                    <tr
                         className={`hover:bg-gray-50 cursor-pointer ${isOpen ? 'bg-blue-50/30' : ''}`}
                         onClick={() => toggle(id)}>
                       <td data-label="" className="mob-hide py-2.5 px-2 text-gray-400">
@@ -293,9 +269,7 @@ export default function Accounting() {
                         {fmtDate(j.date)}
                       </td>
                       <td data-label="Entity" className="mob-hide py-2.5 px-3">
-                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${ENTITY_TONE[j.entity] || 'bg-gray-100 text-gray-600'}`}>
-                          {j.entity || 'general'}
-                        </span>
+                        <TypeChip className="capitalize">{j.entity || 'general'}</TypeChip>
                       </td>
                       <td data-label="Reference" className="py-2.5 px-3 text-xs whitespace-nowrap">
                         {(() => {
@@ -324,10 +298,10 @@ export default function Accounting() {
                         const balanced = drift < 1;
                         const orig = originalAmount(j.totalDebit || j.total_debit, j.currency);
                         return (
-                          <td data-label="Amount" className={`py-2.5 px-3 text-right font-medium whitespace-nowrap ${balanced ? 'text-gray-900' : 'text-red-700'}`}
+                          <td data-label="Amount" className={`py-2.5 px-3 text-right tabular-nums font-medium whitespace-nowrap ${balanced ? 'text-gray-900' : 'text-red-700'}`}
                               title={balanced ? '' : `Imbalanced — DR ${fmtPKR(drPkr, { decimals: 2 })} · CR ${fmtPKR(crPkr, { decimals: 2 })}`}>
                             {fmtPKR(drPkr, { decimals: 2 })}
-                            {!balanced && <span className="ml-1 text-[10px]">⚠</span>}
+                            {!balanced && <span className="ml-1 text-xs">⚠ <span className="sr-only">Imbalanced</span></span>}
                             {orig && <div className="text-[10px] text-gray-400 font-normal">{orig}</div>}
                           </td>
                         );
@@ -337,7 +311,7 @@ export default function Accounting() {
                       </td>
                     </tr>
                     {isOpen && (
-                      <tr key={`${id}-lines`} className="bg-blue-50/20">
+                      <tr className="bg-blue-50/20">
                         <td></td>
                         <td colSpan={8} className="mob-full px-4 py-3">
                           {lines.length === 0 ? (
@@ -393,7 +367,7 @@ export default function Accounting() {
                         </td>
                       </tr>
                     )}
-                  </>
+                  </Fragment>
                 );
               })}
             </tbody>
