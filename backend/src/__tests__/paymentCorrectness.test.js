@@ -207,7 +207,7 @@ describe('recordPayment', () => {
     await financeController.recordPayment({ body: body(), user: { id: 1 } }, r);
     expect(r.statusCode).toBe(201);
     expect(inserts('payments')[0].bank_account_id).toBe(41);
-    expect(moves('bank_accounts')).toEqual([expect.objectContaining({ op: 'increment', amount: -200, where: { id: 41 } })]);
+    expect(moves('bank_accounts')).toEqual([expect.objectContaining({ op: 'decrement', amount: 200, where: { id: 41 } })]);
   });
 
   test('an unbalanced journal fails the payment with a 400 and rolls back', async () => {
