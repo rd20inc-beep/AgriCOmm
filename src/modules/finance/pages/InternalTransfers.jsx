@@ -46,7 +46,7 @@ export default function InternalTransfers() {
       {/* Page Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Internal Transfers</h1>
+          <h2 className="text-xl font-semibold text-gray-900">Internal Transfers</h2>
           <p className="text-sm text-gray-500 mt-0.5">
             Mill-to-Export entity inter-company stock transfers
           </p>
