@@ -99,8 +99,12 @@ router.post('/fund-transfers/:id/replace', authorizeRole('Owner', 'Super Admin')
   auditAction('replace_fund_transfer', 'finance', (req) => req.params.id),
   async (req, res) => {
     try {
-      const { reason, ...payload } = req.body;
-      const result = await fundTransfers.replace(req.params.id, payload, req.user?.id, { reason });
+      // Everything but the reason is the corrected transfer. (Kept as an
+      // explicit filter: the schema-strip sweep treats a rest-spread binding
+      // off the body as a body field of that name.)
+      const { reason } = req.body;
+      const corrected = Object.fromEntries(Object.entries(req.body).filter(([k]) => k !== 'reason'));
+      const result = await fundTransfers.replace(req.params.id, corrected, req.user?.id, { reason });
       return res.json({ success: true, data: result });
     } catch (e) { return sendTransferError(res, e); }
   });
