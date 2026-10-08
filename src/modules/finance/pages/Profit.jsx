@@ -9,6 +9,7 @@ import { DEFAULT_FX_RATE } from '../utils/fx';
 import { useApp } from '../../../context/AppContext';
 import StatusBadge from '../../../shared/components/StatusBadge';
 import { fmtPKR, fmtMoney, fmtPct, fmtDate, fmtDateTime, fmtKg } from '../../../shared/utils/format';
+import { HeadlineCard, TypeChip } from '../components/FinanceUI';
 
 const TABS = ['Export', 'Mill', 'Local', 'Consolidated'];
 
@@ -21,13 +22,18 @@ const RICE_BASIS = {
   unpriced: 'not costed',
 };
 
+// How exact a row's profit is — a StatusBadge word (see shared statusStyle).
+const ACCURACY = {
+  exact: ['Exact'],
+  estimated: ['Estimated'],
+  operational_margin_only: ['Operational Only', 'Operational margin only — no locked cost yet'],
+  unpriced: ['Not Costed', 'No rice cost locked, reserved, allocated or estimable — left out of Booked Profit'],
+  missing_prices: ['Missing Prices'],
+};
 function AccuracyBadge({ status }) {
-  if (status === 'exact') return <span className="inline-flex items-center gap-0.5 text-xs text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded-full"><CheckCircle size={10} /> Exact</span>;
-  if (status === 'estimated') return <span className="inline-flex items-center gap-0.5 text-xs text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded-full">Est.</span>;
-  if (status === 'operational_margin_only') return <span className="inline-flex items-center gap-0.5 text-xs text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded-full"><AlertTriangle size={10} /> Op. Only</span>;
-  if (status === 'unpriced') return <span className="inline-flex items-center gap-0.5 text-xs text-red-700 bg-red-50 px-1.5 py-0.5 rounded-full" title="No rice cost locked, reserved, allocated or estimable — left out of Booked Profit"><AlertTriangle size={10} /> Not costed</span>;
-  if (status === 'missing_prices') return <span className="inline-flex items-center gap-0.5 text-xs text-red-700 bg-red-50 px-1.5 py-0.5 rounded-full"><AlertTriangle size={10} /> Missing</span>;
-  return <span className="text-xs text-gray-400">{status || '—'}</span>;
+  const a = ACCURACY[status];
+  if (!a) return <span className="text-xs text-gray-500">{status || '—'}</span>;
+  return <span title={a[1]}><StatusBadge status={a[0]} /></span>;
 }
 
 export default function Profit() {
@@ -72,7 +78,7 @@ export default function Profit() {
       <OrderRefLink to={`/export/${row.id}`} module="export_orders" onClick={e => e.stopPropagation()}>{v}</OrderRefLink>
     )},
     { key: 'status', label: 'Status', sortable: true, render: (v) => (v ? <StatusBadge status={v} /> : '—') },
-    { key: 'currency', label: 'Cur.', render: (v) => <span className="text-xs bg-gray-100 px-1.5 py-0.5 rounded">{v}</span> },
+    { key: 'currency', label: 'Cur.', render: (v) => <TypeChip>{v}</TypeChip> },
     { key: 'contractValueForeign', label: 'Contract (Foreign)', sortable: true, align: 'right', render: (v, row) => fmtMoney(v, row.currency || 'USD') },
     { key: 'bookedFxRate', label: 'Locked Rate', align: 'right', render: (v) => <span className="text-xs text-gray-500">{v}</span> },
     { key: 'revenuePkrBooked', label: 'Revenue (PKR)', sortable: true, align: 'right', render: (v) => (v == null ? '—' : fmtPKR(v)) },
@@ -80,7 +86,7 @@ export default function Profit() {
     { key: 'riceCostPkr', label: 'Rice Cost', sortable: true, align: 'right', render: (v, row) => (
       <span className="inline-flex flex-col items-end">
         <span>{v == null ? '—' : fmtPKR(v)}</span>
-        <span className="text-[10px] text-gray-400">{RICE_BASIS[row.riceCostBasis] || row.riceCostBasis}</span>
+        <span className="text-xs text-gray-500">{RICE_BASIS[row.riceCostBasis] || row.riceCostBasis}</span>
       </span>
     )},
     { key: 'bookedProfitPkr', label: 'Booked Profit', sortable: true, align: 'right', render: (v) => (
@@ -166,9 +172,6 @@ export default function Profit() {
     { key: 'paymentStatus', label: 'Status', render: (v) => <StatusBadge status={v || 'Pending'} /> },
   ];
 
-  const heroGradient = consolidatedPkr >= 0
-    ? 'from-emerald-600 via-emerald-500 to-teal-500'
-    : 'from-red-600 via-red-500 to-red-500';
   const HeroIcon = consolidatedPkr >= 0 ? TrendingUp : TrendingDown;
   const totalRevenue = (exp.bookedRevenuePkr || 0)
     + (summary.mill?.revenuePkr || 0)
@@ -195,38 +198,30 @@ export default function Profit() {
           </div>
         </div>
 
-      {/* ─── HERO BAND ────────────────────────────────────────────── */}
-      <div className={`rounded-2xl bg-gradient-to-r ${heroGradient} p-5 sm:p-6 text-white shadow-sm relative overflow-hidden`}>
-        <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(circle at 30% 20%, white 0%, transparent 60%)' }} />
-        <div className="relative flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 text-xs uppercase tracking-wider opacity-80 mb-1">
-              <HeroIcon size={14} /> Consolidated profit (export booked + mill realised + local other) · {periodLabel}
-            </div>
-            <div className="text-3xl sm:text-4xl font-bold leading-tight tabular-nums">
-              {fmtPKR(consolidatedPkr)}
-            </div>
-            <div className="text-xs opacity-90 mt-1">
-              Export {fmtPKR(exportBookedProfitPkr)} · Mill {fmtPKR(millProfitPkr)} · Local {fmtPKR(localProfitPkr)}
-              {exportFxGainLoss !== 0 && <> · FX realised {exportFxGainLoss >= 0 ? '+' : ''}{fmtPKR(exportFxGainLoss)} (not included)</>}
-            </div>
-            <div className="text-[11px] opacity-80 mt-0.5">
-              Realised basis {fmtPKR(consolidatedRealisedPkr)}
-              {(exp.unpricedCount || 0) > 0 && <> · {exp.unpricedCount} export order{exp.unpricedCount === 1 ? '' : 's'} not costed yet ({fmtPKR(exp.unpricedRevenuePkr || 0)} contract) — excluded</>}
-              {(exp.estimatedCount || 0) > 0 && <> · {exp.estimatedCount} estimated</>}
-            </div>
-          </div>
-          <div className="flex flex-col items-start sm:items-end gap-1.5 text-[11px]">
-            <span className="inline-flex items-center gap-1.5 font-semibold uppercase tracking-wider px-3 py-1.5 rounded-full bg-white/15 ring-1 ring-white/30">
-              <Activity size={12} /> Margin {fmtPct(overallMargin)}
-            </span>
-            <div className="opacity-80 text-right">Base PKR · 1 USD = {currentFxRate}</div>
-          </div>
-        </div>
-      </div>
+      {/* ─── Headline: a calm card, only the figure carries the sign colour ── */}
+      <HeadlineCard
+        icon={HeroIcon}
+        label={<>Consolidated profit (export booked + mill realised + local other) · {periodLabel}</>}
+        value={<>{fmtPKR(consolidatedPkr)}{consolidatedPkr < 0 && <span className="ml-2 align-middle text-sm font-semibold">(loss)</span>}</>}
+        tone={consolidatedPkr < 0 ? 'negative' : consolidatedPkr > 0 ? 'positive' : 'neutral'}
+        sub={<>
+          Export {fmtPKR(exportBookedProfitPkr)} · Mill {fmtPKR(millProfitPkr)} · Local {fmtPKR(localProfitPkr)}
+          {exportFxGainLoss !== 0 && <> · FX realised {exportFxGainLoss >= 0 ? '+' : ''}{fmtPKR(exportFxGainLoss)} (not included)</>}
+        </>}
+        meta={<>
+          Realised basis {fmtPKR(consolidatedRealisedPkr)}
+          {(exp.unpricedCount || 0) > 0 && <> · {exp.unpricedCount} export order{exp.unpricedCount === 1 ? '' : 's'} not costed yet ({fmtPKR(exp.unpricedRevenuePkr || 0)} contract) — excluded</>}
+          {(exp.estimatedCount || 0) > 0 && <> · {exp.estimatedCount} estimated</>}
+        </>}
+        right={<>
+          <TypeChip icon={Activity}>Margin {fmtPct(overallMargin)}</TypeChip>
+          <TypeChip>Base PKR · 1 USD = {currentFxRate}</TypeChip>
+        </>}
+      />
 
       {/* KPIs */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-3">
+      {/* The consolidated figure is the headline above; these are its parts. */}
+      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
         <FinanceKPI icon={DollarSign} title="Export Booked" value={fmtPKR(exportBookedProfitPkr)}
           subtitle={`${exp.pricedCount || 0} confirmed orders costed${(exp.unpricedCount || 0) > 0 ? ` · ${exp.unpricedCount} excluded` : ''}`} status={exportBookedProfitPkr >= 0 ? 'good' : 'danger'} loading={isLoading} />
         <FinanceKPI icon={CheckCircle} title="Export Realised" value={fmtPKR(exportRealisedPkr)}
@@ -239,16 +234,14 @@ export default function Profit() {
           subtitle="Sales of mill output − COGS" status={millProfitPkr >= 0 ? 'good' : 'danger'} loading={isLoading} />
         <FinanceKPI icon={Store} title="Local (other)" value={fmtPKR(localProfitPkr)}
           subtitle={`${summary.local?.saleCount || 0} non-mill sales`} status={localProfitPkr >= 0 ? 'good' : 'danger'} loading={isLoading} />
-        <FinanceKPI icon={TrendingUp} title="Consolidated" value={fmtPKR(consolidatedPkr)}
-          subtitle={`Booked · realised ${fmtPKR(consolidatedRealisedPkr)}`} status={consolidatedPkr >= 0 ? 'good' : 'danger'} loading={isLoading} />
       </div>
 
       {/* View mode selector */}
-      <div className="flex items-center gap-3">
-        <div className="inline-flex bg-white border border-gray-200 rounded-lg p-0.5 shadow-sm">
+      <div className="flex items-center gap-3 overflow-x-auto scrollbar-hide">
+        <div className="inline-flex bg-white border border-gray-200 rounded-lg p-0.5" role="group" aria-label="Profit view">
           {TABS.map(t => (
-            <button key={t} onClick={() => setTab(t)}
-              className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
+            <button key={t} type="button" aria-pressed={tab === t} onClick={() => setTab(t)}
+              className={`px-4 min-h-10 sm:min-h-9 text-sm font-medium rounded-md whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
                 tab === t ? 'bg-gray-900 text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'
               }`}>{t}</button>
           ))}

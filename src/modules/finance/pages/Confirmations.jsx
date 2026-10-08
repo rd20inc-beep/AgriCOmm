@@ -25,6 +25,8 @@ import EmailComposer from '../../../components/EmailComposer';
 import useConfirm from '../../../hooks/useConfirm';
 import { isBalanceDue } from '../../exportOrders/components/constants';
 import { fmtUSD, fmtPKR, fmtMoney, fmtDate } from '../../../shared/utils/format';
+import { EmptyLine } from '../components/FinanceUI';
+import { btnIcon, btnRowPrimary, btnRowSecondary, btnRowQuiet } from '../utils/uiClasses';
 
 // Amount in the order's own currency (an EUR order must not read — or be
 // dunned — in dollars). Export orders default to USD.
@@ -251,7 +253,7 @@ export default function FinanceConfirmations() {
                   style={{ width: `${Math.min(pctReceived, 100)}%` }}
                 />
               </div>
-              <span className="text-[10px] text-gray-400">{pctReceived.toFixed(0)}%</span>
+              <span className="text-xs text-gray-500">{pctReceived.toFixed(0)}%</span>
               {isOverdue && (
                 <span className="inline-flex items-center gap-1 text-xs text-red-600 font-medium">
                   <AlertTriangle size={12} />
@@ -262,9 +264,9 @@ export default function FinanceConfirmations() {
           </div>
         </div>
 
-        <div className="flex items-center gap-4 flex-shrink-0">
+        <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-3 flex-shrink-0">
           <div className="text-right">
-            <div className="text-sm font-semibold text-gray-900">
+            <div className="text-sm font-semibold text-gray-900 tabular-nums">
               {fmtOrd(remaining, order)}
             </div>
             <div className="text-xs text-gray-400">
@@ -273,24 +275,24 @@ export default function FinanceConfirmations() {
           </div>
           <StatusBadge status={order.status} />
           <button
+            type="button"
             onClick={() => { setEmailOrder(order); setEmailType(type); }}
-            className="inline-flex items-center justify-center w-8 h-8 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+            className={btnIcon}
             title="Send Payment Reminder"
-            aria-label="Send payment reminder"
+            aria-label={`Send payment reminder for ${order.id}`}
           >
-            <Mail size={14} />
+            <Mail size={15} aria-hidden="true" />
           </button>
           {canHold && (
-            <button onClick={() => handlePutOnHold(order)} disabled={updateStatusMut.isPending} data-action="hold"
-              className="inline-flex items-center gap-1 px-2.5 py-1.5 border border-gray-200 text-gray-600 text-xs font-medium rounded-lg hover:border-red-300 hover:text-red-700 disabled:opacity-50"
+            <button type="button" onClick={() => handlePutOnHold(order)} disabled={updateStatusMut.isPending} data-action="hold"
+              className={btnRowSecondary}
               title="Put the order on hold (cancels it for a payment issue)">
-              <PauseCircle size={13} /> Hold
+              <PauseCircle size={13} aria-hidden="true" /> Hold
             </button>
           )}
           {canRecord && (
-            <button onClick={() => openReceipt(order, type)} data-action="receive"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 transition-colors">
-              <CheckCircle size={14} />
+            <button type="button" onClick={() => openReceipt(order, type)} data-action="receive" className={btnRowPrimary}>
+              <CheckCircle size={14} aria-hidden="true" />
               Record receipt
             </button>
           )}
@@ -342,14 +344,14 @@ export default function FinanceConfirmations() {
       </div>
 
       {/* Pending export receipts — Finance verifies FX + confirms (item 14) */}
-      <div className="bg-white rounded-xl shadow-sm p-5 border border-amber-200">
+      <div className="bg-white rounded-xl p-5 border border-amber-200">
         <div className="flex items-center gap-2 mb-4">
           <Clock size={16} className="text-amber-500" />
-          <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">Pending Finance Confirmation</h2>
+          <h2 className="text-sm font-semibold text-gray-900">Pending Finance Confirmation</h2>
           <span className="ml-auto text-xs text-gray-400">{pendingReceipts.length} receipt{pendingReceipts.length !== 1 ? 's' : ''}</span>
         </div>
         {pendingReceipts.length === 0 ? (
-          <div className="text-center py-6 text-gray-400 text-sm">No receipts awaiting confirmation.</div>
+          <EmptyLine icon={CheckCircle}>No receipts awaiting confirmation.</EmptyLine>
         ) : (
           <div className="space-y-2">
             {pendingReceipts.map((p) => {
@@ -380,24 +382,22 @@ export default function FinanceConfirmations() {
                   <div className="flex items-center gap-2">
                     {isForeign && (
                       <div className="text-right">
-                        <label className="block text-[10px] text-gray-400 uppercase">FX rate</label>
+                        <label className="block text-xs text-gray-500 uppercase">FX rate</label>
                         <input type="number" step="0.0001" value={fxByPayment[p.id] ?? (p.fxRate || '')}
                           onChange={(e) => setFxByPayment((s) => ({ ...s, [p.id]: e.target.value }))}
-                          placeholder="rate" aria-label="FX rate" className="w-24 px-2 py-1 border border-gray-300 rounded text-sm text-right" />
+                          placeholder="rate" aria-label="FX rate" className="w-24 px-2 min-h-10 md:min-h-8 border border-gray-300 rounded-lg text-sm text-right tabular-nums focus:outline-none focus:ring-2 focus:ring-blue-500" />
                       </div>
                     )}
                     <div className="text-right text-xs text-gray-500 w-28">
-                      <span className="block text-[10px] uppercase text-gray-400">PKR</span>
+                      <span className="block text-xs uppercase text-gray-500">PKR</span>
                       {fmtPKR(pkr)}
                     </div>
                     {canConfirm && (<>
-                    <button onClick={() => confirmPending(p)} disabled={confirmReceiptMut.isPending} data-action="confirm-receipt"
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 text-white text-xs font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-50">
-                      <CheckCircle size={14} /> Confirm
-                    </button>
-                    <button onClick={() => rejectPending(p)} disabled={rejectReceiptMut.isPending}
-                      className="disabled:opacity-50 inline-flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 text-gray-600 text-xs font-medium rounded-lg hover:bg-gray-50">
+                    <button type="button" onClick={() => rejectPending(p)} disabled={rejectReceiptMut.isPending} className={btnRowQuiet}>
                       Reject
+                    </button>
+                    <button type="button" onClick={() => confirmPending(p)} disabled={confirmReceiptMut.isPending} data-action="confirm-receipt" className={btnRowPrimary}>
+                      <CheckCircle size={14} aria-hidden="true" /> Confirm
                     </button>
                     </>)}
                   </div>
@@ -410,7 +410,7 @@ export default function FinanceConfirmations() {
 
       {/* Financial Summary KPIs */}
       <div className="kpi-grid">
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+        <div className="bg-white rounded-xl border border-gray-200 p-4">
           <div className="flex items-center gap-2 mb-1">
             <DollarSign size={16} className="text-blue-500" />
             <span className="text-xs font-medium text-gray-500 uppercase">Total Receivables</span>
@@ -418,7 +418,7 @@ export default function FinanceConfirmations() {
           <p className="text-xl font-bold text-gray-900">{cards.fmt(cards.receivables)}</p>
           <p className="text-xs text-gray-400 mt-0.5">across {cards.subCount} {canViewExport ? 'orders' : 'receivables'}</p>
         </div>
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+        <div className="bg-white rounded-xl border border-gray-200 p-4">
           <div className="flex items-center gap-2 mb-1">
             <CheckCircle size={16} className="text-emerald-500" />
             <span className="text-xs font-medium text-gray-500 uppercase">Total Received</span>
@@ -431,7 +431,7 @@ export default function FinanceConfirmations() {
             />
           </div>
         </div>
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+        <div className="bg-white rounded-xl border border-gray-200 p-4">
           <div className="flex items-center gap-2 mb-1">
             <Clock size={16} className="text-amber-500" />
             <span className="text-xs font-medium text-gray-500 uppercase">Outstanding</span>
@@ -441,7 +441,7 @@ export default function FinanceConfirmations() {
             {cards.receivables > 0 ? ((cards.outstanding / cards.receivables) * 100).toFixed(1) : 0}% of receivables
           </p>
         </div>
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+        <div className="bg-white rounded-xl border border-gray-200 p-4">
           <div className="flex items-center gap-2 mb-1">
             <TrendingUp size={16} className="text-purple-500" />
             <span className="text-xs font-medium text-gray-500 uppercase">Collection Rate</span>
@@ -456,10 +456,10 @@ export default function FinanceConfirmations() {
       {canViewExport && (<>
       {/* Overdue Collections */}
       {overdueCollections.length > 0 && (
-        <div className="bg-white rounded-xl shadow-sm p-5">
+        <div className="bg-white rounded-xl p-5">
           <div className="flex items-center gap-2 mb-4">
             <AlertTriangle size={16} className="text-red-500" />
-            <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">
+            <h2 className="text-sm font-semibold text-gray-900">
               Overdue Collections
             </h2>
             <span className="ml-auto text-xs text-red-500 font-medium">
@@ -473,10 +473,10 @@ export default function FinanceConfirmations() {
       )}
 
       {/* Pending Advance Confirmations */}
-      <div className="bg-white rounded-xl shadow-sm p-5">
+      <div className="bg-white rounded-xl p-5">
         <div className="flex items-center gap-2 mb-4">
           <Banknote size={16} className="text-amber-500" />
-          <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">
+          <h2 className="text-sm font-semibold text-gray-900">
             Pending Advance Confirmations
           </h2>
           <span className="ml-auto text-xs text-gray-400">
@@ -493,10 +493,10 @@ export default function FinanceConfirmations() {
       </div>
 
       {/* Pending Balance Confirmations */}
-      <div className="bg-white rounded-xl shadow-sm p-5">
+      <div className="bg-white rounded-xl p-5">
         <div className="flex items-center gap-2 mb-4">
           <CreditCard size={16} className="text-amber-500" />
-          <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">
+          <h2 className="text-sm font-semibold text-gray-900">
             Pending Balance Confirmations
           </h2>
           <span className="ml-auto text-xs text-gray-400">
@@ -514,10 +514,10 @@ export default function FinanceConfirmations() {
 
       {/* Partial Payments */}
       {partialPayments.length > 0 && (
-        <div className="bg-white rounded-xl shadow-sm p-5">
+        <div className="bg-white rounded-xl p-5">
           <div className="flex items-center gap-2 mb-4">
             <Receipt size={16} className="text-purple-500" />
-            <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">
+            <h2 className="text-sm font-semibold text-gray-900">
               Partial Payments
             </h2>
             <span className="ml-auto text-xs text-gray-400">
@@ -577,10 +577,10 @@ export default function FinanceConfirmations() {
       )}
 
       {/* Accounts Receivable Summary */}
-      <div className="bg-white rounded-xl shadow-sm p-5">
+      <div className="bg-white rounded-xl p-5">
         <div className="flex items-center gap-2 mb-4">
           <FileText size={16} className="text-indigo-500" />
-          <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">
+          <h2 className="text-sm font-semibold text-gray-900">
             Accounts Receivable — All Orders
           </h2>
         </div>

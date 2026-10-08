@@ -18,6 +18,8 @@ import { useAuth } from '../../../context/AuthContext';
 import { useFinanceDrawers } from '../drawers/drawersContext';
 import StatusBadge from '../../../shared/components/StatusBadge';
 import { fmtMoney, fmtDate, fmtDateTime } from '../../../shared/utils/format';
+import { EmptyLine, InlineError } from '../components/FinanceUI';
+import { btnPrimary, btnSecondary, th } from '../utils/uiClasses';
 
 // Statements are shown in the party's transaction currency (export parties are
 // USD; mill/local are PKR), as returned by the backend's `currency` field.
@@ -84,7 +86,7 @@ export default function PartyLedger() {
     return p;
   }, [rangeParams]);
 
-  const { data: statement, isLoading: stmtLoading, isError, error } = useQuery({
+  const { data: statement, isLoading: stmtLoading, isError, error, refetch: refetchStatement } = useQuery({
     queryKey: ['party-statement', mode, partyId, stmtParams],
     enabled: !!partyId,
     queryFn: async () => {
@@ -134,20 +136,22 @@ export default function PartyLedger() {
       {/* ─── Controls ───────────────────────────────────────────── */}
       <div className="flex flex-col sm:flex-row sm:items-end gap-3 no-print">
         {/* Customer / Supplier toggle */}
-        <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-0.5">
+        <div className="inline-flex self-start rounded-lg border border-gray-200 bg-gray-50 p-0.5" role="group" aria-label="Party type">
           <button
+            type="button" aria-pressed={mode === 'customer'}
             onClick={() => switchMode('customer')}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+            className={`inline-flex items-center gap-1.5 px-3 min-h-10 sm:min-h-9 text-sm font-medium rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
               mode === 'customer' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'
             }`}>
-            <Users size={15} /> Customer
+            <Users size={15} aria-hidden="true" /> Customer
           </button>
           <button
+            type="button" aria-pressed={mode === 'supplier'}
             onClick={() => switchMode('supplier')}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+            className={`inline-flex items-center gap-1.5 px-3 min-h-10 sm:min-h-9 text-sm font-medium rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
               mode === 'supplier' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'
             }`}>
-            <Truck size={15} /> Supplier
+            <Truck size={15} aria-hidden="true" /> Supplier
           </button>
         </div>
 
@@ -165,35 +169,32 @@ export default function PartyLedger() {
         </div>
 
         {partyId && (
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
+            {/* Secondary actions first, the one primary (Record) at the right. */}
+            <button type="button" onClick={() => setDraftOpen(true)} className={`${btnSecondary} no-print`}>
+              <Sparkles size={14} aria-hidden="true" /> Draft Email
+            </button>
+            <button type="button" onClick={handlePrint} className={btnSecondary}>
+              <Printer size={14} aria-hidden="true" /> Print
+            </button>
             {/* The allocator records one payment per open invoice through
                 POST /finance/payments — finance.confirm_payment or milling.edit. */}
             {canPay && (
-              <button onClick={() => setPayOpen(true)} data-action={mode === 'customer' ? 'receive' : 'pay'}
-                className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm">
-                {mode === 'customer' ? <Wallet size={14} /> : <HandCoins size={14} />}
+              <button type="button" onClick={() => setPayOpen(true)} data-action={mode === 'customer' ? 'receive' : 'pay'} className={btnPrimary}>
+                {mode === 'customer' ? <Wallet size={14} aria-hidden="true" /> : <HandCoins size={14} aria-hidden="true" />}
                 {mode === 'customer' ? 'Record Receipt' : 'Record Payment'}
               </button>
             )}
-            <button onClick={() => setDraftOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-violet-700 bg-violet-50 border border-violet-200 hover:bg-violet-100 rounded-lg shadow-sm no-print">
-              <Sparkles size={14} /> Draft Email
-            </button>
-            <button onClick={handlePrint}
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm">
-              <Printer size={14} /> Print
-            </button>
           </div>
         )}
       </div>
 
       {/* ─── Empty state ────────────────────────────────────────── */}
       {!partyId && (
-        <div className="rounded-2xl border border-dashed border-gray-300 bg-gray-50/50 p-12 text-center">
-          <BookUser size={32} className="mx-auto text-gray-300 mb-3" />
-          <p className="text-sm text-gray-500">
+        <div className="rounded-xl border border-dashed border-gray-300 bg-white">
+          <EmptyLine icon={BookUser}>
             Pick a {mode} above to see its ledger — opening balance, every posted transaction, and the running balance.
-          </p>
+          </EmptyLine>
         </div>
       )}
 
@@ -216,25 +217,15 @@ export default function PartyLedger() {
             </div>
           </div>
 
-          {/* Hero band */}
-          <div className="rounded-2xl bg-gradient-to-r from-slate-800 via-slate-700 to-slate-600 p-5 sm:p-6 text-white shadow-sm relative overflow-hidden no-print">
-            <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(circle at 80% 20%, white 0%, transparent 60%)' }} />
-            <div className="relative flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2 text-xs uppercase tracking-wider opacity-80 mb-1">
-                  <BookUser size={14} /> {mode === 'customer' ? 'Customer' : 'Supplier'} ledger
-                </div>
-                <div className="text-2xl sm:text-3xl font-bold leading-tight truncate" title={selectedParty?.name || ''}>{selectedParty?.name || '—'}</div>
-                <div className="text-xs opacity-90 mt-1">
-                  {transactions.length} {transactions.length === 1 ? 'transaction' : 'transactions'} in selected period
-                </div>
-              </div>
-              <div className="flex flex-col items-start sm:items-end gap-1">
-                <span className="text-[11px] uppercase tracking-wider opacity-80">{balanceLabel} (closing)</span>
-                <span className="text-2xl font-bold tabular-nums">{fmtCur(closing, cur)}</span>
-                {showUsd && <span className="text-xs opacity-70 tabular-nums">≈ {fmtCur(closingUsd, 'USD')}</span>}
-              </div>
-            </div>
+          {/* Whose ledger this is — a plain heading; the closing balance is the last tile below */}
+          <div className="no-print min-w-0">
+            <p className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-gray-500">
+              <BookUser size={14} className="text-gray-400" aria-hidden="true" /> {mode === 'customer' ? 'Customer' : 'Supplier'} ledger
+            </p>
+            <h2 className="text-xl sm:text-2xl font-semibold text-gray-900 truncate" title={selectedParty?.name || ''}>{selectedParty?.name || '—'}</h2>
+            <p className="text-sm text-gray-500">
+              {transactions.length} {transactions.length === 1 ? 'transaction' : 'transactions'} in selected period
+            </p>
           </div>
 
           {/* KPI tiles — screen only, excluded from the printed ledger */}
@@ -251,16 +242,16 @@ export default function PartyLedger() {
 
           {/* Section heading + Statement | Allocation toggle */}
           <div className="flex items-center justify-between gap-2 pt-1">
-            <div className="flex items-center gap-2 text-sm text-gray-700">
-              <FileText size={15} className="text-blue-500" />
-              <span className="font-semibold">{view === 'allocation' ? 'Invoice allocation' : 'Transactions'}</span>
-              <span className="text-xs text-gray-400 hidden sm:inline">
+            <div className="flex items-center gap-2 text-sm text-gray-700 min-w-0">
+              <FileText size={16} className="text-gray-400 shrink-0" aria-hidden="true" />
+              <h3 className="font-semibold text-gray-900">{view === 'allocation' ? 'Invoice allocation' : 'Transactions'}</h3>
+              <span className="text-xs text-gray-500 hidden sm:inline">
                 {view === 'allocation' ? '— each invoice with the payments applied.' : '— posted journal lines, oldest first.'}
               </span>
             </div>
-            <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-0.5 text-xs no-print">
-              <button onClick={() => setView('statement')} className={`px-2.5 py-1 rounded-md font-medium ${view === 'statement' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Statement</button>
-              <button onClick={() => setView('allocation')} className={`px-2.5 py-1 rounded-md font-medium ${view === 'allocation' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Allocation</button>
+            <div className="inline-flex shrink-0 rounded-lg border border-gray-200 bg-gray-50 p-0.5 text-xs no-print" role="group" aria-label="Ledger view">
+              <button type="button" aria-pressed={view === 'statement'} onClick={() => setView('statement')} className={`px-3 min-h-10 sm:min-h-8 rounded-md font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${view === 'statement' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Statement</button>
+              <button type="button" aria-pressed={view === 'allocation'} onClick={() => setView('allocation')} className={`px-3 min-h-10 sm:min-h-8 rounded-md font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${view === 'allocation' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Allocation</button>
             </div>
           </div>
 
@@ -271,23 +262,22 @@ export default function PartyLedger() {
           {/* Ledger table */}
           <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
             {stmtLoading ? (
-              <div className="p-10 text-center text-sm text-gray-400">Loading statement…</div>
+              <div className="p-4 space-y-2 animate-pulse" aria-busy="true">
+                <span className="sr-only">Loading statement…</span>
+                {[0, 1, 2, 3, 4].map((i) => <div key={i} className="h-9 bg-gray-100 rounded" />)}
+              </div>
             ) : isError ? (
-              <div className="p-10 text-center text-sm text-red-500">
-                Couldn’t load statement{error?.message ? ` — ${error.message}` : ''}.
+              <div className="p-4">
+                <InlineError message={`Couldn’t load statement${error?.message ? ` — ${error.message}` : ''}.`} onRetry={refetchStatement} />
               </div>
             ) : (
-              <div className="overflow-x-auto mobile-cards">
+              <div className={`overflow-x-auto mobile-cards ${transactions.length > 15 ? 'md:max-h-[75vh] md:overflow-y-auto' : ''}`}>
                 <table className="w-full text-sm min-w-[720px]">
                   <thead>
-                    <tr className="border-b border-gray-200 bg-gray-50 text-xs uppercase text-gray-500">
-                      <th className="text-left py-2.5 px-3 font-semibold">Date</th>
-                      <th className="text-left py-2.5 px-3 font-semibold">Type</th>
-                      <th className="text-left py-2.5 px-3 font-semibold">Voucher No.</th>
-                      <th className="text-left py-2.5 px-3 font-semibold">Description</th>
-                      <th className="text-right py-2.5 px-3 font-semibold">Debit</th>
-                      <th className="text-right py-2.5 px-3 font-semibold">Credit</th>
-                      <th className="text-right py-2.5 px-3 font-semibold">Balance</th>
+                    <tr>
+                      {[['Date'], ['Type'], ['Voucher No.'], ['Description'], ['Debit', 'text-right'], ['Credit', 'text-right'], ['Balance', 'text-right']].map(([label, align = 'text-left']) => (
+                        <th key={label} className={`${th} ${align} md:sticky md:top-0 md:z-[1]`}>{label}</th>
+                      ))}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">

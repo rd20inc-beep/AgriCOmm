@@ -100,6 +100,15 @@ const statusStyles = {
   'Snoozed': YELLOW,
   'Escalated': RED,
   'Acknowledged': BLUE,
+  // Cheques
+  'Cleared': GREEN,
+  'Uncleared': AMBER,
+  // Profit accuracy (Accounting › Profit)
+  'Exact': GREEN,
+  'Estimated': BLUE,
+  'Operational Only': AMBER,
+  'Not Costed': RED,
+  'Missing Prices': RED,
   // Inventory: lot, stock-count, purchase-requirement and sample statuses
   'Available': GREEN,
   'Reserved': AMBER,

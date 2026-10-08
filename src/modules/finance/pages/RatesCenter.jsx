@@ -7,6 +7,8 @@ import { financeApi } from '../../../api/services';
 import { useApp } from '../../../context/AppContext';
 import PermissionGate from '../../../shared/components/PermissionGate';
 import { todayLocalISO, fmtDate, fmtNum, fmtMoney, fmtPKR } from '../../../shared/utils/format';
+import { HeadlineCard, TypeChip } from '../components/FinanceUI';
+import { btnPrimary, btnSecondary } from '../utils/uiClasses';
 
 // By-product grades a rate can be scoped to; blank means the product as a whole.
 // Finished rice and raw are priced per product, so they leave this empty.
@@ -98,9 +100,9 @@ export default function RatesCenter() {
     { key: 'rate', label: 'Rate', sortable: true, align: 'right', render: (v) => fmtNum(v, 2) },
     { key: 'effective_date', label: 'Effective Date', sortable: true, render: (v) => fmtDate(v) },
     { key: 'source_type', label: 'Source', render: (v) => (
-      <span className={`text-xs px-2 py-0.5 rounded-full ${v === 'manual' ? 'bg-blue-50 text-blue-700' : v === 'market' ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-50 text-gray-600'}`}>{v || 'manual'}</span>
+      <TypeChip className="capitalize">{v || 'manual'}</TypeChip>
     )},
-    { key: 'is_active', label: 'Active', render: (v) => v ? <Check size={14} className="text-emerald-500" /> : <span className="text-gray-300">—</span> },
+    { key: 'is_active', label: 'Active', render: (v) => v ? <span className="inline-flex items-center gap-1 text-xs text-emerald-700"><Check size={14} aria-hidden="true" /> Active</span> : <span className="text-gray-400">—</span> },
   ];
 
   const crColumns = [
@@ -111,61 +113,52 @@ export default function RatesCenter() {
     { key: 'currency', label: 'Currency', render: (v) => v || 'PKR' },
     { key: 'rateValue', label: 'Rate', sortable: true, align: 'right', render: (v, row) => fmtMoney(v, row.currency || 'PKR', { decimals: 2 }) },
     { key: 'effectiveDate', label: 'Effective', sortable: true, render: (v) => fmtDate(v) },
-    { key: 'isLocked', label: 'Locked', render: (v) => v ? <Check size={14} className="text-emerald-500" /> : '—' },
+    { key: 'isLocked', label: 'Locked', render: (v) => v ? <span className="inline-flex items-center gap-1 text-xs text-gray-700"><Lock size={13} aria-hidden="true" /> Locked</span> : '—' },
   ];
 
   const isFallback = latestFx.source === 'system_settings_fallback';
-  const heroGradient = isFallback
-    ? 'from-amber-600 via-amber-500 to-amber-500'
-    : 'from-violet-700 via-indigo-600 to-blue-600';
 
   const lockedCount = useMemo(() => commodityRates.filter(c => c.isLocked).length, [commodityRates]);
 
   return (
     <div className="space-y-5 pb-4">
-      {/* ─── HERO BAND ────────────────────────────────────────────── */}
-      <div className={`rounded-2xl bg-gradient-to-r ${heroGradient} p-5 sm:p-6 text-white shadow-sm relative overflow-hidden`}>
-        <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(circle at 80% 30%, white 0%, transparent 60%)' }} />
-        <div className="relative flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 text-xs uppercase tracking-wider opacity-80 mb-1">
-              <DollarSign size={14} /> Current USD / PKR
-            </div>
-            <div className="text-3xl sm:text-4xl font-bold leading-tight tabular-nums">
-              {latestFx.rate ? fmtPKR(latestFx.rate, { decimals: 2 }) : 'Not set'}
-            </div>
-            <div className="text-xs opacity-90 mt-1">
-              {latestFx.effectiveDate ? <>Effective {fmtDate(latestFx.effectiveDate)}</> : 'No FX history yet'}
-              {' · '}{fxRates.length} historical {fxRates.length === 1 ? 'entry' : 'entries'}
-              {' · '}{commodityRates.length} commodity {commodityRates.length === 1 ? 'rate' : 'rates'}
-            </div>
-          </div>
-          <div className="flex flex-col items-start sm:items-end gap-1.5 text-[11px]">
-            <span className={`inline-flex items-center gap-1.5 font-semibold uppercase tracking-wider px-3 py-1.5 rounded-full ${isFallback ? 'bg-white/15 ring-1 ring-white/30' : 'bg-emerald-500/20 ring-1 ring-emerald-300/30'}`}>
-              {isFallback ? <AlertTriangle size={12} /> : <Check size={12} />}
-              {isFallback ? 'Fallback rate — add proper FX' : `Source: ${latestFx.source || 'manual'}`}
+      {/* ─── Headline: the rate in use, and whether it is a real one ─── */}
+      <HeadlineCard
+        icon={DollarSign}
+        label="Current USD / PKR"
+        value={latestFx.rate ? fmtPKR(latestFx.rate, { decimals: 2 }) : 'Not set'}
+        sub={<>
+          {latestFx.effectiveDate ? <>Effective {fmtDate(latestFx.effectiveDate)}</> : 'No FX history yet'}
+          {' · '}{fxRates.length} historical {fxRates.length === 1 ? 'entry' : 'entries'}
+          {' · '}{commodityRates.length} commodity {commodityRates.length === 1 ? 'rate' : 'rates'}
+        </>}
+        right={<>
+          {isFallback ? (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold bg-amber-50 text-amber-800 ring-1 ring-inset ring-amber-200" data-testid="fx-fallback">
+              <AlertTriangle size={13} aria-hidden="true" /> Fallback rate — add proper FX
             </span>
-            {/* Adding / refreshing rates is finance.confirm_payment (finance.routes.js). */}
-            <PermissionGate module="finance" action="confirm_payment">
-              <button onClick={handleRefreshFx} data-action="refresh-fx"
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-white/15 hover:bg-white/25 ring-1 ring-white/30 transition-colors">
-                <RefreshCw size={12} /> Refresh open orders
-              </button>
-            </PermissionGate>
-          </div>
-        </div>
-      </div>
+          ) : (
+            <TypeChip icon={Check}>Source: {latestFx.source || 'manual'}</TypeChip>
+          )}
+          {/* Adding / refreshing rates is finance.confirm_payment (finance.routes.js). */}
+          <PermissionGate module="finance" action="confirm_payment">
+            <button type="button" onClick={handleRefreshFx} data-action="refresh-fx" className={btnSecondary}>
+              <RefreshCw size={14} aria-hidden="true" /> Refresh open orders
+            </button>
+          </PermissionGate>
+        </>}
+      />
 
       {/* Sub-tabs */}
-      <div className="flex items-center gap-3">
-        <div className="inline-flex bg-white border border-gray-200 rounded-lg p-0.5 shadow-sm">
+      <div className="flex items-center gap-3 overflow-x-auto scrollbar-hide">
+        <div className="inline-flex bg-white border border-gray-200 rounded-lg p-0.5" role="group" aria-label="Rates">
           {SUB_TABS.map(t => {
             const Icon = t.icon;
             return (
-              <button key={t.key} onClick={() => setSubTab(t.key)}
-                className={`flex items-center gap-1.5 px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
+              <button key={t.key} type="button" aria-pressed={subTab === t.key} onClick={() => setSubTab(t.key)}
+                className={`flex items-center gap-1.5 px-4 min-h-10 sm:min-h-9 text-sm font-medium rounded-md whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
                   subTab === t.key ? 'bg-gray-900 text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'
-                }`}><Icon size={14} /> {t.label}</button>
+                }`}><Icon size={14} aria-hidden="true" /> {t.label}</button>
             );
           })}
         </div>
@@ -176,8 +169,8 @@ export default function RatesCenter() {
           {/* Actions */}
           <PermissionGate module="finance" action="confirm_payment">
             <div className="flex gap-2">
-              <button onClick={() => setShowFxForm(!showFxForm)} data-action="add-fx-rate"
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">
+              <button type="button" onClick={() => setShowFxForm(!showFxForm)} data-action="add-fx-rate" aria-expanded={showFxForm}
+                className={showFxForm ? btnSecondary : btnPrimary}>
                 <Plus size={14} /> Add FX Rate
               </button>
             </div>
@@ -210,7 +203,7 @@ export default function RatesCenter() {
                   <option value="manual">Manual</option><option value="market">Market</option><option value="imported">Imported</option>
                 </select>
               </div>
-              <button type="submit" disabled={savingFx} className="bg-blue-600 text-white rounded-lg px-4 py-1.5 text-sm font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed">{savingFx ? 'Saving…' : 'Save'}</button>
+              <button type="submit" disabled={savingFx} className={btnPrimary}>{savingFx ? 'Saving…' : 'Save'}</button>
             </form>
           )}
 
@@ -232,8 +225,8 @@ export default function RatesCenter() {
 
           <PermissionGate module="finance" action="confirm_payment">
             <div className="flex gap-2">
-              <button onClick={() => setShowCrForm(!showCrForm)} data-action="add-commodity-rate"
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">
+              <button type="button" onClick={() => setShowCrForm(!showCrForm)} data-action="add-commodity-rate" aria-expanded={showCrForm}
+                className={showCrForm ? btnSecondary : btnPrimary}>
                 <Plus size={14} /> Add Rate
               </button>
             </div>
@@ -289,7 +282,7 @@ export default function RatesCenter() {
                 <input type="date" required value={crForm.effectiveDate} onChange={e => setCrForm({ ...crForm, effectiveDate: e.target.value })}
                   className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
               </div>
-              <button type="submit" disabled={savingCr} className="bg-blue-600 text-white rounded-lg px-4 py-1.5 text-sm font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed">{savingCr ? 'Saving…' : 'Save'}</button>
+              <button type="submit" disabled={savingCr} className={btnPrimary}>{savingCr ? 'Saving…' : 'Save'}</button>
             </form>
           )}
 

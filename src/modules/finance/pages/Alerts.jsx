@@ -6,11 +6,15 @@ import { useFinanceAlerts } from '../../../api/queries';
 import { alertSeverity } from '../utils/alerts';
 import { financeHref } from '../financeNav';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
+import { EmptyLine } from '../components/FinanceUI';
+import { btnRowSecondary } from '../utils/uiClasses';
 
+// Same look as Home's Needs Attention: a white card with a coloured edge, a
+// different icon per severity and the severity in words — never colour alone.
 const SEVERITY_CONFIG = {
-  danger:  { bg: 'bg-red-50',   border: 'border-red-200',   dot: 'bg-red-500',   icon: AlertTriangle, iconColor: 'text-red-500' },
-  warning: { bg: 'bg-amber-50', border: 'border-amber-200', dot: 'bg-amber-500', icon: AlertCircle,   iconColor: 'text-amber-500' },
-  info:    { bg: 'bg-blue-50',  border: 'border-blue-200',  dot: 'bg-blue-500',  icon: Info,          iconColor: 'text-blue-500' },
+  danger:  { edge: 'border-l-red-500',   icon: AlertTriangle, iconColor: 'text-red-600',   word: 'Critical' },
+  warning: { edge: 'border-l-amber-500', icon: AlertCircle,   iconColor: 'text-amber-600', word: 'Warning' },
+  info:    { edge: 'border-l-blue-400',  icon: Info,          iconColor: 'text-blue-600',  word: 'Info' },
 };
 
 // 'Resolved' was removed — alerts are computed from live conditions
@@ -66,14 +70,14 @@ export default function Alerts() {
       </div>
 
       {/* Filter tabs */}
-      <div className="flex gap-1 bg-gray-100 rounded-lg p-1 w-fit">
+      <div className="flex flex-wrap gap-1 bg-gray-100 rounded-lg p-1 w-fit" role="group" aria-label="Severity">
         {FILTER_TABS.map(t => (
-          <button key={t} onClick={() => setFilter(t)}
-            className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+          <button key={t} type="button" aria-pressed={filter === t} onClick={() => setFilter(t)}
+            className={`px-3 min-h-10 sm:min-h-8 text-sm font-medium rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
               filter === t ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'
             }`}>{t}
             {t !== 'All' && (
-              <span className="ml-1 text-xs">{
+              <span className="ml-1 text-xs tabular-nums">{
                 t === 'Critical' ? criticalCount : t === 'Warning' ? warningCount : infoCount
               }</span>
             )}
@@ -84,8 +88,8 @@ export default function Alerts() {
       {/* Alert list */}
       <div className="space-y-3">
         {filtered.length === 0 && (
-          <div className="bg-white rounded-xl border border-gray-200 p-10 text-center text-gray-400">
-            No alerts match the current filter
+          <div className="bg-white rounded-xl border border-gray-200">
+            <EmptyLine icon={Bell}>No alerts match the current filter.</EmptyLine>
           </div>
         )}
         {filtered.map((alert, i) => {
@@ -94,27 +98,32 @@ export default function Alerts() {
           return (
             <div key={alert.id || i}
               onClick={() => alert.link && navigate(financeHref(alert.link, rangeKey))}
-              className={`${config.bg} border ${config.border} rounded-xl p-4 ${alert.link ? 'cursor-pointer hover:shadow-sm transition-shadow' : ''}`}>
-              <div className="flex items-start gap-3">
-                <Icon size={18} className={`${config.iconColor} mt-0.5 flex-shrink-0`} />
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <h4 className="text-sm font-semibold text-gray-900">{alert.title}</h4>
-                    <span className={`w-2 h-2 rounded-full ${config.dot}`} />
-                    {alert.link && <ArrowUpRight size={13} className="text-gray-400" />}
+              onKeyDown={(e) => { if (alert.link && (e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget) { e.preventDefault(); navigate(financeHref(alert.link, rangeKey)); } }}
+              role={alert.link ? 'link' : undefined} tabIndex={alert.link ? 0 : undefined}
+              className={`bg-white border border-gray-200 border-l-4 ${config.edge} rounded-xl p-4 ${alert.link ? 'cursor-pointer hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500' : ''}`}>
+              <div className="flex flex-col sm:flex-row sm:items-start gap-3">
+                <div className="flex items-start gap-3 flex-1 min-w-0">
+                  <Icon size={18} className={`${config.iconColor} mt-0.5 flex-shrink-0`} aria-hidden="true" />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <h4 className="text-sm font-semibold text-gray-900">{alert.title}</h4>
+                      <span className={`text-xs font-medium ${config.iconColor}`}>{config.word}</span>
+                      {alert.link && <ArrowUpRight size={14} className="text-gray-400" aria-hidden="true" />}
+                    </div>
+                    <p className="text-sm text-gray-600">{alert.message}</p>
+                    {alert.date && (
+                      <p className="text-xs text-gray-500 mt-1 flex items-center gap-1">
+                        <Clock size={12} aria-hidden="true" /> {alert.date}
+                      </p>
+                    )}
                   </div>
-                  <p className="text-sm text-gray-600">{alert.message}</p>
-                  {alert.date && (
-                    <p className="text-xs text-gray-400 mt-1 flex items-center gap-1">
-                      <Clock size={11} /> {alert.date}
-                    </p>
-                  )}
                 </div>
-                <div className="flex items-center gap-1 flex-shrink-0">
+                <div className="flex items-center justify-end gap-1 flex-shrink-0">
                   <button
+                    type="button"
                     onClick={(e) => { e.stopPropagation(); handleDismiss(alert.id); }}
                     title="Hide this alert in the current session. Alerts are recomputed on refresh — fix the underlying condition to make it go away."
-                    className="text-xs px-3 py-1.5 rounded-lg bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 font-medium">
+                    className={btnRowSecondary}>
                     Dismiss
                   </button>
                 </div>
