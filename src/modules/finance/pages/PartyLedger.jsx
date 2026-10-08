@@ -15,6 +15,7 @@ import { favStar } from '../../../shared/utils/favorites';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
+import { useFinanceDrawers } from '../drawers/drawersContext';
 import StatusBadge from '../../../shared/components/StatusBadge';
 import { fmtMoney, fmtDate, fmtDateTime } from '../../../shared/utils/format';
 
@@ -36,6 +37,7 @@ const STATUS_ROW = { Paid: 'bg-emerald-50', Partial: 'bg-amber-50', Unpaid: 'bg-
 export default function PartyLedger() {
   const { companyProfileData } = useApp();
   const { hasPermission } = useAuth();
+  const drawers = useFinanceDrawers();
   const canPay = hasPermission('finance', 'confirm_payment') || hasPermission('milling', 'edit');
   const { queryParams: rangeParams } = useFinanceDateRange();
   // Mode + selected party live in the URL (?type=customer|supplier&id=123)
@@ -316,7 +318,10 @@ export default function PartyLedger() {
                             <td data-label="Type" className="mob-hide py-2.5 px-3 text-xs text-gray-600 whitespace-nowrap">{t.vch_type || '—'}</td>
                             <td data-label="Voucher No." className="py-2.5 px-3 text-xs whitespace-nowrap">
                               {t.ref_no
-                                ? (href
+                                ? (/^PAY-/i.test(t.ref_no) && drawers?.openTransaction
+                                    // A payment line opens its Transaction drawer.
+                                    ? <button type="button" onClick={() => drawers.openTransaction('payment', t.ref_no)} className="text-blue-600 hover:underline font-medium">{t.ref_no}</button>
+                                    : href
                                     ? <Link to={href} className="text-blue-600 hover:underline font-medium">{t.ref_no}</Link>
                                     : <span className="text-gray-700">{t.ref_no}</span>)
                                 : <span className="text-gray-400">—</span>}
