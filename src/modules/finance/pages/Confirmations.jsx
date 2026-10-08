@@ -11,22 +11,20 @@ import {
   Banknote,
   FileText,
   TrendingUp,
-  ArrowRight,
   Receipt,
   Mail,
   Landmark,
 } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
-import { useUpdateOrderStatus, useRecordExportReceipt, usePendingExportReceipts, useConfirmExportReceipt, useRejectExportReceipt, useReceivables } from '../../../api/queries';
-import Modal from '../../../components/Modal';
+import { useUpdateOrderStatus, usePendingExportReceipts, useConfirmExportReceipt, useRejectExportReceipt, useReceivables } from '../../../api/queries';
+import { useFinanceDrawers } from '../drawers/drawersContext';
+import { canRecordVariant } from '../../../components/payments/paymentVariants';
 import StatusBadge from '../../../shared/components/StatusBadge';
-import FieldError from '../../../shared/components/FieldError';
 import EmailComposer from '../../../components/EmailComposer';
-import { favStar } from '../../../shared/utils/favorites';
 import useConfirm from '../../../hooks/useConfirm';
 import { isBalanceDue } from '../../exportOrders/components/constants';
-import { todayLocalISO, fmtUSD, fmtPKR, fmtMoney, fmtDate, fmtDateTime } from '../../../shared/utils/format';
+import { fmtUSD, fmtPKR, fmtMoney, fmtDate } from '../../../shared/utils/format';
 
 // Amount in the order's own currency (an EUR order must not read — or be
 // dunned — in dollars). Export orders default to USD.
@@ -40,11 +38,19 @@ function daysSince(dateStr) {
 }
 
 export default function FinanceConfirmations() {
-  const { exportOrders, addToast, settings, bankAccountsList, customersList = [] } = useApp();
+  const { exportOrders, addToast, settings, customersList = [] } = useApp();
   const { hasPermission } = useAuth();
   // Finance (payments-only) can't open export order pages — render order numbers
   // as plain text for them instead of an /export link that lands on Access Denied.
   const canViewExport = hasPermission('export_orders', 'view');
+  // What each button asks of the server: recording a receipt is
+  // export_orders.confirm_advance or finance.confirm_payment (record-receipt);
+  // confirming / rejecting one is finance.confirm_payment; holding an order
+  // is a status change, export_orders.approve.
+  const canRecord = canRecordVariant('receive_export', hasPermission);
+  const canConfirm = hasPermission('finance', 'confirm_payment');
+  const canHold = hasPermission('export_orders', 'approve');
+  const drawers = useFinanceDrawers();
   const [confirm, confirmDialog] = useConfirm();
   const orderRef = (id, cls = 'font-semibold text-blue-600 hover:text-blue-800') =>
     (canViewExport
@@ -68,7 +74,6 @@ export default function FinanceConfirmations() {
     return { expected, received, outstanding: Math.max(0, expected - received) };
   }, [receivables]);
 
-  const recordReceiptMut = useRecordExportReceipt();
   const updateStatusMut = useUpdateOrderStatus();
   // Item 14 — pending export receipts inbox (Finance verifies FX + confirms).
   const { data: pendingReceipts = [] } = usePendingExportReceipts();
@@ -76,19 +81,6 @@ export default function FinanceConfirmations() {
   const rejectReceiptMut = useRejectExportReceipt();
   const [fxByPayment, setFxByPayment] = useState({});
 
-  const [modalOpen, setModalOpen] = useState(false);
-  const [selectedOrder, setSelectedOrder] = useState(null);
-  const [milestoneType, setMilestoneType] = useState('advance');
-  const [formData, setFormData] = useState({
-    receivedAmount: 0,
-    date: todayLocalISO(),
-    paymentMethod: 'Bank Transfer',
-    bankAccount: '',
-    bankReference: '',
-    notes: '',
-  });
-  const [paymentHistory, setPaymentHistory] = useState([]);
-  const [formErrors, setFormErrors] = useState({});
   const [emailOrder, setEmailOrder] = useState(null);
   const [emailType, setEmailType] = useState('advance');
 
@@ -141,76 +133,46 @@ export default function FinanceConfirmations() {
     return { totalReceivables, totalReceived, totalOutstanding, totalContractValue };
   }, [exportOrders]);
 
-  // === MODAL HANDLERS ===
-
-  function openModal(order, type) {
-    setSelectedOrder(order);
-    setMilestoneType(type);
-    const expectedAmount = type === 'advance'
-      ? order.advanceExpected - order.advanceReceived
-      : order.balanceExpected - order.balanceReceived;
-    // #6 — preselect the order's bank account (still changeable per-payment).
-    const preBank = order.bankAccountId || order.bank_account_id || '';
-    const preAcct = (bankAccountsList || []).find(a => String(a.id) === String(preBank));
-    setFormData({
-      receivedAmount: Math.max(0, expectedAmount),
-      date: todayLocalISO(),
-      paymentMethod: 'Bank Transfer',
-      bankAccount: preAcct ? preAcct.name : '',
-      bankAccountId: preBank ? String(preBank) : '',
-      bankReference: '',
-      notes: '',
+  // === RECEIPT + HOLD ===
+  // Recording an advance / balance opens the shared Payment form (variant
+  // receive_export → POST /export-orders/:id/record-receipt): a PENDING
+  // receipt Finance confirms above with the rate the bank applied.
+  function openReceipt(order, type) {
+    const expected = type === 'advance' ? order.advanceExpected - order.advanceReceived : order.balanceExpected - order.balanceReceived;
+    drawers?.openPayment(null, {
+      variant: 'receive_export',
+      ctx: {
+        orderId: order.dbId || order.id, kind: type, currency: order.currency || 'USD',
+        outstanding: Math.max(0, Math.round(expected * 100) / 100),
+        bankAccountId: order.bankAccountId || order.bank_account_id || null,
+        fxRate: order.bookedFxRate || null,
+        party: { type: 'customer', id: order.customerId, name: order.customerName },
+        ref: `${order.id} · ${type === 'advance' ? 'Advance' : 'Balance'}`,
+        notes: `${type === 'advance' ? 'Advance' : 'Balance'} payment for ${order.id}`,
+      },
     });
-    setFormErrors({});
-    setModalOpen(true);
   }
 
-  function closeModal() {
-    setModalOpen(false);
-    setSelectedOrder(null);
-  }
-
-  function recordPayment(orderId, type, amount, method, reference, bankAccount) {
-    setPaymentHistory(prev => [{
-      id: Date.now(),
-      orderId,
-      type,
-      amount,
-      method,
-      reference,
-      bankAccount,
-      date: formData.date,
-      timestamp: fmtDateTime(new Date()),
-    }, ...prev]);
-  }
-
-  // Recording a receipt (full or partial) now SUBMITS a pending receipt; Finance
-  // confirms it below with the actual FX rate (item 14).
-  async function submitPendingReceipt(amount) {
-    if (!selectedOrder || recordReceiptMut.isPending) return;
-    if (isNaN(amount) || amount <= 0) { setFormErrors({ receivedAmount: 'Enter a valid amount' }); return; }
-    setFormErrors({});
-    const orderId = selectedOrder.dbId || selectedOrder.id;
+  async function handlePutOnHold(order) {
+    if (!order || updateStatusMut.isPending) return;
+    const ok = await confirm({
+      title: `Put ${order.id} on hold?`,
+      consequence: 'The order is cancelled for a payment issue. The reason is recorded on the order.',
+      reason: 'required',
+      confirmLabel: 'Put on hold',
+      cancelLabel: 'Go back',
+    });
+    if (!ok) return;
     try {
-      await recordReceiptMut.mutateAsync({
-        id: orderId,
-        data: {
-          kind: milestoneType,
-          amount,
-          payment_date: formData.date,
-          payment_method: formData.paymentMethod,
-          bank_account_id: formData.bankAccountId || null,
-          notes: formData.notes,
-        },
+      await updateStatusMut.mutateAsync({
+        id: order.dbId || order.id,
+        data: { status: 'Cancelled', notes: `Put on hold by Finance. Reason: ${ok.reason || 'Payment issue'}` },
       });
-      addToast(`${milestoneType === 'advance' ? 'Advance' : 'Balance'} of ${fmtOrd(amount, selectedOrder)} submitted — pending confirmation`);
+      addToast(`${order.id} cancelled due to payment hold`, 'warning');
     } catch (err) {
-      addToast(err?.data?.message || err?.message || 'Failed to submit receipt', 'error');
+      addToast(`Failed to update order: ${err.message || 'Server error'}`, 'error');
     }
-    closeModal();
   }
-  function handleConfirmReceipt() { return submitPendingReceipt(parseFloat(formData.receivedAmount)); }
-  function handleMarkPartial() { return submitPendingReceipt(parseFloat(formData.receivedAmount)); }
 
   // Finance confirms a PENDING receipt with the actual FX rate → posts it.
   async function confirmPending(p) {
@@ -242,20 +204,6 @@ export default function FinanceConfirmations() {
     } catch (err) {
       addToast(err?.data?.message || err?.message || 'Reject failed', 'error');
     }
-  }
-
-  async function handlePutOnHold() {
-    if (!selectedOrder || updateStatusMut.isPending) return;
-    try {
-      await updateStatusMut.mutateAsync({
-        id: selectedOrder.dbId || selectedOrder.id,
-        data: { status: 'Cancelled', notes: `Put on hold by Finance. Reason: ${formData.notes || 'Payment issue'}` },
-      });
-      addToast(`${selectedOrder.id} cancelled due to payment hold`, 'warning');
-    } catch (err) {
-      addToast(`Failed to update order: ${err.message || 'Server error'}`, 'error');
-    }
-    closeModal();
   }
 
   // === ROW RENDERER ===
@@ -332,13 +280,20 @@ export default function FinanceConfirmations() {
           >
             <Mail size={14} />
           </button>
-          <button
-            onClick={() => openModal(order, type)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 transition-colors"
-          >
-            <CheckCircle size={14} />
-            Confirm
-          </button>
+          {canHold && (
+            <button onClick={() => handlePutOnHold(order)} disabled={updateStatusMut.isPending} data-action="hold"
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 border border-gray-200 text-gray-600 text-xs font-medium rounded-lg hover:border-red-300 hover:text-red-700 disabled:opacity-50"
+              title="Put the order on hold (cancels it for a payment issue)">
+              <PauseCircle size={13} /> Hold
+            </button>
+          )}
+          {canRecord && (
+            <button onClick={() => openReceipt(order, type)} data-action="receive"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 transition-colors">
+              <CheckCircle size={14} />
+              Record receipt
+            </button>
+          )}
         </div>
       </div>
     );
@@ -435,7 +390,8 @@ export default function FinanceConfirmations() {
                       <span className="block text-[10px] uppercase text-gray-400">PKR</span>
                       {fmtPKR(pkr)}
                     </div>
-                    <button onClick={() => confirmPending(p)} disabled={confirmReceiptMut.isPending}
+                    {canConfirm && (<>
+                    <button onClick={() => confirmPending(p)} disabled={confirmReceiptMut.isPending} data-action="confirm-receipt"
                       className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 text-white text-xs font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-50">
                       <CheckCircle size={14} /> Confirm
                     </button>
@@ -443,6 +399,7 @@ export default function FinanceConfirmations() {
                       className="disabled:opacity-50 inline-flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 text-gray-600 text-xs font-medium rounded-lg hover:bg-gray-50">
                       Reject
                     </button>
+                    </>)}
                   </div>
                 </div>
               );
@@ -601,12 +558,14 @@ export default function FinanceConfirmations() {
                       </td>
                       <td data-label="Outstanding" className="py-2.5 px-3 text-right font-bold text-red-600">{fmtOrd(outstanding, o)}</td>
                       <td data-label="Action" className="py-2.5 px-3 text-center">
-                        <button
-                          onClick={() => openModal(o, advPartial ? 'advance' : 'balance')}
-                          className="text-xs text-blue-600 hover:text-blue-800 font-medium"
-                        >
-                          Confirm More
-                        </button>
+                        {canRecord && (
+                          <button
+                            onClick={() => openReceipt(o, advPartial ? 'advance' : 'balance')} data-action="receive"
+                            className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+                          >
+                            Record more
+                          </button>
+                        )}
                       </td>
                     </tr>
                   );
@@ -673,205 +632,7 @@ export default function FinanceConfirmations() {
         </div>
       </div>
 
-      {/* Payment History Log */}
-      {paymentHistory.length > 0 && (
-        <div className="bg-white rounded-xl shadow-sm p-5">
-          <div className="flex items-center gap-2 mb-4">
-            <Receipt size={16} className="text-emerald-500" />
-            <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">
-              Payment History (This Session)
-            </h2>
-            <span className="ml-auto text-xs text-gray-400">{paymentHistory.length} transaction{paymentHistory.length !== 1 ? 's' : ''}</span>
-          </div>
-          <div className="space-y-2">
-            {paymentHistory.map(p => (
-              <div key={p.id} className="flex flex-wrap items-center justify-between gap-2 bg-emerald-50 border border-emerald-100 rounded-lg px-4 py-2.5 text-sm">
-                <div className="flex items-center gap-3">
-                  <CheckCircle size={16} className="text-emerald-500" />
-                  <div>
-                    <span className="font-semibold text-gray-900">{p.orderId}</span>
-                    <span className="text-gray-400 mx-2">—</span>
-                    <span className="text-gray-600 capitalize">{p.type}</span>
-                  </div>
-                </div>
-                <div className="flex items-center gap-4">
-                  <span className="font-bold text-emerald-700">{fmtMoney(p.amount, p.currency || 'USD')}</span>
-                  <span className="text-xs text-gray-500">{p.method}</span>
-                  {p.bankAccount && <span className="text-xs text-gray-400">{p.bankAccount}</span>}
-                  {p.reference && <span className="text-xs text-gray-400 font-mono">Ref: {p.reference}</span>}
-                  <span className="text-xs text-gray-400">{p.timestamp}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
       </>)}
-
-      {/* Confirm Receipt Modal */}
-      <Modal
-        isOpen={modalOpen}
-        onClose={closeModal}
-        title={`Confirm ${milestoneType === 'advance' ? 'Advance' : 'Balance'} Receipt — ${selectedOrder?.id || ''}`}
-        size="md"
-      >
-        {selectedOrder && (
-          <div className="space-y-4">
-            {/* Order Summary */}
-            <div className="bg-gray-50 rounded-lg p-3">
-              <div className="grid grid-cols-2 gap-2 text-sm">
-                <div>
-                  <span className="text-gray-500">Customer:</span>{' '}
-                  <span className="font-medium text-gray-900 break-words"><PartyLink type="customer" id={selectedOrder.customerId} name={selectedOrder.customerName} /></span>
-                </div>
-                <div>
-                  <span className="text-gray-500">Contract:</span>{' '}
-                  <span className="font-medium text-gray-900">{fmtOrd(selectedOrder.contractValue, selectedOrder)}</span>
-                </div>
-                <div>
-                  <span className="text-gray-500">Expected:</span>{' '}
-                  <span className="font-medium text-gray-900">
-                    {fmtOrd(milestoneType === 'advance' ? selectedOrder.advanceExpected : selectedOrder.balanceExpected, selectedOrder)}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-gray-500">Received so far:</span>{' '}
-                  <span className="font-medium text-emerald-600">
-                    {fmtOrd(milestoneType === 'advance' ? selectedOrder.advanceReceived : selectedOrder.balanceReceived, selectedOrder)}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-gray-500">Remaining:</span>{' '}
-                  <span className="font-bold text-amber-700">
-                    {fmtOrd(
-                      (milestoneType === 'advance' ? selectedOrder.advanceExpected - selectedOrder.advanceReceived : selectedOrder.balanceExpected - selectedOrder.balanceReceived),
-                      selectedOrder,
-                    )}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-gray-500">Country:</span>{' '}
-                  <span className="font-medium text-gray-900">{selectedOrder.country}</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Form Fields */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Received Amount ({selectedOrder.currency || 'USD'}) <span className="text-red-500">*</span></label>
-              <input
-                type="number"
-                value={formData.receivedAmount}
-                onChange={(e) => setFormData({ ...formData, receivedAmount: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-              />
-              <FieldError error={formErrors.receivedAmount} />
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Date</label>
-                <input
-                  type="date"
-                  value={formData.date}
-                  onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Payment Method</label>
-                <select
-                  value={formData.paymentMethod}
-                  onChange={(e) => setFormData({ ...formData, paymentMethod: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white"
-                >
-                  <option value="bank_transfer">Bank Transfer</option>
-                  <option value="wire">Wire</option>
-                  <option value="lc">Letter of Credit</option>
-                  <option value="tt">Telegraphic Transfer</option>
-                  <option value="cash">Cash</option>
-                </select>
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Receiving Bank Account</label>
-              <select
-                value={formData.bankAccountId}
-                onChange={(e) => {
-                  const acct = bankAccountsList.find(a => String(a.id) === e.target.value);
-                  setFormData({ ...formData, bankAccountId: e.target.value, bankAccount: acct ? acct.name : '' });
-                }}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white"
-              >
-                <option value="">Select account...</option>
-                {(bankAccountsList || []).map(a => (
-                  <option key={a.id} value={a.id}>
-                    {favStar(a)}{a.name} ({a.currency}) — {a.bankName}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Bank Reference / TXN ID</label>
-              <input
-                type="text"
-                value={formData.bankReference}
-                onChange={(e) => setFormData({ ...formData, bankReference: e.target.value })}
-                placeholder="e.g. TXN-20260317-001"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
-              <textarea
-                value={formData.notes}
-                onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                rows={2}
-                placeholder="Additional notes..."
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none"
-              />
-            </div>
-
-            {/* Accounting Impact Preview */}
-            <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
-              <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Accounting Impact</h4>
-              <div className="font-mono text-xs space-y-1">
-                <div className="flex justify-between">
-                  <span className="text-gray-700">DR: {formData.bankAccount || 'Bank Account'}</span>
-                  <span className="text-gray-900 font-medium">{fmtOrd(formData.receivedAmount, selectedOrder)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-700">CR: Accounts Receivable — {selectedOrder.customerName}</span>
-                  <span className="text-gray-900 font-medium">{fmtOrd(formData.receivedAmount, selectedOrder)}</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Action Buttons */}
-            <div className="flex items-center gap-3 pt-2 border-t border-gray-100">
-              <button
-                onClick={handleConfirmReceipt}
-                disabled={recordReceiptMut.isPending}
-                className="disabled:opacity-50 flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
-              >
-                <CheckCircle size={16} />
-                Submit for confirmation
-              </button>
-              <button
-                onClick={handlePutOnHold}
-                disabled={updateStatusMut.isPending}
-                className="disabled:opacity-50 flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-red-500 text-white text-sm font-medium rounded-lg hover:bg-red-600 transition-colors"
-              >
-                <PauseCircle size={16} />
-                Hold
-              </button>
-            </div>
-          </div>
-        )}
-      </Modal>
 
       {/* Email Composer for Payment Reminders */}
       {emailOrder && (
