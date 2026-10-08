@@ -194,6 +194,11 @@ router.get('/alerts', authorize('finance', 'view'), controller.getAlerts);
 router.get('/overview', authorize('finance', 'view'), controller.getOverview);
 router.get('/upcoming', authorize('finance', 'view'), controller.getUpcoming);
 router.post('/payments/:id/clear', authorize('finance', 'confirm_payment'), controller.clearCheque);
+// B1: an uncleared cheque bounced — reason required, optional bank charge.
+router.post('/payments/:id/bounce', authorize('finance', 'confirm_payment'),
+  validate(schemas.bounceCheque),
+  auditAction('bounce_cheque', 'payment', (req) => req.params.id),
+  controller.bounceCheque);
 // Paying is finance.confirm_payment — or, for the MILL's own payables and
 // receivables only, milling.edit (the Mill Operator, owner decision
 // 2026-10-05). The handler refuses a mill-only payer anything whose entity is

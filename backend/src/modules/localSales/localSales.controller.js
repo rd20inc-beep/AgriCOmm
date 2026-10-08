@@ -52,7 +52,7 @@ async function unclearedChequesBySale(trx, saleIds) {
   const rows = await trx('payments')
     .whereIn('local_sale_id', saleIds)
     .where({ payment_method: 'cheque', cleared: false })
-    .whereNotIn('status', ['Reversed', 'Rejected'])
+    .whereNotIn('status', ['Reversed', 'Rejected', 'Bounced'])
     .select('local_sale_id', 'amount');
   for (const r of rows || []) out.set(r.local_sale_id, uc.round2((out.get(r.local_sale_id) || 0) + (parseFloat(r.amount) || 0)));
   return out;

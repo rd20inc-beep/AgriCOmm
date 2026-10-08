@@ -12,7 +12,9 @@
 // receipts) — excluded from the feed entirely, as before.
 const NEVER_MONEY = ['Pending Finance Confirmation', 'Rejected'];
 
-const NOT_REVERSED = "(p.status IS NULL OR p.status <> 'Reversed')";
+// A bounced cheque (B1) never moved money and is no longer pending either: it
+// is listed, but counted in neither the totals nor the pending cheques.
+const NOT_REVERSED = "(p.status IS NULL OR p.status NOT IN ('Reversed', 'Bounced'))";
 const SETTLED = `${NOT_REVERSED} AND p.cleared IS NOT FALSE`;
 const PENDING_CHEQUE = `${NOT_REVERSED} AND p.cleared IS FALSE`;
 

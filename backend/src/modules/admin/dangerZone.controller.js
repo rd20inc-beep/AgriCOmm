@@ -448,6 +448,15 @@ async function reversePaymentCash(trx, p) {
       await trx('bank_accounts').where('id', p.bank_account_id).increment('current_balance', dir * moved);
     }
   }
+  // A bounced cheque moved nothing itself, but its bank return charge (and any
+  // legacy move it undid) left rows of their own — put their balance back.
+  if (p.cleared === false) {
+    const bounceRows = await trx('bank_transactions').where({ linked_payment_id: p.id, source: 'cheque_bounce' });
+    for (const b of Array.isArray(bounceRows) ? bounceRows : []) {
+      const signed = (b.type === 'credit' ? -1 : 1) * num(b.amount);
+      if (b.bank_account_id && signed) await trx('bank_accounts').where('id', b.bank_account_id).increment('current_balance', signed);
+    }
+  }
   // Delete the bank_transactions trail. linked_payment_id is now set at source;
   // the notes fallback catches legacy record_payment rows that predate that fix.
   await trx('bank_transactions')
