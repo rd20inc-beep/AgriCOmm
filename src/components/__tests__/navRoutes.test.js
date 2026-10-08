@@ -51,15 +51,12 @@ describe('Standard shell routes', () => {
 });
 
 describe('legacy finance aliases', () => {
+  // The aliases are generated from financeNav's LEGACY_FINANCE_REDIRECTS (the
+  // table itself is tested in modules/finance/__tests__/financeNav.test.jsx).
   const app = src('App.jsx');
-  it.each([
-    ['receivables', '/finance/money-in'],
-    ['payables', '/finance/money-out'],
-    ['profitability', '/finance/profit'],
-    ['ledger', '/finance/accounting'],
-  ])('/finance/%s redirects to %s', (alias, target) => {
-    const re = new RegExp(`<Route path="${alias}" element={<Navigate to="${target}" replace />} />`);
-    expect(app).toMatch(re);
+  it('FinanceRoutes mounts a redirect route for every legacy segment, and a catch-all', () => {
+    expect(app).toMatch(/Object\.keys\(LEGACY_FINANCE_REDIRECTS\)\.map\(\(seg\) => \(\s*<Route key=\{seg\} path=\{seg\} element=\{<LegacyFinanceRedirect \/>\} \/>/);
+    expect(app).toMatch(/<Route path="\*" element=\{<FinanceCatchAll \/>\} \/>/);
   });
 });
 

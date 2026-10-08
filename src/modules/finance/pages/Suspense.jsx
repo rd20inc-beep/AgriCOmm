@@ -69,11 +69,10 @@ export default function Suspense() {
   }, [entries, search]);
 
   return (
-    <div className="p-4 sm:p-6 space-y-5">
+    <div className="space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 inline-flex items-center gap-2"><HelpCircle size={20} /> Suspense Account</h1>
-          <p className="text-xs text-gray-400 mt-0.5">Unidentified / unallocated money held in the 1290 Suspense account until Finance resolves it to the correct account.</p>
+          <p className="text-sm text-gray-500">Unidentified / unallocated money held in the 1290 Suspense account until Finance resolves it to the correct account.</p>
         </div>
         <button onClick={() => setShowRecord(true)} className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">
           <Plus size={16} /> Record Suspense Entry
