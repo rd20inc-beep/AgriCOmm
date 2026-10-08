@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ListChecks, CheckCircle2, AlertCircle, AlertTriangle, Info } from 'lucide-react';
+import { ListChecks, CheckCircle2, AlertCircle, AlertTriangle, Info, ChevronRight } from 'lucide-react';
 import { useAuth } from '../../../context/AuthContext';
 import { useApp } from '../../../context/AppContext';
 import useConfirm from '../../../hooks/useConfirm';
@@ -20,11 +20,14 @@ import { useFinanceDrawers } from '../drawers/drawersContext';
 import { fmtAmt } from '../drawers/drawerLogic';
 import { buildNeedsAttention } from '../utils/needsAttention';
 import { withRange } from '../financeNav';
+import { btnQuiet, btnRowPrimary, btnRowQuiet } from '../utils/uiClasses';
 
+// Severity shows three ways: the edge colour, a different icon, and a word
+// for screen readers — never colour alone.
 const TONE = {
-  danger: { cls: 'border-l-red-500', Icon: AlertCircle, icon: 'text-red-500' },
-  warning: { cls: 'border-l-amber-500', Icon: AlertTriangle, icon: 'text-amber-500' },
-  info: { cls: 'border-l-blue-400', Icon: Info, icon: 'text-blue-500' },
+  danger: { cls: 'border-l-red-500', Icon: AlertCircle, icon: 'text-red-600', word: 'Urgent' },
+  warning: { cls: 'border-l-amber-500', Icon: AlertTriangle, icon: 'text-amber-600', word: 'Warning' },
+  info: { cls: 'border-l-blue-400', Icon: Info, icon: 'text-blue-600', word: 'Info' },
 };
 
 /**
@@ -176,52 +179,54 @@ export default function NeedsAttention({ summary, rangeKey = '' }) {
   }
 
   return (
-    <div className="bg-white rounded-xl border border-gray-200 p-4" data-testid="needs-attention">
-      <div className="flex items-center justify-between mb-3">
-        <h2 className="text-sm font-semibold text-gray-900 inline-flex items-center gap-2">
-          <ListChecks size={16} className="text-amber-600" /> Needs attention
-          {items.length > 0 && <span className="text-xs font-medium text-amber-700 bg-amber-50 rounded-full px-2 py-0.5" data-testid="na-count">{items.length}</span>}
+    <section className="bg-white rounded-xl border border-gray-200 p-4 sm:p-5" data-testid="needs-attention" aria-labelledby="na-title">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+        <h2 id="na-title" className="text-base font-semibold text-gray-900 inline-flex items-center gap-2">
+          <ListChecks size={18} className="text-amber-600" aria-hidden="true" /> Needs attention
+          {items.length > 0 && <span className="text-sm font-medium text-gray-500 tabular-nums" data-testid="na-count">({items.length})</span>}
         </h2>
-        <Link to={withRange('/finance/alerts', rangeKey)} className="text-xs text-blue-600 hover:underline">All alerts →</Link>
+        <Link to={withRange('/finance/alerts', rangeKey)} className={btnQuiet}>All alerts <ChevronRight size={14} aria-hidden="true" /></Link>
       </div>
       {items.length === 0 ? (
-        <div className="text-center text-sm text-gray-400 py-6 flex items-center justify-center gap-2">
-          <CheckCircle2 size={16} className="text-emerald-500" /> Nothing waiting for you
+        <div className="flex flex-col items-center gap-2 py-8 text-center" data-testid="empty-state">
+          <CheckCircle2 size={20} className="text-emerald-600" aria-hidden="true" />
+          <p className="text-sm text-gray-500">Nothing waiting for you.</p>
         </div>
       ) : (
-        <ul className="space-y-1.5">
+        <ul className="space-y-2">
           {items.map((item) => {
             const tone = TONE[item.severity] || TONE.info;
             const p = item.payload;
             return (
-              <li key={item.key} data-kind={item.kind} className={`flex flex-wrap items-center justify-between gap-2 rounded-lg border border-gray-100 border-l-4 ${tone.cls} px-3 py-2`}>
+              <li key={item.key} data-kind={item.kind} className={`flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 rounded-lg border border-gray-200 border-l-4 ${tone.cls} px-3 py-2.5`}>
                 <div className="flex items-start gap-2 min-w-0 flex-1">
-                  <tone.Icon size={14} className={`mt-0.5 shrink-0 ${tone.icon}`} />
+                  <tone.Icon size={16} className={`mt-0.5 shrink-0 ${tone.icon}`} aria-hidden="true" />
+                  <span className="sr-only">{tone.word}:</span>
                   <div className="min-w-0">
                     {item.kind === 'receive' && drawers?.openDocument
-                      ? <button type="button" onClick={() => drawers.openDocument(p)} className="block max-w-full text-sm text-gray-900 font-medium truncate text-left hover:text-blue-700 hover:underline">{item.title}</button>
+                      ? <button type="button" onClick={() => drawers.openDocument(p)} className="block max-w-full text-sm text-gray-900 font-medium truncate text-left hover:text-blue-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded">{item.title}</button>
                       : <p className="text-sm text-gray-900 font-medium truncate">{item.title}</p>}
-                    {item.sub && <p className="text-[11px] text-gray-500 truncate">{item.sub}</p>}
+                    {item.sub && <p className="text-xs text-gray-500 truncate">{item.sub}</p>}
                   </div>
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex flex-wrap items-center justify-end gap-2 shrink-0 pl-6 sm:pl-0">
                   {item.amount != null && item.currency && (
-                    <span className="text-sm font-semibold tabular-nums" data-currency={item.currency}>{fmtAmt(item.amount, item.currency)}</span>
+                    <span className="text-sm font-semibold tabular-nums mr-auto sm:mr-0" data-currency={item.currency}>{fmtAmt(item.amount, item.currency)}</span>
                   )}
                   {item.action?.type === 'confirmReceipt' && item.action.needsRate && (
                     <input type="number" step="0.0001" min="0" aria-label="FX rate the bank applied"
                       value={rates[p.id] ?? (p.fxRate || p.bookedFxRate || '')}
                       onChange={(e) => setRates((s) => ({ ...s, [p.id]: e.target.value }))}
-                      className="w-20 px-2 py-1 border border-gray-300 rounded text-xs text-right" placeholder="rate" />
+                      className="w-24 px-2 min-h-10 md:min-h-8 border border-gray-300 rounded-lg text-sm text-right tabular-nums focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Rate" />
+                  )}
+                  {item.action?.type === 'confirmReceipt' && (
+                    <button type="button" onClick={() => reject(p)} className={btnRowQuiet} data-action="rejectReceipt">Reject</button>
                   )}
                   {item.action && (
                     <button type="button" disabled={busy === item.key} onClick={() => run(item)} data-action={item.action.type}
-                      className="px-2.5 py-1 text-xs font-medium rounded-lg text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50">
+                      className={btnRowPrimary}>
                       {item.action.label}
                     </button>
-                  )}
-                  {item.action?.type === 'confirmReceipt' && (
-                    <button type="button" onClick={() => reject(p)} className="text-[11px] text-gray-500 hover:text-red-600" data-action="rejectReceipt">Reject</button>
                   )}
                 </div>
               </li>
@@ -230,7 +235,7 @@ export default function NeedsAttention({ summary, rangeKey = '' }) {
         </ul>
       )}
       {hiddenCount > 0 && (
-        <p className="text-[11px] text-gray-400 mt-2" data-testid="na-hidden">{hiddenCount} more need someone with other permissions.</p>
+        <p className="text-xs text-gray-500 mt-3" data-testid="na-hidden">{hiddenCount} more need someone with other permissions.</p>
       )}
       {clearing && (
         <ClearChequeDialog key={clearing.paymentId} item={clearing} accounts={accountsForMethod(accounts, 'cheque')}
@@ -241,6 +246,6 @@ export default function NeedsAttention({ summary, rangeKey = '' }) {
           onDone={() => { setResolving(null); qc.invalidateQueries({ queryKey: ['suspense'] }); }} />
       )}
       {confirmDialog}
-    </div>
+    </section>
   );
 }
