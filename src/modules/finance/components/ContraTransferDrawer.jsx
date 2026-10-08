@@ -30,7 +30,7 @@ const ENTITY_ORDER = { general: 0, mill: 1, export: 2 };
  * `editing` (a transfer, camelCase) turns the drawer into Edit: the server
  * reverses the original and records this as its replacement, in one step.
  */
-export default function ContraTransferDrawer({ open, onClose, editing = null, onDone }) {
+export default function ContraTransferDrawer({ open, onClose, editing = null, onDone, fromAccountId = null }) {
   const { hasPermission } = useAuth();
   const { addToast } = useApp();
   // A mill role that pays only through milling.edit may use only the mill's accounts.
@@ -54,7 +54,9 @@ export default function ContraTransferDrawer({ open, onClose, editing = null, on
     return [...m.values()].sort((x, y) => (ENTITY_ORDER[x.entity] ?? 9) - (ENTITY_ORDER[y.entity] ?? 9) || x.label.localeCompare(y.label));
   }, [accounts]);
 
-  const [form, setForm] = useState(() => initialForm(editing));
+  // `fromAccountId` — opened from an account (Account drawer › Transfer): the
+  // source is inherited, still changeable.
+  const [form, setForm] = useState(() => initialForm(editing, fromAccountId));
   const [fieldErrors, setFieldErrors] = useState({});
   const [error, setError] = useState('');
   const [step, setStep] = useState('form'); // 'form' | 'review'
@@ -67,8 +69,8 @@ export default function ContraTransferDrawer({ open, onClose, editing = null, on
   useEffect(() => {
     if (!open) return;
     setError(''); setFieldErrors({}); setStep('form'); setClientRef(newClientRef()); setRateTouched(!!editing);
-    setForm(initialForm(editing));
-  }, [open, editing]);
+    setForm(initialForm(editing, fromAccountId));
+  }, [open, editing, fromAccountId]);
 
   const fromAcct = accounts.find((a) => String(a.id) === String(form.fromId));
   const toAcct = accounts.find((a) => String(a.id) === String(form.toId));
@@ -333,10 +335,10 @@ export default function ContraTransferDrawer({ open, onClose, editing = null, on
 }
 
 // The form for a new transfer, or pre-filled from the transfer being edited.
-function initialForm(editing) {
+function initialForm(editing, fromAccountId = null) {
   if (!editing) {
     return {
-      fromId: '', toId: '', amount: '', date: todayLocalISO(), reference: '', notes: '',
+      fromId: fromAccountId ? String(fromAccountId) : '', toId: '', amount: '', date: todayLocalISO(), reference: '', notes: '',
       rate: '', converted: '', charges: '', attachmentUrl: '', attachmentName: '', reason: '',
     };
   }
