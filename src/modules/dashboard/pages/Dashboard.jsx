@@ -20,11 +20,12 @@ import YieldDistributionChart from './dashboard/YieldDistributionChart';
 import RecentActivity from './dashboard/RecentActivity';
 import PendingApprovalsCard from '../components/PendingApprovalsCard';
 import { useOwnerAuth } from '../../../context/OwnerAuthContext';
-import { canSeeCost } from '../../../hooks/useCanSeeCost';
+import { canSeeCost, canSeeProfit } from '../../../hooks/useCanSeeCost';
+import { useProfitHeadline } from '../../../api/queries';
 import { isBalanceDue } from '../../exportOrders/components/constants';
 import StatusBadge from '../../../shared/components/StatusBadge';
 import useConfirm from '../../../hooks/useConfirm';
-import { fmtUSD, fmtMT, fmtKg, fmtPct, fmtDate } from '../../../shared/utils/format';
+import { fmtUSD, fmtPKR, fmtMT, fmtKg, fmtPct, fmtDate } from '../../../shared/utils/format';
 
 // ─── Formatting ────────────────────────────────────────────────────────
 // Exact figures from the shared formatter (en-PK locale, no abbreviation).
@@ -68,6 +69,17 @@ export default function Dashboard() {
   // Order book / receipts / profit tiles are money — hidden from roles without
   // reports.view_cost or finance.view (QC Analyst / Inventory Officer / Documentation Officer).
   const showMoney = canSeeCost(hasPermission);
+  // Booked Profit comes from the server's one definition (G-2): confirmed
+  // orders, PKR, rice cost locked / reserved / estimated; unpriced orders left
+  // out and counted. All time — the tile says so.
+  const canProfit = canSeeProfit(hasPermission);
+  const { data: profitHeadline = {}, isLoading: profitLoading } = useProfitHeadline({}, { enabled: canProfit });
+  const bookedExport = profitHeadline.export || {};
+  const bookedHint = [
+    (bookedExport.estimatedCount || 0) > 0 ? `${bookedExport.estimatedCount} estimated` : null,
+    (bookedExport.unpricedCount || 0) > 0 ? `${bookedExport.unpricedCount} not costed yet (excluded)` : null,
+    `Realised ${fmtPKR(bookedExport.realisedPkr || 0)}`,
+  ].filter(Boolean).join(' · ');
   // Pending master-data quick-add approvals (Admin → Approvals). Hook must run
   // before the early return below to keep hook order stable.
   const { data: pendingMasterApprovals = 0 } = useMasterDataApprovalsCount();
@@ -106,10 +118,6 @@ export default function Dashboard() {
   const totalReceivable = safeOrders.reduce((s, o) => {
     const out = (Number(o.contractValue) || 0) - (Number(o.advanceReceived) || 0) - (Number(o.balanceReceived) || 0);
     return out > 0 ? s + out : s;
-  }, 0);
-  const exportProfit = safeOrders.reduce((s, o) => {
-    const costs = Object.values(o.costs || {}).reduce((cs, c) => cs + (parseFloat(c) || 0), 0);
-    return costs > 0 ? s + ((Number(o.contractValue) || 0) - costs) : s;
   }, 0);
   const totalContractValue = safeOrders.reduce((s, o) => s + (Number(o.contractValue) || 0), 0);
 
@@ -361,16 +369,18 @@ export default function Dashboard() {
           hintBad={awaitingBalance > 0}
           onClick={canFinance ? () => navigate('/finance/money-in') : undefined}
         />
+        {canProfit && (
         <KpiTile
           icon={TrendingUp}
           tone="violet"
-          label="Booked Profit"
-          primary={fmt(exportProfit)}
-          secondary="Across all open orders"
-          hint={exportProfit > 0 ? 'Positive' : 'Below break-even'}
-          hintBad={exportProfit <= 0}
+          label="Booked Profit (export, PKR)"
+          primary={profitLoading ? '…' : fmtPKR(bookedExport.bookedPkr || 0)}
+          secondary={`All confirmed orders to date · ${bookedExport.pricedCount || 0} costed`}
+          hint={bookedHint}
+          hintBad={(bookedExport.unpricedCount || 0) > 0 || (bookedExport.bookedPkr || 0) < 0}
           onClick={canFinance ? () => navigate('/finance/accounting/profit') : undefined}
         />
+        )}
       </div>
       )}
 

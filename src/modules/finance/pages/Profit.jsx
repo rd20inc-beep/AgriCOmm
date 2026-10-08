@@ -2,7 +2,9 @@ import { useState, useMemo } from 'react';
 import OrderRefLink from '../../../shared/components/OrderRefLink';
 import { TrendingUp, TrendingDown, DollarSign, Factory, Store, AlertTriangle, CheckCircle, RefreshCw, Activity, Printer } from 'lucide-react';
 import { FinanceKPI, FinanceTable, FinanceChart } from '../../../components/finance';
-import { useProfitabilitySummary, useLocalSales, useLocalSalesSummary } from '../../../api/queries';
+import { useProfitabilitySummary, useLocalSales } from '../../../api/queries';
+import { useFinanceDateRange, overviewSummaryParams } from '../hooks/useFinanceDateRange';
+import { rangeLabel } from '../financeNav';
 import { DEFAULT_FX_RATE } from '../utils/fx';
 import { useApp } from '../../../context/AppContext';
 import StatusBadge from '../../../shared/components/StatusBadge';
@@ -10,19 +12,32 @@ import { fmtPKR, fmtMoney, fmtPct, fmtDate, fmtDateTime, fmtKg } from '../../../
 
 const TABS = ['Export', 'Mill', 'Local', 'Consolidated'];
 
+const RICE_BASIS = {
+  locked: 'locked COGS',
+  reserved: 'reserved lots',
+  'reserved+estimate': 'reserved + estimate',
+  allocated: 'allocated',
+  estimate: 'estimate',
+  unpriced: 'not costed',
+};
+
 function AccuracyBadge({ status }) {
   if (status === 'exact') return <span className="inline-flex items-center gap-0.5 text-xs text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded-full"><CheckCircle size={10} /> Exact</span>;
   if (status === 'estimated') return <span className="inline-flex items-center gap-0.5 text-xs text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded-full">Est.</span>;
   if (status === 'operational_margin_only') return <span className="inline-flex items-center gap-0.5 text-xs text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded-full"><AlertTriangle size={10} /> Op. Only</span>;
+  if (status === 'unpriced') return <span className="inline-flex items-center gap-0.5 text-xs text-red-700 bg-red-50 px-1.5 py-0.5 rounded-full" title="No rice cost locked, reserved, allocated or estimable — left out of Booked Profit"><AlertTriangle size={10} /> Not costed</span>;
   if (status === 'missing_prices') return <span className="inline-flex items-center gap-0.5 text-xs text-red-700 bg-red-50 px-1.5 py-0.5 rounded-full"><AlertTriangle size={10} /> Missing</span>;
   return <span className="text-xs text-gray-400">{status || '—'}</span>;
 }
 
 export default function Profit() {
   const { companyProfileData } = useApp();
-  const { data: summary = {}, isLoading } = useProfitabilitySummary();
+  // Every figure here is the server's one profit definition
+  // (backend finance/profitDefinitions.js), for the period in the URL.
+  const { queryParams: rangeParams, rangeKey } = useFinanceDateRange();
+  const periodLabel = rangeKey ? rangeLabel(rangeKey) : 'All time';
+  const { data: summary = {}, isLoading } = useProfitabilitySummary(overviewSummaryParams(rangeParams));
   const { data: localSales = [], isLoading: localLoading } = useLocalSales();
-  const { data: localSummary = {} } = useLocalSalesSummary();
   const [tab, setTab] = useState('Export');
 
   function handlePrint() {
@@ -40,12 +55,17 @@ export default function Profit() {
   const millRows = summary.mill?.rows || [];
   const currentFxRate = summary.currentFxRate || DEFAULT_FX_RATE;
 
-  // KPIs
-  const exportBookedProfitPkr = summary.export?.totalBookedProfitPkr || 0;
-  const exportFxGainLoss = summary.export?.totalFxGainLossPkr || 0;
-  const millProfitPkr = summary.mill?.totalProfitPkr || 0;
-  const localProfitPkr = parseFloat(localSummary?.profit?.grossProfit) || 0;
-  const consolidatedPkr = exportBookedProfitPkr + millProfitPkr + localProfitPkr;
+  // KPIs — Booked / Realised / Pipeline / FX (export), mill realised (sales of
+  // mill output − their COGS), local other, consolidated. PKR.
+  const exp = summary.export || {};
+  const exportBookedProfitPkr = exp.bookedPkr || 0;
+  const exportRealisedPkr = exp.realisedPkr || 0;
+  const exportPipelinePkr = exp.pipelinePkr || 0;
+  const exportFxGainLoss = exp.fxRealisedPkr || 0;
+  const millProfitPkr = summary.mill?.profitPkr || 0;
+  const localProfitPkr = summary.local?.profitPkr || 0;
+  const consolidatedPkr = summary.consolidated?.bookedPkr || 0;
+  const consolidatedRealisedPkr = summary.consolidated?.realisedPkr || 0;
 
   const exportColumns = [
     { key: 'orderNo', label: 'Order', sortable: true, render: (v, row) => (
@@ -55,50 +75,53 @@ export default function Profit() {
     { key: 'currency', label: 'Cur.', render: (v) => <span className="text-xs bg-gray-100 px-1.5 py-0.5 rounded">{v}</span> },
     { key: 'contractValueForeign', label: 'Contract (Foreign)', sortable: true, align: 'right', render: (v, row) => fmtMoney(v, row.currency || 'USD') },
     { key: 'bookedFxRate', label: 'Locked Rate', align: 'right', render: (v) => <span className="text-xs text-gray-500">{v}</span> },
-    { key: 'revenuePkrBooked', label: 'Revenue (PKR)', sortable: true, align: 'right', render: (v) => fmtPKR(v) },
-    { key: 'totalCostPkr', label: 'Total Cost (PKR)', sortable: true, align: 'right', render: (v) => fmtPKR(v) },
-    { key: 'bookedProfitPkr', label: 'Booked Profit', sortable: true, align: 'right', render: (v) => (
-      <span className={v >= 0 ? 'text-emerald-600 font-medium' : 'text-red-600 font-medium'}>{fmtPKR(v)}</span>
+    { key: 'revenuePkrBooked', label: 'Revenue (PKR)', sortable: true, align: 'right', render: (v) => (v == null ? '—' : fmtPKR(v)) },
+    { key: 'opCostsPkr', label: 'Op. Costs', sortable: true, align: 'right', render: (v) => fmtPKR(v) },
+    { key: 'riceCostPkr', label: 'Rice Cost', sortable: true, align: 'right', render: (v, row) => (
+      <span className="inline-flex flex-col items-end">
+        <span>{v == null ? '—' : fmtPKR(v)}</span>
+        <span className="text-[10px] text-gray-400">{RICE_BASIS[row.riceCostBasis] || row.riceCostBasis}</span>
+      </span>
     )},
-    { key: 'fxGainLossPkr', label: 'FX +/-', sortable: true, align: 'right', render: (v) => (
+    { key: 'bookedProfitPkr', label: 'Booked Profit', sortable: true, align: 'right', render: (v) => (
+      v == null ? <span className="text-gray-400">excluded</span>
+        : <span className={v >= 0 ? 'text-emerald-600 font-medium' : 'text-red-600 font-medium'}>{fmtPKR(v)}</span>
+    )},
+    { key: 'realisedProfitPkr', label: 'Realised', sortable: true, align: 'right', render: (v) => (v == null ? '—' : fmtPKR(v)) },
+    { key: 'fxGainLossPkr', label: 'FX realised', sortable: true, align: 'right', render: (v) => (
       <span className={v >= 0 ? 'text-blue-600' : 'text-amber-600'}>{fmtPKR(v)}</span>
     )},
-    { key: 'marginPct', label: 'Margin', sortable: true, align: 'right', render: (v) => fmtPct(v, { decimals: 2 })},
+    { key: 'marginPct', label: 'Margin', sortable: true, align: 'right', render: (v) => (v == null ? '—' : fmtPct(v, { decimals: 2 }))},
     { key: 'calculationStatus', label: 'Accuracy', render: (v) => <AccuracyBadge status={v} /> },
   ];
 
+  // Per batch (information): output at cost, what has been sold so far
+  // (local sales + transfers to export, to date) and what is still stock.
   const millColumns = [
     { key: 'batchNo', label: 'Batch', sortable: true, render: (v, row) => (
       <OrderRefLink to={`/milling/${row.id}`} module="milling" onClick={e => e.stopPropagation()}>{v}</OrderRefLink>
     )},
-    { key: 'status', label: 'Status', sortable: true, render: (v) => (v ? <StatusBadge status={v} /> : '—') },
     { key: 'rawQtyMT', label: 'Raw (MT)', sortable: true, align: 'right' },
-    { key: 'finishedMT', label: 'Finished (MT)', sortable: true, align: 'right' },
-    { key: 'revenue', label: 'Revenue (PKR)', sortable: true, align: 'right', render: (v) => fmtPKR(v) },
-    { key: 'costs', label: 'Costs (PKR)', sortable: true, align: 'right', render: (v) => fmtPKR(v) },
-    { key: 'grossProfit', label: 'Profit (PKR)', sortable: true, align: 'right', render: (v) => (
-      <span className={v >= 0 ? 'text-emerald-600 font-medium' : 'text-red-600 font-medium'}>{fmtPKR(v)}</span>
-    )},
-    { key: 'marginPct', label: 'Margin', sortable: true, align: 'right', render: (v) => fmtPct(v, { decimals: 2 })},
-    { key: 'priceSource', label: 'Price Source', render: (v, row) => (
-      <span className="inline-flex flex-col items-start gap-0.5">
-        <span className={`text-xs px-1.5 py-0.5 rounded ${v === 'confirmed' ? 'bg-emerald-50 text-emerald-700' : v === 'commodity_rates' ? 'bg-blue-50 text-blue-700' : 'bg-red-50 text-red-700'}`}>{v || 'none'}</span>
-        {/* By-products: as booked on the yield's output lots, or recomputed
-            from batch prices when the batch has no stored output. */}
-        {row.byproductValueSource === 'computed' && (
-          <span className="text-[10px] text-amber-700" title="No output lots booked for this batch — by-product value recomputed from the batch's prices">by-products computed</span>
-        )}
+    { key: 'outputKg', label: 'Output (kg)', sortable: true, align: 'right', render: (v) => fmtKg(v || 0) },
+    { key: 'outputValueAtCostPkr', label: 'Output at cost', sortable: true, align: 'right', render: (v, row) => (row.hasOutputLots ? fmtPKR(v) : <span className="text-gray-400" title="No output lots booked for this batch">—</span>) },
+    { key: 'soldKg', label: 'Sold (kg)', sortable: true, align: 'right', render: (v) => fmtKg(v || 0) },
+    { key: 'soldRevenuePkr', label: 'Sales', sortable: true, align: 'right', render: (v) => fmtPKR(v) },
+    { key: 'soldCogsPkr', label: 'COGS', sortable: true, align: 'right', render: (v) => fmtPKR(v) },
+    { key: 'soldProfitPkr', label: 'Profit on sales', sortable: true, align: 'right', render: (v, row) => (
+      <span className={v >= 0 ? 'text-emerald-600 font-medium' : 'text-red-600 font-medium'}>
+        {fmtPKR(v)}{row.uncostedSales > 0 && <span className="block text-[10px] text-amber-700">{row.uncostedSales} sale(s) without COGS</span>}
       </span>
     )},
-    { key: 'calculationStatus', label: 'Accuracy', render: (v) => <AccuracyBadge status={v} /> },
+    { key: 'unsoldKg', label: 'Unsold (kg)', sortable: true, align: 'right', render: (v) => fmtKg(v || 0) },
+    { key: 'unsoldValueAtCostPkr', label: 'Unsold stock at cost', sortable: true, align: 'right', render: (v) => fmtPKR(v) },
   ];
 
   // Chart data per tab. Consolidated rolls every segment into one bar
   // so the user sees totals side-by-side.
   const chartData = useMemo(() => {
     if (tab === 'Mill') {
-      return millRows.filter(r => r.revenue > 0 || r.costs > 0).map(r => ({
-        name: r.batchNo, Revenue: r.revenue, Cost: r.costs, Profit: r.grossProfit,
+      return millRows.filter(r => r.soldRevenuePkr > 0 || r.soldCogsPkr > 0).map(r => ({
+        name: r.batchNo, Revenue: r.soldRevenuePkr, Cost: r.soldCogsPkr, Profit: r.soldProfitPkr,
       }));
     }
     if (tab === 'Local') {
@@ -112,31 +135,18 @@ export default function Profit() {
         }));
     }
     if (tab === 'Consolidated') {
-      const exportTotals = exportRows.reduce((a, r) => ({
-        Revenue: a.Revenue + (parseFloat(r.revenuePkrBooked) || 0),
-        Cost:    a.Cost    + (parseFloat(r.totalCostPkr)     || 0),
-        Profit:  a.Profit  + (parseFloat(r.bookedProfitPkr)  || 0),
-      }), { Revenue: 0, Cost: 0, Profit: 0 });
-      const millTotals = millRows.reduce((a, r) => ({
-        Revenue: a.Revenue + (parseFloat(r.revenue)     || 0),
-        Cost:    a.Cost    + (parseFloat(r.costs)       || 0),
-        Profit:  a.Profit  + (parseFloat(r.grossProfit) || 0),
-      }), { Revenue: 0, Cost: 0, Profit: 0 });
-      const localTotals = (localSales || []).reduce((a, s) => ({
-        Revenue: a.Revenue + (parseFloat(s.totalAmount)                       || 0),
-        Cost:    a.Cost    + (parseFloat(s.cogsTotalPkr || s.landedCostTotal) || 0),
-        Profit:  a.Profit  + (parseFloat(s.grossProfit || s.grossProfitPkr)   || 0),
-      }), { Revenue: 0, Cost: 0, Profit: 0 });
+      // Server totals: export Booked, mill realised, local other — each sale once.
       const data = [];
-      if (exportTotals.Revenue || exportTotals.Cost) data.push({ name: 'Export', ...exportTotals });
-      if (millTotals.Revenue   || millTotals.Cost)   data.push({ name: 'Mill',   ...millTotals });
-      if (localTotals.Revenue  || localTotals.Cost)  data.push({ name: 'Local',  ...localTotals });
+      const e = summary.export || {}; const m = summary.mill || {}; const l = summary.local || {};
+      if (e.bookedRevenuePkr) data.push({ name: 'Export (booked)', Revenue: e.bookedRevenuePkr, Cost: (e.bookedRevenuePkr || 0) - (e.bookedPkr || 0), Profit: e.bookedPkr || 0 });
+      if (m.revenuePkr || m.cogsPkr) data.push({ name: 'Mill (sales)', Revenue: m.revenuePkr || 0, Cost: m.cogsPkr || 0, Profit: m.profitPkr || 0 });
+      if (l.revenuePkr || l.cogsPkr) data.push({ name: 'Local (other)', Revenue: l.revenuePkr || 0, Cost: l.cogsPkr || 0, Profit: l.profitPkr || 0 });
       return data;
     }
-    return exportRows.filter(r => r.revenuePkrBooked > 0).map(r => ({
+    return exportRows.filter(r => r.priced && r.revenuePkrBooked > 0).map(r => ({
       name: r.orderNo, Revenue: r.revenuePkrBooked, Cost: r.totalCostPkr, Profit: r.bookedProfitPkr,
     }));
-  }, [tab, exportRows, millRows, localSales]);
+  }, [tab, exportRows, millRows, localSales, summary]);
 
   const localColumns = [
     { key: 'saleNo', label: 'Sale', sortable: true, render: (v, row) => (
@@ -160,9 +170,9 @@ export default function Profit() {
     ? 'from-emerald-600 via-emerald-500 to-teal-500'
     : 'from-red-600 via-red-500 to-red-500';
   const HeroIcon = consolidatedPkr >= 0 ? TrendingUp : TrendingDown;
-  const totalRevenue = (summary.export?.totalRevenuePkr ?? exportRows.reduce((a, r) => a + (parseFloat(r.revenuePkrBooked) || 0), 0))
-    + millRows.reduce((a, r) => a + (parseFloat(r.revenue) || 0), 0)
-    + (parseFloat(localSummary?.profit?.revenue) || 0);
+  const totalRevenue = (exp.bookedRevenuePkr || 0)
+    + (summary.mill?.revenuePkr || 0)
+    + (summary.local?.revenuePkr || 0);
   const overallMargin = totalRevenue > 0 ? (consolidatedPkr / totalRevenue) * 100 : null;
 
   const companyName = companyProfileData?.legalName || companyProfileData?.name || 'AGRI COMMODITIES';
@@ -191,14 +201,19 @@ export default function Profit() {
         <div className="relative flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
           <div className="min-w-0">
             <div className="flex items-center gap-2 text-xs uppercase tracking-wider opacity-80 mb-1">
-              <HeroIcon size={14} /> Consolidated profit (Export + Mill + Local)
+              <HeroIcon size={14} /> Consolidated profit (export booked + mill realised + local other) · {periodLabel}
             </div>
             <div className="text-3xl sm:text-4xl font-bold leading-tight tabular-nums">
               {fmtPKR(consolidatedPkr)}
             </div>
             <div className="text-xs opacity-90 mt-1">
               Export {fmtPKR(exportBookedProfitPkr)} · Mill {fmtPKR(millProfitPkr)} · Local {fmtPKR(localProfitPkr)}
-              {exportFxGainLoss !== 0 && <> · FX {exportFxGainLoss >= 0 ? '+' : ''}{fmtPKR(exportFxGainLoss)}</>}
+              {exportFxGainLoss !== 0 && <> · FX realised {exportFxGainLoss >= 0 ? '+' : ''}{fmtPKR(exportFxGainLoss)} (not included)</>}
+            </div>
+            <div className="text-[11px] opacity-80 mt-0.5">
+              Realised basis {fmtPKR(consolidatedRealisedPkr)}
+              {(exp.unpricedCount || 0) > 0 && <> · {exp.unpricedCount} export order{exp.unpricedCount === 1 ? '' : 's'} not costed yet ({fmtPKR(exp.unpricedRevenuePkr || 0)} contract) — excluded</>}
+              {(exp.estimatedCount || 0) > 0 && <> · {exp.estimatedCount} estimated</>}
             </div>
           </div>
           <div className="flex flex-col items-start sm:items-end gap-1.5 text-[11px]">
@@ -211,17 +226,21 @@ export default function Profit() {
       </div>
 
       {/* KPIs */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-        <FinanceKPI icon={DollarSign} title="Export Profit" value={fmtPKR(exportBookedProfitPkr)}
-          subtitle={`${exportRows.length} orders`} status={exportBookedProfitPkr >= 0 ? 'good' : 'danger'} loading={isLoading} />
-        <FinanceKPI icon={RefreshCw} title="FX Gain/Loss" value={fmtPKR(exportFxGainLoss)}
-          subtitle="Current vs locked rate" status={exportFxGainLoss >= 0 ? 'good' : 'warning'} loading={isLoading} />
-        <FinanceKPI icon={Factory} title="Mill Profit" value={fmtPKR(millProfitPkr)}
-          subtitle={`${millRows.length} batches (PKR)`} status={millProfitPkr >= 0 ? 'good' : 'danger'} loading={isLoading} />
-        <FinanceKPI icon={Store} title="Local Profit" value={fmtPKR(localProfitPkr)}
-          subtitle={`${localSales.length} sales`} status={localProfitPkr >= 0 ? 'good' : 'danger'} loading={localLoading} />
+      <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-3">
+        <FinanceKPI icon={DollarSign} title="Export Booked" value={fmtPKR(exportBookedProfitPkr)}
+          subtitle={`${exp.pricedCount || 0} confirmed orders costed${(exp.unpricedCount || 0) > 0 ? ` · ${exp.unpricedCount} excluded` : ''}`} status={exportBookedProfitPkr >= 0 ? 'good' : 'danger'} loading={isLoading} />
+        <FinanceKPI icon={CheckCircle} title="Export Realised" value={fmtPKR(exportRealisedPkr)}
+          subtitle={`${exp.realisedCount || 0} shipped · locked COGS`} status={exportRealisedPkr >= 0 ? 'good' : 'danger'} loading={isLoading} />
+        <FinanceKPI icon={Activity} title="Export Pipeline" value={fmtPKR(exportPipelinePkr)}
+          subtitle="Booked − Realised" status={exportPipelinePkr >= 0 ? 'good' : 'warning'} loading={isLoading} />
+        <FinanceKPI icon={RefreshCw} title="FX Realised" value={fmtPKR(exportFxGainLoss)}
+          subtitle="PKR received vs booked rate" status={exportFxGainLoss >= 0 ? 'good' : 'warning'} loading={isLoading} />
+        <FinanceKPI icon={Factory} title="Mill Realised" value={fmtPKR(millProfitPkr)}
+          subtitle="Sales of mill output − COGS" status={millProfitPkr >= 0 ? 'good' : 'danger'} loading={isLoading} />
+        <FinanceKPI icon={Store} title="Local (other)" value={fmtPKR(localProfitPkr)}
+          subtitle={`${summary.local?.saleCount || 0} non-mill sales`} status={localProfitPkr >= 0 ? 'good' : 'danger'} loading={isLoading} />
         <FinanceKPI icon={TrendingUp} title="Consolidated" value={fmtPKR(consolidatedPkr)}
-          subtitle="Export + Mill + Local" status={consolidatedPkr >= 0 ? 'good' : 'danger'} loading={isLoading} />
+          subtitle={`Booked · realised ${fmtPKR(consolidatedRealisedPkr)}`} status={consolidatedPkr >= 0 ? 'good' : 'danger'} loading={isLoading} />
       </div>
 
       {/* View mode selector */}
@@ -252,11 +271,11 @@ export default function Profit() {
           searchKeys={['orderNo']} exportFilename="export-profitability-pkr" loading={isLoading} />
       )}
       {(tab === 'Mill' || tab === 'Consolidated') && (
-        <FinanceTable title="Milling Batches — PKR" columns={millColumns} data={millRows}
+        <FinanceTable title="Milling Batches — output, sold so far and unsold stock (PKR)" columns={millColumns} data={millRows}
           searchKeys={['batchNo']} exportFilename="mill-profitability-pkr" loading={isLoading} />
       )}
       {(tab === 'Local' || tab === 'Consolidated') && (
-        <FinanceTable title="Local Sales — PKR" columns={localColumns} data={localSales}
+        <FinanceTable title="Local Sales — PKR (all; sales of mill output count in Mill profit)" columns={localColumns} data={localSales}
           searchKeys={['saleNo', 'buyerName', 'itemName']} exportFilename="local-sales-profitability-pkr" loading={localLoading} />
       )}
       </div>{/* /.print-report */}
