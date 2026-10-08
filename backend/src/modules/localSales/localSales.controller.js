@@ -21,11 +21,16 @@ async function generateSaleNo(trx) {
   return nextDocNo(trx || db, { table: 'local_sales', column: 'sale_no', prefix: 'LS-' });
 }
 
+const BANK_METHODS = ['bank_transfer', 'online', 'lc', 'tt', 'wire', 'mobile'];
+
 // Which account a receipt lands in: cash → the cash-type account; bank transfer
 // → the chosen bank account; cheque (uncleared) / credit (unpaid) → none.
 async function resolveReceiptAccountId(trx, { paymentMode, bankAccountId, amount, collectionLocation }) {
   if (!(amount > 0)) return null;
-  if (paymentMode === 'bank_transfer') return bankAccountId || null;
+  // Every non-cash method that moves money now (bank transfer, online, LC, TT,
+  // wire, mobile) lands in the account picked for it. Only bank_transfer used
+  // to: an 'online' receipt moved no account yet still posted Dr 1000.
+  if (BANK_METHODS.includes(paymentMode)) return bankAccountId || null;
   if (paymentMode === 'cash') {
     // Local sales are mill sales — cash collected lands in the Mill's cash float
     // (Mill Cash) unless it was explicitly collected at Head Office.
@@ -587,7 +592,7 @@ function readReceiptInput(body = {}) {
   if (!amount || parseFloat(amount) <= 0) return { error: 'A positive amount is required.' };
   // Same guard as create: a bank-transfer receipt must name its account, else
   // the payment records but no bank balance moves.
-  if (payment_method === 'bank_transfer' && !bank_account_id) return { error: 'A bank account is required for a bank-transfer receipt.' };
+  if (BANK_METHODS.includes(payment_method) && !bank_account_id) return { error: `A bank account is required for a ${payment_method === 'bank_transfer' ? 'bank-transfer' : String(payment_method).replace(/_/g, ' ')} receipt.` };
   // A cheque — any cheque, same-day included — is recorded but does NOT
   // settle the sale until it is cleared in Due Dates: the sale stays
   // Partial/Credit, no bank moves, no journal. It keeps its cheque date (or the
