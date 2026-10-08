@@ -112,11 +112,15 @@ export default function FinanceOverview() {
               {fmtPKR(consolidatedProfit)}
             </div>
             <div className="text-xs opacity-90 mt-1">
-              Export {fmtPKR(exp.bookedProfitPkr || 0)} · Mill {fmtPKR(mill.grossProfit || 0)}
-              {(local.grossProfit || 0) !== 0 && <> · Local {fmtPKR(local.grossProfit || 0)}</>}
+              Export booked {fmtPKR(exp.bookedProfitPkr || 0)} · Mill realised {fmtPKR(mill.grossProfit || 0)}
+              {(local.grossProfit || 0) !== 0 && <> · Local other {fmtPKR(local.grossProfit || 0)}</>}
               {(exp.fxGainLossPkr || 0) !== 0 && (
-                <> · FX {(exp.fxGainLossPkr || 0) >= 0 ? '+' : ''}{fmtPKR(exp.fxGainLossPkr || 0)}</>
+                <> · FX realised {(exp.fxGainLossPkr || 0) >= 0 ? '+' : ''}{fmtPKR(exp.fxGainLossPkr || 0)} (not included)</>
               )}
+            </div>
+            <div className="text-[11px] opacity-80 mt-0.5">
+              Realised basis {fmtPKR(consolidated.realisedPkr || 0)}
+              {(exp.unpricedCount || 0) > 0 && <> · {exp.unpricedCount} export order{exp.unpricedCount === 1 ? '' : 's'} not costed yet — excluded</>}
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -238,25 +242,32 @@ export default function FinanceOverview() {
           revenueSub={`${fmtUSD(exp.revenueForeign || 0)} foreign`}
           profitLabel="Booked Profit"
           profit={fmtPKR(exp.bookedProfitPkr || 0)}
+          profitSub={[
+            `Realised ${fmtPKR(exp.realisedProfitPkr || 0)}`,
+            `Pipeline ${fmtPKR(exp.pipelineProfitPkr || 0)}`,
+            (exp.estimatedCount || 0) > 0 ? `${exp.estimatedCount} estimated` : null,
+            (exp.unpricedCount || 0) > 0 ? `${exp.unpricedCount} not costed (excluded)` : null,
+          ].filter(Boolean).join(' · ')}
           marginPct={exp.marginPct}
           onClick={goExport}
         />
         <SegmentCard
           tone="amber"
           title="Mill Operations"
-          subtitle={`${mill.batchCount || 0} completed batches${mill.priceSource && mill.priceSource !== 'confirmed' ? ` · prices ${mill.priceSource.replace(/_/g, ' ')}` : ''}`}
-          revenueLabel="Revenue (PKR)"
+          subtitle={`Sales of mill output (local sales + transfers to export) · ${mill.batchCount || 0} batches completed`}
+          revenueLabel="Sales (PKR)"
           revenue={fmtPKR(mill.revenue || 0)}
-          revenueSub={`Costs ${fmtPKR((mill.directCosts || 0) + (mill.overheads || 0))}`}
-          profitLabel="Gross Profit"
+          revenueSub={`COGS ${fmtPKR(mill.cogs || 0)} · unsold stock at cost ${fmtPKR(mill.unsoldStockAtCostPkr || 0)}`}
+          profitLabel="Realised Profit"
           profit={fmtPKR(mill.grossProfit || 0)}
+          profitSub={(mill.uncostedCount || 0) > 0 ? `${mill.uncostedCount} sale(s) without COGS excluded` : 'Sales − COGS; unsold output is stock'}
           marginPct={mill.marginPct}
           onClick={goMill}
         />
         <SegmentCard
           tone="emerald"
-          title="Local Sales"
-          subtitle={`${local.completedCount || 0} completed · ${local.saleCount || 0} total${(local.outstanding || 0) > 0 ? ` · ${fmtPKR(local.outstanding)} due` : ''}`}
+          title="Local Sales (other)"
+          subtitle={`${local.completedCount || 0} completed · ${local.saleCount || 0} total${(local.outstanding || 0) > 0 ? ` · ${fmtPKR(local.outstanding)} due` : ''} · profit excludes mill-output sales (in Mill)`}
           revenueLabel="Revenue (PKR)"
           revenue={fmtPKR(local.revenue || 0)}
           revenueSub={`Collected ${fmtPKR(local.collected || 0)}`}
@@ -453,7 +464,7 @@ function KpiTile({ icon: Icon, tone = 'gray', label, basis, primary, secondary, 
 }
 
 // ─── Segment card (Export / Mill / Local Sales) ───────────────────────
-function SegmentCard({ tone = 'gray', title, subtitle, revenueLabel, revenue, revenueSub, profitLabel, profit, marginPct, onClick }) {
+function SegmentCard({ tone = 'gray', title, subtitle, revenueLabel, revenue, revenueSub, profitLabel, profit, profitSub, marginPct, onClick }) {
   const tones = {
     blue:    { bar: 'bg-blue-500',    accent: 'text-blue-600',    ring: 'ring-blue-100' },
     amber:   { bar: 'bg-amber-500',   accent: 'text-amber-600',   ring: 'ring-amber-100' },
@@ -489,6 +500,7 @@ function SegmentCard({ tone = 'gray', title, subtitle, revenueLabel, revenue, re
         <div>
           <p className="text-[10px] uppercase tracking-wider text-gray-400 font-medium">{profitLabel}</p>
           <p className={`text-base font-bold mt-0.5 ${profitColor}`}>{profit}</p>
+          {profitSub && <p className="text-[10px] text-gray-400 mt-0.5">{profitSub}</p>}
         </div>
       </div>
     </Cmp>

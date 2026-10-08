@@ -611,6 +611,20 @@ export function useProfitabilitySummary(params = {}) {
   });
 }
 
+// Booked / Realised / Pipeline / FX + mill / local / consolidated totals — the
+// one server definition (backend finance/profitDefinitions.js). PKR only.
+export function useProfitHeadline(params = {}, options = {}) {
+  return useQuery({
+    queryKey: ['finance-profit-headline', params],
+    queryFn: async () => {
+      const res = await financeApi.profitHeadline(params);
+      return unwrap(res) || {};
+    },
+    staleTime: 60 * 1000,
+    ...options,
+  });
+}
+
 export function useFxRates(params = {}) {
   return useQuery({
     queryKey: ['finance-fx-rates', params],

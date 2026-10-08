@@ -848,7 +848,14 @@ export default function Reports() {
           <KpiTile icon={Coins}       tone="amber"   label="Outstanding A/R" primary={fmtPKR(exec.totalOutstandingPkr)} secondary={`${exec.openReceivables ?? 0} open`} loading={execLoading} />
         )}
         {!millScoped && (
-          <KpiTile icon={TrendingUp}  tone="blue"    label="Booked Profit"   primary={fmtPKR(exec.bookedProfitPkr)} secondary={`Margin ${fmtPct(exec.avgMarginPct)}`} loading={execLoading} />
+          <KpiTile icon={TrendingUp}  tone="blue"    label="Booked Profit (export, PKR)"   primary={fmtPKR(exec.bookedProfitPkr)}
+                   secondary={[
+                     `Margin ${fmtPct(exec.avgMarginPct)}`,
+                     `Realised ${fmtPKR(exec.realisedProfitPkr)}`,
+                     (exec.bookedEstimatedCount || 0) > 0 ? `${exec.bookedEstimatedCount} estimated` : null,
+                     (exec.bookedUnpricedCount || 0) > 0 ? `${exec.bookedUnpricedCount} not costed (excluded)` : null,
+                     'orders dated in the selected period',
+                   ].filter(Boolean).join(' · ')} loading={execLoading} />
         )}
       </div>
       )}
