@@ -80,8 +80,15 @@ export default function Profit() {
       <span className={v >= 0 ? 'text-emerald-600 font-medium' : 'text-red-600 font-medium'}>{fmtPKR(v)}</span>
     )},
     { key: 'marginPct', label: 'Margin', sortable: true, align: 'right', render: (v) => fmtPct(v, { decimals: 2 })},
-    { key: 'priceSource', label: 'Price Source', render: (v) => (
-      <span className={`text-xs px-1.5 py-0.5 rounded ${v === 'confirmed' ? 'bg-emerald-50 text-emerald-700' : v === 'commodity_rates' ? 'bg-blue-50 text-blue-700' : 'bg-red-50 text-red-700'}`}>{v || 'none'}</span>
+    { key: 'priceSource', label: 'Price Source', render: (v, row) => (
+      <span className="inline-flex flex-col items-start gap-0.5">
+        <span className={`text-xs px-1.5 py-0.5 rounded ${v === 'confirmed' ? 'bg-emerald-50 text-emerald-700' : v === 'commodity_rates' ? 'bg-blue-50 text-blue-700' : 'bg-red-50 text-red-700'}`}>{v || 'none'}</span>
+        {/* By-products: as booked on the yield's output lots, or recomputed
+            from batch prices when the batch has no stored output. */}
+        {row.byproductValueSource === 'computed' && (
+          <span className="text-[10px] text-amber-700" title="No output lots booked for this batch — by-product value recomputed from the batch's prices">by-products computed</span>
+        )}
+      </span>
     )},
     { key: 'calculationStatus', label: 'Accuracy', render: (v) => <AccuracyBadge status={v} /> },
   ];

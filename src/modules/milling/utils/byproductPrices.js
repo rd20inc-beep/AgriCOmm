@@ -37,3 +37,18 @@ export function byproductRevenuePKR(b, fallbackBrokenPerMT = 0) {
     + n(b.sweepingMT) * n(b.sweepingPricePerMT)
     + n(b.chobaMT) * n(b.chobaPricePerMT);
 }
+
+/**
+ * A batch's by-product revenue for reports: the value its yield BOOKED on the
+ * output lots (`outputValue`, from the batch list) when the server has one, so
+ * a by-product price edited on the batch afterwards can't move the report off
+ * the books. Batches with no stored output (not yielded / legacy) fall back to
+ * byproductRevenuePKR — kg × the batch's own prices.
+ */
+export function batchByproductRevenuePKR(b, fallbackBrokenPerMT = 0) {
+  const stored = b && b.outputValue;
+  if (stored && stored.source === 'yield_lots' && stored.byproductValue != null) {
+    return parseFloat(stored.byproductValue) || 0;
+  }
+  return byproductRevenuePKR(b || {}, fallbackBrokenPerMT);
+}

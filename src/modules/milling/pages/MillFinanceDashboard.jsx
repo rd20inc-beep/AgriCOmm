@@ -49,7 +49,7 @@ import { valueInventory } from '../utils/inventoryValue';
 import useConfirm from '../../../hooks/useConfirm';
 import PaymentDrawer from '../../../components/payments/PaymentDrawer';
 import { toLocalISODate, todayLocalISO, fmtPKR, fmtNum, fmtPct, fmtKg, fmtDate, fmtDateTime } from '../../../shared/utils/format';
-import { byproductRevenuePKR } from '../utils/byproductPrices';
+import { batchByproductRevenuePKR } from '../utils/byproductPrices';
 
 const PKR = (v) => fmtPKR(v || 0, { decimals: 2 });
 // Was a Cr/L/k abbreviator; KPI cards now show the exact rupee figure.
@@ -546,12 +546,12 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
     // that rice can only be sold once.
     const sellableFinishedMT = (b) => Math.max(0, b.actualFinishedMT - (b.finishedConsumedMT || 0));
     const finishedRev = completed.reduce((s, b) => s + sellableFinishedMT(b) * batchPrice(b, 'finished'), 0);
-    // Every by-product at the batch's own price, per broken grade when the
-    // batch recorded the split — not brokenMT × the aggregate broken price,
-    // which ignored the grade prices actually set (and on prod still held a
-    // per-MT default saved as per-kg, ~Rs 87m of phantom revenue).
+    // By-products at what the yield booked on the output lots (server-side
+    // batchOutputValues). Only a batch with no stored output is recomputed —
+    // each by-product at the batch's own price, per broken grade when the
+    // batch recorded the split (never brokenMT × the aggregate broken price).
     const byproductRev = completed.reduce((s, b) =>
-      s + byproductRevenuePKR(b, DEFAULT_PRICES.broken), 0);
+      s + batchByproductRevenuePKR(b, DEFAULT_PRICES.broken), 0);
     const totalRev = finishedRev + byproductRev;
     const totalCost = totalRaw + totalMilling + totalOtherCosts + totalOverhead;
     const totalFinishedKg = completed.reduce((s, b) => s + sellableFinishedMT(b) * 1000, 0);

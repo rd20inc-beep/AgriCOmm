@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { byproductRevenuePKR, isImplausiblePerKg, MAX_PRICE_PER_KG } from '../byproductPrices';
+import { byproductRevenuePKR, batchByproductRevenuePKR, isImplausiblePerKg, MAX_PRICE_PER_KG } from '../byproductPrices';
+import { transformBatch } from '../../../../api/transforms';
 
 // Prod M-001 as the transform delivers it (MT quantities, per-MT prices = per-kg × 1000).
 const M001 = {
@@ -31,5 +32,28 @@ describe('isImplausiblePerKg', () => {
     expect(isImplausiblePerKg(MAX_PRICE_PER_KG)).toBe(false);
     expect(isImplausiblePerKg('38')).toBe(false);
     expect(isImplausiblePerKg('')).toBe(false);
+  });
+});
+
+describe('batchByproductRevenuePKR', () => {
+  it('uses what the yield booked on the output lots, even after the batch prices were edited', () => {
+    const edited = { ...M001, b2PricePerMT: 999 * 1000, sweepingPricePerMT: 999 * 1000 };
+    const b = { ...edited, outputValue: { byproductValue: 179000, finishedValue: 665903, source: 'yield_lots' } };
+    expect(batchByproductRevenuePKR(b, 38000)).toBe(179000);
+  });
+
+  it('a stored 0 (only a finished lot) stays 0 — no fallback', () => {
+    expect(batchByproductRevenuePKR({ brokenMT: 1, outputValue: { byproductValue: 0, source: 'yield_lots' } }, 38000)).toBe(0);
+  });
+
+  it('falls back to the batch prices when there is no stored output (or it was redacted)', () => {
+    expect(batchByproductRevenuePKR({ ...M001, outputValue: null }, 38000)).toBeCloseTo(179000, 6);
+    expect(batchByproductRevenuePKR(M001, 38000)).toBeCloseTo(179000, 6);
+  });
+
+  it('transformBatch carries output_value through as outputValue', () => {
+    const t = transformBatch({ id: 1, batch_no: 'M-001', output_value: { byproductValue: 179000, source: 'yield_lots' } });
+    expect(t.outputValue).toEqual({ byproductValue: 179000, source: 'yield_lots' });
+    expect(transformBatch({ id: 2, batch_no: 'M-002' }).outputValue).toBeNull();
   });
 });

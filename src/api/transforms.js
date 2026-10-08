@@ -287,6 +287,9 @@ export function transformBatch(dbBatch) {
     plannedFinishedMT: (parseFloat(dbBatch.planned_finished_kg) || 0) / 1000,
     actualFinishedMT: (parseFloat(dbBatch.actual_finished_kg) || 0) / 1000,
     finishedConsumedMT: (parseFloat(dbBatch.finished_consumed_kg) || 0) / 1000,
+    // What the yield booked on the output lots (server: batchOutputValues) —
+    // { byproductValue, finishedValue, byproductByGrade, source } or null.
+    outputValue: dbBatch.output_value || null,
     brokenMT: (parseFloat(dbBatch.broken_kg) || 0) / 1000,
     b1MT: (parseFloat(dbBatch.b1_kg) || 0) / 1000,
     b2MT: (parseFloat(dbBatch.b2_kg) || 0) / 1000,
