@@ -78,6 +78,10 @@ function seedMill({ onHand = 10, delta = -4, status = 'Pending', stockRow = true
   db.tables.mill_stock = stockRow ? [{ id: 5, item_id: 2, warehouse_id: null, quantity_available: onHand, quantity_reserved: 0 }] : [];
   db.tables.mill_stock_adjustments = [{ id: 11, item_id: 2, warehouse_id: null, quantity_delta: delta, status, reason: 'torn', requested_by: 9 }];
   db.tables.mill_stock_movements = [];
+  db.tables.chart_of_accounts = [{ id: 50, code: '1250', name: 'Bags & Packaging' }, { id: 60, code: '6000', name: 'Operating Expenses' }];
+  db.tables.journal_entries = [];
+  db.tables.journal_lines = [];
+  db.tables.accounting_periods = [];
   db.locks.length = 0;
 }
 
@@ -89,6 +93,10 @@ describe('mill-store adjustment approval', () => {
     expect(db.tables.mill_stock_movements.map((m) => m.quantity)).toEqual([-4]);
     expect(db.tables.mill_stock_adjustments[0].status).toBe('Approved');
     expect(db.locks.map((l) => l.table)).toEqual(expect.arrayContaining(['mill_stock_adjustments', 'mill_stock']));
+    // The write-off leaves 1250 at the item's average cost: 4 × 30 (A4).
+    expect(db.tables.journal_entries).toHaveLength(1);
+    expect(db.tables.journal_entries[0]).toMatchObject({ ref_type: 'Mill Store Adjustment', ref_no: 'MSA-11', status: 'Posted' });
+    expect(db.tables.journal_lines.map((l) => [l.account_id, l.debit, l.credit])).toEqual([[60, 120, 0], [50, 0, 120]]);
   });
 
   test('a write-off larger than on-hand is refused (400), nothing changes', async () => {

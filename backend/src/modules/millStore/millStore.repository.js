@@ -11,6 +11,38 @@ function adjustedBalance(onHand, delta) {
   return Math.max(0, next);
 }
 
+// A stock adjustment moves what the store holds, so it moves 1250 Bags &
+// Packaging too (A4, 2026-10-09). Both paths used to change the quantity and
+// write a costed movement with NO journal — the bags typed in by "Direct
+// stock set" on 2026-09-28 (Rs 684,875.10) never reached 1250, and the
+// packing runs that drew them drove 1250 negative. A count gain is
+// Dr 1250 / Cr 6000 (stock adjustment), a loss / write-off Dr 6000 / Cr 1250,
+// at the item's average cost. No value (no cost on file) → no journal.
+async function postStoreAdjustmentJournal(trx, { item, delta, costPerUnit, refNo, userId, reason }) {
+  const value = Number((Math.abs(Number(delta) || 0) * (Number(costPerUnit) || 0)).toFixed(2));
+  if (!(value > 0)) return null;
+  const [store, opEx] = await Promise.all([
+    trx('chart_of_accounts').where({ code: '1250' }).first(),
+    trx('chart_of_accounts').where({ code: '6000' }).first(),
+  ]);
+  if (!store || !opEx) throw new ValidationError('Chart of accounts is missing 1250 / 6000 — cannot post the stock adjustment.');
+  const gain = Number(delta) > 0;
+  const [dr, cr] = gain ? [store, opEx] : [opEx, store];
+  const what = `${gain ? 'Stock gain' : 'Stock loss'} ${Math.abs(Number(delta))} × ${item.name || item.code || `item #${item.id}`} @ ${costPerUnit}`;
+  const j = await accountingService.createJournal(trx, {
+    date: new Date().toISOString().slice(0, 10), entity: 'mill',
+    refType: 'Mill Store Adjustment', refNo,
+    description: `${what}${reason ? ` — ${String(reason).slice(0, 200)}` : ''}`,
+    currency: 'PKR', fxRate: 1, isAuto: true, userId: userId || null,
+    lines: [
+      { account_id: dr.id, account: dr.name, debit: value, credit: 0, narration: `DR ${dr.code} ${dr.name} — ${what}` },
+      { account_id: cr.id, account: cr.name, debit: 0, credit: value, narration: `CR ${cr.code} ${cr.name} — ${what}` },
+    ],
+  });
+  if (j && j.id) await accountingService.postJournal(trx, j.id);
+  return j;
+}
+
 // ─── Item-level stock ───
 // ONE definition of an item's on-hand: the SUM of every mill_stock row it has
 // (all warehouses plus the unassigned bucket), LEFT JOINed so an item with no
@@ -587,6 +619,9 @@ const millStoreRepo = {
       performed_by: adj.requested_by,
       approved_by: approvedBy,
     });
+    await postStoreAdjustmentJournal(trx, {
+      item: item || { id: adj.item_id }, delta, costPerUnit, refNo: `MSA-${id}`, userId: approvedBy, reason: adj.reason,
+    });
 
     return trx('mill_stock_adjustments as a')
       .join('mill_items as mi', 'mi.id', 'a.item_id')
@@ -640,7 +675,7 @@ const millStoreRepo = {
 
       if (delta !== 0) {
         const costPerUnit = Number(item.avg_cost_per_unit) || 0;
-        await trx('mill_stock_movements').insert({
+        const [mv] = await trx('mill_stock_movements').insert({
           item_id: itemId,
           warehouse_id: warehouseId,
           movement_type: 'adjustment',
@@ -650,6 +685,9 @@ const millStoreRepo = {
           reference_type: 'manual_edit',
           reason: reason || `Direct stock set to ${target}`,
           performed_by: userId,
+        }).returning('id');
+        await postStoreAdjustmentJournal(trx, {
+          item, delta, costPerUnit, refNo: `MSS-${(mv && (mv.id || mv)) || itemId}`, userId, reason: reason || `Direct stock set to ${target}`,
         });
       }
 
@@ -660,6 +698,7 @@ const millStoreRepo = {
 
 module.exports = millStoreRepo;
 module.exports.adjustedBalance = adjustedBalance;
+module.exports.postStoreAdjustmentJournal = postStoreAdjustmentJournal;
 module.exports.ITEM_ON_HAND = ITEM_ON_HAND;
 module.exports.withItemOnHand = withItemOnHand;
 module.exports.lowStockItemsQuery = lowStockItemsQuery;
