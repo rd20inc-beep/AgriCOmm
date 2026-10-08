@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Percent, Paperclip, FileText, X } from 'lucide-react';
+import { Percent, Paperclip, FileText, X, ChevronDown } from 'lucide-react';
 import api from '../../api/client';
 import { favStar } from '../../shared/utils/favorites';
 import FieldError from '../../shared/components/FieldError';
@@ -16,7 +16,7 @@ import { accountsForCurrency } from '../../shared/utils/accountCurrency';
  * decides what it submits, what it defaults, and what else it shows.
  */
 
-const inp = 'w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 bg-white';
+const inp = 'w-full rounded-lg border border-gray-300 px-3 py-2 min-h-10 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white';
 const lbl = 'block text-xs font-medium text-gray-600 mb-1';
 
 /**
@@ -90,45 +90,65 @@ export function PaymentExtras({ form, set, gross, currency = 'PKR', addToast, er
 
   if (!taxes && !attach) return null;
   return (
-    <div className="rounded-lg border border-gray-200 p-3 space-y-3 bg-gray-50/60">
-      <div className="text-xs font-semibold text-gray-600">{taxes ? <>Tax, discount &amp; document</> : 'Supporting document'} <span className="font-normal text-gray-400">(optional)</span></div>
+    <div className="rounded-lg border border-gray-200 p-3 space-y-3 bg-white">
+      <div className="text-xs font-semibold text-gray-600">{taxes ? <>Tax, discount &amp; document</> : 'Supporting document'} <span className="font-normal text-gray-500">(optional)</span></div>
       {taxes && (<>
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 min-[400px]:grid-cols-3 gap-3">
         <div>
-          <label className="block text-[11px] font-medium text-gray-500 mb-1 inline-flex items-center gap-1"><Percent size={11} /> WHT rate</label>
-          <input type="number" step="0.01" min="0" max="100" value={form.whtRate || ''} onChange={(e) => onRate(e.target.value)} placeholder="e.g. 2" className={inp} />
+          <label className="block text-xs font-medium text-gray-600 mb-1 inline-flex items-center gap-1" htmlFor="pay-wht-rate"><Percent size={11} aria-hidden="true" /> WHT rate</label>
+          <input id="pay-wht-rate" type="number" step="0.01" min="0" max="100" value={form.whtRate || ''} onChange={(e) => onRate(e.target.value)} placeholder="e.g. 2" className={inp} />
         </div>
         <div>
-          <label className="block text-[11px] font-medium text-gray-500 mb-1">WHT amount</label>
-          <input type="number" step="0.01" min="0" value={form.whtAmount || ''} onChange={(e) => set('whtAmount', e.target.value)} placeholder="0" className={inp} />
+          <label className="block text-xs font-medium text-gray-600 mb-1" htmlFor="pay-wht-amount">WHT amount</label>
+          <input id="pay-wht-amount" type="number" step="0.01" min="0" value={form.whtAmount || ''} onChange={(e) => set('whtAmount', e.target.value)} placeholder="0" className={inp} />
           <FieldError error={errors.whtAmount} />
         </div>
         <div>
-          <label className="block text-[11px] font-medium text-gray-500 mb-1">Discount</label>
-          <input type="number" step="0.01" min="0" value={form.discountAmount || ''} onChange={(e) => set('discountAmount', e.target.value)} placeholder="0" className={inp} />
+          <label className="block text-xs font-medium text-gray-600 mb-1" htmlFor="pay-discount">Discount</label>
+          <input id="pay-discount" type="number" step="0.01" min="0" value={form.discountAmount || ''} onChange={(e) => set('discountAmount', e.target.value)} placeholder="0" className={inp} />
         </div>
       </div>
-      <div className="flex items-center justify-between text-xs bg-white rounded-md border border-gray-200 px-3 py-2">
+      <div className="flex items-center justify-between text-xs bg-gray-50 rounded-md border border-gray-200 px-3 py-2">
         <span className="text-gray-500">Net cash to pay</span>
         <span className="font-semibold text-gray-800 tabular-nums">{money(netCash(form), currency)}</span>
       </div>
       </>)}
       {attach && (
       <div>
-        <label className="block text-[11px] font-medium text-gray-500 mb-1 inline-flex items-center gap-1"><Paperclip size={11} /> Supporting document</label>
+        <label className="block text-xs font-medium text-gray-600 mb-1 inline-flex items-center gap-1"><Paperclip size={11} aria-hidden="true" /> Supporting document</label>
         {form.attachmentUrl ? (
-          <div className="flex items-center justify-between text-xs bg-white rounded-md border border-gray-200 px-3 py-2">
-            <span className="text-gray-700 truncate inline-flex items-center gap-1.5"><FileText size={13} className="text-emerald-600" /> {form.attachmentName || 'Attached'}</span>
-            <button type="button" onClick={() => { set('attachmentUrl', ''); set('attachmentName', ''); }} aria-label="Remove attachment" title="Remove attachment" className="text-red-500 hover:text-red-600"><X size={14} /></button>
+          <div className="flex items-center justify-between text-xs bg-gray-50 rounded-md border border-gray-200 px-3 py-1">
+            <span className="text-gray-700 truncate inline-flex items-center gap-1.5"><FileText size={13} className="text-emerald-600" aria-hidden="true" /> {form.attachmentName || 'Attached'}</span>
+            <button type="button" onClick={() => { set('attachmentUrl', ''); set('attachmentName', ''); }} aria-label="Remove attachment" title="Remove attachment" className="inline-flex items-center justify-center w-10 h-10 rounded-lg text-red-600 hover:bg-red-50"><X size={14} aria-hidden="true" /></button>
           </div>
         ) : (
           <input type="file" onChange={onFile} disabled={uploading}
-            className="block w-full text-xs text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100" />
+            className="block w-full text-xs text-gray-500 file:mr-3 file:py-2 file:px-3 file:rounded-md file:border file:border-gray-200 file:text-xs file:font-medium file:bg-white file:text-gray-700 hover:file:bg-gray-50" />
         )}
-        {uploading && <p className="text-[11px] text-gray-400 mt-1">Uploading…</p>}
+        {uploading && <p className="text-xs text-gray-500 mt-1">Uploading…</p>}
       </div>
       )}
     </div>
+  );
+}
+
+/**
+ * A collapsible "More details" block for a form's optional fields. Its content
+ * stays mounted (a closed <details> only hides it), so values, uploads and
+ * validation keep working. `forceOpen` opens it when it holds a value or an
+ * error, so nothing the user typed or must fix is ever hidden.
+ */
+export function MoreDetails({ hint, forceOpen = false, children }) {
+  const [open, setOpen] = useState(forceOpen);
+  const isOpen = open || forceOpen;
+  return (
+    <details open={isOpen} onToggle={(e) => setOpen(e.currentTarget.open)} className="group rounded-lg border border-gray-200 bg-gray-50/60" data-testid="more-details">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 min-h-11 text-sm font-medium text-gray-700 rounded-lg hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 [&::-webkit-details-marker]:hidden">
+        <span>More details{hint && <span className="ml-1.5 text-xs font-normal text-gray-500">({hint} — optional)</span>}</span>
+        <ChevronDown size={16} className="shrink-0 text-gray-400 group-open:rotate-180" aria-hidden="true" />
+      </summary>
+      <div className="px-3 pb-3 pt-1 space-y-3">{children}</div>
+    </details>
   );
 }
 
@@ -192,7 +212,7 @@ export default function PaymentFields({
           value={form.amount} onChange={(e) => set('amount', e.target.value)} className={inp} />
         <FieldError error={errors.amount} />
       </div>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 min-[400px]:grid-cols-2 gap-3">
         <div>
           <label className={lbl} htmlFor={`${idPrefix}-method`}>Method</label>
           <select id={`${idPrefix}-method`} value={form.method} onChange={(e) => onMethod(e.target.value)} className={inp}>
@@ -211,10 +231,10 @@ export default function PaymentFields({
             {['Mill', 'Head Office'].map((loc) => (
               <button key={loc} type="button" role="radio" aria-checked={(form.collectionLocation || 'Mill') === loc}
                 onClick={() => set('collectionLocation', loc)}
-                className={`px-3 py-2 text-sm font-medium rounded-lg border ${(form.collectionLocation || 'Mill') === loc ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-gray-200 text-gray-600 hover:border-gray-300'}`}>{loc}</button>
+                className={`px-3 min-h-10 text-sm font-medium rounded-lg border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${(form.collectionLocation || 'Mill') === loc ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600 hover:border-gray-300'}`}>{loc}</button>
             ))}
           </div>
-          <p className="text-[11px] text-gray-400 mt-1">{(form.collectionLocation || 'Mill') === 'Head Office' ? 'Lands in Office Petty Cash.' : 'Lands in Mill Cash.'}</p>
+          <p className="text-xs text-gray-500 mt-1">{(form.collectionLocation || 'Mill') === 'Head Office' ? 'Lands in Office Petty Cash.' : 'Lands in Mill Cash.'}</p>
         </div>
       )}
       {!hideAccount && !(cashLocation && form.method === 'cash') && (
@@ -238,12 +258,21 @@ export default function PaymentFields({
           <ChequeHint />
         </div>
       )}
-      {extras && <PaymentExtras form={form} set={set} gross={parseFloat(form.amount) || 0} currency={currency} addToast={addToast} errors={errors} taxes={taxes} attach={attach} />}
-      {remarks && (
-        <div>
-          <label className={lbl} htmlFor={`${idPrefix}-notes`}>Remarks</label>
-          <textarea id={`${idPrefix}-notes`} value={form.notes} onChange={(e) => set('notes', e.target.value)} rows={2} placeholder="Optional" className={inp} />
-        </div>
+      {/* Optional fields — folded under "More details" so the form leads
+          with what every payment needs. Opens by itself when one of them
+          already has a value or an error. */}
+      {(extras || remarks) && (
+        <MoreDetails
+          hint={[extras && taxes ? 'tax, discount' : null, extras && attach ? 'document' : null, remarks ? 'remarks' : null].filter(Boolean).join(', ')}
+          forceOpen={!!(errors.whtAmount || form.whtRate || form.whtAmount || form.discountAmount || form.attachmentUrl || form.notes)}>
+          {extras && <PaymentExtras form={form} set={set} gross={parseFloat(form.amount) || 0} currency={currency} addToast={addToast} errors={errors} taxes={taxes} attach={attach} />}
+          {remarks && (
+            <div>
+              <label className={lbl} htmlFor={`${idPrefix}-notes`}>Remarks</label>
+              <textarea id={`${idPrefix}-notes`} value={form.notes} onChange={(e) => set('notes', e.target.value)} rows={2} placeholder="Optional" className={inp} />
+            </div>
+          )}
+        </MoreDetails>
       )}
     </>
   );

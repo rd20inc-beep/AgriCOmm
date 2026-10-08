@@ -1,3 +1,4 @@
+import { btnPrimary, btnSecondary } from '../utils/uiClasses';
 import { useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { CheckCircle, Wallet, HandCoins, Info } from 'lucide-react';
@@ -215,6 +216,23 @@ export default function StatementPayDrawer({ mode, party, onClose }) {
       icon={Icon}
       title={`Record ${verb}`}
       subtitle={party.name}
+      // The submit sits in the pinned footer (primary, right) and posts the
+      // form below through its id.
+      footer={!loading && queue.length > 0 ? (
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={onClose} className={btnSecondary}>Cancel</button>
+          <button
+            type="submit"
+            form="statement-pay-form"
+            disabled={saving || recordPaymentMut.isPending || allocatedTotal <= 0}
+            className={btnPrimary}>
+            <CheckCircle size={16} aria-hidden="true" />
+            {saving || recordPaymentMut.isPending
+              ? 'Processing…'
+              : `Record ${verb} — ${fmt(allocatedTotal, activeCur)}`}
+          </button>
+        </div>
+      ) : null}
     >
       {loading ? (
         <div className="py-10 text-center text-sm text-gray-400">Loading open invoices…</div>
@@ -229,7 +247,7 @@ export default function StatementPayDrawer({ mode, party, onClose }) {
           </p>
         </div>
       ) : (
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form id="statement-pay-form" onSubmit={handleSubmit} className="space-y-4">
           {/* Outstanding summary + optional currency switch */}
           <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 flex items-center justify-between">
             <div>
@@ -401,16 +419,6 @@ export default function StatementPayDrawer({ mode, party, onClose }) {
               </p>
             )}
           </div>
-
-          <button
-            type="submit"
-            disabled={saving || recordPaymentMut.isPending || allocatedTotal <= 0}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-medium text-sm disabled:opacity-50">
-            <CheckCircle size={16} />
-            {saving || recordPaymentMut.isPending
-              ? 'Processing…'
-              : `Record ${verb} — ${fmt(allocatedTotal, activeCur)}`}
-          </button>
         </form>
       )}
     </SlideDrawer>

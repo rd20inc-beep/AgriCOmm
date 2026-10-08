@@ -1,3 +1,4 @@
+import { btnPrimary, btnSecondary } from '../utils/uiClasses';
 import { useMemo, useState } from 'react';
 import { DollarSign, Loader2, Receipt, Calendar } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -116,10 +117,9 @@ export default function ExpenseCreateDrawer({ open = true, onClose, onCreated })
     <SlideDrawer open={open} onClose={onClose} title="New expense" subtitle="Recorded as a bill — pay now or later" icon={Receipt} size="2xl"
       footer={(
         <div className="flex justify-end gap-2">
-          <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
-          <button type="submit" form="expense-create-form" disabled={createMut.isPending}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50">
-            {createMut.isPending ? <Loader2 size={16} className="animate-spin" /> : <DollarSign size={16} />} Record expense
+          <button type="button" onClick={onClose} className={btnSecondary}>Cancel</button>
+          <button type="submit" form="expense-create-form" disabled={createMut.isPending} className={btnPrimary}>
+            {createMut.isPending ? <Loader2 size={16} className="animate-spin" aria-hidden="true" /> : <DollarSign size={16} aria-hidden="true" />} Record expense
           </button>
         </div>
       )}>

@@ -106,7 +106,7 @@ export default function SlideDrawer({ open, onClose, title, subtitle, icon: Icon
         className={`bg-white w-full ${widthClass} h-full shadow-xl flex flex-col animate-in slide-in-from-right duration-200 outline-none`}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+        <div className="px-4 sm:px-5 py-3 sm:py-4 border-b border-gray-100 flex items-center justify-between gap-2">
           <div className="flex items-center gap-3 min-w-0">
             {Icon && (
               <div className="w-9 h-9 rounded-lg bg-gray-100 flex items-center justify-center flex-shrink-0" aria-hidden="true">
@@ -118,15 +118,17 @@ export default function SlideDrawer({ open, onClose, title, subtitle, icon: Icon
               {subtitle && <p className="text-xs text-gray-500 mt-0.5 truncate" title={subtitleText}>{subtitle}</p>}
             </div>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close" className="text-gray-400 hover:text-gray-700 flex-shrink-0">
+          <button type="button" onClick={onClose} aria-label="Close"
+            className="-mr-2 inline-flex items-center justify-center w-10 h-10 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 flex-shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
             <X size={18} aria-hidden="true" />
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-5">{children}</div>
+        <div className="flex-1 overflow-y-auto p-4 sm:p-5">{children}</div>
 
+        {/* Pinned under the scrolling body; clears the phone's home indicator. */}
         {footer && (
-          <div className="border-t border-gray-100 px-5 py-3 bg-gray-50">{footer}</div>
+          <div className="border-t border-gray-100 px-4 sm:px-5 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-gray-50">{footer}</div>
         )}
       </div>
     </div>
