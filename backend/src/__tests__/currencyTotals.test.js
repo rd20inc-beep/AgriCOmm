@@ -98,6 +98,65 @@ describe('Finance overview — Cash Position per currency', () => {
   });
 });
 
+describe('Finance overview — Receivables per currency (R4)', () => {
+  // Prod 2026-10: USD 121,621.10 open + a PKR opening receivable of
+  // Rs 821,395 — the tile showed ≈ $943,016 (the rupees added to the dollars).
+  const base = {
+    export_orders: zeros, export_order_costs: zeros, milling_batches: () => [], milling_costs: () => [],
+    mill_expenses: zeros, local_sales: zeros, payables: zeros, bank_accounts: () => [],
+  };
+  const recvRows = [
+    { currency: 'USD', count: '4', outstanding: '121621.10', overdue_count: '1', overdue_amount: '3172' },
+    { currency: 'PKR', count: '2', outstanding: '821395', overdue_count: '2', overdue_amount: '821395' },
+  ];
+  const collRows = [
+    { currency: 'USD', expected: '200000', received: '78378.90' },
+    { currency: 'PKR', expected: '1000000', received: '178605' },
+  ];
+  const isOutstandingQ = (q) => q.raws.some((r) => r.includes('SUM(outstanding)'));
+  const receivables = (q) => {
+    if (!q.groupBy) return {};
+    return isOutstandingQ(q) ? recvRows : collRows;
+  };
+
+  test('USD and PKR outstanding/overdue are reported separately, in their own currency', async () => {
+    db.__set({ ...base, receivables });
+    const out = await financeService.getOverviewSummary({});
+    expect(out.receivables.byCurrency.USD).toEqual({ count: 4, outstanding: 121621.1, overdueCount: 1, overdueAmount: 3172 });
+    expect(out.receivables.byCurrency.PKR).toEqual({ count: 2, outstanding: 821395, overdueCount: 2, overdueAmount: 821395 });
+    expect(out.receivables.totalOutstandingForeign).toBe(121621.1); // USD only
+    expect(out.receivables.overdueAmountForeign).toBe(3172);       // not the rupees
+    expect(out.receivables.totalOutstandingPkr).toBe(821395);
+    expect(out.receivables.overdueAmountPkr).toBe(821395);
+    expect(out.receivables.count).toBe(6);
+    expect(out.receivables.totalOutstandingForeign).not.toBeCloseTo(943016.1, 0);
+  });
+
+  test('outstanding is read per currency from what is still owed, not base_amount_pkr', async () => {
+    db.__set({ ...base, receivables });
+    await financeService.getOverviewSummary({});
+    const q = db.__queries.find((x) => x.table === 'receivables' && x.groupBy && isOutstandingQ(x));
+    expect(q).toBeDefined();
+    expect(String(q.groupBy)).toMatch(/currency/);
+    expect(q.raws.join(' ')).toMatch(/SUM\(outstanding\)/);
+    expect(q.raws.join(' ')).not.toMatch(/base_amount_pkr/);
+  });
+
+  test('collection rate is per currency; no single figure across currencies', async () => {
+    db.__set({ ...base, receivables });
+    const out = await financeService.getOverviewSummary({});
+    expect(out.collectionRateByCurrency).toEqual({ USD: 39.2, PKR: 17.9 });
+    expect(out.collectionRate).toBeNull();
+  });
+
+  test('one currency only → the single rate is that currency', async () => {
+    db.__set({ ...base, receivables: (q) => (!q.groupBy ? {} : isOutstandingQ(q) ? [recvRows[0]] : [collRows[0]]) });
+    const out = await financeService.getOverviewSummary({});
+    expect(out.collectionRate).toBe(39.2);
+    expect(out.receivables.totalOutstandingPkr).toBe(0);
+  });
+});
+
 describe('Executive summary — Outstanding A/R', () => {
   const arQuery = () => db.__queries.find((q) => q.table === 'receivables' && q.raws.some((r) => r.includes('outstanding_pkr')));
 

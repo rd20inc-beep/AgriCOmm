@@ -180,16 +180,32 @@ const financeService = {
     // Exclude local-sale receivables (local_sale_id set): those are already
     // captured in the `local` KPI above from local_sales.due_amount, so counting
     // them here too would double the same debt across the two KPIs.
-    const hasRecvBasePkr = await db.schema.hasColumn('receivables', 'base_amount_pkr');
-    const recvStats = await db('receivables').whereNot('status', 'Paid').whereNull('local_sale_id').select(
-      db.raw("COUNT(*) as count"),
-      db.raw("COALESCE(SUM(outstanding), 0) as total_outstanding"),
-      db.raw(hasRecvBasePkr
-        ? "COALESCE(SUM(base_amount_pkr), 0) as total_outstanding_pkr"
-        : "COALESCE(SUM(outstanding * ?), 0) as total_outstanding_pkr", hasRecvBasePkr ? [] : [pkrRate]),
-      db.raw("COUNT(CASE WHEN due_date < CURRENT_DATE THEN 1 END) as overdue_count"),
-      db.raw("COALESCE(SUM(CASE WHEN due_date < CURRENT_DATE THEN outstanding END), 0) as overdue_amount"),
-    ).first();
+    // Per currency, in each receivable's OWN currency, from what is still
+    // OUTSTANDING (not the full booked base_amount_pkr). A rupee receivable
+    // (e.g. a PKR opening balance) is never added into the dollar figure.
+    const recvRows = await db('receivables').whereNot('status', 'Paid').whereNull('local_sale_id')
+      .select(
+        db.raw("COALESCE(currency, 'PKR') as currency"),
+        db.raw('COUNT(*) as count'),
+        db.raw('COALESCE(SUM(outstanding), 0) as outstanding'),
+        db.raw('COUNT(CASE WHEN due_date < CURRENT_DATE THEN 1 END) as overdue_count'),
+        db.raw('COALESCE(SUM(CASE WHEN due_date < CURRENT_DATE THEN outstanding END), 0) as overdue_amount'),
+      )
+      .groupByRaw("COALESCE(currency, 'PKR')");
+    const recvByCurrency = {};
+    let recvCount = 0; let recvOverdueCount = 0;
+    for (const r of Array.isArray(recvRows) ? recvRows : []) {
+      const cur = String(r.currency || 'PKR').toUpperCase();
+      recvByCurrency[cur] = {
+        count: parseInt(r.count, 10) || 0,
+        outstanding: parseFloat(r.outstanding) || 0,
+        overdueCount: parseInt(r.overdue_count, 10) || 0,
+        overdueAmount: parseFloat(r.overdue_amount) || 0,
+      };
+      recvCount += recvByCurrency[cur].count;
+      recvOverdueCount += recvByCurrency[cur].overdueCount;
+    }
+    const recvCur = (c) => recvByCurrency[c] || { count: 0, outstanding: 0, overdueCount: 0, overdueAmount: 0 };
 
     // ── Payables ──
     const payStats = await db('payables').whereNot('status', 'Paid')
@@ -222,10 +238,23 @@ const financeService = {
     const bankBalanceUSD = bankByCurrency.USD || 0;
 
     // ── Collection rate ──
-    const totalExpected = await db('receivables').sum('expected_amount as total').first();
-    const totalReceived = await db('receivables').sum('received_amount as total').first();
-    const collectionRate = parseFloat(totalExpected?.total) > 0
-      ? (parseFloat(totalReceived?.total) / parseFloat(totalExpected?.total) * 100) : 0;
+    // Received ÷ expected, per currency — dollars and rupees are never summed.
+    // The single `collectionRate` is only given when one currency is present;
+    // with more than one it is null and the per-currency rates stand.
+    const collRows = await db('receivables')
+      .select(db.raw("COALESCE(currency, 'PKR') as currency"))
+      .sum('expected_amount as expected')
+      .sum('received_amount as received')
+      .groupByRaw("COALESCE(currency, 'PKR')");
+    const collectionRateByCurrency = {};
+    for (const r of Array.isArray(collRows) ? collRows : []) {
+      const exp = parseFloat(r.expected) || 0;
+      if (exp <= 0) continue;
+      collectionRateByCurrency[String(r.currency || 'PKR').toUpperCase()] = parseFloat(((parseFloat(r.received) || 0) / exp * 100).toFixed(1));
+    }
+    const collCurrencies = Object.keys(collectionRateByCurrency);
+    const collectionRate = collCurrencies.length === 1 ? collectionRateByCurrency[collCurrencies[0]]
+      : collCurrencies.length === 0 ? 0 : null;
 
     // ── Consolidated profit (PKR) ──
     const consolidatedProfitPkr = exportBookedProfitPkr + millGrossProfit + localGrossProfit;
@@ -290,11 +319,16 @@ const financeService = {
         fxGainLossPkr: fxGainLossTotal,
       },
       receivables: {
-        count: parseInt(recvStats.count),
-        totalOutstandingForeign: parseFloat(recvStats.total_outstanding),
-        totalOutstandingPkr: parseFloat(recvStats.total_outstanding_pkr) || (parseFloat(recvStats.total_outstanding) * pkrRate),
-        overdueCount: parseInt(recvStats.overdue_count),
-        overdueAmountForeign: parseFloat(recvStats.overdue_amount),
+        count: recvCount,
+        overdueCount: recvOverdueCount,
+        // Each currency on its own: { USD: { count, outstanding, overdueCount, overdueAmount }, PKR: {...} }.
+        byCurrency: recvByCurrency,
+        // USD receivables only, in USD (the field name is kept for callers).
+        totalOutstandingForeign: recvCur('USD').outstanding,
+        overdueAmountForeign: recvCur('USD').overdueAmount,
+        // PKR receivables only, in rupees — outstanding, not the booked total.
+        totalOutstandingPkr: recvCur('PKR').outstanding,
+        overdueAmountPkr: recvCur('PKR').overdueAmount,
       },
       payables: {
         count: parseInt(payStats.count),
@@ -310,7 +344,8 @@ const financeService = {
         accountCount: bankAccountCount,
         currency: 'PKR',
       },
-      collectionRate: parseFloat(collectionRate.toFixed(1)),
+      collectionRate,
+      collectionRateByCurrency,
       warnings: (() => {
         const out = [];
         const preShipped = parseInt(exportStats.pre_shipment_orders);
