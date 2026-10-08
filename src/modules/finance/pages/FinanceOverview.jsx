@@ -8,17 +8,19 @@ import { useApp } from '../../../context/AppContext';
 import useConfirm from '../../../hooks/useConfirm';
 import StatusBadge from '../../../shared/components/StatusBadge';
 import {
-  Landmark, ArrowDownLeft, ArrowUpRight,
-  TrendingUp, TrendingDown, AlertTriangle,
+  ArrowDownLeft, ArrowUpRight,
+  TrendingUp, AlertTriangle,
   Bell, Clock, Lock, Wallet, Activity,
-  Plus, Receipt, ArrowRightLeft, RefreshCw, ExternalLink,
+  Receipt, RefreshCw, ExternalLink,
   CheckCircle2, AlertCircle, CalendarClock,
 } from 'lucide-react';
 import {
   useReceivables, usePayables, useFinanceAlerts, useJournalEntries,
   useFinanceOverviewSummary, useUpcoming,
 } from '../../../api/queries';
-import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
+import { useFinanceDateRange, overviewSummaryParams } from '../hooks/useFinanceDateRange';
+import { withRange, financeHref, rangeLabel } from '../financeNav';
+import { alertSeverity } from '../utils/alerts';
 import {
   BUCKET_KEYS, BUCKET_COLORS, ageDays, ageBucket, bucketize, isOpenAR,
 } from '../utils/aging';
@@ -39,11 +41,16 @@ export default function FinanceOverview() {
   // Finance (payments-only) can't open Export/Mill pages — only navigate there if
   // the role actually has access, else keep the click on a finance destination so
   // it never lands on an "Access Denied" route.
-  const goExport = () => navigate(hasPermission('export_orders', 'view') ? '/export' : '/finance/money-in');
-  const goMill = () => navigate(hasPermission('milling', 'view') ? '/milling' : '/finance/money-in');
+  const { queryParams: rangeParams, rangeKey } = useFinanceDateRange();
+  // Every finance link carries the period.
+  const fl = (path) => withRange(path, rangeKey);
+  const goExport = () => navigate(hasPermission('export_orders', 'view') ? '/export' : fl('/finance/money-in'));
+  const goMill = () => navigate(hasPermission('milling', 'view') ? '/milling' : fl('/finance/money-in'));
   const { data: upcoming } = useUpcoming();
-  const { queryParams: rangeParams } = useFinanceDateRange();
-  const { data: summary = {}, isLoading, refetch } = useFinanceOverviewSummary();
+  // The summary endpoint reads start_date / end_date. Profit and the segment
+  // cards honour them; receivables, payables, cash and collection rate are
+  // point-in-time / all-time and are labelled so.
+  const { data: summary = {}, isLoading, refetch } = useFinanceOverviewSummary(overviewSummaryParams(rangeParams));
   const { data: receivables = [] } = useReceivables(rangeParams);
   const { data: payables = [] } = usePayables(rangeParams);
   const { data: alertsData = [] } = useFinanceAlerts();
@@ -99,7 +106,7 @@ export default function FinanceOverview() {
         <div className="relative flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
           <div>
             <div className="flex items-center gap-2 text-xs uppercase tracking-wider opacity-80 mb-1">
-              <Activity size={14} /> Consolidated profit (booked)
+              <Activity size={14} /> Consolidated profit (booked) · {rangeKey ? rangeLabel(rangeKey) : 'All time'}
             </div>
             <div className="text-3xl sm:text-4xl font-bold leading-tight">
               {fmtPKR(consolidatedProfit)}
@@ -129,7 +136,7 @@ export default function FinanceOverview() {
           <div className="relative mt-3 pt-3 border-t border-white/20 space-y-1">
             {summary.warnings.slice(0, 2).map((w, i) => (
               <div key={i} className="flex items-center gap-2 text-xs">
-                <AlertTriangle size={12} /> <span className="opacity-95">{w}</span>
+                <AlertTriangle size={12} /> <WarningText text={w} ratesHref={fl('/finance/accounting/rates')} />
               </div>
             ))}
           </div>
@@ -138,7 +145,7 @@ export default function FinanceOverview() {
 
       {/* ─── UPCOMING CHEQUES & DUES ──────────────────────────────── */}
       {((upcoming?.receiving?.length || 0) + (upcoming?.giving?.length || 0)) > 0 && (
-        <Link to="/finance/due-dates" className="block bg-white rounded-xl border border-gray-200 p-4 hover:border-blue-300 transition-colors">
+        <Link to={fl('/finance/accounts/cheques')} className="block bg-white rounded-xl border border-gray-200 p-4 hover:border-blue-300 transition-colors">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
               <CalendarClock size={16} className="text-blue-600" />
@@ -167,26 +174,29 @@ export default function FinanceOverview() {
           icon={ArrowDownLeft}
           tone="emerald"
           label="Receivables"
+          basis="all open"
           primary={recvSplit.primary}
           secondary={recvSplit.secondary}
           hint={recvSplit.overdue || 'All current'}
           hintBad={!!recvSplit.overdue}
-          onClick={() => navigate('/finance/money-in')}
+          onClick={() => navigate(fl('/finance/money-in'))}
         />
         <KpiTile
           icon={ArrowUpRight}
           tone="rose"
           label="Payables"
+          basis="all open"
           primary={fmtPKR(pay.totalOutstandingPkr || 0)}
           secondary={`${pay.count || 0} outstanding`}
           hint={(pay.overdueAmountPkr || 0) > 0 ? `${fmtPKR(pay.overdueAmountPkr)} overdue` : 'All current'}
           hintBad={(pay.overdueAmountPkr || 0) > 0}
-          onClick={() => navigate('/finance/money-out')}
+          onClick={() => navigate(fl('/finance/money-out'))}
         />
         <KpiTile
           icon={Wallet}
           tone="indigo"
           label="Cash Position"
+          basis="now"
           primary={fmtPKR(cash.bankBalancePkr || 0)}
           secondary={[
             (cash.bankBalanceUsd || 0) !== 0 ? `+ ${fmtUSD(cash.bankBalanceUsd, { decimals: 0 })}` : null,
@@ -194,12 +204,13 @@ export default function FinanceOverview() {
           ].filter(Boolean).join(' · ')}
           hint={cash.bankBalancePkr > 0 ? 'Available' : 'Below zero'}
           hintBad={(cash.bankBalancePkr || 0) <= 0}
-          onClick={() => navigate('/finance/cash')}
+          onClick={() => navigate(fl('/finance/accounts'))}
         />
         <KpiTile
           icon={TrendingUp}
           tone="violet"
           label="Collection Rate"
+          basis="all time"
           primary={collection.primary}
           secondary={collection.secondary}
           hint={collection.hint}
@@ -252,7 +263,7 @@ export default function FinanceOverview() {
           profitLabel="Gross Profit"
           profit={fmtPKR(local.grossProfit || 0)}
           marginPct={local.marginPct}
-          onClick={() => navigate('/finance/local-sales')}
+          onClick={() => navigate(fl('/finance/money-in/local-sales'))}
         />
       </div>
 
@@ -268,7 +279,7 @@ export default function FinanceOverview() {
           data={recvAging}
           totalLabel={fmtUSD(recvAging.totalForeign)}
           totalSubLabel={fmtPKR(recvAging.totalPkr)}
-          onClickAll={() => navigate('/finance/money-in')}
+          onClickAll={() => navigate(fl('/finance/money-in'))}
         />
         <AgingPanel
           title="Payables Aging"
@@ -276,7 +287,7 @@ export default function FinanceOverview() {
           tone="rose"
           data={payAging}
           totalLabel={fmtPKR(payAging.totalPkr)}
-          onClickAll={() => navigate('/finance/money-out')}
+          onClickAll={() => navigate(fl('/finance/money-out'))}
         />
       </div>
 
@@ -290,7 +301,7 @@ export default function FinanceOverview() {
           itemLabel={(r) => r.customerName || r.party || `#${r.id}`}
           itemAmount={(r) => fmtUSD(parseFloat(r.outstanding) || 0)}
           itemAge={(r) => ageDays(r.dueDate || r.due_date)}
-          itemHref={(r) => r.orderId ? `/export/${r.orderId}` : '/finance/money-in'}
+          itemHref={(r) => r.orderId ? `/export/${r.orderId}` : fl('/finance/money-in')}
           tone="rose"
         />
         <CounterpartyList
@@ -301,7 +312,7 @@ export default function FinanceOverview() {
           itemLabel={(p) => p.supplierName || p.supplier_name || p.party || p.linkedRef || p.linked_ref || `#${p.id}`}
           itemAmount={(p) => fmtPKR(parseFloat(p.outstanding) || 0)}
           itemAge={(p) => ageDays(p.dueDate || p.due_date)}
-          itemHref={() => '/finance/money-out'}
+          itemHref={() => fl('/finance/money-out')}
           tone="amber"
         />
       </div>
@@ -317,7 +328,7 @@ export default function FinanceOverview() {
           title="Alerts"
           icon={Bell}
           iconColor="text-amber-500"
-          onSeeAll={() => navigate('/finance/alerts')}
+          onSeeAll={() => navigate(fl('/finance/alerts'))}
         >
           {topAlerts.length === 0 ? (
             <div className="text-center text-sm text-gray-400 py-6 flex items-center justify-center gap-2">
@@ -326,23 +337,30 @@ export default function FinanceOverview() {
           ) : (
             <div className="space-y-1.5">
               {topAlerts.map((a, i) => {
-                const tone = a.type === 'danger' || a.severity === 'critical' ? 'red' :
-                  a.type === 'warning' || a.severity === 'warning' ? 'amber' : 'blue';
+                const tone = { danger: 'red', warning: 'amber', info: 'blue' }[alertSeverity(a)];
                 const cls = {
                   red: 'bg-red-50 border-l-red-500',
                   amber: 'bg-amber-50 border-l-amber-500',
                   blue: 'bg-blue-50 border-l-blue-500',
                 }[tone];
-                return (
-                  <div key={a.id || i} className={`p-2.5 rounded-lg border-l-4 ${cls}`}>
-                    <div className="flex items-start gap-2">
-                      <AlertCircle size={14} className={`mt-0.5 flex-shrink-0 text-${tone}-500`} />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm text-gray-900 font-medium line-clamp-1">{a.title || a.message}</p>
-                        {a.detail && <p className="text-xs text-gray-600 mt-0.5 line-clamp-2">{a.detail}</p>}
-                      </div>
+                const iconCls = { red: 'text-red-500', amber: 'text-amber-500', blue: 'text-blue-500' }[tone];
+                const body = (
+                  <div className="flex items-start gap-2">
+                    <AlertCircle size={14} className={`mt-0.5 flex-shrink-0 ${iconCls}`} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm text-gray-900 font-medium line-clamp-1">{a.title || a.message}</p>
+                      {a.title && a.message && <p className="text-xs text-gray-600 mt-0.5 line-clamp-2">{a.message}</p>}
                     </div>
                   </div>
+                );
+                return a.link ? (
+                  <button key={a.id || i} type="button" data-severity={alertSeverity(a)}
+                    onClick={() => navigate(financeHref(a.link, rangeKey))}
+                    className={`block w-full text-left p-2.5 rounded-lg border-l-4 hover:shadow-sm transition-shadow ${cls}`}>
+                    {body}
+                  </button>
+                ) : (
+                  <div key={a.id || i} data-severity={alertSeverity(a)} className={`p-2.5 rounded-lg border-l-4 ${cls}`}>{body}</div>
                 );
               })}
             </div>
@@ -353,7 +371,7 @@ export default function FinanceOverview() {
           title="Recent Journal Entries"
           icon={Clock}
           iconColor="text-indigo-500"
-          onSeeAll={() => navigate('/finance/accounting')}
+          onSeeAll={() => navigate(fl('/finance/accounting'))}
         >
           {recentJournals.length === 0 ? (
             <p className="text-sm text-gray-400 text-center py-6">No recent entries</p>
@@ -366,7 +384,11 @@ export default function FinanceOverview() {
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="text-sm text-gray-800 truncate" title={j.description || j.narration || 'Journal entry'}>{j.description || j.narration || 'Journal entry'}</p>
-                    {j.referenceNo && <p className="text-[11px] text-gray-400 truncate">{j.referenceNo}</p>}
+                    {(j.journalNo || j.refNo) && (
+                      <p className="text-[11px] text-gray-400 truncate">
+                        {[j.journalNo, j.refNo].filter(Boolean).join(' · ')}
+                      </p>
+                    )}
                   </div>
                   <span className="text-[10px] text-gray-400 flex-shrink-0">{j.date ? fmtDate(j.date) : ''}</span>
                 </li>
@@ -376,17 +398,6 @@ export default function FinanceOverview() {
         </Panel>
       </div>
 
-      {/* ─── QUICK ACTIONS BAR ────────────────────────────────────── */}
-      <div className="bg-gradient-to-r from-gray-900 to-gray-800 rounded-xl p-4 text-white">
-        <div className="flex flex-wrap items-center gap-3">
-          <span className="text-xs uppercase tracking-wider text-gray-400 mr-2">Quick actions</span>
-          <QuickAction icon={ArrowDownLeft} label="Record Receipt" onClick={() => navigate('/finance/money-in')} tone="emerald" />
-          <QuickAction icon={ArrowUpRight} label="Make Payment" onClick={() => navigate('/finance/money-out')} tone="rose" />
-          <QuickAction icon={ArrowRightLeft} label="Internal Transfer" onClick={() => navigate('/finance/transfers')} tone="indigo" />
-          <QuickAction icon={Landmark} label="Reconcile" onClick={() => navigate('/finance/cash')} tone="violet" />
-          <QuickAction icon={TrendingUp} label="Profitability" onClick={() => navigate('/finance/profit')} tone="amber" />
-        </div>
-      </div>
     </div>
   );
 }
@@ -408,7 +419,7 @@ function Skeleton() {
 }
 
 // ─── KPI Tile ──────────────────────────────────────────────────────────
-function KpiTile({ icon: Icon, tone = 'gray', label, primary, secondary, hint, hintBad, onClick }) {
+function KpiTile({ icon: Icon, tone = 'gray', label, basis, primary, secondary, hint, hintBad, onClick }) {
   const tones = {
     emerald: { ring: 'ring-emerald-100', icon: 'text-emerald-500 bg-emerald-50', accent: 'text-emerald-600' },
     rose:    { ring: 'ring-red-100',    icon: 'text-red-500 bg-red-50',       accent: 'text-red-600' },
@@ -425,7 +436,9 @@ function KpiTile({ icon: Icon, tone = 'gray', label, primary, secondary, hint, h
       className={`bg-white rounded-xl border border-gray-200 ${onClick ? 'hover:border-gray-300 cursor-pointer hover:shadow-sm' : ''} transition-all p-4 text-left ring-1 ${t.ring}`}
     >
       <div className="flex items-start justify-between gap-2 mb-2">
-        <span className="text-[11px] uppercase tracking-wider text-gray-500 font-medium min-w-0 truncate">{label}</span>
+        <span className="text-[11px] uppercase tracking-wider text-gray-500 font-medium min-w-0 truncate">
+          {label}{basis && <span className="normal-case tracking-normal font-normal text-gray-400"> · {basis}</span>}
+        </span>
         {Icon && <span className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${t.icon}`}><Icon size={14} /></span>}
       </div>
       <div className="text-xl font-bold text-gray-900 leading-tight break-words tabular-nums">{primary}</div>
@@ -616,25 +629,6 @@ function CogsCell({ tone, label, value, sub }) {
   );
 }
 
-// ─── Quick action button ──────────────────────────────────────────────
-function QuickAction({ icon: Icon, label, onClick, tone }) {
-  const tones = {
-    emerald: 'hover:bg-emerald-500/20 text-emerald-300',
-    rose:    'hover:bg-red-500/20 text-red-300',
-    indigo:  'hover:bg-indigo-500/20 text-indigo-300',
-    violet:  'hover:bg-violet-500/20 text-violet-300',
-    amber:   'hover:bg-amber-500/20 text-amber-300',
-  };
-  return (
-    <button
-      onClick={onClick}
-      className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm font-medium transition-colors ${tones[tone] || ''}`}
-    >
-      <Icon size={14} /> {label}
-    </button>
-  );
-}
-
 // ─── Helpers ──────────────────────────────────────────────────────────
 function onlyOpen(rows) {
   return (Array.isArray(rows) ? rows : [])
@@ -767,5 +761,20 @@ function PayrollApprovalsCard({ fmtPKR }) {
       {confirmDialog}
       <p className="text-[11px] text-gray-400 mt-2">Approving has no financial effect; paying posts the salary expense to Money Out / GL and recovers scheduled advances. Prepare runs in Mill Finance → Payroll.</p>
     </div>
+  );
+}
+
+// The server's warning text still says "Finance → Rates"; point it at the
+// Rates view instead of leaving the reader to find it.
+function WarningText({ text, ratesHref }) {
+  const marker = 'Finance → Rates';
+  const at = String(text).indexOf(marker);
+  if (at < 0) return <span className="opacity-95">{text}</span>;
+  return (
+    <span className="opacity-95">
+      {text.slice(0, at)}
+      <Link to={ratesHref} className="underline font-semibold">Accounting › Rates</Link>
+      {text.slice(at + marker.length)}
+    </span>
   );
 }
