@@ -26,6 +26,7 @@ import { useFxRate } from '../utils/fx';
 import AnomalyWatchCard from '../../ai/components/AnomalyWatchCard';
 import PurchaseRequirementsPanel from '../../purchaseRequirements/components/PurchaseRequirementsPanel';
 import { fmtPKR, fmtUSD, fmtDate, fmtPct } from '../../../shared/utils/format';
+import { receivablesTile, collectionTile } from '../utils/currencyTiles';
 
 // Aging helpers + bucket palette moved to ../utils/aging so MoneyIn and
 // any future caller render the same buckets. See useFxRate() too for
@@ -55,6 +56,10 @@ export default function FinanceOverview() {
   const pay = summary.payables || {};
   const cash = summary.cashPosition || {};
   const consolidated = summary.consolidated || {};
+  // Receivables and collection rate per currency — USD and PKR shown side by
+  // side, never added together.
+  const recvSplit = receivablesTile(recv);
+  const collection = collectionTile(summary);
 
   // ─── Aging analysis (FE-computed since backend hardcodes aging=0) ──
   const recvAging = useMemo(() => bucketize(receivables, { mode: 'mixed' }), [receivables]);
@@ -162,10 +167,10 @@ export default function FinanceOverview() {
           icon={ArrowDownLeft}
           tone="emerald"
           label="Receivables"
-          primary={fmtUSD(recv.totalOutstandingForeign || 0)}
-          secondary={`${recv.count || 0} open · ${fmtPKR(recv.totalOutstandingPkr || 0)}`}
-          hint={(recv.overdueAmountForeign || 0) > 0 ? `${fmtUSD(recv.overdueAmountForeign)} overdue` : 'All current'}
-          hintBad={(recv.overdueAmountForeign || 0) > 0}
+          primary={recvSplit.primary}
+          secondary={recvSplit.secondary}
+          hint={recvSplit.overdue || 'All current'}
+          hintBad={!!recvSplit.overdue}
           onClick={() => navigate('/finance/money-in')}
         />
         <KpiTile
@@ -195,10 +200,10 @@ export default function FinanceOverview() {
           icon={TrendingUp}
           tone="violet"
           label="Collection Rate"
-          primary={`${summary.collectionRate || 0}%`}
-          secondary="Received vs expected"
-          hint={(summary.collectionRate || 0) >= 80 ? 'On target' : 'Below 80%'}
-          hintBad={(summary.collectionRate || 0) < 80}
+          primary={collection.primary}
+          secondary={collection.secondary}
+          hint={collection.hint}
+          hintBad={collection.bad}
         />
       </div>
 
