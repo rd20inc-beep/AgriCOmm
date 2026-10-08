@@ -11,12 +11,7 @@ import { accountingApi } from '../../accounting/api/services';
 import { useApp } from '../../../context/AppContext';
 import { fmtDate, fmtNum, fmtPKR } from '../../../shared/utils/format';
 import { btnPrimary, btnSecondary } from '../utils/uiClasses';
-
-/** The month before today, as YYYY-MM — the usual one to close. Pure. */
-export function lastMonth(today = new Date()) {
-  const d = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-}
+import { lastMonth } from '../utils/ledgerStructure';
 
 const signed = (n) => `${Number(n) >= 0 ? '+' : '−'}${fmtPKR(Math.abs(Number(n) || 0))}`;
 

@@ -12,7 +12,8 @@ vi.mock('@tanstack/react-query', () => ({
 vi.mock('../../../context/AppContext', () => ({ useApp: () => ({ addToast: vi.fn() }) }));
 vi.mock('../../accounting/api/services', () => ({ accountingApi: {} }));
 
-const { default: FxRevaluationPanel, lastMonth } = await import('../components/FxRevaluationPanel');
+const { default: FxRevaluationPanel } = await import('../components/FxRevaluationPanel');
+const { lastMonth } = await import('../utils/ledgerStructure');
 const text = (html) => html.replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/\s+/g, ' ');
 
 describe('FX revaluation panel', () => {
