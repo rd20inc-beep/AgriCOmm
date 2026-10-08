@@ -161,7 +161,7 @@ export default function CustomersTab() {
                   <td data-label="Actions" className="px-4 py-3 text-right">
                     <div className="inline-flex gap-1">
                       <button
-                        onClick={() => navigate(`/finance/statements?type=customer&id=${c.id}`)}
+                        onClick={() => navigate(`/finance/accounting/statements?type=customer&id=${c.id}`)}
                         className="p-1.5 rounded hover:bg-emerald-50 text-emerald-600"
                         title="View ledger"
                         aria-label={`View ledger for ${c.name}`}

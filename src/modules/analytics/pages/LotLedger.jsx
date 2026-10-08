@@ -218,7 +218,7 @@ export default function LotLedger() {
       {/* Sales */}
       <Section icon={ShoppingCart} title="Sales from this lot">
         <Tbl head={['Date', 'Invoice', 'Customer', 'Type', 'Product', { t: 'Qty', r: 1 }, { t: 'Amount', r: 1 }]}
-          rows={sales.map(s => [dt(s.date), <Link to={s.href} className="font-mono text-blue-600 hover:underline">{s.invoice}</Link>, s.customerId ? <Link to={`/finance/statements?type=customer&id=${s.customerId}`} className="text-blue-600 hover:underline">{s.customer}</Link> : s.customer, s.kind, s.product || '—', kg(s.qtyKg), pkr(s.amount)])}
+          rows={sales.map(s => [dt(s.date), <Link to={s.href} className="font-mono text-blue-600 hover:underline">{s.invoice}</Link>, s.customerId ? <Link to={`/finance/accounting/statements?type=customer&id=${s.customerId}`} className="text-blue-600 hover:underline">{s.customer}</Link> : s.customer, s.kind, s.product || '—', kg(s.qtyKg), pkr(s.amount)])}
           empty="Nothing sold from this lot yet." />
       </Section>
 

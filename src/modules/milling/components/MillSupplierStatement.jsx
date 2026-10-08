@@ -78,7 +78,7 @@ export default function MillSupplierStatement({ supplierId, supplierName, params
             <Sparkles size={13} /> Draft
           </button>
           <Link
-            to={`/finance/statements?type=supplier&id=${supplierId}`}
+            to={`/finance/accounting/statements?type=supplier&id=${supplierId}`}
             className="inline-flex items-center gap-1 rounded-lg bg-white/10 hover:bg-white/20 px-2.5 py-1.5 text-xs"
             title="Open full statement in Finance"
           >

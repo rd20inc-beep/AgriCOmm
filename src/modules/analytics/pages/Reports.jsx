@@ -632,7 +632,7 @@ export default function Reports() {
   // Party statements live under /milling for the Mill role, /finance otherwise.
   // The Mill Operator reaches neither (finance), so its rows link to nothing.
   const statementHref = (type, id) => id && !operatorScoped
-    ? `${millScoped ? '/milling' : '/finance'}/statements?type=${type}&id=${id}`
+    ? `${millScoped ? '/milling/statements' : '/finance/accounting/statements'}?type=${type}&id=${id}`
     : null;
 
   // One shared right-slider that renders the printable/downloadable document

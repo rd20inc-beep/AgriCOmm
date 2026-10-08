@@ -207,7 +207,7 @@ export default function Buyers() {
                   </td>
                   <td data-label="Actions" className="px-4 py-3 text-center">
                     <div className="flex items-center justify-center gap-1">
-                      <button onClick={() => navigate(`/finance/statements?type=customer&id=${b.id}`)} className="p-1.5 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors" title="View ledger" aria-label={`View ledger for ${b.name}`}>
+                      <button onClick={() => navigate(`/finance/accounting/statements?type=customer&id=${b.id}`)} className="p-1.5 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors" title="View ledger" aria-label={`View ledger for ${b.name}`}>
                         <BookOpen className="w-4 h-4" />
                       </button>
                       <button onClick={() => openEdit(b)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Edit" aria-label={`Edit ${b.name}`}>
