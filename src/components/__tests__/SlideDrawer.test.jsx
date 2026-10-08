@@ -64,3 +64,15 @@ describe('trapTarget (Tab focus trap)', () => {
   });
   it('does nothing when the drawer has nothing focusable', () => expect(trapTarget([], a, false)).toBeNull());
 });
+
+describe('SlideDrawer keeps the chat bubble off its buttons', () => {
+  it('the chat launcher is hidden while body[data-drawers] is set', async () => {
+    const fs = await import('node:fs');
+    const css = fs.readFileSync(new URL('../../index.css', import.meta.url), 'utf8');
+    expect(css).toMatch(/body\[data-drawers\]\s+\.chat-launcher\s*\{\s*display:\s*none;/);
+    const chat = fs.readFileSync(new URL('../ChatWidget.jsx', import.meta.url), 'utf8');
+    expect(chat).toContain('chat-launcher fixed');
+    const drawer = fs.readFileSync(new URL('../SlideDrawer.jsx', import.meta.url), 'utf8');
+    expect(drawer).toContain('body.dataset.drawers');
+  });
+});

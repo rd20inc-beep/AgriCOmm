@@ -50,3 +50,20 @@ describe('Collection Rate tile', () => {
     expect(collectionTile({ collectionRate: null }).primary).toBe('—');
   });
 });
+
+describe('nativeTotals (Upcoming cheques & dues)', () => {
+  it('keeps each currency separate, PKR first, never a converted total', async () => {
+    const { nativeTotals } = await import('../currencyTiles');
+    const text = nativeTotals([
+      { amount: 739361, currency: 'PKR' }, { amount: 82034, currency: 'PKR' },
+      { amount: 2650, currency: 'USD', amountPkr: 747300 }, { amount: 4294.62, currency: 'usd' },
+    ]);
+    expect(text).toMatch(/^Rs\s?821,395/);
+    expect(text).toMatch(/\$6,94[45]/);
+    expect(text).not.toMatch(/35,|1,568/); // no PKR-equivalent sum
+  });
+  it('empty → Rs 0', async () => {
+    const { nativeTotals } = await import('../currencyTiles');
+    expect(nativeTotals([])).toMatch(/Rs\s?0/);
+  });
+});

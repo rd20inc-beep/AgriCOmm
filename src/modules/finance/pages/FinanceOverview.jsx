@@ -24,7 +24,8 @@ import {
 import { useFxRate } from '../utils/fx';
 import AnomalyWatchCard from '../../ai/components/AnomalyWatchCard';
 import PurchaseRequirementsPanel from '../../purchaseRequirements/components/PurchaseRequirementsPanel';
-import { fmtPKR, fmtUSD, fmtDate, fmtPct } from '../../../shared/utils/format';
+import { fmtPKR, fmtUSD, fmtMoney, fmtDate, fmtPct } from '../../../shared/utils/format';
+import { nativeTotals } from '../utils/currencyTiles';
 import { receivablesTile, collectionTile } from '../utils/currencyTiles';
 
 // Aging helpers + bucket palette moved to ../utils/aging so MoneyIn and
@@ -155,12 +156,12 @@ export default function FinanceOverview() {
           <div className="grid grid-cols-2 gap-3">
             <div className="bg-emerald-50 rounded-lg p-3">
               <p className="text-[11px] text-emerald-600 uppercase tracking-wide flex items-center gap-1"><ArrowDownLeft size={11} /> Receiving</p>
-              <p className="text-lg font-bold text-emerald-700">{fmtPKR(upcoming?.totalReceiving || 0)}</p>
+              <p className="text-lg font-bold text-emerald-700">{nativeTotals(upcoming?.receiving)}</p>
               <p className="text-[11px] text-emerald-600/80">{upcoming?.receiving?.length || 0} cheque(s) / due(s)</p>
             </div>
             <div className="bg-red-50 rounded-lg p-3">
               <p className="text-[11px] text-red-600 uppercase tracking-wide flex items-center gap-1"><ArrowUpRight size={11} /> Giving</p>
-              <p className="text-lg font-bold text-red-700">{fmtPKR(upcoming?.totalGiving || 0)}</p>
+              <p className="text-lg font-bold text-red-700">{nativeTotals(upcoming?.giving)}</p>
               <p className="text-[11px] text-red-600/80">{upcoming?.giving?.length || 0} cheque(s) / due(s)</p>
             </div>
           </div>
@@ -306,7 +307,7 @@ export default function FinanceOverview() {
           empty="No overdue receivables"
           rows={topOverdueRecv}
           itemLabel={(r) => r.customerName || r.party || `#${r.id}`}
-          itemAmount={(r) => fmtUSD(parseFloat(r.outstanding) || 0)}
+          itemAmount={(r) => fmtMoney(parseFloat(r.outstanding) || 0, (r.currency || 'PKR').toUpperCase())}
           itemAge={(r) => ageDays(r.dueDate || r.due_date)}
           itemHref={(r) => r.orderId ? `/export/${r.orderId}` : fl('/finance/money-in')}
           tone="rose"

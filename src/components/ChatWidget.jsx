@@ -217,7 +217,7 @@ export default function ChatWidget() {
       {/* Floating button */}
       {!open && !hidden && (
         <div
-          className={`fixed z-[60] group ${pos ? '' : 'bottom-[4.25rem] right-4 lg:bottom-5 lg:right-5'}`}
+          className={`chat-launcher fixed z-[60] group ${pos ? '' : 'bottom-[4.25rem] right-4 lg:bottom-5 lg:right-5'}`}
           style={pos ? { left: pos.x, top: pos.y } : undefined}
         >
           <button

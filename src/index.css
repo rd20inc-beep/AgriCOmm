@@ -663,3 +663,7 @@ input, select, textarea { font-size: 14px; }
    only splits a token that cannot fit its line at all, and these cells are sized
    by their document's <colgroup> to hold the widest realistic value. */
 .doc-a4-preview .agri-doc .agri-num { white-space: nowrap; }
+
+/* The chat bubble steps aside while a drawer is open (SlideDrawer sets
+   body[data-drawers]) so it never covers the drawer's Save / Review buttons. */
+body[data-drawers] .chat-launcher { display: none; }
