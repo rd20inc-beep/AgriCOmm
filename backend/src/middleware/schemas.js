@@ -322,6 +322,8 @@ const recordExportReceipt = Joi.object({
   payment_date: Joi.date().iso().allow(null, ''),
   payment_method: Joi.string().max(50).allow(null, ''),
   bank_account_id: Joi.number().integer().positive().allow(null),
+  // The bank's reference for the credit, carried onto the posted receipt.
+  bank_reference: Joi.string().max(255).allow(null, ''),
   notes: Joi.string().max(1000).allow(null, ''),
 });
 

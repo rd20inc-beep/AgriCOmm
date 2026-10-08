@@ -10,6 +10,7 @@ const { resolveShipmentField, resolveRequiredField } = require('./shipmentField'
 const { billableFreight, balanceExpectedFor, freightChanges } = require('./billableFreight');
 const debitNoteService = require('./debitNote.service');
 const { unwindOrderReceipts } = require('./unwindReceipts');
+const { recordPendingExportReceipt, postExportReceipt, confirmPendingExportReceipt } = require('./exportReceipts');
 const { fillSingleLineBagSpec, linePackaging } = require('./orderLines');
 const { assertAccountCurrency } = require('../../shared/accountCurrency');
 const notificationService = require('../../services/notificationService');
@@ -47,20 +48,6 @@ async function generateOrderNo(trx) {
   return `EX-${String(num + 1).padStart(3, '0')}`;
 }
 
-async function generatePaymentNo(trx, prefix = 'PAY') {
-  const last = await trx('payments')
-    .select('payment_no')
-    .where('payment_no', 'like', `${prefix}-%`)
-    .orderBy('id', 'desc')
-    .first();
-
-  if (!last || !last.payment_no) {
-    return `${prefix}-001`;
-  }
-
-  const num = parseInt(last.payment_no.replace(`${prefix}-`, ''), 10) || 0;
-  return `${prefix}-${String(num + 1).padStart(3, '0')}`;
-}
 
 function lockRow(query) {
   return typeof query?.forUpdate === 'function' ? query.forUpdate() : query;
@@ -158,6 +145,15 @@ function emitExportOrderUpdate(orderId, eventType, extra = {}) {
     eventType,
     ...extra,
   });
+}
+
+// Notifications after a receipt has committed. Not money: a failure here is
+// logged, never undoes the posted receipt.
+async function runReceiptAutomation(ctx, isAdvance, userId) {
+  try {
+    const fn = isAdvance ? automationService.onAdvanceConfirmed : automationService.onBalanceConfirmed;
+    if (typeof fn === 'function') await fn.call(automationService, db, { orderId: ctx.orderId, amount: parseFloat(ctx.payment?.amount) || 0, userId });
+  } catch (e) { console.warn(`${isAdvance ? 'Advance' : 'Balance'} automation failed:`, e.message); }
 }
 
 // Map frontend camelCase doc keys to checklist snake_case doc_type values
@@ -2340,440 +2336,46 @@ const exportOrderController = {
     }
   },
 
+  // Direct confirm (no pending step). Posts through exportReceipts.postExportReceipt:
+  // the order's advance, the receivable, the bank + its bank_transactions row and
+  // the journal (Dr 1000 / Cr 1310) commit together or not at all.
   async confirmAdvance(req, res) {
-    try {
-      const rawId = req.params.id;
-      const isNumeric = /^\d+$/.test(rawId);
-      const whereClause = isNumeric ? { id: parseInt(rawId) } : { order_no: rawId };
-      const { amount, payment_date, payment_method, reference, bank_reference, bank_account_id, notes, fx_rate } = req.body;
-      const bankRef = bank_reference || reference || null;
-
-      if (!amount || parseFloat(amount) <= 0) {
-        return res.status(400).json({ success: false, message: 'A positive amount is required.' });
-      }
-
-      const confirmedAmount = settledAmount(amount);
-      // FX rate captured at receipt time. For PKR-denominated orders
-      // this is always 1; for foreign orders the FE collects it from
-      // the user (the rate the bank actually applied) — that's the
-      // single point where USD→PKR conversion gets locked.
-      const requestedFxRate = parseFloat(fx_rate);
-      const paymentContext = await db.transaction(async (trx) => {
-        const order = await lockRow(trx('export_orders').where(whereClause)).first();
-        if (!order) {
-          const err = new Error('Export order not found.');
-          err.statusCode = 404;
-          throw err;
-        }
-
-        if (['Closed', 'Cancelled'].includes(order.status)) {
-          const err = new Error(`Cannot confirm advance for an order in '${order.status}' status.`);
-          err.statusCode = 400;
-          throw err;
-        }
-
-        const expectedAdvance = settledAmount(order.advance_expected);
-        const receivedAdvance = settledAmount(order.advance_received);
-        const outstandingAdvance = Math.max(0, settledAmount(expectedAdvance - receivedAdvance));
-
-        if (outstandingAdvance <= MONEY_EPSILON) {
-          const err = new Error('Advance has already been fully received for this order.');
-          err.statusCode = 400;
-          throw err;
-        }
-
-        if (confirmedAmount - outstandingAdvance > MONEY_EPSILON) {
-          const err = new Error(`Advance confirmation exceeds outstanding amount of ${outstandingAdvance.toFixed(2)}.`);
-          err.statusCode = 400;
-          throw err;
-        }
-
-        const newAdvanceReceived = settledAmount(receivedAdvance + confirmedAmount);
-
-        // Resolve effective FX rate for this advance receipt.
-        // For PKR orders: 1. For foreign orders: prefer the rate the
-        // user provided in the modal; fall back to the order's
-        // booked_fx_rate so older clients (no fx_rate sent) keep
-        // working.
-        const orderCurrency = order.currency || 'USD';
-        const isPkrOrder = orderCurrency === 'PKR';
-        const effectiveFxRate = isPkrOrder
-          ? 1
-          : (Number.isFinite(requestedFxRate) && requestedFxRate > 0
-              ? requestedFxRate
-              : (parseFloat(order.booked_fx_rate) || 280));
-        const advancePkr = settledAmount(confirmedAmount * effectiveFxRate);
-        const totalAdvancePkr = settledAmount(
-          (parseFloat(order.advance_received_pkr) || 0) + advancePkr
-        );
-
-        // Update order advance fields. advance_fx_rate locks the rate
-        // for the most recent receipt; advance_received_pkr is the
-        // running PKR equivalent banked. Together they let the FX
-        // gain/loss vs booked_fx_rate be computed at any time.
-        await trx('export_orders').where({ id: order.id }).update({
-          advance_received: newAdvanceReceived,
-          advance_date: payment_date || trx.fn.now(),
-          advance_fx_rate: isPkrOrder ? null : effectiveFxRate,
-          advance_received_pkr: totalAdvancePkr,
-          // #2 financial track: a posted advance confirmation resolves the
-          // financial_status — fully received → Confirmed (dispatch unlocked),
-          // otherwise Partially Confirmed. (Operational status is untouched.)
-          financial_status: newAdvanceReceived >= expectedAdvance - MONEY_EPSILON ? 'Confirmed' : 'Partially Confirmed',
-          updated_at: trx.fn.now(),
-        });
-
-        const advReceivable = await trx('receivables')
-          .where({ order_id: order.id, type: 'Advance' })
-          .first();
-
-        // Guard against a double receipt: the advance may already have been
-        // settled through the Money-In "Record Payment" drawer, which updates the
-        // RECEIVABLE but NOT order.advance_received — so the order-level check
-        // above can be blind to it (this is exactly how EX-001 got two PAY rows
-        // on 2026-06-26). Re-check the actual advance receivable.
-        if (advReceivable) {
-          const recvOutstanding = Math.max(0, settledAmount(
-            parseFloat(advReceivable.expected_amount || 0) - parseFloat(advReceivable.received_amount || 0),
-          ));
-          if (recvOutstanding <= MONEY_EPSILON) {
-            const err = new Error('This advance has already been received (the receivable is settled). It may have been recorded via Money-In → Record Payment.');
-            err.statusCode = 400;
-            throw err;
-          }
-          if (confirmedAmount - recvOutstanding > MONEY_EPSILON) {
-            const err = new Error(`Advance confirmation exceeds the receivable's outstanding amount of ${recvOutstanding.toFixed(2)}.`);
-            err.statusCode = 400;
-            throw err;
-          }
-        }
-
-        const advPayNo = await generatePaymentNo(trx, 'PAY');
-        // #6 — the receipt settles into the bank chosen for this payment; if none
-        // was supplied it defaults to the order's bank account (preselected).
-        const advBankId = bank_account_id || order.bank_account_id || null;
-        // A non-PKR account banks only its own currency (a PKR account takes the
-        // converted PKR figure). Refused before the payment row is written.
-        if (advBankId) assertAccountCurrency(await trx('bank_accounts').where({ id: advBankId }).first(), orderCurrency);
-        await trx('payments').insert({
-          payment_no: advPayNo,
-          type: 'receipt',
-          linked_receivable_id: advReceivable ? advReceivable.id : null,
-          amount: confirmedAmount,
-          currency: orderCurrency,
-          fx_rate: effectiveFxRate,
-          base_amount_pkr: advancePkr,
-          payment_method: payment_method ? payment_method.toLowerCase().replace(/\s+/g, '_') : null,
-          // #6 — settle into the payment's chosen bank, defaulting to the order's.
-          bank_account_id: advBankId,
-          bank_reference: bankRef,
-          payment_date: payment_date || trx.fn.now(),
-          notes: notes || `Advance payment for ${order.order_no}`,
-          created_by: req.user.id,
-        });
-
-        // Update receivable record
-        if (advReceivable) {
-          const newReceived = settledAmount(parseFloat(advReceivable.received_amount || 0) + confirmedAmount);
-          const newOutstanding = Math.max(0, settledAmount(parseFloat(advReceivable.expected_amount) - newReceived));
-          await trx('receivables').where({ id: advReceivable.id }).update({
-            received_amount: newReceived,
-            outstanding: newOutstanding,
-            status: newOutstanding <= MONEY_EPSILON ? 'Paid' : 'Partial',
-            updated_at: trx.fn.now(),
-          });
-        }
-
-        // Credit bank account balance if a bank account was selected.
-        // Use the amount in the account's currency: PKR accounts get
-        // the converted PKR amount; foreign-currency accounts that
-        // match the order currency get the original amount.
-        if (advBankId) {
-          const bank = await trx('bank_accounts').where({ id: advBankId }).first();
-          const credit = bank && bank.currency === orderCurrency ? confirmedAmount : advancePkr;
-          await trx('bank_accounts')
-            .where({ id: advBankId })
-            .increment('current_balance', credit);
-        }
-
-        await workflowService.maybePromoteAfterAdvance(trx, {
-          order,
-          newAdvanceReceived,
-          userId: req.user.id,
-          reason: `Advance payment of ${confirmedAmount} confirmed`,
-        });
-
-        // Best-effort auto-reserve of the STILL-UNRESERVED portion of the order.
-        // Idempotent: a repeat/partial advance won't re-reserve the full quantity
-        // (previously every advance reserved order.qty_mt again against another lot,
-        // double-holding stock). The precise, guaranteed path is Allocate Stock.
-        try {
-          const targetKg = (parseFloat(order.qty_mt) || 0) * 1000; // MT (doc) → KG
-          const alreadyRow = await trx('inventory_reservations')
-            .where({ order_id: order.id, status: 'Active' })
-            .sum('reserved_qty as r').first();
-          const remainingKg = targetKg - (parseFloat(alreadyRow?.r) || 0);
-          if (remainingKg > 0.0001) {
-            const availableLot = await trx('inventory_lots')
-              .where({ entity: 'export', type: 'finished', status: 'Available' })
-              .where('available_qty', '>=', remainingKg)
-              .first();
-            if (availableLot) {
-              await inventoryService.reserveStock(trx, {
-                lotId: availableLot.id, orderId: order.id,
-                qtyKg: remainingKg, userId: req.user?.id,
-              });
-            }
-          }
-        } catch (e) { console.warn('Stock reservation failed:', e.message); }
-
-        return {
-          orderId: order.id,
-          orderNo: order.order_no,
-          customerId: order.customer_id,
-          currency: order.currency || 'USD',
-          fxRate: effectiveFxRate,
-          advancePkr,
-          newAdvanceReceived,
-        };
-      });
-
-      // Auto-post journal & automation OUTSIDE transaction (non-blocking).
-      // Per the "single conversion point" rule, journal entries are
-      // posted in PKR using the receipt-time FX rate. The foreign
-      // amount and rate are preserved on the journal header for audit.
-      try {
-        await accountingService.autoPost(db, {
-          triggerEvent: 'advance_receipt', entity: 'export',
-          amount: paymentContext.advancePkr, currency: 'PKR',
-          refType: 'Export Order', refNo: paymentContext.orderNo,
-          description: paymentContext.currency === 'PKR'
-            ? `Adv rcpt ${paymentContext.orderNo}`
-            : `Adv rcpt ${paymentContext.orderNo} (${paymentContext.currency} ${confirmedAmount.toLocaleString()} @ ${paymentContext.fxRate})`,
-          userId: req.user?.id,
-          partyType: paymentContext.customerId ? 'customer' : null,
-          partyId: paymentContext.customerId || null,
-          // Record the original foreign currency + rate so the ledger can show
-          // an exact USD figure (PKR lines keep the GL consistent).
-          origCurrency: paymentContext.currency !== 'PKR' ? paymentContext.currency : null,
-          origFxRate: paymentContext.currency !== 'PKR' ? paymentContext.fxRate : null,
-        });
-      } catch (e) { console.warn('Advance journal failed:', e.message); }
-      try {
-        await automationService.onAdvanceConfirmed(db, {
-          orderId: paymentContext.orderId, amount: confirmedAmount, userId: req.user.id,
-        });
-      } catch (e) { console.warn('Advance automation failed:', e.message); }
-
-      const updated = await db('export_orders').where(whereClause).first();
-
-      emitExportOrderUpdate(updated.id, 'advance_confirmed', { status: updated.status });
-      return res.json({
-        success: true,
-        data: { order: updated },
-      });
-    } catch (err) {
-      if (err.statusCode) {
-        return res.status(err.statusCode).json({ success: false, message: err.message });
-      }
-      console.error('Export order confirmAdvance error:', err);
-      return res.status(500).json({ success: false, message: 'Internal server error.' });
-    }
+    return exportOrderController.confirmReceiptDirect(req, res, 'advance');
   },
 
+  // Same as confirmAdvance for the balance leg (Dr 1000 / Cr 1110).
   async confirmBalance(req, res) {
+    return exportOrderController.confirmReceiptDirect(req, res, 'balance');
+  },
+
+  async confirmReceiptDirect(req, res, kind) {
     try {
       const rawId = req.params.id;
-      const isNumericBal = /^\d+$/.test(rawId);
-      const whereClauseBal = isNumericBal ? { id: parseInt(rawId) } : { order_no: rawId };
+      const whereClause = /^\d+$/.test(rawId) ? { id: parseInt(rawId, 10) } : { order_no: rawId };
       const { amount, payment_date, payment_method, reference, bank_reference, bank_account_id, notes, fx_rate } = req.body;
-      const bankRef = bank_reference || reference || null;
-      const requestedFxRate = parseFloat(fx_rate);
-
       if (!amount || parseFloat(amount) <= 0) {
         return res.status(400).json({ success: false, message: 'A positive amount is required.' });
       }
-
-      const confirmedAmount = settledAmount(amount);
-      const paymentContext = await db.transaction(async (trx) => {
-        const order = await lockRow(trx('export_orders').where(whereClauseBal)).first();
-        if (!order) {
-          const err = new Error('Export order not found.');
-          err.statusCode = 404;
-          throw err;
-        }
-
-        if (['Closed', 'Cancelled'].includes(order.status)) {
-          const err = new Error(`Cannot confirm balance for an order in '${order.status}' status.`);
-          err.statusCode = 400;
-          throw err;
-        }
-
-        const expectedBalance = settledAmount(order.balance_expected);
-        const receivedBalance = settledAmount(order.balance_received);
-        const outstandingBalance = Math.max(0, settledAmount(expectedBalance - receivedBalance));
-
-        if (outstandingBalance <= MONEY_EPSILON) {
-          const err = new Error('Balance has already been fully received for this order.');
-          err.statusCode = 400;
-          throw err;
-        }
-
-        if (confirmedAmount - outstandingBalance > MONEY_EPSILON) {
-          const err = new Error(`Balance confirmation exceeds outstanding amount of ${outstandingBalance.toFixed(2)}.`);
-          err.statusCode = 400;
-          throw err;
-        }
-
-        const newBalanceReceived = settledAmount(receivedBalance + confirmedAmount);
-
-        // Resolve the FX rate to lock for this balance leg.
-        // Foreign currency: require an explicit rate from the operator
-        // (per business rule — bank's actual applied rate at receipt).
-        // Fall back to advance/booked rate only when none was supplied,
-        // so older clients keep working.
-        const balanceCurrency = order.currency || 'USD';
-        const isPkrOrder = balanceCurrency === 'PKR';
-        const effectiveBalanceFxRate = isPkrOrder
-          ? 1
-          : (requestedFxRate > 0
-              ? requestedFxRate
-              : (parseFloat(order.advance_fx_rate) || parseFloat(order.booked_fx_rate) || 280));
-        const balancePkr = settledAmount(confirmedAmount * effectiveBalanceFxRate);
-        const totalBalanceReceivedPkr = settledAmount(
-          (parseFloat(order.balance_received_pkr) || 0) + balancePkr
-        );
-
-        await trx('export_orders').where({ id: order.id }).update({
-          balance_received: newBalanceReceived,
-          balance_date: payment_date || trx.fn.now(),
-          balance_fx_rate: isPkrOrder ? null : effectiveBalanceFxRate,
-          balance_received_pkr: totalBalanceReceivedPkr,
-          updated_at: trx.fn.now(),
-        });
-
-        const balReceivable = await trx('receivables')
-          .where({ order_id: order.id, type: 'Balance' })
-          .first();
-
-        // Guard against a double receipt: the balance may already have been
-        // settled through the Money-In "Record Payment" drawer, which updates
-        // the RECEIVABLE but NOT order.balance_received — so the order-level
-        // check above can be blind to it. Mirror the confirmAdvance re-check.
-        if (balReceivable) {
-          const recvOutstanding = Math.max(0, settledAmount(
-            parseFloat(balReceivable.expected_amount || 0) - parseFloat(balReceivable.received_amount || 0),
-          ));
-          if (recvOutstanding <= MONEY_EPSILON) {
-            const err = new Error('This balance has already been received (the receivable is settled). It may have been recorded via Money-In → Record Payment.');
-            err.statusCode = 400;
-            throw err;
-          }
-          if (confirmedAmount - recvOutstanding > MONEY_EPSILON) {
-            const err = new Error(`Balance confirmation exceeds the receivable's outstanding amount of ${recvOutstanding.toFixed(2)}.`);
-            err.statusCode = 400;
-            throw err;
-          }
-        }
-
-        const balPayNo = await generatePaymentNo(trx, 'PAY');
-        // #6 — default the receipt's bank to the order's when not overridden.
-        const balBankId = bank_account_id || order.bank_account_id || null;
-        if (balBankId) assertAccountCurrency(await trx('bank_accounts').where({ id: balBankId }).first(), balanceCurrency);
-        await trx('payments').insert({
-          payment_no: balPayNo,
-          type: 'receipt',
-          linked_receivable_id: balReceivable ? balReceivable.id : null,
-          amount: confirmedAmount,
-          currency: balanceCurrency,
-          fx_rate: effectiveBalanceFxRate,
-          base_amount_pkr: balancePkr,
-          payment_method: payment_method ? payment_method.toLowerCase().replace(/\s+/g, '_') : null,
-          bank_account_id: balBankId,
-          bank_reference: bankRef,
-          payment_date: payment_date || trx.fn.now(),
-          notes: notes || `Balance payment for ${order.order_no}`,
-          created_by: req.user.id,
-        });
-
-        // Update receivable record
-        if (balReceivable) {
-          const newReceived = settledAmount(parseFloat(balReceivable.received_amount || 0) + confirmedAmount);
-          const newOutstanding = Math.max(0, settledAmount(parseFloat(balReceivable.expected_amount) - newReceived));
-          await trx('receivables').where({ id: balReceivable.id }).update({
-            received_amount: newReceived,
-            outstanding: newOutstanding,
-            status: newOutstanding <= MONEY_EPSILON ? 'Paid' : 'Partial',
-            updated_at: trx.fn.now(),
-          });
-        }
-
-        // Credit bank account balance if a bank account was selected — in the
-        // account's own currency, exactly as confirmAdvance does (and as
-        // unwindOrderReceipts reverses it): a foreign account matching the
-        // order currency gets the native amount, a PKR account the PKR figure
-        // stamped on this payment. It used to add the raw foreign amount to a
-        // PKR account.
-        if (balBankId) {
-          const bank = await trx('bank_accounts').where({ id: balBankId }).first();
-          const credit = bank && bank.currency === balanceCurrency ? confirmedAmount : balancePkr;
-          await trx('bank_accounts')
-            .where({ id: balBankId })
-            .increment('current_balance', credit);
-        }
-
-        await workflowService.maybePromoteAfterBalance(trx, {
-          order,
-          newBalanceReceived,
-          userId: req.user.id,
-          reason: `Balance payment of ${confirmedAmount} confirmed`,
-        });
-        return {
-          orderId: order.id,
-          orderNo: order.order_no,
-          customerId: order.customer_id,
-          currency: balanceCurrency,
-          fxRate: effectiveBalanceFxRate,
-          balancePkr,
-        };
-      });
-
-      // Auto-post journal & automation OUTSIDE transaction (non-blocking).
-      // Posted in PKR with the foreign amount + rate captured in the
-      // narration for audit.
-      try {
-        await accountingService.autoPost(db, {
-          triggerEvent: 'balance_receipt', entity: 'export',
-          amount: paymentContext.balancePkr, currency: 'PKR',
-          refType: 'Export Order', refNo: paymentContext.orderNo,
-          description: paymentContext.currency === 'PKR'
-            ? `Bal rcpt ${paymentContext.orderNo}`
-            : `Bal rcpt ${paymentContext.orderNo} (${paymentContext.currency} ${confirmedAmount.toLocaleString()} @ ${paymentContext.fxRate})`,
-          userId: req.user?.id,
-          partyType: paymentContext.customerId ? 'customer' : null,
-          partyId: paymentContext.customerId || null,
-          origCurrency: paymentContext.currency !== 'PKR' ? paymentContext.currency : null,
-          origFxRate: paymentContext.currency !== 'PKR' ? paymentContext.fxRate : null,
-        });
-      } catch (e) { console.warn('Balance journal failed:', e.message); }
-      try {
-        await automationService.onBalanceConfirmed(db, {
-          orderId: paymentContext.orderId, amount: confirmedAmount, userId: req.user.id,
-        });
-      } catch (e) { console.warn('Balance automation failed:', e.message); }
-
-      const updated = await db('export_orders').where(whereClauseBal).first();
-
-      emitExportOrderUpdate(updated.id, 'balance_confirmed', { status: updated.status });
-      return res.json({
-        success: true,
-        data: { order: updated },
-      });
+      const ctx = await db.transaction((trx) => postExportReceipt(trx, {
+        orderWhere: whereClause,
+        kind,
+        amount,
+        fxRate: fx_rate,
+        bankAccountId: bank_account_id || null,
+        paymentMethod: payment_method || null,
+        paymentDate: payment_date || null,
+        bankReference: bank_reference || reference || null,
+        notes: notes || null,
+        userId: req.user.id,
+      }));
+      await runReceiptAutomation(ctx, kind === 'advance', req.user.id);
+      const updated = await db('export_orders').where({ id: ctx.orderId }).first();
+      emitExportOrderUpdate(updated.id, kind === 'advance' ? 'advance_confirmed' : 'balance_confirmed', { status: updated.status });
+      return res.json({ success: true, data: { order: updated } });
     } catch (err) {
-      if (err.statusCode) {
-        return res.status(err.statusCode).json({ success: false, message: err.message });
-      }
-      console.error('Export order confirmBalance error:', err);
+      const code = err.statusCode || err.status;
+      if (code) return res.status(code).json({ success: false, message: err.message });
+      console.error(`Export order confirm ${kind} error:`, err);
       return res.status(500).json({ success: false, message: 'Internal server error.' });
     }
   },
@@ -2781,72 +2383,29 @@ const exportOrderController = {
   // ── Export receipt: record (pending) → Finance confirms (FX + post) ──────────
   // Item 14: an export receipt (advance/balance) recorded here does NOT post to
   // bank/GL. It's a PENDING payment row that Finance verifies, sets the actual FX
-  // rate on, and confirms — only then does it post (via confirmAdvance/Balance).
+  // rate on, and confirms — only then does it post (exportReceipts.js).
 
   // RECORD a pending export receipt. No bank move / GL / receivable settle.
   async recordExportReceipt(req, res) {
     try {
       const rawId = req.params.id;
-      const isNumeric = /^\d+$/.test(rawId);
-      const whereClause = isNumeric ? { id: parseInt(rawId) } : { order_no: rawId };
-      const { kind, amount, bank_account_id, fx_rate, payment_date, payment_method, notes } = req.body || {};
-      const isAdvance = kind !== 'balance';
-      const amt = settledAmount(amount);
-      if (!(amt > 0)) return res.status(400).json({ success: false, message: 'A positive amount is required.' });
-
+      const whereClause = /^\d+$/.test(rawId) ? { id: parseInt(rawId, 10) } : { order_no: rawId };
+      const { kind, amount, bank_account_id, fx_rate, payment_date, payment_method, bank_reference, notes } = req.body || {};
       const out = await db.transaction(async (trx) => {
         const order = await trx('export_orders').where(whereClause).first();
         if (!order) { const e = new Error('Export order not found.'); e.statusCode = 404; throw e; }
-        if (['Closed', 'Cancelled'].includes(order.status)) { const e = new Error(`Cannot record a receipt for an order in '${order.status}' status.`); e.statusCode = 400; throw e; }
-
-        const expected = settledAmount(isAdvance ? order.advance_expected : order.balance_expected);
-        const received = settledAmount(isAdvance ? order.advance_received : order.balance_received);
-        // Already-pending receipts of this kind reduce what can still be recorded.
-        const recv = await trx('receivables').where({ order_id: order.id, type: isAdvance ? 'Advance' : 'Balance' }).first();
-        const pendingRow = await trx('payments')
-          .where({ status: 'Pending Finance Confirmation', type: 'receipt' })
-          .modify((q) => { if (recv) q.where('linked_receivable_id', recv.id); else q.whereRaw('1=0'); })
-          .sum('amount as s').first();
-        const pending = settledAmount(pendingRow && pendingRow.s);
-        const room = Math.max(0, settledAmount(expected - received - pending));
-        if (expected > 0 && amt - room > MONEY_EPSILON) {
-          const e = new Error(`Amount exceeds what's still outstanding for this ${isAdvance ? 'advance' : 'balance'} (${room.toFixed(2)}${pending > 0 ? `, ${pending.toFixed(2)} already pending` : ''}).`);
-          e.statusCode = 400; throw e;
-        }
-
-        const orderCurrency = order.currency || 'USD';
-        // FX at record time is only an ESTIMATE; Finance sets the real rate at
-        // confirm. base_amount_pkr is NOT NULL, so store the estimate (this row
-        // is excluded from Money-In until confirmed, so it books no real money).
-        const fxEst = orderCurrency === 'PKR' ? 1 : (parseFloat(fx_rate) > 0 ? parseFloat(fx_rate) : (parseFloat(order.booked_fx_rate) || 0));
-        const payNo = await generatePaymentNo(trx, 'PAY');
-        const [row] = await trx('payments').insert({
-          payment_no: payNo,
-          type: 'receipt',
-          status: 'Pending Finance Confirmation',
-          linked_receivable_id: recv ? recv.id : null,
-          amount: amt,
-          currency: orderCurrency,
-          fx_rate: fxEst || null,
-          base_amount_pkr: settledAmount(amt * fxEst),
-          payment_method: payment_method ? String(payment_method).toLowerCase().replace(/\s+/g, '_') : null,
-          // #6 — default to the order's bank account when the recorder didn't pick one.
-          bank_account_id: bank_account_id || order.bank_account_id || null,
-          payment_date: payment_date || trx.fn.now(),
-          notes: notes || `${isAdvance ? 'Advance' : 'Balance'} receipt for ${order.order_no} — pending Finance confirmation`,
-          created_by: req.user?.id || null,
-        }).returning('*');
-
-        // #2 financial track: an advance receipt awaiting Finance confirmation
-        // moves the order's financial_status to 'Pending Confirmation' (visible to
-        // Finance/Owner) WITHOUT touching the operational status — operational work
-        // keeps flowing. Balance receipts don't affect the advance track.
-        if (isAdvance) {
-          await trx('export_orders').where({ id: order.id }).update({
-            financial_status: 'Pending Confirmation',
-            updated_at: trx.fn.now(),
-          });
-        }
+        const row = await recordPendingExportReceipt(trx, {
+          order,
+          kind: kind === 'balance' ? 'balance' : 'advance',
+          amount,
+          bankAccountId: bank_account_id || null,
+          fxRate: fx_rate,
+          paymentDate: payment_date || null,
+          paymentMethod: payment_method || null,
+          bankReference: bank_reference || null,
+          notes: notes || null,
+          userId: req.user?.id || null,
+        });
         return { order, row };
       });
 
@@ -2859,48 +2418,28 @@ const exportOrderController = {
     }
   },
 
-  // Finance CONFIRMS a pending receipt: enter the actual FX rate → post it. Reuses
-  // the audited confirmAdvance/confirmBalance posting verbatim (internal call),
-  // then removes the pending placeholder (replaced by the real confirmed PAY row).
+  // Finance CONFIRMS a pending receipt: enter the actual FX rate → post it. The
+  // posting and the removal of the pending placeholder are one transaction.
   async confirmExportReceipt(req, res) {
     try {
       const paymentId = parseInt(req.params.paymentId, 10);
       const { fx_rate, bank_account_id, payment_method } = req.body || {};
-      const pending = await db('payments').where({ id: paymentId }).first();
-      if (!pending) return res.status(404).json({ success: false, message: 'Payment not found.' });
-      if (pending.status !== 'Pending Finance Confirmation') {
-        return res.status(409).json({ success: false, message: `This receipt is already ${pending.status}.` });
-      }
-      const recv = pending.linked_receivable_id ? await db('receivables').where({ id: pending.linked_receivable_id }).first() : null;
-      if (!recv || !recv.order_id) return res.status(400).json({ success: false, message: 'Cannot resolve the export order for this receipt.' });
-      const isAdvance = recv.type !== 'Balance';
-
-      // Internal call into the posting workhorse with the finance-entered FX rate.
-      const innerReq = {
-        params: { id: recv.order_id },
-        user: req.user,
-        body: {
-          amount: pending.amount,
-          fx_rate: (fx_rate != null && fx_rate !== '') ? parseFloat(fx_rate) : pending.fx_rate,
-          bank_account_id: bank_account_id || pending.bank_account_id || null,
-          payment_method: payment_method || pending.payment_method || null,
-          payment_date: pending.payment_date,
-          notes: pending.notes,
-        },
-      };
-      const cap = { _status: 200, status(c) { this._status = c; return this; }, json(b) { this._body = b; return this; } };
-      await (isAdvance ? exportOrderController.confirmAdvance : exportOrderController.confirmBalance)(innerReq, cap);
-
-      if (cap._status >= 400) {
-        return res.status(cap._status).json(cap._body || { success: false, message: 'Confirmation failed.' });
-      }
-      // Posted successfully → the real confirmed PAY row now exists; drop the
-      // pending placeholder so it isn't double-counted.
-      await db('payments').where({ id: paymentId }).del();
-      return res.json({ success: true, data: cap._body?.data || {}, message: 'Receipt confirmed and posted.' });
+      const ctx = await db.transaction((trx) => confirmPendingExportReceipt(trx, {
+        paymentId,
+        fxRate: fx_rate,
+        bankAccountId: bank_account_id || null,
+        paymentMethod: payment_method || null,
+        userId: req.user?.id || null,
+      }));
+      await runReceiptAutomation(ctx, ctx.isAdvance, req.user?.id);
+      const updated = await db('export_orders').where({ id: ctx.orderId }).first();
+      emitExportOrderUpdate(ctx.orderId, ctx.isAdvance ? 'advance_confirmed' : 'balance_confirmed', { status: updated?.status });
+      return res.json({ success: true, data: { order: updated }, message: 'Receipt confirmed and posted.' });
     } catch (err) {
+      const code = err.statusCode || err.status;
+      if (code) return res.status(code).json({ success: false, message: err.message });
       console.error('confirmExportReceipt error:', err);
-      return res.status(500).json({ success: false, message: err.message });
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
     }
   },
 

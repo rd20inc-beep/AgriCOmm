@@ -20,6 +20,14 @@ function resetState() {
     // Default active mill so the milling-create controller's mill_id
     // fallback resolves without hitting a real DB.
     mills: [{ id: 1, name: 'Default Mill', is_active: true }],
+    // The receipt moves the order's bank account and journals Dr 1000 / Cr 1310·1110.
+    bank_accounts: [{ id: 1, name: 'USD Account', currency: 'USD', current_balance: 0, type: 'bank', entity: 'export', is_active: true }],
+    bank_transactions: [],
+    chart_of_accounts: [
+      { id: 101, code: '1000', name: 'Cash & Bank' },
+      { id: 102, code: '1110', name: 'Export AR (USD)' },
+      { id: 103, code: '1310', name: 'Customer Advances Received' },
+    ],
   };
   mockState.seq = {
     export_orders: 1,
@@ -35,6 +43,9 @@ function resetState() {
     inventory_lots: 1,
     export_order_items: 1,
     mills: 2,
+    bank_accounts: 2,
+    bank_transactions: 1,
+    chart_of_accounts: 200,
   };
 }
 
@@ -183,6 +194,12 @@ class Query {
     return this;
   }
 
+  forUpdate() { return this; }
+
+  whereRaw() { return this; }
+
+  orderByRaw() { return this; }
+
   insert(payload) {
     const rows = Array.isArray(payload) ? payload : [payload];
     const inserted = rows.map((row) => {
@@ -279,6 +296,7 @@ jest.mock('../modules/inventory/inventory.service', () => mockInventorySvc);
 const mockAccountingSvc = {
   autoPost: jest.fn().mockResolvedValue(null),
   createJournal: jest.fn().mockResolvedValue({ id: 1 }),
+  postJournal: jest.fn().mockResolvedValue({}),
 };
 jest.mock('../services/accountingService', () => mockAccountingSvc);
 jest.mock('../modules/accounting/accounting.service', () => mockAccountingSvc);
