@@ -2023,9 +2023,17 @@ const inventoryService = {
   async calculateOrderCOGS(trx, orderId) {
     const conn = trx || db;
 
-    // Get all lots allocated/reserved for this order
+    // Every lot held for this order (Active) or already shipped from it
+    // (Consumed). The Shipped transition marks each reservation Consumed as it
+    // dispatches it and only THEN locks COGS, so reading Active alone found
+    // nothing at the one moment that matters: COGS locked at 0, the 5020/1230
+    // journal was skipped and the export showed the whole contract as profit.
+    // A reservation is in exactly one status and an order ships once (allocation
+    // is refused from Shipped on), so Active + Consumed never counts a kilo
+    // twice; Released (un-allocated) holds are left out.
     const reservations = await conn('inventory_reservations')
-      .where({ order_id: orderId, status: 'Active' })
+      .where({ order_id: orderId })
+      .whereIn('status', ['Active', 'Consumed'])
       .select('lot_id', 'reserved_qty');
 
     let totalCOGS = 0;
@@ -2035,7 +2043,10 @@ const inventoryService = {
       const lot = await conn('inventory_lots').where('id', r.lot_id).first();
       if (!lot) continue;
 
-      const costPerKg = parseFloat(lot.landed_cost_per_kg) || parseFloat(lot.rate_per_kg) || 0;
+      // Same cost chain allocate-stock checks before it lets a lot onto an order
+      // (landed → cost_per_unit → purchase rate, all per KG since mig 228), so a
+      // lot that passed that guard can never cost Rs 0 here.
+      const costPerKg = parseFloat(lot.landed_cost_per_kg) || parseFloat(lot.cost_per_unit) || parseFloat(lot.rate_per_kg) || 0;
       const qtyKg = parseFloat(r.reserved_qty); // KG (Phase 5c)
       totalCOGS += costPerKg * qtyKg;
       totalQtyKg += qtyKg;
@@ -2125,9 +2136,25 @@ const inventoryService = {
    * reservation/transfer can override the estimate.
    */
   async lockOrderCOGS(trx, orderId, pkrRate) {
-    const cogs = await inventoryService.calculateOrderCOGS(trx, orderId);
     const order = await trx('export_orders').where('id', orderId).first();
     if (!order) return;
+
+    // Locked once: a re-driven Shipped transition must leave the figure the
+    // 5020/1230 journal was posted from alone, even if a lot's cost was edited
+    // since (the batch/lot cost-edit recomputes skip locked orders for the same reason).
+    if (order.cost_locked_at_dispatch) {
+      const totalCOGS = parseFloat(order.inventory_cogs_total_pkr) || 0;
+      return {
+        totalCOGS,
+        cogsPerMT: parseFloat(order.inventory_cogs_per_mt_pkr) || 0,
+        grossProfitPKR: parseFloat(order.gross_profit_pkr) || 0,
+        grossProfitUSD: parseFloat(order.gross_profit_usd) || 0,
+        isExact: true,
+        alreadyLocked: true,
+      };
+    }
+
+    const cogs = await inventoryService.calculateOrderCOGS(trx, orderId);
 
     // Value the contract in PKR at the order's BOOKED rate (fall back to the caller
     // rate, then 280) and prefer the already-locked PKR figure so COGS/profit use
