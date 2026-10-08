@@ -11,7 +11,8 @@ import { useAuth } from '../../../context/AuthContext';
 import { useFinanceDrawers } from '../drawers/drawersContext';
 import { isSettleable, canRecordVariant } from '../../../components/payments/paymentVariants';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
-import { LoadingSpinner, ErrorState } from '../../../components/LoadingState';
+import { EmptyLine, InlineError } from '../components/FinanceUI';
+import { btnSecondary, btnRowSecondary, btnIcon, th, tdMoney, kpiLabel, kpiValue, kpiSub, errorText } from '../utils/uiClasses';
 import { downloadCSV } from '../../../utils/csvExport';
 import { useApp } from '../../../context/AppContext';
 import { shortenRef } from '../utils/refs';
@@ -162,15 +163,23 @@ export default function Purchases() {
     downloadCSV(rows, `purchases-${todayLocalISO()}.csv`);
   }
 
-  if (isLoading) return <LoadingSpinner message="Loading purchases…" />;
-  if (error) return <ErrorState message={error.message} onRetry={refetch} />;
+  if (isLoading) {
+    return (
+      <div className="space-y-5 animate-pulse" aria-busy="true">
+        <span className="sr-only">Loading purchases…</span>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">{[0, 1, 2, 3].map((i) => <div key={i} className="h-24 bg-gray-100 rounded-xl" />)}</div>
+        <div className="h-64 bg-gray-100 rounded-xl" />
+      </div>
+    );
+  }
+  if (error) return <InlineError message={errorText(error, 'Purchases')} onRetry={refetch} />;
 
   return (
     <div className="space-y-5 pb-4">
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <p className="text-sm text-gray-500">Every purchase recorded across the company — raw rice, mill store, export costs, and expenses.</p>
+          <p className="text-sm text-gray-600 max-w-3xl">Every purchase recorded across the company — raw rice, mill store, export costs, and expenses.</p>
         </div>
         <div className="flex items-center gap-2">
           {/* Add purchase — opens a dropdown that routes to the right creator,
@@ -178,14 +187,16 @@ export default function Purchases() {
               mill store, export costs, expenses). */}
           <div className="relative" ref={addRef}>
             <button
+              type="button"
               onClick={() => setAddOpen(o => !o)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm"
+              aria-haspopup="menu" aria-expanded={addOpen}
+              className={btnSecondary}
             >
-              <Plus size={14} /> Add Purchase
-              <ChevronDown size={13} className={`transition-transform ${addOpen ? 'rotate-180' : ''}`} />
+              <Plus size={14} aria-hidden="true" /> Add Purchase
+              <ChevronDown size={13} aria-hidden="true" className={addOpen ? 'rotate-180' : ''} />
             </button>
             {addOpen && (
-              <div className="absolute right-0 mt-1.5 w-80 bg-white rounded-xl border border-gray-200 shadow-lg z-20 overflow-hidden">
+              <div className="absolute right-0 mt-1.5 w-[min(20rem,calc(100vw-2rem))] bg-white rounded-xl border border-gray-200 shadow-lg z-20 overflow-hidden" role="menu">
                 <div className="px-3 py-2 border-b border-gray-100">
                   <p className="text-xs font-semibold text-gray-700">What are you adding?</p>
                   <p className="text-[11px] text-gray-500 mt-0.5">Each type is recorded in its own module; this jumps you straight there.</p>
@@ -196,6 +207,7 @@ export default function Purchases() {
                     return (
                       <li key={opt.label}>
                         <button
+                          type="button" role="menuitem"
                           onClick={() => {
                             setAddOpen(false);
                             if (opt.drawer === 'store') setShowStorePurchase(true);
@@ -218,14 +230,14 @@ export default function Purchases() {
               </div>
             )}
           </div>
-          <button onClick={handlePrint} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-700 bg-white hover:bg-gray-50 border border-gray-200 rounded-lg">
-            <Printer size={14} /> Print
+          <button type="button" onClick={handlePrint} className={btnSecondary}>
+            <Printer size={14} aria-hidden="true" /> Print
           </button>
-          <button onClick={exportCsv} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-700 bg-white hover:bg-gray-50 border border-gray-200 rounded-lg">
-            <Download size={14} /> CSV
+          <button type="button" onClick={exportCsv} className={btnSecondary}>
+            <Download size={14} aria-hidden="true" /> CSV
           </button>
-          <button onClick={() => refetch()} aria-label="Refresh" title="Refresh" className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-700 bg-white hover:bg-gray-50 border border-gray-200 rounded-lg">
-            <RefreshCw size={14} />
+          <button type="button" onClick={() => refetch()} aria-label="Refresh" title="Refresh" className={`${btnSecondary} !px-0 w-10 sm:w-9`}>
+            <RefreshCw size={14} aria-hidden="true" />
           </button>
         </div>
       </div>
@@ -261,37 +273,33 @@ export default function Purchases() {
           including the global date range from FinanceLayout's header dropdown. */}
       {(rangeKey || source !== 'all' || statusFilter !== 'All' || searchTerm) && (
         <div className="flex items-center gap-2 flex-wrap text-xs">
-          <span className="text-gray-500 font-medium">Active filters:</span>
+          <span className="text-gray-500 font-medium">Active filters</span>
           {rangeKey && (
-            <button onClick={clearDateRange}
-              className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100">
+            <button type="button" onClick={clearDateRange} aria-label={`Remove filter: Date ${RANGE_LABEL[rangeKey] || rangeKey}`} className={FILTER_CHIP}>
               Date: {RANGE_LABEL[rangeKey] || rangeKey}
-              <X size={11} />
+              <X size={12} aria-hidden="true" />
             </button>
           )}
           {source !== 'all' && (
-            <button onClick={() => setSource('all')}
-              className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full bg-blue-50 text-blue-800 border border-blue-200 hover:bg-blue-100">
+            <button type="button" onClick={() => setSource('all')} aria-label={`Remove filter: Source ${SOURCE_META[source]?.label || source}`} className={FILTER_CHIP}>
               Source: {SOURCE_META[source]?.label || source}
-              <X size={11} />
+              <X size={12} aria-hidden="true" />
             </button>
           )}
           {statusFilter !== 'All' && (
-            <button onClick={() => setStatusFilter('All')}
-              className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full bg-violet-50 text-violet-800 border border-violet-200 hover:bg-violet-100">
+            <button type="button" onClick={() => setStatusFilter('All')} aria-label={`Remove filter: Status ${statusFilter}`} className={FILTER_CHIP}>
               Status: {statusFilter}
-              <X size={11} />
+              <X size={12} aria-hidden="true" />
             </button>
           )}
           {searchTerm && (
-            <button onClick={() => setSearchTerm('')}
-              className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full bg-gray-100 text-gray-700 border border-gray-200 hover:bg-gray-200">
+            <button type="button" onClick={() => setSearchTerm('')} aria-label="Remove filter: Search" className={FILTER_CHIP}>
               Search: "{searchTerm}"
-              <X size={11} />
+              <X size={12} aria-hidden="true" />
             </button>
           )}
-          <button onClick={clearAllFilters}
-            className="text-xs text-gray-500 hover:text-gray-900 underline ml-1">
+          <button type="button" onClick={clearAllFilters}
+            className="text-xs text-gray-600 hover:text-gray-900 underline ml-1 min-h-10 sm:min-h-0 px-1">
             Clear all
           </button>
         </div>
@@ -306,17 +314,19 @@ export default function Purchases() {
           return (
             <button
               key={s.value}
+              type="button"
+              aria-pressed={isActive}
               onClick={() => setSource(s.value)}
-              className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
+              className={`inline-flex items-center gap-2 px-3 min-h-10 sm:min-h-9 rounded-lg text-sm font-medium border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
                 isActive
                   ? 'bg-gray-900 text-white border-gray-900'
                   : 'bg-white text-gray-700 border-gray-200 hover:border-gray-400'
               }`}
             >
-              <Icon size={14} />
+              <Icon size={14} aria-hidden="true" />
               {s.label}
               {s.value !== 'all' && sourceTotal != null && (
-                <span className={`text-[10px] ${isActive ? 'text-gray-300' : 'text-gray-400'}`}>
+                <span className={`text-xs tabular-nums ${isActive ? 'text-gray-300' : 'text-gray-500'}`}>
                   {fmtFull(sourceTotal)}
                 </span>
               )}
@@ -328,45 +338,41 @@ export default function Purchases() {
       {/* Filter row */}
       <div className="flex items-center gap-3 flex-wrap">
         <div className="relative flex-1 min-w-[220px] max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" aria-hidden="true" />
           <input
             type="text"
             value={searchTerm}
             onChange={e => setSearchTerm(e.target.value)}
             placeholder="Search ref / supplier / category / approver…"
-            className="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:border-gray-900 transition-colors"
+            aria-label="Search purchases"
+            className="w-full pl-9 pr-3 min-h-10 sm:min-h-9 text-sm border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 transition-colors"
           />
         </div>
-        <div className="inline-flex bg-gray-100 rounded-lg p-0.5">
+        <div className="inline-flex flex-wrap bg-gray-100 rounded-lg p-0.5" role="group" aria-label="Payment status">
           {['All', 'Paid', 'Partial', 'Pending'].map(s => (
             <button
               key={s}
+              type="button"
+              aria-pressed={statusFilter === s}
               onClick={() => setStatusFilter(s)}
-              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${statusFilter === s ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}
+              className={`px-3 min-h-10 sm:min-h-8 text-xs font-medium rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${statusFilter === s ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}
             >
               {s}
             </button>
           ))}
         </div>
-        <span className="text-xs text-gray-500">{filtered.length} of {purchases.length}</span>
+        <span className="text-xs text-gray-500 tabular-nums">{filtered.length} of {purchases.length}</span>
       </div>
 
       {/* Table */}
-      <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-        <div className="overflow-x-auto mobile-cards">
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className={`overflow-x-auto mobile-cards ${filtered.length > 15 ? 'md:max-h-[75vh] md:overflow-y-auto' : ''}`}>
           <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b border-gray-200">
-              <tr className="text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
-                <th className="px-4 py-3">Date</th>
-                <th className="px-4 py-3">Ref</th>
-                <th className="px-4 py-3">Source</th>
-                <th className="px-4 py-3">Supplier</th>
-                <th className="px-4 py-3">Category</th>
-                <th className="px-4 py-3 text-right">Amount</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3">Created</th>
-                <th className="px-4 py-3">Approved</th>
-                <th className="px-4 py-3 w-10"></th>
+            <thead>
+              <tr>
+                {[['Date'], ['Ref'], ['Source'], ['Supplier'], ['Category'], ['Amount', 'text-right'], ['Status'], ['Created'], ['Approved'], ['', 'w-10']].map(([label, extra = 'text-left'], i) => (
+                  <th key={i} className={`${th} ${extra} md:sticky md:top-0 md:z-[1]`}>{label || <span className="sr-only">Actions</span>}</th>
+                ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -374,21 +380,15 @@ export default function Purchases() {
                 <tr>
                   <td colSpan={10} className="px-4 py-12 text-center text-sm">
                     {purchases.length === 0 ? (
-                      <div className="text-gray-400 space-y-3">
-                        <p>No purchases recorded {rangeKey ? <>in <span className="font-semibold text-gray-600">{RANGE_LABEL[rangeKey] || rangeKey}</span>.</> : 'yet.'}</p>
-                        {rangeKey && (
-                          <button onClick={clearDateRange} className="text-xs px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-medium">
-                            Show all time
-                          </button>
-                        )}
-                      </div>
+                      <EmptyLine icon={Receipt} action={rangeKey ? (
+                        <button type="button" onClick={clearDateRange} className={btnSecondary}>Show all time</button>
+                      ) : null}>
+                        No purchases recorded {rangeKey ? <>in <span className="font-semibold text-gray-700">{RANGE_LABEL[rangeKey] || rangeKey}</span>.</> : 'yet.'}
+                      </EmptyLine>
                     ) : (
-                      <div className="text-gray-400 space-y-3">
-                        <p>{purchases.length} {purchases.length === 1 ? 'purchase' : 'purchases'} loaded, but none match the current filters.</p>
-                        <button onClick={clearAllFilters} className="text-xs px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-medium">
-                          Clear all filters
-                        </button>
-                      </div>
+                      <EmptyLine icon={Search} action={<button type="button" onClick={clearAllFilters} className={btnSecondary}>Clear all filters</button>}>
+                        {purchases.length} {purchases.length === 1 ? 'purchase' : 'purchases'} loaded, but none match the current filters.
+                      </EmptyLine>
                     )}
                   </td>
                 </tr>
@@ -403,16 +403,16 @@ export default function Purchases() {
                     </td>
                     <td data-label="Source" className="mob-hide px-4 py-2.5">
                       <span className="inline-flex items-center gap-1 text-xs text-gray-600">
-                        <SrcIcon size={12} className="text-gray-400" />
+                        <SrcIcon size={12} className="text-gray-400" aria-hidden="true" />
                         {meta?.label || p.source}
                       </span>
                     </td>
                     <td data-label="Supplier" className="px-4 py-2.5 text-gray-700 truncate max-w-[180px]" title={p.supplierName || undefined}><PartyLink type="supplier" id={p.supplierId} name={p.supplierName} /></td>
                     <td data-label="Category" className="mob-hide px-4 py-2.5 text-gray-600 capitalize text-xs">{p.category ? String(p.category).replace(/_/g, ' ') : '—'}</td>
-                    <td data-label="Amount" className="px-4 py-2.5 text-right tabular-nums">
+                    <td data-label="Amount" className={`px-4 py-2.5 ${tdMoney}`}>
                       <span className="font-medium text-gray-900">{fmtFull(p.amountPkr)}</span>
                       {(p.currency || 'PKR') !== 'PKR' && parseFloat(p.amount) > 0 && (
-                        <div className="text-[10px] text-gray-400">{fmtMoney(p.amount, p.currency)}</div>
+                        <div className="text-xs text-gray-500">{fmtMoney(p.amount, p.currency)}</div>
                       )}
                     </td>
                     <td data-label="Status" className="px-4 py-2.5">
@@ -422,26 +422,25 @@ export default function Purchases() {
                     <td data-label="Approved" className="mob-hide px-4 py-2.5 text-gray-600 text-xs truncate max-w-[140px]" title={p.approvedByName || undefined}>
                       {p.approvedByName ? (
                         <span className="inline-flex items-center gap-1 text-emerald-700">
-                          <CheckCircle size={11} /> {p.approvedByName}
+                          <CheckCircle size={12} aria-hidden="true" /> {p.approvedByName}
                         </span>
                       ) : p.source === 'expense' ? (
-                        <span className="inline-flex items-center gap-1 text-gray-400">
-                          <Clock size={11} /> Pending
+                        <span className="inline-flex items-center gap-1 text-gray-500">
+                          <Clock size={12} aria-hidden="true" /> Pending
                         </span>
                       ) : (
                         <span className="text-gray-300">—</span>
                       )}
                     </td>
-                    <td data-label="Actions" className="px-4 py-2.5 text-center">
+                    <td data-label="Actions" className="px-4 py-2.5 text-right">
                       <div className="inline-flex items-center gap-1.5">
                         {canPay(p) && (
-                          <button onClick={() => drawers?.openPayment(docOf(p))} data-action="pay"
-                            className="px-2.5 py-1 bg-emerald-50 text-emerald-700 text-xs font-medium rounded hover:bg-emerald-100 inline-flex items-center gap-1">
-                            <DollarSign size={12} /> Pay
+                          <button type="button" onClick={() => drawers?.openPayment(docOf(p))} data-action="pay" className={btnRowSecondary}>
+                            <DollarSign size={12} aria-hidden="true" /> Pay
                           </button>
                         )}
-                        <button onClick={() => drawers?.openDocument(docOf(p))} className="text-blue-600 hover:text-blue-800 p-1" title="View details" aria-label="View details">
-                          <Eye size={15} />
+                        <button type="button" onClick={() => drawers?.openDocument(docOf(p))} className={btnIcon} title="View details" aria-label={`View ${p.ref || 'purchase'}`}>
+                          <Eye size={15} aria-hidden="true" />
                         </button>
                       </div>
                     </td>
@@ -470,18 +469,16 @@ function RefLink({ p }) {
   return <span title={p.ref || ''} className="whitespace-nowrap">{short}</span>;
 }
 
-function KpiTile({ label, primary, secondary, tone = 'gray' }) {
-  const ring = {
-    emerald: 'ring-emerald-100',
-    rose:    'ring-red-100',
-    blue:    'ring-blue-100',
-    gray:    'ring-gray-100',
-  }[tone] || 'ring-gray-100';
+// The shared tile anatomy: small label · big figure · small sub-line.
+function KpiTile({ label, primary, secondary }) {
   return (
-    <div className={`bg-white rounded-xl border border-gray-200 p-4 ring-1 ${ring}`}>
-      <p className="text-[11px] uppercase tracking-wider text-gray-500 font-medium">{label}</p>
-      <p className="text-xl font-bold text-gray-900 mt-1">{primary}</p>
-      {secondary && <p className="text-[11px] text-gray-500 mt-0.5">{secondary}</p>}
+    <div className="bg-white rounded-xl border border-gray-200 p-4 min-w-0">
+      <p className={kpiLabel}>{label}</p>
+      <p className={`${kpiValue} mt-1 break-words`}>{primary}</p>
+      {secondary && <p className={`${kpiSub} mt-1`}>{secondary}</p>}
     </div>
   );
 }
+
+// An active-filter chip (neutral; the X removes that filter).
+const FILTER_CHIP = 'inline-flex items-center gap-1.5 px-2.5 min-h-10 sm:min-h-7 rounded-full bg-gray-100 text-gray-700 border border-gray-200 hover:bg-gray-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500';
