@@ -14,7 +14,7 @@ vi.mock('../../../api/queries', () => ({
   useTrialBalance: vi.fn(), useProfitLoss: vi.fn(), useBalanceSheet: vi.fn(),
 }));
 const queries = await import('../../../api/queries');
-const { default: TrialBalance, TrialBalanceView } = await import('../pages/TrialBalance');
+const { default: TrialBalance, TrialBalanceView, groupCashRows } = await import('../pages/TrialBalance');
 const { default: GlProfitLoss, ProfitLossView } = await import('../pages/GlProfitLoss');
 const { default: BalanceSheet, BalanceSheetView } = await import('../pages/BalanceSheet');
 
@@ -43,6 +43,24 @@ describe('Trial balance', () => {
     expect(t).toMatch(/Rs 1,000\.00 Cr/);
     expect(html).toContain('data-testid="balanced"');
     expect(html).not.toContain('data-testid="imbalanced"');
+  });
+
+  it('per-account cash / bank GL rolls up under one Cash & Bank group row (G-8)', () => {
+    const accounts = [
+      { accountId: 1, code: '1000', name: 'Cash & Bank', type: 'Asset', debitTotal: 100, creditTotal: 0, balance: 100 },
+      { accountId: 7, code: '1011', name: 'Mill Cash', parentCode: '1000', type: 'Asset', debitTotal: 500, creditTotal: 200, balance: 300 },
+      { accountId: 8, code: '1020', name: 'BAHL Agri Commodities', parentCode: '1000', type: 'Asset', debitTotal: 900, creditTotal: 0, balance: 900 },
+      { accountId: 2, code: '4000', name: 'Sales', type: 'Revenue', debitTotal: 0, creditTotal: 1300, balance: -1300 },
+    ];
+    const rows = groupCashRows(accounts);
+    expect(rows.map((r) => (r.kind === 'group' ? `G${r.code}:${r.balance}` : `${r.child ? '  ' : ''}${r.a.code}`)))
+      .toEqual(['G1000:1300', '  1000', '  1011', '  1020', '4000']);
+    const t = text(wrap(<TrialBalanceView data={{ accounts, grandDebit: 1500, grandCredit: 1500, isBalanced: true }} entity="all" onEntity={() => {}} />));
+    expect(t).toContain('1000 Cash & Bank Asset Rs 1,500.00 Rs 200.00 Rs 1,300.00 Dr');
+    expect(t).toContain('Cash & Bank (unassigned)');
+    expect(t).toContain('1020 BAHL Agri Commodities');
+    // No per-account children → unchanged.
+    expect(groupCashRows(TB_OK.accounts).every((r) => r.kind === 'row')).toBe(true);
   });
 
   it('an imbalanced ledger says so, with the difference', () => {
