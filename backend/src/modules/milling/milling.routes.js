@@ -553,7 +553,9 @@ router.put('/batches/:id/prices', authorize('milling', 'edit'),
 const expensesService = require('../expenses/expenses.service');
 const accountingService = require('../accounting/accounting.service');
 const automationService = require('../admin/automation.service');
-const { resolveCashAccountId } = require('../../shared/cashAccounts');
+const { resolvePaymentAccountId } = require('../../shared/cashAccounts');
+const { assertAccountCurrency } = require('../../shared/accountCurrency');
+const { postAccountMovement } = require('../finance/paymentEngine');
 // Shared payroll logic (also used by the scheduler) — compute + prepare.
 const payrollService = require('./payroll.service');
 const { computePayrollSummary, committedWorkerStatus, preparePayrollRun, nextPrepareDate, computeLeaveBalances } = payrollService;
@@ -1939,7 +1941,18 @@ router.post('/payroll/statutory-remittances', authorize('payroll', 'pay'),
       if (amount - outstanding > 0.01) {
         const e = new Error(`Amount ${amount} exceeds the outstanding ${acc.name} liability of ${outstanding}.`); e.statusCode = 400; throw e;
       }
-      const acctId = method === 'bank' ? (b.bank_account_id || null) : await resolveCashAccountId(trx, { entity });
+      // The account the money leaves, resolved and checked exactly as for any
+      // payment: a bank remittance must name its account (it used to post the
+      // GL with no account moving), cash with none comes out of the entity's
+      // float, and only a PKR account can pay this PKR liability.
+      const acctId = await resolvePaymentAccountId(trx, {
+        bankAccountId: method === 'bank' ? (b.bank_account_id || null) : null,
+        method: method === 'bank' ? 'bank_transfer' : 'cash',
+        entity,
+      });
+      const acctRow = await trx('bank_accounts').where('id', acctId).first();
+      if (!acctRow) { const e = new Error('Bank account not found.'); e.statusCode = 400; throw e; }
+      assertAccountCurrency(acctRow, 'PKR');
       // Collision-safe STR number (M3): MAX trailing-digit + 1, not MAX(id)+1 —
       // the latter regenerates an existing number after a delete (see nextDocNo).
       // A reversed remittance's row is removed but its journals stay (signed-
@@ -1968,24 +1981,19 @@ router.post('/payroll/statutory-remittances', authorize('payroll', 'pay'),
       });
       if (journal?.id) await accountingService.postJournal(trx, journal.id);
 
-      // Move the cash/bank account + record the outflow on its ledger.
-      if (acctId) {
-        await trx('bank_accounts').where('id', acctId).update({ current_balance: trx.raw('current_balance - ?', [amount]), updated_at: trx.fn.now() });
-        const acctRow = await trx('bank_accounts').where('id', acctId).first();
-        const btNo = await nextDocNo(trx, { table: 'bank_transactions', column: 'transaction_no', prefix: 'BT-' });
-        await trx('bank_transactions').insert({
-          transaction_no: btNo, bank_account_id: acctId, type: 'debit', amount, currency: 'PKR',
-          status: 'posted', transaction_date: remitDate, reference: remitNo,
-          notes: `Statutory remittance ${remitNo}${b.authority ? ` — ${b.authority}` : ''}`,
-          source: 'statutory_remittance', running_balance: acctRow ? acctRow.current_balance : null,
-          category: 'statutory', counterparty: b.authority || null, created_by: req.user?.id || null,
-        });
-      }
+      // Move the cash/bank account + record the outflow on its ledger — the
+      // payment engine's account movement.
+      await postAccountMovement(trx, {
+        account: acctRow, direction: 'out', amount, date: remitDate, reference: remitNo,
+        userId: req.user?.id || null, source: 'statutory_remittance', category: 'statutory',
+        counterparty: b.authority || null,
+        notes: `Statutory remittance ${remitNo}${b.authority ? ` — ${b.authority}` : ''}`,
+      });
       await trx('mill_statutory_remittances').where('id', r.id).update({ journal_id: journal?.id || null });
       return { ...r, journal_id: journal?.id || null };
     });
     return res.status(201).json({ success: true, data: row });
-  } catch (err) { return res.status(err.statusCode || 500).json({ success: false, message: err.message }); }
+  } catch (err) { return res.status(err.statusCode || err.status || 500).json({ success: false, message: err.message }); }
 });
 
 // Reverse a remittance — net its GL with a signed-delta journal, restore the

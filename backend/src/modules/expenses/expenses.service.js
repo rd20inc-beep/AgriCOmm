@@ -1,60 +1,9 @@
 const db = require('../../config/database');
 const { NotFoundError, ValidationError } = require('../../shared/errors');
-const { nextDocNo } = require('../../utils/docNumber');
 const accountingService = require('../accounting/accounting.service');
-const { resolveCashAccountId } = require('../../shared/cashAccounts');
-const { assertAccountCurrency } = require('../../shared/accountCurrency');
 const { normalizePaymentMethod } = require('../../shared/constants/paymentMethods');
-const { ledgerFailure, missingAccounts } = require('../../shared/ledgerFailure');
-const { pendingChequeTotal, round2, isCheque } = require('../finance/paymentSettlement');
-
-// Settlement journal posted when an expense is PAID: DR Supplier Payable (2010)
-// CR Cash & Bank (1000). The obligation was booked at create (CR 2010 via the
-// expense_recorded rule); this clears it and lands the cash/bank outflow on the
-// GL — mirroring finance recordPayment for Money In/Out. Cash payments (no bank
-// account) still credit the 1000 control account. A journal failure (closed
-// period, unbalanced, missing account) is rethrown so the caller's transaction
-// rolls the payment back with it: a payment with no journal is a gap in the
-// books, and a database error here has already aborted the transaction anyway.
-// Returns nothing.
-async function postExpenseSettlement(trx, { expense, paymentNo, payDate, userId }) {
-  try {
-    // Settle against the SAME payable the accrual credited: salaries credit
-    // 2040 Salaries Payable, everything else credits 2010 Supplier Payable. The
-    // settlement must debit that account back or the payable never clears.
-    const payableCode = expense.category === 'salaries' ? '2040' : '2010';
-    let [ap, cash] = await Promise.all([
-      trx('chart_of_accounts').where({ code: payableCode }).first(),
-      trx('chart_of_accounts').where({ code: '1000' }).first(),
-    ]);
-    // Fall back to Supplier Payable if the dedicated account is missing (older DB).
-    if (!ap && payableCode !== '2010') ap = await trx('chart_of_accounts').where({ code: '2010' }).first();
-    if (!ap || !cash) throw missingAccounts([payableCode, '1000']);
-    const amt = parseFloat(expense.amount_pkr) || 0;
-    if (amt <= 0) return;
-    const entity = expense.expense_type === 'mill' ? 'mill' : expense.expense_type === 'export' ? 'export' : 'general';
-    const journal = await accountingService.createJournal(trx, {
-      date: payDate,
-      entity,
-      refType: 'Payment',
-      refNo: paymentNo,
-      description: `Payment ${paymentNo} for ${expense.expense_no}`,
-      currency: 'PKR',
-      fxRate: 1,
-      isAuto: true,
-      userId: userId || null,
-      partyType: expense.supplier_id ? 'supplier' : null,
-      partyId: expense.supplier_id || null,
-      lines: [
-        { account_id: ap.id, account: ap.name, debit: amt, credit: 0, narration: `DR ${ap.code} ${ap.name} — ${paymentNo}` },
-        { account_id: cash.id, account: cash.name, debit: 0, credit: amt, narration: `CR ${cash.code} ${cash.name} — ${paymentNo}` },
-      ],
-    });
-    if (journal?.id) await accountingService.postJournal(trx, journal.id);
-  } catch (e) {
-    throw ledgerFailure(e);
-  }
-}
+const { pendingChequeTotal, round2 } = require('../finance/paymentSettlement');
+const { recordMoneyMovement } = require('../finance/paymentEngine');
 
 const CATEGORY_MAP = {
   general: [
@@ -101,10 +50,8 @@ const expensesService = {
     if (!expense_date) throw new ValidationError('Expense date is required.');
 
     const amountNum = Number(amount);
-    // Paying by cheque at create records the cheque but settles nothing: the
-    // expense stays unpaid until the cheque clears in Due Dates.
-    const payByCheque = !!pay_now && isCheque(payment_method);
-    const settledNow = !!pay_now && !payByCheque;
+    // Paying at create goes through the payment engine once the expense and
+    // its payable exist (a cheque records but settles nothing until it clears).
     const rate = Number(fx_rate) || (currency === 'PKR' ? 1 : 280);
     const amountPkr = currency === 'PKR' ? amountNum : Number((amountNum * rate).toFixed(2));
 
@@ -113,14 +60,6 @@ const expensesService = {
     // pay marking lines paid). Otherwise open our own.
     const run = async (trx) => {
       const expenseNo = await generateExpenseNo(trx);
-
-      // For a cash payment with no explicit account, draw from the paying entity's
-      // cash float: the Mill's cash (Mill Cash) for mill expenses, Office Petty Cash
-      // for Head Office / general — so each entity's cash balance stays accurate.
-      let resolvedAccountId = bank_account_id || null;
-      if (pay_now && !resolvedAccountId && payment_method === 'cash') {
-        resolvedAccountId = await resolveCashAccountId(trx, { entity: expense_type || 'general' });
-      }
 
       // Route salaries to dedicated GL accounts (Phase 9/10): DR 6135 Salaries &
       // Wages (instead of generic 6000) and CR 2040 Salaries Payable (instead of
@@ -158,11 +97,12 @@ const expensesService = {
         employee_id: employee_id || null,
         is_recurring: !!is_recurring,
         recurrence: is_recurring ? (recurrence || 'monthly') : null,
-        payment_status: settledNow ? 'Paid' : 'Pending',
-        // Same figure the payable records, so the two never disagree.
-        paid_amount: settledNow ? amountPkr : 0,
-        bank_account_id: settledNow ? resolvedAccountId : null,
-        paid_date: settledNow ? expense_date : null,
+        // Unpaid until a payment settles it (pay-now settles it below, through
+        // the same engine as every other payment).
+        payment_status: 'Pending',
+        paid_amount: 0,
+        bank_account_id: null,
+        paid_date: null,
         payment_method: pay_now ? normalizePaymentMethod(payment_method) : null,
         payment_reference: pay_now ? (payment_reference || null) : null,
         created_by: userId,
@@ -226,84 +166,44 @@ const expensesService = {
         supplier_id: supplier_id || null,
         linked_ref: vendorLabel,
         original_amount: amountPkr,
-        paid_amount: settledNow ? amountPkr : 0,
-        outstanding: settledNow ? 0 : amountPkr,
+        paid_amount: 0,
+        outstanding: amountPkr,
         currency: 'PKR',
         due_date: due_date || expense_date,
-        status: settledNow ? 'Paid' : 'Pending',
+        status: 'Pending',
         source_table: 'business_expenses',
         source_id: expense.id,
         payable_type: 'expense',
         notes: description || null,
-      }).returning('id');
+      }).returning('*');
 
-      // ─── If paid now: record the payment row, debit the bank, and post the
-      // settlement journal — so a pay-at-create expense is fully consistent
-      // with the pay-later (markPaid) flow (payment trail + GL both move). ───
-      if (payByCheque) {
+      // ─── If paid now: the payment engine records the payment (stamped with
+      // this expense), moves the account with its bank_transactions row, posts
+      // Dr 2010 (2040 for salaries) / Cr 1000 and settles the payable and the
+      // expense — exactly what paying it later does. A cheque records only.
+      if (pay_now) {
         const payDate = (expense_date instanceof Date ? expense_date.toISOString().slice(0, 10) : expense_date) || new Date().toISOString().split('T')[0];
-        const clearsOn = due_date ? (due_date instanceof Date ? due_date.toISOString().slice(0, 10) : due_date) : payDate;
-        await trx('payments').insert({
-          payment_no: await nextDocNo(trx, { table: 'payments', column: 'payment_no', prefix: 'EXP-PAY-', pad: 0 }),
-          type: 'payment', amount: amountPkr, currency: 'PKR', fx_rate: 1, base_amount_pkr: amountPkr,
-          payment_method: 'cheque', bank_account_id: bank_account_id || null,
-          bank_reference: payment_reference || null, due_date: clearsOn, cleared: false,
-          linked_payable_id: payableRow?.id || null,
-          source_table: 'business_expenses', source_id: expense.id,
-          payment_date: payDate, notes: `Pending cheque for ${expenseNo}`, created_by: userId || null,
-        });
-      } else if (pay_now) {
-        const payDate = (expense_date instanceof Date ? expense_date.toISOString().slice(0, 10) : expense_date) || new Date().toISOString().split('T')[0];
-        const paymentNo = await nextDocNo(trx, { table: 'payments', column: 'payment_no', prefix: 'EXP-PAY-', pad: 0 });
-        // Canonical on BOTH columns. This used to normalise only the payments
-        // row, leaving business_expenses holding 'bank' for the same payment.
-        // (cash/bank_transfer/cheque/...); the UI shorthand 'bank' maps to
-        // 'bank_transfer' so a bank-paid expense doesn't violate the CHECK.
-        const payMethod = normalizePaymentMethod(payment_method);
-        // Expenses are paid in PKR — a non-PKR account cannot be moved by it.
-        if (resolvedAccountId) assertAccountCurrency(await trx('bank_accounts').where('id', resolvedAccountId).first(), 'PKR');
-        await trx('payments').insert({
-          payment_no: paymentNo,
-          type: 'payment', amount: amountPkr, currency: 'PKR', fx_rate: 1, base_amount_pkr: amountPkr,
-          payment_method: payMethod, bank_account_id: resolvedAccountId,
-          bank_reference: payment_reference || null,
-          linked_payable_id: payableRow?.id || null,
-          payment_date: payDate, notes: `Payment for ${expenseNo}`, created_by: userId || null,
-        });
-        if (resolvedAccountId) {
-          await trx('bank_accounts').where('id', resolvedAccountId).update({
-            current_balance: trx.raw('current_balance - ?', [amountPkr]),
-            updated_at: trx.fn.now(),
-          });
-          // Record the cash/bank outflow on the account's transaction ledger so
-          // the Bank/Cash statement shows the payout (mirrors the receipt side
-          // in localSales.postReceiptToAccount).
-          // A failed insert aborts the transaction, so it is not swallowed:
-          // carrying on would report success for a payment COMMIT discards.
-          const acct = await trx('bank_accounts').where('id', resolvedAccountId).first();
-          const btNo = await nextDocNo(trx, { table: 'bank_transactions', column: 'transaction_no', prefix: 'BT-' });
-          const paymentRow = await trx('payments').where('payment_no', paymentNo).first();
-          await trx('bank_transactions').insert({
-            transaction_no: btNo,
-            bank_account_id: resolvedAccountId,
-            type: 'debit',
-            amount: amountPkr,
-            currency: 'PKR',
-            status: 'posted',
-            transaction_date: payDate,
-            reference: paymentNo,
-            notes: `Payment for ${expenseNo}`,
+        await recordMoneyMovement(trx, {
+          type: 'payment',
+          payable: payableRow,
+          source: { table: 'business_expenses', id: expense.id },
+          amount: amountPkr,
+          currency: 'PKR', // expenses are paid in PKR
+          method: normalizePaymentMethod(payment_method),
+          bankAccountId: bank_account_id || null,
+          accountEntity: expense_type || 'general',
+          paymentDate: payDate,
+          dueDate: due_date ? (due_date instanceof Date ? due_date.toISOString().slice(0, 10) : due_date) : null,
+          bankReference: payment_reference || null,
+          notes: `Payment for ${expenseNo}`,
+          userId: userId || null,
+          checkOutstanding: false,
+          bt: {
             source: category === 'salaries' ? 'salaries' : 'expense',
-            linked_payment_id: paymentRow?.id || null,
-            running_balance: acct ? acct.current_balance : null,
             category: category || 'expense',
             counterparty: vendorLabel,
-            created_by: userId || null,
-          });
-        }
-        await postExpenseSettlement(trx, {
-          expense: { amount_pkr: amountPkr, supplier_id, expense_type, expense_no: expenseNo, category },
-          paymentNo, payDate, userId,
+            notes: `Payment for ${expenseNo}`,
+          },
         });
       }
 
@@ -330,7 +230,7 @@ const expensesService = {
         console.warn('Expense journal post failed:', e.message);
       }
 
-      return expense;
+      return pay_now ? trx('business_expenses').where('id', expense.id).first() : expense;
     };
 
     return existingTrx ? run(existingTrx) : db.transaction(run);
@@ -485,9 +385,6 @@ const expensesService = {
     // GL journal's date math (createJournal does string ops) doesn't choke.
     const rawPayDate = paid_date || new Date().toISOString().split('T')[0];
     const payDate = rawPayDate instanceof Date ? rawPayDate.toISOString().slice(0, 10) : rawPayDate;
-    // A cheque — same-day included — is not money in the bank until it clears.
-    const isPostDated = isCheque(payment_method);
-
     const run = async (trx) => {
       // The expense and its payable are read UNDER A LOCK inside the same
       // transaction that writes them. They used to be read before it opened,
@@ -513,99 +410,34 @@ const expensesService = {
       if (payAmt > remaining + 0.01) {
         throw new ValidationError(`Payment (Rs ${payAmt.toFixed(2)}) exceeds the outstanding balance (Rs ${remaining.toFixed(2)}).`);
       }
-      const newPaid = round2(alreadyPaid + payAmt);
-      const fullyPaid = newPaid >= totalPkr - 0.01;
-
-      // A cheque records but does NOT settle, move the bank or journal until it
-      // clears — insert the uncleared payment (for this installment), carrying
-      // the expense as its source, and stop. Clear Cheque does the rest.
-      if (isPostDated) {
-        await trx('payments').insert({
-          payment_no: await nextDocNo(trx, { table: 'payments', column: 'payment_no', prefix: 'EXP-PAY-', pad: 0 }),
-          type: 'payment', amount: payAmt, currency: 'PKR', fx_rate: 1, base_amount_pkr: payAmt,
-          payment_method: normalizePaymentMethod(payment_method), bank_account_id: bank_account_id || null,
-          bank_reference: payment_reference || null,
-          due_date: due_date || payDate, cleared: false,
-          linked_payable_id: payable ? payable.id : null,
-          source_table: 'business_expenses', source_id: parseInt(id, 10), payment_date: payDate,
-          notes: notes || `Pending cheque for ${expense.expense_no}`, created_by: userId || null,
-        });
-        return expense;
-      }
-
-      // Cash with no explicit account → the paying entity's cash float (Mill Cash
-      // for mill expenses, Office Petty Cash for Head Office / general).
-      const acctId = bank_account_id || (payment_method === 'cash' ? await resolveCashAccountId(trx, { entity: expense.expense_type || 'general' }) : null);
-      // Expenses are paid in PKR — a non-PKR account cannot be moved by it.
-      if (acctId) assertAccountCurrency(await trx('bank_accounts').where('id', acctId).first(), 'PKR');
-      const payMethod = normalizePaymentMethod(payment_method);
-      // paid_amount moves with the payable: the Expenses tab and the Purchases
-      // tab both read it, and it used to stay at 0 here while the payable said
-      // the expense was part-paid.
-      const [updated] = await trx('business_expenses').where('id', id).update({
-        paid_amount: newPaid,
-        payment_status: fullyPaid ? 'Paid' : 'Partial',
-        bank_account_id: acctId,
-        payment_method: payMethod,
-        payment_reference: payment_reference || null,
-        paid_date: payDate,
-        updated_at: trx.fn.now(),
-      }).returning('*');
-
-      // Update payable — running paid/outstanding (Partial until fully settled).
-      if (payable) {
-        await trx('payables').where({ id: payable.id }).update({
-          paid_amount: newPaid,
-          outstanding: Math.max(0, round2(totalPkr - newPaid)),
-          status: fullyPaid ? 'Paid' : 'Partial',
-        });
-      }
-
-      // Canonical payment row for this installment.
-      const paymentNo = await nextDocNo(trx, { table: 'payments', column: 'payment_no', prefix: 'EXP-PAY-', pad: 0 });
-      const [payRow] = await trx('payments').insert({
-        payment_no: paymentNo,
-        type: 'payment', amount: payAmt, currency: 'PKR', fx_rate: 1, base_amount_pkr: payAmt,
-        payment_method: payMethod, bank_account_id: acctId,
-        bank_reference: payment_reference || null, due_date: due_date || null,
-        linked_payable_id: payable ? payable.id : null,
-        payment_date: payDate, notes: notes || `Payment for ${expense.expense_no}`, created_by: userId || null,
-      }).returning('id');
-
-      // Debit the resolved cash/bank account for this installment + record the
-      // outflow on the account's transaction ledger (mirrors create()'s pay-now).
-      if (acctId) {
-        await trx('bank_accounts').where('id', acctId).update({
-          current_balance: trx.raw('current_balance - ?', [payAmt]),
-          updated_at: trx.fn.now(),
-        });
-        // A failed insert aborts the transaction, so it is not swallowed:
-        // carrying on would report success for a payment COMMIT discards.
-        const acct = await trx('bank_accounts').where('id', acctId).first();
-        const btNo = await nextDocNo(trx, { table: 'bank_transactions', column: 'transaction_no', prefix: 'BT-' });
-        await trx('bank_transactions').insert({
-          transaction_no: btNo,
-          bank_account_id: acctId,
-          type: 'debit',
-          amount: payAmt,
-          currency: 'PKR',
-          status: 'posted',
-          transaction_date: payDate,
-          reference: paymentNo,
-          notes: notes || `Payment for ${expense.expense_no}`,
+      // The payment engine records the installment (stamped with this
+      // expense), moves the account (cash with none picked → the paying
+      // entity's cash float) with its bank_transactions row, posts Dr 2010
+      // (2040 for salaries) / Cr 1000 and settles the payable and the expense.
+      // A cheque records only; Clear Cheque settles it.
+      await recordMoneyMovement(trx, {
+        type: 'payment',
+        payable: payable || null,
+        source: { table: 'business_expenses', id: expense.id },
+        amount: payAmt,
+        currency: 'PKR', // expenses are paid in PKR
+        method: normalizePaymentMethod(payment_method),
+        bankAccountId: bank_account_id || null,
+        accountEntity: expense.expense_type || 'general',
+        paymentDate: payDate,
+        dueDate: due_date ? (due_date instanceof Date ? due_date.toISOString().slice(0, 10) : due_date) : null,
+        bankReference: payment_reference || null,
+        notes: notes || `Payment for ${expense.expense_no}`,
+        userId: userId || null,
+        checkOutstanding: false, // capped above, net of uncleared cheques
+        bt: {
           source: expense.category === 'salaries' ? 'salaries' : 'expense',
-          linked_payment_id: payRow?.id || null,
-          running_balance: acct ? acct.current_balance : null,
           category: expense.category || 'expense',
           counterparty: expense.vendor_name || null,
-          created_by: userId || null,
-        });
-      }
-
-      // GL settlement for this installment: DR Supplier Payable / CR Cash & Bank.
-      await postExpenseSettlement(trx, { expense: { ...expense, amount_pkr: payAmt }, paymentNo, payDate, userId });
-
-      return updated;
+          notes: notes || `Payment for ${expense.expense_no}`,
+        },
+      });
+      return trx('business_expenses').where('id', id).first();
     };
     return existingTrx ? run(existingTrx) : db.transaction(run);
   },
