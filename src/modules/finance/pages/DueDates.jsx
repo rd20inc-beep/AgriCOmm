@@ -1,19 +1,23 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { ArrowDownLeft, ArrowUpRight, AlertTriangle, CheckCircle, Loader2, X } from 'lucide-react';
 import { useUpcoming, useClearCheque, useBankAccounts } from '../../../api/queries';
 import { useApp } from '../../../context/AppContext';
+import { useAuth } from '../../../context/AuthContext';
+import PartyLink from '../../../shared/components/PartyLink';
+import { totalsByCurrency } from '../drawers/drawerLogic';
+import { PerCurrency } from '../drawers/drawerParts';
 import { AccountSelect } from '../../../components/payments/PaymentFields';
 import { accountsForMethod, pickAccountForMethod } from '../../../components/payments/paymentPayload';
 import { accountsForCurrency } from '../../../shared/utils/accountCurrency';
-import { fmtPKR as fmtPKRBase, fmtMoney as fmtMoneyBase, fmtDate } from '../../../shared/utils/format';
+import { fmtMoney as fmtMoneyBase, fmtDate } from '../../../shared/utils/format';
 
 // Exact, two decimals; each amount in its own currency (USD export receivables vs PKR dues).
-const fmtPKR = (n) => fmtPKRBase(parseFloat(n) || 0, { decimals: 2 });
 const fmtMoney = (n, cur) => fmtMoneyBase(parseFloat(n) || 0, cur || 'PKR', { decimals: 2 });
 const isOverdue = (s) => s && new Date(s) < new Date(new Date().toDateString());
 
-function List({ title, icon: Icon, tone, items, total, onClear, clearing }) {
+function List({ title, icon: Icon, tone, items, onClear, clearing, canClear }) {
+  // Each currency on its own — a USD cheque and a rupee due are never added.
+  const totals = totalsByCurrency(items, 'amount');
   return (
     <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
       <div className={`px-5 py-3 border-b border-gray-100 flex items-center justify-between ${tone === 'in' ? 'bg-emerald-50' : 'bg-red-50'}`}>
@@ -22,7 +26,7 @@ function List({ title, icon: Icon, tone, items, total, onClear, clearing }) {
           <h2 className="text-sm font-semibold text-gray-900">{title}</h2>
           <span className="text-xs text-gray-500">({items.length})</span>
         </div>
-        <span className={`text-sm font-bold ${tone === 'in' ? 'text-emerald-700' : 'text-red-700'}`}>{fmtPKR(total)}</span>
+        <PerCurrency totals={totals} empty="" className={`text-sm font-bold ${tone === 'in' ? 'text-emerald-700' : 'text-red-700'}`} />
       </div>
       {items.length === 0 ? (
         <p className="text-sm text-gray-400 text-center py-10">Nothing upcoming.</p>
@@ -41,10 +45,7 @@ function List({ title, icon: Icon, tone, items, total, onClear, clearing }) {
                     {isOverdue(x.dueDate) && <span className="ml-1.5 text-[10px] text-red-500 inline-flex items-center gap-0.5"><AlertTriangle size={10} /> overdue</span>}
                   </td>
                   <td data-label="Party" className="py-2 px-4 text-gray-900 break-words">
-                    {x.partyId ? (
-                      <Link to={`/finance/accounting/statements?type=${x.partyType}&id=${x.partyId}`}
-                        className="text-blue-600 hover:underline font-medium">{x.party}</Link>
-                    ) : x.party}
+                    <PartyLink type={x.partyType} id={x.partyId} name={x.party} className="font-medium" />
                   </td>
                   <td data-label="Type" className="py-2 px-4">
                     <span className={`text-[11px] px-2 py-0.5 rounded-full ${x.kind === 'cheque' ? 'bg-blue-50 text-blue-700' : 'bg-purple-50 text-purple-700'}`}>{x.label}</span>
@@ -52,10 +53,9 @@ function List({ title, icon: Icon, tone, items, total, onClear, clearing }) {
                   </td>
                   <td data-label="Amount" className="py-2 px-4 text-right tabular-nums font-medium text-gray-900">
                     {fmtMoney(x.amount, x.currency)}
-                    {x.currency && x.currency !== 'PKR' && x.amountPkr ? <span className="block text-[10px] text-gray-400 font-normal">≈ {fmtPKR(x.amountPkr)}</span> : null}
                   </td>
                   <td data-label="" className="py-2 px-4 text-right">
-                    {x.paymentId && (
+                    {x.paymentId && canClear && (
                       <button onClick={() => onClear(x)} disabled={clearing}
                         className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-emerald-700 bg-emerald-50 rounded hover:bg-emerald-100 disabled:opacity-50">
                         <CheckCircle size={12} /> Mark cleared
@@ -145,6 +145,10 @@ export default function DueDates() {
   const { data: allAccounts } = useBankAccounts();
   const { addToast } = useApp();
   const clearMut = useClearCheque();
+  // Clearing posts the money — POST /finance/payments/:id/clear is
+  // finance.confirm_payment; a read-only role sees the list, not the button.
+  const { hasPermission } = useAuth();
+  const canClear = hasPermission('finance', 'confirm_payment');
   const [clearing, setClearing] = useState(null);
   const receiving = data?.receiving || [];
   const giving = data?.giving || [];
@@ -170,8 +174,8 @@ export default function DueDates() {
         <p className="text-sm text-gray-400">Loading…</p>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-          <List title="Receiving (money in)" icon={ArrowDownLeft} tone="in" items={receiving} total={data?.totalReceiving || 0} onClear={setClearing} clearing={clearMut.isPending} />
-          <List title="Giving (money out)" icon={ArrowUpRight} tone="out" items={giving} total={data?.totalGiving || 0} onClear={setClearing} clearing={clearMut.isPending} />
+          <List title="Receiving (money in)" icon={ArrowDownLeft} tone="in" items={receiving} onClear={setClearing} clearing={clearMut.isPending} canClear={canClear} />
+          <List title="Giving (money out)" icon={ArrowUpRight} tone="out" items={giving} onClear={setClearing} clearing={clearMut.isPending} canClear={canClear} />
         </div>
       )}
       <ClearChequeDialog key={clearing?.paymentId || 'none'} item={clearing} accounts={bankAccounts} busy={clearMut.isPending}

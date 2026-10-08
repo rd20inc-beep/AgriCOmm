@@ -5,19 +5,16 @@ import {
   Search, Download, ExternalLink, Eye, User, ShoppingCart, DollarSign, CheckCircle,
 } from 'lucide-react';
 import { FinanceKPI } from '../../../components/finance';
-import { useLocalSales, useLocalSalesSummary, useAcceptLocalSalePayment, useBankAccounts, useReceivableReceipts } from '../../../api/queries';
+import { useLocalSales, useLocalSalesSummary, useReceivableReceipts } from '../../../api/queries';
+import { useAuth } from '../../../context/AuthContext';
+import { useFinanceDrawers } from '../drawers/drawersContext';
+import { canRecordVariant } from '../../../components/payments/paymentVariants';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { downloadCSV } from '../../../utils/csvExport';
-import { useApp } from '../../../context/AppContext';
 import SlideDrawer from '../../../components/SlideDrawer';
-import { favStar, isFavorite } from '../../../shared/utils/favorites';
-import { accountsForCurrency } from '../../../shared/utils/accountCurrency';
-import { paymentWord, defaultBankAccountId } from '../../localSales/utils/saleStatus';
-import { CHEQUE_DATE_LABEL } from '../../../components/payments/paymentPayload';
-import { ChequeHint } from '../../../components/payments/PaymentFields';
+import { paymentWord } from '../../localSales/utils/saleStatus';
 import { todayLocalISO, fmtPKR, fmtKg, fmtNum, fmtPct, fmtDate, fmtDateTime } from '../../../shared/utils/format';
 import StatusBadge from '../../../shared/components/StatusBadge';
-import FieldError from '../../../shared/components/FieldError';
 
 // Exact to the paisa — sale totals are reconciled line by line.
 const fmtFull = (n) => fmtPKR(parseFloat(n) || 0, { decimals: 2 });
@@ -27,51 +24,28 @@ export default function LocalSalesFinance() {
   const { queryParams: rangeParams } = useFinanceDateRange();
   const { data: sales = [], isLoading } = useLocalSales(rangeParams);
   const { data: summary = {} } = useLocalSalesSummary();
-  const { data: bankAccounts = [] } = useBankAccounts();
-  const { addToast } = useApp();
-  const acceptPay = useAcceptLocalSalePayment();
   const [statusFilter, setStatusFilter] = useState('All');
   const [searchTerm, setSearchTerm] = useState('');
   const [detailSale, setDetailSale] = useState(null);
-  const [payForm, setPayForm] = useState({ amount: '', method: 'cash', bankAccountId: '', reference: '', dueDate: '', collectionLocation: 'Mill' });
-  const [payErrors, setPayErrors] = useState({});
-  // Local sales are PKR: a non-PKR (e.g. USD) account cannot take the receipt.
-  const nonCashAccounts = accountsForCurrency(bankAccounts.filter(a => a.type !== 'cash'), 'PKR');
   // Where each payment was received (account/cash) + type, for the open sale.
   const { data: receiptData, isLoading: receiptsLoading } = useReceivableReceipts(detailSale?.id, 'local_sale', !!detailSale);
+  // Receiving on one sale line is POST /local-sales/:id/payments through the
+  // shared Payment form; the button asks what that route asks.
+  const { hasPermission } = useAuth();
+  const drawers = useFinanceDrawers();
+  const canReceive = canRecordVariant('receive_local_sale_line', hasPermission);
 
-  function openDetail(s) {
-    setDetailSale(s);
-    setPayErrors({});
-    setPayForm({
-      amount: String(parseFloat(s.dueAmount) || 0), method: 'cash',
-      bankAccountId: defaultBankAccountId(nonCashAccounts, isFavorite), reference: '', dueDate: '',
-      collectionLocation: s.collectionLocation || 'Mill',
+  function openDetail(s) { setDetailSale(s); }
+  function receive(s) {
+    drawers?.openPayment(null, {
+      variant: 'receive_local_sale_line',
+      ctx: {
+        saleId: s.id, currency: 'PKR', outstanding: parseFloat(s.dueAmount) || 0,
+        party: { type: 'customer', id: s.customerId, name: s.buyerName || s.customerName },
+        ref: s.saleNo, collectionLocation: s.collectionLocation || 'Mill',
+      },
+      onDone: () => setDetailSale(null),
     });
-  }
-  async function recordPayment() {
-    if (acceptPay.isPending) return;
-    const amount = parseFloat(payForm.amount);
-    if (!amount || amount <= 0) { setPayErrors({ amount: 'Enter a valid amount' }); return; }
-    setPayErrors({});
-    try {
-      await acceptPay.mutateAsync({
-        saleId: detailSale.id,
-        data: {
-          amount,
-          payment_method: payForm.method,
-          bank_account_id: payForm.method === 'cash' ? null : (payForm.bankAccountId || null),
-          // Cash lands in Mill Cash or Office Petty Cash by where it was collected.
-          collection_location: payForm.method === 'cash' ? (payForm.collectionLocation || 'Mill') : null,
-          reference: payForm.reference || null,
-          due_date: payForm.dueDate || null,
-        },
-      });
-      addToast?.(`Payment of ${fmtFull(amount)} recorded for ${detailSale.saleNo}`, 'success');
-      setDetailSale(null);
-    } catch (err) {
-      addToast?.(err?.data?.message || err.message || 'Failed to record payment', 'error');
-    }
   }
 
   const filtered = useMemo(() => {
@@ -285,53 +259,12 @@ export default function LocalSalesFinance() {
             // Only a confirmed sale is owed anything — a Pending one takes its
             // receipt when confirmed, a Cancelled one never happened.
             footer={due > 0 && s.status === 'Completed' ? (
-              <div className="space-y-2">
-                <div className="flex gap-2">
-                  <input type="number" min="0" step="0.01" value={payForm.amount}
-                    onChange={(e) => setPayForm({ ...payForm, amount: e.target.value })}
-                    aria-label="Amount" aria-required="true"
-                    className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm" placeholder="Amount *" />
-                  <select value={payForm.method} onChange={(e) => setPayForm({ ...payForm, method: e.target.value })}
-                    className="border border-gray-200 rounded-lg px-2 py-2 text-sm bg-white">
-                    <option value="cash">Cash</option>
-                    <option value="bank_transfer">Bank</option>
-                    <option value="cheque">Cheque</option>
-                  </select>
-                </div>
-                <FieldError error={payErrors.amount} />
-                {payForm.method === 'cash' && (
-                  <div className="grid grid-cols-2 gap-2">
-                    {['Mill', 'Head Office'].map(loc => (
-                      <button key={loc} type="button" onClick={() => setPayForm({ ...payForm, collectionLocation: loc })}
-                        className={`px-3 py-2 text-sm font-medium rounded-lg border ${payForm.collectionLocation === loc ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600 hover:border-gray-300'}`}>
-                        Collected at {loc}
-                      </button>
-                    ))}
-                  </div>
-                )}
-                {payForm.method !== 'cash' && (
-                  <select value={payForm.bankAccountId} onChange={(e) => setPayForm({ ...payForm, bankAccountId: e.target.value })}
-                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white">
-                    <option value="">Select bank account…</option>
-                    {nonCashAccounts.map(a => <option key={a.id} value={a.id}>{favStar(a)}{a.name}{a.bankName ? ` — ${a.bankName}` : ''}</option>)}
-                  </select>
-                )}
-                {payForm.method === 'cheque' && (
-                  <div>
-                    <div className="flex gap-2">
-                      <input type="text" value={payForm.reference} onChange={(e) => setPayForm({ ...payForm, reference: e.target.value })}
-                        className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm" placeholder="Cheque # (optional)" />
-                      <input type="date" value={payForm.dueDate} onChange={(e) => setPayForm({ ...payForm, dueDate: e.target.value })}
-                        className="border border-gray-200 rounded-lg px-2 py-2 text-sm" title={CHEQUE_DATE_LABEL} aria-label={CHEQUE_DATE_LABEL} />
-                    </div>
-                    <ChequeHint />
-                  </div>
-                )}
-                <button onClick={recordPayment} disabled={acceptPay.isPending}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-50">
-                  <DollarSign size={16} /> {acceptPay.isPending ? 'Recording…' : `Record Payment — ${fmtFull(parseFloat(payForm.amount) || 0)}`}
+              canReceive ? (
+                <button onClick={() => receive(s)} data-action="receive"
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700">
+                  <DollarSign size={16} /> Receive — {fmtFull(due)} due
                 </button>
-              </div>
+              ) : <p className="w-full text-center text-sm text-gray-500">{fmtFull(due)} due</p>
             ) : (
               <p className="w-full text-center text-sm text-gray-500 inline-flex items-center justify-center gap-1.5"><CheckCircle size={15} className="text-emerald-600" /> Paid in full</p>
             )}>
@@ -370,7 +303,7 @@ export default function LocalSalesFinance() {
                       let into = [p.accountName, p.bankName].filter(Boolean).join(' · ');
                       if (!into) into = p.paymentMethod === 'cash' ? 'Cash (in hand)' : '—';
                       return (
-                        <div key={p.id} className="border border-gray-200 rounded-lg px-3 py-2">
+                        <button type="button" key={p.id} onClick={() => drawers?.openTransaction?.('payment', p.id)} className="block w-full text-left border border-gray-200 rounded-lg px-3 py-2 hover:bg-blue-50">
                           <div className="flex items-center justify-between">
                             <span className="text-sm font-semibold text-emerald-700">{fmtFull(p.amount)}</span>
                             <span className="text-xs text-gray-500">{fmtDate(p.paymentDate)}</span>
@@ -381,7 +314,7 @@ export default function LocalSalesFinance() {
                             <span>Into: <span className="font-medium text-gray-700">{into}</span></span>
                             {p.bankReference && <span>Ref: <span className="font-medium text-gray-700">{p.bankReference}</span></span>}
                           </div>
-                        </div>
+                        </button>
                       );
                     })}
                   </div>

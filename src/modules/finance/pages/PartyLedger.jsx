@@ -14,6 +14,7 @@ import { useCustomers, useSuppliers } from '../../../api/queries';
 import { favStar } from '../../../shared/utils/favorites';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { useApp } from '../../../context/AppContext';
+import { useAuth } from '../../../context/AuthContext';
 import StatusBadge from '../../../shared/components/StatusBadge';
 import { fmtMoney, fmtDate, fmtDateTime } from '../../../shared/utils/format';
 
@@ -34,6 +35,8 @@ const STATUS_ROW = { Paid: 'bg-emerald-50', Partial: 'bg-amber-50', Unpaid: 'bg-
 
 export default function PartyLedger() {
   const { companyProfileData } = useApp();
+  const { hasPermission } = useAuth();
+  const canPay = hasPermission('finance', 'confirm_payment') || hasPermission('milling', 'edit');
   const { queryParams: rangeParams } = useFinanceDateRange();
   // Mode + selected party live in the URL (?type=customer|supplier&id=123)
   // so other pages can deep-link straight to a party's ledger.
@@ -161,11 +164,15 @@ export default function PartyLedger() {
 
         {partyId && (
           <div className="flex items-center gap-2">
-            <button onClick={() => setPayOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm">
-              {mode === 'customer' ? <Wallet size={14} /> : <HandCoins size={14} />}
-              {mode === 'customer' ? 'Record Receipt' : 'Record Payment'}
-            </button>
+            {/* The allocator records one payment per open invoice through
+                POST /finance/payments — finance.confirm_payment or milling.edit. */}
+            {canPay && (
+              <button onClick={() => setPayOpen(true)} data-action={mode === 'customer' ? 'receive' : 'pay'}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm">
+                {mode === 'customer' ? <Wallet size={14} /> : <HandCoins size={14} />}
+                {mode === 'customer' ? 'Record Receipt' : 'Record Payment'}
+              </button>
+            )}
             <button onClick={() => setDraftOpen(true)}
               className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-violet-700 bg-violet-50 border border-violet-200 hover:bg-violet-100 rounded-lg shadow-sm no-print">
               <Sparkles size={14} /> Draft Email

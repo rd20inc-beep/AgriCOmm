@@ -9,8 +9,10 @@ import SlideDrawer from '../../../components/SlideDrawer';
 import SearchSelect from '../../../components/SearchSelect';
 import { financeApi } from '../api/services';
 import { useApp } from '../../../context/AppContext';
+import { useAuth } from '../../../context/AuthContext';
+import PermissionGate from '../../../shared/components/PermissionGate';
 import { favStar } from '../../../shared/utils/favorites';
-import { todayLocalISO, fmtPKR, fmtDate, toNumber } from '../../../shared/utils/format';
+import { todayLocalISO, fmtPKR, fmtMoney, fmtDate, toNumber } from '../../../shared/utils/format';
 import StatusBadge from '../../../shared/components/StatusBadge';
 import FieldError from '../../../shared/components/FieldError';
 
@@ -42,6 +44,8 @@ export default function Suspense() {
   const [showRecord, setShowRecord] = useState(false);
   const [resolveFor, setResolveFor] = useState(null);
   const [confirm, confirmDialog] = useConfirm();
+  const { hasPermission } = useAuth();
+  const canJournal = hasPermission('finance', 'post_journal');
 
   const { data: summary } = useQuery({ queryKey: ['suspense', 'summary'], queryFn: async () => (await financeApi.suspenseSummary())?.data || {} });
   const { data: entries = [], isLoading } = useQuery({
@@ -74,9 +78,13 @@ export default function Suspense() {
         <div>
           <p className="text-sm text-gray-500">Unidentified / unallocated money held in the 1290 Suspense account until Finance resolves it to the correct account.</p>
         </div>
-        <button onClick={() => setShowRecord(true)} className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">
-          <Plus size={16} /> Record Suspense Entry
-        </button>
+        {/* POST /suspense is finance.confirm_payment; resolve / reverse are
+            finance.post_journal (finance.routes.js). */}
+        <PermissionGate module="finance" action="confirm_payment">
+          <button onClick={() => setShowRecord(true)} data-action="record-suspense" className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">
+            <Plus size={16} /> Record Suspense Entry
+          </button>
+        </PermissionGate>
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -130,17 +138,17 @@ export default function Suspense() {
                       <td data-label="Type" className="mob-hide px-3 py-2">{e.direction === 'receipt' ? <span className="text-emerald-700">Receipt</span> : <span className="text-red-600">Payment</span>}</td>
                       <td data-label="Payer / Payee" className="px-3 py-2 text-gray-700 max-w-[12rem] truncate" title={e.party_details || ''}>{e.party_details || '—'}</td>
                       <td data-label="Account" className="mob-hide px-3 py-2 text-gray-500 text-xs max-w-[10rem] truncate" title={e.bank_account_name || ''}>{e.bank_account_name || '—'}</td>
-                      <td data-label="Amount" className="px-3 py-2 text-right tabular-nums">{PKR(e.amount)}</td>
-                      <td data-label="Outstanding" className="mob-hide px-3 py-2 text-right tabular-nums font-medium">{outstanding > 0.01 ? PKR(outstanding) : '—'}</td>
+                      <td data-label="Amount" className="px-3 py-2 text-right tabular-nums">{fmtMoney(e.amount, e.currency || 'PKR')}</td>
+                      <td data-label="Outstanding" className="mob-hide px-3 py-2 text-right tabular-nums font-medium">{outstanding > 0.01 ? fmtMoney(outstanding, e.currency || 'PKR') : '—'}</td>
                       <td data-label="Status" className="px-3 py-2 text-center"><StatusBadge status={e.status} /></td>
                       <td data-label="Actions" className="px-3 py-2 text-right whitespace-nowrap">
-                        {canResolve && <button onClick={() => setResolveFor(e)} className="text-xs font-medium text-emerald-700 hover:underline mr-2">Resolve</button>}
+                        {canResolve && canJournal && <button onClick={() => setResolveFor(e)} data-action="resolve" className="text-xs font-medium text-emerald-700 hover:underline mr-2">Resolve</button>}
                         {e.status === 'Open' && <button onClick={() => reviewMut.mutate(e.id)} className="text-xs text-amber-600 hover:underline mr-2">Review</button>}
-                        {canReverse && <button onClick={async () => {
+                        {canReverse && canJournal && <button data-action="reverse" onClick={async () => {
                           if (!await confirm({
                             title: `Reverse ${e.entry_no}?`,
                             consequence: 'The money movement is unwound and every reclassification made against this entry is reversed.',
-                            amount: PKR(e.amount),
+                            amount: fmtMoney(e.amount, e.currency || 'PKR'),
                             confirmLabel: 'Reverse entry',
                           })) return;
                           reverseMut.mutate(e.id);

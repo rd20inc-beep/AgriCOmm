@@ -5,6 +5,7 @@ import { FinanceTable, FinanceKPI } from '../../../components/finance';
 import { useFxRates, useCommodityRates, useProducts } from '../../../api/queries';
 import { financeApi } from '../../../api/services';
 import { useApp } from '../../../context/AppContext';
+import PermissionGate from '../../../shared/components/PermissionGate';
 import { todayLocalISO, fmtDate, fmtNum, fmtMoney, fmtPKR } from '../../../shared/utils/format';
 
 // By-product grades a rate can be scoped to; blank means the product as a whole.
@@ -144,10 +145,13 @@ export default function RatesCenter() {
               {isFallback ? <AlertTriangle size={12} /> : <Check size={12} />}
               {isFallback ? 'Fallback rate — add proper FX' : `Source: ${latestFx.source || 'manual'}`}
             </span>
-            <button onClick={handleRefreshFx}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-white/15 hover:bg-white/25 ring-1 ring-white/30 transition-colors">
-              <RefreshCw size={12} /> Refresh open orders
-            </button>
+            {/* Adding / refreshing rates is finance.confirm_payment (finance.routes.js). */}
+            <PermissionGate module="finance" action="confirm_payment">
+              <button onClick={handleRefreshFx} data-action="refresh-fx"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-white/15 hover:bg-white/25 ring-1 ring-white/30 transition-colors">
+                <RefreshCw size={12} /> Refresh open orders
+              </button>
+            </PermissionGate>
           </div>
         </div>
       </div>
@@ -170,12 +174,14 @@ export default function RatesCenter() {
       {subTab === 'fx' && (
         <>
           {/* Actions */}
-          <div className="flex gap-2">
-            <button onClick={() => setShowFxForm(!showFxForm)}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">
-              <Plus size={14} /> Add FX Rate
-            </button>
-          </div>
+          <PermissionGate module="finance" action="confirm_payment">
+            <div className="flex gap-2">
+              <button onClick={() => setShowFxForm(!showFxForm)} data-action="add-fx-rate"
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">
+                <Plus size={14} /> Add FX Rate
+              </button>
+            </div>
+          </PermissionGate>
 
           {/* Add form */}
           {showFxForm && (
@@ -224,12 +230,14 @@ export default function RatesCenter() {
               subtitle="Distinct categories" status="neutral" loading={crLoading} />
           </div>
 
-          <div className="flex gap-2">
-            <button onClick={() => setShowCrForm(!showCrForm)}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">
-              <Plus size={14} /> Add Rate
-            </button>
-          </div>
+          <PermissionGate module="finance" action="confirm_payment">
+            <div className="flex gap-2">
+              <button onClick={() => setShowCrForm(!showCrForm)} data-action="add-commodity-rate"
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">
+                <Plus size={14} /> Add Rate
+              </button>
+            </div>
+          </PermissionGate>
 
           {showCrForm && (
             <form onSubmit={handleAddCommodityRate} className="bg-gray-50 rounded-xl border border-gray-200 p-4 grid grid-cols-2 md:grid-cols-4 gap-3 items-end">
