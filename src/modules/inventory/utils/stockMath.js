@@ -2,6 +2,7 @@
 // Mirrors backend/src/modules/inventory/stockSql.js — keep the two in step.
 
 import { fmtNum } from '../../../shared/utils/format';
+import { mtToKg } from '../../../shared/utils/unitConversion';
 const n = (v) => Number(v) || 0;
 
 /** KG physically on hand: net_weight_kg, falling back to qty (KG). */
@@ -66,5 +67,5 @@ export function transferKg(t) {
   if (!t) return 0;
   const kg = t.qtyKg ?? t.qty_kg;
   if (kg != null && kg !== '') return n(kg);
-  return n(t.qtyMt ?? t.qty_mt) * 1000;
+  return mtToKg(t.qtyMt ?? t.qty_mt);
 }

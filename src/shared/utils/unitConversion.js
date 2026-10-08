@@ -90,3 +90,21 @@ export function formatRate(ratePerKg, unit, currency = 'Rs', bagWt = DEFAULT_KAT
   const label = UNIT_LABELS[unit] || unit?.toUpperCase() || 'KG';
   return `${currency} ${val.toLocaleString()}/${label}`;
 }
+
+// ─── The MT ↔ KG document boundary ───
+// Stock, milling and mill-side screens are KG (mig 228). Export orders,
+// quotations, contracts and printed export documents keep metric tons
+// (qty_mt, price_per_mt, USD/MT). Every crossing of that boundary goes
+// through these four instead of an inline ×1000 / ÷1000.
+//
+// Unlike toKg/fromKg above these are EXACT — a plain ×1000 / ÷1000 on the
+// parsed number, the same float operation the inline code did — so routing a
+// call site through them never changes a figure. Round when displaying.
+// null / undefined / '' / non-numeric count as 0, like `(parseFloat(x) || 0)`.
+// Twin of backend/src/shared/units.js.
+export const KG_PER_MT = TON_KG;
+const num = (v) => parseFloat(v) || 0;
+export const mtToKg = (mt) => num(mt) * KG_PER_MT;
+export const kgToMt = (kg) => num(kg) / KG_PER_MT;
+export const perMtToPerKg = (ratePerMt) => num(ratePerMt) / KG_PER_MT;
+export const perKgToPerMt = (ratePerKg) => num(ratePerKg) * KG_PER_MT;

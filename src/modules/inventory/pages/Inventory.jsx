@@ -18,8 +18,6 @@ const tabs = [
 ];
 
 const fmtPKR = (v) => fmtPKRBase(v, { decimals: 2 });
-// Hero/summary tonnage is a headline figure, one decimal.
-const fmtTons = (kg) => `${fmtNum(kg / 1000, 1)} MT`;
 
 export default function Inventory() {
   const [activeTab, setActiveTab] = useState('all');
@@ -89,6 +87,9 @@ export default function Inventory() {
   const fmtQty = (v) => (displayUnit === 'ton' ? fmtNum(v || 0, 3) : fmtNum(v || 0));
   function dv(kg) { return fmtQty(fromKg(kg, displayUnit)); }
   function ul() { return displayUnit === 'katta' ? 'Katta' : displayUnit === 'maund' ? 'Maund' : displayUnit === 'ton' ? 'MT' : 'KG'; }
+  // Hero/summary quantities follow the same unit toggle as the cards and the
+  // table (KG by default) — the mill works in KG; MT is an export-doc unit.
+  const fmtStock = (kg) => `${dv(kg)} ${ul()}`;
 
   if (isLoading) return <LoadingSpinner message="Loading inventory..." />;
   if (error) return <ErrorState message={error.message} onRetry={refetch} />;
@@ -105,13 +106,13 @@ export default function Inventory() {
               <Package size={14} /> Stock on hand
             </div>
             <div className="text-3xl sm:text-4xl font-bold leading-tight tabular-nums">
-              {showCost ? fmtPKR(kpis.totalValue) : fmtTons(totalKgAll)}
+              {showCost ? fmtPKR(kpis.totalValue) : fmtStock(totalKgAll)}
             </div>
             <div className="text-xs opacity-90 mt-1">
-              {kpis.totalLots} lots · {fmtTons(totalKgAll)}
-              {kpis.rawKg       > 0 && <> · Raw {fmtTons(kpis.rawKg)}</>}
-              {kpis.finishedKg  > 0 && <> · Finished {fmtTons(kpis.finishedKg)}</>}
-              {kpis.byproductKg > 0 && <> · Byproducts {fmtTons(kpis.byproductKg)}</>}
+              {kpis.totalLots} lots · {fmtStock(totalKgAll)}
+              {kpis.rawKg       > 0 && <> · Raw {fmtStock(kpis.rawKg)}</>}
+              {kpis.finishedKg  > 0 && <> · Finished {fmtStock(kpis.finishedKg)}</>}
+              {kpis.byproductKg > 0 && <> · Byproducts {fmtStock(kpis.byproductKg)}</>}
             </div>
           </div>
           <div className="flex items-center gap-2">

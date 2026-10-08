@@ -3,6 +3,7 @@
  * Convert between backend snake_case and frontend camelCase.
  * Also maps backend field names to frontend expected names.
  */
+import { kgToMt, perKgToPerMt } from '../shared/utils/unitConversion';
 
 // Generic snake_case to camelCase
 function snakeToCamel(str) {
@@ -283,28 +284,28 @@ export function transformBatch(dbBatch) {
     customTags: Array.isArray(dbBatch.custom_tags)
       ? dbBatch.custom_tags
       : (() => { try { return JSON.parse(dbBatch.custom_tags || '[]'); } catch { return []; } })(),
-    rawQtyMT: (parseFloat(dbBatch.raw_qty_kg) || 0) / 1000,
-    plannedFinishedMT: (parseFloat(dbBatch.planned_finished_kg) || 0) / 1000,
-    actualFinishedMT: (parseFloat(dbBatch.actual_finished_kg) || 0) / 1000,
-    finishedConsumedMT: (parseFloat(dbBatch.finished_consumed_kg) || 0) / 1000,
+    rawQtyMT: kgToMt(dbBatch.raw_qty_kg),
+    plannedFinishedMT: kgToMt(dbBatch.planned_finished_kg),
+    actualFinishedMT: kgToMt(dbBatch.actual_finished_kg),
+    finishedConsumedMT: kgToMt(dbBatch.finished_consumed_kg),
     // What the yield booked on the output lots (server: batchOutputValues) —
     // { byproductValue, finishedValue, byproductByGrade, source } or null.
     outputValue: dbBatch.output_value || null,
-    brokenMT: (parseFloat(dbBatch.broken_kg) || 0) / 1000,
-    b1MT: (parseFloat(dbBatch.b1_kg) || 0) / 1000,
-    b2MT: (parseFloat(dbBatch.b2_kg) || 0) / 1000,
-    b3MT: (parseFloat(dbBatch.b3_kg) || 0) / 1000,
-    csrMT: (parseFloat(dbBatch.csr_kg) || 0) / 1000,
-    shortGrainMT: (parseFloat(dbBatch.short_grain_kg) || 0) / 1000,
-    branMT: (parseFloat(dbBatch.bran_kg) || 0) / 1000,
-    huskMT: (parseFloat(dbBatch.husk_kg) || 0) / 1000,
-    powderMT: (parseFloat(dbBatch.powder_kg) || 0) / 1000,
-    sweepingMT: (parseFloat(dbBatch.sweeping_kg) || 0) / 1000,
-    chobaMT: (parseFloat(dbBatch.choba_kg) || 0) / 1000,
-    ovMT: (parseFloat(dbBatch.ov_kg) || 0) / 1000,
-    stoneMT: (parseFloat(dbBatch.stone_kg) || 0) / 1000,
-    sortexRejectsMT: (parseFloat(dbBatch.sortex_rejects_kg) || 0) / 1000,
-    wastageMT: (parseFloat(dbBatch.wastage_kg) || 0) / 1000,
+    brokenMT: kgToMt(dbBatch.broken_kg),
+    b1MT: kgToMt(dbBatch.b1_kg),
+    b2MT: kgToMt(dbBatch.b2_kg),
+    b3MT: kgToMt(dbBatch.b3_kg),
+    csrMT: kgToMt(dbBatch.csr_kg),
+    shortGrainMT: kgToMt(dbBatch.short_grain_kg),
+    branMT: kgToMt(dbBatch.bran_kg),
+    huskMT: kgToMt(dbBatch.husk_kg),
+    powderMT: kgToMt(dbBatch.powder_kg),
+    sweepingMT: kgToMt(dbBatch.sweeping_kg),
+    chobaMT: kgToMt(dbBatch.choba_kg),
+    ovMT: kgToMt(dbBatch.ov_kg),
+    stoneMT: kgToMt(dbBatch.stone_kg),
+    sortexRejectsMT: kgToMt(dbBatch.sortex_rejects_kg),
+    wastageMT: kgToMt(dbBatch.wastage_kg),
     yieldPct: parseFloat(dbBatch.yield_pct) || 0,
     supplierId: dbBatch.supplier_id,
     supplierName: dbBatch.supplier_name || '',
@@ -320,20 +321,20 @@ export function transformBatch(dbBatch) {
     varianceStatus: dbBatch.variance_status || null,
     vehicleArrivals: dbBatch.vehicleArrivals || [],
     millingFeePerKg: parseFloat(dbBatch.milling_fee_per_kg) || 5,
-    finishedPricePerMT: (parseFloat(dbBatch.finished_price_per_kg) || 0) * 1000,
-    brokenPricePerMT: (parseFloat(dbBatch.broken_price_per_kg) || 0) * 1000,
-    branPricePerMT: (parseFloat(dbBatch.bran_price_per_kg) || 0) * 1000,
-    huskPricePerMT: (parseFloat(dbBatch.husk_price_per_kg) || 0) * 1000,
-    sortexRejectsPricePerMT: (parseFloat(dbBatch.sortex_rejects_price_per_kg) || 0) * 1000,
+    finishedPricePerMT: perKgToPerMt(dbBatch.finished_price_per_kg),
+    brokenPricePerMT: perKgToPerMt(dbBatch.broken_price_per_kg),
+    branPricePerMT: perKgToPerMt(dbBatch.bran_price_per_kg),
+    huskPricePerMT: perKgToPerMt(dbBatch.husk_price_per_kg),
+    sortexRejectsPricePerMT: perKgToPerMt(dbBatch.sortex_rejects_price_per_kg),
     // Per-grade broken prices (added in migration 130)
-    b1PricePerMT: (parseFloat(dbBatch.b1_price_per_kg) || 0) * 1000,
-    b2PricePerMT: (parseFloat(dbBatch.b2_price_per_kg) || 0) * 1000,
-    b3PricePerMT: (parseFloat(dbBatch.b3_price_per_kg) || 0) * 1000,
-    csrPricePerMT: (parseFloat(dbBatch.csr_price_per_kg) || 0) * 1000,
-    shortGrainPricePerMT: (parseFloat(dbBatch.short_grain_price_per_kg) || 0) * 1000,
-    powderPricePerMT: (parseFloat(dbBatch.powder_price_per_kg) || 0) * 1000,
-    sweepingPricePerMT: (parseFloat(dbBatch.sweeping_price_per_kg) || 0) * 1000,
-    chobaPricePerMT: (parseFloat(dbBatch.choba_price_per_kg) || 0) * 1000,
+    b1PricePerMT: perKgToPerMt(dbBatch.b1_price_per_kg),
+    b2PricePerMT: perKgToPerMt(dbBatch.b2_price_per_kg),
+    b3PricePerMT: perKgToPerMt(dbBatch.b3_price_per_kg),
+    csrPricePerMT: perKgToPerMt(dbBatch.csr_price_per_kg),
+    shortGrainPricePerMT: perKgToPerMt(dbBatch.short_grain_price_per_kg),
+    powderPricePerMT: perKgToPerMt(dbBatch.powder_price_per_kg),
+    sweepingPricePerMT: perKgToPerMt(dbBatch.sweeping_price_per_kg),
+    chobaPricePerMT: perKgToPerMt(dbBatch.choba_price_per_kg),
     // KG-native quantities & per-KG prices (engine truth, post MT→KG conversion).
     // Use these for KG-denominated displays; the *MT / *PricePerMT keys above remain
     // for MT-denominated consumers (reports, export docs, the scenario simulator).

@@ -15,6 +15,7 @@ import StatusBadge from '../../../components/StatusBadge';
 import SlideDrawer from '../../../components/SlideDrawer';
 import { fmtPKR, fmtUSD, fmtNum, fmtPct, fmtDate, fmtDateTime } from '../../../shared/utils/format';
 import { transferKg } from '../utils/stockMath';
+import { mtToKg, kgToMt, perMtToPerKg, perKgToPerMt } from '../../../shared/utils/unitConversion';
 
 const PKR_RATE = 280; // PKR per USD
 const formatPKR = (value) => fmtPKR(parseFloat(value) || 0, { decimals: 2 });
@@ -50,7 +51,7 @@ export default function InternalTransfer() {
   const completedBatches = millingBatches
     .filter(b => !(b.isServiceMilling ?? b.is_service_milling))
     .map(b => {
-      const finishedKg = parseFloat(b.actualFinishedKg) || (parseFloat(b.actualFinishedMT ?? b.actual_finished_mt) || 0) * 1000;
+      const finishedKg = parseFloat(b.actualFinishedKg) || mtToKg(b.actualFinishedMT ?? b.actual_finished_mt);
       const transferredKg = transferredKgByBatch[b.dbId] || transferredKgByBatch[b.id] || 0;
       return { ...b, _remainingKg: Math.max(0, finishedKg - transferredKg) };
     })
@@ -116,8 +117,8 @@ export default function InternalTransfer() {
         batch_id: batchId,
         export_order_id: canLinkOrder ? orderId : null,
         product_name: productName || 'Finished Rice',
-        qty_mt: qty / 1000,            // KG → MT for the export/transfer doc boundary
-        transfer_price_pkr: price * 1000, // per-kg → per-MT
+        qty_mt: kgToMt(qty),                   // KG → MT for the export/transfer doc boundary
+        transfer_price_pkr: perKgToPerMt(price), // per-kg → per-MT
         total_value_pkr: totalAmount,
         usd_equivalent: usdEquiv,
         pkr_rate: fxRate,
@@ -185,7 +186,7 @@ export default function InternalTransfer() {
                     <option value="">Select active export order...</option>
                     {activeExportOrders.map(o => (
                       <option key={o.id} value={o.id}>
-                        {o.id} - {o.customerName} ({fmtNum(Math.round((o.qtyMT || 0) * 1000))} kg)
+                        {o.id} - {o.customerName} ({fmtNum(Math.round(mtToKg(o.qtyMT)))} kg)
                       </option>
                     ))}
                   </select>
@@ -381,7 +382,7 @@ export default function InternalTransfer() {
                     {canLinkOrder && <td data-label="Export Order" className="mob-hide px-4 py-3 text-gray-900">{t.exportOrderNo || `#${t.exportOrderId}`}</td>}
                     <td data-label="Product" className="px-4 py-3 text-gray-600 max-w-[14rem] truncate" title={t.productName || undefined}>{t.productName}</td>
                     <td data-label="Qty kg" className="px-4 py-3 text-right text-gray-900 font-medium">{fmtNum(Math.round(transferKg(t)))}</td>
-                    <td data-label="Price/kg" className="mob-hide px-4 py-3 text-right text-gray-900">{formatPKR((parseFloat(t.transferPricePkr) || 0) / 1000)}</td>
+                    <td data-label="Price/kg" className="mob-hide px-4 py-3 text-right text-gray-900">{formatPKR(perMtToPerKg(t.transferPricePkr))}</td>
                     <td data-label="Total" className="px-4 py-3 text-right text-gray-900 font-medium">{formatPKR(t.totalValuePkr)}</td>
                     <td data-label="Dispatch" className="mob-hide px-4 py-3 text-gray-600">{fmtDate(t.dispatchDate)}</td>
                     <td data-label="Status" className="px-4 py-3 text-center">
@@ -446,7 +447,7 @@ function TransferDetailDrawer({ transferId, onClose, canLinkOrder = true }) {
             <Fact label="Customer" value={t.exportCustomerName || '—'} />
             <Fact label="Dispatch date" value={fmtDate(t.dispatchDate)} />
             <Fact label="Qty" value={`${fmtNum(Math.round(transferKg(t)))} kg`} />
-            <Fact label="Price / kg" value={formatPKR((parseFloat(t.transferPricePkr) || 0) / 1000)} />
+            <Fact label="Price / kg" value={formatPKR(perMtToPerKg(t.transferPricePkr))} />
             <Fact label="Total (PKR)" value={formatPKR(t.totalValuePkr)} />
             <Fact label="Total (USD)" value={formatUSD(t.usdEquivalent)} />
             <Fact label="Created by" value={t.createdByName || '—'} />
