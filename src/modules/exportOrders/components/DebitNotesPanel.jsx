@@ -5,6 +5,7 @@ import useConfirm from '../../../hooks/useConfirm';
 import { useDebitNotes, useIssueDebitNote, useCancelDebitNote } from '../../../api/queries';
 import { todayLocalISO, fmtMoney, fmtNum, fmtDate } from '../../../shared/utils/format';
 import StatusBadge from '../../../shared/components/StatusBadge';
+import { useOwnerAuth } from '../../../context/OwnerAuthContext';
 
 // Freight escalation debit notes.
 //
@@ -32,6 +33,9 @@ export default function DebitNotesPanel({ order, addToast, canIssue = true }) {
   const { data: notes = [], isLoading } = useDebitNotes(orderId);
   const issue = useIssueDebitNote();
   const cancel = useCancelDebitNote();
+  // The cancel route is owner-approved (ownerApproval('export_balance')): an
+  // Owner cancels directly, anyone else needs the Owner's password here.
+  const { requestOwnerApproval } = useOwnerAuth();
   const [open, setOpen] = useState(false);
   const [confirm, confirmDialog] = useConfirm();
 
@@ -95,9 +99,10 @@ export default function DebitNotesPanel({ order, addToast, canIssue = true }) {
     });
     if (!ok) return;
     try {
-      await cancel.mutateAsync({ id: orderId, noteId: note.id, data: { reason: ok.reason || null } });
+      await requestOwnerApproval((ownerId) => cancel.mutateAsync({ id: orderId, noteId: note.id, data: { reason: ok.reason || null, authorized_by_owner_id: ownerId } }));
       addToast?.(`${note.debit_note_no} cancelled`, 'success');
     } catch (err) {
+      if (err?.message === 'Owner authorization cancelled') return;
       addToast?.(err?.data?.errors?.[0]?.message || err?.data?.message || err.message || 'Failed to cancel', 'error');
     }
   }

@@ -74,6 +74,7 @@ COL approval_authorizations.kind:character varying:NOT NULL
 COL approval_authorizations.performed_by:integer:NULL
 COL approval_authorizations.ref:character varying:NULL
 COL approval_authorizations.self_approved:boolean:NOT NULL
+COL approval_authorizations.verification:character varying:NULL
 COL approval_queue.amount:numeric:NULL
 COL approval_queue.approval_type:character varying:NOT NULL
 COL approval_queue.approved_at:timestamp with time zone:NULL
@@ -2836,6 +2837,7 @@ CON api_sync_log.api_sync_log_pkey(p)
 CON api_sync_log.chk_api_sync_log_status_valid(c)
 CON approval_authorizations.approval_authorizations_authorized_by_owner_id_fk(f)
 CON approval_authorizations.approval_authorizations_pkey(p)
+CON approval_authorizations.chk_approval_authorizations_verification(c)
 CON approval_queue.approval_queue_approved_by_foreign(f)
 CON approval_queue.approval_queue_pkey(p)
 CON approval_queue.approval_queue_requested_by_foreign(f)
