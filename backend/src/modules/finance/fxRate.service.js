@@ -59,21 +59,6 @@ const fxRateService = {
   },
 
   /**
-   * Compute FX gain/loss between locked and current rate.
-   */
-  computeFxGainLoss(foreignAmount, lockedRate, currentRate) {
-    const bookedPkr = foreignAmount * lockedRate;
-    const currentPkr = foreignAmount * currentRate;
-    return {
-      bookedPkr,
-      currentPkr,
-      gainLossPkr: currentPkr - bookedPkr,
-      lockedRate,
-      currentRate,
-    };
-  },
-
-  /**
    * Get the system default PKR rate (for backward compat).
    */
   async getSystemRate() {

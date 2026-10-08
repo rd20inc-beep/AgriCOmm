@@ -603,65 +603,9 @@ const accountingService = {
     return row ? parseFloat(row.rate) : null;
   },
 
-  /**
-   * Calculate realized FX gain/loss and auto-post a journal.
-   */
-  async calculateFxGainLoss(trx, { originalAmount, originalRate, currentRate, currency, refNo, userId }) {
-    // Wrap in a transaction if one was not provided, to ensure
-    // the FX journal creation + posting are atomic.
-    const execute = async (knex) => {
-      const parsedAmount = parseFloat(originalAmount);
-      const parsedOriginal = parseFloat(originalRate);
-      const parsedCurrent = parseFloat(currentRate);
-      const gainLoss = parseFloat((parsedAmount * (parsedCurrent - parsedOriginal)).toFixed(2));
-
-      if (Math.abs(gainLoss) < 0.01) return null;
-
-      // FX Gain/Loss account
-      const fxAccount = await knex('chart_of_accounts').where({ code: '6210' }).first();
-      const bankAccount = await knex('chart_of_accounts').where({ code: '1020' }).first();
-
-      if (!fxAccount || !bankAccount) {
-        throw new Error('FX Gain/Loss or Bank account not found in chart of accounts.');
-      }
-
-      let lines;
-      if (gainLoss > 0) {
-        // FX Gain: DR Bank, CR FX Gain/Loss
-        lines = [
-          { account_id: bankAccount.id, account: bankAccount.name, debit: Math.abs(gainLoss), credit: 0, narration: 'FX Gain' },
-          { account_id: fxAccount.id, account: fxAccount.name, debit: 0, credit: Math.abs(gainLoss), narration: 'FX Gain' },
-        ];
-      } else {
-        // FX Loss: DR FX Gain/Loss, CR Bank
-        lines = [
-          { account_id: fxAccount.id, account: fxAccount.name, debit: Math.abs(gainLoss), credit: 0, narration: 'FX Loss' },
-          { account_id: bankAccount.id, account: bankAccount.name, debit: 0, credit: Math.abs(gainLoss), narration: 'FX Loss' },
-        ];
-      }
-
-      const journal = await accountingService.createJournal(knex, {
-        date: new Date().toISOString().slice(0, 10),
-        entity: null,
-        refType: 'FX Adjustment',
-        refNo: refNo || null,
-        description: `Realized FX ${gainLoss > 0 ? 'Gain' : 'Loss'} of ${Math.abs(gainLoss)} on ${currency} transaction`,
-        lines,
-        currency: 'PKR',
-        isAuto: true,
-        userId,
-      });
-
-      await accountingService.postJournal(knex, journal.id);
-
-      return { gainLoss, journal };
-    };
-
-    if (trx) {
-      return execute(trx);
-    }
-    return db.transaction(async (autoTrx) => execute(autoTrx));
-  },
+  // Realised FX gain / loss is posted by the payment engine's receipt journal
+  // (finance/paymentSettlement.postPaymentJournal → 6210) and month-end
+  // unrealised by accounting/fxRevaluation.js — no separate mechanism here.
 
   // ═══════════════════════════════════════════════════════════════════
   // Financial Statements

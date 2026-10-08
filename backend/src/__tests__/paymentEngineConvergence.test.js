@@ -50,8 +50,8 @@ const exportController = require('../modules/exportOrders/exportOrders.controlle
 const serviceController = require('../modules/serviceMilling/serviceMilling.controller');
 const expensesService = require('../modules/expenses/expenses.service');
 
-// ids: 1000→10, 1110→11, 1120→12, 1310→13, 2010→14, 2040→15, 2060→16, 4060→17, 1020→18
-const COA = ['1000', '1110', '1120', '1310', '2010', '2040', '2060', '4060', '1020'].map((code, i) => ({ id: 10 + i, code, name: `Acct ${code}` }));
+// ids: 1000→10, 1110→11, 1120→12, 1310→13, 2010→14, 2040→15, 2060→16, 4060→17, 1020→18, 6210→19
+const COA = ['1000', '1110', '1120', '1310', '2010', '2040', '2060', '4060', '1020', '6210'].map((code, i) => ({ id: 10 + i, code, name: `Acct ${code}` }));
 const ACC = Object.fromEntries(COA.map((a) => [a.code, a.id]));
 
 function seed(tables) {
@@ -200,12 +200,14 @@ describe('R5 · confirming an export receipt', () => {
     bank_accounts: [PKR_BANK],
   });
 
-  test('balance: Dr 1000 / Cr 1110 (never 1020), PKR account banks the PKR figure, BT row', async () => {
+  test('balance: Dr 1000 / Cr 1110 at the booked rate + realised FX loss on 6210 (never 1020), PKR account banks the PKR figure, BT row', async () => {
     seed(tables());
     const r = res();
     await exportController.confirmExportReceipt({ params: { paymentId: '70' }, body: { fx_rate: 279 }, user: { id: 4 } }, r);
     expect(r.statusCode).toBe(200);
-    expect(lines(accounting.journals[0])).toEqual([[ACC['1000'], 279000, 0], [ACC['1110'], 0, 279000]]);
+    // Booked at 280, received at 279: AR clears its 280,000, the bank takes
+    // 279,000, the 1,000 shortfall is a realised loss (G-7).
+    expect(lines(accounting.journals[0])).toEqual([[ACC['1000'], 279000, 0], [ACC['1110'], 0, 280000], [ACC['6210'], 1000, 0]]);
     expect(accounting.journals[0].lines.map((l) => l.account_id)).not.toContain(ACC['1020']);
     expect(accounting.autoPost).not.toHaveBeenCalled();
     expect(row('bank_accounts', 8).current_balance).toBe(100000 + 279000);
