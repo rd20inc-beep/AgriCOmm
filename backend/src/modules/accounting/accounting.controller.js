@@ -1,5 +1,15 @@
 const db = require('../../config/database');
 const accountingService = require('../../services/accountingService');
+const bankReconciliation = require('./bankReconciliation.service');
+
+// A reconciliation refusal carries its status (404 / 409 / 400); anything else is a 500.
+function reconError(res, err, label) {
+  const code = err.statusCode || 500;
+  if (code === 500) console.error(label, err);
+  const body = { success: false, message: code === 500 ? 'Internal server error.' : err.message };
+  if (err.existing) body.data = { reconciliation: err.existing };
+  return res.status(code).json(body);
+}
 
 const accountingController = {
   // ═══════════════════════════════════════════════════════════════════
@@ -385,14 +395,19 @@ const accountingController = {
   // Bank Reconciliation
   // ═══════════════════════════════════════════════════════════════════
 
+  // B5: the Reconcile screen (Finance › Accounts › Reconcile) — one bank /
+  // cash account at a time; see bankReconciliation.service.js.
   async listReconciliations(req, res) {
     try {
-      const reconciliations = await db('bank_reconciliation as br')
+      let q = db('bank_reconciliation as br')
         .leftJoin('bank_accounts as ba', 'br.bank_account_id', 'ba.id')
         .leftJoin('users as u', 'br.reconciled_by', 'u.id')
-        .select('br.*', 'ba.name as bank_account_name', 'u.full_name as reconciled_by_name')
-        .orderBy('br.statement_date', 'desc');
-
+        .select('br.*', 'ba.name as bank_account_name', 'ba.currency as bank_account_currency', 'u.full_name as reconciled_by_name')
+        .orderBy('br.statement_date', 'desc')
+        .orderBy('br.id', 'desc');
+      const accountId = parseInt(req.query.bank_account_id, 10);
+      if (accountId) q = q.where('br.bank_account_id', accountId);
+      const reconciliations = await q;
       return res.json({ success: true, data: { reconciliations } });
     } catch (err) {
       console.error('List reconciliations error:', err);
@@ -402,77 +417,63 @@ const accountingController = {
 
   async createReconciliation(req, res) {
     try {
-      const { bank_account_id, statement_date, statement_balance } = req.body;
-
-      if (!bank_account_id || !statement_date || statement_balance == null) {
+      const { bank_account_id, statement_date, statement_balance, notes } = req.body;
+      if (!bank_account_id || !statement_date || statement_balance == null || statement_balance === '') {
         return res.status(400).json({
           success: false,
           message: 'bank_account_id, statement_date, and statement_balance are required.',
         });
       }
-
-      const reconciliation = await db.transaction(async (trx) => {
-        return accountingService.createReconciliation(trx, {
-          bankAccountId: bank_account_id,
-          statementDate: statement_date,
-          statementBalance: statement_balance,
-          userId: req.user?.id,
-        });
+      const reconciliation = await bankReconciliation.create({
+        bankAccountId: bank_account_id,
+        statementDate: statement_date,
+        statementBalance: statement_balance,
+        notes,
+        userId: req.user?.id,
       });
-
       return res.status(201).json({ success: true, data: { reconciliation } });
     } catch (err) {
-      console.error('Create reconciliation error:', err);
-      return res.status(500).json({ success: false, message: 'Internal server error.' });
+      return reconError(res, err, 'Create reconciliation error:');
     }
   },
 
   async getReconciliation(req, res) {
     try {
-      const { id } = req.params;
-
-      const reconciliation = await db('bank_reconciliation as br')
-        .leftJoin('bank_accounts as ba', 'br.bank_account_id', 'ba.id')
-        .leftJoin('users as u', 'br.reconciled_by', 'u.id')
-        .select('br.*', 'ba.name as bank_account_name', 'u.full_name as reconciled_by_name')
-        .where('br.id', id)
-        .first();
-
-      if (!reconciliation) {
-        return res.status(404).json({ success: false, message: 'Reconciliation not found.' });
-      }
-
-      const items = await db('bank_reconciliation_items')
-        .where({ reconciliation_id: id })
-        .orderBy('date');
-
-      return res.json({ success: true, data: { reconciliation, items } });
+      const id = parseInt(req.params.id, 10);
+      if (!id) return res.status(404).json({ success: false, message: 'Reconciliation not found.' });
+      const workspace = await bankReconciliation.getWorkspace(id);
+      const items = await db('bank_reconciliation_items').where({ reconciliation_id: id }).orderBy('date');
+      return res.json({ success: true, data: { ...workspace, items } });
     } catch (err) {
-      console.error('Get reconciliation error:', err);
-      return res.status(500).json({ success: false, message: 'Internal server error.' });
+      return reconError(res, err, 'Get reconciliation error:');
     }
   },
 
+  // Save progress: the ticked bank_transactions rows (replaces the set).
+  async saveReconciliationTicks(req, res) {
+    try {
+      const { bank_transaction_ids, statement_balance } = req.body;
+      const workspace = await bankReconciliation.saveTicks(parseInt(req.params.id, 10), {
+        bankTransactionIds: bank_transaction_ids,
+        statementBalance: statement_balance,
+      });
+      return res.json({ success: true, data: workspace });
+    } catch (err) {
+      return reconError(res, err, 'Save reconciliation error:');
+    }
+  },
+
+  // Statement lines (CSV import) — used to suggest ticks by amount + date.
   async addReconciliationItems(req, res) {
     try {
-      const { id } = req.params;
       const { items } = req.body;
-
       if (!items || !Array.isArray(items) || items.length === 0) {
         return res.status(400).json({ success: false, message: 'items array is required.' });
       }
-
-      const inserted = await db.transaction(async (trx) => {
-        return accountingService.addReconciliationItems(trx, {
-          reconciliationId: parseInt(id),
-          items,
-        });
-      });
-
-      return res.status(201).json({ success: true, data: { items: inserted } });
+      const workspace = await bankReconciliation.addStatementLines(parseInt(req.params.id, 10), items);
+      return res.status(201).json({ success: true, data: workspace });
     } catch (err) {
-      console.error('Add reconciliation items error:', err);
-      return res.status(500).json({ success: false, message: 'Internal server error.' });
+      return reconError(res, err, 'Add reconciliation items error:');
     }
   },
 
@@ -498,21 +499,13 @@ const accountingController = {
     }
   },
 
+  // Complete — only when the cleared balance equals the statement (409 otherwise).
   async completeReconciliation(req, res) {
     try {
-      const { id } = req.params;
-
-      const reconciliation = await db.transaction(async (trx) => {
-        return accountingService.completeReconciliation(trx, {
-          reconciliationId: parseInt(id),
-          userId: req.user?.id,
-        });
-      });
-
-      return res.json({ success: true, data: { reconciliation } });
+      const workspace = await bankReconciliation.complete(parseInt(req.params.id, 10), req.user?.id);
+      return res.json({ success: true, data: workspace });
     } catch (err) {
-      console.error('Complete reconciliation error:', err);
-      return res.status(400).json({ success: false, message: err.message });
+      return reconError(res, err, 'Complete reconciliation error:');
     }
   },
 
