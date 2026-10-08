@@ -122,10 +122,10 @@ exports.seed = async function (knex) {
   // Posting Rules (10)
   // ══════════════════════════════════════════════════════════════════
   const rules = [
-    { rule_name: 'advance_receipt', trigger_event: 'advance_receipt', entity: 'export', debit_code: '1020', credit_code: '1310', description: 'Customer advance payment received into bank' },
-    { rule_name: 'balance_receipt', trigger_event: 'balance_receipt', entity: 'export', debit_code: '1020', credit_code: '1110', description: 'Balance payment received against export AR' },
+    { rule_name: 'advance_receipt', trigger_event: 'advance_receipt', entity: 'export', debit_code: '1000', credit_code: '1310', description: 'Customer advance payment received into bank' },
+    { rule_name: 'balance_receipt', trigger_event: 'balance_receipt', entity: 'export', debit_code: '1000', credit_code: '1110', description: 'Balance payment received against export AR' },
     { rule_name: 'purchase_invoice', trigger_event: 'purchase_invoice', entity: 'mill', debit_code: '1210', credit_code: '2010', description: 'Supplier invoice for raw paddy purchase' },
-    { rule_name: 'supplier_payment', trigger_event: 'supplier_payment', entity: 'mill', debit_code: '2010', credit_code: '1020', description: 'Payment to supplier' },
+    { rule_name: 'supplier_payment', trigger_event: 'supplier_payment', entity: 'mill', debit_code: '2010', credit_code: '1000', description: 'Payment to supplier' },
     { rule_name: 'milling_completion', trigger_event: 'milling_completion', entity: 'mill', debit_code: '1220', credit_code: '1210', description: 'Milling completed — finished goods from raw paddy' },
     { rule_name: 'internal_transfer_mill', trigger_event: 'internal_transfer_mill', entity: 'mill', debit_code: '1130', credit_code: '4040', description: 'Mill side of inter-company transfer' },
     { rule_name: 'internal_transfer_export', trigger_event: 'internal_transfer_export', entity: 'export', debit_code: '1230', credit_code: '2030', description: 'Export side of inter-company transfer' },
