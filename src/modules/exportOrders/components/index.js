@@ -10,8 +10,6 @@ export { default as PackingTab } from './PackingTab';
 export { default as PrintedBagsTab } from './PrintedBagsTab';
 export { default as TimelineTab } from './TimelineTab';
 export {
-  AdvancePaymentModal,
-  BalancePaymentModal,
   MillingDemandModal,
   ShipmentModal,
   ExpenseModal,
