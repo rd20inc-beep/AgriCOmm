@@ -181,6 +181,7 @@ COL bank_transactions.created_at:timestamp with time zone:NOT NULL
 COL bank_transactions.created_by:integer:NULL
 COL bank_transactions.currency:character varying:NOT NULL
 COL bank_transactions.device_uuid:text:NULL
+COL bank_transactions.fund_transfer_id:integer:NULL
 COL bank_transactions.id:integer:NOT NULL
 COL bank_transactions.linked_payment_id:integer:NULL
 COL bank_transactions.local_ts:timestamp with time zone:NULL
@@ -842,23 +843,40 @@ COL follow_ups.user_id:integer:NULL
 COL fund_transfers.accepted_at:timestamp with time zone:NULL
 COL fund_transfers.accepted_by:integer:NULL
 COL fund_transfers.amount:numeric:NOT NULL
+COL fund_transfers.amount_pkr:numeric:NULL
+COL fund_transfers.attachment_name:text:NULL
+COL fund_transfers.attachment_url:text:NULL
+COL fund_transfers.bank_charges:numeric:NOT NULL
+COL fund_transfers.client_ref:uuid:NULL
 COL fund_transfers.created_at:timestamp with time zone:NOT NULL
 COL fund_transfers.created_by:integer:NULL
 COL fund_transfers.currency:character varying:NOT NULL
 COL fund_transfers.direction:character varying:NOT NULL
 COL fund_transfers.from_account_id:integer:NULL
 COL fund_transfers.from_entity:character varying:NOT NULL
+COL fund_transfers.fx_rate:numeric:NULL
+COL fund_transfers.fx_unbooked:boolean:NOT NULL
 COL fund_transfers.id:integer:NOT NULL
 COL fund_transfers.je_ref_no:character varying:NULL
 COL fund_transfers.method:character varying:NOT NULL
 COL fund_transfers.notes:text:NULL
+COL fund_transfers.rate_basis:character varying:NULL
+COL fund_transfers.rate_date:date:NULL
 COL fund_transfers.reference:character varying:NULL
+COL fund_transfers.replaced_by_id:integer:NULL
+COL fund_transfers.replaces_id:integer:NULL
+COL fund_transfers.reversal_reason:text:NULL
+COL fund_transfers.reversed_at:timestamp with time zone:NULL
+COL fund_transfers.reversed_by:integer:NULL
 COL fund_transfers.status:character varying:NOT NULL
 COL fund_transfers.to_account_id:integer:NULL
+COL fund_transfers.to_amount:numeric:NULL
+COL fund_transfers.to_currency:character varying:NULL
 COL fund_transfers.to_entity:character varying:NOT NULL
 COL fund_transfers.transfer_date:date:NOT NULL
 COL fund_transfers.transfer_no:character varying:NOT NULL
 COL fund_transfers.updated_at:timestamp with time zone:NOT NULL
+COL fund_transfers.updated_by:integer:NULL
 COL fx_gain_loss_ledger.calculated_at:timestamp with time zone:NULL
 COL fx_gain_loss_ledger.calculation_basis:character varying:NULL
 COL fx_gain_loss_ledger.created_at:timestamp with time zone:NULL
@@ -2837,6 +2855,7 @@ CON bank_reconciliation.bank_reconciliation_status_check(c)
 CON bank_reconciliation_items.bank_reconciliation_items_pkey(p)
 CON bank_reconciliation_items.bank_reconciliation_items_reconciliation_id_foreign(f)
 CON bank_transactions.bank_transactions_bank_account_id_foreign(f)
+CON bank_transactions.bank_transactions_fund_transfer_id_foreign(f)
 CON bank_transactions.bank_transactions_linked_payment_id_foreign(f)
 CON bank_transactions.bank_transactions_pkey(p)
 CON bank_transactions.bank_transactions_status_check(c)
@@ -3041,13 +3060,19 @@ CON export_quotations.uq_export_quotations_uuid(u)
 CON follow_ups.chk_follow_ups_status_valid(c)
 CON follow_ups.follow_ups_pkey(p)
 CON follow_ups.follow_ups_user_id_foreign(f)
+CON fund_transfers.chk_fund_transfers_direction_valid(c)
 CON fund_transfers.chk_fund_transfers_status_valid(c)
 CON fund_transfers.fund_transfers_accepted_by_foreign(f)
+CON fund_transfers.fund_transfers_client_ref_unique(u)
 CON fund_transfers.fund_transfers_created_by_foreign(f)
 CON fund_transfers.fund_transfers_from_account_id_foreign(f)
 CON fund_transfers.fund_transfers_pkey(p)
+CON fund_transfers.fund_transfers_replaced_by_id_foreign(f)
+CON fund_transfers.fund_transfers_replaces_id_foreign(f)
+CON fund_transfers.fund_transfers_reversed_by_foreign(f)
 CON fund_transfers.fund_transfers_to_account_id_foreign(f)
 CON fund_transfers.fund_transfers_transfer_no_unique(u)
+CON fund_transfers.fund_transfers_updated_by_foreign(f)
 CON fx_gain_loss_ledger.fx_gain_loss_ledger_export_order_id_foreign(f)
 CON fx_gain_loss_ledger.fx_gain_loss_ledger_pkey(p)
 CON fx_rates.chk_fx_rates_rate_nonneg(c)

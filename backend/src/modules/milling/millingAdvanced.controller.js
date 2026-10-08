@@ -752,6 +752,9 @@ const millingAdvancedController = {
         })
         // A reversed transfer undid every move it made, so it is neither in nor out.
         .whereNot('ft.status', 'reversed')
+        // A contra between two of the mill's OWN accounts (direction 'internal')
+        // is not cash flow: nothing entered or left the mill.
+        .whereNot('ft.direction', 'internal')
         .select('ft.id', 'ft.transfer_no', 'ft.transfer_date', 'ft.method', 'ft.amount', 'ft.from_entity', 'ft.to_entity', 'ft.status');
       if (from_date) ftQ = ftQ.where('ft.transfer_date', '>=', from_date);
       if (to_date) ftQ = ftQ.where('ft.transfer_date', '<=', to_date);
