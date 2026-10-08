@@ -31,6 +31,11 @@ const SOURCES = {
 };
 // Legacy payables carry no source_table, only the source row's natural key.
 const NATURAL_KEYS = [['inventory_lots', 'lot_no'], ['mill_purchases', 'purchase_no'], ['business_expenses', 'expense_no']];
+// The itemised supplier lines of a purchase lot (labour, bags, …) are part of
+// the same purchase as its 'Raw Material' line: each carries source_id = the
+// lot, so a payment on any of them is a payment on that lot. Lines owed to
+// another party (lot_transport → hauler, lot_commission → broker) are not.
+const LOT_SUPPLIER_LINES = ['lot_labor', 'lot_unloading', 'lot_packing', 'lot_other', 'lot_bag'];
 
 /**
  * The source row a payment settles: the payment's own source ref (payPurchase
@@ -46,6 +51,13 @@ async function resolveSource(trx, { payment, payable }) {
   if (payable && SOURCES[payable.source_table] && payable.source_id) {
     return { table: payable.source_table, id: payable.source_id };
   }
+  if (payable && LOT_SUPPLIER_LINES.includes(payable.source_table) && payable.source_id) {
+    return { table: 'inventory_lots', id: payable.source_id };
+  }
+  if (payable && !payable.source_table && payable.category === 'Raw Material' && payable.source_id) {
+    // The lot's rice line (createPurchaseLot keys it by source_id = lot id).
+    return { table: 'inventory_lots', id: payable.source_id };
+  }
   if (payable && !payable.source_table && payable.linked_ref) {
     for (const [table, col] of NATURAL_KEYS) {
       const r = await trx(table).where(col, payable.linked_ref).first('id');
@@ -55,8 +67,12 @@ async function resolveSource(trx, { payment, payable }) {
   return null;
 }
 
-/** Add a signed PKR delta to a source row's paid_amount and restate its status. */
-async function mirrorSourcePaid(trx, source, deltaPkr, extra = {}) {
+/**
+ * Add a signed PKR delta to a source row's paid_amount and restate its status.
+ * `paidOn` dates a row this payment completes (default: today, or the date it
+ * already carries).
+ */
+async function mirrorSourcePaid(trx, source, deltaPkr, extra = {}, paidOn = null) {
   if (!source || !SOURCES[source.table]) return null;
   const spec = SOURCES[source.table];
   const row = await trx(source.table).where({ id: source.id }).forUpdate().first();
@@ -65,7 +81,7 @@ async function mirrorSourcePaid(trx, source, deltaPkr, extra = {}) {
   const paid = Math.max(0, round2(num(row.paid_amount) + deltaPkr));
   const status = paid <= 0.01 ? spec.unpaid : (total - paid <= 0.01 ? 'Paid' : 'Partial');
   const upd = { paid_amount: paid, payment_status: status, updated_at: trx.fn.now(), ...extra };
-  if (spec.paidDate) upd[spec.paidDate] = status === 'Paid' ? (row[spec.paidDate] || new Date()) : null;
+  if (spec.paidDate) upd[spec.paidDate] = status === 'Paid' ? (paidOn || row[spec.paidDate] || new Date()) : null;
   if (spec.due) upd[spec.due] = Math.max(0, round2(total - paid));
   await trx(source.table).where({ id: source.id }).update(upd);
   return { table: source.table, paid, status };
@@ -90,6 +106,63 @@ async function applyPayableDelta(trx, payable, delta) {
     await trx('transport_costs').where({ payable_id: payable.id }).update({ status: tc, updated_at: trx.fn.now() });
   }
   return { paid, status, fullyPaid: status === 'Paid' };
+}
+
+/** Add a signed delta to a local sale's paid / due (read here under lock). */
+async function mirrorLocalSale(trx, saleId, delta) {
+  const sale = await trx('local_sales').where({ id: saleId }).forUpdate().first();
+  if (!sale) return null;
+  const paid = Math.max(0, round2(num(sale.paid_amount) + delta));
+  const due = Math.max(0, round2(num(sale.total_amount) - paid));
+  const status = due <= 0.01 ? 'Paid' : paid > 0.01 ? 'Partial' : (sale.payment_mode === 'credit' ? 'Credit' : 'Pending');
+  await trx('local_sales').where({ id: sale.id }).update({
+    paid_amount: paid, due_amount: due, payment_status: status, updated_at: trx.fn.now(),
+  });
+  return { paid, due, status };
+}
+
+/** Add a signed delta to a service-milling invoice's received / balance. */
+async function mirrorServiceInvoice(trx, invoiceId, delta) {
+  const inv = await trx('service_milling_invoices').where({ id: invoiceId }).forUpdate().first();
+  if (!inv) return null;
+  const total = num(inv.total_amount);
+  const received = Math.max(0, round2(num(inv.received_amount) + delta));
+  const balance = Math.max(0, round2(total - received));
+  const status = received <= 0 ? 'Unpaid' : (received + 0.009 < total ? 'Partial' : 'Paid');
+  await trx('service_milling_invoices').where({ id: inv.id }).update({
+    received_amount: received, balance_amount: balance, payment_status: status, updated_at: trx.fn.now(),
+  });
+  return { received, balance, status };
+}
+
+/**
+ * Settle (delta > 0) or un-settle (delta < 0) every document one payment row
+ * touches, by the same signed delta:
+ *  - a receipt: its receivable, the local sale and the service-milling invoice
+ *    behind it;
+ *  - a payment: its payable (+ transport_costs) and the source row the payable
+ *    — or the payment itself — names (expense, mill purchase, export cost,
+ *    printed-bag order, lot).
+ * Recording, clearing a cheque and reversing all go through here, so a
+ * document can never hear about a payment on one path and not on another.
+ * `payable` / `receivable` are rows already read under lock.
+ */
+async function settleDocuments(trx, { payment, payable = null, receivable = null, delta, deltaPkr, stamp = {}, paidOn = null }) {
+  const out = {};
+  if (payment.type === 'receipt') {
+    if (receivable) out.receivable = await applyReceivableDelta(trx, receivable, delta);
+    const saleId = payment.local_sale_id || receivable?.local_sale_id;
+    if (saleId) out.localSale = await mirrorLocalSale(trx, saleId, delta);
+    const invoiceId = payment.service_invoice_id || receivable?.service_invoice_id;
+    if (invoiceId) out.serviceInvoice = await mirrorServiceInvoice(trx, invoiceId, delta);
+  } else {
+    if (payable) out.payable = await applyPayableDelta(trx, payable, delta);
+    const source = await resolveSource(trx, { payment, payable });
+    // Rows that record how they were paid hear which account it was.
+    const how = delta > 0 && source && ['business_expenses', 'export_order_costs', 'mill_purchases'].includes(source.table) ? stamp : {};
+    out.source = await mirrorSourcePaid(trx, source, deltaPkr, how, paidOn);
+  }
+  return out;
 }
 
 /** Add a signed delta to a receivable (already read under lock). */
@@ -192,7 +265,7 @@ const expenseEntity = (t) => (t === 'mill' ? 'mill' : t === 'export' ? 'export' 
  * posts for a cheque recorded on any screen (Money In/Out, Purchases,
  * Expenses). Throws through ledgerFailure so the caller's transaction rolls back.
  */
-async function postPaymentJournal(trx, { payment, userId, date, description }) {
+async function postPaymentJournal(trx, { payment, userId, date, description, overrides = {} }) {
   try {
     const isReceivable = payment.type === 'receipt';
     const paymentNo = payment.payment_no;
@@ -208,17 +281,32 @@ async function postPaymentJournal(trx, { payment, userId, date, description }) {
     let entity = isReceivable ? 'export' : 'mill';
     let partyType = null; let partyId = null;
     let what = isReceivable ? `receivable #${payment.linked_receivable_id || ''}` : `payable #${payment.linked_payable_id || ''}`;
-    if (isReceivable && payment.linked_receivable_id) {
-      const r = await trx('receivables').where({ id: payment.linked_receivable_id }).first();
-      if (r) {
-        if (r.local_sale_id) { counterCode = '1120'; entity = 'mill'; }
-        else if (String(r.type || '').toLowerCase() === 'advance') { counterCode = '1310'; entity = 'export'; }
-        else counterCode = '1110';
-        if (r.customer_id) { partyType = 'customer'; partyId = r.customer_id; }
+    if (isReceivable && (payment.linked_receivable_id || payment.service_invoice_id)) {
+      const r = payment.linked_receivable_id ? await trx('receivables').where({ id: payment.linked_receivable_id }).first() : null;
+      const invoiceId = payment.service_invoice_id || r?.service_invoice_id;
+      // Credit the receivable account the document was booked to:
+      //  - a local sale, a service-milling invoice (Dr 1120 / Cr 4050) and any
+      //    other mill receivable (opening balances were booked to 1120) → 1120;
+      //  - an export order's advance → 1310, its balance → 1110.
+      if (r?.local_sale_id || invoiceId) { counterCode = '1120'; entity = 'mill'; }
+      else if (r && (r.order_id || String(r.entity || '').toLowerCase() === 'export')) {
+        counterCode = String(r.type || '').toLowerCase() === 'advance' ? '1310' : '1110';
+        entity = 'export';
+      } else if (r) { counterCode = '1120'; entity = r.entity === 'general' ? 'general' : 'mill'; }
+      if (r?.recv_no) what = r.recv_no;
+      if (r?.customer_id) { partyType = 'customer'; partyId = r.customer_id; }
+      if (invoiceId) {
+        const inv = await trx('service_milling_invoices').where({ id: invoiceId }).first();
+        if (!partyId && inv?.client_customer_id) { partyType = 'customer'; partyId = inv.client_customer_id; }
+        if (inv?.invoice_no) what = inv.invoice_no;
       }
     } else if (!isReceivable) {
       const pa = payment.linked_payable_id ? await trx('payables').where({ id: payment.linked_payable_id }).first() : null;
+      // The payable's own side of the business, unless its source says otherwise below.
+      if (pa?.entity) entity = ['mill', 'export', 'general'].includes(pa.entity) ? pa.entity : 'mill';
+      if (pa?.pay_no) what = pa.pay_no;
       if (pa?.supplier_id) { partyType = 'supplier'; partyId = pa.supplier_id; }
+      else if (pa?.hauler_id) { partyType = 'hauler'; partyId = pa.hauler_id; }
       // A payment recorded against a source document (Purchases tab, Expenses)
       // carries it on the payment row.
       const src = SOURCES[payment.source_table] && payment.source_id
@@ -227,15 +315,25 @@ async function postPaymentJournal(trx, { payment, userId, date, description }) {
       if (src) {
         what = src.expense_no || src.lot_no || src.purchase_no || src.pbo_no || `${payment.source_table} #${payment.source_id}`;
         if (payment.source_table === 'business_expenses') {
+          // The account the accrual credited (expenses.service create):
+          // salaries → 2040 Salaries Payable, everything else → 2010.
           if (src.category === 'salaries') counterCode = '2040';
           entity = expenseEntity(src.expense_type);
         } else if (['export_order_costs', 'printed_bag_orders'].includes(payment.source_table)) {
           entity = 'export';
+        } else if (payment.source_table === 'inventory_lots' && src.entity) {
+          entity = src.entity === 'export' ? 'export' : 'mill';
         }
         const sid = src.supplier_id || pa?.supplier_id || null;
         if (sid) { partyType = 'supplier'; partyId = sid; }
       }
     }
+
+    // A caller that owns the document's posting (an export order's receipt)
+    // names the counter account, entity, party and the reference it journals under.
+    if (overrides.counterCode) counterCode = overrides.counterCode;
+    if (overrides.entity) entity = overrides.entity;
+    if (overrides.partyType !== undefined) { partyType = overrides.partyType; partyId = overrides.partyId || null; }
 
     const cash = await trx('chart_of_accounts').where({ code: '1000' }).first();
     let counter = await trx('chart_of_accounts').where({ code: counterCode }).first();
@@ -272,15 +370,19 @@ async function postPaymentJournal(trx, { payment, userId, date, description }) {
     const journal = await accountingService.createJournal(trx, {
       date: (Number.isNaN(d.getTime()) ? new Date() : d).toISOString().slice(0, 10),
       entity,
-      refType: 'Payment',
-      refNo: paymentNo,
-      description: description || `Payment ${paymentNo} for ${what}${noteOriginal}`,
+      refType: overrides.refType || 'Payment',
+      refNo: overrides.refNo || paymentNo,
+      description: description || overrides.description || `${isReceivable ? 'Receipt' : 'Payment'} ${paymentNo} for ${what}${noteOriginal}`,
       currency: 'PKR',
       fxRate: 1,
       isAuto: true,
       userId: userId || null,
       partyType,
       partyId,
+      // The original foreign amount's currency + rate, so the ledger can show
+      // the exact USD figure (the PKR lines keep the GL in one currency).
+      origCurrency: overrides.origCurrency || (cur !== 'PKR' ? cur : null),
+      origFxRate: overrides.origFxRate || (cur !== 'PKR' ? fx : null),
       lines,
     });
     if (journal?.id) await accountingService.postJournal(trx, journal.id);
@@ -292,6 +394,7 @@ async function postPaymentJournal(trx, { payment, userId, date, description }) {
 
 module.exports = {
   isCheque, hasPaymentJournal, postPaymentJournal,
-  SOURCES, round2, resolveSource, mirrorSourcePaid, applyPayableDelta, applyReceivableDelta,
+  SOURCES, LOT_SUPPLIER_LINES, round2, resolveSource, mirrorSourcePaid, applyPayableDelta, applyReceivableDelta,
+  mirrorLocalSale, mirrorServiceInvoice, settleDocuments,
   pendingChequeTotal, nextBtNo, postDeltaOf,
 };

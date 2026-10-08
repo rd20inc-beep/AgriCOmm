@@ -21,6 +21,7 @@ function fakeKnex(seed = {}) {
     const filters = [];
     let locked = false;
     let counted = null;
+    let summed = null; // { col, alias } for sum('col as alias')
     const rows = () => tables[table].filter((row) => filters.every((f) => f(row)));
 
     const b = {
@@ -78,10 +79,18 @@ function fakeKnex(seed = {}) {
         counted = alias.trim();
         return b;
       },
+      // sum('amount as s') → first() gives { s: <total> }.
+      sum(expr) {
+        const [col, alias] = String(expr).split(/\s+as\s+/i);
+        summed = { col: colOf(col.trim()), alias: (alias || 'sum').trim() };
+        return b;
+      },
+      modify(fn, ...args) { fn.call(b, b, ...args); return b; },
       pluck(col) { return Promise.resolve(rows().map((r) => r[colOf(col)])); },
       async first() {
         if (locked) locks.push({ table });
         if (counted) return { [counted]: String(rows().length) };
+        if (summed) return { [summed.alias]: rows().reduce((t, r) => t + (Number(r[summed.col]) || 0), 0) };
         const r = rows()[0];
         return r ? { ...r } : undefined;
       },
@@ -92,6 +101,11 @@ function fakeKnex(seed = {}) {
         hit.forEach((r) => Object.assign(r, resolved));
         const out = hit.map((r) => ({ ...r }));
         return { returning: async () => out, then: (res, rej) => Promise.resolve(out.length).then(res, rej) };
+      },
+      del() {
+        const hit = new Set(rows());
+        tables[table] = tables[table].filter((r) => !hit.has(r));
+        return Promise.resolve(hit.size);
       },
       insert(data) {
         const list = (Array.isArray(data) ? data : [data]).map((d) => ({ id: nextId++, ...d }));
