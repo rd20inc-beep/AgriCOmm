@@ -1808,14 +1808,15 @@ const millingController = {
             // cost, the input lots' own accounts (a blend of finished lots is
             // carried in 1220, by-products in 1240), split by source-lot value;
             // freight owed to a transporter is accrued Dr 1210 / Cr 2010 just
-            // below, so it comes off 1210; every other processing cost is an
-            // operating expense absorbed into finished stock — Cr 6000 (A3b).
+            // below, so it comes off 1210; any other cost typed onto the sheet
+            // is booked nowhere else — a cost incurred, not yet paid: Cr 2110
+            // Accrued Expenses (A3b).
             const owedToHauler = category === 'transport'
               && (transport_paid_by == null || transport_paid_by === '' || transport_paid_by === 'company')
               && hauler_id != null && hauler_id !== '' && newAmt > 0;
             const parts = category === 'raw_rice'
               ? proportionalInputSplit(absDelta, await sourceLotValuesByAccount(trx, batch.id))
-              : [{ code: owedToHauler ? '1210' : '6000', amount: absDelta }];
+              : [{ code: owedToHauler ? '1210' : '2110', amount: absDelta }];
             const fin = await trx('chart_of_accounts').where({ code: '1220' }).first();
             const accs = await trx('chart_of_accounts').whereIn('code', parts.map((p) => p.code));
             const byCode = Object.fromEntries(accs.map((a) => [a.code, a]));

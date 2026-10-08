@@ -17,11 +17,14 @@
 // down by every batch's processing (prod M-001..M-006: 381,045.60):
 //   - freight owed to a transporter was accrued Dr 1210 / Cr 2010 ('Batch
 //     Transport') — that much comes off 1210;
-//   - everything else is an operating expense when it is incurred (the Mill
-//     Packing run posts Dr 6000 / Cr 1250 for bags drawn from store, business
-//     expenses post Dr 6000) and is ABSORBED into finished stock here: Cr 6000.
-//     Capitalised once, never expensed twice (M-002's 42,163.20 of bags sat
-//     in 6000 AND 1220).
+//   - what was already EXPENSED for the batch — bags drawn by its packing
+//     runs and store issues (Dr 6000 / Cr 1250), business expenses booked
+//     against it (Dr 6000, salaries 6135) — is absorbed into finished stock:
+//     Cr that expense account. Capitalised once, never expensed twice
+//     (M-002's 42,163.20 of bags sat in 6000 AND 1220);
+//   - the rest of the cost sheet was never booked anywhere (labour, unloading,
+//     other typed straight onto the sheet): it is a cost incurred and not yet
+//     paid — Cr 2110 Accrued Expenses. Pay it against 2110.
 //
 // The OUTPUTS are debited where the yield lots carry them (A3a): by-product
 // lots at their booked value → 1240, the rest → 1220. The split is its own
@@ -47,6 +50,9 @@ const RAW_ACCOUNT = '1210';
 const FINISHED_ACCOUNT = '1220';
 const BYPRODUCT_ACCOUNT = '1240';
 const ABSORBED_ACCOUNT = '6000';
+const ACCRUED_ACCOUNT = '2110';
+// Journals that EXPENSE a batch's packaging / store issues under its batch no.
+const EXPENSED_REF_TYPES = ['Mill Packing', 'Mill Store Consumption'];
 const OUTPUT_SPLIT_REF_TYPE = 'Milling Output Split';
 // Journals that accrue a batch's processing cost INTO 1210 before the yield.
 const STAGED_REF_TYPES = ['Batch Transport'];
@@ -138,17 +144,53 @@ async function stagedRawForBatch(trx, batchNo) {
 }
 
 /**
- * Credit lines for the processing part of a capitalisation: the part staged
- * in 1210 (capped at `staged`) comes off 1210, the rest is absorbed from 6000.
- * Pure; exported for tests.
+ * Net expense (Dr − Cr on Expense / COGS accounts) already booked for a batch:
+ * its packing runs and store issues (under the batch no) and the business
+ * expenses booked against it (business_expenses.batch_id, by expense no).
+ * Returns [{ code, amount }] with amount > 0, 6000 first.
  */
-function processingCredits(processing, staged) {
-  const p = r2(processing);
-  if (p <= 0) return [];
-  const from1210 = r2(Math.min(p, Math.max(0, r2(staged))));
+async function expensedForBatch(trx, batch) {
+  if (!batch || !batch.batch_no) return [];
+  const sumBy = async (where) => {
+    const q = trx('journal_lines as jl')
+      .join('journal_entries as je', 'je.id', 'jl.journal_id')
+      .join('chart_of_accounts as c', 'c.id', 'jl.account_id')
+      .where('je.status', 'Posted')
+      .whereIn('c.type', ['Expense', 'COGS'])
+      .groupBy('c.code')
+      .select('c.code', trx.raw('COALESCE(SUM(jl.debit - jl.credit), 0) as net'));
+    where(q);
+    return q;
+  };
+  const rows = [...await sumBy((q) => q.where('je.ref_no', batch.batch_no).whereIn('je.ref_type', EXPENSED_REF_TYPES))];
+  if (batch.id != null) {
+    const expNos = await trx('business_expenses').where({ batch_id: batch.id }).pluck('expense_no');
+    if (Array.isArray(expNos) && expNos.length) rows.push(...await sumBy((q) => q.whereIn('je.ref_no', expNos)));
+  }
+  const by = {};
+  for (const r of rows || []) by[r.code] = r2((by[r.code] || 0) + Number(r.net || 0));
+  return Object.entries(by).filter(([, v]) => v > 0)
+    .sort(([a], [b]) => (a === ABSORBED_ACCOUNT ? -1 : b === ABSORBED_ACCOUNT ? 1 : a.localeCompare(b)))
+    .map(([code, amount]) => ({ code, amount }));
+}
+
+/**
+ * Credit lines for the processing part of a capitalisation, in order: what
+ * was staged in 1210 (`staged`), what was already expensed (`expensed`,
+ * [{code, amount}]), each capped by what is left; the remainder was never
+ * booked — Cr 2110 Accrued Expenses. Pure; exported for tests.
+ */
+function processingCredits(processing, staged, expensed = []) {
+  let left = r2(processing);
+  if (left <= 0) return [];
   const out = [];
-  if (from1210 > 0) out.push({ code: RAW_ACCOUNT, amount: from1210 });
-  if (r2(p - from1210) > 0) out.push({ code: ABSORBED_ACCOUNT, amount: r2(p - from1210) });
+  const take = (code, avail) => {
+    const amt = r2(Math.min(left, Math.max(0, r2(avail))));
+    if (amt > 0) { out.push({ code, amount: amt }); left = r2(left - amt); }
+  };
+  take(RAW_ACCOUNT, staged);
+  for (const e of expensed || []) take(e.code, e.amount);
+  if (left > 0) out.push({ code: ACCRUED_ACCOUNT, amount: left });
   return out;
 }
 
@@ -165,7 +207,7 @@ function mergeCredits(lines) {
 /**
  * Credit lines for a batch's completion: the raw-rice cost split by source
  * lot (1210 / 1220 / 1240), the processing costs by where they were accrued
- * (1210 for staged transport, else 6000).
+ * (1210 staged transport → the expense accounts already charged → 2110).
  */
 async function completionCredits(trx, batchId, amount, batchNo = null) {
   if (batchId == null) return [{ code: RAW_ACCOUNT, amount: r2(amount) }];
@@ -174,7 +216,8 @@ async function completionCredits(trx, batchId, amount, batchNo = null) {
   const rawCost = Math.min(r2(amount), Number(rawRow && rawRow.t) || 0);
   const raw = rawCost > 0 ? splitInputCredits(rawCost, rawCost, await sourceLotValuesByAccount(trx, batchId)) : [];
   const staged = await stagedRawForBatch(trx, batchNo);
-  return mergeCredits([...raw, ...processingCredits(r2(amount - rawCost), staged)]);
+  const expensed = await expensedForBatch(trx, { id: batchId, batch_no: batchNo });
+  return mergeCredits([...raw, ...processingCredits(r2(amount - rawCost), staged, expensed)]);
 }
 
 /**
@@ -280,10 +323,11 @@ async function syncOutputSplit(trx, accountingService, { batch, userId = null, d
 
 /**
  * A processing cost that changed AFTER the batch's completion (a packing run
- * after the yield, store consumption, a cost-sheet edit): absorb the signed
- * delta into finished stock — Dr 1220 / Cr `counterCode` (6000 by default:
- * the cost was expensed when it was incurred), reversed for a cut. Posts
- * nothing before the completion (the completion capitalises the whole sheet).
+ * after the yield, store consumption, a business expense booked against the
+ * batch): capitalise the signed delta into finished stock — Dr 1220 /
+ * Cr `counterCode` (the account the cost was charged to: 6000 by default),
+ * reversed for a cut. Posts nothing before the completion (the completion
+ * capitalises the whole sheet).
  */
 async function postProcessingDelta(trx, accountingService, { batch, delta, label, userId = null, counterCode = ABSORBED_ACCOUNT }) {
   const d = r2(delta);
@@ -357,6 +401,6 @@ async function hasPostedCompletion(q, batchNo) {
 module.exports = {
   postMillingCompletion, postedMillingTransfer, hasPostedCompletion, MILLING_REF_TYPE,
   sourceLotValuesByAccount, splitInputCredits, completionCredits, proportionalInputSplit,
-  processingCredits, mergeCredits, stagedRawForBatch, syncOutputSplit, bookedOutputSplit,
-  postProcessingDelta, OUTPUT_SPLIT_REF_TYPE, ABSORBED_ACCOUNT, STAGED_REF_TYPES,
+  processingCredits, mergeCredits, stagedRawForBatch, expensedForBatch, syncOutputSplit, bookedOutputSplit,
+  postProcessingDelta, OUTPUT_SPLIT_REF_TYPE, ABSORBED_ACCOUNT, ACCRUED_ACCOUNT, STAGED_REF_TYPES, EXPENSED_REF_TYPES,
 };

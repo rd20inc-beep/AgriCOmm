@@ -59,7 +59,8 @@ describe('postMillingCompletion (no DB)', () => {
   const fakeTrx = ({ posted, net = 0 }) => {
     const t = (table) => {
       const b = {
-        join: () => b, leftJoin: () => b, where: () => b, whereIn: () => b, select: () => b, sum: () => b,
+        join: () => b, leftJoin: () => b, where: () => b, whereIn: () => b, groupBy: () => b, select: () => b, sum: () => b,
+        pluck: async () => [],
         // A batch with no source lots (direct truck intake): all CR 1210.
         then: (resolve) => resolve([]),
         first: async () => {

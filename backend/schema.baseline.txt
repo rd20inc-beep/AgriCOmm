@@ -141,6 +141,7 @@ COL bank_accounts.created_at:timestamp with time zone:NOT NULL
 COL bank_accounts.currency:character varying:NOT NULL
 COL bank_accounts.current_balance:numeric:NOT NULL
 COL bank_accounts.entity:character varying:NOT NULL
+COL bank_accounts.gl_account_id:integer:NULL
 COL bank_accounts.iban:character varying:NULL
 COL bank_accounts.id:integer:NOT NULL
 COL bank_accounts.is_active:boolean:NOT NULL
@@ -901,6 +902,24 @@ COL fx_rates.rate:numeric:NOT NULL
 COL fx_rates.source:character varying:NULL
 COL fx_rates.source_type:character varying:NOT NULL
 COL fx_rates.to_currency:character varying:NOT NULL
+COL fx_revaluations.ar_foreign:numeric:NOT NULL
+COL fx_revaluations.ar_unrealised_pkr:numeric:NOT NULL
+COL fx_revaluations.bank_unrealised_pkr:numeric:NOT NULL
+COL fx_revaluations.created_at:timestamp with time zone:NOT NULL
+COL fx_revaluations.created_by:integer:NULL
+COL fx_revaluations.currency:character varying:NOT NULL
+COL fx_revaluations.detail:jsonb:NULL
+COL fx_revaluations.id:integer:NOT NULL
+COL fx_revaluations.journal_ids:jsonb:NULL
+COL fx_revaluations.month_end:date:NOT NULL
+COL fx_revaluations.rate:numeric:NOT NULL
+COL fx_revaluations.rate_date:date:NOT NULL
+COL fx_revaluations.rate_id:integer:NULL
+COL fx_revaluations.reversal_journal_ids:jsonb:NULL
+COL fx_revaluations.status:character varying:NOT NULL
+COL fx_revaluations.superseded_at:timestamp with time zone:NULL
+COL fx_revaluations.superseded_by:integer:NULL
+COL fx_revaluations.total_unrealised_pkr:numeric:NOT NULL
 COL generated_documents.approved_at:timestamp with time zone:NULL
 COL generated_documents.approved_by:integer:NULL
 COL generated_documents.audience:character varying:NOT NULL
@@ -2851,6 +2870,7 @@ CON background_jobs.chk_background_jobs_status_valid(c)
 CON bag_types.bag_types_pkey(p)
 CON bag_types.chk_bag_types_reorder_level_nn(c)
 CON bag_types.chk_bag_types_size_kg_nn(c)
+CON bank_accounts.bank_accounts_gl_account_id_foreign(f)
 CON bank_accounts.bank_accounts_pkey(p)
 CON bank_accounts.bank_accounts_type_check(c)
 CON bank_accounts.bank_accounts_uid_unique(u)
@@ -3085,6 +3105,11 @@ CON fx_gain_loss_ledger.fx_gain_loss_ledger_pkey(p)
 CON fx_rates.chk_fx_rates_rate_nonneg(c)
 CON fx_rates.fx_rates_created_by_foreign(f)
 CON fx_rates.fx_rates_pkey(p)
+CON fx_revaluations.chk_fx_revaluations_status_valid(c)
+CON fx_revaluations.fx_revaluations_created_by_foreign(f)
+CON fx_revaluations.fx_revaluations_pkey(p)
+CON fx_revaluations.fx_revaluations_rate_id_foreign(f)
+CON fx_revaluations.fx_revaluations_superseded_by_foreign(f)
 CON generated_documents.chk_gendoc_audience(c)
 CON generated_documents.chk_gendoc_status(c)
 CON generated_documents.generated_documents_approved_by_foreign(f)

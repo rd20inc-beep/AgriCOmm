@@ -159,11 +159,32 @@ d('postMillingCompletion credits the input accounts (DB-gated)', () => {
     expect(await helper.postedMillingTransfer(db, batch.batch_no)).toBe(0);
   });
 
-  test('raw batch → CR 1210 for the rice, processing absorbed from 6000 (A3b)', async () => {
+  test('raw batch → CR 1210 for the rice; labour booked nowhere else is accrued to 2110 (A3b)', async () => {
     const { batch, total } = await makeBatch('RAW', [{ type: 'raw', kg: 1000, rate: 300 }], 5000);
     await complete(batch, total);
     const l = await linesOf(batch.batch_no);
-    expect(l).toEqual({ 1210: { dr: 0, cr: 300000 }, 1220: { dr: 305000, cr: 0 }, 6000: { dr: 0, cr: 5000 } });
+    expect(l).toEqual({ 1210: { dr: 0, cr: 300000 }, 1220: { dr: 305000, cr: 0 }, 2110: { dr: 0, cr: 5000 } });
+  });
+
+  test('packing expensed before the yield (Dr 6000 / Cr 1250) is absorbed from 6000, not counted twice', async () => {
+    const { batch } = await makeBatch('PK', [{ type: 'raw', kg: 1000, rate: 200 }], 1000);
+    await db('milling_costs').insert({ batch_id: batch.id, category: 'packaging', amount: 4392 });
+    const [opex, store] = await Promise.all(['6000', '1250'].map((c) => db('chart_of_accounts').where({ code: c }).first()));
+    await db.transaction(async (trx) => {
+      const j = await accounting.createJournal(trx, {
+        date: new Date().toISOString().slice(0, 10), entity: 'mill', refType: 'Mill Packing', refNo: batch.batch_no,
+        description: 'packing', currency: 'PKR', fxRate: 1, isAuto: true,
+        lines: [{ account_id: opex.id, account: opex.name, debit: 4392, credit: 0 }, { account_id: store.id, account: store.name, debit: 0, credit: 4392 }],
+      });
+      await accounting.postJournal(trx, j.id);
+    });
+    await complete(batch, 200000 + 1000 + 4392);
+    const l = await linesOf(batch.batch_no);
+    // 6000: Dr 4,392 (the run) − Cr 4,392 (absorbed) = 0; labour 1,000 → 2110.
+    expect(l['6000']).toEqual({ dr: 4392, cr: 4392 });
+    expect(l['2110']).toEqual({ dr: 0, cr: 1000 });
+    expect(l['1210']).toEqual({ dr: 0, cr: 200000 });
+    expect(l['1220']).toEqual({ dr: 205392, cr: 0 });
   });
 
   test('mixed raw + finished + by-product with processing → split exactly, totals equal the cost sheet', async () => {
@@ -173,10 +194,10 @@ d('postMillingCompletion credits the input accounts (DB-gated)', () => {
     await complete(batch, total);
     const l = await linesOf(batch.batch_no);
     expect(l['1210'].cr).toBe(85785);
-    expect(l['6000'].cr).toBe(650);
+    expect(l['2110'].cr).toBe(650);
     expect(l['1220']).toEqual({ dr: total, cr: 110511.5 });
     expect(l['1240'].cr).toBe(188736.5);
-    expect(l['1210'].cr + l['1220'].cr + l['1240'].cr + l['6000'].cr).toBeCloseTo(total, 2);
+    expect(l['1210'].cr + l['1220'].cr + l['1240'].cr + l['2110'].cr).toBeCloseTo(total, 2);
   });
 
   // ── A3: outputs split 1220 / 1240, processing by where it was accrued ──
@@ -222,7 +243,7 @@ d('postMillingCompletion credits the input accounts (DB-gated)', () => {
     const l = await linesOf(batch.batch_no);
     // Raw 2,500,000 + transport 12,000 come off 1210 (net: the accrual's Dr 12,000 nets to zero there).
     expect(net(l, '1210')).toBe(12000 - 2512000);
-    expect(net(l, '6000')).toBe(-30000);
+    expect(net(l, '2110')).toBe(-30000);
     expect(net(l, '1240')).toBe(120000);
     expect(net(l, '1220')).toBe(total - 120000);
     expect(await splitLines(batch.batch_no)).toEqual([['1240', 120000, 0], ['1220', 0, 120000]]);
@@ -266,8 +287,10 @@ d('postMillingCompletion credits the input accounts (DB-gated)', () => {
   });
 
   test('processingCredits / mergeCredits', () => {
-    expect(helper.processingCredits(30000, 12000)).toEqual([{ code: '1210', amount: 12000 }, { code: '6000', amount: 18000 }]);
-    expect(helper.processingCredits(5000, 9000)).toEqual([{ code: '1210', amount: 5000 }]);
+    expect(helper.processingCredits(30000, 12000)).toEqual([{ code: '1210', amount: 12000 }, { code: '2110', amount: 18000 }]);
+    expect(helper.processingCredits(30000, 0, [{ code: '6000', amount: 4392 }, { code: '6135', amount: 600 }]))
+      .toEqual([{ code: '6000', amount: 4392 }, { code: '6135', amount: 600 }, { code: '2110', amount: 25008 }]);
+    expect(helper.processingCredits(5000, 9000, [{ code: '6000', amount: 100 }])).toEqual([{ code: '1210', amount: 5000 }]);
     expect(helper.processingCredits(0, 9000)).toEqual([]);
     expect(helper.mergeCredits([{ code: '1210', amount: 1 }, { code: '6000', amount: 2 }, { code: '1210', amount: 3 }]))
       .toEqual([{ code: '1210', amount: 4 }, { code: '6000', amount: 2 }]);
