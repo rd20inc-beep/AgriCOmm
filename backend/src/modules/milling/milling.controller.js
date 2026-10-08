@@ -18,6 +18,7 @@ const batchPackagingService = require('./batchPackaging.service');
 const {
   yieldMode, batchHasOutputLots, checkTransition, releaseBatchSources, commitLotToBatch, TRANSITIONS,
 } = require('./batchLifecycle');
+const { postMillingCompletion, hasPostedCompletion } = require('./millingCompletionJournal');
 
 // Can this inventory lot be fed into a milling/blend batch? Mirrors the
 // frontend NON_MILLABLE_CATEGORIES (src/utils/lotCategory.js): any rice form is
@@ -1135,7 +1136,11 @@ const millingController = {
       // Status guard + first-yield vs re-yield. Decided here for a fast answer
       // and decided AGAIN inside each transaction on a locked row (lockForYield)
       // so two saves can't both take the first-yield path.
-      const mode = yieldMode({ status: batch.status, hasOutputs: await batchHasOutputLots(db, batch.id) });
+      const mode = yieldMode({
+        status: batch.status,
+        hasOutputs: await batchHasOutputLots(db, batch.id),
+        hasCompletion: await hasPostedCompletion(db, batch.batch_no),
+      });
       if (mode === 'refuse') {
         return res.status(409).json({
           success: false,
@@ -1145,7 +1150,11 @@ const millingController = {
       const lockForYield = async (trx) => {
         const locked = await trx('milling_batches').where({ id }).forUpdate().first();
         const lockedMode = locked
-          ? yieldMode({ status: locked.status, hasOutputs: await batchHasOutputLots(trx, id) })
+          ? yieldMode({
+            status: locked.status,
+            hasOutputs: await batchHasOutputLots(trx, id),
+            hasCompletion: await hasPostedCompletion(trx, locked.batch_no),
+          })
           : 'refuse';
         if (lockedMode !== mode) {
           const e = new Error('The batch changed while the yield was being saved — reload and try again.');
@@ -1212,6 +1221,18 @@ const millingController = {
       // first-yield: that would re-post production output and the
       // milling_completion journal).
       if (mode === 'reyield') {
+        // A re-yield of nothing at all would retire every output lot while the
+        // raw stays consumed and the cost stays capitalised — the batch then
+        // looked un-yielded and the next save took the first-yield path again
+        // (M-004: completion journal posted twice). A yield is corrected, not
+        // emptied; removing one is a Danger Zone delete.
+        const lotOutputs = finished + broken + bran + husk + sortex + powder + sweeping + choba;
+        if (!(lotOutputs > 0)) {
+          return res.status(400).json({
+            success: false,
+            message: `Batch ${batch.batch_no} already has its yield recorded — a re-recorded yield must still produce some output. Correct the quantities instead of clearing them.`,
+          });
+        }
         // Already recorded — re-record the yield. Persist EVERY output field (incl.
         // powder/sweeping, so the stored totals match what the over-yield guard
         // validated) AND re-sync the output LOTS to the new quantities. Previously
@@ -1594,16 +1615,12 @@ const millingController = {
 
         // Service batches never touch company inventory GL (client-owned) — only
         // the Service Milling invoice posts revenue. (millingValue is 0 anyway.)
+        // Idempotent: if this batch already has its completion on the books only
+        // the signed difference is posted (normally none) — never the full
+        // amount twice.
         if (millingValue > 0 && !batch.is_service_milling) {
-          await accountingService.autoPost(trx, {
-            triggerEvent: 'milling_completion',
-            entity: 'mill',
-            amount: millingValue,
-            currency: 'PKR',
-            refType: 'Milling Batch',
-            refNo: batch.batch_no,
-            description: `Milling completed for batch ${batch.batch_no} — ${finished} MT finished`,
-            userId: req.user?.id,
+          await postMillingCompletion(trx, accountingService, {
+            batch, amount: millingValue, finishedKg: finished, userId: req.user?.id,
           });
         }
 

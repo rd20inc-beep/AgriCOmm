@@ -17,12 +17,16 @@ const YIELDABLE_STATUSES = ['Queued', 'In Progress', 'Pending', 'Pending Approva
  *   'refuse'  — the batch is not in a state that can take a yield
  *   'reyield' — output lots already exist: update quantities + resync the lots
  *   'first'   — no outputs yet: consume raw, create output lots, post journals
- * Re-yield is keyed on the outputs existing, not on the status — the status
- * can drift (legacy rows, manual edits); duplicate outputs and journals cannot.
+ * Re-yield is keyed on facts, not on the status — the status can drift (legacy
+ * rows, manual edits); duplicate outputs and journals cannot. The facts are the
+ * output lots existing OR the batch's completion journal already being Posted:
+ * a batch whose output lots were retired (a re-yield of all zeros) has still
+ * consumed its raw and capitalised its cost, so a later save is a re-yield, not
+ * a second first-yield (that double-posted M-004's completion on prod).
  */
-function yieldMode({ status, hasOutputs }) {
+function yieldMode({ status, hasOutputs, hasCompletion = false }) {
   if (!YIELDABLE_STATUSES.includes(status)) return 'refuse';
-  return hasOutputs ? 'reyield' : 'first';
+  return (hasOutputs || hasCompletion) ? 'reyield' : 'first';
 }
 
 // A batch's yield outputs are the finished/by-product lots stamped with
