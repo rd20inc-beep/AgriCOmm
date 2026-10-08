@@ -64,7 +64,7 @@ describe('six workspaces', () => {
 
   it('Accounting hides the GL statement views when finance.view is missing, and keeps the rest', () => {
     const acc = (perms) => visibleWorkspaces(perms).find((w) => w.key === 'accounting').views.map((v) => v.key);
-    expect(acc(allow('finance.view'))).toEqual(['journal', 'trial-balance', 'pnl', 'balance-sheet', 'profit', 'statements', 'rates']);
+    expect(acc(allow('finance.view'))).toEqual(['journal', 'trial-balance', 'pnl', 'balance-sheet', 'profit', 'statements', 'rates', 'stock-transfers']);
     expect(acc(allow())).toEqual(['journal', 'profit', 'statements', 'rates']);
   });
 
@@ -155,6 +155,7 @@ describe('legacy /finance/* paths', () => {
     ['/finance/receivables', '/finance/money-in'],
     ['/finance/payables', '/finance/money-out'],
     ['/finance/ledger', '/finance/accounting'],
+    ['/finance/transfers', '/finance/accounting/stock-transfers'],
   ];
   it.each(TABLE)('%s → %s', (from, to) => {
     const [path, query = ''] = from.split('?');
@@ -167,7 +168,7 @@ describe('legacy /finance/* paths', () => {
   });
 
   it('new paths, alerts and the kept orphans are not redirected', () => {
-    for (const p of ['/finance', '/finance/money-in', '/finance/alerts', '/finance/costs', '/finance/transfers', '/finance/reconciliation', '/finance/accounting/statements']) {
+    for (const p of ['/finance', '/finance/money-in', '/finance/alerts', '/finance/costs', '/finance/reconciliation', '/finance/accounting/statements', '/finance/accounting/stock-transfers']) {
       expect(legacyFinanceTarget(p, '')).toBeNull();
     }
   });
@@ -184,6 +185,38 @@ describe('legacy /finance/* paths', () => {
   it('nothing in the new nav links to the URL-only orphans', () => {
     const all = WORKSPACES.flatMap((w) => [w.path, ...w.views.map((v) => v.path)]);
     for (const orphan of ['/finance/costs', '/finance/transfers', '/finance/reconciliation']) expect(all).not.toContain(orphan);
+  });
+});
+
+describe('Stock transfers (D3: the old /finance/transfers orphan)', () => {
+  const view = () => WORKSPACES.find((w) => w.key === 'accounting').views.find((v) => v.key === 'stock-transfers');
+
+  it('is an Accounting view, labelled as stock, at a nested path, behind finance.view', () => {
+    expect(view()).toEqual(expect.objectContaining({
+      label: 'Stock transfers', path: '/finance/accounting/stock-transfers', period: false,
+      permission: { module: 'finance', action: 'view' },
+    }));
+    const m = matchFinanceLocation('/finance/accounting/stock-transfers');
+    expect([m.workspace.key, m.view.key]).toEqual(['accounting', 'stock-transfers']);
+  });
+
+  it('the old URL redirects there, query kept, and server links to it resolve', () => {
+    expect(legacyFinanceTarget('/finance/transfers', '')).toBe('/finance/accounting/stock-transfers');
+    expect(legacyFinanceTarget('/finance/transfers', '?range=month')).toBe('/finance/accounting/stock-transfers?range=month');
+    expect(resolveFinanceLink('/finance/transfers')).toBe('/finance/accounting/stock-transfers');
+  });
+
+  it('is hidden from a user without finance.view', () => {
+    const acc = visibleWorkspaces(allow()).find((w) => w.key === 'accounting').views.map((v) => v.key);
+    expect(acc).not.toContain('stock-transfers');
+  });
+
+  it('the Accounting tab bar shows it and marks it selected on its page', () => {
+    const html = renderAt('/finance/accounting/stock-transfers');
+    expect(hrefsOf(html, 'data-view').map((v) => v.key)).toContain('stock-transfers');
+    expect(html).toMatch(/aria-selected="true"[^>]*data-view="stock-transfers"|data-view="stock-transfers"[^>]*aria-selected="true"/);
+    expect(html).toContain('Stock transfers');
+    expect(html).toContain('Not filtered by period');
   });
 });
 

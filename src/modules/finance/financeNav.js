@@ -75,6 +75,11 @@ export const WORKSPACES = [
       { key: 'profit', label: 'Profit', path: '/finance/accounting/profit', period: false },
       { key: 'statements', label: 'Statements', path: '/finance/accounting/statements', period: 'range' },
       { key: 'rates', label: 'Rates', path: '/finance/accounting/rates', period: false },
+      // Mill → Export STOCK moves (internal_transfers), not money: bank-to-bank
+      // moves are Accounts → Transfer. Same finance.view gate as the API
+      // (GET /api/finance/internal-transfers) and the old /finance/transfers.
+      { key: 'stock-transfers', label: 'Stock transfers', path: '/finance/accounting/stock-transfers', period: false,
+        permission: { module: 'finance', action: 'view' } },
     ],
   },
   {
@@ -85,11 +90,12 @@ export const WORKSPACES = [
 ];
 
 // Pages that keep a route but sit in no workspace. Alerts is reached from
-// Home's alerts panel; the three orphans stay URL-only (nothing links to them).
+// Home's alerts panel; the two orphans stay URL-only (nothing links to them).
+// The old stock-transfer orphan (/finance/transfers) is now Accounting's
+// "Stock transfers" view; its URL redirects there.
 const UNLISTED = [
   { path: '/finance/alerts', workspace: 'home', period: false },
   { path: '/finance/costs', workspace: 'home', period: false },
-  { path: '/finance/transfers', workspace: 'home', period: false },
   { path: '/finance/reconciliation', workspace: 'home', period: false },
 ];
 
@@ -111,6 +117,7 @@ export const LEGACY_FINANCE_REDIRECTS = {
   'profitability': '/finance/accounting/profit',
   'statements': '/finance/accounting/statements',
   'ledger': '/finance/accounting',
+  'transfers': '/finance/accounting/stock-transfers',
 };
 
 const has = (hasPermission, p) => !p || hasPermission(p.module, p.action);
