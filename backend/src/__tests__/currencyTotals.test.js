@@ -55,6 +55,17 @@ jest.mock('../modules/finance/fxRate.service', () => ({
 jest.mock('../modules/finance/commodityRate.service', () => ({
   getMillProductRates: jest.fn(async () => ({})),
 }));
+// The collection rate (C6: received ÷ amounts due) has its own module and its
+// own tests (profitReportingRules*.test.js); here only how the overview reports
+// it per currency is checked.
+let mockCollection = { targetPct: 95, byCurrency: {}, notYetDue: {} };
+jest.mock('../modules/finance/collectionRate', () => ({
+  collectionRate: jest.fn(async () => mockCollection),
+}));
+// The books' P&L (C1) reads the GL through the accounting service.
+jest.mock('../modules/accounting/accounting.service', () => ({
+  getProfitAndLoss: jest.fn(async () => ({ net_profit: 0, gross_profit: 0, revenue: { total: 0 }, cogs: { total: 0 }, expenses: { total: 0 } })),
+}));
 
 const db = require('../config/database');
 const financeService = require('../modules/finance/finance.service');
@@ -138,11 +149,17 @@ describe('Finance overview — Receivables per currency (R4)', () => {
     const q = db.__queries.find((x) => x.table === 'receivables' && x.groupBy && isOutstandingQ(x));
     expect(q).toBeDefined();
     expect(String(q.groupBy)).toMatch(/currency/);
-    expect(q.raws.join(' ')).toMatch(/SUM\(outstanding\)/);
-    expect(q.raws.join(' ')).not.toMatch(/base_amount_pkr/);
+    // The outstanding figure itself is the native SUM(outstanding); base_amount_pkr
+    // is read only for the separate ≈ PKR equivalent (C5), never the figure.
+    const outstandingSel = q.raws.find((r) => /as outstanding$/.test(r));
+    expect(outstandingSel).toMatch(/SUM\(outstanding\)/);
+    expect(outstandingSel).not.toMatch(/base_amount_pkr/);
+    expect(q.raws.find((r) => /as pkr_equiv$/.test(r))).toMatch(/base_amount_pkr \* outstanding \/ expected_amount/);
   });
 
+  const coll = (byCurrency) => ({ targetPct: 95, byCurrency, notYetDue: {} });
   test('collection rate is per currency; no single figure across currencies', async () => {
+    mockCollection = coll({ USD: { ratePct: 39.2 }, PKR: { ratePct: 17.9 } });
     db.__set({ ...base, receivables });
     const out = await financeService.getOverviewSummary({});
     expect(out.collectionRateByCurrency).toEqual({ USD: 39.2, PKR: 17.9 });
@@ -150,6 +167,7 @@ describe('Finance overview — Receivables per currency (R4)', () => {
   });
 
   test('one currency only → the single rate is that currency', async () => {
+    mockCollection = coll({ USD: { ratePct: 39.2 } });
     db.__set({ ...base, receivables: (q) => (!q.groupBy ? {} : isOutstandingQ(q) ? [recvRows[0]] : [collRows[0]]) });
     const out = await financeService.getOverviewSummary({});
     expect(out.collectionRate).toBe(39.2);
