@@ -53,11 +53,12 @@ describe('normalizePaymentMethod', () => {
 
 describe('expenses write a canonical method to both columns', () => {
   it('normalises every payment_method it stores', () => {
-    // Four writes: business_expenses at create, payments at create,
-    // business_expenses at markPaid, payments at markPaid (incl. the
-    // post-dated cheque row, which used to skip the mapping entirely).
-    const normalised = (SERVICE.match(/payment_method:\s*(normalizePaymentMethod|payMethod)/g) || []).length;
-    expect(normalised).toBeGreaterThanOrEqual(4);
+    // business_expenses at create, plus the method handed to the payment
+    // engine at create and at markPaid (the engine writes the payments row and
+    // stamps the same method back onto the expense when it settles it; a
+    // post-dated cheque goes through the same call).
+    const normalised = (SERVICE.match(/(payment_method|method):\s*(pay_now \? )?(normalizePaymentMethod|payMethod)/g) || []).length;
+    expect(normalised).toBeGreaterThanOrEqual(3);
   });
 
   it('no longer hard-codes the shorthand as a fallback', () => {
