@@ -5,42 +5,14 @@
  * - Base currency: PKR
  * - Export orders: foreign currency (USD/GBP/EUR) converted to PKR using locked FX rate
  * - All profit computed in PKR first, then optionally converted to foreign for display
- * - FX gain/loss = (currentRate - lockedRate) × foreignAmount, shown separately
- * - No hardcoded rates — all from fxRateService or order's booked_fx_rate
+ * - Profit (export Booked / Realised / Pipeline / FX, mill, local, consolidated)
+ *   comes from ONE place: ./profitDefinitions.js (owner decisions G-2 / G-3).
+ * - FX gain/loss = PKR actually received − the same foreign amount at the
+ *   booked rate (realised), shown beside profit, never inside it.
  */
 const db = require('../../config/database');
 const fxRateService = require('./fxRate.service');
-const commodityRateService = require('./commodityRate.service');
-const { byproductSaleValue } = require('../milling/byproductPrices');
-const { batchOutputValues } = require('../milling/batchOutputValues');
-
-// A completed batch's by-product revenue: each by-product at the batch's own
-// per-kg price, per broken GRADE when the batch recorded the grade split (the
-// residual engine's credit). The aggregate broken_kg × broken_price_per_kg used
-// before ignored the grade prices the operator actually set and valued the
-// whole broken tier at the aggregate price — which on prod still held a per-MT
-// default (Rs 38,000 "per kg"), inflating mill revenue by ~Rs 87m. Only a
-// batch with no by-product price at all falls back to the commodity broken
-// rate (per-MT → ÷1000).
-function millByproductRevenue(b, millRates) {
-  const own = byproductSaleValue(b);
-  if (own > 0) return own;
-  return (parseFloat(b.broken_kg) || 0) * ((millRates.broken_rice || 0) / 1000);
-}
-
-// The by-product value a report shows for a batch: what its yield BOOKED on the
-// output lots (batchOutputValues — qty yielded × the lot's carried per-kg), so
-// a price edited on the batch after yield can't make the report drift from the
-// books. Only a batch with no stored output (not yielded / legacy / toll) is
-// recomputed from its price columns, and says so.
-function millByproductValue(b, millRates, stored) {
-  const s = stored && stored.get(b.id);
-  if (s) return { value: s.byproductValue, source: 'yield_lots' };
-  return { value: millByproductRevenue(b, millRates), source: 'computed' };
-}
-
-// Categories in export_order_costs that are INTERNAL ALLOCATIONS (COGS), not vendor costs
-const INTERNAL_COST_CATS = ['rice', 'raw_rice', 'milling'];
+const { profitDefinitions, millBatchRows } = require('./profitDefinitions');
 
 const financeService = {
 
@@ -58,13 +30,13 @@ const financeService = {
     const currentFx = await fxRateService.getLatestRate('USD');
     const pkrRate = currentFx.rate;
 
-    // ── Export metrics (all non-cancelled orders) ──
+    // ── Profit: one definition for every tile (profitDefinitions.js) ──
+    const defs = await profitDefinitions(db, { startDate, endDate, currentFxRate: pkrRate });
+    const et = defs.export;
+
+    // ── Export counts (not profit) — all non-cancelled orders in the period ──
     let orderQuery = db('export_orders').whereNotIn('status', ['Cancelled']);
     if (startDate || endDate) orderQuery = dateFilter(orderQuery, 'created_at');
-
-    // Check if new PKR columns exist (safe for pre-migration DBs)
-    const hasPkrLocked = await db.schema.hasColumn('export_orders', 'contract_value_pkr_locked');
-
     const exportStats = await orderQuery.clone().select(
       db.raw("COUNT(*) as total_orders"),
       db.raw("COUNT(CASE WHEN status NOT IN ('Closed','Cancelled') THEN 1 END) as active_orders"),
@@ -73,108 +45,44 @@ const financeService = {
       db.raw("COUNT(CASE WHEN status IN ('Shipped','Arrived','Closed') THEN 1 END) as shipped_orders"),
       db.raw("COUNT(CASE WHEN status IN ('Shipped','Arrived','Closed') AND (inventory_cogs_total_pkr IS NULL OR inventory_cogs_total_pkr = 0) THEN 1 END) as shipped_missing_cogs"),
       db.raw("COALESCE(SUM(contract_value), 0) as total_revenue_foreign"),
-      db.raw(hasPkrLocked
-        ? "COALESCE(SUM(contract_value_pkr_locked), 0) as total_revenue_pkr_booked"
-        : "0 as total_revenue_pkr_booked"),
-      db.raw("COALESCE(SUM(contract_value * COALESCE(booked_fx_rate, ?)), 0) as total_revenue_pkr_calc", [pkrRate]),
-      db.raw("COALESCE(SUM(advance_received), 0) as total_advance_received"),
-      db.raw("COALESCE(SUM(balance_received), 0) as total_balance_received"),
-      db.raw("COALESCE(SUM(inventory_cogs_total_pkr), 0) as total_cogs_pkr"),
     ).first();
-
-    // Revenue PKR: use stored locked value, fall back to calculated
-    const revenuePkrBooked = parseFloat(exportStats.total_revenue_pkr_booked) || parseFloat(exportStats.total_revenue_pkr_calc) || 0;
     const revenueForeign = parseFloat(exportStats.total_revenue_foreign) || 0;
-    const revenuePkrCurrent = revenueForeign * pkrRate;
-    const fxGainLossTotal = revenuePkrCurrent - revenuePkrBooked;
+    const confirmedRevenuePkr = defs.exportRows.reduce((s, r) => s + (r.revenuePkr || 0), 0);
 
-    // Export operational costs are paid to local Pakistani vendors and
-    // stored in PKR (business rule, enforced by migration 079 and the
-    // addCost handler). Sum amount directly — no FX conversion needed.
-    const costToPkrExpr = 'eoc.amount';
-
-    const exportOpResult = await db('export_order_costs as eoc')
-      .join('export_orders as eo', 'eoc.order_id', 'eo.id')
-      .whereNotIn('eo.status', ['Cancelled'])
-      .whereNotIn('eoc.category', INTERNAL_COST_CATS)
-      .select(
-        db.raw("COALESCE(SUM(" + costToPkrExpr + "), 0) as total_pkr"),
-        db.raw("COALESCE(SUM(eoc.amount), 0) as total_raw"),
-      ).first();
-    const exportOpCostsPkr = parseFloat(exportOpResult?.total_pkr) || 0;
-
-    // Export COGS (PKR) — from rice allocation or locked COGS
-    const cogsResult = await db('export_order_costs as eoc')
-      .join('export_orders as eo', 'eoc.order_id', 'eo.id')
-      .whereNotIn('eo.status', ['Cancelled'])
-      .whereIn('eoc.category', INTERNAL_COST_CATS)
-      .select(
-        db.raw("COALESCE(SUM(" + costToPkrExpr + "), 0) as total_pkr"),
-      ).first();
-    const lockedCogsPkr = parseFloat(exportStats.total_cogs_pkr) || 0;
-    const allocCogsPkr = parseFloat(cogsResult?.total_pkr) || 0;
-    const exportCogsPkr = lockedCogsPkr > 0 ? lockedCogsPkr : allocCogsPkr;
-
-    // Total export cost and profit — all in PKR
-    const exportTotalCostPkr = exportOpCostsPkr + exportCogsPkr;
-    const exportBookedProfitPkr = revenuePkrBooked - exportTotalCostPkr;
-    const exportCurrentProfitPkr = revenuePkrCurrent - exportTotalCostPkr;
-    const exportMarginPct = revenuePkrBooked > 0 ? (exportBookedProfitPkr / revenuePkrBooked * 100) : 0;
-
-    // ── Mill metrics ──
+    // ── Mill: completed batches in the period (count only — mill PROFIT is
+    // sales of mill output − their COGS, from profitDefinitions) ──
     let batchQuery = db('milling_batches').where('status', 'Completed');
     if (startDate || endDate) batchQuery = dateFilter(batchQuery, 'completed_at');
-    const batches = await batchQuery.select('*');
-    const batchIds = batches.map(b => b.id);
-    const batchCosts = batchIds.length > 0 ? await db('milling_costs').whereIn('batch_id', batchIds) : [];
+    const batchCountRow = await batchQuery.count('id as count').first();
+    const batchCount = parseInt(batchCountRow?.count, 10) || 0;
 
-    // Get commodity rates for mill revenue when prices not confirmed
-    const millRates = await commodityRateService.getMillProductRates();
+    // Unsold mill output is stock, carried at cost — shown beside the profit,
+    // never in it. Point-in-time (today), company-owned only.
+    const millStock = await db('inventory_lots')
+      .where('entity', 'mill').whereIn('type', ['finished', 'byproduct'])
+      .where('qty', '>', 0).whereNot('status', 'Closed')
+      .whereRaw("COALESCE(ownership, 'company') <> 'client'")
+      .select(db.raw('COALESCE(SUM(qty * COALESCE(NULLIF(landed_cost_per_kg, 0), cost_per_unit, 0)), 0) as value'))
+      .first();
 
-    const millStoredOutput = await batchOutputValues(db, batchIds);
-
-    let millRevenue = 0, millCost = 0, millPricesConfirmed = 0, millByproductFromLots = 0;
-    for (const b of batches) {
-      // Prices are per-KG and quantities are KG (Phase 5c) — qty×price = PKR is
-      // invariant. Commodity-rate fallbacks are per-MT, so ÷1000 to per-KG.
-      const fp = parseFloat(b.finished_price_per_kg) || (millRates.finished_rice || 0) / 1000;
-      const usedConfirmed = !!b.prices_confirmed;
-
-      const bp = millByproductValue(b, millRates, millStoredOutput);
-      if (bp.source === 'yield_lots') millByproductFromLots++;
-      millRevenue += (parseFloat(b.actual_finished_kg) || 0) * fp + bp.value;
-      if (usedConfirmed) millPricesConfirmed++;
-
-      const bCosts = batchCosts.filter(c => c.batch_id === b.id);
-      millCost += bCosts.reduce((s, c) => s + (parseFloat(c.amount) || 0), 0);
-    }
-
+    // Mill overheads (mill_expenses) in the period — a period expense the GL
+    // P&L carries; reported here for reference, NOT deducted from mill profit.
     let ohQuery = db('mill_expenses');
     if (startDate || endDate) ohQuery = dateFilter(ohQuery, 'expense_date');
     const overheads = await ohQuery.sum('amount as total').first();
     const overheadTotal = parseFloat(overheads?.total) || 0;
 
-    const millGrossProfit = millRevenue - millCost - overheadTotal;
-    const millMargin = millRevenue > 0 ? (millGrossProfit / millRevenue * 100) : 0;
-
-    // ── Local sales metrics ──
-    // All amounts are PKR (local sales are domestic). cogs_total_pkr and
-    // gross_profit_pkr are stamped at sale time / lockSaleCOGS.
+    // ── Local sales: collection figures over ALL local sales; profit over the
+    // sales that are not mill output (those are in the mill segment). ──
     let localQuery = db('local_sales').whereNotIn('status', ['Cancelled', 'Voided', 'Returned', 'Pending']);
     if (startDate || endDate) localQuery = dateFilter(localQuery, 'sale_date');
     const localStats = await localQuery.clone().select(
       db.raw("COUNT(*) AS sale_count"),
       db.raw("COUNT(CASE WHEN status = 'Completed' THEN 1 END) AS completed_count"),
       db.raw("COALESCE(SUM(total_amount), 0) AS revenue_pkr"),
-      db.raw("COALESCE(SUM(cogs_total_pkr), 0) AS cogs_pkr"),
-      db.raw("COALESCE(SUM(gross_profit_pkr), 0) AS gross_profit_pkr"),
       db.raw("COALESCE(SUM(paid_amount), 0) AS collected_pkr"),
       db.raw("COALESCE(SUM(due_amount), 0) AS outstanding_pkr"),
     ).first();
-    const localRevenue = parseFloat(localStats.revenue_pkr) || 0;
-    const localCogs = parseFloat(localStats.cogs_pkr) || 0;
-    const localGrossProfit = parseFloat(localStats.gross_profit_pkr) || (localRevenue - localCogs);
-    const localMargin = localRevenue > 0 ? (localGrossProfit / localRevenue * 100) : 0;
 
     // ── Receivables ──
     // Exclude local-sale receivables (local_sale_id set): those are already
@@ -256,31 +164,39 @@ const financeService = {
     const collectionRate = collCurrencies.length === 1 ? collectionRateByCurrency[collCurrencies[0]]
       : collCurrencies.length === 0 ? 0 : null;
 
-    // ── Consolidated profit (PKR) ──
-    const consolidatedProfitPkr = exportBookedProfitPkr + millGrossProfit + localGrossProfit;
+    const exportCalc = et.unpricedCount > 0 ? 'incomplete' : (et.estimatedCount > 0 ? 'estimated' : 'exact');
 
     return {
       asOfTimestamp: new Date().toISOString(),
       baseCurrency: 'PKR',
       currentFxRate: pkrRate,
       fxRateSource: currentFx.source,
+      period: defs.period,
       export: {
         totalOrders: parseInt(exportStats.total_orders),
         activeOrders: parseInt(exportStats.active_orders),
+        // Confirmed orders (not Draft / Cancelled) the profit figures cover.
+        confirmedOrders: et.orderCount,
         revenueForeign: revenueForeign,
         revenueForeignCurrency: 'USD',
-        revenuePkrBooked: revenuePkrBooked,
-        revenuePkrCurrent: revenuePkrCurrent,
-        operationalCostsPkr: exportOpCostsPkr,
-        cogsPkr: exportCogsPkr,
-        totalCostPkr: exportTotalCostPkr,
-        bookedProfitPkr: exportBookedProfitPkr,
-        currentProfitPkr: exportCurrentProfitPkr,
-        fxGainLossPkr: fxGainLossTotal,
-        marginPct: parseFloat(exportMarginPct.toFixed(1)),
-        // Foreign equivalents for display
-        bookedProfitForeign: revenuePkrBooked > 0 ? exportBookedProfitPkr / (revenuePkrBooked / revenueForeign) : 0,
-        calculationStatus: exportCogsPkr > 0 ? 'exact' : (exportOpCostsPkr > 0 ? 'operational_margin_only' : 'no_costs'),
+        // Booked PKR contract value of the confirmed orders (locked / booked rate).
+        revenuePkrBooked: confirmedRevenuePkr,
+        operationalCostsPkr: et.opCostsPkr,
+        cogsPkr: et.riceCostPkr,
+        totalCostPkr: et.opCostsPkr + et.riceCostPkr,
+        // G-2: Booked / Realised / Pipeline / FX — see profitDefinitions.js.
+        bookedProfitPkr: et.bookedPkr,
+        realisedProfitPkr: et.realisedPkr,
+        pipelineProfitPkr: et.pipelinePkr,
+        fxGainLossPkr: et.fxRealisedPkr,
+        fxOpenRevaluationPkr: et.fxOpenRevaluationPkr,
+        unpricedCount: et.unpricedCount,
+        unpricedRevenuePkr: et.unpricedRevenuePkr,
+        estimatedCount: et.estimatedCount,
+        realisedCount: et.realisedCount,
+        realisedUnpricedCount: et.realisedUnpricedCount,
+        marginPct: et.bookedMarginPct,
+        calculationStatus: exportCalc,
         // COGS lifecycle breakdown — see warnings for explanation.
         cogsStatus: {
           preShipment: parseInt(exportStats.pre_shipment_orders),
@@ -289,34 +205,49 @@ const financeService = {
         },
       },
       mill: {
-        batchCount: batches.length,
-        pricesConfirmed: millPricesConfirmed,
-        priceSource: millPricesConfirmed === batches.length ? 'confirmed' : (millRates.finished_rice ? 'commodity_rate_master' : 'none'),
-        // How many batches' by-product value came from the lots booked at yield
-        // (the rest were recomputed from batch prices).
-        byproductFromYieldLots: millByproductFromLots,
-        revenue: millRevenue,
-        directCosts: millCost,
+        // G-3: realised mill profit = sales of mill output (local sales of mill
+        // lots + transfers to export at the transfer price) − their COGS.
+        basis: 'sales_of_mill_output',
+        batchCount,
+        revenue: defs.mill.revenuePkr,
+        cogs: defs.mill.cogsPkr,
+        grossProfit: defs.mill.profitPkr,
+        marginPct: defs.mill.marginPct,
+        saleCount: defs.mill.saleCount,
+        soldKg: defs.mill.soldKg,
+        transferCount: defs.mill.transferCount,
+        transferRevenuePkr: defs.mill.transferRevenuePkr,
+        uncostedCount: defs.mill.uncostedCount,
+        uncostedRevenuePkr: defs.mill.uncostedRevenuePkr,
+        unsoldStockAtCostPkr: parseFloat(millStock?.value) || 0,
         overheads: overheadTotal,
-        grossProfit: millGrossProfit,
-        marginPct: parseFloat(millMargin.toFixed(1)),
+        overheadsDeducted: false,
         currency: 'PKR',
       },
       local: {
+        // Profit: local sales that are NOT mill output (raw-rice lots, services,
+        // packaging). Counts / collection: every local sale.
+        basis: 'non_mill_output_sales',
         saleCount: parseInt(localStats.sale_count) || 0,
         completedCount: parseInt(localStats.completed_count) || 0,
-        revenue: localRevenue,
-        cogs: localCogs,
-        grossProfit: localGrossProfit,
-        marginPct: parseFloat(localMargin.toFixed(1)),
+        allSalesRevenue: parseFloat(localStats.revenue_pkr) || 0,
+        otherSaleCount: defs.local.saleCount,
+        revenue: defs.local.revenuePkr,
+        cogs: defs.local.cogsPkr,
+        grossProfit: defs.local.profitPkr,
+        marginPct: defs.local.marginPct,
+        uncostedCount: defs.local.uncostedCount,
         collected: parseFloat(localStats.collected_pkr) || 0,
         outstanding: parseFloat(localStats.outstanding_pkr) || 0,
         currency: 'PKR',
       },
       consolidated: {
-        profitPkr: consolidatedProfitPkr,
-        profitForeign: consolidatedProfitPkr / pkrRate,
-        fxGainLossPkr: fxGainLossTotal,
+        // export Booked + mill realised + local other (each sale counted once).
+        profitPkr: defs.consolidated.bookedPkr,
+        bookedPkr: defs.consolidated.bookedPkr,
+        realisedPkr: defs.consolidated.realisedPkr,
+        profitForeign: defs.consolidated.bookedPkr / pkrRate,
+        fxGainLossPkr: et.fxRealisedPkr,
       },
       receivables: {
         count: recvCount,
@@ -348,24 +279,17 @@ const financeService = {
       collectionRateByCurrency,
       warnings: (() => {
         const out = [];
-        const preShipped = parseInt(exportStats.pre_shipment_orders);
         const shippedMissing = parseInt(exportStats.shipped_missing_cogs);
 
-        if (millPricesConfirmed < batches.length && !millRates.finished_rice) {
-          out.push(`${batches.length - millPricesConfirmed} milling batch(es) have unconfirmed prices and no commodity rates — mill revenue may be zero. Set prices on each batch or seed the commodity_rates table.`);
+        if (et.unpricedCount > 0) {
+          out.push(`${et.unpricedCount} confirmed export order${et.unpricedCount === 1 ? '' : 's'} have no rice cost yet (nothing locked, reserved or allocated, and no stock of that product to estimate from) — left out of Booked Profit until costed.`);
         }
-        if (millPricesConfirmed < batches.length && millRates.finished_rice) {
-          out.push(`${batches.length - millPricesConfirmed} milling batch(es) using commodity-rate-master prices (estimated). Confirm prices on each batch for exact figures.`);
+        if (et.estimatedCount > 0) {
+          out.push(`${et.estimatedCount} export order${et.estimatedCount === 1 ? '' : 's'} in Booked Profit use an ESTIMATED rice cost (current stock cost of the product) — reserve stock for an exact figure.`);
         }
-
-        // Pre-shipment COGS: this is the *normal* state for any order that
-        // hasn't shipped yet — COGS locks automatically at dispatch. Phrase
-        // the warning so the user understands that, not as if something is
-        // broken.
-        if (preShipped > 0 && exportCogsPkr === 0) {
-          out.push(`${preShipped} active export order${preShipped === 1 ? '' : 's'} pre-shipment — exact COGS will lock automatically at dispatch. Profit shown is revenue minus operational costs only until then.`);
-        } else if (preShipped > 0 && exportCogsPkr > 0) {
-          out.push(`${preShipped} order${preShipped === 1 ? '' : 's'} still pre-shipment — their COGS will lock at dispatch and may shift the totals.`);
+        const uncosted = (defs.mill.uncostedCount || 0) + (defs.local.uncostedCount || 0);
+        if (uncosted > 0) {
+          out.push(`${uncosted} sale${uncosted === 1 ? '' : 's'} drawn from stock have no COGS recorded — left out of profit until costed.`);
         }
 
         // Genuine red flag: an order has shipped but COGS never locked.
@@ -382,112 +306,53 @@ const financeService = {
   },
 
   /**
-   * Profitability Summary — per-order and per-batch breakdown, all in PKR.
+   * Profitability Summary — per order and per batch, all PKR, in the period.
+   * Export rows and totals and the mill / local totals come from
+   * profitDefinitions (G-2 / G-3); the batch rows are information (output at
+   * cost, sold so far, unsold stock), not the period's mill profit.
    */
   async getProfitabilitySummary({ startDate, endDate } = {}) {
     const currentFx = await fxRateService.getLatestRate('USD');
     const pkrRate = currentFx.rate;
 
-    const orders = await db('export_orders').whereNotIn('status', ['Cancelled']).select('*');
-    const orderIds = orders.map(o => o.id);
-    const allCosts = orderIds.length > 0 ? await db('export_order_costs').whereIn('order_id', orderIds) : [];
+    const [defs, batchRows] = await Promise.all([
+      profitDefinitions(db, { startDate, endDate, currentFxRate: pkrRate }),
+      millBatchRows(db, { startDate, endDate }),
+    ]);
+    const et = defs.export;
 
-    const exportRows = orders.map(o => {
-      const orderCosts = allCosts.filter(c => c.order_id === o.id);
-      const lockedRate = parseFloat(o.booked_fx_rate) || pkrRate;
-      const revenue = parseFloat(o.contract_value) || 0;
-      const revenuePkrBooked = parseFloat(o.contract_value_pkr_locked) || (revenue * lockedRate);
-      const revenuePkrCurrent = revenue * pkrRate;
-
-      // Op costs in PKR — currency-aware with sanity check
-      const costToPkr = (c) => {
-        const amt = parseFloat(c.amount) || 0;
-        if (amt === 0) return 0;
-        if (c.currency === 'PKR') return amt; // already PKR
-        // Sanity check: if marked USD but amount > 100K, it's likely PKR stored incorrectly
-        if (amt > 100000 && (!c.currency || c.currency === 'USD')) return amt; // treat as PKR
-        return amt * lockedRate; // convert foreign to PKR
-      };
-      const opCostsPkr = orderCosts
-        .filter(c => !INTERNAL_COST_CATS.includes(c.category))
-        .reduce((s, c) => s + costToPkr(c), 0);
-
-      // COGS in PKR
-      const lockedCogsPkr = parseFloat(o.inventory_cogs_total_pkr) || 0;
-      const allocCogsPkr = orderCosts
-        .filter(c => INTERNAL_COST_CATS.includes(c.category))
-        .reduce((s, c) => s + costToPkr(c), 0);
-      const cogsPkr = lockedCogsPkr > 0 ? lockedCogsPkr : allocCogsPkr;
-
-      const totalCostPkr = opCostsPkr + cogsPkr;
-      const bookedProfitPkr = revenuePkrBooked - totalCostPkr;
-      const currentProfitPkr = revenuePkrCurrent - totalCostPkr;
-      const fxGainLoss = revenuePkrCurrent - revenuePkrBooked;
-      const marginPct = revenuePkrBooked > 0 ? (bookedProfitPkr / revenuePkrBooked * 100) : 0;
-
-      return {
-        id: o.id, orderNo: o.order_no, status: o.status,
-        currency: o.currency || 'USD',
-        contractValueForeign: revenue,
-        bookedFxRate: lockedRate,
-        currentFxRate: pkrRate,
-        revenuePkrBooked,
-        revenuePkrCurrent,
-        opCostsPkr,
-        cogsPkr,
-        totalCostPkr,
-        bookedProfitPkr,
-        currentProfitPkr,
-        fxGainLossPkr: fxGainLoss,
-        marginPct: parseFloat(marginPct.toFixed(1)),
-        hasCOGS: cogsPkr > 0,
-        calculationStatus: cogsPkr > 0 ? 'exact' : (opCostsPkr > 0 ? 'operational_margin_only' : 'no_costs'),
-      };
-    });
-
-    // Mill batches (all PKR)
-    const millRates = await commodityRateService.getMillProductRates();
-    const batches = await db('milling_batches').where('status', 'Completed').select('*');
-    const batchIds = batches.map(b => b.id);
-    const batchCosts = batchIds.length > 0 ? await db('milling_costs').whereIn('batch_id', batchIds) : [];
-    const millStoredOutput = await batchOutputValues(db, batchIds);
-
-    const millRows = batches.map(b => {
-      const costs = batchCosts.filter(c => c.batch_id === b.id).reduce((s, c) => s + (parseFloat(c.amount) || 0), 0);
-      // per-KG prices × KG qty = PKR (invariant); fallbacks per-MT → ÷1000.
-      const fp = parseFloat(b.finished_price_per_kg) || (millRates.finished_rice || 0) / 1000;
-      const bp = millByproductValue(b, millRates, millStoredOutput);
-      const revenue = (parseFloat(b.actual_finished_kg) || 0) * fp + bp.value;
-      const profit = revenue - costs;
-      return {
-        id: b.id, batchNo: b.batch_no, status: b.status,
-        rawQtyMT: parseFloat(b.raw_qty_kg) / 1000, finishedMT: parseFloat(b.actual_finished_kg) / 1000,
-        yieldPct: parseFloat(b.yield_pct), revenue, costs, grossProfit: profit,
-        marginPct: revenue > 0 ? parseFloat((profit / revenue * 100).toFixed(1)) : 0,
-        pricesConfirmed: !!b.prices_confirmed,
-        byproductValue: bp.value,
-        // 'yield_lots' = as booked on the output lots at yield; 'computed' = no
-        // stored output, recomputed from the batch's by-product prices.
-        byproductValueSource: bp.source,
-        priceSource: b.prices_confirmed ? 'confirmed' : (millRates.finished_rice ? 'commodity_rates' : 'none'),
-        calculationStatus: b.prices_confirmed ? 'exact' : (millRates.finished_rice ? 'estimated' : 'missing_prices'),
-        currency: 'PKR',
-      };
-    });
+    const exportRows = defs.exportRows.map((r) => ({
+      ...r,
+      revenuePkrBooked: r.revenuePkr,
+      cogsPkr: r.riceCostPkr,
+      fxGainLossPkr: r.fxRealisedPkr,
+      calculationStatus: !r.priced ? 'unpriced' : (r.estimated ? 'estimated' : 'exact'),
+    }));
 
     return {
       asOfTimestamp: new Date().toISOString(),
       baseCurrency: 'PKR',
       currentFxRate: pkrRate,
+      period: defs.period,
       export: {
         rows: exportRows,
-        totalBookedProfitPkr: exportRows.reduce((s, r) => s + r.bookedProfitPkr, 0),
-        totalFxGainLossPkr: exportRows.reduce((s, r) => s + r.fxGainLossPkr, 0),
+        ...et,
+        // Names the Profit page has always read.
+        totalBookedProfitPkr: et.bookedPkr,
+        totalRevenuePkr: et.bookedRevenuePkr,
+        totalFxGainLossPkr: et.fxRealisedPkr,
       },
       mill: {
-        rows: millRows,
-        totalProfitPkr: millRows.reduce((s, r) => s + r.grossProfit, 0),
+        basis: 'sales_of_mill_output',
+        rows: batchRows,
+        ...defs.mill,
+        totalProfitPkr: defs.mill.profitPkr,
       },
+      local: {
+        basis: 'non_mill_output_sales',
+        ...defs.local,
+      },
+      consolidated: defs.consolidated,
     };
   },
 };

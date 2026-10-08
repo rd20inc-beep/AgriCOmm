@@ -105,6 +105,11 @@ const reportingController = {
     try {
       const { entity, dateFrom, dateTo } = req.query;
       const data = await reportingService.getExecutiveSummary({ entity, dateFrom, dateTo });
+      // The Booked / Realised / Pipeline profit figures follow the profit
+      // visibility rule (reports.view_profit or finance.view).
+      if (!(await require('../../utils/costVisibility').canSeeProfit(req))) {
+        for (const k of ['bookedProfitPkr', 'realisedProfitPkr', 'pipelineProfitPkr', 'avgMarginPct', 'fxRealisedPkr']) data[k] = null;
+      }
       return res.json({ success: true, data });
     } catch (err) {
       console.error('Executive summary error:', err);
