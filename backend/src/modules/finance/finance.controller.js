@@ -1710,9 +1710,17 @@ const financeController = {
       const { page = 1, limit = 20, bank_account_id, from_date, to_date } = req.query;
       const offset = (Math.max(1, parseInt(page)) - 1) * parseInt(limit);
 
+      // Rows written by a fund / contra transfer carry fund_transfer_id (mig
+      // 319): bring the transfer's direction and both account names along so
+      // the Cash page can label them "CONTRA · From → To" and open the transfer.
       let query = db('bank_transactions as bt')
         .leftJoin('bank_accounts as ba', 'bt.bank_account_id', 'ba.id')
-        .select('bt.*', 'ba.name as account_name');
+        .leftJoin('fund_transfers as ft', 'ft.id', 'bt.fund_transfer_id')
+        .leftJoin('bank_accounts as fta', 'fta.id', 'ft.from_account_id')
+        .leftJoin('bank_accounts as ftb', 'ftb.id', 'ft.to_account_id')
+        .select('bt.*', 'ba.name as account_name',
+          'ft.transfer_no as ft_transfer_no', 'ft.direction as ft_direction', 'ft.status as ft_status',
+          'fta.name as ft_from_account_name', 'ftb.name as ft_to_account_name');
 
       if (bank_account_id) {
         query = query.where('bt.bank_account_id', bank_account_id);

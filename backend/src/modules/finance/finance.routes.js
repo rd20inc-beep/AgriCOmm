@@ -11,6 +11,7 @@ const auditAction = require('../../middleware/audit');
 const validate = require('../../middleware/validate');
 const schemas = require('../../middleware/schemas');
 const fundTransfers = require('../finance/fundTransfers.service');
+const { isMillOnlyPayer } = require('../../shared/millPayer');
 
 // #14 Phase 1e — supporting-document upload for payments (WHT certificate,
 // vendor invoice, receipt). Disk storage under uploads/payments, mirroring the
@@ -29,12 +30,95 @@ const payAttachStorage = multer.diskStorage({
 });
 const payAttachUpload = multer({ storage: payAttachStorage, limits: { fileSize: 25 * 1024 * 1024 } });
 
+// Contra-transfer supporting documents (bank advice, deposit slip) — same
+// pattern as payment attachments, own folder uploads/contra.
+const CONTRA_UPLOAD_DIR = require('../../config/paths').uploadPath('contra');
+const contraAttachUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => {
+      if (!fs.existsSync(CONTRA_UPLOAD_DIR)) fs.mkdirSync(CONTRA_UPLOAD_DIR, { recursive: true });
+      cb(null, CONTRA_UPLOAD_DIR);
+    },
+    filename: (req, file, cb) => cb(null, `${Date.now()}-${Math.round(Math.random() * 1e6)}${path.extname(file.originalname)}`),
+  }),
+  limits: { fileSize: 25 * 1024 * 1024 },
+});
+
+// Error → response for the transfer routes. A 409 carrying the transfer that
+// already exists (duplicate client_ref) returns it so the client can show it.
+function sendTransferError(res, e) {
+  const status = e.statusCode || e.status || 400;
+  const body = { success: false, message: e.message };
+  if (e.existing) body.data = { transfer: e.existing };
+  return res.status(status).json(body);
+}
+
+// ── Contra transfers (money between the company's own accounts) ──
+// Create: finance.confirm_payment, or milling.edit for a mill-only payer who
+// may then use only the mill's own accounts (both sides — shared/millPayer).
+// Same-entity → settles at once; Head Office ⇄ Mill → the two-phase flow.
+const canMoveMoney = authorizeAny(['finance', 'confirm_payment'], ['milling', 'edit']);
+router.post('/contra-transfers', canMoveMoney,
+  validate(schemas.createContraTransfer),
+  auditAction('contra_transfer', 'finance', (req, data) => data?.data?.transfer?.id || null),
+  async (req, res) => {
+    try {
+      const millOnly = await isMillOnlyPayer(req);
+      const transfer = await fundTransfers.createContra(req.body, req.user?.id, { millOnly });
+      return res.json({ success: true, data: { transfer } });
+    } catch (e) { return sendTransferError(res, e); }
+  });
+// The default rate the drawer pre-fills (fx_rates, else the system default).
+router.get('/contra-transfers/rate', canMoveMoney, async (req, res) => {
+  try {
+    const currency = String(req.query.currency || '').toUpperCase();
+    if (!/^[A-Z]{3}$/.test(currency) || currency === 'PKR') {
+      return res.status(400).json({ success: false, message: 'currency must be a 3-letter non-PKR code.' });
+    }
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || '')) ? req.query.date : new Date().toISOString().slice(0, 10);
+    const r = await require('./fxRate.service').getRateForDate(currency, date);
+    return res.json({ success: true, data: { currency, date, rate: r.rate, source: r.source, effective_date: r.effectiveDate || null, warning: r.warning || null } });
+  } catch (e) { return res.status(500).json({ success: false, message: e.message }); }
+});
+router.post('/fund-transfers/attachment', canMoveMoney, contraAttachUpload.single('file'), (req, res) => {
+  if (!req.file) return res.status(400).json({ success: false, message: 'No file uploaded.' });
+  return res.json({ success: true, data: { url: req.file.filename, name: req.file.originalname } });
+});
+router.get('/fund-transfers/attachment/:file', authorize('finance', 'view'), (req, res) => {
+  const safe = path.basename(req.params.file || '');
+  const full = path.join(CONTRA_UPLOAD_DIR, safe);
+  if (!full.startsWith(CONTRA_UPLOAD_DIR) || !fs.existsSync(full)) {
+    return res.status(404).json({ success: false, message: 'Attachment not found.' });
+  }
+  return res.sendFile(full);
+});
+// Edit = reverse the original + create the corrected transfer, atomically.
+// Owner / Super Admin, like reversal.
+router.post('/fund-transfers/:id/replace', authorizeRole('Owner', 'Super Admin'),
+  validate(schemas.replaceContraTransfer),
+  auditAction('replace_fund_transfer', 'finance', (req) => req.params.id),
+  async (req, res) => {
+    try {
+      const { reason, ...payload } = req.body;
+      const result = await fundTransfers.replace(req.params.id, payload, req.user?.id, { reason });
+      return res.json({ success: true, data: result });
+    } catch (e) { return sendTransferError(res, e); }
+  });
+
 // ── Head Office ⇄ Mill fund transfers ──
 router.get('/fund-transfers', authorize('finance', 'view'), async (req, res) => {
   try {
     const transfers = await fundTransfers.list(req.query);
     return res.json({ success: true, data: { transfers } });
   } catch (e) { return res.status(e.statusCode || 500).json({ success: false, message: e.message }); }
+});
+// One transfer: both sides' bank rows, journals, audit fields, replace links.
+router.get('/fund-transfers/:id', authorize('finance', 'view'), async (req, res) => {
+  try {
+    if (!/^\d+$/.test(String(req.params.id))) return res.status(404).json({ success: false, message: 'Fund transfer not found.' });
+    const transfer = await fundTransfers.getById(req.params.id);
+    return res.json({ success: true, data: { transfer } });
+  } catch (e) { return sendTransferError(res, e); }
 });
 router.post('/fund-transfers', authorize('finance', 'confirm_payment'),
   auditAction('fund_transfer', 'finance', (req, data) => data?.data?.transfer?.id || null),
@@ -79,9 +163,12 @@ async function reverseTransferHandler(req, res) {
   try {
     const result = await fundTransfers.reverse(req.params.id, req.user?.id, { reason: req.body?.reason });
     return res.json({ success: true, data: result });
-  } catch (e) { return res.status(e.statusCode || 400).json({ success: false, message: e.message }); }
+  } catch (e) { return sendTransferError(res, e); }
 }
+// A reason is required (kept on the transfer as reversal_reason). The DELETE
+// alias predates that and still reverses without one.
 router.post('/fund-transfers/:id/reverse', authorizeRole('Owner', 'Super Admin'),
+  validate(schemas.reverseFundTransfer),
   auditAction('reverse_fund_transfer', 'finance', (req) => req.params.id),
   reverseTransferHandler);
 router.delete('/fund-transfers/:id', authorizeRole('Owner', 'Super Admin'),

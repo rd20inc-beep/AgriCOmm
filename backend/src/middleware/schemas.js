@@ -547,6 +547,47 @@ const createInternalTransfer = Joi.object({
   status: Joi.string().allow(null, ''),
 });
 
+// ===================== CONTRA TRANSFERS =====================
+// Money between the company's own accounts (fundTransfers.createContra). Dates
+// stay strings (.raw()) — the service works in YYYY-MM-DD. Every field the
+// service reads is declared here: validate() strips anything else.
+const ISO_DAY = Joi.date().iso().raw();
+const contraTransferFields = {
+  from_account_id: Joi.number().integer().positive().required(),
+  to_account_id: Joi.number().integer().positive().required(),
+  amount: Joi.number().positive().required().messages({ 'number.positive': 'Amount must be greater than zero' }),
+  currency: Joi.string().trim().uppercase().length(3).allow(null, ''),
+  to_amount: Joi.number().positive().allow(null, ''),
+  to_currency: Joi.string().trim().uppercase().length(3).allow(null, ''),
+  fx_rate: Joi.number().positive().allow(null, ''),
+  rate_date: ISO_DAY.allow(null, ''),
+  bank_charges: Joi.number().min(0).allow(null, ''),
+  transfer_date: ISO_DAY.allow(null, ''),
+  method: Joi.string().valid('cash', 'bank_transfer', 'cheque', 'online').allow(null, ''),
+  reference: Joi.string().trim().max(100).required().messages({
+    'any.required': 'Reference / transaction number is required',
+    'string.empty': 'Reference / transaction number is required',
+  }),
+  notes: Joi.string().max(2000).allow(null, ''),
+  attachment_url: Joi.string().max(500).allow(null, ''),
+  attachment_name: Joi.string().max(500).allow(null, ''),
+  client_ref: Joi.string().guid().allow(null, ''),
+};
+const createContraTransfer = Joi.object(contraTransferFields);
+const replaceContraTransfer = Joi.object({
+  ...contraTransferFields,
+  reason: Joi.string().trim().min(1).max(2000).required().messages({
+    'any.required': 'A reason is required to edit a transfer',
+    'string.empty': 'A reason is required to edit a transfer',
+  }),
+});
+const reverseFundTransfer = Joi.object({
+  reason: Joi.string().trim().min(1).max(2000).required().messages({
+    'any.required': 'A reason is required to reverse a transfer',
+    'string.empty': 'A reason is required to reverse a transfer',
+  }),
+});
+
 // ===================== PAYMENTS =====================
 
 const recordPayment = Joi.object({
@@ -839,6 +880,9 @@ module.exports = {
   allocateAdvance,
   createInternalTransfer,
   recordPayment,
+  createContraTransfer,
+  replaceContraTransfer,
+  reverseFundTransfer,
   createJournal,
   stockAdjustment,
   submitApproval,
