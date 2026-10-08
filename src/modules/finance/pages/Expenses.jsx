@@ -11,6 +11,8 @@ import { TYPES } from '../utils/expenseCatalogue';
 import ExpenseCreateDrawer from '../components/ExpenseCreateDrawer';
 import { todayLocalISO, fmtPKR, fmtMoney, fmtDate } from '../../../shared/utils/format';
 import StatusBadge from '../../../shared/components/StatusBadge';
+import { HeadlineCard, TypeChip, EmptyLine, InlineError } from '../components/FinanceUI';
+import { btnSecondary, btnRowSecondary, btnIcon, th, tdMoney, errorText } from '../utils/uiClasses';
 
 // ─── Formatting ──────────────────────────────────────────────────────
 // Exact to the paisa, in the expense's own currency (PKR / USD / EUR / GBP).
@@ -49,7 +51,7 @@ export default function Expenses() {
   const [typeFilter, setTypeFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [search, setSearch] = useState('');
-  const { data: expenses = [], isLoading } = useExpenses({
+  const { data: expenses = [], isLoading, error, refetch } = useExpenses({
     ...(typeFilter ? { expense_type: typeFilter } : {}),
     ...(statusFilter ? { payment_status: statusFilter } : {}),
     ...rangeParams,
@@ -85,23 +87,18 @@ export default function Expenses() {
 
   return (
     <div className="space-y-5 pb-4">
-      {/* ─── Hero band ────────────────────────────────────────────── */}
-      <div className="rounded-2xl bg-gradient-to-r from-slate-900 via-slate-800 to-red-900 p-5 sm:p-6 text-white shadow-sm relative overflow-hidden">
-        <div className="absolute inset-0 opacity-15" style={{ backgroundImage: 'radial-gradient(circle at 80% 20%, white 0%, transparent 60%)' }} />
-        <div className="relative flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2 text-xs uppercase tracking-wider opacity-80 mb-1">
-              <Wallet size={14} /> Business Expenses
-            </div>
-            <h1 className="text-3xl font-bold leading-tight">{fmtPKR(summary.total_amount_pkr)}</h1>
-            <p className="text-sm opacity-80 mt-1">
-              {summary.total_expenses || 0} expenses ·
-              <span className="text-red-300 font-medium"> {fmtPKR(summary.unpaid_amount_pkr)} unpaid</span>
-              <span className="opacity-60"> · {summary.unpaid_count || 0} pending</span>
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <button onClick={() => downloadCSV(filtered, [
+      {/* ─── Headline: total, with what is still unpaid ──────────────── */}
+      <HeadlineCard
+        icon={Wallet}
+        label="Business expenses"
+        value={fmtPKR(summary.total_amount_pkr)}
+        sub={<>
+          {summary.total_expenses || 0} expenses ·
+          <span className="text-red-700 font-medium"> {fmtPKR(summary.unpaid_amount_pkr)} unpaid</span>
+          <span className="text-gray-500"> · {summary.unpaid_count || 0} pending</span>
+        </>}
+        right={<>
+            <button type="button" onClick={() => downloadCSV(filtered, [
                 { key: 'expense_no', label: 'Ref' },
                 { key: 'expense_date', label: 'Date' },
                 { key: 'expense_type', label: 'Type' },
@@ -112,19 +109,18 @@ export default function Expenses() {
                 { key: 'description', label: 'Description' },
                 { key: 'payment_status', label: 'Status' },
               ], `expenses-${todayLocalISO()}.csv`)}
-              className="bg-white/15 hover:bg-white/25 backdrop-blur-sm px-3 py-2 rounded-lg text-xs font-medium inline-flex items-center gap-1 transition-colors"
+              className={btnSecondary}
             >
-              <Download size={12} /> CSV
+              <Download size={14} aria-hidden="true" /> CSV
             </button>
+            {/* The header's filled "+ Expense" is this view's primary; this is the same drawer. */}
             {canCreate && (
-              <button onClick={() => setShowForm(true)} data-action="new-expense"
-                className="bg-white text-slate-900 hover:bg-gray-100 px-4 py-2 rounded-lg text-sm font-medium inline-flex items-center gap-2 shadow-sm transition-colors">
-                <Plus size={14} /> New Expense
+              <button type="button" onClick={() => setShowForm(true)} data-action="new-expense" className={btnSecondary}>
+                <Plus size={14} aria-hidden="true" /> New Expense
               </button>
             )}
-          </div>
-        </div>
-      </div>
+        </>}
+      />
 
       {/* ─── Type tiles ───────────────────────────────────────────── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -133,20 +129,20 @@ export default function Expenses() {
           if (!T) return null;
           const Icon = T.icon;
           return (
-            <button key={t.expense_type}
+            <button key={t.expense_type} type="button" aria-pressed={typeFilter === t.expense_type}
               onClick={() => setTypeFilter(typeFilter === t.expense_type ? '' : t.expense_type)}
-              className={`bg-white rounded-xl border p-4 text-left transition-all hover:shadow-sm ${typeFilter === t.expense_type ? 'border-blue-400 ring-2 ring-blue-100' : 'border-gray-200'}`}>
-              <div className="flex items-start justify-between mb-2">
-                <span className="text-[11px] uppercase tracking-wider text-gray-500 font-medium">{T.label}</span>
-                <span className="w-7 h-7 rounded-lg bg-gray-50 text-gray-500 flex items-center justify-center"><Icon size={14} /></span>
+              className={`min-w-0 bg-white rounded-xl border p-4 text-left transition-colors hover:border-gray-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${typeFilter === t.expense_type ? 'border-blue-400 ring-2 ring-blue-100' : 'border-gray-200'}`}>
+              <div className="flex items-start justify-between gap-2 mb-2">
+                <span className="text-xs uppercase tracking-wide text-gray-500 font-medium">{T.label}</span>
+                <span className="w-8 h-8 rounded-lg bg-gray-50 text-gray-500 flex items-center justify-center shrink-0" aria-hidden="true"><Icon size={16} /></span>
               </div>
-              <div className="text-xl font-bold text-gray-900 leading-none">{fmtPKR(t.total_pkr)}</div>
-              <div className="text-[11px] text-gray-500 mt-1">{t.count || 0} entries</div>
+              <div className="text-xl sm:text-2xl font-bold text-gray-900 leading-tight tabular-nums break-words">{fmtPKR(t.total_pkr)}</div>
+              <div className="text-xs text-gray-500 mt-1">{t.count || 0} entries</div>
             </button>
           );
         })}
         {(summary.by_type || []).length === 0 && (
-          <div className="bg-white rounded-xl border border-dashed border-gray-200 p-4 text-center text-sm text-gray-400 col-span-2 lg:col-span-4">
+          <div className="bg-white rounded-xl border border-dashed border-gray-200 p-4 text-center text-sm text-gray-500 col-span-2 lg:col-span-4">
             No expenses recorded yet{canCreate ? <> — click <strong>New Expense</strong> to add the first one</> : ''}.
           </div>
         )}
@@ -155,10 +151,10 @@ export default function Expenses() {
       {/* ─── Filters ──────────────────────────────────────────────── */}
       <div className="bg-white rounded-xl border border-gray-200 p-3 flex flex-wrap items-center gap-2">
         <div className="relative flex-1 min-w-[200px]">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" aria-hidden="true" />
           <input type="text" value={search} onChange={e => setSearch(e.target.value)}
-            placeholder="Search vendor, description, ref..."
-            className="w-full pl-9 pr-4 py-2 text-sm border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500" />
+            placeholder="Search vendor, description, ref..." aria-label="Search expenses"
+            className="w-full pl-9 pr-4 min-h-10 sm:min-h-9 text-sm border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500" />
         </div>
         <FilterPills
           options={[{ v: '', l: 'All types' }, { v: 'general', l: 'General' }, { v: 'mill', l: 'Mill' }, { v: 'export', l: 'Export' }]}
@@ -175,6 +171,8 @@ export default function Expenses() {
       {/* ═══ TABLE ════════════════════════════════════════════════ */}
       <ExpenseTable
         loading={isLoading}
+        error={error}
+        onRetry={refetch}
         rows={filtered}
         onPay={canPay ? openPay : null}
         onView={openDetail}
@@ -189,10 +187,10 @@ export default function Expenses() {
 
 function FilterPills({ options, value, onChange }) {
   return (
-    <div className="inline-flex items-center gap-1 bg-gray-50 rounded-lg p-0.5">
+    <div className="inline-flex flex-wrap items-center gap-1 bg-gray-50 rounded-lg p-0.5">
       {options.map(o => (
-        <button key={o.v || 'all'} onClick={() => onChange(o.v)}
-          className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${value === o.v ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}>
+        <button key={o.v || 'all'} type="button" aria-pressed={value === o.v} onClick={() => onChange(o.v)}
+          className={`px-3 min-h-10 sm:min-h-8 text-xs font-medium rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${value === o.v ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}>
           {o.l}
         </button>
       ))}
@@ -200,15 +198,15 @@ function FilterPills({ options, value, onChange }) {
   );
 }
 
-function ExpenseTable({ loading, rows, onPay, onView }) {
+function ExpenseTable({ loading, error, onRetry, rows, onPay, onView }) {
   if (loading) {
-    return <div className="animate-pulse space-y-2">{[0,1,2,3].map(i => <div key={i} className="h-12 bg-gray-100 rounded" />)}</div>;
+    return <div className="animate-pulse space-y-2" aria-busy="true">{[0,1,2,3].map(i => <div key={i} className="h-12 bg-gray-100 rounded" />)}</div>;
   }
+  if (error) return <InlineError message={errorText(error, 'Expenses')} onRetry={onRetry} />;
   if (rows.length === 0) {
     return (
-      <div className="bg-white rounded-xl border border-gray-200 p-10 text-center">
-        <Wallet size={36} className="mx-auto text-gray-300 mb-3" />
-        <p className="text-sm text-gray-500">No expenses match the current filters.</p>
+      <div className="bg-white rounded-xl border border-gray-200">
+        <EmptyLine icon={Wallet}>No expenses match the current filters.</EmptyLine>
       </div>
     );
   }
@@ -217,15 +215,15 @@ function ExpenseTable({ loading, rows, onPay, onView }) {
       <div className="overflow-x-auto mobile-cards">
       <table className="w-full text-sm min-w-[760px]">
         <thead>
-          <tr className="border-b border-gray-200 bg-gray-50">
-            <th className="text-left py-2.5 px-4 font-semibold text-gray-600">Ref / Type</th>
-            <th className="text-left py-2.5 px-4 font-semibold text-gray-600">Date</th>
-            <th className="text-left py-2.5 px-4 font-semibold text-gray-600">Vendor / Description</th>
-            <th className="text-left py-2.5 px-4 font-semibold text-gray-600">Category</th>
-            <th className="text-right py-2.5 px-4 font-semibold text-gray-600">Amount</th>
-            <th className="text-left py-2.5 px-4 font-semibold text-gray-600">Linked To</th>
-            <th className="text-left py-2.5 px-4 font-semibold text-gray-600">Status</th>
-            <th className="text-right py-2.5 px-4 font-semibold text-gray-600"></th>
+          <tr>
+            <th className={`${th} text-left`}>Ref / Type</th>
+            <th className={`${th} text-left`}>Date</th>
+            <th className={`${th} text-left`}>Vendor / Description</th>
+            <th className={`${th} text-left`}>Category</th>
+            <th className={`${th} text-right`}>Amount</th>
+            <th className={`${th} text-left`}>Linked To</th>
+            <th className={`${th} text-left`}>Status</th>
+            <th className={`${th} text-right`}><span className="sr-only">Actions</span></th>
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-100">
@@ -233,21 +231,19 @@ function ExpenseTable({ loading, rows, onPay, onView }) {
             <tr key={e.id} className="hover:bg-gray-50">
               <td data-label="Ref / Type" className="py-2.5 px-4">
                 <p className="font-mono text-xs text-gray-700">{e.expense_no}</p>
-                <p className="text-[10px] text-gray-400 capitalize">{e.expense_type}</p>
+                <p className="text-xs text-gray-500 capitalize">{e.expense_type}</p>
               </td>
               <td data-label="Date" className="mob-hide py-2.5 px-4 text-gray-600">{fmtDate(e.expense_date)}</td>
               <td data-label="Vendor / Description" className="py-2.5 px-4">
                 <p className="font-medium text-gray-900 truncate max-w-[240px]" title={e.vendor_name || e.supplier_name_joined || undefined}>
                   {e.vendor_name || e.supplier_name_joined || '—'}
                 </p>
-                {e.description && <p className="text-[11px] text-gray-500 truncate max-w-[240px]" title={e.description}>{e.description}</p>}
+                {e.description && <p className="text-xs text-gray-500 truncate max-w-[240px]" title={e.description}>{e.description}</p>}
               </td>
               <td data-label="Category" className="mob-hide py-2.5 px-4">
-                <span className="inline-block px-2 py-0.5 text-xs font-medium rounded-full bg-gray-100 text-gray-700 capitalize">
-                  {(e.category || '').replace(/_/g, ' ')}
-                </span>
+                <TypeChip className="capitalize">{(e.category || '').replace(/_/g, ' ')}</TypeChip>
               </td>
-              <td data-label="Amount" className="py-2.5 px-4 text-right font-bold text-gray-900">
+              <td data-label="Amount" className={`py-2.5 px-4 ${tdMoney} font-semibold text-gray-900`}>
                 {fmtAmt(e.amount, e.currency)}
               </td>
               <td data-label="Linked To" className="mob-hide py-2.5 px-4 text-xs">
@@ -261,14 +257,12 @@ function ExpenseTable({ loading, rows, onPay, onView }) {
               <td data-label="Actions" className="py-2.5 px-4 text-right">
                 <div className="inline-flex items-center gap-1.5">
                   {e.payment_status !== 'Paid' && onPay && (
-                    <button onClick={() => onPay(e)} data-action="pay"
-                      className="px-2.5 py-1 bg-emerald-50 text-emerald-700 text-xs font-medium rounded hover:bg-emerald-100 inline-flex items-center gap-1">
-                      <CreditCard size={12} /> Pay
+                    <button type="button" onClick={() => onPay(e)} data-action="pay" className={btnRowSecondary}>
+                      <CreditCard size={12} aria-hidden="true" /> Pay
                     </button>
                   )}
-                  <button onClick={() => onView?.(e)} className="text-blue-600 hover:text-blue-800 p-1" title="View details" aria-label="View details">
-
-                    <Eye size={15} />
+                  <button type="button" onClick={() => onView?.(e)} className={btnIcon} title="View details" aria-label={`View ${e.expense_no || 'expense'}`}>
+                    <Eye size={15} aria-hidden="true" />
                   </button>
                 </div>
               </td>
