@@ -665,6 +665,7 @@ COL export_orders.balance_expected:numeric:NOT NULL
 COL export_orders.balance_fx_rate:numeric:NULL
 COL export_orders.balance_received:numeric:NOT NULL
 COL export_orders.balance_received_pkr:numeric:NULL
+COL export_orders.balance_term_days:integer:NOT NULL
 COL export_orders.bank_account_id:integer:NULL
 COL export_orders.bl_date:date:NULL
 COL export_orders.bl_number:character varying:NULL
@@ -3029,6 +3030,7 @@ CON export_orders.chk_export_orders_bag_size_kg_nn(c)
 CON export_orders.chk_export_orders_bag_weight_gm_nn(c)
 CON export_orders.chk_export_orders_balance_expected_nonneg(c)
 CON export_orders.chk_export_orders_balance_received_nonneg(c)
+CON export_orders.chk_export_orders_balance_term_days_range(c)
 CON export_orders.chk_export_orders_broken_pct_target_range(c)
 CON export_orders.chk_export_orders_currency_valid(c)
 CON export_orders.chk_export_orders_daterange(c)

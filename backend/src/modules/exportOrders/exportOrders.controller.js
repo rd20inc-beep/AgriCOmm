@@ -12,6 +12,8 @@ const debitNoteService = require('./debitNote.service');
 const { unwindOrderReceipts } = require('./unwindReceipts');
 const { recordPendingExportReceipt, postExportReceipt, confirmPendingExportReceipt } = require('./exportReceipts');
 const { fillSingleLineBagSpec, linePackaging } = require('./orderLines');
+const { syncBalanceDueDate } = require('./balanceDueDate');
+const { balanceTermDaysSetting } = require('../finance/collectionRate');
 const { assertAccountCurrency } = require('../../shared/accountCurrency');
 const { mtToKg, kgToMt } = require('../../shared/units');
 const notificationService = require('../../services/notificationService');
@@ -349,6 +351,8 @@ const ALLOWED_UPDATE_FIELDS = [
   'doc_weight_unit',
   'freight_per_mt', 'insurance_per_mt', 'freight_basis_date',
   'freight_valid_until', 'freight_display', 'freight_clause',
+  // Days after sailing (BL / departure) the balance is due — C6.
+  'balance_term_days',
 ];
 
 // Batch 7 — container-capacity rule. The 25,000 KG (loose) / 20,000 KG (palletized)
@@ -405,13 +409,20 @@ async function ensureOrderReceivables(trx, order) {
   }
 }
 
+// The balance term for a new order: the one given (0..365), else the setting.
+async function resolveBalanceTermDays(conn, given) {
+  const n = parseInt(given, 10);
+  if (given !== undefined && given !== null && given !== '' && Number.isFinite(n) && n >= 0 && n <= 365) return n;
+  return balanceTermDaysSetting(conn);
+}
+
 // Columns where Postgres rejects '' — coerce empty strings to null on update.
 const NUMERIC_UPDATE_FIELDS = new Set([
   'qty_mt', 'price_per_mt', 'advance_pct',
   'bag_size_kg', 'bag_weight_gm', 'broken_pct_target',
   'master_bag_size_kg', 'master_bag_weight_gm',
   'freight_per_mt', 'insurance_per_mt',
-  'bank_account_id', 'units_per_bag',
+  'bank_account_id', 'units_per_bag', 'balance_term_days',
 ]);
 const DATE_UPDATE_FIELDS = new Set([
   'shipment_eta', 'production_date', 'expiry_date',
@@ -1095,6 +1106,9 @@ const exportOrderController = {
             packing_type: ['retail', 'jumbo', 'container'].includes(packing_type) ? packing_type : 'retail',
             palletized: !!palletized,
             payment_terms: payment_terms || null,
+            // Days after sailing the balance is due (C6): the order's own, else
+            // the system setting export_balance_term_days.
+            balance_term_days: await resolveBalanceTermDays(trx, req.body.balance_term_days),
             // Company bank account for this order's documents (optional).
             bank_account_id: req.body.bank_account_id || null,
             // Which buyer location lines print on documents
@@ -1306,6 +1320,20 @@ const exportOrderController = {
             v = null;
           }
           safeUpdates[key] = v;
+        }
+      }
+
+      // Balance term (C6): blank returns to the system setting; anything else
+      // must be whole days 0..365 (the column is NOT NULL with a CHECK).
+      if (safeUpdates.balance_term_days !== undefined) {
+        if (safeUpdates.balance_term_days === null) {
+          safeUpdates.balance_term_days = await balanceTermDaysSetting(db);
+        } else {
+          const n = Number(safeUpdates.balance_term_days);
+          if (!Number.isInteger(n) || n < 0 || n > 365) {
+            return res.status(400).json({ success: false, field: 'balance_term_days', message: 'Balance term must be whole days between 0 and 365.' });
+          }
+          safeUpdates.balance_term_days = n;
         }
       }
 
@@ -1527,6 +1555,12 @@ const exportOrderController = {
               ...partyFields,
               updated_at: trx.fn.now(),
             });
+        }
+
+        // The balance falls due a term after sailing (C6): re-date it when the
+        // BL date or the term changes, or when the receivable was just rebased.
+        if (safeUpdates.bl_date !== undefined || safeUpdates.balance_term_days !== undefined || resyncReceivables) {
+          await syncBalanceDueDate(trx, id);
         }
 
         // Handle packing_lines update: delete old, insert new
@@ -1850,6 +1884,10 @@ const exportOrderController = {
           updated_at: trx.fn.now(),
         });
 
+        // The balance is due a term after sailing (C6) — re-date it from the
+        // BL date / atd just saved.
+        await syncBalanceDueDate(trx, id);
+
         // The snapshot handed to transitionOrder. It resolves each field exactly
         // as the update above did, or it would claim a field is empty when the row
         // still holds a value — and a transition that checks for one would refuse
@@ -1957,6 +1995,7 @@ const exportOrderController = {
             : 'Draft submitted'),
         });
         await ensureOrderReceivables(trx, order);
+        await syncBalanceDueDate(trx, order.id);
         return moved;
       });
 

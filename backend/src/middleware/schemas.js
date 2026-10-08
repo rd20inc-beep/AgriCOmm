@@ -122,6 +122,9 @@ const createExportOrder = Joi.object({
   packing_type: Joi.string().valid('retail', 'jumbo', 'container').default('retail'),
   palletized: Joi.boolean().default(false),
   payment_terms: Joi.string().allow('', null),
+  // Days after sailing (BL / departure) the balance falls due (C6, mig 323).
+  // Blank → the system setting export_balance_term_days.
+  balance_term_days: Joi.number().integer().min(0).max(365).allow(null, ''),
   // #6 — Company bank account whose details print on this order's documents and
   // which its payments settle into. Mandatory at creation.
   bank_account_id: Joi.number().integer().positive().required(),

@@ -328,6 +328,19 @@ router.get('/profit-headline', authorizeAny(['finance', 'view'], ['reports', 'vi
   }
 });
 
+// Collection rate (C6): received ÷ amounts due, per currency, against the
+// configurable target — the Finance Home tile and the operations Dashboard's
+// Money Received tile. Anyone who may see money: finance.view or reports.view_cost.
+router.get('/collection-rate', authorizeAny(['finance', 'view'], ['reports', 'view_cost']), async (req, res) => {
+  try {
+    const { collectionRate } = require('./collectionRate');
+    return res.json({ success: true, data: await collectionRate(db) });
+  } catch (err) {
+    console.error('Finance collection-rate error:', err);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 // Cost Allocations
 router.get('/cost-allocations', authorize('finance', 'view'), controller.listCostAllocations);
 router.post(
