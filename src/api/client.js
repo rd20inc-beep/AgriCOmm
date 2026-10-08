@@ -84,6 +84,35 @@ function getToken() {
   return localStorage.getItem('riceflow_token');
 }
 
+// Owner approval (G-11): while an owner-authorized action runs, the owner's
+// password rides on the request that names that owner (body
+// authorized_by_owner_id) as the X-Owner-Credential header — base64 of UTF-8,
+// never in the body (the audit log stores bodies) and never stored. Only that
+// request carries it, and it is never queued offline.
+let pendingOwnerCredential = null; // { ownerId, value }
+
+function encodeCredential(secret) {
+  const bytes = new TextEncoder().encode(String(secret));
+  let bin = '';
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin);
+}
+
+async function withOwnerCredential(ownerId, secret, fn) {
+  pendingOwnerCredential = { ownerId: Number(ownerId), value: encodeCredential(secret) };
+  try {
+    return await fn();
+  } finally {
+    pendingOwnerCredential = null;
+  }
+}
+
+function ownerCredentialFor(method, body) {
+  if (!pendingOwnerCredential || !MUTATING.has(method)) return null;
+  if (!body || typeof body !== 'object' || (typeof FormData !== 'undefined' && body instanceof FormData)) return null;
+  return Number(body.authorized_by_owner_id) === pendingOwnerCredential.ownerId ? pendingOwnerCredential.value : null;
+}
+
 async function request(endpoint, options = {}) {
   const { method = 'GET', body, headers = {}, timeout = 30000 } = options;
 
@@ -101,6 +130,8 @@ async function request(endpoint, options = {}) {
   }
   // Bind every request to this device so a revoked device can be blocked server-side.
   try { config.headers['X-Device-Id'] = getDeviceId(); } catch { /* noop */ }
+  const ownerCredential = ownerCredentialFor(method, body);
+  if (ownerCredential) config.headers['X-Owner-Credential'] = ownerCredential;
 
   if (body && method !== 'GET') {
     if (typeof FormData !== 'undefined' && body instanceof FormData) {
@@ -110,6 +141,12 @@ async function request(endpoint, options = {}) {
     } else {
       config.body = typeof body === 'string' ? body : JSON.stringify(body);
     }
+  }
+
+  // An owner-authorized write needs the server to check the owner's password
+  // now — it is never queued for later.
+  if (ownerCredential && !isOnline()) {
+    throw new ApiError('Owner approval needs a connection — try again when online.', 0);
   }
 
   // Known-offline: queue eligible writes immediately (skip the network + timeout).
@@ -179,8 +216,9 @@ async function request(endpoint, options = {}) {
     // A genuine network failure (server unreachable) — flag offline so the UI
     // can show the banner and hold work for sync.
     markServerOffline();
-    // Capture eligible writes into the outbox instead of losing them.
-    if (isQueueable(method, endpoint, body)) {
+    // Capture eligible writes into the outbox instead of losing them (never
+    // an owner-authorized one — see above).
+    if (!ownerCredential && isQueueable(method, endpoint, body)) {
       return queueWrite(method, endpoint, body);
     }
     // Serve a mirrored read if the network dropped mid-GET.
@@ -421,4 +459,4 @@ async function replayRequest(item) {
 }
 
 export default api;
-export { ApiError, API_BASE, replayRequest, uploadReplay };
+export { ApiError, API_BASE, replayRequest, uploadReplay, withOwnerCredential };
