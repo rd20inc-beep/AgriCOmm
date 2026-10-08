@@ -5,13 +5,14 @@ import { Landmark, Wallet, TrendingUp, TrendingDown, Activity, Printer, ArrowLef
 import { FinanceKPI, FinanceTable, FinanceChart } from '../../../components/finance';
 import { useBankAccounts, useBankTransactions, useFundTransfers, useReverseFundTransfer, useAcceptFundTransfer } from '../../../api/queries';
 import ListCapHint from '../../../shared/components/ListCapHint';
-import TransferFundsDrawer from '../components/TransferFundsDrawer';
 import ContraTransferDrawer from '../components/ContraTransferDrawer';
 import FundTransferDetailDrawer from '../components/FundTransferDetailDrawer';
 import { transferRowLabel, transferStatusLabel, DIRECTION_LABEL } from '../utils/contraTransfer';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
+import { useFinanceDrawers } from '../drawers/drawersContext';
+import { canAcceptTransfer } from '../utils/transferPermissions';
 import { shortenRef } from '../utils/refs';
 import StatusBadge from '../../../shared/components/StatusBadge';
 import { toLocalISODate, fmtPKR, fmtUSD, fmtMoney, fmtDate, fmtDateTime } from '../../../shared/utils/format';
@@ -23,7 +24,6 @@ export default function Cash() {
   const { data: txData, isLoading: loadingTx } = useBankTransactions(rangeParams);
   const allTransactions = txData?.transactions || txData || [];
   const [accountFilter, setAccountFilter] = useState('all');
-  const [showTransfer, setShowTransfer] = useState(false);
   // Contra transfer drawer (new, or editing = reverse + replace) and the
   // transfer detail drawer.
   const [contra, setContra] = useState({ open: false, editing: null });
@@ -35,6 +35,9 @@ export default function Cash() {
   // Reversal / edit is Owner / Super Admin only (the server enforces the same).
   const canReverse = user?.role === 'Owner' || user?.role === 'Super Admin';
   const canCreateContra = hasPermission('finance', 'confirm_payment') || hasPermission('milling', 'edit');
+  // A bank row opens the Transaction drawer (or its transfer); an account row
+  // opens the Account drawer.
+  const drawers = useFinanceDrawers();
   const [confirm, confirmDialog] = useConfirm();
 
   // ?action=transfer (the Finance header's + Transfer) opens a new contra
@@ -260,6 +263,7 @@ export default function Cash() {
       )}
 
       <FinanceTable title="Bank Accounts" columns={accountColumns} data={accounts}
+        onRowClick={drawers?.openAccount ? (row) => drawers.openAccount(row) : undefined}
         searchKeys={['name', 'bankName', 'accountNumber']} exportFilename="bank-accounts" loading={loadingAccounts} />
 
       {/* Head Office ⇄ Mill fund transfers */}
@@ -268,7 +272,6 @@ export default function Cash() {
           <h3 className="text-sm font-semibold text-gray-800 inline-flex items-center gap-1.5"><ArrowLeftRight size={14} className="text-blue-500" /> Transfers between your accounts</h3>
           <div className="no-print flex items-center gap-3">
             {canCreateContra && <button onClick={() => setContra({ open: true, editing: null })} className="text-xs font-medium text-blue-600 hover:text-blue-700">+ Contra transfer</button>}
-            <button onClick={() => setShowTransfer(true)} className="text-xs font-medium text-gray-500 hover:text-gray-700">+ HO ⇄ Mill</button>
           </div>
         </div>
         {fundTransfers.length === 0 ? (
@@ -309,7 +312,7 @@ export default function Cash() {
                         : transferStatusLabel(t)} />
                     </td>
                     <td className="px-3 py-2 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                      {t.status === 'pending' && hoIsReceiver && (
+                      {t.status === 'pending' && hoIsReceiver && canAcceptTransfer(t, hasPermission) && (
                         <button onClick={() => handleAcceptTransfer(t)} disabled={acceptTransfer.isPending} title="Accept funds"
                           className="no-print inline-flex items-center gap-1 px-2 py-1 mr-1 text-[11px] font-medium rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"><Check size={12} /> Accept</button>
                       )}
@@ -349,12 +352,14 @@ export default function Cash() {
           </div>
           <ListCapHint rows={allTransactions} total={txData?.listTotal} className="mb-1" />
           <FinanceTable title="Recent Transactions" columns={txColumns} data={transactions}
-            onRowClick={(row) => { if (row.fundTransferId) setDetailId(row.fundTransferId); }}
+            onRowClick={(row) => {
+              if (row.fundTransferId) setDetailId(row.fundTransferId);
+              else drawers?.openTransaction?.('bank', row.id);
+            }}
             searchKeys={['reference', 'counterparty', 'accountName', 'category', 'ftFromAccountName', 'ftToAccountName']} exportFilename="bank-transactions" loading={loadingTx} />
         </div>
       )}
       </div>{/* /.print-report */}
-      <TransferFundsDrawer open={showTransfer} onClose={() => setShowTransfer(false)} defaultDirection="ho_to_mill" />
       <ContraTransferDrawer open={contraOpen} editing={contra.editing}
         onClose={closeContra}
         onDone={(data) => { const id = data?.transfer?.id; if (id && contra.editing) setDetailId(id); }} />
