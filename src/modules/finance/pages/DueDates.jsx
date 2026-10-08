@@ -10,6 +10,8 @@ import { AccountSelect } from '../../../components/payments/PaymentFields';
 import { accountsForMethod, pickAccountForMethod } from '../../../components/payments/paymentPayload';
 import { accountsForCurrency } from '../../../shared/utils/accountCurrency';
 import { fmtMoney as fmtMoneyBase, fmtDate } from '../../../shared/utils/format';
+import { TypeChip, EmptyLine, InlineError } from '../components/FinanceUI';
+import { btnPrimary, btnSecondary, btnRowSecondary, th, tdMoney, errorText } from '../utils/uiClasses';
 
 // Exact, two decimals; each amount in its own currency (USD export receivables vs PKR dues).
 const fmtMoney = (n, cur) => fmtMoneyBase(parseFloat(n) || 0, cur || 'PKR', { decimals: 2 });
@@ -19,46 +21,45 @@ function List({ title, icon: Icon, tone, items, onClear, clearing, canClear }) {
   // Each currency on its own — a USD cheque and a rupee due are never added.
   const totals = totalsByCurrency(items, 'amount');
   return (
-    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-      <div className={`px-5 py-3 border-b border-gray-100 flex items-center justify-between ${tone === 'in' ? 'bg-emerald-50' : 'bg-red-50'}`}>
+    <section className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div className="px-4 sm:px-5 py-3 border-b border-gray-100 flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <Icon size={16} className={tone === 'in' ? 'text-emerald-600' : 'text-red-600'} />
+          <Icon size={16} className={tone === 'in' ? 'text-emerald-600' : 'text-red-600'} aria-hidden="true" />
           <h2 className="text-sm font-semibold text-gray-900">{title}</h2>
-          <span className="text-xs text-gray-500">({items.length})</span>
+          <span className="text-xs text-gray-500 tabular-nums">({items.length})</span>
         </div>
-        <PerCurrency totals={totals} empty="" className={`text-sm font-bold ${tone === 'in' ? 'text-emerald-700' : 'text-red-700'}`} />
+        <PerCurrency totals={totals} empty="" className="text-sm font-bold text-gray-900" />
       </div>
       {items.length === 0 ? (
-        <p className="text-sm text-gray-400 text-center py-10">Nothing upcoming.</p>
+        <EmptyLine icon={CheckCircle}>Nothing upcoming.</EmptyLine>
       ) : (
         <div className="overflow-x-auto mobile-cards">
           <table className="w-full text-sm">
-            <thead><tr className="text-left text-[11px] text-gray-500 uppercase border-b border-gray-100">
-              <th className="py-2 px-4">Due</th><th className="py-2 px-4">Party</th>
-              <th className="py-2 px-4">Type</th><th className="py-2 px-4 text-right">Amount</th><th className="py-2 px-4"></th>
+            <thead><tr>
+              <th className={`${th} text-left`}>Due</th><th className={`${th} text-left`}>Party</th>
+              <th className={`${th} text-left`}>Type</th><th className={`${th} text-right`}>Amount</th><th className={th}><span className="sr-only">Actions</span></th>
             </tr></thead>
             <tbody className="divide-y divide-gray-50">
               {items.map((x, i) => (
                 <tr key={i} className={`hover:bg-gray-50 ${isOverdue(x.dueDate) ? 'bg-red-50/40' : ''}`}>
                   <td data-label="Due" className="py-2 px-4 whitespace-nowrap">
                     <span className={isOverdue(x.dueDate) ? 'text-red-600 font-medium' : 'text-gray-700'}>{fmtDate(x.dueDate)}</span>
-                    {isOverdue(x.dueDate) && <span className="ml-1.5 text-[10px] text-red-500 inline-flex items-center gap-0.5"><AlertTriangle size={10} /> overdue</span>}
+                    {isOverdue(x.dueDate) && <span className="ml-1.5 text-xs font-medium text-red-700 inline-flex items-center gap-0.5"><AlertTriangle size={12} aria-hidden="true" /> Overdue</span>}
                   </td>
                   <td data-label="Party" className="py-2 px-4 text-gray-900 break-words">
                     <PartyLink type={x.partyType} id={x.partyId} name={x.party} className="font-medium" />
                   </td>
                   <td data-label="Type" className="py-2 px-4">
-                    <span className={`text-[11px] px-2 py-0.5 rounded-full ${x.kind === 'cheque' ? 'bg-blue-50 text-blue-700' : 'bg-purple-50 text-purple-700'}`}>{x.label}</span>
+                    <TypeChip>{x.label}</TypeChip>
                     {x.reference && <span className="ml-1.5 text-[11px] text-gray-400 font-mono">{x.reference}</span>}
                   </td>
-                  <td data-label="Amount" className="py-2 px-4 text-right tabular-nums font-medium text-gray-900">
+                  <td data-label="Amount" className={`py-2 px-4 ${tdMoney} font-medium text-gray-900`}>
                     {fmtMoney(x.amount, x.currency)}
                   </td>
                   <td data-label="" className="py-2 px-4 text-right">
                     {x.paymentId && canClear && (
-                      <button onClick={() => onClear(x)} disabled={clearing}
-                        className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-emerald-700 bg-emerald-50 rounded hover:bg-emerald-100 disabled:opacity-50">
-                        <CheckCircle size={12} /> Mark cleared
+                      <button type="button" onClick={() => onClear(x)} disabled={clearing} className={btnRowSecondary}>
+                        <CheckCircle size={12} aria-hidden="true" /> Mark cleared
                       </button>
                     )}
                   </td>
@@ -68,7 +69,7 @@ function List({ title, icon: Icon, tone, items, onClear, clearing, canClear }) {
           </table>
         </div>
       )}
-    </div>
+    </section>
   );
 }
 
@@ -114,24 +115,23 @@ export function ClearChequeDialog({ item, accounts: allAccounts, busy, onCancel,
               {isIn ? 'The money lands in the account below' : 'The money leaves the account below'}, {item.party || 'the party'}&apos;s balance is settled and the ledger entry is posted — today.
             </p>
           </div>
-          <button onClick={() => !busy && onCancel()} className="shrink-0 text-gray-400 hover:text-gray-600" aria-label="Close">
-            <X className="w-4 h-4" />
+          <button type="button" onClick={() => !busy && onCancel()} className="shrink-0 -mr-2 -mt-1 inline-flex items-center justify-center w-10 h-10 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" aria-label="Close">
+            <X className="w-4 h-4" aria-hidden="true" />
           </button>
         </div>
         <div className="mx-5 mb-3 rounded-lg bg-gray-50 border border-gray-200 px-3 py-2 text-center">
           <p className="text-[11px] uppercase tracking-wide text-gray-500">Amount</p>
-          <p className="text-lg font-bold text-gray-900 break-words">{fmtMoney(item.amount, item.currency)}</p>
+          <p className="text-lg font-bold text-gray-900 break-words tabular-nums">{fmtMoney(item.amount, item.currency)}</p>
         </div>
         <div className="px-5 pb-1">
           <AccountSelect id="clear-cheque-account" accounts={accounts} value={accountId} onChange={setAccountId}
             label="Bank account it cleared through *" />
         </div>
         <div className="flex items-center justify-end gap-2 p-5 pt-3">
-          <button onClick={onCancel} disabled={busy}
-            className="px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 disabled:opacity-50">Cancel</button>
-          <button onClick={() => onConfirm(accountId)} disabled={busy || !accountId}
+          <button type="button" onClick={onCancel} disabled={busy} className={btnSecondary}>Cancel</button>
+          <button type="button" onClick={() => onConfirm(accountId)} disabled={busy || !accountId}
             title={!accountId ? 'Choose the bank account' : undefined}
-            className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-white rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50">
+            className={btnPrimary}>
             {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : null}Mark cleared
           </button>
         </div>
@@ -141,7 +141,7 @@ export function ClearChequeDialog({ item, accounts: allAccounts, busy, onCancel,
 }
 
 export default function DueDates() {
-  const { data, isLoading } = useUpcoming();
+  const { data, isLoading, error, refetch } = useUpcoming();
   const { data: allAccounts } = useBankAccounts();
   const { addToast } = useApp();
   const clearMut = useClearCheque();
@@ -169,9 +169,13 @@ export default function DueDates() {
 
   return (
     <div className="space-y-6">
-      <p className="text-sm text-gray-500">Uncleared cheques &amp; credit (udhaar) dues — when money is expected or due. A cheque settles only when you mark it cleared here.</p>
+      <p className="text-sm text-gray-600 max-w-3xl">Uncleared cheques &amp; credit (udhaar) dues — when money is expected or due. A cheque settles only when you mark it cleared here.</p>
       {isLoading ? (
-        <p className="text-sm text-gray-400">Loading…</p>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 animate-pulse" aria-busy="true">
+          <div className="h-48 bg-gray-100 rounded-xl" /><div className="h-48 bg-gray-100 rounded-xl" />
+        </div>
+      ) : error ? (
+        <InlineError message={errorText(error, 'Cheques and dues')} onRetry={refetch} />
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
           <List title="Receiving (money in)" icon={ArrowDownLeft} tone="in" items={receiving} onClear={setClearing} clearing={clearMut.isPending} canClear={canClear} />
