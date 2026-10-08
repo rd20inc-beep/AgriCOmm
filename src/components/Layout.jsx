@@ -7,6 +7,7 @@ import { useMasterDataApprovalsCount } from '../modules/admin/api/queries';
 import { usePurchaseRequirementsCount } from '../modules/purchaseRequirements/api/queries';
 import { usePendingDocumentApprovalsCount } from '../modules/documents/api/queries';
 import { RouteErrorBoundary } from './ErrorBoundary';
+import { FinanceDrawersProvider } from '../modules/finance/drawers/FinanceDrawers';
 import ChatWidget from './ChatWidget';
 import OfflineBanner from './OfflineBanner';
 import PendingSyncTray from './PendingSyncTray';
@@ -634,7 +635,7 @@ export default function Layout({ children }) {
               another page clears it (RouteErrorBoundary is keyed by route). */}
           <RouteErrorBoundary>
             <Suspense fallback={<SkeletonPage />}>
-              {children}
+              <FinanceDrawersProvider>{children}</FinanceDrawersProvider>
             </Suspense>
           </RouteErrorBoundary>
         </main>
