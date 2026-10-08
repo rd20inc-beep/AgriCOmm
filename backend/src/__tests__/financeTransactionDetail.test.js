@@ -38,6 +38,12 @@ describe('routes', () => {
     expect(stack.some((h) => h.anyOf)).toBe(false);
   });
 
+  test('attaching a document to a payment is finance.confirm_payment (the upload\'s own guard)', () => {
+    const stack = stackOf('put', '/payments/:id/attachment');
+    expect(stack.map((h) => h.permission).filter(Boolean)).toEqual(['finance.confirm_payment']);
+    expect(stack.some((h) => h.anyOf)).toBe(false);
+  });
+
   test.each(['/transactions/:kind/:id', '/search'])('no write verb is registered on %s', (path) => {
     for (const verb of ['post', 'put', 'patch', 'delete']) expect(stackOf(verb, path)).toBeNull();
   });

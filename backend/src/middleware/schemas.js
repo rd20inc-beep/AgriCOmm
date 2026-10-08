@@ -592,6 +592,13 @@ const reverseFundTransfer = Joi.object({
 
 // ===================== PAYMENTS =====================
 
+// Attach a supporting document to a payment already recorded (the file was
+// uploaded first through POST /finance/payments/attachment). Metadata only.
+const attachPaymentDocument = Joi.object({
+  attachment_url: Joi.string().max(255).required(),
+  attachment_name: Joi.string().max(255).allow(null, ''),
+});
+
 const recordPayment = Joi.object({
   type: Joi.string().valid('receipt', 'payment').required(),
   amount: Joi.number().positive().required().messages({
@@ -892,6 +899,7 @@ const updateBankAccount = Joi.object({
 });
 
 module.exports = {
+  attachPaymentDocument,
   createBankAccount,
   updateBankAccount,
   bundleDocuments,

@@ -213,6 +213,33 @@ router.post('/payments/attachment', authorize('finance', 'confirm_payment'), pay
   if (!req.file) return res.status(400).json({ success: false, message: 'No file uploaded.' });
   return res.json({ success: true, data: { url: req.file.filename, name: req.file.originalname } });
 });
+// Attach the supporting document to a payment that was recorded without one.
+// Metadata only — the amount, accounts and ledger are untouched — so it sits
+// behind the same permission as the upload itself, audited. A payment keeps
+// the document it has: this fills an empty slot, it does not replace one.
+router.put('/payments/:id/attachment', authorize('finance', 'confirm_payment'),
+  validate(schemas.attachPaymentDocument),
+  auditAction('attach_payment_document', 'payment', (req) => req.params.id),
+  async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const file = path.basename(String(req.body.attachment_url || ''));
+      if (!id) return res.status(400).json({ success: false, message: 'Invalid payment id.' });
+      if (!file || !fs.existsSync(path.join(PAY_UPLOAD_DIR, file))) {
+        return res.status(400).json({ success: false, message: 'Upload the document first.' });
+      }
+      const p = await db('payments').where({ id }).first('id', 'attachment_url');
+      if (!p) return res.status(404).json({ success: false, message: 'Payment not found.' });
+      if (p.attachment_url) return res.status(409).json({ success: false, message: 'This payment already has a document attached.' });
+      const [updated] = await db('payments').where({ id }).update({
+        attachment_url: file, attachment_name: req.body.attachment_name || file, updated_at: db.fn.now(),
+      }).returning(['id', 'attachment_url', 'attachment_name']);
+      return res.json({ success: true, data: { payment: updated } });
+    } catch (err) {
+      console.error('attach payment document error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  });
 // Serve a stored payment attachment. The :file segment is a generated basename
 // (no path separators) — resolve within the upload dir and reject traversal.
 router.get('/payments/attachment/:file', authorize('finance', 'view'), (req, res) => {
