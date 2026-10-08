@@ -27,6 +27,7 @@ function parseCustomTags(v) {
 // quantities but not the money. The key lists and the permission rule live in
 // utils/costVisibility so the lot/inventory endpoints redact the same fields.
 const { redactForUser } = require('../../utils/costVisibility');
+const { kgToMt, KG_PER_MT } = require('../../shared/units');
 
 // Mutates + returns the data object, redacting per the caller's permissions.
 function redactReport(req, data, opts) {
@@ -917,15 +918,15 @@ const reportingController = {
           if (b.status === 'Completed' || b.status === 'Approved') acc.completed += 1;
           if (isBlend(b)) {
             acc.blendedCount += 1;
-            acc.blendedRawMt += num(b.raw_qty_kg)/1000;
-            acc.blendedFinishedMt += num(b.actual_finished_kg)/1000;
+            acc.blendedRawMt += kgToMt(b.raw_qty_kg);
+            acc.blendedFinishedMt += kgToMt(b.actual_finished_kg);
           } else if (!isReceived(b)) {
             acc.pendingCount += 1;
-            acc.pendingRawMt += num(b.raw_qty_kg)/1000;
+            acc.pendingRawMt += kgToMt(b.raw_qty_kg);
           } else {
-            acc.rawMt += num(b.raw_qty_kg)/1000;
-            acc.finishedMt += num(b.actual_finished_kg)/1000;
-            acc.plannedMt += num(b.planned_finished_kg)/1000;
+            acc.rawMt += kgToMt(b.raw_qty_kg);
+            acc.finishedMt += kgToMt(b.actual_finished_kg);
+            acc.plannedMt += kgToMt(b.planned_finished_kg);
           }
           return acc;
         },
@@ -942,8 +943,8 @@ const reportingController = {
           const k = b[key] || '—';
           const r = map.get(k) || { name: k, batchCount: 0, rawMt: 0, finishedMt: 0 };
           r.batchCount += 1;
-          r.rawMt += num(b.raw_qty_kg)/1000;
-          r.finishedMt += num(b.actual_finished_kg)/1000;
+          r.rawMt += kgToMt(b.raw_qty_kg);
+          r.finishedMt += kgToMt(b.actual_finished_kg);
           map.set(k, r);
         }
         return Array.from(map.values()).map(r => ({
@@ -965,9 +966,9 @@ const reportingController = {
             status: b.status,
             processingType: b.processing_type,
             isBlend: isBlend(b),
-            rawMt: num(b.raw_qty_kg)/1000,
-            plannedMt: num(b.planned_finished_kg)/1000,
-            finishedMt: num(b.actual_finished_kg)/1000,
+            rawMt: kgToMt(b.raw_qty_kg),
+            plannedMt: kgToMt(b.planned_finished_kg),
+            finishedMt: kgToMt(b.actual_finished_kg),
             yieldPct: num(b.yield_pct) || (num(b.raw_qty_kg) > 0 ? num(b.actual_finished_kg) / num(b.raw_qty_kg) * 100 : 0),
             perKgFinished: num(b.total_cost_per_kg_finished),
             bags: bagsByBatch[`batch-${b.id}`] || 0,
@@ -1024,8 +1025,8 @@ const reportingController = {
         .whereBetween('completed_at', [fromDate, toDate])
         .count({ cnt: 'id' })
         // qty columns are KG (Phase 5c) → ÷1000 for the MT totals.
-        .select(db.raw('COALESCE(SUM(raw_qty_kg),0)/1000 as "rawMt"'))
-        .select(db.raw('COALESCE(SUM(actual_finished_kg),0)/1000 as "finishedMt"'))
+        .select(db.raw(`COALESCE(SUM(raw_qty_kg),0)/${KG_PER_MT} as "rawMt"`))
+        .select(db.raw(`COALESCE(SUM(actual_finished_kg),0)/${KG_PER_MT} as "finishedMt"`))
         .first();
 
       // ─── Costs ──────────────────────────────────────────────────
@@ -1644,7 +1645,7 @@ const reportingController = {
         return {
           lotId: r.id, lotNo: r.lot_no, date: r.created_at, supplier: r.supplier_name || '—', supplierId: r.supplier_id,
           riceType: r.product_name || r.item_name, variety: r.variety, grade: r.grade,
-          mt: kg / 1000, ratePerKg: rate, valuePkr: kg * rate, bags: r.total_bags, paymentStatus: r.payment_status,
+          mt: kgToMt(kg), ratePerKg: rate, valuePkr: kg * rate, bags: r.total_bags, paymentStatus: r.payment_status,
           receivedKg: kg, remainingKg, soldKg, milledKg,
           buyers: lotSales.map((x) => ({
             saleNo: x.sale_no, date: x.sale_date, customer: x.customer, customerId: x.customer_id || null,
@@ -1791,7 +1792,7 @@ const reportingController = {
           downstreamSales: downstreamByLot[l.id] || [],
         };
       });
-      return res.json({ success: true, data: await redactReport(req, { rows, totals: { lots: rows.length, mt: rows.reduce((s, r) => s + r.receivedKg / 1000, 0), valuePkr: rows.reduce((s, r) => s + r.landedTotal, 0) } }) });
+      return res.json({ success: true, data: await redactReport(req, { rows, totals: { lots: rows.length, mt: rows.reduce((s, r) => s + kgToMt(r.receivedKg), 0), valuePkr: rows.reduce((s, r) => s + r.landedTotal, 0) } }) });
     } catch (err) { console.error('Lot tracker error:', err); return res.status(500).json({ success: false, message: 'Internal server error.' }); }
   },
 
@@ -1910,7 +1911,7 @@ const reportingController = {
       // the ledger prints "avg 1,270 (1,250–1,290)", not 1,270 as a unit price.
       const { linePricesByOrder, priceSummary } = require('../exportOrders/orderLines');
       const exLinePrices = await linePricesByOrder(db, exportRows.map((r) => r.id));
-      const local = localRows.map((r) => ({ id: r.id, ref: r.sale_no, date: r.sale_date, customer: r.customer, customerId: r.customer_id || null, item: r.item_name, itemType: r.item_type, mt: (parseFloat(r.quantity_kg) || 0) / 1000, bags: r.quantity_bags || 0, ratePerKg: parseFloat(r.rate_per_kg) || 0, valuePkr: parseFloat(r.total_amount) || 0, lotNo: r.lot_no, lotId: r.lot_id, batchNo: r.batch_ref ? (lsBatchByRef[r.batch_ref] || null) : null, batchName: r.batch_ref ? (lsBatchNameByRef[r.batch_ref] || null) : null, warehouse: r.warehouse_name || null, paymentStatus: r.payment_status }));
+      const local = localRows.map((r) => ({ id: r.id, ref: r.sale_no, date: r.sale_date, customer: r.customer, customerId: r.customer_id || null, item: r.item_name, itemType: r.item_type, mt: kgToMt(r.quantity_kg), bags: r.quantity_bags || 0, ratePerKg: parseFloat(r.rate_per_kg) || 0, valuePkr: parseFloat(r.total_amount) || 0, lotNo: r.lot_no, lotId: r.lot_id, batchNo: r.batch_ref ? (lsBatchByRef[r.batch_ref] || null) : null, batchName: r.batch_ref ? (lsBatchNameByRef[r.batch_ref] || null) : null, warehouse: r.warehouse_name || null, paymentStatus: r.payment_status }));
       const exp = exportRows.map((r) => {
         const ps = priceSummary(r, exLinePrices[r.id] || []);
         return { id: r.id, ref: r.order_no, date: r.created_at, customer: r.customer, customerId: r.customer_id || null, item: r.product_name, mt: parseFloat(r.qty_mt) || 0, bags: r.total_bags || 0, ratePerMt: parseFloat(r.price_per_mt) || 0, rateLabel: ps.label, rateMixed: ps.mixed, rateMin: ps.min, rateMax: ps.max, valueUsd: (parseFloat(r.qty_mt) || 0) * (parseFloat(r.price_per_mt) || 0), status: r.status };
@@ -2087,7 +2088,7 @@ const reportingController = {
           packedUnits: specDisagrees && run.sizeKg > 0 ? Math.ceil(onHand / run.sizeKg) : null,
           specDisagrees,
           intakeBags: l.total_bags,
-          onHandMt: onHand / 1000, availableMt: (parseFloat(l.available_kg) || 0) / 1000, reservedMt: (parseFloat(l.reserved_kg) || 0) / 1000,
+          onHandMt: kgToMt(onHand), availableMt: kgToMt(l.available_kg), reservedMt: kgToMt(l.reserved_kg),
           costPerKg: cpk, valuePkr: onHand * cpk };
       });
       // Mill-store stock, carrying each item's TYPE and SIZE so the report can
@@ -2317,7 +2318,7 @@ const reportingController = {
       if (ids.length) {
         const bs = await db('milling_batches as mb').leftJoin('suppliers as s', 'mb.supplier_id', 's.id').leftJoin('products as p', 'mb.product_id', 'p.id')
           .whereIn('mb.id', ids).select('mb.id', 'mb.batch_no', 'mb.batch_name', 'mb.custom_tags', 'mb.raw_qty_kg', 'mb.created_at', 's.name as raw_supplier', 's.id as raw_supplier_id', 'p.name as product');
-        for (const b of bs) bi[`batch-${b.id}`] = { batchId: b.id, batchNo: b.batch_no, batchName: b.batch_name || null, customTags: parseCustomTags(b.custom_tags), rawSupplier: b.raw_supplier, rawSupplierId: b.raw_supplier_id, product: b.product, rawMt: (parseFloat(b.raw_qty_kg) || 0) / 1000, date: b.created_at };
+        for (const b of bs) bi[`batch-${b.id}`] = { batchId: b.id, batchNo: b.batch_no, batchName: b.batch_name || null, customTags: parseCustomTags(b.custom_tags), rawSupplier: b.raw_supplier, rawSupplierId: b.raw_supplier_id, product: b.product, rawMt: kgToMt(b.raw_qty_kg), date: b.created_at };
       }
       const rows = lots.map((l) => {
         const kg = parseFloat(l.kg) || 0; const cpk = parseFloat(l.cost_per_kg) || 0; const b = bi[l.batch_ref] || {};
@@ -2325,7 +2326,7 @@ const reportingController = {
           batchName: b.batchName || null, customTags: b.customTags || [],
           rawSupplier: b.rawSupplier || l.supplier_name || null, rawSupplierId: b.rawSupplierId || l.supplier_id || null,
           milledProduct: b.product || null, rawMt: b.rawMt || null, date: b.date,
-          sweepingMt: kg / 1000, availableMt: (parseFloat(l.available_qty) || 0) / 1000, ratePerKg: cpk, valuePkr: kg * cpk,
+          sweepingMt: kgToMt(kg), availableMt: kgToMt(l.available_qty), ratePerKg: cpk, valuePkr: kg * cpk,
           bags: l.total_bags, status: l.status };
       });
       const totals = { lots: rows.length, sweepingMt: rows.reduce((s, r) => s + r.sweepingMt, 0), valuePkr: rows.reduce((s, r) => s + r.valuePkr, 0), batches: new Set(rows.map((r) => r.batchNo).filter(Boolean)).size };

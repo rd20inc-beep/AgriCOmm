@@ -13,6 +13,7 @@ const { unwindOrderReceipts } = require('./unwindReceipts');
 const { recordPendingExportReceipt, postExportReceipt, confirmPendingExportReceipt } = require('./exportReceipts');
 const { fillSingleLineBagSpec, linePackaging } = require('./orderLines');
 const { assertAccountCurrency } = require('../../shared/accountCurrency');
+const { mtToKg, kgToMt } = require('../../shared/units');
 const notificationService = require('../../services/notificationService');
 // #9-scoping: per-user warehouse restriction, applied to stock READ paths only
 // (the dispatch/reservation engine is never scoped).
@@ -296,7 +297,7 @@ function rescaleLinesToQty(lines, newQtyMt, headerPrice) {
     assigned = r3(assigned + qty);
     const price = parseFloat(l.price_per_mt) || 0;
     const bagKg = parseFloat(l.bag_size_kg) || 0;
-    const bagCount = l.bag_count != null && bagKg > 0 ? Math.round((qty * 1000) / bagKg) : (l.bag_count ?? null);
+    const bagCount = l.bag_count != null && bagKg > 0 ? Math.round(mtToKg(qty) / bagKg) : (l.bag_count ?? null);
     return { id: l.id, qty_mt: qty, price_per_mt: price, line_total: r2(qty * price), bag_count: bagCount };
   });
   return { lines: out, contractValue: r2(out.reduce((s, l) => s + l.line_total, 0)) };
@@ -356,7 +357,7 @@ const ALLOWED_UPDATE_FIELDS = [
 // container count is surfaced as guidance in the UI, not blocked.)
 function packingCapacityError(qtyMt, palletized, packingType) {
   if (packingType !== 'container') return null;
-  const totalKg = (parseFloat(qtyMt) || 0) * 1000;
+  const totalKg = mtToKg(qtyMt);
   const cap = palletized ? 20000 : 25000;
   if (totalKg > cap) {
     return `Container bulk load capped at ${cap.toLocaleString()} KG${palletized ? ' (palletized)' : ''}. Use a bagged packing type or split into multiple orders for a larger quantity.`;
@@ -2558,13 +2559,13 @@ const exportOrderController = {
           .sum('reserved_qty as s')
           .first();
         const alreadyKg = parseFloat(reservedRow && reservedRow.s) || 0;
-        const orderKg = (parseFloat(order.qty_mt) || 0) * 1000;
-        const requestKg = qtyMT * 1000;
+        const orderKg = mtToKg(order.qty_mt);
+        const requestKg = mtToKg(qtyMT);
         if (alreadyKg + requestKg > orderKg + 1) {
-          const roomMt = Math.max(0, orderKg - alreadyKg) / 1000;
+          const roomMt = kgToMt(Math.max(0, orderKg - alreadyKg));
           const err = new Error(
-            `That would allocate ${((alreadyKg + requestKg) / 1000).toFixed(3)} MT to an order for ${(orderKg / 1000).toFixed(3)} MT. ` +
-            `${(alreadyKg / 1000).toFixed(3)} MT is already allocated; at most ${roomMt.toFixed(3)} MT more can be.`
+            `That would allocate ${kgToMt(alreadyKg + requestKg).toFixed(3)} MT to an order for ${kgToMt(orderKg).toFixed(3)} MT. ` +
+            `${kgToMt(alreadyKg).toFixed(3)} MT is already allocated; at most ${roomMt.toFixed(3)} MT more can be.`
           );
           err.statusCode = 400;
           throw err;
@@ -2603,9 +2604,9 @@ const exportOrderController = {
         }
 
         const available = parseFloat(lot.available_qty) || 0; // KG (Phase 5c)
-        const qtyKg = qtyMT * 1000; // FE sends MT; engine reserves in KG
+        const qtyKg = mtToKg(qtyMT); // FE sends MT; engine reserves in KG
         if (qtyKg > available) {
-          const err = new Error(`Requested ${qtyMT} MT but only ${available / 1000} MT available in ${lot.lot_no}.`);
+          const err = new Error(`Requested ${qtyMT} MT but only ${kgToMt(available)} MT available in ${lot.lot_no}.`);
           err.statusCode = 400;
           throw err;
         }
@@ -2698,11 +2699,11 @@ const exportOrderController = {
           const e = new Error(`Cannot source from stock for an order already in '${order.status}'.`); e.statusCode = 400; throw e;
         }
 
-        const demandKg = settledAmount((parseFloat(order.qty_mt) || 0) * 1000);
+        const demandKg = settledAmount(mtToKg(order.qty_mt));
         const resRow = await trx('inventory_reservations').where({ order_id: id, status: 'Active' }).sum('reserved_qty as s').first();
         const reservedKg = settledAmount(resRow && resRow.s);
         if (reservedKg + MONEY_EPSILON < demandKg) {
-          const e = new Error(`Order is not fully sourced from stock: ${(reservedKg / 1000).toFixed(2)} MT reserved of ${(demandKg / 1000).toFixed(2)} MT required. Allocate the remainder or create a milling demand for it.`);
+          const e = new Error(`Order is not fully sourced from stock: ${kgToMt(reservedKg).toFixed(2)} MT reserved of ${kgToMt(demandKg).toFixed(2)} MT required. Allocate the remainder or create a milling demand for it.`);
           e.statusCode = 400; throw e;
         }
 
@@ -2713,7 +2714,7 @@ const exportOrderController = {
           order,
           toStatus: 'Docs In Preparation',
           userId: req.user?.id,
-          reason: `Fully sourced from existing finished stock (${(reservedKg / 1000).toFixed(2)} MT reserved) — milling skipped`,
+          reason: `Fully sourced from existing finished stock (${kgToMt(reservedKg).toFixed(2)} MT reserved) — milling skipped`,
           skipValidation: true,
         });
 
@@ -2758,7 +2759,7 @@ const exportOrderController = {
       const id = await resolveExportOrderId(req.params.id);
       if (!id) return res.status(404).json({ success: false, message: 'Export order not found.' });
       const order = await db('export_orders').where({ id }).first('id', 'qty_mt');
-      const requiredNet = (parseFloat(order.qty_mt) || 0) * 1000;
+      const requiredNet = mtToKg(order.qty_mt);
       let row = await db('export_packing_weights').where({ order_id: id }).first();
       // Suggested packed net = the net weight of finished lots reserved to this order.
       const resv = await db('inventory_reservations as r')
@@ -2778,7 +2779,7 @@ const exportOrderController = {
       if (!id) return res.status(404).json({ success: false, message: 'Export order not found.' });
       const order = await db('export_orders').where({ id }).first('id', 'qty_mt');
       if (!order) return res.status(404).json({ success: false, message: 'Export order not found.' });
-      const required_net_kg = (parseFloat(order.qty_mt) || 0) * 1000;
+      const required_net_kg = mtToKg(order.qty_mt);
       const c = exportOrderController._computePackingVariance({
         required_net_kg,
         packed_net_rice_kg: req.body.packed_net_rice_kg,
@@ -2882,7 +2883,7 @@ const exportOrderController = {
           if (committed) {
             const e = new Error('Cannot re-price the order after money has been received or it has shipped/closed.'); e.statusCode = 400; throw e;
           }
-          const newQtyMt = (parseFloat(row.packed_net_rice_kg) || 0) / 1000;
+          const newQtyMt = kgToMt(row.packed_net_rice_kg);
           const advPct = parseFloat(order.advance_pct) || 0;
           // The packed weight is recorded per order, so every line moves by the
           // same factor and keeps its OWN price; the contract value is the sum
@@ -2944,7 +2945,7 @@ const exportOrderController = {
   // From an order's packing spec + qty, compute the bags / master bags / polythene
   // / pallets needed, match them to mill_stock, and surface the shortage per item.
   async _materialLines(order, itemsIn) {
-    const orderKg = (parseFloat(order.qty_mt) || 0) * 1000;
+    const orderKg = mtToKg(order.qty_mt);
     const pt = order.packing_type || 'retail';
     if (pt === 'container' || orderKg <= 0) return [];
     const lines = [];
@@ -3022,7 +3023,7 @@ const exportOrderController = {
       if (!id) return res.status(404).json({ success: false, message: 'Export order not found.' });
       const order = await db('export_orders').where({ id }).first();
       const lines = await exportOrderController._materialLines(order);
-      return res.json({ success: true, data: { lines, orderKg: (parseFloat(order.qty_mt) || 0) * 1000, packingType: order.packing_type } });
+      return res.json({ success: true, data: { lines, orderKg: mtToKg(order.qty_mt), packingType: order.packing_type } });
     } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
   },
 
@@ -3107,7 +3108,7 @@ const exportOrderController = {
           id: l.id,
           export_display_name: l.export_display_name || l.variety || l.product_name || l.item_name || 'Export Rice',
           available_qty: availKg,          // KG
-          available_mt: availKg / 1000,
+          available_mt: kgToMt(availKg),
           packing_status: (parseFloat(l.total_bags) || 0) > 0 ? 'Packed' : 'Loose',
           transfer_status: l.entity === 'export' ? 'Transferred' : 'At mill',
           variety: l.variety, grade: l.grade, type: l.type,
