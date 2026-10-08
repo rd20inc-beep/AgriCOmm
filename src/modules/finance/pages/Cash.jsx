@@ -3,6 +3,7 @@ import useConfirm from '../../../hooks/useConfirm';
 import { Landmark, Wallet, TrendingUp, TrendingDown, Activity, Printer, ArrowLeftRight, Undo2, Check } from 'lucide-react';
 import { FinanceKPI, FinanceTable, FinanceChart } from '../../../components/finance';
 import { useBankAccounts, useBankTransactions, useFundTransfers, useReverseFundTransfer, useAcceptFundTransfer } from '../../../api/queries';
+import ListCapHint from '../../../shared/components/ListCapHint';
 import TransferFundsDrawer from '../components/TransferFundsDrawer';
 import ContraTransferDrawer from '../components/ContraTransferDrawer';
 import FundTransferDetailDrawer from '../components/FundTransferDetailDrawer';
@@ -343,6 +344,7 @@ export default function Cash() {
               );
             })}
           </div>
+          <ListCapHint rows={allTransactions} total={txData?.listTotal} className="mb-1" />
           <FinanceTable title="Recent Transactions" columns={txColumns} data={transactions}
             onRowClick={(row) => { if (row.fundTransferId) setDetailId(row.fundTransferId); }}
             searchKeys={['reference', 'counterparty', 'accountName', 'category', 'ftFromAccountName', 'ftToAccountName']} exportFilename="bank-transactions" loading={loadingTx} />

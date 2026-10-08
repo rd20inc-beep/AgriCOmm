@@ -5,6 +5,7 @@ import { isUnclearedCheque, CHEQUE_DATE_LABEL } from '../../../components/paymen
 import OrderRefLink from '../../../shared/components/OrderRefLink';
 import { ArrowUpRight, AlertTriangle, CheckCircle, Clock, Eye, X, DollarSign, Landmark, Printer } from 'lucide-react';
 import { FinanceKPI, FinanceTable, FinanceFilterBar } from '../../../components/finance';
+import ListCapHint from '../../../shared/components/ListCapHint';
 import { usePayables, useRecordPayment, useBankAccounts, useReceivables, usePayablePayments, useReversePayment } from '../../../api/queries';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { useApp } from '../../../context/AppContext';
@@ -310,6 +311,7 @@ export default function MoneyOut() {
       />
 
       {/* Table */}
+      <ListCapHint rows={payables} />
       <FinanceTable
         columns={columns} data={filtered}
         searchKeys={['supplierName', 'haulerName', 'payNo', 'category', 'linkedRef']}

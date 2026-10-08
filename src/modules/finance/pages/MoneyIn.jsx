@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { ArrowDownLeft, DollarSign, AlertTriangle, CheckCircle, Clock, Eye, X, Printer } from 'lucide-react';
 import { FinanceKPI, FinanceTable, FinanceChart, FinanceFilterBar } from '../../../components/finance';
+import ListCapHint from '../../../shared/components/ListCapHint';
 import { useReceivables, useRecordPayment, useBankAccounts, useReceivableReceipts, useAcceptLocalSaleGroupPayment } from '../../../api/queries';
 import { isUnclearedCheque, CHEQUE_DATE_LABEL } from '../../../components/payments/paymentPayload';
 import { ChequeHint } from '../../../components/payments/PaymentFields';
@@ -275,6 +276,7 @@ export default function MoneyIn() {
       />
 
       {/* Table */}
+      <ListCapHint rows={receivables} />
       <FinanceTable
         columns={columns}
         data={filtered}

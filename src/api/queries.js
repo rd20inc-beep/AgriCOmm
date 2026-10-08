@@ -34,6 +34,22 @@ function unwrap(res, key) {
   return res?.data ?? res;
 }
 
+// The finance lists (receivables, payables, journals, bank transactions) feed
+// page totals and charts, so they are fetched up to LIST_LIMIT rows — not the
+// old silent 200. Past that the server still reports
+// how many rows match; it rides on the array as a non-enumerable `listTotal`
+// so the page can say "showing 200 of 1,234" without changing what every
+// consumer receives. (structuralSharing is off on those queries so the
+// property is not dropped when React Query rebuilds the array.)
+const LIST_LIMIT = 2000;
+function withListTotal(arr, res) {
+  const total = Number(res?.data?.pagination?.total);
+  if (Array.isArray(arr) && Number.isFinite(total)) {
+    Object.defineProperty(arr, 'listTotal', { value: total, enumerable: false, configurable: true });
+  }
+  return arr;
+}
+
 // ===================== EXPORT ORDERS =====================
 
 export function useExportOrders(params = {}, opts = {}) {
@@ -633,9 +649,10 @@ export function useReceivables(params = {}, { enabled = true } = {}) {
   return useQuery({
     queryKey: queryKeys.receivables.list(params),
     queryFn: async () => {
-      const res = await financeApi.receivables({ limit: 200, ...params });
-      return transformKeys(unwrap(res, 'receivables') || []);
+      const res = await financeApi.receivables({ limit: LIST_LIMIT, ...params });
+      return withListTotal(transformKeys(unwrap(res, 'receivables') || []), res);
     },
+    structuralSharing: false,
     enabled,
     staleTime: 5 * 1000, // Finance data refreshes quickly
     refetchOnMount: 'always',
@@ -742,9 +759,10 @@ export function usePayables(params = {}, { enabled = true } = {}) {
   return useQuery({
     queryKey: queryKeys.payables.list(params),
     queryFn: async () => {
-      const res = await financeApi.payables({ limit: 200, ...params });
-      return transformKeys(unwrap(res, 'payables') || []);
+      const res = await financeApi.payables({ limit: LIST_LIMIT, ...params });
+      return withListTotal(transformKeys(unwrap(res, 'payables') || []), res);
     },
+    structuralSharing: false,
     enabled,
     staleTime: 5 * 1000,
     refetchOnMount: 'always',
@@ -788,10 +806,17 @@ export function usePayments(params = {}) {
     queryFn: async () => {
       const res = await financeApi.payments(params);
       const d = res?.data || {};
+      // Totals are computed server-side over the whole filtered set, per
+      // currency ({ PKR: { amount, count }, USD: … }) — settled money only.
       return {
         payments: transformKeys(d.payments || []),
-        totalPkr: parseFloat(d.totalPkr) || 0,
+        totals: d.totals || {},
+        pendingCheques: d.pending_cheques || {},
+        reversedCount: parseInt(d.reversed_count) || 0,
+        bySource: d.by_source || [],
         count: parseInt(d.count) || 0,
+        totalCount: parseInt(d.total_count ?? d.count) || 0,
+        truncated: !!d.truncated,
       };
     },
     staleTime: 10 * 1000,
@@ -968,9 +993,10 @@ export function useBankTransactions(params = {}) {
   return useQuery({
     queryKey: ['bank-transactions', params],
     queryFn: async () => {
-      const res = await financeApi.bankTransactions({ limit: 200, ...params });
-      return transformKeys(unwrap(res, 'transactions') || []);
+      const res = await financeApi.bankTransactions({ limit: LIST_LIMIT, ...params });
+      return withListTotal(transformKeys(unwrap(res, 'transactions') || []), res);
     },
+    structuralSharing: false,
     staleTime: 5 * 1000,
     refetchOnMount: 'always',
   });
@@ -980,9 +1006,10 @@ export function useJournalEntries(params = {}) {
   return useQuery({
     queryKey: queryKeys.journals.list(params),
     queryFn: async () => {
-      const res = await financeApi.journalEntries({ limit: 200, ...params });
-      return transformKeys(unwrap(res, 'entries') || unwrap(res, 'journal_entries') || []);
+      const res = await financeApi.journalEntries({ limit: LIST_LIMIT, ...params });
+      return withListTotal(transformKeys(unwrap(res, 'entries') || unwrap(res, 'journal_entries') || []), res);
     },
+    structuralSharing: false,
     staleTime: 5 * 1000,
     refetchOnMount: 'always',
   });

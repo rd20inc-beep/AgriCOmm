@@ -5,6 +5,7 @@ const fxRateService = require('./fxRate.service');
 const { nextDocNo } = require('../../utils/docNumber');
 const { postLocalReceiptJournal } = require('../localSales/receiptJournal');
 const { buildLocalReceivablesQuery } = require('./localReceivablesQuery');
+const { feedBase, feedTotals } = require('./paymentsFeedTotals');
 
 // Finance-dashboard confidentiality: every role EXCEPT Super Admin / Owner sees
 // reference NUMBERS (export order, mill batch, lot) but NOT the trading-party
@@ -1072,22 +1073,23 @@ const financeController = {
   // and Money Out tabs on the Reports hub.
   async listPayments(req, res) {
     try {
-      const { type, from_date, to_date, entity, limit = 500 } = req.query;
-      let q = db('payments as p')
-        // Pending/Rejected export receipts (item 14) aren't banked money yet —
-        // exclude them from Money-In/Out until Finance confirms (then a real
-        // confirmed row exists).
-        .whereNotIn('p.status', ['Pending Finance Confirmation', 'Rejected'])
-        .leftJoin('receivables as r', 'p.linked_receivable_id', 'r.id')
-        .leftJoin('payables as pa',   'p.linked_payable_id',    'pa.id')
+      const { type, from_date, to_date, entity } = req.query;
+      // The list is a page (newest first); the totals below cover the WHOLE
+      // filtered set, so the cap never silently shrinks a total.
+      const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 500, 1), 5000);
+      const filters = { type, from_date, to_date, entity };
+      // Pending/Rejected export receipts (item 14) aren't banked money yet —
+      // excluded from Money-In/Out until Finance confirms (then a real
+      // confirmed row exists). See paymentsFeedTotals.feedBase.
+      const q = feedBase(db, filters)
         .leftJoin('customers as c',   'r.customer_id',          'c.id')
         .leftJoin('suppliers as s',   'pa.supplier_id',         's.id')
-        .leftJoin('local_sales as ls','p.local_sale_id',        'ls.id')
         .leftJoin('bank_accounts as ba','p.bank_account_id',    'ba.id')
         .select(
           'p.id', 'p.payment_no', 'p.type', 'p.amount', 'p.currency',
           'p.fx_rate', 'p.base_amount_pkr', 'p.payment_method',
           'p.payment_date', 'p.bank_reference', 'p.notes', 'p.created_at',
+          'p.status', 'p.cleared',
           'p.linked_receivable_id', 'p.linked_payable_id', 'p.local_sale_id',
           'r.recv_no as recv_no', 'r.entity as recv_entity', 'r.type as recv_type', 'r.customer_id as recv_customer_id',
           'pa.pay_no as pay_no', 'pa.entity as pay_entity', 'pa.payable_type', 'pa.linked_ref as pay_linked_ref', 'pa.supplier_id as pay_supplier_id',
@@ -1096,23 +1098,13 @@ const financeController = {
           'ls.sale_no as sale_no', 'ls.buyer_name as sale_buyer', 'ls.customer_id as sale_customer_id',
           'ba.name as bank_name', 'ba.currency as bank_currency'
         );
-      if (type) q = q.where('p.type', type);
-      if (from_date) q = q.where('p.payment_date', '>=', from_date);
-      if (to_date)   q = q.where('p.payment_date', '<=', to_date);
-      // Entity scope (e.g. a Mill role must not see export-order payments): keep
-      // only rows whose receivable / payable / local-sale belongs to that entity.
-      if (entity) {
-        q = q.where(function () {
-          this.where('r.entity', entity)
-            .orWhere('pa.entity', entity)
-            .orWhere('ls.entity', entity);
-        });
-      }
-      const rows = await q
-        .orderBy('p.payment_date', 'desc')
-        .orderBy('p.created_at', 'desc')
-        .orderBy('p.id', 'desc')
-        .limit(parseInt(limit));
+      const [rows, agg] = await Promise.all([
+        q.orderBy('p.payment_date', 'desc')
+          .orderBy('p.created_at', 'desc')
+          .orderBy('p.id', 'desc')
+          .limit(limit),
+        feedTotals(db, filters),
+      ]);
 
       // Confidentiality: restricted roles (everyone except Super Admin / Owner)
       // see the reference (recv_no / sale_no / pay_no) but NOT the trading-party
@@ -1162,23 +1154,31 @@ const financeController = {
         return { ...r, counterparty, sourceRef, sourceHref, counterparty_type, counterparty_id };
       });
 
-      // PKR totals across the filtered set. Resolve order:
-      //   1. base_amount_pkr if present (post round-094/095 entries)
-      //   2. amount × fx_rate if fx_rate > 1
-      //   3. for non-PKR currency with no rate, fall back to 280 (the
-      //      historical default) so legacy rows don't silently render
-      //      as 1× the foreign amount in the PKR total
-      //   4. amount as-is for PKR rows
-      const totalPkr = enriched.reduce((s, r) => s + paymentToPkr(r), 0);
-      // Re-stamp each row with a normalized basePkr field so the FE
-      // doesn't have to repeat this fallback chain.
+      // Each row keeps a PKR-equivalent for its own display (base_amount_pkr →
+      // amount × fx_rate → 280 fallback; see paymentToPkr). It is NOT summed:
+      // the totals are per currency, from SQL over the whole filtered set.
       for (const r of enriched) {
         r.base_amount_pkr_normalized = paymentToPkr(r);
+        // Not money in/out: reversed, or a cheque that has not cleared.
+        r.counts_in_total = r.status !== 'Reversed' && r.cleared !== false;
       }
 
       return res.json({
         success: true,
-        data: { payments: enriched, totalPkr: Number(totalPkr.toFixed(2)), count: enriched.length },
+        data: {
+          payments: enriched,
+          // Rows returned (this page) vs rows matching the filters.
+          count: enriched.length,
+          total_count: agg.totalCount,
+          limit,
+          truncated: agg.totalCount > enriched.length,
+          // { PKR: { amount, count }, USD: { amount, count } } — settled money
+          // only (no Reversed, no uncleared cheques); never added across currencies.
+          totals: agg.totals,
+          pending_cheques: agg.pendingCheques,
+          reversed_count: agg.reversedCount,
+          by_source: agg.bySource,
+        },
       });
     } catch (err) {
       console.error('List payments error:', err);

@@ -32,6 +32,7 @@ import StatusBadge from '../../../shared/components/StatusBadge';
 import {
   fmtPKR as baseFmtPKR, fmtNum, fmtPct, fmtMT, fmtMoney, fmtDate, toLocalISODate, todayLocalISO,
 } from '../../../shared/utils/format';
+import { moneyTile, netTile, currencyLines, formatCurrencyLines, cappedHint } from '../utils/moneyFeed';
 
 // ─── Formatting ────────────────────────────────────────────────────────
 // Reports are reconciled line by line, so money is always shown in full —
@@ -704,9 +705,11 @@ export default function Reports() {
   // and the Money In/Out tabs without each tab refetching.
   const { data: receiptsData,  refetch: refetchReceipts }  = usePayments({ ...params, type: 'receipt' });
   const { data: paymentsData,  refetch: refetchPayments }  = usePayments({ ...params, type: 'payment' });
-  const totalIn  = receiptsData?.totalPkr || 0;
-  const totalOut = paymentsData?.totalPkr || 0;
-  const netFlow  = totalIn - totalOut;
+  // Per currency, settled money only (no reversed payments, no uncleared
+  // cheques) — PKR and USD are never added together.
+  const inTile  = moneyTile(receiptsData, 'receipts');
+  const outTile = moneyTile(paymentsData, 'payments');
+  const net     = netTile(receiptsData?.totals, paymentsData?.totals);
 
   const refetchAll = () => { refetchExec(); refetchReceipts(); refetchPayments(); };
 
@@ -837,10 +840,10 @@ export default function Reports() {
           Company-wide money — hidden entirely for the Mill Operator. */}
       {!operatorScoped && (
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
-        <KpiTile icon={ArrowDownLeft} tone="emerald" label="Total Money In"  primary={fmtPKR(totalIn)}  secondary={`${receiptsData?.count ?? 0} receipts`} />
-        <KpiTile icon={ArrowUpRight}  tone="rose"    label="Total Money Out" primary={fmtPKR(totalOut)} secondary={`${paymentsData?.count ?? 0} payments`} />
-        <KpiTile icon={Activity}      tone={netFlow >= 0 ? 'violet' : 'rose'} label="Net Cashflow"
-                 primary={fmtPKR(netFlow)} secondary={netFlow >= 0 ? 'Positive' : 'Negative'} />
+        <KpiTile icon={ArrowDownLeft} tone="emerald" label="Total Money In"  primary={inTile.primary}  secondary={inTile.secondary} />
+        <KpiTile icon={ArrowUpRight}  tone="rose"    label="Total Money Out" primary={outTile.primary} secondary={outTile.secondary} />
+        <KpiTile icon={Activity}      tone={net.negative ? 'rose' : 'violet'} label="Net Cashflow"
+                 primary={net.primary} secondary={net.secondary} />
         {!millScoped && (
           <KpiTile icon={Coins}       tone="amber"   label="Outstanding A/R" primary={fmtPKR(exec.totalOutstandingPkr)} secondary={`${exec.openReceivables ?? 0} open`} loading={execLoading} />
         )}
@@ -974,42 +977,24 @@ function MoneyFlowTab({ kind, params, totalLabel, statementHref, openDoc }) {
   const { data: payables    = [] } = usePayables(params);
 
   const rows  = data?.payments || [];
-  const total = data?.totalPkr || 0;
+  // Server-side, per currency, over the whole filtered set (not this page).
+  const totalText = formatCurrencyLines(data?.totals);
+  const pending = currencyLines(data?.pendingCheques);
+  const capHint = cappedHint(rows.length, data?.totalCount);
+  const sourceBreakdown = data?.bySource || [];
 
-  // Source breakdown — group receipts by recv_entity / recv_type
-  // (export advance vs balance vs local sale), payments by
-  // payable_type (vendor / expense / purchase).
-  const sourceBreakdown = useMemo(() => {
-    const buckets = new Map();
-    for (const p of rows) {
-      let key;
-      if (kind === 'receipt') {
-        if (p.localSaleId) key = 'Local Sale';
-        else if ((p.recvType || '').toLowerCase().includes('advance')) key = 'Advance';
-        else if ((p.recvType || '').toLowerCase().includes('balance')) key = 'Balance';
-        else key = 'Other Receipt';
-      } else {
-        const pt = (p.payableType || '').toLowerCase();
-        if (pt === 'expense')  key = 'Business Expense';
-        else if (pt === 'purchase') key = 'Mill Purchase';
-        else if (pt === 'vendor')   key = 'Supplier Payment';
-        else key = 'Other Payment';
-      }
-      // Backend pre-normalises this so the FE doesn't have to repeat
-      // the fallback chain (base_amount_pkr → amount × fx_rate → amount × 280).
-      const pkr = parseFloat(p.baseAmountPkrNormalized) || parseFloat(p.baseAmountPkr) || 0;
-      const cur = buckets.get(key) || { name: key, count: 0, totalPkr: 0 };
-      cur.count += 1; cur.totalPkr += pkr;
-      buckets.set(key, cur);
-    }
-    return Array.from(buckets.values()).sort((a, b) => b.totalPkr - a.totalPkr);
-  }, [rows, kind]);
-
-  // Open-balance summary (receivable side for receipts, payable side
-  // for payments).
+  // Open-balance summary (receivable side for receipts, payable side for
+  // payments), per currency — each row's outstanding in its own currency.
   const openBalance = useMemo(() => {
     const list = kind === 'receipt' ? receivables : payables;
-    return list.reduce((s, x) => s + (parseFloat(x.outstanding) || 0), 0);
+    const by = {};
+    for (const x of list) {
+      const cur = String(x.currency || 'PKR').toUpperCase();
+      by[cur] = by[cur] || { amount: 0, count: 0 };
+      by[cur].amount += parseFloat(x.outstanding) || 0;
+      by[cur].count += 1;
+    }
+    return formatCurrencyLines(by);
   }, [kind, receivables, payables]);
 
   if (isLoading) return <Skeleton />;
@@ -1025,19 +1010,23 @@ function MoneyFlowTab({ kind, params, totalLabel, statementHref, openDoc }) {
 
       {/* Summary cells */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <SummaryCell label={`Total ${totalLabel}`} value={fmtPKR(total)} />
-        <SummaryCell label="Transactions" value={String(rows.length)} />
-        <SummaryCell label={kind === 'receipt' ? 'Open Receivables' : 'Open Payables'} value={fmtPKR(openBalance)} />
-        <SummaryCell label="Sources"       value={String(sourceBreakdown.length)} />
+        <SummaryCell label={`Total ${totalLabel}`} value={totalText} />
+        <SummaryCell label="Transactions" value={String(data?.totalCount ?? rows.length)} />
+        <SummaryCell label={kind === 'receipt' ? 'Open Receivables' : 'Open Payables'} value={openBalance} />
+        <SummaryCell label="Uncleared cheques" value={pending.length ? pending.map((l) => fmtMoney(l.amount, l.currency, { decimals: 2 })).join(' · ') : '—'} />
       </div>
+      <p className="text-[11px] text-gray-500">
+        Totals are per currency and count settled money only — reversed {kind === 'receipt' ? 'receipts' : 'payments'}{data?.reversedCount ? ` (${data.reversedCount} in this period)` : ''} and uncleared cheques are left out.
+        {capHint ? ` ${capHint} rows below (newest first); totals cover all of them.` : ''}
+      </p>
 
       {/* Source breakdown chips */}
       {sourceBreakdown.length > 0 && (
         <div className="flex flex-wrap gap-2">
           {sourceBreakdown.map(b => (
-            <div key={b.name} className={`px-3 py-2 rounded-lg border bg-${tone}-50 border-${tone}-200`}>
+            <div key={`${b.name}-${b.currency}`} className={`px-3 py-2 rounded-lg border bg-${tone}-50 border-${tone}-200`}>
               <div className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">{b.name}</div>
-              <div className="text-sm font-bold text-gray-900">{fmtPKR(b.totalPkr)}</div>
+              <div className="text-sm font-bold text-gray-900">{fmtMoney(b.amount, b.currency, { decimals: 2 })}</div>
               <div className="text-[11px] text-gray-500">{b.count} {b.count === 1 ? 'txn' : 'txns'}</div>
             </div>
           ))}
@@ -1055,12 +1044,20 @@ function MoneyFlowTab({ kind, params, totalLabel, statementHref, openDoc }) {
           rows={rows.map(p => {
             const pkr = parseFloat(p.baseAmountPkrNormalized) || parseFloat(p.baseAmountPkr) || 0;
             const isForeign = (p.currency || 'PKR') !== 'PKR';
+            const flag = p.status === 'Reversed' ? 'Reversed' : p.cleared === false ? 'Uncleared cheque' : null;
+            const flagEl = flag ? <div className="text-[10px] font-semibold uppercase text-amber-600">{flag} · not in total</div> : null;
             const amountCell = isForeign ? (
-              <div className="text-right">
-                <div className="font-semibold text-gray-900">{fmtPKR(pkr)}</div>
+              <div className={`text-right ${flag ? 'opacity-60' : ''}`}>
+                <div className={`font-semibold text-gray-900 ${p.status === 'Reversed' ? 'line-through' : ''}`}>{fmtPKR(pkr)}</div>
                 <div className="text-[11px] text-gray-400">{fmtMoney(p.amount, p.currency)} @ {p.fxRate}</div>
+                {flagEl}
               </div>
-            ) : <span className="font-semibold text-gray-900">{fmtPKR(pkr)}</span>;
+            ) : (
+              <div className={`text-right ${flag ? 'opacity-60' : ''}`}>
+                <span className={`font-semibold text-gray-900 ${p.status === 'Reversed' ? 'line-through' : ''}`}>{fmtPKR(pkr)}</span>
+                {flagEl}
+              </div>
+            );
             const href = statementHref?.(p.counterpartyType, p.counterpartyId);
             return [
               p.paymentDate ? new Date(p.paymentDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : '—',
