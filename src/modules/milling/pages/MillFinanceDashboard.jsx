@@ -50,6 +50,7 @@ import useConfirm from '../../../hooks/useConfirm';
 import PaymentDrawer from '../../../components/payments/PaymentDrawer';
 import { toLocalISODate, todayLocalISO, fmtPKR, fmtNum, fmtPct, fmtKg, fmtDate, fmtDateTime } from '../../../shared/utils/format';
 import { batchByproductRevenuePKR } from '../utils/byproductPrices';
+import { isNetLowered, rowsMissingNetReason, netOverrideReasonFor } from '../utils/payrollNet';
 
 const PKR = (v) => fmtPKR(v || 0, { decimals: 2 });
 // Was a Cr/L/k abbreviator; KPI cards now show the exact rupee figure.
@@ -3924,6 +3925,7 @@ function payslipBody(run, line, company) {
 
     <div class="net"><div><div style="font-size:10px;text-transform:uppercase;color:#047857">Net Paid</div><b>${rs(line.netPay)}</b></div>
       <div style="text-align:right;max-width:55%"><div class="words">Rupees ${amountInWords(line.netPay)} Only</div></div></div>
+    ${line.netOverrideReason ? `<div class="muted" style="margin-top:6px">Paid less than the computed net — ${String(line.netOverrideReason).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))}</div>` : ''}
 
     <div class="sec">Attendance &amp; advance</div>
     <table><tbody>
@@ -4189,7 +4191,7 @@ function PayrollRunDrawer({ month, entity = 'mill', employees, preselectId, bank
       outstanding: Math.round(w.advanceOutstanding || 0),
       scheduled,
       include: preselectId ? w.id === preselectId : true,
-      advance: scheduled, net: Math.max(0, (w.grossPay || 0) + bonus - scheduled - deduction - statutory), reason: '',
+      advance: scheduled, net: Math.max(0, (w.grossPay || 0) + bonus - scheduled - deduction - statutory), reason: '', netReason: '',
     };
   }));
 
@@ -4209,10 +4211,13 @@ function PayrollRunDrawer({ month, entity = 'mill', employees, preselectId, bank
   const totalAdvance = included.reduce((s, r) => s + r.advance, 0);
   // A reason is required where the deduction was changed away from the schedule.
   const needsReason = included.filter(r => Math.round(r.advance) !== Math.round(r.scheduled) && !String(r.reason || '').trim());
+  // Paying less than the net needs its own reason (B3) — kept on the line.
+  const needsNetReason = rowsMissingNetReason(included, netOf);
 
   async function post() {
     if (!included.length) { addToast('Select at least one employee to pay', 'error'); return; }
     if (needsReason.length) { addToast(`Add a reason for the changed deduction: ${needsReason.map(r => r.name).join(', ')}`, 'error'); return; }
+    if (needsNetReason.length) { addToast(`Add a reason for paying less than the net: ${needsNetReason.map(r => r.name).join(', ')}`, 'error'); return; }
     if (form.pay_method === 'bank' && !form.bank_account_id) { addToast('Select a bank account to pay from', 'error'); return; }
     try {
       const res = await postRunMut.mutateAsync({
@@ -4221,7 +4226,11 @@ function PayrollRunDrawer({ month, entity = 'mill', employees, preselectId, bank
         pay_method: form.pay_method,
         bank_account_id: form.pay_method === 'bank' ? Number(form.bank_account_id) : null,
         pay_date: form.pay_date,
-        lines: included.map(r => ({ worker_id: r.id, net_pay: r.net, advance_deducted: r.advance, skip_reason: Math.round(r.advance) !== Math.round(r.scheduled) ? (r.reason || null) : null })),
+        lines: included.map(r => ({
+          worker_id: r.id, net_pay: r.net, advance_deducted: r.advance,
+          skip_reason: Math.round(r.advance) !== Math.round(r.scheduled) ? (r.reason || null) : null,
+          net_override_reason: netOverrideReasonFor(r, netOf(r, r.advance)),
+        })),
       });
       const raw = res?.data?.run || {};
       onPosted({ id: raw.id, period: raw.period, netTotal: raw.net_total });
@@ -4295,6 +4304,7 @@ function PayrollRunDrawer({ month, entity = 'mill', employees, preselectId, bank
               <tbody className="divide-y divide-gray-100">
                 {rows.map(r => {
                   const changed = Math.round(r.advance) !== Math.round(r.scheduled);
+                  const lowered = r.include && isNetLowered(r.net, netOf(r, r.advance));
                   return (
                   <Fragment key={r.id}>
                   <tr className={r.include ? '' : 'opacity-40'}>
@@ -4349,6 +4359,18 @@ function PayrollRunDrawer({ month, entity = 'mill', employees, preselectId, bank
                       </td>
                     </tr>
                   )}
+                  {lowered && (
+                    <tr>
+                      <td></td>
+                      <td colSpan={6} className="px-3 pb-2">
+                        <input type="text" value={r.netReason} data-testid={`net-reason-${r.id}`}
+                          placeholder={`Reason for paying ${PKR(r.net)} instead of ${PKR(netOf(r, r.advance))} (required)`}
+                          aria-label={`Reason for paying ${r.name} less than the net`}
+                          onChange={e => setRow(r.id, { netReason: e.target.value })}
+                          className="w-full border border-amber-300 bg-amber-50/40 rounded px-2 py-1 text-xs focus:outline-none focus:border-amber-500" />
+                      </td>
+                    </tr>
+                  )}
                   </Fragment>
                 ); })}
                 {rows.length === 0 && <tr><td colSpan={7} className="px-3 py-6 text-center text-gray-400">Everyone is already paid for this month, or no one has pay due — mark attendance / set salaries first.</td></tr>}
@@ -4366,7 +4388,7 @@ function PayrollRunDrawer({ month, entity = 'mill', employees, preselectId, bank
             </table>
           </div>
         </div>
-        <p className="text-[11px] text-gray-400">Prepares a payroll run for the ticked employees — it must then be <span className="font-medium">Approved</span> and <span className="font-medium">Paid</span> (by Finance/Owner) before any cash/GL posts. Advances are only recovered when the run is paid. "Paying now" can be lowered but not raised above the net; a lowered amount is not carried forward — the employee counts as paid for the month.</p>
+        <p className="text-[11px] text-gray-400">Prepares a payroll run for the ticked employees — it must then be <span className="font-medium">Approved</span> and <span className="font-medium">Paid</span> (by Finance/Owner) before any cash/GL posts. Advances are only recovered when the run is paid. "Paying now" can be lowered but not raised above the net, and a lowered amount needs a reason (kept on the payslip); it is not carried forward — the employee counts as paid for the month.</p>
       </div>
     </SlideDrawer>
   );
@@ -5323,6 +5345,9 @@ function PayslipsPanel({ runId, companyProfile, canApprove, canPay, canDelete, a
                   <div className="text-xs text-gray-400">
                     Gross {PKR(l.grossPay)}{parseFloat(l.advanceDeducted) > 0 ? ` · advance −${PKR(l.advanceDeducted)}` : ''} · <span className="text-emerald-700 font-medium">net {PKR(l.netPay)}</span>
                   </div>
+                  {l.netOverrideReason && (
+                    <div className="text-[11px] text-amber-700 mt-0.5" data-testid="net-override-reason">Paid less than the net — {l.netOverrideReason}</div>
+                  )}
                 </div>
               </div>
               {linePaid && (

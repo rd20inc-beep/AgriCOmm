@@ -61,8 +61,31 @@ describe('1. server-computed net pay', () => {
     expect(resolvePrepareLine(worker(), { net_pay: 29999.4 }).netPay).toBe(30000);
   });
 
-  test('a LOWER client net (reduced "Paying now") is kept as entered', () => {
-    expect(resolvePrepareLine(worker(), { net_pay: 25000 }).netPay).toBe(25000);
+  test('a LOWER client net (reduced "Paying now") is kept as entered, with its reason', () => {
+    const r = resolvePrepareLine(worker(), { net_pay: 25000, net_override_reason: ' Half paid in cash last week ' });
+    expect(r.netPay).toBe(25000);
+    expect(r.netOverrideReason).toBe('Half paid in cash last week');
+  });
+
+  test('B3: a LOWER client net with no reason is refused (400)', () => {
+    let err;
+    try { resolvePrepareLine(worker(), { net_pay: 25000 }); } catch (e) { err = e; }
+    expect(err.httpStatus).toBe(400);
+    expect(err.message).toMatch(/needs a reason/);
+    expect(() => resolvePrepareLine(worker(), { net_pay: 25000, net_override_reason: '   ' })).toThrow(/needs a reason/);
+    // The computed net (or within Rs 1 of it) needs none, and stores none.
+    expect(resolvePrepareLine(worker(), { net_pay: 29999.4 }).netOverrideReason).toBeNull();
+    expect(resolvePrepareLine(worker(), {}).netOverrideReason).toBeNull();
+  });
+
+  test('B3: preparePayrollRun stores the reason on the line; refuses a lowered net without one', async () => {
+    seed();
+    await expect(preparePayrollRun({ month: MONTH, lines: [{ worker_id: 1, net_pay: 20000 }] }, 1))
+      .rejects.toMatchObject({ httpStatus: 400 });
+    expect(db.tables.mill_payroll_lines).toEqual([]);
+    const run = await preparePayrollRun({ month: MONTH, lines: [{ worker_id: 1, net_pay: 20000, net_override_reason: 'Balance next month' }] }, 1);
+    const line = db.tables.mill_payroll_lines.find((l) => l.run_id === run.id);
+    expect(line).toMatchObject({ net_pay: 20000, net_override_reason: 'Balance next month' });
   });
 
   test('a negative / non-numeric client net is rejected', () => {
