@@ -185,6 +185,25 @@ describe('the shared drawer', () => {
     expect(LEGACY).toEqual({});
   });
 
+  it('B4: every non-mill local-sale receipt goes through the shared Payment form, local-sale variant', () => {
+    const src = (f) => (FILES.find(([n]) => n === f) || [])[1] || '';
+    // Money In rows open the form through the drawer stack (docKind local_sale).
+    expect(src('modules/finance/pages/MoneyIn.jsx')).toMatch(/docKind: row\.kind === 'local_sale' \? 'local_sale'/);
+    expect(src('modules/finance/pages/MoneyIn.jsx')).toContain('openPayment');
+    // Finance › Money In › Local sales: one line.
+    expect(src('modules/finance/pages/LocalSalesFinance.jsx')).toMatch(/openPayment\(null, \{\s*variant: 'receive_local_sale_line'/);
+    // The Local Sales module: the list (group or one line) and the invoice page (its group).
+    expect(src('modules/localSales/pages/LocalSales.jsx')).toContain('PaymentFormDrawer');
+    expect(src('modules/localSales/pages/LocalSales.jsx')).toMatch(/variant: 'receive_local_sale'/);
+    expect(src('modules/localSales/pages/InvoiceView.jsx')).toMatch(/<PaymentFormDrawer variant="receive_local_sale"/);
+    // Nothing else posts one by hand; Mill Finance keeps its Mill-Cash drawer (owner decision).
+    const direct = FILES
+      .filter(([, s]) => /useAcceptLocalSalePayment|useAcceptGroupPayment|localSalesApi\.accept(Group)?Payment/.test(s))
+      .map(([f]) => f)
+      .filter((f) => !f.startsWith('api/') && !f.startsWith('modules/localSales/api/'));
+    expect(direct).toEqual(['modules/milling/components/MillCustomerPayDrawer.jsx']);
+  });
+
   it('owns the payment arithmetic — no screen reimplements the overpayment check', () => {
     // Expenses.jsx settles through PUT /expenses/:id/pay, whose server-side
     // markPaid does its own capping; its message is its own. Everything else

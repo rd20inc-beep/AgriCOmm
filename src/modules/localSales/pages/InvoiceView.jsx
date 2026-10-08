@@ -1,7 +1,7 @@
 // Invoice 360 — a richer, read-only detail view of one local sale (the sale row
 // IS the invoice). Phase 2 of the invoice plan: clearer + traceable + easy to
 // print. Additive only — reuses the existing sale data, the existing
-// accept-payment mutation, and the existing TransactionDocument print template.
+// shared Payment form, and the existing TransactionDocument print template.
 // Deliberately does NOT show COGS/margin (admin copy is a placeholder).
 import { useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
@@ -13,12 +13,11 @@ import {
 import { localSalesApi } from '../api/services';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
-import { useAcceptLocalSalePayment } from '../../../api/queries';
+import PaymentFormDrawer from '../../../components/payments/PaymentFormDrawer';
 import SlideDrawer from '../../../components/SlideDrawer';
 import { printCustomerInvoice, printAdminInvoice, printGatePass } from '../utils/invoicePrint';
-import { todayLocalISO, fmtPKR, fmtKg, fmtNum, fmtDate } from '../../../shared/utils/format';
+import { fmtPKR, fmtKg, fmtNum, fmtDate } from '../../../shared/utils/format';
 import StatusBadge from '../../../shared/components/StatusBadge';
-import FieldError from '../../../shared/components/FieldError';
 
 // Roles allowed to view the admin invoice copy (mirrors the backend route gate).
 const ADMIN_INVOICE_ROLES = ['Super Admin', 'Owner', 'Finance Manager', 'Mill Manager'];
@@ -33,7 +32,6 @@ export default function InvoiceView() {
   const { companyProfileData, addToast } = useApp();
   const { user } = useAuth();
   const canSeeAdminCopy = ADMIN_INVOICE_ROLES.includes(user?.role);
-  const payMutation = useAcceptLocalSalePayment();
   const [adminBusy, setAdminBusy] = useState(false);
 
   const { data, isLoading, isError, refetch } = useQuery({
@@ -70,12 +68,10 @@ export default function InvoiceView() {
   });
 
   const [payOpen, setPayOpen] = useState(false);
-  const [payForm, setPayForm] = useState({ amount: '', payment_method: 'cash', reference: '', payment_date: todayLocalISO(), due_date: '', collection_location: 'Mill' });
   const [template, setTemplate] = useState('standard'); // print template: standard | compact
   const [emailOpen, setEmailOpen] = useState(false);
   const [emailTo, setEmailTo] = useState('');
   const [emailBusy, setEmailBusy] = useState(false);
-  const [payErrors, setPayErrors] = useState({});
 
   if (isLoading) return <div className="p-6 text-sm text-gray-400">Loading invoice…</div>;
   if (isError || !data?.sale) return (
@@ -134,18 +130,15 @@ export default function InvoiceView() {
     } finally { setAdminBusy(false); }
   };
 
-  const submitPayment = async () => {
-    const amt = parseFloat(payForm.amount) || 0;
-    if (amt <= 0) { setPayErrors({ amount: 'Enter an amount greater than zero.' }); return; }
-    setPayErrors({});
-    try {
-      await payMutation.mutateAsync({ saleId: sale.id, data: payForm });
-      addToast?.('Payment recorded.', 'success');
-      setPayOpen(false);
-      refetch();
-    } catch (e) {
-      addToast?.(e?.message || 'Payment failed.', 'error');
-    }
+  // B4: the receipt is the shared Payment form's local-sale variant — the
+  // whole invoice (its sale group) settles through POST
+  // /local-sales/group/:groupNo/payments, as Money In and the Local Sales
+  // list do, with the account picker and cheque rules they have.
+  const payCtx = {
+    groupNo: sale.saleGroupNo || sale.invoiceNo, currency: 'PKR', outstanding: parseFloat(sale.outstanding) || 0,
+    collectionLocation: dispatch.collectionLocation || 'Mill',
+    party: { type: 'customer', id: sale.customerId, name: sale.customer || '' },
+    ref: sale.saleGroupNo || sale.invoiceNo,
   };
 
   const ActionBtn = ({ icon: Icon, label, onClick, to, tone = 'default', disabled }) => {
@@ -182,7 +175,7 @@ export default function InvoiceView() {
           {canSeeAdminCopy && <ActionBtn icon={ShieldCheck} label={adminBusy ? 'Preparing…' : 'Print admin copy'} onClick={onPrintAdmin} disabled={adminBusy} />}
           <ActionBtn icon={Mail} label="Email invoice" onClick={() => { setEmailTo(sale.customerEmail || ''); setEmailOpen(true); }} />
           <ActionBtn icon={MessageCircle} label="WhatsApp" onClick={onWhatsApp} />
-          {sale.outstanding > 0.01 && <ActionBtn icon={Wallet} label="Record payment" onClick={() => { setPayForm(f => ({ ...f, amount: String(Math.round(sale.outstanding)) })); setPayOpen(true); }} />}
+          {sale.outstanding > 0.01 && <ActionBtn icon={Wallet} label="Record payment" onClick={() => setPayOpen(true)} />}
         </div>
       </div>
 
@@ -376,38 +369,11 @@ export default function InvoiceView() {
         )}
       </SlideDrawer>
 
-      {/* Record payment modal */}
-      <SlideDrawer open={payOpen} onClose={() => setPayOpen(false)} title="Record payment" subtitle={`Against invoice ${sale.invoiceNo}`} icon={Wallet} size="md">
-        {payOpen && (
-          <div className="space-y-3">
-            <Lbl text="Amount" required>
-              <input type="number" value={payForm.amount} autoFocus aria-invalid={!!payErrors.amount}
-                onChange={e => { setPayForm(f => ({ ...f, amount: e.target.value })); setPayErrors({}); }}
-                className={`w-full border rounded-lg px-3 py-2 text-sm outline-none ${payErrors.amount ? 'border-red-400' : 'border-gray-200'}`} />
-              <FieldError error={payErrors.amount} />
-            </Lbl>
-            <Lbl text="Method">
-              <select value={payForm.payment_method} onChange={e => setPayForm(f => ({ ...f, payment_method: e.target.value }))} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white outline-none">
-                <option value="cash">Cash</option><option value="cheque">Cheque</option><option value="bank_transfer">Bank transfer</option><option value="credit">Credit (udhaar)</option>
-              </select>
-            </Lbl>
-            {(payForm.payment_method === 'cash' || payForm.payment_method === 'credit') && (
-              <Lbl text="Collection location">
-                <select value={payForm.collection_location} onChange={e => setPayForm(f => ({ ...f, collection_location: e.target.value }))} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white outline-none">
-                  <option value="Mill">Mill</option><option value="Head Office">Head Office</option>
-                </select>
-              </Lbl>
-            )}
-            <Lbl text="Reference (cheque / bank ref)"><input value={payForm.reference} onChange={e => setPayForm(f => ({ ...f, reference: e.target.value }))} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none" /></Lbl>
-            <Lbl text="Payment date"><input type="date" value={payForm.payment_date} onChange={e => setPayForm(f => ({ ...f, payment_date: e.target.value }))} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none" /></Lbl>
-            {payForm.payment_method === 'cheque' && <Lbl text="Cheque due/clearing date"><input type="date" value={payForm.due_date} onChange={e => setPayForm(f => ({ ...f, due_date: e.target.value }))} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none" /></Lbl>}
-            {payForm.payment_method === 'cheque' && <p className="text-[11px] text-amber-700">Cheques settle when cleared in Due Dates — until then the balance stays owed.</p>}
-            <button onClick={submitPayment} disabled={payMutation.isPending} className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">
-              <Wallet size={14} /> {payMutation.isPending ? 'Recording…' : 'Record payment'}
-            </button>
-          </div>
-        )}
-      </SlideDrawer>
+      {/* Record payment — the shared Payment form (B4) */}
+      {payOpen && (
+        <PaymentFormDrawer variant="receive_local_sale" ctx={payCtx}
+          onClose={() => setPayOpen(false)} onDone={() => refetch()} />
+      )}
     </div>
   );
 }
