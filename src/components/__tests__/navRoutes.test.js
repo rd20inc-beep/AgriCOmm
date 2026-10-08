@@ -58,6 +58,13 @@ describe('legacy finance aliases', () => {
     expect(app).toMatch(/Object\.keys\(LEGACY_FINANCE_REDIRECTS\)\.map\(\(seg\) => \(\s*<Route key=\{seg\} path=\{seg\} element=\{<LegacyFinanceRedirect \/>\} \/>/);
     expect(app).toMatch(/<Route path="\*" element=\{<FinanceCatchAll \/>\} \/>/);
   });
+
+  it('Stock transfers lives under Accounting (finance.view) and /finance/transfers is only a redirect now', () => {
+    const paths = shellPaths('FinanceRoutes');
+    expect(paths).toContain('accounting/stock-transfers');
+    expect(paths).not.toContain('transfers');
+    expect(app).toMatch(/<Route path="accounting\/stock-transfers" element=\{<ProtectedRoute module="finance" action="view"><FinanceTransfers \/><\/ProtectedRoute>\} \/>/);
+  });
 });
 
 describe('sidebar labels', () => {

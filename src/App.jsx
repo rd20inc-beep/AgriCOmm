@@ -159,13 +159,14 @@ function FinanceRoutes() {
         <Route path="accounting/profit" element={<Profit />} />
         <Route path="accounting/statements" element={<PartyLedger />} />
         <Route path="accounting/rates" element={<RatesCenter />} />
+        {/* Mill → Export STOCK transfers (not money). Was /finance/transfers. */}
+        <Route path="accounting/stock-transfers" element={<ProtectedRoute module="finance" action="view"><FinanceTransfers /></ProtectedRoute>} />
         {/* Payroll */}
         <Route path="payroll" element={<ProtectedRoute module="payroll" action="view"><FinancePayroll /></ProtectedRoute>} />
         {/* Reached from Home's alerts panel (Needs Attention replaces it later). */}
         <Route path="alerts" element={<FinanceAlerts />} />
         {/* URL-only pages, kept until their removal is proven safe. */}
         <Route path="costs" element={<CostAllocation />} />
-        <Route path="transfers" element={<FinanceTransfers />} />
         <Route path="reconciliation" element={<Reconciliation />} />
         {/* Every pre-redesign path → its new view, query string kept. */}
         {Object.keys(LEGACY_FINANCE_REDIRECTS).map((seg) => (
