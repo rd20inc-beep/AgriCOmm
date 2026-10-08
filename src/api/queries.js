@@ -766,6 +766,21 @@ export function useClearCheque() {
   });
 }
 
+// B1: mark an uncleared cheque bounced (the document it was against reopens).
+export function useBounceCheque() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }) => financeApi.bounceCheque(id, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['finance'] });
+      qc.invalidateQueries({ queryKey: ['receivables'] });
+      qc.invalidateQueries({ queryKey: ['payables'] });
+      qc.invalidateQueries({ queryKey: ['local-sales'] });
+      qc.invalidateQueries({ queryKey: ['bank-accounts'] });
+    },
+  });
+}
+
 // Merged payment trail (where/how each was paid) for one Finance→Purchases row.
 export function usePurchasePaymentTrail(source, sourceId, enabled = true) {
   return useQuery({

@@ -3,6 +3,8 @@ export const financeApi = {
   overview: () => api.get('/api/finance/overview'),
   upcoming: () => api.get('/api/finance/upcoming'),
   clearCheque: (id, data) => api.post(`/api/finance/payments/${id}/clear`, data || {}),
+  // B1: an uncleared cheque bounced — { reason, bank_charge?, charge_date?, charge_account_id? }.
+  bounceCheque: (id, data) => api.post(`/api/finance/payments/${id}/bounce`, data || {}),
   receivables: (params) => api.get('/api/finance/receivables', params),
   receivableReceipts: (id, source) => api.get(`/api/finance/receivables/${id}/receipts`, { source }),
   payablePayments: (id) => api.get(`/api/finance/payables/${id}/payments`),

@@ -52,7 +52,7 @@ describe('buildNeedsAttention', () => {
     expect(byKey['recv-receivable-12']).toMatchObject({ title: expect.stringMatching(/^Advance due/), currency: 'USD' });
     expect(byKey['recv-receivable-13']).toBeUndefined(); // due in December — not yet
     expect(byKey['recv-receivable-14']).toBeUndefined(); // paid
-    expect(byKey['cheque-50']).toMatchObject({ severity: 'danger', action: { type: 'clearCheque' } });
+    expect(byKey['cheque-50']).toMatchObject({ severity: 'danger', action: { type: 'clearCheque' }, secondary: { type: 'bounceCheque' } });
     expect(byKey['cheque-51']).toBeUndefined(); // clears in November
     expect(byKey['transfer-60']).toMatchObject({ action: { type: 'acceptTransfer' } });
     expect(byKey['payroll-70'].action.type).toBe('approvePayroll');
@@ -121,7 +121,7 @@ vi.mock('@tanstack/react-query', () => ({
 const mut = () => ({ mutateAsync: vi.fn(), mutate: vi.fn(), isPending: false });
 vi.mock('../../../api/queries', () => ({
   usePendingExportReceipts: () => ({ data: SOURCES.pendingReceipts }),
-  useConfirmExportReceipt: mut, useRejectExportReceipt: mut, useAcceptFundTransfer: mut, useClearCheque: mut,
+  useConfirmExportReceipt: mut, useRejectExportReceipt: mut, useAcceptFundTransfer: mut, useClearCheque: mut, useBounceCheque: mut,
   useApprovePayrollRun: mut, usePayPayrollRun: mut,
   useReceivables: () => ({ data: SOURCES.receivables }),
   useUpcoming: () => ({ data: SOURCES.upcoming }),
@@ -145,7 +145,7 @@ describe('<NeedsAttention />', () => {
   it('Finance gets the actions (Confirm with the rate inline, Reject, Receive, Clear, Accept, Approve, Pay, Resolve…)', () => {
     const html = render();
     expect(actions(html)).toEqual(expect.arrayContaining([
-      'confirmReceipt', 'rejectReceipt', 'receive', 'clearCheque', 'acceptTransfer', 'approvePayroll', 'payPayroll', 'markPurchased', 'resolveSuspense', 'openAccount', 'addRate',
+      'confirmReceipt', 'rejectReceipt', 'receive', 'clearCheque', 'bounceCheque', 'acceptTransfer', 'approvePayroll', 'payPayroll', 'markPurchased', 'resolveSuspense', 'openAccount', 'addRate',
     ]));
     expect(html).toContain('aria-label="FX rate the bank applied"');
     expect(html).toMatch(/data-currency="USD"[^>]*>\$2,000\.00/);

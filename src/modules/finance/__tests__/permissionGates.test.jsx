@@ -48,7 +48,7 @@ vi.mock('../../../api/queries', () => ({
   useCustomers: listHook([{ id: 3, name: 'B' }]),
   useSuppliers: listHook([]),
   useExpenseVendors: listHook({}),
-  useClearCheque: mut, useReverseFundTransfer: mut, useAcceptFundTransfer: mut, useConfirmExportReceipt: mut,
+  useClearCheque: mut, useBounceCheque: mut, useReverseFundTransfer: mut, useAcceptFundTransfer: mut, useConfirmExportReceipt: mut,
   useRejectExportReceipt: mut, useUpdateOrderStatus: mut,
 }));
 vi.mock('@tanstack/react-query', () => ({
@@ -104,7 +104,7 @@ const FM_EXPECTS = {
   MoneyOut: ['pay'],
   Purchases: ['pay'],
   Expenses: ['new-expense', 'pay'],
-  DueDates: [],
+  DueDates: ['bounce-cheque'],
   Suspense: ['record-suspense', 'resolve', 'reverse'],
   RatesCenter: ['add-fx-rate', 'refresh-fx'],
   Confirmations: ['confirm-receipt', 'hold', 'receive'],

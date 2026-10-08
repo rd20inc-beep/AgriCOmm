@@ -20,7 +20,9 @@ import { useFinanceDrawers } from '../drawers/drawersContext';
 import { fmtAmt } from '../drawers/drawerLogic';
 import { buildNeedsAttention } from '../utils/needsAttention';
 import { withRange } from '../financeNav';
-import { btnQuiet, btnRowPrimary, btnRowQuiet } from '../utils/uiClasses';
+import { btnQuiet, btnRowPrimary, btnRowQuiet, btnRowDanger } from '../utils/uiClasses';
+import PermissionGate from '../../../shared/components/PermissionGate';
+import useChequeBounce from '../hooks/useChequeBounce';
 
 // Severity shows three ways: the edge colour, a different icon, and a word
 // for screen readers — never colour alone.
@@ -81,6 +83,7 @@ export default function NeedsAttention({ summary, rangeKey = '' }) {
   const payMut = usePayPayrollRun();
   const [rates, setRates] = useState({});
   const [clearing, setClearing] = useState(null);
+  const bounce = useChequeBounce({ accounts: accountsForMethod(accounts, 'cheque') });
   const [resolving, setResolving] = useState(null);
   const [busy, setBusy] = useState(null);
   const err = (e, fallback) => addToast?.(e?.data?.message || e?.response?.data?.message || e?.message || fallback, 'error');
@@ -222,6 +225,13 @@ export default function NeedsAttention({ summary, rangeKey = '' }) {
                   {item.action?.type === 'confirmReceipt' && (
                     <button type="button" onClick={() => reject(p)} className={btnRowQuiet} data-action="rejectReceipt">Reject</button>
                   )}
+                  {item.secondary?.type === 'bounceCheque' && (
+                    <PermissionGate module="finance" action="confirm_payment">
+                      <button type="button" disabled={bounce.busy} onClick={() => bounce.start(p)} data-action="bounceCheque" className={btnRowDanger}>
+                        {item.secondary.label}
+                      </button>
+                    </PermissionGate>
+                  )}
                   {item.action && (
                     <button type="button" disabled={busy === item.key} onClick={() => run(item)} data-action={item.action.type}
                       className={btnRowPrimary}>
@@ -241,6 +251,7 @@ export default function NeedsAttention({ summary, rangeKey = '' }) {
         <ClearChequeDialog key={clearing.paymentId} item={clearing} accounts={accountsForMethod(accounts, 'cheque')}
           busy={clearMut.isPending} onCancel={() => setClearing(null)} onConfirm={onClearConfirm} />
       )}
+      {bounce.dialog}
       {resolving && (
         <ResolveDrawer entry={resolving} addToast={addToast} onClose={() => setResolving(null)}
           onDone={() => { setResolving(null); qc.invalidateQueries({ queryKey: ['suspense'] }); }} />

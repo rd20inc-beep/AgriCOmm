@@ -46,6 +46,7 @@ vi.mock('@tanstack/react-query', () => ({
 vi.mock('../../../api/queries', () => ({
   useBankAccounts: () => ({ data: mockAccounts }),
   useClearCheque: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useBounceCheque: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useReversePayment: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useReceivables: () => ({ data: mockReceivables, isLoading: false }),
   usePayables: () => ({ data: mockPayables, isLoading: false }),
@@ -113,12 +114,30 @@ describe('Transaction drawer', () => {
     expect(actions(html)).toEqual([]);
   });
 
-  it('an uncleared cheque offers Clear (never Bounce — pending decision)', () => {
-    mockTx = { ...PAYMENT_DETAIL, payment: { ...PAYMENT_DETAIL.payment, payment_method: 'cheque', cleared: false }, clearable: true, bank_transactions: [], journals: [] };
+  it('an uncleared cheque offers Clear and Bounced (B1) to Finance; a read-only role sees neither', () => {
+    mockTx = { ...PAYMENT_DETAIL, payment: { ...PAYMENT_DETAIL.payment, payment_method: 'cheque', cleared: false }, clearable: true, bounceable: true, bank_transactions: [], journals: [] };
     const html = render(<TransactionDrawer txKind="payment" id={5} onClose={() => {}} />);
-    expect(actions(html)).toContain('clear-cheque');
-    expect(text(html)).not.toMatch(/Bounce/);
+    expect(actions(html)).toEqual(expect.arrayContaining(['clear-cheque', 'bounce-cheque']));
     expect(text(html)).toContain('Nothing is posted until the cheque clears.');
+    mockPerms = AUDITOR;
+    const ro = render(<TransactionDrawer txKind="payment" id={5} onClose={() => {}} />);
+    expect(actions(ro)).not.toContain('bounce-cheque');
+    expect(actions(ro)).not.toContain('clear-cheque');
+  });
+
+  it('a bounced cheque shows Bounced (red), who and why, and offers no action', () => {
+    mockTx = {
+      ...PAYMENT_DETAIL,
+      payment: { ...PAYMENT_DETAIL.payment, payment_method: 'cheque', cleared: false, status: 'Bounced', bounced_by_name: 'Finance One', bounced_at: '2026-10-09T10:00:00Z', bounce_reason: 'Insufficient funds' },
+      clearable: false, bounceable: false, reversal: { allowed: false, reason: 'This cheque bounced — it never moved any money.' }, bank_transactions: [], journals: [],
+    };
+    const html = render(<TransactionDrawer txKind="payment" id={5} onClose={() => {}} />);
+    expect(actions(html)).not.toEqual(expect.arrayContaining(['clear-cheque']));
+    expect(actions(html)).not.toContain('bounce-cheque');
+    expect(actions(html)).not.toContain('reverse');
+    expect(html).toMatch(/bg-red-50 text-red-700[^"]*"[^>]*>(<[^>]+>)*\s*Bounced/);
+    expect(text(html)).toContain('Insufficient funds');
+    expect(text(html)).not.toContain('Uncleared');
   });
 
   it('a receipt the server will not reverse here says why, with no Reverse button', () => {
@@ -129,7 +148,9 @@ describe('Transaction drawer', () => {
   });
 
   it('transactionActions mirrors finance.confirm_payment', () => {
-    expect(transactionActions(PAYMENT_DETAIL, FM)).toMatchObject({ reverse: true, clear: false, attach: true });
+    expect(transactionActions(PAYMENT_DETAIL, FM)).toMatchObject({ reverse: true, clear: false, bounce: false, attach: true });
+    expect(transactionActions({ ...PAYMENT_DETAIL, bounceable: true }, FM).bounce).toBe(true);
+    expect(transactionActions({ ...PAYMENT_DETAIL, bounceable: true }, AUDITOR).bounce).toBe(false);
     expect(transactionActions(PAYMENT_DETAIL, AUDITOR)).toMatchObject({ reverse: false, clear: false, attach: false });
     expect(transactionActions({ ...PAYMENT_DETAIL, payment: { ...PAYMENT_DETAIL.payment, attachment_url: 'x.pdf' } }, FM).attach).toBe(false);
   });
