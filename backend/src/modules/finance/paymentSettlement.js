@@ -13,6 +13,7 @@
 const { nextDocNo } = require('../../utils/docNumber');
 const accountingService = require('../accounting/accounting.service');
 const { ledgerFailure, missingAccounts } = require('../../shared/ledgerFailure');
+const { glAccountFor, remapControlLines } = require('../../shared/accountGl');
 
 const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 const num = (v) => parseFloat(v) || 0;
@@ -203,15 +204,20 @@ function nextBtNo(trx) {
  * original. Nothing is edited or marked — the trial balance counts Posted
  * journals only, so the original plus its delta nets to zero (never
  * reverse-and-repost, which double-counts). Returns how many were mirrored.
+ * `cashAccountId`: the bank account the payment moved — a line the original
+ * put on the 1000 control account is mirrored onto that account's own GL.
  */
-async function postDeltaOf(trx, { refNo, refTypes, refType, description, userId, date }) {
+async function postDeltaOf(trx, { refNo, refTypes, refType, description, userId, date, cashAccountId = null }) {
   let q = trx('journal_entries').where({ ref_no: refNo, status: 'Posted' });
   if (refTypes && refTypes.length) q = q.whereIn('ref_type', refTypes);
   const originals = await q.select('*');
   let n = 0;
   for (const j of Array.isArray(originals) ? originals : []) {
-    const lines = await trx('journal_lines').where({ journal_id: j.id }).select('*');
+    let lines = await trx('journal_lines').where({ journal_id: j.id }).select('*');
     if (!Array.isArray(lines) || !lines.length) continue;
+    // A journal posted on the 1000 control account before per-account GL:
+    // its cash line comes off the account's own GL now (see remapControlLines).
+    if (cashAccountId) lines = await remapControlLines(trx, lines, () => cashAccountId);
     const delta = await accountingService.createJournal(trx, {
       date: date || new Date().toISOString().slice(0, 10),
       entity: j.entity || 'mill',
@@ -335,7 +341,8 @@ async function postPaymentJournal(trx, { payment, userId, date, description, ove
     if (overrides.entity) entity = overrides.entity;
     if (overrides.partyType !== undefined) { partyType = overrides.partyType; partyId = overrides.partyId || null; }
 
-    const cash = await trx('chart_of_accounts').where({ code: '1000' }).first();
+    // The account the money moved through posts to its own GL (G-8).
+    const cash = await glAccountFor(trx, payment.bank_account_id || null);
     let counter = await trx('chart_of_accounts').where({ code: counterCode }).first();
     // Salaries Payable missing on an older DB → Supplier Payable, as expenses do.
     if (!counter && counterCode === '2040') { counterCode = '2010'; counter = await trx('chart_of_accounts').where({ code: '2010' }).first(); }

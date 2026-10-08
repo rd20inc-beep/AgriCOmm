@@ -1,5 +1,6 @@
 const db = require('../../config/database');
 const fxRateService = require('../finance/fxRate.service');
+const { cashGroupAccountIds } = require('../../shared/accountGl');
 
 /**
  * Currency conversion helpers for party statements. Journals are stored in
@@ -673,6 +674,8 @@ const accountingService = {
     let query = db('journal_lines as jl')
       .join('journal_entries as je', 'jl.journal_id', 'je.id')
       .join('chart_of_accounts as coa', 'jl.account_id', 'coa.id')
+      // The group an account rolls up to (per-account cash / bank GL → 1000).
+      .leftJoin('chart_of_accounts as par', 'coa.parent_id', 'par.id')
       .where('je.status', 'Posted');
 
     if (periodId) {
@@ -688,8 +691,10 @@ const accountingService = {
     }
 
     const rows = await query
-      .groupBy('coa.id', 'coa.code', 'coa.name', 'coa.type', 'coa.sub_type', 'coa.normal_balance')
+      .groupBy('coa.id', 'coa.code', 'coa.name', 'coa.type', 'coa.sub_type', 'coa.normal_balance', 'par.code', 'par.name')
       .select(
+        'par.code as parent_code',
+        'par.name as parent_name',
         'coa.id as account_id',
         'coa.code',
         'coa.name',
@@ -718,6 +723,8 @@ const accountingService = {
         type: row.type,
         sub_type: row.sub_type,
         normal_balance: row.normal_balance,
+        parent_code: row.parent_code || null,
+        parent_name: row.parent_name || null,
         debit_total: debitTotal,
         credit_total: creditTotal,
         balance,
@@ -814,6 +821,7 @@ const accountingService = {
     let query = db('journal_lines as jl')
       .join('journal_entries as je', 'jl.journal_id', 'je.id')
       .join('chart_of_accounts as coa', 'jl.account_id', 'coa.id')
+      .leftJoin('chart_of_accounts as par', 'coa.parent_id', 'par.id')
       .where('je.status', 'Posted');
 
     if (asOfDate) {
@@ -826,8 +834,10 @@ const accountingService = {
     }
 
     const rows = await query
-      .groupBy('coa.id', 'coa.code', 'coa.name', 'coa.type', 'coa.sub_type', 'coa.normal_balance')
+      .groupBy('coa.id', 'coa.code', 'coa.name', 'coa.type', 'coa.sub_type', 'coa.normal_balance', 'par.code', 'par.name')
       .select(
+        'par.code as parent_code',
+        'par.name as parent_name',
         'coa.id as account_id',
         'coa.code',
         'coa.name',
@@ -892,13 +902,9 @@ const accountingService = {
    * Cash Flow Statement — simplified from journal entries touching cash/bank accounts.
    */
   async getCashFlow({ periodStart, periodEnd, entity }) {
-    // Cash/bank accounts: 1000-1050
-    const cashAccounts = await db('chart_of_accounts')
-      .where('code', '>=', '1000')
-      .where('code', '<=', '1050')
-      .select('id', 'code', 'name');
-
-    const cashAccountIds = cashAccounts.map((a) => a.id);
+    // Cash/bank accounts: 1000 Cash & Bank and every per-account GL under it
+    // (G-8). A contra between two of them nets to zero within the group.
+    const cashAccountIds = await cashGroupAccountIds(db);
 
     if (cashAccountIds.length === 0) {
       return { operating: [], investing: [], financing: [], net_change: 0 };

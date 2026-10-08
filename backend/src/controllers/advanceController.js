@@ -1,5 +1,6 @@
 const db = require('../config/database');
 const accountingService = require('../services/accountingService');
+const { glAccountFor } = require('../shared/accountGl');
 
 async function generateAdvanceNo(trx) {
   const last = await trx('advance_payments')
@@ -110,7 +111,10 @@ const advanceController = {
       });
 
       try {
+        // The receiving account's own GL (G-8) instead of the rule's 1000.
+        const cashGl = bank_account_id ? await glAccountFor(db, bank_account_id) : null;
         await accountingService.autoPost(db, {
+          debitAccountId: cashGl ? cashGl.id : null,
           triggerEvent: 'advance_receipt',
           entity: 'export',
           amount: parseFloat(amount),

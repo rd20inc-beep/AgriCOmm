@@ -1,4 +1,5 @@
 const db = require('../../config/database');
+const { glAccountFor } = require('../../shared/accountGl');
 const accountingService = require('../accounting/accounting.service');
 const { NotFoundError, ValidationError } = require('../../shared/errors');
 const { nextDocNo } = require('../../utils/docNumber');
@@ -54,9 +55,8 @@ async function create(payload, userId) {
     if (!bank) throw new NotFoundError('Bank/cash account not found.');
     if ((bank.currency || 'PKR') !== 'PKR') throw new ValidationError('Suspense entries are supported for PKR accounts only.');
     const suspense = await suspenseAccount(trx);
-    // Bank leg posts to the shared 1000 Cash & Bank control account (same as
-    // recordPayment) — bank_accounts has no per-account GL link.
-    const cashCoa = await trx('chart_of_accounts').where({ code: '1000' }).first();
+    // Bank leg posts to the account's own GL (G-8), as every payment does.
+    const cashCoa = await glAccountFor(trx, bank);
     if (!cashCoa) throw new ValidationError('Cash/Bank GL account (1000) is missing — cannot post the suspense entry.');
 
     const entryNo = await generateEntryNo(trx);

@@ -26,6 +26,11 @@ d('contra transfers (DB-gated)', () => {
   const run = `${Date.now()}`.slice(-7);
   const tok = {};
   const acc = {};
+  const glCode = {};
+  const { ensureAccountGl } = require('../shared/accountGl');
+  const linesOf = (journalId) => db('journal_lines as jl').join('chart_of_accounts as c', 'c.id', 'jl.account_id')
+    .where('jl.journal_id', journalId).orderBy('jl.id').select('c.code', 'jl.debit', 'jl.credit')
+    .then((ls) => ls.map((l) => [l.code, Number(l.debit), Number(l.credit)]));
   const TODAY = new Date().toISOString().slice(0, 10);
   const uuid = () => require('crypto').randomUUID();
 
@@ -62,7 +67,10 @@ d('contra transfers (DB-gated)', () => {
 
     const mk = async (key, row) => {
       const [a] = await db('bank_accounts').insert({ name: `ZZ ${key} ${run}`, is_active: true, ...row }).returning('*');
-      acc[key] = a;
+      // Each account its own GL account under 1000 (G-8), as createBankAccount does.
+      const gl = await ensureAccountGl(db, a);
+      acc[key] = { ...a, gl_account_id: gl.id };
+      glCode[key] = gl.code;
     };
     await mk('hoCash', { type: 'cash', entity: 'general', currency: 'PKR', current_balance: 2000000 });
     await mk('hoBank', { type: 'bank', entity: 'general', currency: 'PKR', current_balance: 1000000 });
@@ -75,7 +83,7 @@ d('contra transfers (DB-gated)', () => {
   afterAll(async () => { if (db) await db.destroy(); });
 
   // ── T1 ──
-  test('T1 Cash → Bank PKR 500,000 (same entity): both balances move, two linked BT rows, no journal, no payment', async () => {
+  test('T1 Cash → Bank PKR 500,000 (same entity): both balances move, two linked BT rows, Dr bank GL / Cr cash GL, no payment', async () => {
     const before = await balances();
     const pays = await paymentsCount();
     const res = await contra('fm', { from_account_id: acc.hoCash.id, to_account_id: acc.hoBank.id, amount: 500000, currency: 'PKR', transfer_date: TODAY, notes: 'float to bank' });
@@ -96,7 +104,11 @@ d('contra transfers (DB-gated)', () => {
         [acc.hoCash.id, 'debit', 500000, 'PKR', 'Contra Transfer', 'fund_transfer', t.transfer_no, 'posted'],
         [acc.hoBank.id, 'credit', 500000, 'PKR', 'Contra Transfer', 'fund_transfer', t.transfer_no, 'posted'],
       ]);
-    expect(await journalsFor(t.transfer_no)).toHaveLength(0);
+    // One journal between the two accounts' own GL accounts (G-8).
+    const js = await journalsFor(t.transfer_no);
+    expect(js.map((j) => [j.ref_type, j.status, j.entity])).toEqual([['Fund Transfer', 'Posted', 'general']]);
+    expect(await linesOf(js[0].id)).toEqual([[glCode.hoBank, 500000, 0], [glCode.hoCash, 0, 500000]]);
+    expect(t.je_ref_no).toBe(t.transfer_no);
     expect(await paymentsCount()).toBe(pays);
   });
 
@@ -108,11 +120,13 @@ d('contra transfers (DB-gated)', () => {
     const after = await balances();
     expect(after.hoBank - before.hoBank).toBe(-100000);
     expect(after.hoCash - before.hoCash).toBe(100000);
-    expect(await journalsFor(res.body.data.transfer.transfer_no)).toHaveLength(0);
+    const js = await journalsFor(res.body.data.transfer.transfer_no);
+    expect(js).toHaveLength(1);
+    expect(await linesOf(js[0].id)).toEqual([[glCode.hoCash, 100000, 0], [glCode.hoBank, 0, 100000]]);
   });
 
   // ── T3 ──
-  test('T3 USD Bank A → USD Bank B 10,000: both move in USD, no journal', async () => {
+  test('T3 USD Bank A → USD Bank B 10,000: both move in USD, journal between the two USD accounts at the PKR value', async () => {
     const before = await balances();
     const res = await contra('fm', { from_account_id: acc.usdA.id, to_account_id: acc.usdB.id, amount: 10000, currency: 'USD' });
     expect(res.status).toBe(200);
@@ -123,11 +137,16 @@ d('contra transfers (DB-gated)', () => {
     expect(after.usdB - before.usdB).toBe(10000);
     const bts = await btFor(t.id);
     expect(bts.every((b) => b.currency === 'USD' && Number(b.amount) === 10000)).toBe(true);
-    expect(await journalsFor(t.transfer_no)).toHaveLength(0);
+    const js = await journalsFor(t.transfer_no);
+    expect(js).toHaveLength(1);
+    expect(js[0]).toMatchObject({ orig_currency: 'USD' });
+    const pkr = Number(t.amount_pkr);
+    expect(pkr).toBeGreaterThan(0);
+    expect(await linesOf(js[0].id)).toEqual([[glCode.usdB, pkr, 0], [glCode.usdA, 0, pkr]]);
   });
 
   // ── T4 ──
-  test('T4 USD Bank → PKR Cash 10,000 @ 280 = 2,800,000: native moves, rate stored, FX unbooked, no FX journal', async () => {
+  test('T4 USD Bank → PKR Cash 10,000 @ 280 = 2,800,000: native moves, rate stored, FX unbooked, Dr cash GL / Cr USD GL, no FX line', async () => {
     const before = await balances();
     const res = await contra('fm', {
       from_account_id: acc.usdA.id, to_account_id: acc.hoCash.id, amount: 10000, currency: 'USD',
@@ -145,11 +164,13 @@ d('contra transfers (DB-gated)', () => {
     expect(after.hoCash - before.hoCash).toBe(2800000);
     const bts = await btFor(t.id);
     expect(bts.map((b) => [b.type, Number(b.amount), b.currency])).toEqual([['debit', 10000, 'USD'], ['credit', 2800000, 'PKR']]);
-    // No FX gain/loss (6210) and no transfer journal at all.
-    expect(await journalsFor(t.transfer_no)).toHaveLength(0);
+    // The PKR received moves between the two GL accounts; no FX gain/loss (6210).
+    const js = await journalsFor(t.transfer_no);
+    expect(js).toHaveLength(1);
+    expect(await linesOf(js[0].id)).toEqual([[glCode.hoCash, 2800000, 0], [glCode.usdA, 0, 2800000]]);
   });
 
-  test('T4b USD → PKR with USD 5.36 bank charges: extra source debit + Dr 6200 / Cr 1000 at the transfer rate', async () => {
+  test('T4b USD → PKR with USD 5.36 bank charges: extra source debit + Dr 6200 / Cr source GL at the transfer rate', async () => {
     const before = await balances();
     const pnlBefore = await accounting.getProfitAndLoss({});
     const res = await contra('fm', {
@@ -170,12 +191,11 @@ d('contra transfers (DB-gated)', () => {
       ['debit', 5.36, 'USD', 'Bank Charges'],
     ]);
     const js = await journalsFor(t.transfer_no);
-    expect(js).toHaveLength(1);
-    expect(js[0]).toMatchObject({ status: 'Posted', orig_currency: 'USD' });
-    expect(Number(js[0].orig_fx_rate)).toBe(280);
-    const lines = await db('journal_lines as jl').join('chart_of_accounts as c', 'c.id', 'jl.account_id')
-      .where('jl.journal_id', js[0].id).orderBy('jl.id').select('c.code', 'jl.debit', 'jl.credit');
-    expect(lines.map((l) => [l.code, Number(l.debit), Number(l.credit)])).toEqual([['6200', 1500.8, 0], ['1000', 0, 1500.8]]);
+    expect(js).toHaveLength(2);
+    expect(await linesOf(js[0].id)).toEqual([[glCode.hoCash, 280000, 0], [glCode.usdA, 0, 280000]]);
+    expect(js[1]).toMatchObject({ status: 'Posted', orig_currency: 'USD' });
+    expect(Number(js[1].orig_fx_rate)).toBe(280);
+    expect(await linesOf(js[1].id)).toEqual([['6200', 1500.8, 0], [glCode.usdA, 0, 1500.8]]);
 
     // The fee is a real expense on the GL P&L.
     const pnlAfter = await accounting.getProfitAndLoss({});
@@ -278,8 +298,11 @@ d('contra transfers (DB-gated)', () => {
       [acc.hoCash.id, 'debit', 50000, 'Contra Transfer Reversal'],
     ]);
     const js = await journalsFor(t.transfer_no);
-    expect(js.map((j) => [j.ref_type, j.status])).toEqual([['Fund Transfer', 'Posted'], ['Fund Transfer Reversal', 'Posted']]);
-    // Original + delta net to zero on 6200 and 1000.
+    expect(js.map((j) => [j.ref_type, j.status])).toEqual([
+      ['Fund Transfer', 'Posted'], ['Fund Transfer', 'Posted'],
+      ['Fund Transfer Reversal', 'Posted'], ['Fund Transfer Reversal', 'Posted'],
+    ]);
+    // Original + delta net to zero on 6200 and both accounts' GL.
     const net = await db('journal_lines').whereIn('journal_id', js.map((j) => j.id))
       .select(db.raw('SUM(debit) - SUM(credit) AS n')).first();
     expect(Number(net.n)).toBe(0);
@@ -347,7 +370,10 @@ d('contra transfers (DB-gated)', () => {
     const after = await balances();
     expect(after.hoBank - before.hoBank).toBe(-20000);
     expect(after.millCash - before.millCash).toBe(0);
-    expect((await journalsFor(t.transfer_no)).map((j) => j.entity)).toEqual(['general']);
+    const hoJs = await journalsFor(t.transfer_no);
+    expect(hoJs.map((j) => j.entity)).toEqual(['general']);
+    // The sender's half credits the sending account's own GL.
+    expect(await linesOf(hoJs[0].id)).toEqual([['1130', 20000, 0], [glCode.hoBank, 0, 20000]]);
     // USD across entities is refused (the two-phase flow is PKR-only).
     const usd = await contra('fm', { from_account_id: acc.usdA.id, to_account_id: acc.millCash.id, amount: 1, fx_rate: 280 });
     expect(usd.status).toBe(400);
