@@ -4,6 +4,9 @@ import SlideDrawer from '../../../components/SlideDrawer';
 import { serviceMillingApi } from '../api/services';
 import { useHaulers } from '../../../api/queries';
 import HaulerPicker from '../../../components/HaulerPicker';
+import PaymentFields from '../../../components/payments/PaymentFields';
+import { blankPaymentForm, paymentErrors } from '../../../components/payments/paymentPayload';
+import { useApp } from '../../../context/AppContext';
 import { fmtPKR, fmtKg, fmtNum } from '../../../shared/utils/format';
 
 const num = (v) => parseFloat(v) || 0;
@@ -211,27 +214,40 @@ export function CreateInvoiceDrawer({ open, batch, onClose, onCreated, addToast 
   );
 }
 
-/** Record a payment against a service invoice. `invoice` has total/received/balance. */
+/**
+ * Record a payment against a service invoice. `invoice` has total/received/balance.
+ * The shared payment fields: the money lands in the cash or bank account picked
+ * (cash pre-selects the cash float), and the server posts Dr 1000 / Cr 1120 with
+ * a bank_transactions row through the one payment engine.
+ */
 export function RecordPaymentDrawer({ open, invoice, onClose, onPaid, addToast }) {
-  const [amount, setAmount] = useState('');
-  const [method, setMethod] = useState('cash');
-  const [reference, setReference] = useState('');
+  const { bankAccountsList = [] } = useApp();
+  const [form, setForm] = useState(() => blankPaymentForm({ method: 'cash' }));
+  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
   const balance = invoice ? num(invoice.balance_amount) : 0;
 
   async function submit() {
-    const amt = num(amount);
-    if (amt <= 0) { addToast?.('Enter a payment amount', 'error'); return; }
-    if (amt - balance > 0.009) { addToast?.(`Amount exceeds balance (${pkr(balance)})`, 'error'); return; }
+    const errs = paymentErrors(form, { outstanding: balance, currency: 'PKR' });
+    setErrors(errs);
+    if (Object.keys(errs).length) return;
     setSaving(true);
     try {
-      await serviceMillingApi.recordPayment(invoice.id, { amount: amt, payment_method: method, reference: reference || null });
+      await serviceMillingApi.recordPayment(invoice.id, {
+        amount: num(form.amount),
+        payment_method: form.method,
+        bank_account_id: form.bankAccountId ? parseInt(form.bankAccountId, 10) : null,
+        payment_date: form.date,
+        due_date: form.method === 'cheque' ? (form.dueDate || null) : null,
+        reference: form.reference || null,
+      });
       addToast?.('Payment recorded', 'success');
-      setAmount(''); setReference('');
+      setForm(blankPaymentForm({ method: 'cash' }));
       onPaid?.();
       onClose?.();
     } catch (err) {
-      addToast?.(err?.response?.data?.message || err.message || 'Failed to record payment', 'error');
+      addToast?.(err?.response?.data?.message || err?.data?.message || err.message || 'Failed to record payment', 'error');
     } finally { setSaving(false); }
   }
 
@@ -244,22 +260,10 @@ export function RecordPaymentDrawer({ open, invoice, onClose, onPaid, addToast }
           <div className="rounded-lg border border-gray-200 p-2"><p className="text-[10px] uppercase text-gray-400">Received</p><p className="font-bold text-emerald-700">{pkr(invoice?.received_amount)}</p></div>
           <div className="rounded-lg border border-gray-200 p-2"><p className="text-[10px] uppercase text-gray-400">Balance</p><p className="font-bold text-rose-600">{pkr(balance)}</p></div>
         </div>
-        <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">Amount (PKR)</label>
-          <input type="number" min="0" value={amount} onChange={e => setAmount(e.target.value)} autoFocus className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
-          <button type="button" onClick={() => setAmount(String(Math.round(balance)))} className="text-xs text-blue-600 mt-1">Pay full balance</button>
-        </div>
-        <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">Method</label>
-          <select value={method} onChange={e => setMethod(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white">
-            <option value="cash">Cash</option>
-            <option value="bank_transfer">Bank Transfer</option>
-          </select>
-        </div>
-        <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">Reference (optional)</label>
-          <input type="text" value={reference} onChange={e => setReference(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
-        </div>
+        <PaymentFields form={form} set={set} accounts={bankAccountsList} currency="PKR" addToast={addToast}
+          amountLabel="Amount received (PKR) *" max={balance} extras={false} remarks={false} idPrefix="svc-pay"
+          filterAccountsByMethod errors={errors} />
+        <button type="button" onClick={() => set('amount', String(balance))} className="text-xs text-blue-600 -mt-2">Pay full balance</button>
       </div>
     </SlideDrawer>
   );

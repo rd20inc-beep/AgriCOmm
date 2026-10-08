@@ -7,16 +7,11 @@ const accountingService = require('../accounting/accounting.service');
 const inventoryService = require('../../services/inventoryService');
 const { resolveCashAccountId } = require('../../shared/cashAccounts');
 const { nextDocNo } = require('../../utils/docNumber');
-const { assertAccountCurrency } = require('../../shared/accountCurrency');
+const { normalizePaymentMethod } = require('../../shared/constants/paymentMethods');
+const { recordMoneyMovement } = require('../finance/paymentEngine');
 
 const num = (v) => parseFloat(v) || 0;
 const round2 = (v) => Math.round((num(v) + Number.EPSILON) * 100) / 100;
-
-function deriveStatus(total, received) {
-  if (received <= 0) return 'Unpaid';
-  if (received + 0.009 < total) return 'Partial';
-  return 'Paid';
-}
 
 // The dispatch routes take the URL param, which is the batch_no (e.g. "M-011")
 // — NOT the numeric id. Querying `.where({ id: 'M-011' })` on an integer column
@@ -49,28 +44,6 @@ async function recomputeServiceLotStatus(trx, batchId) {
   }
   await trx('milling_batches').where({ id: batchId }).update({ service_lot_status: status, updated_at: trx.fn.now() });
   return status;
-}
-
-// Move a receiving account's balance + drop a linked Cash & Bank sub-ledger row
-// (mirrors the local-sale receipt helper so a delete can reverse it).
-async function postReceiptToAccount(trx, { accountId, amount, paymentId, reference, notes, date, userId }) {
-  if (!accountId || !(amount > 0)) return;
-  // A PKR receipt: a non-PKR (e.g. USD) account must not be moved by a rupee figure.
-  assertAccountCurrency(await trx('bank_accounts').where({ id: accountId }).first(), 'PKR');
-  await trx('bank_accounts').where({ id: accountId }).increment('current_balance', amount);
-  const btNo = await nextDocNo(trx, { table: 'bank_transactions', column: 'transaction_no', prefix: 'BT-', pad: 4 });
-  await trx('bank_transactions').insert({
-    transaction_no: btNo, bank_account_id: accountId,
-    type: 'credit', amount, currency: 'PKR', status: 'posted',
-    transaction_date: date || new Date(), reference: reference || null,
-    notes: notes || null, source: 'service_milling', linked_payment_id: paymentId, created_by: userId || null,
-  });
-}
-
-async function resolveReceiptAccountId(trx, { paymentMode, bankAccountId, collectionLocation }) {
-  if (paymentMode === 'bank_transfer') return bankAccountId || null;
-  if (paymentMode === 'cash') return resolveCashAccountId(trx, { entity: 'mill', collectionLocation: collectionLocation || null });
-  return null;
 }
 
 module.exports = {
@@ -299,53 +272,52 @@ module.exports = {
   },
 
   // ── Record a payment against an invoice ──
+  // Through the one payment engine: the receivable and the invoice settle, the
+  // chosen account (or the mill's cash float for cash) moves with a
+  // bank_transactions row, and Dr 1000 / Cr 1120 Local AR — the account the
+  // invoice was booked to — posts in the same transaction.
   async recordPayment(req, res) {
     const b = req.body || {};
     try {
       const result = await db.transaction(async (trx) => {
-        const inv = await trx('service_milling_invoices').where({ id: req.params.id }).first();
+        const inv = await trx('service_milling_invoices').where({ id: req.params.id }).forUpdate().first();
         if (!inv) throw new Error('Invoice not found');
         const amount = round2(b.amount);
         if (amount <= 0) throw new Error('Payment amount must be greater than zero');
-        const newReceived = round2(num(inv.received_amount) + amount);
-        if (newReceived - num(inv.total_amount) > 0.009) {
+        if (round2(num(inv.received_amount) + amount) - num(inv.total_amount) > 0.009) {
           throw new Error(`Payment exceeds balance — outstanding is PKR ${round2(num(inv.total_amount) - num(inv.received_amount))}`);
         }
-        const method = b.payment_method || 'cash';
-        const receiptAccountId = await resolveReceiptAccountId(trx, {
-          paymentMode: method, bankAccountId: b.bank_account_id, collectionLocation: b.collection_location,
-        });
-        const [pay] = await trx('payments').insert({
-          payment_no: await nextDocNo(trx, { table: 'payments', column: 'payment_no', prefix: 'PS-', pad: 0 }),
-          type: 'receipt', amount, currency: 'PKR', fx_rate: 1, base_amount_pkr: amount,
-          payment_method: method === 'bank' ? 'bank_transfer' : method,
-          bank_reference: b.reference || null, bank_account_id: receiptAccountId || b.bank_account_id || null,
-          payment_date: b.payment_date || trx.fn.now(),
+        const method = normalizePaymentMethod(b.payment_method || 'cash');
+        const receivable = await trx('receivables').where({ service_invoice_id: inv.id }).forUpdate().first();
+        // Cash with no account picked lands in the mill's cash float (or Head
+        // Office cash when collected there); any other method names its account.
+        const accountId = b.bank_account_id
+          || (method === 'cash' ? await resolveCashAccountId(trx, { entity: 'mill', collectionLocation: b.collection_location || null }) : null);
+        const { payment } = await recordMoneyMovement(trx, {
+          type: 'receipt',
+          receivable: receivable || null,
+          source: { table: 'service_milling_invoices', id: inv.id },
+          extra: receivable ? {} : { service_invoice_id: inv.id },
+          amount,
+          currency: 'PKR',
+          method,
+          bankAccountId: accountId || null,
+          accountEntity: 'mill',
+          paymentDate: b.payment_date || null,
+          dueDate: b.due_date || null,
+          bankReference: b.reference || null,
           notes: `Service milling invoice ${inv.invoice_no} receipt`,
-          service_invoice_id: inv.id, created_by: req.user?.id || null,
-        }).returning('*');
-
-        await postReceiptToAccount(trx, {
-          accountId: receiptAccountId, amount, paymentId: pay.id,
-          reference: b.reference || inv.invoice_no, notes: `Service milling ${inv.invoice_no} receipt`,
-          date: b.payment_date, userId: req.user?.id,
+          userId: req.user?.id || null,
+          bt: { source: 'service_milling', notes: `Service milling ${inv.invoice_no} receipt` },
         });
-
-        const status = deriveStatus(num(inv.total_amount), newReceived);
-        const balance = round2(num(inv.total_amount) - newReceived);
-        await trx('service_milling_invoices').where({ id: inv.id }).update({
-          received_amount: newReceived, balance_amount: balance, payment_status: status, updated_at: trx.fn.now(),
-        });
-        await trx('receivables').where({ service_invoice_id: inv.id }).update({
-          received_amount: newReceived, outstanding: balance,
-          status: status === 'Paid' ? 'Paid' : 'Partial', updated_at: trx.fn.now(),
-        });
-        return { payment: pay, invoice: { ...inv, received_amount: newReceived, balance_amount: balance, payment_status: status } };
+        const updated = await trx('service_milling_invoices').where({ id: inv.id }).first();
+        return { payment, invoice: updated };
       });
       return res.status(201).json({ success: true, data: result });
     } catch (err) {
-      console.error('Service payment error:', err);
-      return res.status(400).json({ success: false, message: err.message || 'Failed to record payment.' });
+      const code = err.statusCode || err.status;
+      if (!code) console.error('Service payment error:', err);
+      return res.status(code && code !== 500 ? code : 400).json({ success: false, message: err.message || 'Failed to record payment.' });
     }
   },
 
@@ -361,13 +333,22 @@ module.exports = {
         if (!inv) throw new Error('Invoice not found');
 
         // 1. Reverse payment receipts linked to this invoice (account balance +
-        //    bank_transactions), then drop the payment rows.
+        //    bank_transactions + their journals), then drop the payment rows.
+        //    A bank row is undone by its own direction: a receipt's credit is
+        //    taken back out, a reversal's debit is put back.
         const payments = await trx('payments').where({ service_invoice_id: inv.id });
         for (const pay of payments) {
           const bts = await trx('bank_transactions').where({ linked_payment_id: pay.id });
           for (const bt of bts) {
-            await trx('bank_accounts').where({ id: bt.bank_account_id }).decrement('current_balance', parseFloat(bt.amount) || 0);
+            const amt = parseFloat(bt.amount) || 0;
+            await trx('bank_accounts').where({ id: bt.bank_account_id })[bt.type === 'debit' ? 'increment' : 'decrement']('current_balance', amt);
             await trx('bank_transactions').where({ id: bt.id }).del();
+          }
+          // The receipt's own journal (Dr 1000 / Cr 1120) and any reversal of
+          // it — marked Reversed, like the revenue journal below.
+          const own = await trx('journal_entries').where({ ref_no: pay.payment_no, status: 'Posted' });
+          for (const j of own) {
+            await accountingService.reverseJournal(trx, { journalId: j.id, reason: `Voided invoice ${inv.invoice_no}`, userId: req.user?.id });
           }
           await trx('payments').where({ id: pay.id }).del();
         }
