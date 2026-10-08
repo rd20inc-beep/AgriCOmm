@@ -6,8 +6,9 @@ import {
   CreditCard, X, Clock, CheckCircle, RefreshCw, Download,
   Check, ChevronLeft, ChevronRight, UserPlus, Eye, User, Inbox,
 } from 'lucide-react';
-import { useLocalSales, useLocalSalesSummary, useCreateLocalSale, useAcceptLocalSalePayment, useAcceptLocalSaleGroupPayment, useLotInventory,
+import { useLocalSales, useLocalSalesSummary, useCreateLocalSale, useLotInventory,
   usePendingLocalSales, useConfirmLocalSale, useRejectLocalSale } from '../../../api/queries';
+import PaymentFormDrawer from '../../../components/payments/PaymentFormDrawer';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import TransactionDocument from '../../../components/TransactionDocument';
@@ -50,8 +51,6 @@ const LABEL = "block text-xs font-semibold text-gray-600 uppercase mb-1";
 
 export default function LocalSales() {
   const { addToast, customersList, refreshFromApi, bankAccountsList = [], companyProfileData } = useApp();
-  // Local sales are PKR — a non-PKR (e.g. USD) account cannot take the receipt.
-  const bankOpts = (Array.isArray(bankAccountsList) ? bankAccountsList : []).filter(b => (b.type || '') !== 'cash' && (b.isActive ?? b.is_active ?? true) && accountTakesCurrency(b, 'PKR'));
   const [showSaleModal, setShowSaleModal] = useState(false);
   const [invoiceSale, setInvoiceSale] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -61,33 +60,45 @@ export default function LocalSales() {
   const [showRejected, setShowRejected] = useState(false);
   const [selectedSale, setSelectedSale] = useState(null);
   const [salePayments, setSalePayments] = useState([]);
-  const [showPaymentModal, setShowPaymentModal] = useState(false);
-  // When set, the payment drawer settles a whole multi-item sale in one
-  // receipt: { groupNo, due, count, buyer }.
-  const [payGroup, setPayGroup] = useState(null);
-  const EMPTY_PAY = () => ({ amount: '', payment_method: 'cash', bank_account_id: '', payment_date: localToday(), reference: '', notes: '', due_date: '', collection_location: 'Mill' });
-  const [payForm, setPayForm] = useState(EMPTY_PAY);
-  const [payLoading, setPayLoading] = useState(false);
-  const [payErrors, setPayErrors] = useState({});
-  const setPay = (k, v) => { setPayForm(p => ({ ...p, [k]: v })); setPayErrors(e => (e[k] ? { ...e, [k]: undefined } : e)); };
-
+  // Accepting a payment is the shared Payment form: a whole multi-item sale
+  // settles in one receipt (variant receive_local_sale → POST
+  // /local-sales/group/:groupNo/payments), one line through
+  // POST /local-sales/:id/payments — the same endpoints as before.
+  const [payCtx, setPayCtx] = useState(null);
   const { data: sales = [], isLoading, error, refetch } = useLocalSales();
   const { data: summary = {} } = useLocalSalesSummary();
-  const payMutation = useAcceptLocalSalePayment();
-  const groupPayMutation = useAcceptLocalSaleGroupPayment();
   function openGroupPay(g) {
-    const due = payableDue(g.items);
-    setPayGroup({ groupNo: g.key, due, count: g.items.length, buyer: g.items[0]?.customerName || g.items[0]?.buyerName || '' });
-    setPayForm({ ...EMPTY_PAY(), amount: String(due), collection_location: g.items[0]?.collectionLocation || 'Mill' });
-    setPayErrors({});
-    setShowPaymentModal(true);
+    const first = g.items[0] || {};
+    setPayCtx({
+      variant: 'receive_local_sale',
+      ctx: {
+        groupNo: g.key, currency: 'PKR', outstanding: payableDue(g.items),
+        collectionLocation: first.collectionLocation || 'Mill',
+        party: { type: 'customer', id: first.customerId, name: first.customerName || first.buyerName || '' },
+        ref: `${g.key} · ${g.items.length} items`,
+      },
+    });
   }
   function openLinePay(s) {
-    setPayGroup(null);
     setSelectedSale(s);
-    setPayForm({ ...EMPTY_PAY(), amount: String(parseFloat(s.dueAmount) || 0), collection_location: s.collectionLocation || s.collection_location || 'Mill' });
-    setPayErrors({});
-    setShowPaymentModal(true);
+    setPayCtx({
+      variant: 'receive_local_sale_line',
+      ctx: {
+        saleId: s.id, currency: 'PKR', outstanding: parseFloat(s.dueAmount) || 0,
+        collectionLocation: s.collectionLocation || s.collection_location || 'Mill',
+        party: { type: 'customer', id: s.customerId, name: s.customerName || s.buyerName || '' },
+        ref: s.saleNo,
+      },
+    });
+  }
+  async function afterPayment() {
+    refetch();
+    if (payCtx?.variant === 'receive_local_sale_line' && selectedSale) {
+      const updated = await localSalesApi.get(selectedSale.id);
+      setSelectedSale(updated?.data?.sale || selectedSale);
+      const payRes = await localSalesApi.getPayments(selectedSale.id);
+      setSalePayments(payRes?.data?.payments || []);
+    }
   }
   // Sale confirmation (Batch 6 · item 9): only a Mill Manager/Owner releases a
   // pending sale's stock + revenue.
@@ -506,106 +517,11 @@ export default function LocalSales() {
         </SlideDrawer>
       )}
 
-      {/* Accept Payment — right slide-over (SlideDrawer convention) */}
-      <SlideDrawer
-        open={showPaymentModal}
-        onClose={() => setShowPaymentModal(false)}
-        title="Accept Payment"
-        subtitle={payGroup ? `Sale ${payGroup.groupNo} · ${payGroup.count} items${payGroup.buyer ? ` · ${payGroup.buyer}` : ''}` : (selectedSale?.saleNo ? `Sale ${selectedSale.saleNo}` : undefined)}
-        icon={CreditCard}
-        size="md"
-        footer={(
-          <div className="flex justify-end gap-3">
-            <button onClick={() => setShowPaymentModal(false)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
-            <button onClick={async () => {
-              const errs = {};
-              if (!payForm.amount || parseFloat(payForm.amount) <= 0) errs.amount = 'Enter an amount greater than zero';
-              if (payForm.payment_method === 'bank_transfer' && !payForm.bank_account_id) errs.bank_account_id = 'Select the bank account that received the payment';
-              if (Object.keys(errs).length) { setPayErrors(errs); return; }
-              setPayLoading(true);
-              try {
-                if (payGroup) {
-                  await groupPayMutation.mutateAsync({ groupNo: payGroup.groupNo, data: payForm });
-                  addToast(`Payment of ${fmtPKR(payForm.amount)} accepted on ${payGroup.groupNo}`, 'success');
-                  setPayGroup(null);
-                  refetch();
-                } else {
-                  await payMutation.mutateAsync({ saleId: selectedSale.id, data: payForm });
-                  addToast(`Payment of ${fmtPKR(payForm.amount)} accepted`, 'success');
-                  const updated = await localSalesApi.get(selectedSale.id);
-                  setSelectedSale(updated?.data?.sale || selectedSale);
-                  const payRes = await localSalesApi.getPayments(selectedSale.id);
-                  setSalePayments(payRes?.data?.payments || []);
-                }
-                setShowPaymentModal(false);
-                setPayForm(EMPTY_PAY());
-              } catch (err) { addToast(err.message || 'Payment failed', 'error'); }
-              setPayLoading(false);
-            }} disabled={payLoading}
-              className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-50">
-              {payLoading ? 'Processing...' : 'Confirm Payment'}
-            </button>
-          </div>
-        )}
-      >
-        <div className="space-y-4">
-          <div className="bg-blue-50 rounded-lg p-3 text-sm">
-            <span className="text-blue-600">Remaining:</span> <span className="font-bold text-blue-900">{fmtPKR(payGroup ? payGroup.due : selectedSale?.dueAmount)}</span>
-            {payGroup && <span className="block text-[11px] text-blue-700/80 mt-0.5">One receipt for all {payGroup.count} items, applied to the oldest line first.</span>}
-          </div>
-          <div>
-            <label className={LABEL}>Amount (PKR) *</label>
-            <input type="number" value={payForm.amount} onChange={e => setPay('amount', e.target.value)} className={INPUT} placeholder="Rs" min="0" aria-invalid={!!payErrors.amount} />
-            <FieldError error={payErrors.amount} />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={LABEL}>Method</label>
-              <select value={payForm.payment_method} onChange={e => { const m = e.target.value; setPayForm(p => ({ ...p, payment_method: m, bank_account_id: m === 'bank_transfer' && !p.bank_account_id ? defaultBankAccountId(bankOpts, isFavorite) : p.bank_account_id })); }} className={SELECT}>
-                <option value="cash">Cash</option><option value="cheque">Cheque</option><option value="bank_transfer">Bank Transfer</option>
-              </select>
-            </div>
-            <div>
-              <label className={LABEL}>Date</label>
-              <input type="date" value={payForm.payment_date} onChange={e => setPayForm(p => ({...p, payment_date: e.target.value}))} className={INPUT} />
-            </div>
-          </div>
-          {/* Where the cash / udhaar was collected (cash receipts only) */}
-          {payForm.payment_method === 'cash' && (
-            <div>
-              <label className={LABEL}>Collected at</label>
-              <div className="grid grid-cols-2 gap-2">
-                {['Mill', 'Head Office'].map(loc => (
-                  <button key={loc} type="button" onClick={() => setPayForm(p => ({ ...p, collection_location: loc }))}
-                    className={`px-3 py-2 text-sm font-medium rounded-lg border ${payForm.collection_location === loc ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600 hover:border-gray-300'}`}>{loc}</button>
-                ))}
-              </div>
-            </div>
-          )}
-          {payForm.payment_method === 'bank_transfer' && (
-            <div>
-              <label className={LABEL}>Bank Account *</label>
-              <select value={payForm.bank_account_id} onChange={e => setPay('bank_account_id', e.target.value)} className={SELECT} aria-invalid={!!payErrors.bank_account_id}>
-                <option value="">Select bank account…</option>
-                {bankOpts.map(b => <option key={b.id} value={b.id}>{favStar(b)}{b.name}{(b.bankName || b.bank_name) ? ` — ${b.bankName || b.bank_name}` : ''}</option>)}
-              </select>
-              <FieldError error={payErrors.bank_account_id} />
-            </div>
-          )}
-          <div>
-            <label className={LABEL}>Reference</label>
-            <input value={payForm.reference} onChange={e => setPayForm(p => ({...p, reference: e.target.value}))} className={INPUT} placeholder="Receipt / cheque #" />
-          </div>
-          {payForm.payment_method === 'cheque' && (
-            <div>
-              <label className={LABEL}>Cheque date <span className="text-gray-400 font-normal">(when it clears)</span></label>
-              <input type="date" value={payForm.due_date} onChange={e => setPayForm(p => ({...p, due_date: e.target.value}))} className={INPUT} />
-            </div>
-          )}
-          {payForm.payment_method === 'cheque' && <p className="text-[11px] text-amber-700">Cheques settle when cleared in Due Dates — until then the balance stays owed.</p>}
-          <p className="text-[11px] text-gray-400">Cash and bank receipts update the account balance.</p>
-        </div>
-      </SlideDrawer>
+      {/* Accept Payment — the shared Payment form */}
+      {payCtx && (
+        <PaymentFormDrawer variant={payCtx.variant} ctx={payCtx.ctx}
+          onClose={() => setPayCtx(null)} onDone={afterPayment} />
+      )}
       {confirmDialog}
     </div>
   );
