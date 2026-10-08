@@ -122,7 +122,7 @@ describe('a read-only role sees no write buttons on any Finance page', () => {
     const html = render(pages[name], URL[name]);
     expect([name, actions(html)]).toEqual([name, []]);
     // No accept / contra / clear buttons either (those carry no data-action).
-    expect(html).not.toMatch(/>\s*(Accept|Mark cleared|\+ Contra transfer|Record Receipt|New Expense)\s*</);
+    expect(html).not.toMatch(/>\s*(Accept|Mark cleared|(\+ )?Contra transfer|Record Receipt|New Expense)\s*</);
   });
 });
 
@@ -134,7 +134,8 @@ describe('a Finance Manager sees the actions its guards admit', () => {
 
   it('Cash: Accept (to Head Office) and + Contra transfer; Mark cleared on Cheques', () => {
     expect(render(pages.Cash)).toMatch(/Accept/);
-    expect(render(pages.Cash)).toContain('+ Contra transfer');
+    // The button reads "[+ icon] Contra transfer" (the + is an icon now, not text).
+    expect(render(pages.Cash)).toMatch(/>\s*Contra transfer\s*</);
     expect(render(pages.DueDates)).toContain('Mark cleared');
   });
 });
