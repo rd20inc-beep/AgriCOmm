@@ -202,7 +202,7 @@ function RiceTypeDetail({ id }) {
                   ? <tr><td colSpan={4} className="px-3 py-5 text-center text-gray-400">No raw purchases tagged to this rice type.</td></tr>
                   : bySupplier.map((s, i) => (
                     <tr key={i} className="hover:bg-gray-50">
-                      <td data-label="Supplier" className="px-3 py-2">{s.supplierId ? <Link to={`/finance/statements?type=supplier&id=${s.supplierId}`} className="text-blue-600 hover:underline">{s.supplier}</Link> : s.supplier}</td>
+                      <td data-label="Supplier" className="px-3 py-2">{s.supplierId ? <Link to={`/finance/accounting/statements?type=supplier&id=${s.supplierId}`} className="text-blue-600 hover:underline">{s.supplier}</Link> : s.supplier}</td>
                       <td data-label="Purchased" className="px-3 py-2 text-right tabular-nums">{kg(s.purchasedKg)}</td>
                       <td data-label="Remaining" className="px-3 py-2 text-right tabular-nums">{kg(s.remainingKg)}</td>
                       <td data-label="Value" className="px-3 py-2 text-right tabular-nums">{pkr(s.value)}</td>
@@ -263,7 +263,7 @@ function RiceTypeDetail({ id }) {
                       {l.isServiceMilling && <span className="ml-1.5 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-800 align-middle">Service Milling</span>}
                     </td>
                     <td data-label="Type" className="mob-hide px-3 py-2">{typeLabel(l.type)}{l.entity === 'export' ? <span className="text-gray-400"> · export</span> : ''}</td>
-                    <td data-label="Supplier" className="mob-hide px-3 py-2">{l.supplierId ? <Link to={`/finance/statements?type=supplier&id=${l.supplierId}`} className="text-blue-600 hover:underline">{l.supplier}</Link> : (l.supplier || '—')}</td>
+                    <td data-label="Supplier" className="mob-hide px-3 py-2">{l.supplierId ? <Link to={`/finance/accounting/statements?type=supplier&id=${l.supplierId}`} className="text-blue-600 hover:underline">{l.supplier}</Link> : (l.supplier || '—')}</td>
                     <td data-label="Warehouse" className="mob-hide px-3 py-2">{l.warehouse || '—'}</td>
                     <td data-label="Purchased" className="px-3 py-2 text-right tabular-nums">{l.purchasedKg ? kg(l.purchasedKg) : '—'}</td>
                     <td data-label="Produced" className="mob-hide px-3 py-2 text-right tabular-nums">{l.producedKg ? kg(l.producedKg) : '—'}</td>

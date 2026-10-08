@@ -369,7 +369,7 @@ export default function Dashboard() {
           secondary="Across all open orders"
           hint={exportProfit > 0 ? 'Positive' : 'Below break-even'}
           hintBad={exportProfit <= 0}
-          onClick={canFinance ? () => navigate('/finance/profit') : undefined}
+          onClick={canFinance ? () => navigate('/finance/accounting/profit') : undefined}
         />
       </div>
       )}

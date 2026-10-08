@@ -107,7 +107,7 @@ export function ProductionReportView({ data, companyName, range, preset, showCos
               ]),
               childRows: mine.map(b => c([
                 <RefLink to={`/milling/${b.id}`}>{b.isBlend ? `${b.batchNo} (blend)` : b.batchNo}</RefLink>,
-                b.supplierId ? <RefLink to={`/finance/statements?type=supplier&id=${b.supplierId}`}>{b.supplierName}</RefLink> : (b.supplierName || '—'),
+                b.supplierId ? <RefLink to={`/finance/accounting/statements?type=supplier&id=${b.supplierId}`}>{b.supplierName}</RefLink> : (b.supplierName || '—'),
                 b.status, fmtMt(b.rawMt), fmtMt(b.finishedMt), fmtKg(b.finishedMt * 1000), fmtPkr(b.perKgFinished), fmtKg(b.bags), fmtPct(b.yieldPct), fmtDate(b.createdAt),
               ])),
             };
@@ -123,7 +123,7 @@ export function ProductionReportView({ data, companyName, range, preset, showCos
           align={['left', 'left', 'left', 'left', 'right', 'right', 'right', 'left']}
           rows={batches.map(b => [
             <RefLink to={`/milling/${b.id}`}>{b.isBlend ? `${b.batchNo} (blend)` : b.batchNo}</RefLink>,
-            b.supplierId ? <RefLink to={`/finance/statements?type=supplier&id=${b.supplierId}`}>{b.supplierName}</RefLink> : (b.supplierName || '—'),
+            b.supplierId ? <RefLink to={`/finance/accounting/statements?type=supplier&id=${b.supplierId}`}>{b.supplierName}</RefLink> : (b.supplierName || '—'),
             b.productName || '—',
             b.status, fmtMt(b.rawMt), fmtMt(b.finishedMt), fmtPct(b.yieldPct), fmtDate(b.createdAt),
           ])}
@@ -179,7 +179,7 @@ export function StockReportView({ data, companyName, groupLabel, showCost = true
             key: `${r.name}-${idx}`,
             cells: c([
               (isSupplier && r.supplierId)
-                ? <RefLink to={`/finance/statements?type=supplier&id=${r.supplierId}`}>{r.name}</RefLink>
+                ? <RefLink to={`/finance/accounting/statements?type=supplier&id=${r.supplierId}`}>{r.name}</RefLink>
                 : (ledgerLink(r) ? <RefLink to={ledgerLink(r)}>{r.name}</RefLink> : r.name),
               r.lotCount, fmtKg(r.totalKg), fmtKg(r.bags), bagCell(r.bagUnits, r.bagSizeKg), fmtKg(r.availableKg), fmtKg(r.reservedKg), fmtPkr(r.perKg), fmtPkr(r.valuePkr),
             ]),
@@ -187,7 +187,7 @@ export function StockReportView({ data, companyName, groupLabel, showCost = true
               <span>
                 <RefLink to={`/lot-inventory/${l.lotId}`}>{l.lotNo}</RefLink>
                 <span className="text-gray-400"> · {[l.item, l.variety || l.grade].filter(Boolean).join(' · ') || '—'}</span>
-                {(l.supplier && l.supplier !== '—') && <> · {l.supplierId ? <RefLink to={`/finance/statements?type=supplier&id=${l.supplierId}`}>{l.supplier}</RefLink> : <span className="text-gray-500">{l.supplier}</span>}</>}
+                {(l.supplier && l.supplier !== '—') && <> · {l.supplierId ? <RefLink to={`/finance/accounting/statements?type=supplier&id=${l.supplierId}`}>{l.supplier}</RefLink> : <span className="text-gray-500">{l.supplier}</span>}</>}
                 {(l.warehouse && l.warehouse !== '—') && <span className="text-gray-400"> · {l.warehouse}</span>}
               </span>,
               '', fmtKg(l.onHandKg), fmtKg(l.bags), bagCell(l.bagUnits, l.bagSizeKg), fmtKg(l.availableKg), '', fmtPkr(l.perKg), fmtPkr(l.valuePkr),
@@ -263,25 +263,25 @@ export function PnlReportView({ data, companyName, range, preset }) {
       {detail && (detail.export?.length > 0) && (
         <Section title="Export Sales — detail">
           <Table head={['Order', 'Customer', 'Product', 'Revenue (PKR)']} align={['left', 'left', 'left', 'right']}
-            rows={detail.export.map(r => [<RefLink to={`/export/${r.id}`}>{r.ref}</RefLink>, r.customerId ? <RefLink to={`/finance/statements?type=customer&id=${r.customerId}`}>{r.party}</RefLink> : (r.party || '—'), r.item || '—', fmtPkr(r.amountPkr)])} empty="" />
+            rows={detail.export.map(r => [<RefLink to={`/export/${r.id}`}>{r.ref}</RefLink>, r.customerId ? <RefLink to={`/finance/accounting/statements?type=customer&id=${r.customerId}`}>{r.party}</RefLink> : (r.party || '—'), r.item || '—', fmtPkr(r.amountPkr)])} empty="" />
         </Section>
       )}
       {detail && (detail.local?.length > 0) && (
         <Section title="Local Sales — detail">
           <Table head={['Sale', 'Customer', 'Item', 'Revenue (PKR)']} align={['left', 'left', 'left', 'right']}
-            rows={detail.local.map(r => [r.lotId ? <RefLink to={`/lot-inventory/${r.lotId}`}>{r.ref}</RefLink> : r.ref, r.customerId ? <RefLink to={`/finance/statements?type=customer&id=${r.customerId}`}>{r.party}</RefLink> : (r.party || '—'), r.item || '—', fmtPkr(r.amountPkr)])} empty="" />
+            rows={detail.local.map(r => [r.lotId ? <RefLink to={`/lot-inventory/${r.lotId}`}>{r.ref}</RefLink> : r.ref, r.customerId ? <RefLink to={`/finance/accounting/statements?type=customer&id=${r.customerId}`}>{r.party}</RefLink> : (r.party || '—'), r.item || '—', fmtPkr(r.amountPkr)])} empty="" />
         </Section>
       )}
       {detail && (detail.purchases?.length > 0) && (
         <Section title="Rice Purchases — detail">
           <Table head={['Lot', 'Supplier', 'Item', 'Landed Cost (PKR)']} align={['left', 'left', 'left', 'right']}
-            rows={detail.purchases.map(r => [<RefLink to={`/lot-inventory/${r.lotId}`}>{r.ref}</RefLink>, r.supplierId ? <RefLink to={`/finance/statements?type=supplier&id=${r.supplierId}`}>{r.party}</RefLink> : (r.party || '—'), r.item || '—', fmtPkr(r.amountPkr)])} empty="" />
+            rows={detail.purchases.map(r => [<RefLink to={`/lot-inventory/${r.lotId}`}>{r.ref}</RefLink>, r.supplierId ? <RefLink to={`/finance/accounting/statements?type=supplier&id=${r.supplierId}`}>{r.party}</RefLink> : (r.party || '—'), r.item || '—', fmtPkr(r.amountPkr)])} empty="" />
         </Section>
       )}
       {detail && (detail.expenses?.length > 0) && (
         <Section title="Business Expenses — detail">
           <Table head={['Expense', 'Category', 'Payee', 'Type', 'Amount (PKR)']} align={['left', 'left', 'left', 'left', 'right']}
-            rows={detail.expenses.map(r => [r.ref, r.category || '—', r.supplierId ? <RefLink to={`/finance/statements?type=supplier&id=${r.supplierId}`}>{r.party}</RefLink> : (r.party || '—'), r.kind || '—', fmtPkr(r.amountPkr)])} empty="" />
+            rows={detail.expenses.map(r => [r.ref, r.category || '—', r.supplierId ? <RefLink to={`/finance/accounting/statements?type=supplier&id=${r.supplierId}`}>{r.party}</RefLink> : (r.party || '—'), r.kind || '—', fmtPkr(r.amountPkr)])} empty="" />
         </Section>
       )}
       <Footer />
@@ -318,7 +318,7 @@ export function CashflowReportView({ data, companyName, range, preset }) {
             align={['left', 'left', 'left', 'left', 'right']}
             rows={topReceipts.map(r => [
               r.paymentNo, fmtDate(r.date),
-              r.customerId ? <RefLink to={`/finance/statements?type=customer&id=${r.customerId}`}>{r.counterparty}</RefLink> : r.counterparty,
+              r.customerId ? <RefLink to={`/finance/accounting/statements?type=customer&id=${r.customerId}`}>{r.counterparty}</RefLink> : r.counterparty,
               r.method || '—', fmtPkr(r.amountPkr),
             ])}
             empty=""
@@ -332,7 +332,7 @@ export function CashflowReportView({ data, companyName, range, preset }) {
             align={['left', 'left', 'left', 'left', 'right']}
             rows={topPayments.map(r => [
               r.paymentNo, fmtDate(r.date),
-              r.supplierId ? <RefLink to={`/finance/statements?type=supplier&id=${r.supplierId}`}>{r.counterparty}</RefLink> : r.counterparty,
+              r.supplierId ? <RefLink to={`/finance/accounting/statements?type=supplier&id=${r.supplierId}`}>{r.counterparty}</RefLink> : r.counterparty,
               r.method || '—', fmtPkr(r.amountPkr),
             ])}
             empty=""
@@ -375,7 +375,7 @@ export function AgingReportView({ data, companyName, kind }) {
                 const partyId = isAR ? r.customerId : r.supplierId;
                 return [
                   isAR ? r.recvNo : r.payableNo,
-                  partyId ? <RefLink to={`/finance/statements?type=${isAR ? 'customer' : 'supplier'}&id=${partyId}`}>{r.counterparty}</RefLink> : r.counterparty,
+                  partyId ? <RefLink to={`/finance/accounting/statements?type=${isAR ? 'customer' : 'supplier'}&id=${partyId}`}>{r.counterparty}</RefLink> : r.counterparty,
                   r.dueDate ? fmtDate(r.dueDate) : '—', r.ageDays, fmtPkr(r.outstandingPkr), '',
                 ];
               }),
@@ -401,7 +401,7 @@ export function AgingReportView({ data, companyName, kind }) {
             const partyId = isAR ? r.customerId : r.supplierId;
             return [
               isAR ? r.recvNo : r.payableNo,
-              partyId ? <RefLink to={`/finance/statements?type=${isAR ? 'customer' : 'supplier'}&id=${partyId}`}>{r.counterparty}</RefLink> : r.counterparty,
+              partyId ? <RefLink to={`/finance/accounting/statements?type=${isAR ? 'customer' : 'supplier'}&id=${partyId}`}>{r.counterparty}</RefLink> : r.counterparty,
               r.dueDate ? fmtDate(r.dueDate) : '—',
               r.ageDays,
               r.bucket,
@@ -607,7 +607,7 @@ export function PurchaseLedgerView({ data, companyName, range }) {
               kids.push([
                 outLabel,
                 d.saleId ? <RefLink to={`/local-sales/${d.saleId}`}>{d.saleNo}</RefLink> : (d.saleNo || '—'),
-                d.customerId ? <RefLink to={`/finance/statements?type=customer&id=${d.customerId}`}>{d.customer}</RefLink> : (d.customer || '—'),
+                d.customerId ? <RefLink to={`/finance/accounting/statements?type=customer&id=${d.customerId}`}>{d.customer}</RefLink> : (d.customer || '—'),
                 d.outputType === 'finished' ? (d.outputItem || 'Finished') : (d.outputItem || '—'), '',
                 fmtMt(d.kg / 1000), fmtKg(d.kg), fmtPkr(d.ratePerKg), '', fmtPkr(d.valuePkr), d.paymentStatus || '—',
               ]);
@@ -617,7 +617,7 @@ export function PurchaseLedgerView({ data, companyName, range }) {
               kids.push([
                 'Sold',
                 b.lotSaleNo || b.saleNo || '—',
-                b.customerId ? <RefLink to={`/finance/statements?type=customer&id=${b.customerId}`}>{b.customer}</RefLink> : (b.customer || '—'),
+                b.customerId ? <RefLink to={`/finance/accounting/statements?type=customer&id=${b.customerId}`}>{b.customer}</RefLink> : (b.customer || '—'),
                 '', '',
                 fmtMt(b.kg / 1000), fmtKg(b.kg), fmtPkr(b.ratePerKg), '', fmtPkr(b.valuePkr), b.paymentStatus || '—',
               ]);
@@ -630,7 +630,7 @@ export function PurchaseLedgerView({ data, companyName, range }) {
               cells: [
                 fmtDate(r.date),
                 <RefLink to={`/lot-inventory/${r.lotId}`}>{r.lotNo}</RefLink>,
-                r.supplierId ? <RefLink to={`/finance/statements?type=supplier&id=${r.supplierId}`}>{r.supplier}</RefLink> : (r.supplier || '—'),
+                r.supplierId ? <RefLink to={`/finance/accounting/statements?type=supplier&id=${r.supplierId}`}>{r.supplier}</RefLink> : (r.supplier || '—'),
                 r.riceType || '—', r.variety || r.grade || '—',
                 fmtMt(r.mt), fmtKg(r.mt * 1000), fmtPkr(r.ratePerKg), fmtKg(r.bags), fmtPkr(r.valuePkr), r.paymentStatus || '—',
               ],
@@ -681,7 +681,7 @@ export function SalesLedgerView({ data, companyName, range }) {
           rows={local.map(r => [
             r.lotId ? <RefLink to={`/lot-inventory/${r.lotId}`}>{r.ref}</RefLink> : r.ref,
             fmtDate(r.date),
-            r.customerId ? <RefLink to={`/finance/statements?type=customer&id=${r.customerId}`}>{r.customer}</RefLink> : (r.customer || '—'),
+            r.customerId ? <RefLink to={`/finance/accounting/statements?type=customer&id=${r.customerId}`}>{r.customer}</RefLink> : (r.customer || '—'),
             r.item || '—',
             r.lotId ? <RefLink to={`/lot-inventory/${r.lotId}`}>{r.lotNo || '—'}</RefLink> : (r.lotNo || '—'),
             r.batchNo || '—',
@@ -699,7 +699,7 @@ export function SalesLedgerView({ data, companyName, range }) {
           rows={exp.map(r => [
             <RefLink to={`/export/${r.id}`}>{r.ref}</RefLink>,
             fmtDate(r.date),
-            r.customerId ? <RefLink to={`/finance/statements?type=customer&id=${r.customerId}`}>{r.customer}</RefLink> : (r.customer || '—'),
+            r.customerId ? <RefLink to={`/finance/accounting/statements?type=customer&id=${r.customerId}`}>{r.customer}</RefLink> : (r.customer || '—'),
             r.item || '—',
             fmtMt(r.mt), fmtKg(r.mt * 1000), ...exportRateCells(r), fmtKg(r.bags), fmtUSD(r.valueUsd || 0), r.status || '—',
           ])}
@@ -871,7 +871,7 @@ export function StockDetailView({ data, companyName, showCost = true }) {
                 : '—',
               fmtMt(r.availableMt),
               r.supplier
-                ? (r.supplierId ? <RefLink to={`/finance/statements?type=supplier&id=${r.supplierId}`}>{r.supplier}</RefLink> : r.supplier)
+                ? (r.supplierId ? <RefLink to={`/finance/accounting/statements?type=supplier&id=${r.supplierId}`}>{r.supplier}</RefLink> : r.supplier)
                 : (r.sourceSupplier ? <span className="text-gray-600">milled from {r.sourceSupplier}{r.sourceBatch ? ` · ${r.sourceBatch}` : ''}</span> : '—'),
               r.warehouse || '—', fmtPkr(r.valuePkr),
             ]))}
@@ -948,7 +948,7 @@ export function SweepingReportView({ data, companyName }) {
           rows={rows.map(r => [
             <RefLink to={`/lot-inventory/${r.lotId}`}>{r.lotNo}</RefLink>,
             r.batchId ? <RefLink to={`/milling/${r.batchId}`}>{r.batchNo}</RefLink> : (r.batchNo || '—'),
-            r.rawSupplierId ? <RefLink to={`/finance/statements?type=supplier&id=${r.rawSupplierId}`}>{r.rawSupplier}</RefLink> : (r.rawSupplier || '—'),
+            r.rawSupplierId ? <RefLink to={`/finance/accounting/statements?type=supplier&id=${r.rawSupplierId}`}>{r.rawSupplier}</RefLink> : (r.rawSupplier || '—'),
             r.milledProduct || '—',
             r.rawMt != null ? fmtMt(r.rawMt) : '—',
             fmtMt(r.sweepingMt), fmtMt(r.availableMt), fmtPkr(r.ratePerKg), fmtPkr(r.valuePkr), r.status || '—',
@@ -1008,7 +1008,7 @@ export function PnlAccrualView({ data, companyName, range, preset }) {
                 cells: [c.category || '—', '', '', c.count, fmtPkr(c.amountPkr)],
                 childRows: mine.map(e => [
                   e.ref,
-                  e.supplierId ? <RefLink to={`/finance/statements?type=supplier&id=${e.supplierId}`}>{e.payee}</RefLink> : (e.payee || '—'),
+                  e.supplierId ? <RefLink to={`/finance/accounting/statements?type=supplier&id=${e.supplierId}`}>{e.payee}</RefLink> : (e.payee || '—'),
                   fmtDate(e.date), '', fmtPkr(e.amountPkr),
                 ]),
               };
@@ -1066,7 +1066,7 @@ export function PnlAccrualView({ data, companyName, range, preset }) {
             rows={detail.sales.map(r => [
               r.channel,
               r.channel === 'Export' ? <RefLink to={`/export/${r.id}`}>{r.ref}</RefLink> : (r.lotId ? <RefLink to={`/lot-inventory/${r.lotId}`}>{r.ref}</RefLink> : r.ref),
-              r.customerId ? <RefLink to={`/finance/statements?type=customer&id=${r.customerId}`}>{r.party}</RefLink> : (r.party || '—'),
+              r.customerId ? <RefLink to={`/finance/accounting/statements?type=customer&id=${r.customerId}`}>{r.party}</RefLink> : (r.party || '—'),
               r.item || '—',
               fmtPkr(r.revPkr), fmtPkr(r.cogsPkr), fmtPkr(r.grossPkr), r.revPkr > 0 ? pct(r.grossPkr / r.revPkr * 100) : '—',
             ])}
@@ -1248,7 +1248,7 @@ export function FreightRecoveryView({ data, companyName }) {
             align={['left', 'left', 'left', 'right', 'right', 'right', 'right']}
             rows={short.map((r) => [
               <RefLink to={`/export/${r.orderNo}`}>{r.orderNo}</RefLink>,
-              r.customerId ? <RefLink to={`/finance/statements?type=customer&id=${r.customerId}`}>{r.customer}</RefLink> : r.customer,
+              r.customerId ? <RefLink to={`/finance/accounting/statements?type=customer&id=${r.customerId}`}>{r.customer}</RefLink> : r.customer,
               r.incoterm,
               fmtPkr(r.chargedPkr), fmtPkr(r.paidPkr),
               <span className="text-red-600">{fmtPkr(Math.abs(r.gapPkr))}</span>,
@@ -1265,7 +1265,7 @@ export function FreightRecoveryView({ data, companyName }) {
           align={['left', 'left', 'right', 'left', 'left', 'right', 'right', 'right', 'right']}
           rows={rows.map((r) => [
             <RefLink to={`/export/${r.orderNo}`}>{r.orderNo}</RefLink>,
-            r.customerId ? <RefLink to={`/finance/statements?type=customer&id=${r.customerId}`}>{r.customer}</RefLink> : r.customer,
+            r.customerId ? <RefLink to={`/finance/accounting/statements?type=customer&id=${r.customerId}`}>{r.customer}</RefLink> : r.customer,
             fmtMt(r.qtyMT),
             r.incoterm,
             r.freightPerMT > 0 || r.insurancePerMT > 0

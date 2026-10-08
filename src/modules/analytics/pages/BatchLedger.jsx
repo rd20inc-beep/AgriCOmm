@@ -164,7 +164,7 @@ export default function BatchLedger() {
       {/* Sales */}
       <Section icon={ShoppingCart} title="Sales from this batch">
         <Tbl head={['Date', 'Invoice', 'Customer', 'Product', { t: 'Qty', r: 1 }, { t: 'Amount', r: 1 }]}
-          rows={sales.map(s => [dt(s.date), <Link to={s.href} className="font-mono text-blue-600 hover:underline">{s.invoice}</Link>, s.customerId ? <Link to={`/finance/statements?type=customer&id=${s.customerId}`} className="text-blue-600 hover:underline">{s.customer}</Link> : s.customer, s.product || '—', kg(s.qtyKg), pkr(s.amount)])}
+          rows={sales.map(s => [dt(s.date), <Link to={s.href} className="font-mono text-blue-600 hover:underline">{s.invoice}</Link>, s.customerId ? <Link to={`/finance/accounting/statements?type=customer&id=${s.customerId}`} className="text-blue-600 hover:underline">{s.customer}</Link> : s.customer, s.product || '—', kg(s.qtyKg), pkr(s.amount)])}
           empty="Nothing sold from this batch yet." />
       </Section>
 

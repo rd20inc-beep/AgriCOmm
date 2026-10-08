@@ -161,7 +161,7 @@ export default function SuppliersTab() {
                   <td data-label="Contact Person" className="mob-hide px-4 py-3 text-gray-900">{s.contact}</td>
                   <td data-label="Actions" className="px-4 py-3 text-right">
                     <div className="inline-flex gap-1">
-                      <button onClick={() => navigate(`/finance/statements?type=supplier&id=${s.id}`)} className="p-1.5 rounded hover:bg-emerald-50 text-emerald-600" title="View ledger" aria-label={`View ledger for ${s.name}`}>
+                      <button onClick={() => navigate(`/finance/accounting/statements?type=supplier&id=${s.id}`)} className="p-1.5 rounded hover:bg-emerald-50 text-emerald-600" title="View ledger" aria-label={`View ledger for ${s.name}`}>
                         <BookOpen className="w-4 h-4" />
                       </button>
                       <button onClick={() => openEdit(s)} className="p-1.5 rounded hover:bg-blue-50 text-blue-600" title="Edit" aria-label={`Edit ${s.name}`}>

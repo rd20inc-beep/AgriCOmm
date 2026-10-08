@@ -353,7 +353,7 @@ export default function InvoiceView() {
 
       {/* Related ledgers */}
       <div className="flex flex-wrap gap-2">
-        {sale.customerId && <ActionBtn icon={BookUser} label="Customer ledger" to={`/finance/statements?type=customer&id=${sale.customerId}`} />}
+        {sale.customerId && <ActionBtn icon={BookUser} label="Customer ledger" to={`/finance/accounting/statements?type=customer&id=${sale.customerId}`} />}
         {primary.finishedGoodsHref && <ActionBtn icon={Package} label="Lot ledger" to={primary.finishedGoodsHref} />}
         {primary.batchHref && <ActionBtn icon={Factory} label="Batch ledger" to={primary.batchHref} />}
       </div>
