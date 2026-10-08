@@ -23,6 +23,7 @@ const schemas = require('../../middleware/schemas');
 const ownerApproval = require('../../middleware/ownerApproval');
 const aiService = require('../ai/ai.service');
 const { pickBatchEdits } = require('./batchLifecycle');
+const { buildLastPrices, findImplausiblePrices, implausiblePriceMessage } = require('./byproductPrices');
 
 // =============================================================================
 // Existing Batch Routes
@@ -454,32 +455,12 @@ router.get('/last-prices', authorize('milling', 'view'), async (req, res) => {
       )
       .first();
 
-    const brokenDefault = parseFloat(last?.broken_price_per_kg) || 38;
+    // Per-KG throughout. buildLastPrices drops any stored value above the
+    // per-kg ceiling (a per-MT figure saved by mistake) so it is never copied
+    // forward into the next batch, and falls back to per-KG defaults.
     return res.json({
       success: true,
-      data: {
-        lastPrices: last ? {
-          finished:    parseFloat(last.finished_price_per_kg) || 72.8,
-          broken:      brokenDefault,
-          bran:        parseFloat(last.bran_price_per_kg) || 28,
-          husk:        parseFloat(last.husk_price_per_kg) || 8.4,
-          sortex:      parseFloat(last.sortex_rejects_price_per_kg) || 35,
-          // Per-grade broken prices — fall back to the aggregate broken
-          // price so old batches give the operator a sensible starting
-          // value until they set grade-specific rates.
-          b1:          parseFloat(last.b1_price_per_kg) || brokenDefault,
-          b2:          parseFloat(last.b2_price_per_kg) || brokenDefault,
-          b3:          parseFloat(last.b3_price_per_kg) || brokenDefault,
-          csr:         parseFloat(last.csr_price_per_kg) || brokenDefault,
-          short_grain: parseFloat(last.short_grain_price_per_kg) || brokenDefault,
-          fromBatch:   last.batch_no,
-          date:        last.completed_at,
-        } : {
-          finished: 72800, broken: 38000, bran: 28000, husk: 8400, sortex: 35000,
-          b1: 38000, b2: 38000, b3: 38000, csr: 38000, short_grain: 38000,
-          fromBatch: null, date: null,
-        },
-      },
+      data: { lastPrices: buildLastPrices(last) },
     });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
@@ -503,6 +484,14 @@ router.put('/batches/:id/prices', authorize('milling', 'edit'),
         // Expenses (PKR totals). Finished price is DERIVED, not accepted here.
         manual_milling_cost_pkr, manual_other_expenses_pkr,
       } = req.body;
+
+      // Every price here is per KG. A per-MT figure (1000× too large) would
+      // credit the by-products at a thousand times their value and, through
+      // the residual engine, zero the finished cost — refuse it outright.
+      const implausible = findImplausiblePrices(req.body);
+      if (implausible.length) {
+        return res.status(400).json({ success: false, message: implausiblePriceMessage(implausible), fields: implausible.map((b) => b.field) });
+      }
 
       // 0 is a valid manual cost; only blank/invalid → null.
       const numOrNull = (v) => (v === '' || v == null || Number.isNaN(parseFloat(v))) ? null : parseFloat(v);

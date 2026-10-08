@@ -54,6 +54,7 @@ import BatchPackagingPanel from '../components/BatchPackagingPanel';
 import { qualityParams } from '../qualityParams';
 import useCanSeeCost from '../../../hooks/useCanSeeCost';
 import { todayLocalISO, fmtPKR, fmtKg, fmtPct, fmtNum, fmtDateTime } from '../../../shared/utils/format';
+import { MAX_PRICE_PER_KG, isImplausiblePerKg } from '../utils/byproductPrices';
 
 const tabs = [
   { key: 'overview', label: 'Overview', icon: Package },
@@ -2327,7 +2328,10 @@ export default function MillingBatchDetail() {
                       <label className="block text-xs text-gray-600 mb-1">{f.label}<span className="text-gray-400 ml-1">· {fmtKg(f.qty * 1000)}</span></label>
                       <input type="number" min="0" value={priceForm[f.key] ?? ''}
                         onChange={e => setPriceForm(p => ({ ...p, [f.key]: e.target.value }))}
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
+                        className={`w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 ${isImplausiblePerKg(priceForm[f.key]) ? 'border-red-400 bg-red-50' : 'border-gray-300'}`} />
+                      {isImplausiblePerKg(priceForm[f.key]) && (
+                        <p className="text-[11px] text-red-600 mt-1">Looks like a per-MT price — enter Rs per KG (e.g. {Rs(num(priceForm[f.key]) / 1000)}/kg).</p>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -2348,6 +2352,14 @@ export default function MillingBatchDetail() {
               <div className="flex justify-end gap-2 pt-2 border-t">
                 <button onClick={() => setShowPriceModal(false)} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Skip for Now</button>
                 <button disabled={savingPrices} onClick={async () => {
+                  // Every price key is saved, shown or not — check them all so a
+                  // hidden per-MT figure can't slip through (the server refuses it too).
+                  const PRICE_KEYS = ['broken', 'bran', 'husk', 'sortex', 'b1', 'b2', 'b3', 'csr', 'shortGrain', 'powder', 'sweeping', 'choba'];
+                  const bad = PRICE_KEYS.filter(k => isImplausiblePerKg(priceForm[k]));
+                  if (bad.length) {
+                    addToast(`By-product prices are per KG — ${bad.join(', ')} above Rs ${MAX_PRICE_PER_KG.toLocaleString()}/kg looks like a per-MT price. Divide by 1000.`, 'error');
+                    return;
+                  }
                   setSavingPrices(true);
                   try {
                     await millingApi.confirmPrices(batchId, {
