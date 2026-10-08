@@ -187,6 +187,15 @@ function ExportRoutes() {
         <Route path="/export/:id" element={<ExportOrderDetail />} />
         <Route path="/buyers" element={<Buyers />} />
         <Route path="/documents" element={<Documents />} />
+        {/* Finance (owner decisions G-9 / G-10): the same tree and the same
+            finance.view gate as StandardRoutes, so every finance link works
+            for this role; backend permissions are unchanged. */}
+        <Route path="/finance/*" element={<ProtectedRoute module="finance" action="view"><FinanceRoutes /></ProtectedRoute>} />
+        {/* Pages the finance screens link to (a batch, a local sale, a lot) —
+            same gates as StandardRoutes, so a finance link never bounces home. */}
+        <Route path="/milling/:id" element={<ProtectedRoute module="milling" action="view"><MillingBatchDetail /></ProtectedRoute>} />
+        <Route path="/local-sales/:id" element={<ProtectedRoute anyOf={[{ module: 'inventory', action: 'view' }, { module: 'finance', action: 'view' }]}><LocalSaleDetail /></ProtectedRoute>} />
+        <Route path="/lot-inventory/:id" element={<ProtectedRoute module="inventory" action="view"><LotDetail /></ProtectedRoute>} />
         <Route path="/reports" element={<Reports />} />
         <Route path="/reports/print" element={<PrintableReports />} />
         <Route path="/reports/lots" element={<LotReport />} />
@@ -234,6 +243,14 @@ function MillRoutes() {
         <Route path="/service-milling/invoices" element={<ServiceInvoices />} />
         <Route path="/service-milling/:id" element={<ServiceMillingBatchDetail />} />
         <Route path="/milling/finance" element={<MillFinanceDashboard />} />
+        {/* Finance (owner decisions G-9 / G-10): the same tree and the same
+            finance.view gate as StandardRoutes, so every finance link works
+            for this role; backend permissions are unchanged. */}
+        <Route path="/finance/*" element={<ProtectedRoute module="finance" action="view"><FinanceRoutes /></ProtectedRoute>} />
+        {/* The export orders the finance screens link to — same gates as
+            StandardRoutes, so a finance link never bounces home. */}
+        <Route path="/export" element={<ProtectedRoute module="export_orders" action="view"><ExportOrders /></ProtectedRoute>} />
+        <Route path="/export/:id" element={<ProtectedRoute module="export_orders" action="view"><ExportOrderDetail /></ProtectedRoute>} />
         <Route path="/milling/rice-purchases" element={<RicePurchasesLedger />} />
         <Route path="/milling/customers" element={<MillCustomers />} />
         <Route path="/milling/suppliers" element={<MillSuppliers />} />

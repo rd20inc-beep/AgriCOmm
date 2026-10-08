@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, Suspense } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Ship, Users, FileText, BarChart3, Search, Bell, ChevronDown, User, X, LogOut, AlertTriangle, AlertCircle, Info, Menu, Plus, ChevronsLeft, ChevronsRight, Sun, Moon, MessageCircle, MessageCircleOff } from 'lucide-react';
+import { LayoutDashboard, DollarSign, Ship, Users, FileText, BarChart3, Search, Bell, ChevronDown, User, X, LogOut, AlertTriangle, AlertCircle, Info, Menu, Plus, ChevronsLeft, ChevronsRight, Sun, Moon, MessageCircle, MessageCircleOff } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import { RouteErrorBoundary } from './ErrorBoundary';
@@ -24,6 +24,10 @@ const exportNav = [
   { label: 'Buyers', icon: Users, to: '/buyers' },
   { label: 'Documents', icon: FileText, to: '/documents' },
   { label: 'Reports', icon: BarChart3, to: '/reports' },
+  // The company Finance screens (owner decision G-10): same routes and the
+  // same finance.view gate as every other role; the server's permissions
+  // decide what each screen lets this role do.
+  { label: 'Finance Dashboard', icon: DollarSign, to: '/finance', permission: { module: 'finance', action: 'view' } },
 ];
 
 function SidebarLink({ to, icon: Icon, label, nested, collapsed, onNavigate }) {
@@ -113,7 +117,7 @@ function AlertTypeIcon({ type }) {
 
 export default function ExportLayout({ children }) {
   const { alerts, dismissAlert, dataLoading } = useApp();
-  const { user, logout } = useAuth();
+  const { user, logout, hasPermission } = useAuth();
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -229,7 +233,7 @@ export default function ExportLayout({ children }) {
         </div>
 
         <nav className="flex-1 py-3 space-y-0.5 overflow-y-auto sidebar-scroll">
-          {exportNav.map((item, idx) => {
+          {exportNav.filter((item) => !item.permission || hasPermission(item.permission.module, item.permission.action)).map((item, idx) => {
             if (item.section) {
               if (sidebarCollapsed) return <div key={idx} className="my-2 mx-3 border-t border-white/[0.06]" />;
               return (
