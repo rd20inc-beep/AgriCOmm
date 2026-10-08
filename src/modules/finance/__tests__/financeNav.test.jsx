@@ -68,6 +68,16 @@ describe('six workspaces', () => {
     expect(acc(allow())).toEqual(['journal', 'profit', 'statements', 'rates']);
   });
 
+  it('B5: Accounts has Reconcile (finance.view), not filtered by period', () => {
+    const acc = (perms) => visibleWorkspaces(perms).find((w) => w.key === 'accounts').views.map((v) => v.key);
+    expect(acc(allow('finance.view'))).toEqual(['cash', 'cheques', 'suspense', 'reconcile']);
+    expect(acc(allow())).toEqual(['cash', 'cheques', 'suspense']);
+    expect(matchFinanceLocation('/finance/accounts/reconcile')).toMatchObject({ workspace: { key: 'accounts' }, view: { key: 'reconcile', period: false } });
+    const html = renderAt('/finance/accounts/reconcile');
+    expect(hrefsOf(html, 'data-view')).toContainEqual({ key: 'reconcile', href: '/finance/accounts/reconcile' });
+    expect(html).toContain('Not filtered by period');
+  });
+
   it('Service invoices shows only with service_milling.view_invoice and is marked as leaving Finance', () => {
     const html = renderAt('/finance/money-in');
     expect(html).toContain('data-view="service-invoices"');
