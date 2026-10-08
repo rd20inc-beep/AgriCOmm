@@ -50,6 +50,22 @@ export function HeadlineCard({ icon: Icon, label, value, tone = 'neutral', sub, 
   );
 }
 
+/**
+ * The "≈ PKR equiv." secondary line (owner decision G-1 / C5): a reference
+ * conversion under a figure that spans currencies — never the figure itself,
+ * never cash. `text` comes from currencyTiles.pkrEquivText(); nothing renders
+ * when it is empty.
+ */
+export function PkrEquivLine({ text, className = '' }) {
+  if (!text) return null;
+  return (
+    <p className={`text-xs text-gray-500 tabular-nums ${className}`} data-testid="pkr-equiv"
+      title="For reference only — each row converted at its own booked rate (or the rate shown). Not cash, and not part of the figure above.">
+      {text}
+    </p>
+  );
+}
+
 /** A neutral chip for a category / type / entity — not a status (use StatusBadge). */
 export function TypeChip({ icon: Icon, children, title, className = '' }) {
   return (

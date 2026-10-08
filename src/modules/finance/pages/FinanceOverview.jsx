@@ -25,9 +25,10 @@ import { useFxRate } from '../utils/fx';
 import AnomalyWatchCard from '../../ai/components/AnomalyWatchCard';
 import PurchaseRequirementsPanel from '../../purchaseRequirements/components/PurchaseRequirementsPanel';
 import { fmtPKR, fmtUSD, fmtMoney, fmtDate, fmtPct } from '../../../shared/utils/format';
-import { nativeTotals } from '../utils/currencyTiles';
-import { receivablesTile, collectionTile } from '../utils/currencyTiles';
-import { Section, HeadlineCard, TypeChip, EmptyLine, MoreSection } from '../components/FinanceUI';
+import {
+  nativeTotals, receivablesTile, collectionTile, pkrEquivText, upcomingPkrEquiv,
+} from '../utils/currencyTiles';
+import { Section, HeadlineCard, TypeChip, EmptyLine, MoreSection, PkrEquivLine } from '../components/FinanceUI';
 import { btnQuiet, kpiLabel, kpiValue, kpiSub, sectionTitle } from '../utils/uiClasses';
 
 // Aging helpers + bucket palette moved to ../utils/aging so MoneyIn and
@@ -91,9 +92,18 @@ export default function FinanceOverview() {
 
   if (isLoading) return <Skeleton />;
 
-  const consolidatedProfit = consolidated.profitPkr || 0;
-  const profitTone = consolidatedProfit < 0 ? 'negative' : consolidatedProfit > 0 ? 'positive' : 'neutral';
+  // C1: the headline is the books — GL P&L net profit (Posted journals,
+  // company-wide). The operational figures sit underneath, labelled so.
+  const books = summary.books || {};
+  const booksProfit = books.netProfitPkr || 0;
+  const profitTone = booksProfit < 0 ? 'negative' : booksProfit > 0 ? 'positive' : 'neutral';
   const warnings = summary.warnings || [];
+  // C5: a foreign bank balance has no booked PKR figure, so its equivalent is
+  // at today's rate, dated.
+  const cashForeign = Object.entries(cash.byCurrency || {}).some(([c, v]) => c !== 'PKR' && (v || 0) !== 0);
+  const cashEquiv = cashForeign && cash.pkrEquiv
+    ? pkrEquivText({ ...cash.pkrEquiv, foreign: true, missingCount: cash.pkrEquiv.unconvertedCount || 0 }) : null;
+  const recvEquivSplit = (recvAging.native && Object.keys(recvAging.native).length > 0);
 
   return (
     <div className="space-y-5 pb-4">
@@ -105,6 +115,7 @@ export default function FinanceOverview() {
           basis="all open"
           primary={recvSplit.primary}
           secondary={recvSplit.secondary}
+          equiv={recvSplit.equiv}
           hint={recvSplit.overdue || 'All current'}
           hintBad={!!recvSplit.overdue}
           onClick={() => navigate(fl('/finance/money-in'))}
@@ -128,6 +139,7 @@ export default function FinanceOverview() {
             (cash.bankBalanceUsd || 0) !== 0 ? `+ ${fmtUSD(cash.bankBalanceUsd, { decimals: 0 })}` : null,
             cash.accountCount ? `${cash.accountCount} accounts` : 'All bank accounts',
           ].filter(Boolean).join(' · ')}
+          equiv={cashEquiv}
           hint={cash.bankBalancePkr > 0 ? 'Available' : 'Below zero'}
           hintBad={(cash.bankBalancePkr || 0) <= 0}
           onClick={() => navigate(fl('/finance/accounts'))}
@@ -135,7 +147,7 @@ export default function FinanceOverview() {
         <KpiTile
           icon={TrendingUp}
           label="Collection Rate"
-          basis="all time"
+          basis="due to date"
           primary={collection.primary}
           secondary={collection.secondary}
           hint={collection.hint}
@@ -147,24 +159,21 @@ export default function FinanceOverview() {
            panel and the payroll-approvals card) ───────────────────────── */}
       <NeedsAttention summary={summary} rangeKey={rangeKey} />
 
-      {/* ─── 3. PROFIT — a calm card; only the figure carries the sign colour,
-           and the word (profit / loss) says it too ─────────────────────── */}
+      {/* ─── 3. PROFIT — the books lead (GL P&L net profit, Posted journals);
+           the operational figures sit underneath, labelled. Only the figure
+           carries the sign colour, and the word (profit / loss) says it too ── */}
       <HeadlineCard
         testId="profit-card"
         icon={Activity}
-        label={<>Consolidated profit (booked) · {rangeKey ? rangeLabel(rangeKey) : 'All time'}</>}
-        value={<>{fmtPKR(consolidatedProfit)}{profitTone === 'negative' && <span className="ml-2 align-middle text-sm font-semibold">(loss)</span>}</>}
+        label={<>Net profit (books) · {rangeKey ? rangeLabel(rangeKey) : 'All time'}</>}
+        value={<span data-testid="books-net-profit">{fmtPKR(booksProfit)}{profitTone === 'negative' && <span className="ml-2 align-middle text-sm font-semibold">(loss)</span>}</span>}
         tone={profitTone}
         sub={<>
-          Export booked {fmtPKR(exp.bookedProfitPkr || 0)} · Mill realised {fmtPKR(mill.grossProfit || 0)}
-          {(local.grossProfit || 0) !== 0 && <> · Local other {fmtPKR(local.grossProfit || 0)}</>}
-          {(exp.fxGainLossPkr || 0) !== 0 && (
-            <> · FX realised {(exp.fxGainLossPkr || 0) >= 0 ? '+' : ''}{fmtPKR(exp.fxGainLossPkr || 0)} (not included)</>
-          )}
+          Revenue {fmtPKR(books.revenuePkr || 0)} · COGS {fmtPKR(books.cogsPkr || 0)} · Expenses {fmtPKR(books.expensesPkr || 0)}
         </>}
         meta={<>
-          Realised basis {fmtPKR(consolidated.realisedPkr || 0)}
-          {(exp.unpricedCount || 0) > 0 && <> · {exp.unpricedCount} export order{exp.unpricedCount === 1 ? '' : 's'} not costed yet — excluded</>}
+          General ledger, Posted journals, all entities ·{' '}
+          <Link to={fl('/finance/accounting')} className="underline">Profit &amp; Loss</Link>
         </>}
         right={<>
           {summary.currentFxRate && <TypeChip>1 USD = {summary.currentFxRate} PKR</TypeChip>}
@@ -174,6 +183,22 @@ export default function FinanceOverview() {
           </button>
         </>}
       >
+        <div className="mt-4 pt-3 border-t border-gray-100" data-testid="operational-profit">
+          <p className={kpiLabel}>Operational (management view — not the books)</p>
+          <dl className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <OpFigure label="Booked" value={consolidated.bookedPkr ?? consolidated.profitPkr} sub="export booked + mill + local" testId="op-booked" />
+            <OpFigure label="Realised" value={consolidated.realisedPkr} sub="export by shipment date + mill + local" testId="op-realised" />
+            <OpFigure label="Mill (net)" value={mill.netProfit ?? mill.grossProfit} sub={`gross ${fmtPKR(mill.grossProfit || 0)} − overheads ${fmtPKR(mill.overheads || 0)}`} testId="op-mill" />
+            <OpFigure label="Local other" value={local.grossProfit} sub="non-mill local sales" testId="op-local" />
+          </dl>
+          <p className="mt-2 text-xs text-gray-500">
+            Export booked {fmtPKR(exp.bookedProfitPkr || 0)} · realised {fmtPKR(exp.realisedProfitPkr || 0)} · pipeline {fmtPKR(exp.pipelineProfitPkr || 0)} (booked, not yet shipped)
+            {(exp.fxGainLossPkr || 0) !== 0 && (
+              <> · FX realised {(exp.fxGainLossPkr || 0) >= 0 ? '+' : ''}{fmtPKR(exp.fxGainLossPkr || 0)} (not included)</>
+            )}
+            {(exp.unpricedCount || 0) > 0 && <> · {exp.unpricedCount} export order{exp.unpricedCount === 1 ? '' : 's'} not costed yet — excluded</>}
+          </p>
+        </div>
         {warnings.length > 0 && (
           <ul className="mt-4 space-y-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5" data-testid="profit-warnings">
             {warnings.slice(0, 2).map((w, i) => (
@@ -225,11 +250,13 @@ export default function FinanceOverview() {
             <div className="rounded-lg border border-gray-100 bg-gray-50 p-3">
               <p className="text-xs font-medium uppercase tracking-wide text-gray-500 flex items-center gap-1"><ArrowDownLeft size={12} className="text-emerald-600" aria-hidden="true" /> Receiving</p>
               <p className="text-lg font-bold text-gray-900 tabular-nums break-words">{nativeTotals(upcoming?.receiving)}</p>
+              <PkrEquivLine text={pkrEquivText(upcomingPkrEquiv(upcoming?.receiving, { rateDate: upcoming?.todayRateDate }))} />
               <p className="text-xs text-gray-500">{upcoming?.receiving?.length || 0} cheque(s) / due(s)</p>
             </div>
             <div className="rounded-lg border border-gray-100 bg-gray-50 p-3">
               <p className="text-xs font-medium uppercase tracking-wide text-gray-500 flex items-center gap-1"><ArrowUpRight size={12} className="text-red-600" aria-hidden="true" /> Giving</p>
               <p className="text-lg font-bold text-gray-900 tabular-nums break-words">{nativeTotals(upcoming?.giving)}</p>
+              <PkrEquivLine text={pkrEquivText(upcomingPkrEquiv(upcoming?.giving, { rateDate: upcoming?.todayRateDate }))} />
               <p className="text-xs text-gray-500">{upcoming?.giving?.length || 0} cheque(s) / due(s)</p>
             </div>
           </div>
@@ -247,8 +274,8 @@ export default function FinanceOverview() {
           profitLabel="Booked Profit"
           profit={fmtPKR(exp.bookedProfitPkr || 0)}
           profitSub={[
-            `Realised ${fmtPKR(exp.realisedProfitPkr || 0)}`,
-            `Pipeline ${fmtPKR(exp.pipelineProfitPkr || 0)}`,
+            `Realised ${fmtPKR(exp.realisedProfitPkr || 0)} (by shipment date)`,
+            `Pipeline ${fmtPKR(exp.pipelineProfitPkr || 0)} (not yet shipped)`,
             (exp.estimatedCount || 0) > 0 ? `${exp.estimatedCount} estimated` : null,
             (exp.unpricedCount || 0) > 0 ? `${exp.unpricedCount} not costed (excluded)` : null,
           ].filter(Boolean).join(' · ')}
@@ -261,9 +288,12 @@ export default function FinanceOverview() {
           revenueLabel="Sales (PKR)"
           revenue={fmtPKR(mill.revenue || 0)}
           revenueSub={`COGS ${fmtPKR(mill.cogs || 0)} · unsold stock at cost ${fmtPKR(mill.unsoldStockAtCostPkr || 0)}`}
-          profitLabel="Realised Profit"
-          profit={fmtPKR(mill.grossProfit || 0)}
-          profitSub={(mill.uncostedCount || 0) > 0 ? `${mill.uncostedCount} sale(s) without COGS excluded` : 'Sales − COGS; unsold output is stock'}
+          profitLabel="Realised Profit (net)"
+          profit={fmtPKR(mill.netProfit ?? mill.grossProfit ?? 0)}
+          profitSub={[
+            `Gross ${fmtPKR(mill.grossProfit || 0)} − overheads ${fmtPKR(mill.overheads || 0)}`,
+            (mill.uncostedCount || 0) > 0 ? `${mill.uncostedCount} sale(s) without COGS excluded` : null,
+          ].filter(Boolean).join(' · ')}
           marginPct={mill.marginPct}
           onClick={goMill}
         />
@@ -289,8 +319,9 @@ export default function FinanceOverview() {
           title="Receivables aging"
           icon={ArrowDownLeft}
           data={recvAging}
-          totalLabel={fmtUSD(recvAging.totalForeign)}
-          totalSubLabel={fmtPKR(recvAging.totalPkr)}
+          totalLabel={recvEquivSplit ? nativeLine(recvAging.native) : fmtPKR(0)}
+          equiv={recvAging.foreign ? pkrEquivText({ pkr: recvAging.totalPkr, basis: 'booked', missingCount: recvAging.missingCount, foreign: true }) : null}
+          showNative
           onClickAll={() => navigate(fl('/finance/money-in'))}
         />
         <AgingPanel
@@ -372,7 +403,7 @@ function ViewAll({ onClick }) {
 // ─── KPI Tile ──────────────────────────────────────────────────────────
 // Same anatomy as FinanceKPI: small label · big figure · small sub-line. The
 // hint carries a symbol and words as well as its colour.
-function KpiTile({ icon: Icon, label, basis, primary, secondary, hint, hintBad, onClick }) {
+function KpiTile({ icon: Icon, label, basis, primary, secondary, equiv, hint, hintBad, onClick }) {
   const Cmp = onClick ? 'button' : 'div';
   return (
     <Cmp
@@ -388,6 +419,7 @@ function KpiTile({ icon: Icon, label, basis, primary, secondary, hint, hintBad, 
       </div>
       <div className={`${kpiValue} break-words`}>{primary}</div>
       {secondary && <div className={`${kpiSub} mt-1`}>{secondary}</div>}
+      <PkrEquivLine text={equiv} className="mt-0.5" />
       {hint && (
         <div className={`text-xs mt-2 font-medium ${hintBad ? 'text-red-700' : 'text-emerald-700'}`}>
           <span aria-hidden="true">{hintBad ? '● ' : '✓ '}</span>{hint}
@@ -432,14 +464,34 @@ function SegmentCard({ title, subtitle, revenueLabel, revenue, revenueSub, profi
   );
 }
 
+// ─── Operational figure (under the books headline) ────────────────────
+function OpFigure({ label, value, sub, testId }) {
+  const v = Number(value) || 0;
+  return (
+    <div className="min-w-0" data-testid={testId}>
+      <dt className="text-xs text-gray-500">{label}</dt>
+      <dd className={`text-base font-semibold tabular-nums break-words ${v < 0 ? 'text-red-700' : 'text-gray-900'}`}>{fmtPKR(v)}</dd>
+      {sub && <dd className="text-[11px] text-gray-500">{sub}</dd>}
+    </div>
+  );
+}
+
+// Each currency's own total, USD first ("$3,000.00 · Rs 821,395"), never summed.
+function nativeLine(native = {}) {
+  const order = ['USD', 'PKR', ...Object.keys(native).filter((c) => c !== 'USD' && c !== 'PKR').sort()];
+  const parts = order.filter((c) => Math.abs(native[c] || 0) > 0.004).map((c) => fmtMoney(native[c], c, { decimals: c === 'PKR' ? 0 : 2 }));
+  return parts.length ? parts.join(' · ') : '—';
+}
+
 // ─── Aging panel ───────────────────────────────────────────────────────
-function AgingPanel({ title, icon, data, totalLabel, totalSubLabel, onClickAll }) {
+function AgingPanel({ title, icon, data, totalLabel, totalSubLabel, equiv, showNative = false, onClickAll }) {
   const total = data.totalPkr || 0;
   return (
     <Section title={title} icon={icon} action={<ViewAll onClick={onClickAll} />}>
       <div className="mb-3">
         <div className="text-2xl font-bold text-gray-900 tabular-nums">{totalLabel}</div>
         {totalSubLabel && <div className="text-xs text-gray-500 mt-0.5 tabular-nums">{totalSubLabel}</div>}
+        <PkrEquivLine text={equiv} className="mt-0.5" />
       </div>
 
       {/* Stacked bar */}
@@ -459,7 +511,11 @@ function AgingPanel({ title, icon, data, totalLabel, totalSubLabel, onClickAll }
               <div key={k} className={`text-center px-1.5 py-2 rounded-md ${BUCKET_COLORS[k].tag}`}>
                 <div className="text-[11px] uppercase tracking-wider font-medium">{k} days</div>
                 <div className="text-sm font-bold mt-0.5 tabular-nums">{data[k].count}</div>
-                <div className="text-[11px] mt-0.5 truncate tabular-nums" title={fmtPKR(data[k].totalPkr)}>{fmtPKR(data[k].totalPkr)}</div>
+                {showNative ? (
+                  <div className="text-[11px] mt-0.5 tabular-nums break-words" title={nativeLine(data[k].native)}>{nativeLine(data[k].native)}</div>
+                ) : (
+                  <div className="text-[11px] mt-0.5 truncate tabular-nums" title={fmtPKR(data[k].totalPkr)}>{fmtPKR(data[k].totalPkr)}</div>
+                )}
               </div>
             ))}
           </div>

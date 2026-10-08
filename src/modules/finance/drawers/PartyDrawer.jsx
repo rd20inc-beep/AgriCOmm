@@ -13,6 +13,8 @@ import { useFinanceDrawers } from './drawersContext';
 import { Section, Row, PerCurrency, DrawerActions } from './drawerParts';
 import { fmtAmt, btnPrimary, btnSecondary, partyOpenItems } from './drawerLogic';
 import { btnRowSecondary } from '../utils/uiClasses';
+import { receivablesPkrEquiv, pkrEquivText } from '../utils/currencyTiles';
+import { PkrEquivLine } from '../components/FinanceUI';
 
 // A statement line that is a payment carries the payment number.
 const PAYMENT_NO = /^PAY-/i;
@@ -30,10 +32,14 @@ export default function PartyDrawer({ party, onClose }) {
   const isCustomer = party?.type === 'customer';
   const { data: receivables = [], isLoading: rl } = useReceivables({ customer_id: party?.id }, { enabled: isCustomer && !!party?.id });
   const { data: payables = [], isLoading: pl } = usePayables({ supplier_id: party?.id }, { enabled: !isCustomer && !!party?.id });
-  const { items, totals } = useMemo(() => {
+  const { items, totals, equivText } = useMemo(() => {
     const rows = isCustomer ? receivables.filter((r) => String(r.customerId) === String(party?.id))
       : payables.filter((r) => String(r.supplierId) === String(party?.id));
-    return partyOpenItems(party?.type, rows);
+    const open = partyOpenItems(party?.type, rows);
+    // C5: ≈ PKR equivalent of the open items, each at its own booked rate.
+    const fallbackCur = isCustomer ? 'USD' : 'PKR';
+    const eq = receivablesPkrEquiv(open.items.map((i) => ({ ...i.row, currency: i.row.currency || fallbackCur })), 'outstanding');
+    return { ...open, equivText: pkrEquivText(eq) };
   }, [isCustomer, receivables, payables, party?.type, party?.id]);
 
   const { data: statement, isLoading: sl } = useQuery({
@@ -73,6 +79,7 @@ export default function PartyDrawer({ party, onClose }) {
         <div className="rounded-lg bg-gray-50 p-3">
           <p className="text-xs text-gray-500">{isCustomer ? 'They owe (open items)' : 'We owe (open items)'}</p>
           <p className="text-xl font-bold text-gray-900 tabular-nums">{rl || pl ? '…' : <PerCurrency totals={totals} empty="Nothing open" />}</p>
+          {!(rl || pl) && <PkrEquivLine text={equivText} className="mt-0.5" />}
           {statement && (
             <p className="text-xs text-gray-500 mt-1">
               Ledger balance (PKR books): {fmtAmt(statement.closing_balance, 'PKR')}

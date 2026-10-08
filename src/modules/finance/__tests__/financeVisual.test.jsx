@@ -19,7 +19,7 @@ let mockPerms = allow('finance.view', 'finance.confirm_payment', 'finance.alloca
 vi.mock('../../../context/AuthContext', () => ({ useAuth: () => ({ hasPermission: (m, a) => mockPerms(m, a) }) }));
 vi.mock('../../../api/queries', () => ({
   usePendingExportReceipts: () => ({ data: [] }),
-  useFinanceOverviewSummary: () => ({ data: { consolidated: { profitPkr: -5000 }, export: {}, mill: {}, local: {}, warnings: [] }, isLoading: false, refetch: () => {} }),
+  useFinanceOverviewSummary: () => ({ data: { books: { netProfitPkr: -5000 }, consolidated: { profitPkr: -5000 }, export: {}, mill: {}, local: {}, warnings: [] }, isLoading: false, refetch: () => {} }),
   useReceivables: () => ({ data: [] }),
   usePayables: () => ({ data: [] }),
   useJournalEntries: () => ({ data: [] }),
