@@ -1,3 +1,4 @@
+import { btnPrimary, btnSecondary } from '../utils/uiClasses';
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowLeftRight, Building2, Factory } from 'lucide-react';
 import SlideDrawer from '../../../components/SlideDrawer';
@@ -90,14 +91,13 @@ export default function TransferFundsDrawer({ open, onClose, defaultDirection = 
       icon={ArrowLeftRight}
       footer={
         <div className="flex items-center justify-end gap-2">
-          <button onClick={onClose} className="px-3 py-2 text-sm text-gray-600 hover:text-gray-900">Cancel</button>
-          <button onClick={submit} disabled={createMut.isPending || noMill}
-            className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">
-            <ArrowLeftRight className="w-4 h-4" /> {createMut.isPending ? 'Transferring…' : 'Transfer'}
+          <button type="button" onClick={onClose} className={btnSecondary}>Cancel</button>
+          <button type="button" onClick={submit} disabled={createMut.isPending || noMill} className={btnPrimary}>
+            <ArrowLeftRight className="w-4 h-4" aria-hidden="true" /> {createMut.isPending ? 'Transferring…' : 'Transfer'}
           </button>
         </div>
       }>
-      <div className="p-5 space-y-4">
+      <div className="space-y-4">
         {noMill && <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">No Mill account found. Run the latest migration to seed the Mill Cash account.</div>}
 
         {/* Direction toggle (hidden when locked to a single direction) */}

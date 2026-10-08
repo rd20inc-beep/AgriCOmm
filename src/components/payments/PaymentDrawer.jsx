@@ -5,6 +5,11 @@ import PaymentFields from './PaymentFields';
 import PaymentHistory from './PaymentHistory';
 import { blankPaymentForm, paymentPayload, paymentFieldError } from './paymentPayload';
 
+// The Finance-wide button styles (one filled primary at the right).
+const btnBase = 'inline-flex items-center justify-center gap-1.5 rounded-lg text-sm font-medium whitespace-nowrap px-3.5 min-h-10 sm:min-h-9 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1';
+const btnPrimary = `${btnBase} text-white bg-blue-600 hover:bg-blue-700`;
+const btnSecondary = `${btnBase} text-gray-700 bg-white border border-gray-200 hover:bg-gray-50`;
+
 /**
  * One drawer for settling a payable or a receivable.
  *
@@ -104,20 +109,19 @@ export default function PaymentDrawer({
     <SlideDrawer open={open} onClose={onClose} title={title} subtitle={subtitle} icon={icon} size={size}
       footer={(
         <div className="flex justify-end gap-2">
-          <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
-          <button type="submit" form={formId} disabled={saving}
-            className="px-4 py-2 text-sm text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-60">
+          <button type="button" onClick={onClose} className={btnSecondary}>Cancel</button>
+          <button type="submit" form={formId} disabled={saving} className={btnPrimary}>
             {saving ? 'Processing…' : label}
           </button>
         </div>
       )}>
       <form id={formId} onSubmit={submit} className="space-y-4">
         {summary.length > 0 && (
-          <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm space-y-1">
+          <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm space-y-1" data-testid="payment-context">
             {summary.filter(Boolean).map(([k, v], i) => (
-              <div key={k || i} className="flex justify-between">
-                <span className="text-gray-500">{k}</span>
-                <span className={i === summary.length - 1 ? 'font-semibold text-amber-700' : 'text-gray-700'}>{v}</span>
+              <div key={k || i} className="flex justify-between gap-3">
+                <span className="text-gray-500 shrink-0">{k}</span>
+                <span className={`text-right min-w-0 break-words ${i === summary.length - 1 ? 'font-semibold text-gray-900 tabular-nums' : 'text-gray-700'}`}>{v}</span>
               </div>
             ))}
           </div>

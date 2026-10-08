@@ -15,6 +15,7 @@ import { ClearChequeDialog } from '../pages/DueDates';
 import { fmtDate, fmtDateTime } from '../../../shared/utils/format';
 import { useFinanceDrawers } from './drawersContext';
 import { Section, Row, LinkButton, DrawerActions } from './drawerParts';
+import { InlineError, MoreSection } from '../components/FinanceUI';
 import { fmtAmt, btnSecondary, btnDanger, btnPrimary, transactionActions, transactionKey } from './drawerLogic';
 import { useTransactionDetail } from './drawerHooks';
 
@@ -32,7 +33,7 @@ const DOC_KIND = { receivable: 'receivable', payable: 'payable', local_sale: 'lo
  * transfer's own drawer instead.
  */
 export default function TransactionDrawer({ txKind, id, onClose }) {
-  const { data, isLoading, isError } = useTransactionDetail(txKind, id);
+  const { data, isLoading, isError, refetch } = useTransactionDetail(txKind, id);
   const drawers = useFinanceDrawers();
   const { hasPermission } = useAuth();
   const { addToast } = useApp();
@@ -113,15 +114,15 @@ export default function TransactionDrawer({ txKind, id, onClose }) {
 
   const footer = p && (acts.reverse || acts.clear) ? (
     <DrawerActions>
+      {acts.reverse && (
+        <button type="button" className={btnDanger} disabled={reverseMut.isPending} onClick={reverse} data-action="reverse">
+          <Undo2 size={14} aria-hidden="true" /> Reverse
+        </button>
+      )}
       {acts.clear && (
         <button type="button" className={btnPrimary} disabled={clearMut.isPending} data-action="clear-cheque"
           onClick={() => setClearing({ paymentId: p.id, paymentNo: p.payment_no, reference: p.bank_reference, amount: p.amount, currency: p.currency, bankAccountId: p.bank_account_id, party: data.party?.name, partyType: p.type === 'receipt' ? 'customer' : 'supplier' })}>
-          <CheckCircle size={14} /> Clear cheque
-        </button>
-      )}
-      {acts.reverse && (
-        <button type="button" className={btnDanger} disabled={reverseMut.isPending} onClick={reverse} data-action="reverse">
-          <Undo2 size={14} /> Reverse
+          <CheckCircle size={14} aria-hidden="true" /> Clear cheque
         </button>
       )}
     </DrawerActions>
@@ -129,14 +130,18 @@ export default function TransactionDrawer({ txKind, id, onClose }) {
 
   return (
     <SlideDrawer open onClose={onClose} title={title} subtitle={subtitle} icon={isIn ? ArrowDownLeft : ArrowUpRight} size="lg" footer={footer}>
-      {isLoading ? <p className="text-sm text-gray-400">Loading…</p>
-        : isError || !data ? <p className="text-sm text-red-600">This transaction could not be loaded.</p>
-        : data.kind === 'fund_transfer' ? <p className="text-sm text-gray-400">Opening the transfer…</p>
+      {isLoading ? <p className="text-sm text-gray-500">Loading…</p>
+        : isError || !data ? <InlineError message="This transaction could not be loaded." onRetry={refetch} />
+        : data.kind === 'fund_transfer' ? <p className="text-sm text-gray-500">Opening the transfer…</p>
         : (
           <div className="space-y-5" data-testid="transaction-drawer">
             {/* The amount, in its own currency */}
-            <div className={`rounded-lg p-3 text-center ${isIn ? 'bg-emerald-50' : 'bg-red-50'}`}>
-              <p className="text-xs text-gray-500">{isIn ? 'Received' : 'Paid'}</p>
+            {/* Neutral tile; the word (Received / Paid) and the figure's colour carry the direction. */}
+            <div className="rounded-lg p-3 text-center bg-gray-50 border border-gray-100">
+              <p className="text-xs font-medium text-gray-500 inline-flex items-center gap-1">
+                {isIn ? <ArrowDownLeft size={13} className="text-emerald-600" aria-hidden="true" /> : <ArrowUpRight size={13} className="text-red-600" aria-hidden="true" />}
+                {isIn ? 'Received' : 'Paid'}
+              </p>
               <p className={`text-2xl font-bold tabular-nums ${isIn ? 'text-emerald-700' : 'text-red-700'}`}>{fmtAmt(p ? p.amount : bt.amount, p ? p.currency : bt.currency)}</p>
               {p && p.currency !== 'PKR' && p.base_amount_pkr > 0 && (
                 <p className="text-[11px] text-gray-500">Booked at {p.fx_rate} · {fmtAmt(p.base_amount_pkr, 'PKR')} in the PKR ledger</p>
@@ -205,6 +210,9 @@ export default function TransactionDrawer({ txKind, id, onClose }) {
               </Section>
             )}
 
+            {/* Bank rows, journals and the audit trail — for checking, so folded away. */}
+            <MoreSection testId="tx-more" title="Bank, ledger & audit"
+              summary={`${data.bank_transactions?.length || 0} bank row(s) · ${data.journals?.length || 0} journal(s)`}>
             {p && (
               <Section title="Audit">
                 <div>
@@ -267,8 +275,9 @@ export default function TransactionDrawer({ txKind, id, onClose }) {
                     </tbody>
                   </table>
                 </div>
-              )) : <p className="text-xs text-gray-400">{p?.payment_method === 'cheque' && !p?.cleared ? 'Nothing is posted until the cheque clears.' : p && ['Pending Finance Confirmation', 'Rejected'].includes(p.status) ? 'Nothing is posted until Finance confirms it.' : 'No journal found for this movement.'}</p>}
+              )) : <p className="text-xs text-gray-500">{p?.payment_method === 'cheque' && !p?.cleared ? 'Nothing is posted until the cheque clears.' : p && ['Pending Finance Confirmation', 'Rejected'].includes(p.status) ? 'Nothing is posted until Finance confirms it.' : 'No journal found for this movement.'}</p>}
             </Section>
+            </MoreSection>
 
             {acts.reverseBlockedReason && p.status !== 'Reversed' && hasPermission('finance', 'confirm_payment') && (
               <p className="text-[11px] text-gray-500" data-testid="reverse-blocked">{acts.reverseBlockedReason}</p>

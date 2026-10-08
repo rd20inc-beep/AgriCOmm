@@ -1,3 +1,4 @@
+import { btnPrimary, btnSecondary } from '../utils/uiClasses';
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowLeftRight, Paperclip, FileText, X, AlertTriangle, Info } from 'lucide-react';
 import SlideDrawer from '../../../components/SlideDrawer';
@@ -198,16 +199,14 @@ export default function ContraTransferDrawer({ open, onClose, editing = null, on
       footer={
         <div className="flex items-center justify-end gap-2">
           {step === 'review'
-            ? <button onClick={() => setStep('form')} className="px-3 py-2 text-sm text-gray-600 hover:text-gray-900">Back</button>
-            : <button onClick={onClose} className="px-3 py-2 text-sm text-gray-600 hover:text-gray-900">Cancel</button>}
+            ? <button type="button" onClick={() => setStep('form')} className={btnSecondary}>Back</button>
+            : <button type="button" onClick={onClose} className={btnSecondary}>Cancel</button>}
           {step === 'review' ? (
-            <button onClick={submit} disabled={busy}
-              className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">
-              <ArrowLeftRight className="w-4 h-4" /> {busy ? 'Saving…' : (editing ? 'Reverse & replace' : 'Confirm transfer')}
+            <button type="button" onClick={submit} disabled={busy} className={btnPrimary}>
+              <ArrowLeftRight className="w-4 h-4" aria-hidden="true" /> {busy ? 'Saving…' : (editing ? 'Reverse & replace' : 'Confirm transfer')}
             </button>
           ) : (
-            <button onClick={review} disabled={uploading}
-              className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50">
+            <button type="button" onClick={review} disabled={uploading} className={btnPrimary}>
               Review
             </button>
           )}

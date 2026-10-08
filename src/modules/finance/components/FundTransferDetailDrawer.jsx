@@ -1,3 +1,4 @@
+import { btnSecondary, btnDanger } from '../utils/uiClasses';
 import { ArrowLeftRight, AlertTriangle, Paperclip, Pencil, Undo2 } from 'lucide-react';
 import SlideDrawer from '../../../components/SlideDrawer';
 import StatusBadge from '../../../shared/components/StatusBadge';
@@ -62,12 +63,12 @@ export default function FundTransferDetailDrawer({ open, transferId, onClose, ca
       subtitle={t ? `${t.fromAccountName || '—'} → ${t.toAccountName || '—'}` : ''}
       footer={canAct ? (
         <div className="flex items-center justify-end gap-2">
-          <button onClick={() => onEdit?.(t)} className="inline-flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg border border-gray-200 text-gray-700 hover:border-gray-400"><Pencil size={14} /> Edit</button>
-          <button onClick={handleReverse} disabled={reverseMut.isPending} className="inline-flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg border border-red-200 text-red-700 hover:bg-red-50 disabled:opacity-50"><Undo2 size={14} /> Reverse</button>
+          <button type="button" onClick={handleReverse} disabled={reverseMut.isPending} className={btnDanger}><Undo2 size={14} aria-hidden="true" /> Reverse</button>
+          <button type="button" onClick={() => onEdit?.(t)} className={btnSecondary}><Pencil size={14} aria-hidden="true" /> Edit</button>
         </div>
       ) : null}>
-      <div className="p-5 space-y-4">
-        {isLoading || !t ? <div className="text-sm text-gray-400">Loading…</div> : (
+      <div className="space-y-4">
+        {isLoading || !t ? <div className="text-sm text-gray-500">Loading…</div> : (
           <>
             <div className="flex items-center gap-2 flex-wrap">
               <StatusBadge status={transferStatusLabel(t)} />

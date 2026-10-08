@@ -14,7 +14,8 @@ import { contextForDocument, isSettleable, canRecordVariant } from '../../../com
 import { isDerivedPayable, derivedPayableHint } from '../../../shared/utils/derivedPayables';
 import { fmtDate } from '../../../shared/utils/format';
 import { useFinanceDrawers } from './drawersContext';
-import { Section, Row, LinkButton, DrawerActions } from './drawerParts';
+import { Section, Row, LinkButton, DrawerActions, Figures } from './drawerParts';
+import { MoreSection } from '../components/FinanceUI';
 import { fmtAmt, btnPrimary, documentFigures } from './drawerLogic';
 import { useDocumentRow } from './drawerHooks';
 
@@ -88,11 +89,11 @@ export default function DocumentDrawer({ doc, onClose }) {
     <SlideDrawer open onClose={onClose} title={title} subtitle={subtitle} icon={FileText} size="lg" footer={footer}>
       {!row ? <p className="text-sm text-gray-400">Loading…</p> : (
         <div className="space-y-5" data-testid="document-drawer">
-          <div className="grid grid-cols-3 gap-2 text-center">
-            <div className="bg-gray-50 rounded-lg p-2.5"><p className="text-[11px] text-gray-500">Total</p><p className="text-sm font-semibold tabular-nums">{fmtAmt(figures.total, figures.currency)}</p></div>
-            <div className="bg-emerald-50 rounded-lg p-2.5"><p className="text-[11px] text-emerald-600">{figures.settledLabel}</p><p className="text-sm font-semibold text-emerald-700 tabular-nums">{fmtAmt(figures.settled, figures.currency)}</p></div>
-            <div className="bg-red-50 rounded-lg p-2.5"><p className="text-[11px] text-red-600">Outstanding</p><p className="text-sm font-semibold text-red-700 tabular-nums" data-testid="doc-outstanding">{fmtAmt(figures.outstanding, figures.currency)}</p></div>
-          </div>
+          <Figures items={[
+            { label: 'Total', value: fmtAmt(figures.total, figures.currency) },
+            { label: figures.settledLabel, value: fmtAmt(figures.settled, figures.currency), tone: 'positive' },
+            { label: 'Outstanding', value: fmtAmt(figures.outstanding, figures.currency), tone: figures.outstanding > 0 ? 'negative' : undefined, testId: 'doc-outstanding' },
+          ]} />
 
           <Section title="Details">
             <div>
@@ -108,7 +109,7 @@ export default function DocumentDrawer({ doc, onClose }) {
               {docKind === 'payable' && row.linkedRef && <Row label="Linked to">{row.linkedRef}</Row>}
               {docKind === 'expense' && (row.batch_no || row.order_no) && <Row label="Linked to">{row.batch_no || row.order_no}</Row>}
               {docKind === 'expense' && row.description && <Row label="Description">{row.description}</Row>}
-              {orderHref && <Row label="Order"><Link to={orderHref} className="text-blue-600 hover:underline">Open order →</Link></Row>}
+              {orderHref && <Row label="Order"><Link to={orderHref} className="text-blue-600 hover:underline">Open order <span aria-hidden="true">→</span></Link></Row>}
               {docKind === 'purchase' && row.source === 'lot' && row.ref && hasPermission('inventory', 'view') && (
                 <Row label="Lot"><Link to={`/lot-inventory/${row.ref}`} className="text-blue-600 hover:underline">{row.ref} →</Link></Row>
               )}
@@ -145,8 +146,8 @@ export default function DocumentDrawer({ doc, onClose }) {
           )}
 
           <Section title={isIn ? 'Receipts' : 'Payments'}>
-            {history.loading ? <p className="text-xs text-gray-400">Loading…</p>
-              : !history.rows.length ? <p className="text-xs text-gray-400">None recorded yet.</p>
+            {history.loading ? <p className="text-xs text-gray-500">Loading…</p>
+              : !history.rows.length ? <p className="text-xs text-gray-500">None recorded yet.</p>
               : (
                 <div className="rounded-lg border border-gray-200 divide-y divide-gray-100 text-xs" data-testid="doc-history">
                   {history.rows.map((h, i) => {
@@ -158,7 +159,7 @@ export default function DocumentDrawer({ doc, onClose }) {
                       </>
                     );
                     return open ? (
-                      <button key={h.id || i} type="button" onClick={open} className="w-full flex items-center justify-between px-3 py-2 hover:bg-blue-50 text-left">{body}</button>
+                      <button key={h.id || i} type="button" onClick={open} className="w-full flex items-center justify-between gap-2 px-3 py-2 min-h-11 hover:bg-blue-50 text-left focus-visible:outline-none focus-visible:bg-blue-50">{body}</button>
                     ) : <div key={h.id || i} className="flex items-center justify-between px-3 py-2">{body}</div>;
                   })}
                 </div>
@@ -166,9 +167,9 @@ export default function DocumentDrawer({ doc, onClose }) {
           </Section>
 
           {(docKind === 'receivable' || docKind === 'local_sale' || docKind === 'payable') && (
-            <div className="pt-2 border-t border-gray-100">
+            <MoreSection title={isIn ? 'Printable receipt' : 'Printable voucher'} summary="Preview, print or share">
               <TransactionDocument kind={isIn ? 'receipt' : 'voucher'} data={row} companyProfile={companyProfileData} />
-            </div>
+            </MoreSection>
           )}
         </div>
       )}
