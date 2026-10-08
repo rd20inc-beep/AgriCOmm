@@ -234,11 +234,19 @@ d('contra transfers (DB-gated)', () => {
     expect(await balances()).toEqual(before);
   });
 
-  test('insufficient source balance → 409, nothing moves', async () => {
+  test('B2: overdrawing the source goes through with a warning and the overdrawn alert', async () => {
     const before = await balances();
     const res = await contra('fm', { from_account_id: acc.millBank.id, to_account_id: acc.millCash.id, amount: before.millBank + 1 });
-    expect(res.status).toBe(409);
-    expect(res.body.message).toMatch(/Insufficient balance/);
+    expect(res.status).toBe(200);
+    expect(res.body.data.warning).toMatchObject({ account_id: acc.millBank.id, currency: 'PKR', overdrawn_by: 1, balance_after: -1 });
+    const after = await balances();
+    expect(after.millBank).toBe(-1);
+    expect(after.millCash - before.millCash).toBe(before.millBank + 1);
+    const alerts = await get('fm', '/api/finance/alerts');
+    expect(alerts.body.data.alerts.some((a) => a.title === 'Account overdrawn' && a.message.includes(acc.millBank.name))).toBe(true);
+    // Put it back (signed-delta reversal) so later tests start from the same balances.
+    const rev = await post('owner', `/api/finance/fund-transfers/${res.body.data.transfer.id}/reverse`, { reason: 'test cleanup' });
+    expect(rev.status).toBe(200);
     expect(await balances()).toEqual(before);
   });
 
@@ -353,9 +361,9 @@ d('contra transfers (DB-gated)', () => {
     const t = res.body.data.transfer;
     const before = await balances();
     const bad = await post('owner', `/api/finance/fund-transfers/${t.id}/replace`, {
-      from_account_id: acc.hoCash.id, to_account_id: acc.hoBank.id, amount: 99999999999, reference: 'x', reason: 'too much',
+      from_account_id: acc.hoCash.id, to_account_id: acc.hoBank.id, amount: 1000, currency: 'USD', reference: 'x', reason: 'wrong currency',
     });
-    expect(bad.status).toBe(409);
+    expect(bad.status).toBe(400); // HO Cash holds PKR (an overdraft would no longer fail — B2)
     expect((await db('fund_transfers').where({ id: t.id }).first()).status).toBe('completed');
     expect(await balances()).toEqual(before);
   });
