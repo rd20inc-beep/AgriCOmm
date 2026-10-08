@@ -91,6 +91,27 @@ d('finance transaction detail + search (DB-gated)', () => {
     expect(viaBank.body.data).toMatchObject({ kind: 'payment', focus_bank_transaction_id: bt.id, payment: { id: pay.id } });
   });
 
+  test('a document can be attached to a payment once; Finance only', async () => {
+    const up = await request(app).post('/api/finance/payments/attachment').set(auth('fm'))
+      .attach('file', Buffer.from('%PDF-1.4 test'), 'wht-cert.pdf');
+    expect(up.status).toBe(200);
+    const body = { attachment_url: up.body.data.url, attachment_name: 'wht-cert.pdf' };
+    expect((await request(app).put(`/api/finance/payments/${ids.pay.id}/attachment`).set(auth('qc')).send(body)).status).toBe(403);
+    const ok = await request(app).put(`/api/finance/payments/${ids.pay.id}/attachment`).set(auth('fm')).send(body);
+    expect(ok.status).toBe(200);
+    const dt = (await get('fm', `/api/finance/transactions/payment/${ids.pay.id}`)).body.data;
+    expect(dt.payment).toMatchObject({ attachment_url: up.body.data.url, attachment_name: 'wht-cert.pdf' });
+    // It fills an empty slot; it never replaces a document.
+    expect((await request(app).put(`/api/finance/payments/${ids.pay.id}/attachment`).set(auth('fm')).send(body)).status).toBe(409);
+    // A file that was never uploaded is refused.
+    const [pa] = await db('payables').insert({
+      pay_no: `ZZP3PAY2-${run}`, entity: 'mill', payable_type: 'vendor', category: 'Other', supplier_id: ids.sup,
+      original_amount: 100, paid_amount: 0, outstanding: 100, status: 'Pending', currency: 'PKR',
+    }).returning('*');
+    const p2 = (await post('fm', '/api/finance/payments', { type: 'payment', linked_payable_id: pa.id, amount: 100, currency: 'PKR', payment_method: 'bank_transfer', bank_account_id: acc.pkr.id, payment_date: TODAY })).body.data.payment;
+    expect((await request(app).put(`/api/finance/payments/${p2.id}/attachment`).set(auth('fm')).send({ attachment_url: 'nope.pdf' })).status).toBe(400);
+  });
+
   test('a restricted role sees the reference but not the party', async () => {
     const res = await get('em', `/api/finance/transactions/payment/${ids.pay.id}`);
     expect(res.status).toBe(200);
