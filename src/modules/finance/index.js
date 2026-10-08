@@ -4,7 +4,6 @@ export { default as Alerts } from './pages/Alerts.jsx';
 export { default as Cash } from './pages/Cash.jsx';
 export { default as Confirmations } from './pages/Confirmations.jsx';
 export { default as CostAllocation } from './pages/CostAllocation.jsx';
-export { default as FinanceAlerts } from './pages/FinanceAlerts.jsx';
 export { default as FinanceLayout } from './pages/FinanceLayout.jsx';
 export { default as FinanceOverview } from './pages/FinanceOverview.jsx';
 export { default as InternalTransfers } from './pages/InternalTransfers.jsx';
