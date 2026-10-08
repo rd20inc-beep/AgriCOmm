@@ -1,7 +1,8 @@
 import { todayLocalISO } from '../../../shared/utils/format';
 // Workflow steps — static config. Ship on the advance (2026-10-07): the order
 // ships once the advance is confirmed and the pre-shipment documents approved;
-// the balance (and BL Final) are collected after sailing, before Close.
+// the balance (and BL Final + Certificate of Origin) are collected after
+// sailing, before Close.
 // `statuses` are the order statuses a step covers; `status` is the one a
 // pipeline click filters on. The legacy 'Awaiting Balance' sits on Ready to
 // Ship: its documents are done and it can ship on the advance.
@@ -116,3 +117,8 @@ export function allDocsFinal(docs) {
   const values = Object.values(docs);
   return values.length > 0 && values.every(d => d?.status === 'Approved');
 }
+
+// Issued only once the vessel has sailed, so they never hold up Ready to Ship
+// or Shipped; they are still required to Close. Mirrors POST_SHIPMENT_DOCS in
+// backend/src/modules/exportOrders/exportOrders.workflow.js.
+export const POST_SHIPMENT_KEYS = new Set(['blFinal', 'coo']);

@@ -2,7 +2,7 @@ import React, { useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { FileText, CheckCircle, Circle, Eye, Upload, ExternalLink, Download, FolderOpen, Loader2, Package, ChevronUp, ChevronDown } from 'lucide-react';
 import { togglePick, movePick, inReferenceOrder } from '../utils/pickOrder';
-import { documentLabels } from './constants';
+import { documentLabels, POST_SHIPMENT_KEYS } from './constants';
 import { documentsApi } from '../../documents/api/services';
 import api from '../../../api/client';
 import { renderDocument, buildDocHtml } from './DocumentCenter';
@@ -41,6 +41,10 @@ const BASE_LABELS = {
   ...documentLabels,
   quality: 'Quality / Inspection Certificate',
   custom: 'Other / Custom Document',
+};
+
+const POST_SHIPMENT_HINTS = {
+  coo: 'Endorsed by the chamber against the shipped BL. Post-shipment: not needed to ship, required to close.',
 };
 
 const UPLOAD_HINTS = {
@@ -468,10 +472,12 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
                   <p className={`text-sm font-medium ${isChecked ? 'text-emerald-800' : 'text-gray-900'}`}>{LABELS[key]}</p>
                   {uploadOnly && !stored && <span className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-full"><ExternalLink className="w-2.5 h-2.5" /> Upload</span>}
                   {systemDoc && <span className="text-[10px] font-medium px-1.5 py-0.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-full">System-generated</span>}
+                  {POST_SHIPMENT_KEYS.has(key) && <span className="text-[10px] font-medium px-1.5 py-0.5 bg-slate-50 text-slate-600 border border-slate-200 rounded-full" title="Not needed to ship; required to close the order">After sailing</span>}
                   {stored && <span className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full"><FileText className="w-2.5 h-2.5" /> {files.length > 1 ? `${files.length} files attached` : 'File attached'}</span>}
                   {pendingCount > 0 && <span className="text-[10px] font-medium px-1.5 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-full">{pendingCount} awaiting approval</span>}
                 </div>
                 {uploadOnly && !stored && <p className="text-[11px] text-gray-500 mt-0.5">{UPLOAD_HINTS[key]}</p>}
+                {!uploadOnly && !isChecked && POST_SHIPMENT_HINTS[key] && <p className="text-[11px] text-gray-500 mt-0.5">{POST_SHIPMENT_HINTS[key]}</p>}
                 {/* Every file of the live version — one upload can carry several
                     (a multi-page scan sent as separate images). Older versions
                     are listed under "version history" below. */}

@@ -1,7 +1,8 @@
 /**
  * Ship on the advance (owner decision 2026-10-07). An export order ships once
  * the advance is confirmed and the PRE-shipment documents are approved; the
- * balance and the BL Final are collected after sailing and gate Close.
+ * balance, the BL Final and the Certificate of Origin are collected after
+ * sailing and gate Close (CoO moved post-shipment, owner decision D1).
  *
  * Every case RUNS the real controller / workflow against the in-memory
  * database (helpers/memoryDb.js); nothing greps the source.
@@ -80,8 +81,9 @@ function order(over = {}) {
 
 const CHECKLIST = ['phyto', 'bl_draft', 'bl_final', 'commercial_invoice', 'packing_list', 'coo', 'fumigation'];
 // The checklist as an order has it once its pre-shipment documents are done:
-// everything approved except the BL Final, which the carrier issues after sailing.
-function checklist({ unfulfilled = ['bl_final'] } = {}) {
+// everything approved except the BL Final (the carrier issues it after sailing)
+// and the Certificate of Origin (the chamber endorses it against the shipped BL).
+function checklist({ unfulfilled = ['bl_final', 'coo'] } = {}) {
   return CHECKLIST.map((doc_type, i) => ({
     id: i + 1, linked_type: 'export_order', linked_id: 1, doc_type,
     is_required: true, is_fulfilled: !unfulfilled.includes(doc_type),
@@ -89,7 +91,7 @@ function checklist({ unfulfilled = ['bl_final'] } = {}) {
 }
 const DOC_ROWS = [
   ['phyto', 'Approved'], ['bl_draft', 'Approved'], ['commercial_invoice', 'Approved'],
-  ['packing_list', 'Approved'], ['coo', 'Approved'], ['fumigation', 'Final'],
+  ['packing_list', 'Approved'], ['fumigation', 'Final'],
 ];
 const docs = (list = DOC_ROWS) => list.map(([doc_type, status], i) => ({ id: i + 1, order_id: 1, doc_type, status }));
 
@@ -116,14 +118,14 @@ beforeEach(() => { jest.clearAllMocks(); });
 
 // ─────────────────────────────────────────────────────────────────────────────
 describe('pre-shipment vs post-shipment documents', () => {
-  it('BL Final is the post-shipment document; the other six are pre-shipment', () => {
-    expect(workflow.POST_SHIPMENT_DOCS).toEqual(['blFinal']);
-    expect(workflow.PRE_SHIPMENT_DOCS).toEqual(['phyto', 'blDraft', 'invoice', 'packingList', 'coo', 'fumigation']);
+  it('BL Final and CoO are the post-shipment documents; the other five are pre-shipment', () => {
+    expect(workflow.POST_SHIPMENT_DOCS).toEqual(['blFinal', 'coo']);
+    expect(workflow.PRE_SHIPMENT_DOCS).toEqual(['phyto', 'blDraft', 'invoice', 'packingList', 'fumigation']);
     expect([...workflow.PRE_SHIPMENT_DOCS, ...workflow.POST_SHIPMENT_DOCS].sort())
       .toEqual([...workflow.REQUIRED_DOCS].sort());
   });
 
-  it('the six pre-shipment documents approved, without the BL Final, are enough to ship', () => {
+  it('the five pre-shipment documents approved, without the BL Final or CoO, are enough to ship', () => {
     expect(workflow.preShipmentDocsApproved(docs())).toBe(true);
     expect(workflow.requiredDocsApproved(docs())).toBe(false);
   });
@@ -170,11 +172,19 @@ describe('shipping on the advance', () => {
   );
 
   it('is refused while a pre-shipment document is unapproved, and names it', async () => {
-    seed({ unfulfilled: ['phyto', 'bl_final'] });
+    seed({ unfulfilled: ['phyto', 'bl_final', 'coo'] });
     const r = await setStatus('Shipped');
     expect(r.statusCode).toBe(400);
     expect(r.body.message).toMatch(/pre-shipment export documents.*Phytosanitary Certificate/);
     expect(r.body.message).not.toMatch(/BL Final/);
+    expect(r.body.message).not.toMatch(/Certificate of Origin/);
+  });
+
+  it('ships without the Certificate of Origin (it is issued after sailing)', async () => {
+    seed({ unfulfilled: ['coo'] });
+    const r = await setStatus('Shipped');
+    expect(r.statusCode).toBe(200);
+    expect(state.tables.export_orders[0].status).toBe('Shipped');
   });
 
   it('ATD on a Ready to Ship order ships it with the balance unpaid', async () => {
@@ -214,10 +224,25 @@ describe('Ready to Ship no longer waits for the balance', () => {
   });
 
   it('a manual move to Ready to Ship is held to the same gate', async () => {
-    seed({ o: { status: 'Docs In Preparation' }, unfulfilled: ['coo', 'bl_final'] });
+    seed({ o: { status: 'Docs In Preparation' }, unfulfilled: ['fumigation', 'coo', 'bl_final'] });
     const r = await setStatus('Ready to Ship');
     expect(r.statusCode).toBe(400);
-    expect(r.body.message).toMatch(/Cannot mark Ready to Ship: .*Certificate of Origin/);
+    expect(r.body.message).toMatch(/Cannot mark Ready to Ship: .*Fumigation Certificate/);
+    expect(r.body.message).not.toMatch(/Certificate of Origin/);
+  });
+
+  it('a manual move to Ready to Ship is allowed without the Certificate of Origin', async () => {
+    seed({ o: { status: 'Docs In Preparation' }, unfulfilled: ['coo', 'bl_final'] });
+    const r = await setStatus('Ready to Ship');
+    expect(r.statusCode).toBe(200);
+    expect(state.tables.export_orders[0].status).toBe('Ready to Ship');
+  });
+
+  it('a Certificate of Origin row that is not approved does not hold up the auto-promotion', async () => {
+    seed({ o: { status: 'Docs In Preparation', current_step: 6 }, documents: docs([...DOC_ROWS, ['coo', 'Draft']]) });
+    const out = await workflow.maybePromoteAfterDocuments(db, { order: { ...state.tables.export_orders[0] }, userId: 1 });
+    expect(out.changed).toBe(true);
+    expect(state.tables.export_orders[0].status).toBe('Ready to Ship');
   });
 
   it('Docs In Preparation can no longer go to Awaiting Balance', async () => {
@@ -272,7 +297,15 @@ describe('Close collects the balance and the post-shipment documents', () => {
     expect(r.body.message).toMatch(/Cannot close: .*BL Final/);
   });
 
-  it('closes once the balance is received and the BL Final approved', async () => {
+  it('is refused with the balance in but the Certificate of Origin not yet approved', async () => {
+    seed({ o: { status: 'Arrived', balance_received: 40000 }, unfulfilled: ['coo'] });
+    const r = await setStatus('Closed');
+    expect(r.statusCode).toBe(400);
+    expect(r.body.message).toMatch(/Cannot close: .*Certificate of Origin/);
+    expect(state.tables.export_orders[0].status).toBe('Arrived');
+  });
+
+  it('closes once the balance is received and the BL Final and CoO approved', async () => {
     seed({ o: { status: 'Arrived', balance_received: 40000 }, unfulfilled: [] });
     const r = await setStatus('Closed');
     expect(r.statusCode).toBe(200);
