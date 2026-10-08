@@ -118,8 +118,6 @@ describe('2. the service on an in-memory knex', () => {
       [{ from_account_id: 1, to_account_id: 2, amount: 5, currency: 'USD' }, 400, /holds PKR/],
       [{ from_account_id: 3, to_account_id: 1, amount: 5, to_currency: 'USD' }, 400, /holds PKR/],
       [{ from_account_id: 3, to_account_id: 1, amount: 5 }, 400, /exchange rate is required/],
-      [{ from_account_id: 2, to_account_id: 1, amount: 5 }, 409, /Insufficient balance/],
-      [{ from_account_id: 1, to_account_id: 2, amount: 999999, bank_charges: 2 }, 409, /amount \+ bank charges/],
     ];
     for (const [body, status, msg] of bad) {
       const err = await create(body).catch((e) => e);
@@ -127,6 +125,28 @@ describe('2. the service on an in-memory knex', () => {
       expect(err.message).toMatch(msg);
     }
     expect(JSON.stringify(db.tables)).toBe(before);
+  });
+
+  test('B2: an overdraft goes through, with the warning on the result', async () => {
+    seed();
+    // HO Bank holds 0: the transfer still moves the money and posts.
+    const t = await create({ from_account_id: 2, to_account_id: 1, amount: 500 });
+    expect(t.status).toBe('completed');
+    expect(balances()).toMatchObject({ 2: -500, 1: 1000500 });
+    expect(t.overdraft).toMatchObject({ account_id: 2, currency: 'PKR', balance_before: 0, balance_after: -500, overdrawn_by: 500 });
+    expect(t.overdraft.message).toMatch(/overdraws HO Bank by PKR 500\.00/);
+    // Amount + bank charges count toward it.
+    const t2 = await create({ from_account_id: 1, to_account_id: 2, amount: 1000500, bank_charges: 2 });
+    expect(t2.overdraft).toMatchObject({ account_id: 1, overdrawn_by: 2 });
+    // Within the balance: no warning.
+    const t3 = await create({ from_account_id: 4, to_account_id: 5, amount: 10 });
+    expect(t3.overdraft).toBeUndefined();
+  });
+
+  test('overdraftOf: null at or above zero, the shortfall below it', () => {
+    expect(ft.overdraftOf({ id: 1, name: 'A', currency: 'USD', current_balance: 100 }, 100)).toBeNull();
+    expect(ft.overdraftOf({ id: 1, name: 'A', currency: 'USD', current_balance: 100 }, 100.5)).toMatchObject({ currency: 'USD', overdrawn_by: 0.5, balance_after: -0.5 });
+    expect(ft.overdraftOf({ id: 1, name: 'A', current_balance: -10 }, 5)).toMatchObject({ currency: 'PKR', overdrawn_by: 15 });
   });
 
   test('a repeated client_ref is a 409 carrying the existing transfer', async () => {

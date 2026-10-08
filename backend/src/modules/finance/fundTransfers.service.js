@@ -137,6 +137,25 @@ function conflict(message, existing) {
   return e;
 }
 
+// What taking `out` (amount + charges, in the account's own currency) leaves
+// the source account at, when that is below zero: { account_id, account_name,
+// currency, balance_before, balance_after, overdrawn_by, message }. null when
+// the account stays at or above zero. Pure; exported for tests.
+function overdraftOf(account, out) {
+  const before = round2(parseFloat(account && account.current_balance) || 0);
+  const after = round2(before - (Number(out) || 0));
+  if (after > -0.005) return null;
+  const cur = curOf(account);
+  const by = round2(-after);
+  return {
+    account_id: account.id, account_name: account.name, currency: cur,
+    balance_before: before, balance_after: after, overdrawn_by: by,
+    message: `This overdraws ${account.name} by ${cur} ${by.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`,
+  };
+}
+// The transfer row, plus the overdraft warning when there is one (not a column).
+const withOverdraft = (row, overdraft) => (overdraft && row ? { ...row, overdraft } : row);
+
 // Post ONE entity's half of a Head Office ⇄ Mill transfer. cashIn ⇒ DR cash /
 // CR inter-company; otherwise CR cash / DR inter-company (the sender advanced funds).
 // `account` is the bank account that moved — its own GL carries the cash line.
@@ -284,7 +303,8 @@ async function create(payload, userId) {
       trx('bank_accounts').where({ id: to_account_id }).first(),
     ]);
     if (!fromAcc || !toAcc) throw new NotFoundError('Bank account not found.');
-    return createCrossEntityInTrx(trx, { direction, fromAcc, toAcc, amt, date, method, reference, notes, userId });
+    const overdraft = overdraftOf(fromAcc, round2(amt));
+    return withOverdraft(await createCrossEntityInTrx(trx, { direction, fromAcc, toAcc, amt, date, method, reference, notes, userId }), overdraft);
   });
 }
 
@@ -332,10 +352,10 @@ async function createContraInTrx(trx, payload, userId, { millOnly = false, repla
     throw new ValidationError(`${toAcc.name} holds ${dstCur} — the converted amount must be in ${dstCur}, not ${String(p.to_currency).toUpperCase()}.`);
   }
 
-  const available = round2(parseFloat(fromAcc.current_balance) || 0);
-  if (available + 0.005 < amt + charges) {
-    throw conflict(`Insufficient balance in ${fromAcc.name}: ${available.toFixed(2)} ${srcCur} available, ${round2(amt + charges).toFixed(2)} ${srcCur} needed${charges > 0 ? ' (amount + bank charges)' : ''}.`);
-  }
+  // Overdraft is allowed with a warning (owner decision B2), as payments are:
+  // the transfer goes through, the response carries `overdraft`, and the
+  // account shows in the 'Account overdrawn' alert (getAlerts) while negative.
+  const overdraft = overdraftOf(fromAcc, round2(amt + charges));
 
   const fromEntity = entityOf(fromAcc);
   const toEntity = entityOf(toAcc);
@@ -358,7 +378,7 @@ async function createContraInTrx(trx, payload, userId, { millOnly = false, repla
       extra: { ...common, bank_charges: charges },
     });
     await takeBankCharges(trx, { fromAcc, charges, chargesPkr: charges, rate: null, transfer: row, date, userId });
-    return row;
+    return withOverdraft(row, overdraft);
   }
 
   // ── Same entity: internal contra, settles now ──
@@ -428,7 +448,7 @@ async function createContraInTrx(trx, payload, userId, { millOnly = false, repla
     if (!chargeRate) throw new ValidationError(`An exchange rate is needed to book ${srcCur} bank charges in PKR.`);
     await takeBankCharges(trx, { fromAcc, charges, chargesPkr: round2(charges * chargeRate), rate: srcCur === 'PKR' ? null : chargeRate, transfer: row, date, userId });
   }
-  return out;
+  return withOverdraft(out, overdraft);
 }
 
 function systemRate(currency, date) {
@@ -669,6 +689,6 @@ module.exports = {
   create, accept, reverse, list, getById,
   createContra, replace,
   // exported for tests / reuse
-  computeContraAmounts, fxTolerance, createContraInTrx, reverseInTrx,
+  computeContraAmounts, fxTolerance, overdraftOf, createContraInTrx, reverseInTrx,
   ENTITY_LABEL, CATEGORY,
 };

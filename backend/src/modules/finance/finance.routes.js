@@ -65,6 +65,8 @@ router.post('/contra-transfers', canMoveMoney,
     try {
       const millOnly = await isMillOnlyPayer(req);
       const transfer = await fundTransfers.createContra(req.body, req.user?.id, { millOnly });
+      // B2: an overdraft goes through, with the warning alongside.
+      if (transfer && transfer.overdraft) return res.json({ success: true, data: { transfer, warning: transfer.overdraft } });
       return res.json({ success: true, data: { transfer } });
     } catch (e) { return sendTransferError(res, e); }
   });
@@ -105,6 +107,7 @@ router.post('/fund-transfers/:id/replace', authorizeRole('Owner', 'Super Admin')
       const { reason } = req.body;
       const corrected = Object.fromEntries(Object.entries(req.body).filter(([k]) => k !== 'reason'));
       const result = await fundTransfers.replace(req.params.id, corrected, req.user?.id, { reason });
+      if (result?.transfer?.overdraft) return res.json({ success: true, data: { ...result, warning: result.transfer.overdraft } });
       return res.json({ success: true, data: result });
     } catch (e) { return sendTransferError(res, e); }
   });
@@ -129,6 +132,7 @@ router.post('/fund-transfers', authorize('finance', 'confirm_payment'),
   async (req, res) => {
     try {
       const transfer = await fundTransfers.create(req.body, req.user?.id);
+      if (transfer && transfer.overdraft) return res.json({ success: true, data: { transfer, warning: transfer.overdraft } });
       return res.json({ success: true, data: { transfer } });
     } catch (e) { return res.status(e.statusCode || 400).json({ success: false, message: e.message }); }
   });
