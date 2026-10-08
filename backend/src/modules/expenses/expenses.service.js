@@ -4,6 +4,7 @@ const accountingService = require('../accounting/accounting.service');
 const { normalizePaymentMethod } = require('../../shared/constants/paymentMethods');
 const { pendingChequeTotal, round2 } = require('../finance/paymentSettlement');
 const { recordMoneyMovement } = require('../finance/paymentEngine');
+const { postProcessingDelta } = require('../milling/millingCompletionJournal');
 
 const CATEGORY_MAP = {
   general: [
@@ -228,6 +229,20 @@ const expensesService = {
         });
       } catch (e) {
         console.warn('Expense journal post failed:', e.message);
+      }
+
+      // A mill expense booked against a batch whose completion is already on
+      // the books joins its cost sheet above; capitalise it into the batch's
+      // finished stock now — Dr 1220 / Cr the expense account it was charged
+      // to (A3b). Before the completion, the completion absorbs it.
+      if (batch_id && expense_type === 'mill') {
+        const batch = await trx('milling_batches').where({ id: batch_id }).first();
+        if (batch) {
+          await postProcessingDelta(trx, accountingService, {
+            batch, delta: amountPkr, label: `${category || 'expense'} (${expenseNo})`, userId,
+            counterCode: salaryDebitAccountId ? '6135' : '6000',
+          });
+        }
       }
 
       return pay_now ? trx('business_expenses').where('id', expense.id).first() : expense;
