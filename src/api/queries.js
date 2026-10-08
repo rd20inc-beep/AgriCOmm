@@ -1086,6 +1086,30 @@ export function useProfitLoss(params = {}) {
   });
 }
 
+// Company GL trial balance (Posted journals only, cumulative to as_of_date).
+// params: { as_of_date?, entity? }
+export function useTrialBalance(params = {}, options = {}) {
+  return useQuery({
+    queryKey: ['trial-balance', params],
+    queryFn: async () => {
+      const res = await accountingApi.trialBalance(params);
+      return transformKeys(unwrap(res) || {});
+    },
+    ...options,
+  });
+}
+
+// Company GL balance sheet as at as_of_date. params: { as_of_date?, entity? }
+export function useBalanceSheet(params = {}) {
+  return useQuery({
+    queryKey: ['balance-sheet', params],
+    queryFn: async () => {
+      const res = await accountingApi.balanceSheet(params);
+      return transformKeys(unwrap(res) || {});
+    },
+  });
+}
+
 // useCashForecast is defined further down (line ~1107) — keeping a
 // single declaration for the hook used by Reports + the existing
 // Cash forecast tile.
