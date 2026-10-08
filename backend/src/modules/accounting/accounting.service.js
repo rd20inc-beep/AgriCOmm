@@ -468,54 +468,8 @@ const accountingService = {
   // ═══════════════════════════════════════════════════════════════════
   // Bank Reconciliation
   // ═══════════════════════════════════════════════════════════════════
-
-  async createReconciliation(trx, { bankAccountId, statementDate, statementBalance, userId }) {
-    const knex = trx || db;
-
-    const [recon] = await knex('bank_reconciliation')
-      .insert({
-        bank_account_id: bankAccountId,
-        statement_date: statementDate,
-        statement_balance: parseFloat(statementBalance),
-        status: 'Draft',
-        reconciled_by: userId || null,
-      })
-      .returning('*');
-
-    return recon;
-  },
-
-  async addReconciliationItems(trx, { reconciliationId, items }) {
-    // Wrap in a transaction if one was not provided, to ensure
-    // item inserts + reconciliation status update are atomic.
-    const execute = async (knex) => {
-      const rows = items.map((item) => ({
-        reconciliation_id: reconciliationId,
-        transaction_type: item.transaction_type,
-        reference: item.reference || null,
-        date: item.date || null,
-        amount: parseFloat(item.amount),
-        matched: false,
-        notes: item.notes || null,
-      }));
-
-      const inserted = await knex('bank_reconciliation_items')
-        .insert(rows)
-        .returning('*');
-
-      // Update status to In Progress
-      await knex('bank_reconciliation')
-        .where({ id: reconciliationId })
-        .update({ status: 'In Progress', updated_at: knex.fn.now() });
-
-      return inserted;
-    };
-
-    if (trx) {
-      return execute(trx);
-    }
-    return db.transaction(async (autoTrx) => execute(autoTrx));
-  },
+  // Starting, ticking and completing a reconciliation live in
+  // bankReconciliation.service.js (B5); the legacy book <-> bank pairing stays.
 
   async matchItems(trx, { bookItemId, bankItemId }) {
     // Wrap in a transaction if one was not provided, to ensure
@@ -536,37 +490,6 @@ const accountingService = {
       return execute(trx);
     }
     return db.transaction(async (autoTrx) => execute(autoTrx));
-  },
-
-  async completeReconciliation(trx, { reconciliationId, userId }) {
-    const knex = trx || db;
-
-    const recon = await knex('bank_reconciliation').where({ id: reconciliationId }).first();
-    if (!recon) throw new Error(`Reconciliation ${reconciliationId} not found.`);
-
-    // Calculate book balance from matched book items
-    const bookTotals = await knex('bank_reconciliation_items')
-      .where({ reconciliation_id: reconciliationId, transaction_type: 'book', matched: true })
-      .select(knex.raw('COALESCE(SUM(amount), 0) as total'))
-      .first();
-
-    const bookBalance = parseFloat(bookTotals.total);
-    const statementBalance = parseFloat(recon.statement_balance);
-    const difference = parseFloat((statementBalance - bookBalance).toFixed(2));
-
-    const [updated] = await knex('bank_reconciliation')
-      .where({ id: reconciliationId })
-      .update({
-        book_balance: bookBalance,
-        difference,
-        status: 'Completed',
-        reconciled_by: userId || null,
-        reconciled_at: knex.fn.now(),
-        updated_at: knex.fn.now(),
-      })
-      .returning('*');
-
-    return updated;
   },
 
   // ═══════════════════════════════════════════════════════════════════

@@ -922,8 +922,31 @@ const bounceCheque = Joi.object({
   charge_account_id: Joi.number().integer().positive().allow(null, ''),
 });
 
+// Bank reconciliation (B5) — /api/accounting/reconciliations.
+const createReconciliation = Joi.object({
+  bank_account_id: Joi.number().integer().positive().required(),
+  statement_date: Joi.date().iso().raw().required(),
+  statement_balance: Joi.number().required(),
+  notes: Joi.string().max(2000).allow(null, ''),
+});
+const saveReconciliationTicks = Joi.object({
+  bank_transaction_ids: Joi.array().items(Joi.number().integer().positive()).required(),
+  statement_balance: Joi.number().allow(null, ''),
+});
+const reconciliationStatementLines = Joi.object({
+  items: Joi.array().min(1).max(5000).items(Joi.object({
+    date: Joi.date().iso().raw().allow(null, ''),
+    reference: Joi.string().max(255).allow(null, ''),
+    amount: Joi.number().required(),
+    notes: Joi.string().max(2000).allow(null, ''),
+  })).required(),
+});
+
 module.exports = {
   bounceCheque,
+  createReconciliation,
+  saveReconciliationTicks,
+  reconciliationStatementLines,
   fxRevaluation,
   attachPaymentDocument,
   createBankAccount,

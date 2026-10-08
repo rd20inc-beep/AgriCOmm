@@ -94,18 +94,29 @@ router.put(
 // ═══════════════════════════════════════════════════════════════════
 // Bank Reconciliation
 // ═══════════════════════════════════════════════════════════════════
+// B5 — Finance › Accounts › Reconcile. Reading is finance.view; starting,
+// ticking, importing statement lines and completing are finance.post_journal.
 router.get('/reconciliations', authorize('finance', 'view'), controller.listReconciliations);
 router.post(
   '/reconciliations',
   authorize('finance', 'post_journal'),
-  auditAction('create_reconciliation', 'bank_reconciliation'),
+  validate(schemas.createReconciliation),
+  auditAction('create_reconciliation', 'bank_reconciliation', (req, data) => data?.data?.reconciliation?.id || null),
   controller.createReconciliation
 );
 router.get('/reconciliations/:id', authorize('finance', 'view'), controller.getReconciliation);
+router.put(
+  '/reconciliations/:id/ticks',
+  authorize('finance', 'post_journal'),
+  validate(schemas.saveReconciliationTicks),
+  auditAction('save_reconciliation', 'bank_reconciliation', (req) => req.params.id),
+  controller.saveReconciliationTicks
+);
 router.post(
   '/reconciliations/:id/items',
   authorize('finance', 'post_journal'),
-  auditAction('add_reconciliation_items', 'bank_reconciliation'),
+  validate(schemas.reconciliationStatementLines),
+  auditAction('add_reconciliation_items', 'bank_reconciliation', (req) => req.params.id),
   controller.addReconciliationItems
 );
 router.put(
