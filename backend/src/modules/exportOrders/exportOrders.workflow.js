@@ -2,6 +2,7 @@ const documentService = require('../documents/documents.service');
 const inventoryService = require('../inventory/inventory.service');
 const automationService = require('../admin/automation.service');
 const accountingService = require('../accounting/accounting.service');
+const notificationService = require('../../services/notificationService');
 const { billableFreight } = require('./billableFreight');
 const { BALANCE_COLLECTION_STATUSES, BALANCE_OUTSTANDING_SQL } = require('./balanceCollection');
 
@@ -263,6 +264,29 @@ async function closeProblems(conn, order) {
   return problems;
 }
 
+// A shipment that locked no COGS (the lock failed, or nothing to cost it
+// from) posts no 5020/1230 journal and shows the full contract as profit. Tell
+// the Owner — never Finance, who must not see order numbers (notifyFinance
+// guardrail). Best-effort in its own savepoint: it never blocks the shipment.
+async function flagMissingCogs(trx, order, err) {
+  const ref = order.order_no || `#${order.id}`;
+  const why = err
+    ? `the COGS lock failed (${String(err.message || err).slice(0, 160)})`
+    : 'nothing was reserved or allocated to cost it from';
+  console.warn(`[shipment] ${ref} shipped with COGS 0 — ${why}.`);
+  try {
+    await trx.transaction((sp) => notificationService.createForRole(sp, {
+      roleName: 'Owner',
+      type: 'shipment',
+      title: `${ref} shipped without COGS`,
+      message: `${ref} shipped but no cost of goods was locked — ${why}. No COGS journal was posted, so its profit shows the full contract value. Reserve or allocate its stock and re-lock COGS.`,
+      linkedRef: ref,
+    }));
+  } catch (e) {
+    console.error(`[shipment] could not raise the missing-COGS alert for ${ref}:`, e.message);
+  }
+}
+
 async function runTransitionSideEffects(trx, order, toStatus, userId) {
   if (toStatus !== 'Shipped') return;
 
@@ -302,10 +326,23 @@ async function runTransitionSideEffects(trx, order, toStatus, userId) {
   // so gross profit isn't computed on a different FX rate than revenue.
   // The reservations above are Consumed by now; calculateOrderCOGS counts
   // Consumed + Active, so this is Σ dispatched kg × lot cost/kg, locked once.
+  //
+  // In a SAVEPOINT: a SQL error inside the lock used to abort the whole
+  // Postgres transaction (the shipment then failed with an unrelated-looking
+  // error), and a JS error shipped silently with COGS 0 and no 5020 journal.
+  // Now a failure rolls back only the COGS write, the shipment goes through,
+  // and a missing COGS is raised to the Owner (it already counts in the
+  // Finance summary's shippedMissingCogs warning) instead of being swallowed.
+  let cogs = null;
+  let cogsError = null;
   try {
-    await inventoryService.lockOrderCOGS(trx, order.id, parseFloat(order.booked_fx_rate) || null);
+    cogs = await trx.transaction((sp) => inventoryService.lockOrderCOGS(sp, order.id, parseFloat(order.booked_fx_rate) || null));
   } catch (e) {
-    console.warn('COGS lock failed (non-blocking):', e.message);
+    cogsError = e;
+    console.error(`[shipment] COGS lock failed for ${order.order_no || order.id} — shipped without COGS:`, e.message);
+  }
+  if (cogsError || !(parseFloat(cogs && cogs.totalCOGS) > 0)) {
+    await flagMissingCogs(trx, order, cogsError);
   }
 
   // Recognize revenue + matching COGS at shipment (control transfer).

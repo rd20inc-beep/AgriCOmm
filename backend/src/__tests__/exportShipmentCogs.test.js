@@ -72,6 +72,10 @@ function seed() {
     journal_entries: [],
     journal_lines: [],
     chart_of_accounts: [],
+    // A shipment that locks no COGS alerts the Owner(s).
+    roles: [{ id: 9, name: 'Owner' }, { id: 5, name: 'Finance Manager' }],
+    users: [{ id: 2, role_id: 9, is_active: true }, { id: 3, role_id: 5, is_active: true }],
+    notifications: [],
   });
 }
 
@@ -132,4 +136,59 @@ test('after shipment, calculateOrderCOGS still sees the shipped (Consumed) stock
   const c = await inventoryService.calculateOrderCOGS(db, 1);
   expect(c.totalCOGS).toBe(EXPECTED_COGS);
   expect(c.source).toBe('reservations');
+});
+
+// ── A COGS lock that fails or finds nothing must not be silent ──────────────
+// It runs in a savepoint: the shipment still goes through, but no 5020/1230
+// journal posts — so the Owner is told (never Finance, who must not see order
+// numbers), and the order still counts in the summary's shippedMissingCogs.
+const ownerAlerts = () => state.tables.notifications.filter((n) => n.user_id === 2);
+
+test('a costed shipment raises no missing-COGS alert', async () => {
+  await ship();
+  expect(state.tables.notifications).toEqual([]);
+});
+
+test('a COGS lock that throws: the order still ships, no COGS journal, the Owner is alerted', async () => {
+  const spy = jest.spyOn(inventoryService, 'lockOrderCOGS').mockRejectedValueOnce(new Error('column "x" does not exist'));
+  const err = jest.spyOn(console, 'error').mockImplementation(() => {});
+  const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+  try {
+    await ship();
+    const o = state.tables.export_orders[0];
+    expect(o.status).toBe('Shipped');
+    expect(o.revenue_posted).toBe(true); // revenue still recognised
+    expect(cogsJournals()).toHaveLength(0);
+    expect(ownerAlerts()).toEqual([expect.objectContaining({
+      type: 'shipment', linked_ref: 'EX-COGS-1', title: 'EX-COGS-1 shipped without COGS',
+      message: expect.stringMatching(/COGS lock failed \(column "x" does not exist\)/),
+    })]);
+    expect(state.tables.notifications.some((n) => n.user_id === 3)).toBe(false); // not Finance
+  } finally { spy.mockRestore(); err.mockRestore(); warn.mockRestore(); }
+});
+
+test('a shipment with nothing to cost it from alerts the Owner too', async () => {
+  state.tables.inventory_reservations = [];
+  const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+  try {
+    await ship();
+    expect(state.tables.export_orders[0].status).toBe('Shipped');
+    expect(cogsJournals()).toHaveLength(0);
+    expect(ownerAlerts()).toEqual([expect.objectContaining({ message: expect.stringMatching(/nothing was reserved or allocated/) })]);
+  } finally { warn.mockRestore(); }
+});
+
+test('the lock runs in its own savepoint, not on the shipment transaction', async () => {
+  // Count open trx.transaction(...) callbacks at the moment the lock runs.
+  const realLock = inventoryService.lockOrderCOGS.bind(inventoryService);
+  const realTxn = db.transaction;
+  let depth = 0;
+  let depthAtLock = null;
+  db.transaction = async (fn) => { depth += 1; try { return await fn(db); } finally { depth -= 1; } };
+  const spy = jest.spyOn(inventoryService, 'lockOrderCOGS').mockImplementation(async (...args) => { depthAtLock = depth; return realLock(...args); });
+  try {
+    await ship();
+    expect(depthAtLock).toBeGreaterThanOrEqual(1);
+    expect(state.tables.export_orders[0].inventory_cogs_total_pkr).toBe(EXPECTED_COGS);
+  } finally { spy.mockRestore(); db.transaction = realTxn; }
 });
