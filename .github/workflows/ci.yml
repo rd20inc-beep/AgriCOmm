@@ -13,6 +13,31 @@ jobs:
     defaults:
       run:
         working-directory: backend
+    # The DB-backed suites (GL balance, payment engine, money rules, sync, …)
+    # are gated on DB_HOST and skip silently without it. Give them a disposable
+    # Postgres built from the current migrations so they actually run here.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: riceflow
+          POSTGRES_PASSWORD: riceflow
+          POSTGRES_DB: riceflow_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U riceflow"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DB_HOST: localhost
+      DB_PORT: 5432
+      DB_NAME: riceflow_test
+      DB_USER: riceflow
+      DB_PASSWORD: riceflow
+      # Throwaway value for the test run only — not a real secret.
+      JWT_SECRET: FAKE-ci-test-secret
     steps:
       - uses: actions/checkout@v5
 
@@ -26,8 +51,32 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run tests
-        run: npm test
+      - name: Build test database from migrations
+        run: npm run migrate
+
+      # --runInBand: the DB suites share one database and assert on totals
+      # (cash flow, P&L, ledgers), so running them in parallel workers makes
+      # them see each other's rows and fail. Serially the whole run is ~30 s.
+      - name: Run tests (unit + DB-backed)
+        run: npm test -- --runInBand --ci --json --outputFile=/tmp/jest-results.json
+
+      # A DB-gated suite skips itself wholesale when it cannot see the DB. Make
+      # that loud: no suite may be skipped in full. (A single known-bug test
+      # skipped with test.skip + a KNOWN-BUG comment does not trip this.)
+      - name: Assert no test suite was silently skipped
+        run: |
+          node -e '
+            const r = require("/tmp/jest-results.json");
+            const skipped = r.testResults
+              .filter((t) => t.assertionResults.length > 0
+                && t.assertionResults.every((a) => a.status === "pending" || a.status === "skipped"))
+              .map((t) => t.name);
+            console.log(`suites=${r.numTotalTestSuites} tests=${r.numTotalTests} passed=${r.numPassedTests} skipped=${r.numPendingTests}`);
+            if (skipped.length) {
+              console.log("::error::Entire test suites were skipped (is the DB reachable?):\n  " + skipped.join("\n  "));
+              process.exit(1);
+            }
+          '
 
       # Joi validate() runs with stripUnknown, so a body field a controller reads
       # but its schema does not declare is DELETED before the handler sees it —
@@ -114,9 +163,57 @@ jobs:
       - name: Build
         run: npm run build
 
+  # Lint only the JS/JSX files this push/PR changes. The codebase carries
+  # pre-existing lint errors (≈293 in src/), so a whole-repo gate would be red
+  # on day one; this gate keeps every file you touch clean instead, and the
+  # backlog shrinks as files are edited. Warnings never fail the job.
+  lint-changed:
+    name: Lint Changed Files
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Lint files changed versus the base
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            BASE="origin/$BASE_REF"
+            RANGE="$BASE...HEAD"
+          elif [ -n "$BEFORE_SHA" ] && ! echo "$BEFORE_SHA" | grep -qE '^0+$' \
+               && git cat-file -e "$BEFORE_SHA^{commit}" 2>/dev/null; then
+            RANGE="$BEFORE_SHA..HEAD"
+          else
+            RANGE="HEAD~1..HEAD"
+          fi
+          echo "Diff range: $RANGE"
+          git diff --name-only --diff-filter=ACMR "$RANGE" -- '*.js' '*.jsx' \
+            | grep -E '^(src|backend/src)/' > /tmp/changed-files.txt || true
+          if [ ! -s /tmp/changed-files.txt ]; then
+            echo "No changed JS/JSX files under src/ or backend/src/ — nothing to lint."
+            exit 0
+          fi
+          echo "Linting $(wc -l < /tmp/changed-files.txt) changed file(s):"
+          cat /tmp/changed-files.txt
+          xargs -d '\n' npx eslint --no-warn-ignored < /tmp/changed-files.txt
+
   deploy:
     name: Deploy to Production
-    needs: [test-backend, build-frontend, schema-drift]
+    needs: [test-backend, build-frontend, schema-drift, lint-changed]
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     # Only ONE deploy may touch the server at a time. Without this, two merges a
