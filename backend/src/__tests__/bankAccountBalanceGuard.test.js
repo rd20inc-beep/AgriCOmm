@@ -11,7 +11,7 @@
  *   - a different balance → 400 and nothing written
  *   - stale form (a payment moved the balance after the form loaded) → stored
  *     balance survives, whether the old client re-sends it or the new one omits it
- *   - currency / entity change on an account with transactions → 409
+ *   - currency / entity / type change on an account with transactions → 409
  *   - create gives the account its own GL account under 1000 (G-8) and an
  *     opening balance writes the BT row + a Posted Dr account GL / Cr 3000
  *   - the Joi schemas keep every field the service reads; the routes validate
@@ -135,6 +135,31 @@ describe('updateBankAccount — balance is never written', () => {
     const res = await call('updateBankAccount', { params: { id: 2 }, body: { currency: 'EUR' } });
     expect(res.statusCode).toBe(200);
     expect(acct(2).currency).toBe('EUR');
+  });
+
+  test('type change (bank → cash) on an account with transactions → 409, unchanged', async () => {
+    const res = await call('updateBankAccount', { params: { id: 1 }, body: { type: 'cash' } });
+    expect(res.statusCode).toBe(409);
+    expect(res.body.message).toMatch(/type cannot be changed/);
+    expect(acct(1).type).toBe('bank');
+  });
+
+  test('re-sending the same type with other edits is fine on a used account', async () => {
+    const res = await call('updateBankAccount', { params: { id: 1 }, body: { type: 'bank', iban: 'PK00NEW' } });
+    expect(res.statusCode).toBe(200);
+    expect(acct(1).iban).toBe('PK00NEW');
+  });
+
+  test('a used account stored with no type accepts the default "bank" re-sent', async () => {
+    acct(1).type = null;
+    const res = await call('updateBankAccount', { params: { id: 1 }, body: { type: 'bank', name: 'HBL' } });
+    expect(res.statusCode).toBe(200);
+  });
+
+  test('type change on an unused, zero-balance account is allowed', async () => {
+    const res = await call('updateBankAccount', { params: { id: 2 }, body: { type: 'cash' } });
+    expect(res.statusCode).toBe(200);
+    expect(acct(2).type).toBe('cash');
   });
 
   test('unknown id → 404', async () => {
