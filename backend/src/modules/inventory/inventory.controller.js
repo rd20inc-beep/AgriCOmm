@@ -18,6 +18,7 @@ const inventoryController = {
         status,
         search,
         ownership,
+        in_stock,
       } = req.query;
 
       const offset = (Math.max(1, parseInt(page)) - 1) * parseInt(limit);
@@ -47,6 +48,9 @@ const inventoryController = {
       // #9-scoping: restrict a warehouse-scoped user to their allowed warehouses.
       query = whScope.applyWarehouseScope(query, await whScope.resolveWarehouseScope(req), 'il.warehouse_id');
       if (status) query = query.where('il.status', status);
+      // ?in_stock=1 — only lots with free qty (the New Batch picker), so the
+      // page limit can't push older stock off the list.
+      if (in_stock === '1' || in_stock === 'true') query = query.where('il.available_qty', '>', 0);
       // Client-owned Service Milling stock physically sits in our warehouse but
       // belongs to the client — it must NEVER count as company inventory (mill
       // stock lists, valuation, availability). Default to company-owned only;

@@ -40,7 +40,7 @@ import KPICard from '../../../components/KPICard';
 import StatusBadge from '../../../components/StatusBadge';
 import SlideDrawer from '../../../components/SlideDrawer';
 import RiceTypePicker from '../../../components/RiceTypePicker';
-import { lotCategory, CAT_ORDER, CAT_COLOR, NON_MILLABLE_CATEGORIES } from '../../../utils/lotCategory';
+import { lotCategory, CAT_ORDER, CAT_COLOR, millableLots } from '../../../utils/lotCategory';
 import SupplierPicker from '../../../components/SupplierPicker';
 import CustomerPicker from '../../../components/CustomerPicker';
 import { serviceMillingApi } from '../api/services';
@@ -137,14 +137,12 @@ export default function MillingDashboard() {
   const { data: products = [] } = useProducts();
   // Available mill lots that can be fed to a batch — any rice form (raw paddy,
   // finished rice, and re-blendable byproduct fractions like broken grades /
-  // powder / sweeping), excluding non-rice residue (bran/husk/packaging) and
-  // lots already committed to milling.
-  const blendableLots = useMemo(() => (directInv || []).filter(l =>
-    l.entity === 'mill'
-    && parseFloat(l.availableQty) > 0
-    && !['In Milling', 'Consumed'].includes(l.millingStatus)
-    && !NON_MILLABLE_CATEGORIES.includes(lotCategory(l))
-  ), [directInv]);
+  // powder / sweeping), excluding non-rice residue (bran/husk/packaging).
+  // Fetched on their own, server-filtered to mill stock with free qty: the
+  // general list is the newest 500 lots of every kind, so older stock (opening
+  // lots) silently fell off the picker once the lot count passed 500.
+  const { data: millStock = [] } = useInventory({ entity: 'mill', in_stock: 1, limit: 5000 });
+  const blendableLots = useMemo(() => millableLots(millStock), [millStock]);
   // Category tags present among the millable lots (SaleModal-style filter).
   const blendTags = useMemo(() => {
     const present = new Set(blendableLots.map(lotCategory));

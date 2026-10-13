@@ -40,3 +40,16 @@ export const CAT_COLOR = {
 // Non-rice milling residue — present in inventory but cannot be fed back into a
 // milling/blend batch.
 export const NON_MILLABLE_CATEGORIES = ['Bran', 'Husk', 'Packaging', 'Other'];
+
+// Mill lots the New Batch picker offers. Free stock decides it, not
+// milling_status: a lot partly committed to a running batch stays 'In Milling'
+// until yield, yet its remainder is free (available_qty already excludes the
+// milling hold, and the backend commit checks the same figure). Filtering on
+// 'In Milling' hid that remainder from every new batch.
+export function millableLots(lots = []) {
+  return (lots || []).filter(l =>
+    l.entity === 'mill'
+    && parseFloat(l.availableQty) > 0
+    && !NON_MILLABLE_CATEGORIES.includes(lotCategory(l))
+  );
+}
