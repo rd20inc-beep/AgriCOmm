@@ -24,6 +24,15 @@ async function isMillOnlyPayer(req, extraUnrestricted = []) {
   return userHasPermission(req, 'milling', 'edit');
 }
 
+// Mill routes gated on a MILL permission alone (milling.create on a mill
+// expense, service_milling.record_payment on a toll-milling receipt): anyone
+// who got in without finance.confirm_payment may move money only through the
+// mill's own accounts. Unlike isMillOnlyPayer this does not require
+// milling.edit — the route's own gate already admitted the caller.
+async function lacksFinancePayment(req) {
+  return !(await userHasPermission(req, 'finance', 'confirm_payment'));
+}
+
 function millOnlyError(message) {
   const e = new Error(message);
   e.statusCode = 403;
@@ -56,4 +65,4 @@ async function assertMillReceipt(trx, { bankAccountId, paymentMethod, collection
   }
 }
 
-module.exports = { isMillOnlyPayer, assertMillEntity, assertMillAccount, assertMillReceipt, millOnlyError };
+module.exports = { isMillOnlyPayer, lacksFinancePayment, assertMillEntity, assertMillAccount, assertMillReceipt, millOnlyError };

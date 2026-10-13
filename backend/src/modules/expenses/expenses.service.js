@@ -38,7 +38,9 @@ async function generateExpenseNo(trx) {
 }
 
 const expensesService = {
-  async create(data, userId, existingTrx = null) {
+  // `millOnly` (a mill route's caller without finance.confirm_payment): a
+  // pay-now may only draw on one of the mill's own accounts (paymentEngine).
+  async create(data, userId, existingTrx = null, { millOnly = false } = {}) {
     const {
       expense_type, category, subcategory, amount, currency, fx_rate,
       supplier_id, vendor_name, expense_date, due_date, invoice_reference,
@@ -199,6 +201,7 @@ const expensesService = {
           notes: `Payment for ${expenseNo}`,
           userId: userId || null,
           checkOutstanding: false,
+          millOnly,
           bt: {
             source: category === 'salaries' ? 'salaries' : 'expense',
             category: category || 'expense',
@@ -395,7 +398,7 @@ const expensesService = {
 
   // `existingTrx` lets a caller (payroll settle) commit the payment atomically
   // with its own writes, as create() already allows.
-  async markPaid(id, { amount, bank_account_id, payment_method, payment_reference, paid_date, due_date, notes }, userId, existingTrx = null) {
+  async markPaid(id, { amount, bank_account_id, payment_method, payment_reference, paid_date, due_date, notes }, userId, existingTrx = null, { millOnly = false } = {}) {
     // Joi parses paid_date into a Date; normalize to a YYYY-MM-DD string so the
     // GL journal's date math (createJournal does string ops) doesn't choke.
     const rawPayDate = paid_date || new Date().toISOString().split('T')[0];
@@ -445,6 +448,7 @@ const expensesService = {
         notes: notes || `Payment for ${expense.expense_no}`,
         userId: userId || null,
         checkOutstanding: false, // capped above, net of uncleared cheques
+        millOnly,
         bt: {
           source: expense.category === 'salaries' ? 'salaries' : 'expense',
           category: expense.category || 'expense',
