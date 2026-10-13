@@ -6,6 +6,7 @@ const controller = require('../../controllers/millingController');
 const advancedController = require('../../controllers/millingAdvancedController');
 const authorize = require('../../middleware/rbac');
 const { authorizeRole } = require('../../middleware/rbac');
+const { lacksFinancePayment } = require('../../shared/millPayer');
 // The mill's money — expenses, the rice-purchase (rate) ledger, the mill cash
 // account and batch profitability — needs reports.view_cost or finance.view.
 // The Mill Operator holds view_cost since mig 314 (owner decision 2026-10-05:
@@ -762,9 +763,13 @@ router.post('/expenses', authorize('milling', 'create'),
         bank_account_id: bank_account_id || null,
         payment_method: payment_method || null,
         payment_reference: reference || null,
-      }, req.user?.id);
+        // milling.create is a mill gate: without finance.confirm_payment the
+        // pay-now leg may only use the mill's own accounts, never Head Office's.
+      }, req.user?.id, null, { millOnly: !!pay_now && await lacksFinancePayment(req) });
       return res.json({ success: true, data: { expense } });
     } catch (err) {
+      const code = err.statusCode || err.status;
+      if (code && code < 500) return res.status(code).json({ success: false, message: err.message });
       console.error('Mill expense create error:', err);
       return res.status(500).json({ success: false, message: err.message });
     }
@@ -841,9 +846,12 @@ router.post('/expenses/recurring/:id/materialize', authorize('milling', 'create'
       notes: `Recurring (${tmpl.recurrence}) from ${tmpl.expense_no}`,
       pay_now: !!req.body.pay_now, bank_account_id: req.body.bank_account_id || null,
       payment_method: req.body.payment_method || null, payment_reference: req.body.reference || null,
-    }, req.user?.id);
+    }, req.user?.id, null, { millOnly: !!req.body.pay_now && await lacksFinancePayment(req) });
     return res.json({ success: true, data: { expense, next_due: nextDue } });
-  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+  } catch (err) {
+    const code = err.statusCode || err.status;
+    return res.status(code && code < 500 ? code : 500).json({ success: false, message: err.message });
+  }
 });
 
 // =============================================================================

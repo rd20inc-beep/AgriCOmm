@@ -9,6 +9,7 @@ const { resolveCashAccountId } = require('../../shared/cashAccounts');
 const { nextDocNo } = require('../../utils/docNumber');
 const { normalizePaymentMethod } = require('../../shared/constants/paymentMethods');
 const { recordMoneyMovement } = require('../finance/paymentEngine');
+const { lacksFinancePayment } = require('../../shared/millPayer');
 
 const num = (v) => parseFloat(v) || 0;
 const round2 = (v) => Math.round((num(v) + Number.EPSILON) * 100) / 100;
@@ -279,6 +280,10 @@ module.exports = {
   async recordPayment(req, res) {
     const b = req.body || {};
     try {
+      // service_milling.record_payment is a mill permission (Mill Manager holds
+      // it): without finance.confirm_payment the money lands only in one of the
+      // mill's own accounts — Head Office cash/banks are Finance's.
+      const millOnly = await lacksFinancePayment(req);
       const result = await db.transaction(async (trx) => {
         const inv = await trx('service_milling_invoices').where({ id: req.params.id }).forUpdate().first();
         if (!inv) throw new Error('Invoice not found');
@@ -308,6 +313,7 @@ module.exports = {
           bankReference: b.reference || null,
           notes: `Service milling invoice ${inv.invoice_no} receipt`,
           userId: req.user?.id || null,
+          millOnly,
           bt: { source: 'service_milling', notes: `Service milling ${inv.invoice_no} receipt` },
         });
         const updated = await trx('service_milling_invoices').where({ id: inv.id }).first();
