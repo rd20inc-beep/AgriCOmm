@@ -1,4 +1,5 @@
 const db = require('../config/database');
+const { ensureAccountGl } = require('../shared/accountGl');
 
 /**
  * External API Integration Service — Phase 10 (Enterprise)
@@ -303,12 +304,20 @@ const integrationService = {
               updated_at: db.fn.now(),
             });
           } else {
-            await db('bank_accounts').insert({
-              bank_name: record.bank_name,
-              account_number: record.account_number,
-              account_title: record.account_title || record.bank_name,
-              branch: record.branch || null,
-              currency: record.currency || 'PKR',
+            // Give the new account its own GL sub-account under 1000
+            // the way Admin ▸ Bank Accounts does — otherwise its money posts to
+            // the 1000 control account and no per-account ledger exists.
+            // Insert + GL in one transaction so neither lands without the other.
+            await db.transaction(async (trx) => {
+              const [inserted] = await trx('bank_accounts').insert({
+                name: record.name || record.account_title || record.bank_name || record.account_number,
+                bank_name: record.bank_name,
+                account_number: record.account_number,
+                account_title: record.account_title || record.bank_name,
+                branch: record.branch || null,
+                currency: record.currency || 'PKR',
+              }).returning('*');
+              await ensureAccountGl(trx, inserted);
             });
           }
           synced++;
