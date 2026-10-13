@@ -10,7 +10,7 @@ const { resolveShipmentField, resolveRequiredField } = require('./shipmentField'
 const { billableFreight, balanceExpectedFor, freightChanges } = require('./billableFreight');
 const debitNoteService = require('./debitNote.service');
 const { unwindOrderReceipts } = require('./unwindReceipts');
-const { recordPendingExportReceipt, postExportReceipt, confirmPendingExportReceipt } = require('./exportReceipts');
+const { recordPendingExportReceipt, postExportReceipt, confirmPendingExportReceipt, assertNotSelfConfirm } = require('./exportReceipts');
 const { fillSingleLineBagSpec, linePackaging } = require('./orderLines');
 const { syncBalanceDueDate } = require('./balanceDueDate');
 const { balanceTermDaysSetting } = require('../finance/collectionRate');
@@ -2396,6 +2396,14 @@ const exportOrderController = {
       if (!amount || parseFloat(amount) <= 0) {
         return res.status(400).json({ success: false, message: 'A positive amount is required.' });
       }
+      // One step records AND confirms the money, so the caller is both maker
+      // and checker: only an Owner / Super Admin may (R10a). Everyone else
+      // records it (record-receipt) for another Finance user to confirm.
+      await assertNotSelfConfirm(db, {
+        recordedBy: req.user.id,
+        userId: req.user.id,
+        message: 'Posting a receipt in one step records and confirms it yourself. Record it instead — it waits as Pending Finance Confirmation for another Finance user to confirm. Only an Owner may do both.',
+      });
       const ctx = await db.transaction((trx) => postExportReceipt(trx, {
         orderWhere: whereClause,
         kind,
@@ -2531,7 +2539,7 @@ const exportOrderController = {
         .where('p.status', 'Pending Finance Confirmation')
         .select(
           'p.id', 'p.payment_no', 'p.amount', 'p.currency', 'p.fx_rate', 'p.payment_date',
-          'p.bank_account_id', 'p.notes', 'p.created_at', 'u.full_name as recorded_by_name',
+          'p.bank_account_id', 'p.notes', 'p.created_at', 'p.created_by', 'u.full_name as recorded_by_name',
           'r.type as receipt_type', 'eo.id as order_id', 'eo.order_no', 'eo.booked_fx_rate',
           'c.name as customer_name',
           'ba.name as bank_account_name', 'ba.bank_name', 'ba.currency as bank_currency',

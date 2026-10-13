@@ -226,10 +226,13 @@ describe('R5 · confirming an export receipt', () => {
   });
 
   test('the direct confirm-advance route posts through the same engine', async () => {
+    // One step records and confirms, so only an Owner may use it (R10a).
     seed({
       export_orders: [{ id: 1, order_no: 'EX-002', status: 'Awaiting Advance', currency: 'PKR', customer_id: 7, advance_expected: 50000, advance_received: 0, balance_expected: 0, bank_account_id: 8, qty_mt: 0 }],
       receivables: [{ id: 3, type: 'Advance', entity: 'export', order_id: 1, customer_id: 7, currency: 'PKR', expected_amount: 50000, received_amount: 0, outstanding: 50000, status: 'Pending' }],
       bank_accounts: [PKR_BANK],
+      users: [{ id: 4, role_id: 9 }],
+      roles: [{ id: 9, name: 'Owner' }],
     });
     const r = res();
     await exportController.confirmAdvance({ params: { id: '1' }, body: { amount: 50000, payment_method: 'bank_transfer', bank_reference: 'R-1' }, user: { id: 4 } }, r);
@@ -345,6 +348,9 @@ describe('R6 · payPurchase resolves the real payable', () => {
 
 // ─── Service-milling receipts: GL + BT + account choice ──────────────────────
 describe('A4 · service-milling receipts', () => {
+  // A Finance user: a caller without finance.confirm_payment is held to the
+  // mill's own accounts (millExpensePayer.test.js).
+  const FINANCE_USER = () => ({ id: 1, role_id: 3, _permissionsLoaded: true, permissions: new Set(['finance.confirm_payment']) });
   const tables = () => ({
     service_milling_invoices: [{ id: 4, invoice_no: 'SMI-4', client_customer_id: 61, total_amount: 10000, received_amount: 0, balance_amount: 10000, payment_status: 'Unpaid' }],
     receivables: [{ id: 12, recv_no: 'RCV-SMI-4', type: 'Service Milling', entity: 'mill', customer_id: 61, service_invoice_id: 4, expected_amount: 10000, received_amount: 0, outstanding: 10000, status: 'Pending' }],
@@ -354,7 +360,7 @@ describe('A4 · service-milling receipts', () => {
   test('a bank transfer lands in the picked account and posts Dr 1000 / Cr 1120 (mill, client)', async () => {
     seed(tables());
     const r = res();
-    await serviceController.recordPayment({ params: { id: '4' }, body: { amount: 4000, payment_method: 'bank_transfer', bank_account_id: 8, reference: 'TT-9' }, user: { id: 1 } }, r);
+    await serviceController.recordPayment({ params: { id: '4' }, body: { amount: 4000, payment_method: 'bank_transfer', bank_account_id: 8, reference: 'TT-9' }, user: FINANCE_USER() }, r);
     expect(r.statusCode).toBe(201);
     expect(r.body.data.payment).toMatchObject({ service_invoice_id: 4, linked_receivable_id: 12, bank_account_id: 8 });
     expect(row('bank_accounts', 8).current_balance).toBe(104000);
@@ -368,7 +374,7 @@ describe('A4 · service-milling receipts', () => {
   test('cash with no account lands in Mill Cash', async () => {
     seed(tables());
     const r = res();
-    await serviceController.recordPayment({ params: { id: '4' }, body: { amount: 10000, payment_method: 'cash' }, user: { id: 1 } }, r);
+    await serviceController.recordPayment({ params: { id: '4' }, body: { amount: 10000, payment_method: 'cash' }, user: FINANCE_USER() }, r);
     expect(r.statusCode).toBe(201);
     expect(row('bank_accounts', 41).current_balance).toBe(60000);
     expect(row('service_milling_invoices', 4).payment_status).toBe('Paid');
@@ -377,7 +383,7 @@ describe('A4 · service-milling receipts', () => {
   test('a bank transfer with no account is refused instead of posting with no bank move', async () => {
     seed(tables());
     const r = res();
-    await serviceController.recordPayment({ params: { id: '4' }, body: { amount: 100, payment_method: 'bank_transfer' }, user: { id: 1 } }, r);
+    await serviceController.recordPayment({ params: { id: '4' }, body: { amount: 100, payment_method: 'bank_transfer' }, user: FINANCE_USER() }, r);
     expect(r.statusCode).toBe(400);
     expect(db.tables.payments).toEqual([]);
   });
@@ -395,7 +401,7 @@ describe('A4 · service-milling receipts', () => {
     seed(tables());
     ledgerDown();
     const r = res();
-    await serviceController.recordPayment({ params: { id: '4' }, body: { amount: 100, payment_method: 'cash' }, user: { id: 1 } }, r);
+    await serviceController.recordPayment({ params: { id: '4' }, body: { amount: 100, payment_method: 'cash' }, user: FINANCE_USER() }, r);
     expect(r.statusCode).toBe(400);
     expect(r.body.message).toMatch(/ledger entry could not be posted/);
   });

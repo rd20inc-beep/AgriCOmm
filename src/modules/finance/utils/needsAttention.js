@@ -19,6 +19,7 @@
 //   GET /finance/overview-summary            data warnings              (read-only)
 import { isSettleable, canRecordVariant, contextForDocument } from '../../../components/payments/paymentVariants';
 import { canAcceptTransfer } from './transferPermissions';
+import { isOwnPendingReceipt, OWN_RECEIPT_NOTE } from './receiptMakerChecker';
 
 const DAY = 24 * 60 * 60 * 1000;
 const num = (v) => parseFloat(v) || 0;
@@ -34,7 +35,9 @@ const SEVERITY_ORDER = { danger: 0, warning: 1, info: 2 };
 /**
  * sources: {
  *   pendingReceipts, receivables, upcoming, fundTransfers, payroll, purchaseRequests,
- *   suspense, accounts, fx, summary
+ *   suspense, accounts, fx, summary,
+ *   viewer   — the signed-in user ({ id, role }): a receipt they recorded
+ *              shows without Confirm (maker-checker; Owner / Super Admin exempt)
  * }
  * Returns { items, hiddenCount } — items sorted by severity, then due date.
  */
@@ -45,12 +48,13 @@ export function buildNeedsAttention(sources = {}, hasPermission = () => false, t
 
   // 1. Export receipts recorded and waiting for Finance (maker ≠ checker).
   for (const p of sources.pendingReceipts || []) {
+    const own = isOwnPendingReceipt(p, sources.viewer);
     add({
       key: `receipt-${p.id}`, kind: 'confirmReceipt', severity: 'warning',
       title: `${p.receiptType ? `${String(p.receiptType).charAt(0).toUpperCase()}${String(p.receiptType).slice(1)} receipt` : 'Receipt'} · ${p.orderNo || ''}`.trim(),
-      sub: `Recorded by ${p.recordedByName || '—'} — awaiting confirmation`,
+      sub: own ? OWN_RECEIPT_NOTE : `Recorded by ${p.recordedByName || '—'} — awaiting confirmation`,
       amount: num(p.amount), currency: (p.currency || 'USD').toUpperCase(),
-      action: { type: 'confirmReceipt', label: 'Confirm', needsRate: (p.currency || 'USD').toUpperCase() !== 'PKR' },
+      action: own ? null : { type: 'confirmReceipt', label: 'Confirm', needsRate: (p.currency || 'USD').toUpperCase() !== 'PKR' },
       payload: p,
     }, hasPermission('finance', 'confirm_payment'));
   }

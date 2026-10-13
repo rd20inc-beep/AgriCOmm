@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
+import { isOwnPendingReceipt, OWN_RECEIPT_NOTE } from '../utils/receiptMakerChecker';
 import { useUpdateOrderStatus, usePendingExportReceipts, useConfirmExportReceipt, useRejectExportReceipt, useReceivables } from '../../../api/queries';
 import { useFinanceDrawers } from '../drawers/drawersContext';
 import { canRecordVariant } from '../../../components/payments/paymentVariants';
@@ -41,7 +42,7 @@ function daysSince(dateStr) {
 
 export default function FinanceConfirmations() {
   const { exportOrders, addToast, settings, customersList = [] } = useApp();
-  const { hasPermission } = useAuth();
+  const { hasPermission, user } = useAuth();
   // Finance (payments-only) can't open export order pages — render order numbers
   // as plain text for them instead of an /export link that lands on Access Denied.
   const canViewExport = hasPermission('export_orders', 'view');
@@ -396,9 +397,15 @@ export default function FinanceConfirmations() {
                     <button type="button" onClick={() => rejectPending(p)} disabled={rejectReceiptMut.isPending} className={btnRowQuiet}>
                       Reject
                     </button>
-                    <button type="button" onClick={() => confirmPending(p)} disabled={confirmReceiptMut.isPending} data-action="confirm-receipt" className={btnRowPrimary}>
-                      <CheckCircle size={14} aria-hidden="true" /> Confirm
-                    </button>
+                    {/* Maker-checker: the recorder never confirms their own
+                        receipt (server 403); Owner / Super Admin exempt. */}
+                    {isOwnPendingReceipt(p, user)
+                      ? <span className="text-xs text-gray-500 max-w-[11rem]" data-note="own-receipt">{OWN_RECEIPT_NOTE}</span>
+                      : (
+                        <button type="button" onClick={() => confirmPending(p)} disabled={confirmReceiptMut.isPending} data-action="confirm-receipt" className={btnRowPrimary}>
+                          <CheckCircle size={14} aria-hidden="true" /> Confirm
+                        </button>
+                      )}
                     </>)}
                   </div>
                 </div>
