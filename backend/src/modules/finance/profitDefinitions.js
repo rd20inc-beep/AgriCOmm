@@ -171,6 +171,22 @@ function costRowPkr(c, orderRate) {
 }
 
 /**
+ * An export order's revenue in PKR (G-2): contract_value_pkr_locked, else
+ * contract_value × booked_fx_rate; a PKR order is its contract_value. null
+ * when a foreign order has neither — no live rate is ever used.
+ * Returns { currency, bookedRate (0 = none), revenuePkr }.
+ */
+function orderRevenuePkr(o = {}) {
+  const currency = String(o.currency || 'USD').toUpperCase();
+  const bookedRate = currency === 'PKR' ? 1 : num(o.booked_fx_rate);
+  const contract = num(o.contract_value);
+  const lockedRevenue = num(o.contract_value_pkr_locked);
+  const revenuePkr = lockedRevenue > 0 ? lockedRevenue
+    : (currency === 'PKR' ? contract : (bookedRate > 0 ? contract * bookedRate : null));
+  return { currency, bookedRate, revenuePkr };
+}
+
+/**
  * The export figures, per order and in total.
  * @param conn knex instance / transaction
  * @param opts { startDate, endDate, currentFxRate }
@@ -251,12 +267,8 @@ async function exportProfit(conn, { startDate, endDate, currentFxRate } = {}) {
 
   const fxNow = num(currentFxRate);
   const rows = orders.map((o) => {
-    const currency = String(o.currency || 'USD').toUpperCase();
-    const bookedRate = currency === 'PKR' ? 1 : num(o.booked_fx_rate);
+    const { currency, bookedRate, revenuePkr } = orderRevenuePkr(o);
     const contract = num(o.contract_value);
-    const lockedRevenue = num(o.contract_value_pkr_locked);
-    const revenuePkr = lockedRevenue > 0 ? lockedRevenue
-      : (currency === 'PKR' ? contract : (bookedRate > 0 ? contract * bookedRate : null));
 
     const orderCosts = costs.filter((c) => Number(c.order_id) === Number(o.id));
     const opCostsPkr = orderCosts.filter((c) => !INTERNAL_COST_CATS.includes(c.category))
@@ -670,6 +682,7 @@ module.exports = {
   booksProfit,
   exportProfit,
   exportTotals,
+  orderRevenuePkr,
   rateMasterPerKg,
   millOverheads,
   millAndLocalProfit,

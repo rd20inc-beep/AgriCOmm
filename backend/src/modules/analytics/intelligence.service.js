@@ -2,6 +2,15 @@ const db = require('../../config/database');
 const { BALANCE_COLLECTION_STATUSES, BALANCE_OUTSTANDING_SQL } = require('../exportOrders/balanceCollection');
 const auditService = require('../admin/audit.service');
 const { companyStock } = require('../inventory/stockSql');
+const { marginFinding, orderMarginRows } = require('./orderMargins');
+const { exportProfit } = require('../finance/profitDefinitions');
+const { collectionRate: computeCollectionRate } = require('../finance/collectionRate');
+const fxRateService = require('../finance/fxRate.service');
+const { dayOf } = require('../exportOrders/balanceDueDate');
+const {
+  RECEIVABLE_CLOSED, PAYABLE_CLOSED, ORDER_COST_PKR_SQL,
+  byCurrency, cashSummary, collectionRateFields,
+} = require('../finance/currencyFigures');
 
 /**
  * Intelligence Service — Decision Intelligence Engine (Phase 12)
@@ -206,61 +215,43 @@ const intelligenceService = {
   },
 
   async scanLowMarginOrders() {
-    // Calculate margin for each active export order
-    // margin = (contract_value - sum(costs)) / contract_value * 100
+    // Booked margin per open export order, in PKR (orderMargins.js): revenue
+    // at the order's locked / booked rate less its costs in PKR. Orders with
+    // no booked rate or no rice cost are skipped — never alarmed on.
     const lowMarginThreshold = 10;
 
-    const rows = await db('export_orders as eo')
-      .leftJoin('export_order_costs as c', 'c.order_id', 'eo.id')
-      .whereNotIn('eo.status', ['Draft', 'Closed', 'Cancelled'])
-      .where('eo.contract_value', '>', 0)
-      .select(
-        'eo.id',
-        'eo.order_no',
-        'eo.contract_value',
-        'eo.currency',
-        db.raw('COALESCE(SUM(c.amount), 0) as total_costs')
-      )
-      .groupBy('eo.id', 'eo.order_no', 'eo.contract_value', 'eo.currency')
-      .havingRaw('COALESCE(SUM(c.amount), 0) > 0');
+    const rows = await orderMarginRows(db, { excludeStatuses: ['Closed'] });
 
     const exceptions = [];
     for (const r of rows) {
-      const contractValue = parseFloat(r.contract_value);
-      const totalCosts = parseFloat(r.total_costs);
-      const margin = ((contractValue - totalCosts) / contractValue) * 100;
-
-      if (margin < 0) {
+      const f = marginFinding(r, { lowPct: lowMarginThreshold });
+      if (!f) continue;
+      const base = {
+        entity: 'export',
+        linked_type: 'export_order',
+        linked_id: r.id,
+        linked_ref: r.orderNo,
+        description: f.description,
+        metric_value: f.marginPct,
+        amount_at_risk: f.atRiskPkr,
+        currency: 'PKR',
+        auto_generated: true,
+      };
+      if (f.negative) {
         exceptions.push({
+          ...base,
           exception_type: 'negative_margin',
           severity: 'critical',
-          entity: 'export',
-          linked_type: 'export_order',
-          linked_id: r.id,
-          linked_ref: r.order_no,
-          title: `Negative margin on ${r.order_no}: ${margin.toFixed(2)}%`,
-          description: `Contract value: ${r.currency} ${contractValue.toFixed(2)}, Total costs: ${r.currency} ${totalCosts.toFixed(2)}. Loss of ${r.currency} ${(totalCosts - contractValue).toFixed(2)}.`,
-          metric_value: parseFloat(margin.toFixed(2)),
+          title: `Negative margin on ${r.orderNo}: ${f.marginPct.toFixed(2)}%`,
           threshold_value: 0,
-          amount_at_risk: totalCosts - contractValue,
-          currency: r.currency,
-          auto_generated: true,
         });
-      } else if (margin < lowMarginThreshold) {
+      } else {
         exceptions.push({
+          ...base,
           exception_type: 'low_margin',
-          severity: margin < 5 ? 'warning' : 'info',
-          entity: 'export',
-          linked_type: 'export_order',
-          linked_id: r.id,
-          linked_ref: r.order_no,
-          title: `Low margin on ${r.order_no}: ${margin.toFixed(2)}%`,
-          description: `Contract value: ${r.currency} ${contractValue.toFixed(2)}, Total costs: ${r.currency} ${totalCosts.toFixed(2)}. Margin is below ${lowMarginThreshold}% threshold.`,
-          metric_value: parseFloat(margin.toFixed(2)),
+          severity: f.marginPct < 5 ? 'warning' : 'info',
+          title: `Low margin on ${r.orderNo}: ${f.marginPct.toFixed(2)}%`,
           threshold_value: lowMarginThreshold,
-          amount_at_risk: contractValue * (lowMarginThreshold / 100) - (contractValue - totalCosts),
-          currency: r.currency,
-          auto_generated: true,
         });
       }
     }
@@ -1406,45 +1397,49 @@ const intelligenceService = {
       if (dateTo) q.where(dateCol, '<=', dateTo);
     };
 
-    // Export KPIs
+    // Export KPIs — money in each order's own currency: { USD, PKR }, never
+    // added together (owner decision G-1).
     const activeOrdersQ = db('export_orders').whereNotIn('status', ['Draft', 'Closed', 'Cancelled']);
     if (entity === 'mill') activeOrdersQ.where(db.raw('1 = 0')); // no export data for mill entity
     dateFilter(activeOrdersQ, 'created_at');
     const activeOrders = await activeOrdersQ.count('id as count').first();
 
+    const CUR = 'UPPER(currency)';
     const contractValueQ = db('export_orders').whereNotIn('status', ['Draft', 'Cancelled']);
     if (entity === 'mill') contractValueQ.where(db.raw('1 = 0'));
     dateFilter(contractValueQ, 'created_at');
-    const contractValue = await contractValueQ.sum('contract_value as total').first();
+    const contractValueRows = await contractValueQ
+      .select(db.raw(`${CUR} as currency`), db.raw('COALESCE(SUM(contract_value), 0) as total'))
+      .groupByRaw(CUR);
 
     const advancePendingQ = db('export_orders').where('status', 'Awaiting Advance');
     dateFilter(advancePendingQ, 'created_at');
-    const advancePending = entity === 'mill'
-      ? { total: 0 }
-      : await advancePendingQ.select(db.raw('COALESCE(SUM(advance_expected - COALESCE(advance_received, 0)), 0) as total')).first();
+    const advancePendingRows = entity === 'mill'
+      ? []
+      : await advancePendingQ
+        .select(db.raw(`${CUR} as currency`), db.raw('COALESCE(SUM(advance_expected - COALESCE(advance_received, 0)), 0) as total'))
+        .groupByRaw(CUR);
 
     const balancePendingQ = db('export_orders').whereIn('status', BALANCE_COLLECTION_STATUSES).whereRaw(BALANCE_OUTSTANDING_SQL);
     dateFilter(balancePendingQ, 'created_at');
-    const balancePending = entity === 'mill'
-      ? { total: 0 }
-      : await balancePendingQ.select(db.raw('COALESCE(SUM(balance_expected - COALESCE(balance_received, 0)), 0) as total')).first();
+    const balancePendingRows = entity === 'mill'
+      ? []
+      : await balancePendingQ
+        .select(db.raw(`${CUR} as currency`), db.raw('COALESCE(SUM(balance_expected - COALESCE(balance_received, 0)), 0) as total'))
+        .groupByRaw(CUR);
 
     const shipmentsInTransitQ = db('export_orders').where('status', 'Shipped');
     const shipmentsInTransit = entity === 'mill'
       ? { count: 0 }
       : await shipmentsInTransitQ.count('id as count').first();
 
-    // Export profit (simple: contract_value - sum of costs)
-    let exportProfitTotal = 0;
-    if (entity !== 'mill') {
-      const orders = await db('export_orders').whereNotIn('status', ['Draft', 'Cancelled']).select('id', 'contract_value');
-      for (const o of orders) {
-        const costs = await db('export_order_costs').where('order_id', o.id).sum('amount as total').first();
-        const costTotal = parseFloat(costs?.total) || 0;
-        if (costTotal > 0) exportProfitTotal += parseFloat(o.contract_value) - costTotal;
-      }
-    }
-    const exportProfit = { total: exportProfitTotal };
+    // Export profit — the Booked profit of the one definition every profit
+    // tile reads (finance/profitDefinitions.js, G-2), in PKR at each order's
+    // booked rate, for orders dated in the range. (Was contract_value − SUM of
+    // costs: rupee costs taken off dollar contracts.)
+    const exportDefs = entity === 'mill'
+      ? { bookedPkr: 0, unpricedCount: 0 }
+      : (await exportProfit(db, { startDate: dateFrom, endDate: dateTo })).totals;
 
     // Mill KPIs
     const activeBatchesQ = db('milling_batches').whereIn('status', ['Queued', 'In Progress', 'Processing']);
@@ -1474,42 +1469,52 @@ const intelligenceService = {
       ? { avg: 0 }
       : await avgYieldQ.avg('yield_pct as avg').first();
 
-    // Finance KPIs
-    const totalReceivables = await db('receivables')
-      .whereIn('status', ['Pending', 'Partially Paid', 'Overdue'])
-      .sum('outstanding as total')
-      .first();
+    // Finance KPIs — each currency on its own. Open = something still
+    // outstanding and not settled / written off / reversed.
+    const OPEN_CUR = "UPPER(COALESCE(currency, 'PKR'))";
+    const receivableRows = await db('receivables')
+      .whereNotIn('status', RECEIVABLE_CLOSED)
+      .where('outstanding', '>', 0)
+      .select(db.raw(`${OPEN_CUR} as currency`), db.raw('COALESCE(SUM(outstanding), 0) as total'))
+      .groupByRaw(OPEN_CUR);
 
-    const totalPayables = await db('payables')
-      .whereIn('status', ['Pending', 'Partially Paid', 'Overdue'])
-      .sum('outstanding as total')
-      .first();
+    const payableRows = await db('payables')
+      .whereNotIn('status', PAYABLE_CLOSED)
+      .where('outstanding', '>', 0)
+      .select(db.raw(`${OPEN_CUR} as currency`), db.raw('COALESCE(SUM(outstanding), 0) as total'))
+      .groupByRaw(OPEN_CUR);
 
-    const cashPosition = await db('bank_accounts')
-      .where('is_active', true)
+    // Cash per currency, every account (as Finance ▸ Home); ≈ PKR at today's rate.
+    const bankRows = await db('bank_accounts')
+      .select(db.raw(`${OPEN_CUR} as currency`))
       .sum('current_balance as total')
-      .first();
+      .count('id as count')
+      .groupByRaw(OPEN_CUR);
+    const fx = await fxRateService.getLatestRate('USD');
 
-    // Collection rate: received / expected over active orders
-    const collectionData = await db('export_orders')
-      .whereNotIn('status', ['Draft', 'Cancelled'])
-      .select(
-        db.raw('COALESCE(SUM(advance_received), 0) + COALESCE(SUM(balance_received), 0) as total_received'),
-        db.raw('COALESCE(SUM(contract_value), 0) as total_expected')
-      )
-      .first();
-    const collectionRate = parseFloat(collectionData.total_expected) > 0
-      ? (parseFloat(collectionData.total_received) / parseFloat(collectionData.total_expected)) * 100
-      : 0;
+    // Collection rate (C6): received ÷ amounts DUE, per currency.
+    const collection = await computeCollectionRate(db);
 
-    // Pipeline: orders by status with count and value
-    const pipeline = await db('export_orders')
+    // Pipeline: orders by status with count and value — the value per order
+    // currency, never one sum.
+    const pipelineRows = await db('export_orders')
       .whereNotIn('status', ['Cancelled'])
-      .select('status')
+      .select('status', db.raw(`${CUR} as currency`))
       .count('id as count')
       .sum('contract_value as total_value')
-      .groupBy('status')
-      .orderByRaw("CASE status WHEN 'Draft' THEN 1 WHEN 'Awaiting Advance' THEN 2 WHEN 'Advance Received' THEN 3 WHEN 'Procurement Pending' THEN 4 WHEN 'In Milling' THEN 5 WHEN 'Docs In Preparation' THEN 6 WHEN 'Awaiting Balance' THEN 7 WHEN 'Ready to Ship' THEN 8 WHEN 'Shipped' THEN 9 WHEN 'Arrived' THEN 10 WHEN 'Closed' THEN 11 ELSE 12 END");
+      .groupByRaw(`status, ${CUR}`);
+    const STAGE_ORDER = ['Draft', 'Awaiting Advance', 'Advance Received', 'Procurement Pending', 'In Milling',
+      'Docs In Preparation', 'Awaiting Balance', 'Ready to Ship', 'Shipped', 'Arrived', 'Closed'];
+    const stageRank = (s) => { const i = STAGE_ORDER.indexOf(s); return i < 0 ? STAGE_ORDER.length : i; };
+    const pipelineByStatus = new Map();
+    for (const r of Array.isArray(pipelineRows) ? pipelineRows : []) {
+      const p = pipelineByStatus.get(r.status) || { status: r.status, count: 0, valueByCurrency: {} };
+      p.count += parseInt(r.count, 10) || 0;
+      const cur = String(r.currency || 'USD').toUpperCase();
+      p.valueByCurrency[cur] = (p.valueByCurrency[cur] || 0) + (parseFloat(r.total_value) || 0);
+      pipelineByStatus.set(r.status, p);
+    }
+    const pipeline = [...pipelineByStatus.values()].sort((a, b) => stageRank(a.status) - stageRank(b.status));
 
     // Exceptions summary
     const exceptionsData = await db('exception_inbox')
@@ -1558,41 +1563,64 @@ const intelligenceService = {
       `).then(r => r.rows || []);
     } catch (e) { profitTrend = []; }
 
-    // Cost breakdown
-    const costBreakdown = await db('export_order_costs')
-      .select('category')
-      .sum('amount as total')
-      .groupBy('category')
-      .orderBy('total', 'desc');
-
-    // Receivables aging
-    const aging = await db('receivables')
-      .whereIn('status', ['Pending', 'Partially Paid', 'Overdue'])
+    // Cost breakdown — in PKR at each cost row's / order's booked rate (a cost
+    // row with no rate is counted, not guessed).
+    const costBreakdown = (await db('export_order_costs as eoc')
+      .join('export_orders as eo', 'eo.id', 'eoc.order_id')
       .select(
-        db.raw("COALESCE(SUM(CASE WHEN aging BETWEEN 0 AND 30 THEN outstanding ELSE 0 END), 0) as \"0-30\""),
-        db.raw("COALESCE(SUM(CASE WHEN aging BETWEEN 31 AND 60 THEN outstanding ELSE 0 END), 0) as \"31-60\""),
-        db.raw("COALESCE(SUM(CASE WHEN aging BETWEEN 61 AND 90 THEN outstanding ELSE 0 END), 0) as \"61-90\""),
-        db.raw("COALESCE(SUM(CASE WHEN aging > 90 THEN outstanding ELSE 0 END), 0) as \"90+\"")
+        'eoc.category',
+        db.raw(`COALESCE(SUM(${ORDER_COST_PKR_SQL}), 0) as total_pkr`),
+        db.raw(`COUNT(*) FILTER (WHERE (${ORDER_COST_PKR_SQL}) IS NULL) as unpriced_count`),
       )
-      .first();
+      .groupBy('eoc.category')
+      .orderBy('total_pkr', 'desc')) || [];
+
+    // Receivables aging, per currency (days past due — the stored aging
+    // column is never maintained).
+    const AGE = 'GREATEST(0, CURRENT_DATE - due_date::date)';
+    const agingRows = await db('receivables')
+      .whereNotIn('status', RECEIVABLE_CLOSED)
+      .where('outstanding', '>', 0)
+      .select(
+        db.raw(`${OPEN_CUR} as currency`),
+        db.raw(`COALESCE(SUM(CASE WHEN due_date IS NULL OR ${AGE} <= 30 THEN outstanding ELSE 0 END), 0) as "0-30"`),
+        db.raw(`COALESCE(SUM(CASE WHEN ${AGE} BETWEEN 31 AND 60 THEN outstanding ELSE 0 END), 0) as "31-60"`),
+        db.raw(`COALESCE(SUM(CASE WHEN ${AGE} BETWEEN 61 AND 90 THEN outstanding ELSE 0 END), 0) as "61-90"`),
+        db.raw(`COALESCE(SUM(CASE WHEN ${AGE} > 90 THEN outstanding ELSE 0 END), 0) as "90+"`),
+      )
+      .groupByRaw(OPEN_CUR);
+    const receivablesAging = {};
+    for (const a of Array.isArray(agingRows) ? agingRows : []) {
+      receivablesAging[String(a.currency || 'PKR').toUpperCase()] = {
+        '0-30': parseFloat(a['0-30']) || 0,
+        '31-60': parseFloat(a['31-60']) || 0,
+        '61-90': parseFloat(a['61-90']) || 0,
+        '90+': parseFloat(a['90+']) || 0,
+      };
+    }
 
     return {
+      // Money KPIs are { PKR, USD } per currency — never one added-up figure.
+      // (Renamed from totalContractValue / advancePending / balancePending /
+      // exportProfit / totalReceivables / totalPayables / cashPosition so a
+      // stored snapshot of the old mixed numbers is never read as the new ones.)
       kpis: {
         activeOrders: parseInt(activeOrders.count, 10),
-        totalContractValue: parseFloat(contractValue.total || 0),
-        advancePending: parseFloat(advancePending.total || 0),
-        balancePending: parseFloat(balancePending.total || 0),
+        contractValueByCurrency: byCurrency(contractValueRows, 'total'),
+        advancePendingByCurrency: byCurrency(advancePendingRows, 'total'),
+        balancePendingByCurrency: byCurrency(balancePendingRows, 'total'),
         shipmentsInTransit: parseInt(shipmentsInTransit.count, 10),
-        exportProfit: parseFloat(exportProfit.total || 0),
+        exportBookedProfitPkr: exportDefs.bookedPkr || 0,
+        exportUnpricedOrders: exportDefs.unpricedCount || 0,
         activeBatches: parseInt(activeBatches.count, 10),
         rawStock: parseFloat(rawStock.total || 0),
         finishedStock: parseFloat(finishedStock.total || 0),
         millProfit: parseFloat(millProfit.total || 0),
         avgYield: parseFloat(parseFloat(avgYield.avg || 0).toFixed(2)),
-        totalReceivables: parseFloat(totalReceivables.total || 0),
-        totalPayables: parseFloat(totalPayables.total || 0),
-        cashPosition: parseFloat(cashPosition.total || 0),
-        collectionRate: parseFloat(collectionRate.toFixed(2)),
+        receivablesByCurrency: byCurrency(receivableRows, 'total'),
+        payablesByCurrency: byCurrency(payableRows, 'total'),
+        cashPosition: cashSummary(bankRows, { usdRate: parseFloat(fx && fx.rate) || 0, rateDate: dayOf(fx && fx.effectiveDate) }),
+        ...collectionRateFields(collection),
       },
       pipeline,
       exceptions: {
@@ -1611,12 +1639,8 @@ const intelligenceService = {
       charts: {
         profitTrend,
         costBreakdown,
-        receivablesAging: aging ? {
-          '0-30': parseFloat(aging['0-30']),
-          '31-60': parseFloat(aging['31-60']),
-          '61-90': parseFloat(aging['61-90']),
-          '90+': parseFloat(aging['90+']),
-        } : { '0-30': 0, '31-60': 0, '61-90': 0, '90+': 0 },
+        // { USD: { '0-30', '31-60', '61-90', '90+' }, PKR: {...} } — per currency.
+        receivablesAging,
       },
     };
   },
@@ -1672,24 +1696,42 @@ const intelligenceService = {
           .orderBy('eo.eta', 'asc');
         break;
 
-      case 'lowMarginOrders':
-        query = db('export_orders as eo')
-          .leftJoin('customers as c', 'c.id', 'eo.customer_id')
-          .leftJoin(
-            db('export_order_costs').select('order_id').sum('amount as total_costs').groupBy('order_id').as('costs'),
-            'costs.order_id', 'eo.id'
-          )
-          .whereNotIn('eo.status', ['Draft', 'Cancelled'])
-          .where('eo.contract_value', '>', 0)
-          .whereRaw('COALESCE(costs.total_costs, 0) > 0')
-          .select(
-            'eo.id', 'eo.order_no', 'eo.contract_value',
-            db.raw('COALESCE(costs.total_costs, 0) as total_costs'),
-            db.raw('ROUND(((eo.contract_value - COALESCE(costs.total_costs, 0)) / eo.contract_value * 100)::numeric, 2) as margin_pct'),
-            'eo.currency', 'c.name as customer_name', 'eo.status'
-          )
-          .orderByRaw('((eo.contract_value - COALESCE(costs.total_costs, 0)) / eo.contract_value * 100) ASC');
-        break;
+      case 'lowMarginOrders': {
+        // Booked margin in PKR per order (orderMargins.js) — not dollars less
+        // rupees. Unpriced orders (no booked rate / no rice cost) are left out.
+        const priced = (await orderMarginRows(db, { startDate: dateFrom, endDate: dateTo }))
+          .filter((r) => r.priced && r.revenuePkr > 0)
+          .sort((a, b) => (a.bookedProfitPkr / a.revenuePkr) - (b.bookedProfitPkr / b.revenuePkr));
+        const pageRows = priced.slice(offset, offset + limit);
+        const ids = pageRows.map((r) => r.id);
+        const names = ids.length
+          ? await db('export_orders as eo').leftJoin('customers as c', 'c.id', 'eo.customer_id')
+            .whereIn('eo.id', ids).select('eo.id', 'c.name as customer_name')
+          : [];
+        const nameOf = new Map((names || []).map((n) => [Number(n.id), n.customer_name]));
+        return {
+          data: pageRows.map((r) => ({
+            id: r.id,
+            order_no: r.orderNo,
+            status: r.status,
+            currency: r.currency,
+            contract_value: r.contractValueForeign,
+            booked_fx_rate: r.bookedFxRate,
+            revenue_pkr: r.revenuePkr,
+            total_cost_pkr: r.totalCostPkr,
+            booked_profit_pkr: r.bookedProfitPkr,
+            margin_pct: Math.round((r.bookedProfitPkr / r.revenuePkr) * 10000) / 100,
+            rice_cost_estimated: !!r.estimated,
+            customer_name: nameOf.get(Number(r.id)) || null,
+          })),
+          pagination: {
+            page: parseInt(page, 10),
+            limit: parseInt(limit, 10),
+            total: priced.length,
+            totalPages: Math.ceil(priced.length / limit),
+          },
+        };
+      }
 
       case 'activeBatches':
         query = db('milling_batches as mb')
@@ -1706,7 +1748,7 @@ const intelligenceService = {
         query = db('receivables as r')
           .leftJoin('customers as c', 'c.id', 'r.customer_id')
           .leftJoin('export_orders as eo', 'eo.id', 'r.order_id')
-          .whereIn('r.status', ['Pending', 'Partially Paid', 'Overdue'])
+          .whereNotIn('r.status', RECEIVABLE_CLOSED).where('r.outstanding', '>', 0)
           .select(
             'r.id', 'r.recv_no', 'r.type', 'r.expected_amount', 'r.received_amount',
             'r.outstanding', 'r.due_date',
@@ -1720,7 +1762,7 @@ const intelligenceService = {
       case 'totalPayables':
         query = db('payables as p')
           .leftJoin('suppliers as s', 's.id', 'p.supplier_id')
-          .whereIn('p.status', ['Pending', 'Partially Paid', 'Overdue'])
+          .whereNotIn('p.status', PAYABLE_CLOSED).where('p.outstanding', '>', 0)
           .select(
             'p.id', 'p.pay_no', 'p.category', 'p.original_amount', 'p.paid_amount',
             'p.outstanding', 'p.due_date',
