@@ -2,6 +2,10 @@ const db = require('../../config/database');
 const { BALANCE_COLLECTION_STATUSES, BALANCE_OUTSTANDING_SQL } = require('../exportOrders/balanceCollection');
 const emailService = require('../communications/email.service');
 const expensesService = require('../expenses/expenses.service');
+const { marginFinding, orderMarginRows, orderValuePkr } = require('../analytics/orderMargins');
+const {
+  RECEIVABLE_CLOSED, PAYABLE_CLOSED, receivablePkrAtBooked, nativeMoneyText,
+} = require('../finance/currencyFigures');
 
 // Recurring-expense date helpers (mirror milling.routes so cadence math matches).
 const _isoDate = (d) => (d instanceof Date ? d.toISOString().slice(0, 10) : String(d).slice(0, 10));
@@ -269,12 +273,17 @@ const automationService = {
     return { processed, details: { orders_checked: orders.length } };
   },
 
+  // Alerts carry ONE amount and no currency, so amount_at_risk is always PKR —
+  // a foreign figure at its own booked rate, or null when it has none (never a
+  // dollar amount stored as if it were rupees). The native amount is in the
+  // summary text.
   async scanOverdueReceivables() {
     const today = new Date().toISOString().split('T')[0];
 
     const overdue = await db('receivables')
       .where('due_date', '<', today)
-      .whereNot('status', 'Received')
+      .whereNotIn('status', RECEIVABLE_CLOSED)
+      .where('outstanding', '>', 0)
       .select('*');
 
     let processed = 0;
@@ -282,24 +291,26 @@ const automationService = {
       const ageDays = Math.floor((Date.now() - new Date(rec.due_date).getTime()) / (1000 * 60 * 60 * 24));
 
       await db('receivables').where({ id: rec.id }).update({
-        aging_days: ageDays,
+        aging: ageDays,
         updated_at: db.fn.now(),
       });
 
       if (ageDays > 30) {
+        const ref = rec.recv_no || `RCV-${rec.id}`;
         const existingAlert = await db('alerts')
-          .where({ linked_ref: rec.ref_no || `RCV-${rec.id}`, title: 'Significantly Overdue Receivable' })
+          .where({ linked_ref: ref, title: 'Significantly Overdue Receivable' })
           .where('status', 'Open')
           .first();
 
         if (!existingAlert) {
+          const pkr = receivablePkrAtBooked(rec);
           await db('alerts').insert({
             severity: 'high',
-            entity: 'export',
-            linked_ref: rec.ref_no || `RCV-${rec.id}`,
+            entity: rec.entity || 'export',
+            linked_ref: ref,
             title: 'Significantly Overdue Receivable',
-            summary: `Receivable of ${rec.amount} is ${ageDays} days past due`,
-            amount_at_risk: rec.amount,
+            summary: `Receivable of ${nativeMoneyText(rec.outstanding, rec.currency)} is ${ageDays} days past due`,
+            amount_at_risk: pkr == null ? null : Math.round(pkr * 100) / 100,
             age_days: ageDays,
             recommended_action: 'Escalate collection efforts',
             status: 'Open',
@@ -318,7 +329,8 @@ const automationService = {
 
     const overdue = await db('payables')
       .where('due_date', '<', today)
-      .whereNot('status', 'Paid')
+      .whereNotIn('status', PAYABLE_CLOSED)
+      .where('outstanding', '>', 0)
       .select('*');
 
     let processed = 0;
@@ -326,24 +338,27 @@ const automationService = {
       const ageDays = Math.floor((Date.now() - new Date(pay.due_date).getTime()) / (1000 * 60 * 60 * 24));
 
       await db('payables').where({ id: pay.id }).update({
-        aging_days: ageDays,
+        aging: ageDays,
         updated_at: db.fn.now(),
       });
 
       if (ageDays > 30) {
+        const ref = pay.pay_no || `PAY-${pay.id}`;
         const existingAlert = await db('alerts')
-          .where({ linked_ref: pay.ref_no || `PAY-${pay.id}`, title: 'Overdue Payable' })
+          .where({ linked_ref: ref, title: 'Overdue Payable' })
           .where('status', 'Open')
           .first();
 
         if (!existingAlert) {
+          // A payable keeps no booked rate: PKR as is, a foreign one unpriced.
+          const isPkr = String(pay.currency || 'PKR').toUpperCase() === 'PKR';
           await db('alerts').insert({
             severity: 'medium',
-            entity: 'mill',
-            linked_ref: pay.ref_no || `PAY-${pay.id}`,
+            entity: pay.entity || 'mill',
+            linked_ref: ref,
             title: 'Overdue Payable',
-            summary: `Payable of ${pay.amount} is ${ageDays} days past due`,
-            amount_at_risk: pay.amount,
+            summary: `Payable of ${nativeMoneyText(pay.outstanding, pay.currency)} is ${ageDays} days past due`,
+            amount_at_risk: isPkr ? parseFloat(pay.outstanding) || 0 : null,
             age_days: ageDays,
             recommended_action: 'Arrange payment to supplier',
             status: 'Open',
@@ -380,8 +395,10 @@ const automationService = {
           entity: 'export',
           linked_ref: order.order_no,
           title: 'Shipment Delay',
-          summary: `Order ${order.order_no} ETA was ${order.eta}, now ${daysLate} days late`,
-          amount_at_risk: order.total_value,
+          summary: `Order ${order.order_no} (${nativeMoneyText(order.contract_value, order.currency)}) ETA was ${order.eta}, now ${daysLate} days late`,
+          // export_orders has no total_value: the contract value, in PKR at
+          // the order's locked / booked rate.
+          amount_at_risk: orderValuePkr(order),
           age_days: daysLate,
           recommended_action: 'Contact shipping line for status update',
           status: 'Open',
@@ -399,44 +416,38 @@ const automationService = {
     const setting = await db('system_settings').where({ key: 'min_margin_pct' }).first();
     const minMargin = setting ? parseFloat(setting.value) : 5;
 
-    const activeOrders = await db('export_orders')
-      .whereNotIn('status', ['Closed', 'Cancelled', 'Draft'])
-      .select('*');
+    // Booked margin per open order, all in PKR (analytics/orderMargins.js):
+    // revenue at the order's locked / booked rate less its costs in PKR. Was
+    // order.total_value (no such column) less SUM(export_order_costs) looked up
+    // by export_order_id (the column is order_id) — rupee costs off a dollar
+    // contract. Orders with no booked rate or no rice cost are skipped.
+    const activeOrders = await orderMarginRows(db, { excludeStatuses: ['Closed'] });
 
     let processed = 0;
     for (const order of activeOrders) {
-      // Sum all costs for this order
-      const costResult = await db('export_order_costs')
-        .where({ export_order_id: order.id })
-        .sum('amount as total_cost')
+      const f = marginFinding(order, { lowPct: minMargin });
+      if (!f) continue;
+
+      const existingAlert = await db('alerts')
+        .where({ linked_ref: order.orderNo, title: 'Low Margin Order' })
+        .where('status', 'Open')
         .first();
 
-      const totalCost = parseFloat(costResult?.total_cost || 0);
-      const totalValue = parseFloat(order.total_value || 0);
-      const margin = totalValue > 0 ? ((totalValue - totalCost) / totalValue) * 100 : 0;
-
-      if (margin < minMargin && totalCost > 0) {
-        const existingAlert = await db('alerts')
-          .where({ linked_ref: order.order_no, title: 'Low Margin Order' })
-          .where('status', 'Open')
-          .first();
-
-        if (!existingAlert) {
-          await db('alerts').insert({
-            severity: margin < 0 ? 'critical' : 'medium',
-            entity: 'export',
-            linked_ref: order.order_no,
-            title: 'Low Margin Order',
-            summary: `Order ${order.order_no} margin is ${margin.toFixed(1)}% (threshold: ${minMargin}%)`,
-            amount_at_risk: totalValue - totalCost,
-            age_days: 0,
-            recommended_action: 'Review order costs and pricing',
-            status: 'Open',
-          });
-        }
-
-        processed++;
+      if (!existingAlert) {
+        await db('alerts').insert({
+          severity: f.negative ? 'critical' : 'medium',
+          entity: 'export',
+          linked_ref: order.orderNo,
+          title: 'Low Margin Order',
+          summary: `Order ${order.orderNo} margin is ${f.marginPct.toFixed(1)}% (threshold: ${minMargin}%). ${f.description}`,
+          amount_at_risk: f.atRiskPkr,
+          age_days: 0,
+          recommended_action: 'Review order costs and pricing',
+          status: 'Open',
+        });
       }
+
+      processed++;
     }
 
     return { processed, details: { orders_checked: activeOrders.length } };
