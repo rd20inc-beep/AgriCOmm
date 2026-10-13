@@ -50,4 +50,14 @@ export default defineConfig([
       'no-unused-vars': ['warn', { varsIgnorePattern: '^[A-Z_]', argsIgnorePattern: '^_' }],
     },
   },
+
+  // ── Backend tests — jest injects describe/test/expect/jest as globals ──
+  // Without this every backend test file reports thousands of false no-undef
+  // errors, which would drown a real one in the CI lint gate.
+  {
+    files: ['backend/**/__tests__/**/*.js', 'backend/**/*.test.js'],
+    languageOptions: {
+      globals: globals.jest,
+    },
+  },
 ])
