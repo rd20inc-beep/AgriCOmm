@@ -3,7 +3,7 @@ const { BALANCE_COLLECTION_STATUSES, BALANCE_OUTSTANDING_SQL } = require('../exp
 const auditService = require('../admin/audit.service');
 const { companyStock } = require('../inventory/stockSql');
 const { marginFinding, orderMarginRows } = require('./orderMargins');
-const { exportProfit } = require('../finance/profitDefinitions');
+const { exportProfit, orderRevenuePkr, costRowPkr } = require('../finance/profitDefinitions');
 const { collectionRate: computeCollectionRate } = require('../finance/collectionRate');
 const fxRateService = require('../finance/fxRate.service');
 const { dayOf } = require('../exportOrders/balanceDueDate');
@@ -398,11 +398,12 @@ const intelligenceService = {
               linked_id: r.order_id,
               linked_ref: r.order_no,
               title: `High cost variance in "${category}" on ${r.order_no}: +${variancePct.toFixed(1)}%`,
-              description: `Estimated: ${r.currency} ${est.toFixed(2)}, Actual: ${r.currency} ${act.toFixed(2)}. Variance: ${(act - est).toFixed(2)} (${variancePct.toFixed(1)}%).`,
+              // margin_analysis holds both sides in PKR at the booked rate.
+              description: `Estimated: Rs ${est.toFixed(2)}, Actual: Rs ${act.toFixed(2)}. Variance: Rs ${(act - est).toFixed(2)} (${variancePct.toFixed(1)}%).`,
               metric_value: parseFloat(variancePct.toFixed(2)),
               threshold_value: 20,
               amount_at_risk: act - est,
-              currency: r.currency,
+              currency: 'PKR',
               auto_generated: true,
             });
           }
@@ -949,9 +950,13 @@ const intelligenceService = {
     const actualCosts = await db('export_order_costs').where({ order_id: orderId });
     const actualCostMap = {};
     let totalActual = 0;
+    // In PKR (each cost at its own / the order's booked rate), the same
+    // currency as margin_analysis.estimated_costs — never rupees vs dollars.
+    const { revenuePkr: orderPkr, bookedRate: orderRate } = orderRevenuePkr(order);
     for (const c of actualCosts) {
-      actualCostMap[c.category] = parseFloat(c.amount);
-      totalActual += parseFloat(c.amount);
+      const pkr = costRowPkr(c, orderRate);
+      actualCostMap[c.category] = (actualCostMap[c.category] || 0) + pkr;
+      totalActual += pkr;
     }
 
     // Use margin_analysis estimated_costs if available, else assume 80% of contract as estimate
@@ -966,7 +971,7 @@ const intelligenceService = {
       }
     } else {
       // Estimate based on contract value
-      const cv = parseFloat(order.contract_value);
+      const cv = orderPkr || 0; // contract in PKR at the booked rate
       estimatedCostMap = { rice: cv * 0.5, bags: cv * 0.05, loading: cv * 0.04, clearing: cv * 0.03, freight: cv * 0.12, misc: cv * 0.02 };
       totalEstimated = Object.values(estimatedCostMap).reduce((s, v) => s + v, 0);
     }
@@ -1008,7 +1013,7 @@ const intelligenceService = {
     const topFactors = factors.slice(0, 3);
     for (const f of topFactors) {
       if (f.variance > 0) {
-        recommendations.push(`Investigate ${f.category} cost increase: actual ${order.currency} ${f.actual.toFixed(2)} vs estimated ${order.currency} ${f.expected.toFixed(2)}. Consider renegotiating or finding alternative providers.`);
+        recommendations.push(`Investigate ${f.category} cost increase: actual Rs ${f.actual.toFixed(2)} vs estimated Rs ${f.expected.toFixed(2)}. Consider renegotiating or finding alternative providers.`);
       }
     }
     if (totalVariance > 0) {
@@ -1016,7 +1021,7 @@ const intelligenceService = {
       recommendations.push('Consider building a larger contingency buffer into future quotations.');
     }
 
-    const contractValue = parseFloat(order.contract_value);
+    const contractValue = orderPkr || 0; // PKR at the booked rate, like the costs
     const estimatedMargin = totalEstimated > 0 ? ((contractValue - totalEstimated) / contractValue * 100) : 0;
     const actualMargin = totalActual > 0 ? ((contractValue - totalActual) / contractValue * 100) : 0;
 
@@ -1025,10 +1030,10 @@ const intelligenceService = {
       linked_type: 'export_order',
       linked_id: orderId,
       linked_ref: order.order_no,
-      summary: `Margin dropped from ${estimatedMargin.toFixed(2)}% (estimated) to ${actualMargin.toFixed(2)}% (actual) on ${order.order_no}. Total cost overrun: ${order.currency} ${totalVariance.toFixed(2)}.`,
+      summary: `Margin dropped from ${estimatedMargin.toFixed(2)}% (estimated) to ${actualMargin.toFixed(2)}% (actual) on ${order.order_no}. Total cost overrun: Rs ${totalVariance.toFixed(2)}.`,
       factors: JSON.stringify(factors),
       total_impact: totalVariance,
-      currency: order.currency,
+      currency: 'PKR',
       recommendations: JSON.stringify(recommendations),
       created_by: userId || null,
     }).returning('*');
@@ -1048,9 +1053,13 @@ const intelligenceService = {
     const actualCosts = await db('export_order_costs').where({ order_id: orderId });
     const actualCostMap = {};
     let totalActual = 0;
+    // In PKR (each cost at its own / the order's booked rate), the same
+    // currency as margin_analysis.estimated_costs — never rupees vs dollars.
+    const { revenuePkr: orderPkr, bookedRate: orderRate } = orderRevenuePkr(order);
     for (const c of actualCosts) {
-      actualCostMap[c.category] = parseFloat(c.amount);
-      totalActual += parseFloat(c.amount);
+      const pkr = costRowPkr(c, orderRate);
+      actualCostMap[c.category] = (actualCostMap[c.category] || 0) + pkr;
+      totalActual += pkr;
     }
 
     let estimatedCostMap = {};
@@ -1091,10 +1100,10 @@ const intelligenceService = {
     const recommendations = [];
     const overruns = factors.filter((f) => f.variance > 0);
     if (overruns.length > 0) {
-      recommendations.push(`Top cost overrun: ${overruns[0].category} (+${order.currency} ${overruns[0].variance.toFixed(2)}). Review vendor contracts.`);
+      recommendations.push(`Top cost overrun: ${overruns[0].category} (+Rs ${overruns[0].variance.toFixed(2)}). Review vendor contracts.`);
     }
     if (totalActual > totalEstimated) {
-      recommendations.push(`Total cost overrun is ${order.currency} ${(totalActual - totalEstimated).toFixed(2)}. Update cost estimation models.`);
+      recommendations.push(`Total cost overrun is Rs ${(totalActual - totalEstimated).toFixed(2)}. Update cost estimation models.`);
       recommendations.push('Schedule a cost review meeting with operations and procurement teams.');
     }
 
@@ -1103,10 +1112,10 @@ const intelligenceService = {
       linked_type: 'export_order',
       linked_id: orderId,
       linked_ref: order.order_no,
-      summary: `Cost analysis for ${order.order_no}: Estimated ${order.currency} ${totalEstimated.toFixed(2)}, Actual ${order.currency} ${totalActual.toFixed(2)}. Overrun: ${order.currency} ${(totalActual - totalEstimated).toFixed(2)}.`,
+      summary: `Cost analysis for ${order.order_no}: Estimated Rs ${totalEstimated.toFixed(2)}, Actual Rs ${totalActual.toFixed(2)}. Overrun: Rs ${(totalActual - totalEstimated).toFixed(2)}.`,
       factors: JSON.stringify(factors),
       total_impact: totalActual - totalEstimated,
-      currency: order.currency,
+      currency: 'PKR',
       recommendations: JSON.stringify(recommendations),
       created_by: userId || null,
     }).returning('*');

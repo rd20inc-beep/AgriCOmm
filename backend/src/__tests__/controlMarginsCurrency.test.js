@@ -121,3 +121,20 @@ describe('risk exposure — never one added-up figure', () => {
     expect(r).not.toHaveProperty('totalFinancialExposure');
   });
 });
+
+describe('root-cause analyses — costs and estimates both in PKR', () => {
+  test('cost overrun compares PKR costs with the PKR estimate and says Rs', async () => {
+    db.__set({
+      export_orders: () => ({ id: 7, order_no: 'EX-007', currency: 'USD', contract_value: 100000, booked_fx_rate: 280 }),
+      margin_analysis: () => ({ estimated_costs: JSON.stringify({ freight: 1820000 }) }),
+      export_order_costs: () => [
+        { category: 'freight', amount: 7000, currency: 'USD', fx_rate: 280 }, // Rs 1,960,000
+      ],
+      root_cause_analyses: echoInsert,
+    });
+    const r = await intelligence.analyzeCostOverrun(7, 1);
+    expect(r.currency).toBe('PKR');
+    expect(r.summary).toMatch(/Estimated Rs 1820000.00, Actual Rs 1960000.00/);
+    expect(r.summary).not.toMatch(/USD/);
+  });
+});
