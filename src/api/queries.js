@@ -541,18 +541,40 @@ export function useDeleteBatch() {
 
 // ===================== INVENTORY =====================
 
+const INVENTORY_PAGE = 1000;
+
+/**
+ * Every lot matching params. The list is paged newest-first, and a single
+ * page of 500 used to be read as "all inventory": once there were more lots,
+ * the oldest (opening stock) silently dropped out of Mill Home, Mill Finance
+ * and every AppContext consumer. Without an explicit `limit` this walks the
+ * pages until the server's total is reached; with one, it reads that page.
+ */
+export async function fetchAllInventory(params = {}, list = inventoryApi.list) {
+  // Don't use `unwrap(res, 'inventory') || unwrap(res, 'lots')` — when
+  // the first key is missing, unwrap falls back to the whole data
+  // object (truthy), short-circuiting `||` before we ever read `lots`.
+  // The /api/inventory endpoint always returns data.lots[].
+  const lotsOf = (res) => {
+    const lots = res?.data?.lots ?? res?.data?.inventory ?? [];
+    return Array.isArray(lots) ? lots : [];
+  };
+  if (params.limit != null) return transformKeys(lotsOf(await list(params)));
+  const all = [];
+  for (let page = 1; ; page += 1) {
+    const res = await list({ ...params, limit: INVENTORY_PAGE, page });
+    const lots = lotsOf(res);
+    all.push(...lots);
+    const total = parseInt(res?.data?.pagination?.total, 10);
+    if (lots.length < INVENTORY_PAGE || !(all.length < total)) break;
+  }
+  return transformKeys(all);
+}
+
 export function useInventory(params = {}, opts = {}) {
   return useQuery({
     queryKey: queryKeys.inventory.list(params),
-    queryFn: async () => {
-      const res = await inventoryApi.list({ limit: 500, ...params });
-      // Don't use `unwrap(res, 'inventory') || unwrap(res, 'lots')` — when
-      // the first key is missing, unwrap falls back to the whole data
-      // object (truthy), short-circuiting `||` before we ever read `lots`.
-      // The /api/inventory endpoint always returns data.lots[].
-      const lots = res?.data?.lots ?? res?.data?.inventory ?? [];
-      return transformKeys(Array.isArray(lots) ? lots : []);
-    },
+    queryFn: () => fetchAllInventory(params),
     ...opts,
   });
 }
