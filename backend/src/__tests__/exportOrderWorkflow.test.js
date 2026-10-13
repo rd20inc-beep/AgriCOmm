@@ -20,6 +20,11 @@ function resetState() {
     // Default active mill so the milling-create controller's mill_id
     // fallback resolves without hitting a real DB.
     mills: [{ id: 1, name: 'Default Mill', is_active: true }],
+    // The acting user (makeReq) is the Super Admin: the one-step
+    // confirm-advance / confirm-balance routes record AND confirm the money,
+    // which only an Owner / Super Admin may do (maker-checker).
+    users: [{ id: 1, role_id: 1 }],
+    roles: [{ id: 1, name: 'Super Admin' }],
     // The receipt moves the order's bank account and journals Dr 1000 / Cr 1310·1110.
     bank_accounts: [{ id: 1, name: 'USD Account', currency: 'USD', current_balance: 0, type: 'bank', entity: 'export', is_active: true }],
     bank_transactions: [],
