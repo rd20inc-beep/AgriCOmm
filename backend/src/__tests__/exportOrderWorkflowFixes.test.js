@@ -444,3 +444,51 @@ describe('drafts', () => {
     expect(state.tables.export_orders[0].status).toBe('Draft');
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+describe('raising the advance % from 0 creates the advance receivable (EX-003)', () => {
+  const noAdvance = {
+    advance_pct: 0, advance_expected: 0, balance_expected: 50000,
+    financial_status: 'Not Required',
+  };
+  const balanceRow = {
+    id: 1, recv_no: 'RCV-BAL-EX-001', order_id: 1, type: 'Balance',
+    expected_amount: 50000, received_amount: 0, outstanding: 50000, status: 'Pending', currency: 'USD',
+  };
+  async function put(body, over = {}) {
+    reset({ export_orders: [order({ ...noAdvance, ...over })], export_order_items: [item()], receivables: [{ ...balanceRow }] });
+    const r = res();
+    await controller.update(req({ params: { id: '1' }, body }), r);
+    return r;
+  }
+
+  it('the RCV-ADV row appears and the advance track leaves Not Required', async () => {
+    const r = await put({ advance_pct: 20 });
+    expect(r.statusCode).toBe(200);
+    const adv = state.tables.receivables.find((x) => x.type === 'Advance');
+    expect(adv).toMatchObject({
+      recv_no: 'RCV-ADV-EX-001', expected_amount: 10000, outstanding: 10000,
+      status: 'Pending', currency: 'USD', base_amount_pkr: 2800000,
+    });
+    expect(state.tables.receivables.find((x) => x.type === 'Balance').expected_amount).toBe(40000);
+    expect(state.tables.export_orders[0].financial_status).toBe('Advance Not Entered');
+  });
+
+  it('a receipt awaiting confirmation keeps Pending Confirmation', async () => {
+    await put({ advance_pct: 20 }, { financial_status: 'Pending Confirmation' });
+    expect(state.tables.export_orders[0].financial_status).toBe('Pending Confirmation');
+  });
+
+  it('dropping the advance to 0 marks it Not Required', async () => {
+    reset({
+      export_orders: [order({ financial_status: 'Advance Not Entered' })],
+      export_order_items: [item()],
+      receivables: [{ ...balanceRow, expected_amount: 40000, outstanding: 40000 },
+        { ...balanceRow, id: 2, recv_no: 'RCV-ADV-EX-001', type: 'Advance', expected_amount: 10000, outstanding: 10000 }],
+    });
+    const r = res();
+    await controller.update(req({ params: { id: '1' }, body: { advance_pct: 0 } }), r);
+    expect(r.statusCode).toBe(200);
+    expect(state.tables.export_orders[0].financial_status).toBe('Not Required');
+  });
+});
