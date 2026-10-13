@@ -2,10 +2,12 @@
 // portal-scoped JWT) so mill workers — who aren't in the `users` table — can
 // view ONLY their own payslips, tax certificate and advance balance.
 const router = require('express').Router();
-const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const db = require('../../config/database');
-let cfg = require('../../config'); cfg = cfg.default || cfg;
+const { portalLoginLimiter } = require('../../middleware/rateLimiter');
+const {
+  newPinError, lockedMessage, reserveAttempt, recordFailure, recordSuccess, signPortalToken, portalAuth,
+} = require('./portalAuth');
 
 const num = (v) => parseFloat(v) || 0;
 
@@ -19,33 +21,30 @@ async function companyProfile() {
   return { name: 'Agri Commodities' };
 }
 
-// Verify a portal-scoped token and pin the worker on the request. Staff tokens
-// (no `portal` claim) are rejected; portal tokens carry no role_id so they also
-// can't satisfy staff `authorize()` elsewhere.
-function portalAuth(req, res, next) {
-  const h = req.headers.authorization;
-  if (!h || !h.startsWith('Bearer ')) return res.status(401).json({ success: false, message: 'No token provided.' });
-  try {
-    const d = jwt.verify(h.split(' ')[1], cfg.jwt.secret);
-    if (!d.portal || !d.workerId) return res.status(401).json({ success: false, message: 'Not a portal session.' });
-    req.workerId = d.workerId;
-    next();
-  } catch {
-    return res.status(401).json({ success: false, message: 'Invalid or expired token.' });
-  }
-}
-
-// POST /api/portal/login — CNIC + PIN.
-router.post('/login', async (req, res) => {
+// POST /api/portal/login — CNIC + PIN. Rate-limited per IP and locked per
+// worker after repeated wrong PINs (see portalAuth.js).
+router.post('/login', portalLoginLimiter, async (req, res) => {
   try {
     const cnic = String(req.body && req.body.cnic || '').trim();
     const pin = String(req.body && req.body.pin || '');
     if (!cnic || !pin) return res.status(400).json({ success: false, message: 'CNIC and PIN are required.' });
-    const w = await db('mill_workers').where('cnic', cnic).where('is_active', true).first();
+    const matches = await db('mill_workers').where('cnic', cnic).where('is_active', true).orderBy('id').limit(2);
+    // Two active workers on one CNIC: refuse rather than guess whose account it is.
+    if (matches.length > 1) {
+      return res.status(409).json({ success: false, message: 'This CNIC is registered to more than one employee. Please contact your payroll administrator.' });
+    }
+    const w = matches[0];
     if (!w || !w.portal_enabled || !w.portal_pin_hash) return res.status(401).json({ success: false, message: 'Invalid credentials, or self-service is not enabled for you.' });
+    const slot = await reserveAttempt(w.id);
+    if (slot.locked) return res.status(429).json({ success: false, message: lockedMessage(slot.locked) });
     const ok = await bcrypt.compare(pin, w.portal_pin_hash);
-    if (!ok) return res.status(401).json({ success: false, message: 'Invalid CNIC or PIN.' });
-    const token = jwt.sign({ portal: true, workerId: w.id, name: w.name }, cfg.jwt.secret, { expiresIn: '12h' });
+    if (!ok) {
+      const lockedUntil = await recordFailure(w.id, slot.attempt);
+      if (lockedUntil) return res.status(429).json({ success: false, message: lockedMessage(lockedUntil) });
+      return res.status(401).json({ success: false, message: 'Invalid CNIC or PIN.' });
+    }
+    await recordSuccess(w.id);
+    const token = signPortalToken(w);
     return res.json({ success: true, data: { token, worker: { id: w.id, name: w.name, role: w.role } } });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
@@ -152,18 +151,24 @@ router.get('/tax-statement', portalAuth, async (req, res) => {
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 
-// POST /api/portal/change-pin — worker changes their own PIN.
+// POST /api/portal/change-pin — worker changes their own PIN. The PIN version
+// moves on, so other sessions end; this one gets a fresh token back.
 router.post('/change-pin', portalAuth, async (req, res) => {
   try {
     const current = String(req.body && req.body.current_pin || '');
     const next = String(req.body && req.body.new_pin || '').trim();
-    if (!/^\d{4,8}$/.test(next)) return res.status(400).json({ success: false, message: 'New PIN must be 4–8 digits.' });
+    const pinErr = newPinError(next);
+    if (pinErr) return res.status(400).json({ success: false, message: `New ${pinErr}` });
     const w = await db('mill_workers').where('id', req.workerId).first();
     if (!w || !w.portal_pin_hash) return res.status(404).json({ success: false, message: 'Worker not found.' });
     const ok = await bcrypt.compare(current, w.portal_pin_hash);
     if (!ok) return res.status(401).json({ success: false, message: 'Current PIN is incorrect.' });
-    await db('mill_workers').where('id', w.id).update({ portal_pin_hash: await bcrypt.hash(next, 10), updated_at: db.fn.now() });
-    return res.json({ success: true, data: { changed: true } });
+    const [updated] = await db('mill_workers').where('id', w.id).update({
+      portal_pin_hash: await bcrypt.hash(next, 10),
+      portal_pin_version: db.raw('portal_pin_version + 1'),
+      updated_at: db.fn.now(),
+    }).returning(['id', 'name', 'portal_pin_version']);
+    return res.json({ success: true, data: { changed: true, token: signPortalToken(updated) } });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 

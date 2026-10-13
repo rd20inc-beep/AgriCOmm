@@ -159,7 +159,10 @@ export default function EmployeePortal() {
   async function changePin(e) {
     e.preventDefault(); setErr(''); setMsg('');
     try {
-      await portalApi('/change-pin', { method: 'POST', token, body: pinForm });
+      if (!/^\d{6,8}$/.test(pinForm.new_pin)) { setErr('New PIN must be 6–8 digits.'); return; }
+      const res = await portalApi('/change-pin', { method: 'POST', token, body: pinForm });
+      // A PIN change ends every older session; carry on with the fresh token.
+      if (res?.data?.token) { localStorage.setItem(TOKEN_KEY, res.data.token); setToken(res.data.token); }
       setPinForm({ current_pin: '', new_pin: '' }); setPinOpen(false); setMsg('PIN changed.');
     } catch (e2) { setErr(e2.message); }
   }
@@ -237,7 +240,7 @@ export default function EmployeePortal() {
             <div className="text-sm font-semibold text-gray-900 mb-2">Change your PIN</div>
             <form onSubmit={changePin} className="space-y-2">
               <input type="password" inputMode="numeric" maxLength={8} value={pinForm.current_pin} onChange={(e) => setPinForm((f) => ({ ...f, current_pin: e.target.value.replace(/\D/g, '') }))} placeholder="Current PIN" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
-              <input type="password" inputMode="numeric" maxLength={8} value={pinForm.new_pin} onChange={(e) => setPinForm((f) => ({ ...f, new_pin: e.target.value.replace(/\D/g, '') }))} placeholder="New PIN (4–8 digits)" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+              <input type="password" inputMode="numeric" maxLength={8} value={pinForm.new_pin} onChange={(e) => setPinForm((f) => ({ ...f, new_pin: e.target.value.replace(/\D/g, '') }))} placeholder="New PIN (6–8 digits)" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
               <button type="submit" className="px-4 py-2 text-sm text-white bg-[#1e3a5f] rounded-lg hover:bg-[#162a45]">Update PIN</button>
             </form>
           </div>

@@ -2589,11 +2589,11 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
                 <input
                   type="text" inputMode="numeric" maxLength={8} value={portalPin}
                   onChange={e => setPortalPin(e.target.value.replace(/\D/g, ''))}
-                  placeholder="4–8 digit PIN"
+                  placeholder="6–8 digit PIN"
                   className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900"
                 />
                 <button
-                  disabled={!workerForm.cnic || portalPin.length < 4 || setPinMut.isPending}
+                  disabled={!workerForm.cnic || portalPin.length < 6 || setPinMut.isPending}
                   onClick={async () => { try { await setPinMut.mutateAsync({ id: workerForm.id, data: { pin: portalPin, enabled: true } }); setPortalPin(''); setWorkerForm(p => ({ ...p, portal_enabled: true })); addToast('Self-service PIN set', 'success'); } catch (e) { addToast(e.message, 'error'); } }}
                   className="px-3 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 whitespace-nowrap"
                 >{workerForm.portal_enabled ? 'Reset PIN' : 'Set PIN & enable'}</button>
