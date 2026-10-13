@@ -5,6 +5,8 @@ const auditService = require('../admin/audit.service');
 const inventoryService = require('../inventory/inventory.service');
 const { nextDocNo } = require('../../utils/docNumber');
 const { companyStock } = require('../inventory/stockSql');
+const { orderMarginRows } = require('./orderMargins');
+const { orderRevenuePkr, costRowPkr } = require('../finance/profitDefinitions');
 
 const round2 = (v) => Math.round(v * 100) / 100;
 
@@ -235,21 +237,26 @@ const controlService = {
     const order = await db('export_orders').where({ id: orderId }).first();
     if (!order) throw new Error('Export order not found.');
 
-    // Get actual costs from export_order_costs
+    // Everything in PKR at the order's BOOKED rate (owner rule G-1). This used
+    // to take export_order_costs (rupees) off contract value / receipts
+    // (dollars), so every USD order showed a loss and a negative_margin flag.
+    const { currency, bookedRate: orderRate, revenuePkr } = orderRevenuePkr(order);
+    const toPkr = (foreign) => (currency === 'PKR' ? foreign : (orderRate > 0 ? foreign * orderRate : null));
+
+    // Actual costs from export_order_costs, each in PKR.
     const costRows = await db('export_order_costs').where({ order_id: orderId });
     const actualCosts = {};
     let totalActualCost = 0;
     for (const c of costRows) {
-      actualCosts[c.category] = parseFloat(c.amount) || 0;
-      totalActualCost += parseFloat(c.amount) || 0;
+      const pkr = costRowPkr(c, orderRate);
+      actualCosts[c.category] = (actualCosts[c.category] || 0) + pkr;
+      totalActualCost += pkr;
     }
 
-    // Estimated costs: use contract_value-based estimates (industry norms per MT)
+    // Estimated costs: industry norms per MT (USD), converted at the booked rate.
     const qtyMT = parseFloat(order.qty_mt) || 1;
     const pricePerMT = parseFloat(order.price_per_mt) || 0;
-    const contractValue = parseFloat(order.contract_value) || 0;
-
-    const estimatedCosts = {
+    const normsForeign = {
       rice: qtyMT * pricePerMT * 0.50,     // ~50% of selling price for raw material
       bags: qtyMT * 25,                      // ~$25/MT for bags
       loading: qtyMT * 20,                   // ~$20/MT for loading
@@ -257,11 +264,17 @@ const controlService = {
       freight: qtyMT * 65,                   // ~$65/MT for freight (CIF/CNF)
       misc: qtyMT * 10,                      // ~$10/MT misc
     };
-    let totalEstimatedCost = Object.values(estimatedCosts).reduce((s, v) => s + v, 0);
+    const priced = revenuePkr != null;
+    const estimatedCosts = Object.fromEntries(Object.entries(normsForeign)
+      .map(([k, v]) => [k, priced ? Math.round(toPkr(v) * 100) / 100 : null]));
+    const totalEstimatedCost = priced ? Object.values(estimatedCosts).reduce((s, v) => s + v, 0) : 0;
 
-    // Revenue
-    const estimatedRevenue = contractValue;
-    const actualRevenue = parseFloat(order.advance_received || 0) + parseFloat(order.balance_received || 0);
+    // Revenue (PKR): contract at the booked rate; received = PKR actually
+    // credited when recorded, else the foreign receipts at the booked rate.
+    const estimatedRevenue = priced ? revenuePkr : 0;
+    const receivedForeign = parseFloat(order.advance_received || 0) + parseFloat(order.balance_received || 0);
+    const receivedPkrBooked = parseFloat(order.advance_received_pkr || 0) + parseFloat(order.balance_received_pkr || 0);
+    const actualRevenue = receivedPkrBooked > 0 ? receivedPkrBooked : (toPkr(receivedForeign) || 0);
 
     // Margin calculations
     const estimatedMarginPct = estimatedRevenue > 0 ? ((estimatedRevenue - totalEstimatedCost) / estimatedRevenue * 100) : 0;
@@ -270,15 +283,9 @@ const controlService = {
     const varianceAmount = (actualRevenue - totalActualCost) - (estimatedRevenue - totalEstimatedCost);
     const variancePct = estimatedRevenue > 0 ? (varianceAmount / estimatedRevenue * 100) : 0;
 
-    // FX rates
-    const fxRateBooked = await db('fx_rates')
-      .where('from_currency', 'USD')
-      .where('to_currency', 'PKR')
-      .where('effective_date', '<=', order.created_at || new Date())
-      .orderBy('effective_date', 'desc')
-      .select('rate')
-      .first();
-
+    // FX: the order's own booked rate vs today's rate. Gain / loss is the
+    // realised one — PKR credited minus the same foreign amount at the booked
+    // rate — in PKR.
     const fxRateActual = await db('fx_rates')
       .where('from_currency', 'USD')
       .where('to_currency', 'PKR')
@@ -286,17 +293,22 @@ const controlService = {
       .select('rate')
       .first();
 
-    const bookedRate = fxRateBooked ? parseFloat(fxRateBooked.rate) : 280.00;
-    const currentRate = fxRateActual ? parseFloat(fxRateActual.rate) : 280.00;
-    const fxGainLoss = (currentRate - bookedRate) * actualRevenue / currentRate;
+    const bookedRate = currency === 'PKR' ? 1 : (orderRate || null);
+    const currentRate = currency === 'PKR' ? 1 : (fxRateActual ? parseFloat(fxRateActual.rate) : null);
+    const fxGainLoss = (currency !== 'PKR' && orderRate > 0 && receivedPkrBooked > 0)
+      ? receivedPkrBooked - receivedForeign * orderRate : 0;
 
     // Risk flags
+    // An order with no booked rate can't be put in one currency: flag it
+    // unpriced instead of raising margin alarms on mixed figures.
     const riskFlags = [];
-    if (actualMarginPct < 0) riskFlags.push('negative_margin');
-    if (actualMarginPct < 5) riskFlags.push('low_margin');
-    if (Math.abs(variancePct) > 10) riskFlags.push('high_variance');
+    if (!priced) riskFlags.push('unpriced');
+    if (priced && actualRevenue > 0 && actualMarginPct < 0) riskFlags.push('negative_margin');
+    if (priced && actualRevenue > 0 && actualMarginPct < 5) riskFlags.push('low_margin');
+    if (priced && Math.abs(variancePct) > 10) riskFlags.push('high_variance');
     if (order.balance_received < order.balance_expected && order.status !== 'Draft') riskFlags.push('outstanding_balance');
-    if (Math.abs(fxGainLoss) > 500) riskFlags.push(fxGainLoss > 0 ? 'fx_gain' : 'fx_loss');
+    // ≈ USD 500 at the booked rate (the old threshold was in dollars).
+    if (orderRate > 0 && Math.abs(fxGainLoss) > 500 * orderRate) riskFlags.push(fxGainLoss > 0 ? 'fx_gain' : 'fx_loss');
 
     // Upsert margin_analysis record
     const existing = await db('margin_analysis').where({ order_id: orderId }).first();
@@ -680,11 +692,18 @@ const controlService = {
       .where('created_at', '<=', periodEnd);
 
     const totalOrders = orders.length;
-    const totalRevenue = orders.reduce((s, o) => s + parseFloat(o.contract_value || 0), 0);
 
-    // Calculate margin per order
-    let totalProfit = 0;
-    let marginSum = 0;
+    // Revenue / profit / margin: the Booked figures of the one profit
+    // definition, all PKR at each order's booked rate. Taking export_order_costs
+    // (rupees) off contract_value (dollars) made every USD order a loss.
+    // Unpriced orders (no booked rate / rice cost) don't count toward margin.
+    const ids = new Set(orders.map((o) => Number(o.id)));
+    const priced = (await orderMarginRows(db, { startDate: periodStart, endDate: periodEnd }))
+      .filter((r) => ids.has(Number(r.id)) && r.priced && parseFloat(r.revenuePkr) > 0);
+    const totalRevenue = priced.reduce((s, r) => s + parseFloat(r.revenuePkr), 0);
+    const totalProfit = priced.reduce((s, r) => s + parseFloat(r.bookedProfitPkr || 0), 0);
+    const marginSum = priced.reduce((s, r) => s + (parseFloat(r.bookedProfitPkr || 0) / parseFloat(r.revenuePkr)) * 100, 0);
+
     let overdueCount = 0;
     let advanceDaysSum = 0;
     let balanceDaysSum = 0;
@@ -692,14 +711,6 @@ const controlService = {
     let balanceCount = 0;
 
     for (const order of orders) {
-      // Get costs
-      const costs = await db('export_order_costs').where({ order_id: order.id });
-      const totalCost = costs.reduce((s, c) => s + parseFloat(c.amount || 0), 0);
-      const revenue = parseFloat(order.contract_value || 0);
-      const profit = revenue - totalCost;
-      totalProfit += profit;
-      if (revenue > 0) marginSum += (profit / revenue) * 100;
-
       // Advance timing
       if (order.advance_date && order.created_at) {
         const created = new Date(order.created_at);
@@ -728,7 +739,7 @@ const controlService = {
       }
     }
 
-    const avgMarginPct = totalOrders > 0 ? marginSum / totalOrders : 0;
+    const avgMarginPct = priced.length > 0 ? marginSum / priced.length : 0;
     const avgAdvanceDays = advanceCount > 0 ? advanceDaysSum / advanceCount : 0;
     const avgBalanceDays = balanceCount > 0 ? balanceDaysSum / balanceCount : 0;
 

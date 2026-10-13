@@ -8,7 +8,7 @@ const { collectionRate: computeCollectionRate } = require('../finance/collection
 const fxRateService = require('../finance/fxRate.service');
 const { dayOf } = require('../exportOrders/balanceDueDate');
 const {
-  RECEIVABLE_CLOSED, PAYABLE_CLOSED, ORDER_COST_PKR_SQL,
+  RECEIVABLE_CLOSED, PAYABLE_CLOSED, ORDER_COST_PKR_SQL, RECV_PKR_EQUIV_SQL,
   byCurrency, cashSummary, collectionRateFields,
 } = require('../finance/currencyFigures');
 
@@ -780,13 +780,19 @@ const intelligenceService = {
       }
     }
 
-    // Factor 2: Outstanding receivables
+    // Factor 2: Outstanding receivables — PKR at each receivable's booked
+    // rate, so a customer's USD and PKR receivables aren't added as one
+    // number. Rows with no booked figure are left out of both sides.
     const receivables = await db('receivables')
       .where({ customer_id: customerId })
-      .whereIn('status', ['Pending', 'Partially Paid', 'Overdue'])
+      .whereIn('status', ['Pending', 'Partial', 'Overdue'])
+      .whereRaw(`(${RECV_PKR_EQUIV_SQL}) IS NOT NULL`)
       .select(
-        db.raw('COALESCE(SUM(outstanding), 0) as total_outstanding'),
-        db.raw('COALESCE(SUM(expected_amount), 0) as total_expected')
+        db.raw(`COALESCE(SUM(${RECV_PKR_EQUIV_SQL}), 0) as total_outstanding`),
+        db.raw(`COALESCE(SUM(CASE
+          WHEN COALESCE(currency, 'PKR') = 'PKR' THEN expected_amount
+          WHEN base_amount_pkr > 0 THEN base_amount_pkr
+          ELSE expected_amount * fx_rate END), 0) as total_expected`)
       )
       .first();
 
@@ -847,7 +853,7 @@ const intelligenceService = {
       risk_level: riskLevel,
       risk_factors: JSON.stringify(factors),
       financial_exposure: totalOutstanding,
-      currency: 'USD',
+      currency: 'PKR', // booked-rate PKR equivalent of the open receivables
       calculated_at: new Date(),
     };
 
@@ -904,9 +910,10 @@ const intelligenceService = {
         .groupBy('risk_level'),
       this.getTopRiskOrders(5),
       this.getTopRiskCustomers(5),
+      // Per currency — an order's exposure is in its own currency.
       db('risk_scores')
-        .select(db.raw('COALESCE(SUM(financial_exposure), 0) as total'))
-        .first(),
+        .select(db.raw("COALESCE(currency, 'PKR') as currency"), db.raw('COALESCE(SUM(financial_exposure), 0) as total'))
+        .groupByRaw("COALESCE(currency, 'PKR')"),
     ]);
 
     const levels = levelCounts.reduce((acc, r) => { acc[r.risk_level] = parseInt(r.count, 10); return acc; }, {});
@@ -920,7 +927,7 @@ const intelligenceService = {
       },
       topOrders,
       topCustomers,
-      totalFinancialExposure: parseFloat(totalExposure.total),
+      totalFinancialExposureByCurrency: byCurrency(totalExposure),
     };
   },
 
