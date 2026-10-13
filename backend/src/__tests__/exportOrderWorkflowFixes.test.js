@@ -474,6 +474,12 @@ describe('raising the advance % from 0 creates the advance receivable (EX-003)',
     expect(state.tables.export_orders[0].financial_status).toBe('Advance Not Entered');
   });
 
+  it('an order that jumped to Advance Received at 0% goes back to Awaiting Advance', async () => {
+    await put({ advance_pct: 20 }, { status: 'Advance Received', current_step: 3 });
+    expect(state.tables.export_orders[0]).toMatchObject({ status: 'Awaiting Advance', current_step: 2 });
+    expect(state.tables.export_order_status_history.at(-1)).toMatchObject({ from_status: 'Advance Received', to_status: 'Awaiting Advance' });
+  });
+
   it('a receipt awaiting confirmation keeps Pending Confirmation', async () => {
     await put({ advance_pct: 20 }, { financial_status: 'Pending Confirmation' });
     expect(state.tables.export_orders[0].financial_status).toBe('Pending Confirmation');
