@@ -27,13 +27,18 @@ const { ensureAccountGl } = require('../../shared/accountGl');
 // Descriptive columns an edit may change (schema.baseline.txt bank_accounts).
 // Never: id, uid, created_at, updated_at, current_balance.
 const EDITABLE = [
-  'name', 'bank_name', 'account_number', 'branch', 'type',
+  'name', 'bank_name', 'account_number', 'branch',
   'account_title', 'iban', 'swift_bic', 'bank_address',
   'correspondent_bank_name', 'correspondent_swift', 'correspondent_account',
   'is_active', 'is_export_default', 'approved_for_customer', 'is_favorite',
 ];
-// Columns that change what the money IS — only while the account has no money history.
-const LOCKED_ONCE_USED = ['currency', 'entity'];
+// Columns that change what the money IS — only while the account has no money
+// history. `type` (bank / cash / lc) is one: it picks the cash float a cash
+// receipt lands in, the cash method's auto-selected account and the GL
+// sub_type, so flipping a used bank account to cash re-reads its past.
+const LOCKED_ONCE_USED = ['currency', 'entity', 'type'];
+// A stored NULL means the default, so re-sending the default is not a change.
+const LOCKED_DEFAULTS = { type: 'bank' };
 
 const BALANCE_MSG = 'Balances change only through payments, transfers or a Danger Zone adjustment.';
 
@@ -55,7 +60,7 @@ async function hasMoneyHistory(trx, acct) {
 
 /**
  * Edit an account's descriptive fields. Throws {status} errors:
- *   404 not found · 400 a different balance was sent · 409 currency/entity change on a used account.
+ *   404 not found · 400 a different balance was sent · 409 currency/entity/type change on a used account.
  */
 async function updateBankAccount(trx, id, body = {}) {
   const acct = await trx('bank_accounts').where({ id }).forUpdate().first();
@@ -74,7 +79,7 @@ async function updateBankAccount(trx, id, body = {}) {
   for (const k of EDITABLE) if (body[k] !== undefined) updates[k] = body[k];
 
   const changingLocked = LOCKED_ONCE_USED.filter(
-    (k) => body[k] !== undefined && body[k] !== null && String(body[k]) !== String(acct[k] ?? ''),
+    (k) => body[k] !== undefined && body[k] !== null && String(body[k]) !== String(acct[k] ?? LOCKED_DEFAULTS[k] ?? ''),
   );
   if (changingLocked.length) {
     if (await hasMoneyHistory(trx, acct)) {
@@ -95,6 +100,7 @@ async function updateBankAccount(trx, id, body = {}) {
     if (updates.name !== undefined && updates.name) glUpd.name = String(updates.name).slice(0, 255);
     if (updates.currency !== undefined) glUpd.currency = String(updates.currency || 'PKR').toUpperCase();
     if (updates.entity !== undefined) glUpd.entity = ['general', 'mill', 'export'].includes(updates.entity) ? updates.entity : null;
+    if (updates.type !== undefined) glUpd.sub_type = updates.type === 'cash' ? 'cash' : 'bank';
     if (Object.keys(glUpd).length) {
       await trx('chart_of_accounts').where({ id: row.gl_account_id }).update({ ...glUpd, updated_at: trx.fn.now() });
     }
