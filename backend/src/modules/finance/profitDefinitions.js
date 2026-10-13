@@ -683,6 +683,7 @@ module.exports = {
   exportProfit,
   exportTotals,
   orderRevenuePkr,
+  costRowPkr,
   rateMasterPerKg,
   millOverheads,
   millAndLocalProfit,
