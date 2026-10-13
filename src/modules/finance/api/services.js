@@ -34,7 +34,6 @@ export const financeApi = {
   collectionRate: () => api.get('/api/finance/collection-rate'),
   internalTransfers: (params) => api.get('/api/finance/internal-transfers', params),
   internalTransfer: (id) => api.get(`/api/finance/internal-transfers/${id}`),
-  createTransfer: (data) => api.post('/api/finance/internal-transfers', data),
   confirmTransferExport: (id) => api.put(`/api/finance/internal-transfers/${id}/confirm-export`),
   fundTransfers: (params) => api.get('/api/finance/fund-transfers', params),
   createFundTransfer: (data) => api.post('/api/finance/fund-transfers', data),

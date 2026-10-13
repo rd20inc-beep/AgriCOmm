@@ -4,8 +4,7 @@
  *  A. createReprocessingBatch took an MT quantity and passed it straight to
  *     postMovement (which takes KG) and compared it to available_qty (KG), so
  *     reprocessing 2 MT consumed 2 kg.
- *  B. createInternalTransfer only checked TOTAL mill finished stock, so one
- *     batch could be transferred past its own finished output.
+ *  B. createInternalTransfer (batch → order) is now retired — see its test.
  */
 
 jest.mock('../config/database', () => {
@@ -19,15 +18,6 @@ jest.mock('../config/database', () => {
 jest.mock('../modules/inventory/inventory.service', () => ({
   postMovement: jest.fn(async (trx, args) => ({ ...args })),
   MOVEMENT_TYPES: { PRODUCTION_ISSUE: 'production_issue' },
-}));
-
-// Reaching the doc-number step means the per-batch cap let the transfer through.
-jest.mock('../utils/docNumber', () => ({
-  nextDocNo: jest.fn(async () => {
-    const err = new Error('PAST_CAP');
-    err.status = 418;
-    throw err;
-  }),
 }));
 
 const { fakeKnex } = require('./helpers/fakeKnex');
@@ -73,55 +63,26 @@ describe('A. createReprocessingBatch converts MT → KG for the stock engine', (
   });
 });
 
-describe('B. createInternalTransfer caps each batch at its finished output', () => {
+describe('B. createInternalTransfer is retired (410 Gone)', () => {
+  // The batch → order transfer booked USD into the PKR GL; the per-batch cap it
+  // once enforced no longer matters because nothing can create one. New moves
+  // are lot-precise (/lot-inventory/lots/:id/transfer-to-export).
   const db = require('../config/database');
   const controller = require('../modules/finance/finance.controller');
 
-  beforeAll(() => jest.spyOn(console, 'error').mockImplementation(() => {}));
-  afterAll(() => console.error.mockRestore());
-
-  // Chainable stub: every builder method returns itself; first() resolves to
-  // the scripted row for that table.
-  function stubDb({ batch, priorKg }) {
-    const rowFor = { milling_batches: batch, internal_transfers: { kg: priorKg } };
-    const builder = (table) => {
-      const name = String(table).split(/\s+as\s+/i)[0];
-      const b = {};
-      for (const m of ['where', 'whereNot', 'orWhereNull', 'select', 'forUpdate', 'sum', 'leftJoin', 'orderBy']) {
-        b[m] = (a) => { if (typeof a === 'function') a.call(b); return b; };
-      }
-      b.first = async () => rowFor[name];
-      return b;
-    };
-    db.mockImplementation(builder);
-    db.transaction.mockImplementation(async (cb) => cb(builder));
-  }
-
-  function run(body) {
+  test('refuses to create a transfer and touches no table', async () => {
+    db.mockClear();
+    db.transaction.mockClear();
     const res = { statusCode: 200, body: null };
     res.status = (c) => { res.statusCode = c; return res; };
     res.json = (b) => { res.body = b; return res; };
-    return controller.createInternalTransfer({ body, user: { id: 1 } }, res).then(() => res);
-  }
-
-  const body = { batch_id: 7, export_order_id: 3, product_name: 'Super', transfer_price_pkr: 200000, dispatch_date: '2026-10-07' };
-
-  test('rejects a transfer beyond what is left on the batch', async () => {
-    stubDb({ batch: { id: 7, batch_no: 'M-007', actual_finished_kg: '10000' }, priorKg: '8000' });
-    const res = await run({ ...body, qty_mt: 3 }); // 3000 kg > 2000 kg left
-    expect(res.statusCode).toBe(422);
-    expect(res.body.message).toMatch(/only 2,000 kg/);
-  });
-
-  test('allows a transfer within what is left on the batch', async () => {
-    stubDb({ batch: { id: 7, batch_no: 'M-007', actual_finished_kg: '10000' }, priorKg: '8000' });
-    const res = await run({ ...body, qty_mt: 2 }); // exactly the 2000 kg left
-    expect(res.statusCode).toBe(418); // got past the cap to doc numbering
-  });
-
-  test('a batch with nothing transferred yet can send its whole output', async () => {
-    stubDb({ batch: { id: 7, batch_no: 'M-007', actual_finished_kg: '10000' }, priorKg: null });
-    const res = await run({ ...body, qty_mt: 10 });
-    expect(res.statusCode).toBe(418);
+    await controller.createInternalTransfer({
+      body: { batch_id: 7, export_order_id: 3, qty_mt: 2, total_value_pkr: 400000, usd_equivalent: 1429 },
+      user: { id: 1 },
+    }, res);
+    expect(res.statusCode).toBe(410);
+    expect(res.body.message).toMatch(/Transfer to Export/);
+    expect(db).not.toHaveBeenCalled();
+    expect(db.transaction).not.toHaveBeenCalled();
   });
 });

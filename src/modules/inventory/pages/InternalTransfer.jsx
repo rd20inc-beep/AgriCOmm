@@ -1,147 +1,40 @@
 import { useState } from 'react';
-import { ArrowRightLeft, Package, DollarSign, Calendar, Warehouse, CheckCircle, Building2, Clock, Truck, Loader2, ArrowDown } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { ArrowRightLeft, Calendar, CheckCircle, Clock, Truck, Loader2, ArrowDown, Info } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
-import { useInternalTransfers, useCreateTransfer, useInternalTransfer, useConfirmTransferExport } from '../../../api/queries';
+import { useInternalTransfers, useInternalTransfer, useConfirmTransferExport } from '../../../api/queries';
 
-// Roles allowed to see supplier names — mirrors the backend redaction
-// (export roles never see who the mill bought from).
-const SUPPLIER_NAME_ROLES = ['Super Admin', 'Owner', 'Mill Manager', 'Mill Operator'];
-// Only finance / owner (management) may LINK a transfer to an export order. Every
-// mill-side role (Mill Manager, Mill Operator, Inventory Officer, …) transfers to
-// the export pool; the export team allocates it to an order later.
+// Only finance / owner (management) see which export order a transfer is linked
+// to; mill-side roles transfer to the export pool.
 const ORDER_LINK_ROLES = ['Super Admin', 'Owner', 'Finance Manager'];
 import StatusBadge from '../../../components/StatusBadge';
 import SlideDrawer from '../../../components/SlideDrawer';
-import { fmtPKR, fmtUSD, fmtNum, fmtPct, fmtDate, fmtDateTime } from '../../../shared/utils/format';
+import { fmtPKR, fmtUSD, fmtNum, fmtDate, fmtDateTime } from '../../../shared/utils/format';
 import { transferKg } from '../utils/stockMath';
-import { mtToKg, kgToMt, perMtToPerKg, perKgToPerMt } from '../../../shared/utils/unitConversion';
+import { perMtToPerKg } from '../../../shared/utils/unitConversion';
 
-const PKR_RATE = 280; // PKR per USD
+const PKR_RATE = 280; // PKR per USD (display fallback for old rows)
 const formatPKR = (value) => fmtPKR(parseFloat(value) || 0, { decimals: 2 });
 const formatUSD = (value) => fmtUSD(parseFloat(value) || 0);
 
+// Read-only history of Mill → Export stock transfers. The old batch → order
+// "New Transfer" form is retired (POST /api/finance/internal-transfers is 410
+// Gone): it booked the export side in USD straight into the PKR ledger. New
+// transfers are made per lot from Lot Detail → "Transfer to Export", which is
+// lot-precise and still lands in this list.
 export default function InternalTransfer() {
-  const { millingBatches, exportOrders, addToast, settings } = useApp();
   const { user } = useAuth();
   const { data: transfers = [], isLoading: loading } = useInternalTransfers();
-  const createTransferMut = useCreateTransfer();
-
-  // Mill-side users transfer to the export pool and must NOT pick an export order —
-  // only finance/owner link one. Export-side users must NOT see supplier names.
   const canLinkOrder = ORDER_LINK_ROLES.includes(user?.role);
-  const canSeeSupplier = SUPPLIER_NAME_ROLES.includes(user?.role);
-
-  // Already-transferred kg per batch (any non-cancelled transfer counts), so a
-  // batch drops out of the picker once its finished output is fully transferred
-  // and can't be transferred twice.
-  const transferredKgByBatch = {};
-  for (const t of transfers) {
-    if (t.status === 'Cancelled') continue;
-    const bid = t.batchId;
-    if (bid == null) continue;
-    transferredKgByBatch[bid] = (transferredKgByBatch[bid] || 0) + transferKg(t);
-  }
-
-  // Any batch with finished output still to transfer is a candidate — not only
-  // "Completed" batches ("Pending Approval"/"Approved" often have output ready).
-  // Batches whose finished output is fully transferred are excluded. Service
-  // Milling (client-owned) batches are NEVER transferable to export — their rice
-  // belongs to the client and leaves only via a Service Milling dispatch.
-  const completedBatches = millingBatches
-    .filter(b => !(b.isServiceMilling ?? b.is_service_milling))
-    .map(b => {
-      const finishedKg = parseFloat(b.actualFinishedKg) || mtToKg(b.actualFinishedMT ?? b.actual_finished_mt);
-      const transferredKg = transferredKgByBatch[b.dbId] || transferredKgByBatch[b.id] || 0;
-      return { ...b, _remainingKg: Math.max(0, finishedKg - transferredKg) };
-    })
-    .filter(b => b._remainingKg > 1 && !['Cancelled', 'Rejected'].includes(b.status));
-  const activeExportOrders = exportOrders.filter(o =>
-    !['Closed', 'Cancelled', 'Draft'].includes(o.status)
-  );
-
-  const [form, setForm] = useState({
-    batchNo: '',
-    exportOrder: '',
-    qtyKg: '',
-    transferPrice: '',
-    dispatchDate: '',
-  });
-  const [submitting, setSubmitting] = useState(false);
   const [openId, setOpenId] = useState(null);
-
-  const selectedBatch = completedBatches.find(b => b.id === form.batchNo);
-  const selectedOrder = activeExportOrders.find(o => o.id === form.exportOrder);
-
-  const productName = selectedBatch
-    ? exportOrders.find(o => o.millingOrderId === selectedBatch.id)?.productName || 'Finished Rice'
-    : '';
-
-  const qty = parseFloat(form.qtyKg) || 0;       // KG
-  const price = parseFloat(form.transferPrice) || 0; // PKR per KG
-  const totalAmount = qty * price;
-  // Convert to USD at the selected order's locked (booked) rate — the transfer
-  // becomes an export cost against that order, so its USD must match the order's
-  // rate (the backend books the cost at booked_fx_rate too). Fall back to the live
-  // settings rate, then the module default. NOT a hardcoded 280.
-  const fxRate = parseFloat(selectedOrder?.bookedFxRate) || parseFloat(settings?.pkrRate) || PKR_RATE;
-  // Cap the transfer to the batch's REMAINING (not-yet-transferred) finished output (KG).
-  const batchFinishedKg = selectedBatch ? (parseFloat(selectedBatch._remainingKg) || 0) : 0;
-  const exceedsStock = batchFinishedKg > 0 && qty > batchFinishedKg + 1e-6;
-
-  const handleChange = (field, value) => {
-    setForm(prev => ({ ...prev, [field]: value }));
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!form.batchNo || (canLinkOrder && !form.exportOrder) || !form.qtyKg || !form.transferPrice || !form.dispatchDate) {
-      addToast('Please fill in all required fields', 'error');
-      return;
-    }
-    if (exceedsStock) {
-      addToast(`Cannot transfer more than the ${fmtNum(Math.round(batchFinishedKg))} kg still available on this batch`, 'error');
-      return;
-    }
-
-    // Resolve numeric IDs from the batch/order objects
-    const batch = completedBatches.find(b => b.id === form.batchNo);
-    const order = activeExportOrders.find(o => o.id === form.exportOrder);
-    const batchId = batch?.dbId || parseInt(form.batchNo) || null;
-    const orderId = order?.dbId || parseInt(form.exportOrder) || null;
-    const usdEquiv = Math.round(totalAmount / fxRate);
-
-    setSubmitting(true);
-    try {
-      const res = await createTransferMut.mutateAsync({
-        batch_id: batchId,
-        export_order_id: canLinkOrder ? orderId : null,
-        product_name: productName || 'Finished Rice',
-        qty_mt: kgToMt(qty),                   // KG → MT for the export/transfer doc boundary
-        transfer_price_pkr: perKgToPerMt(price), // per-kg → per-MT
-        total_value_pkr: totalAmount,
-        usd_equivalent: usdEquiv,
-        pkr_rate: fxRate,
-        dispatch_date: form.dispatchDate,
-        status: 'In Transit',
-      });
-
-      const t = res?.data?.transfer;
-      addToast(`Transfer ${t?.transfer_no || ''} created: ${fmtNum(Math.round(qty))} kg dispatched`, 'success');
-      setForm({ batchNo: '', exportOrder: '', qtyKg: '', transferPrice: '', dispatchDate: '' });
-    } catch (err) {
-      addToast(err.message || 'Failed to create transfer', 'error');
-    } finally {
-      setSubmitting(false);
-    }
-  };
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Internal Transfer</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Mill-to-Export entity stock transfer</p>
+          <p className="text-sm text-gray-500 mt-0.5">Mill-to-Export entity stock transfer history</p>
         </div>
         <div className="flex items-center gap-2 text-sm text-gray-500">
           <ArrowRightLeft className="w-4 h-4" />
@@ -149,201 +42,17 @@ export default function InternalTransfer() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Transfer Form */}
-        <div className="lg:col-span-2">
-          <form onSubmit={handleSubmit} className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-5">
-            <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-              <Package className="w-5 h-5 text-blue-600" />
-              New Transfer
-            </h2>
-
-            <div className="form-grid">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Batch No <span className="text-red-500">*</span></label>
-                <select
-                  value={form.batchNo}
-                  onChange={(e) => handleChange('batchNo', e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white"
-                >
-                  <option value="">Select completed batch...</option>
-                  {completedBatches.map(b => (
-                    <option key={b.id} value={b.id}>
-                      {b.id} - {fmtNum(Math.round(b._remainingKg))} kg available{canSeeSupplier && b.supplierName ? ` (${b.supplierName})` : ''}{b.batchName ? ` · ${b.batchName}` : ''}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {canLinkOrder && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Export Order <span className="text-red-500">*</span></label>
-                  <select
-                    value={form.exportOrder}
-                    onChange={(e) => handleChange('exportOrder', e.target.value)}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white"
-                  >
-                    <option value="">Select active export order...</option>
-                    {activeExportOrders.map(o => (
-                      <option key={o.id} value={o.id}>
-                        {o.id} - {o.customerName} ({fmtNum(Math.round(mtToKg(o.qtyMT)))} kg)
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Product</label>
-                <input
-                  type="text"
-                  value={productName}
-                  readOnly
-                  placeholder="Auto-filled from batch"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm bg-gray-50 text-gray-600 outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Qty (kg) <span className="text-red-500">*</span></label>
-                <input
-                  type="number"
-                  step="1"
-                  min="0"
-                  max={batchFinishedKg > 0 ? batchFinishedKg : undefined}
-                  value={form.qtyKg}
-                  onChange={(e) => handleChange('qtyKg', e.target.value)}
-                  placeholder="e.g. 50000"
-                  className={`w-full border rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none ${exceedsStock ? 'border-red-400' : 'border-gray-300'}`}
-                />
-                {selectedBatch && (
-                  exceedsStock
-                    ? <p className="text-xs text-red-600 mt-1">Only {fmtNum(Math.round(batchFinishedKg))} kg finished in this batch.</p>
-                    : <button type="button" onClick={() => handleChange('qtyKg', String(Math.round(batchFinishedKg)))} className="text-xs text-blue-600 hover:text-blue-800 mt-1">Available: {fmtNum(Math.round(batchFinishedKg))} kg — use all</button>
-                )}
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Transfer Price per kg (PKR) <span className="text-red-500">*</span></label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={form.transferPrice}
-                  onChange={(e) => handleChange('transferPrice', e.target.value)}
-                  placeholder="e.g. 72.8"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Dispatch Date <span className="text-red-500">*</span></label>
-                <input
-                  type="date"
-                  value={form.dispatchDate}
-                  onChange={(e) => handleChange('dispatchDate', e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Warehouse From</label>
-                <input
-                  type="text"
-                  value="Mill Finished Goods"
-                  readOnly
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm bg-gray-50 text-gray-600 outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Warehouse To</label>
-                <input
-                  type="text"
-                  value="Export Dispatch"
-                  readOnly
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm bg-gray-50 text-gray-600 outline-none"
-                />
-              </div>
-            </div>
-
-            <div className="flex justify-end">
-              <button
-                type="submit"
-                disabled={submitting || exceedsStock}
-                className="inline-flex items-center gap-2 bg-blue-600 text-white px-6 py-2.5 rounded-lg hover:bg-blue-700 transition-colors font-medium text-sm disabled:opacity-50"
-              >
-                <ArrowRightLeft className="w-4 h-4" />
-                {submitting ? 'Creating...' : 'Create Transfer'}
-              </button>
-            </div>
-          </form>
-        </div>
-
-        {/* Financial Impact Preview */}
-        <div className="lg:col-span-1">
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-5 sticky top-6">
-            <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-              <DollarSign className="w-5 h-5 text-emerald-600" />
-              Financial Impact Preview
-            </h2>
-
-            <div className="space-y-4">
-              <div className="bg-blue-50 rounded-lg p-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <Building2 className="w-4 h-4 text-blue-600" />
-                  <span className="text-sm font-semibold text-blue-800">Mill Entity</span>
-                </div>
-                <p className="text-xs text-blue-600 mb-1">Records internal sale (PKR)</p>
-                <div className="text-lg font-bold text-blue-900">
-                  {totalAmount > 0 ? `+${formatPKR(totalAmount)}` : 'Rs 0'}
-                </div>
-                <p className="text-xs text-blue-500 mt-1">
-                  Revenue: {qty > 0 ? `${fmtNum(qty, 2)} kg` : '0 kg'} x {price > 0 ? formatPKR(price) : 'Rs 0'}/kg
-                </p>
-              </div>
-
-              <div className="bg-amber-50 rounded-lg p-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <Warehouse className="w-4 h-4 text-amber-600" />
-                  <span className="text-sm font-semibold text-amber-800">Export Entity</span>
-                </div>
-                <p className="text-xs text-amber-600 mb-1">Records purchase cost (USD equivalent)</p>
-                <div className="text-lg font-bold text-amber-900">
-                  {totalAmount > 0 ? `-${formatUSD(Math.round(totalAmount / fxRate))}` : '$0'}
-                </div>
-                <p className="text-xs text-amber-500 mt-1">
-                  Cost of goods: {qty > 0 ? `${fmtNum(Math.round(qty))} kg` : '0 kg'} x {price > 0 ? formatUSD(price / fxRate) : '$0'}/kg
-                  <span className="block mt-0.5 text-amber-400">@ 1 USD = {fxRate} PKR</span>
-                </p>
-              </div>
-
-              {selectedOrder && totalAmount > 0 && (
-                <div className="bg-gray-50 rounded-lg p-4 text-xs text-gray-600 space-y-1">
-                  <div className="flex justify-between">
-                    <span>Contract Value (USD):</span>
-                    <span className="font-medium text-gray-900">{formatUSD(selectedOrder.contractValue)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Transfer Cost (PKR):</span>
-                    <span className="font-medium text-gray-900">{formatPKR(totalAmount)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Transfer Cost (USD):</span>
-                    <span className="font-medium text-gray-900">{formatUSD(Math.round(totalAmount / fxRate))}</span>
-                  </div>
-                  <div className="flex justify-between border-t border-gray-200 pt-1 mt-1">
-                    <span>Rice Cost % of Contract:</span>
-                    <span className="font-semibold text-gray-900">
-                      {fmtPct(((totalAmount / fxRate) / selectedOrder.contractValue) * 100)}
-                    </span>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
+      <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 flex items-start gap-3">
+        <Info className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
+        <div className="text-sm text-blue-900">
+          <p className="font-medium">New transfers are made from the lot itself.</p>
+          <p className="mt-0.5 text-blue-800">
+            Open the finished-rice lot in <Link to="/lot-inventory" className="font-semibold underline">Lot Inventory</Link> and
+            use <span className="font-semibold">Transfer to Export</span> on Lot Detail. It moves exactly that lot and shows up in this list.
+          </p>
         </div>
       </div>
+
 
       {/* Recent Transfers Table */}
       <div className="table-container mobile-cards">

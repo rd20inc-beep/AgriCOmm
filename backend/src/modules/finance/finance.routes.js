@@ -278,13 +278,9 @@ router.post(
 router.get('/bank-accounts', authorize('finance', 'view'), controller.getBankAccounts);
 router.get('/bank-transactions', authorize('finance', 'view'), controller.getBankTransactions);
 router.get('/internal-transfers', authorize('finance', 'view'), controller.getInternalTransfers);
-router.post(
-  '/internal-transfers',
-  authorize('inventory', 'transfer'),
-  validate(schemas.createInternalTransfer),
-  auditAction('create_internal_transfer', 'finance', (req, data) => data.data && data.data.id ? data.data.id : null),
-  controller.createInternalTransfer
-);
+// Creation RETIRED (410 Gone) — it booked USD into the PKR GL. New Mill → Export
+// moves go through /lot-inventory/lots/:id/transfer-to-export. History stays.
+router.post('/internal-transfers', controller.createInternalTransfer);
 router.get('/internal-transfers/:id', authorize('finance', 'view'), controller.getInternalTransferDetail);
 router.put(
   '/internal-transfers/:id/confirm-export',

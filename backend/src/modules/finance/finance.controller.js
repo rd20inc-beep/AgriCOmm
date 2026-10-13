@@ -1,8 +1,6 @@
 const db = require('../../config/database');
-const inventoryService = require('../../services/inventoryService');
 const accountingService = require('../../services/accountingService');
 const fxRateService = require('./fxRate.service');
-const { nextDocNo } = require('../../utils/docNumber');
 const { postLocalReceiptJournal } = require('../localSales/receiptJournal');
 const { buildLocalReceivablesQuery } = require('./localReceivablesQuery');
 const { feedBase, feedTotals } = require('./paymentsFeedTotals');
@@ -44,13 +42,6 @@ function paymentToPkr(p) {
   const rate = parseFloat(p.fx_rate);
   if (rate && rate > 1) return amount * rate;
   return amount * 280;
-}
-
-// IT-NNN. MAX(suffix)+1, not "the newest row + 1": the newest row is not the
-// highest number once rows are deleted or two transfers race, and the next
-// insert then collides on the unique transfer_no.
-function generateTransferNo(trx) {
-  return nextDocNo(trx || db, { table: 'internal_transfers', column: 'transfer_no', prefix: 'IT-', pad: 3 });
 }
 
 /**
@@ -1677,222 +1668,21 @@ const financeController = {
     }
   },
 
+  // RETIRED — 410 Gone. The batch → order transfer booked its export-side
+  // journal as `amount: usd_equivalent, currency: 'USD'` straight into the PKR
+  // GL and wrote a USD figure into export_order_costs (PKR-only since mig 079),
+  // even folding it onto an existing PKR raw_rice row. Its only callers (the
+  // /transfer "New Transfer" form and Export Order › Procurement "Receive from
+  // Mill") are replaced by the lot-precise Mill → Export transfer
+  // (POST /api/lot-inventory/lots/:id/transfer-to-export), which can link an
+  // export order too. History (GET list/detail) and confirm-export of an
+  // already-dispatched transfer stay.
   async createInternalTransfer(req, res) {
-    try {
-      const {
-        batch_id,
-        export_order_id,
-        product_name,
-        qty_mt,
-        transfer_price_pkr,
-        total_value_pkr,
-        usd_equivalent,
-        pkr_rate,
-        dispatch_date,
-        status,
-      } = req.body;
-
-      if (!batch_id || !export_order_id || !qty_mt || parseFloat(qty_mt) <= 0) {
-        return res.status(400).json({
-          success: false,
-          message: 'batch_id, export_order_id, and a positive qty_mt are required.',
-        });
-      }
-
-      // Service Milling stock is CLIENT-owned — it must never enter the company
-      // export/sale pipeline. Reject up front if the source batch is a service
-      // (toll/job-work) batch; the client's rice leaves only via a Service
-      // Milling dispatch, not an internal transfer to an export order.
-      const srcBatch = await db('milling_batches')
-        .where('id', batch_id)
-        .select('is_service_milling')
-        .first();
-      if (srcBatch && srcBatch.is_service_milling) {
-        return res.status(422).json({
-          success: false,
-          message: 'This is a Service Milling (client-owned) batch. Its rice cannot be transferred to export — hand it to the client via a Service Milling dispatch instead.',
-        });
-      }
-
-      const transfer = await db.transaction(async (trx) => {
-        // Per-batch cap: everything transferred from this batch (non-cancelled)
-        // may not exceed the batch's finished output. The FIFO draw below only
-        // checks TOTAL mill stock, so without this a batch could be transferred
-        // twice (once from its own lots, again from other batches' stock). Lock
-        // the batch row so two concurrent transfers can't both pass the check.
-        const capBatch = await trx('milling_batches')
-          .where('id', batch_id)
-          .select('id', 'batch_no', 'actual_finished_kg')
-          .forUpdate()
-          .first();
-        if (!capBatch) {
-          const err = new Error('Milling batch not found.');
-          err.status = 404;
-          throw err;
-        }
-        const requestedKg = parseFloat(qty_mt) * 1000;
-        const finishedKg = parseFloat(capBatch.actual_finished_kg) || 0;
-        const prior = await trx('internal_transfers')
-          .where('batch_id', batch_id)
-          .where(function () { this.whereNot('status', 'Cancelled').orWhereNull('status'); })
-          .sum('qty_kg as kg')
-          .first();
-        const alreadyKg = parseFloat(prior?.kg) || 0;
-        const remainingBatchKg = Math.max(0, finishedKg - alreadyKg);
-        if (requestedKg > remainingBatchKg + 1e-3) {
-          const err = new Error(
-            `Batch ${capBatch.batch_no || batch_id} has only ${Math.round(remainingBatchKg).toLocaleString()} kg of finished output `
-            + `left to transfer (finished ${Math.round(finishedKg).toLocaleString()} kg, already transferred `
-            + `${Math.round(alreadyKg).toLocaleString()} kg); requested ${Math.round(requestedKg).toLocaleString()} kg.`
-          );
-          err.status = 422;
-          throw err;
-        }
-
-        const transferNo = await generateTransferNo(trx);
-
-        const [t] = await trx('internal_transfers')
-          .insert({
-            transfer_no: transferNo,
-            batch_id,
-            export_order_id,
-            product_name: product_name || null,
-            qty_kg: parseFloat(qty_mt) * 1000, // FE sends MT; internal_transfers stores KG (Phase 5c)
-            transfer_price_pkr: transfer_price_pkr ? parseFloat(transfer_price_pkr) : null,
-            total_value_pkr: total_value_pkr ? parseFloat(total_value_pkr) : null,
-            usd_equivalent: usd_equivalent ? parseFloat(usd_equivalent) : null,
-            pkr_rate: pkr_rate ? parseFloat(pkr_rate) : 280,
-            dispatch_date: dispatch_date || null,
-            status: status || 'Pending',
-            created_by: req.user.id,
-          })
-          .returning('*');
-
-        // Move the stock, drawing from one OR MORE mill finished lots (FIFO by
-        // oldest) so fragmented stock still transfers. Use available_qty (not qty)
-        // so already-transferred/reserved stock isn't double-counted. Fail LOUDLY
-        // if total on-hand is short — we must never post the GL journals / raw_rice
-        // cost below without a matching inventory movement (that would decouple the
-        // books from physical stock, the exact invariant the 5c harness protects).
-        // Prefer this transfer's OWN batch output lots (batch_ref = 'batch-<id>'),
-        // then fall back to other mill finished stock oldest-first.
-        // NEVER draw client-owned Service Milling stock (ownership='client') into
-        // a company export transfer — that inventory belongs to the client and is
-        // ring-fenced from the export/sale pipeline. Company stock is ownership
-        // 'company' or NULL (legacy rows), so exclude only 'client'.
-        const candidateLots = await trx('inventory_lots')
-          .where({ entity: 'mill', type: 'finished' })
-          .where('available_qty', '>', 0)
-          .where(function () { this.whereNot('ownership', 'client').orWhereNull('ownership'); })
-          .orderByRaw('(batch_ref = ?) DESC, created_at ASC', [`batch-${batch_id}`]);
-
-        const totalAvailableKg = candidateLots.reduce((s, l) => s + (parseFloat(l.available_qty) || 0), 0);
-        if (totalAvailableKg + 1e-6 < t.qty_kg) {
-          const err = new Error(
-            `Insufficient mill finished stock to transfer: need ${Math.round(t.qty_kg).toLocaleString()} kg, `
-            + `only ${Math.round(totalAvailableKg).toLocaleString()} kg available across ${candidateLots.length} lot(s).`
-          );
-          err.status = 422;
-          throw err;
-        }
-
-        let remainingKg = t.qty_kg;
-        for (const lot of candidateLots) {
-          if (remainingKg <= 1e-6) break;
-          const takeKg = Math.min(parseFloat(lot.available_qty) || 0, remainingKg);
-          if (takeKg <= 0) continue;
-          await inventoryService.transferToExport(trx, {
-            transferId: t.id,
-            lotId: lot.id,
-            qtyKg: takeKg,
-            productName: t.product_name,
-            orderId: t.export_order_id,
-            transferPricePerMT: parseFloat(t.transfer_price_pkr) || 0,
-            // Split the transfer value proportionally across the source lots.
-            totalValuePkr: (parseFloat(t.total_value_pkr) || 0) * (takeKg / t.qty_kg),
-            userId: req.user?.id,
-          });
-          remainingKg -= takeKg;
-        }
-
-        // Auto-post accounting journals for both entities
-        const transferAmount = parseFloat(t.total_value_pkr || 0);
-        if (transferAmount > 0) {
-          await accountingService.autoPost(trx, {
-            triggerEvent: 'internal_transfer_mill',
-            entity: 'mill',
-            amount: transferAmount,
-            currency: 'PKR',
-            refType: 'Internal Transfer',
-            refNo: t.transfer_no || `IT-${t.id}`,
-            description: `Internal transfer (mill side) — ${t.product_name || 'rice'}`,
-            userId: req.user?.id,
-          });
-
-          await accountingService.autoPost(trx, {
-            triggerEvent: 'internal_transfer_export',
-            entity: 'export',
-            amount: parseFloat(t.usd_equivalent || transferAmount),
-            currency: 'USD',
-            refType: 'Internal Transfer',
-            refNo: t.transfer_no || `IT-${t.id}`,
-            description: `Internal transfer (export side) — ${t.product_name || 'rice'}`,
-            userId: req.user?.id,
-          });
-        }
-
-        if (t.export_order_id) {
-          // Transfer value is in PKR — convert to order currency using order's locked FX rate
-          const linkedOrder = await trx('export_orders').where('id', t.export_order_id).first();
-          const orderFxRate = parseFloat(linkedOrder?.booked_fx_rate) || parseFloat(t.pkr_rate) || 280;
-          const valuePkr = parseFloat(t.total_value_pkr) || 0;
-          const valueInOrderCurrency = valuePkr / orderFxRate;
-
-          if (valueInOrderCurrency > 0) {
-            const existingCost = await trx('export_order_costs')
-              .where({ order_id: t.export_order_id, category: 'raw_rice' })
-              .first();
-
-            if (existingCost) {
-              await trx('export_order_costs')
-                .where({ id: existingCost.id })
-                .update({
-                  amount: parseFloat(existingCost.amount || 0) + valueInOrderCurrency,
-                  currency: linkedOrder?.currency || 'USD',
-                  base_amount_pkr: (parseFloat(existingCost.amount || 0) + valueInOrderCurrency) * orderFxRate,
-                  fx_rate: orderFxRate,
-                  notes: `Updated from transfer ${t.transfer_no} (PKR ${Math.round(valuePkr).toLocaleString()} ÷ ${orderFxRate})`,
-                  updated_at: trx.fn.now(),
-                });
-            } else {
-              await trx('export_order_costs').insert({
-                order_id: t.export_order_id,
-                category: 'raw_rice',
-                amount: valueInOrderCurrency,
-                currency: linkedOrder?.currency || 'USD',
-                base_amount_pkr: valuePkr,
-                fx_rate: orderFxRate,
-                notes: `From transfer ${t.transfer_no} (PKR ${Math.round(valuePkr).toLocaleString()} ÷ ${orderFxRate})`,
-              });
-            }
-          }
-        }
-
-        return t;
-      });
-
-      return res.status(201).json({
-        success: true,
-        data: { transfer },
-      });
-    } catch (err) {
-      console.error('Create internal transfer error:', err);
-      const status = err.status || 500;
-      return res.status(status).json({
-        success: false,
-        message: status === 500 ? 'Internal server error.' : err.message,
-      });
-    }
+    return res.status(410).json({
+      success: false,
+      message: 'Batch-to-order stock transfers are retired. Open the finished lot in Lot Inventory '
+        + 'and use "Transfer to Export" on Lot Detail — it moves exactly that lot and can link the export order.',
+    });
   },
 
   // Full detail for one transfer + the stock movements it produced + a lifecycle

@@ -1083,17 +1083,6 @@ export function useInternalTransfers(params = {}) {
   });
 }
 
-export function useCreateTransfer() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (data) => financeApi.createTransfer(data),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['internal-transfers'] });
-      qc.invalidateQueries({ queryKey: queryKeys.financeOverview });
-    },
-  });
-}
-
 export function useInternalTransfer(id) {
   return useQuery({
     queryKey: ['internal-transfer', id],
