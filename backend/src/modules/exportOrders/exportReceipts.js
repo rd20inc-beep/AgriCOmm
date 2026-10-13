@@ -29,6 +29,23 @@ const PENDING = 'Pending Finance Confirmation';
 const httpError = (message, statusCode = 400) => { const e = new Error(message); e.statusCode = statusCode; return e; };
 const lockRow = (q) => (typeof q?.forUpdate === 'function' ? q.forUpdate() : q);
 
+// Maker-checker (audit R10a): whoever recorded a receipt does not confirm it —
+// except an Owner or Super Admin, who answer for the books anyway. Resolved by
+// role NAME (role ids differ between environments, see ownerApproval).
+const SELF_CONFIRM_ROLES = ['Owner', 'Super Admin'];
+async function maySelfConfirm(conn, userId) {
+  if (!userId) return false;
+  const u = await conn('users').where({ id: userId }).first('role_id');
+  const role = u && u.role_id ? await conn('roles').where({ id: u.role_id }).first('name') : null;
+  return !!role && SELF_CONFIRM_ROLES.includes(role.name);
+}
+const SELF_CONFIRM_MESSAGE = 'You recorded this receipt, so another Finance user must confirm it (maker-checker). Only an Owner may confirm a receipt they recorded.';
+async function assertNotSelfConfirm(conn, { recordedBy, userId, message = SELF_CONFIRM_MESSAGE }) {
+  if (!recordedBy || !userId || String(recordedBy) !== String(userId)) return;
+  if (await maySelfConfirm(conn, userId)) return;
+  throw httpError(message, 403);
+}
+
 /**
  * Record a pending advance / balance receipt (the maker's step). `order` is the
  * order row. Refuses more than is still outstanding, net of receipts already
@@ -270,12 +287,14 @@ async function postExportReceipt(trx, {
  * Finance confirms a pending receipt: posts it (postExportReceipt) and removes
  * the pending placeholder in the SAME transaction, so a posting failure leaves
  * the pending row for another try. The posted row keeps the recorder as
- * created_by and the confirmer as confirmed_by.
+ * created_by and the confirmer as confirmed_by — never the same person unless
+ * an Owner / Super Admin (403 otherwise).
  */
 async function confirmPendingExportReceipt(trx, { paymentId, fxRate, bankAccountId, paymentMethod, userId }) {
   const pending = await lockRow(trx('payments').where({ id: paymentId })).first();
   if (!pending) throw httpError('Payment not found.', 404);
   if (pending.status !== PENDING) throw httpError(`This receipt is already ${pending.status}.`, 409);
+  await assertNotSelfConfirm(trx, { recordedBy: pending.created_by, userId });
   const recv = pending.linked_receivable_id ? await trx('receivables').where({ id: pending.linked_receivable_id }).first() : null;
   const orderId = recv?.order_id || (pending.source_table === 'export_orders' ? pending.source_id : null);
   if (!orderId) throw httpError('Cannot resolve the export order for this receipt.');
@@ -298,4 +317,7 @@ async function confirmPendingExportReceipt(trx, { paymentId, fxRate, bankAccount
   return { ...ctx, isAdvance: !(recv && recv.type === 'Balance') };
 }
 
-module.exports = { recordPendingExportReceipt, postExportReceipt, confirmPendingExportReceipt, PENDING };
+module.exports = {
+  recordPendingExportReceipt, postExportReceipt, confirmPendingExportReceipt, assertNotSelfConfirm,
+  SELF_CONFIRM_ROLES, PENDING,
+};

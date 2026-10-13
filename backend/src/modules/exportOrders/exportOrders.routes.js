@@ -138,14 +138,20 @@ router.post(
 );
 router.post(
   '/:id/confirm-advance',
+  // Records AND posts in one step: needs finance.confirm_payment on top, and
+  // the controller lets only an Owner / Super Admin through (maker-checker).
   authorizeAny(['export_orders', 'confirm_advance'], ['finance', 'confirm_payment']),
+  authorize('finance', 'confirm_payment'),
   validate(schemas.confirmAdvance),
   auditAction('confirm_advance', 'export_order', (req) => req.params.id),
   controller.confirmAdvance
 );
 router.post(
   '/:id/confirm-balance',
+  // Records AND posts in one step: needs finance.confirm_payment on top, and
+  // the controller lets only an Owner / Super Admin through (maker-checker).
   authorizeAny(['export_orders', 'confirm_balance'], ['finance', 'confirm_payment']),
+  authorize('finance', 'confirm_payment'),
   validate(schemas.confirmBalance),
   auditAction('confirm_balance', 'export_order', (req) => req.params.id),
   controller.confirmBalance

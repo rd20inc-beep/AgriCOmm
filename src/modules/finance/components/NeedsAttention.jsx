@@ -41,7 +41,7 @@ const TONE = {
  * the route behind that action admits; the rest are counted, not shown.
  */
 export default function NeedsAttention({ summary, rangeKey = '' }) {
-  const { hasPermission } = useAuth();
+  const { hasPermission, user } = useAuth();
   const { addToast } = useApp() || {};
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -71,9 +71,12 @@ export default function NeedsAttention({ summary, rangeKey = '' }) {
     queryFn: async () => (await financeApi.suspenseList({}))?.data || [],
   });
 
+  const viewerId = user?.id;
+  const viewerRole = user?.role;
   const { items, hiddenCount } = useMemo(() => buildNeedsAttention({
     pendingReceipts, receivables, upcoming, fundTransfers, payroll, purchaseRequests, suspense, accounts, fx, summary,
-  }, hasPermission), [pendingReceipts, receivables, upcoming, fundTransfers, payroll, purchaseRequests, suspense, accounts, fx, summary, hasPermission]);
+    viewer: { id: viewerId, role: viewerRole },
+  }, hasPermission), [pendingReceipts, receivables, upcoming, fundTransfers, payroll, purchaseRequests, suspense, accounts, fx, summary, hasPermission, viewerId, viewerRole]);
 
   const confirmMut = useConfirmExportReceipt();
   const rejectMut = useRejectExportReceipt();
