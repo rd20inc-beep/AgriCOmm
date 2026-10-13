@@ -1570,6 +1570,17 @@ const exportOrderController = {
               order.financial_status = financialStatus;
             }
           }
+          // A 0% order submits straight to 'Advance Received'; once an advance
+          // is owed and nothing has come in, it is awaiting it again (EX-003).
+          if (order.status === 'Advance Received' && order.financial_status === 'Advance Not Entered') {
+            await trx('export_orders').where({ id }).update({ status: 'Awaiting Advance', current_step: getStepForStatus('Awaiting Advance') });
+            await trx('export_order_status_history').insert({
+              order_id: order.id, from_status: 'Advance Received', to_status: 'Awaiting Advance',
+              changed_by: req.user.id, reason: `Advance raised to ${order.advance_pct}% with nothing received`,
+            });
+            order.status = 'Awaiting Advance';
+            order.current_step = getStepForStatus('Awaiting Advance');
+          }
         }
 
         // The balance falls due a term after sailing (C6): re-date it when the
