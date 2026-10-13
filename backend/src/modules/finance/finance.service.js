@@ -17,13 +17,8 @@ const { collectionRate: computeCollectionRate } = require('./collectionRate');
 const { dayOf } = require('../exportOrders/balanceDueDate');
 
 // PKR equivalent of an open receivable's OUTSTANDING at its own booked rate
-// (C5): the booked base_amount_pkr scaled by the share still outstanding, else
-// outstanding × the row's booked fx_rate. A PKR row is itself.
-const RECV_PKR_EQUIV_SQL = `CASE
-  WHEN COALESCE(currency, 'PKR') = 'PKR' THEN outstanding
-  WHEN base_amount_pkr > 0 AND expected_amount > 0 THEN base_amount_pkr * outstanding / expected_amount
-  WHEN fx_rate > 0 THEN outstanding * fx_rate
-  ELSE NULL END`;
+// (C5) — shared with Reports ▸ Executive (currencyFigures.js).
+const { RECV_PKR_EQUIV_SQL, collectionRateFields } = require('./currencyFigures');
 
 const financeService = {
 
@@ -170,11 +165,7 @@ const financeService = {
     // `collectionRate` is only given when one currency is present; with more
     // than one it is null and the per-currency rates stand.
     const collection = await computeCollectionRate(db);
-    const collectionRateByCurrency = {};
-    for (const [cur, c] of Object.entries(collection.byCurrency)) collectionRateByCurrency[cur] = c.ratePct;
-    const collCurrencies = Object.keys(collectionRateByCurrency);
-    const collectionRate = collCurrencies.length === 1 ? collectionRateByCurrency[collCurrencies[0]]
-      : collCurrencies.length === 0 ? 0 : null;
+    const { collectionRate, collectionRateByCurrency } = collectionRateFields(collection);
 
     const exportCalc = et.unpricedCount > 0 ? 'incomplete' : (et.estimatedCount > 0 ? 'estimated' : 'exact');
 
