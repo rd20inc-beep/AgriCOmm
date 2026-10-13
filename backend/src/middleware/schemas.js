@@ -539,19 +539,6 @@ const allocateAdvance = Joi.object({
   notes: Joi.string().allow(null, ''),
 });
 
-const createInternalTransfer = Joi.object({
-  batch_id: Joi.number().integer().positive().required(),
-  export_order_id: Joi.number().integer().positive().required(),
-  product_name: Joi.string().allow('', null),
-  qty_mt: Joi.number().positive().required(),
-  transfer_price_pkr: Joi.number().min(0).allow(null),
-  total_value_pkr: Joi.number().min(0).allow(null),
-  usd_equivalent: Joi.number().min(0).allow(null),
-  pkr_rate: Joi.number().min(0).allow(null),
-  dispatch_date: Joi.date().iso().allow(null, ''),
-  status: Joi.string().allow(null, ''),
-});
-
 // ===================== CONTRA TRANSFERS =====================
 // Money between the company's own accounts (fundTransfers.createContra). Dates
 // stay strings (.raw()) — the service works in YYYY-MM-DD. Every field the
@@ -976,7 +963,6 @@ module.exports = {
   updateLotQuality,
   createAdvance,
   allocateAdvance,
-  createInternalTransfer,
   recordPayment,
   createContraTransfer,
   replaceContraTransfer,

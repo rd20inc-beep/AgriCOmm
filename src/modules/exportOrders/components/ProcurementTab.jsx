@@ -2,12 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import StatusBadge from '../../../components/StatusBadge';
 import PartyLink from '../../../shared/components/PartyLink';
-import { financeApi } from '../../../api/services';
 import { useApp } from '../../../context/AppContext';
 import { Package, Plus, ExternalLink, Warehouse, Scale, FileText, Truck, ArrowRight } from 'lucide-react';
 import StockAllocationPicker from './StockAllocationPicker';
 import { packingSummary, fmtSizeKg } from '../utils/orderLines';
-import { todayLocalISO, fmtKg, fmtNum, fmtPKR, fmtUSD, fmtPct } from '../../../shared/utils/format';
+import { fmtKg, fmtNum, fmtPKR, fmtPct } from '../../../shared/utils/format';
 
 export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], onCreateMilling, onStartDocsPreparation, onLinkExternalPurchase, canCreateMilling, canStartDocs, onStockAllocated }) {
   // Supplier privacy: Export users see the Supplier Code, not the name/ledger link.
@@ -211,8 +210,6 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
         <ReceiveFromMill
           order={order}
           linkedBatch={linkedBatch}
-          addToast={addToast}
-          onTransferComplete={() => { if (onStockAllocated) onStockAllocated(); }}
         />
       )}
 
@@ -376,55 +373,18 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
 }
 
 // ─── Receive from Mill sub-component ───
-function ReceiveFromMill({ order, linkedBatch, addToast, onTransferComplete }) {
-  const [transferring, setTransferring] = useState(false);
+// Points the export team at the lot-precise transfer. The old one-click
+// "Receive from Mill" posted a batch → order transfer through
+// POST /api/finance/internal-transfers, which booked the export side in USD
+// straight into the PKR ledger; that route is retired (410 Gone). The batch's
+// finished lots are listed on the batch page — each one moves with
+// Lot Detail → "Transfer to Export", which can link this order.
+function ReceiveFromMill({ order, linkedBatch }) {
   const [expanded, setExpanded] = useState(true);
 
   // Supplier privacy: Export users see the Supplier Code, not the name/ledger link.
   const canSeeSupplierName = order?.canSeeSupplierName !== false;
   const finishedMT = parseFloat(linkedBatch.actualFinishedMT) || 0;
-  const batchId = linkedBatch.dbId || linkedBatch.id;
-  const orderId = order.dbId || order.id;
-
-  // Auto-calculate transfer price from batch cost: (raw cost + milling cost) per KG.
-  const autoPrice = linkedBatch.totalCostPerKgFinished
-    ? Math.round(linkedBatch.totalCostPerKgFinished * 100) / 100
-    : '';
-  const [transferPrice, setTransferPrice] = useState(autoPrice || '');
-
-  async function handleTransfer() {
-    const price = parseFloat(transferPrice); // PKR per kg
-    if (!price || price <= 0) {
-      addToast('Please enter the transfer price (PKR/kg)', 'error');
-      return;
-    }
-
-    setTransferring(true);
-    try {
-      const totalPKR = Math.round(price * finishedMT * 1000); // per-kg × finished kg
-      // Convert at the order's locked (booked) FX rate, not a hardcoded 280 — the
-      // backend books the resulting export cost at booked_fx_rate too.
-      const pkrRate = parseFloat(order?.bookedFxRate) || 280;
-      await financeApi.createTransfer({
-        batch_id: batchId,
-        export_order_id: orderId,
-        product_name: linkedBatch.productName || order.productName || 'Finished Rice',
-        qty_mt: finishedMT,
-        transfer_price_pkr: price * 1000, // per-kg → per-MT for the doc boundary
-        total_value_pkr: totalPKR,
-        usd_equivalent: Math.round(totalPKR / pkrRate),
-        pkr_rate: pkrRate,
-        dispatch_date: todayLocalISO(),
-        status: 'In Transit',
-      });
-      addToast(`${fmtKg(finishedMT * 1000)} transferred from mill to export — ${linkedBatch.id}`, 'success');
-      if (onTransferComplete) onTransferComplete();
-    } catch (err) {
-      addToast(`Transfer failed: ${err.message}`, 'error');
-    } finally {
-      setTransferring(false);
-    }
-  }
 
   return (
     <div className="bg-gradient-to-r from-amber-50 to-amber-50 rounded-xl shadow-sm border-2 border-amber-300 p-6">
@@ -443,7 +403,7 @@ function ReceiveFromMill({ order, linkedBatch, addToast, onTransferComplete }) {
           <p className="text-sm text-amber-700 mb-4">
             Milling batch <span className="font-bold">{linkedBatch.id}</span> has completed with{' '}
             <span className="font-bold">{fmtKg(finishedMT * 1000)}</span> finished rice.
-            Transfer this stock from the mill to your export warehouse to make it available for allocation.
+            Move its finished lots from the mill to the export entity to make them available for allocation.
           </p>
 
           <div className="bg-white/70 rounded-lg border border-amber-200 p-4 mb-4">
@@ -486,40 +446,18 @@ function ReceiveFromMill({ order, linkedBatch, addToast, onTransferComplete }) {
             )}
           </div>
 
-          <div className="flex flex-col sm:flex-row items-end gap-3">
-            <div className="flex-1">
-              <label className="block text-xs font-medium text-amber-800 mb-1">Transfer Price (PKR/kg) <span className="text-red-500">*</span></label>
-              <input
-                type="number"
-                step="0.01"
-                value={transferPrice}
-                onChange={e => setTransferPrice(e.target.value)}
-                placeholder="e.g. 72.8"
-                className="w-full border border-amber-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-amber-500 focus:border-amber-500 outline-none bg-white"
-              />
-              {transferPrice && finishedMT > 0 && (
-                <p className="text-xs text-amber-600 mt-1">
-                  Total: {fmtPKR(parseFloat(transferPrice) * finishedMT * 1000, { decimals: 2 })} (~{fmtUSD((parseFloat(transferPrice) * finishedMT * 1000) / (parseFloat(order?.bookedFxRate) || 280))})
-                </p>
-              )}
-            </div>
-            <button
-              onClick={handleTransfer}
-              disabled={transferring}
-              className="inline-flex items-center gap-2 px-5 py-2.5 bg-amber-600 text-white rounded-lg text-sm font-semibold hover:bg-amber-700 transition-colors disabled:opacity-50 whitespace-nowrap"
+          <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+            <p className="flex-1 text-xs text-amber-700">
+              Open the batch, pick its finished lot and use <span className="font-semibold">Transfer to Export</span> on
+              Lot Detail (choose order {order.id} there).
+            </p>
+            <Link
+              to={`/milling/${linkedBatch.id}`}
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-amber-600 text-white rounded-lg text-sm font-semibold hover:bg-amber-700 transition-colors whitespace-nowrap"
             >
-              {transferring ? (
-                <>
-                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  Transferring...
-                </>
-              ) : (
-                <>
-                  <ArrowRight className="w-4 h-4" />
-                  Receive {fmtKg(finishedMT * 1000)} from Mill
-                </>
-              )}
-            </button>
+              <ArrowRight className="w-4 h-4" />
+              Open batch lots
+            </Link>
           </div>
         </>
       )}
