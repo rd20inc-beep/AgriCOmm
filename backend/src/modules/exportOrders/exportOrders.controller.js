@@ -20,7 +20,7 @@ const notificationService = require('../../services/notificationService');
 // #9-scoping: per-user warehouse restriction, applied to stock READ paths only
 // (the dispatch/reservation engine is never scoped).
 const whScope = require('../../utils/warehouseScope');
-const { MONEY_EPSILON, settledAmount, getStepForStatus, getAllowedActions } = workflowService;
+const { MONEY_EPSILON, settledAmount, getStepForStatus, getAllowedActions, deriveFinancialStatus } = workflowService;
 
 /**
  * Resolve an :id route param to a numeric export_orders.id.
@@ -1555,6 +1555,21 @@ const exportOrderController = {
               ...partyFields,
               updated_at: trx.fn.now(),
             });
+          // The updates above only touch rows that exist, so an advance % raised
+          // from 0 left no RCV-ADV at all and financial_status at 'Not Required':
+          // the advance was missing from receivables and dispatch was not gated
+          // (EX-003, USD 3,172). Create whichever receivable is missing and
+          // re-derive the advance track. A receipt awaiting confirmation keeps
+          // its 'Pending Confirmation' (not derivable from the order alone). A
+          // Draft gets its receivables at Submit, so it is left alone.
+          if (order.status !== 'Draft') await ensureOrderReceivables(trx, order);
+          if (['Not Required', 'Advance Not Entered'].includes(order.financial_status)) {
+            const financialStatus = deriveFinancialStatus(order);
+            if (financialStatus !== order.financial_status) {
+              await trx('export_orders').where({ id }).update({ financial_status: financialStatus });
+              order.financial_status = financialStatus;
+            }
+          }
         }
 
         // The balance falls due a term after sailing (C6): re-date it when the
