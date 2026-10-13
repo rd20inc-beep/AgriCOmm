@@ -600,7 +600,7 @@ export function useFinanceOverviewSummary(params = {}) {
   });
 }
 
-export function useProfitabilitySummary(params = {}) {
+export function useProfitabilitySummary(params = {}, options = {}) {
   return useQuery({
     queryKey: ['finance-profitability-summary', params],
     queryFn: async () => {
@@ -608,6 +608,7 @@ export function useProfitabilitySummary(params = {}) {
       return unwrap(res) || {};
     },
     staleTime: 15 * 1000,
+    ...options,
   });
 }
 

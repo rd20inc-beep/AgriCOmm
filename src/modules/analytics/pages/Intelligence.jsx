@@ -11,11 +11,12 @@ import {
 } from 'recharts';
 import { useApp } from '../../../context/AppContext';
 import {
-  useMarginComparison, useSupplierScoreboard, useCustomerScoreboard,
+  useProfitabilitySummary, useSupplierScoreboard, useCustomerScoreboard,
   usePredictiveAlerts, useTopRiskOrders, useTopRiskCustomers,
 } from '../../../api/queries';
 import { LoadingSpinner, ErrorState } from '../../../components/LoadingState';
-import { fmtMoney, fmtUSD, fmtMT } from '../../../shared/utils/format';
+import { fmtMoney, fmtUSD, fmtMT, fmtPKR } from '../../../shared/utils/format';
+import { orderProfitRows, customerProfit, countryRevenue, profitByCustomer } from '../utils/orderProfitability';
 
 const TABS = ['Profitability', 'Customer Scoring', 'Supplier Scoring', 'Risk Monitor', 'Smart Alerts'];
 
@@ -40,54 +41,25 @@ function formatCurrency(v, currency = 'USD') {
 }
 
 function ProfitabilityTab() {
-  const { exportOrders, millingBatches } = useApp();
-  const { data: marginData = [], isLoading } = useMarginComparison();
+  const { exportOrders } = useApp();
+  // Booked profit per order, all PKR at the order's booked rate — the same
+  // rows as Finance ▸ Profit. Unpriced orders are left out, never guessed.
+  const { data: summary = {}, isLoading } = useProfitabilitySummary();
 
-  // Compute from real data if margin API returns empty
-  const orderProfitability = useMemo(() => {
-    if (marginData.length > 0) return marginData;
-    return exportOrders.map(o => {
-      const costs = Object.values(o.costs || {}).reduce((s, c) => s + c, 0);
-      const margin = o.contractValue > 0 ? ((o.contractValue - costs) / o.contractValue) * 100 : 0;
-      return {
-        id: o.id, customer: o.customerName, country: o.country, product: o.productName,
-        contractValue: o.contractValue, totalCosts: costs, grossProfit: o.contractValue - costs,
-        marginPct: margin, status: o.status,
-        costBreakdown: o.costs || {},
-      };
-    }).filter(o => o.totalCosts > 0);
-  }, [marginData, exportOrders]);
+  const orderProfitability = useMemo(
+    () => orderProfitRows(summary.export?.rows || [], exportOrders),
+    [summary, exportOrders],
+  );
+  const customerProfitability = useMemo(() => customerProfit(orderProfitability), [orderProfitability]);
+  const countryBreakdown = useMemo(() => countryRevenue(orderProfitability), [orderProfitability]);
+  const anyEstimated = orderProfitability.some(o => o.estimated);
 
-  // Customer profitability
-  const customerProfitability = useMemo(() => {
-    const map = {};
-    orderProfitability.forEach(o => {
-      const key = o.customer || 'Unknown';
-      if (!map[key]) map[key] = { name: key, orders: 0, revenue: 0, costs: 0, profit: 0 };
-      map[key].orders += 1;
-      map[key].revenue += o.contractValue || 0;
-      map[key].costs += o.totalCosts || 0;
-      map[key].profit += o.grossProfit || 0;
-    });
-    return Object.values(map).sort((a, b) => b.profit - a.profit).slice(0, 10);
-  }, [orderProfitability]);
-
-  // Country breakdown
-  const countryBreakdown = useMemo(() => {
-    const map = {};
-    exportOrders.forEach(o => {
-      const key = o.country || 'Unknown';
-      if (!map[key]) map[key] = { name: key, revenue: 0, orders: 0 };
-      map[key].revenue += o.contractValue || 0;
-      map[key].orders += 1;
-    });
-    return Object.values(map).sort((a, b) => b.revenue - a.revenue).slice(0, 8);
-  }, [exportOrders]);
+  if (isLoading) return <LoadingSpinner />;
 
   const PIE_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ef4444', '#06b6d4', '#f97316', '#ec4899'];
 
   const chartData = orderProfitability.slice(0, 12).map(o => ({
-    name: o.id, profit: Math.round(o.grossProfit), margin: parseFloat(o.marginPct?.toFixed?.(1) || o.marginPct || 0),
+    name: o.orderNo, profit: Math.round(o.profitPkr), margin: parseFloat(o.marginPct.toFixed(1)),
   }));
 
   return (
@@ -95,16 +67,16 @@ function ProfitabilityTab() {
       {/* KPIs */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div className="bg-white rounded-xl border border-gray-100 p-4">
-          <p className="text-xs font-medium text-gray-500 uppercase">Total Revenue</p>
-          <p className="text-xl font-bold text-gray-900 mt-1">{formatCurrency(orderProfitability.reduce((s, o) => s + (o.contractValue || 0), 0))}</p>
+          <p className="text-xs font-medium text-gray-500 uppercase">Booked Revenue</p>
+          <p className="text-xl font-bold text-gray-900 mt-1">{fmtPKR(orderProfitability.reduce((s, o) => s + o.revenuePkr, 0))}</p>
         </div>
         <div className="bg-white rounded-xl border border-gray-100 p-4">
           <p className="text-xs font-medium text-gray-500 uppercase">Total Costs</p>
-          <p className="text-xl font-bold text-gray-900 mt-1">{formatCurrency(orderProfitability.reduce((s, o) => s + (o.totalCosts || 0), 0))}</p>
+          <p className="text-xl font-bold text-gray-900 mt-1">{fmtPKR(orderProfitability.reduce((s, o) => s + o.costPkr, 0))}</p>
         </div>
         <div className="bg-white rounded-xl border border-gray-100 p-4">
-          <p className="text-xs font-medium text-gray-500 uppercase">Gross Profit</p>
-          <p className="text-xl font-bold text-emerald-600 mt-1">{formatCurrency(orderProfitability.reduce((s, o) => s + (o.grossProfit || 0), 0))}</p>
+          <p className="text-xs font-medium text-gray-500 uppercase">Booked Profit</p>
+          <p className="text-xl font-bold text-emerald-600 mt-1">{fmtPKR(orderProfitability.reduce((s, o) => s + o.profitPkr, 0))}</p>
         </div>
         <div className="bg-white rounded-xl border border-gray-100 p-4">
           <p className="text-xs font-medium text-gray-500 uppercase">Avg Margin</p>
@@ -116,6 +88,11 @@ function ProfitabilityTab() {
         </div>
       </div>
 
+      <p className="text-xs text-gray-500">
+        Booked figures in PKR at each order's booked rate — the same as Finance ▸ Profit. Orders with no booked rate or rice cost are left out.
+        {anyEstimated && ' Some rice costs are estimated from the rate master.'}
+      </p>
+
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-white rounded-xl border border-gray-100 p-5">
@@ -124,8 +101,8 @@ function ProfitabilityTab() {
             {chartData.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={chartData}><CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                  <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#94a3b8' }} /><YAxis tick={{ fontSize: 11 }} tickFormatter={v => `$${(v/1000).toFixed(0)}k`} />
-                  <Tooltip formatter={v => [fmtUSD(v), 'Profit']} /><Bar dataKey="profit" fill="#3b82f6" radius={[4,4,0,0]} />
+                  <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#94a3b8' }} /><YAxis tick={{ fontSize: 11 }} tickFormatter={v => `Rs ${(v/1000).toFixed(0)}k`} />
+                  <Tooltip formatter={v => [fmtPKR(v), 'Booked profit']} /><Bar dataKey="profit" fill="#3b82f6" radius={[4,4,0,0]} />
                 </BarChart>
               </ResponsiveContainer>
             ) : <div className="flex items-center justify-center h-full text-sm text-gray-400">No cost data yet</div>}
@@ -139,7 +116,7 @@ function ProfitabilityTab() {
                 <PieChart><Pie data={countryBreakdown} cx="50%" cy="50%" innerRadius={50} outerRadius={90} dataKey="revenue" paddingAngle={2}
                   label={({ name, percent }) => `${name} ${(percent*100).toFixed(0)}%`}>
                   {countryBreakdown.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
-                </Pie><Tooltip formatter={v => formatCurrency(v)} /></PieChart>
+                </Pie><Tooltip formatter={v => fmtPKR(v)} /></PieChart>
               </ResponsiveContainer>
             ) : <div className="flex items-center justify-center h-full text-sm text-gray-400">No data</div>}
           </div>
@@ -159,9 +136,9 @@ function ProfitabilityTab() {
                   <tr key={c.name}>
                     <td data-label="Customer" className="font-medium text-gray-900">{c.name}</td>
                     <td data-label="Orders" className="mob-hide text-right">{c.orders}</td>
-                    <td data-label="Revenue" className="text-right">{formatCurrency(c.revenue)}</td>
-                    <td data-label="Costs" className="mob-hide text-right">{formatCurrency(c.costs)}</td>
-                    <td data-label="Profit" className={`text-right font-semibold ${c.profit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{formatCurrency(c.profit)}</td>
+                    <td data-label="Revenue" className="text-right">{fmtPKR(c.revenue)}</td>
+                    <td data-label="Costs" className="mob-hide text-right">{fmtPKR(c.costs)}</td>
+                    <td data-label="Profit" className={`text-right font-semibold ${c.profit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{fmtPKR(c.profit)}</td>
                     <td data-label="Margin %" className={`text-right font-bold ${parseFloat(margin) < 5 ? 'text-red-600' : parseFloat(margin) < 15 ? 'text-amber-600' : 'text-emerald-600'}`}>{margin}%</td>
                   </tr>
                 );
@@ -178,6 +155,7 @@ function ScoringTab({ type }) {
   const isCustomer = type === 'customer';
   const { data: scoreboard = [], isLoading } = isCustomer ? useCustomerScoreboard() : useSupplierScoreboard();
   const { exportOrders, millingBatches, customersList, suppliersList } = useApp();
+  const { data: profitSummary = {} } = useProfitabilitySummary({}, { enabled: isCustomer });
 
   // Compute scores from real data if API returns empty
   const scores = useMemo(() => {
@@ -188,13 +166,17 @@ function ScoringTab({ type }) {
         const key = o.customerName || 'Unknown';
         if (!map[key]) map[key] = { name: key, orders: 0, revenue: 0, onTimePayments: 0, totalPayments: 0, profit: 0 };
         map[key].orders += 1;
-        map[key].revenue += o.contractValue || 0;
-        const costs = Object.values(o.costs || {}).reduce((s, c) => s + c, 0);
-        map[key].profit += (o.contractValue - costs);
         if (o.advanceReceived >= o.advanceExpected && o.advanceExpected > 0) { map[key].onTimePayments += 1; map[key].totalPayments += 1; }
         else if (o.advanceExpected > 0) map[key].totalPayments += 1;
       });
+      // Revenue / profit: booked PKR (one currency); a customer with no priced
+      // order gets the neutral profitability score.
+      const booked = profitByCustomer(orderProfitRows(profitSummary.export?.rows || [], exportOrders));
       return Object.values(map).map(c => ({
+        ...c,
+        revenue: booked[c.name]?.revenuePkr || 0,
+        profit: booked[c.name]?.profitPkr || 0,
+      })).map(c => ({
         ...c,
         paymentScore: c.totalPayments > 0 ? Math.round((c.onTimePayments / c.totalPayments) * 100) : 50,
         profitabilityScore: c.revenue > 0 ? Math.min(100, Math.round((c.profit / c.revenue) * 200)) : 50,
@@ -227,7 +209,7 @@ function ScoringTab({ type }) {
         };
       }).sort((a, b) => b.overallScore - a.overallScore);
     }
-  }, [scoreboard, exportOrders, millingBatches, isCustomer]);
+  }, [scoreboard, exportOrders, millingBatches, isCustomer, profitSummary]);
 
   if (isLoading) return <LoadingSpinner />;
 
@@ -294,7 +276,7 @@ function ScoringTab({ type }) {
                 {entity.revenue > 0 && (
                   <div className="text-right flex-shrink-0">
                     <p className="text-xs text-gray-500">Revenue</p>
-                    <p className="text-sm font-semibold text-gray-900">{formatCurrency(entity.revenue)}</p>
+                    <p className="text-sm font-semibold text-gray-900">{fmtPKR(entity.revenue)}</p>
                   </div>
                 )}
               </div>
@@ -334,7 +316,7 @@ function RiskMonitorTab() {
                     <td data-label="Order"><Link to={`/export/${o.entityRef || o.entityId}`} className="text-blue-600 hover:text-blue-800 font-medium">{o.entityRef || o.entityId}</Link></td>
                     <td data-label="Score" className="text-right font-bold">{o.riskScore || o.score}</td>
                     <td data-label="Level"><span className={`inline-flex px-2 py-0.5 rounded-md text-[11px] font-semibold ${(o.riskLevel || o.level) === 'Critical' ? 'bg-red-50 text-red-700' : (o.riskLevel || o.level) === 'High' ? 'bg-amber-50 text-amber-700' : 'bg-amber-50 text-amber-700'}`}>{o.riskLevel || o.level}</span></td>
-                    <td data-label="Exposure" className="text-right font-medium text-red-600">{formatCurrency(o.financialExposure || o.exposure)}</td>
+                    <td data-label="Exposure" className="text-right font-medium text-red-600">{formatCurrency(o.financialExposure || o.exposure, o.currency || 'PKR')}</td>
                   </tr>
                 )) : <tr><td colSpan={4} className="text-center py-8 text-gray-400">No risk data. Run exception scan first.</td></tr>}
               </tbody>
@@ -355,7 +337,7 @@ function RiskMonitorTab() {
                     <td data-label="Customer" className="font-medium text-gray-900">{c.entityRef || c.name || c.entityId}</td>
                     <td data-label="Score" className="text-right font-bold">{c.riskScore || c.score}</td>
                     <td data-label="Level"><span className={`inline-flex px-2 py-0.5 rounded-md text-[11px] font-semibold ${(c.riskLevel || c.level) === 'Critical' ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-700'}`}>{c.riskLevel || c.level}</span></td>
-                    <td data-label="Exposure" className="text-right font-medium text-red-600">{formatCurrency(c.financialExposure || c.exposure)}</td>
+                    <td data-label="Exposure" className="text-right font-medium text-red-600">{formatCurrency(c.financialExposure || c.exposure, c.currency || 'PKR')}</td>
                   </tr>
                 )) : <tr><td colSpan={4} className="text-center py-8 text-gray-400">No customer risk data.</td></tr>}
               </tbody>
