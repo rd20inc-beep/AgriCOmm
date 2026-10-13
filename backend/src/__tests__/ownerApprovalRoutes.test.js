@@ -47,3 +47,14 @@ test.each(gated.map((g) => [g.route, g]))('%s runs ownerApproval before validate
   expect(gate).toBeGreaterThan(-1);
   if (v > -1) expect(gate).toBeLessThan(v);
 });
+
+// R10b: approving a salary advance needs payroll.approve like rejecting it —
+// it was payroll.view, so a view-only role could submit an approval (the Owner
+// gate still applies on top).
+test('approve and reject of a salary advance both need payroll.approve', () => {
+  const text = fs.readFileSync(path.join(modules, 'milling', 'milling.routes.js'), 'utf8');
+  for (const verb of ['approve', 'reject']) {
+    const m = text.match(new RegExp(`router\\.post\\('/advances/:id/${verb}', authorize\\('payroll', '(\\w+)'\\)`));
+    expect(m && m[1]).toBe('approve');
+  }
+});

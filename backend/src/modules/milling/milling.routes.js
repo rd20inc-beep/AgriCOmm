@@ -1650,9 +1650,11 @@ router.post('/workers/:id/advances', authorize('payroll', 'create'), auditAction
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 
-// Approve a pending advance — Owner only (ownerApproval gate: the Owner
-// self-approves, anyone else must name the authorizing owner). No cash yet.
-router.post('/advances/:id/approve', authorize('payroll', 'view'), ownerApproval('salary_advance'),
+// Approve a pending advance — payroll.approve (as reject) AND the Owner
+// (ownerApproval gate: the Owner self-approves, anyone else must name the
+// authorizing owner). No cash yet. Was payroll.view, which let a view-only
+// role (Mill Manager, Read-Only Auditor) submit an approval.
+router.post('/advances/:id/approve', authorize('payroll', 'approve'), ownerApproval('salary_advance'),
   auditAction('advance_approved', 'mill_worker_advance', (req) => req.params.id), async (req, res) => {
   try {
     const advance = await db('mill_worker_advances').where('id', req.params.id).first();
