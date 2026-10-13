@@ -5,7 +5,16 @@ const db = require('../../config/database');
 // touches req/rbac itself.
 const { applyWarehouseScope, isWarehouseInScope } = require('../../utils/warehouseScope');
 const { companyStock } = require('../inventory/stockSql');
-const { exportProfit } = require('../finance/profitDefinitions');
+const { exportProfit, EXCLUDED_ORDER_STATUSES } = require('../finance/profitDefinitions');
+const { collectionRate: computeCollectionRate } = require('../finance/collectionRate');
+const fxRateService = require('../finance/fxRate.service');
+const { dayOf } = require('../exportOrders/balanceDueDate');
+const {
+  RECV_PKR_EQUIV_SQL, ORDER_COST_PKR_SQL, RECEIVABLE_CLOSED, PAYABLE_CLOSED,
+  byCurrency, foldPkrEquiv, cashSummary, workingCapitalSummary, collectionRateFields,
+} = require('../finance/currencyFigures');
+const { foldCashForecast, addDays } = require('./cashForecast');
+const { PENDING_CHEQUE, NEVER_MONEY } = require('../finance/paymentsFeedTotals');
 const { kgToMt, KG_PER_MT } = require('../../shared/units');
 
 // Parse a milling_batches.custom_tags jsonb value into a plain array. The pg
@@ -121,6 +130,13 @@ const reportingService = {
 
   /**
    * Executive summary — key metrics in one call.
+   *
+   * PKR and USD are never added together (owner decision G-1). Money that
+   * spans currencies comes back per currency ({ PKR, USD }), with at most one
+   * secondary ≈ PKR equivalent beside it (each row at its own booked rate, or
+   * today's rate where none is kept — labelled). Profit is the Booked /
+   * Realised / Pipeline definition (profitDefinitions.js) in PKR; collection
+   * is received ÷ amounts DUE per currency (C6, collectionRate.js).
    */
   async getExecutiveSummary({ entity, dateFrom, dateTo }) {
     const orderQuery = db('export_orders');
@@ -129,40 +145,35 @@ const reportingService = {
 
     // Order metrics
     const orderStats = await orderQuery.clone()
-      .select(
-        db.raw('COUNT(id) as total_orders'),
-        db.raw('COALESCE(SUM(contract_value), 0) as total_revenue')
-      )
+      .select(db.raw('COUNT(id) as total_orders'))
       .first();
 
-    // Total costs from export_order_costs
+    // Contract value of the period's confirmed orders, in each order's own
+    // currency (Draft / Cancelled are not sales).
+    const contractRows = await orderQuery.clone()
+      .whereNotIn('status', EXCLUDED_ORDER_STATUSES)
+      .select(db.raw('UPPER(currency) as currency'), db.raw('COALESCE(SUM(contract_value), 0) as total'))
+      .groupByRaw('UPPER(currency)');
+
+    // Recorded order costs, in each cost row's own currency, with the PKR
+    // equivalent at the row's / order's booked rate.
     const costQuery = db('export_order_costs as eoc')
-      .join('export_orders as eo', 'eoc.order_id', 'eo.id');
+      .join('export_orders as eo', 'eoc.order_id', 'eo.id')
+      .whereNotIn('eo.status', EXCLUDED_ORDER_STATUSES);
     if (dateFrom) costQuery.where('eo.created_at', '>=', dateFrom);
     if (dateTo) costQuery.where('eo.created_at', '<=', dateTo);
-
-    const costStats = await costQuery
-      .select(db.raw('COALESCE(SUM(eoc.amount), 0) as total_costs'))
-      .first();
-
-    const totalRevenue = parseFloat(orderStats.total_revenue) || 0;
-    const totalCosts = parseFloat(costStats.total_costs) || 0;
-    const grossProfit = totalRevenue - totalCosts;
-    const netMargin = totalRevenue > 0 ? parseFloat(((grossProfit / totalRevenue) * 100).toFixed(2)) : 0;
-
-    // Receivables
-    const recvStats = await db('receivables')
+    const costRows = await costQuery
       .select(
-        db.raw('COALESCE(SUM(expected_amount), 0) as total_receivables'),
-        db.raw('COALESCE(SUM(received_amount), 0) as total_collected')
+        db.raw("UPPER(COALESCE(eoc.currency, 'PKR')) as currency"),
+        db.raw('COALESCE(SUM(eoc.amount), 0) as total'),
+        db.raw(`COALESCE(SUM(${ORDER_COST_PKR_SQL}), 0) as pkr_equiv`),
+        db.raw(`COUNT(*) FILTER (WHERE (${ORDER_COST_PKR_SQL}) IS NULL) as pkr_missing`),
       )
-      .first();
+      .groupByRaw("UPPER(COALESCE(eoc.currency, 'PKR'))");
 
-    const totalReceivables = parseFloat(recvStats.total_receivables) || 0;
-    const totalCollected = parseFloat(recvStats.total_collected) || 0;
-    const collectionRate = totalReceivables > 0
-      ? parseFloat(((totalCollected / totalReceivables) * 100).toFixed(2))
-      : 0;
+    // Collection rate (C6): received ÷ amounts DUE, per currency. Point in
+    // time (today) — the period filter does not apply.
+    const collection = await computeCollectionRate(db);
 
     // Milling metrics
     const batchQuery = db('milling_batches');
@@ -185,28 +196,41 @@ const reportingService = {
       .avg('yield_pct as avg_yield')
       .first();
 
-    // Working capital: total outstanding receivables + inventory value
+    // Working capital: open receivables + inventory value − open payables,
+    // each currency on its own.
     // Company stock only — client-owned service-milling lots are not ours.
     const inventoryValue = await companyStock(db('inventory_lots'), null)
       .where('qty', '>', 0)
       .select(db.raw('COALESCE(SUM(total_value), 0) as total'))
       .first();
 
-    const outstandingRecv = await db('receivables')
-      .where('status', '!=', 'Closed')
-      .select(db.raw('COALESCE(SUM(outstanding), 0) as total'))
-      .first();
+    const openRecvRows = await db('receivables')
+      .whereNotIn('status', RECEIVABLE_CLOSED)
+      .where('outstanding', '>', 0)
+      .select(
+        db.raw("UPPER(COALESCE(currency, 'PKR')) as currency"),
+        db.raw('COALESCE(SUM(outstanding), 0) as outstanding'),
+        db.raw(`COALESCE(SUM(${RECV_PKR_EQUIV_SQL}), 0) as pkr_equiv`),
+        db.raw(`COUNT(*) FILTER (WHERE (${RECV_PKR_EQUIV_SQL}) IS NULL) as pkr_missing`),
+      )
+      .groupByRaw("UPPER(COALESCE(currency, 'PKR'))");
 
-    const outstandingPay = await db('payables')
-      .where('status', '!=', 'Closed')
-      .select(db.raw('COALESCE(SUM(outstanding), 0) as total'))
-      .first();
+    const openPayRows = await db('payables')
+      .whereNotIn('status', PAYABLE_CLOSED)
+      .where('outstanding', '>', 0)
+      .select(
+        db.raw("UPPER(COALESCE(currency, 'PKR')) as currency"),
+        db.raw('COALESCE(SUM(outstanding), 0) as outstanding'),
+        db.raw('COUNT(*) as count'),
+      )
+      .groupByRaw("UPPER(COALESCE(currency, 'PKR'))");
 
-    // Cash position from bank accounts
-    const cashPosition = await db('bank_accounts')
-      .where('is_active', true)
-      .select(db.raw('COALESCE(SUM(current_balance), 0) as total'))
-      .first();
+    // Cash per currency — every account, as Finance ▸ Home counts it.
+    const bankRows = await db('bank_accounts')
+      .select(db.raw("UPPER(COALESCE(currency, 'PKR')) as currency"))
+      .sum('current_balance as total')
+      .count('id as count')
+      .groupByRaw("UPPER(COALESCE(currency, 'PKR'))");
 
     // Outstanding A/R in PKR (Reports ▸ Executive tile). PKR rows count their
     // own outstanding; a foreign-currency row uses the PKR amount booked on it
@@ -231,30 +255,61 @@ const reportingService = {
     // Booked / Realised / Pipeline export profit — the one definition every
     // profit tile reads (finance/profitDefinitions.js, owner decision G-2),
     // in the same period (by order date). PKR only.
-    const exportDefs = (await exportProfit(db, { startDate: dateFrom, endDate: dateTo })).totals;
+    const exp = await exportProfit(db, { startDate: dateFrom, endDate: dateTo });
+    const exportDefs = exp.totals;
+
+    // Today's USD rate — only for balances that keep no booked rate (bank
+    // balances, foreign payables), and always labelled with its date.
+    const fx = await fxRateService.getLatestRate('USD');
+    const usdRate = parseFloat(fx && fx.rate) || 0;
+    const rateDate = dayOf(fx && fx.effectiveDate);
+
+    // ≈ PKR equivalent of the contract value: each order's booked PKR revenue
+    // (locked, else contract × booked rate); an order with neither is counted.
+    const bookedRows = (exp.rows || []).filter((r) => r.inBookedPeriod !== false);
+    const contractValuePkrEquiv = foldPkrEquiv(bookedRows.map((r) => ({
+      currency: r.currency, pkr: r.revenuePkr, basis: 'booked',
+    })));
+    const costsList = Array.isArray(costRows) ? costRows : [];
+    const orderCostsPkrEquiv = foldPkrEquiv(costsList.map((r) => ({
+      currency: r.currency, pkr: parseFloat(r.pkr_equiv) || 0, basis: 'booked', missing: parseInt(r.pkr_missing, 10) || 0,
+    })));
 
     return {
-      totalOrders: parseInt(orderStats.total_orders, 10),
+      totalOrders: parseInt(orderStats && orderStats.total_orders, 10) || 0,
       bookedProfitPkr: exportDefs.bookedPkr,
       realisedProfitPkr: exportDefs.realisedPkr,
       pipelineProfitPkr: exportDefs.pipelinePkr,
       avgMarginPct: exportDefs.bookedMarginPct,
+      bookedRevenuePkr: exportDefs.bookedRevenuePkr,
       bookedOrderCount: exportDefs.pricedCount,
       bookedEstimatedCount: exportDefs.estimatedCount,
       bookedUnpricedCount: exportDefs.unpricedCount,
       fxRealisedPkr: exportDefs.fxRealisedPkr,
-      totalRevenue,
-      totalCosts,
-      grossProfit,
-      netMargin,
-      totalReceivables,
-      totalCollected,
-      collectionRate,
+      // Each currency's own figure (replaces totalRevenue / totalCosts /
+      // grossProfit / netMargin, which took rupee costs off dollar contracts —
+      // the profit is bookedProfitPkr above).
+      contractValueByCurrency: byCurrency(contractRows, 'total'),
+      contractValuePkrEquiv,
+      orderCostsByCurrency: byCurrency(costsList, 'total'),
+      orderCostsPkrEquiv,
+      // C6: { USD: 39.2, PKR: 17.9 }; collectionRate is the single rate only
+      // when one currency has something due (else null). Detail in collection.
+      ...collectionRateFields(collection),
+      collection,
       activeMillBatches: parseInt(activeBatches.count, 10),
       completedBatches: parseInt(completedBatches.count, 10),
       avgYield: parseFloat(parseFloat(avgYield.avg_yield || 0).toFixed(1)),
-      workingCapitalLocked: parseFloat(outstandingRecv.total) + parseFloat(inventoryValue.total) - parseFloat(outstandingPay.total),
-      cashPosition: parseFloat(cashPosition.total),
+      // Replaces workingCapitalLocked (dollars + rupees in one number).
+      workingCapital: workingCapitalSummary({
+        receivables: openRecvRows,
+        payables: openPayRows,
+        inventoryPkr: parseFloat(inventoryValue && inventoryValue.total) || 0,
+        usdRate,
+        rateDate,
+      }),
+      // { byCurrency, accountCount, pkrEquiv (today's rate) } — was one SUM.
+      cashPosition: cashSummary(bankRows, { usdRate, rateDate }),
       totalOutstandingPkr: parseFloat(parseFloat(arStats?.outstanding_pkr || 0).toFixed(2)),
       openReceivables: parseInt(arStats?.open_count, 10) || 0,
       openReceivablesUnpriced: parseInt(arStats?.unpriced_count, 10) || 0,
@@ -3193,80 +3248,72 @@ const reportingService = {
   },
 
   /**
-   * Cash forecast vs commitments: expected receipts, expected payments, net projection.
+   * Cash forecast vs commitments: expected receipts, expected payments, net
+   * projection — one forecast per currency, never summed (cashForecast.js).
+   * Open receivables / payables only (not Paid, Written Off, Reversed);
+   * uncleared cheques are reported apart as pending, as on Money In / Out.
    */
-  async getCashForecastVsCommitments({ daysAhead = 30 }) {
-    const today = new Date();
-    const endDate = new Date(today);
-    endDate.setDate(endDate.getDate() + daysAhead);
+  async getCashForecastVsCommitments({ daysAhead = 30, asOf } = {}) {
+    const today = /^\d{4}-\d{2}-\d{2}$/.test(String(asOf || '')) ? asOf : new Date().toISOString().slice(0, 10);
+    const parsed = parseInt(daysAhead, 10);
+    const days = Number.isFinite(parsed) && parsed >= 0 ? Math.min(parsed, 366) : 30;
+    const endDay = addDays(today, days);
 
-    // Expected receipts from receivables due within range
+    // Expected receipts from receivables due within range, per currency and
+    // day, with each row's booked PKR equivalent.
     const receipts = await db('receivables')
-      .where('status', '!=', 'Closed')
+      .whereNotIn('status', RECEIVABLE_CLOSED)
       .where('outstanding', '>', 0)
-      .whereBetween('due_date', [today.toISOString().slice(0, 10), endDate.toISOString().slice(0, 10)])
+      .whereBetween('due_date', [today, endDay])
       .select(
-        'due_date',
-        db.raw('COALESCE(SUM(outstanding), 0) as expected_receipt')
+        db.raw("UPPER(COALESCE(currency, 'PKR')) as currency"),
+        db.raw('due_date::text as due_day'),
+        db.raw('COALESCE(SUM(outstanding), 0) as amount'),
+        db.raw(`COALESCE(SUM(${RECV_PKR_EQUIV_SQL}), 0) as pkr_equiv`),
+        db.raw(`COUNT(*) FILTER (WHERE (${RECV_PKR_EQUIV_SQL}) IS NULL) as pkr_missing`),
       )
-      .groupBy('due_date')
-      .orderBy('due_date');
+      .groupByRaw("UPPER(COALESCE(currency, 'PKR')), due_date");
 
-    // Expected payments from payables due within range
+    // Expected payments from payables due within range, per currency and day.
     const payments = await db('payables')
-      .where('status', '!=', 'Closed')
+      .whereNotIn('status', PAYABLE_CLOSED)
       .where('outstanding', '>', 0)
-      .whereBetween('due_date', [today.toISOString().slice(0, 10), endDate.toISOString().slice(0, 10)])
+      .whereBetween('due_date', [today, endDay])
       .select(
-        'due_date',
-        db.raw('COALESCE(SUM(outstanding), 0) as expected_payment')
+        db.raw("UPPER(COALESCE(currency, 'PKR')) as currency"),
+        db.raw('due_date::text as due_day'),
+        db.raw('COALESCE(SUM(outstanding), 0) as amount'),
+        db.raw('COUNT(*) as count'),
       )
-      .groupBy('due_date')
-      .orderBy('due_date');
+      .groupByRaw("UPPER(COALESCE(currency, 'PKR')), due_date");
 
-    // Current cash
-    const cashPosition = await db('bank_accounts')
+    // Current cash per currency (active accounts).
+    const bank = await db('bank_accounts')
       .where('is_active', true)
+      .select(db.raw("UPPER(COALESCE(currency, 'PKR')) as currency"))
       .sum('current_balance as total')
-      .first();
+      .count('id as count')
+      .groupByRaw("UPPER(COALESCE(currency, 'PKR'))");
 
-    // Build daily projection
-    const receiptMap = {};
-    for (const r of receipts) {
-      const d = new Date(r.due_date).toISOString().slice(0, 10);
-      receiptMap[d] = parseFloat(r.expected_receipt) || 0;
-    }
-    const paymentMap = {};
-    for (const p of payments) {
-      const d = new Date(p.due_date).toISOString().slice(0, 10);
-      paymentMap[d] = parseFloat(p.expected_payment) || 0;
-    }
+    // Uncleared cheques (not Reversed / Bounced / unconfirmed): not money yet.
+    const cheques = await db('payments as p')
+      .whereNotIn('p.status', NEVER_MONEY)
+      .whereRaw(PENDING_CHEQUE)
+      .select(
+        'p.type',
+        db.raw("UPPER(COALESCE(p.currency, 'PKR')) as currency"),
+        db.raw('COALESCE(SUM(p.amount), 0) as amount'),
+        db.raw('COUNT(*) as count'),
+      )
+      .groupByRaw("p.type, UPPER(COALESCE(p.currency, 'PKR'))");
 
-    let runningBalance = parseFloat(cashPosition.total) || 0;
-    const projection = [];
-    for (let i = 0; i <= daysAhead; i++) {
-      const d = new Date(today);
-      d.setDate(d.getDate() + i);
-      const dateStr = d.toISOString().slice(0, 10);
-      const inflow = receiptMap[dateStr] || 0;
-      const outflow = paymentMap[dateStr] || 0;
-      runningBalance += inflow - outflow;
-
-      projection.push({
-        date: dateStr,
-        expectedReceipts: inflow,
-        expectedPayments: outflow,
-        netCashFlow: inflow - outflow,
-        projectedBalance: parseFloat(runningBalance.toFixed(2)),
-      });
-    }
-
-    return {
-      currentCash: parseFloat(cashPosition.total) || 0,
-      totalExpectedReceipts: receipts.reduce((sum, r) => sum + (parseFloat(r.expected_receipt) || 0), 0),
-      totalExpectedPayments: payments.reduce((sum, p) => sum + (parseFloat(p.expected_payment) || 0), 0),
-      projection,
-    };
+    const fx = await fxRateService.getLatestRate('USD');
+    return foldCashForecast({ receipts, payments, bank, cheques }, {
+      asOf: today,
+      daysAhead: days,
+      usdRate: parseFloat(fx && fx.rate) || 0,
+      rateDate: dayOf(fx && fx.effectiveDate),
+    });
   },
 
   /**
@@ -3989,7 +4036,25 @@ const reportingService = {
   async exportToCSV(data, columns) {
     if (!data || data.length === 0) return '';
 
-    const cols = columns || Object.keys(data[0]);
+    // Nested objects become dotted columns — a per-currency figure
+    // { PKR, USD } exports as contractValueByCurrency.PKR / .USD, never as
+    // "[object Object]" or one added-up number. Arrays are written as JSON.
+    const flatten = (obj, prefix = '', out = {}) => {
+      for (const [k, v] of Object.entries(obj || {})) {
+        const key = prefix ? `${prefix}.${k}` : k;
+        if (v && typeof v === 'object' && !Array.isArray(v) && !(v instanceof Date)) flatten(v, key, out);
+        else out[key] = Array.isArray(v) ? JSON.stringify(v) : v;
+      }
+      return out;
+    };
+    data = data.map((row) => (row && typeof row === 'object' ? flatten(row) : row));
+
+    let cols = columns;
+    if (!cols) {
+      const seen = new Set();
+      for (const row of data) for (const k of Object.keys(row || {})) seen.add(k);
+      cols = [...seen];
+    }
     const header = cols.join(',');
     const rows = data.map((row) =>
       cols.map((col) => {

@@ -216,3 +216,76 @@ describe('Executive summary — Outstanding A/R', () => {
     expect(out.openReceivables).toBe(0);
   });
 });
+
+describe('Executive summary — every money figure per currency (R12)', () => {
+  const setExec = () => db.__set({
+    export_orders: (q) => (q.groupBy
+      ? [{ currency: 'USD', total: '121621.10' }, { currency: 'PKR', total: '500000' }]
+      : { total_orders: '3' }),
+    export_order_costs: (q) => (q.groupBy
+      ? [{ currency: 'PKR', total: '2000000', pkr_equiv: '2000000', pkr_missing: '0' }]
+      : {}),
+    milling_batches: zeros,
+    inventory_lots: () => ({ total: '1000000' }),
+    receivables: (q) => {
+      if (q.raws.some((r) => r.includes('outstanding_pkr'))) return { open_count: '1', outstanding_pkr: '0', unpriced_count: '0' };
+      return q.groupBy ? [{ currency: 'USD', outstanding: '121621.10', pkr_equiv: '34053908', pkr_missing: '0' }] : {};
+    },
+    payables: (q) => (q.groupBy ? [{ currency: 'PKR', outstanding: '300000', count: '1' }] : {}),
+    bank_accounts: (q) => (q.groupBy
+      ? [{ currency: 'PKR', total: '1500000', count: '2' }, { currency: 'USD', total: '2500', count: '1' }]
+      : {}),
+  });
+
+  test('contract value, costs, cash and working capital come back per currency', async () => {
+    mockCollection = { targetPct: 95, byCurrency: { USD: { ratePct: 39.2 }, PKR: { ratePct: 17.9 } }, notYetDue: {} };
+    setExec();
+    const out = await reportingService.getExecutiveSummary({});
+    expect(out.contractValueByCurrency).toEqual({ USD: 121621.1, PKR: 500000 });
+    expect(out.orderCostsByCurrency).toEqual({ PKR: 2000000 });
+    expect(out.cashPosition.byCurrency).toEqual({ PKR: 1500000, USD: 2500 });
+    expect(out.cashPosition.pkrEquiv).toMatchObject({ pkr: 1500000 + 2500 * 280, basis: 'today' });
+    expect(out.workingCapital.receivablesByCurrency).toEqual({ USD: 121621.1 });
+    expect(out.workingCapital.netByCurrency).toEqual({ USD: 121621.1, PKR: 1000000 - 300000 });
+    expect(out.workingCapital.pkrEquiv.pkr).toBe(34053908 + 1000000 - 300000);
+    // C6: received ÷ due per currency; no single rate across two currencies.
+    expect(out.collectionRateByCurrency).toEqual({ USD: 39.2, PKR: 17.9 });
+    expect(out.collectionRate).toBeNull();
+    // The mixed figures are gone — not merely relabelled.
+    for (const k of ['totalRevenue', 'totalCosts', 'grossProfit', 'netMargin', 'totalReceivables', 'totalCollected', 'workingCapitalLocked']) {
+      expect(out).not.toHaveProperty(k);
+    }
+  });
+
+  test('open payables leave out Paid / Written Off / Reversed', async () => {
+    setExec();
+    await reportingService.getExecutiveSummary({});
+    const q = db.__queries.find((x) => x.table === 'payables' && x.groupBy);
+    expect(q.whereNotIns).toEqual([['status', ['Paid', 'Written Off', 'Reversed']]]);
+  });
+});
+
+describe('Cash forecast — per currency; reversed / bounced / uncleared kept out', () => {
+  test('USD receipts project against USD cash; pending cheques reported apart', async () => {
+    db.__set({
+      receivables: (q) => (q.groupBy ? [{ currency: 'USD', due_day: '2026-10-14', amount: '121621', pkr_equiv: '34053880', pkr_missing: '0' }] : []),
+      payables: (q) => (q.groupBy ? [{ currency: 'PKR', due_day: '2026-10-14', amount: '1000', count: '1' }] : []),
+      bank_accounts: (q) => (q.groupBy ? [{ currency: 'PKR', total: '50000', count: '1' }] : []),
+      payments: () => [{ type: 'receipt', currency: 'PKR', amount: '300', count: '1' }],
+    });
+    const out = await reportingService.getCashForecastVsCommitments({ daysAhead: 2, asOf: '2026-10-13' });
+    expect(out.byCurrency.PKR).toMatchObject({ currentCash: 50000, expectedReceipts: 0, expectedPayments: 1000, projectedBalance: 49000 });
+    expect(out.byCurrency.USD).toMatchObject({ currentCash: 0, expectedReceipts: 121621, projectedBalance: 121621 });
+    expect(out.byCurrency.PKR.pendingChequesIn).toEqual({ amount: 300, count: 1 });
+    expect(out).not.toHaveProperty('currentCash');
+
+    const recvQ = db.__queries.find((x) => x.table === 'receivables');
+    expect(recvQ.whereNotIns).toEqual([['status', ['Paid', 'Received', 'Written Off']]]);
+    const payQ = db.__queries.find((x) => x.table === 'payables');
+    expect(payQ.whereNotIns).toEqual([['status', ['Paid', 'Written Off', 'Reversed']]]);
+    // Unconfirmed / rejected receipts never count; PENDING_CHEQUE (whereRaw)
+    // drops Reversed / Bounced and keeps only cleared = false.
+    const chqQ = db.__queries.find((x) => x.table === 'payments as p');
+    expect(chqQ.whereNotIns).toEqual([['p.status', ['Pending Finance Confirmation', 'Rejected']]]);
+  });
+});

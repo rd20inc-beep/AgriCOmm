@@ -109,7 +109,7 @@ const reportingController = {
       // The Booked / Realised / Pipeline profit figures follow the profit
       // visibility rule (reports.view_profit or finance.view).
       if (!(await require('../../utils/costVisibility').canSeeProfit(req))) {
-        for (const k of ['bookedProfitPkr', 'realisedProfitPkr', 'pipelineProfitPkr', 'avgMarginPct', 'fxRealisedPkr']) data[k] = null;
+        for (const k of ['bookedProfitPkr', 'realisedProfitPkr', 'pipelineProfitPkr', 'avgMarginPct', 'bookedRevenuePkr', 'fxRealisedPkr']) data[k] = null;
       }
       return res.json({ success: true, data });
     } catch (err) {
@@ -816,6 +816,9 @@ const reportingController = {
         exportData = rawData;
       } else if (rawData.data && Array.isArray(rawData.data)) {
         exportData = rawData.data;
+      } else if (reportType === 'cash_forecast' && Array.isArray(rawData.projection)) {
+        // One row per currency per day — each currency's own forecast.
+        exportData = rawData.projection;
       } else {
         exportData = [rawData];
       }

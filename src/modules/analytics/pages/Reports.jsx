@@ -33,6 +33,7 @@ import {
   fmtPKR as baseFmtPKR, fmtNum, fmtPct, fmtMT, fmtMoney, fmtDate, toLocalISODate, todayLocalISO,
 } from '../../../shared/utils/format';
 import { moneyTile, netTile, currencyLines, formatCurrencyLines, cappedHint } from '../utils/moneyFeed';
+import { forecastCards, forecastRows, forecastEquivText, money as forecastMoney } from '../utils/cashForecastView';
 
 // ─── Formatting ────────────────────────────────────────────────────────
 // Reports are reconciled line by line, so money is always shown in full —
@@ -2248,49 +2249,72 @@ function ProductionTab({ params }) {
 }
 
 // ─── Tab: Cash Forecast (30-day projection) ───────────────────────────
+// One forecast per currency, side by side — PKR and USD are never added
+// together. The ≈ PKR equivalent is a secondary line, never cash.
+const FORECAST_LINE = { PKR: '#3b82f6', USD: '#10b981' };
 function ForecastTab() {
   const { data = {}, isLoading } = useCashForecast({});
   if (isLoading) return <Skeleton />;
-  const proj = Array.isArray(data.projection) ? data.projection : [];
-  const cur = parseFloat(data.currentCash) || 0;
-  const recv = parseFloat(data.totalExpectedReceipts) || 0;
-  const pay = parseFloat(data.totalExpectedPayments) || 0;
-  const endBal = proj.length ? (parseFloat(proj[proj.length - 1].projectedBalance) || 0) : cur;
-  const chart = proj.map(d => ({ name: new Date(d.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }), Balance: parseFloat(d.projectedBalance) || 0 }));
+  const cards = forecastCards(data);
+  const curs = cards.map(c => c.currency);
+  const rows = forecastRows(data);
+  const equiv = forecastEquivText(data);
+  const short = (d) => new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+  const days = data.daysAhead ?? 30;
 
   return (
     <div className="space-y-5">
-      <SectionHeader title="Cash Forecast — projected balance (next 30 days)" subtitle="Current cash plus expected receipts (from receivable due dates) less expected payments (payable due dates)." />
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <SummaryCell label="Current cash" value={<span className={cur < 0 ? 'text-red-600' : ''}>{fmtPKR(cur)}</span>} />
-        <SummaryCell label="Expected in" value={<span className="text-emerald-600">{fmtPKR(recv)}</span>} />
-        <SummaryCell label="Expected out" value={<span className="text-red-600">{fmtPKR(pay)}</span>} />
-        <SummaryCell label="Projected balance" value={<span className={endBal < 0 ? 'text-red-600' : 'text-emerald-600'}>{fmtPKR(endBal)}</span>} />
+      <SectionHeader title={`Cash Forecast — projected balance (next ${days} days)`}
+        subtitle="Per currency: current cash plus expected receipts (receivable due dates) less expected payments (payable due dates). Rupees and dollars are separate forecasts — never added together." />
+      <div className={`grid grid-cols-1 ${curs.length > 1 ? 'lg:grid-cols-2' : ''} gap-4`}>
+        {cards.map(c => (
+          <div key={c.currency} className="rounded-xl border border-gray-200 p-3 space-y-3" data-testid={`forecast-${c.currency}`}>
+            <div className="text-xs font-semibold uppercase tracking-wider text-gray-600">{c.currency} forecast</div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              <SummaryCell label="Current cash" value={<span className={c.currentCash < 0 ? 'text-red-600' : ''}>{forecastMoney(c.currentCash, c.currency)}</span>} />
+              <SummaryCell label="Expected in" value={<span className="text-emerald-600">{forecastMoney(c.expectedReceipts, c.currency)}</span>} />
+              <SummaryCell label="Expected out" value={<span className="text-red-600">{forecastMoney(c.expectedPayments, c.currency)}</span>} />
+              <SummaryCell label="Projected balance" value={<span className={c.projectedBalance < 0 ? 'text-red-600' : 'text-emerald-600'}>{forecastMoney(c.projectedBalance, c.currency)}</span>} />
+            </div>
+            {c.pendingText && <p className="text-xs text-amber-700">{c.pendingText}</p>}
+            {rows.length > 0 && (
+              <div className="bg-gray-50 rounded-xl p-3 border border-gray-200" style={{ height: 200 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={rows.map(r => ({ name: short(r.date), Balance: parseFloat(r.cells[c.currency]?.projectedBalance) || 0 }))} margin={{ top: 10, right: 10, left: 0, bottom: 10 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                    <XAxis dataKey="name" interval={Math.ceil(rows.length / 6)} tick={{ fontSize: 10, fill: '#6b7280' }} />
+                    <YAxis tick={{ fontSize: 11, fill: '#6b7280' }} tickFormatter={(v) => Math.abs(v) >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : Math.abs(v) >= 1e3 ? `${(v / 1e3).toFixed(0)}K` : v} />
+                    <Tooltip formatter={(v) => forecastMoney(v, c.currency)} />
+                    <Line type="monotone" dataKey="Balance" stroke={FORECAST_LINE[c.currency] || '#8b5cf6'} strokeWidth={2} dot={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </div>
+        ))}
       </div>
-      {chart.length > 0 && (
-        <div className="bg-gray-50 rounded-xl p-4 border border-gray-200" style={{ height: 260 }}>
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={chart} margin={{ top: 10, right: 10, left: 0, bottom: 20 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-              <XAxis dataKey="name" interval={Math.ceil(chart.length / 8)} tick={{ fontSize: 10, fill: '#6b7280' }} />
-              <YAxis tick={{ fontSize: 11, fill: '#6b7280' }} tickFormatter={(v) => Math.abs(v) >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : Math.abs(v) >= 1e3 ? `${(v / 1e3).toFixed(0)}K` : v} />
-              <Tooltip formatter={(v) => fmtPKR(v)} />
-              <Line type="monotone" dataKey="Balance" stroke="#3b82f6" strokeWidth={2} dot={false} />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
+      {equiv && (
+        <p className="text-xs text-gray-500 tabular-nums" data-testid="forecast-pkr-equiv"
+          title="For reference only — receivables at their own booked rate, bank balances and foreign payables at the rate shown. Not cash, and not part of either forecast.">
+          {equiv}
+        </p>
       )}
       <Table
-        head={['Date', 'Expected In', 'Expected Out', 'Net', 'Projected Balance']}
-        align={['left', 'right', 'right', 'right', 'right']}
-        rows={proj.map(d => [
-          new Date(d.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }),
-          fmtPKR(d.expectedReceipts), fmtPKR(d.expectedPayments),
-          <span className={(parseFloat(d.netCashFlow) || 0) >= 0 ? 'text-emerald-600' : 'text-red-600'}>{fmtPKR(d.netCashFlow)}</span>,
-          <span className={(parseFloat(d.projectedBalance) || 0) < 0 ? 'text-red-600 font-medium' : ''}>{fmtPKR(d.projectedBalance)}</span>,
+        head={['Date', ...curs.flatMap(cur => [`${cur} In`, `${cur} Out`, `${cur} Balance`])]}
+        align={['left', ...curs.flatMap(() => ['right', 'right', 'right'])]}
+        rows={rows.map(r => [
+          short(r.date),
+          ...curs.flatMap(cur => {
+            const x = r.cells[cur] || {};
+            return [
+              forecastMoney(x.expectedReceipts, cur),
+              forecastMoney(x.expectedPayments, cur),
+              <span className={(parseFloat(x.projectedBalance) || 0) < 0 ? 'text-red-600 font-medium' : ''}>{forecastMoney(x.projectedBalance, cur)}</span>,
+            ];
+          }),
         ])}
       />
-      <p className="text-[11px] text-gray-400">Forward-looking 30 days — the global date range filter does not apply here.</p>
+      <p className="text-[11px] text-gray-400">Forward-looking {days} days — the global date range filter does not apply here. Uncleared cheques are not money until they clear, so they are listed beside each forecast, not in it.</p>
     </div>
   );
 }
