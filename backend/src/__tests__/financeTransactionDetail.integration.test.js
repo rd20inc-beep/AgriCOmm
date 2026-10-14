@@ -15,6 +15,8 @@
 jest.mock('../middleware/rateLimiter', () => ({
   authLimiter: (req, res, next) => next(),
   apiLimiter: (req, res, next) => next(),
+  loginLimiter: (req, res, next) => next(),
+  passwordResetLimiter: (req, res, next) => next(),
 }));
 
 const hasDb = !!process.env.DB_HOST;

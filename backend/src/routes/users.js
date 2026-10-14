@@ -6,6 +6,20 @@ const db = require('../config/database');
 const authorize = require('../middleware/rbac');
 const auditAction = require('../middleware/audit');
 const auditService = require('../services/auditService');
+const { bumpTokenVersion, hashResetToken } = require('../modules/auth/auth.repository');
+
+const SUPER_ADMIN = 'Super Admin';
+
+// P1-14: only a Super Admin may grant the Super Admin role (an Owner holding
+// admin.manage_users must not be able to promote anyone — incl. themselves).
+// Sends the 403 and returns true when the grant is refused.
+async function refuseSuperAdminGrant(req, res, targetRole) {
+  if (!targetRole || targetRole.name !== SUPER_ADMIN) return false;
+  const caller = await db('roles').where({ id: req.user.role_id }).first('name');
+  if (caller && caller.name === SUPER_ADMIN) return false;
+  res.status(403).json({ success: false, message: 'Only a Super Admin can grant the Super Admin role.' });
+  return true;
+}
 
 // GET /api/users/owners — active Owner users, for the approval owner-picker.
 // Open to any authenticated user (just id + name) so a non-owner approver can
@@ -167,6 +181,7 @@ router.post(
           message: 'Invalid role_id.',
         });
       }
+      if (await refuseSuperAdminGrant(req, res, role)) return;
 
       const salt = await bcrypt.genSalt(12);
       const password_hash = await bcrypt.hash(password, salt);
@@ -216,6 +231,17 @@ router.put(
         updates.email = updates.email.toLowerCase();
       }
 
+      if (updates.role_id !== undefined) {
+        const newRole = await db('roles').where({ id: updates.role_id }).first();
+        if (!newRole) return res.status(400).json({ success: false, message: 'Invalid role_id.' });
+        if (await refuseSuperAdminGrant(req, res, newRole)) return;
+      }
+
+      const before = await db('users').where({ id: req.params.id }).first('id', 'role_id', 'is_active');
+      if (!before) {
+        return res.status(404).json({ success: false, message: 'User not found.' });
+      }
+
       updates.updated_at = db.fn.now();
 
       const [user] = await db('users')
@@ -225,6 +251,11 @@ router.put(
 
       if (!user) {
         return res.status(404).json({ success: false, message: 'User not found.' });
+      }
+
+      // P1-03: a role or active-flag change ends the user's existing sessions.
+      if (user.role_id !== before.role_id || user.is_active !== before.is_active) {
+        await bumpTokenVersion(user.id);
       }
 
       const role = await db('roles').where({ id: user.role_id }).first();
@@ -253,6 +284,7 @@ router.put('/:id/role', authorize('admin', 'manage_users'), async (req, res) => 
     if (!role) {
       return res.status(400).json({ success: false, message: 'Invalid role_id.' });
     }
+    if (await refuseSuperAdminGrant(req, res, role)) return;
 
     const user = await db('users').where({ id: req.params.id }).first();
     if (!user) {
@@ -265,6 +297,8 @@ router.put('/:id/role', authorize('admin', 'manage_users'), async (req, res) => 
       role_id,
       updated_at: db.fn.now(),
     });
+    // P1-03: the old token's sessions end — a demotion takes effect now.
+    if (Number(oldRoleId) !== Number(role_id)) await bumpTokenVersion(user.id);
 
     await auditService.log({
       userId: req.user.id,
@@ -311,6 +345,7 @@ router.put('/:id/deactivate', authorize('admin', 'manage_users'), async (req, re
       status: 'deactivated', // #9 lifecycle
       updated_at: db.fn.now(),
     });
+    await bumpTokenVersion(user.id); // P1-03
 
     await auditService.log({
       userId: req.user.id,
@@ -343,9 +378,11 @@ router.put('/:id/activate', authorize('admin', 'manage_users'), async (req, res)
       is_active: true,
       status: 'active', // #9 reactivate clears any suspended/locked/deactivated state
       locked_at: null,
+      locked_until: null,
       failed_login_count: 0,
       updated_at: db.fn.now(),
     });
+    await bumpTokenVersion(user.id); // P1-03
 
     await auditService.log({
       userId: req.user.id,
@@ -383,7 +420,9 @@ router.put('/:id/password', authorize('admin', 'manage_users'), async (req, res)
     const force = req.body.force_password_change !== false;
     await db('users').where({ id: req.params.id }).update({
       password_hash, force_password_change: force, password_changed_at: db.fn.now(), updated_at: db.fn.now(),
+      locked_until: null, failed_login_count: 0,
     });
+    await bumpTokenVersion(user.id); // P1-03: the old password's sessions end
 
     await auditService.log({
       userId: req.user.id, action: 'reset_user_password', entityType: 'user',
@@ -469,8 +508,9 @@ router.put('/:id/status', authorize('admin', 'manage_users'), async (req, res) =
       locked_at: status === 'locked' ? db.fn.now() : null,
       updated_at: db.fn.now(),
     };
-    if (status === 'active') patch.failed_login_count = 0; // reactivating clears the lockout counter
+    if (status === 'active') { patch.failed_login_count = 0; patch.locked_until = null; } // reactivating clears the lockout
     await db('users').where({ id: req.params.id }).update(patch);
+    if (status !== user.status) await bumpTokenVersion(user.id); // P1-03
 
     await auditService.log({
       userId: req.user.id, action: 'set_user_status', entityType: 'user',
@@ -510,12 +550,15 @@ router.post('/:id/reset-link', authorize('admin', 'manage_users'), async (req, r
     if (!user) return res.status(404).json({ success: false, message: 'User not found.' });
     const token = crypto.randomBytes(32).toString('hex');
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24h
-    await db('password_reset_tokens').insert({ user_id: user.id, token, expires_at: expiresAt, used: false });
+    // Stored hashed (P1-04); the raw token exists only in the link returned here.
+    await db('password_reset_tokens').insert({ user_id: user.id, token: hashResetToken(token), expires_at: expiresAt, used: false });
     await auditService.log({
       userId: req.user.id, action: 'issue_reset_link', entityType: 'user',
       entityId: req.params.id, details: { email: user.email }, ipAddress: req.ip,
     });
-    const link = `/reset-password?token=${token}`;
+    // #fragment, not ?query — browsers never send it to the server, so the token
+    // stays out of access logs when the link is opened.
+    const link = `/reset-password#token=${token}`;
     return res.json({ success: true, data: { token, link, expires_at: expiresAt }, message: `Reset link generated for ${user.full_name} (valid 24h).` });
   } catch (err) {
     console.error('Issue reset link error:', err);
@@ -530,7 +573,7 @@ router.post('/:id/revoke-sessions', authorize('admin', 'manage_users'), async (r
   try {
     const user = await db('users').where({ id: req.params.id }).first();
     if (!user) return res.status(404).json({ success: false, message: 'User not found.' });
-    await db('users').where({ id: req.params.id }).update({ token_version: (parseInt(user.token_version, 10) || 0) + 1, updated_at: db.fn.now() });
+    await bumpTokenVersion(user.id);
     await auditService.log({
       userId: req.user.id, action: 'revoke_user_sessions', entityType: 'user',
       entityId: req.params.id, details: { email: user.email }, ipAddress: req.ip,

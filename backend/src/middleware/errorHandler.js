@@ -1,5 +1,6 @@
 const winston = require('winston');
 const { captureException } = require('../utils/errorReporter');
+const { pathOnly } = require('./requestLogger');
 
 const logger = winston.createLogger({
   level: 'error',
@@ -17,13 +18,13 @@ function errorHandler(err, req, res, _next) {
     message: err.message,
     stack: err.stack,
     method: req.method,
-    url: req.originalUrl,
+    url: pathOnly(req.originalUrl), // never log query strings (tickets/tokens)
   });
 
   // Report to error monitoring (Sentry-ready)
   captureException(err, {
     method: req.method,
-    url: req.originalUrl,
+    url: pathOnly(req.originalUrl),
     userId: req.user?.id,
   });
 
