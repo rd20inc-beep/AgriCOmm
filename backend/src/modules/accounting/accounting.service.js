@@ -278,6 +278,9 @@ const accountingService = {
       const original = await knex('journal_entries').where({ id: journalId }).first();
       if (!original) throw new Error(`Journal entry ${journalId} not found.`);
       if (original.status !== 'Posted') throw new Error('Only posted journals can be reversed.');
+      // Flipping the status changes the books of the period the journal is
+      // dated in, so it honours that period's lock exactly as posting does.
+      await accountingService.assertPeriodOpen(knex, original, 'reverse');
 
       const note = reason ? ` [Reversed: ${reason}]` : ' [Reversed]';
       await knex('journal_entries')
@@ -294,6 +297,87 @@ const accountingService = {
     if (trx) {
       return execute(trx);
     }
+    return db.transaction(async (autoTrx) => execute(autoTrx));
+  },
+
+  /**
+   * Refuse to change a journal whose accounting period is not Open. The period
+   * is the one it was stamped with, else the one its date falls in.
+   */
+  async assertPeriodOpen(knex, journal, verb = 'change') {
+    let period = journal.period_id
+      ? await knex('accounting_periods').where({ id: journal.period_id }).first()
+      : null;
+    if (!period && journal.date) {
+      const d = journal.date instanceof Date ? journal.date.toISOString().slice(0, 10) : String(journal.date).slice(0, 10);
+      period = await knex('accounting_periods').where('period_start', '<=', d).andWhere('period_end', '>=', d).first();
+    }
+    if (period && period.status !== 'Open') {
+      throw new LedgerPostingError(
+        `Accounting period '${period.name}' is ${period.status}. Cannot ${verb} ${journal.journal_no || 'this journal'}; post a correcting journal in an open period instead.`,
+        'period_closed',
+      );
+    }
+  },
+
+  /**
+   * Reverse ONE posted journal by its signed delta — the period-safe reversal
+   * (P2-13). A fresh Posted journal with every line's debit and credit swapped,
+   * dated `date` (default today; createJournal refuses a closed period), points
+   * back at the original through reversal_of. The original stays Posted and
+   * untouched, so a closed period's books never change and the trial balance
+   * (Posted-only) nets the pair to zero. Never reverse-and-repost.
+   *
+   * Idempotent on reversal_of: the original is locked, and if it already has a
+   * Posted delta that delta is returned (alreadyReversed: true) — a double
+   * click or a retry posts one reversal, not two. A journal that is itself a
+   * reversal is refused (reversing it would re-post the original).
+   *
+   * Returns { journal, alreadyReversed }.
+   */
+  async postReversalDelta(trx, { journalId, date, reason, userId, refType = 'Journal Reversal' }) {
+    const execute = async (knex) => {
+      const original = await knex('journal_entries').where({ id: journalId }).forUpdate().first();
+      if (!original) throw new LedgerPostingError(`Journal entry ${journalId} not found.`, 'not_found');
+      if (original.status !== 'Posted') {
+        throw new LedgerPostingError('Only posted journals can be reversed.', 'invalid_state');
+      }
+      if (original.reversal_of) {
+        throw new LedgerPostingError(`${original.journal_no} is itself a reversal; it cannot be reversed again.`, 'invalid_state');
+      }
+      const done = await knex('journal_entries')
+        .where({ reversal_of: original.id, status: 'Posted' }).orderBy('id').first();
+      if (done) return { journal: done, alreadyReversed: true };
+
+      const lines = await knex('journal_lines').where({ journal_id: original.id }).orderBy('id');
+      const note = reason ? `: ${String(reason).slice(0, 500)}` : '';
+      const delta = await accountingService.createJournal(knex, {
+        date: date || new Date().toISOString().slice(0, 10),
+        entity: original.entity || null,
+        refType,
+        refNo: original.ref_no || original.journal_no,
+        description: `Reversal of ${original.journal_no}${note}`.slice(0, 1000),
+        currency: 'PKR',
+        fxRate: 1,
+        isAuto: original.is_auto,
+        userId: userId || null,
+        partyType: original.party_type || null,
+        partyId: original.party_id || null,
+        origCurrency: original.orig_currency || null,
+        origFxRate: original.orig_fx_rate || null,
+        lines: lines.map((l) => ({
+          account_id: l.account_id,
+          account: l.account,
+          debit: parseFloat(l.credit) || 0,
+          credit: parseFloat(l.debit) || 0,
+          narration: `Reversal — ${l.narration || original.journal_no}`.slice(0, 240),
+        })),
+      });
+      await knex('journal_entries').where({ id: delta.id }).update({ reversal_of: original.id });
+      const posted = await accountingService.postJournal(knex, delta.id);
+      return { journal: { ...posted, lines: delta.lines }, alreadyReversed: false };
+    };
+    if (trx) return execute(trx);
     return db.transaction(async (autoTrx) => execute(autoTrx));
   },
 

@@ -13,7 +13,9 @@ function auditAction(action, entityType, getEntityId) {
     const originalJson = res.json.bind(res);
 
     res.json = function (data) {
-      if (data && data.success) {
+      // A handler that already wrote its audit row inside its own transaction
+      // (auditService.logInTrx) is not logged a second time here.
+      if (data && data.success && !req.auditedInTrx) {
         auditService
           .log({
             userId: req.user ? req.user.id : null,
