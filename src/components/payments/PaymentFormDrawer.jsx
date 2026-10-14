@@ -109,6 +109,14 @@ export default function PaymentFormDrawer({ doc, variant: variantIn, ctx: ctxIn,
           <input id="pay-fx" type="number" step="0.0001" min="0" value={form.fxRate || ''} onChange={(e) => set('fxRate', e.target.value)}
             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white" placeholder="Optional" />
           <p className="text-[11px] text-gray-400 mt-1">Finance enters the rate the bank actually applied when it confirms.</p>
+          {currency === 'USD' && (
+            <div className="mt-3">
+              <label className="block text-xs font-medium text-gray-600 mb-1" htmlFor="pay-bank-charges">Bank charges deducted (USD)</label>
+              <input id="pay-bank-charges" type="number" step="0.01" min="0" value={form.bankCharges || ''} onChange={(e) => set('bankCharges', e.target.value)}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white" placeholder="0.00" />
+              <p className="text-[11px] text-gray-400 mt-1">What the banks kept from the wire. Settles the receivable with the amount; booked to Bank Charges. Up to the tolerance (USD 50 by default).</p>
+            </div>
+          )}
         </div>
       ) : null}
       onSubmit={submit}

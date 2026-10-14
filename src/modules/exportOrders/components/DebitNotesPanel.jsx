@@ -40,6 +40,8 @@ export default function DebitNotesPanel({ order, addToast, canIssue = true }) {
   const [confirm, confirmDialog] = useConfirm();
 
   const currency = order?.currency || 'USD';
+  // Raised after sailing, as the clause says — the server refuses it earlier.
+  const shipped = ['Shipped', 'Arrived'].includes(order?.status);
   const blank = {
     basis: 'freight_escalation',
     old_rate_per_mt: order?.freightPerMT ?? '',
@@ -113,7 +115,7 @@ export default function DebitNotesPanel({ order, addToast, canIssue = true }) {
         <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide inline-flex items-center gap-1.5">
           <FileWarning className="w-4 h-4" /> Freight Debit Notes
         </h3>
-        {canIssue && (
+        {canIssue && shipped && (
           <button onClick={() => { setForm(blank); setOpen(true); }}
             className="text-xs font-medium text-blue-600 hover:text-blue-700 inline-flex items-center gap-1">
             <Plus className="w-3.5 h-3.5" /> Raise

@@ -188,8 +188,19 @@ router.post(
 router.post(
   '/receipts/:paymentId/reject',
   authorize('finance', 'confirm_payment'),
+  validate(schemas.rejectExportReceipt),
   auditAction('reject_export_receipt', 'payment', (req) => req.params.paymentId),
   controller.rejectExportReceipt
+);
+// D-8: a short balance left after the last receipt (bank deductions the
+// recorder did not enter, a buyer short-paying). Always Owner-approved.
+router.post(
+  '/:id/write-off-balance',
+  authorize('finance', 'confirm_payment'),
+  ownerApproval('export_short_write_off'),
+  validate(schemas.writeOffExportBalance),
+  auditAction('write_off_balance', 'export_order', (req) => req.params.id),
+  controller.writeOffBalance
 );
 router.post(
   '/:id/allocate-stock',

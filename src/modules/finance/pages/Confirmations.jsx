@@ -371,7 +371,7 @@ export default function FinanceConfirmations() {
                       <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 capitalize">{p.receiptType}</span>
                     </div>
                     <div className="text-xs text-gray-500 mt-0.5">
-                      {fmtMoney(p.amount, p.currency || 'USD')} · recorded by {p.recordedByName || '—'} · {p.paymentDate ? fmtDate(String(p.paymentDate).slice(0, 10)) : ''}
+                      {fmtMoney(p.amount, p.currency || 'USD')}{parseFloat(p.bankCharges) > 0 ? ` + ${fmtMoney(p.bankCharges, p.currency || 'USD')} bank charges` : ''} · recorded by {p.recordedByName || '—'} · {p.paymentDate ? fmtDate(String(p.paymentDate).slice(0, 10)) : ''}
                     </div>
                     <div className="text-xs mt-0.5 inline-flex items-center gap-1 text-emerald-700">
                       <Landmark size={12} className="flex-shrink-0" />

@@ -26,6 +26,7 @@ const { NotFoundError, ValidationError } = require('../../shared/errors');
 
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 const MONEY_EPSILON = 0.01;
+const ISSUABLE_STATUSES = ['Shipped', 'Arrived'];
 
 // A `date` column comes back from Postgres as a JS Date, and Date#toString gives
 // "Tue Sep 29 2026 …" — slicing that to ten characters produced "Tue Sep 29",
@@ -137,8 +138,11 @@ const debitNoteService = {
     return db.transaction(async (trx) => {
       const order = await trx('export_orders').where({ id: orderId }).forUpdate().first();
       if (!order) throw new NotFoundError('Export order not found.');
-      if (order.status === 'Cancelled') {
-        throw new ValidationError('Cannot raise a debit note against a cancelled order.');
+      // Only once the goods have sailed, as the clause says: before that the
+      // contract can still be edited, and a recompute must not meet a claim the
+      // buyer was never meant to see yet (EXP-01).
+      if (!ISSUABLE_STATUSES.includes(order.status)) {
+        throw new ValidationError(`A debit note is raised after shipment — this order is '${order.status}'. It can be issued once the order is Shipped or Arrived.`);
       }
 
       const qtyMt = parseFloat(body.qty_mt) || parseFloat(order.qty_mt) || 0;

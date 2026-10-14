@@ -183,6 +183,12 @@ describe('editing an order on the Overview tab', () => {
     expect(p).not.toHaveProperty('price_per_mt');
   });
 
+  it('advance % is only sent when it changes (EXP-01: a port-only save recomputes nothing)', () => {
+    const withPct = { ...order, advancePct: 20 };
+    expect(contractEditPayload(withPct, { ...contract, destination_port: 'Jebel Ali' }, { qtyPriceEditable: true })).not.toHaveProperty('advance_pct');
+    expect(contractEditPayload(withPct, { ...contract, advance_pct: '30' }, { qtyPriceEditable: true }).advance_pct).toBe(30);
+  });
+
   it('the currency is only sent when it changes', () => {
     expect(contractEditPayload(order, contract, { qtyPriceEditable: true })).not.toHaveProperty('currency');
     expect(contractEditPayload(order, { ...contract, currency: 'EUR' }, { qtyPriceEditable: true }).currency).toBe('EUR');

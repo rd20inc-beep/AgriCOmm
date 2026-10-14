@@ -296,6 +296,8 @@ const confirmAdvance = Joi.object({
   bank_reference: Joi.string().max(255).allow(null, ''),
   reference: Joi.string().max(255).allow(null, ''),
   notes: Joi.string().max(1000).allow(null, ''),
+  // What the banks deducted from the wire (USD, ≤ the tolerance setting, D-8).
+  bank_charges: Joi.number().min(0).allow(null),
 });
 
 const confirmBalance = Joi.object({
@@ -309,6 +311,8 @@ const confirmBalance = Joi.object({
   bank_reference: Joi.string().max(255).allow(null, ''),
   reference: Joi.string().max(255).allow(null, ''),
   notes: Joi.string().max(1000).allow(null, ''),
+  // What the banks deducted from the wire (USD, ≤ the tolerance setting, D-8).
+  bank_charges: Joi.number().min(0).allow(null),
 });
 
 // Mark a finished/by-product lot ready for export + set its export display name.
@@ -328,6 +332,8 @@ const recordExportReceipt = Joi.object({
   // The bank's reference for the credit, carried onto the posted receipt.
   bank_reference: Joi.string().max(255).allow(null, ''),
   notes: Joi.string().max(1000).allow(null, ''),
+  // What the banks deducted from the wire (USD, ≤ the tolerance setting, D-8).
+  bank_charges: Joi.number().min(0).allow(null),
 });
 
 // Finance confirms a pending export receipt with the actual FX rate → posts.
@@ -335,6 +341,22 @@ const confirmExportReceipt = Joi.object({
   fx_rate: Joi.number().positive().allow(null),
   bank_account_id: Joi.number().integer().positive().allow(null),
   payment_method: Joi.string().max(50).allow(null, ''),
+  // Finance may correct the charge the recorder entered.
+  bank_charges: Joi.number().min(0).allow(null),
+});
+
+// Finance rejects a pending export receipt (not received): the reason is kept
+// on the row for whoever recorded it.
+const rejectExportReceipt = Joi.object({
+  reason: Joi.string().trim().min(1).max(1000).required(),
+});
+
+// Owner-approved write-off of a shipped order's short balance (D-8). The
+// amount defaults to everything outstanding.
+const writeOffExportBalance = Joi.object({
+  amount: Joi.number().positive().allow(null),
+  reason: Joi.string().trim().min(1).max(1000).required(),
+  authorized_by_owner_id: Joi.number().integer().positive().allow(null),
 });
 
 const allocateExportStock = Joi.object({
@@ -1001,6 +1023,8 @@ module.exports = {
   confirmAdvance,
   confirmBalance,
   recordExportReceipt,
+  rejectExportReceipt,
+  writeOffExportBalance,
   confirmExportReceipt,
   setExportReady,
   allocateExportStock,
