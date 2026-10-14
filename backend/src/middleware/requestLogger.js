@@ -36,10 +36,10 @@ function pathOnly(url) {
 }
 morgan.token('path', (req) => pathOnly(req.originalUrl || req.url));
 
-const requestLogger = morgan(
-  ':method :path :status :response-time ms',
-  { stream }
-);
+// :path (not :url) — see pathOnly above.
+const FORMAT = ':method :path :status :response-time ms';
+const requestLogger = morgan(FORMAT, { stream });
 
 module.exports = requestLogger;
 module.exports.pathOnly = pathOnly;
+module.exports.FORMAT = FORMAT;

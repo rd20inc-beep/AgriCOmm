@@ -243,22 +243,15 @@ describe('request logging', () => {
   test('logged URL drops the query string (no token= / ticket=)', async () => {
     const requestLogger = require('../middleware/requestLogger');
     expect(requestLogger.pathOnly('/api/streams/call-signals?ticket=abc&token=xyz')).toBe('/api/streams/call-signals');
+    // Capture with the logger's own format on a private stream: process.stdout
+    // spying is unreliable under `jest --ci --json` (the transport bypasses it).
+    const morgan = require('morgan');
     const writes = [];
-    const spy = jest.spyOn(process.stdout, 'write').mockImplementation((chunk, ...rest) => {
-      writes.push(String(chunk));
-      const cb = rest.find((x) => typeof x === 'function');
-      if (cb) cb();
-      return true;
-    });
-    try {
-      const app = express();
-      app.use(requestLogger);
-      app.get('/x', (req, res) => res.send('ok'));
-      await request(app).get('/x?token=FAKE-SECRET-TOKEN&ticket=FAKE-TICKET');
-      await new Promise((r) => setTimeout(r, 20));
-    } finally {
-      spy.mockRestore();
-    }
+    const app = express();
+    app.use(morgan(requestLogger.FORMAT, { stream: { write: (line) => writes.push(line) } }));
+    app.get('/x', (req, res) => res.send('ok'));
+    await request(app).get('/x?token=FAKE-SECRET-TOKEN&ticket=FAKE-TICKET');
+    await new Promise((r) => setTimeout(r, 20));
     const out = writes.join('');
     expect(out).toContain('GET /x 200');
     expect(out).not.toContain('FAKE-SECRET-TOKEN');

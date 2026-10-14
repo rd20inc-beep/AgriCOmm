@@ -40,6 +40,10 @@ jobs:
       JWT_SECRET: FAKE-ci-test-secret
       # Lets the AI read-only role log in so its DB-gated suite runs (fake value).
       AI_DB_PASSWORD: FAKE-ci-ai-secret
+      # GitHub's Ubuntu 24 runners block Chromium's user-namespace sandbox (AppArmor);
+      # run it the way production does (as root, no sandbox). The PDF tests still
+      # assert the renderer's network block.
+      PDF_CHROME_NO_SANDBOX: '1'
     steps:
       - uses: actions/checkout@v5
 
