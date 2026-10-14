@@ -102,4 +102,18 @@ const chromeAvailable = pdfService.isAvailable();
     expect(hits).toEqual([]);
     expect(buf.toString('latin1')).not.toContain('SECRET-INTERNAL-RESPONSE');
   }, 60000);
+
+  it('a stored document page (sanitized body + server shell, logo inlined) renders with no requests', async () => {
+    const { buildDocumentPage } = require('../modules/documents/documentHtml');
+    const base = `http://127.0.0.1:${port}`;
+    const page = buildDocumentPage(
+      `<div class="agri-doc"><div><img src="${base}/logo.jpg"><img src="https://app.example/logo.jpg"><p>Body</p>`
+      + `<div style="background:url(${base}/x)">x</div><div class="agri-ftr">f</div></div></div>`,
+      { docType: 'commercial-invoice', title: 'CI', orientation: 'landscape' },
+    );
+    const before = hits.length;
+    const pdf = Buffer.from(await pdfService.htmlToPdf(page));
+    expect(pdf.slice(0, 4).toString()).toBe('%PDF');
+    expect(hits.length).toBe(before);
+  }, 60000);
 });
