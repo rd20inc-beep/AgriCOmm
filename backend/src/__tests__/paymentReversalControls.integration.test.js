@@ -177,6 +177,34 @@ d('payment reversal controls + cash tie-out (DB-gated)', () => {
     expect(Number((await db('receivables').where({ id: rv.id }).first()).received_amount)).toBe(0);
   });
 
+  test('P2-17: contra transfer (and its reversal), cheque clear and suspense keep both accounts tied out', async () => {
+    const { createBankAccount } = require('../modules/admin/bankAccounts.service');
+    const cash = (await db.transaction((trx) => createBankAccount(trx, {
+      name: `ZZ Cash ${run}`, type: 'cash', entity: 'general', currency: 'PKR', is_active: true, opening_balance: 5000,
+    }, ids.owner))).bank_account;
+    const contra = await post('owner', '/api/finance/contra-transfers', {
+      from_account_id: acc.bank.id, to_account_id: cash.id, amount: 1234, currency: 'PKR', reference: `ZZ-C-${run}`, bank_charges: 25,
+    });
+    expect(contra.status).toBe(200);
+    for (const id of [acc.bank.id, cash.id]) expect(await tiesOut(id)).toMatchObject({ ok: true });
+    const rev = await post('owner', `/api/finance/fund-transfers/${contra.body.data.transfer.id}/reverse`, { reason: 'test' });
+    expect(rev.status).toBe(200);
+    for (const id of [acc.bank.id, cash.id]) expect(await tiesOut(id)).toMatchObject({ ok: true });
+
+    // A cheque: recorded (moves nothing), then cleared (moves the bank).
+    const pa = await newPayable(900);
+    const chq = await pay('fm', pa, { payment_method: 'cheque', due_date: TODAY });
+    expect(chq.status).toBe(201);
+    const clr = await post('owner', `/api/finance/payments/${chq.body.data.payment.id}/clear`, { bank_account_id: acc.bank.id });
+    expect(clr.status).toBe(200);
+    expect(await tiesOut(acc.bank.id)).toMatchObject({ ok: true });
+
+    // Suspense receipt and its reversal.
+    const sus = await post('owner', '/api/finance/suspense', { direction: 'receipt', amount: 777, bank_account_id: cash.id, reason: 'unknown deposit' });
+    expect(sus.status).toBeLessThan(300);
+    expect(await tiesOut(cash.id)).toMatchObject({ ok: true });
+  });
+
   test('P2-31: a payment that overdraws its account goes through with the warning; the account still ties out', async () => {
     const pa = await newPayable(700);
     const r = await pay('fm', pa, { bank_account_id: acc.empty.id });
