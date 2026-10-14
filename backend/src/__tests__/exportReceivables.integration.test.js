@@ -456,6 +456,7 @@ d('export receivables (DB-gated)', () => {
       bal = await recv(o.id, 'Balance');
       expect([n(bal.outstanding), bal.status]).toEqual([0, 'Paid']);
       expect(n((await order(o.id)).balance_received)).toBe(4000);
+      await new Promise((r) => setTimeout(r, 200)); // approval logged on response finish
       const audits = await db('approval_authorizations').where({ kind: 'export_short_write_off', ref: String(o.id) });
       expect(audits.length).toBe(2);
       expect(await tbBalanced()).toBe(true);

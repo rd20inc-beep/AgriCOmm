@@ -191,7 +191,12 @@ d('export cancel with money received (DB-gated)', () => {
   test('debit notes are cancelled by delta; un-ordered PRs cancelled; cost payables flagged, not touched', async () => {
     const o = await makeOrder('D');
     const debitNotes = require('../modules/exportOrders/debitNote.service');
+    // A debit note is only issuable once Shipped/Arrived (P2-01); stage that,
+    // then put the order back to cancel it.
+    const { status: was } = await db('export_orders').where({ id: o.id }).first('status');
+    await db('export_orders').where({ id: o.id }).update({ status: 'Shipped' });
     const note = await debitNotes.issue(o.id, { amount: 300 }, ownerId);
+    await db('export_orders').where({ id: o.id }).update({ status: was });
     const [pr] = await db('purchase_requisitions').insert({
       req_no: `ZPR${run}`, linked_export_order_id: o.id, status: 'Submitted', qty_mt: 1,
     }).returning('*');

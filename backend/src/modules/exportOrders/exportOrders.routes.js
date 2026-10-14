@@ -14,6 +14,7 @@ function cancelOwnerApproval(forfeitGate, cancelGate) {
     req.body && req.body.money_disposition === 'forfeit' ? forfeitGate : cancelGate
   )(req, res, next);
   gate.ownerApprovalGates = { forfeit: forfeitGate, other: cancelGate };
+  gate.ownerApproval = cancelGate.ownerApproval; // every path is Owner-gated
   return gate;
 }
 

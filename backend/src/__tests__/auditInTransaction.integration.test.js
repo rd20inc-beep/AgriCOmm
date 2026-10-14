@@ -63,7 +63,7 @@ d('audit inside the transaction (DB-gated)', () => {
   });
 
   test('a committed expense leaves exactly one audit row', async () => {
-    const res = await request(app).post('/api/expenses').send(expenseBody('ok'));
+    const res = await request(app).post('/api/expenses').set('Idempotency-Key', `audit-trx-${Math.random()}`).send(expenseBody('ok'));
     expect(res.status).toBe(201);
     await settle();
     const rows = await audits({ entity_type: 'business_expense', entity_id: String(res.body.data.expense.id), action: 'create' });
@@ -75,7 +75,7 @@ d('audit inside the transaction (DB-gated)', () => {
     await db('posting_rules').whereIn('id', ids).update({ is_active: false });
     const before = Number((await db('audit_logs').count({ c: '*' }).first()).c);
     try {
-      const res = await request(app).post('/api/expenses').send(expenseBody('fail'));
+      const res = await request(app).post('/api/expenses').set('Idempotency-Key', `audit-trx-${Math.random()}`).send(expenseBody('fail'));
       expect(res.status).toBe(400);
     } finally {
       await db('posting_rules').whereIn('id', ids).update({ is_active: true });
@@ -86,16 +86,16 @@ d('audit inside the transaction (DB-gated)', () => {
   });
 
   test('paying it: one audit row for the payment', async () => {
-    const created = await request(app).post('/api/expenses').send(expenseBody('pay'));
+    const created = await request(app).post('/api/expenses').set('Idempotency-Key', `audit-trx-${Math.random()}`).send(expenseBody('pay'));
     const id = created.body.data.expense.id;
-    const res = await request(app).put(`/api/expenses/${id}/pay`).send({ payment_method: 'cash', bank_account_id: cash.id });
+    const res = await request(app).put(`/api/expenses/${id}/pay`).set('Idempotency-Key', `audit-trx-${Math.random()}`).send({ payment_method: 'cash', bank_account_id: cash.id });
     expect(res.status).toBe(200);
     await settle();
     expect(await audits({ entity_type: 'business_expense', entity_id: String(id), action: 'pay' })).toHaveLength(1);
   });
 
   test('linking a supplier: one audit row, written with the link', async () => {
-    const created = await request(app).post('/api/expenses').send(expenseBody('link'));
+    const created = await request(app).post('/api/expenses').set('Idempotency-Key', `audit-trx-${Math.random()}`).send(expenseBody('link'));
     const id = created.body.data.expense.id;
     const [s] = await db('suppliers').insert({ name: `ZZ aud sup ${run}`, is_active: true }).returning('id');
     const res = await request(app).put(`/api/expenses/${id}/supplier`).send({ supplier_id: s.id || s });

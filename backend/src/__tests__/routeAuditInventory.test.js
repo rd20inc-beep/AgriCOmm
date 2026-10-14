@@ -29,6 +29,8 @@ function jsFiles(dir) {
 const EXEMPT = {
   // Authentication — sign-in / session / own-password events, not business data.
   'modules/auth/auth.routes.js POST /login': 'auth',
+  // Answers 405 and changes nothing: settlements are reversed via POST …/reverse (audited).
+  'modules/milling/milling.routes.js DELETE /payroll/final-settlements/:id': 'retired',
   'modules/auth/auth.routes.js POST /register': 'auth',
   'modules/auth/auth.routes.js POST /refresh-token': 'auth',
   'modules/auth/auth.routes.js POST /change-password': 'auth',

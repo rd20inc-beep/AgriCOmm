@@ -55,6 +55,8 @@ const OWNER_MODAL_SCREENS = {
   'modules/exportOrders/pages/ExportOrderDetail.jsx': ['post', '/export-orders/:id/cancel'],
   'modules/exportOrders/components/DebitNotesPanel.jsx': ['post', '/export-orders/:id/debit-notes/:noteId/cancel'],
   'modules/exportOrders/components/PackingWeightCard.jsx': ['post', '/export-orders/:id/packing-weight/resolve'],
+  'modules/exportOrders/components/ShortBalanceWriteOff.jsx': ['post', '/export-orders/:id/write-off-balance'],
+  'modules/milling/components/ServiceBillingTab.jsx': ['post', '/service-milling/invoices/:id/void'],
 };
 
 function frontendFilesCalling(dir, needle, out = []) {
