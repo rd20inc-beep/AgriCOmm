@@ -43,4 +43,17 @@ describe('classifyPushResult', () => {
     expect(classifyPushResult(500, {}).outcome).toBe('retry');
     expect(classifyPushResult(0, {}).outcome).toBe('retry');
   });
+
+  // P2-12: an in-flight duplicate is transient; a business 403 is parked, not
+  // retried forever; a revoked device / inactive sync account holds the queue.
+  test('409 idempotency_in_progress → retry; other 409 → conflict', () => {
+    expect(classifyPushResult(409, { code: 'idempotency_in_progress' }).outcome).toBe('retry');
+    expect(classifyPushResult(409, { code: 'duplicate' })).toEqual({ outcome: 'conflict', code: 'duplicate' });
+  });
+
+  test('403 → conflict not_permitted, except device/account revocation → retry', () => {
+    expect(classifyPushResult(403, { message: 'Forbidden' })).toEqual({ outcome: 'conflict', code: 'not_permitted' });
+    expect(classifyPushResult(403, { code: 'device_revoked' }).outcome).toBe('retry');
+    expect(classifyPushResult(403, { code: 'account_inactive' }).outcome).toBe('retry');
+  });
 });

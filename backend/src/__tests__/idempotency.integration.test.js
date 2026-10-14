@@ -95,4 +95,77 @@ d('idempotency middleware (DB-gated)', () => {
     expect(await db('idempotency_keys').where({ key: 'ZZTEST-OLD' }).first()).toBeUndefined();
     expect(await db('idempotency_keys').where({ key: 'ZZTEST-NEW' }).first()).toBeTruthy();
   });
+
+  // ── P2-12 ──────────────────────────────────────────────────────────────
+  test('the in-progress 409 carries code idempotency_in_progress (clients retry it)', async () => {
+    await db('idempotency_keys').insert({ key: 'ZZTEST-CODE', method: 'POST', path: '/api/local-sales', status: 'in_progress' });
+    const r = await runRequest(middleware, { key: 'ZZTEST-CODE' }, handler);
+    expect(r.status).toBe(409);
+    expect(r.body.code).toBe('idempotency_in_progress');
+  });
+
+  test('a stale in_progress key (holder died) is taken over and completes once', async () => {
+    await db('idempotency_keys').insert({
+      key: 'ZZTEST-STALE', method: 'POST', path: '/api/local-sales', status: 'in_progress',
+      created_at: db.raw(`now() - interval '${middleware.STALE_MINUTES + 5} minutes'`),
+    });
+    const r = await runRequest(middleware, { key: 'ZZTEST-STALE' }, handler);
+    expect(r.nexted).toBe(true);
+    expect(executions).toBe(1);
+    const row = await db('idempotency_keys').where({ key: 'ZZTEST-STALE' }).first();
+    expect(row.status).toBe('completed');
+    // …and a later replay returns that result without running again.
+    const again = await runRequest(middleware, { key: 'ZZTEST-STALE' }, handler);
+    expect(again.nexted).toBe(false);
+    expect(executions).toBe(1);
+  });
+
+  test('concurrent identical requests → exactly one execution', async () => {
+    const results = await Promise.all(Array.from({ length: 5 }, () => runRequest(middleware, { key: 'ZZTEST-RACE' }, handler)));
+    expect(executions).toBe(1);
+    expect(results.filter((r) => r.nexted)).toHaveLength(1);
+    // The losers were told it is in flight (or, if they arrived after it
+    // finished, got the stored response) — never a second execution.
+    for (const r of results.filter((x) => !x.nexted)) expect([201, 409]).toContain(r.status);
+  });
+
+  test('a handler answering without res.json still finalizes its key on finish', async () => {
+    const req = mockReq('ZZTEST-SEND', 'POST', '/api/x', { a: 1 });
+    const listeners = {};
+    const res = { ...mockRes(), on: (ev, fn) => { listeners[ev] = fn; } };
+    let nexted = false;
+    await middleware(req, res, () => { nexted = true; });
+    expect(nexted).toBe(true);
+    res.statusCode = 204;
+    listeners.finish();
+    await settle();
+    const row = await db('idempotency_keys').where({ key: 'ZZTEST-SEND' }).first();
+    expect(row.status).toBe('completed');
+  });
+});
+
+describe('requireIdempotencyKey (per-route gate)', () => {
+  const { requireIdempotencyKey } = require('../middleware/idempotency');
+  const run = (method, key) => {
+    const req = { method, originalUrl: '/api/local-sales', get: (h) => (h.toLowerCase() === 'idempotency-key' ? key : undefined) };
+    const res = mockRes();
+    let nexted = false;
+    requireIdempotencyKey(req, res, () => { nexted = true; });
+    return { nexted, status: res._status, body: res._body };
+  };
+  afterEach(() => { delete process.env.IDEMPOTENCY_ENFORCE; });
+
+  test('a money POST without a key is refused 428', () => {
+    const r = run('POST', undefined);
+    expect(r.nexted).toBe(false);
+    expect(r.status).toBe(428);
+    expect(r.body.code).toBe('idempotency_key_required');
+  });
+  test('with a key it proceeds', () => expect(run('POST', 'k-1').nexted).toBe(true));
+  test('reads are never gated', () => expect(run('GET', undefined).nexted).toBe(true));
+  test('IDEMPOTENCY_ENFORCE=off downgrades to a warning', () => {
+    process.env.IDEMPOTENCY_ENFORCE = 'off';
+    jest.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(run('POST', undefined).nexted).toBe(true);
+  });
 });

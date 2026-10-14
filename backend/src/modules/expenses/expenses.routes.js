@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const authorize = require('../../middleware/rbac');
 const auditAction = require('../../middleware/audit');
+const { requireIdempotencyKey } = require('../../middleware/idempotency');
 const ctrl = require('./expenses.controller');
 
 router.get('/', authorize('finance', 'view'), ctrl.list);
@@ -12,6 +13,7 @@ router.get('/:id', authorize('finance', 'view'), ctrl.getById);
 router.post(
   '/',
   authorize('finance', 'allocate_cost'),
+  requireIdempotencyKey, // money-creating: one record per submit (P2-12)
   auditAction('create', 'business_expense'),
   ctrl.create
 );
@@ -29,6 +31,7 @@ router.put(
 router.put(
   '/:id/pay',
   authorize('finance', 'confirm_payment'),
+  requireIdempotencyKey,
   auditAction('pay', 'business_expense', (req) => req.params.id),
   ctrl.markPaid
 );

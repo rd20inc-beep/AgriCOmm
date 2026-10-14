@@ -37,7 +37,16 @@ const CONFLICT_CODES = ['insufficient_stock', 'duplicate', 'version_conflict', '
 //   retry    — transient (network / 5xx / auth expiry). Leave pending, try again later.
 function classifyPushResult(status, body) {
   if (status >= 200 && status < 300) return { outcome: 'synced' };
-  if (status === 401 || status === 403 || status === 429) return { outcome: 'retry', code: 'auth_or_throttle' };
+  if (status === 401 || status === 429) return { outcome: 'retry', code: 'auth_or_throttle' };
+  // The same key is still running on the cloud (or a dropped response is being
+  // finalized) — transient, the replay will get the stored result next cycle.
+  if (status === 409 && body && body.code === 'idempotency_in_progress') return { outcome: 'retry', code: 'in_progress' };
+  // A revoked device / inactive sync account is an operator fix — hold the queue.
+  // Any other 403 is a business refusal: park it rather than retry it forever.
+  if (status === 403) {
+    if (body && (body.code === 'device_revoked' || body.code === 'account_inactive')) return { outcome: 'retry', code: 'auth_or_throttle' };
+    return { outcome: 'conflict', code: 'not_permitted' };
+  }
   if (status >= 500) return { outcome: 'retry', code: 'server_error' };
   if (status >= 400) {
     const code = (body && (body.code || body.conflict_code)) || 'rejected';

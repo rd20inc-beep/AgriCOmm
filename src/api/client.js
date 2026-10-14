@@ -15,19 +15,65 @@ const API_BASE = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? '' : 'h
 
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
-// Which mutating calls are safe to queue for offline sync. Excludes auth, file
-// uploads (FormData can't be reliably serialized/replayed), and read-style POST
-// endpoints (search/AI/reporting) that mutate nothing.
-function isQueueable(method, endpoint, body) {
-  if (!MUTATING.has(method)) return false;
-  if (typeof FormData !== 'undefined' && body instanceof FormData) return false;
-  if (/^\/api\/(auth|portal|streams|sync)\b/.test(endpoint)) return false;
-  if (/^\/api\/(ai|smart|intelligence|reporting)\b/.test(endpoint)) return false;
-  if (/(search|preview|export|download|login|refresh|logout)/i.test(endpoint)) return false;
+const newId = () => (globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.round(Math.random() * 1e9)}`);
+
+// Which mutating calls may be captured offline and replayed later (P2-12). An
+// ALLOWLIST: only the day-to-day capture modules used at the mill are queued;
+// anything else (admin / danger zone, users, accounting, approvals queue,
+// communication, documents, auth/sync plumbing, AI/reporting) fails loudly
+// while offline instead of replaying hours later against changed books.
+const QUEUEABLE_MODULES = new Set([
+  'local-sales', 'milling', 'service-milling', 'mill-store', 'lot-inventory', 'inventory',
+  'procurement', 'expenses', 'expense-vendors', 'transport-costs', 'haulers',
+  'customers', 'suppliers', 'products', 'finance', 'sample-analysis',
+  'purchase-requirements', 'quotations', 'printed-bag-orders', 'chat',
+]);
+// Control actions inside an allowed module are never replayed: they decide on
+// or undo money already in the books (reversals, voids, approvals, payroll
+// pay/settle), so they need a live server answer, not a deferred one.
+const NEVER_QUEUE = [
+  /\/(reverse|reversal|void|cancel|bounce|approve|reject|confirm|accrue|settle|run-now|write-?off|close|reopen|lock|unlock|post)(\/|$)/i,
+  /\/payroll\/(run|runs|final-settlements?|statutory-remittances|schedule)(\/|$)/,
+  /\/advances\/[^/]+\/pay(\/|$)/,
   // A month-end FX revaluation posts against that day's books — never replayed later.
-  if (/\/fx-revaluation\b/.test(endpoint)) return false;
-  return true;
+  /\/fx-revaluation\b/,
+  /(search|preview|export|download|login|refresh|logout)/i,
+];
+function isQueueable(method, endpoint, body) {
+  // DELETE is never deferred: removing a record later, against data that may
+  // have moved on, is a decision the user must see succeed or fail now.
+  if (!MUTATING.has(method) || method === 'DELETE') return false;
+  if (typeof FormData !== 'undefined' && body instanceof FormData) return false;
+  const path = String(endpoint).split('?')[0];
+  const mod = (path.match(/^\/api\/([^/]+)/) || [])[1];
+  if (!mod || !QUEUEABLE_MODULES.has(mod)) return false;
+  return !NEVER_QUEUE.some((re) => re.test(path));
 }
+
+// Per-submit idempotency (P2-12). Every mutating JSON request carries an
+// Idempotency-Key. The SAME key is reused when that submit is:
+//   - double-clicked while the first is still in flight (we hand back the
+//     first request's promise — the server sees one request),
+//   - retried after an ambiguous outcome (timeout / dropped connection: the
+//     server may have committed) — an identical re-submit within the window
+//     reuses the key, so the server replays the stored result,
+//   - captured offline — the outbox item's id IS the key, so its replay and
+//     any identical re-submit de-dupe to one record.
+// A definitive answer from the server (any HTTP status) clears the memory.
+const inflightWrites = new Map(); // fingerprint → promise
+const ambiguousWrites = new Map(); // fingerprint → { key, at }
+const AMBIGUOUS_TTL_MS = 15 * 60 * 1000;
+
+function writeFingerprint(method, endpoint, bodyStr) {
+  return `${method} ${endpoint} ${bodyStr ?? ''}`;
+}
+function ambiguousKeyFor(fp) {
+  const hit = ambiguousWrites.get(fp);
+  if (!hit) return null;
+  if (Date.now() - hit.at > AMBIGUOUS_TTL_MS) { ambiguousWrites.delete(fp); return null; }
+  return hit.key;
+}
+function __resetIdempotencyForTests() { inflightWrites.clear(); ambiguousWrites.clear(); }
 
 // Friendly label for the Pending Sync tray.
 function describeRequest(method, endpoint) {
@@ -67,8 +113,11 @@ function queuedResponse(id, body) {
   };
 }
 
-async function queueWrite(method, endpoint, body) {
-  const id = (crypto?.randomUUID?.() || `${Date.now()}-${Math.round(Math.random() * 1e9)}`);
+// `key` is the submit's Idempotency-Key: the outbox item id doubles as the key
+// its replay sends, so a write that reached the server before the connection
+// dropped is answered from the server's stored result, not executed again.
+async function queueWrite(method, endpoint, body, key) {
+  const id = key || newId();
   await enqueue({ id, method, endpoint, body: body ?? null, label: describeRequest(method, endpoint) });
   return queuedResponse(id, body);
 }
@@ -116,7 +165,35 @@ function ownerCredentialFor(method, body) {
 }
 
 async function request(endpoint, options = {}) {
+  const method = options.method || 'GET';
+  const { body } = options;
+  if (!MUTATING.has(method) || (typeof FormData !== 'undefined' && body instanceof FormData)) {
+    return send(endpoint, options, null, null);
+  }
+  const bodyStr = body == null ? '' : (typeof body === 'string' ? body : JSON.stringify(body));
+  const fp = writeFingerprint(method, endpoint, bodyStr);
+  // Double-click / double-submit while the first is in flight → same request.
+  if (inflightWrites.has(fp)) return inflightWrites.get(fp);
+  const key = options.idempotencyKey || ambiguousKeyFor(fp) || newId();
+  const p = send(endpoint, options, key, fp);
+  inflightWrites.set(fp, p);
+  const clear = () => { if (inflightWrites.get(fp) === p) inflightWrites.delete(fp); };
+  p.then(clear, clear);
+  return p;
+}
+
+async function send(endpoint, options, idemKey, fp) {
   const { method = 'GET', body, headers = {}, timeout = 30000 } = options;
+  // The outcome of this write is unknown (timeout / dropped connection / held
+  // offline): remember its key so an identical re-submit reuses it.
+  const markAmbiguous = () => { if (fp && idemKey) ambiguousWrites.set(fp, { key: idemKey, at: Date.now() }); };
+  // The server answered — that key's outcome is settled, forget it. A 409
+  // "still processing" is NOT an answer; keep the key for the next retry.
+  const markAnswered = (status, data) => {
+    if (!fp) return;
+    if (status === 409 && data?.code === 'idempotency_in_progress') return;
+    ambiguousWrites.delete(fp);
+  };
 
   const config = {
     method,
@@ -132,6 +209,7 @@ async function request(endpoint, options = {}) {
   }
   // Bind every request to this device so a revoked device can be blocked server-side.
   try { config.headers['X-Device-Id'] = getDeviceId(); } catch { /* noop */ }
+  if (idemKey) config.headers['Idempotency-Key'] = idemKey;
   const ownerCredential = ownerCredentialFor(method, body);
   if (ownerCredential) config.headers['X-Owner-Credential'] = ownerCredential;
 
@@ -153,7 +231,8 @@ async function request(endpoint, options = {}) {
 
   // Known-offline: queue eligible writes immediately (skip the network + timeout).
   if (!isOnline() && isQueueable(method, endpoint, body)) {
-    return queueWrite(method, endpoint, body);
+    markAmbiguous();
+    return queueWrite(method, endpoint, body, idemKey);
   }
 
   // Known-offline reads: serve the durable local replica if we mirrored this GET.
@@ -175,6 +254,7 @@ async function request(endpoint, options = {}) {
     clearTimeout(timer);
 
     if (res.status === 401) {
+      markAnswered(401, null);
       localStorage.removeItem('riceflow_token');
       localStorage.removeItem('riceflow_user');
       // Only redirect if not already on login page (prevents infinite loop)
@@ -185,6 +265,7 @@ async function request(endpoint, options = {}) {
     }
 
     const data = await res.json().catch(() => null);
+    markAnswered(res.status, data);
 
     // Device revoked OR account suspended/locked/deactivated mid-session (#9) →
     // wipe local read data + session and force re-login.
@@ -212,16 +293,21 @@ async function request(endpoint, options = {}) {
   } catch (err) {
     clearTimeout(timer);
     if (err.name === 'AbortError') {
+      // The server may still commit this write — a retry must reuse its key.
+      markAmbiguous();
       throw new ApiError('Request timed out', 408);
     }
     if (err instanceof ApiError) throw err;
     // A genuine network failure (server unreachable) — flag offline so the UI
-    // can show the banner and hold work for sync.
+    // can show the banner and hold work for sync. The write may have reached
+    // the server before the connection dropped, so its key is kept.
     markServerOffline();
+    markAmbiguous();
     // Capture eligible writes into the outbox instead of losing them (never
-    // an owner-authorized one — see above).
+    // an owner-authorized one — see above) — under the SAME key, so if the
+    // server already committed it the replay returns that result.
     if (!ownerCredential && isQueueable(method, endpoint, body)) {
-      return queueWrite(method, endpoint, body);
+      return queueWrite(method, endpoint, body, idemKey);
     }
     // Serve a mirrored read if the network dropped mid-GET.
     if (method === 'GET') {
@@ -249,7 +335,6 @@ function deserializeFormData(entries) {
   }
   return fd;
 }
-const newId = () => (globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.round(Math.random() * 1e9)}`);
 
 async function queueUpload(endpoint, formData) {
   const id = newId();
@@ -281,6 +366,24 @@ async function uploadFile(endpoint, formData) {
   }
 }
 
+// Map a replayed write's response to an outbox verdict (P2-12):
+//   2xx → applied. Transient → retry later: 5xx, 401 (session — re-login), 429,
+//   a 409 the idempotency layer flags as still running, and a revoked device /
+//   inactive account (held until an operator fixes it). Every OTHER 4xx —
+//   including a business 409 (duplicate / stock moved) and a permission 403 —
+//   is a refusal the user must see in the Pending Sync tray: retrying it would
+//   fail identically forever.
+function replayVerdict(res, body, key) {
+  const transient = res.status >= 500 || res.status === 401 || res.status === 429
+    || (res.status === 409 && body?.code === 'idempotency_in_progress')
+    || (res.status === 403 && (body?.code === 'device_revoked' || body?.code === 'account_inactive'));
+  if (transient) return { retry: true, status: res.status };
+  // Settled — an identical re-submit is a NEW submit from here on.
+  for (const [fp, v] of ambiguousWrites) if (v.key === key) ambiguousWrites.delete(fp);
+  if (res.ok) return { ok: true, status: res.status, body };
+  return { ok: false, status: res.status, body };
+}
+
 // Replay a queued upload (from the file outbox) with its stable Idempotency-Key.
 async function uploadReplay(item) {
   const token = getToken();
@@ -296,9 +399,7 @@ async function uploadReplay(item) {
   }
   markServerOnline();
   const body = await res.json().catch(() => null);
-  if (res.ok) return { ok: true, status: res.status, body };
-  if (res.status === 401 || res.status === 403 || res.status === 409 || res.status >= 500) return { retry: true, status: res.status };
-  return { ok: false, status: res.status, body };
+  return replayVerdict(res, body, item.id);
 }
 
 // Authenticated file download — fetches the (token-protected) endpoint as a blob
@@ -431,7 +532,7 @@ const api = {
 // stable Idempotency-Key so the server (Phase 2 middleware) returns the original
 // result rather than re-executing. Returns a verdict for the outbox flusher:
 //   { ok }                         → applied (2xx)
-//   { retry }                      → still offline / transient (network, 5xx, 401/403, 409-in-progress)
+//   { retry }                      → still offline / transient (network, 5xx, 401, 409-in-progress)
 //   { ok:false, status, body }     → server refused the data (other 4xx) → tray
 async function replayRequest(item) {
   const token = getToken();
@@ -451,14 +552,8 @@ async function replayRequest(item) {
   }
   markServerOnline();
   const body = await res.json().catch(() => null);
-  if (res.ok) return { ok: true, status: res.status, body };
-  // Auth / server / mid-flight-duplicate → don't discard; try again later.
-  if (res.status === 401 || res.status === 403 || res.status === 409 || res.status >= 500) {
-    return { retry: true, status: res.status };
-  }
-  // Genuine data rejection (400/422/…): surface in the tray for the user.
-  return { ok: false, status: res.status, body };
+  return replayVerdict(res, body, item.id);
 }
 
 export default api;
-export { ApiError, API_BASE, replayRequest, uploadReplay, withOwnerCredential };
+export { ApiError, API_BASE, replayRequest, uploadReplay, withOwnerCredential, isQueueable, __resetIdempotencyForTests };

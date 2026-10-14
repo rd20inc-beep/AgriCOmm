@@ -3,6 +3,7 @@ const router = express.Router();
 const authorize = require('../../middleware/rbac');
 const auditAction = require('../../middleware/audit');
 const ownerApproval = require('../../middleware/ownerApproval');
+const { requireIdempotencyKey } = require('../../middleware/idempotency');
 const ctrl = require('./millStore.controller');
 const { redactCostInResponses } = require('../../utils/costVisibility');
 
@@ -73,6 +74,7 @@ router.get('/purchases/:id', authorize('mill_store', 'view'), ctrl.getPurchase);
 router.post(
   '/purchases',
   authorize('mill_store', 'create_purchase'),
+  requireIdempotencyKey, // money-creating: one record per submit (P2-12)
   auditAction('create', 'mill_purchase'),
   ctrl.createPurchase
 );
@@ -81,6 +83,7 @@ router.post(
 router.put(
   '/purchases/:id/pay',
   authorize('finance', 'confirm_payment'),
+  requireIdempotencyKey,
   auditAction('update', 'mill_purchase', (req) => req.params.id),
   ctrl.updatePurchasePayment
 );
