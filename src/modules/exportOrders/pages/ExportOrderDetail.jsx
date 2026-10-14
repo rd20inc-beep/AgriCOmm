@@ -165,7 +165,7 @@ export default function ExportOrderDetail() {
   useEffect(() => {
     if (!id || !token || token === 'mock-prototype-token') return undefined;
 
-    const close = realtimeRepo.subscribeExportOrder(id, token, {
+    const close = realtimeRepo.subscribeExportOrder(id, {
       onMessage: () => {
         if (sseTimer.current) clearTimeout(sseTimer.current);
         sseTimer.current = setTimeout(() => invalidateOrder(), 500);
