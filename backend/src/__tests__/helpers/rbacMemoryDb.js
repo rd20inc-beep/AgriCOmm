@@ -55,10 +55,14 @@ function chain(resolve) {
 function db(table) {
   const t = String(table);
   if (t.startsWith('role_permissions')) {
-    return chain((w) => (grants[w['rp.role_id']] || []).map((p) => {
-      const [module, action] = p.split('.');
-      return { module, action };
-    }));
+    return chain((w, first) => {
+      const rows = (grants[w['rp.role_id']] || []).map((p, i) => {
+        const [module, action] = p.split('.');
+        return { id: i + 1, module, action };
+      }).filter((r) => (w['p.module'] === undefined || r.module === w['p.module'])
+        && (w['p.action'] === undefined || r.action === w['p.action']));
+      return first ? rows[0] : rows;
+    });
   }
   if (t === 'user_scopes') return chain(() => []);
   if (t.startsWith('users as u')) {

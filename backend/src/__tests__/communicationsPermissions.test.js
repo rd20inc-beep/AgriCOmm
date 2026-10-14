@@ -112,12 +112,33 @@ describe('what deliberately stays open to any authenticated user', () => {
     ['put', '/follow-ups/:id/done'],
     ['put', '/notifications/:id/read'],
     ['put', '/notifications/read-all'],
-    // A preview renders a template without sending anything.
-    ['post', '/whatsapp/preview'],
   ])('%s %s is per-user, not company-wide', (method, routePath) => {
     const l = line(method, routePath);
     expect(l).not.toContain('canSend');
     expect(l).not.toContain('canConfigure');
+  });
+});
+
+describe('company reads are gated like sends (P1-11)', () => {
+  it.each([
+    ['get', '/email/logs'],
+    ['get', '/email/logs/:type/:id'],
+    ['get', '/email/templates'],
+    ['get', '/whatsapp/templates'],
+    ['get', '/whatsapp/templates/:id'],
+    ['get', '/whatsapp/logs'],
+    // A preview renders a stored template's body.
+    ['post', '/whatsapp/preview'],
+  ])('%s %s', (method, routePath) => {
+    expect(line(method, routePath)).toContain('canReadComms');
+  });
+
+  it('canReadComms admits a sender or an admin', () => {
+    expect(ROUTES).toContain("const canReadComms = authorizeAny(['export_orders', 'send_email'], ['admin', 'manage_settings'])");
+  });
+
+  it.each([['get', '/scheduler/tasks'], ['get', '/scheduler/logs']])('%s %s needs manage_settings', (method, routePath) => {
+    expect(line(method, routePath)).toContain('canConfigure');
   });
 });
 
@@ -127,12 +148,11 @@ describe('no write route is left unguarded by accident', () => {
       '/comments', '/tasks', '/tasks/:id', '/tasks/:id/complete',
       '/follow-ups', '/follow-ups/:id/done',
       '/notifications/:id/read', '/notifications/read-all',
-      '/whatsapp/preview',
     ];
     const writes = [...ROUTES.matchAll(/router\.(post|put|delete)\('([^']+)'([^\n]*)/g)];
     expect(writes.length).toBeGreaterThan(15);
     const unaccounted = writes
-      .filter(([, , p, rest]) => !/canSend|canConfigure/.test(rest) && !PER_USER.includes(p))
+      .filter(([, , p, rest]) => !/canSend|canConfigure|canReadComms/.test(rest) && !PER_USER.includes(p))
       .map(([, m, p]) => `${m.toUpperCase()} ${p}`);
     if (unaccounted.length) {
       throw new Error(`unguarded and not on the per-user list: ${unaccounted.join(', ')}`);

@@ -91,10 +91,29 @@ async function getMessages(meId, { peer, broadcast }) {
   return rows.map((m) => ({ ...m, mine: m.sender_id === meId, hasAttachment: !!m.attachment_name }));
 }
 
+// Announcements reach every user, so posting one is limited (P1-11 / PLT-29) to
+// Owner / Super Admin and roles holding admin.manage_users — the roles that
+// already manage the whole user base. Reading the channel stays open to all.
+async function canBroadcast(userId) {
+  const user = await db('users').where({ id: userId }).select('role_id').first();
+  if (!user || !user.role_id) return false;
+  const role = await db('roles').where({ id: user.role_id }).select('name').first();
+  if (role && (role.name === 'Owner' || role.name === 'Super Admin')) return true;
+  const grant = await db('role_permissions as rp').join('permissions as p', 'rp.permission_id', 'p.id')
+    .where('rp.role_id', user.role_id).where({ 'p.module': 'admin', 'p.action': 'manage_users' })
+    .select('p.id').first();
+  return !!grant;
+}
+
 async function sendMessage(meId, { recipient_id, body, broadcast, attachment }) {
   const text = String(body || '').trim();
   if (!text && !attachment) { const e = new Error('Message cannot be empty.'); e.statusCode = 400; throw e; }
   if (!broadcast && !recipient_id) { const e = new Error('recipient_id is required for a direct message.'); e.statusCode = 400; throw e; }
+  if (broadcast && !(await canBroadcast(meId))) {
+    // Don't keep an upload for a message that was refused.
+    if (attachment?.path) require('fs').promises.unlink(attachment.path).catch(() => {});
+    const e = new Error('Only an Owner or an admin who manages users can post announcements.'); e.statusCode = 403; throw e;
+  }
   const [row] = await db('chat_messages').insert({
     sender_id: meId,
     recipient_id: broadcast ? null : recipient_id,
@@ -193,4 +212,4 @@ async function getApprovals(meId) {
   return { items, count: items.length };
 }
 
-module.exports = { listUsers, getConversations, getMessages, sendMessage, getUnread, markRead, getAttachment, getApprovals };
+module.exports = { listUsers, getConversations, getMessages, sendMessage, canBroadcast, getUnread, markRead, getAttachment, getApprovals };

@@ -18,12 +18,17 @@ const communicationController = require('../../controllers/communicationControll
 //   SEND      export_orders:send_email   Export Manager, Owner, Super Admin
 //   CONFIGURE admin:manage_settings      Owner, Super Admin
 //
-// READS and PER-USER COLLABORATION (your own tasks, your own notifications,
-// adding a comment) stay authenticated-only, as they are today. Narrowing those
-// would lock out roles that use them daily and would not close the hole: the
-// hole is that anyone could ACT AS the company or change its configuration.
+// PER-USER COLLABORATION (your own tasks, your own notifications, adding a
+// comment) stays authenticated-only — the handlers scope each one to the
+// caller's own rows (P1-11). Company READS (logs, templates, the scheduler) are
+// gated below like the sends. Narrowing the per-user routes by permission
+// would lock out roles that use them daily; scoping them to the caller closes
+// the cross-user hole without that.
 const canSend = authorize('export_orders', 'send_email');
 const canConfigure = authorize('admin', 'manage_settings');
+// READING what was sent (email / WhatsApp logs: recipients, bodies) and the
+// templates is gated like sending (P1-11 / PLT-16): a sender or an admin.
+const canReadComms = authorizeAny(['export_orders', 'send_email'], ['admin', 'manage_settings']);
 
 // Sending a DOCUMENT is a special case. TransactionDocument.jsx posts to
 // /whatsapp/send-document and is embedded in Local Sales, Money In, Money Out,
@@ -52,28 +57,28 @@ const canSendDocument = authorizeAny(
 // Email
 // ============================================================
 router.post('/email/send', canSend, communicationController.sendEmail);
-router.get('/email/logs', communicationController.getEmailLogs);
-router.get('/email/logs/:type/:id', communicationController.getEmailLogsByEntity);
+router.get('/email/logs', canReadComms, communicationController.getEmailLogs);
+router.get('/email/logs/:type/:id', canReadComms, communicationController.getEmailLogsByEntity);
 
 // ============================================================
 // Email Templates
 // ============================================================
-router.get('/email/templates', communicationController.listTemplates);
+router.get('/email/templates', canReadComms, communicationController.listTemplates);
 router.post('/email/templates', canConfigure, communicationController.createTemplate);
 router.put('/email/templates/:id', canConfigure, communicationController.updateTemplate);
 
 // ============================================================
 // WhatsApp
 // ============================================================
-router.get('/whatsapp/templates', communicationController.listWhatsAppTemplates);
-router.get('/whatsapp/templates/:id', communicationController.getWhatsAppTemplate);
+router.get('/whatsapp/templates', canReadComms, communicationController.listWhatsAppTemplates);
+router.get('/whatsapp/templates/:id', canReadComms, communicationController.getWhatsAppTemplate);
 router.post('/whatsapp/templates', canConfigure, communicationController.createWhatsAppTemplate);
 router.put('/whatsapp/templates/:id', canConfigure, communicationController.updateWhatsAppTemplate);
 router.delete('/whatsapp/templates/:id', canConfigure, communicationController.deleteWhatsAppTemplate);
 router.post('/whatsapp/send', canSend, communicationController.sendWhatsAppMessage);
 router.post('/whatsapp/send-document', canSendDocument, communicationController.sendWhatsAppDocument);
-router.post('/whatsapp/preview', communicationController.previewWhatsAppTemplate);
-router.get('/whatsapp/logs', communicationController.getWhatsAppLogs);
+router.post('/whatsapp/preview', canReadComms, communicationController.previewWhatsAppTemplate);
+router.get('/whatsapp/logs', canReadComms, communicationController.getWhatsAppLogs);
 
 // QR-pairing channel (WhatsApp Web). Free, no Meta API, but breaks ToS
 // — use for internal comms; keep API for customer-facing transactional.
@@ -134,9 +139,9 @@ router.put('/notifications/read-all', communicationController.markAllNotificatio
 // ============================================================
 // Scheduled Tasks (admin)
 // ============================================================
-router.get('/scheduler/tasks', communicationController.listScheduledTasks);
+router.get('/scheduler/tasks', canConfigure, communicationController.listScheduledTasks);
 router.put('/scheduler/tasks/:id/toggle', canConfigure, communicationController.toggleScheduledTask);
 router.post('/scheduler/tasks/:id/run', canConfigure, communicationController.runScheduledTask);
-router.get('/scheduler/logs', communicationController.getExecutionLogs);
+router.get('/scheduler/logs', canConfigure, communicationController.getExecutionLogs);
 
 module.exports = router;

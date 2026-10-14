@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const controller = require('../../controllers/reportingController');
 const authorize = require('../../middleware/rbac');
-const { denyRoles } = require('../../middleware/rbac');
+const { denyRoles, authorizeAny } = require('../../middleware/rbac');
 // Company-wide finance is closed to the Mill Operator BY ROLE: payroll, export /
 // customer / country / product profitability, the executive summary, AR / AP,
 // cash forecast, FX, P&L, the invoice + export sales ledgers and scheduled
@@ -18,11 +18,15 @@ const noFinanceForOperator = denyRoles('Mill Operator');
 // Executive Dashboards
 // ═══════════════════════════════════════════════════════════════════
 router.get('/search', authorize('reports', 'view'), controller.globalSearch);
-// Scheduled report emails — finance-free roles excluded (they can email finance data otherwise)
-router.get('/scheduled-reports', authorize('reports', 'view'), noFinanceForOperator, controller.listScheduledReports);
-router.post('/scheduled-reports', authorize('reports', 'view'), noFinanceForOperator, controller.createScheduledReport);
-router.delete('/scheduled-reports/:id', authorize('reports', 'view'), noFinanceForOperator, controller.deleteScheduledReport);
-router.post('/scheduled-reports/:id/run', authorize('reports', 'view'), noFinanceForOperator, controller.runScheduledReport);
+// Scheduled report emails — finance-free roles excluded (they can email finance data otherwise).
+// P1-11: managing schedules needs an admin or finance permission on top of
+// reports.view; run-now / delete are further limited (controller) to report_email
+// schedules the caller created, or any for admin.manage_settings.
+const canSchedule = authorizeAny(['admin', 'manage_settings'], ['finance', 'view']);
+router.get('/scheduled-reports', authorize('reports', 'view'), canSchedule, noFinanceForOperator, controller.listScheduledReports);
+router.post('/scheduled-reports', authorize('reports', 'view'), canSchedule, noFinanceForOperator, controller.createScheduledReport);
+router.delete('/scheduled-reports/:id', authorize('reports', 'view'), canSchedule, noFinanceForOperator, controller.deleteScheduledReport);
+router.post('/scheduled-reports/:id/run', authorize('reports', 'view'), canSchedule, noFinanceForOperator, controller.runScheduledReport);
 router.get('/lot-ledger/:id', authorize('reports', 'view'), controller.lotLedger);
 router.get('/batch-ledger/:id', authorize('reports', 'view'), controller.batchLedger);
 router.get('/invoice-ledger', authorize('reports', 'view'), noFinanceForOperator, controller.invoiceLedger);
@@ -132,10 +136,13 @@ router.get('/kpi/benchmarks', authorize('reports', 'view'), controller.benchmark
 // ═══════════════════════════════════════════════════════════════════
 // Saved Reports
 // ═══════════════════════════════════════════════════════════════════
-router.get('/saved', authorize('reports', 'view'), controller.list);
-router.post('/saved', authorize('reports', 'view'), controller.save);
-router.post('/saved/:id/run', authorize('reports', 'view'), controller.run);
-router.delete('/saved/:id', authorize('reports', 'view'), controller.delete);
+// Saved reports run finance reports (profitability, receivables, cash forecast),
+// so the finance-free Mill Operator is kept out like the live routes; run is
+// limited to the caller's own + shared reports, delete to the owner (service).
+router.get('/saved', authorize('reports', 'view'), noFinanceForOperator, controller.list);
+router.post('/saved', authorize('reports', 'view'), noFinanceForOperator, controller.save);
+router.post('/saved/:id/run', authorize('reports', 'view'), noFinanceForOperator, controller.run);
+router.delete('/saved/:id', authorize('reports', 'view'), noFinanceForOperator, controller.delete);
 
 // ═══════════════════════════════════════════════════════════════════
 // Export
