@@ -196,7 +196,7 @@ router.get('/journal-entries', authorize('finance', 'view'), controller.getJourn
 router.get('/alerts', authorize('finance', 'view'), controller.getAlerts);
 router.get('/overview', authorize('finance', 'view'), controller.getOverview);
 router.get('/upcoming', authorize('finance', 'view'), controller.getUpcoming);
-router.post('/payments/:id/clear', authorize('finance', 'confirm_payment'), controller.clearCheque);
+router.post('/payments/:id/clear', authorize('finance', 'confirm_payment'), auditAction('clear_cheque', 'payment'), controller.clearCheque);
 // B1: an uncleared cheque bounced — reason required, optional bank charge.
 router.post('/payments/:id/bounce', authorize('finance', 'confirm_payment'),
   validate(schemas.bounceCheque),

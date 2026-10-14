@@ -204,7 +204,7 @@ router.post(
 
 // Reports
 router.get('/reports/stock', authorize('inventory', 'view'), controller.getStockReport);
-router.put('/products/:id/reorder-level', authorize('inventory', 'edit'), controller.setProductReorderLevel);
+router.put('/products/:id/reorder-level', authorize('inventory', 'edit'), auditAction('set_reorder_level', 'product'), controller.setProductReorderLevel);
 
 // Phase 4: Lot lineage & traceability
 
@@ -335,7 +335,7 @@ router.get('/order-cogs/:orderId', authorize('finance', 'view'), async (req, res
 
 // Phase 7: Valuation snapshots & repair tools
 
-router.post('/valuation-snapshot', authorize('inventory', 'view'), requireCostVisibility, async (req, res) => {
+router.post('/valuation-snapshot', authorize('inventory', 'view'), auditAction('valuation_snapshot', 'inventory_valuation'), requireCostVisibility, async (req, res) => {
   try {
     const result = await inventoryService.takeValuationSnapshot();
     return res.json({ success: true, data: result });

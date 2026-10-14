@@ -5,6 +5,7 @@ const { normalizePaymentMethod } = require('../../shared/constants/paymentMethod
 const { pendingChequeTotal, round2 } = require('../finance/paymentSettlement');
 const { recordMoneyMovement } = require('../finance/paymentEngine');
 const { postProcessingDelta } = require('../milling/millingCompletionJournal');
+const auditService = require('../admin/audit.service');
 const { ledgerFailure, missingAccounts } = require('../../shared/ledgerFailure');
 
 // Owner's Drawings (equity) — migration 350, owner decision D-9.
@@ -44,7 +45,9 @@ async function generateExpenseNo(trx) {
 const expensesService = {
   // `millOnly` (a mill route's caller without finance.confirm_payment): a
   // pay-now may only draw on one of the mill's own accounts (paymentEngine).
-  async create(data, userId, existingTrx = null, { millOnly = false } = {}) {
+  // `req` (the HTTP request, when there is one): the audit row is written
+  // inside this transaction (P2-30) instead of after the response.
+  async create(data, userId, existingTrx = null, { millOnly = false, req = null } = {}) {
     const {
       expense_type, category, subcategory, amount, currency, fx_rate,
       supplier_id, vendor_name, expense_date, due_date, invoice_reference,
@@ -272,6 +275,13 @@ const expensesService = {
         }
       }
 
+      if (req) {
+        await auditService.logInTrx(trx, req, {
+          action: 'create', entityType: 'business_expense', entityId: expense.id,
+          result: { expense_no: expenseNo, amount_pkr: amountPkr, pay_now: !!pay_now },
+        });
+      }
+
       return pay_now ? trx('business_expenses').where('id', expense.id).first() : expense;
     };
 
@@ -401,6 +411,9 @@ const expensesService = {
         })
         : 0;
 
+      // The audit row commits with the link (P2-30) and is NOT caught: inside a
+      // transaction a failed insert aborts it, so swallowing the error used to
+      // make COMMIT silently roll the link back while the user saw success.
       await trx('audit_logs').insert({
         user_id: userId || null,
         action: supplier ? 'link_supplier' : 'unlink_supplier',
@@ -414,7 +427,7 @@ const expensesService = {
           journals_stamped: stamped,
           journal_refs: refs,
         }),
-      }).catch(() => { /* audit is best-effort; the link still stands */ });
+      });
 
       return trx('business_expenses').where('id', id).first();
     });
@@ -422,7 +435,7 @@ const expensesService = {
 
   // `existingTrx` lets a caller (payroll settle) commit the payment atomically
   // with its own writes, as create() already allows.
-  async markPaid(id, { amount, bank_account_id, payment_method, payment_reference, paid_date, due_date, notes }, userId, existingTrx = null, { millOnly = false } = {}) {
+  async markPaid(id, { amount, bank_account_id, payment_method, payment_reference, paid_date, due_date, notes }, userId, existingTrx = null, { millOnly = false, req = null } = {}) {
     // Joi parses paid_date into a Date; normalize to a YYYY-MM-DD string so the
     // GL journal's date math (createJournal does string ops) doesn't choke.
     const rawPayDate = paid_date || new Date().toISOString().split('T')[0];
@@ -480,6 +493,12 @@ const expensesService = {
           notes: notes || `Payment for ${expense.expense_no}`,
         },
       });
+      if (req) {
+        await auditService.logInTrx(trx, req, {
+          action: 'pay', entityType: 'business_expense', entityId: expense.id,
+          result: { expense_no: expense.expense_no, amount: payAmt, method: payment_method || null },
+        });
+      }
       return trx('business_expenses').where('id', id).first();
     };
     return existingTrx ? run(existingTrx) : db.transaction(run);

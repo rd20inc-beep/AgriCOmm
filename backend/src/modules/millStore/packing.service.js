@@ -1,4 +1,5 @@
 const db = require('../../config/database');
+const auditService = require('../admin/audit.service');
 const accountingService = require('../accounting/accounting.service');
 const { postProcessingDelta } = require('../milling/millingCompletionJournal');
 const inventoryService = require('../inventory/inventory.service');
@@ -82,7 +83,7 @@ const packingService = {
     // is only one of the three real cases — and at Rs 12 a sheet the difference
     // between 400, 80 and 480 is real money.
     poly_item_id = null, poly_count = null, poly_applies_to = 'bag',
-  }, userId, { allowOverPack = false } = {}) {
+  }, userId, { allowOverPack = false, req = null } = {}) {
     const bagsCount = Number(bags_count);
     if (!bagsCount || bagsCount <= 0) throw new ValidationError('Bag count must be greater than zero.');
 
@@ -354,6 +355,14 @@ const packingService = {
         await trx('mill_packing_logs').where('id', log.id)
           .update({ notes: [log.notes, summary].filter(Boolean).join(' ') });
         log.notes = [log.notes, summary].filter(Boolean).join(' ');
+      }
+
+      // Audited inside the transaction (P2-30) when called over HTTP.
+      if (req) {
+        await auditService.logInTrx(trx, req, {
+          action: 'pack', entityType: 'milling_batch', entityId: batchId,
+          result: { packing_log_id: log.id, bags_count: bagsCount, total_cost: grandTotal },
+        });
       }
 
       return { ...log, shortages };

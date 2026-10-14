@@ -20,6 +20,7 @@ const { requireCostVisibility, redactCostInResponses } = require('../../utils/co
 // (migration 203). Mill Operator holds no payroll permissions, so the old
 // denyRoles('Mill Operator') guard is no longer needed.
 const auditAction = require('../../middleware/audit');
+const auditService = require('../admin/audit.service');
 const validate = require('../../middleware/validate');
 const schemas = require('../../middleware/schemas');
 const ownerApproval = require('../../middleware/ownerApproval');
@@ -836,7 +837,7 @@ router.get('/expenses/recurring', authorize('milling', 'view'), requireCostVisib
 
 // Auto-post EVERY due recurring series in one shot (the same routine the hourly
 // scheduler runs). Lets the user trigger the catch-up on demand from the UI.
-router.post('/expenses/recurring/run-due', authorize('milling', 'create'), async (req, res) => {
+router.post('/expenses/recurring/run-due', authorize('milling', 'create'), auditAction('run_due_recurring', 'business_expense'), async (req, res) => {
   try {
     const result = await automationService.materializeDueRecurringExpenses();
     return res.json({ success: true, data: result });
@@ -845,7 +846,7 @@ router.post('/expenses/recurring/run-due', authorize('milling', 'create'), async
 
 // Materialize the next occurrence of a recurring series (the :id is its latest
 // occurrence / template). Copies its fields with expense_date = next due date.
-router.post('/expenses/recurring/:id/materialize', authorize('milling', 'create'), async (req, res) => {
+router.post('/expenses/recurring/:id/materialize', authorize('milling', 'create'), auditAction('materialize_recurring', 'business_expense'), async (req, res) => {
   try {
     const tmpl = await db('business_expenses').where('id', req.params.id).where('expense_type', 'mill').first();
     if (!tmpl) return res.status(404).json({ success: false, message: 'Recurring expense not found.' });
@@ -1078,7 +1079,7 @@ router.put('/workers/:id', authorize('payroll', 'edit'), auditAction('update', '
 // Dedicated "Revise salary" — records a revision (old→new) WITH an effective date
 // + reason, then applies the new pay. (The generic PUT also auto-logs, but this
 // is the proper increment flow that captures why + when.)
-router.post('/workers/:id/salary-revision', authorize('payroll', 'edit'), async (req, res) => {
+router.post('/workers/:id/salary-revision', authorize('payroll', 'edit'), auditAction('salary_revision', 'mill_worker'), async (req, res) => {
   try {
     const worker = await db('mill_workers').where('id', req.params.id).first();
     if (!worker) return res.status(404).json({ success: false, message: 'Worker not found.' });
@@ -1223,7 +1224,7 @@ function unwindAdvanceExpense(trx, expenseId, opts = {}) {
 // must be 6–8 digits and is bcrypt-hashed; `enabled:false` turns the portal off.
 // A reset or disable bumps portal_pin_version, ending every portal session the
 // worker already has, and a reset clears any wrong-PIN lockout (P1-07).
-router.post('/workers/:id/portal-pin', authorize('payroll', 'edit'), async (req, res) => {
+router.post('/workers/:id/portal-pin', authorize('payroll', 'edit'), auditAction('set_portal_pin', 'mill_worker'), async (req, res) => {
   try {
     const bcrypt = require('bcryptjs');
     const { newPinError } = require('../portal/portalAuth');
@@ -1274,7 +1275,7 @@ router.get('/worker-requests/count', authorize('payroll', 'view'), async (req, r
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 
-router.post('/worker-requests/:id/resolve', authorize('payroll', 'edit'), async (req, res) => {
+router.post('/worker-requests/:id/resolve', authorize('payroll', 'edit'), auditAction('resolve_request', 'worker_request'), async (req, res) => {
   try {
     const r = await db('mill_worker_requests').where('id', req.params.id).first();
     if (!r) return res.status(404).json({ success: false, message: 'Request not found.' });
@@ -1330,7 +1331,7 @@ router.get('/payroll/leave-types', authorize('payroll', 'view'), async (req, res
   try { return res.json({ success: true, data: await db('mill_leave_types').orderBy('sort_order').orderBy('id') }); }
   catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
-router.post('/payroll/leave-types', authorize('payroll', 'approve'), async (req, res) => {
+router.post('/payroll/leave-types', authorize('payroll', 'approve'), auditAction('create', 'leave_type'), async (req, res) => {
   try {
     const b = req.body || {};
     if (!b.name) return res.status(400).json({ success: false, message: 'Name is required.' });
@@ -1344,7 +1345,7 @@ router.post('/payroll/leave-types', authorize('payroll', 'approve'), async (req,
     return res.status(201).json({ success: true, data: row });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
-router.put('/payroll/leave-types/:id', authorize('payroll', 'approve'), async (req, res) => {
+router.put('/payroll/leave-types/:id', authorize('payroll', 'approve'), auditAction('update', 'leave_type'), async (req, res) => {
   try {
     const existing = await db('mill_leave_types').where('id', req.params.id).first();
     if (!existing) return res.status(404).json({ success: false, message: 'Leave type not found.' });
@@ -1361,7 +1362,7 @@ router.put('/payroll/leave-types/:id', authorize('payroll', 'approve'), async (r
     return res.json({ success: true, data: row });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
-router.delete('/payroll/leave-types/:id', authorize('payroll', 'approve'), async (req, res) => {
+router.delete('/payroll/leave-types/:id', authorize('payroll', 'approve'), auditAction('delete', 'leave_type'), async (req, res) => {
   try {
     const used = await db('mill_leave_requests').where('leave_type_id', req.params.id).first();
     if (used) { await db('mill_leave_types').where('id', req.params.id).update({ is_active: false, updated_at: db.fn.now() }); return res.json({ success: true, data: { deactivated: true } }); }
@@ -1393,7 +1394,7 @@ router.get('/payroll/leave-balances', authorize('payroll', 'view'), async (req, 
     return res.json({ success: true, data: await computeLeaveBalances(parseInt(req.query.worker_id, 10), year) });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
-router.post('/payroll/leave-requests', authorize('payroll', 'create'), async (req, res) => {
+router.post('/payroll/leave-requests', authorize('payroll', 'create'), auditAction('create', 'leave_request'), async (req, res) => {
   try {
     const b = req.body || {};
     if (!b.worker_id || !b.from_date || !b.to_date) return res.status(400).json({ success: false, message: 'worker, from and to dates are required.' });
@@ -1427,7 +1428,7 @@ router.post('/payroll/leave-requests/:id/reject', authorize('payroll', 'approve'
     return res.json({ success: true, data: row });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
-router.delete('/payroll/leave-requests/:id', authorize('payroll', 'delete'), async (req, res) => {
+router.delete('/payroll/leave-requests/:id', authorize('payroll', 'delete'), auditAction('delete', 'leave_request'), async (req, res) => {
   try {
     const r = await db('mill_leave_requests').where('id', req.params.id).first();
     if (!r) return res.status(404).json({ success: false, message: 'Leave request not found.' });
@@ -1842,7 +1843,7 @@ router.get('/workers/:id/adjustments', authorize('payroll', 'view'), async (req,
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 
-router.post('/workers/:id/adjustments', authorize('payroll', 'create'), async (req, res) => {
+router.post('/workers/:id/adjustments', authorize('payroll', 'create'), auditAction('create_adjustment', 'mill_worker'), async (req, res) => {
   try {
     const worker = await db('mill_workers').where('id', req.params.id).first();
     if (!worker) return res.status(404).json({ success: false, message: 'Worker not found.' });
@@ -1862,7 +1863,7 @@ router.post('/workers/:id/adjustments', authorize('payroll', 'create'), async (r
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 
-router.delete('/adjustments/:id', authorize('payroll', 'delete'), async (req, res) => {
+router.delete('/adjustments/:id', authorize('payroll', 'delete'), auditAction('delete', 'payroll_adjustment'), async (req, res) => {
   try {
     const adj = await db('mill_worker_adjustments').where('id', req.params.id).first();
     if (!adj) return res.status(404).json({ success: false, message: 'Adjustment not found.' });
@@ -1881,7 +1882,7 @@ router.get('/payroll/statutory-deductions', authorize('payroll', 'view'), async 
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 
-router.post('/payroll/statutory-deductions', authorize('payroll', 'approve'), async (req, res) => {
+router.post('/payroll/statutory-deductions', authorize('payroll', 'approve'), auditAction('create', 'statutory_deduction'), async (req, res) => {
   try {
     const b = req.body || {};
     if (!b.name || !String(b.name).trim()) return res.status(400).json({ success: false, message: 'Name is required.' });
@@ -1907,7 +1908,7 @@ router.post('/payroll/statutory-deductions', authorize('payroll', 'approve'), as
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 
-router.put('/payroll/statutory-deductions/:id', authorize('payroll', 'approve'), async (req, res) => {
+router.put('/payroll/statutory-deductions/:id', authorize('payroll', 'approve'), auditAction('update', 'statutory_deduction'), async (req, res) => {
   try {
     const existing = await db('mill_statutory_deductions').where('id', req.params.id).first();
     if (!existing) return res.status(404).json({ success: false, message: 'Rule not found.' });
@@ -1931,7 +1932,7 @@ router.put('/payroll/statutory-deductions/:id', authorize('payroll', 'approve'),
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 
-router.delete('/payroll/statutory-deductions/:id', authorize('payroll', 'approve'), async (req, res) => {
+router.delete('/payroll/statutory-deductions/:id', authorize('payroll', 'approve'), auditAction('delete', 'statutory_deduction'), async (req, res) => {
   try {
     const row = await db('mill_statutory_deductions').where('id', req.params.id).first();
     if (!row) return res.status(404).json({ success: false, message: 'Rule not found.' });
@@ -2066,37 +2067,52 @@ router.post('/payroll/statutory-remittances', authorize('payroll', 'pay'),
 });
 
 // Reverse a remittance — net its GL with a signed-delta journal, restore the
-// bank with a reversing bank row (both kept), and remove the remittance record
-// so the liability shows as owed again.
+// bank with a reversing bank row (both kept), and mark the remittance Reversed
+// so the liability shows as owed again. The row is KEPT (P2-30): it used to be
+// hard-deleted, losing the record of what was paid, when and who undid it.
+// Its audit row is written inside the same transaction.
 router.delete('/payroll/statutory-remittances/:id', authorize('payroll', 'pay'),
   auditAction('void', 'statutory_remittance', (req) => req.params.id),
   async (req, res) => {
   try {
-    const row = await db('mill_statutory_remittances').where('id', req.params.id).first();
-    if (!row) return res.status(404).json({ success: false, message: 'Remittance not found.' });
-    await db.transaction(async (trx) => {
-      const amt = parseFloat(row.amount) || 0;
-      const moved = await trx('bank_transactions').where({ reference: row.remittance_no, source: 'statutory_remittance' }).first('id');
-      if (row.bank_account_id && moved && amt > 0) {
-        await trx('bank_accounts').where('id', row.bank_account_id).increment('current_balance', amt);
-        const acct = await trx('bank_accounts').where('id', row.bank_account_id).first();
+    const reason = (req.body && typeof req.body.reason === 'string' && req.body.reason.trim()) || null;
+    const row = await db.transaction(async (trx) => {
+      const r = await trx('mill_statutory_remittances').where('id', req.params.id).forUpdate().first();
+      if (!r) { const e = new Error('Remittance not found.'); e.statusCode = 404; throw e; }
+      if (r.status === 'Reversed') { const e = new Error(`Remittance ${r.remittance_no} is already reversed.`); e.statusCode = 409; throw e; }
+      const amt = parseFloat(r.amount) || 0;
+      const moved = await trx('bank_transactions').where({ reference: r.remittance_no, source: 'statutory_remittance' }).first('id');
+      if (r.bank_account_id && moved && amt > 0) {
+        await trx('bank_accounts').where('id', r.bank_account_id).increment('current_balance', amt);
+        const acct = await trx('bank_accounts').where('id', r.bank_account_id).first();
         await trx('bank_transactions').insert({
           transaction_no: await nextDocNo(trx, { table: 'bank_transactions', column: 'transaction_no', prefix: 'BT-', pad: 4 }),
-          bank_account_id: row.bank_account_id, type: 'credit', amount: amt, currency: acct?.currency || 'PKR',
-          status: 'posted', transaction_date: new Date().toISOString().slice(0, 10), reference: row.remittance_no,
-          notes: `Reversal of statutory remittance ${row.remittance_no}`, source: 'statutory_remittance_reversal',
+          bank_account_id: r.bank_account_id, type: 'credit', amount: amt, currency: acct?.currency || 'PKR',
+          status: 'posted', transaction_date: new Date().toISOString().slice(0, 10), reference: r.remittance_no,
+          notes: `Reversal of statutory remittance ${r.remittance_no}`, source: 'statutory_remittance_reversal',
           running_balance: acct ? acct.current_balance : null, category: 'statutory', created_by: req.user?.id || null,
         });
       }
       await mirrorJournals(trx, {
-        refNo: row.remittance_no, refTypes: ['Statutory Remittance'], refType: 'Statutory Remittance Reversal',
-        description: `Reversal of statutory remittance ${row.remittance_no}`, userId: req.user?.id || null,
-        cashAccountId: row.bank_account_id || null,
+        refNo: r.remittance_no, refTypes: ['Statutory Remittance'], refType: 'Statutory Remittance Reversal',
+        description: `Reversal of statutory remittance ${r.remittance_no}`, userId: req.user?.id || null,
+        cashAccountId: r.bank_account_id || null,
       });
-      await trx('mill_statutory_remittances').where('id', row.id).del();
+      const [updated] = await trx('mill_statutory_remittances').where('id', r.id).update({
+        status: 'Reversed', reversed_at: trx.fn.now(), reversed_by: req.user?.id || null,
+        reversal_reason: reason, updated_at: trx.fn.now(),
+      }).returning('*');
+      await auditService.logInTrx(trx, req, {
+        action: 'void', entityType: 'statutory_remittance', entityId: r.id,
+        details: { remittance_no: r.remittance_no, amount: amt, reason },
+      });
+      return updated;
     });
-    return res.json({ success: true, data: { deleted: row.id } });
-  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+    return res.json({ success: true, data: { reversed: row.id, remittance: row } });
+  } catch (err) {
+    const code = err.statusCode || 500;
+    return res.status(code).json({ success: false, message: code === 500 ? 'Internal server error.' : err.message });
+  }
 });
 
 // ── Year-end tax statement (Pakistani tax year: Jul Y – Jun Y+1) ────────────
@@ -2174,7 +2190,7 @@ router.get('/attendance', authorize('payroll', 'view'), async (req, res) => {
 const VALID_ATTENDANCE = ['present', 'absent', 'half_day', 'leave', 'off'];
 const attHours = (status) => (status === 'half_day' ? 4 : status === 'present' ? 8 : 0);
 
-router.post('/attendance', authorize('payroll', 'create'), async (req, res) => {
+router.post('/attendance', authorize('payroll', 'create'), auditAction('record', 'attendance'), async (req, res) => {
   try {
     const { worker_id, date, status, hours_worked, overtime_hours, notes } = req.body;
     if (!worker_id || !date) return res.status(400).json({ success: false, message: 'worker_id and date required.' });
@@ -2192,7 +2208,7 @@ router.post('/attendance', authorize('payroll', 'create'), async (req, res) => {
 
 // Bulk attendance — set many (worker, date) cells at once (Sundays off, holidays,
 // company-wide leave, a range). status 'clear' deletes the cell. One transaction.
-router.post('/attendance/bulk', authorize('payroll', 'create'), async (req, res) => {
+router.post('/attendance/bulk', authorize('payroll', 'create'), auditAction('record_bulk', 'attendance'), async (req, res) => {
   try {
     const { records } = req.body;
     if (!Array.isArray(records) || !records.length) return res.status(400).json({ success: false, message: 'records[] required.' });
@@ -2222,7 +2238,7 @@ router.post('/attendance/bulk', authorize('payroll', 'create'), async (req, res)
 // single status across a day and zeroes OT), this upserts status + hours + OVER-
 // TIME per row — for importing a whole month from a biometric/timesheet export.
 // The FE resolves CNIC/name → worker_id and validates; the server re-validates.
-router.post('/attendance/import', authorize('payroll', 'create'), async (req, res) => {
+router.post('/attendance/import', authorize('payroll', 'create'), auditAction('import', 'attendance'), async (req, res) => {
   try {
     const { records } = req.body;
     if (!Array.isArray(records) || !records.length) return res.status(400).json({ success: false, message: 'records[] required.' });

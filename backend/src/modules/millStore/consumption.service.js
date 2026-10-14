@@ -1,4 +1,5 @@
 const db = require('../../config/database');
+const auditService = require('../admin/audit.service');
 const accountingService = require('../accounting/accounting.service');
 const { postProcessingDelta } = require('../milling/millingCompletionJournal');
 const { NotFoundError, ValidationError } = require('../../shared/errors');
@@ -112,7 +113,7 @@ const consumptionService = {
    * @param {number} userId
    * @param {boolean} allowNegative - override for insufficient stock
    */
-  async confirm(batchId, lines, userId, allowNegative = false) {
+  async confirm(batchId, lines, userId, allowNegative = false, { req = null } = {}) {
     if (!lines || lines.length === 0) throw new ValidationError('At least one item is required.');
 
     const batch = await db('milling_batches').where('id', batchId).first();
@@ -266,6 +267,14 @@ const consumptionService = {
       if (totalConsumed > 0) {
         await postProcessingDelta(trx, accountingService, {
           batch, delta: totalConsumed, label: 'mill store consumption', userId,
+        });
+      }
+
+      // Audited inside the transaction (P2-30) when called over HTTP.
+      if (req) {
+        await auditService.logInTrx(trx, req, {
+          action: 'confirm_consumption', entityType: 'milling_batch', entityId: batchId,
+          result: { lines_consumed: logs.length, total_cost: totalConsumed },
         });
       }
 

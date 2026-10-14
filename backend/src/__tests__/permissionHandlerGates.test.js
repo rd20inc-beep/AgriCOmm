@@ -39,13 +39,13 @@ describe('consumption past zero', () => {
     mockAllowed = new Set(['mill_store.override_negative_stock']);
     const r = res();
     await ctrl.confirm({ params: { id: '3' }, body: { lines: LINES, allow_negative: true }, user: { id: 9 } }, r, jest.fn());
-    expect(consumptionService.confirm).toHaveBeenCalledWith('3', LINES, 9, true);
+    expect(consumptionService.confirm).toHaveBeenCalledWith('3', LINES, 9, true, expect.objectContaining({ req: expect.any(Object) }));
   });
 
   test('normal consumption is unaffected', async () => {
     const r = res();
     await ctrl.confirm({ params: { id: '3' }, body: { lines: LINES }, user: { id: 9 } }, r, jest.fn());
-    expect(consumptionService.confirm).toHaveBeenCalledWith('3', LINES, 9, false);
+    expect(consumptionService.confirm).toHaveBeenCalledWith('3', LINES, 9, false, expect.objectContaining({ req: expect.any(Object) }));
   });
 });
 
