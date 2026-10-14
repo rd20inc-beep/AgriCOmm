@@ -178,7 +178,8 @@ export function AuthProvider({ children }) {
   const hasPermission = useCallback(
     (module, action) => {
       if (!user) return false;
-      if (user.role === 'Super Admin') return true;
+      // Same bypass as the backend (rbac.js): Super Admin and Owner pass every check.
+      if (user.role === 'Super Admin' || user.role === 'Owner') return true;
       if (!user.permissions) return false;
       return user.permissions.some((perm) => {
         if (perm === `${module}.*`) return true;

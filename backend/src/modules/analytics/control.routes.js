@@ -2,7 +2,6 @@ const express = require('express');
 const router = express.Router();
 const controller = require('../../controllers/controlController');
 const authorize = require('../../middleware/rbac');
-const { authorizeRole } = require('../../middleware/rbac');
 const auditAction = require('../../middleware/audit');
 const retired = require('../../middleware/retired');
 const validate = require('../../middleware/validate');
@@ -116,11 +115,12 @@ router.put(
   auditAction('review_stock_count_line', 'stock_count_items'),
   controller.reviewCountItem
 );
-// Completing a count writes stock off / on — the Owner approves write-offs
-// (owner decision 2026-10-05). authorizeRole has no bypass, so both are listed.
+// Completing a count writes stock off / on. Owner decision 2026-10-05: write-offs are Owner-only. The gate is
+// inventory.approve_write_off, held by Owner and Super Admin only (mig 339) —
+// the same people the old hard-coded role list let through.
 router.put(
   '/stock-counts/:id/approve',
-  authorizeRole('Owner', 'Super Admin'),
+  authorize('inventory', 'approve_write_off'),
   auditAction('approve_stock_count', 'stock_counts'),
   controller.approveStockCount
 );

@@ -5,10 +5,12 @@ import { useCreateBagType, useUpdateBagType, useDeleteBagType } from '../../../.
 import Modal from '../../components/AdminDrawer';
 import FieldError from '../../../../shared/components/FieldError';
 import useConfirm from '../../../../hooks/useConfirm';
+import { useAdminCanWrite } from './adminWrite';
 
 const EMPTY = { name: '', category: 'empty', sizeKg: '25', material: '', description: '', reorderLevel: '100' };
 
 export default function BagTypesTab() {
+  const canWrite = useAdminCanWrite();
   const { bagTypesList, addToast } = useApp();
   const createMut = useCreateBagType();
   const updateMut = useUpdateBagType();
@@ -90,13 +92,15 @@ export default function BagTypesTab() {
             <ShoppingBag className="w-5 h-5 text-cyan-600" />
             Bag Types
           </h2>
-          <button
-            onClick={openCreate}
-            className="inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors font-medium text-sm"
-          >
-            <Plus className="w-4 h-4" />
-            Add Bag Type
-          </button>
+          {canWrite && (
+            <button
+              onClick={openCreate}
+              className="inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors font-medium text-sm"
+            >
+              <Plus className="w-4 h-4" />
+              Add Bag Type
+            </button>
+          )}
         </div>
         <div className="px-4 py-2 flex gap-3 text-xs text-gray-500 border-b border-gray-100">
           <span>Empty: <strong>{bagTypesList.filter(b => b.category === 'empty').length}</strong></span>
@@ -137,12 +141,16 @@ export default function BagTypesTab() {
                   <td data-label="Reorder Level" className="mob-hide px-4 py-3 text-right text-gray-900">{b.reorderLevel}</td>
                   <td data-label="Actions" className="px-4 py-3 text-right">
                     <div className="inline-flex gap-1">
-                      <button onClick={() => openEdit(b)} className="p-1.5 rounded hover:bg-blue-50 text-blue-600" title="Edit" aria-label={`Edit ${b.name}`}>
-                        <Pencil className="w-4 h-4" />
-                      </button>
-                      <button onClick={() => handleDelete(b)} className="p-1.5 rounded hover:bg-red-50 text-red-600" title="Delete" aria-label={`Delete ${b.name}`}>
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      {canWrite && (
+                        <button onClick={() => openEdit(b)} className="p-1.5 rounded hover:bg-blue-50 text-blue-600" title="Edit" aria-label={`Edit ${b.name}`}>
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                      )}
+                      {canWrite && (
+                        <button onClick={() => handleDelete(b)} className="p-1.5 rounded hover:bg-red-50 text-red-600" title="Delete" aria-label={`Delete ${b.name}`}>
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>

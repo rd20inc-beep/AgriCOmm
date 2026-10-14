@@ -23,6 +23,7 @@ import DangerZoneTab from './admin/DangerZoneTab';
 import DevicesTab from './admin/DevicesTab';
 import MobileNavTab from './admin/MobileNavTab';
 import { adminApi } from '../api/services';
+import { AdminWriteContext, canWriteTab } from './admin/adminWrite';
 
 const tabs = [
   { key: 'approvals', label: 'Approvals', icon: Inbox, badge: 'pendingApprovalsCount' },
@@ -86,7 +87,7 @@ const NAV = [
 ];
 
 export default function Admin() {
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
   const isSuperAdmin = user?.role === 'Super Admin';
   const [activeTab, setActiveTab] = useState('approvals');
   const [openGroup, setOpenGroup] = useState(null);
@@ -189,7 +190,14 @@ export default function Admin() {
       </div>
 
       {/* Active Tab Content */}
-      {ActiveComponent && <ActiveComponent />}
+      {ActiveComponent && (
+        <AdminWriteContext.Provider value={canWriteTab(activeTab, hasPermission)}>
+          {!canWriteTab(activeTab, hasPermission) && (
+            <p className="text-xs text-gray-500" data-testid="admin-read-only">View only — your role cannot change this.</p>
+          )}
+          <ActiveComponent />
+        </AdminWriteContext.Provider>
+      )}
     </div>
   );
 }

@@ -144,6 +144,18 @@ function authorizeAny(...pairs) {
  * Checks if the user's role name matches one of the provided role names.
  *
  * Usage: authorizeRole('Super Admin', 'Finance Manager')
+ *
+ * Prefer authorize() with a permission — the Admin › Permissions matrix only
+ * governs permission gates. The remaining role-list gates are deliberate
+ * exceptions with no matching permission (P1-18, 2026-10-15):
+ *   - admin: PUT /roles/:id/permissions (Super Admin only — editing the matrix),
+ *     PUT /roles/:id/mobile-nav, every /danger/* route (Super Admin only)
+ *   - finance: fund-transfer replace / reverse / delete (Owner, Super Admin)
+ *   - milling: batch approve / reject (Owner, Super Admin)
+ *   - local sales: confirm / reject and the admin invoice view
+ *   - purchase requirements: approve / reject (Super Admin, Owner, Mill Manager)
+ *   - sync: conflict / device / site-status management
+ * Note authorizeRole has NO Owner / Super Admin bypass: list them explicitly.
  */
 function authorizeRole(...roles) {
   return tagGuard({ kind: 'authorizeRole', roles }, async (req, res, next) => {

@@ -77,7 +77,7 @@ router.get(
 
 router.post(
   '/upload',
-  authorize('documents', 'create'),
+  authorize('documents', 'upload'), // same holders as documents.create (mig 339)
   versionFiles,
   auditAction('upload', 'document', (req, data) => data.data && data.data.document ? data.data.document.id : null),
   controller.upload
@@ -158,7 +158,7 @@ router.put(
 
 router.put(
   '/:id/reject',
-  authorize('documents', 'approve'),
+  authorize('documents', 'reject'), // held by documents.approve holders only (mig 339)
   auditAction('reject', 'document', (req) => req.params.id),
   controller.reject
 );

@@ -264,9 +264,10 @@ router.delete(
   auditAction('delete_vehicle', 'milling_batch', (req) => req.params.id),
   controller.deleteVehicle
 );
+// milling.delete (mig 339): Super Admin + Mill Manager as before, and the Owner.
 router.delete(
   '/batches/:id',
-  authorizeRole('Super Admin', 'Mill Manager'),
+  authorize('milling', 'delete'),
   auditAction('delete', 'milling_batch', (req) => req.params.id),
   controller.deleteBatch
 );

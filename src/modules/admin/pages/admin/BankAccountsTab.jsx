@@ -10,6 +10,7 @@ import Modal from '../../components/AdminDrawer';
 import FieldError from '../../../../shared/components/FieldError';
 import useConfirm from '../../../../hooks/useConfirm';
 import { fmtMoney } from '../../../../shared/utils/format';
+import { useAdminCanWrite } from './adminWrite';
 
 // Form state uses camelCase for ergonomics, but the bank_accounts table
 // columns are: name, type, account_number, bank_name, branch, currency,
@@ -38,6 +39,7 @@ const EMPTY = {
 };
 
 export default function BankAccountsTab() {
+  const canWrite = useAdminCanWrite();
   const { bankAccountsList, addToast } = useApp();
   const createMut = useCreateBankAccount();
   const updateMut = useUpdateBankAccount();
@@ -158,13 +160,15 @@ export default function BankAccountsTab() {
             Bank Accounts
             <span className="ml-2 text-xs font-normal text-gray-500">({accounts.length} accounts)</span>
           </h2>
-          <button
-            onClick={openCreate}
-            className="inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors font-medium text-sm"
-          >
-            <Plus className="w-4 h-4" />
-            Add Account
-          </button>
+          {canWrite && (
+            <button
+              onClick={openCreate}
+              className="inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors font-medium text-sm"
+            >
+              <Plus className="w-4 h-4" />
+              Add Account
+            </button>
+          )}
         </div>
         <div className="px-4 py-2 flex gap-4 text-xs text-gray-500 border-b border-gray-100">
           <span>PKR Accounts: <strong className="text-gray-900">{accounts.filter(a => a.currency === 'PKR').length}</strong></span>
@@ -229,12 +233,16 @@ export default function BankAccountsTab() {
                   </td>
                   <td data-label="Actions" className="px-4 py-3 text-right">
                     <div className="inline-flex gap-1">
-                      <button onClick={() => openEdit(a)} className="p-1.5 rounded hover:bg-blue-50 text-blue-600" title="Edit" aria-label={`Edit ${a.name || a.accountName}`}>
-                        <Pencil className="w-4 h-4" />
-                      </button>
-                      <button onClick={() => handleDelete(a)} className="p-1.5 rounded hover:bg-red-50 text-red-600" title="Delete" aria-label={`Delete ${a.name || a.accountName}`}>
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      {canWrite && (
+                        <button onClick={() => openEdit(a)} className="p-1.5 rounded hover:bg-blue-50 text-blue-600" title="Edit" aria-label={`Edit ${a.name || a.accountName}`}>
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                      )}
+                      {canWrite && (
+                        <button onClick={() => handleDelete(a)} className="p-1.5 rounded hover:bg-red-50 text-red-600" title="Delete" aria-label={`Delete ${a.name || a.accountName}`}>
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>

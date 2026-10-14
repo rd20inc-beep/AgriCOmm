@@ -10,10 +10,12 @@ import {
 import Modal from '../../components/AdminDrawer';
 import FieldError from '../../../../shared/components/FieldError';
 import useConfirm from '../../../../hooks/useConfirm';
+import { useAdminCanWrite } from './adminWrite';
 
 const EMPTY = { name: '', parentId: '', groupKey: '', description: '' };
 
 export default function CategoriesTab() {
+  const canWrite = useAdminCanWrite();
   const { addToast } = useApp();
   const { data: categories = [] } = useProductCategories();
   const createMut = useCreateProductCategory();
@@ -98,13 +100,15 @@ export default function CategoriesTab() {
             Product Categories
             <span className="text-xs font-normal text-gray-500">· top-level groups + subcategories</span>
           </h2>
-          <button
-            onClick={() => openCreate('')}
-            className="inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors font-medium text-sm"
-          >
-            <Plus className="w-4 h-4" />
-            Add Category
-          </button>
+          {canWrite && (
+            <button
+              onClick={() => openCreate('')}
+              className="inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors font-medium text-sm"
+            >
+              <Plus className="w-4 h-4" />
+              Add Category
+            </button>
+          )}
         </div>
 
         <div className="divide-y divide-gray-100">
@@ -126,15 +130,21 @@ export default function CategoriesTab() {
                     {parent.description && <span className="ml-2 text-xs text-gray-500">— {parent.description}</span>}
                   </div>
                   <div className="inline-flex gap-1">
-                    <button onClick={() => openCreate(parent.id)} className="px-2 py-1 rounded hover:bg-emerald-50 text-emerald-600 text-xs font-medium" title="Add subcategory">
-                      + Subcategory
-                    </button>
-                    <button onClick={() => openEdit(parent)} className="p-1.5 rounded hover:bg-blue-50 text-blue-600" title="Edit" aria-label={`Edit ${parent.name}`}>
-                      <Pencil className="w-4 h-4" />
-                    </button>
-                    <button onClick={() => handleDelete(parent)} className="p-1.5 rounded hover:bg-red-50 text-red-600" title="Delete" aria-label={`Delete ${parent.name}`}>
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    {canWrite && (
+                      <button onClick={() => openCreate(parent.id)} className="px-2 py-1 rounded hover:bg-emerald-50 text-emerald-600 text-xs font-medium" title="Add subcategory">
+                        + Subcategory
+                      </button>
+                    )}
+                    {canWrite && (
+                      <button onClick={() => openEdit(parent)} className="p-1.5 rounded hover:bg-blue-50 text-blue-600" title="Edit" aria-label={`Edit ${parent.name}`}>
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                    )}
+                    {canWrite && (
+                      <button onClick={() => handleDelete(parent)} className="p-1.5 rounded hover:bg-red-50 text-red-600" title="Delete" aria-label={`Delete ${parent.name}`}>
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
                   </div>
                 </div>
                 {kids.length > 0 && (
@@ -147,12 +157,16 @@ export default function CategoriesTab() {
                           {k.description && <span className="text-xs text-gray-500">— {k.description}</span>}
                         </div>
                         <div className="inline-flex gap-1">
-                          <button onClick={() => openEdit(k)} className="p-1 rounded hover:bg-blue-50 text-blue-600" title="Edit" aria-label={`Edit ${k.name}`}>
-                            <Pencil className="w-3.5 h-3.5" />
-                          </button>
-                          <button onClick={() => handleDelete(k)} className="p-1 rounded hover:bg-red-50 text-red-600" title="Delete" aria-label={`Delete ${k.name}`}>
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                          {canWrite && (
+                            <button onClick={() => openEdit(k)} className="p-1 rounded hover:bg-blue-50 text-blue-600" title="Edit" aria-label={`Edit ${k.name}`}>
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                          {canWrite && (
+                            <button onClick={() => handleDelete(k)} className="p-1 rounded hover:bg-red-50 text-red-600" title="Delete" aria-label={`Delete ${k.name}`}>
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                         </div>
                       </div>
                     ))}

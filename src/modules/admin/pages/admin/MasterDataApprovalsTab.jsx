@@ -6,6 +6,7 @@ import { useApp } from '../../../../context/AppContext';
 import { useOwnerAuth } from '../../../../context/OwnerAuthContext';
 import SlideDrawer from '../../../../components/SlideDrawer';
 import { fmtDateTime } from '../../../../shared/utils/format';
+import { useAdminCanWrite } from './adminWrite';
 
 /**
  * Reviews pending product / supplier submissions made via the Purchase
@@ -82,6 +83,7 @@ function RejectModal({ open, onClose, onConfirm, target }) {
 }
 
 function Section({ title, icon: Icon, color, rows, onApprove, onReject, busyId }) {
+  const canWrite = useAdminCanWrite();
   return (
     <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
       <div className={`px-4 py-3 border-b border-gray-200 flex items-center justify-between ${color}`}>
@@ -132,21 +134,25 @@ function Section({ title, icon: Icon, color, rows, onApprove, onReject, busyId }
                 </div>
                 {r.approval_status === 'pending' && (
                   <div className="flex items-center gap-2 flex-shrink-0">
-                    <button
-                      onClick={() => onApprove(r)}
-                      disabled={isBusy}
-                      className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md hover:bg-emerald-100 disabled:opacity-50"
-                    >
-                      {isBusy ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
-                      Approve
-                    </button>
-                    <button
-                      onClick={() => onReject(r)}
-                      disabled={isBusy}
-                      className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-red-700 bg-red-50 border border-red-200 rounded-md hover:bg-red-100 disabled:opacity-50"
-                    >
-                      <XCircle size={12} /> Reject
-                    </button>
+                    {canWrite && (
+                      <button
+                        onClick={() => onApprove(r)}
+                        disabled={isBusy}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md hover:bg-emerald-100 disabled:opacity-50"
+                      >
+                        {isBusy ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
+                        Approve
+                      </button>
+                    )}
+                    {canWrite && (
+                      <button
+                        onClick={() => onReject(r)}
+                        disabled={isBusy}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-red-700 bg-red-50 border border-red-200 rounded-md hover:bg-red-100 disabled:opacity-50"
+                      >
+                        <XCircle size={12} /> Reject
+                      </button>
+                    )}
                   </div>
                 )}
               </div>

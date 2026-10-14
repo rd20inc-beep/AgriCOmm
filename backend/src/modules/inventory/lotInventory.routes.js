@@ -3,7 +3,7 @@ const router = express.Router();
 const db = require('../../config/database');
 const controller = require('./lotInventory.controller');
 const inventoryService = require('./inventory.service');
-const { authorize, authorizeRole } = require('../../middleware/rbac');
+const { authorize } = require('../../middleware/rbac');
 const auditAction = require('../../middleware/audit');
 const validate = require('../../middleware/validate');
 const ownerApproval = require('../../middleware/ownerApproval');
@@ -266,10 +266,11 @@ router.post('/adjustments', authorize('inventory', 'create'),
 
 // Write-offs and stock adjustments are approved by the Owner only (owner
 // decision 2026-10-05) — inventory.edit is held by Mill Operator, so it cannot
-// be the gate. authorizeRole has no bypass, so Super Admin is listed too.
-const WRITE_OFF_APPROVERS = ['Owner', 'Super Admin'];
+// be the gate. The gate is inventory.approve_write_off, held by Owner and
+// Super Admin only (mig 339) — the same people the old role list admitted.
+const canApproveWriteOff = authorize('inventory', 'approve_write_off');
 
-router.put('/adjustments/:id/approve', authorizeRole(...WRITE_OFF_APPROVERS),
+router.put('/adjustments/:id/approve', canApproveWriteOff,
   auditAction('approve_stock_adjustment', 'stock_adjustment', (req) => req.params.id),
   async (req, res) => {
     try {
@@ -284,7 +285,7 @@ router.put('/adjustments/:id/approve', authorizeRole(...WRITE_OFF_APPROVERS),
   }
 );
 
-router.put('/adjustments/:id/reject', authorizeRole(...WRITE_OFF_APPROVERS),
+router.put('/adjustments/:id/reject', canApproveWriteOff,
   auditAction('reject_stock_adjustment', 'stock_adjustment', (req) => req.params.id),
   async (req, res) => {
     try {
