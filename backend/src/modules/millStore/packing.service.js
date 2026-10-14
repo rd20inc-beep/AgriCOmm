@@ -4,6 +4,7 @@ const { postProcessingDelta } = require('../milling/millingCompletionJournal');
 const inventoryService = require('../inventory/inventory.service');
 const { NotFoundError, ValidationError, ConflictError, ForbiddenError } = require('../../shared/errors');
 const { isKattaItem } = require('../../shared/packagingTypes');
+const { ledgerFailure, missingAccounts } = require('../../shared/ledgerFailure');
 const {
   LOCKED_STATUSES, isBatchCompleted, canEditBatchPacking, assertCanEditBatchPacking,
 } = require('../milling/packingGate');
@@ -256,31 +257,32 @@ const packingService = {
 
       // GL: recognise the full packing cost (bag + master + polythene) — DR 6000
       // Operating Expenses / CR 1250 Bags & Packaging (same treatment as store
-      // consumption). Best-effort.
+      // consumption). Part of the packing run (P2-02): this used to be
+      // best-effort, so a failed journal left the bags drawn from the store and
+      // still sitting in 1250. Now the run rolls back and the user sees why.
       if (grandTotal > 0) {
+        const opEx = await trx('chart_of_accounts').where({ code: '6000' }).first();
+        const storeInv = await trx('chart_of_accounts').where({ code: '1250' }).first();
+        if (!opEx || !storeInv) throw missingAccounts(['6000', '1250'], 'The packing run');
         try {
-          const opEx = await trx('chart_of_accounts').where({ code: '6000' }).first();
-          const storeInv = await trx('chart_of_accounts').where({ code: '1250' }).first();
-          if (opEx && storeInv) {
-            const journal = await accountingService.createJournal(trx, {
-              date: new Date().toISOString().slice(0, 10),
-              entity: 'mill',
-              refType: 'Mill Packing',
-              refNo: batch.batch_no || `BATCH-${batchId}`,
-              description: `Packing (${breakdown}) for batch ${batch.batch_no || batchId} — Rs ${Math.round(grandTotal).toLocaleString('en-PK')}`,
-              currency: 'PKR',
-              fxRate: 1,
-              isAuto: true,
-              userId,
-              lines: [
-                { account_id: opEx.id, account: opEx.name, debit: grandTotal, credit: 0, narration: `DR 6000 Operating Expenses — ${batch.batch_no || batchId} packing` },
-                { account_id: storeInv.id, account: storeInv.name, debit: 0, credit: grandTotal, narration: `CR 1250 Bags & Packaging — ${breakdown}` },
-              ],
-            });
-            if (journal?.id) await accountingService.postJournal(trx, journal.id);
-          }
+          const journal = await accountingService.createJournal(trx, {
+            date: new Date().toISOString().slice(0, 10),
+            entity: 'mill',
+            refType: 'Mill Packing',
+            refNo: batch.batch_no || `BATCH-${batchId}`,
+            description: `Packing (${breakdown}) for batch ${batch.batch_no || batchId} — Rs ${Math.round(grandTotal).toLocaleString('en-PK')}`,
+            currency: 'PKR',
+            fxRate: 1,
+            isAuto: true,
+            userId,
+            lines: [
+              { account_id: opEx.id, account: opEx.name, debit: grandTotal, credit: 0, narration: `DR 6000 Operating Expenses — ${batch.batch_no || batchId} packing` },
+              { account_id: storeInv.id, account: storeInv.name, debit: 0, credit: grandTotal, narration: `CR 1250 Bags & Packaging — ${breakdown}` },
+            ],
+          });
+          if (journal?.id) await accountingService.postJournal(trx, journal.id);
         } catch (jeErr) {
-          console.error('Packing journal post failed (packing still recorded):', jeErr.message);
+          throw ledgerFailure(jeErr, 'The packing run');
         }
       }
 
@@ -301,9 +303,12 @@ const packingService = {
         });
         // Re-cost the batch's outputs so the finished cost/kg includes the bags
         // (no-op if the batch hasn't yielded yet).
+        // Not swallowed: the cost sheet above already carries the bags, so a
+        // failed re-cost would leave the lots at the old cost/kg — and a
+        // database error here aborts the transaction, which COMMIT would then
+        // silently roll back while the user was told it worked.
         if ((Number(batch.actual_finished_kg) || 0) > 0) {
-          try { await inventoryService.recomputeBatchOutputsAfterPriceChange(trx, batchId, { userId }); }
-          catch (e) { console.error('Packing cost reallocation failed:', e.message); }
+          await inventoryService.recomputeBatchOutputsAfterPriceChange(trx, batchId, { userId });
         }
       }
 
@@ -328,8 +333,12 @@ const packingService = {
       // recorded either way.
       // Katta this run named but the store does not hold is flagged like any
       // other packing shortage.
+      // It runs in a SAVEPOINT: a failure undoes only the reconcile's own
+      // writes. Without one, a database error inside it aborted the whole
+      // transaction and COMMIT silently discarded the packing run too.
       if ((Number(batch.actual_finished_kg) || 0) > 0) {
-        try { const katta = await inventoryService.reconcileBatchKatta(trx, batchId, userId);
+        try {
+          const katta = await trx.transaction((sp) => inventoryService.reconcileBatchKatta(sp, batchId, userId));
           for (const s of (katta && katta.shortages) || []) {
             shortages.push({ item: s.item, unit: 'pcs', needed: s.needed, available: s.available, short: s.short });
           }

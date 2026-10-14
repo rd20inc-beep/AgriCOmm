@@ -5,6 +5,7 @@ const { normalizePaymentMethod } = require('../../shared/constants/paymentMethod
 const { pendingChequeTotal, round2 } = require('../finance/paymentSettlement');
 const { recordMoneyMovement } = require('../finance/paymentEngine');
 const { postProcessingDelta } = require('../milling/millingCompletionJournal');
+const { ledgerFailure } = require('../../shared/ledgerFailure');
 
 const CATEGORY_MAP = {
   general: [
@@ -213,8 +214,12 @@ const expensesService = {
 
       // ─── Auto-post journal entry ───
       // expense_recorded rule: DR Operating Expenses, CR Supplier Payable.
-      // Wrapped in try/catch so accounting failures never block the
-      // user-facing expense save (matches the pattern in other flows).
+      // The expense and its journal are one event (P2-02): a journal that
+      // cannot be posted (no rule, closed period, missing account) used to be
+      // logged and swallowed, so the expense and its payable committed with
+      // nothing in the GL — or, on a database error, the whole transaction
+      // silently rolled back at COMMIT. It now rolls the expense back and the
+      // user is told why.
       try {
         await accountingService.autoPost(trx, {
           triggerEvent: 'expense_recorded',
@@ -231,7 +236,7 @@ const expensesService = {
           creditAccountId: salaryCreditAccountId,
         });
       } catch (e) {
-        console.warn('Expense journal post failed:', e.message);
+        throw ledgerFailure(e, 'The expense');
       }
 
       // A mill expense booked against a batch whose completion is already on

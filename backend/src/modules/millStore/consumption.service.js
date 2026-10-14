@@ -2,6 +2,7 @@ const db = require('../../config/database');
 const accountingService = require('../accounting/accounting.service');
 const { postProcessingDelta } = require('../milling/millingCompletionJournal');
 const { NotFoundError, ValidationError } = require('../../shared/errors');
+const { ledgerFailure, missingAccounts } = require('../../shared/ledgerFailure');
 
 const CATEGORY_MAP = {
   packaging: 'packaging',
@@ -226,35 +227,34 @@ const consumptionService = {
       // recognizes the cost on the P&L:
       //   DR 6000 Operating Expenses
       //   CR 1250 Bags & Packaging
-      // Wrapped in try/catch so a missing chart-of-accounts seed never
-      // blocks the consumption itself.
+      // The stock issue and its journal are one event (P2-02). A missing
+      // account or a journal that cannot be posted used to be logged and
+      // swallowed — the store stock left while 1250 kept it. Now the whole
+      // consumption rolls back and the user is told why.
       const totalConsumed = Object.values(costByCategory).reduce((s, v) => s + v, 0);
       if (totalConsumed > 0) {
+        const opEx     = await trx('chart_of_accounts').where({ code: '6000' }).first();
+        const storeInv = await trx('chart_of_accounts').where({ code: '1250' }).first();
+        if (!opEx || !storeInv) throw missingAccounts(['6000', '1250'], 'The consumption');
         try {
-          const opEx     = await trx('chart_of_accounts').where({ code: '6000' }).first();
-          const storeInv = await trx('chart_of_accounts').where({ code: '1250' }).first();
-          if (opEx && storeInv) {
-            const journal = await accountingService.createJournal(trx, {
-              date: new Date().toISOString().slice(0, 10),
-              entity: 'mill',
-              refType: 'Mill Store Consumption',
-              refNo: batch.batch_no || `BATCH-${batchId}`,
-              description: `Mill store consumption for batch ${batch.batch_no || batchId} — ${logs.length} item${logs.length === 1 ? '' : 's'}, Rs ${Math.round(totalConsumed).toLocaleString('en-PK')}`,
-              currency: 'PKR',
-              fxRate: 1,
-              isAuto: true,
-              userId,
-              lines: [
-                { account_id: opEx.id,     account: opEx.name,     debit: totalConsumed, credit: 0,             narration: `DR 6000 Operating Expenses — ${batch.batch_no || batchId} consumption` },
-                { account_id: storeInv.id, account: storeInv.name, debit: 0,             credit: totalConsumed, narration: `CR 1250 Bags & Packaging — stock issued to ${batch.batch_no || batchId}` },
-              ],
-            });
-            if (journal?.id) await accountingService.postJournal(trx, journal.id);
-          } else {
-            console.warn(`Consumption: chart_of_accounts missing 6000/1250 — journal skipped for batch ${batchId}`);
-          }
+          const journal = await accountingService.createJournal(trx, {
+            date: new Date().toISOString().slice(0, 10),
+            entity: 'mill',
+            refType: 'Mill Store Consumption',
+            refNo: batch.batch_no || `BATCH-${batchId}`,
+            description: `Mill store consumption for batch ${batch.batch_no || batchId} — ${logs.length} item${logs.length === 1 ? '' : 's'}, Rs ${Math.round(totalConsumed).toLocaleString('en-PK')}`,
+            currency: 'PKR',
+            fxRate: 1,
+            isAuto: true,
+            userId,
+            lines: [
+              { account_id: opEx.id,     account: opEx.name,     debit: totalConsumed, credit: 0,             narration: `DR 6000 Operating Expenses — ${batch.batch_no || batchId} consumption` },
+              { account_id: storeInv.id, account: storeInv.name, debit: 0,             credit: totalConsumed, narration: `CR 1250 Bags & Packaging — stock issued to ${batch.batch_no || batchId}` },
+            ],
+          });
+          if (journal?.id) await accountingService.postJournal(trx, journal.id);
         } catch (jeErr) {
-          console.error('Consumption journal post failed (consumption still recorded):', jeErr.message);
+          throw ledgerFailure(jeErr, 'The consumption');
         }
       }
 
