@@ -5,6 +5,12 @@ const { normalizePaymentMethod } = require('../../shared/constants/paymentMethod
 const { pendingChequeTotal, round2 } = require('../finance/paymentSettlement');
 const { recordMoneyMovement } = require('../finance/paymentEngine');
 const { postProcessingDelta } = require('../milling/millingCompletionJournal');
+const { ledgerFailure, missingAccounts } = require('../../shared/ledgerFailure');
+
+const toYmd = (d) => (d instanceof Date ? d.toISOString().slice(0, 10) : String(d).slice(0, 10));
+
+// The business_expenses category of a salary-advance payout (D-11).
+const STAFF_ADVANCE_CATEGORY = 'staff_advance';
 
 const CATEGORY_MAP = {
   general: [
@@ -40,7 +46,11 @@ async function generateExpenseNo(trx) {
 const expensesService = {
   // `millOnly` (a mill route's caller without finance.confirm_payment): a
   // pay-now may only draw on one of the mill's own accounts (paymentEngine).
-  async create(data, userId, existingTrx = null, { millOnly = false } = {}) {
+  //
+  // `strictLedger` (payroll callers): the expense journal is part of the event —
+  // a posting failure rolls the whole expense back instead of being logged and
+  // skipped (shared/ledgerFailure.js).
+  async create(data, userId, existingTrx = null, { millOnly = false, strictLedger = false } = {}) {
     const {
       expense_type, category, subcategory, amount, currency, fx_rate,
       supplier_id, vendor_name, expense_date, due_date, invoice_reference,
@@ -77,6 +87,20 @@ const expensesService = {
         ]);
         if (salDr) salaryDebitAccountId = salDr.id;
         if (salCr) salaryCreditAccountId = salCr.id;
+      }
+      // A salary advance is an ASSET recovered from salary, not a cost (owner
+      // decision D-11): DR 1330 Staff Advances / CR 2040, and the payment clears
+      // 2040 against cash — so the payout nets to Dr 1330 / Cr Cash & Bank. Each
+      // recovery from salary later moves it to cost (Dr 6135 / Cr 1330). No
+      // fallback: without 1330 the advance must not be booked as an expense.
+      if (category === STAFF_ADVANCE_CATEGORY) {
+        const [advDr, salCr] = await Promise.all([
+          trx('chart_of_accounts').where('code', '1330').first(),
+          trx('chart_of_accounts').where('code', '2040').first(),
+        ]);
+        if (!advDr || !salCr) throw missingAccounts(['1330', '2040'], 'The salary advance');
+        salaryDebitAccountId = advDr.id;
+        salaryCreditAccountId = salCr.id;
       }
 
       const [expense] = await trx('business_expenses').insert({
@@ -203,7 +227,7 @@ const expensesService = {
           checkOutstanding: false,
           millOnly,
           bt: {
-            source: category === 'salaries' ? 'salaries' : 'expense',
+            source: (category === 'salaries' || category === STAFF_ADVANCE_CATEGORY) ? 'salaries' : 'expense',
             category: category || 'expense',
             counterparty: vendorLabel,
             notes: `Payment for ${expenseNo}`,
@@ -216,7 +240,7 @@ const expensesService = {
       // Wrapped in try/catch so accounting failures never block the
       // user-facing expense save (matches the pattern in other flows).
       try {
-        await accountingService.autoPost(trx, {
+        const journal = await accountingService.autoPost(trx, {
           triggerEvent: 'expense_recorded',
           entity: expense_type === 'mill' ? 'mill' : expense_type === 'export' ? 'export' : 'general',
           amount: amountPkr,
@@ -229,8 +253,13 @@ const expensesService = {
           partyId: supplier_id || null,
           debitAccountId: salaryDebitAccountId,
           creditAccountId: salaryCreditAccountId,
+          // A strict (payroll) expense is journalled on its own date, the
+          // same day its payment posts — not on the day it was keyed in.
+          date: strictLedger ? toYmd(expense_date) : null,
         });
+        if (strictLedger && !journal) throw new Error('no active expense_recorded posting rule');
       } catch (e) {
+        if (strictLedger) throw ledgerFailure(e, `Expense ${expenseNo}`);
         console.warn('Expense journal post failed:', e.message);
       }
 

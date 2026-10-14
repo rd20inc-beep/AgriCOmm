@@ -357,8 +357,9 @@ async function postPaymentJournal(trx, { payment, userId, date, description, ove
         what = src.expense_no || src.lot_no || src.purchase_no || src.pbo_no || `${payment.source_table} #${payment.source_id}`;
         if (payment.source_table === 'business_expenses') {
           // The account the accrual credited (expenses.service create):
-          // salaries → 2040 Salaries Payable, everything else → 2010.
-          if (src.category === 'salaries') counterCode = '2040';
+          // salaries and salary advances (staff_advance, D-11) → 2040
+          // Salaries Payable, everything else → 2010.
+          if (src.category === 'salaries' || src.category === 'staff_advance') counterCode = '2040';
           entity = expenseEntity(src.expense_type);
         } else if (['export_order_costs', 'printed_bag_orders'].includes(payment.source_table)) {
           entity = 'export';
