@@ -9,8 +9,9 @@ const { apiLimiter } = require('./middleware/rateLimiter');
 function createApp() {
   const app = express();
 
-  // Trust proxy (Nginx reverse proxy sets X-Forwarded-For)
-  app.set('trust proxy', 1);
+  // Trust proxy (Nginx reverse proxy sets X-Forwarded-For). Hop count is
+  // configurable (TRUST_PROXY) — see config/index.js.
+  app.set('trust proxy', config.trustProxy);
 
   // Security headers
   app.use(helmet());

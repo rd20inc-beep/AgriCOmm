@@ -275,7 +275,11 @@ async function getScopedWarehouseIds(user) {
     user._warehouseScopeLoaded = true;
     return ids;
   } catch (e) {
-    return null; // fail-open: never hide data on an infra error
+    // Fail CLOSED: an infra error must never widen access. An empty scope
+    // matches no warehouse (see utils/warehouseScope); the user sees an empty
+    // list for this request instead of every warehouse's data.
+    console.error('getScopedWarehouseIds: scope lookup failed:', e.message);
+    return [];
   }
 }
 

@@ -27,9 +27,19 @@ const stream = {
   },
 };
 
+// Log the PATH only — never the query string. Query strings can carry
+// credentials (stream tickets, legacy ?token=, reset tokens) and search terms.
+function pathOnly(url) {
+  const s = String(url || '');
+  const i = s.indexOf('?');
+  return i === -1 ? s : s.slice(0, i);
+}
+morgan.token('path', (req) => pathOnly(req.originalUrl || req.url));
+
 const requestLogger = morgan(
-  ':method :url :status :response-time ms',
+  ':method :path :status :response-time ms',
   { stream }
 );
 
 module.exports = requestLogger;
+module.exports.pathOnly = pathOnly;

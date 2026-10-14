@@ -9,7 +9,7 @@
  * Semantics (kept identical to the module allow-list):
  *   - no warehouse scope rows      → unrestricted (returns null)
  *   - Super Admin / Owner          → never scoped (returns null)
- *   - an infra error while loading → fail-open (returns null)
+ *   - an infra error while loading → fail-closed (returns [] = no warehouse)
  *
  * IMPORTANT: scoping is for READ paths only (lists, detail, reports, pickers).
  * The movement/milling/dispatch engines must never be scoped — filtering a

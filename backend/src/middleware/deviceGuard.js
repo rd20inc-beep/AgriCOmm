@@ -4,8 +4,13 @@
 // 403 `device_revoked`. Reads are not blocked here (the sync /pull path already
 // checks the device, and blocking every GET would add a DB hit per read).
 //
-// Fail-open on any lookup error or malformed/absent id — never block legitimate
-// work because the guard itself hiccuped.
+// An absent/malformed id or an unregistered device passes (normal online use).
+// A failed LOOKUP fails closed with 503 — the write is refused (clients retry /
+// keep it queued) rather than let a revoked device through during an outage.
+//
+// Revoking a device also bumps its user's token_version (sync.controller), so the
+// tokens it holds stop working for reads too, not only for writes that volunteer
+// this header.
 const db = require('../config/database');
 
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
@@ -28,7 +33,12 @@ module.exports = async function deviceGuard(req, res, next) {
       db('devices').where({ id: dev.id }).update({ last_seen_at: db.fn.now() }).catch(() => {});
     }
   } catch (err) {
-    console.error('deviceGuard error:', err.message); // fail-open
+    console.error('deviceGuard error:', err.message);
+    return res.status(503).json({
+      success: false,
+      code: 'auth_unavailable',
+      message: 'Service temporarily unavailable. Please try again shortly.',
+    });
   }
   return next();
 };
