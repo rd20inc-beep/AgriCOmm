@@ -242,6 +242,7 @@ COL business_expenses.payment_reference:character varying:NULL
 COL business_expenses.payment_status:character varying:NOT NULL
 COL business_expenses.record_version:integer:NOT NULL
 COL business_expenses.recurrence:character varying:NULL
+COL business_expenses.recurrence_end_date:date:NULL
 COL business_expenses.server_ts:timestamp with time zone:NULL
 COL business_expenses.subcategory:character varying:NULL
 COL business_expenses.supplier_id:integer:NULL
@@ -1423,8 +1424,12 @@ COL mill_final_settlements.net_amount:numeric:NOT NULL
 COL mill_final_settlements.notes:text:NULL
 COL mill_final_settlements.other_deductions:numeric:NOT NULL
 COL mill_final_settlements.pay_method:character varying:NOT NULL
+COL mill_final_settlements.reversal_reason:text:NULL
+COL mill_final_settlements.reversed_at:timestamp with time zone:NULL
+COL mill_final_settlements.reversed_by:integer:NULL
 COL mill_final_settlements.service_years:numeric:NULL
 COL mill_final_settlements.settlement_date:date:NOT NULL
+COL mill_final_settlements.status:character varying:NOT NULL
 COL mill_final_settlements.updated_at:timestamp with time zone:NOT NULL
 COL mill_final_settlements.worker_id:integer:NOT NULL
 COL mill_items.avg_cost_per_unit:numeric:NULL
@@ -1495,10 +1500,13 @@ COL mill_packing_logs.tare_kg_per_bag:numeric:NOT NULL
 COL mill_packing_logs.tare_weight_kg:numeric:NOT NULL
 COL mill_packing_logs.total_cost:numeric:NULL
 COL mill_packing_logs.warehouse_id:integer:NULL
+COL mill_payroll_lines.active:boolean:NOT NULL
 COL mill_payroll_lines.advance_deducted:numeric:NOT NULL
 COL mill_payroll_lines.basic_pay:numeric:NOT NULL
 COL mill_payroll_lines.bonus_total:numeric:NOT NULL
 COL mill_payroll_lines.created_at:timestamp with time zone:NOT NULL
+COL mill_payroll_lines.daily_rate:numeric:NULL
+COL mill_payroll_lines.daily_rate_rule:character varying:NULL
 COL mill_payroll_lines.days_in_month:integer:NULL
 COL mill_payroll_lines.deduction_total:numeric:NOT NULL
 COL mill_payroll_lines.department:character varying:NULL
@@ -1514,8 +1522,11 @@ COL mill_payroll_lines.ot_pay:numeric:NOT NULL
 COL mill_payroll_lines.paid_at:timestamp with time zone:NULL
 COL mill_payroll_lines.paid_by:integer:NULL
 COL mill_payroll_lines.pay_type:character varying:NULL
+COL mill_payroll_lines.period:character varying:NOT NULL
 COL mill_payroll_lines.role:character varying:NULL
 COL mill_payroll_lines.run_id:integer:NOT NULL
+COL mill_payroll_lines.short_pay_amount:numeric:NOT NULL
+COL mill_payroll_lines.short_pay_carried_in:numeric:NOT NULL
 COL mill_payroll_lines.skip_reason:text:NULL
 COL mill_payroll_lines.statutory_json:jsonb:NULL
 COL mill_payroll_lines.statutory_total:numeric:NOT NULL
@@ -1545,6 +1556,7 @@ COL mill_payroll_runs.period:character varying:NOT NULL
 COL mill_payroll_runs.reversal_reason:text:NULL
 COL mill_payroll_runs.reversed_at:timestamp with time zone:NULL
 COL mill_payroll_runs.reversed_by:integer:NULL
+COL mill_payroll_runs.self_approved:boolean:NOT NULL
 COL mill_payroll_runs.status:character varying:NOT NULL
 COL mill_payroll_runs.updated_at:timestamp with time zone:NOT NULL
 COL mill_payroll_runs.void_reason:text:NULL
@@ -1708,6 +1720,7 @@ COL mill_worker_advances.approval_status:character varying:NOT NULL
 COL mill_worker_advances.approved_at:timestamp with time zone:NULL
 COL mill_worker_advances.approved_by:integer:NULL
 COL mill_worker_advances.auto_deduct:boolean:NOT NULL
+COL mill_worker_advances.bank_account_id:integer:NULL
 COL mill_worker_advances.created_at:timestamp with time zone:NOT NULL
 COL mill_worker_advances.created_by:integer:NULL
 COL mill_worker_advances.deduction_percent:numeric:NULL
@@ -1716,12 +1729,19 @@ COL mill_worker_advances.id:integer:NOT NULL
 COL mill_worker_advances.installment_amount:numeric:NULL
 COL mill_worker_advances.installment_count:integer:NULL
 COL mill_worker_advances.notes:text:NULL
+COL mill_worker_advances.paid_at:date:NULL
+COL mill_worker_advances.paid_by:integer:NULL
+COL mill_worker_advances.pay_method:character varying:NULL
+COL mill_worker_advances.payout_gl:character varying:NOT NULL
 COL mill_worker_advances.recovered_amount:numeric:NOT NULL
 COL mill_worker_advances.recovery_method:character varying:NOT NULL
 COL mill_worker_advances.recovery_start_period:character varying:NULL
 COL mill_worker_advances.reject_reason:text:NULL
 COL mill_worker_advances.status:character varying:NOT NULL
 COL mill_worker_advances.updated_at:timestamp with time zone:NOT NULL
+COL mill_worker_advances.void_reason:text:NULL
+COL mill_worker_advances.voided_at:timestamp with time zone:NULL
+COL mill_worker_advances.voided_by:integer:NULL
 COL mill_worker_advances.worker_id:integer:NOT NULL
 COL mill_worker_requests.created_at:timestamp with time zone:NOT NULL
 COL mill_worker_requests.from_date:date:NULL
@@ -2426,8 +2446,10 @@ COL scheduled_reports.updated_at:timestamp with time zone:NOT NULL
 COL scheduled_tasks.config:jsonb:NULL
 COL scheduled_tasks.created_at:timestamp with time zone:NOT NULL
 COL scheduled_tasks.cron_expression:character varying:NULL
+COL scheduled_tasks.failure_count:integer:NOT NULL
 COL scheduled_tasks.id:integer:NOT NULL
 COL scheduled_tasks.is_active:boolean:NOT NULL
+COL scheduled_tasks.last_error:text:NULL
 COL scheduled_tasks.last_run:timestamp with time zone:NULL
 COL scheduled_tasks.last_status:character varying:NULL
 COL scheduled_tasks.name:character varying:NOT NULL
@@ -3328,9 +3350,11 @@ CON mill_expenses.mill_expenses_created_by_foreign(f)
 CON mill_expenses.mill_expenses_mill_id_foreign(f)
 CON mill_expenses.mill_expenses_pkey(p)
 CON mill_expenses.uq_mill_expenses_uuid(u)
+CON mill_final_settlements.chk_mill_final_settlements_status_valid(c)
 CON mill_final_settlements.mill_final_settlements_bank_account_id_fk(f)
 CON mill_final_settlements.mill_final_settlements_expense_id_fk(f)
 CON mill_final_settlements.mill_final_settlements_pkey(p)
+CON mill_final_settlements.mill_final_settlements_reversed_by_foreign(f)
 CON mill_final_settlements.mill_final_settlements_worker_id_foreign(f)
 CON mill_items.chk_mill_items_avg_cost_per_unit_nn(c)
 CON mill_items.chk_mill_items_last_purchase_cost_nn(c)
@@ -3429,9 +3453,13 @@ CON mill_worker_advance_recovery_schedule.mill_worker_advance_recovery_schedule_
 CON mill_worker_advance_recovery_schedule.mill_worker_advance_recovery_schedule_pkey(p)
 CON mill_worker_advance_recovery_schedule.mill_worker_advance_recovery_schedule_worker_id_foreign(f)
 CON mill_worker_advances.chk_mill_worker_advances_approval_status_valid(c)
+CON mill_worker_advances.chk_mill_worker_advances_payout_gl(c)
 CON mill_worker_advances.chk_mill_worker_advances_status_valid(c)
+CON mill_worker_advances.mill_worker_advances_bank_account_id_foreign(f)
 CON mill_worker_advances.mill_worker_advances_expense_id_foreign(f)
+CON mill_worker_advances.mill_worker_advances_paid_by_foreign(f)
 CON mill_worker_advances.mill_worker_advances_pkey(p)
+CON mill_worker_advances.mill_worker_advances_voided_by_foreign(f)
 CON mill_worker_advances.mill_worker_advances_worker_id_foreign(f)
 CON mill_worker_requests.chk_mill_worker_requests_status_valid(c)
 CON mill_worker_requests.mill_worker_requests_pkey(p)
