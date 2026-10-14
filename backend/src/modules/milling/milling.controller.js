@@ -267,7 +267,8 @@ const millingController = {
 
       // Billing status per batch from its invoice (A2). No invoice → Not Invoiced.
       const invRows = ids.length
-        ? await db('service_milling_invoices').whereIn('service_batch_id', ids).select('service_batch_id', 'id', 'invoice_no', 'total_amount', 'payment_status')
+        // A voided invoice (P2-16) is kept for audit but bills nothing.
+        ? await db('service_milling_invoices').whereIn('service_batch_id', ids).where('status', 'Active').select('service_batch_id', 'id', 'invoice_no', 'total_amount', 'payment_status')
         : [];
       const invByBatch = {};
       for (const inv of invRows) invByBatch[inv.service_batch_id] = inv;

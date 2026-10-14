@@ -135,10 +135,9 @@ async function postRicePurchaseDelta(trx, { batchNo, supplierId, delta, refType 
     const e = new Error('No active purchase_invoice posting rule — cannot adjust the rice purchase.');
     e.status = 500; throw e;
   }
-  const [stockAcc, apAcc] = await Promise.all([
-    trx('chart_of_accounts').where({ id: rule.debit_account_id }).first(),
-    trx('chart_of_accounts').where({ id: rule.credit_account_id }).first(),
-  ]);
+  // Sequential: one transaction is one connection.
+  const stockAcc = await trx('chart_of_accounts').where({ id: rule.debit_account_id }).first();
+  const apAcc = await trx('chart_of_accounts').where({ id: rule.credit_account_id }).first();
   const amt = Math.abs(d);
   const up = d > 0;
   const label = (a) => (a ? `${a.code} ${a.name}` : '');
