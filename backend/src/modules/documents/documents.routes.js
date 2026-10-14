@@ -22,6 +22,7 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage,
   limits: { fileSize: 50 * 1024 * 1024 }, // 50MB max
+  fileFilter: require('../../middleware/uploadFilter').uploadFileFilter('documents'), // no HTML/SVG/scripts
 });
 
 // One upload action = one version. `files` carries several (a multi-page scan

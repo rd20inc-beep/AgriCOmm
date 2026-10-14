@@ -31,6 +31,7 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage,
   limits: { fileSize: 25 * 1024 * 1024 }, // 25MB max for mobile uploads
+  fileFilter: require('../../middleware/uploadFilter').uploadFileFilter('documents'), // no HTML/SVG/scripts
 });
 
 // ═══════════════════════════════════════════════════════════════════════════

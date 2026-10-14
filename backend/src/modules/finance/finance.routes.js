@@ -28,7 +28,8 @@ const payAttachStorage = multer.diskStorage({
     cb(null, unique + path.extname(file.originalname));
   },
 });
-const payAttachUpload = multer({ storage: payAttachStorage, limits: { fileSize: 25 * 1024 * 1024 } });
+const { uploadFileFilter, setSafeFileHeaders } = require('../../middleware/uploadFilter');
+const payAttachUpload = multer({ storage: payAttachStorage, limits: { fileSize: 25 * 1024 * 1024 }, fileFilter: uploadFileFilter('documents') });
 
 // Contra-transfer supporting documents (bank advice, deposit slip) — same
 // pattern as payment attachments, own folder uploads/contra.
@@ -42,6 +43,7 @@ const contraAttachUpload = multer({
     filename: (req, file, cb) => cb(null, `${Date.now()}-${Math.round(Math.random() * 1e6)}${path.extname(file.originalname)}`),
   }),
   limits: { fileSize: 25 * 1024 * 1024 },
+  fileFilter: uploadFileFilter('documents'),
 });
 
 // Error → response for the transfer routes. A 409 carrying the transfer that
@@ -92,6 +94,7 @@ router.get('/fund-transfers/attachment/:file', authorize('finance', 'view'), (re
   if (!full.startsWith(CONTRA_UPLOAD_DIR) || !fs.existsSync(full)) {
     return res.status(404).json({ success: false, message: 'Attachment not found.' });
   }
+  setSafeFileHeaders(res, safe);
   return res.sendFile(full);
 });
 // Edit = reverse the original + create the corrected transfer, atomically.
@@ -257,6 +260,7 @@ router.get('/payments/attachment/:file', authorize('finance', 'view'), (req, res
   if (!full.startsWith(PAY_UPLOAD_DIR) || !fs.existsSync(full)) {
     return res.status(404).json({ success: false, message: 'Attachment not found.' });
   }
+  setSafeFileHeaders(res, safe);
   return res.sendFile(full);
 });
 router.get('/payments', authorize('finance', 'view'), controller.listPayments);
