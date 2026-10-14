@@ -113,23 +113,17 @@ const expensesService = {
       }).returning('*');
 
       // ─── Link to batch costs if mill ───
+      // Its OWN cost row, stamped with the expense (P2-21). It used to be
+      // merged into the batch's row for the category, which the payables feed
+      // then re-derived as a second bill (MC-…) next to this expense's own
+      // payable — paying one left the other outstanding. A stamped row counts
+      // in the batch costing but is never a bill: the expense's payable is.
       if (batch_id && expense_type === 'mill') {
-        const costCat = category || 'miscellaneous';
-        const existing = await trx('milling_costs')
-          .where({ batch_id, category: costCat })
-          .first();
-        if (existing) {
-          await trx('milling_costs').where('id', existing.id).update({
-            amount: trx.raw('amount + ?', [amountPkr]),
-            notes: `Updated via business expense ${expenseNo}`,
-            updated_at: trx.fn.now(),
-          });
-        } else {
-          await trx('milling_costs').insert({
-            batch_id, category: costCat, amount: amountPkr,
-            currency: 'PKR', notes: `From business expense ${expenseNo}`,
-          });
-        }
+        await trx('milling_costs').insert({
+          batch_id, category: category || 'miscellaneous', amount: amountPkr,
+          currency: 'PKR', notes: `From business expense ${expenseNo}`,
+          business_expense_id: expense.id, created_by: userId || null,
+        });
       }
 
       // ─── Link to order costs if export ───
@@ -139,6 +133,8 @@ const expensesService = {
         // applied at write or read time. Whatever the user entered in
         // PKR goes straight in. (Foreign-currency expenses get
         // converted to PKR via amount_pkr at the top of this method.)
+        // Stamped with the expense (P2-21): it is paid through the expense's
+        // payable, never as an export-cost bill of its own.
         await trx('export_order_costs').insert({
           order_id,
           category: category || 'miscellaneous',
@@ -147,6 +143,8 @@ const expensesService = {
           fx_rate: 1,
           base_amount_pkr: amountPkr,
           notes: `From business expense ${expenseNo}`,
+          business_expense_id: expense.id,
+          created_by: userId || null,
         });
       }
 

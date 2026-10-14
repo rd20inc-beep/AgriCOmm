@@ -2188,8 +2188,10 @@ const exportOrderController = {
         : (notes || null);
 
       const cost = await db.transaction(async (trx) => {
+        // Never onto a row a business expense owns (P2-21).
         const existing = await trx('export_order_costs')
           .where({ order_id: id, category })
+          .whereNull('business_expense_id')
           .first();
 
         let row;

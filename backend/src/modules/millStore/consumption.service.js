@@ -188,8 +188,10 @@ const consumptionService = {
 
       // Upsert milling_costs — one row per category
       for (const [category, amount] of Object.entries(costByCategory)) {
+        // Never merged into a business expense's own row (P2-21).
         const existing = await trx('milling_costs')
           .where({ batch_id: batchId, category })
+          .whereNull('business_expense_id')
           .first();
 
         if (existing) {

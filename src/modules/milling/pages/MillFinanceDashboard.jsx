@@ -36,7 +36,7 @@ import SlideDrawer from '../../../components/SlideDrawer';
 import SearchSelect from '../../../shared/components/SearchSelect';
 import MillSupplierStatement from '../components/MillSupplierStatement';
 import MillSupplierPayDrawer from '../components/MillSupplierPayDrawer';
-import { UNASSIGNED, isStoredPayable } from '../utils/payableBuckets';
+import { UNASSIGNED, isStoredPayable, isSupplierDebt } from '../utils/payableBuckets';
 import { buildCustomerRows } from '../utils/customerDirectory';
 import MillCustomerStatement from '../components/MillCustomerStatement';
 import MillCustomerPayDrawer from '../components/MillCustomerPayDrawer';
@@ -641,7 +641,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
       // is the allocation of bags already bought — the money owed for them sits
       // on the store purchase, under that vendor. Offering to "pay" the
       // allocation as well would pay for the same bags twice.
-      if (!key) continue;
+      if (!key || !isSupplierDebt(p)) continue;
       if (!map[key]) {
         map[key] = {
           id: name ? (p.supplierId || null) : UNASSIGNED,
