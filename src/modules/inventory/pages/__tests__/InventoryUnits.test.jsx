@@ -8,7 +8,8 @@ import { MemoryRouter } from 'react-router-dom';
  * the unit toggle said; it now follows the toggle, which defaults to KG.
  * Add Purchase (Rs/kg rates) shows its stock figures in kg too.
  */
-vi.mock('../../../../hooks/useCanSeeCost', () => ({ default: () => false }));
+const costView = vi.hoisted(() => ({ canSee: false }));
+vi.mock('../../../../hooks/useCanSeeCost', () => ({ default: () => costView.canSee }));
 vi.mock('../../../../api/queries', () => ({
   useLotInventory: () => ({ data: [], isLoading: false, error: null, refetch: vi.fn() }),
   useStockReport: () => ({ data: { report: [
@@ -38,8 +39,17 @@ describe('Inventory headline units', () => {
 describe('Add Purchase units', () => {
   it('shows current and new lot stock in kg alongside the Rs/kg rate', () => {
     const lot = { id: 1, lotNo: 'L-001', netWeightKg: 24350, landedCostTotal: 4200375, landedCostPerKg: 172.5 };
+    costView.canSee = true;
     const html = renderToStaticMarkup(<MemoryRouter><AddPurchaseModal isOpen lot={lot} onClose={() => {}} /></MemoryRouter>);
+    costView.canSee = false;
     expect(html).toContain('24,350 kg @ Rs 172.50/kg');
     expect(html).not.toMatch(/\d MT/);
+  });
+
+  // A purchase is priced — the server 403s it without reports.view_cost (P1-12).
+  it('renders nothing for a cost-blind viewer', () => {
+    const lot = { id: 1, lotNo: 'L-001', netWeightKg: 24350, landedCostTotal: 4200375, landedCostPerKg: 172.5 };
+    const html = renderToStaticMarkup(<MemoryRouter><AddPurchaseModal isOpen lot={lot} onClose={() => {}} /></MemoryRouter>);
+    expect(html).toBe('');
   });
 });
