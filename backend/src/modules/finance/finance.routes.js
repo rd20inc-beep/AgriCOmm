@@ -214,9 +214,11 @@ router.post(
   auditAction('record_payment', 'finance', (req, data) => data.data && data.data.id ? data.data.id : null),
   controller.recordPayment
 );
+// Reversal is its own permission (split from confirm_payment, mig 339 —
+// granted to every confirm_payment holder; the owner may revoke it per role).
 router.post(
   '/payments/:id/reverse',
-  authorize('finance', 'confirm_payment'),
+  authorize('finance', 'reverse_payment'),
   auditAction('reverse_payment', 'payment', (req) => req.params.id),
   controller.reversePayment
 );
@@ -387,7 +389,11 @@ router.get('/fx-rates', authorize('finance', 'view'), async (req, res) => {
   }
 });
 
-router.post('/fx-rates', authorize('finance', 'confirm_payment'), async (req, res) => {
+// Setting rates is finance.set_rates (split from confirm_payment, mig 339) and
+// every change is audit-logged.
+router.post('/fx-rates', authorize('finance', 'set_rates'),
+  auditAction('set_fx_rate', 'fx_rates', (req, data) => data?.data?.id || null),
+  async (req, res) => {
   try {
     const { currency_code, rate, effective_date, source_type, notes } = req.body;
     if (!currency_code || !rate || !effective_date) {
@@ -405,7 +411,9 @@ router.post('/fx-rates', authorize('finance', 'confirm_payment'), async (req, re
   }
 });
 
-router.post('/fx-rates/refresh', authorize('finance', 'confirm_payment'), async (req, res) => {
+router.post('/fx-rates/refresh', authorize('finance', 'set_rates'),
+  auditAction('refresh_fx_values', 'fx_rates', () => null),
+  async (req, res) => {
   try {
     const result = await fxRateService.refreshCurrentFxValues();
     return res.json({ success: true, data: result });
@@ -427,7 +435,9 @@ router.get('/commodity-rates', authorize('finance', 'view'), async (req, res) =>
   }
 });
 
-router.post('/commodity-rates', authorize('finance', 'confirm_payment'), async (req, res) => {
+router.post('/commodity-rates', authorize('finance', 'set_rates'),
+  auditAction('set_commodity_rate', 'commodity_rate_master', (req, data) => data?.data?.id || null),
+  async (req, res) => {
   try {
     const row = await commodityRateService.upsertRate({
       ...req.body, createdBy: req.user?.id,
@@ -459,7 +469,8 @@ router.post('/suspense/:id/resolve', authorize('finance', 'post_journal'),
 router.post('/suspense/:id/reverse', authorize('finance', 'post_journal'),
   auditAction('reverse_suspense', 'suspense_entries', (req) => req.params.id),
   wrapSuspense((req) => suspenseService.reverse(req.params.id, req.body?.reason, req.user?.id)));
-router.post('/suspense/:id/review', authorize('finance', 'view'),
+// Marking an entry Under Review is a write: confirm_payment, not view.
+router.post('/suspense/:id/review', authorize('finance', 'confirm_payment'),
   auditAction('review_suspense', 'suspense_entries', (req) => req.params.id),
   wrapSuspense((req) => suspenseService.setUnderReview(req.params.id, req.user?.id)));
 

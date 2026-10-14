@@ -1,6 +1,5 @@
 const express = require('express');
 const router = express.Router();
-const db = require('../../config/database');
 const controller = require('../../controllers/exportOrderController');
 const authorize = require('../../middleware/rbac');
 const auditAction = require('../../middleware/audit');
@@ -8,39 +7,18 @@ const validate = require('../../middleware/validate');
 const schemas = require('../../middleware/schemas');
 const ownerApproval = require('../../middleware/ownerApproval');
 
-/**
- * Authorize if user has ANY of the listed module.action permissions.
- * Used for payment confirmation which can be done by export or finance users.
- */
-function authorizeAny(...permPairs) {
-  return async (req, res, next) => {
-    if (!req.user) {
-      return res.status(401).json({ success: false, message: 'Not authenticated.' });
-    }
-    try {
-      // Super Admin bypass
-      const role = await db('roles').where({ id: req.user.role_id }).select('name').first();
-      if (role && role.name === 'Super Admin') return next();
+// Multi-permission gates use the shared rbac authorizeAny (Owner / Super Admin
+// bypass and user module scopes, like every other gate). It replaces a local
+// copy that only Super Admin bypassed.
+const { authorizeAny, userHasPermission } = require('../../middleware/rbac');
 
-      // Load permissions if not cached
-      if (!req.user._permissionsLoaded) {
-        const perms = await db('role_permissions as rp')
-          .join('permissions as p', 'rp.permission_id', 'p.id')
-          .where('rp.role_id', req.user.role_id)
-          .select('p.module', 'p.action');
-        req.user.permissions = new Set(perms.map((p) => `${p.module}.${p.action}`));
-        req.user._permissionsLoaded = true;
-      }
-
-      const allowed = permPairs.some(([mod, act]) => req.user.permissions.has(`${mod}.${act}`));
-      if (!allowed) {
-        return res.status(403).json({ success: false, message: 'Forbidden.' });
-      }
-      next();
-    } catch (err) {
-      return res.status(500).json({ success: false, message: 'Authorization error.' });
-    }
-  };
+// Closing an order is export_orders.close (granted by mig 339 to every
+// export_orders.approve holder, so nobody who could close before is refused).
+async function closeNeedsClosePermission(req, res, next) {
+  if (req.body && req.body.status === 'Closed' && !(await userHasPermission(req, 'export_orders', 'close'))) {
+    return res.status(403).json({ success: false, message: 'Forbidden. Closing an export order needs the close permission.' });
+  }
+  return next();
 }
 
 router.get('/', authorize('export_orders', 'view'), controller.list);
@@ -69,6 +47,7 @@ router.put(
 router.put(
   '/:id/status',
   authorize('export_orders', 'approve'),
+  closeNeedsClosePermission,
   auditAction('update_status', 'export_order', (req) => req.params.id),
   controller.updateStatus
 );

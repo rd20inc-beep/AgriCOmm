@@ -15,7 +15,7 @@
 //                                                                        milling.edit, mill_store.create_purchase)
 //   GET /finance/suspense                    open suspense entry        Resolve (finance.post_journal)
 //   GET /finance/bank-accounts               overdrawn account          Open account (finance.view)
-//   GET /finance/fx-rates                    USD rate older than 30 d   Add rate (finance.confirm_payment)
+//   GET /finance/fx-rates                    USD rate older than 30 d   Add rate (finance.set_rates)
 //   GET /finance/overview-summary            data warnings              (read-only)
 import { isSettleable, canRecordVariant, contextForDocument } from '../../../components/payments/paymentVariants';
 import { canAcceptTransfer } from './transferPermissions';
@@ -180,7 +180,7 @@ export function buildNeedsAttention(sources = {}, hasPermission = () => false, t
         amount: null, currency: null,
         action: { type: 'addRate', label: 'Add rate' },
         payload: null,
-      }, hasPermission('finance', 'confirm_payment'));
+      }, hasPermission('finance', 'set_rates'));
     }
   }
 

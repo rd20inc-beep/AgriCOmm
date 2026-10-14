@@ -2,6 +2,20 @@ const db = require('../../config/database');
 const millingService = require('../../services/millingService');
 const { redactForUser } = require('../../utils/costVisibility');
 
+// Editable columns per master table. An update copies only these from the
+// body — never id, timestamps or anything else a caller adds (mass-assign).
+const BENCHMARK_FIELDS = [
+  'product_id', 'variety', 'season', 'expected_yield_pct', 'expected_broken_pct',
+  'expected_bran_pct', 'expected_husk_pct', 'expected_wastage_pct',
+  'moisture_range_min', 'moisture_range_max', 'notes',
+];
+const MILL_FIELDS = ['name', 'location', 'capacity_mt_per_day', 'status', 'contact_person', 'phone', 'notes'];
+function pickFields(body, fields) {
+  const out = {};
+  for (const f of fields) if (body && Object.prototype.hasOwnProperty.call(body, f)) out[f] = body[f];
+  return out;
+}
+
 const millingAdvancedController = {
   // =========================================================================
   // Production Plans
@@ -321,9 +335,10 @@ const millingAdvancedController = {
   async updateBenchmark(req, res) {
     try {
       const { id } = req.params;
-      const updates = req.body;
-      delete updates.id;
-      delete updates.created_at;
+      const updates = pickFields(req.body, BENCHMARK_FIELDS);
+      if (!Object.keys(updates).length) {
+        return res.status(400).json({ success: false, message: 'Nothing to update.' });
+      }
       updates.updated_at = db.fn.now();
 
       const [benchmark] = await db('recovery_benchmarks')
@@ -547,9 +562,10 @@ const millingAdvancedController = {
   async updateMill(req, res) {
     try {
       const { id } = req.params;
-      const updates = req.body;
-      delete updates.id;
-      delete updates.created_at;
+      const updates = pickFields(req.body, MILL_FIELDS);
+      if (!Object.keys(updates).length) {
+        return res.status(400).json({ success: false, message: 'Nothing to update.' });
+      }
       updates.updated_at = db.fn.now();
 
       const [mill] = await db('mills')

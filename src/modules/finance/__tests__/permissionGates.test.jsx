@@ -9,7 +9,8 @@ import { MemoryRouter } from 'react-router-dom';
  * same fixtures; write buttons carry data-action.
  */
 const allow = (...p) => (m, a) => p.includes(`${m}.${a}`);
-const FM = allow('finance.view', 'finance.confirm_payment', 'finance.allocate_cost', 'finance.post_journal', 'export_orders.view', 'export_orders.approve');
+// mig 339 grants finance.reverse_payment / finance.set_rates to every confirm_payment holder.
+const FM = allow('finance.view', 'finance.confirm_payment', 'finance.reverse_payment', 'finance.set_rates', 'finance.allocate_cost', 'finance.post_journal', 'export_orders.view', 'export_orders.approve');
 const AUDITOR = allow('finance.view');
 let mockPerms = FM;
 
@@ -105,7 +106,7 @@ const FM_EXPECTS = {
   Purchases: ['pay'],
   Expenses: ['new-expense', 'pay'],
   DueDates: ['bounce-cheque'],
-  Suspense: ['record-suspense', 'resolve', 'reverse'],
+  Suspense: ['record-suspense', 'review', 'resolve', 'reverse'],
   RatesCenter: ['add-fx-rate', 'refresh-fx'],
   Confirmations: ['confirm-receipt', 'hold', 'receive'],
   LocalSalesFinance: [],
@@ -130,6 +131,13 @@ describe('a Finance Manager sees the actions its guards admit', () => {
   it.each(Object.keys(pages))('%s', (name) => {
     const html = render(pages[name], URL[name]);
     expect(actions(html)).toEqual(expect.arrayContaining(FM_EXPECTS[name]));
+  });
+
+  it('rates need finance.set_rates and suspense review needs confirm_payment, not view', () => {
+    mockPerms = allow('finance.view', 'finance.confirm_payment');
+    expect(actions(render(pages.RatesCenter))).not.toEqual(expect.arrayContaining(['add-fx-rate']));
+    mockPerms = allow('finance.view');
+    expect(actions(render(pages.Suspense))).not.toContain('review');
   });
 
   it('Cash: Accept (to Head Office) and + Contra transfer; Mark cleared on Cheques', () => {

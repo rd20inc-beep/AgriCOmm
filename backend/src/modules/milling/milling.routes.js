@@ -6,6 +6,7 @@ const controller = require('../../controllers/millingController');
 const advancedController = require('../../controllers/millingAdvancedController');
 const authorize = require('../../middleware/rbac');
 const { authorizeRole } = require('../../middleware/rbac');
+const retired = require('../../middleware/retired');
 const { lacksFinancePayment } = require('../../shared/millPayer');
 // The mill's money — expenses, the rice-purchase (rate) ledger, the mill cash
 // account and batch profitability — needs reports.view_cost or finance.view.
@@ -263,9 +264,10 @@ router.delete(
   auditAction('delete_vehicle', 'milling_batch', (req) => req.params.id),
   controller.deleteVehicle
 );
+// milling.delete (mig 339): Super Admin + Mill Manager as before, and the Owner.
 router.delete(
   '/batches/:id',
-  authorizeRole('Super Admin', 'Mill Manager'),
+  authorize('milling', 'delete'),
   auditAction('delete', 'milling_batch', (req) => req.params.id),
   controller.deleteBatch
 );
@@ -281,8 +283,11 @@ router.post(
   auditAction('create', 'production_plan', (req, data) => data.data && data.data.plan ? data.data.plan.id : null),
   advancedController.createPlan
 );
+// RETIRED (410): no screen; it moved the linked batch to In Progress from any
+// status but Completed — a Cancelled batch came back yieldable.
 router.put(
   '/plans/:id/start',
+  retired('Starting a production plan is retired. Start milling from the batch.'),
   authorize('milling', 'edit'),
   auditAction('start_production', 'production_plan', (req) => req.params.id),
   advancedController.startPlan
@@ -340,14 +345,18 @@ router.get('/batches/:id/benchmark-comparison', authorize('milling', 'view'), ad
 // =============================================================================
 
 router.get('/reprocessing', authorize('milling', 'view'), advancedController.listReprocessing);
+// RETIRED (410): no screen; it issued stock out of the output lot with no
+// GL, and completing it created no output lot (the rice vanished).
 router.post(
   '/reprocessing',
+  retired('Reprocessing is retired. Re-mill rice through a new milling batch.'),
   authorize('milling', 'create'),
   auditAction('create', 'reprocessing_batch', (req, data) => data.data && data.data.reprocessing ? data.data.reprocessing.id : null),
   advancedController.createReprocessing
 );
 router.put(
   '/reprocessing/:id/complete',
+  retired('Reprocessing is retired. Re-mill rice through a new milling batch.'),
   authorize('milling', 'edit'),
   auditAction('complete_reprocessing', 'reprocessing_batch', (req) => req.params.id),
   advancedController.completeReprocessing

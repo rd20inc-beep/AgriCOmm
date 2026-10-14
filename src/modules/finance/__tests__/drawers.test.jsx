@@ -11,7 +11,7 @@ import {
  * server lets do it, and never add money across currencies.
  */
 const allow = (...p) => (m, a) => p.includes(`${m}.${a}`);
-const FM = allow('finance.view', 'finance.confirm_payment', 'finance.allocate_cost', 'export_orders.view');
+const FM = allow('finance.view', 'finance.confirm_payment', 'finance.reverse_payment', 'finance.allocate_cost', 'export_orders.view');
 const AUDITOR = allow('finance.view');
 let mockPerms = FM;
 
@@ -153,6 +153,11 @@ describe('Transaction drawer', () => {
     expect(transactionActions({ ...PAYMENT_DETAIL, bounceable: true }, AUDITOR).bounce).toBe(false);
     expect(transactionActions(PAYMENT_DETAIL, AUDITOR)).toMatchObject({ reverse: false, clear: false, attach: false });
     expect(transactionActions({ ...PAYMENT_DETAIL, payment: { ...PAYMENT_DETAIL.payment, attachment_url: 'x.pdf' } }, FM).attach).toBe(false);
+  });
+
+  it('Reverse needs finance.reverse_payment (split from confirm_payment, mig 339)', () => {
+    const payerOnly = allow('finance.view', 'finance.confirm_payment');
+    expect(transactionActions(PAYMENT_DETAIL, payerOnly)).toMatchObject({ reverse: false, attach: true });
   });
 });
 

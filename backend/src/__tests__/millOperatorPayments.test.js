@@ -217,9 +217,11 @@ describe('the routes', () => {
     expect(guard.anyOf).toEqual(['finance.confirm_payment', 'milling.edit']);
   });
 
-  test('reversing a payment stays finance.confirm_payment only', () => {
+  // finance.reverse_payment since mig 339 (split from confirm_payment, granted
+  // to every confirm_payment holder) — still never milling.edit.
+  test('reversing a payment stays finance-only (finance.reverse_payment)', () => {
     const stack = stackOf(require('../modules/finance/finance.routes'), 'post', '/payments/:id/reverse');
-    expect(stack.map((h) => h.permission)).toContain('finance.confirm_payment');
+    expect(stack.map((h) => h.permission)).toContain('finance.reverse_payment');
     expect(stack.some((h) => h.anyOf)).toBe(false);
   });
 

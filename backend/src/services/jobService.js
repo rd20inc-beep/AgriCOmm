@@ -1,3 +1,4 @@
+const path = require('path');
 const db = require('../config/database');
 
 /**
@@ -148,8 +149,15 @@ const jobService = {
     await db('data_imports').where({ id: importId }).update({ status: 'Processing' });
 
     try {
-      const inputData = importRecord.file_path
-        ? require('fs').readFileSync(importRecord.file_path, 'utf8')
+      // Only a file the server wrote into its own imports folder is read —
+      // never an arbitrary path stored on the row.
+      const importDir = path.resolve(require('../config/paths').uploadPath('imports'));
+      const importFile = importRecord.file_path ? path.resolve(importRecord.file_path) : null;
+      if (importFile && !importFile.startsWith(importDir + path.sep)) {
+        throw new Error('Import file must be inside the server imports folder.');
+      }
+      const inputData = importFile
+        ? require('fs').readFileSync(importFile, 'utf8')
         : null;
 
       let rows = [];
@@ -188,8 +196,9 @@ const jobService = {
           result = await this.importProducts(rows, jobId);
           break;
         case 'opening_balances':
-          result = await this.importOpeningBalances(rows, jobId);
-          break;
+          // Retired: it posted one-sided Posted journals (no balancing line,
+          // wrong account column). Opening balances go through accounting.
+          throw new Error('Opening-balance import is retired.');
         default:
           throw new Error(`Unsupported import type: ${importRecord.import_type}`);
       }

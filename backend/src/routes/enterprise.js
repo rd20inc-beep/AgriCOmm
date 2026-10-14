@@ -3,10 +3,14 @@ const router = express.Router();
 const controller = require('../controllers/enterpriseController');
 const authenticate = require('../middleware/auth');
 const authorize = require('../middleware/rbac');
+const retired = require('../middleware/retired');
 
 // ═══════════════════════════════════════════════════════════════════
 // PUBLIC — System Health (no auth required)
 // ═══════════════════════════════════════════════════════════════════
+// Read-only and minimal: a database ping, the overall status and a timestamp.
+// It writes nothing (it used to insert six system_health rows per hit) and
+// shows no memory figures or error text to an unauthenticated caller.
 router.get('/health', controller.healthCheck);
 
 // ═══════════════════════════════════════════════════════════════════
@@ -21,7 +25,10 @@ router.put('/jobs/:id/cancel', authorize('admin', 'manage_settings'), controller
 
 // ─── Data Import ─────────────────────────────────────────────────
 router.get('/imports', authorize('admin', 'view'), controller.listImports);
-router.post('/imports', authorize('admin', 'manage_settings'), controller.createImport);
+// RETIRED (410). No screen calls it. The opening-balance import posted
+// one-sided Posted journals (opening balances were loaded another way on
+// 2026-09-26) and the route took a server file path from the client.
+router.post('/imports', retired('Data import is retired. Opening balances and master data are entered through their own screens.'), authorize('admin', 'manage_settings'), controller.createImport);
 router.get('/imports/:id', authorize('admin', 'view'), controller.getImport);
 
 // ─── API Integrations ────────────────────────────────────────────
@@ -43,8 +50,11 @@ router.get('/preferences', controller.getPreferences);
 router.put('/preferences', controller.updatePreferences);
 
 // ─── Bulk Operations ─────────────────────────────────────────────
-router.post('/bulk/status-update', authorize('admin', 'manage_settings'), controller.bulkStatusUpdate);
-router.post('/bulk/archive', authorize('admin', 'manage_settings'), controller.bulkArchive);
+// RETIRED (410). No screen calls them. They set a raw status on payments /
+// orders / batches (no GL, stock, history or approval) and archived with a
+// status the CHECK constraints reject. Change a record through its own screen.
+router.post('/bulk/status-update', retired('Bulk status update is retired. Change a record\'s status through its own screen so the ledger, stock and history follow.'), authorize('admin', 'manage_settings'), controller.bulkStatusUpdate);
+router.post('/bulk/archive', retired('Bulk archive is retired. Deactivate master data from Admin.'), authorize('admin', 'manage_settings'), controller.bulkArchive);
 router.post('/bulk/export', authorize('admin', 'manage_settings'), controller.bulkExport);
 
 module.exports = router;

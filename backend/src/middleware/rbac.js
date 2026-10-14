@@ -1,5 +1,13 @@
 const db = require('../config/database');
 
+// Every guard carries a description of what it checks (`guard.authz`), so the
+// route-permission inventory test can prove each mutating route is guarded and
+// the Admin › Permissions matrix can be compared with the real gates.
+function tagGuard(authz, fn) {
+  fn.authz = authz;
+  return fn;
+}
+
 /**
  * Granular permission-based authorization middleware.
  * Checks if the authenticated user's role has the specified module+action permission.
@@ -7,7 +15,7 @@ const db = require('../config/database');
  * Usage: authorize('export_orders', 'create')
  */
 function authorize(module, action) {
-  return async (req, res, next) => {
+  return tagGuard({ kind: 'authorize', perms: [[module, action]] }, async (req, res, next) => {
     if (!req.user) {
       return res.status(401).json({
         success: false,
@@ -79,7 +87,7 @@ function authorize(module, action) {
         message: 'Internal server error during authorization.',
       });
     }
-  };
+  });
 }
 
 /**
@@ -91,7 +99,7 @@ function authorize(module, action) {
  * Usage: authorizeAny(['inventory','create'], ['export_orders','create'])
  */
 function authorizeAny(...pairs) {
-  return async (req, res, next) => {
+  return tagGuard({ kind: 'authorizeAny', perms: pairs }, async (req, res, next) => {
     if (!req.user) {
       return res.status(401).json({ success: false, message: 'Access denied. Not authenticated.' });
     }
@@ -128,7 +136,7 @@ function authorizeAny(...pairs) {
       console.error('Authorization error:', err);
       return res.status(500).json({ success: false, message: 'Internal server error during authorization.' });
     }
-  };
+  });
 }
 
 /**
@@ -136,9 +144,21 @@ function authorizeAny(...pairs) {
  * Checks if the user's role name matches one of the provided role names.
  *
  * Usage: authorizeRole('Super Admin', 'Finance Manager')
+ *
+ * Prefer authorize() with a permission — the Admin › Permissions matrix only
+ * governs permission gates. The remaining role-list gates are deliberate
+ * exceptions with no matching permission (P1-18, 2026-10-15):
+ *   - admin: PUT /roles/:id/permissions (Super Admin only — editing the matrix),
+ *     PUT /roles/:id/mobile-nav, every /danger/* route (Super Admin only)
+ *   - finance: fund-transfer replace / reverse / delete (Owner, Super Admin)
+ *   - milling: batch approve / reject (Owner, Super Admin)
+ *   - local sales: confirm / reject and the admin invoice view
+ *   - purchase requirements: approve / reject (Super Admin, Owner, Mill Manager)
+ *   - sync: conflict / device / site-status management
+ * Note authorizeRole has NO Owner / Super Admin bypass: list them explicitly.
  */
 function authorizeRole(...roles) {
-  return async (req, res, next) => {
+  return tagGuard({ kind: 'authorizeRole', roles }, async (req, res, next) => {
     if (!req.user) {
       return res.status(401).json({
         success: false,
@@ -180,7 +200,7 @@ function authorizeRole(...roles) {
         message: 'Internal server error during authorization.',
       });
     }
-  };
+  });
 }
 
 /**
@@ -192,7 +212,7 @@ function authorizeRole(...roles) {
  * Usage: denyRoles('Mill Operator')
  */
 function denyRoles(...roles) {
-  return async (req, res, next) => {
+  return tagGuard({ kind: 'denyRoles', roles }, async (req, res, next) => {
     if (!req.user) {
       return res.status(401).json({ success: false, message: 'Access denied. Not authenticated.' });
     }
@@ -218,7 +238,7 @@ function denyRoles(...roles) {
       console.error('denyRoles error:', err);
       return res.status(500).json({ success: false, message: 'Internal server error during authorization.' });
     }
-  };
+  });
 }
 
 /**
