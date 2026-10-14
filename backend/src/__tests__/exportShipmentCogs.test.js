@@ -205,7 +205,7 @@ test('a foreign order with no booked rate is not posted as rupees — the shipme
   Object.assign(state.tables.export_orders[0], { booked_fx_rate: null, contract_value_pkr_locked: null });
   const err = await ship().then(() => null, (e) => e);
   expect(err && err.statusCode).toBe(400);
-  expect(err.message).toMatch(/no booked USD\/PKR rate/);
+  expect(err.message).toMatch(/no booked USD(\/|→)PKR rate/);
   expect(state.tables.journal_entries.filter((j) => j.trigger_event === 'export_revenue')).toHaveLength(0);
 });
 

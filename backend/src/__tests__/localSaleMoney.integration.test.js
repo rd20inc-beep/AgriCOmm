@@ -26,7 +26,8 @@ d('local-sale money integrity (DB-gated)', () => {
   let cashAcct;
 
   const auth = (who) => ({ Authorization: `Bearer ${tok[who]}` });
-  const post = (who, url, body) => request(app).post(url).set(auth(who)).send(body);
+  const post = (who, url, body) => request(app).post(url).set(auth(who))
+    .set('Idempotency-Key', `ls-money-${Math.random()}`).send(body);
 
   beforeAll(async () => {
     db = require('../config/database');

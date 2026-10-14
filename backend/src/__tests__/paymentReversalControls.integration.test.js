@@ -165,7 +165,8 @@ d('payment reversal controls + cash tie-out (DB-gated)', () => {
     expect(usd.status).toBe(400);
     expect(usd.body.message).toMatch(/in PKR/);
     const [rv] = await db('receivables').insert({
-      recv_no: `ZZR219-${run}`, type: 'Advance', entity: 'general', customer_id: ids.cust,
+      // Not Advance/Balance: those need their export order (P2-18 CHECK).
+      recv_no: `ZZR219-${run}`, type: 'Local Sale', entity: 'general', customer_id: ids.cust,
       currency: 'USD', expected_amount: 100, received_amount: 0, outstanding: 100, status: 'Pending',
     }).returning('*');
     const pkr = await post('fm', '/api/finance/payments', {
