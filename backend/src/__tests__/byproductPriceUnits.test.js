@@ -65,6 +65,8 @@ async function runRoute(router, method, path, req) {
   for (const s of layer.route.stack) {
     let advanced = false;
     await s.handle(req, r, () => { advanced = true; });
+    // The cost-visibility guards resolve the caller's permissions asynchronously.
+    await new Promise((resolve) => setImmediate(resolve));
     if (r.body || !advanced) return r;
   }
   return r;
