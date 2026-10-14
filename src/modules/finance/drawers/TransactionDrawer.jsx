@@ -7,6 +7,7 @@ import StatusBadge from '../../../shared/components/StatusBadge';
 import api from '../../../api/client';
 import { useAuth } from '../../../context/AuthContext';
 import { useApp } from '../../../context/AppContext';
+import { useOwnerAuth } from '../../../context/OwnerAuthContext';
 import useConfirm from '../../../hooks/useConfirm';
 import { useBankAccounts, useClearCheque, useReversePayment } from '../../../api/queries';
 import { accountsForMethod, METHOD_LABEL } from '../../../components/payments/paymentPayload';
@@ -42,6 +43,7 @@ export default function TransactionDrawer({ txKind, id, onClose }) {
   const qc = useQueryClient();
   const [confirm, confirmDialog] = useConfirm();
   const reverseMut = useReversePayment();
+  const { requestOwnerApproval } = useOwnerAuth();
   const clearMut = useClearCheque();
   const { data: allAccounts = [] } = useBankAccounts();
   const [clearing, setClearing] = useState(null);
@@ -63,8 +65,8 @@ export default function TransactionDrawer({ txKind, id, onClose }) {
     const ok = await confirm({
       title: `Reverse ${p.type === 'receipt' ? 'receipt' : 'payment'} ${p.payment_no}?`,
       consequence: p.type === 'receipt'
-        ? 'The receivable goes back to outstanding, the money comes out of the account it landed in, and the ledger entries are reversed. The receipt stays on record as Reversed.'
-        : 'The payable goes back to outstanding, the account balance is restored, and the ledger entries are reversed. The payment stays on record as Reversed.',
+        ? 'The receivable goes back to outstanding, the money comes out of the account it landed in, and the ledger entries are reversed. The receipt stays on record as Reversed. An Owner must approve it.'
+        : 'The payable goes back to outstanding, the account balance is restored, and the ledger entries are reversed. The payment stays on record as Reversed. An Owner must approve it.',
       amount: fmtAmt(p.amount, p.currency),
       reason: 'required',
       confirmLabel: 'Reverse',
@@ -72,10 +74,13 @@ export default function TransactionDrawer({ txKind, id, onClose }) {
     });
     if (!ok) return;
     try {
-      await reverseMut.mutateAsync({ id: p.id, reason: ok.reason || null });
+      // D-3: the Owner approves every reversal (an Owner self-approves;
+      // anyone else has an Owner enter their password).
+      await requestOwnerApproval((ownerId) => reverseMut.mutateAsync({ id: p.id, reason: ok.reason || null, ownerId }));
       addToast?.(`${p.payment_no} reversed`, 'success');
       refresh();
     } catch (err) {
+      if (err?.message === 'Owner authorization cancelled') return;
       addToast?.(err?.data?.message || err?.message || 'Reversal failed', 'error');
     }
   }

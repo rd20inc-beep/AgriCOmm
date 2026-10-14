@@ -160,6 +160,19 @@ const exportOrderItemDraft = exportOrderItem.keys({
   qty_mt: Joi.number().min(0).allow(...DRAFT_BLANK),
   price_per_mt: Joi.number().min(0).allow(...DRAFT_BLANK),
 });
+// P2-20: an order edit checks its money / currency fields; every other field
+// passes through untouched (.unknown) to the controller's own allow-list.
+// booked_fx_rate is read only with a currency change, which re-locks the rate.
+const BLANK = ['', null];
+const updateExportOrder = Joi.object({
+  currency: Joi.string().valid('USD', 'EUR', 'GBP', 'PKR'), // an existing PKR order may re-send its own
+  booked_fx_rate: Joi.number().positive().allow(...BLANK),
+  qty_mt: Joi.number().min(0).allow(...BLANK),
+  price_per_mt: Joi.number().min(0).allow(...BLANK),
+  advance_pct: Joi.number().min(0).max(100).allow(...BLANK),
+  customer_id: Joi.number().integer().positive().allow(...BLANK),
+}).unknown(true);
+
 const createExportOrderDraft = createExportOrder.keys({
   qty_mt: Joi.number().min(0).allow(...DRAFT_BLANK),
   price_per_mt: Joi.number().min(0).allow(...DRAFT_BLANK),
@@ -629,6 +642,35 @@ const replaceContraTransfer = Joi.object({
     'string.empty': 'A reason is required to edit a transfer',
   }),
 });
+// P2-24: a local sale's money fields. Only these are checked — every other
+// field (items[], repacking, buyer, vehicle …) passes through untouched
+// (.unknown), so the controller still sees the whole body. The cap paid ≤
+// total needs the priced lines, so it is enforced in the controller.
+const LOCAL_SALE_MODES = ['cash', 'credit', 'cheque', 'bank_transfer', 'online', 'lc', 'tt', 'wire', 'mobile'];
+const localSaleCreate = Joi.object({
+  payment_mode: Joi.string().valid(...LOCAL_SALE_MODES).default('cash').messages({
+    'any.only': `payment_mode must be one of: ${LOCAL_SALE_MODES.join(', ')}`,
+  }),
+  paid_amount: Joi.number().min(0).allow(null, ''),
+  bank_account_id: Joi.number().integer().positive().allow(null, ''),
+  gate_pass_no: Joi.string().trim().max(60).allow(null, ''),
+}).unknown(true);
+const localSaleReceipt = Joi.object({
+  amount: Joi.number().positive().required(),
+  payment_method: Joi.string().lowercase().valid(...LOCAL_SALE_MODES.filter((m) => m !== 'credit')).default('cash'),
+}).unknown(true);
+
+// P2-19 / D-3: a payment reversal always carries its reason. The Owner's
+// approval (authorized_by_owner_id + X-Owner-Credential) is read by
+// ownerApproval BEFORE this runs, so it need not survive stripUnknown.
+const reversePayment = Joi.object({
+  reason: Joi.string().trim().min(1).max(2000).required().messages({
+    'any.required': 'A reason is required to reverse a payment',
+    'string.empty': 'A reason is required to reverse a payment',
+  }),
+  authorized_by_owner_id: Joi.number().integer().positive().allow(null, ''),
+});
+
 const reverseFundTransfer = Joi.object({
   reason: Joi.string().trim().min(1).max(2000).required().messages({
     'any.required': 'A reason is required to reverse a transfer',
@@ -668,6 +710,30 @@ const recordPayment = Joi.object({
   discount_amount: Joi.number().min(0).allow(null),
   attachment_url: Joi.string().allow('', null),
   attachment_name: Joi.string().allow('', null),
+});
+
+// P2-31: one settlement across several invoices, in one transaction
+// (finance/settleAcross.js). The allocation items carry their own amount and,
+// for payments, WHT / discount.
+const settleAcross = Joi.object({
+  type: Joi.string().valid('receipt', 'payment').required(),
+  currency: Joi.string().trim().uppercase().length(3).allow(null, ''),
+  payment_method: Joi.string().valid('bank_transfer', 'cash', 'cheque', 'lc', 'tt', 'wire', 'online', 'mobile').required(),
+  bank_account_id: Joi.number().integer().positive().allow(null, ''),
+  bank_reference: Joi.string().max(200).allow('', null),
+  due_date: Joi.date().iso().allow(null, ''),
+  payment_date: Joi.date().iso().required(),
+  notes: Joi.string().max(2000).allow('', null),
+  collection_location: Joi.string().valid('Mill', 'Head Office').allow(null, ''),
+  allocations: Joi.array().min(1).max(200).required().items(Joi.object({
+    payable_id: Joi.number().integer().positive(),
+    receivable_id: Joi.number().integer().positive(),
+    sale_group_no: Joi.string().trim().max(60),
+    amount: Joi.number().positive().required(),
+    wht_amount: Joi.number().min(0).allow(null),
+    wht_rate: Joi.number().min(0).max(100).allow(null),
+    discount_amount: Joi.number().min(0).allow(null),
+  }).xor('payable_id', 'receivable_id', 'sale_group_no')),
 });
 
 // ===================== JOURNAL ENTRIES =====================
@@ -1082,7 +1148,10 @@ const updateSettings = Joi.object({
   payment_reminder_days: Joi.number().integer().min(1).max(365),
   // automation.service scanLowMarginOrders
   min_margin_pct: Joi.number().min(0).max(100),
-  // fxRate.service fallback when no fx_rates row exists
+  // Legacy key, kept so older clients can still save settings. Nothing
+  // converts with it any more (D-10: no fallback FX rate — rates are kept per
+  // currency in fx_rates through POST /finance/fx-rates; addRate mirrors the
+  // latest USD rate here for display only).
   pkr_rate: Joi.number().positive().max(100000),
   // finance/collectionRate.js
   export_balance_term_days: Joi.number().integer().min(0).max(365),
@@ -1114,6 +1183,7 @@ module.exports = {
   bundleDocuments,
   createExportOrder,
   createExportOrderDraft,
+  updateExportOrder,
   updateExportShipment,
   exportPackingWeight,
   exportOrderAction,
@@ -1145,6 +1215,10 @@ module.exports = {
   createContraTransfer,
   replaceContraTransfer,
   reverseFundTransfer,
+  reversePayment,
+  settleAcross,
+  localSaleCreate,
+  localSaleReceipt,
   createJournal,
   reverseJournal,
   reopenPeriod,

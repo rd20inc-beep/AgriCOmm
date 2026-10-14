@@ -11,6 +11,7 @@
 const accountingService = require('../accounting/accounting.service');
 const { nextDocNo } = require('../../utils/docNumber');
 const { remapControlLines } = require('../../shared/accountGl');
+const { postBankTransaction } = require('../../shared/bankBalance');
 
 const num = (v) => parseFloat(v) || 0;
 const r2 = (n) => Math.round(num(n) * 100) / 100;
@@ -101,22 +102,17 @@ async function reverseExpenseTrail(trx, expenseId, { userId = null, reason = nul
     const moved = p.cleared !== false;
     const amt = r2(p.base_amount_pkr || p.amount);
     if (moved && p.bank_account_id && amt > 0) {
-      await trx('bank_accounts').where('id', p.bank_account_id).increment('current_balance', amt);
-      const acct = await trx('bank_accounts').where('id', p.bank_account_id).first();
       const btNo = await nextDocNo(trx, { table: 'bank_transactions', column: 'transaction_no', prefix: 'BT-', pad: 4 });
-      await trx('bank_transactions').insert({
-        transaction_no: btNo,
-        bank_account_id: p.bank_account_id,
+      await postBankTransaction(trx, {
+        transactionNo: btNo,
+        accountId: p.bank_account_id,
         type: 'credit',
         amount: amt,
-        currency: (acct && acct.currency) || 'PKR',
-        status: 'posted',
         transaction_date: when,
         reference: p.payment_no,
         notes: `Reversal of ${p.payment_no} (${exp.expense_no})${why}`.slice(0, 1000),
         source: 'payment_reversal',
         linked_payment_id: p.id,
-        running_balance: acct ? acct.current_balance : null,
         category: exp.category || 'expense',
         created_by: userId,
       });

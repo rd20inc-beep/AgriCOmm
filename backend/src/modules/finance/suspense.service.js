@@ -2,7 +2,7 @@ const db = require('../../config/database');
 const { glAccountFor } = require('../../shared/accountGl');
 const accountingService = require('../accounting/accounting.service');
 const { NotFoundError, ValidationError } = require('../../shared/errors');
-const { nextDocNo } = require('../../utils/docNumber');
+const { postBankTransaction } = require('../../shared/bankBalance');
 
 // Suspense Account (#8) — record unidentified money into the 1290 Suspense
 // control account (backed by a real bank/cash movement), then RESOLVE it later
@@ -25,10 +25,6 @@ async function generateEntryNo(trx) {
   const last = await trx('suspense_entries').where('entry_no', 'like', like).orderBy('id', 'desc').first('entry_no');
   const seq = last ? (parseInt(String(last.entry_no).split('-')[2], 10) || 0) + 1 : 1;
   return `SUS-${ym}-${String(seq).padStart(4, '0')}`;
-}
-// MAX(suffix)+1, not "last row by id + 1" (which repeats after a delete).
-function nextBtNo(trx) {
-  return nextDocNo(trx, { table: 'bank_transactions', column: 'transaction_no', prefix: 'BT-', pad: 4 });
 }
 async function suspenseAccount(trx) {
   const acc = await trx('chart_of_accounts').where({ code: SUSPENSE_CODE }).first();
@@ -63,14 +59,13 @@ async function create(payload, userId) {
     const isReceipt = direction === 'receipt';
 
     // Move the real money + record the bank transaction.
-    await trx('bank_accounts').where({ id: bank.id }).increment('current_balance', isReceipt ? amt : -amt);
-    const [btn] = await trx('bank_transactions').insert({
-      transaction_no: await nextBtNo(trx), bank_account_id: bank.id,
-      type: isReceipt ? 'credit' : 'debit', amount: amt, currency: 'PKR', status: 'posted',
+    const btn = await postBankTransaction(trx, {
+      accountId: bank.id,
+      type: isReceipt ? 'credit' : 'debit', amount: amt, currency: 'PKR',
       transaction_date: when, reference: reference_no || entryNo, counterparty: party_details || null,
       category: 'Suspense', notes: reason || `Suspense ${direction} ${entryNo}`,
       source: 'suspense', created_by: userId || null,
-    }).returning('id');
+    });
 
     // Post the GL: receipt ⇒ DR Bank / CR Suspense; payment ⇒ DR Suspense / CR Bank.
     const lines = isReceipt
@@ -178,10 +173,9 @@ async function reverse(entryId, reason, userId) {
     if (entry.bank_account_id) {
       const amt = round2(entry.amount);
       const isReceipt = entry.direction === 'receipt';
-      await trx('bank_accounts').where({ id: entry.bank_account_id }).increment('current_balance', isReceipt ? -amt : amt);
-      await trx('bank_transactions').insert({
-        transaction_no: await nextBtNo(trx), bank_account_id: entry.bank_account_id,
-        type: isReceipt ? 'debit' : 'credit', amount: amt, currency: 'PKR', status: 'posted',
+      await postBankTransaction(trx, {
+        accountId: entry.bank_account_id,
+        type: isReceipt ? 'debit' : 'credit', amount: amt, currency: 'PKR',
         transaction_date: new Date().toISOString().slice(0, 10), reference: entry.entry_no,
         counterparty: entry.party_details || null, category: 'Suspense',
         notes: `Reversal of suspense ${entry.entry_no}${reason ? ` — ${reason}` : ''}`,

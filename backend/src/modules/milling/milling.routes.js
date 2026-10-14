@@ -621,6 +621,7 @@ const automationService = require('../admin/automation.service');
 const { resolvePaymentAccountId } = require('../../shared/cashAccounts');
 const { assertAccountCurrency } = require('../../shared/accountCurrency');
 const { postAccountMovement } = require('../finance/paymentEngine');
+const { postBankTransaction } = require('../../shared/bankBalance');
 const { glAccountFor, controlAccount } = require('../../shared/accountGl');
 // Shared payroll logic (also used by the scheduler) — compute + prepare.
 const payrollService = require('./payroll.service');
@@ -2112,14 +2113,11 @@ router.delete('/payroll/statutory-remittances/:id', authorize('payroll', 'pay'),
       const amt = parseFloat(r.amount) || 0;
       const moved = await trx('bank_transactions').where({ reference: r.remittance_no, source: 'statutory_remittance' }).first('id');
       if (r.bank_account_id && moved && amt > 0) {
-        await trx('bank_accounts').where('id', r.bank_account_id).increment('current_balance', amt);
-        const acct = await trx('bank_accounts').where('id', r.bank_account_id).first();
-        await trx('bank_transactions').insert({
-          transaction_no: await nextDocNo(trx, { table: 'bank_transactions', column: 'transaction_no', prefix: 'BT-', pad: 4 }),
-          bank_account_id: r.bank_account_id, type: 'credit', amount: amt, currency: acct?.currency || 'PKR',
-          status: 'posted', transaction_date: new Date().toISOString().slice(0, 10), reference: r.remittance_no,
+        await postBankTransaction(trx, {
+          accountId: r.bank_account_id, type: 'credit', amount: amt,
+          transaction_date: new Date().toISOString().slice(0, 10), reference: r.remittance_no,
           notes: `Reversal of statutory remittance ${r.remittance_no}`, source: 'statutory_remittance_reversal',
-          running_balance: acct ? acct.current_balance : null, category: 'statutory', created_by: req.user?.id || null,
+          category: 'statutory', created_by: req.user?.id || null,
         });
       }
       await mirrorJournals(trx, {

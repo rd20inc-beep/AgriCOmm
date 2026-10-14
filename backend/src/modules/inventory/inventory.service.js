@@ -2166,9 +2166,15 @@ const inventoryService = {
     const cogs = await inventoryService.calculateOrderCOGS(trx, orderId);
 
     // Value the contract in PKR at the order's BOOKED rate (fall back to the caller
-    // rate, then 280) and prefer the already-locked PKR figure so COGS/profit use
-    // the SAME PKR revenue basis as revenue recognition — not a flat 280.
-    const rate = pkrRate || parseFloat(order.booked_fx_rate) || 280;
+    // rate) and prefer the already-locked PKR figure so COGS/profit use the SAME
+    // PKR revenue basis as revenue recognition. No rate and no locked figure →
+    // refused (D-10), never a flat 280.
+    const rate = pkrRate || parseFloat(order.booked_fx_rate)
+      || (String(order.currency || 'USD').toUpperCase() === 'PKR' ? 1 : 0);
+    if (!(parseFloat(order.contract_value_pkr_locked) > 0) && !(rate > 0)) {
+      const e = new Error(`Order ${order.order_no || orderId} has no booked ${order.currency || 'USD'}→PKR rate — set it before locking COGS.`);
+      e.status = 422; e.statusCode = 422; throw e;
+    }
     const contractValuePKR = parseFloat(order.contract_value_pkr_locked)
       || (parseFloat(order.contract_value) || 0) * rate;
     const grossProfitPKR = contractValuePKR - cogs.totalCOGS;

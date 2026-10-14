@@ -904,6 +904,24 @@ export function usePurchases(params = {}) {
   });
 }
 
+// P2-31: settle several invoices (payables / receivables / local-sale groups)
+// in ONE server transaction — a failure posts nothing.
+export function useSettleAcross() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data) => financeApi.settleAcross(data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.receivables.all });
+      qc.invalidateQueries({ queryKey: queryKeys.payables.all });
+      qc.invalidateQueries({ queryKey: queryKeys.financeOverview });
+      qc.invalidateQueries({ queryKey: queryKeys.journals.all });
+      qc.invalidateQueries({ queryKey: queryKeys.bankAccounts.all });
+      qc.invalidateQueries({ queryKey: ['local-sales'] });
+      qc.invalidateQueries({ queryKey: ['mill-cash-flow'] });
+      qc.invalidateQueries({ queryKey: ['finance-bank-transactions'] });
+    },
+  });
+}
 export function useRecordPayment() {
   const qc = useQueryClient();
   return useMutation({
@@ -928,7 +946,7 @@ export function useRecordPayment() {
 export function useReversePayment() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, reason }) => financeApi.reversePayment(id, reason),
+    mutationFn: ({ id, reason, ownerId }) => financeApi.reversePayment(id, reason, ownerId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: queryKeys.payables.all });
       qc.invalidateQueries({ queryKey: queryKeys.financeOverview });
@@ -973,13 +991,6 @@ function invalidateMoneyCaches(qc) {
   qc.invalidateQueries({ queryKey: ['finance-bank-transactions'] });
   qc.invalidateQueries({ queryKey: queryKeys.financeOverview });
   qc.invalidateQueries({ queryKey: ['mill-cash-flow'] });
-}
-export function useCreateFundTransfer() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (data) => financeApi.createFundTransfer(data),
-    onSuccess: () => invalidateMoneyCaches(qc),
-  });
 }
 export function useAcceptFundTransfer() {
   const qc = useQueryClient();

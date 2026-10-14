@@ -1,5 +1,5 @@
 const db = require('../../config/database');
-const { nextDocNo } = require('../../utils/docNumber');
+const { postBankTransaction, deleteBankTransaction } = require('../../shared/bankBalance');
 const { redactSecrets } = require('../../utils/redactSecrets');
 const accountingService = require('../accounting/accounting.service');
 const { mirrorJournals } = require('../milling/payrollReversal');
@@ -349,28 +349,20 @@ const dangerZone = {
           journalNo = j?.journal_no || null;
         }
 
-        await trx('bank_accounts').where('id', acct.id).update({ current_balance: after, updated_at: trx.fn.now() });
-
-        // Trail row so the correction is visible in the account's history.
-        // type is constrained to credit/debit and status to posted/pending/reversed.
-        if (await trx.schema.hasTable('bank_transactions')) {
-          const btNo = await nextDocNo(trx, { table: 'bank_transactions', column: 'transaction_no', prefix: 'BT-', pad: 4 });
-          await trx('bank_transactions').insert({
-            transaction_no: btNo,
-            bank_account_id: acct.id,
-            type: delta >= 0 ? 'credit' : 'debit',
-            amount: Math.abs(delta),
-            currency: acct.currency || 'PKR',
-            transaction_date: new Date().toISOString().slice(0, 10),
-            reference: 'Danger Zone',
-            category: 'manual_adjustment',
-            running_balance: after,
-            status: 'posted',
-            source: 'manual_adjustment',
-            notes: reason || `Manual balance ${mode} by super admin`,
-            created_by: req.user?.id || null,
-          });
-        }
+        // The correction is a bank row like any other money move, written by
+        // the single balance writer (P2-17), so it is visible in the account's
+        // history and the balance stays Σ of its rows.
+        await postBankTransaction(trx, {
+          accountId: acct.id,
+          type: delta >= 0 ? 'credit' : 'debit',
+          amount: Math.abs(delta),
+          transaction_date: new Date().toISOString().slice(0, 10),
+          reference: 'Danger Zone',
+          category: 'manual_adjustment',
+          source: 'manual_adjustment',
+          notes: reason || `Manual balance ${mode} by super admin`,
+          created_by: req.user?.id || null,
+        });
         await auditDanger(trx, req, 'adjust_balance', 'bank_account', acct.id, { name: acct.name, mode, amount: amt, before, after, reason: reason || null, journal_no: journalNo });
         return { id: acct.id, name: acct.name, currency: acct.currency, before, after, journalNo };
       });
@@ -566,13 +558,8 @@ async function deleteLocalSale(trx, req, id) {
   if (payIds.length) {
     // Reverse any account-balance movement these receipts posted before removing
     // the ledger rows (a credit added cash → debit it back on delete).
-    const bts = await trx('bank_transactions').whereIn('linked_payment_id', payIds).select('bank_account_id', 'type', 'amount');
-    for (const bt of bts) {
-      if (!bt.bank_account_id) continue;
-      const delta = bt.type === 'credit' ? -num(bt.amount) : num(bt.amount);
-      await trx('bank_accounts').where('id', bt.bank_account_id).increment('current_balance', delta);
-    }
-    await trx('bank_transactions').whereIn('linked_payment_id', payIds).del();
+    const bts = await trx('bank_transactions').whereIn('linked_payment_id', payIds).select('id', 'bank_account_id', 'type', 'amount', 'status');
+    for (const bt of bts) await deleteBankTransaction(trx, bt);
   }
   await trx('payments').where('local_sale_id', id).del();
   await trx('receivables').where('local_sale_id', id).del();

@@ -41,6 +41,7 @@ test('the owner-approved routes', () => {
     'POST exportOrders /:id/debit-notes/:noteId/cancel [export_balance]',
     'POST exportOrders /:id/packing-weight/resolve [packing_variance]',
     'POST exportOrders /:id/write-off-balance [export_short_write_off]',
+    'POST finance /payments/:id/reverse [payment_reversal]',
     'POST milling /advances/:id/approve [salary_advance]',
     'POST milling /advances/:id/void [salary_advance_void]',
     'POST milling /payroll/final-settlements/:id/reverse [final_settlement_reversal]',

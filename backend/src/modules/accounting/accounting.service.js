@@ -1007,7 +1007,7 @@ const accountingService = {
     // with orig metadata divides by its original rate. Only journals with no
     // original-currency info fall back to the current USD→PKR rate.
     const { factorSql, conv, statementCurrency } = await currencyMode();
-    const usdRate = (await fxRateService.getLatestRate('USD')).rate || 280;
+    const usdRate = (await fxRateService.getLatestRate('USD')).rate || null; // none → no USD line (D-10)
     const usdOf = (native, cur, fx, origRate, origCur) => {
       const c = (cur || 'PKR').toUpperCase();
       if (c === 'USD') return native;
@@ -1486,7 +1486,7 @@ const accountingService = {
     // PKR base (primary) with a USD sub-line on every amount. usdOf is exact
     // from the journal's original-currency metadata; see the customer note.
     const { factorSql, conv, statementCurrency } = await currencyMode();
-    const usdRate = (await fxRateService.getLatestRate('USD')).rate || 280;
+    const usdRate = (await fxRateService.getLatestRate('USD')).rate || null; // none → no USD line (D-10)
     const usdOf = (native, cur, fx, origRate, origCur) => {
       const c = (cur || 'PKR').toUpperCase();
       if (c === 'USD') return native;

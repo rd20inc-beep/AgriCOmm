@@ -3011,7 +3011,9 @@ module.exports = {
           qty_kg: qty,
           transfer_price_pkr: pricePerMT,
           total_value_pkr: totalValue,
-          pkr_rate: 280,
+          // The linked order's booked USD rate when there is one, else none —
+          // never a flat 280 (D-10). Display only; the transfer is in PKR.
+          pkr_rate: linkOrderId ? ((await trx('export_orders').where({ id: linkOrderId }).first('booked_fx_rate'))?.booked_fx_rate || null) : null,
           dispatch_date: new Date().toISOString().slice(0, 10),
           status: 'Completed',
           created_by: req.user?.id || null,

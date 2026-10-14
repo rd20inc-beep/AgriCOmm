@@ -399,7 +399,8 @@ function packingCapacityError(qtyMt, palletized, packingType) {
 async function ensureOrderReceivables(trx, order) {
   const currency = order.currency || 'USD';
   const advanceDays = await advanceTermDays(trx);
-  const rate = parseFloat(order.booked_fx_rate) || 280;
+  // No booked rate → no PKR figure (0, flagged as unbooked), never 280 (D-10).
+  const rate = parseFloat(order.booked_fx_rate) || (String(currency).toUpperCase() === 'PKR' ? 1 : 0);
   const wanted = [
     { type: 'Advance', prefix: 'RCV-ADV', amount: parseFloat(order.advance_expected) || 0, days: advanceDays,
       notes: `Advance ${order.advance_pct}% for order ${order.order_no}` },
@@ -1075,8 +1076,12 @@ const exportOrderController = {
       })();
 
       // Get locked FX rate via service (unless manually provided)
+      // D-10 (P2-20): booked at the typed rate, else the currency's rate on
+      // file — never a made-up one. A live order with neither is refused
+      // (400 FX_RATE_MISSING); a Draft may wait — Submit locks the rate.
       const fxRateService = require('../../services/fxRateService');
-      const fxResult = await fxRateService.lockRateForOrder(currency || 'USD', new Date().toISOString().split('T')[0], parseFloat(req.body.booked_fx_rate) || null);
+      const fxResult = await fxRateService.lockRateForOrder(currency || 'USD', new Date().toISOString().split('T')[0], parseFloat(req.body.booked_fx_rate) || null)
+        .catch((e) => { if (e.code === 'FX_RATE_MISSING' && (!requestedStatus || requestedStatus === 'Draft')) return { rate: null }; throw e; });
       const _lockedFxRate = fxResult.rate;
 
       const result = await db.transaction(async (trx) => {
@@ -1162,9 +1167,9 @@ const exportOrderController = {
               const manual = parseFloat(req.body.booked_fx_rate);
               return manual > 0 ? manual : _lockedFxRate;
             })(),
-            fx_rate_source: parseFloat(req.body.booked_fx_rate) > 0 ? 'manual' : 'system',
-            fx_rate_locked_at: new Date(),
-            contract_value_pkr_locked: contractValue * (parseFloat(req.body.booked_fx_rate) > 0 ? parseFloat(req.body.booked_fx_rate) : _lockedFxRate),
+            fx_rate_source: parseFloat(req.body.booked_fx_rate) > 0 ? 'manual' : (_lockedFxRate ? 'system' : null),
+            fx_rate_locked_at: _lockedFxRate || parseFloat(req.body.booked_fx_rate) > 0 ? new Date() : null,
+            contract_value_pkr_locked: contractValue * ((parseFloat(req.body.booked_fx_rate) > 0 ? parseFloat(req.body.booked_fx_rate) : _lockedFxRate) || 0),
           })
           .returning('*');
 
@@ -1223,7 +1228,7 @@ const exportOrderController = {
             aging: 0,
             notes: `Advance ${order.advance_pct}% for order ${orderNo}`,
             fx_rate: order.booked_fx_rate,
-            base_amount_pkr: order.advance_expected * (order.booked_fx_rate || 280),
+            base_amount_pkr: order.advance_expected * (parseFloat(order.booked_fx_rate) || 0),
           });
         }
         if (order.balance_expected > 0) {
@@ -1244,7 +1249,7 @@ const exportOrderController = {
             aging: 0,
             notes: `Balance payment for order ${orderNo} (against BL)${freightReceivable > 0 ? ` — includes ${order.currency || 'USD'} ${freightReceivable.toLocaleString()} freight` : ''}`,
             fx_rate: order.booked_fx_rate,
-            base_amount_pkr: order.balance_expected * (order.booked_fx_rate || 280),
+            base_amount_pkr: order.balance_expected * (parseFloat(order.booked_fx_rate) || 0),
           });
         }
 
@@ -1334,6 +1339,8 @@ const exportOrderController = {
         data: { order: result, materialRequests },
       });
     } catch (err) {
+      // D-10: no rate for the order's currency → a clear 400, not a 500.
+      if (err.code === 'FX_RATE_MISSING') return res.status(err.statusCode || 400).json({ success: false, code: err.code, field: 'booked_fx_rate', message: err.message });
       console.error('Export order create error:', err);
       return res.status(500).json({ success: false, message: 'Internal server error.' });
     }
@@ -1486,6 +1493,16 @@ const exportOrderController = {
         if (changesContract && bookedRate > 0) {
           safeUpdates.contract_value_pkr_locked = contractValue * bookedRate;
         }
+        // P2-20: a new currency is a new booked rate — re-locked here (the
+        // rate typed with the edit, else that currency's rate on file), never
+        // the old currency's rate carried over. No rate → refused (D-10).
+        if (currencyChanges) {
+          const relock = await require('../finance/fxRate.service').lockRateForOrder(safeUpdates.currency, new Date().toISOString().slice(0, 10), parseFloat(updates.booked_fx_rate) || null);
+          safeUpdates.booked_fx_rate = relock.rate;
+          safeUpdates.fx_rate_source = relock.source === 'manual' ? 'manual' : 'system';
+          safeUpdates.fx_rate_locked_at = new Date();
+          safeUpdates.contract_value_pkr_locked = contractValue * relock.rate;
+        }
         resyncReceivables = changesContract;
       }
 
@@ -1589,7 +1606,7 @@ const exportOrderController = {
             || (parseFloat(order.contract_value) > 0
                 ? (parseFloat(order.contract_value_pkr_locked) || 0) / parseFloat(order.contract_value)
                 : 0)
-            || 280;
+            || (String(order.currency || 'USD').toUpperCase() === 'PKR' ? 1 : 0); // none: unbooked (D-10)
           // The receivables carry the buyer and currency too; the guard above
           // only lets those change while nothing has been received.
           const partyFields = {
@@ -1684,6 +1701,8 @@ const exportOrderController = {
         data: { order: result },
       });
     } catch (err) {
+      // D-10: a currency change with no rate for the new currency.
+      if (err.code === 'FX_RATE_MISSING') return res.status(err.statusCode || 400).json({ success: false, code: err.code, field: 'booked_fx_rate', message: err.message });
       if (err.statusCode) return res.status(err.statusCode).json({ success: false, message: err.message });
       console.error('Export order update error:', err);
       return res.status(500).json({ success: false, message: 'Internal server error.' });
@@ -2118,6 +2137,18 @@ const exportOrderController = {
             ? 'Draft submitted (0% advance — advance stage skipped)'
             : 'Draft submitted'),
         });
+        // D-10: a Draft saved without a rate is booked now (after the draft's
+        // own checks above, so their messages come first) — at that
+        // currency's rate on file, else refused (400 FX_RATE_MISSING).
+        if (!(parseFloat(order.booked_fx_rate) > 0)) {
+          const lock = await require('../finance/fxRate.service').lockRateForOrder(order.currency || 'USD', new Date().toISOString().slice(0, 10));
+          const patch = {
+            booked_fx_rate: lock.rate, fx_rate_source: 'system', fx_rate_locked_at: new Date(),
+            contract_value_pkr_locked: (parseFloat(order.contract_value) || 0) * lock.rate,
+          };
+          await trx('export_orders').where({ id: order.id }).update(patch);
+          Object.assign(order, patch);
+        }
         await ensureOrderReceivables(trx, order);
         await syncBalanceDueDate(trx, order.id);
         return moved;
@@ -2944,7 +2975,8 @@ const exportOrderController = {
             contractValue, advanceExpected, order: { ...order, qty_mt: newQtyMt },
           });
           const bookedRate = parseFloat(order.booked_fx_rate)
-            || (parseFloat(order.contract_value) > 0 ? (parseFloat(order.contract_value_pkr_locked) || 0) / parseFloat(order.contract_value) : 0) || 280;
+            || (parseFloat(order.contract_value) > 0 ? (parseFloat(order.contract_value_pkr_locked) || 0) / parseFloat(order.contract_value) : 0)
+            || (String(order.currency || 'USD').toUpperCase() === 'PKR' ? 1 : 0); // none: unbooked (D-10)
           await trx('export_orders').where({ id }).update({
             qty_mt: newQtyMt, price_per_mt: price, contract_value: contractValue, advance_expected: advanceExpected,
             balance_expected: balanceExpected, contract_value_pkr_locked: contractValue * bookedRate, updated_at: trx.fn.now(),

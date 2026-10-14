@@ -15,16 +15,16 @@ import {
 } from 'lucide-react';
 import { useInternalTransfers } from '../../../api/queries';
 import StatusBadge from '../../../shared/components/StatusBadge';
-import { DEFAULT_FX_RATE } from '../utils/fx';
+import { useFxRate, fxRateLabel } from '../utils/fx';
 import { fmtPKR, fmtUSD, fmtDate, fmtKg } from '../../../shared/utils/format';
 import { stockTransferView } from '../utils/stockTransfers';
 
-const PKR_RATE = DEFAULT_FX_RATE;
 
 const formatPKR = (v) => fmtPKR(v, { decimals: 2 });
 
 export default function InternalTransfers() {
   const { data: apiTransfers = [] } = useInternalTransfers();
+  const usdRate = useFxRate(); // latest USD rate on file, or null (D-10)
   const [viewMode, setViewMode] = useState('legal'); // 'legal' or 'consolidated'
   const [expandedRow, setExpandedRow] = useState(null);
 
@@ -103,7 +103,7 @@ export default function InternalTransfers() {
             <span className="text-xs font-medium text-gray-500 uppercase">Total USD Equivalent</span>
           </div>
           <p className="text-xl font-bold text-emerald-700">{fmtUSD(summary.totalUSD)}</p>
-          <p className="text-xs text-gray-400 mt-0.5">@ PKR {PKR_RATE}/USD avg rate</p>
+          <p className="text-xs text-gray-400 mt-0.5">{fxRateLabel(usdRate)}</p>
         </div>
       </div>
 

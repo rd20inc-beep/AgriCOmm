@@ -249,7 +249,7 @@ describe('reversePayment', () => {
     });
     accountingService.createJournal.mockRejectedValue(new Error("Accounting period 'Sep 2026' is Locked. Cannot post journals."));
     const r = res();
-    await financeController.reversePayment({ params: { id: '9' }, body: {}, user: { id: 1 } }, r);
+    await financeController.reversePayment({ params: { id: '9' }, body: { reason: 'test reversal' }, user: { id: 1 } }, r);
     expect(r.statusCode).toBe(400);
     expect(r.body.message).toMatch(/reversal was not saved.*Locked/);
     expect(db.__outcomes).toEqual(['rollback']);

@@ -1,4 +1,5 @@
 const db = require('../../config/database');
+const fxRateService = require('../finance/fxRate.service');
 const { NotFoundError, ValidationError } = require('../../shared/errors');
 const accountingService = require('../accounting/accounting.service');
 const { normalizePaymentMethod } = require('../../shared/constants/paymentMethods');
@@ -84,8 +85,13 @@ const expensesService = {
     const amountNum = Number(amount);
     // Paying at create goes through the payment engine once the expense and
     // its payable exist (a cheque records but settles nothing until it clears).
-    const rate = Number(fx_rate) || (currency === 'PKR' ? 1 : 280);
-    const amountPkr = currency === 'PKR' ? amountNum : Number((amountNum * rate).toFixed(2));
+    // No currency means PKR (it is stored that way below). A foreign expense
+    // converts at the rate given, else the currency's rate for the expense
+    // date — refused when none is on file (D-10), never a flat 280.
+    const cur = String(currency || 'PKR').toUpperCase();
+    const rate = cur === 'PKR' ? 1
+      : (Number(fx_rate) > 0 ? Number(fx_rate) : await fxRateService.requireRate(cur, expense_date, { what: 'This expense' }));
+    const amountPkr = cur === 'PKR' ? amountNum : Number((amountNum * rate).toFixed(2));
 
     // Run inside a caller-supplied transaction when given, so the expense +
     // cash-out + GL commit atomically with the caller's own work (e.g. payroll
@@ -506,7 +512,7 @@ const expensesService = {
       // entity's cash float) with its bank_transactions row, posts Dr 2010
       // (2040 for salaries) / Cr 1000 and settles the payable and the expense.
       // A cheque records only; Clear Cheque settles it.
-      await recordMoneyMovement(trx, {
+      const moved = await recordMoneyMovement(trx, {
         type: 'payment',
         payable: payable || null,
         source: { table: 'business_expenses', id: expense.id },
@@ -535,7 +541,9 @@ const expensesService = {
           result: { expense_no: expense.expense_no, amount: payAmt, method: payment_method || null },
         });
       }
-      return trx('business_expenses').where('id', id).first();
+      const row = await trx('business_expenses').where('id', id).first();
+      // P2-31: the overdraft warning rides on the response (not a column).
+      return moved.overdraft ? { ...row, warning: moved.overdraft } : row;
     };
     return existingTrx ? run(existingTrx) : db.transaction(run);
   },

@@ -4,6 +4,7 @@ const { NotFoundError, ValidationError, ConflictError } = require('../../shared/
 const { nextDocNo } = require('../../utils/docNumber');
 const { assertMillAccount } = require('../../shared/millPayer');
 const { glAccountFor, remapControlLines } = require('../../shared/accountGl');
+const { postBankTransaction } = require('../../shared/bankBalance');
 
 // Money moved between the company's OWN accounts. One table, fund_transfers,
 // carries both kinds:
@@ -78,9 +79,6 @@ const todayIso = () => new Date().toISOString().slice(0, 10);
 // transfers and then fails on the unique index. Same FT-NNNN / BT-NNNN shape.
 function generateTransferNo(trx) {
   return nextDocNo(trx, { table: 'fund_transfers', column: 'transfer_no', prefix: 'FT-', pad: 4 });
-}
-function nextBtNo(trx) {
-  return nextDocNo(trx, { table: 'bank_transactions', column: 'transaction_no', prefix: 'BT-', pad: 4 });
 }
 
 // ── Amount / currency rules for a contra (pure, unit-tested) ─────────────────
@@ -221,13 +219,15 @@ async function postContraJournal(trx, { transferNo, entity, fromAcc, toAcc, amou
   return j;
 }
 
+// One side of a transfer: the account's balance AND its bank row, written
+// together by the single balance writer (P2-17).
 async function writeBankTxn(trx, {
   account, type, amount, date, transferNo, counterpartyName, noteLine, userId,
   category = CATEGORY.fund, currency, fundTransferId = null,
 }) {
-  await trx('bank_transactions').insert({
-    transaction_no: await nextBtNo(trx), bank_account_id: account.id, type,
-    amount, currency: currency || curOf(account), status: 'posted', transaction_date: date,
+  return postBankTransaction(trx, {
+    accountId: account.id, type,
+    amount, currency: currency || curOf(account), transaction_date: date,
     reference: transferNo, counterparty: counterpartyName, category,
     notes: noteLine, source: 'fund_transfer', fund_transfer_id: fundTransferId,
     created_by: userId || null,
@@ -239,7 +239,6 @@ async function writeBankTxn(trx, {
 // account's currency; chargesPkr is its PKR value.
 async function takeBankCharges(trx, { fromAcc, charges, chargesPkr, rate, transfer, date, userId }) {
   if (!(charges > 0)) return;
-  await trx('bank_accounts').where({ id: fromAcc.id }).decrement('current_balance', charges);
   const desc = `Bank charges on ${transfer.transfer_no} (${fromAcc.name})`;
   await writeBankTxn(trx, {
     account: fromAcc, type: 'debit', amount: charges, date, transferNo: transfer.transfer_no,
@@ -281,7 +280,6 @@ async function createCrossEntityInTrx(trx, { direction, fromAcc, toAcc, amt, dat
   }).returning('*');
 
   // SENDER side only — money leaves now; the receiver accepts to take it in.
-  await trx('bank_accounts').where({ id: fromAcc.id }).decrement('current_balance', amt);
   await writeBankTxn(trx, { account: fromAcc, type: 'debit', amount: amt, date, transferNo, counterpartyName: toAcc.name, noteLine, userId, fundTransferId: row.id });
   await postEntityBook(trx, { transferNo, entity: fromEntity, cashIn: false, amount: amt, date, userId, description: desc, account: fromAcc });
   return row;
@@ -417,13 +415,11 @@ async function createContraInTrx(trx, payload, userId, { millOnly = false, repla
     ...common,
   }).returning('*');
 
-  await trx('bank_accounts').where({ id: fromAcc.id }).decrement('current_balance', amt);
   await writeBankTxn(trx, {
     account: fromAcc, type: 'debit', amount: amt, date, transferNo, counterpartyName: toAcc.name,
     noteLine: calc.foreign && srcCur !== dstCur ? `${noteLine} · ${fmtAmt(calc.toAmount, dstCur)} received` : noteLine,
     userId, category: CATEGORY.contra, currency: srcCur, fundTransferId: row.id,
   });
-  await trx('bank_accounts').where({ id: toAcc.id }).increment('current_balance', calc.toAmount);
   await writeBankTxn(trx, {
     account: toAcc, type: 'credit', amount: calc.toAmount, date, transferNo, counterpartyName: fromAcc.name,
     noteLine: calc.foreign && srcCur !== dstCur ? `${noteLine} · from ${fmtAmt(amt, srcCur)}` : noteLine,
@@ -484,7 +480,6 @@ async function accept(id, userId) {
     const desc = `Fund transfer ${t.transfer_no} received by ${ENTITY_LABEL[t.to_entity]}`;
     const noteLine = `${desc}${t.reference ? ` · Ref: ${t.reference}` : ''}`;
 
-    await trx('bank_accounts').where({ id: toAcc.id }).increment('current_balance', amt);
     await writeBankTxn(trx, { account: toAcc, type: 'credit', amount: amt, date: todayIso(), transferNo: t.transfer_no, counterpartyName: fromAcc ? fromAcc.name : ENTITY_LABEL[t.from_entity], noteLine, userId, fundTransferId: t.id });
     await postEntityBook(trx, { transferNo: t.transfer_no, entity: t.to_entity, cashIn: true, amount: amt, date: todayIso(), userId, description: desc, account: toAcc });
 
@@ -535,14 +530,12 @@ async function reverseInTrx(trx, id, userId, { reason } = {}) {
 
   // Bank: the sender's money always left at create, so give it back.
   if (fromAcc) {
-    await trx('bank_accounts').where({ id: fromAcc.id }).increment('current_balance', amt);
     await writeBankTxn(trx, {
       account: fromAcc, type: 'credit', amount: amt, date, transferNo: t.transfer_no,
       counterpartyName: toAcc ? toAcc.name : ENTITY_LABEL[t.to_entity], noteLine: desc, userId,
       category: revCategory, currency: t.currency || curOf(fromAcc), fundTransferId: t.id,
     });
     if (charges > 0) {
-      await trx('bank_accounts').where({ id: fromAcc.id }).increment('current_balance', charges);
       await writeBankTxn(trx, {
         account: fromAcc, type: 'credit', amount: charges, date, transferNo: t.transfer_no,
         counterpartyName: 'Bank charges', noteLine: `${desc} (bank charges)`, userId,
@@ -553,7 +546,6 @@ async function reverseInTrx(trx, id, userId, { reason } = {}) {
   // The receiver was only credited once it accepted (an internal contra is
   // completed at create), so take it back only then.
   if (t.status === 'completed' && toAcc) {
-    await trx('bank_accounts').where({ id: toAcc.id }).decrement('current_balance', toAmt);
     await writeBankTxn(trx, {
       account: toAcc, type: 'debit', amount: toAmt, date, transferNo: t.transfer_no,
       counterpartyName: fromAcc ? fromAcc.name : ENTITY_LABEL[t.from_entity], noteLine: desc, userId,

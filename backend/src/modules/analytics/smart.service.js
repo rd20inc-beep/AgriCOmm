@@ -1,4 +1,17 @@
 const db = require('../../config/database');
+const fxRateService = require('../finance/fxRate.service');
+
+// D-10: an estimate needs a real USD→PKR rate — the latest in Rates Center —
+// and is refused (422) without one; never a flat 280.
+async function latestUsdRateOrThrow() {
+  const r = await fxRateService.getLatestRate('USD');
+  if (!(r.rate > 0)) {
+    const e = new Error('No USD→PKR rate is on file — add one in Rates Center (or pass a rate) to run this estimate.');
+    e.statusCode = 422; e.status = 422; e.code = 'FX_RATE_MISSING';
+    throw e;
+  }
+  return r.rate;
+}
 
 /**
  * Smart Service — Competitive Intelligence Engine (Phase 13)
@@ -110,11 +123,7 @@ const smartService = {
     const predictedClearing = avg(costBuckets.clearing);
 
     // 5. Get current PKR/USD rate
-    const fxRate = await db('fx_rates')
-      .where({ from_currency: 'USD', to_currency: 'PKR' })
-      .orderBy('effective_date', 'desc')
-      .first();
-    const pkrPerUsd = fxRate ? parseFloat(fxRate.rate) : 280;
+    const pkrPerUsd = await latestUsdRateOrThrow();
 
     // Total cost in PKR per MT
     const totalCostPKR = predictedRawCost + predictedMillingCost + predictedBagsCost + predictedFreight + predictedClearing;
@@ -356,13 +365,7 @@ const smartService = {
 
     // Get current FX rate
     let rate = fxRate;
-    if (!rate) {
-      const fx = await db('fx_rates')
-        .where({ from_currency: 'USD', to_currency: 'PKR' })
-        .orderBy('effective_date', 'desc')
-        .first();
-      rate = fx ? parseFloat(fx.rate) : 280;
-    }
+    if (!rate) rate = await latestUsdRateOrThrow();
 
     const avgFreightPerMT = freightData && freightData.avg_freight_per_mt
       ? parseFloat(freightData.avg_freight_per_mt)
@@ -653,13 +656,7 @@ const smartService = {
   async simulateFxScenario({ contractValueUSD, currentRate, scenarios: rateScenarios }) {
     // Get actual current rate if not provided
     let actualCurrentRate = currentRate;
-    if (!actualCurrentRate) {
-      const fx = await db('fx_rates')
-        .where({ from_currency: 'USD', to_currency: 'PKR' })
-        .orderBy('effective_date', 'desc')
-        .first();
-      actualCurrentRate = fx ? parseFloat(fx.rate) : 280;
-    }
+    if (!actualCurrentRate) actualCurrentRate = await latestUsdRateOrThrow();
 
     // Get average PKR costs from recent export orders
     const avgCostData = await db('export_order_costs as eoc')
@@ -681,7 +678,9 @@ const smartService = {
     const scenarioResults = [];
     let breakevenRate = null;
 
-    for (const s of (rateScenarios || [{ rate: actualCurrentRate }])) {
+    // No scenarios given: −2% / today / +2% / +4% around the current rate.
+    const spread = [0.98, 1, 1.02, 1.04].map((f) => ({ rate: Math.round(actualCurrentRate * f * 100) / 100 }));
+    for (const s of (rateScenarios || spread)) {
       const rate = parseFloat(s.rate);
       const prkRevenue = contractValueUSD * rate;
       const profit = prkRevenue - estimatedTotalCostPKR;
@@ -1330,14 +1329,13 @@ const smartService = {
 
       if (contractValue === 0) continue;
 
-      // Get FX rate for conversion if needed
-      const fx = await db('fx_rates')
-        .where({ from_currency: 'USD', to_currency: 'PKR' })
-        .orderBy('effective_date', 'desc')
-        .first();
-      const fxRate = fx ? parseFloat(fx.rate) : 280;
+      // The order's own currency at its latest rate (an estimate); a currency
+      // with no rate on file is skipped, never valued at a made-up rate (D-10).
+      const cur = String(order.currency || 'USD').toUpperCase();
+      const fxRate = cur === 'PKR' ? 1 : (await fxRateService.getLatestRate(cur)).rate;
+      if (!(fxRate > 0)) continue;
 
-      const contractPKR = order.currency === 'USD' ? contractValue * fxRate : contractValue;
+      const contractPKR = contractValue * fxRate;
       const costRatio = contractPKR > 0 ? (totalCost / contractPKR) * 100 : 0;
 
       // If costs trending to exceed 85% of contract value

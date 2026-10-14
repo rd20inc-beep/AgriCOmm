@@ -3,7 +3,7 @@ import { useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { CheckCircle, Wallet, HandCoins, Info } from 'lucide-react';
 import SlideDrawer from '../../../components/SlideDrawer';
-import { useReceivables, usePayables, useBankAccounts, useRecordPayment, useAcceptLocalSaleGroupPayment } from '../../../api/queries';
+import { useReceivables, usePayables, useBankAccounts, useSettleAcross } from '../../../api/queries';
 import { useApp } from '../../../context/AppContext';
 import { favStar } from '../../../shared/utils/favorites';
 import { accountsForCurrency } from '../../../shared/utils/accountCurrency';
@@ -12,6 +12,7 @@ import { ChequeHint } from '../../../components/payments/PaymentFields';
 import StatusBadge from '../../../shared/components/StatusBadge';
 import FieldError from '../../../shared/components/FieldError';
 import { todayLocalISO, fmtMoney, fmtDate } from '../../../shared/utils/format';
+import { serverOverdraft } from '../../../shared/utils/overdraft';
 
 // Exact, two decimals, in the invoice's own currency.
 const fmt = (v, cur) => fmtMoney(parseFloat(v) || 0, cur || 'PKR', { decimals: 2 });
@@ -25,17 +26,18 @@ const sumOut = (rows) => rows.reduce((s, r) => s + (parseFloat(r.outstanding) ||
  * The statement balance is GL-driven, but the receivables / payables sub-ledger
  * (Money In / Money Out) tracks the same money per invoice. To keep both in sync
  * we don't post a bare on-account journal — we allocate the entered amount across
- * the party's OPEN invoices oldest-first (FIFO) and reuse the existing, tested
- * recordPayment endpoint per invoice. Each call updates the receivable/payable,
- * the bank account, and posts a party-stamped journal, so the statement and the
- * aging lists both move together.
+ * the party's OPEN invoices oldest-first (FIFO) and send the whole allocation to
+ * POST /finance/settle (P2-31), which records every part through the payment
+ * engine in ONE transaction: each receivable/payable, the bank account and a
+ * party-stamped journal move together — or, if any part fails, nothing does.
+ * (It used to be one request per invoice, so a failure part-way left the
+ * earlier invoices settled.) A single targeted bill may carry WHT / discount.
  */
 export default function StatementPayDrawer({ mode, party, onClose }) {
   const isCustomer = mode === 'customer';
   const { addToast } = useApp();
   const qc = useQueryClient();
-  const recordPaymentMut = useRecordPayment();
-  const acceptLocalSaleMut = useAcceptLocalSaleGroupPayment();
+  const settleMut = useSettleAcross();
   const { data: bankAccounts = [] } = useBankAccounts();
   // Only one side is ever relevant; React Query caches both cheaply.
   const { data: receivables = [], isLoading: rLoading } = useReceivables();
@@ -104,6 +106,8 @@ export default function StatementPayDrawer({ mode, party, onClose }) {
     date: todayLocalISO(),
     dueDate: '',
     notes: '',
+    wht: '',
+    discount: '',
   });
 
   // Default the amount to the full bucket once the queue resolves / currency
@@ -132,8 +136,7 @@ export default function StatementPayDrawer({ mode, party, onClose }) {
   const verb = isCustomer ? 'Receipt' : 'Payment';
   const refOf = (it) => it.recvNo || it.payNo || `#${it.dbId || it.id}`;
 
-  // The allocation loop makes one request per invoice; isPending can drop
-  // between them, so the drawer holds its own busy flag for the whole run.
+  // The drawer's own busy flag, set for the whole submit.
   const [saving, setSaving] = useState(false);
   const [amountError, setAmountError] = useState('');
 
@@ -152,56 +155,45 @@ export default function StatementPayDrawer({ mode, party, onClose }) {
     }
     setSaving(true);
     try {
-      // Sequential so each invoice's outstanding is read fresh by the backend.
-      for (const { item, chunk } of allocation) {
-        if (isCustomer && item.kind === 'local_sale') {
-          // A local-sale row is a sale GROUP, and its id is a local_sales id —
-          // not a receivables id. Sending it as linked_receivable_id settled
-          // whichever receivable happened to share the number. It is paid
-          // through the local-sale receipt endpoint, as Money In does.
-          const acct = bankAccounts.find((b) => String(b.id) === String(form.bankAccountId));
-          await acceptLocalSaleMut.mutateAsync({
-            groupNo: item.saleGroupNo || item.recvNo,
-            data: {
-              amount: Number(chunk.toFixed(2)),
-              payment_method: form.method,
-              payment_date: form.date,
-              // Cash lands in the cash float of where it was collected.
-              bank_account_id: form.method === 'cash' ? null : (form.bankAccountId || null),
-              collection_location: form.method === 'cash' ? ((acct?.entity || 'mill') === 'mill' ? 'Mill' : 'Head Office') : null,
-              due_date: form.method === 'cheque' && form.dueDate ? form.dueDate : null,
-              notes: form.notes || `${verb} for ${refOf(item)} — ${party.name}`,
-            },
-          });
-          continue;
-        }
-        await recordPaymentMut.mutateAsync({
-          type: isCustomer ? 'receipt' : 'payment',
-          amount: Number(chunk.toFixed(2)),
-          currency: activeCur,
-          payment_method: form.method,
-          payment_date: form.date,
-          bank_account_id: form.bankAccountId || null,
-          ...(form.method === 'cheque' && form.dueDate ? { due_date: form.dueDate } : {}),
-          ...(isCustomer
-            ? { linked_receivable_id: item.dbId || item.id }
-            : { linked_payable_id: item.dbId || item.id }),
-          notes: form.notes || `${verb} for ${refOf(item)} — ${party.name}`,
-        });
-      }
-      // recordPayment already invalidates receivables/payables/overview/journals;
-      // the statement is GL-driven, so refresh it too.
+      // One request, one server transaction: every allocation is posted, or
+      // none is. A local-sale row is a sale GROUP (its id is a local_sales id,
+      // not a receivables id), so it is sent by its group number.
+      const acct = bankAccounts.find((b) => String(b.id) === String(form.bankAccountId));
+      const single = allocation.length === 1 && !!targetId;
+      const res = await settleMut.mutateAsync({
+        type: isCustomer ? 'receipt' : 'payment',
+        currency: activeCur,
+        payment_method: form.method,
+        payment_date: form.date,
+        bank_account_id: form.bankAccountId || null,
+        ...(form.method === 'cheque' && form.dueDate ? { due_date: form.dueDate } : {}),
+        // Cash for a local sale lands in the cash float of where it was collected.
+        ...(isCustomer && form.method === 'cash' && acct ? { collection_location: (acct.entity || 'mill') === 'mill' ? 'Mill' : 'Head Office' } : {}),
+        notes: form.notes || `${verb} — ${party.name}`,
+        allocations: allocation.map(({ item, chunk }) => {
+          const amount = Number(chunk.toFixed(2));
+          if (isCustomer && item.kind === 'local_sale') return { sale_group_no: item.saleGroupNo || item.recvNo, amount };
+          if (isCustomer) return { receivable_id: item.dbId || item.id, amount };
+          return {
+            payable_id: item.dbId || item.id, amount,
+            // WHT / discount only when ONE bill is being paid (its figures are that bill's).
+            ...(single && parseFloat(form.wht) > 0 ? { wht_amount: parseFloat(form.wht) } : {}),
+            ...(single && parseFloat(form.discount) > 0 ? { discount_amount: parseFloat(form.discount) } : {}),
+          };
+        }),
+      });
+      // The statement is GL-driven, so refresh it too.
       qc.invalidateQueries({ queryKey: ['party-statement'] });
       addToast(
         `${verb} of ${fmt(allocatedTotal, activeCur)} recorded across ${allocation.length} invoice${allocation.length === 1 ? '' : 's'}`,
         'success',
       );
+      const od = serverOverdraft(res);
+      if (od) addToast(`Recorded — ${od}`, 'warning');
       onClose();
     } catch (err) {
-      // A mid-loop failure still applied the earlier chunks — refresh so the UI
-      // shows what actually went through.
-      qc.invalidateQueries({ queryKey: ['party-statement'] });
-      addToast(`Failed: ${err.message}`, 'error');
+      // Nothing was posted: the server rolled the whole settlement back.
+      addToast(`Failed — nothing was recorded: ${err?.data?.message || err.message}`, 'error');
     } finally {
       setSaving(false);
     }
@@ -224,10 +216,10 @@ export default function StatementPayDrawer({ mode, party, onClose }) {
           <button
             type="submit"
             form="statement-pay-form"
-            disabled={saving || recordPaymentMut.isPending || allocatedTotal <= 0}
+            disabled={saving || settleMut.isPending || allocatedTotal <= 0}
             className={btnPrimary}>
             <CheckCircle size={16} aria-hidden="true" />
-            {saving || recordPaymentMut.isPending
+            {saving || settleMut.isPending
               ? 'Processing…'
               : `Record ${verb} — ${fmt(allocatedTotal, activeCur)}`}
           </button>
@@ -373,6 +365,25 @@ export default function StatementPayDrawer({ mode, party, onClose }) {
               <input type="date" value={form.dueDate} onChange={(e) => setForm((f) => ({ ...f, dueDate: e.target.value }))}
                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
               <ChequeHint />
+            </div>
+          )}
+
+          {/* WHT / discount — a payment against ONE chosen bill only */}
+          {!isCustomer && targetId && (
+            <div className="grid grid-cols-2 gap-3" data-testid="wht-discount">
+              <div>
+                <label className="text-xs text-gray-500 block mb-1">WHT withheld ({activeCur}) <span className="text-gray-400">(optional)</span></label>
+                <input type="number" step="0.01" min="0" value={form.wht}
+                  onChange={(e) => setForm((f) => ({ ...f, wht: e.target.value }))}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 block mb-1">Discount ({activeCur}) <span className="text-gray-400">(optional)</span></label>
+                <input type="number" step="0.01" min="0" value={form.discount}
+                  onChange={(e) => setForm((f) => ({ ...f, discount: e.target.value }))}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <p className="col-span-2 text-[11px] text-gray-400">Settles the bill in full figure; only the net leaves the account.</p>
             </div>
           )}
 

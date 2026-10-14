@@ -206,7 +206,9 @@ router.post('/draft', noFinanceForOperator, canUseAi, async (req, res) => {
       prompt: `Recipient (${party_type}): ${party.name}.\n`
         + `Email purpose: "${kind}" — statement = share a balance summary; reminder = politely request settlement of the outstanding amount; thankyou = thank them for business.\n`
         + (instructions ? `Extra instructions: ${instructions}\n` : '')
-        + `Ledger (PKR). open_items are unsettled bills/invoices; closing_balance is the net balance.\n${JSON.stringify(summary)}\n\n`
+        // P2-20: the statement's own currency, not a hard-coded 'PKR'; each
+        // open item keeps its own currency (a USD invoice stays USD).
+        + `Ledger (${summary.currency}): closing_balance and the ledger lines are in ${summary.currency}. open_items are unsettled bills/invoices, each in the currency it carries (never convert or relabel one).\n${JSON.stringify(summary)}\n\n`
         + 'Write a short, courteous, professional email. Reference the exact outstanding figure(s) from open_items where relevant. Do NOT invent numbers. '
         + 'Return JSON: {"subject":"...","body":"..."}. Body is plain text with line breaks, signed off as "AGRI COMMODITIES".',
       json: true, maxTokens: 700,

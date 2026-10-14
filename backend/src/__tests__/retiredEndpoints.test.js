@@ -52,6 +52,7 @@ const RETIRED = [
   ['routes/advances', 'get', '/'],
   ['routes/advances', 'post', '/'],
   ['routes/advances', 'put', '/:id/allocate'],
+  ['modules/finance/finance.routes', 'post', '/fund-transfers'],
 ];
 
 describe('retired endpoints answer 410 before anything else runs', () => {

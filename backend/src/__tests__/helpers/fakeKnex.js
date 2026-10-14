@@ -42,7 +42,8 @@ function fakeKnex(seed = {}) {
             // Numbers compare as numbers; anything else (YYYY-MM dates, periods)
             // as strings, which is chronological for ISO dates.
             filters.push((r) => {
-              const x = r[colOf(a)];
+              const raw = r[colOf(a)];
+              const x = raw instanceof Date ? raw.toISOString().slice(0, 10) : raw;
               const nx = Number(x); const ny = Number(c);
               if (x !== '' && c !== '' && Number.isFinite(nx) && Number.isFinite(ny)) return cmp(nx, ny);
               return x != null && cmp(String(x).slice(0, String(c).length), String(c));

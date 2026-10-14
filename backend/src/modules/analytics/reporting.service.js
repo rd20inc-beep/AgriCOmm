@@ -3328,14 +3328,11 @@ const reportingService = {
    * FX exposure dashboard: USD receivables vs PKR costs, unrealized FX impact.
    */
   async getFxExposureDashboard() {
-    // Get latest FX rate
-    const latestRate = await db('fx_rates')
-      .where('from_currency', 'USD')
-      .where('to_currency', 'PKR')
-      .orderBy('effective_date', 'desc')
-      .first();
-
-    const currentRate = latestRate ? parseFloat(latestRate.rate) : 280;
+    // The latest USD rate (an estimate, D-10); none on file → no PKR figures
+    // (null), never a flat 280.
+    const latest = await fxRateService.getLatestRate('USD');
+    const currentRate = latest.rate || null;
+    const toPkr = (usd) => (currentRate ? parseFloat((usd * currentRate).toFixed(2)) : null);
 
     // USD receivables
     const usdReceivables = await db('receivables')
@@ -3374,18 +3371,21 @@ const reportingService = {
 
     return {
       currentRate,
+      rateEstimated: !!currentRate,
+      rateStale: !!latest.stale,
+      rateMissing: !currentRate,
       usdReceivables: {
         totalOutstandingUSD: totalUSD,
-        totalOutstandingPKR: parseFloat((totalUSD * currentRate).toFixed(2)),
+        totalOutstandingPKR: toPkr(totalUSD),
         count: parseInt(usdReceivables.count, 10),
       },
       pkrCostsOutstanding: totalPKRCosts,
-      netExposure: parseFloat((totalUSD * currentRate - totalPKRCosts).toFixed(2)),
+      netExposure: currentRate ? parseFloat((totalUSD * currentRate - totalPKRCosts).toFixed(2)) : null,
       orderExposure: orderExposure.map((o) => ({
         orderNo: o.order_no,
         contractValue: parseFloat(o.contract_value),
         outstandingUSD: parseFloat(o.outstanding_usd),
-        outstandingPKR: parseFloat((parseFloat(o.outstanding_usd) * currentRate).toFixed(2)),
+        outstandingPKR: toPkr(parseFloat(o.outstanding_usd)),
       })),
     };
   },

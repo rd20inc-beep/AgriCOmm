@@ -69,7 +69,9 @@ const line = (id, due, extra = {}) => ({ id, sale_no: `LS-${id}`, sale_group_no:
 const committed = (op, table) => mockState.committed.filter((w) => w.op === op && w.table === table);
 
 beforeEach(() => {
-  mockState.rows = {}; mockState.first = {}; mockState.committed = [];
+  mockState.rows = {}; mockState.committed = [];
+  // The receiving account the single balance writer reads back (P2-17).
+  mockState.first = { bank_accounts: { id: 9, name: 'ZZ Cash', currency: 'PKR', current_balance: 0 } };
   mockState.failPaymentInsertNo = 0; mockState.paymentInserts = 0; mockDocNo = 0;
   jest.clearAllMocks();
   jest.spyOn(console, 'error').mockImplementation(() => {});

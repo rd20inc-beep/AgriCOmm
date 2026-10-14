@@ -22,6 +22,7 @@ const healthService = {
     checks.push(await this.checkApiResponse());
     checks.push(await this.checkPendingJobs());
     checks.push(await this.checkOverdueAlerts());
+    checks.push(await this.checkBankTieOut());
 
     if (!persist) return checks;
 
@@ -209,6 +210,28 @@ const healthService = {
   /**
    * Count open alerts older than 7 days.
    */
+  /**
+   * Cash tie-out (P2-17): every cash / bank account's balance must equal
+   * Σ its posted bank rows, and a PKR account's balance its own GL account.
+   * Warning on any drift; details carry account ids only (no amounts).
+   */
+  async checkBankTieOut() {
+    try {
+      const { bankTieOut } = require('../modules/finance/bankTieOut');
+      const t = await bankTieOut();
+      const drifting = t.accounts.filter((a) => !a.ok).map((a) => a.account_id);
+      return {
+        checkType: 'bank_tie_out',
+        status: drifting.length ? 'Warning' : 'Healthy',
+        value: `${drifting.length} account(s) drifting`,
+        threshold: `0 accounts off by more than ${t.tolerance}`,
+        details: { driftingAccountIds: drifting, bankRowsWithoutAccount: t.control.bank_rows_without_account },
+      };
+    } catch (err) {
+      return { checkType: 'bank_tie_out', status: 'Warning', value: 'error', threshold: '0 accounts', details: { error: err.message } };
+    }
+  },
+
   async checkOverdueAlerts() {
     try {
       const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();

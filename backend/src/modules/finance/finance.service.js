@@ -174,6 +174,10 @@ const financeService = {
       baseCurrency: 'PKR',
       currentFxRate: pkrRate,
       fxRateSource: currentFx.source,
+      // D-10: the latest rate-master rate, shown as an estimate; flagged when old / absent.
+      fxRateEstimated: !!pkrRate,
+      fxRateStale: !!currentFx.stale,
+      fxRateDate: dayOf(currentFx.effectiveDate),
       period: defs.period,
       export: {
         totalOrders: parseInt(exportStats.total_orders),
@@ -262,7 +266,7 @@ const financeService = {
         profitPkr: defs.consolidated.bookedPkr,
         bookedPkr: defs.consolidated.bookedPkr,
         realisedPkr: defs.consolidated.realisedPkr,
-        profitForeign: defs.consolidated.bookedPkr / pkrRate,
+        profitForeign: pkrRate ? defs.consolidated.bookedPkr / pkrRate : null,
         fxGainLossPkr: et.fxRealisedPkr,
       },
       receivables: {

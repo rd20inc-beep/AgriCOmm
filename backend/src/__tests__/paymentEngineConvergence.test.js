@@ -310,7 +310,7 @@ describe('R6 · payPurchase resolves the real payable', () => {
     );
     accounting.journals.length = 0;
     const r = res();
-    await financeController.reversePayment({ params: { id: String(p.id) }, body: {}, user: { id: 1 } }, r);
+    await financeController.reversePayment({ params: { id: String(p.id) }, body: { reason: 'test reversal' }, user: { id: 1 } }, r);
     expect(r.statusCode).toBe(200);
     expect(row('payables', 41)).toMatchObject({ paid_amount: 0, status: 'Pending' });
     expect(row('inventory_lots', 5).paid_amount).toBe(0);

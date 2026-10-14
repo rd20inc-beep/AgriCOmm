@@ -31,6 +31,9 @@ function eq(a, b) {
   return String(a) === String(b);
 }
 
+// Numbers compare as numbers; anything else (an ISO date) as text.
+const ord = (v) => (v !== null && v !== '' && Number.isFinite(Number(v)) ? Number(v) : String(v instanceof Date ? v.toISOString().slice(0, 10) : v));
+
 function test(row, c) {
   if (c.type === 'obj') return Object.entries(c.value).every(([k, v]) => eq(row[k], v));
   if (c.type === 'in') return c.values.some((v) => eq(row[c.field], v));
@@ -41,10 +44,10 @@ function test(row, c) {
   switch (c.op) {
     case '=': return eq(l, r);
     case '!=': case '<>': return !eq(l, r);
-    case '>': return parseFloat(l) > parseFloat(r);
-    case '>=': return parseFloat(l) >= parseFloat(r);
-    case '<': return parseFloat(l) < parseFloat(r);
-    case '<=': return parseFloat(l) <= parseFloat(r);
+    case '>': return ord(l) > ord(r);
+    case '>=': return ord(l) >= ord(r);
+    case '<': return ord(l) < ord(r);
+    case '<=': return ord(l) <= ord(r);
     case 'like': return String(l || '').includes(String(r).replace(/%/g, ''));
     default: throw new Error(`memoryDb: unsupported operator ${c.op}`);
   }
