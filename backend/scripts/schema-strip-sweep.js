@@ -44,6 +44,15 @@ function schemaKeys(name) {
   }
   return keys;
 }
+// A schema declared with .unknown(true) keeps every undeclared field even under
+// validate()'s stripUnknown, so nothing it doesn't list is stripped.
+function passesUnknown(name) {
+  const m = new RegExp(`const\\s+${name}\\s*=\\s*Joi\\.object\\(\\{`).exec(schemaSrc);
+  if (!m) return false;
+  const close = balanced(schemaSrc, m.index + m[0].length - 1);
+  const rest = schemaSrc.slice(close + 1, schemaSrc.indexOf(';', close));
+  return /\.unknown\(\s*(true)?\s*\)/.test(rest);
+}
 const allFiles = (dir, out = []) => {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
     const p = path.join(dir, e.name);
@@ -144,6 +153,7 @@ for (const file of FILES.filter((f) => f.endsWith('.routes.js'))) {
     if (!sm) continue;
     examined += 1;
     const schema = sm[1];
+    if (passesUnknown(schema)) continue;
     const keys = schemaKeys(schema);
     const routePath = (/^\(\s*'([^']*)'/.exec(call) || [])[1] || '?';
     const tail = call.slice(sm.index);
