@@ -26,10 +26,12 @@ router.post('/scheduled-reports/:id/run', authorize('reports', 'view'), noFinanc
 router.get('/lot-ledger/:id', authorize('reports', 'view'), controller.lotLedger);
 router.get('/batch-ledger/:id', authorize('reports', 'view'), controller.batchLedger);
 router.get('/invoice-ledger', authorize('reports', 'view'), noFinanceForOperator, controller.invoiceLedger);
-router.get('/payroll-ledger', authorize('reports', 'view'), noFinanceForOperator, controller.payrollLedger);
-router.get('/payroll-overview', authorize('reports', 'view'), noFinanceForOperator, controller.payrollOverview);
-router.get('/payroll-pending', authorize('reports', 'view'), noFinanceForOperator, controller.payrollPending);
-router.get('/payroll-analytics', authorize('reports', 'view'), noFinanceForOperator, controller.payrollAnalytics);
+// Salaries (owner decision D-24): payroll reports need payroll.view on top of
+// reports.view — reports.view alone is held by roles with no payroll access.
+router.get('/payroll-ledger', authorize('reports', 'view'), authorize('payroll', 'view'), noFinanceForOperator, controller.payrollLedger);
+router.get('/payroll-overview', authorize('reports', 'view'), authorize('payroll', 'view'), noFinanceForOperator, controller.payrollOverview);
+router.get('/payroll-pending', authorize('reports', 'view'), authorize('payroll', 'view'), noFinanceForOperator, controller.payrollPending);
+router.get('/payroll-analytics', authorize('reports', 'view'), authorize('payroll', 'view'), noFinanceForOperator, controller.payrollAnalytics);
 // One local sale's Sale-360 (lot, provenance, payments) — opened from the mill
 // Sales tab, so it follows the sales tracker: no role deny, money redacted.
 router.get('/sale-detail/:id', authorize('reports', 'view'), controller.saleDetail);
