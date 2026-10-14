@@ -2506,171 +2506,7 @@ const millingController = {
       const batchId = await resolveBatchId(req.params.id);
       if (!batchId) return res.status(404).json({ success: false, message: 'Milling batch not found.' });
 
-      const refuse = (status, message) => {
-        const err = new Error(message);
-        err.statusCode = status;
-        return err;
-      };
-
-      await db.transaction(async (trx) => {
-        const batch = await trx('milling_batches').where({ id: batchId }).forUpdate().first();
-        if (!batch) throw refuse(404, 'Milling batch not found.');
-        const label = batch.batch_no || `batch ${batchId}`;
-
-        if (batch.status === 'Completed') {
-          throw refuse(400, 'Completed batches cannot be deleted. Reverse the yield first.');
-        }
-        if (await batchHasOutputLots(trx, batchId)) {
-          throw refuse(409, `${label} already has yield output lots. Reverse the yield first.`);
-        }
-
-        // Service batches: invoices and dispatches reference the batch with a
-        // RESTRICT FK — say so instead of failing on the constraint.
-        if (batch.is_service_milling) {
-          const [inv, disp] = await Promise.all([
-            trx('service_milling_invoices').where({ service_batch_id: batchId }).count('id as c').first(),
-            trx('service_milling_dispatches').where({ service_batch_id: batchId }).count('id as c').first(),
-          ]);
-          const nInv = parseInt(inv && inv.c, 10) || 0;
-          const nDisp = parseInt(disp && disp.c, 10) || 0;
-          if (nInv || nDisp) {
-            const parts = [nInv ? `${nInv} service invoice(s)` : null, nDisp ? `${nDisp} dispatch(es)` : null].filter(Boolean);
-            throw refuse(409, `${label} has ${parts.join(' and ')}. Delete those first, then the batch.`);
-          }
-        }
-
-        // Transporter payable for the batch's freight (Costs tab, Paid By =
-        // company). Paid → the money has left; the payment must be reversed
-        // first. Unpaid → voided below with its accrual.
-        const transportPay = await trx('payables')
-          .where({ source_table: 'batch_transport', source_id: batchId }).forUpdate().first();
-        if (transportPay && (parseFloat(transportPay.paid_amount) || 0) > 0.01) {
-          throw refuse(409, `${label}'s transport payable${transportPay.pay_no ? ` ${transportPay.pay_no}` : ''} has payments recorded — reverse the transporter payment first.`);
-        }
-
-        // Detach raw lot if it exists and has no movements other than receipts
-        const lot = await trx('inventory_lots')
-          .where({ batch_ref: `batch-${batchId}`, type: 'raw', entity: 'mill' })
-          .first();
-        if (lot) {
-          // Canonical ledger equivalents of production_issue / adjustment_minus.
-          const consumed = await trx('lot_transactions')
-            .where('lot_id', lot.id)
-            .whereIn('transaction_type', ['milling_issue', 'stock_adjustment_minus'])
-            .count('* as n').first();
-          if (parseInt(consumed.n, 10) > 0) {
-            throw refuse(400, 'Raw rice from this batch has already been consumed/adjusted; cannot delete.');
-          }
-          await trx('lot_transactions').where('lot_id', lot.id).del();
-          await trx('inventory_lots').where('id', lot.id).del();
-        }
-
-        // Release blend/byproduct source lots: they were flagged 'In Milling'
-        // and hard-reserved when the batch was created but (for a non-Completed
-        // batch) never consumed — otherwise they'd stay reserved and vanish
-        // from the New-Batch picker forever.
-        await releaseBatchSources(trx, batchId);
-        await trx('batch_source_lots').where({ batch_id: batchId }).del();
-
-        await trx('milling_vehicle_arrivals').where({ batch_id: batchId }).del();
-        await trx('milling_quality_samples').where({ batch_id: batchId }).del();
-
-        // Reverse any mill-store consumption logged against this batch and drop
-        // the logs — mill_consumption_logs.batch_id is an onDelete('RESTRICT') FK,
-        // so leaving the rows makes the batch undeletable (opaque 500). Return the
-        // consumed quantity to mill_stock and remove the consumption movements.
-        const consumptionLogs = await trx('mill_consumption_logs').where({ batch_id: batchId });
-        for (const cl of consumptionLogs) {
-          const stockQ = trx('mill_stock').where('item_id', cl.item_id);
-          if (cl.warehouse_id == null) stockQ.whereNull('warehouse_id'); else stockQ.where('warehouse_id', cl.warehouse_id);
-          const stockRow = await stockQ.first();
-          if (stockRow) {
-            await trx('mill_stock').where({ id: stockRow.id })
-              .update({ quantity_available: trx.raw('quantity_available + ?', [cl.quantity_used]), updated_at: trx.fn.now() });
-          }
-        }
-        await trx('mill_stock_movements').where({ reference_type: 'batch', reference_id: batchId }).del();
-        await trx('mill_consumption_logs').where({ batch_id: batchId }).del();
-
-        // Packaging lines (received / consumed bags). Their rows cascade with the
-        // batch but the store stock they moved did not: saving an empty line set
-        // reverses every line through the same service that posted it.
-        await batchPackagingService.save(batchId, [], req.user?.id, trx);
-
-        // Packing runs drew bags / masters / polythene from store and expensed
-        // them (Dr 6000 / Cr 1250). Put back exactly what each run drew, and
-        // reverse the expense by its net (signed delta).
-        const packLogs = await trx('mill_packing_logs').where({ batch_id: batchId });
-        if (packLogs.length) {
-          const drawn = await trx('mill_stock_movements')
-            .where({ reference_type: 'packing' })
-            .whereIn('reference_id', packLogs.map((l) => l.id));
-          const back = [];
-          for (const m of drawn) {
-            const q = -(parseFloat(m.quantity) || 0);
-            if (!q) continue;
-            await batchPackagingService.moveStock(trx, { itemId: m.item_id, warehouseId: m.warehouse_id ?? null, delta: q });
-            back.push({
-              item_id: m.item_id, warehouse_id: m.warehouse_id ?? null,
-              movement_type: q > 0 ? 'return' : 'consumption',
-              quantity: q,
-              cost_per_unit: m.cost_per_unit,
-              total_cost: Math.round(Math.abs(q) * (parseFloat(m.cost_per_unit) || 0) * 100) / 100,
-              reference_type: 'packing', reference_id: m.reference_id,
-              reason: `Batch ${label} deleted — packing run #${m.reference_id} reversed`,
-              performed_by: req.user?.id || null,
-            });
-          }
-          if (back.length) await trx('mill_stock_movements').insert(back);
-          await reverseNetJournal(trx, {
-            refType: 'Mill Packing', refNo: batch.batch_no || `BATCH-${batchId}`,
-            debitCode: '6000', creditCode: '1250', label,
-            description: `Packing reversed — batch ${label} deleted`, userId: req.user?.id,
-          });
-          await trx('mill_packing_logs').where({ batch_id: batchId }).del();
-        }
-
-        // Unpaid transporter payable: void it and reverse its accrual
-        // (Dr Raw 1210 / Cr 2010) by the net that was posted.
-        if (transportPay) {
-          await trx('payables').where({ id: transportPay.id }).update({
-            status: 'Written Off', outstanding: 0,
-            notes: `${transportPay.notes ? `${transportPay.notes} — ` : ''}voided: batch ${label} deleted`,
-            updated_at: trx.fn.now(),
-          });
-          await reverseNetJournal(trx, {
-            refType: 'Batch Transport', refNo: batch.batch_no,
-            debitCode: '1210', creditCode: '2010', label,
-            description: `Transport payable voided — batch ${label} deleted`, userId: req.user?.id,
-            partyType: 'hauler', partyId: transportPay.hauler_id,
-          });
-        }
-        // The freight record survives the batch (its FK is SET NULL) — mark it
-        // cancelled so it no longer shows as owed.
-        await trx('transport_costs').where({ batch_id: batchId })
-          .update({ status: 'cancelled', updated_at: trx.fn.now() });
-
-        // Unlink the advanced-milling child rows that reference this batch with a
-        // NO-ACTION FK (they'd otherwise block the delete with an opaque 500, same
-        // class as the consumption RESTRICT above). All these batch_id columns are
-        // nullable — null them so the independent plan/downtime/utility/reprocess
-        // records survive but no longer point at the deleted batch. No .catch()
-        // here: a failed statement aborts a Postgres transaction, so swallowing
-        // the error only turned it into a confusing failure further down.
-        for (const [table, col] of [
-          ['production_plans', 'batch_id'],
-          ['machine_downtime', 'batch_id'],
-          ['utility_consumption', 'batch_id'],
-          ['reprocessing_batches', 'original_batch_id'],
-        ]) {
-          if (await trx.schema.hasTable(table)) {
-            await trx(table).where(col, batchId).update({ [col]: null });
-          }
-        }
-
-        await trx('milling_costs').where({ batch_id: batchId }).del();
-        await trx('milling_batches').where({ id: batchId }).del();
-      });
+      await db.transaction((trx) => deleteBatchTx(trx, batchId, req.user?.id));
 
       return res.json({ success: true, message: 'Batch deleted.' });
     } catch (err) {
@@ -2679,6 +2515,176 @@ const millingController = {
     }
   },
 };
+
+// The body of deleteBatch, inside the caller's transaction — shared with the
+// Super-Admin Danger Zone (P2-23) so a batch is only ever removed through the
+// same refusals and signed-delta reversals. Throws an Error carrying
+// statusCode on a refusal.
+async function deleteBatchTx(trx, batchId, userId) {
+  const refuse = (status, message) => {
+    const err = new Error(message);
+    err.statusCode = status;
+    return err;
+  };
+
+    const batch = await trx('milling_batches').where({ id: batchId }).forUpdate().first();
+    if (!batch) throw refuse(404, 'Milling batch not found.');
+    const label = batch.batch_no || `batch ${batchId}`;
+
+    if (batch.status === 'Completed') {
+      throw refuse(400, 'Completed batches cannot be deleted. Reverse the yield first.');
+    }
+    if (await batchHasOutputLots(trx, batchId)) {
+      throw refuse(409, `${label} already has yield output lots. Reverse the yield first.`);
+    }
+
+    // Service batches: invoices and dispatches reference the batch with a
+    // RESTRICT FK — say so instead of failing on the constraint.
+    if (batch.is_service_milling) {
+      const [inv, disp] = await Promise.all([
+        trx('service_milling_invoices').where({ service_batch_id: batchId }).count('id as c').first(),
+        trx('service_milling_dispatches').where({ service_batch_id: batchId }).count('id as c').first(),
+      ]);
+      const nInv = parseInt(inv && inv.c, 10) || 0;
+      const nDisp = parseInt(disp && disp.c, 10) || 0;
+      if (nInv || nDisp) {
+        const parts = [nInv ? `${nInv} service invoice(s)` : null, nDisp ? `${nDisp} dispatch(es)` : null].filter(Boolean);
+        throw refuse(409, `${label} has ${parts.join(' and ')}. Delete those first, then the batch.`);
+      }
+    }
+
+    // Transporter payable for the batch's freight (Costs tab, Paid By =
+    // company). Paid → the money has left; the payment must be reversed
+    // first. Unpaid → voided below with its accrual.
+    const transportPay = await trx('payables')
+      .where({ source_table: 'batch_transport', source_id: batchId }).forUpdate().first();
+    if (transportPay && (parseFloat(transportPay.paid_amount) || 0) > 0.01) {
+      throw refuse(409, `${label}'s transport payable${transportPay.pay_no ? ` ${transportPay.pay_no}` : ''} has payments recorded — reverse the transporter payment first.`);
+    }
+
+    // Detach raw lot if it exists and has no movements other than receipts
+    const lot = await trx('inventory_lots')
+      .where({ batch_ref: `batch-${batchId}`, type: 'raw', entity: 'mill' })
+      .first();
+    if (lot) {
+      // Canonical ledger equivalents of production_issue / adjustment_minus.
+      const consumed = await trx('lot_transactions')
+        .where('lot_id', lot.id)
+        .whereIn('transaction_type', ['milling_issue', 'stock_adjustment_minus'])
+        .count('* as n').first();
+      if (parseInt(consumed.n, 10) > 0) {
+        throw refuse(400, 'Raw rice from this batch has already been consumed/adjusted; cannot delete.');
+      }
+      await trx('lot_transactions').where('lot_id', lot.id).del();
+      await trx('inventory_lots').where('id', lot.id).del();
+    }
+
+    // Release blend/byproduct source lots: they were flagged 'In Milling'
+    // and hard-reserved when the batch was created but (for a non-Completed
+    // batch) never consumed — otherwise they'd stay reserved and vanish
+    // from the New-Batch picker forever.
+    await releaseBatchSources(trx, batchId);
+    await trx('batch_source_lots').where({ batch_id: batchId }).del();
+
+    await trx('milling_vehicle_arrivals').where({ batch_id: batchId }).del();
+    await trx('milling_quality_samples').where({ batch_id: batchId }).del();
+
+    // Reverse any mill-store consumption logged against this batch and drop
+    // the logs — mill_consumption_logs.batch_id is an onDelete('RESTRICT') FK,
+    // so leaving the rows makes the batch undeletable (opaque 500). Return the
+    // consumed quantity to mill_stock and remove the consumption movements.
+    const consumptionLogs = await trx('mill_consumption_logs').where({ batch_id: batchId });
+    for (const cl of consumptionLogs) {
+      const stockQ = trx('mill_stock').where('item_id', cl.item_id);
+      if (cl.warehouse_id == null) stockQ.whereNull('warehouse_id'); else stockQ.where('warehouse_id', cl.warehouse_id);
+      const stockRow = await stockQ.first();
+      if (stockRow) {
+        await trx('mill_stock').where({ id: stockRow.id })
+          .update({ quantity_available: trx.raw('quantity_available + ?', [cl.quantity_used]), updated_at: trx.fn.now() });
+      }
+    }
+    await trx('mill_stock_movements').where({ reference_type: 'batch', reference_id: batchId }).del();
+    await trx('mill_consumption_logs').where({ batch_id: batchId }).del();
+
+    // Packaging lines (received / consumed bags). Their rows cascade with the
+    // batch but the store stock they moved did not: saving an empty line set
+    // reverses every line through the same service that posted it.
+    await batchPackagingService.save(batchId, [], userId, trx);
+
+    // Packing runs drew bags / masters / polythene from store and expensed
+    // them (Dr 6000 / Cr 1250). Put back exactly what each run drew, and
+    // reverse the expense by its net (signed delta).
+    const packLogs = await trx('mill_packing_logs').where({ batch_id: batchId });
+    if (packLogs.length) {
+      const drawn = await trx('mill_stock_movements')
+        .where({ reference_type: 'packing' })
+        .whereIn('reference_id', packLogs.map((l) => l.id));
+      const back = [];
+      for (const m of drawn) {
+        const q = -(parseFloat(m.quantity) || 0);
+        if (!q) continue;
+        await batchPackagingService.moveStock(trx, { itemId: m.item_id, warehouseId: m.warehouse_id ?? null, delta: q });
+        back.push({
+          item_id: m.item_id, warehouse_id: m.warehouse_id ?? null,
+          movement_type: q > 0 ? 'return' : 'consumption',
+          quantity: q,
+          cost_per_unit: m.cost_per_unit,
+          total_cost: Math.round(Math.abs(q) * (parseFloat(m.cost_per_unit) || 0) * 100) / 100,
+          reference_type: 'packing', reference_id: m.reference_id,
+          reason: `Batch ${label} deleted — packing run #${m.reference_id} reversed`,
+          performed_by: userId || null,
+        });
+      }
+      if (back.length) await trx('mill_stock_movements').insert(back);
+      await reverseNetJournal(trx, {
+        refType: 'Mill Packing', refNo: batch.batch_no || `BATCH-${batchId}`,
+        debitCode: '6000', creditCode: '1250', label,
+        description: `Packing reversed — batch ${label} deleted`, userId: userId,
+      });
+      await trx('mill_packing_logs').where({ batch_id: batchId }).del();
+    }
+
+    // Unpaid transporter payable: void it and reverse its accrual
+    // (Dr Raw 1210 / Cr 2010) by the net that was posted.
+    if (transportPay) {
+      await trx('payables').where({ id: transportPay.id }).update({
+        status: 'Written Off', outstanding: 0,
+        notes: `${transportPay.notes ? `${transportPay.notes} — ` : ''}voided: batch ${label} deleted`,
+        updated_at: trx.fn.now(),
+      });
+      await reverseNetJournal(trx, {
+        refType: 'Batch Transport', refNo: batch.batch_no,
+        debitCode: '1210', creditCode: '2010', label,
+        description: `Transport payable voided — batch ${label} deleted`, userId: userId,
+        partyType: 'hauler', partyId: transportPay.hauler_id,
+      });
+    }
+    // The freight record survives the batch (its FK is SET NULL) — mark it
+    // cancelled so it no longer shows as owed.
+    await trx('transport_costs').where({ batch_id: batchId })
+      .update({ status: 'cancelled', updated_at: trx.fn.now() });
+
+    // Unlink the advanced-milling child rows that reference this batch with a
+    // NO-ACTION FK (they'd otherwise block the delete with an opaque 500, same
+    // class as the consumption RESTRICT above). All these batch_id columns are
+    // nullable — null them so the independent plan/downtime/utility/reprocess
+    // records survive but no longer point at the deleted batch. No .catch()
+    // here: a failed statement aborts a Postgres transaction, so swallowing
+    // the error only turned it into a confusing failure further down.
+    for (const [table, col] of [
+      ['production_plans', 'batch_id'],
+      ['machine_downtime', 'batch_id'],
+      ['utility_consumption', 'batch_id'],
+      ['reprocessing_batches', 'original_batch_id'],
+    ]) {
+      if (await trx.schema.hasTable(table)) {
+        await trx(table).where(col, batchId).update({ [col]: null });
+      }
+    }
+
+  await trx('milling_costs').where({ batch_id: batchId }).del();
+  await trx('milling_batches').where({ id: batchId }).del();
+}
 
 // Reverse what a batch's auto journals of one kind posted, by their NET
 // (signed delta — never reverse + repost): sum the Posted lines on the debit
@@ -2719,3 +2725,4 @@ async function reverseNetJournal(trx, {
 }
 
 module.exports = millingController;
+module.exports.deleteBatchTx = deleteBatchTx;
