@@ -779,17 +779,24 @@ const documentCustomerStyle = Joi.object({
   fontFamily: Joi.string().max(80).allow('', null),
   fontScale: Joi.number().min(0.7).max(1.5),
 });
-// Send a rendered document to the customer over WhatsApp (QR channel). `html`
-// is the print-ready markup the server converts to a PDF attachment.
+// Store the document body as the operator sees it (P1-08). Sanitized on the
+// server; PDF / email / WhatsApp render this stored copy, never request HTML.
+const saveDocumentRendering = Joi.object({
+  html: Joi.string().max(900000).required(),
+});
+// Approve may carry the body as the approver sees it, stored atomically.
+const documentApprove = Joi.object({
+  renderedHtml: Joi.string().max(900000).allow('', null),
+});
+// Send a document to the customer over WhatsApp (QR channel). The server renders
+// the STORED version — a posted `html` is no longer accepted (stripped).
 const sendDocumentWhatsApp = Joi.object({
-  html: Joi.string().required(),
   to: Joi.string().max(30).allow('', null),
   caption: Joi.string().max(1024).allow('', null),
   filename: Joi.string().max(120).allow('', null),
 });
 
 const sendDocumentEmail = Joi.object({
-  html: Joi.string().required(),
   to: Joi.string().max(200).allow('', null),
   subject: Joi.string().max(255).allow('', null),
   message: Joi.string().max(4000).allow('', null),
@@ -797,14 +804,13 @@ const sendDocumentEmail = Joi.object({
 });
 
 // Bundle several documents into one ZIP: stored files by id, plus generated
-// documents whose HTML the browser renders and sends (the renderers are
-// client-side, so the server cannot produce that HTML itself).
+// documents named by type — the server renders each one's STORED latest version
+// (P1-08); HTML posted by an older client is stripped and ignored.
 const bundleDocuments = Joi.object({
   uploadedIds: Joi.array().items(Joi.number().integer().positive()).default([]),
   generated: Joi.array().items(Joi.object({
     docType: Joi.string().max(60).required(),
     filename: Joi.string().max(160).allow('', null),
-    html: Joi.string().required(),
   })).default([]),
   // The sequence to merge in: { k: 'u', id } for an uploaded file, { k: 'g', i }
   // for a generated one. validate() runs with stripUnknown, so a field missing
@@ -823,7 +829,7 @@ const bundleDocuments = Joi.object({
 });
 
 const downloadDocumentPdf = Joi.object({
-  html: Joi.string().required(),
+  genId: Joi.number().integer().positive(),
   filename: Joi.string().max(160).allow('', null),
 });
 
@@ -974,6 +980,8 @@ module.exports = {
   createBatch,
   recordYield,
   saveDocumentOverrides,
+  saveDocumentRendering,
+  documentApprove,
   documentSettings,
   documentStatus,
   documentRevise,
