@@ -63,7 +63,7 @@ function readCredential(req) {
 }
 
 function ownerApproval(kind) {
-  return async (req, res, next) => {
+  const mw = async (req, res, next) => {
     try {
       const actor = req.user || {};
       const actorRole = actor.role_id
@@ -166,6 +166,9 @@ function ownerApproval(kind) {
       return res.status(500).json({ success: false, message: 'Authorization check failed.' });
     }
   };
+  // Tag so a route walk can prove which routes carry the gate (P2-32).
+  mw.ownerApproval = kind;
+  return mw;
 }
 
 module.exports = ownerApproval;

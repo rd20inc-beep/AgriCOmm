@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { authorizeAny } = require('../../middleware/rbac');
+const { authorize, authorizeAny } = require('../../middleware/rbac');
 const auditAction = require('../../middleware/audit');
 const service = require('./sampleAnalysis.service');
 const validate = require('../../middleware/validate');
@@ -39,12 +39,13 @@ router.patch('/:id/sample-no', canEdit,
   auditAction('rename_sample', 'rice_samples', (req) => req.params.id),
   wrap((req) => service.rename(req.params.id, req.body?.sample_no)));
 
-// Convert creates a purchase lot, so it takes the purchase-lot permission
-// (inventory.create) — or milling.edit, because the Mill Operator holds full
-// mill access but not inventory.create (it never had it: mig 200/224/314). The
-// body is validated like any other purchase; the lot itself goes through
-// createPurchaseLot's own checks and cost-visibility rule.
-const canConvert = authorizeAny(['inventory', 'create'], ['milling', 'edit']);
+// Convert creates a purchase lot — a supplier payable and GL — so it takes the
+// purchase-lot permission, inventory.create, and nothing else (P2-32 /
+// INV-63). It used to also admit milling.edit, which let the Mill Operator
+// (who never held inventory.create: mig 200/224/314) create purchase lots
+// through this back door. The body is validated like any other purchase; the
+// lot itself goes through createPurchaseLot's own checks and cost-visibility rule.
+const canConvert = authorize('inventory', 'create');
 router.post('/:id/convert', canConvert,
   validate(schemas.convertSampleToLot),
   auditAction('convert_sample', 'rice_samples', (req) => req.params.id),

@@ -408,6 +408,9 @@ COL customers.is_active:boolean:NOT NULL
 COL customers.is_favorite:boolean:NOT NULL
 COL customers.name:character varying:NOT NULL
 COL customers.payment_terms:character varying:NULL
+COL customers.pending_edit:jsonb:NULL
+COL customers.pending_edit_at:timestamp with time zone:NULL
+COL customers.pending_edit_by:integer:NULL
 COL customers.phone:character varying:NULL
 COL customers.port:character varying:NULL
 COL customers.review_notes:text:NULL
@@ -2976,6 +2979,7 @@ CON customer_scores.chk_customer_scores_volume_score_range(c)
 CON customer_scores.customer_scores_customer_id_foreign(f)
 CON customer_scores.customer_scores_pkey(p)
 CON customers.chk_customers_approval_status(c)
+CON customers.customers_pending_edit_by_foreign(f)
 CON customers.customers_pkey(p)
 CON customers.customers_reviewed_by_foreign(f)
 CON customers.customers_submitted_by_foreign(f)

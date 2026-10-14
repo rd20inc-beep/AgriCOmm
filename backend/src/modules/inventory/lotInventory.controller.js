@@ -5,6 +5,7 @@
  */
 
 const db = require('../../config/database');
+const { supplierRefusal } = require('../../shared/partyGate');
 const uc = require('../../services/unitConversion');
 const accountingService = require('../../services/accountingService');
 // Shared lot-number generators — keeps the Purchase Lot drawer and the
@@ -955,6 +956,9 @@ module.exports = {
           missing,
         });
       }
+      // A supplier rejected in master-data review cannot be bought from (P2-32).
+      const refusal = await supplierRefusal(db, supplier_id);
+      if (refusal) return res.status(refusal.status).json({ success: false, code: refusal.code, message: refusal.message });
 
       // Kg per bag defaults to the SACK SIZE, not a flat 50. A lot entered as
       // 25kg bags with no explicit per-bag weight was stored as size 25 /
@@ -1528,6 +1532,8 @@ module.exports = {
         if (bodySupplierId && parseInt(bodySupplierId, 10) !== lot.supplier_id) {
           const e = new Error('A purchase can only be added to a lot from the same supplier.'); e.status = 422; throw e;
         }
+        const refusal = await supplierRefusal(trx, lot.supplier_id); // rejected supplier (P2-32)
+        if (refusal) { const e = new Error(refusal.message); e.status = refusal.status; throw e; }
         if (String(lot.status) !== 'Available') {
           const e = new Error(`Cannot add a purchase to a lot with status "${lot.status}".`); e.status = 422; throw e;
         }
