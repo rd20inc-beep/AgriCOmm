@@ -11,6 +11,8 @@ export const financeApi = {
   purchasePaymentTrail: (source, sourceId) => api.get(`/api/finance/purchases/${source}/${sourceId}/payments`),
   payables: (params) => api.get('/api/finance/payables', params),
   recordPayment: (data) => api.post('/api/finance/payments', data),
+  // P2-31: one party's invoices settled together — all parts posted, or none.
+  settleAcross: (data) => api.post('/api/finance/settle', data),
   // D-3: a reason, and the Owner's approval (ownerId + X-Owner-Credential via OwnerAuthContext).
   reversePayment: (id, reason, ownerId) => api.post(`/api/finance/payments/${id}/reverse`, { reason, authorized_by_owner_id: ownerId }),
   payments: (params) => api.get('/api/finance/payments', params),
@@ -37,7 +39,6 @@ export const financeApi = {
   internalTransfer: (id) => api.get(`/api/finance/internal-transfers/${id}`),
   confirmTransferExport: (id) => api.put(`/api/finance/internal-transfers/${id}/confirm-export`),
   fundTransfers: (params) => api.get('/api/finance/fund-transfers', params),
-  createFundTransfer: (data) => api.post('/api/finance/fund-transfers', data),
   acceptFundTransfer: (id, body = {}) => api.post(`/api/finance/fund-transfers/${id}/accept`, body),
   reverseFundTransfer: (id, body = {}) => api.post(`/api/finance/fund-transfers/${id}/reverse`, body),
   fundTransfer: (id) => api.get(`/api/finance/fund-transfers/${id}`),

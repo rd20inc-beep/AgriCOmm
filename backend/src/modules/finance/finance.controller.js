@@ -2262,22 +2262,25 @@ financeController.payPurchase = async (req, res) => {
         },
       };
       const payments = [];
+      let overdraft = null;
       if (!payables.length) {
-        const { payment } = await recordMoneyMovement(trx, {
+        const { payment, overdraft: od } = await recordMoneyMovement(trx, {
           ...common, amount: payNum, notes: notes || `Payment for ${source} ${label}`,
         });
         payments.push(payment);
+        overdraft = od || null;
       } else {
         // FIFO across the open payables, one payment row per payable.
         let left = round2(payNum);
         for (const o of open) {
           if (left <= 0.01) break;
           const part = round2(Math.min(left, o.owed));
-          const { payment } = await recordMoneyMovement(trx, {
+          const { payment, overdraft: od } = await recordMoneyMovement(trx, {
             ...common, payable: o.payable, amount: part, checkOutstanding: false,
             notes: notes || `Payment for ${source} ${label}${o.payable.category && source === 'lot' ? ` — ${o.payable.category}` : ''}`,
           });
           payments.push(payment);
+          overdraft = od || null; // the balance after the last part
           left = round2(left - part);
         }
       }
@@ -2294,6 +2297,8 @@ financeController.payPurchase = async (req, res) => {
         uncleared,
         postDated: uncleared,
         payments: payments.map((p) => ({ id: p.id, payment_no: p.payment_no, amount: parseFloat(p.amount) || 0, payable_id: p.linked_payable_id || null })),
+        // P2-31: allowed, with the warning (owner decision B2).
+        ...(overdraft ? { warning: overdraft } : {}),
       };
     });
 

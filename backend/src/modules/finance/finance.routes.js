@@ -9,11 +9,13 @@ const { authorizeAny, authorizeRole } = require('../../middleware/rbac');
 const db = require('../../config/database');
 const auditAction = require('../../middleware/audit');
 const ownerApproval = require('../../middleware/ownerApproval');
+const retired = require('../../middleware/retired');
 const validate = require('../../middleware/validate');
 const schemas = require('../../middleware/schemas');
 const fundTransfers = require('../finance/fundTransfers.service');
 const { isMillOnlyPayer } = require('../../shared/millPayer');
 const { bankTieOut } = require('./bankTieOut');
+const { settleAcross } = require('./settleAcross');
 
 // #14 Phase 1e — supporting-document upload for payments (WHT certificate,
 // vendor invoice, receipt). Disk storage under uploads/payments, mirroring the
@@ -132,15 +134,12 @@ router.get('/fund-transfers/:id', authorize('finance', 'view'), async (req, res)
     return res.json({ success: true, data: { transfer } });
   } catch (e) { return sendTransferError(res, e); }
 });
-router.post('/fund-transfers', authorize('finance', 'confirm_payment'),
-  auditAction('fund_transfer', 'finance', (req, data) => data?.data?.transfer?.id || null),
-  async (req, res) => {
-    try {
-      const transfer = await fundTransfers.create(req.body, req.user?.id);
-      if (transfer && transfer.overdraft) return res.json({ success: true, data: { transfer, warning: transfer.overdraft } });
-      return res.json({ success: true, data: { transfer } });
-    } catch (e) { return res.status(e.statusCode || 400).json({ success: false, message: e.message }); }
-  });
+// P2-31: the legacy create (no Joi, no account lock, no direction check, no
+// client_ref) is retired. A Head Office ⇄ Mill transfer is made through POST
+// /contra-transfers, which hands a cross-entity pair to the same pending,
+// accept-to-complete flow (fundTransfers.createContra).
+router.post('/fund-transfers',
+  retired('Fund transfers are made through POST /api/finance/contra-transfers (Head Office ⇄ Mill included).'));
 // Accepting is authorised by the RECEIVING side, with no Owner step (owner
 // decision 2026-10-06): Head Office (to_entity 'general') accepts with
 // finance.confirm_payment, the Mill with milling.edit. It used to be
@@ -226,6 +225,25 @@ router.post(
   auditAction('record_payment', 'finance', (req, data) => data.data && data.data.id ? data.data.id : null),
   controller.recordPayment
 );
+// P2-31: settle one party's invoices together — every part posted, or none
+// (finance/settleAcross.js). Same permission as a single payment; a mill-only
+// payer is held to mill documents and accounts by the engine.
+router.post(
+  '/settle',
+  canPayFinanceOrMill,
+  validate(schemas.settleAcross),
+  auditAction('settle_across', 'finance', (req, data) => (data && data.data && data.data.payments && data.data.payments[0] && data.data.payments[0].id) || null),
+  async (req, res) => {
+    try {
+      const millOnly = await isMillOnlyPayer(req);
+      const out = await db.transaction((trx) => settleAcross(trx, req.body, { userId: req.user?.id, millOnly }));
+      return res.status(201).json({ success: true, data: { ...out, ...(out.overdraft ? { warning: out.overdraft } : {}) } });
+    } catch (e) {
+      const code = e.statusCode || e.status || 500;
+      if (code === 500) console.error('settle across error:', e);
+      return res.status(code).json({ success: false, message: code === 500 ? 'Internal server error.' : e.message });
+    }
+  });
 // Reversal is its own permission (split from confirm_payment, mig 339). Owner
 // decision D-3: it also needs a reason and the Owner's approval — the Owner
 // self-approves, anyone else has an Owner enter their password (mig 364 takes

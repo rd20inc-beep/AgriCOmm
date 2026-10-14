@@ -729,6 +729,44 @@ async function applyReceiptToSale(trx, sale, {
   return { paymentNo, paymentId: payRow.id };
 }
 
+// One receipt for a whole multi-item sale, inside the caller's transaction:
+// lock every Completed line of the group, check the amount against what is
+// still open (net of uncleared cheques), split it oldest line first and record
+// each part through applyReceiptToSale. Shared by the group Pay endpoint and
+// the Finance settle-across-invoices endpoint (P2-31), so a group is settled
+// the same way from either. Throws (status set) — the caller's trx rolls back.
+async function receiveOnSaleGroup(trx, groupNo, input, { millOnly = false, userId = null } = {}) {
+  const lines = await trx('local_sales')
+    .where((q) => q.where('sale_group_no', groupNo).orWhere((q2) => q2.whereNull('sale_group_no').where('sale_no', groupNo)))
+    .where('status', 'Completed')
+    .orderBy('id', 'asc')
+    .forUpdate();
+  if (!lines || !lines.length) {
+    const e = new Error(`${groupNo} has no confirmed lines to take a payment against.`); e.status = 409; throw e;
+  }
+  if (millOnly) {
+    for (const l of lines) assertMillEntity(l.entity, 'sales');
+    await assertMillReceipt(trx, input);
+  }
+  // Uncleared cheques count against what is still open on each line.
+  const pending = await unclearedChequesBySale(trx, lines.map((l) => l.id));
+  const open = lines.map((l) => ({ ...l, due_amount: uc.round2(Math.max(0, (parseFloat(l.due_amount) || 0) - (pending.get(l.id) || 0))) }));
+  const totalDue = uc.round2(open.reduce((s, l) => s + (parseFloat(l.due_amount) || 0), 0));
+  if (input.amount > totalDue + 0.01) {
+    const e = new Error(`Cannot pay Rs ${input.amount} — only Rs ${totalDue.toFixed(2)} remaining on ${groupNo}.`); e.status = 400; throw e;
+  }
+  const allocations = allocateOldestFirst(input.amount, open);
+  const applied = [];
+  for (const { sale, amount } of allocations) {
+    const r = await applyReceiptToSale(trx, sale, {
+      ...input, amount, userId,
+      notes: input.notes || `Payment for local sale ${sale.sale_no} (sale ${groupNo})`,
+    });
+    applied.push({ sale_id: sale.id, sale_no: sale.sale_no, amount, payment_no: r.paymentNo, payment_id: r.paymentId });
+  }
+  return { group_no: groupNo, total_due: totalDue, applied };
+}
+
 // ── Sale form inputs ────────────────────────────────────────────────────────
 
 function ymd(d, utc) {
@@ -1438,37 +1476,7 @@ module.exports = {
       if (input.error) return res.status(400).json({ success: false, message: input.error });
       const millOnly = await isMillOnlyPayer(req, [['inventory', 'create']]);
 
-      const result = await db.transaction(async (trx) => {
-        const lines = await trx('local_sales')
-          .where((q) => q.where('sale_group_no', groupNo).orWhere((q2) => q2.whereNull('sale_group_no').where('sale_no', groupNo)))
-          .where('status', 'Completed')
-          .orderBy('id', 'asc')
-          .forUpdate();
-        if (!lines || !lines.length) {
-          const e = new Error(`${groupNo} has no confirmed lines to take a payment against.`); e.status = 409; throw e;
-        }
-        if (millOnly) {
-          for (const l of lines) assertMillEntity(l.entity, 'sales');
-          await assertMillReceipt(trx, input);
-        }
-        // Uncleared cheques count against what is still open on each line.
-        const pending = await unclearedChequesBySale(trx, lines.map((l) => l.id));
-        const open = lines.map((l) => ({ ...l, due_amount: uc.round2(Math.max(0, (parseFloat(l.due_amount) || 0) - (pending.get(l.id) || 0))) }));
-        const totalDue = uc.round2(open.reduce((s, l) => s + (parseFloat(l.due_amount) || 0), 0));
-        if (input.amount > totalDue + 0.01) {
-          const e = new Error(`Cannot pay Rs ${input.amount} — only Rs ${totalDue.toFixed(2)} remaining on ${groupNo}.`); e.status = 400; throw e;
-        }
-        const allocations = allocateOldestFirst(input.amount, open);
-        const applied = [];
-        for (const { sale, amount } of allocations) {
-          const r = await applyReceiptToSale(trx, sale, {
-            ...input, amount, userId: req.user?.id,
-            notes: input.notes || `Payment for local sale ${sale.sale_no} (sale ${groupNo})`,
-          });
-          applied.push({ sale_id: sale.id, sale_no: sale.sale_no, amount, payment_no: r.paymentNo });
-        }
-        return { group_no: groupNo, total_due: totalDue, applied };
-      });
+      const result = await db.transaction((trx) => receiveOnSaleGroup(trx, groupNo, input, { millOnly, userId: req.user?.id }));
 
       return res.json({ success: true, data: result });
     } catch (err) {
@@ -1625,6 +1633,7 @@ module.exports = {
 // Exported for tests (and for any other receipt path that must settle a local
 // sale the same way).
 module.exports.applyReceiptToSale = applyReceiptToSale;
+module.exports.receiveOnSaleGroup = receiveOnSaleGroup;
 module.exports.allocateOldestFirst = allocateOldestFirst;
 module.exports.validateSaleDate = validateSaleDate;
 module.exports.resolveWalkInCustomer = resolveWalkInCustomer;

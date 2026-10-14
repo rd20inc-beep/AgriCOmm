@@ -433,7 +433,7 @@ const expensesService = {
       // entity's cash float) with its bank_transactions row, posts Dr 2010
       // (2040 for salaries) / Cr 1000 and settles the payable and the expense.
       // A cheque records only; Clear Cheque settles it.
-      await recordMoneyMovement(trx, {
+      const moved = await recordMoneyMovement(trx, {
         type: 'payment',
         payable: payable || null,
         source: { table: 'business_expenses', id: expense.id },
@@ -456,7 +456,9 @@ const expensesService = {
           notes: notes || `Payment for ${expense.expense_no}`,
         },
       });
-      return trx('business_expenses').where('id', id).first();
+      const row = await trx('business_expenses').where('id', id).first();
+      // P2-31: the overdraft warning rides on the response (not a column).
+      return moved.overdraft ? { ...row, warning: moved.overdraft } : row;
     };
     return existingTrx ? run(existingTrx) : db.transaction(run);
   },

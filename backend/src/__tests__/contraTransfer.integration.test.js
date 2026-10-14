@@ -431,7 +431,10 @@ d('contra transfers (DB-gated)', () => {
       expense_type: 'general', category: 'utilities', amount: 4321, currency: 'PKR', expense_date: TODAY,
       vendor_name: `ZZ Vendor ${run}`, pay_now: true, bank_account_id: acc.hoBank.id, payment_method: 'bank_transfer',
     }, null);
-    expect((await post('fm', '/api/finance/fund-transfers', { direction: 'mill_to_ho', from_account_id: acc.millCash.id, to_account_id: acc.hoBank.id, amount: 333 })).status).toBe(200);
+    // (P2-31: the legacy POST /fund-transfers is retired — 410 — the contra
+    // endpoint makes the same pending Mill → HO transfer.)
+    expect((await post('fm', '/api/finance/fund-transfers', { direction: 'mill_to_ho', from_account_id: acc.millCash.id, to_account_id: acc.hoBank.id, amount: 333 })).status).toBe(410);
+    expect((await contra('fm', { from_account_id: acc.millCash.id, to_account_id: acc.hoBank.id, amount: 333 })).status).toBe(200);
 
     const s0 = await snap();
     expect(JSON.stringify(s0.moneyOut)).toMatch(new RegExp(`ZZ Vendor ${run}|PAY-EXP`));

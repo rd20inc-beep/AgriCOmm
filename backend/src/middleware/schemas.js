@@ -651,6 +651,30 @@ const recordPayment = Joi.object({
   attachment_name: Joi.string().allow('', null),
 });
 
+// P2-31: one settlement across several invoices, in one transaction
+// (finance/settleAcross.js). The allocation items carry their own amount and,
+// for payments, WHT / discount.
+const settleAcross = Joi.object({
+  type: Joi.string().valid('receipt', 'payment').required(),
+  currency: Joi.string().trim().uppercase().length(3).allow(null, ''),
+  payment_method: Joi.string().valid('bank_transfer', 'cash', 'cheque', 'lc', 'tt', 'wire', 'online', 'mobile').required(),
+  bank_account_id: Joi.number().integer().positive().allow(null, ''),
+  bank_reference: Joi.string().max(200).allow('', null),
+  due_date: Joi.date().iso().allow(null, ''),
+  payment_date: Joi.date().iso().required(),
+  notes: Joi.string().max(2000).allow('', null),
+  collection_location: Joi.string().valid('Mill', 'Head Office').allow(null, ''),
+  allocations: Joi.array().min(1).max(200).required().items(Joi.object({
+    payable_id: Joi.number().integer().positive(),
+    receivable_id: Joi.number().integer().positive(),
+    sale_group_no: Joi.string().trim().max(60),
+    amount: Joi.number().positive().required(),
+    wht_amount: Joi.number().min(0).allow(null),
+    wht_rate: Joi.number().min(0).max(100).allow(null),
+    discount_amount: Joi.number().min(0).allow(null),
+  }).xor('payable_id', 'receivable_id', 'sale_group_no')),
+});
+
 // ===================== JOURNAL ENTRIES =====================
 
 const createJournal = Joi.object({
@@ -1048,6 +1072,7 @@ module.exports = {
   replaceContraTransfer,
   reverseFundTransfer,
   reversePayment,
+  settleAcross,
   localSaleCreate,
   localSaleReceipt,
   createJournal,

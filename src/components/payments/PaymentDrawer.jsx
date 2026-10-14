@@ -4,7 +4,7 @@ import SlideDrawer from '../SlideDrawer';
 import PaymentFields from './PaymentFields';
 import PaymentHistory from './PaymentHistory';
 import { blankPaymentForm, paymentPayload, paymentFieldError } from './paymentPayload';
-import { overdraftWarning } from '../../shared/utils/overdraft';
+import { overdraftWarning, serverOverdraft } from '../../shared/utils/overdraft';
 
 // The Finance-wide button styles (one filled primary at the right).
 const btnBase = 'inline-flex items-center justify-center gap-1.5 rounded-lg text-sm font-medium whitespace-nowrap px-3.5 min-h-10 sm:min-h-9 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1';
@@ -98,7 +98,11 @@ export default function PaymentDrawer({
         type, currency, payableId, receivableId, notes: defaultNotes,
         ...(fixedAccountId !== undefined ? { bankAccountId: fixedAccountId } : {}),
       });
-      await onSubmit(body, form);
+      const res = await onSubmit(body, form);
+      // P2-31: the server says when the payment left its account overdrawn
+      // (the form's own warning only knows the balance it was shown).
+      const serverWarning = serverOverdraft(res);
+      if (serverWarning) addToast?.(`Recorded — ${serverWarning}`, 'warning');
       onDone?.(form);
     } catch (err) {
       addToast?.(err?.data?.message || err?.message || 'Payment failed', 'error');
