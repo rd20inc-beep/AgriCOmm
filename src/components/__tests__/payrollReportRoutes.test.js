@@ -1,11 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 // P1-06 / D-24: salaries are for payroll.view only. Every shell that mounts a
 // /reports/payroll* page must wrap it in a payroll.view guard — reports.view
 // alone is held by Export Manager, QC and Inventory roles.
-const src = (p) => readFileSync(resolve(__dirname, '..', '..', p), 'utf8');
+const SRC = fileURLToPath(new URL('../..', import.meta.url));
+const src = (p) => readFileSync(resolve(SRC, p), 'utf8');
 const app = src('App.jsx');
 
 const shellBody = (name) => {
