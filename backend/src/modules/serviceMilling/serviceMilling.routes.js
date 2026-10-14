@@ -3,6 +3,9 @@ const router = express.Router();
 const controller = require('./serviceMilling.controller');
 const authorize = require('../../middleware/rbac');
 const auditAction = require('../../middleware/audit');
+const validate = require('../../middleware/validate');
+const schemas = require('../../middleware/schemas');
+const ownerApproval = require('../../middleware/ownerApproval');
 
 // Service-milling clients (the third-party rice owners) — mill-side perm, so the
 // New Batch form's client picker works for Mill/Inventory users. Never exposes
@@ -18,6 +21,7 @@ router.get('/invoices/:id', authorize('service_milling', 'view_invoice'), contro
 router.post(
   '/invoices',
   authorize('service_milling', 'create_invoice'),
+  validate(schemas.createServiceInvoice),
   auditAction('create_service_invoice', 'service_milling_invoice', (req, data) => data?.id),
   controller.createInvoice,
 );
@@ -27,10 +31,16 @@ router.post(
   auditAction('record_service_payment', 'service_milling_invoice', (req) => req.params.id),
   controller.recordPayment,
 );
-// Void an invoice (reverse GL + payments, drop it) so the batch can be re-issued.
+// Void an invoice so the batch can be re-issued (P2-16 / MIL-33): Owner
+// approval + a mandatory reason. The invoice, receivable and journals are kept
+// (D-23) — the GL gets a signed delta; journalled receipts are reversed through
+// Finance first, old journal-less ones here by a finance.reverse_payment holder;
+// nothing is deleted.
 router.post(
   '/invoices/:id/void',
   authorize('service_milling', 'create_invoice'),
+  ownerApproval('service_invoice_void'),
+  validate(schemas.voidServiceInvoice),
   auditAction('void_service_invoice', 'service_milling_invoice', (req) => req.params.id),
   controller.voidInvoice,
 );

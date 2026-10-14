@@ -26,6 +26,7 @@ const schemas = require('../../middleware/schemas');
 const ownerApproval = require('../../middleware/ownerApproval');
 const aiService = require('../ai/ai.service');
 const { pickBatchEdits } = require('./batchLifecycle');
+const { batchYielded, assertBatchOutputsUnsold } = require('./costEditLocks');
 const { reverseExpenseTrail, reverseStatutoryJournal, remittedStatutoryForRun, mirrorJournals } = require('./payrollReversal');
 const { buildLastPrices, findImplausiblePrices, implausiblePriceMessage } = require('./byproductPrices');
 
@@ -39,6 +40,7 @@ router.get('/batches', authorize('milling', 'view'), controller.list);
 router.get('/service-batches', authorize('service_milling', 'view'), controller.listServiceBatches);
 router.get('/batches/:id', authorize('milling', 'view'), controller.getById);
 router.put('/batches/:id', authorize('milling', 'edit'),
+  validate(schemas.updateBatch),
   auditAction('update_batch', 'milling_batch', (req) => req.params.id),
   async (req, res) => {
     try {
@@ -50,6 +52,22 @@ router.put('/batches/:id', authorize('milling', 'edit'),
       // holds) could otherwise complete a batch without yield or reopen one.
       // Status moves through /hold, /resume, /cancel, /approve, /reject, /yield.
       const updates = pickBatchEdits(req.body);
+      // Once the yield is recorded, the raw qty is what the yield was measured
+      // against, the supplier is who the purchase was booked to and the fee is
+      // in the capitalised cost — changing them here re-wrote a posted batch
+      // with no payable / GL change (P2-08 / MIL-38). Unchanged values pass.
+      const current = await db('milling_batches').where({ id }).first();
+      if (!current) return res.status(404).json({ success: false, message: 'Batch not found' });
+      const LOCKED_AFTER_YIELD = ['raw_qty_kg', 'supplier_id', 'milling_fee_per_kg'];
+      const changed = LOCKED_AFTER_YIELD.filter((k) => updates[k] !== undefined
+        && String(updates[k] ?? '') !== String(current[k] ?? '')
+        && !(updates[k] != null && current[k] != null && Math.abs(Number(updates[k]) - Number(current[k])) < 1e-6));
+      if (changed.length && await batchYielded(db, current)) {
+        return res.status(409).json({
+          success: false,
+          message: `Batch ${current.batch_no} already has its yield recorded — its ${changed.map((k) => ({ raw_qty_kg: 'raw quantity', supplier_id: 'supplier', milling_fee_per_kg: 'milling fee' }[k])).join(', ')} can no longer be changed.`,
+        });
+      }
       if (updates.batch_name != null) updates.batch_name = String(updates.batch_name).trim().slice(0, 200) || null;
       // Tags: accept an array or comma string → normalised jsonb array.
       if (req.body.custom_tags !== undefined) {
@@ -497,9 +515,8 @@ router.put('/batches/:id/prices', authorize('milling', 'edit'), requireCostVisib
         csr_price_per_kg, short_grain_price_per_kg,
         powder_price_per_kg, sweeping_price_per_kg,
         choba_price_per_kg,
-        // Residual costing inputs — operator-entered Milling Cost and Other
-        // Expenses (PKR totals). Finished price is DERIVED, not accepted here.
-        manual_milling_cost_pkr, manual_other_expenses_pkr,
+        // manual_milling_cost_pkr / manual_other_expenses_pkr are read below —
+        // only clearing a legacy override is accepted. Finished price is DERIVED.
       } = req.body;
 
       // Every price here is per KG. A per-MT figure (1000× too large) would
@@ -511,7 +528,30 @@ router.put('/batches/:id/prices', authorize('milling', 'edit'), requireCostVisib
       }
 
       // 0 is a valid manual cost; only blank/invalid → null.
-      const numOrNull = (v) => (v === '' || v == null || Number.isNaN(parseFloat(v))) ? null : parseFloat(v);
+      const current = await db('milling_batches').where({ id }).first();
+      if (!current) return res.status(404).json({ success: false, message: 'Batch not found.' });
+
+      // One cost source (P2-08 / MIL-03): milling and other costs are the
+      // itemised cost-sheet lines (Costs tab), which post their own journals. A
+      // manual total here re-valued the output lots with no journal and froze
+      // later costs out of the lot value, so a NEW manual figure is refused. A
+      // legacy override may only be CLEARED (back to the itemised lines the GL
+      // already holds); resending the stored value, or omitting it, is a no-op.
+      const posOrNull = (v) => { const n = parseFloat(v); return Number.isFinite(n) && n > 0 ? n : null; };
+      const manualUpdate = {};
+      for (const k of ['manual_milling_cost_pkr', 'manual_other_expenses_pkr']) {
+        if (req.body[k] === undefined) continue;
+        const next = posOrNull(req.body[k]);
+        const cur = posOrNull(current[k]);
+        if (next == null ? cur == null : (cur != null && Math.abs(next - cur) < 0.01)) continue;
+        if (next != null) {
+          return res.status(400).json({
+            success: false,
+            message: 'Milling and other costs are entered as itemised lines on the Costs tab, not as a total here — add the cost there so it is booked in the accounts.',
+          });
+        }
+        manualUpdate[k] = null;
+      }
 
       const priceUpdate = {
         broken_price_per_kg: parseFloat(broken_price_per_kg) || null,
@@ -526,10 +566,19 @@ router.put('/batches/:id/prices', authorize('milling', 'edit'), requireCostVisib
         powder_price_per_kg: parseFloat(powder_price_per_kg) || null,
         sweeping_price_per_kg: parseFloat(sweeping_price_per_kg) || null,
         choba_price_per_kg: parseFloat(choba_price_per_kg) || null,
-        manual_milling_cost_pkr: numOrNull(manual_milling_cost_pkr),
-        manual_other_expenses_pkr: numOrNull(manual_other_expenses_pkr),
+        ...manualUpdate,
         prices_confirmed: true,
       };
+
+      // Re-pricing re-costs the output lots; once one of them has been sold or
+      // used that rice left stock at the old cost, so a change is refused then.
+      const changesValue = Object.keys(manualUpdate).length > 0
+        || Object.entries(priceUpdate).some(([k, v]) => k.endsWith('_price_per_kg')
+          && Math.abs((Number(v) || 0) - (Number(current[k]) || 0)) > 1e-6);
+      if (changesValue) {
+        try { await assertBatchOutputsUnsold(db, current); }
+        catch (e) { return res.status(e.status || 500).json({ success: false, message: e.message }); }
+      }
 
       // Persist prices + manual costs, then run the residual cost engine across
       // the batch's output lots (finished = Net Purchase − by-product value),

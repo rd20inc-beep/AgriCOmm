@@ -11,8 +11,18 @@ const { normalizePaymentMethod } = require('../../shared/constants/paymentMethod
 const { recordMoneyMovement } = require('../finance/paymentEngine');
 const { lacksFinancePayment } = require('../../shared/millPayer');
 
+const { postAccountMovement } = require('../finance/paymentEngine');
+const { postDeltaOf, settleDocuments } = require('../finance/paymentSettlement');
+const { ledgerFailure, missingAccounts } = require('../../shared/ledgerFailure');
+const { userHasPermission } = require('../../middleware/rbac');
+
 const num = (v) => parseFloat(v) || 0;
 const round2 = (v) => Math.round((num(v) + Number.EPSILON) * 100) / 100;
+function httpError(status, message) {
+  const e = new Error(message);
+  e.status = status; e.statusCode = status;
+  return e;
+}
 
 // The dispatch routes take the URL param, which is the batch_no (e.g. "M-011")
 // — NOT the numeric id. Querying `.where({ id: 'M-011' })` on an integer column
@@ -126,11 +136,13 @@ module.exports = {
     const b = req.body || {};
     try {
       const result = await db.transaction(async (trx) => {
-        const batch = await trx('milling_batches').where({ id: b.service_batch_id }).first();
-        if (!batch) throw new Error('Service batch not found');
-        if (!batch.is_service_milling) throw new Error('Batch is not a service-milling batch');
-        const existing = await trx('service_milling_invoices').where({ service_batch_id: batch.id }).first();
-        if (existing) throw new Error(`Batch ${batch.batch_no} already has invoice ${existing.invoice_no}`);
+        // Locked: two saves for the same batch queue here, and the second sees
+        // the first's invoice (the partial unique index, mig 353, backs it up).
+        const batch = await trx('milling_batches').where({ id: b.service_batch_id }).forUpdate().first();
+        if (!batch) throw httpError(404, 'Service batch not found');
+        if (!batch.is_service_milling) throw httpError(400, 'Batch is not a service-milling batch');
+        const existing = await trx('service_milling_invoices').where({ service_batch_id: batch.id, status: 'Active' }).first();
+        if (existing) throw httpError(409, `Batch ${batch.batch_no} already has invoice ${existing.invoice_no}`);
 
         // Each service bills on its OWN chargeable quantity (all overridable in
         // the request) — milling on kg actually milled, rental & labour on their
@@ -141,7 +153,12 @@ module.exports = {
         const yieldOutputKg = num(batch.actual_finished_kg) + num(batch.broken_kg) + num(batch.sortex_rejects_kg)
           + num(batch.powder_kg) + num(batch.sweeping_kg) + num(batch.choba_kg) + num(batch.ov_kg)
           + num(batch.stone_kg) + num(batch.wastage_kg) + num(batch.bran_kg) + num(batch.husk_kg);
-        const defaultMilled = batch.milled_qty_kg != null ? num(batch.milled_qty_kg) : (yieldOutputKg || num(batch.expected_output_kg));
+        // No invoice before the yield (MIL-32): the milling charge falls back
+        // to the expected output otherwise, billing a guess.
+        if (!(yieldOutputKg > 0)) {
+          throw httpError(409, `Batch ${batch.batch_no} has no yield recorded yet — record the milling output before invoicing the client.`);
+        }
+        const defaultMilled = batch.milled_qty_kg != null ? num(batch.milled_qty_kg) : yieldOutputKg;
         const millingQtyKg = round2(b.milling_qty_kg != null ? b.milling_qty_kg : defaultMilled);
         const millingRate = num(b.milling_rate_per_kg != null ? b.milling_rate_per_kg : batch.service_milling_rate_per_kg);
         const rentalKattas = parseInt(b.rental_kattas != null ? b.rental_kattas : (batch.katta_count || batch.bag_count || 0), 10) || 0;
@@ -155,7 +172,14 @@ module.exports = {
         const millingAmount = round2(millingQtyKg * millingRate);
         const rentalAmount = round2(rentalKattas * rentalRate);
         const labourAmount = round2(labourKattas * labourRate);
-        const subtotal = round2(millingAmount + rentalAmount + labourAmount + extra - discount);
+        // A discount larger than the charges made the service total negative:
+        // autoPost skipped the revenue journal silently while the receivable
+        // still carried the freight (MIL-32). Refused.
+        const charges = round2(millingAmount + rentalAmount + labourAmount + extra);
+        if (discount < 0 || discount - charges > 0.005) {
+          throw httpError(400, `Discount Rs ${discount} is more than the service charges Rs ${charges}.`);
+        }
+        const subtotal = round2(charges - discount);
         const taxAmount = round2(subtotal * (taxPct / 100));
         // #14 Phase 2b-ii — client-borne freight recovered on the bill. It adds to
         // the client's total (untaxed pass-through) but is NOT service revenue; we
@@ -233,12 +257,13 @@ module.exports = {
             entity: 'mill', payable_id: haulPay.id, created_by: req.user?.id || null,
             notes: `Client freight for service invoice ${invoiceNo}`,
           });
-          const [ar, rec, ap] = await Promise.all([
-            trx('chart_of_accounts').where({ code: '1120' }).first(),
-            trx('chart_of_accounts').where({ code: '1450' }).first(),
-            trx('chart_of_accounts').where({ code: '2010' }).first(),
-          ]);
-          if (ar && rec && ap) {
+          // Sequential: one transaction is one connection.
+          const ar = await trx('chart_of_accounts').where({ code: '1120' }).first();
+          const rec = await trx('chart_of_accounts').where({ code: '1450' }).first();
+          const ap = await trx('chart_of_accounts').where({ code: '2010' }).first();
+          // The hauler payable above stands only with its journals.
+          if (!(ar && rec && ap)) throw missingAccounts(['1120', '1450', '2010'], 'The invoice');
+          {
             const d0 = (b.invoice_date ? new Date(b.invoice_date) : new Date()).toISOString().slice(0, 10);
             const jc = await accountingService.createJournal(trx, {
               date: d0, entity: 'mill', refType: 'Service Milling Invoice', refNo: invoiceNo,
@@ -267,8 +292,14 @@ module.exports = {
       });
       return res.status(201).json({ success: true, data: result });
     } catch (err) {
-      console.error('Service invoice create error:', err);
-      return res.status(400).json({ success: false, message: err.message || 'Failed to create invoice.' });
+      // The partial unique index (mig 353): a concurrent save got there first.
+      if (err.code === '23505' && /service_milling_invoices_batch_active/.test(err.constraint || err.message || '')) {
+        return res.status(409).json({ success: false, message: 'This batch was just invoiced by another save — reload to see it.' });
+      }
+      const code = err.status || err.statusCode
+        || ((typeof err.code === 'string' && /^[0-9A-Z]{5}$/.test(err.code)) ? 500 : 400);
+      if (code >= 500) console.error('Service invoice create error:', err);
+      return res.status(code).json({ success: false, message: code >= 500 ? 'Internal server error.' : (err.message || 'Failed to create invoice.') });
     }
   },
 
@@ -287,6 +318,7 @@ module.exports = {
       const result = await db.transaction(async (trx) => {
         const inv = await trx('service_milling_invoices').where({ id: req.params.id }).forUpdate().first();
         if (!inv) throw new Error('Invoice not found');
+        if (inv.status === 'Void') throw httpError(409, `Invoice ${inv.invoice_no} is void — record the payment against the batch's current invoice.`);
         const amount = round2(b.amount);
         if (amount <= 0) throw new Error('Payment amount must be greater than zero');
         if (round2(num(inv.received_amount) + amount) - num(inv.total_amount) > 0.009) {
@@ -327,55 +359,116 @@ module.exports = {
     }
   },
 
-  // ── Void an invoice so the batch can be re-issued ──
-  // Reverses any payment receipts (bank/cash), marks the revenue journal
-  // Reversed (Posted-only convention — no reverse+repost), drops the receivable
-  // and the invoice row. The batch then has no invoice, so a fresh one can be
-  // created (e.g. after the katta count was corrected).
+  // ── Void an invoice so the batch can be re-issued (P2-16 / MIL-10, MIL-33) ──
+  // Owner-approved (route) with a mandatory reason. Nothing is deleted (D-23):
+  //  - receipts: a receipt that posted its own journal is reversed in Finance ▸
+  //    Payments (finance.reverse_payment, its own reason) — the void refuses
+  //    while one is live, so the mill can no longer undo a Finance-recorded
+  //    receipt from here. An old receipt that never posted a journal (Finance
+  //    refuses it: "undone by voiding its invoice") is reversed HERE, by a user
+  //    who holds finance.reverse_payment: the account gets a reversing bank row,
+  //    the payment is stamped Reversed with the reason;
+  //  - the client-freight hauler payable is voided (status Reversed) with its
+  //    transport_costs row cancelled — refused if the hauler has been paid;
+  //  - the GL gets the signed delta of every journal under the invoice number
+  //    (revenue + freight), posted today — originals stay Posted;
+  //  - the receivable is closed (Written Off, as export cancel does — the status
+  //    CHECK has no 'Cancelled'), the invoice is stamped Void and kept. A voided
+  //    invoice no longer blocks a fresh one for the batch (partial unique index).
   async voidInvoice(req, res) {
     try {
+      const reason = String(req.body?.reason || '').trim();
+      if (reason.length < 3) throw httpError(400, 'A reason is required to void an invoice.');
       const result = await db.transaction(async (trx) => {
-        const inv = await trx('service_milling_invoices').where({ id: req.params.id }).first();
-        if (!inv) throw new Error('Invoice not found');
+        const inv = await trx('service_milling_invoices').where({ id: req.params.id }).forUpdate().first();
+        if (!inv) throw httpError(404, 'Invoice not found');
+        if (inv.status === 'Void') throw httpError(409, `Invoice ${inv.invoice_no} is already void.`);
+        const label = `Void of service invoice ${inv.invoice_no} — ${reason}`.slice(0, 240);
 
-        // 1. Reverse payment receipts linked to this invoice (account balance +
-        //    bank_transactions + their journals), then drop the payment rows.
-        //    A bank row is undone by its own direction: a receipt's credit is
-        //    taken back out, a reversal's debit is put back.
-        const payments = await trx('payments').where({ service_invoice_id: inv.id });
-        for (const pay of payments) {
-          const bts = await trx('bank_transactions').where({ linked_payment_id: pay.id });
-          for (const bt of bts) {
-            const amt = parseFloat(bt.amount) || 0;
-            await trx('bank_accounts').where({ id: bt.bank_account_id })[bt.type === 'debit' ? 'increment' : 'decrement']('current_balance', amt);
-            await trx('bank_transactions').where({ id: bt.id }).del();
+        // 1. Receipts.
+        const live = await trx('payments').where({ service_invoice_id: inv.id })
+          .whereNotIn('status', ['Reversed', 'Bounced', 'Rejected']).orderBy('id');
+        const legacy = [];
+        const viaFinance = [];
+        for (const pay of live) {
+          const journalled = await trx('journal_entries').where({ ref_no: pay.payment_no }).first('id');
+          if (journalled || pay.status === 'Pending Finance Confirmation' || pay.cleared === false) viaFinance.push(pay);
+          else legacy.push(pay);
+        }
+        if (viaFinance.length) {
+          throw httpError(409, `Invoice ${inv.invoice_no} has receipt(s) ${viaFinance.map((p) => p.payment_no).join(', ')}. Reverse or reject them in Finance ▸ Payments first, then void the invoice.`);
+        }
+        if (legacy.length && !(await userHasPermission(req, 'finance', 'reverse_payment'))) {
+          throw httpError(403, `Invoice ${inv.invoice_no} has receipt(s) ${legacy.map((p) => p.payment_no).join(', ')} that must be reversed with it — that needs the Finance payment-reversal permission.`);
+        }
+        const receivable = await trx('receivables').where({ service_invoice_id: inv.id }).forUpdate().first();
+        for (const pay of legacy) {
+          const amt = round2(pay.amount);
+          await settleDocuments(trx, { payment: pay, receivable: receivable || null, delta: -amt, deltaPkr: -amt });
+          if (pay.bank_account_id) {
+            const account = await trx('bank_accounts').where({ id: pay.bank_account_id }).first();
+            if (account) {
+              await postAccountMovement(trx, {
+                account, direction: 'out', amount: amt, reference: pay.payment_no, paymentId: pay.id,
+                userId: req.user?.id, source: 'payment_reversal', notes: `Reversal of receipt ${pay.payment_no} — ${label}`,
+              });
+            }
           }
-          // The receipt's own journal (Dr 1000 / Cr 1120) and any reversal of
-          // it — marked Reversed, like the revenue journal below.
-          const own = await trx('journal_entries').where({ ref_no: pay.payment_no, status: 'Posted' });
-          for (const j of own) {
-            await accountingService.reverseJournal(trx, { journalId: j.id, reason: `Voided invoice ${inv.invoice_no}`, userId: req.user?.id });
-          }
-          await trx('payments').where({ id: pay.id }).del();
+          await trx('payments').where({ id: pay.id }).update({
+            status: 'Reversed', reversed_at: trx.fn.now(), reversed_by: req.user?.id || null,
+            reversal_reason: label, updated_at: trx.fn.now(),
+          });
         }
 
-        // 2. Reverse the revenue GL (DR 1120 / CR 4050) — mark Reversed only.
-        const journals = await trx('journal_entries')
-          .where({ ref_type: 'Service Milling Invoice', ref_no: inv.invoice_no, status: 'Posted' });
-        for (const j of journals) {
-          await accountingService.reverseJournal(trx, { journalId: j.id, reason: `Voided invoice ${inv.invoice_no}`, userId: req.user?.id });
+        // 2. Client-freight hauler payable + its transport_costs row.
+        const haulPays = await trx('payables').where({ source_table: 'service_transport', source_id: inv.id })
+          .whereNot('status', 'Reversed').forUpdate();
+        const paidHaul = haulPays.find((p) => num(p.paid_amount) > 0.01);
+        if (paidHaul) {
+          throw httpError(409, `The transporter has already been paid against ${paidHaul.pay_no} for this invoice's freight. Reverse that payment in Finance first.`);
+        }
+        for (const p of haulPays) {
+          await trx('payables').where({ id: p.id }).update({
+            status: 'Reversed', outstanding: 0,
+            notes: `${p.notes ? `${p.notes} | ` : ''}Voided with ${inv.invoice_no}`.slice(0, 1000), updated_at: trx.fn.now(),
+          });
+          await trx('transport_costs').where({ payable_id: p.id }).update({ status: 'cancelled', updated_at: trx.fn.now() });
         }
 
-        // 3. Drop the receivable + the invoice row so the batch is re-invoiceable.
-        await trx('receivables').where({ service_invoice_id: inv.id }).del();
-        await trx('service_milling_invoices').where({ id: inv.id }).del();
+        // 3. GL: signed delta of every journal under the invoice number.
+        let reversedJournals;
+        try {
+          reversedJournals = await postDeltaOf(trx, {
+            refNo: inv.invoice_no, refTypes: ['Service Milling Invoice'],
+            refType: 'Service Milling Invoice Void', description: label, userId: req.user?.id,
+          });
+        } catch (jeErr) {
+          throw ledgerFailure(jeErr, 'The void');
+        }
 
-        return { voided: inv.invoice_no, service_batch_id: inv.service_batch_id, reversed_journals: journals.length, reversed_payments: payments.length };
+        // 4. Close the receivable, stamp the invoice Void (both kept).
+        if (receivable) {
+          await trx('receivables').where({ id: receivable.id }).update({
+            status: 'Written Off', outstanding: 0,
+            notes: `${receivable.notes ? `${receivable.notes} | ` : ''}Invoice voided — ${reason}`.slice(0, 1000), updated_at: trx.fn.now(),
+          });
+        }
+        await trx('service_milling_invoices').where({ id: inv.id }).update({
+          status: 'Void', void_reason: reason, voided_at: trx.fn.now(), voided_by: req.user?.id || null,
+          void_authorized_by: req.ownerAuth?.ownerId || null, balance_amount: 0, updated_at: trx.fn.now(),
+        });
+
+        return {
+          voided: inv.invoice_no, service_batch_id: inv.service_batch_id,
+          reversed_journals: reversedJournals, reversed_payments: legacy.length, voided_hauler_payables: haulPays.length,
+        };
       });
       return res.json({ success: true, data: result });
     } catch (err) {
-      console.error('Service invoice void error:', err);
-      return res.status(400).json({ success: false, message: err.message || 'Failed to void invoice.' });
+      const code = err.status || err.statusCode
+        || ((typeof err.code === 'string' && /^[0-9A-Z]{5}$/.test(err.code)) ? 500 : 400);
+      if (code >= 500) console.error('Service invoice void error:', err);
+      return res.status(code).json({ success: false, message: code >= 500 ? 'Internal server error.' : (err.message || 'Failed to void invoice.') });
     }
   },
 

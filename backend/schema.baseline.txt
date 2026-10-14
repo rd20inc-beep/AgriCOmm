@@ -2504,6 +2504,7 @@ COL service_milling_invoices.rental_rate_per_katta:numeric:NULL
 COL service_milling_invoices.rental_to:date:NULL
 COL service_milling_invoices.server_ts:timestamp with time zone:NULL
 COL service_milling_invoices.service_batch_id:integer:NULL
+COL service_milling_invoices.status:character varying:NOT NULL
 COL service_milling_invoices.subtotal:numeric:NULL
 COL service_milling_invoices.sync_status:character varying:NOT NULL
 COL service_milling_invoices.tax_amount:numeric:NULL
@@ -2511,6 +2512,10 @@ COL service_milling_invoices.tax_pct:numeric:NULL
 COL service_milling_invoices.total_amount:numeric:NULL
 COL service_milling_invoices.updated_at:timestamp with time zone:NOT NULL
 COL service_milling_invoices.uuid:uuid:NULL
+COL service_milling_invoices.void_authorized_by:integer:NULL
+COL service_milling_invoices.void_reason:text:NULL
+COL service_milling_invoices.voided_at:timestamp with time zone:NULL
+COL service_milling_invoices.voided_by:integer:NULL
 COL shipment_containers.bags_count:integer:NULL
 COL shipment_containers.container_no:character varying:NOT NULL
 COL shipment_containers.container_type:character varying:NOT NULL
@@ -3781,11 +3786,14 @@ CON service_milling_dispatches.service_milling_dispatches_pkey(p)
 CON service_milling_dispatches.service_milling_dispatches_service_batch_id_foreign(f)
 CON service_milling_dispatches.uq_service_milling_dispatches_uuid(u)
 CON service_milling_invoices.chk_service_milling_invoices_payment_status_valid(c)
+CON service_milling_invoices.chk_service_milling_invoices_status_valid(c)
 CON service_milling_invoices.service_milling_invoices_client_customer_id_foreign(f)
 CON service_milling_invoices.service_milling_invoices_freight_hauler_id_foreign(f)
 CON service_milling_invoices.service_milling_invoices_invoice_no_unique(u)
 CON service_milling_invoices.service_milling_invoices_pkey(p)
 CON service_milling_invoices.service_milling_invoices_service_batch_id_foreign(f)
+CON service_milling_invoices.service_milling_invoices_void_authorized_by_foreign(f)
+CON service_milling_invoices.service_milling_invoices_voided_by_foreign(f)
 CON service_milling_invoices.uq_service_milling_invoices_uuid(u)
 CON shipment_containers.chk_shipment_containers_bags_count_nn(c)
 CON shipment_containers.chk_shipment_containers_gross_weight_kg_nn(c)

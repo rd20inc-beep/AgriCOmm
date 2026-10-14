@@ -12,6 +12,8 @@ const { nextDocNo } = require('../../utils/docNumber');
 // Officer / Documentation Officer) — same rule as the lot and report endpoints.
 const { redactForUser, canSeeCost } = require('../../utils/costVisibility');
 const { batchOutputValues } = require('./batchOutputValues');
+const { rawPurchaseToBook } = require('./rawPurchasePayable');
+const { assertBatchRawCostEditable, assertBatchOutputsUnsold } = require('./costEditLocks');
 // Packing-cost subtotals carry no "cost" in their names.
 const BATCH_EXTRA_COST_KEYS = ['bagsTotal', 'mastersTotal', 'polytheneTotal'];
 const batchPackagingService = require('./batchPackaging.service');
@@ -265,7 +267,8 @@ const millingController = {
 
       // Billing status per batch from its invoice (A2). No invoice → Not Invoiced.
       const invRows = ids.length
-        ? await db('service_milling_invoices').whereIn('service_batch_id', ids).select('service_batch_id', 'id', 'invoice_no', 'total_amount', 'payment_status')
+        // A voided invoice (P2-16) is kept for audit but bills nothing.
+        ? await db('service_milling_invoices').whereIn('service_batch_id', ids).where('status', 'Active').select('service_batch_id', 'id', 'invoice_no', 'total_amount', 'payment_status')
         : [];
       const invByBatch = {};
       for (const inv of invRows) invByBatch[inv.service_batch_id] = inv;
@@ -1045,6 +1048,12 @@ const millingController = {
           const existingCost = await trx('milling_costs')
             .where({ batch_id: id, category: 'raw_rice' })
             .first();
+          // After yield the raw cost is what the supplier bill and the finished
+          // rice were booked at — re-pricing it here moved lot values with no
+          // journal (P2-08 / MIL-07). Refused then; re-saving the same price passes.
+          if (Math.abs(rawRiceCost - (parseFloat(existingCost?.amount) || 0)) > 0.01) {
+            await assertBatchRawCostEditable(trx, batch);
+          }
 
           if (existingCost) {
             await trx('milling_costs')
@@ -1108,6 +1117,7 @@ const millingController = {
         },
       });
     } catch (err) {
+      if (err.status && err.status < 500) return res.status(err.status).json({ success: false, message: err.message });
       console.error('Milling saveQuality error:', err);
       return res.status(500).json({ success: false, message: 'Internal server error.' });
     }
@@ -1530,37 +1540,18 @@ const millingController = {
         }
 
         // Recognize the supplier payable for the raw rice purchase so the
-        // supplier's GL party ledger / statement reflects what we owe. Only for
-        // single-source batches: a blend re-mills already-owned finished stock,
-        // so its raw cost isn't a new supplier purchase (would double-count).
+        // supplier's GL party ledger / statement reflects what we owe.
         // purchase_invoice rule: DR Raw Rice Stock / CR Supplier Payable. The
         // milling_completion journal below then moves Raw Rice → Finished, so
         // Raw Rice nets to zero and the supplier payable stands. (The business
         // buys milled rice by type, not unmilled paddy — see migration 119.)
-        // ...UNLESS the batch mills lots that were already purchased on their own
-        // (each purchased lot booked a supplier payable at intake). Re-booking the
-        // raw cost here would owe the supplier twice for rice bought once. A batch
-        // sourcing from such lots is milling owned stock, not making a new purchase.
-        let sourcedFromPurchasedLots = false;
+        // Only rice NOT already on the books is a new purchase (P2-06/MIL-01):
+        // truck intake (no source lots) books its whole raw cost; a batch milling
+        // finished, opening-stock, purchased or transferred lots books nothing —
+        // re-booking them owed the supplier twice. Blends never book (owned stock).
+        const toBook = await rawPurchaseToBook(trx, batch);
         {
-          const srcLots = await trx('batch_source_lots')
-            .where({ batch_id: batch.id }).whereNotNull('lot_id').select('lot_id');
-          if (srcLots.length) {
-            const lotNos = (await trx('inventory_lots')
-              .whereIn('id', srcLots.map((s) => s.lot_id)).select('lot_no')).map((l) => l.lot_no);
-            if (lotNos.length) {
-              const lotPayable = await trx('payables').whereIn('linked_ref', lotNos)
-                .where((qb) => qb.whereNull('source_table').orWhereNot('source_table', 'milling_raw_rice'))
-                .first('id');
-              sourcedFromPurchasedLots = !!lotPayable;
-            }
-          }
-        }
-        if (batch.processing_type !== 'blended' && batch.supplier_id && !sourcedFromPurchasedLots) {
-          const rawCostRow = await trx('milling_costs')
-            .where({ batch_id: batch.id, category: 'raw_rice' })
-            .sum('amount as total').first();
-          const rawRiceValue = parseFloat(rawCostRow?.total || 0);
+          const rawRiceValue = toBook.amount;
           const existingAP = await trx('journal_entries')
             .where({ ref_type: 'Rice Purchase', ref_no: batch.batch_no })
             .first();
@@ -1753,6 +1744,15 @@ const millingController = {
         const oldAmt = existing ? (parseFloat(existing.amount) || 0) : 0;
         const newAmt = parseFloat(amount);
 
+        // P2-08: the raw rice cost is locked once the yield is recorded (MIL-07 —
+        // the supplier bill and finished stock were booked at it); any other
+        // cost may still change after yield (the signed delta below books it)
+        // until an output lot has been sold or used.
+        if (Math.abs(newAmt - oldAmt) > 0.01) {
+          if (category === 'raw_rice') await assertBatchRawCostEditable(trx, batch);
+          else await assertBatchOutputsUnsold(trx, batch);
+        }
+
         let row;
         if (existing) {
           [row] = await trx('milling_costs')
@@ -1914,6 +1914,7 @@ const millingController = {
         data: { cost },
       });
     } catch (err) {
+      if (err.status && err.status < 500) return res.status(err.status).json({ success: false, message: err.message });
       console.error('Milling addCost error:', err);
       return res.status(500).json({ success: false, message: 'Internal server error.' });
     }

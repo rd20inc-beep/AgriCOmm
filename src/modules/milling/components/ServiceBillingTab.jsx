@@ -4,6 +4,7 @@ import { Wallet, FileText, Receipt, Printer, Ban } from 'lucide-react';
 import { millingApi, serviceMillingApi } from '../api/services';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
+import { useOwnerAuth } from '../../../context/OwnerAuthContext';
 import { CreateInvoiceDrawer, RecordPaymentDrawer } from './ServiceInvoiceDrawers';
 import { printServiceInvoice } from '../utils/serviceInvoicePrint';
 import useConfirm from '../../../hooks/useConfirm';
@@ -26,6 +27,7 @@ export default function ServiceBillingTab({ routeId, batchDbId, onChanged }) {
   const canPay = hasPermission('service_milling', 'record_payment');
   const canViewInvoice = hasPermission('service_milling', 'view_invoice');
   const [confirm, confirmDialog] = useConfirm();
+  const { requestOwnerApproval } = useOwnerAuth();
 
   function viewInvoice() {
     if (!invoice) return;
@@ -34,22 +36,29 @@ export default function ServiceBillingTab({ routeId, batchDbId, onChanged }) {
     }
   }
 
+  // Void needs a reason and the Owner's authorization (P2-16). Receipts that
+  // Finance recorded are reversed in Finance first — the server refuses the
+  // void while one is live and names it.
   async function voidInvoice() {
     if (!invoiceId) return;
     const paid = invoice && num(invoice.received_amount) > 0;
-    if (!await confirm({
+    const ok = await confirm({
       title: `Void ${row?.invoice_no}?`,
       consequence: paid
-        ? 'The receipts against it are reversed (account balance and receipt undone), its revenue posting is reversed, and the invoice is removed so you can re-issue.'
-        : 'The invoice and its revenue posting are reversed and removed, so you can create a fresh one.',
+        ? 'Money has been received against it: reverse those receipts in Finance ▸ Payments first. The invoice is then kept as Void, its revenue posting is offset, and you can issue a new one. Needs the Owner\'s authorization.'
+        : 'The invoice is kept as Void, its revenue posting is offset, and you can create a fresh one. Needs the Owner\'s authorization.',
       // The figure that matters here is the money already taken in, not the
       // invoice total — that is what a void gives back.
       amount: paid ? `${fmtPKR(num(invoice.received_amount), { decimals: 2 })} received` : undefined,
+      reason: 'required',
       confirmLabel: 'Void invoice',
       cancelLabel: 'Keep it',
-    })) return;
+    });
+    if (!ok) return;
     try {
-      await serviceMillingApi.voidInvoice(invoiceId);
+      await requestOwnerApproval((ownerId) => serviceMillingApi.voidInvoice(invoiceId, {
+        reason: ok.reason, authorized_by_owner_id: ownerId,
+      }), { label: `Void service invoice ${row?.invoice_no}` });
       addToast?.('Invoice voided — you can now create a new one', 'success');
       afterChange();
     } catch (err) {

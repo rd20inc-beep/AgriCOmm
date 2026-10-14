@@ -764,6 +764,57 @@ const rejectApproval = Joi.object({
 
 // ===================== MILLING =====================
 
+// PUT /milling/batches/:id — the generic batch edit (EDITABLE_BATCH_FIELDS +
+// custom_tags). Status is not editable here; raw qty / supplier / fee are
+// further locked once the yield is recorded (P2-08 / MIL-38).
+const updateBatch = Joi.object({
+  supplier_id: Joi.number().integer().positive().allow(null),
+  raw_qty_kg: Joi.number().positive(),
+  planned_finished_kg: Joi.number().min(0).allow(null),
+  milling_fee_per_kg: Joi.number().min(0).allow(null),
+  mill_id: Joi.number().integer().positive(),
+  machine_line: Joi.string().max(100).allow('', null),
+  shift: Joi.string().valid('Day', 'Night', 'Full'),
+  notes: Joi.string().allow('', null),
+  variance_status: Joi.string().max(50).allow('', null),
+  batch_name: Joi.string().max(200).allow('', null),
+  custom_tags: Joi.alternatives().try(
+    Joi.array().items(Joi.string().max(60)),
+    Joi.string().allow('', null),
+  ),
+});
+
+// POST /service-milling/invoices (P2-16 / MIL-32). Quantities and rates are
+// overrides of the batch's own figures; blank means "use the batch's".
+const svcNum = Joi.number().min(0).allow(null, '');
+const svcDate = Joi.string().pattern(/^\d{4}-\d{2}-\d{2}/).allow(null, '');
+const createServiceInvoice = Joi.object({
+  service_batch_id: Joi.number().integer().positive().required(),
+  milling_qty_kg: svcNum,
+  milling_rate_per_kg: svcNum,
+  rental_kattas: Joi.number().integer().min(0).allow(null, ''),
+  rental_rate_per_katta: svcNum,
+  rental_from: svcDate,
+  rental_to: svcDate,
+  labour_kattas: Joi.number().integer().min(0).allow(null, ''),
+  labour_rate_per_katta: svcNum,
+  extra_charges: svcNum,
+  discount: svcNum,
+  tax_pct: Joi.number().min(0).max(100).allow(null, ''),
+  freight_amount: svcNum,
+  freight_hauler_id: Joi.number().integer().positive().allow(null, ''),
+  invoice_date: svcDate,
+  due_date: svcDate,
+  notes: Joi.string().max(2000).allow('', null),
+});
+
+// POST /service-milling/invoices/:id/void — a reason is mandatory; the owner
+// authorization travels as authorized_by_owner_id (+ X-Owner-Credential header).
+const voidServiceInvoice = Joi.object({
+  reason: Joi.string().trim().min(3).max(500).required(),
+  authorized_by_owner_id: Joi.number().integer().positive().allow(null, ''),
+});
+
 const createBatch = Joi.object({
   supplier_id: Joi.number().integer().positive().allow(null),
   // Required for a single-source batch; for a blend it's omitted and the
@@ -1101,6 +1152,9 @@ module.exports = {
   submitApproval,
   rejectApproval,
   createBatch,
+  updateBatch,
+  createServiceInvoice,
+  voidServiceInvoice,
   recordYield,
   saveDocumentOverrides,
   saveDocumentRendering,

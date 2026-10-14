@@ -42,6 +42,7 @@ test('the owner-approved routes', () => {
     'POST exportOrders /:id/packing-weight/resolve [packing_variance]',
     'POST exportOrders /:id/write-off-balance [export_short_write_off]',
     'POST milling /advances/:id/approve [salary_advance]',
+    'POST serviceMilling /invoices/:id/void [service_invoice_void]',
     'PUT accounting /periods/:id/reopen [period_reopen]',
   ]);
 });
