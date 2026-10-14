@@ -2,6 +2,13 @@ const db = require('../../config/database');
 const { BALANCE_COLLECTION_STATUSES, BALANCE_OUTSTANDING_SQL } = require('../exportOrders/balanceCollection');
 const emailService = require('../communications/email.service');
 const expensesService = require('../expenses/expenses.service');
+const { nextSlot } = require('./schedulerSlots');
+
+// A failing task is retried on the next scheduler ticks (hourly) up to this
+// many attempts at the same slot; then it is reported and moves to its next slot.
+const MAX_TASK_ATTEMPTS = 3;
+// A claim older than this is a crashed runner: the task may be claimed again.
+const CLAIM_STALE_MS = 2 * 3600 * 1000;
 const { marginFinding, orderMarginRows, orderValuePkr } = require('../analytics/orderMargins');
 const {
   RECEIVABLE_CLOSED, PAYABLE_CLOSED, receivablePkrAtBooked, nativeMoneyText,
@@ -17,6 +24,59 @@ function _addInterval(dateStr, recurrence) {
   else dt.setUTCMonth(dt.getUTCMonth() + 1); // monthly (default)
   return dt.toISOString().slice(0, 10);
 }
+
+// A recurring series = category + payee + cadence (shared with milling.routes).
+const recurringSeriesKey = (e) => `${e.category}|${e.employee_id || e.vendor_name || ''}|${e.recurrence || 'monthly'}`;
+// Salaries are paid only through Payroll (P2-25) — a recurring salary series
+// from before that rule is never materialized again.
+const PAYROLL_ONLY_HEADS = ['salaries', 'staff_advance'];
+
+function httpError(message, status) {
+  const e = new Error(message);
+  e.statusCode = status;
+  return e;
+}
+
+// The rows of a recurring series, newest first.
+function seriesRows(conn, e) {
+  const q = conn('business_expenses')
+    .where('expense_type', 'mill').where('is_recurring', true)
+    .where('category', e.category).where('recurrence', e.recurrence || 'monthly');
+  if (e.employee_id) q.where('employee_id', e.employee_id);
+  else if (e.vendor_name) q.whereNull('employee_id').where('vendor_name', e.vendor_name);
+  else q.whereNull('employee_id').whereNull('vendor_name');
+  return q.orderBy('expense_date', 'desc').orderBy('id', 'desc');
+}
+
+/**
+ * Post ONE occurrence of a recurring series dated `due`, inside `trx` and under
+ * the series' advisory lock — the single guard shared by the scheduler's
+ * catch-up, "Run due" and "Post now". Refuses (409) a date already posted, a
+ * date past the series' end, or a date not yet due. Returns the expense.
+ */
+async function postSeriesOccurrence(trx, latest, due, { payNow = false, bankAccountId = null, paymentMethod = null, reference = null, userId = null, millOnly = false, note = null } = {}) {
+  const today = new Date().toISOString().slice(0, 10);
+  if (due > today) throw httpError(`The next occurrence is not due until ${due}.`, 409);
+  const end = latest.recurrence_end_date ? _isoDate(latest.recurrence_end_date) : null;
+  if (end && due > end) throw httpError(`This recurring series ended on ${end}.`, 409);
+  const dup = await seriesRows(trx, latest).where('expense_date', due).first('expense_no');
+  if (dup) throw httpError(`The ${due} occurrence is already posted (${dup.expense_no}).`, 409);
+  const expense = await expensesService.create({
+    expense_type: 'mill', category: latest.category, subcategory: latest.subcategory,
+    amount: parseFloat(latest.amount), currency: 'PKR', expense_date: due,
+    description: latest.description || null, vendor_name: latest.vendor_name || null,
+    supplier_id: latest.supplier_id || null, employee_id: latest.employee_id || null,
+    is_recurring: true, recurrence: latest.recurrence,
+    notes: note || `Recurring (${latest.recurrence}) from ${latest.expense_no}`,
+    pay_now: !!payNow, bank_account_id: bankAccountId, payment_method: paymentMethod, payment_reference: reference,
+  }, userId, trx, { millOnly });
+  if (end) await trx('business_expenses').where('id', expense.id).update({ recurrence_end_date: end });
+  return expense;
+}
+
+const lockSeries = (trx, e) => trx.raw('SELECT pg_advisory_xact_lock(hashtext(?))', [`recurring_expense:${recurringSeriesKey(e)}`]);
+const SERIES_COLS = ['id', 'expense_no', 'category', 'subcategory', 'vendor_name', 'supplier_id',
+  'employee_id', 'recurrence', 'description', 'amount_pkr as amount', 'expense_date', 'recurrence_end_date'];
 
 const automationService = {
   // ============================================================
@@ -65,14 +125,16 @@ const automationService = {
           }
           break;
         case 'report_generation':
-          // Placeholder for report generation
-          result = { processed: 0, details: { message: 'Report generation placeholder' } };
+          // Not implemented — reported as Skipped, never as a Success.
+          result = { skipped: true, processed: 0, details: { message: 'Report generation is not implemented; nothing was generated.' } };
           break;
         case 'email_reminder':
           result = await this.scanOverdueReceivables();
           break;
         case 'recurring_expense':
-          result = await this.materializeDueRecurringExpenses();
+          // Recurring expenses are ledger postings: they are posted by a person
+          // ("Run due" / "Post now"), never unattended (P2-27).
+          result = { skipped: true, processed: 0, details: { message: 'Recurring expenses are posted from Mill Finance → Recurring ("Run due"), not by the scheduler.' } };
           break;
         case 'payroll_prepare':
           result = await this.runScheduledPayrollPrepare(task);
@@ -81,15 +143,18 @@ const automationService = {
           result = await this.runReportEmail(task);
           break;
         default:
-          result = { processed: 0, details: { message: `Unknown task type: ${task.task_type}` } };
+          result = { skipped: true, processed: 0, details: { message: `Unknown task type: ${task.task_type}` } };
       }
 
+      logEntry.status = result.skipped ? 'Skipped' : 'Success';
       logEntry.items_processed = result.processed || 0;
       logEntry.details = JSON.stringify(result.details || {});
       logEntry.completed_at = new Date().toISOString();
 
       await db('scheduled_tasks').where({ id: taskId }).update({
-        last_status: 'Success',
+        last_status: logEntry.status,
+        failure_count: 0,
+        last_error: null,
         updated_at: db.fn.now(),
       });
     } catch (err) {
@@ -99,6 +164,8 @@ const automationService = {
 
       await db('scheduled_tasks').where({ id: taskId }).update({
         last_status: 'Failed',
+        failure_count: db.raw('failure_count + 1'),
+        last_error: String(err.message || err).slice(0, 2000),
         updated_at: db.fn.now(),
       });
     }
@@ -783,114 +850,163 @@ const automationService = {
   },
 
   // ============================================================
-  // Task Scheduler (simplified — checks DB, not real cron)
+  // Recurring mill expenses
   // ============================================================
-  // Auto-post recurring mill expenses whose next occurrence is due. Each recurring
-  // business_expense series (category + payee + cadence) has a latest occurrence;
-  // we walk forward from it, creating any missed occurrences up to today. New
-  // occurrences are ACCRUED (pay_now=false) — never auto-paid from a bank account —
-  // so a human still confirms the payment. Idempotent: skips a period that already
-  // has an occurrence, so re-runs (or a manual materialize) never double-post.
-  async materializeDueRecurringExpenses() {
+  // Post every due occurrence of every recurring mill-expense series (the
+  // "Run due" button). Each recurring business_expense series (category +
+  // payee + cadence) has a latest occurrence; walk forward from it, creating
+  // any missed occurrences up to today and not past the series' end date.
+  // New occurrences are ACCRUED (pay_now=false) — never auto-paid. Each series
+  // posts under its advisory lock with the duplicate-date guard, so a re-run,
+  // a concurrent run or a "Post now" never double-posts.
+  // NOTE (P2-27): no scheduled task runs this — a recurring expense is a
+  // ledger posting, and the system does not post one unattended. It runs when
+  // someone presses "Run due".
+  async materializeDueRecurringExpenses({ userId = null } = {}) {
     const rows = await db('business_expenses')
       .where('expense_type', 'mill').where('is_recurring', true)
-      .select('id', 'expense_no', 'category', 'subcategory', 'vendor_name', 'supplier_id',
-        'employee_id', 'recurrence', 'description', db.raw('amount_pkr as amount'), 'expense_date')
-      .orderBy('expense_date', 'desc');
+      .whereNotIn('category', PAYROLL_ONLY_HEADS)
+      .select(SERIES_COLS)
+      .orderBy('expense_date', 'desc').orderBy('id', 'desc');
 
     const latest = {};
     for (const e of rows) {
-      const k = `${e.category}|${e.employee_id || e.vendor_name || ''}|${e.recurrence || 'monthly'}`;
+      const k = recurringSeriesKey(e);
       if (!latest[k]) latest[k] = e; // rows are date-desc → first seen is newest
     }
 
     const today = new Date().toISOString().slice(0, 10);
     let created = 0; const items = [];
     for (const e of Object.values(latest)) {
-      let cursor = _isoDate(e.expense_date);
-      let guard = 0;
-      while (guard++ < 240) { // cap catch-up at ~20 yrs monthly to avoid runaway
-        const nextDue = _addInterval(cursor, e.recurrence);
-        if (nextDue > today) break;
-        // Idempotency: does this period already exist for the series?
-        const dupQ = db('business_expenses')
-          .where('expense_type', 'mill').where('category', e.category)
-          .where('recurrence', e.recurrence).whereRaw('DATE(expense_date) = ?', [nextDue]);
-        if (e.employee_id) dupQ.where('employee_id', e.employee_id);
-        else if (e.vendor_name) dupQ.where('vendor_name', e.vendor_name);
-        else dupQ.whereNull('employee_id').whereNull('vendor_name');
-        if (await dupQ.first()) { cursor = nextDue; continue; }
-
-        const expense = await expensesService.create({
-          expense_type: 'mill', category: e.category, subcategory: e.subcategory,
-          amount: parseFloat(e.amount), currency: 'PKR', expense_date: nextDue,
-          description: e.description || null, vendor_name: e.vendor_name || null,
-          supplier_id: e.supplier_id || null, employee_id: e.employee_id || null,
-          is_recurring: true, recurrence: e.recurrence, pay_now: false,
-          notes: `Auto-posted recurring (${e.recurrence}) from ${e.expense_no}`,
-        }, 1);
-        created++;
-        items.push({ expense_no: expense?.expense_no || null, category: e.category, date: nextDue, amount: parseFloat(e.amount) });
-        cursor = nextDue;
-      }
+      await db.transaction(async (trx) => {
+        await lockSeries(trx, e);
+        // Re-read the series' newest row under the lock (another run may have
+        // posted since the list above was read).
+        const cur = await seriesRows(trx, e).first(SERIES_COLS);
+        if (!cur) return;
+        const end = cur.recurrence_end_date ? _isoDate(cur.recurrence_end_date) : null;
+        let cursor = _isoDate(cur.expense_date);
+        let guard = 0;
+        while (guard++ < 240) { // cap catch-up at ~20 yrs monthly to avoid runaway
+          const nextDue = _addInterval(cursor, cur.recurrence);
+          if (nextDue > today || (end && nextDue > end)) break;
+          const dup = await seriesRows(trx, cur).where('expense_date', nextDue).first('id');
+          if (!dup) {
+            const expense = await postSeriesOccurrence(trx, cur, nextDue, {
+              userId, note: `Posted recurring (${cur.recurrence}) from ${cur.expense_no}`,
+            });
+            created++;
+            items.push({ expense_no: expense?.expense_no || null, category: cur.category, date: nextDue, amount: parseFloat(cur.amount) });
+          }
+          cursor = nextDue;
+        }
+      });
     }
     return { processed: created, details: { created, items } };
   },
 
-  // Auto-PREPARE the current month's payroll for every not-yet-committed active
-  // employee. Lands in the approval queue as a 'prepared' run — NEVER auto-
-  // approved or auto-paid (cash/GL + advance recovery still need a human Pay).
-  // Idempotent: re-running in the same month prepares nobody new (everyone is
-  // already committed), so it returns processed:0 rather than erroring.
+  // "Post now" on one series (`expenseId` = any row of it): posts the NEXT
+  // occurrence through the same guard as "Run due" — only when it is due, not
+  // past the end date, and not already posted.
+  async materializeRecurringExpense(expenseId, { payNow = false, bankAccountId = null, paymentMethod = null, reference = null, userId = null, millOnly = false } = {}) {
+    return db.transaction(async (trx) => {
+      const tmpl = await trx('business_expenses').where('id', expenseId).where('expense_type', 'mill').first();
+      if (!tmpl) throw httpError('Recurring expense not found.', 404);
+      if (!tmpl.is_recurring) throw httpError('That expense is not recurring.', 400);
+      if (PAYROLL_ONLY_HEADS.includes(String(tmpl.category || '').toLowerCase())) {
+        throw httpError('Salaries are paid through Payroll — this recurring salary series can no longer be posted.', 400);
+      }
+      await lockSeries(trx, tmpl);
+      const latest = await seriesRows(trx, tmpl).first(SERIES_COLS);
+      const nextDue = _addInterval(latest.expense_date, latest.recurrence);
+      const expense = await postSeriesOccurrence(trx, latest, nextDue, { payNow, bankAccountId, paymentMethod, reference, userId, millOnly });
+      return { expense, next_due: nextDue };
+    });
+  },
+
+  // Stop a recurring series: no occurrence after `endDate` (default today) is
+  // ever posted. Already-posted occurrences are untouched.
+  async stopRecurringSeries(expenseId, { endDate = null } = {}) {
+    const tmpl = await db('business_expenses').where('id', expenseId).where('expense_type', 'mill').first();
+    if (!tmpl) throw httpError('Recurring expense not found.', 404);
+    if (!tmpl.is_recurring) throw httpError('That expense is not recurring.', 400);
+    const end = endDate ? String(endDate).slice(0, 10) : new Date().toISOString().slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(end) || Number.isNaN(Date.parse(end))) throw httpError('A valid end date is required.', 400);
+    const n = await seriesRows(db, tmpl).clearOrder().update({ recurrence_end_date: end, updated_at: db.fn.now() });
+    return { series: recurringSeriesKey(tmpl), end_date: end, rows: n };
+  },
+
+  // Auto-PREPARE payroll for the schedule's entity (Mill or Head Office): the
+  // month just closed for daily-wage staff, the current month for salaried
+  // staff (payroll.service prepareScheduledPayroll). Runs land in the approval
+  // queue as 'prepared' — NEVER auto-approved or auto-paid. Prepared by the
+  // system (no user), so any approver may approve them. Idempotent: everyone
+  // already in a run is skipped.
   async runScheduledPayrollPrepare(task) {
     const payroll = require('../milling/payroll.service');
     let cfg = {}; try { cfg = typeof task.config === 'string' ? JSON.parse(task.config) : (task.config || {}); } catch (e) { cfg = {}; }
-    const period = new Date().toISOString().slice(0, 7); // current month
-    try {
-      const run = await payroll.preparePayrollRun({ month: period, pay_method: cfg.pay_method || 'cash', notes: `Auto-prepared monthly payroll ${period}` }, cfg.created_by || 1);
-      return { processed: run.employee_count || 0, details: { runId: run.id, period, employees: run.employee_count, net: run.net_total } };
-    } catch (e) {
-      if (e.code === 'NONE') return { processed: 0, details: { period, message: 'All active employees already in a run for this period.' } };
-      throw e;
-    }
+    const results = await payroll.prepareScheduledPayroll({ entity: cfg.entity || 'mill', pay_method: cfg.pay_method || 'cash', userId: null });
+    const runs = results.filter((r) => r.run);
+    return {
+      processed: runs.reduce((s, r) => s + (r.run.employee_count || 0), 0),
+      details: {
+        entity: cfg.entity || 'mill',
+        runs: results.map((r) => ({ month: r.month, payType: r.payType, runId: r.run ? r.run.id : null, employees: r.run ? r.run.employee_count : 0, message: r.message || null })),
+      },
+    };
   },
 
-  async runDueScheduledTasks() {
-    const now = new Date().toISOString();
+  // Claim one due task for this runner. Two backend processes (or a restart
+  // mid-run) must not both run it: the claim is an atomic conditional UPDATE
+  // taken under a transaction-scoped advisory lock — the loser sees no row.
+  async claimTask(task, now = new Date()) {
+    return db.transaction(async (trx) => {
+      const got = await trx.raw('SELECT pg_try_advisory_xact_lock(hashtext(?)) AS ok', [`scheduled_task:${task.id}`]);
+      if (!got.rows[0].ok) return null;
+      const stale = new Date(now.getTime() - CLAIM_STALE_MS).toISOString();
+      const [row] = await trx('scheduled_tasks').where({ id: task.id, is_active: true })
+        .where(function () { this.where('next_run', '<=', now.toISOString()).orWhereNull('next_run'); })
+        .where(function () { this.whereNot('last_status', 'Running').orWhereNull('last_status').orWhere('updated_at', '<', stale); })
+        .update({ last_status: 'Running', last_run: now.toISOString(), updated_at: trx.fn.now() })
+        .returning('*');
+      return row || null;
+    });
+  },
 
+  async runDueScheduledTasks(now = new Date()) {
     const dueTasks = await db('scheduled_tasks')
       .where('is_active', true)
       .where(function () {
-        this.where('next_run', '<=', now).orWhereNull('next_run');
+        this.where('next_run', '<=', now.toISOString()).orWhereNull('next_run');
       })
       .select('*');
 
     const results = [];
-    for (const task of dueTasks) {
+    for (const due of dueTasks) {
+      const task = await this.claimTask(due, now);
+      if (!task) continue; // another runner has it
+      let status = 'Failed'; let error = null;
       try {
         const result = await this.runTask(task.id);
-        results.push({ taskId: task.id, name: task.name, status: result.status });
+        status = result.status; error = result.error || null;
       } catch (err) {
-        results.push({ taskId: task.id, name: task.name, status: 'Failed', error: err.message });
+        error = err.message;
       }
+      results.push({ taskId: task.id, name: task.name, status, error });
 
-      // Update next_run. Report-email tasks store an explicit cadence in
-      // cron_expression ('daily'|'weekly'|'monthly'); fall back to the legacy
-      // heuristic for older task rows.
-      let nextRun = new Date();
-      const cadence = task.cron_expression;
-      if (cadence === 'monthly') {
-        nextRun.setMonth(nextRun.getMonth() + 1);
-      } else if (cadence === 'weekly') {
-        nextRun.setDate(nextRun.getDate() + 7);
-      } else if (cadence === 'daily') {
-        nextRun.setDate(nextRun.getDate() + 1);
-      } else if (cadence && cadence.includes('1')) {
-        nextRun.setDate(nextRun.getDate() + 7);
-      } else {
-        nextRun.setDate(nextRun.getDate() + 1);
+      // Next run: a failure is retried on the next tick until MAX_TASK_ATTEMPTS,
+      // then reported and moved on; anything else goes to its next calendar slot.
+      const fresh = await db('scheduled_tasks').where({ id: task.id }).first();
+      const attempts = (fresh && fresh.failure_count) || 0;
+      const slot = nextSlot(due, now);
+      let nextRun = slot.at;
+      if (status === 'Failed' && attempts < MAX_TASK_ATTEMPTS) {
+        nextRun = new Date(now.getTime() + 60 * 1000); // the next hourly tick
+      } else if (status === 'Failed') {
+        await this.reportTaskFailure(fresh || task, error, attempts);
+        await db('scheduled_tasks').where({ id: task.id }).update({ failure_count: 0 });
       }
-
+      if (!slot.known) await this.reportTaskFailure(fresh || task, `Unrecognised schedule "${task.cron_expression}" — running daily until it is corrected.`, 0);
       await db('scheduled_tasks').where({ id: task.id }).update({
         next_run: nextRun.toISOString(),
         updated_at: db.fn.now(),
@@ -898,6 +1014,24 @@ const automationService = {
     }
 
     return results;
+  },
+
+  // Tell the admins a scheduled task gave up (it used to fail silently).
+  async reportTaskFailure(task, error, attempts) {
+    try {
+      const notificationService = require('../../services/notificationService');
+      for (const roleName of ['Super Admin', 'Owner']) {
+        await notificationService.createForRole(null, {
+          roleName,
+          title: `Scheduled task failed: ${task.name}`,
+          message: `${task.name} failed${attempts ? ` ${attempts} time(s)` : ''}: ${String(error || 'unknown error').slice(0, 300)}`,
+          type: 'task',
+          linkedRef: `TASK-${task.id}`,
+        });
+      }
+    } catch (e) {
+      console.error(`[scheduler] could not report failure of task ${task.id}:`, e.message);
+    }
   },
 };
 
