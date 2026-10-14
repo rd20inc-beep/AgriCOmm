@@ -64,8 +64,10 @@ export const transactionKey = (txKind, id) => ['finance-transaction', txKind, St
 export function transactionActions(data, hasPermission) {
   const p = data?.payment;
   const canWrite = typeof hasPermission === 'function' && hasPermission('finance', 'confirm_payment');
+  // Reversal is its own permission since mig 339 (split from confirm_payment).
+  const canReverse = typeof hasPermission === 'function' && hasPermission('finance', 'reverse_payment');
   return {
-    reverse: !!p && canWrite && !!data.reversal?.allowed,
+    reverse: !!p && canReverse && !!data.reversal?.allowed,
     reverseBlockedReason: p && !data.reversal?.allowed ? data.reversal?.reason : null,
     clear: !!p && canWrite && !!data.clearable,
     // B1: an uncleared, confirmed cheque can be marked bounced.

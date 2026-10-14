@@ -295,7 +295,7 @@ export default function TransactionDrawer({ txKind, id, onClose }) {
             </Section>
             </MoreSection>
 
-            {acts.reverseBlockedReason && p.status !== 'Reversed' && hasPermission('finance', 'confirm_payment') && (
+            {acts.reverseBlockedReason && p.status !== 'Reversed' && hasPermission('finance', 'reverse_payment') && (
               <p className="text-[11px] text-gray-500" data-testid="reverse-blocked">{acts.reverseBlockedReason}</p>
             )}
           </div>

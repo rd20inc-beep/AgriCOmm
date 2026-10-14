@@ -9,7 +9,7 @@ import { buildNeedsAttention, countByCurrency } from '../utils/needsAttention';
  * and every amount in its own currency — never converted, never summed.
  */
 const allow = (...p) => (m, a) => p.includes(`${m}.${a}`);
-const FM = allow('finance.view', 'finance.confirm_payment', 'finance.post_journal', 'payroll.approve', 'payroll.pay');
+const FM = allow('finance.view', 'finance.confirm_payment', 'finance.set_rates', 'finance.post_journal', 'payroll.approve', 'payroll.pay');
 const AUDITOR = allow('finance.view');
 const TODAY = new Date('2026-10-09T09:00:00');
 
