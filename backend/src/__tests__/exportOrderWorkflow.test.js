@@ -299,7 +299,7 @@ jest.mock('../services/inventoryService', () => mockInventorySvc);
 jest.mock('../modules/inventory/inventory.service', () => mockInventorySvc);
 
 const mockAccountingSvc = {
-  autoPost: jest.fn().mockResolvedValue(null),
+  autoPost: jest.fn().mockResolvedValue({ id: 1 }), // a posted journal (null = rule missing → ship refused, P2-03)
   createJournal: jest.fn().mockResolvedValue({ id: 1 }),
   postJournal: jest.fn().mockResolvedValue({}),
 };
