@@ -107,6 +107,7 @@ function decodeCssEscapes(s) {
 function sanitizeUrl(raw) {
   const decoded = decodeEntities(raw)
     // Browsers ignore embedded whitespace / control characters in a scheme.
+    // eslint-disable-next-line no-control-regex
     .replace(/[\u0000- \u007f-\u009f]+/g, '')
     .trim();
   if (!decoded) return null;
