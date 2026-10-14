@@ -93,7 +93,9 @@ async function htmlToPdf(html) {
     headless: 'new',
     args: launchArgs(),
     protocolTimeout: RENDER_TIMEOUT_MS,
-    timeout: 15000,
+    // A cold Chromium start on a busy host can take well over 15 s (seen on CI:
+    // the first launch timed out, the next one started in 7 s).
+    timeout: RENDER_TIMEOUT_MS,
   });
   let timer;
   try {
