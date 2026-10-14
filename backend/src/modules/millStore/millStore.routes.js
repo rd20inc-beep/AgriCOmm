@@ -4,6 +4,12 @@ const authorize = require('../../middleware/rbac');
 const auditAction = require('../../middleware/audit');
 const ownerApproval = require('../../middleware/ownerApproval');
 const ctrl = require('./millStore.controller');
+const { redactCostInResponses } = require('../../utils/costVisibility');
+
+// Cost-blind roles (QC, Inventory Officer…) see store quantities, never what the
+// stock cost (owner decision 2026-10-05; P1-12 follow-up). Purchase totals are
+// named *_amount, so they are listed explicitly.
+router.use(redactCostInResponses({ extraCostKeys: ['total_amount', 'original_amount', 'amount', 'line_total', 'subtotal'] }));
 
 // Items
 router.get('/items', authorize('mill_store', 'view'), ctrl.listItems);
