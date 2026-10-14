@@ -1,4 +1,9 @@
 const db = require('../../config/database');
+const { redactSecrets, redactDetails } = require('../../utils/redactSecrets');
+
+// Read-side redaction: rows written before secrets were stripped at write time
+// (and any a future caller forgets) must not leak through the audit readers.
+const redactRows = (rows) => rows.map((r) => (r && r.details != null ? { ...r, details: redactDetails(r.details) } : r));
 
 const auditService = {
   /**
@@ -11,6 +16,11 @@ const auditService = {
    * @param {Object} params.details - Additional details about the action
    * @param {string} params.ipAddress - The IP address of the request
    * @param {Object} [params.db_instance] - Optional knex instance (for transactions)
+   *
+   * `details` is passed through redactSecrets(): every secret-named key
+   * (password, pin, *_key, token, secret, credentials, …) is stored as
+   * "[REDACTED]". This is the single choke point for the auditAction middleware
+   * and every direct auditService.log() caller.
    */
   async log({ userId, action, entityType, entityId, details, ipAddress, db_instance }) {
     const knex = db_instance || db;
@@ -19,7 +29,7 @@ const auditService = {
       action,
       entity_type: entityType,
       entity_id: entityId != null ? String(entityId) : null,
-      details: details ? JSON.stringify(details) : null,
+      details: details ? JSON.stringify(redactSecrets(details)) : null,
       ip_address: ipAddress || null,
     });
   },
@@ -28,36 +38,38 @@ const auditService = {
    * Get audit logs for a specific entity.
    */
   async getByEntity(entityType, entityId, limit = 50) {
-    return db('audit_logs as a')
+    return redactRows(await db('audit_logs as a')
       .leftJoin('users as u', 'a.user_id', 'u.id')
       .where({ 'a.entity_type': entityType, 'a.entity_id': String(entityId) })
       .select('a.*', 'u.full_name as user_name', 'u.email as user_email')
       .orderBy('a.created_at', 'desc')
-      .limit(limit);
+      .limit(limit));
   },
 
   /**
    * Get audit logs for a specific user.
    */
   async getByUser(userId, limit = 50) {
-    return db('audit_logs as a')
+    return redactRows(await db('audit_logs as a')
       .leftJoin('users as u', 'a.user_id', 'u.id')
       .where('a.user_id', userId)
       .select('a.*', 'u.full_name as user_name', 'u.email as user_email')
       .orderBy('a.created_at', 'desc')
-      .limit(limit);
+      .limit(limit));
   },
 
   /**
    * Get recent audit logs.
    */
   async getRecent(limit = 100) {
-    return db('audit_logs as a')
+    return redactRows(await db('audit_logs as a')
       .leftJoin('users as u', 'a.user_id', 'u.id')
       .select('a.*', 'u.full_name as user_name', 'u.email as user_email')
       .orderBy('a.created_at', 'desc')
-      .limit(limit);
+      .limit(limit));
   },
 };
+
+auditService.redactRows = redactRows;
 
 module.exports = auditService;

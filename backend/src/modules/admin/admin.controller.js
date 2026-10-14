@@ -2,14 +2,61 @@ const db = require('../../config/database');
 const { nextDocNo } = require('../../utils/docNumber');
 const whScope = require('../../utils/warehouseScope');
 const bankAccountsService = require('./bankAccounts.service');
+const auditService = require('./audit.service');
+const { userHasPermission } = require('../../middleware/rbac');
+const { maskRowFields, isMaskedValue } = require('../../utils/bankMasking');
+const { isSecretKey } = require('../../utils/redactSecrets');
+const schemas = require('../../middleware/schemas');
+
+// Bank identifiers on master-data rows. Masked to the last 4 for anyone without
+// finance.view_bank_details (Super Admin / Owner bypass) — the same gate the
+// export documents use, so admin.view is no back door to full account numbers.
+const BANK_ACCOUNT_SECRET_FIELDS = ['account_number', 'iban', 'swift_bic', 'correspondent_account', 'correspondent_swift'];
+const CUSTOMER_BANK_FIELDS = ['bank_account', 'bank_iban', 'bank_swift'];
+
+async function bankMasker(req, fields) {
+  if (!fields || !fields.length) return (row) => row;
+  const canSeeFull = await userHasPermission(req, 'finance', 'view_bank_details');
+  return (row) => maskRowFields(row, fields, canSeeFull);
+}
+
+// system_settings rows → { settings, secrets }. Secret-named keys never leave
+// the server; the client learns only whether one is set.
+function serializeSettings(rows) {
+  const settings = {};
+  const secrets = {};
+  for (const row of rows) {
+    if (isSecretKey(row.key)) {
+      secrets[row.key] = { is_set: row.value != null && String(row.value).trim() !== '' && row.value !== '""' };
+      continue;
+    }
+    try {
+      settings[row.key] = JSON.parse(row.value);
+    } catch {
+      settings[row.key] = row.value;
+    }
+  }
+  return { settings, secrets };
+}
+
+// Drop masked placeholders an edit form sent back unchanged, so a round-trip
+// never overwrites the real number with "•••• 1234".
+function dropMaskedValues(body, fields) {
+  for (const f of fields || []) if (isMaskedValue(body[f])) delete body[f];
+  return body;
+}
 
 // Generic CRUD factory
 //
 // `opts.warehouseScoped` marks a table whose PRIMARY KEY *is* a warehouse id
 // (i.e. `warehouses` itself), so #9-scoping filters the list + single-record
 // read to the caller's warehouses. Every other CRUD table is unaffected.
+//
+// `opts.bankFields` lists identifier columns masked on every read/write response
+// unless the caller holds finance.view_bank_details.
 function createCrud(tableName, entityName, opts = {}) {
   const scopeCol = opts.warehouseScoped ? 'id' : null;
+  const bankFields = opts.bankFields || null;
   return {
     async list(req, res) {
       try {
@@ -33,11 +80,12 @@ function createCrud(tableName, entityName, opts = {}) {
         ]);
 
         const total = parseInt(countResult.total);
+        const mask = await bankMasker(req, bankFields);
 
         return res.json({
           success: true,
           data: {
-            [tableName]: rows,
+            [tableName]: rows.map(mask),
             pagination: {
               page: parseInt(page),
               limit: parseInt(limit),
@@ -62,7 +110,8 @@ function createCrud(tableName, entityName, opts = {}) {
         if (!row) {
           return res.status(404).json({ success: false, message: `${entityName} not found.` });
         }
-        return res.json({ success: true, data: { [entityName]: row } });
+        const mask = await bankMasker(req, bankFields);
+        return res.json({ success: true, data: { [entityName]: mask(row) } });
       } catch (err) {
         console.error(`Get ${entityName} error:`, err);
         return res.status(500).json({ success: false, message: 'Internal server error.' });
@@ -72,14 +121,15 @@ function createCrud(tableName, entityName, opts = {}) {
     async create(req, res) {
       try {
         const [row] = await db.transaction(async (trx) => {
-          const body = { ...req.body };
+          const body = dropMaskedValues({ ...req.body }, bankFields);
           // Suppliers get a stable privacy code (SUP-001…) used on export orders.
           if (tableName === 'suppliers' && !body.supplier_code) {
             body.supplier_code = await nextDocNo(trx, { table: 'suppliers', column: 'supplier_code', prefix: 'SUP-', pad: 3 });
           }
           return trx(tableName).insert(body).returning('*');
         });
-        return res.status(201).json({ success: true, data: { [entityName]: row } });
+        const mask = await bankMasker(req, bankFields);
+        return res.status(201).json({ success: true, data: { [entityName]: mask(row) } });
       } catch (err) {
         console.error(`Create ${entityName} error:`, err);
         if (err.code === '23505') {
@@ -91,7 +141,7 @@ function createCrud(tableName, entityName, opts = {}) {
 
     async update(req, res) {
       try {
-        const updates = { ...req.body };
+        const updates = dropMaskedValues({ ...req.body }, bankFields);
         delete updates.id;
         delete updates.created_at;
         updates.updated_at = db.fn.now();
@@ -104,7 +154,8 @@ function createCrud(tableName, entityName, opts = {}) {
         if (!row) {
           return res.status(404).json({ success: false, message: `${entityName} not found.` });
         }
-        return res.json({ success: true, data: { [entityName]: row } });
+        const mask = await bankMasker(req, bankFields);
+        return res.json({ success: true, data: { [entityName]: mask(row) } });
       } catch (err) {
         console.error(`Update ${entityName} error:`, err);
         return res.status(500).json({ success: false, message: 'Internal server error.' });
@@ -133,12 +184,12 @@ function createCrud(tableName, entityName, opts = {}) {
 }
 
 // Create CRUD handlers for each entity
-const customersCrud = createCrud('customers', 'customer');
+const customersCrud = createCrud('customers', 'customer', { bankFields: CUSTOMER_BANK_FIELDS });
 const suppliersCrud = createCrud('suppliers', 'supplier');
 const productsCrud = createCrud('products', 'product');
 const bagTypesCrud = createCrud('bag_types', 'bag_type');
 const warehousesCrud = createCrud('warehouses', 'warehouse', { warehouseScoped: true });
-const bankAccountsCrud = createCrud('bank_accounts', 'bank_account');
+const bankAccountsCrud = createCrud('bank_accounts', 'bank_account', { bankFields: BANK_ACCOUNT_SECRET_FIELDS });
 const documentTemplatesCrud = createCrud('document_templates', 'document_template');
 const productCategoriesCrud = createCrud('product_categories', 'product_category');
 
@@ -188,9 +239,10 @@ const adminController = {
   async createBankAccount(req, res) {
     try {
       const result = await db.transaction((trx) => bankAccountsService.createBankAccount(trx, req.body || {}, req.user?.id || null));
+      const mask = await bankMasker(req, BANK_ACCOUNT_SECRET_FIELDS);
       return res.status(201).json({
         success: true,
-        data: { bank_account: result.bank_account, journal_no: result.journal ? result.journal.journal_no : null },
+        data: { bank_account: mask(result.bank_account), journal_no: result.journal ? result.journal.journal_no : null },
       });
     } catch (err) {
       if (err.status && err.status < 500) return res.status(err.status).json({ success: false, message: err.message });
@@ -201,8 +253,10 @@ const adminController = {
   },
   async updateBankAccount(req, res) {
     try {
-      const row = await db.transaction((trx) => bankAccountsService.updateBankAccount(trx, req.params.id, req.body || {}));
-      return res.json({ success: true, data: { bank_account: row } });
+      const body = dropMaskedValues({ ...(req.body || {}) }, BANK_ACCOUNT_SECRET_FIELDS);
+      const row = await db.transaction((trx) => bankAccountsService.updateBankAccount(trx, req.params.id, body));
+      const mask = await bankMasker(req, BANK_ACCOUNT_SECRET_FIELDS);
+      return res.json({ success: true, data: { bank_account: mask(row) } });
     } catch (err) {
       if (err.status && err.status < 500) return res.status(err.status).json({ success: false, message: err.message });
       console.error('Update bank_account error:', err);
@@ -362,23 +416,15 @@ const adminController = {
   },
 
   // Settings
+  //
+  // Secret settings (anything isSecretKey() matches: whatsapp_api_key, smtp_*
+  // passwords, tokens …) are WRITE-ONLY: a read returns them under `secrets` as
+  // { is_set } and never the value, so admin.view (Mill Manager, Auditor) is not
+  // a way to read an API key.
   async getSettings(req, res) {
     try {
-      const settings = await db('system_settings').select('key', 'value', 'updated_at');
-
-      const settingsObj = {};
-      for (const row of settings) {
-        try {
-          settingsObj[row.key] = JSON.parse(row.value);
-        } catch {
-          settingsObj[row.key] = row.value;
-        }
-      }
-
-      return res.json({
-        success: true,
-        data: { settings: settingsObj },
-      });
+      const rows = await db('system_settings').select('key', 'value', 'updated_at');
+      return res.json({ success: true, data: serializeSettings(rows) });
     } catch (err) {
       console.error('Get settings error:', err);
       return res.status(500).json({ success: false, message: 'Internal server error.' });
@@ -387,42 +433,38 @@ const adminController = {
 
   async updateSettings(req, res) {
     try {
-      const updates = req.body;
+      // Strict allowlist: an unknown / camelCase key is rejected, not stripped
+      // (schemas.updateSettings names the reader of every key).
+      const { error, value } = schemas.updateSettings.validate(req.body || {}, { abortEarly: false, stripUnknown: false });
+      if (error) {
+        return res.status(400).json({
+          success: false,
+          message: 'Validation failed.',
+          errors: error.details.map((d) => ({ field: d.path.join('.'), message: d.message })),
+        });
+      }
+      const userId = req.user?.id || null;
 
       await db.transaction(async (trx) => {
-        for (const [key, value] of Object.entries(updates)) {
-          const serialized = typeof value === 'string' ? value : JSON.stringify(value);
+        for (const [key, raw] of Object.entries(value)) {
+          if (raw === undefined) continue;
+          const serialized = raw === null ? null : (typeof raw === 'string' ? raw : JSON.stringify(raw));
 
           const existing = await trx('system_settings').where({ key }).first();
           if (existing) {
             await trx('system_settings').where({ key }).update({
               value: serialized,
+              updated_by: userId,
               updated_at: trx.fn.now(),
             });
           } else {
-            await trx('system_settings').insert({
-              key,
-              value: serialized,
-            });
+            await trx('system_settings').insert({ key, value: serialized, updated_by: userId });
           }
         }
       });
 
-      // Fetch updated settings
-      const settings = await db('system_settings').select('key', 'value');
-      const settingsObj = {};
-      for (const row of settings) {
-        try {
-          settingsObj[row.key] = JSON.parse(row.value);
-        } catch {
-          settingsObj[row.key] = row.value;
-        }
-      }
-
-      return res.json({
-        success: true,
-        data: { settings: settingsObj },
-      });
+      const rows = await db('system_settings').select('key', 'value', 'updated_at');
+      return res.json({ success: true, data: serializeSettings(rows) });
     } catch (err) {
       console.error('Update settings error:', err);
       return res.status(500).json({ success: false, message: 'Internal server error.' });
@@ -464,7 +506,7 @@ const adminController = {
       return res.json({
         success: true,
         data: {
-          logs,
+          logs: auditService.redactRows(logs),
           pagination: {
             page: parseInt(page),
             limit: parseInt(limit),

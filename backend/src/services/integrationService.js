@@ -1,5 +1,24 @@
 const db = require('../config/database');
 const { ensureAccountGl } = require('../shared/accountGl');
+const { redactSecrets } = require('../utils/redactSecrets');
+
+/**
+ * An integration row as it may leave the API: auth_credentials never goes out
+ * (only whether some are stored), and any secret-named key inside `config` is
+ * "[REDACTED]". getIntegration() stays raw — the sync code needs the creds.
+ */
+function toPublicIntegration(row) {
+  if (!row) return row;
+  const { auth_credentials, ...rest } = row;
+  let creds = auth_credentials;
+  if (typeof creds === 'string') { try { creds = JSON.parse(creds); } catch { /* keep as-is */ } }
+  const isSet = creds != null && (typeof creds !== 'object' || Object.keys(creds).length > 0);
+  return {
+    ...rest,
+    config: rest.config != null ? redactSecrets(rest.config) : rest.config,
+    auth_credentials_set: isSet,
+  };
+}
 
 /**
  * External API Integration Service — Phase 10 (Enterprise)
@@ -11,7 +30,8 @@ const integrationService = {
   // ═══════════════════════════════════════════════════════════════════
 
   async getIntegrations() {
-    return db('api_integrations').orderBy('name', 'asc');
+    const rows = await db('api_integrations').orderBy('name', 'asc');
+    return rows.map(toPublicIntegration);
   },
 
   async getIntegration(id) {
@@ -30,7 +50,7 @@ const integrationService = {
         config: data.config ? JSON.stringify(data.config) : null,
       })
       .returning('*');
-    return integration;
+    return toPublicIntegration(integration);
   },
 
   async updateIntegration(id, data) {
@@ -38,6 +58,8 @@ const integrationService = {
     if (data.name !== undefined) updates.name = data.name;
     if (data.base_url !== undefined) updates.base_url = data.base_url;
     if (data.auth_type !== undefined) updates.auth_type = data.auth_type;
+    // Credentials are write-only: omitted (or the `auth_credentials_set` flag a
+    // read handed out) leaves the stored ones untouched.
     if (data.auth_credentials !== undefined) updates.auth_credentials = JSON.stringify(data.auth_credentials);
     if (data.is_active !== undefined) updates.is_active = data.is_active;
     if (data.sync_frequency !== undefined) updates.sync_frequency = data.sync_frequency;
@@ -48,7 +70,7 @@ const integrationService = {
       .where({ id })
       .update(updates)
       .returning('*');
-    return integration;
+    return toPublicIntegration(integration);
   },
 
   // ═══════════════════════════════════════════════════════════════════
@@ -562,5 +584,7 @@ const integrationService = {
     };
   },
 };
+
+integrationService.toPublicIntegration = toPublicIntegration;
 
 module.exports = integrationService;

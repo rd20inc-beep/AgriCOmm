@@ -2488,7 +2488,7 @@ const reportingController = {
         user: r.user_name || r.user_email || (r.user_id ? `User #${r.user_id}` : 'System'),
         userId: r.user_id, action: r.action, category: catOf(r.action),
         entityType: r.entity_type || '—', entityId: r.entity_id || '',
-        ip: r.ip_address || '', details: summarize(r.details),
+        ip: r.ip_address || '', details: summarize(require('../../utils/redactSecrets').redactDetails(r.details)),
       }));
 
       return res.json({ success: true, data: {

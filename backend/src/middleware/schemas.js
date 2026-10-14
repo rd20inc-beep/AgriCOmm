@@ -929,6 +929,42 @@ const reconciliationStatementLines = Joi.object({
   })).required(),
 });
 
+// ===================== SYSTEM SETTINGS =====================
+// PUT /api/admin/settings — allowlist of the keys something actually reads
+// (each comment names the reader). Validated STRICTLY by the controller (an
+// unknown key is a 400, not silently stripped) so a typo or a camelCase key the
+// backend never reads cannot be "saved".
+const settingStr = (max = 200) => Joi.string().trim().max(max).allow('', null);
+const updateSettings = Joi.object({
+  // portal.routes companyProfile(), AppContext companyProfileData (print headers)
+  companyProfile: Joi.object({
+    name: settingStr(200), tagline: settingStr(200), address: settingStr(500),
+    phone: settingStr(100), email: settingStr(200), website: settingStr(200), ntn: settingStr(50),
+  }).unknown(true),
+  // intelligence.service scanOverdueAdvances; finance Confirmations page
+  payment_reminder_days: Joi.number().integer().min(1).max(365),
+  // automation.service scanLowMarginOrders
+  min_margin_pct: Joi.number().min(0).max(100),
+  // fxRate.service fallback when no fx_rates row exists
+  pkr_rate: Joi.number().positive().max(100000),
+  // finance/collectionRate.js
+  export_balance_term_days: Joi.number().integer().min(0).max(365),
+  collection_target_pct: Joi.number().min(0).max(100),
+  // exportDocument.controller company fields
+  default_hs_code: settingStr(30),
+  rex_number: settingStr(50),
+  kcci_membership: settingStr(50),
+  port_of_loading: settingStr(100),
+  // communications/whatsapp.service getWhatsAppSettings (api key is write-only)
+  whatsapp_provider: settingStr(50),
+  whatsapp_api_url: settingStr(500),
+  whatsapp_api_key: settingStr(1000),
+  whatsapp_sender_phone: settingStr(30),
+})
+  // collection_target_pct_USD / _PKR … (collectionRate.collectionTargets)
+  .pattern(/^collection_target_pct_[A-Za-z]{3}$/, Joi.number().min(0).max(100))
+  .min(1);
+
 module.exports = {
   bounceCheque,
   createReconciliation,
@@ -983,4 +1019,5 @@ module.exports = {
   downloadDocumentPdf,
   updatePackingRun,
   batchPackSpec,
+  updateSettings,
 };
