@@ -76,6 +76,10 @@ function createApp() {
     app.use('/api', require('./middleware/siteOutbox'));
   }
 
+  // No database or code internals in 5xx bodies (P1-16). Mounted after the
+  // idempotency/outbox layers so what they store is already masked.
+  app.use('/api', require('./middleware/maskServerErrors'));
+
   // Mount routes
   const routes = require('./routes/index');
   app.use('/api', routes);
