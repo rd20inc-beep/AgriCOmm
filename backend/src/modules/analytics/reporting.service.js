@@ -2944,23 +2944,31 @@ const reportingService = {
     const rows = await db('scheduled_tasks').where('task_type', 'report_email').orderBy('id', 'desc');
     return rows.map(t => {
       let cfg = {}; try { cfg = typeof t.config === 'string' ? JSON.parse(t.config) : (t.config || {}); } catch (e) { cfg = {}; }
-      return { id: t.id, name: t.name, reportType: cfg.reportType, reportLabel: this.SCHEDULED_REPORT_TYPES[cfg.reportType] || cfg.reportType, frequency: cfg.frequency, recipients: cfg.recipients || [], isActive: !!t.is_active, lastRun: t.last_run, lastStatus: t.last_status, nextRun: t.next_run };
+      return { id: t.id, name: t.name, createdBy: cfg.createdBy || null, reportType: cfg.reportType, reportLabel: this.SCHEDULED_REPORT_TYPES[cfg.reportType] || cfg.reportType, frequency: cfg.frequency, recipients: cfg.recipients || [], isActive: !!t.is_active, lastRun: t.last_run, lastStatus: t.last_status, nextRun: t.next_run };
     });
   },
 
-  async createScheduledReportEmail({ reportType, frequency, recipients, filters }) {
+  // Recipients must be on an internal domain (reportEmailPolicy) — a schedule
+  // can no longer mail company data to an arbitrary outside address. The
+  // creator is kept in config.createdBy so only they (or an admin) can
+  // "Send now" / delete it.
+  async createScheduledReportEmail({ reportType, frequency, recipients, filters, createdBy = null }) {
     if (!this.SCHEDULED_REPORT_TYPES[reportType]) throw new Error('Unknown report type');
     const freq = ['daily', 'weekly', 'monthly'].includes(frequency) ? frequency : 'weekly';
     const list = (Array.isArray(recipients) ? recipients : String(recipients || '').split(','))
       .map(s => String(s).trim()).filter(Boolean);
     if (!list.length) throw new Error('At least one recipient email is required');
+    const policy = require('./reportEmailPolicy');
+    const { invalid, external } = policy.partitionRecipients(list, await policy.allowedDomains(db));
+    if (invalid.length) throw new Error(`Not a valid email address: ${invalid.join(', ')}`);
+    if (external.length) throw new Error(`Scheduled reports can only be sent to company email addresses. Not allowed: ${external.join(', ')}`);
     const label = this.SCHEDULED_REPORT_TYPES[reportType];
     const next = new Date(); next.setDate(next.getDate() + (freq === 'daily' ? 1 : freq === 'weekly' ? 7 : 30));
     const [row] = await db('scheduled_tasks').insert({
       name: `Email: ${label} (${freq})`,
       task_type: 'report_email',
       cron_expression: freq,
-      config: JSON.stringify({ reportType, frequency: freq, recipients: list, filters: filters || {} }),
+      config: JSON.stringify({ reportType, frequency: freq, recipients: list, filters: filters || {}, createdBy }),
       is_active: true,
       next_run: next.toISOString(),
     }).returning(['id']);
@@ -3987,16 +3995,22 @@ const reportingService = {
       .orderBy('updated_at', 'desc');
   },
 
-  async deleteSavedReport(reportId) {
-    return db('saved_reports').where('id', reportId).del();
+  // Only the owner may delete a saved report (a shared one included).
+  async deleteSavedReport(reportId, userId) {
+    return db('saved_reports').where({ id: reportId, created_by: userId }).del();
   },
 
   /**
    * Load saved filters + type, execute the appropriate report method, return results.
+   * Runs only the caller's own reports and shared ones; anything else reads
+   * as not found, so ids can't be probed.
    */
-  async runSavedReport(reportId) {
+  async runSavedReport(reportId, userId) {
     const report = await db('saved_reports').where('id', reportId).first();
     if (!report) throw new Error('Saved report not found');
+    if (userId == null || (Number(report.created_by) !== Number(userId) && !report.is_shared)) {
+      throw new Error('Saved report not found');
+    }
 
     const filters = report.filters || {};
     let result;

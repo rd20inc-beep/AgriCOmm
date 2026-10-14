@@ -48,9 +48,12 @@ const notificationService = {
     return this.createForRole(conn, { roleName: 'Finance Manager', title, message, type: 'payment', linkedRef: linkedRef || null });
   },
 
-  async markRead(notificationId) {
+  // Scoped to the owner (P1-11): marking someone else's notification read is
+  // a no-op that returns undefined (→ 404), not a cross-user write.
+  async markRead(notificationId, userId) {
+    if (userId == null) return undefined;
     const [notification] = await db('notifications')
-      .where({ id: notificationId })
+      .where({ id: notificationId, user_id: userId })
       .update({ is_read: true })
       .returning('*');
     return notification;

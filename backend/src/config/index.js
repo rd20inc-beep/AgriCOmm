@@ -66,6 +66,10 @@ const config = {
     openaiKey: process.env.OPENAI_API_KEY || '',
     model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
     baseUrl: process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
+    // NL→SQL runs as a dedicated read-only role (migration 333), never as the
+    // app's DB user. No password = AI querying is not configured.
+    dbUser: process.env.AI_DB_USER || 'agri_ai_query',
+    dbPassword: process.env.AI_DB_PASSWORD || '',
   },
 
   // Optional on-premises "site server" mode (offline Stage 16). When SITE_MODE=true

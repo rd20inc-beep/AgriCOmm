@@ -204,8 +204,8 @@ function ExportRoutes() {
         <Route path="/reports/print" element={<PrintableReports />} />
         <Route path="/reports/lots" element={<LotReport />} />
         <Route path="/reports/invoices" element={<InvoiceLedger />} />
-        <Route path="/reports/payroll" element={<PayrollLedger />} />
-        <Route path="/reports/payroll-analytics" element={<PayrollAnalytics />} />
+        <Route path="/reports/payroll" element={<ProtectedRoute module="payroll" action="view"><PayrollLedger /></ProtectedRoute>} />
+        <Route path="/reports/payroll-analytics" element={<ProtectedRoute module="payroll" action="view"><PayrollAnalytics /></ProtectedRoute>} />
         <Route path="/reports/lot-ledger/:id" element={<LotLedger />} />
         <Route path="/reports/batch-ledger/:id" element={<BatchLedger />} />
         <Route path="/reports/supplier-ledger" element={<SupplierLedger />} />
@@ -283,8 +283,8 @@ function MillRoutes() {
         <Route path="/reports/print" element={<PrintableReports />} />
         <Route path="/reports/lots" element={<LotReport />} />
         <Route path="/reports/invoices" element={<InvoiceLedger />} />
-        <Route path="/reports/payroll" element={<PayrollLedger />} />
-        <Route path="/reports/payroll-analytics" element={<PayrollAnalytics />} />
+        <Route path="/reports/payroll" element={<ProtectedRoute module="payroll" action="view"><PayrollLedger /></ProtectedRoute>} />
+        <Route path="/reports/payroll-analytics" element={<ProtectedRoute module="payroll" action="view"><PayrollAnalytics /></ProtectedRoute>} />
         <Route path="/reports/lot-ledger/:id" element={<LotLedger />} />
         <Route path="/reports/batch-ledger/:id" element={<BatchLedger />} />
         <Route path="/reports/supplier-ledger" element={<SupplierLedger />} />
@@ -363,8 +363,8 @@ function StandardRoutes() {
         <Route path="/reports/print" element={<ProtectedRoute module="reports" action="view"><PrintableReports /></ProtectedRoute>} />
         <Route path="/reports/lots" element={<ProtectedRoute module="reports" action="view"><LotReport /></ProtectedRoute>} />
         <Route path="/reports/invoices" element={<ProtectedRoute module="reports" action="view"><InvoiceLedger /></ProtectedRoute>} />
-        <Route path="/reports/payroll" element={<ProtectedRoute module="reports" action="view"><PayrollLedger /></ProtectedRoute>} />
-        <Route path="/reports/payroll-analytics" element={<ProtectedRoute module="reports" action="view"><PayrollAnalytics /></ProtectedRoute>} />
+        <Route path="/reports/payroll" element={<ProtectedRoute module="payroll" action="view"><PayrollLedger /></ProtectedRoute>} />
+        <Route path="/reports/payroll-analytics" element={<ProtectedRoute module="payroll" action="view"><PayrollAnalytics /></ProtectedRoute>} />
         <Route path="/reports/lot-ledger/:id" element={<ProtectedRoute module="reports" action="view"><LotLedger /></ProtectedRoute>} />
         <Route path="/reports/batch-ledger/:id" element={<ProtectedRoute module="reports" action="view"><BatchLedger /></ProtectedRoute>} />
         <Route path="/reports/supplier-ledger" element={<ProtectedRoute module="reports" action="view"><SupplierLedger /></ProtectedRoute>} />

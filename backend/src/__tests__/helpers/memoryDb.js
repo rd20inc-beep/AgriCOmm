@@ -50,6 +50,8 @@ function test(row, c) {
 class Mutation {
   constructor(rows) { this.rows = rows; }
   returning() { return Promise.resolve(clone(this.rows)); }
+  // Upsert tail: the row is already inserted; merge/ignore are no-ops here.
+  onConflict() { return { merge: () => this, ignore: () => this }; }
   then(ok, ko) { return Promise.resolve(this.rows.length).then(ok, ko); }
 }
 

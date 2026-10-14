@@ -22,6 +22,22 @@ async function generateTaskNo(trx) {
   return `TSK-${String(num + 1).padStart(3, '0')}`;
 }
 
+// Task edits: the assigner may change the task itself; the assignee only its
+// progress. Everything else in the body (ids, task_no, assigned_by, timestamps,
+// completed_at) is ignored.
+const TASK_EDIT_FIELDS_ASSIGNER = ['title', 'description', 'priority', 'due_date', 'status', 'assigned_to', 'linked_type', 'linked_id'];
+const TASK_EDIT_FIELDS_ASSIGNEE = ['status', 'description'];
+
+// The task if the user is its assignee or assigner, else undefined.
+async function findOwnTask(id, userId) {
+  const taskId = parseInt(id, 10);
+  if (!Number.isFinite(taskId)) return undefined;
+  const task = await db('tasks_assignments').where({ id: taskId }).first();
+  if (!task) return undefined;
+  const mine = Number(task.assigned_to) === Number(userId) || Number(task.assigned_by) === Number(userId);
+  return mine ? task : undefined;
+}
+
 const communicationController = {
   // Render posted print-ready HTML to a PDF and send it to a customer's
   // WhatsApp via the QR-paired session. Generic — used by any document viewer
@@ -443,20 +459,25 @@ const communicationController = {
     }
   },
 
+  // P1-11 / PLT-17: a task is changed only by the person it is assigned to or
+  // the person who assigned it, and only these fields — the body used to be
+  // written to the row verbatim, for any task id, by any user.
   async updateTask(req, res) {
     try {
       const { id } = req.params;
-      const updates = req.body;
+      const existing = await findOwnTask(id, req.user.id);
+      if (!existing) {
+        return res.status(404).json({ success: false, message: 'Task not found.' });
+      }
 
-      delete updates.id;
-      delete updates.task_no;
-      delete updates.created_at;
-      delete updates.assigned_by;
-
+      const allowed = Number(existing.assigned_by) === Number(req.user.id)
+        ? TASK_EDIT_FIELDS_ASSIGNER : TASK_EDIT_FIELDS_ASSIGNEE;
+      const updates = {};
+      for (const f of allowed) if (req.body && req.body[f] !== undefined) updates[f] = req.body[f];
       updates.updated_at = db.fn.now();
 
       const [task] = await db('tasks_assignments')
-        .where({ id })
+        .where({ id: existing.id })
         .update(updates)
         .returning('*');
 
@@ -474,9 +495,13 @@ const communicationController = {
   async completeTask(req, res) {
     try {
       const { id } = req.params;
+      const existing = await findOwnTask(id, req.user.id);
+      if (!existing) {
+        return res.status(404).json({ success: false, message: 'Task not found.' });
+      }
 
       const [task] = await db('tasks_assignments')
-        .where({ id })
+        .where({ id: existing.id })
         .update({
           status: 'Completed',
           completed_at: db.fn.now(),
@@ -581,8 +606,9 @@ const communicationController = {
     try {
       const { id } = req.params;
 
+      // Only the caller's own follow-up (P1-11).
       const [followUp] = await db('follow_ups')
-        .where({ id })
+        .where({ id, user_id: req.user.id })
         .update({ status: 'Done' })
         .returning('*');
 
@@ -628,7 +654,7 @@ const communicationController = {
   async markNotificationRead(req, res) {
     try {
       const { id } = req.params;
-      const notification = await notificationService.markRead(parseInt(id));
+      const notification = await notificationService.markRead(parseInt(id), req.user.id);
 
       if (!notification) {
         return res.status(404).json({ success: false, message: 'Notification not found.' });
