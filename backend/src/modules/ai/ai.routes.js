@@ -7,6 +7,11 @@
  *
  * Every action endpoint no-ops gracefully (aiEnabled:false) when no key is set,
  * so the UI shows a "configure AI" state instead of erroring.
+ *
+ * /query (P1-05 / D-28): the generated SQL is checked by ai.sqlGuard (one
+ * SELECT/WITH over allowed ai_ro views, no dangerous functions or catalogs)
+ * and run by aiDb on a separate read-only DB role that can read only those
+ * views — never on the app's connection. DB error text is never returned.
  */
 const express = require('express');
 
@@ -15,8 +20,11 @@ const db = require('../../config/database');
 const config = require('../../config');
 const ai = require('./ai.service');
 const accountingService = require('../accounting/accounting.service');
+const authorize = require('../../middleware/rbac');
 const { denyRoles, authorizeAny, userHasPermission } = require('../../middleware/rbac');
-const { allowedTables, referencesBlocked } = require('./ai.access');
+const { allowedTables, blockedTables } = require('./ai.access');
+const { checkSql, SqlGuardError } = require('./ai.sqlGuard');
+const aiDb = require('./aiDb');
 
 // The free-form NL→SQL query (and the ledger/anomaly endpoints) can surface
 // finance data, so the finance-free Mill Operator is blocked. Additive — only
@@ -27,6 +35,7 @@ const noFinanceForOperator = denyRoles('Mill Operator');
 const canUseAi = authorizeAny(['reports', 'view_cost'], ['finance', 'view']);
 
 // Which permission-gated table groups this user may see (see ai.access.js).
+// payroll only feeds the anomaly signals — the NL→SQL schema never has payroll.
 async function tableAccess(req) {
   return {
     payroll: await userHasPermission(req, 'payroll', 'view'),
@@ -41,16 +50,19 @@ router.get('/status', (req, res) => {
 });
 
 // ── Curated, annotated schema for text-to-SQL ──────────────────────────────
-// Only these core business tables are exposed to the model. Columns are read live
-// from information_schema (so they never drift), but the table set is an allowlist:
-// dead/analytical/system/auth tables are deliberately omitted — both to focus the
-// model on the right tables and to keep sensitive data out of its reach. Each entry
-// is a one-line purpose hint that materially improves the SQL the model writes.
+// The model only ever sees the ai_ro VIEWS from migration 333 — curated column
+// lists over the business tables, with no bank numbers, contact details, salary
+// rows or system/auth/payroll tables — and its SQL runs as a read-only role that
+// can read nothing else (aiDb.js). Columns are read live from information_schema
+// for schema ai_ro; each entry is a one-line purpose hint that materially
+// improves the SQL the model writes.
 const CURATED = {
   // Inventory & lots
   inventory_lots: 'Current stock lots. qty/available_qty/reserved_qty in KG; rate_per_kg & landed_cost_per_kg in PKR/kg; type=raw|finished|byproduct; entity=mill|export; variety=rice type; supplier_id→suppliers.',
   lot_transactions: 'Per-lot stock ledger — the canonical movement log (purchases, milling issues/receipts, sales, adjustments, transfers). quantity_kg is signed (negative=outward), rate_per_kg, total_cost (PKR); transaction_type.',
   inventory_reservations: 'Soft reservations against lots; reserved_qty in KG.',
+  stock_summary: 'Stock on hand grouped by entity/type/variety/warehouse_id: lot_count, available_kg, reserved_kg.',
+  warehouses: 'Warehouses (name, entity, type).',
   batch_source_lots: 'Raw lots consumed by a milling batch; qty_kg.',
   // Milling
   milling_batches: 'Milling runs. raw_qty_kg, actual_finished_kg, broken_kg & per-grade *_kg; yield_pct; *_price_per_kg (PKR/kg); raw_cost_per_kg_finished/total_cost_per_kg_finished; supplier_id/supplier_name; status (Completed/In Progress/…).',
@@ -71,18 +83,13 @@ const CURATED = {
   journal_entries: "GL journal headers. status — use 'Posted'; journal_no; entry_date; entity.",
   journal_lines: 'GL lines. journal_id→journal_entries.id; account_id→chart_of_accounts.id; debit & credit are separate columns (PKR).',
   chart_of_accounts: 'GL accounts (code, name, type).',
-  payables: 'Amounts owed to suppliers/vendors. outstanding & amount (PKR); due_date; source_table/source_id (no name column — join via source).',
+  payables: 'Amounts owed to suppliers/vendors. outstanding & original_amount (PKR); due_date; supplier_id→suppliers; source_table/source_id.',
+  receivables: 'Amounts due from customers. expected_amount, received_amount, outstanding; currency; customer_id→customers; order_id→export_orders; local_sale_id→local_sales.',
   payments: 'Recorded payments (made/received).',
-  bank_accounts: 'Cash & bank accounts; current_balance (PKR); type (incl. cash).',
+  bank_accounts: 'Cash & bank accounts: name, bank_name, current_balance, currency; type (incl. cash). No account numbers.',
   bank_transactions: "Bank/cash ledger; type=credit|debit; status='posted'.",
-  business_expenses: 'Operating expenses; amount_pkr; category; expense_date; vendor_name.',
+  business_expenses: 'Operating expenses (salaries excluded); amount_pkr; category; expense_date; vendor_name.',
   fund_transfers: 'Head-Office ⇄ Mill money transfers.',
-  // Payroll
-  mill_workers: 'Mill employees (name, type daily|salaried, wage/salary).',
-  mill_payroll_runs: 'Monthly payroll runs (period, pay_date, net_total, employee_count).',
-  mill_payroll_lines: 'Per-employee payroll line within a run.',
-  mill_attendance: 'Daily attendance register.',
-  mill_worker_advances: 'Salary advances to workers.',
   // Procurement
   purchase_orders: 'Purchase orders (price_per_mt — doc, per MT).',
   goods_receipt_notes: 'Goods receipts against POs (accepted_qty_mt/rejected_qty_mt — MT).',
@@ -106,7 +113,7 @@ async function schemaContext(access) {
   if (!_columns) {
     const rows = await db.raw(
       `SELECT table_name, column_name FROM information_schema.columns
-       WHERE table_schema = 'public' AND table_name = ANY(?)
+       WHERE table_schema = 'ai_ro' AND table_name = ANY(?)
        ORDER BY table_name, ordinal_position`, [Object.keys(CURATED)]);
     _columns = {};
     for (const r of rows.rows) (_columns[r.table_name] = _columns[r.table_name] || []).push(r.column_name);
@@ -116,19 +123,15 @@ async function schemaContext(access) {
   return `${CONVENTIONS}\n\nTABLES (table(columns) -- purpose):\n${lines.join('\n')}`;
 }
 
-const WRITE_RE = /\b(insert|update|delete|drop|alter|truncate|create|grant|revoke|comment|copy|merge|call|do)\b/i;
-// Dangerous functions / system catalogs / file & network access — blocked even though
-// the query runs read-only, to prevent metadata recon and server-side file/network reads.
-const DANGER_RE = /\b(pg_sleep|pg_read_file|pg_read_binary_file|pg_ls_dir|pg_stat_file|lo_import|lo_export|lo_get|dblink|set_config|current_setting|pg_catalog|pg_authid|pg_shadow|pg_user|pg_roles|information_schema)\b/i;
-// Auth / PII / access-control tables — never queryable via NL→SQL (a read-only SELECT
-// could still leak password hashes / role grants without this).
-const SENSITIVE_TABLES = ['users', 'password_reset_tokens', 'user_preferences', 'roles', 'role_permissions', 'permissions', 'sessions', 'user_sessions', 'api_integrations', 'api_sync_log', 'approval_authorizations'];
-const SENSITIVE_RE = new RegExp(`\\b(${SENSITIVE_TABLES.join('|')})\\b`, 'i');
+const ROW_CAP = 200;
+const NOT_CONFIGURED = 'AI querying is not configured on this server. Ask an administrator to set AI_DB_PASSWORD for the read-only AI database role.';
 
 // ── 1) Natural-language report query ──
 router.post('/query', noFinanceForOperator, canUseAi, async (req, res) => {
   try {
     if (!ai.enabled()) return res.json(OFF);
+    // Checked before calling the model: no read-only role, no query (and no spend).
+    if (!aiDb.isConfigured()) return res.status(503).json({ success: false, message: NOT_CONFIGURED });
     const question = String(req.body.question || '').trim();
     if (!question) return res.status(400).json({ success: false, message: 'A question is required.' });
 
@@ -139,42 +142,44 @@ router.post('/query', noFinanceForOperator, canUseAi, async (req, res) => {
       prompt: `${schema}\n\nUser question: "${question}"\n\n`
         + 'Write ONE read-only PostgreSQL query that answers it.\nRules:\n'
         + '- SELECT or WITH only. Never write data or DDL. Single statement, no semicolons.\n'
-        + '- Use only the tables/columns listed above; honour the CONVENTIONS (KG quantities, PKR money, Posted journals).\n'
+        + '- Use only the tables/columns listed above (unqualified names); honour the CONVENTIONS (KG quantities, PKR money, Posted journals).\n'
         + "- Use ILIKE '%term%' for name matching; join suppliers/customers/products by id to show names.\n"
-        + '- Add LIMIT 200 unless the result is a single aggregate row.\n'
+        + `- Add LIMIT ${ROW_CAP} unless the result is a single aggregate row.\n`
         + '- Select human-readable columns (names, dates, amounts) rather than raw ids where possible.\n'
         + 'Return JSON: {"sql":"<query>","explanation":"<one sentence>"}.',
       json: true, maxTokens: 700,
     });
 
-    let sql = String(out.sql || '').trim().replace(/;+\s*$/, '');
-    if (!/^(select|with)\b/i.test(sql)) return res.status(400).json({ success: false, message: 'Could not turn that into a read query — try rephrasing.', data: { sql } });
-    if (sql.includes(';')) return res.status(400).json({ success: false, message: 'Only a single read-only statement is allowed.', data: { sql } });
-    if (WRITE_RE.test(sql) || DANGER_RE.test(sql)) return res.status(400).json({ success: false, message: 'Only plain read-only queries are allowed (no writes, system functions, or catalog access).', data: { sql } });
-    if (SENSITIVE_RE.test(sql)) return res.status(400).json({ success: false, message: 'That query touches restricted data (users, roles, or credentials) and was blocked.', data: { sql } });
-    const blocked = referencesBlocked(sql, access);
-    if (blocked) return res.status(403).json({ success: false, message: `That query reads ${blocked}, which your role cannot view.`, data: { sql } });
-    // Enforce a sane row cap: add LIMIT when missing, clamp an over-large one.
-    const limitMatch = sql.match(/\blimit\s+(\d+)/i);
-    if (!limitMatch) sql += ' LIMIT 200';
-    else if (parseInt(limitMatch[1], 10) > 1000) sql = sql.replace(/\blimit\s+\d+/i, 'LIMIT 1000');
-
-    let rows;
+    const sql = String(out.sql || '').trim().replace(/;+\s*$/, '');
+    let relations;
     try {
-      rows = await db.transaction(async (trx) => {
-        await trx.raw('SET TRANSACTION READ ONLY');
-        await trx.raw('SET LOCAL statement_timeout = 8000');
-        const r = await trx.raw(sql);
-        return r.rows || [];
-      });
+      ({ relations } = checkSql(sql, Object.keys(CURATED)));
     } catch (e) {
-      return res.status(400).json({ success: false, message: `Query failed: ${e.message}`, data: { sql, explanation: out.explanation || '' } });
+      if (!(e instanceof SqlGuardError)) throw e;
+      return res.status(400).json({ success: false, message: `That query was blocked: ${e.message} Try rephrasing.`, data: { sql } });
     }
+    const blocked = new Set(blockedTables(access));
+    const hidden = relations.find((r) => blocked.has(r));
+    if (hidden) return res.status(403).json({ success: false, message: `That query reads ${hidden}, which your role cannot view.`, data: { sql } });
+
+    let result;
+    try {
+      result = await aiDb.runReadOnly(sql, { rowCap: ROW_CAP, timeoutMs: 8000 });
+    } catch (e) {
+      if (e instanceof aiDb.AiQueryNotConfigured) return res.status(503).json({ success: false, message: e.message });
+      // Never hand database error text to the client — log it here.
+      console.error('[ai] query failed:', e.code || '', e.message);
+      return res.status(400).json({ success: false, message: 'The query could not be run — try rephrasing the question.', data: { sql, explanation: out.explanation || '' } });
+    }
+    const { rows, truncated } = result;
     return res.json({
       success: true,
-      data: { aiEnabled: true, question, sql, explanation: out.explanation || '', columns: rows.length ? Object.keys(rows[0]) : [], rows: rows.slice(0, 200), rowCount: rows.length },
+      data: { aiEnabled: true, question, sql, explanation: out.explanation || '', columns: rows.length ? Object.keys(rows[0]) : [], rows, rowCount: rows.length, truncated },
     });
-  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+  } catch (err) {
+    console.error('[ai] /query error:', err.message);
+    return res.status(500).json({ success: false, message: 'The AI request failed. Try again later.' });
+  }
 });
 
 // ── 2) Draft a customer / supplier email from their ledger ──
@@ -207,7 +212,7 @@ router.post('/draft', noFinanceForOperator, canUseAi, async (req, res) => {
       json: true, maxTokens: 700,
     });
     return res.json({ success: true, data: { aiEnabled: true, party: party.name, to: party.email || null, subject: out.subject || '', body: out.body || '', closingBalance: stmt.closing_balance } });
-  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+  } catch (err) { console.error('[ai] request failed:', err.message); return res.status(500).json({ success: false, message: 'The AI request failed. Try again later.' }); }
 });
 
 // ── 3) Anomaly detection — gather signals, let AI flag genuine issues ──
@@ -268,12 +273,13 @@ router.get('/anomalies', noFinanceForOperator, canUseAi, async (req, res) => {
       json: true, maxTokens: 1200,
     });
     return res.json({ success: true, data: { aiEnabled: true, generatedAt: new Date().toISOString(), anomalies: Array.isArray(out.anomalies) ? out.anomalies : [], signals } });
-  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+  } catch (err) { console.error('[ai] request failed:', err.message); return res.status(500).json({ success: false, message: 'The AI request failed. Try again later.' }); }
 });
 
 // ── 4) Auto-categorise an expense from its free-text description ──
 const EXPENSE_CATS = ['salaries', 'utilities', 'rent', 'maintenance', 'insurance', 'transport', 'fuel', 'packaging', 'inspection', 'freight', 'commission', 'miscellaneous'];
-router.post('/categorize-expense', noFinanceForOperator, async (req, res) => {
+// Used by the mill expense form — needs the permission to record one (P1-05).
+router.post('/categorize-expense', noFinanceForOperator, authorize('milling', 'create'), async (req, res) => {
   try {
     if (!ai.enabled()) return res.json(OFF);
     const description = String(req.body.description || '').trim();
@@ -292,12 +298,13 @@ router.post('/categorize-expense', noFinanceForOperator, async (req, res) => {
     if (!EXPENSE_CATS.includes(category)) category = 'miscellaneous';
     const confidence = Math.max(0, Math.min(1, parseFloat(out.confidence) || 0));
     return res.json({ success: true, data: { aiEnabled: true, category, subcategory: String(out.subcategory || '').trim(), confidence } });
-  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+  } catch (err) { console.error('[ai] request failed:', err.message); return res.status(500).json({ success: false, message: 'The AI request failed. Try again later.' }); }
 });
 
 // ── 5) Plain-English narrative summary of a computed report ──
 const SUMMARY_KINDS = { pnl: 'cash-basis Profit & Loss', pnl_accrual: 'accrual-basis Profit & Loss', cashflow: 'Cash Flow' };
-router.post('/summarize-report', noFinanceForOperator, async (req, res) => {
+// Used on the printable P&L / cash-flow reports — same gate as those (P1-05).
+router.post('/summarize-report', noFinanceForOperator, authorize('reports', 'view'), async (req, res) => {
   try {
     if (!ai.enabled()) return res.json(OFF);
     const kind = String(req.body.kind || '').trim();
@@ -314,7 +321,10 @@ router.post('/summarize-report', noFinanceForOperator, async (req, res) => {
       json: true, maxTokens: 400,
     });
     return res.json({ success: true, data: { aiEnabled: true, kind, summary: String(out.summary || '').trim() } });
-  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+  } catch (err) { console.error('[ai] request failed:', err.message); return res.status(500).json({ success: false, message: 'The AI request failed. Try again later.' }); }
 });
+
+// Exposed for tests: the curated view list must match migration 333's views.
+router.CURATED = CURATED;
 
 module.exports = router;

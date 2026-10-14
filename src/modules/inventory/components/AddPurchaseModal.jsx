@@ -4,6 +4,7 @@ import { Loader2, CheckCircle2, PlusCircle, Package, Wrench, Warehouse, Boxes, D
 import SlideDrawer from '../../../components/SlideDrawer';
 import { useApp } from '../../../context/AppContext';
 import { useAddPurchaseToLot } from '../../../api/queries';
+import useCanSeeCost from '../../../hooks/useCanSeeCost';
 import { todayLocalISO, fmtPKR as fmtPKRBase, fmtKg } from '../../../shared/utils/format';
 
 const fmtPKR = (v) => fmtPKRBase(v, { decimals: 2 });
@@ -37,6 +38,8 @@ export default function AddPurchaseModal({ isOpen, lot, onClose, onSuccess }) {
   const { addToast } = useApp();
   const navigate = useNavigate();
   const addMut = useAddPurchaseToLot();
+  // A purchase is priced; the server 403s it without reports.view_cost.
+  const showCost = useCanSeeCost();
   const [form, setForm] = useState(BLANK);
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
   useEffect(() => { if (isOpen) setForm({ ...BLANK, purchase_date: todayLocalISO() }); }, [isOpen]);
@@ -96,6 +99,8 @@ export default function AddPurchaseModal({ isOpen, lot, onClose, onSuccess }) {
       addToast?.(err?.response?.data?.message || err.message || 'Failed to add purchase', 'error');
     }
   }
+
+  if (!showCost) return null;
 
   const inp = 'w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-amber-500 focus:border-amber-500';
   const lbl = 'block text-xs font-medium text-gray-600 mb-1';

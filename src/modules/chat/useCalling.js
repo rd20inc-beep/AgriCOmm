@@ -170,7 +170,7 @@ export function useCalling(user, { onError } = {}) {
   // Inbound signaling over SSE.
   useEffect(() => {
     if (!user) return undefined;
-    const close = realtimeRepo.subscribe(chatApi.callStreamUrl(), { onMessage: async (ev) => {
+    const close = realtimeRepo.subscribeCallSignals({ onMessage: async (ev) => {
       let sig; try { sig = JSON.parse(ev.data); } catch { return; }
       if (!sig || !sig.type) return;
       const c = callRef.current;

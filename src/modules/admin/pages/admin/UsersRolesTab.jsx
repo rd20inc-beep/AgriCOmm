@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { UsersRound, Plus, XCircle, CheckCircle, KeyRound, Trash2, Pencil, Shield, ChevronDown, Lock, Unlock, RotateCcw, Link2, Ban, SlidersHorizontal } from 'lucide-react';
 import { useApp } from '../../../../context/AppContext';
-import { useUsers, useCreateUser, useDeactivateUser, useActivateUser, useSetUserPassword, useDeleteUser, useUpdateUser, useSetUserStatus, useForceUserPasswordChange, useUserResetLink, useRevokeUserSessions, useUserScopes, useSetUserScopes } from '../../../../api/queries';
+import { useUsers, useCreateUser, useDeactivateUser, useActivateUser, useSetUserPassword, useDeleteUser, useUpdateUser, useSetUserStatus, useForceUserPasswordChange, useUserResetLink, useRevokeUserSessions, useUserScopes, useSetUserScopes, useRolesWithPermissions } from '../../../../api/queries';
 import Modal from '../../components/AdminDrawer';
 import FieldError from '../../../../shared/components/FieldError';
 import useConfirm from '../../../../hooks/useConfirm';
@@ -25,24 +25,37 @@ function MenuItem({ icon: Icon, label, onClick, tone }) {
   );
 }
 
-const ROLES = [
-  { id: 1, name: 'Super Admin', color: 'bg-purple-100 text-purple-700' },
-  { id: 2, name: 'Export Manager', color: 'bg-blue-100 text-blue-700' },
-  { id: 3, name: 'Finance Manager', color: 'bg-emerald-100 text-emerald-700' },
-  { id: 4, name: 'Mill Manager', color: 'bg-amber-100 text-amber-700' },
-  { id: 5, name: 'QC Analyst', color: 'bg-cyan-100 text-cyan-700' },
-  { id: 6, name: 'Documentation Officer', color: 'bg-indigo-100 text-indigo-700' },
-  { id: 7, name: 'Viewer', color: 'bg-gray-100 text-gray-700' },
-];
+// Role names and ids come from the database (GET /api/admin/roles-with-permissions):
+// ids differ between installs and roles are added over time (Owner, Auditor,
+// Mill Operator …), so a hard-coded id list assigned the wrong role. Colours are
+// cosmetic and keyed by name; unknown roles get grey.
+const ROLE_COLORS = {
+  'Super Admin': 'bg-purple-100 text-purple-700',
+  'Owner': 'bg-rose-100 text-rose-700',
+  'Export Manager': 'bg-blue-100 text-blue-700',
+  'Finance Manager': 'bg-emerald-100 text-emerald-700',
+  'Mill Manager': 'bg-amber-100 text-amber-700',
+  'QC Analyst': 'bg-cyan-100 text-cyan-700',
+};
 
 function getRoleColor(roleName) {
-  const role = ROLES.find(r => r.name === roleName);
-  return role?.color || 'bg-gray-100 text-gray-700';
+  return ROLE_COLORS[roleName] || 'bg-gray-100 text-gray-700';
+}
+
+export function RoleOptions({ roles, loading, error }) {
+  const placeholder = loading ? 'Loading roles…' : error ? 'Could not load roles' : 'Select a role';
+  return (
+    <>
+      <option value="" disabled>{placeholder}</option>
+      {roles.map(r => <option key={r.id} value={String(r.id)}>{r.name}</option>)}
+    </>
+  );
 }
 
 export default function UsersRolesTab() {
   const { addToast } = useApp();
   const { data: users = [], isLoading } = useUsers();
+  const { data: roles = [], isLoading: rolesLoading, isError: rolesError } = useRolesWithPermissions();
   const createUserMut = useCreateUser();
   const deactivateMut = useDeactivateUser();
   const activateMut = useActivateUser();
@@ -52,7 +65,7 @@ export default function UsersRolesTab() {
   const [confirm, confirmDialog] = useConfirm();
 
   const [showModal, setShowModal] = useState(false);
-  const [form, setForm] = useState({ fullName: '', email: '', password: '', roleId: '2' });
+  const [form, setForm] = useState({ fullName: '', email: '', password: '', roleId: '' });
   const [errors, setErrors] = useState({});
   const set = (k, v) => { setForm(p => ({ ...p, [k]: v })); setErrors(e => (e[k] ? { ...e, [k]: null } : e)); };
 
@@ -66,14 +79,15 @@ export default function UsersRolesTab() {
   const [pwForceChange, setPwForceChange] = useState(false);
 
   const [editUser, setEditUser] = useState(null);  // user being edited
-  const [editForm, setEditForm] = useState({ fullName: '', email: '', roleId: '2' });
+  const [editForm, setEditForm] = useState({ fullName: '', email: '', roleId: '' });
   const openEdit = (user) => {
     setEditUser(user);
-    setEditForm({ fullName: user.fullName || '', email: user.email || '', roleId: String(user.roleId || 2) });
+    setEditForm({ fullName: user.fullName || '', email: user.email || '', roleId: user.roleId != null ? String(user.roleId) : '' });
   };
   const handleUpdate = async () => {
     if (updateUserMut.isPending) return;
     if (!editForm.fullName.trim() || !editForm.email.trim()) { addToast('Name and email are required', 'error'); return; }
+    if (!editForm.roleId) { addToast('Choose a role', 'error'); return; }
     try {
       await updateUserMut.mutateAsync({ id: editUser.id, data: {
         full_name: editForm.fullName.trim(),
@@ -115,7 +129,7 @@ export default function UsersRolesTab() {
     }
   };
 
-  const resetForm = () => { setForm({ fullName: '', email: '', password: '', roleId: '2' }); setErrors({}); };
+  const resetForm = () => { setForm({ fullName: '', email: '', password: '', roleId: '' }); setErrors({}); };
 
   const handleCreate = async () => {
     if (createUserMut.isPending) return;
@@ -123,6 +137,7 @@ export default function UsersRolesTab() {
     if (!form.fullName.trim()) missing.fullName = 'Full name is required';
     if (!form.email.trim()) missing.email = 'Email is required';
     if (!form.password) missing.password = 'Password is required';
+    if (!form.roleId) missing.roleId = 'Choose a role';
     if (Object.keys(missing).length) { setErrors(missing); return; }
     try {
       await createUserMut.mutateAsync({
@@ -311,9 +326,10 @@ export default function UsersRolesTab() {
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
-            <select value={form.roleId} onChange={e => set('roleId', e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
-              {ROLES.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+            <select value={form.roleId} onChange={e => set('roleId', e.target.value)} aria-invalid={!!errors.roleId} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
+              <RoleOptions roles={roles} loading={rolesLoading} error={rolesError} />
             </select>
+            <FieldError error={errors.roleId} />
           </div>
           <div className="flex justify-end gap-2 pt-2 border-t border-gray-200">
             <button onClick={() => setShowModal(false)} className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">Cancel</button>
@@ -335,7 +351,7 @@ export default function UsersRolesTab() {
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
             <select value={editForm.roleId} onChange={e => setEditForm(p => ({ ...p, roleId: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
-              {ROLES.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+              <RoleOptions roles={roles} loading={rolesLoading} error={rolesError} />
             </select>
           </div>
           <div className="flex justify-end gap-2 pt-2 border-t border-gray-200">

@@ -14,10 +14,7 @@
  *
  * Every row it creates carries a per-run suffix; assertions are on deltas.
  */
-jest.mock('../middleware/rateLimiter', () => ({
-  authLimiter: (req, res, next) => next(),
-  apiLimiter: (req, res, next) => next(),
-}));
+jest.mock('../middleware/rateLimiter', () => require('./helpers/passThroughLimiters'));
 
 const hasDb = !!process.env.DB_HOST;
 const d = hasDb ? describe : describe.skip;

@@ -938,6 +938,8 @@ COL generated_documents.locked:boolean:NOT NULL
 COL generated_documents.order_id:integer:NOT NULL
 COL generated_documents.overrides_json:jsonb:NULL
 COL generated_documents.previous_version_id:integer:NULL
+COL generated_documents.rendered_at:timestamp with time zone:NULL
+COL generated_documents.rendered_html:text:NULL
 COL generated_documents.revision_reason:text:NULL
 COL generated_documents.snapshot_json:jsonb:NULL
 COL generated_documents.status:character varying:NOT NULL
@@ -1754,7 +1756,10 @@ COL mill_workers.ot_rate_per_hour:numeric:NULL
 COL mill_workers.pay_type:character varying:NOT NULL
 COL mill_workers.phone:character varying:NULL
 COL mill_workers.portal_enabled:boolean:NOT NULL
+COL mill_workers.portal_failed_attempts:integer:NOT NULL
+COL mill_workers.portal_locked_until:timestamp with time zone:NULL
 COL mill_workers.portal_pin_hash:character varying:NULL
+COL mill_workers.portal_pin_version:integer:NOT NULL
 COL mill_workers.role:character varying:NULL
 COL mill_workers.updated_at:timestamp with time zone:NOT NULL
 COL milling_batch_packaging.batch_id:integer:NOT NULL
@@ -2778,6 +2783,7 @@ COL users.id:integer:NOT NULL
 COL users.is_active:boolean:NOT NULL
 COL users.last_login:timestamp with time zone:NULL
 COL users.locked_at:timestamp with time zone:NULL
+COL users.locked_until:timestamp with time zone:NULL
 COL users.password_changed_at:timestamp with time zone:NULL
 COL users.password_hash:character varying:NOT NULL
 COL users.role_id:integer:NULL

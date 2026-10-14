@@ -10,6 +10,7 @@ import {
 import Modal from '../../components/AdminDrawer';
 import FieldError from '../../../../shared/components/FieldError';
 import useConfirm from '../../../../hooks/useConfirm';
+import { useAdminCanWrite } from './adminWrite';
 
 const EMPTY = {
   name: '',
@@ -47,6 +48,7 @@ const DOC_TYPES = [
 const ENTITIES = ['export', 'milling', 'finance', 'inventory', 'general'];
 
 export default function DocTemplatesTab() {
+  const canWrite = useAdminCanWrite();
   const { addToast } = useApp();
   const { data: templates = [], isLoading } = useDocumentTemplates();
   const createMut = useCreateDocumentTemplate();
@@ -126,9 +128,11 @@ export default function DocTemplatesTab() {
             Document Templates
             <span className="ml-2 text-xs font-normal text-gray-500">({templates.length})</span>
           </h2>
-          <button onClick={openCreate} className="inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium">
-            <Plus className="w-4 h-4" /> Add Template
-          </button>
+          {canWrite && (
+            <button onClick={openCreate} className="inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium">
+              <Plus className="w-4 h-4" /> Add Template
+            </button>
+          )}
         </div>
         <div className="overflow-x-auto mobile-cards">
           <table className="w-full text-sm">
@@ -168,12 +172,16 @@ export default function DocTemplatesTab() {
                     </td>
                     <td data-label="Actions" className="py-3 px-4 text-right">
                       <div className="inline-flex gap-1">
-                        <button onClick={() => openEdit(t)} className="p-1.5 rounded hover:bg-blue-50 text-blue-600" title="Edit" aria-label={`Edit ${t.name}`}>
-                          <Pencil className="w-4 h-4" />
-                        </button>
-                        <button onClick={() => handleDelete(t)} className="p-1.5 rounded hover:bg-red-50 text-red-600" title="Delete" aria-label={`Delete ${t.name}`}>
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        {canWrite && (
+                          <button onClick={() => openEdit(t)} className="p-1.5 rounded hover:bg-blue-50 text-blue-600" title="Edit" aria-label={`Edit ${t.name}`}>
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                        )}
+                        {canWrite && (
+                          <button onClick={() => handleDelete(t)} className="p-1.5 rounded hover:bg-red-50 text-red-600" title="Delete" aria-label={`Delete ${t.name}`}>
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>

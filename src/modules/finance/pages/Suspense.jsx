@@ -146,7 +146,7 @@ export default function Suspense() {
                       <td data-label="Status" className="px-3 py-2 text-center"><StatusBadge status={e.status} /></td>
                       <td data-label="Actions" className="px-3 py-2 text-right whitespace-nowrap">
                         <span className="inline-flex items-center gap-1.5">
-                        {e.status === 'Open' && <button type="button" onClick={() => reviewMut.mutate(e.id)} className={btnRowQuiet}>Review</button>}
+                        {e.status === 'Open' && hasPermission('finance', 'confirm_payment') && <button type="button" onClick={() => reviewMut.mutate(e.id)} data-action="review" className={btnRowQuiet}>Review</button>}
                         {canResolve && canJournal && <button type="button" onClick={() => setResolveFor(e)} data-action="resolve" className={btnRowSecondary}>Resolve</button>}
                         {canReverse && canJournal && <button type="button" data-action="reverse" onClick={async () => {
                           if (!await confirm({

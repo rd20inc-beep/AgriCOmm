@@ -1,6 +1,5 @@
 const express = require('express');
 const router = express.Router();
-const db = require('../../config/database');
 const controller = require('../../controllers/exportOrderController');
 const authorize = require('../../middleware/rbac');
 const auditAction = require('../../middleware/audit');
@@ -8,39 +7,18 @@ const validate = require('../../middleware/validate');
 const schemas = require('../../middleware/schemas');
 const ownerApproval = require('../../middleware/ownerApproval');
 
-/**
- * Authorize if user has ANY of the listed module.action permissions.
- * Used for payment confirmation which can be done by export or finance users.
- */
-function authorizeAny(...permPairs) {
-  return async (req, res, next) => {
-    if (!req.user) {
-      return res.status(401).json({ success: false, message: 'Not authenticated.' });
-    }
-    try {
-      // Super Admin bypass
-      const role = await db('roles').where({ id: req.user.role_id }).select('name').first();
-      if (role && role.name === 'Super Admin') return next();
+// Multi-permission gates use the shared rbac authorizeAny (Owner / Super Admin
+// bypass and user module scopes, like every other gate). It replaces a local
+// copy that only Super Admin bypassed.
+const { authorizeAny, userHasPermission } = require('../../middleware/rbac');
 
-      // Load permissions if not cached
-      if (!req.user._permissionsLoaded) {
-        const perms = await db('role_permissions as rp')
-          .join('permissions as p', 'rp.permission_id', 'p.id')
-          .where('rp.role_id', req.user.role_id)
-          .select('p.module', 'p.action');
-        req.user.permissions = new Set(perms.map((p) => `${p.module}.${p.action}`));
-        req.user._permissionsLoaded = true;
-      }
-
-      const allowed = permPairs.some(([mod, act]) => req.user.permissions.has(`${mod}.${act}`));
-      if (!allowed) {
-        return res.status(403).json({ success: false, message: 'Forbidden.' });
-      }
-      next();
-    } catch (err) {
-      return res.status(500).json({ success: false, message: 'Authorization error.' });
-    }
-  };
+// Closing an order is export_orders.close (granted by mig 339 to every
+// export_orders.approve holder, so nobody who could close before is refused).
+async function closeNeedsClosePermission(req, res, next) {
+  if (req.body && req.body.status === 'Closed' && !(await userHasPermission(req, 'export_orders', 'close'))) {
+    return res.status(403).json({ success: false, message: 'Forbidden. Closing an export order needs the close permission.' });
+  }
+  return next();
 }
 
 router.get('/', authorize('export_orders', 'view'), controller.list);
@@ -69,6 +47,7 @@ router.put(
 router.put(
   '/:id/status',
   authorize('export_orders', 'approve'),
+  closeNeedsClosePermission,
   auditAction('update_status', 'export_order', (req) => req.params.id),
   controller.updateStatus
 );
@@ -273,16 +252,26 @@ router.get('/:id/documents/generate/:docType', authorize('export_orders', 'view'
 // Persisted / versioned generated documents (Phase E).
 const genDocController = require('../../modules/documents/generatedDocument.controller');
 router.put('/:id/documents/customer-style', authorize('export_orders', 'edit'), validate(schemas.documentCustomerStyle), genDocController.saveCustomerStyle);
-router.post('/:id/documents/:docType/draft', authorize('export_orders', 'view'), genDocController.createDraft);
+// P1-08 / EXP-13: previewing writes nothing. A viewer previews through GET
+// /current (an existing version) or GET /generate (a stateless render); a
+// version row — and its GD number — is created only when someone who can edit
+// documents first saves, changes a setting or stores the rendering.
+const canEditDocuments = authorize.authorizeAny(['export_orders', 'edit'], ['documents', 'edit']);
+router.post('/:id/documents/:docType/draft', canEditDocuments, genDocController.createDraft);
 router.get('/:id/documents/:docType/current', authorize('export_orders', 'view'), genDocController.getCurrent);
+// P1-08 / EXP-12: PDF and send render the STORED version on the server — the
+// request carries no HTML. Sending needs an Approved version (Proforma Invoice
+// excepted, D-30); the PDF needs the documents download permission on top of
+// order view.
 router.post('/:id/documents/:docType/send-whatsapp', authorize('export_orders', 'send_email'), validate(schemas.sendDocumentWhatsApp), genDocController.sendWhatsApp);
 router.post('/:id/documents/:docType/send-email', authorize('export_orders', 'send_email'), validate(schemas.sendDocumentEmail), genDocController.sendEmail);
-router.post('/:id/documents/:docType/pdf', authorize('export_orders', 'view'), validate(schemas.downloadDocumentPdf), genDocController.downloadPdf);
+router.post('/:id/documents/:docType/pdf', authorize('export_orders', 'view'), authorize('documents', 'download'), validate(schemas.downloadDocumentPdf), genDocController.downloadPdf);
 router.get('/:id/documents/:docType/versions', authorize('export_orders', 'view'), genDocController.listVersions);
 router.put('/documents/:genId/overrides', authorize('export_orders', 'edit'), validate(schemas.saveDocumentOverrides), genDocController.saveOverrides);
+router.put('/documents/:genId/rendering', canEditDocuments, validate(schemas.saveDocumentRendering), genDocController.saveRendering);
 router.put('/documents/:genId/settings', authorize('export_orders', 'edit'), validate(schemas.documentSettings), genDocController.updateSettings);
 router.put('/documents/:genId/submit', authorize('export_orders', 'edit'), genDocController.submit);
-router.put('/documents/:genId/approve', authorize('documents', 'approve'), genDocController.approve);
+router.put('/documents/:genId/approve', authorize('documents', 'approve'), validate(schemas.documentApprove), genDocController.approve);
 router.put('/documents/:genId/status', authorize('export_orders', 'edit'), validate(schemas.documentStatus), genDocController.setStatus);
 router.post('/documents/:genId/revise', authorize('export_orders', 'edit'), validate(schemas.documentRevise), genDocController.revise);
 router.get('/documents/:genId', authorize('export_orders', 'view'), genDocController.getVersion);

@@ -311,7 +311,7 @@ export default function FinanceOverview() {
       </div>
 
       {/* ─── 7. PAYROLL SUMMARY (consolidated from mill payroll) ──────── */}
-      <PayrollSummaryStrip navigate={navigate} fmtPKR={fmtPKR} />
+      {hasPermission('payroll', 'view') && <PayrollSummaryStrip navigate={navigate} fmtPKR={fmtPKR} />}
 
       {/* ─── 8. AGING ────────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -598,8 +598,9 @@ function isOverdue(r) {
 // live in ../utils/aging.js — shared with MoneyIn.
 
 // Consolidated payroll KPIs for the Head-Office Finance dashboard. Reads the
-// existing mill payroll data (reports.view) — creates no payroll data, and the
-// operational payroll stays in Mill Finance. Hidden if the endpoint is denied.
+// existing mill payroll data (payroll.view, D-24) — creates no payroll data, and
+// the operational payroll stays in Mill Finance. Only rendered for payroll.view;
+// also hidden if the endpoint is denied.
 function PayrollSummaryStrip({ navigate, fmtPKR }) {
   const month = new Date().toISOString().slice(0, 7);
   const { data, isError } = useQuery({

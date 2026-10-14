@@ -30,14 +30,15 @@ router.get('/ice-config', (req, res) => {
   return res.json({ success: true, data: { iceServers } });
 });
 
-// Chat files live in the PERSISTED uploads volume (/app/uploads/chat), not the
-// documents module's non-persisted dir.
-const CHAT_DIR = path.join(process.cwd(), 'uploads', 'chat');
+// Chat files live in the PERSISTED uploads volume (/app/uploads/chat), resolved
+// by config/paths like every other upload (same dir as the old cwd-relative path).
+const CHAT_DIR = require('../../config/paths').uploadPath('chat');
 const storage = multer.diskStorage({
   destination: (req, file, cb) => { fs.mkdirSync(CHAT_DIR, { recursive: true }); cb(null, CHAT_DIR); },
   filename: (req, file, cb) => cb(null, `${Date.now()}-${Math.round(Math.random() * 1e6)}${path.extname(file.originalname)}`),
 });
-const upload = multer({ storage, limits: { fileSize: 25 * 1024 * 1024 } }); // 25MB
+// 25MB; images/PDF/Office/CSV plus voice notes, clips and zips — no HTML/SVG/scripts.
+const upload = multer({ storage, limits: { fileSize: 25 * 1024 * 1024 }, fileFilter: require('../../middleware/uploadFilter').uploadFileFilter('chat') });
 
 // All routes are mounted behind `authenticate`, so req.user is set. Chat is open
 // to any authenticated user (no extra RBAC) — it's an internal team tool.

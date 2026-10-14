@@ -7,10 +7,12 @@ import { useCreateCustomer, useUpdateCustomer, useDeleteCustomer } from '../../.
 import Modal from '../../components/AdminDrawer';
 import FieldError from '../../../../shared/components/FieldError';
 import useConfirm from '../../../../hooks/useConfirm';
+import { useAdminCanWrite } from './adminWrite';
 
 const EMPTY = { name: '', country: '', contact_person: '', email: '', phone: '' };
 
 export default function CustomersTab() {
+  const canWrite = useAdminCanWrite();
   const { customersList, addToast } = useApp();
   const navigate = useNavigate();
   const createMut = useCreateCustomer();
@@ -102,13 +104,15 @@ export default function CustomersTab() {
             <Users className="w-5 h-5 text-blue-600" />
             Customers
           </h2>
-          <button
-            onClick={openCreate}
-            className="inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors font-medium text-sm"
-          >
-            <Plus className="w-4 h-4" />
-            Add New
-          </button>
+          {canWrite && (
+            <button
+              onClick={openCreate}
+              className="inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors font-medium text-sm"
+            >
+              <Plus className="w-4 h-4" />
+              Add New
+            </button>
+          )}
         </div>
         <div className="overflow-x-auto mobile-cards">
           <table className="w-full text-sm">
@@ -168,22 +172,26 @@ export default function CustomersTab() {
                       >
                         <BookOpen className="w-4 h-4" />
                       </button>
-                      <button
-                        onClick={() => openEdit(c)}
-                        className="p-1.5 rounded hover:bg-blue-50 text-blue-600"
-                        title="Edit"
-                        aria-label={`Edit ${c.name}`}
-                      >
-                        <Pencil className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => handleDelete(c)}
-                        className="p-1.5 rounded hover:bg-red-50 text-red-600"
-                        title="Delete"
-                        aria-label={`Delete ${c.name}`}
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      {canWrite && (
+                        <button
+                          onClick={() => openEdit(c)}
+                          className="p-1.5 rounded hover:bg-blue-50 text-blue-600"
+                          title="Edit"
+                          aria-label={`Edit ${c.name}`}
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                      )}
+                      {canWrite && (
+                        <button
+                          onClick={() => handleDelete(c)}
+                          className="p-1.5 rounded hover:bg-red-50 text-red-600"
+                          title="Delete"
+                          aria-label={`Delete ${c.name}`}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>

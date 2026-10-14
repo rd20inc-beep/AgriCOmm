@@ -5,10 +5,12 @@ import { useCreateWarehouse, useUpdateWarehouse, useDeleteWarehouse } from '../.
 import Modal from '../../components/AdminDrawer';
 import FieldError from '../../../../shared/components/FieldError';
 import useConfirm from '../../../../hooks/useConfirm';
+import { useAdminCanWrite } from './adminWrite';
 
 const EMPTY = { name: '', entity: 'mill', type: 'raw' };
 
 export default function WarehousesTab() {
+  const canWrite = useAdminCanWrite();
   const { warehousesList, addToast } = useApp();
   const createMut = useCreateWarehouse();
   const updateMut = useUpdateWarehouse();
@@ -76,13 +78,15 @@ export default function WarehousesTab() {
             <Warehouse className="w-5 h-5 text-teal-600" />
             Warehouses
           </h2>
-          <button
-            onClick={openCreate}
-            className="inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors font-medium text-sm"
-          >
-            <Plus className="w-4 h-4" />
-            Add New
-          </button>
+          {canWrite && (
+            <button
+              onClick={openCreate}
+              className="inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors font-medium text-sm"
+            >
+              <Plus className="w-4 h-4" />
+              Add New
+            </button>
+          )}
         </div>
         <div className="overflow-x-auto mobile-cards">
           <table className="w-full text-sm">
@@ -119,12 +123,16 @@ export default function WarehousesTab() {
                   </td>
                   <td data-label="Actions" className="px-4 py-3 text-right">
                     <div className="inline-flex gap-1">
-                      <button onClick={() => openEdit(w)} className="p-1.5 rounded hover:bg-blue-50 text-blue-600" title="Edit" aria-label={`Edit ${w.name}`}>
-                        <Pencil className="w-4 h-4" />
-                      </button>
-                      <button onClick={() => handleDelete(w)} className="p-1.5 rounded hover:bg-red-50 text-red-600" title="Delete" aria-label={`Delete ${w.name}`}>
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      {canWrite && (
+                        <button onClick={() => openEdit(w)} className="p-1.5 rounded hover:bg-blue-50 text-blue-600" title="Edit" aria-label={`Edit ${w.name}`}>
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                      )}
+                      {canWrite && (
+                        <button onClick={() => handleDelete(w)} className="p-1.5 rounded hover:bg-red-50 text-red-600" title="Delete" aria-label={`Delete ${w.name}`}>
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>

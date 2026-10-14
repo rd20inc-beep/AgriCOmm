@@ -29,6 +29,28 @@ function parseCustomTags(v) {
 const { redactForUser } = require('../../utils/costVisibility');
 const { kgToMt, KG_PER_MT } = require('../../shared/units');
 
+// A scheduled report email the caller may run / delete: task_type must be
+// report_email, and the caller must have created it or hold admin.manage_settings
+// (Owner / Super Admin pass via userHasPermission). null = not found / not theirs.
+async function mayManageScheduledReport(req, id) {
+  const taskId = parseInt(id, 10);
+  if (!Number.isFinite(taskId)) return null;
+  const db = require('../../config/database');
+  const { userHasPermission } = require('../../middleware/rbac');
+  const task = await db('scheduled_tasks').where({ id: taskId, task_type: 'report_email' }).first();
+  if (!task) return null;
+  let cfg = {};
+  try { cfg = typeof task.config === 'string' ? JSON.parse(task.config) : (task.config || {}); } catch (e) { cfg = {}; }
+  if (cfg.createdBy != null && Number(cfg.createdBy) === Number(req.user.id)) return task;
+  return (await userHasPermission(req, 'admin', 'manage_settings')) ? task : null;
+}
+
+async function auditScheduled(req, action, taskId, details) {
+  try {
+    await require('../admin/audit.service').log({ userId: req.user.id, action, entityType: 'scheduled_tasks', entityId: taskId, details, ipAddress: req.ip });
+  } catch (e) { console.error('Scheduled report audit failed:', e.message); }
+}
+
 // Mutates + returns the data object, redacting per the caller's permissions.
 function redactReport(req, data, opts) {
   return redactForUser(req, data, opts);
@@ -370,7 +392,11 @@ const reportingController = {
 
   async listScheduledReports(req, res) {
     try {
-      const data = await reportingService.listScheduledReportEmails();
+      const all = await reportingService.listScheduledReportEmails();
+      // An admin sees every schedule; anyone else only the ones they created.
+      const { userHasPermission } = require('../../middleware/rbac');
+      const isAdmin = await userHasPermission(req, 'admin', 'manage_settings');
+      const data = isAdmin ? all : all.filter((r) => r.createdBy != null && Number(r.createdBy) === Number(req.user.id));
       return res.json({ success: true, rows: data, types: reportingService.SCHEDULED_REPORT_TYPES });
     } catch (err) {
       console.error('List scheduled reports error:', err);
@@ -381,7 +407,8 @@ const reportingController = {
   async createScheduledReport(req, res) {
     try {
       const { reportType, frequency, recipients, filters } = req.body || {};
-      const data = await reportingService.createScheduledReportEmail({ reportType, frequency, recipients, filters });
+      const data = await reportingService.createScheduledReportEmail({ reportType, frequency, recipients, filters, createdBy: req.user.id });
+      await auditScheduled(req, 'scheduled_report_create', data.id, { reportType, frequency, recipients });
       return res.json({ success: true, ...data });
     } catch (err) {
       console.error('Create scheduled report error:', err);
@@ -391,7 +418,10 @@ const reportingController = {
 
   async deleteScheduledReport(req, res) {
     try {
-      await reportingService.deleteScheduledReportEmail(req.params.id);
+      const task = await mayManageScheduledReport(req, req.params.id);
+      if (!task) return res.status(404).json({ success: false, message: 'Scheduled report not found.' });
+      await reportingService.deleteScheduledReportEmail(task.id);
+      await auditScheduled(req, 'scheduled_report_delete', task.id, {});
       return res.json({ success: true });
     } catch (err) {
       console.error('Delete scheduled report error:', err);
@@ -401,12 +431,18 @@ const reportingController = {
 
   async runScheduledReport(req, res) {
     try {
+      // Only a report_email schedule the caller created (or any, for an
+      // admin) — this route used to run ANY scheduled_tasks id, payroll_prepare
+      // included, for anyone with reports.view.
+      const task = await mayManageScheduledReport(req, req.params.id);
+      if (!task) return res.status(404).json({ success: false, message: 'Scheduled report not found.' });
       const automationService = require('../admin/automation.service');
-      const result = await automationService.runTask(parseInt(req.params.id, 10));
+      const result = await automationService.runTask(task.id);
+      await auditScheduled(req, 'scheduled_report_run', task.id, { status: result && result.status });
       return res.json({ success: true, result });
     } catch (err) {
       console.error('Run scheduled report error:', err);
-      return res.status(500).json({ success: false, message: err.message || 'Internal server error.' });
+      return res.status(500).json({ success: false, message: 'Could not run the scheduled report.' });
     }
   },
 
@@ -729,8 +765,9 @@ const reportingController = {
   async run(req, res) {
     try {
       const { id } = req.params;
-      const result = await reportingService.runSavedReport(parseInt(id, 10));
-      return res.json({ success: true, data: result });
+      const result = await reportingService.runSavedReport(parseInt(id, 10), req.user.id);
+      // Same cost / profit redaction the live report endpoints apply.
+      return res.json({ success: true, data: await redactReport(req, result) });
     } catch (err) {
       console.error('Run saved report error:', err);
       if (err.message === 'Saved report not found') {
@@ -743,7 +780,7 @@ const reportingController = {
   async delete(req, res) {
     try {
       const { id } = req.params;
-      const deleted = await reportingService.deleteSavedReport(parseInt(id, 10));
+      const deleted = await reportingService.deleteSavedReport(parseInt(id, 10), req.user.id);
       if (!deleted) {
         return res.status(404).json({ success: false, message: 'Report not found.' });
       }
@@ -2488,7 +2525,7 @@ const reportingController = {
         user: r.user_name || r.user_email || (r.user_id ? `User #${r.user_id}` : 'System'),
         userId: r.user_id, action: r.action, category: catOf(r.action),
         entityType: r.entity_type || '—', entityId: r.entity_id || '',
-        ip: r.ip_address || '', details: summarize(r.details),
+        ip: r.ip_address || '', details: summarize(require('../../utils/redactSecrets').redactDetails(r.details)),
       }));
 
       return res.json({ success: true, data: {

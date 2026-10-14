@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { MessageCircle, X, Send, ArrowLeft, Megaphone, Search, Paperclip, FileText, Download, Phone, Video, PhoneOff, Mic, MicOff, VideoOff, Smile, Image as ImageIcon, Camera, CheckCircle2, ShieldCheck } from 'lucide-react';
 import { chatApi } from '../modules/chat/api';
 import { useCalling } from '../modules/chat/useCalling';
+import { fetchStreamTicket } from '../data/repositories/realtime';
 import { useAcceptFundTransfer } from '../api/queries';
 import { isChatHidden, setChatHidden, getChatPos, setChatPos, clampToViewport, onChatPrefsChange } from './chatBubblePrefs';
 import { useAuth } from '../context/AuthContext';
@@ -22,10 +23,28 @@ function fmtTime(iso) {
 }
 const initials = (name) => (name || 'U').split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase();
 
+// One short-lived chat-attachment ticket shared by every attachment on screen.
+// It lives 10 minutes server-side; refreshed every 4 so links never go stale.
+const TICKET_REFRESH_MS = 4 * 60 * 1000;
+function useAttachmentTicket() {
+  const { data } = useQuery({
+    queryKey: ['chat-attachment-ticket'],
+    queryFn: () => fetchStreamTicket('chat-attachment'),
+    staleTime: TICKET_REFRESH_MS,
+    refetchInterval: TICKET_REFRESH_MS,
+    retry: 1,
+  });
+  return data || null;
+}
+
 // Renders a message's attachment — images inline, other files as a download chip.
 function Attachment({ m, mine }) {
-  const url = chatApi.attachmentUrl(m.id);
+  const ticket = useAttachmentTicket();
   const isImg = (m.attachment_type || '').startsWith('image/');
+  if (!ticket) {
+    return <span className="block mb-1 text-xs opacity-70">{m.attachment_name || 'Attachment'}</span>;
+  }
+  const url = chatApi.attachmentUrl(m.id, ticket);
   if (isImg) {
     return (
       <a href={url} target="_blank" rel="noreferrer" className="block mb-1">

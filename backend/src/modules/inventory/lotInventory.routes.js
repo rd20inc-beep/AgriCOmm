@@ -3,14 +3,19 @@ const router = express.Router();
 const db = require('../../config/database');
 const controller = require('./lotInventory.controller');
 const inventoryService = require('./inventory.service');
-const { authorize, authorizeRole } = require('../../middleware/rbac');
+const { authorize } = require('../../middleware/rbac');
 const auditAction = require('../../middleware/audit');
 const validate = require('../../middleware/validate');
 const ownerApproval = require('../../middleware/ownerApproval');
 const schemas = require('../../middleware/schemas');
 // Money-only endpoints need reports.view_cost (or finance.view): the Mill
 // Operator and QC Analyst see stock quantities, never rates or values.
-const { requireCostVisibility } = require('../../utils/costVisibility');
+const { requireCostVisibility, redactCostInResponses } = require('../../utils/costVisibility');
+
+// Every response from this router is cost-redacted for a cost-blind user —
+// the controller's own redactForUser calls stay; this also covers the inline
+// handlers below (adjustments, traces, reconciliation, templates, sources).
+router.use(redactCostInResponses());
 
 // Lot sources (dropdown for purchase lot creation)
 router.get('/sources', authorize('inventory', 'view'), controller.getLotSources);
@@ -58,10 +63,13 @@ router.post(
   controller.createPurchaseLot
 );
 
-// Add another purchase (same supplier) onto an existing untouched lot
+// Add another purchase (same supplier) onto an existing untouched lot.
+// A purchase carries a rate (required) and re-bills the supplier, so it needs
+// reports.view_cost like Edit Price — LotDetail hides the button otherwise.
 router.post(
   '/lots/:id/add-purchase',
   authorize('inventory', 'create'),
+  requireCostVisibility,
   validate(schemas.addPurchaseToLot),
   auditAction('add_purchase_to_lot', 'inventory_lot', (req) => req.params.id),
   controller.addPurchaseToLot
@@ -108,10 +116,14 @@ router.put(
   controller.renameLot
 );
 
-// Record the actual RECEIVED quantity (ordered vs received) — re-bills to received
+// Record the actual RECEIVED quantity (ordered vs received) — re-bills to received.
+// No cost gate on purpose: it is a weighbridge QUANTITY, the server prices it at
+// the lot's own rate, cost-blind roles never see the bill (LotDetail hides it,
+// the response is redacted) and recording intake weight is their job.
 router.put(
   '/lots/:id/received-qty',
   authorize('inventory', 'edit'),
+  validate(schemas.setLotReceivedQty),
   auditAction('update_lot_received_qty', 'inventory_lot'),
   controller.setLotReceivedQty
 );
@@ -266,10 +278,11 @@ router.post('/adjustments', authorize('inventory', 'create'),
 
 // Write-offs and stock adjustments are approved by the Owner only (owner
 // decision 2026-10-05) — inventory.edit is held by Mill Operator, so it cannot
-// be the gate. authorizeRole has no bypass, so Super Admin is listed too.
-const WRITE_OFF_APPROVERS = ['Owner', 'Super Admin'];
+// be the gate. The gate is inventory.approve_write_off, held by Owner and
+// Super Admin only (mig 339) — the same people the old role list admitted.
+const canApproveWriteOff = authorize('inventory', 'approve_write_off');
 
-router.put('/adjustments/:id/approve', authorizeRole(...WRITE_OFF_APPROVERS),
+router.put('/adjustments/:id/approve', canApproveWriteOff,
   auditAction('approve_stock_adjustment', 'stock_adjustment', (req) => req.params.id),
   async (req, res) => {
     try {
@@ -284,7 +297,7 @@ router.put('/adjustments/:id/approve', authorizeRole(...WRITE_OFF_APPROVERS),
   }
 );
 
-router.put('/adjustments/:id/reject', authorizeRole(...WRITE_OFF_APPROVERS),
+router.put('/adjustments/:id/reject', canApproveWriteOff,
   auditAction('reject_stock_adjustment', 'stock_adjustment', (req) => req.params.id),
   async (req, res) => {
     try {

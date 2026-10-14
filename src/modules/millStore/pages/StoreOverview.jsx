@@ -13,6 +13,7 @@ import SlideDrawer from '../../../components/SlideDrawer';
 import SupplierPicker from '../../../components/SupplierPicker';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
+import useCanSeeCost from '../../../hooks/useCanSeeCost';
 import { fmtPKR, fmtNum, fmtDate } from '../../../shared/utils/format';
 
 // Exact figures — never "M"/"K" (store values are reconciled line by line).
@@ -43,6 +44,8 @@ const CATEGORIES = ['all', 'packaging', 'operational', 'fuel', 'maintenance'];
 
 export default function StoreOverview() {
   const { data: summary = {} } = useMillStoreSummary();
+  // Cost / stock value is hidden from cost-blind roles (owner decision 2026-10-05).
+  const showCost = useCanSeeCost();
   const [category, setCategory] = useState('all');
   const [search, setSearch] = useState('');
   const [showNewPurchase, setShowNewPurchase] = useState(false);
@@ -102,14 +105,14 @@ export default function StoreOverview() {
           sub={summary.low_stock_items > 0 ? 'items below reorder level' : 'all levels OK'}
           accent={summary.low_stock_items > 0 ? 'red' : 'green'}
         />
-        <KPI icon={TrendingDown} label="Stock Value" value={formatPKR(summary.stock_value)} accent="green" />
+        {showCost && <KPI icon={TrendingDown} label="Stock Value" value={formatPKR(summary.stock_value)} accent="green" />}
         <Link to="/mill-store/alerts">
           <KPI icon={AlertTriangle} label="View Alerts" value="→" sub="Low stock & reorder" accent="amber" />
         </Link>
       </div>
 
       {/* Unpaid purchases — record payment (captures method + account). */}
-      <PurchasePaymentsCard />
+      {showCost && <PurchasePaymentsCard />}
 
       {/* Katta stock by size — where each size came from / went. */}
       {kattaItems.length > 0 && (
@@ -131,7 +134,7 @@ export default function StoreOverview() {
                   <th className="py-1.5 px-2 text-right font-semibold">Used (pack)</th>
                   <th className="py-1.5 px-2 text-right font-semibold">Sold</th>
                   <th className="py-1.5 px-2 text-right font-semibold">On hand</th>
-                  <th className="py-1.5 pl-2 text-right font-semibold">Value</th>
+                  {showCost && <th className="py-1.5 pl-2 text-right font-semibold">Value</th>}
                 </tr>
               </thead>
               <tbody>
@@ -146,7 +149,7 @@ export default function StoreOverview() {
                       <td data-label="Used" className="mob-hide py-1.5 px-2 text-right text-red-600">{k.packed > 0 ? `−${fmtNum(k.packed, 0)}` : '—'}</td>
                       <td data-label="Sold" className="mob-hide py-1.5 px-2 text-right text-red-600">{k.sold > 0 ? `−${fmtNum(k.sold, 0)}` : '—'}</td>
                       <td data-label="On hand" className={`py-1.5 px-2 text-right font-bold ${low ? 'text-red-600' : 'text-gray-900'}`}>{fmtNum(onHand, 0)}</td>
-                      <td data-label="Value" className="py-1.5 pl-2 text-right text-gray-700">{k.avg_cost > 0 ? formatPKR(onHand * k.avg_cost) : '—'}</td>
+                      {showCost && <td data-label="Value" className="py-1.5 pl-2 text-right text-gray-700">{k.avg_cost > 0 ? formatPKR(onHand * k.avg_cost) : '—'}</td>}
                     </tr>
                   );
                 })}
@@ -203,8 +206,8 @@ export default function StoreOverview() {
                   <th className="text-right py-2 px-3 font-semibold text-gray-600">Bag kg</th>
                   <th className="text-right py-2 px-3 font-semibold text-gray-600">Tare kg</th>
                   <th className="text-right py-2 px-3 font-semibold text-gray-600">Reorder</th>
-                  <th className="text-right py-2 px-3 font-semibold text-gray-600">Avg Cost</th>
-                  <th className="text-right py-2 px-3 font-semibold text-gray-600">Value</th>
+                  {showCost && <th className="text-right py-2 px-3 font-semibold text-gray-600">Avg Cost</th>}
+                  {showCost && <th className="text-right py-2 px-3 font-semibold text-gray-600">Value</th>}
                   <th className="text-right py-2 px-3 font-semibold text-gray-600"></th>
                 </tr>
               </thead>
@@ -234,8 +237,8 @@ export default function StoreOverview() {
                         {item.tare_weight_kg != null && item.tare_weight_kg !== '' ? Number(item.tare_weight_kg) : '—'}
                       </td>
                       <td data-label="Reorder" className="mob-hide py-2 px-3 text-right text-gray-500">{reorder}</td>
-                      <td data-label="Avg Cost" className="mob-hide py-2 px-3 text-right text-gray-700">{formatPKR(avg)}</td>
-                      <td data-label="Value" className="py-2 px-3 text-right text-gray-900 font-medium">{formatPKR(qty * avg)}</td>
+                      {showCost && <td data-label="Avg Cost" className="mob-hide py-2 px-3 text-right text-gray-700">{formatPKR(avg)}</td>}
+                      {showCost && <td data-label="Value" className="py-2 px-3 text-right text-gray-900 font-medium">{formatPKR(qty * avg)}</td>}
                       <td className="mob-hide py-2 px-3 text-right">
                         <button
                           aria-label="Edit stock"
@@ -355,6 +358,7 @@ function StockEditDrawer({ item, onClose }) {
   // action (owner decision 2026-10-05); others request an adjustment.
   const { user } = useAuth();
   const canSetStock = ['Owner', 'Super Admin'].includes(user?.role);
+  const showCost = useCanSeeCost();
 
   useEffect(() => {
     if (!item) { setForm(null); return; }
@@ -478,8 +482,8 @@ function StockEditDrawer({ item, onClose }) {
         {/* Costing — what values this stock and what prices the purchase
             requests raised for export orders. */}
         <div className="border-t border-gray-200 pt-4">
-          <p className={section}>Pricing</p>
-          <div className="grid grid-cols-2 gap-3">
+          <p className={section}>{showCost ? 'Pricing' : 'Supplier'}</p>
+          {showCost && <><div className="grid grid-cols-2 gap-3">
             <div>
               <label className={lbl}>Cost per {form.unit} (Rs)</label>
               <input type="number" min="0" step="0.0001" value={form.avg_cost_per_unit} onChange={(e) => set('avg_cost_per_unit', e.target.value)} className={inp} placeholder="0.00" />
@@ -492,7 +496,7 @@ function StockEditDrawer({ item, onClose }) {
           <p className="text-[11px] text-gray-400 mt-1">
             Cost per unit values the stock and prices the purchase requests raised for export orders.
             {stockValue > 0 && <> Current stock value: <span className="font-medium text-gray-600">{fmtPKR(stockValue, { decimals: 2 })}</span>.</>}
-          </p>
+          </p></>}
           <label className={`${lbl} mt-3`}>Preferred supplier</label>
           <SupplierPicker
             value={form.preferred_supplier_id}

@@ -6,6 +6,7 @@ const controller = require('../../controllers/millingController');
 const advancedController = require('../../controllers/millingAdvancedController');
 const authorize = require('../../middleware/rbac');
 const { authorizeRole } = require('../../middleware/rbac');
+const retired = require('../../middleware/retired');
 const { lacksFinancePayment } = require('../../shared/millPayer');
 // The mill's money — expenses, the rice-purchase (rate) ledger, the mill cash
 // account and batch profitability — needs reports.view_cost or finance.view.
@@ -14,7 +15,7 @@ const { lacksFinancePayment } = require('../../shared/millPayer');
 // Documentation Officer do not, so they never see it. Company-wide finance is
 // closed to the Mill Operator by role in the reporting + ai modules, not here:
 // nothing in this router is company-wide.
-const { requireCostVisibility } = require('../../utils/costVisibility');
+const { requireCostVisibility, redactCostInResponses } = require('../../utils/costVisibility');
 // Payroll routes are gated by the dedicated `payroll.*` permission module
 // (migration 203). Mill Operator holds no payroll permissions, so the old
 // denyRoles('Mill Operator') guard is no longer needed.
@@ -263,9 +264,10 @@ router.delete(
   auditAction('delete_vehicle', 'milling_batch', (req) => req.params.id),
   controller.deleteVehicle
 );
+// milling.delete (mig 339): Super Admin + Mill Manager as before, and the Owner.
 router.delete(
   '/batches/:id',
-  authorizeRole('Super Admin', 'Mill Manager'),
+  authorize('milling', 'delete'),
   auditAction('delete', 'milling_batch', (req) => req.params.id),
   controller.deleteBatch
 );
@@ -281,8 +283,11 @@ router.post(
   auditAction('create', 'production_plan', (req, data) => data.data && data.data.plan ? data.data.plan.id : null),
   advancedController.createPlan
 );
+// RETIRED (410): no screen; it moved the linked batch to In Progress from any
+// status but Completed — a Cancelled batch came back yieldable.
 router.put(
   '/plans/:id/start',
+  retired('Starting a production plan is retired. Start milling from the batch.'),
   authorize('milling', 'edit'),
   auditAction('start_production', 'production_plan', (req) => req.params.id),
   advancedController.startPlan
@@ -340,14 +345,18 @@ router.get('/batches/:id/benchmark-comparison', authorize('milling', 'view'), ad
 // =============================================================================
 
 router.get('/reprocessing', authorize('milling', 'view'), advancedController.listReprocessing);
+// RETIRED (410): no screen; it issued stock out of the output lot with no
+// GL, and completing it created no output lot (the rice vanished).
 router.post(
   '/reprocessing',
+  retired('Reprocessing is retired. Re-mill rice through a new milling batch.'),
   authorize('milling', 'create'),
   auditAction('create', 'reprocessing_batch', (req, data) => data.data && data.data.reprocessing ? data.data.reprocessing.id : null),
   advancedController.createReprocessing
 );
 router.put(
   '/reprocessing/:id/complete',
+  retired('Reprocessing is retired. Re-mill rice through a new milling batch.'),
   authorize('milling', 'edit'),
   auditAction('complete_reprocessing', 'reprocessing_batch', (req) => req.params.id),
   advancedController.completeReprocessing
@@ -375,7 +384,8 @@ router.put(
 // Utility Consumption
 // =============================================================================
 
-router.get('/utilities', authorize('milling', 'view'), advancedController.listUtilities);
+// Utility readings carry rate_per_unit / total_cost — redacted for cost-blind roles.
+router.get('/utilities', authorize('milling', 'view'), redactCostInResponses(), advancedController.listUtilities);
 router.post(
   '/utilities',
   authorize('milling', 'create'),
@@ -440,7 +450,9 @@ router.get('/analytics/batch-profitability/:id', authorize('milling', 'view'), r
 // Product Pricing — confirm byproduct prices per batch
 // =============================================================================
 
-router.get('/last-prices', authorize('milling', 'view'), async (req, res) => {
+// Last confirmed per-kg prices (finished cost included). Its keys are bare grade
+// names (finished, b1, bran…), so the whole object is named as money.
+router.get('/last-prices', authorize('milling', 'view'), redactCostInResponses({ extraCostKeys: ['lastPrices'] }), async (req, res) => {
   try {
     // Get the most recent batch with confirmed prices
     const last = await db('milling_batches')
@@ -469,7 +481,9 @@ router.get('/last-prices', authorize('milling', 'view'), async (req, res) => {
   }
 });
 
-router.put('/batches/:id/prices', authorize('milling', 'edit'),
+// Confirming by-product prices + manual costs re-costs the batch's outputs, so it
+// needs reports.view_cost like every other cost input (the drawer is cost-gated).
+router.put('/batches/:id/prices', authorize('milling', 'edit'), requireCostVisibility,
   auditAction('confirm_prices', 'milling_batch', (req) => req.params.id),
   async (req, res) => {
     try {
@@ -969,12 +983,35 @@ function plannedScheduleRows(advance) {
   return rows;
 }
 
+// A CNIC identifies one employee at portal login, so two ACTIVE workers may not
+// share it (P1-07 / PAY-30). Returns the clash message, or null.
+async function activeCnicClash(cnic, exceptId) {
+  const c = String(cnic || '').trim();
+  if (!c) return null;
+  const q = db('mill_workers').where('cnic', c).where('is_active', true);
+  if (exceptId) q.whereNot('id', exceptId);
+  const other = await q.first('id', 'name');
+  return other ? `CNIC ${c} is already used by active employee ${other.name}.` : null;
+}
+
+// A unique-index hit (CNIC / phone already on another worker) is a 409 the
+// admin can act on, not a 500.
+function sendWorkerSaveError(res, err) {
+  if (err && err.code === '23505') {
+    const field = /cnic/i.test(err.constraint || err.message || '') ? 'CNIC' : /phone/i.test(err.constraint || err.message || '') ? 'phone number' : 'value';
+    return res.status(409).json({ success: false, message: `Another employee already has this ${field}.` });
+  }
+  return res.status(500).json({ success: false, message: err.message });
+}
+
 router.post('/workers', authorize('payroll', 'create'), auditAction('create', 'mill_worker', (req, d) => d.data?.worker?.id), async (req, res) => {
   try {
     const { name, role, phone, cnic, joined_date, left_date, mill_id, notes, bank_name, bank_account_number, iban, department } = req.body;
     const entity = req.body.entity === 'general' ? 'general' : 'mill'; // Head Office vs Mill
     const { pay_type, monthly_salary, daily_wage } = normalizeWorkerPay(req.body);
     if (!name) return res.status(400).json({ success: false, message: 'name is required.' });
+    const cnicClash = await activeCnicClash(cnic);
+    if (cnicClash) return res.status(409).json({ success: false, message: cnicClash });
     if (pay_type === 'monthly' && !(monthly_salary > 0)) return res.status(400).json({ success: false, message: 'monthly_salary required for salaried workers.' });
     if (pay_type === 'daily' && !(daily_wage > 0)) return res.status(400).json({ success: false, message: 'daily_wage required for daily-wage workers.' });
     const ot_rate_per_hour = req.body.ot_rate_per_hour != null && req.body.ot_rate_per_hour !== '' ? parseFloat(req.body.ot_rate_per_hour) : null;
@@ -990,7 +1027,7 @@ router.post('/workers', authorize('payroll', 'create'), auditAction('create', 'm
       mill_id: mill_id || null, notes: notes || null,
     }).returning('*');
     return res.json({ success: true, data: { worker } });
-  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+  } catch (err) { return sendWorkerSaveError(res, err); }
 });
 
 // Edit a worker — pay type/rate, contact, or activate/deactivate. Deactivating
@@ -1009,6 +1046,17 @@ router.put('/workers/:id', authorize('payroll', 'edit'), auditAction('update', '
     }
     if (req.body.is_active !== undefined) updates.is_active = !!req.body.is_active;
     if (req.body.entity !== undefined) updates.entity = req.body.entity === 'general' ? 'general' : 'mill';
+    const nextActive = updates.is_active !== undefined ? updates.is_active : worker.is_active;
+    const nextCnic = updates.cnic !== undefined ? updates.cnic : worker.cnic;
+    if (nextActive && (updates.cnic !== undefined || updates.is_active === true)) {
+      const cnicClash = await activeCnicClash(nextCnic, worker.id);
+      if (cnicClash) return res.status(409).json({ success: false, message: cnicClash });
+    }
+    // Deactivating, or changing the login CNIC, ends the worker's portal sessions.
+    if ((updates.is_active === false && worker.is_active)
+      || (updates.cnic !== undefined && (updates.cnic || null) !== (worker.cnic || null))) {
+      updates.portal_pin_version = db.raw('portal_pin_version + 1');
+    }
     let payRevision = null;
     if (req.body.pay_type !== undefined || req.body.daily_wage !== undefined || req.body.monthly_salary !== undefined) {
       const pay = normalizeWorkerPay({ ...worker, ...req.body });
@@ -1022,8 +1070,9 @@ router.put('/workers/:id', authorize('payroll', 'edit'), auditAction('update', '
       if (payRevision) await recordSalaryRevision(trx, worker, payRevision, { reason: req.body.revision_reason || 'Edited via employee form', userId: req.user?.id });
       return trx('mill_workers').where('id', req.params.id).update(updates).returning('*');
     });
+    if (updated) delete updated.portal_pin_hash; // never send the PIN hash back
     return res.json({ success: true, data: { worker: updated } });
-  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+  } catch (err) { return sendWorkerSaveError(res, err); }
 });
 
 // Dedicated "Revise salary" — records a revision (old→new) WITH an effective date
@@ -1170,11 +1219,14 @@ function unwindAdvanceExpense(trx, expenseId, opts = {}) {
   return reverseExpenseTrail(trx, expenseId, opts);
 }
 
-// Set / reset / disable a worker's self-service portal PIN (Phase 19). A 4+ digit
-// PIN is bcrypt-hashed; `enabled:false` (or no pin) turns the portal off.
+// Set / reset / disable a worker's self-service portal PIN (Phase 19). A new PIN
+// must be 6–8 digits and is bcrypt-hashed; `enabled:false` turns the portal off.
+// A reset or disable bumps portal_pin_version, ending every portal session the
+// worker already has, and a reset clears any wrong-PIN lockout (P1-07).
 router.post('/workers/:id/portal-pin', authorize('payroll', 'edit'), async (req, res) => {
   try {
     const bcrypt = require('bcryptjs');
+    const { newPinError } = require('../portal/portalAuth');
     const worker = await db('mill_workers').where('id', req.params.id).first();
     if (!worker) return res.status(404).json({ success: false, message: 'Worker not found.' });
     const enabled = req.body?.enabled !== false;
@@ -1182,11 +1234,16 @@ router.post('/workers/:id/portal-pin', authorize('payroll', 'edit'), async (req,
     const updates = { updated_at: db.fn.now() };
     if (!enabled) {
       updates.portal_enabled = false;
+      updates.portal_pin_version = db.raw('portal_pin_version + 1');
     } else {
       if (!worker.cnic) return res.status(400).json({ success: false, message: 'Add a CNIC first — the employee logs in with CNIC + PIN.' });
       if (pin) {
-        if (!/^\d{4,8}$/.test(pin)) return res.status(400).json({ success: false, message: 'PIN must be 4–8 digits.' });
+        const pinErr = newPinError(pin);
+        if (pinErr) return res.status(400).json({ success: false, message: pinErr });
         updates.portal_pin_hash = await bcrypt.hash(pin, 10);
+        updates.portal_pin_version = db.raw('portal_pin_version + 1');
+        updates.portal_failed_attempts = 0;
+        updates.portal_locked_until = null;
       } else if (!worker.portal_pin_hash) {
         return res.status(400).json({ success: false, message: 'Set a PIN to enable self-service.' });
       }
@@ -1449,7 +1506,7 @@ router.get('/payroll/audit', authorize('payroll', 'view'), async (req, res) => {
     const logs = await q.select('a.id', 'a.action', 'a.entity_type', 'a.entity_id', 'a.details', 'a.created_at', 'a.user_id', 'u.full_name as user_name')
       .orderBy('a.created_at', 'desc').limit(limit).offset((page - 1) * limit);
     const actions = await db('audit_logs').whereIn('entity_type', PAYROLL_AUDIT_ENTITIES).distinct('action').orderBy('action').pluck('action');
-    return res.json({ success: true, data: { logs, actions, total: parseInt(countRow?.c, 10) || 0, page, limit } });
+    return res.json({ success: true, data: { logs: require('../admin/audit.service').redactRows(logs), actions, total: parseInt(countRow?.c, 10) || 0, page, limit } });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 
@@ -2847,15 +2904,19 @@ router.get(
 // =============================================================================
 const packingCtrl = require('../millStore/packing.controller');
 
+// Packing runs carry bag / master / poly costs: cost-blind roles may record and
+// read them, but every money figure in the response is nulled for them.
 router.post(
   '/batches/:id/packing',
   authorize('mill_store', 'record_consumption'),
+  redactCostInResponses(),
   auditAction('pack_batch', 'milling_batch', (req) => req.params.id),
   packingCtrl.pack
 );
 router.get(
   '/batches/:id/packing',
   authorize('mill_store', 'view'),
+  redactCostInResponses(),
   packingCtrl.history
 );
 // Correct / delete a packing run. The route needs the permission that records
@@ -2894,6 +2955,7 @@ const batchPackagingCtrl = require('./batchPackaging.controller');
 router.get(
   '/batches/:id/packaging',
   authorize('milling', 'view'),
+  redactCostInResponses(), // unit/total cost per line — nulled for cost-blind roles
   batchPackagingCtrl.list
 );
 // Saving moves store stock, so it sits behind the same permission as recording
@@ -2901,6 +2963,7 @@ router.get(
 router.put(
   '/batches/:id/packaging',
   authorize('mill_store', 'record_consumption'),
+  redactCostInResponses(),
   validate(schemas.saveBatchPackaging),
   auditAction('save_batch_packaging', 'milling_batch', (req) => req.params.id),
   batchPackagingCtrl.save

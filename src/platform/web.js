@@ -42,9 +42,10 @@ export default {
   // Realtime — Server-Sent Events on web. Returns an unsubscribe function so native
   // shells can swap SSE for polling without changing callers (Stage 12/13).
   realtime: {
-    subscribe(url, { onMessage, onError } = {}) {
+    subscribe(url, { onMessage, onError, onOpen } = {}) {
       const es = new EventSource(url);
       if (onMessage) es.onmessage = onMessage;
+      if (onOpen) es.onopen = onOpen;
       es.onerror = onError || (() => { /* EventSource auto-reconnects */ });
       return () => { try { es.close(); } catch { /* noop */ } };
     },

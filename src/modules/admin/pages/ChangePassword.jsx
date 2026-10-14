@@ -23,8 +23,12 @@ export default function ChangePassword() {
     if (!valid) return;
     setBusy(true);
     try {
-      await authApi.changePassword({ oldPassword: form.oldPassword, newPassword: form.newPassword });
-      addToast('Password changed.', 'success');
+      const r = await authApi.changePassword({ oldPassword: form.oldPassword, newPassword: form.newPassword });
+      // Changing the password signs out every other session; the server returns
+      // a fresh token so this one carries on.
+      const fresh = r?.data?.token;
+      if (fresh) { try { localStorage.setItem('riceflow_token', fresh); } catch { /* storage disabled */ } }
+      addToast('Password changed. Other devices have been signed out.', 'success');
       await recheckAuth?.();
       navigate('/');
     } catch (e) {

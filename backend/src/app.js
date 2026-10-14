@@ -9,8 +9,9 @@ const { apiLimiter } = require('./middleware/rateLimiter');
 function createApp() {
   const app = express();
 
-  // Trust proxy (Nginx reverse proxy sets X-Forwarded-For)
-  app.set('trust proxy', 1);
+  // Trust proxy (Nginx reverse proxy sets X-Forwarded-For). Hop count is
+  // configurable (TRUST_PROXY) — see config/index.js.
+  app.set('trust proxy', config.trustProxy);
 
   // Security headers
   app.use(helmet());
@@ -74,6 +75,10 @@ function createApp() {
   if (config.site?.enabled) {
     app.use('/api', require('./middleware/siteOutbox'));
   }
+
+  // No database or code internals in 5xx bodies (P1-16). Mounted after the
+  // idempotency/outbox layers so what they store is already masked.
+  app.use('/api', require('./middleware/maskServerErrors'));
 
   // Mount routes
   const routes = require('./routes/index');

@@ -1,10 +1,15 @@
 const express = require('express');
 const router = express.Router();
 const authorize = require('../../middleware/rbac');
-const { authorizeRole } = require('../../middleware/rbac');
 const auditAction = require('../../middleware/audit');
 const ownerApproval = require('../../middleware/ownerApproval');
 const ctrl = require('./millStore.controller');
+const { redactCostInResponses } = require('../../utils/costVisibility');
+
+// Cost-blind roles (QC, Inventory Officer…) see store quantities, never what the
+// stock cost (owner decision 2026-10-05; P1-12 follow-up). Purchase totals are
+// named *_amount, so they are listed explicitly.
+router.use(redactCostInResponses({ extraCostKeys: ['total_amount', 'original_amount', 'amount', 'line_total', 'subtotal'] }));
 
 // Items
 router.get('/items', authorize('mill_store', 'view'), ctrl.listItems);
@@ -28,14 +33,15 @@ router.delete(
   ctrl.deleteItem
 );
 // Stock write-offs and adjustments are approved by the Owner only (owner
-// decision 2026-10-05). authorizeRole has no bypass, so Super Admin is listed.
-const WRITE_OFF_APPROVERS = ['Owner', 'Super Admin'];
+// decision 2026-10-05). The gate is mill_store.approve_adjustment, held by Owner
+// and Super Admin only — the same people the old hard-coded role list admitted.
+const canApproveAdjustment = authorize('mill_store', 'approve_adjustment');
 
 // Direct, audit-logged stock set. It skips the approval queue, so it is an
 // Owner action — everyone else requests an adjustment instead.
 router.put(
   '/items/:id/stock',
-  authorizeRole(...WRITE_OFF_APPROVERS),
+  canApproveAdjustment,
   auditAction('set_stock', 'mill_item', (req) => req.params.id),
   ctrl.setStock
 );
@@ -101,13 +107,13 @@ router.post(
 );
 router.put(
   '/adjustments/:id/approve',
-  authorizeRole(...WRITE_OFF_APPROVERS),
+  canApproveAdjustment,
   auditAction('approve', 'mill_stock_adjustment', (req) => req.params.id),
   ctrl.approveAdjustment
 );
 router.put(
   '/adjustments/:id/reject',
-  authorizeRole(...WRITE_OFF_APPROVERS),
+  canApproveAdjustment,
   auditAction('reject', 'mill_stock_adjustment', (req) => req.params.id),
   ctrl.rejectAdjustment
 );

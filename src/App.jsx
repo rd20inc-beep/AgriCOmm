@@ -41,6 +41,7 @@ function lazyWithReload(factory) {
 // Lazy-loaded page components (pointing at modular locations)
 const Login = lazyWithReload(() => import('./modules/admin/pages/Login'));
 const ChangePassword = lazyWithReload(() => import('./modules/admin/pages/ChangePassword'));
+const ResetPassword = lazyWithReload(() => import('./modules/admin/pages/ResetPassword'));
 const Profile = lazyWithReload(() => import('./modules/admin/pages/Profile'));
 const EmployeePortal = lazyWithReload(() => import('./modules/portal/EmployeePortal'));
 const Dashboard = lazyWithReload(() => import('./modules/dashboard/pages/Dashboard'));
@@ -203,8 +204,8 @@ function ExportRoutes() {
         <Route path="/reports/print" element={<PrintableReports />} />
         <Route path="/reports/lots" element={<LotReport />} />
         <Route path="/reports/invoices" element={<InvoiceLedger />} />
-        <Route path="/reports/payroll" element={<PayrollLedger />} />
-        <Route path="/reports/payroll-analytics" element={<PayrollAnalytics />} />
+        <Route path="/reports/payroll" element={<ProtectedRoute module="payroll" action="view"><PayrollLedger /></ProtectedRoute>} />
+        <Route path="/reports/payroll-analytics" element={<ProtectedRoute module="payroll" action="view"><PayrollAnalytics /></ProtectedRoute>} />
         <Route path="/reports/lot-ledger/:id" element={<LotLedger />} />
         <Route path="/reports/batch-ledger/:id" element={<BatchLedger />} />
         <Route path="/reports/supplier-ledger" element={<SupplierLedger />} />
@@ -282,8 +283,8 @@ function MillRoutes() {
         <Route path="/reports/print" element={<PrintableReports />} />
         <Route path="/reports/lots" element={<LotReport />} />
         <Route path="/reports/invoices" element={<InvoiceLedger />} />
-        <Route path="/reports/payroll" element={<PayrollLedger />} />
-        <Route path="/reports/payroll-analytics" element={<PayrollAnalytics />} />
+        <Route path="/reports/payroll" element={<ProtectedRoute module="payroll" action="view"><PayrollLedger /></ProtectedRoute>} />
+        <Route path="/reports/payroll-analytics" element={<ProtectedRoute module="payroll" action="view"><PayrollAnalytics /></ProtectedRoute>} />
         <Route path="/reports/lot-ledger/:id" element={<LotLedger />} />
         <Route path="/reports/batch-ledger/:id" element={<BatchLedger />} />
         <Route path="/reports/supplier-ledger" element={<SupplierLedger />} />
@@ -362,8 +363,8 @@ function StandardRoutes() {
         <Route path="/reports/print" element={<ProtectedRoute module="reports" action="view"><PrintableReports /></ProtectedRoute>} />
         <Route path="/reports/lots" element={<ProtectedRoute module="reports" action="view"><LotReport /></ProtectedRoute>} />
         <Route path="/reports/invoices" element={<ProtectedRoute module="reports" action="view"><InvoiceLedger /></ProtectedRoute>} />
-        <Route path="/reports/payroll" element={<ProtectedRoute module="reports" action="view"><PayrollLedger /></ProtectedRoute>} />
-        <Route path="/reports/payroll-analytics" element={<ProtectedRoute module="reports" action="view"><PayrollAnalytics /></ProtectedRoute>} />
+        <Route path="/reports/payroll" element={<ProtectedRoute module="payroll" action="view"><PayrollLedger /></ProtectedRoute>} />
+        <Route path="/reports/payroll-analytics" element={<ProtectedRoute module="payroll" action="view"><PayrollAnalytics /></ProtectedRoute>} />
         <Route path="/reports/lot-ledger/:id" element={<ProtectedRoute module="reports" action="view"><LotLedger /></ProtectedRoute>} />
         <Route path="/reports/batch-ledger/:id" element={<ProtectedRoute module="reports" action="view"><BatchLedger /></ProtectedRoute>} />
         <Route path="/reports/supplier-ledger" element={<ProtectedRoute module="reports" action="view"><SupplierLedger /></ProtectedRoute>} />
@@ -416,6 +417,8 @@ function App() {
           <Suspense fallback={<LoadingSpinner message="Loading page..." />}>
             <Routes>
               <Route path="/login" element={<Login />} />
+              {/* Public: target of the emailed / admin-issued password-reset link. */}
+              <Route path="/reset-password" element={<ResetPassword />} />
               {/* #9 Forced/self-service password change — auth-gated, standalone
                   (outside the app shell) so a force_password_change user lands here. */}
               <Route path="/change-password" element={<ProtectedRoute><ChangePassword /></ProtectedRoute>} />

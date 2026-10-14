@@ -194,7 +194,10 @@ export default function WhatsAppTemplatesTab() {
   // ─ API Configuration State ─
   const [provider, setProvider] = useState('WhatsApp Business API');
   const [apiUrl, setApiUrl] = useState('');
+  // The stored key is write-only: the server reports only whether one is set.
+  // Leave the field blank to keep it; type a new one to replace it.
   const [apiKey, setApiKey] = useState('');
+  const [apiKeyIsSet, setApiKeyIsSet] = useState(false);
   const [showApiKey, setShowApiKey] = useState(false);
   const [senderPhone, setSenderPhone] = useState('');
   const [configSaving, setConfigSaving] = useState(false);
@@ -347,7 +350,7 @@ export default function WhatsAppTemplatesTab() {
       const s = res?.data?.settings || res?.data || {};
       if (s.whatsapp_provider) setProvider(s.whatsapp_provider);
       if (s.whatsapp_api_url) setApiUrl(s.whatsapp_api_url);
-      if (s.whatsapp_api_key) setApiKey(s.whatsapp_api_key);
+      setApiKeyIsSet(!!res?.data?.secrets?.whatsapp_api_key?.is_set);
       if (s.whatsapp_sender_phone) setSenderPhone(s.whatsapp_sender_phone);
     } catch {
       // silently use defaults
@@ -374,15 +377,17 @@ export default function WhatsAppTemplatesTab() {
   const handleSaveConfig = async () => {
     setConfigSaving(true);
     try {
-      await api.put('/api/admin/settings', {
+      const payload = {
         whatsapp_provider: provider,
         whatsapp_api_url: apiUrl,
-        whatsapp_api_key: apiKey,
         whatsapp_sender_phone: senderPhone,
-      });
+      };
+      if (apiKey.trim()) payload.whatsapp_api_key = apiKey.trim();
+      await api.put('/api/admin/settings', payload);
+      if (payload.whatsapp_api_key) { setApiKeyIsSet(true); setApiKey(''); }
       addToast('WhatsApp configuration saved', 'success');
-    } catch {
-      addToast('WhatsApp configuration saved (local)', 'success');
+    } catch (err) {
+      addToast(`WhatsApp configuration not saved: ${err?.message || 'request failed'}`, 'error');
     } finally {
       setConfigSaving(false);
     }
@@ -681,7 +686,8 @@ export default function WhatsAppTemplatesTab() {
                 type={showApiKey ? 'text' : 'password'}
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
-                placeholder="Enter your API key"
+                placeholder={apiKeyIsSet ? 'A key is saved — leave blank to keep it' : 'Enter your API key'}
+                autoComplete="new-password"
                 className="w-full border border-gray-300 rounded-lg px-3 py-2.5 pr-10 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
               />
               <button

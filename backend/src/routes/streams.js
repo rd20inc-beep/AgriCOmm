@@ -1,15 +1,24 @@
 const express = require('express');
 const db = require('../config/database');
-const authenticateEventSource = require('../middleware/authEventSource');
+const { authenticateTicket, sessionStillValid } = require('../middleware/authEventSource');
 const authorize = require('../middleware/rbac');
 const { subscribeExportOrderUpdates } = require('../services/exportOrderEventBus');
 const { subscribeSignals } = require('../modules/chat/callSignalBus');
 
 const router = express.Router();
 
+// Heartbeat that also re-checks the session behind an open stream, so revoking
+// sessions / suspending / demoting a user also closes their live streams.
+function startHeartbeat(req, res, onEnd) {
+  return setInterval(async () => {
+    if (!(await sessionStillValid(req.user))) { onEnd(); return; }
+    res.write(': ping\n\n');
+  }, 25000);
+}
+
 // Per-user WebRTC call-signaling channel. The connected user receives any signal
 // (incoming call / answer / ICE / hangup) addressed to them.
-router.get('/call-signals', authenticateEventSource, (req, res) => {
+router.get('/call-signals', authenticateTicket('call-signals'), (req, res) => {
   res.status(200).set({
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache, no-transform',
@@ -22,11 +31,14 @@ router.get('/call-signals', authenticateEventSource, (req, res) => {
   const unsubscribe = subscribeSignals(req.user.id, (signal) => {
     res.write(`data: ${JSON.stringify(signal)}\n\n`);
   });
-  const heartbeat = setInterval(() => res.write(': ping\n\n'), 25000);
-  req.on('close', () => { clearInterval(heartbeat); unsubscribe(); res.end(); });
+  let heartbeat = null;
+  let done = false;
+  const end = () => { if (done) return; done = true; clearInterval(heartbeat); unsubscribe(); res.end(); };
+  heartbeat = startHeartbeat(req, res, end);
+  req.on('close', end);
 });
 
-router.get('/export-orders/:id', authenticateEventSource, authorize('export_orders', 'view'), async (req, res) => {
+router.get('/export-orders/:id', authenticateTicket('export-order', { resourceParam: 'id' }), authorize('export_orders', 'view'), async (req, res) => {
   const { id } = req.params;
   const isNumeric = /^\d+$/.test(id);
   const order = await db('export_orders')
@@ -52,15 +64,17 @@ router.get('/export-orders/:id', authenticateEventSource, authorize('export_orde
     res.write(`data: ${JSON.stringify(payload)}\n\n`);
   });
 
-  const heartbeat = setInterval(() => {
-    res.write(': ping\n\n');
-  }, 25000);
-
-  req.on('close', () => {
+  let heartbeat = null;
+  let done = false;
+  const end = () => {
+    if (done) return;
+    done = true;
     clearInterval(heartbeat);
     unsubscribe();
     res.end();
-  });
+  };
+  heartbeat = startHeartbeat(req, res, end);
+  req.on('close', end);
 });
 
 module.exports = router;

@@ -459,6 +459,14 @@ const addPurchaseToLot = Joi.object({
   notes: Joi.string().allow(null, ''),
 });
 
+// Edit Received: the weighed (received) quantity of a raw purchase lot, plus the
+// ordered quantity for the short/over variance. Quantities only — the server
+// re-bills at the lot's own rate.
+const setLotReceivedQty = Joi.object({
+  received_net_weight_kg: Joi.number().positive().required(),
+  ordered_net_weight_kg: Joi.number().min(0).allow(null, ''),
+});
+
 const recordLotTransaction = Joi.object({
   transaction_type: Joi.string().required(),
   transaction_date: Joi.date().iso().allow(null, ''),
@@ -779,17 +787,24 @@ const documentCustomerStyle = Joi.object({
   fontFamily: Joi.string().max(80).allow('', null),
   fontScale: Joi.number().min(0.7).max(1.5),
 });
-// Send a rendered document to the customer over WhatsApp (QR channel). `html`
-// is the print-ready markup the server converts to a PDF attachment.
+// Store the document body as the operator sees it (P1-08). Sanitized on the
+// server; PDF / email / WhatsApp render this stored copy, never request HTML.
+const saveDocumentRendering = Joi.object({
+  html: Joi.string().max(900000).required(),
+});
+// Approve may carry the body as the approver sees it, stored atomically.
+const documentApprove = Joi.object({
+  renderedHtml: Joi.string().max(900000).allow('', null),
+});
+// Send a document to the customer over WhatsApp (QR channel). The server renders
+// the STORED version — a posted `html` is no longer accepted (stripped).
 const sendDocumentWhatsApp = Joi.object({
-  html: Joi.string().required(),
   to: Joi.string().max(30).allow('', null),
   caption: Joi.string().max(1024).allow('', null),
   filename: Joi.string().max(120).allow('', null),
 });
 
 const sendDocumentEmail = Joi.object({
-  html: Joi.string().required(),
   to: Joi.string().max(200).allow('', null),
   subject: Joi.string().max(255).allow('', null),
   message: Joi.string().max(4000).allow('', null),
@@ -797,14 +812,13 @@ const sendDocumentEmail = Joi.object({
 });
 
 // Bundle several documents into one ZIP: stored files by id, plus generated
-// documents whose HTML the browser renders and sends (the renderers are
-// client-side, so the server cannot produce that HTML itself).
+// documents named by type — the server renders each one's STORED latest version
+// (P1-08); HTML posted by an older client is stripped and ignored.
 const bundleDocuments = Joi.object({
   uploadedIds: Joi.array().items(Joi.number().integer().positive()).default([]),
   generated: Joi.array().items(Joi.object({
     docType: Joi.string().max(60).required(),
     filename: Joi.string().max(160).allow('', null),
-    html: Joi.string().required(),
   })).default([]),
   // The sequence to merge in: { k: 'u', id } for an uploaded file, { k: 'g', i }
   // for a generated one. validate() runs with stripUnknown, so a field missing
@@ -823,7 +837,7 @@ const bundleDocuments = Joi.object({
 });
 
 const downloadDocumentPdf = Joi.object({
-  html: Joi.string().required(),
+  genId: Joi.number().integer().positive(),
   filename: Joi.string().max(160).allow('', null),
 });
 
@@ -929,6 +943,42 @@ const reconciliationStatementLines = Joi.object({
   })).required(),
 });
 
+// ===================== SYSTEM SETTINGS =====================
+// PUT /api/admin/settings — allowlist of the keys something actually reads
+// (each comment names the reader). Validated STRICTLY by the controller (an
+// unknown key is a 400, not silently stripped) so a typo or a camelCase key the
+// backend never reads cannot be "saved".
+const settingStr = (max = 200) => Joi.string().trim().max(max).allow('', null);
+const updateSettings = Joi.object({
+  // portal.routes companyProfile(), AppContext companyProfileData (print headers)
+  companyProfile: Joi.object({
+    name: settingStr(200), tagline: settingStr(200), address: settingStr(500),
+    phone: settingStr(100), email: settingStr(200), website: settingStr(200), ntn: settingStr(50),
+  }).unknown(true),
+  // intelligence.service scanOverdueAdvances; finance Confirmations page
+  payment_reminder_days: Joi.number().integer().min(1).max(365),
+  // automation.service scanLowMarginOrders
+  min_margin_pct: Joi.number().min(0).max(100),
+  // fxRate.service fallback when no fx_rates row exists
+  pkr_rate: Joi.number().positive().max(100000),
+  // finance/collectionRate.js
+  export_balance_term_days: Joi.number().integer().min(0).max(365),
+  collection_target_pct: Joi.number().min(0).max(100),
+  // exportDocument.controller company fields
+  default_hs_code: settingStr(30),
+  rex_number: settingStr(50),
+  kcci_membership: settingStr(50),
+  port_of_loading: settingStr(100),
+  // communications/whatsapp.service getWhatsAppSettings (api key is write-only)
+  whatsapp_provider: settingStr(50),
+  whatsapp_api_url: settingStr(500),
+  whatsapp_api_key: settingStr(1000),
+  whatsapp_sender_phone: settingStr(30),
+})
+  // collection_target_pct_USD / _PKR … (collectionRate.collectionTargets)
+  .pattern(/^collection_target_pct_[A-Za-z]{3}$/, Joi.number().min(0).max(100))
+  .min(1);
+
 module.exports = {
   bounceCheque,
   createReconciliation,
@@ -956,6 +1006,7 @@ module.exports = {
   allocateExportStock,
   createPurchaseLot,
   addPurchaseToLot,
+  setLotReceivedQty,
   recordLotTransaction,
   updateLotCosts,
   setLotPurchaseRate,
@@ -974,6 +1025,8 @@ module.exports = {
   createBatch,
   recordYield,
   saveDocumentOverrides,
+  saveDocumentRendering,
+  documentApprove,
   documentSettings,
   documentStatus,
   documentRevise,
@@ -983,4 +1036,5 @@ module.exports = {
   downloadDocumentPdf,
   updatePackingRun,
   batchPackSpec,
+  updateSettings,
 };

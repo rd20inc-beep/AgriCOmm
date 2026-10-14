@@ -50,6 +50,8 @@ function test(row, c) {
 class Mutation {
   constructor(rows) { this.rows = rows; }
   returning() { return Promise.resolve(clone(this.rows)); }
+  // Upsert tail: the row is already inserted; merge/ignore are no-ops here.
+  onConflict() { return { merge: () => this, ignore: () => this }; }
   then(ok, ko) { return Promise.resolve(this.rows.length).then(ok, ko); }
 }
 
@@ -110,6 +112,12 @@ class Query {
   update(patch) {
     const rows = this.rows();
     rows.forEach((r) => Object.assign(r, clone(patch)));
+    return new Mutation(rows);
+  }
+
+  increment(col, by = 1) {
+    const rows = this.rows();
+    rows.forEach((r) => { r[col] = (Number(r[col]) || 0) + by; });
     return new Mutation(rows);
   }
 

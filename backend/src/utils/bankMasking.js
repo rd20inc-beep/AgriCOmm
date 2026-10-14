@@ -48,4 +48,25 @@ function maskBank(bank, opts = {}) {
   return out;
 }
 
-module.exports = { maskBank, maskTail };
+// Raw table rows (bank_accounts, customers' bank columns) as returned by the
+// admin master-data endpoints: mask the named identifier columns unless the
+// caller may see them in full. Same "•••• 1234" form as maskTail.
+const MASK_PREFIX = '•••• ';
+function maskRowFields(row, fields, canSeeFull) {
+  if (!row || canSeeFull) return row;
+  const out = { ...row };
+  let masked = false;
+  for (const f of fields) {
+    if (out[f] != null && out[f] !== '') { out[f] = maskTail(out[f]); masked = true; }
+  }
+  if (masked) out.bank_details_masked = true;
+  return out;
+}
+
+// A value that came back from a masked read. An edit form that round-trips it
+// must not overwrite the real number with the mask.
+function isMaskedValue(v) {
+  return typeof v === 'string' && v.startsWith(MASK_PREFIX);
+}
+
+module.exports = { maskBank, maskTail, maskRowFields, isMaskedValue };

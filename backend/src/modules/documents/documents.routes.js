@@ -22,6 +22,7 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage,
   limits: { fileSize: 50 * 1024 * 1024 }, // 50MB max
+  fileFilter: require('../../middleware/uploadFilter').uploadFileFilter('documents'), // no HTML/SVG/scripts
 });
 
 // One upload action = one version. `files` carries several (a multi-page scan
@@ -77,7 +78,7 @@ router.get(
 
 router.post(
   '/upload',
-  authorize('documents', 'create'),
+  authorize('documents', 'upload'), // same holders as documents.create (mig 339)
   versionFiles,
   auditAction('upload', 'document', (req, data) => data.data && data.data.document ? data.data.document.id : null),
   controller.upload
@@ -158,7 +159,7 @@ router.put(
 
 router.put(
   '/:id/reject',
-  authorize('documents', 'approve'),
+  authorize('documents', 'reject'), // held by documents.approve holders only (mig 339)
   auditAction('reject', 'document', (req) => req.params.id),
   controller.reject
 );

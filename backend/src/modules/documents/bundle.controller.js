@@ -11,10 +11,12 @@ const pdfService = require('./pdf.service');
  *
  * Two kinds go in:
  *   - uploaded  — files already on disk (document_store), added as they are
- *   - generated — the system's own documents, which are rendered in the BROWSER,
- *                 so the client sends each one's HTML and the server turns it
- *                 into a PDF (same puppeteer path as the single-document
- *                 download, so a bundled copy matches a singly-downloaded one)
+ *   - generated — the system's own documents, named by type. Each is rendered
+ *                 from its STORED latest version (generated_documents
+ *                 rendered_html, sanitized) through the same path as the
+ *                 single-document download, so a bundled copy matches a
+ *                 singly-downloaded one. HTML from the request is never used
+ *                 (P1-08); a type with no saved version is listed as missing.
  *
  * Streamed, not buffered: a shipment's full document set is tens of MB and
  * holding it in memory to count its length first would be wasteful.
@@ -257,11 +259,39 @@ function sequenceEntries(uploadedIds, generated, order) {
   return out;
 }
 
+// Render a generated document's STORED latest version for this order.
+// Lazily required: generatedDocument.controller pulls in the WhatsApp/email
+// stack, which the pure helpers exported below do not need.
+async function renderGenerated(req, orderId, g) {
+  const genService = require('./generatedDocument.service');
+  const { renderStoredPdf } = require('./generatedDocument.controller');
+  const row = orderId ? await genService.getLatest(orderId, g.docType) : null;
+  if (!row) {
+    const e = new Error('not saved yet'); e.code = 'DOC_NOT_SAVED'; throw e;
+  }
+  return renderStoredPdf(row, req);
+}
+
+async function resolveOrderId(id) {
+  if (/^\d+$/.test(String(id))) return parseInt(id, 10);
+  const row = await db('export_orders').where({ order_no: id }).select('id').first();
+  return row ? row.id : null;
+}
+
 async function bundle(req, res) {
   const { uploadedIds = [], generated = [], order, contentsPage = false, format = 'zip' } = req.body || {};
   if (!uploadedIds.length && !generated.length) {
     return res.status(400).json({ success: false, message: 'Select at least one document.' });
   }
+  // A generated document in the bundle is a server-rendered PDF, the same as
+  // the single download — so it needs the same documents permission.
+  if (generated.length) {
+    const { userHasPermission } = require('../../middleware/rbac');
+    if (!(await userHasPermission(req, 'documents', 'download'))) {
+      return res.status(403).json({ success: false, message: 'Forbidden. Downloading generated documents requires the documents download permission.' });
+    }
+  }
+  const orderId = generated.length ? await resolveOrderId(req.params.id) : null;
   if (generated.length && !pdfService.isAvailable()) {
     return res.status(503).json({ success: false, message: 'PDF rendering is unavailable on this server, so generated documents cannot be bundled. Uploaded files can still be downloaded individually.' });
   }
@@ -289,9 +319,9 @@ async function bundle(req, res) {
         continue;
       }
       const g = entry.doc;
-      if (!g || !g.html) continue;
+      if (!g || !g.docType) continue;
       try {
-        const pdf = await pdfService.htmlToPdf(g.html);
+        const pdf = await renderGenerated(req, orderId, g);
         sources.push({ name: g.filename || g.docType, bytes: Buffer.isBuffer(pdf) ? pdf : Buffer.from(pdf), mime: 'application/pdf' });
       } catch (err) {
         console.error('Document bundle PDF failed for', g.docType, err.message);
@@ -374,9 +404,9 @@ async function bundle(req, res) {
       continue;
     }
     const g = entry.doc;
-    if (!g || !g.html) continue;
+    if (!g || !g.docType) continue;
     try {
-      const pdf = await pdfService.htmlToPdf(g.html);
+      const pdf = await renderGenerated(req, orderId, g);
       // Buffer.from: puppeteer returns a Uint8Array, and archiver accepts only a
       // Buffer or a Stream — appending the raw Uint8Array throws
       // INPUTSTEAMBUFFERREQUIRED and kills the response mid-stream.
@@ -384,8 +414,10 @@ async function bundle(req, res) {
         name: uniqueName(`${safeName(g.filename || g.docType, 'document')}.pdf`),
       });
     } catch (err) {
-      console.error('Document bundle PDF failed for', g.docType, err.message);
-      missing.push(g.filename || g.docType);
+      if (err.code !== 'DOC_NOT_SAVED' && err.code !== 'NOT_RENDERED') console.error('Document bundle PDF failed for', g.docType, err.message);
+      missing.push(err.code === 'DOC_NOT_SAVED' || err.code === 'NOT_RENDERED'
+        ? `${g.filename || g.docType} (not saved yet — open it in the Document Center and save it)`
+        : (g.filename || g.docType));
     }
   }
 

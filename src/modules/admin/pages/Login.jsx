@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../../context/AuthContext';
+import { authRepo } from '../../../data/repositories/auth';
 import { Loader2, Eye, EyeOff, Lock, Mail, ArrowRight, Ship } from 'lucide-react';
 
 export default function Login() {
@@ -12,6 +13,27 @@ export default function Login() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [mounted, setMounted] = useState(false);
+  // Forgot-password mode: request a reset link by email.
+  const [forgot, setForgot] = useState(false);
+  const [forgotSent, setForgotSent] = useState(false);
+  const [searchParams] = useSearchParams();
+  const notice = searchParams.get('reset') === '1'
+    ? 'Your password has been reset. Sign in with the new password.'
+    : '';
+
+  const requestReset = async (e) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+    try {
+      const r = await authRepo.forgotPassword(email);
+      if (r.ok) setForgotSent(true);
+      else setError((r.data && r.data.message) || 'Could not request a reset link. Please try again.');
+    } catch {
+      setError('Server is unreachable. Please try again later.');
+    }
+    setLoading(false);
+  };
 
   useEffect(() => {
     setMounted(true);
@@ -150,7 +172,54 @@ export default function Login() {
             </div>
           )}
 
-          {/* Form */}
+          {notice && !error && (
+            <div className="mb-5 px-4 py-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl">
+              <p className="text-sm text-emerald-400">{notice}</p>
+            </div>
+          )}
+
+          {forgot ? (
+            <form onSubmit={requestReset} className="space-y-5">
+              {forgotSent ? (
+                <p className="text-sm text-slate-300">
+                  If an account exists for <span className="font-semibold">{email}</span>, a password-reset link
+                  has been sent to it. The link expires in 1 hour. If no email arrives, ask an administrator
+                  for a reset link.
+                </p>
+              ) : (
+                <>
+                  <p className="text-sm text-slate-400">Enter your account email and we&apos;ll send you a link to set a new password.</p>
+                  <div className="relative">
+                    <Mail size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-600" />
+                    <input
+                      id="forgot-email"
+                      type="email"
+                      aria-label="Email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="you@company.com"
+                      required
+                      autoComplete="email"
+                      className="w-full pl-11 pr-4 py-3 text-sm text-white rounded-xl border border-slate-700/50 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500/50 transition-all placeholder:text-slate-600"
+                      style={{ backgroundColor: 'rgba(15,23,42,0.8)' }}
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="w-full flex items-center justify-center gap-2.5 px-4 py-3 text-sm font-semibold text-white rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                    style={{ background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)' }}
+                  >
+                    {loading ? <Loader2 size={18} className="animate-spin" /> : 'Send reset link'}
+                  </button>
+                </>
+              )}
+              <button type="button" onClick={() => { setForgot(false); setForgotSent(false); setError(''); }}
+                className="w-full text-xs text-blue-400 hover:text-blue-300 font-medium">
+                Back to sign in
+              </button>
+            </form>
+          ) : (
           <form onSubmit={handleSubmit} className="space-y-5">
             <div>
               <label htmlFor="email" className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
@@ -206,7 +275,7 @@ export default function Login() {
                 <input type="checkbox" defaultChecked className="w-3.5 h-3.5 rounded border-slate-600 text-blue-500 focus:ring-blue-500/30 bg-slate-800" />
                 <span className="text-slate-500">Remember me</span>
               </label>
-              <button type="button" className="text-blue-400 hover:text-blue-300 transition-colors font-medium">
+              <button type="button" onClick={() => { setForgot(true); setError(''); }} className="text-blue-400 hover:text-blue-300 transition-colors font-medium">
                 Forgot password?
               </button>
             </div>
@@ -234,6 +303,7 @@ export default function Login() {
               )}
             </button>
           </form>
+          )}
 
           {/* Divider */}
           <div className="mt-8 pt-6 border-t border-slate-800/50">

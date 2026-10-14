@@ -5,7 +5,7 @@ import { togglePick, movePick, inReferenceOrder } from '../utils/pickOrder';
 import { documentLabels, POST_SHIPMENT_KEYS } from './constants';
 import { documentsApi } from '../../documents/api/services';
 import api from '../../../api/client';
-import { renderDocument, buildDocHtml } from './DocumentCenter';
+import { renderDocument } from './DocumentCenter';
 import { useAuth } from '../../../context/AuthContext';
 import { useApp } from '../../../context/AppContext';
 import useConfirm from '../../../hooks/useConfirm';
@@ -65,6 +65,8 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
   // can upload, replace and request deletion freely — they are never blocked,
   // their changes simply wait.
   const canApprove = hasPermission('documents', 'approve');
+  // Saving a generated document's version needs edit rights (P1-08).
+  const canEditDocs = hasPermission('export_orders', 'edit') || hasPermission('documents', 'edit');
 
   // Actually-stored files uploaded for this order (global documents module).
   // MUST be the numeric id: document_store.linked_id is an integer column and
@@ -221,6 +223,29 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
     setPicked(allSelected ? [] : selectableKeys.slice());
   };
 
+  // Make sure a generated document has a stored copy for the server to render:
+  // reuse the saved one, else (for someone who may save) create the version and
+  // store the rendering the Document Center would show. A viewer stores
+  // nothing — a document never saved is then listed as missing in the bundle.
+  async function ensureStoredRendering(docType) {
+    const res = await api.get(`/api/export-orders/${orderDbId}/documents/${docType}/current`);
+    const payload = res?.data || res;
+    let version = payload?.exists ? payload.version : null;
+    if (version?.has_rendering) return;
+    if (version?.locked ? !canApprove : !canEditDocs) return;
+    let doc = payload?.exists ? payload.document : null;
+    let editedHtml = payload?.exists ? payload.editedHtml : null;
+    if (!version) {
+      const created = await api.post(`/api/export-orders/${orderDbId}/documents/${docType}/draft`, {});
+      version = created?.data?.version;
+      doc = created?.data?.document;
+      editedHtml = created?.data?.editedHtml;
+    }
+    if (!version?.id || !doc) return;
+    const html = editedHtml || renderDocument({ ...doc, _docType: docType }, doc.style || {});
+    await api.put(`/api/export-orders/documents/${version.id}/rendering`, { html });
+  }
+
   async function downloadSelected(format = 'pdf') {
     if (!picked.length) return;
     setBundling(format);
@@ -254,22 +279,17 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
           [...files].reverse().forEach((f) => { uploadedIds.push(f.id); sequence.push({ k: 'u', id: f.id }); });
           continue;
         }
-        // No uploaded file — render the system's own version, exactly as the
-        // Document Center would, so the PDF in the zip matches a single download.
+        // No uploaded file — the server renders the system's own document from
+        // its STORED version (the same path as a single download, so the PDF in
+        // the zip matches it). It takes no HTML from here (P1-08); if the
+        // version has no stored copy yet and this user may save one, store the
+        // same rendering the Document Center would show first.
         const docType = CANONICAL_BY_ALIAS[key] || key;
         try {
-          const res = await api.get(`/api/export-orders/${orderDbId}/documents/${docType}/current`);
-          const payload = res?.data || res;
-          const doc = payload?.document || payload;
-          if (!doc) continue;
-          const html = payload.editedHtml || renderDocument({ ...doc, _docType: docType }, doc.style || {});
-          generated.push({
-            docType,
-            filename: LABELS[key] || docType,
-            html: buildDocHtml(html, docType, LABELS[key] || docType, { autoPrint: false, orientation: 'portrait' }),
-          });
-          sequence.push({ k: 'g', i: generated.length - 1 });
-        } catch { /* skipped; the server lists what it could not include */ }
+          await ensureStoredRendering(docType);
+        } catch { /* the server lists what it could not include */ }
+        generated.push({ docType, filename: LABELS[key] || docType });
+        sequence.push({ k: 'g', i: generated.length - 1 });
       }
       if (!uploadedIds.length && !generated.length) {
         addToast?.('Nothing to download for the selected documents.', 'error');

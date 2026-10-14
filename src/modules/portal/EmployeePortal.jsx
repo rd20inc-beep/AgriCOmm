@@ -4,6 +4,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { portalRequest } from '../../data/repositories/portal';
 import { fmtDate, fmtPKR } from '../../shared/utils/format';
+import { escapeHtml, escapeFields } from '../../shared/utils/html';
 
 const TOKEN_KEY = 'rf_portal_token';
 const PKR = (v) => fmtPKR(parseFloat(v) || 0, { decimals: 2 });
@@ -39,16 +40,20 @@ table{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px}th{text-
 .net{display:flex;justify-content:space-between;align-items:center;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 12px;margin-top:12px}.net b{font-size:16px;color:#065f46}.words{font-size:10.5px;color:#6b7280;font-style:italic}
 .sign{display:flex;justify-content:space-between;margin-top:42px;font-size:10px;color:#6b7280}.sign .l{width:150px;border-top:1px solid #9ca3af;padding-top:3px;margin-top:24px;text-align:center}`;
 function openDoc(title, inner) {
-  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>${title}</title><style>${DOC_CSS}</style></head><body>${inner}<script>window.addEventListener('load',function(){setTimeout(function(){window.focus();window.print();},300)});<\/script></body></html>`;
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>${escapeHtml(title)}</title><style>${DOC_CSS}</style></head><body>${inner}<script>window.addEventListener('load',function(){setTimeout(function(){window.focus();window.print();},300)});<\/script></body></html>`; // eslint-disable-line no-useless-escape -- keeps "</script>" from closing an enclosing tag
   const w = window.open('', '_blank', 'width=840,height=1120');
   if (!w) return;
   w.document.write(html); w.document.close();
 }
+// docTitle / sub are the caller's (already safe) HTML; company text is escaped here.
 function header(co, docTitle, sub) {
+  co = escapeFields(co || {});
   const name = co?.legalName || co?.name || 'AGRI COMMODITIES';
   return `<div class="hd"><div><div class="co">${name}</div>${co?.address ? `<div class="muted" style="max-width:300px">${co.address}</div>` : ''}${co?.ntn ? `<div class="muted">NTN ${co.ntn}</div>` : ''}</div><div><div class="doc">${docTitle}</div>${sub ? `<div class="muted" style="text-align:right">${sub}</div>` : ''}</div></div>`;
 }
 function printPayslip(run, line, co) {
+  // P1-09: user-entered strings are HTML-escaped before interpolation.
+  run = escapeFields(run || {}); line = escapeFields(line || {});
   const rs = PKR; const ot = +line.otPay || 0; const adv = +line.advanceDeducted || 0; const bonus = +line.bonusTotal || 0; const otherDed = +line.deductionTotal || 0;
   let stat = line.statutoryJson; if (typeof stat === 'string') { try { stat = JSON.parse(stat); } catch { stat = []; } } if (!Array.isArray(stat)) stat = [];
   const statTotal = +line.statutoryTotal || 0;
@@ -66,18 +71,19 @@ function printPayslip(run, line, co) {
     </tbody></table>
     ${(adv > 0 || otherDed > 0 || statTotal > 0) ? `<div class="sec">Deductions</div><table><tbody>
       ${adv > 0 ? `<tr><td>Advance recovered</td><td class="r">− ${rs(adv)}</td></tr>` : ''}
-      ${stat.map((s) => `<tr><td>${s.name || 'Statutory'}</td><td class="r">− ${rs(s.amount)}</td></tr>`).join('')}
+      ${stat.map((s) => `<tr><td>${escapeHtml(s.name || 'Statutory')}</td><td class="r">− ${rs(s.amount)}</td></tr>`).join('')}
       ${otherDed > 0 ? `<tr><td>Other deductions</td><td class="r">− ${rs(otherDed)}</td></tr>` : ''}
     </tbody></table>` : ''}
     <div class="net"><div><div style="font-size:10px;text-transform:uppercase;color:#047857">Net Paid</div><b>${rs(line.netPay)}</b></div><div style="text-align:right;max-width:55%"><div class="words">Rupees ${amountInWords(line.netPay)} Only</div></div></div>
     <div class="sign"><div><div class="l">Received By</div></div><div><div class="l">Authorized By</div></div></div></div>`);
 }
 function printCertificate(emp, meta, co) {
+  emp = escapeFields(emp || {}); meta = escapeFields(meta || {});
   const rs = PKR; const t = emp.totals || {};
   const y = parseInt(String(meta.taxYear || '').slice(0, 4), 10);
   const label = Number.isFinite(y) ? `1 July ${y} – 30 June ${y + 1}` : meta.taxYear;
   const rows = (emp.months || []).map((m) => `<tr><td>${periodLabel(m.period)}</td><td class="r">${rs(m.gross)}</td><td class="r">${rs(m.statutory)}</td><td class="r">${rs(m.net)}</td></tr>`).join('');
-  const breakdown = Object.entries(t.byStatutory || {}).filter(([, v]) => (+v || 0) > 0).map(([k, v]) => `<tr><td>${k}</td><td class="r">${rs(v)}</td></tr>`).join('');
+  const breakdown = Object.entries(t.byStatutory || {}).filter(([, v]) => (+v || 0) > 0).map(([k, v]) => `<tr><td>${escapeHtml(k)}</td><td class="r">${rs(v)}</td></tr>`).join('');
   openDoc(`Tax Certificate ${meta.taxYear}`, `<div>${header(co, 'Salary &amp; Tax Certificate', label)}
     <div class="meta"><span><div class="k">Employee</div><div class="v">${emp.name || '—'}</div></span><span><div class="k">CNIC</div><div class="v">${emp.cnic || '—'}</div></span><span><div class="k">Designation</div><div class="v" style="text-transform:capitalize">${emp.role || '—'}</div></span><span><div class="k">Tax year</div><div class="v">${label}</div></span></div>
     <p style="font-size:11.5px;color:#374151">Certifies the salary paid and tax/statutory deducted under section 149 of the Income Tax Ordinance, 2001.</p>
@@ -159,7 +165,10 @@ export default function EmployeePortal() {
   async function changePin(e) {
     e.preventDefault(); setErr(''); setMsg('');
     try {
-      await portalApi('/change-pin', { method: 'POST', token, body: pinForm });
+      if (!/^\d{6,8}$/.test(pinForm.new_pin)) { setErr('New PIN must be 6–8 digits.'); return; }
+      const res = await portalApi('/change-pin', { method: 'POST', token, body: pinForm });
+      // A PIN change ends every older session; carry on with the fresh token.
+      if (res?.data?.token) { localStorage.setItem(TOKEN_KEY, res.data.token); setToken(res.data.token); }
       setPinForm({ current_pin: '', new_pin: '' }); setPinOpen(false); setMsg('PIN changed.');
     } catch (e2) { setErr(e2.message); }
   }
@@ -237,7 +246,7 @@ export default function EmployeePortal() {
             <div className="text-sm font-semibold text-gray-900 mb-2">Change your PIN</div>
             <form onSubmit={changePin} className="space-y-2">
               <input type="password" inputMode="numeric" maxLength={8} value={pinForm.current_pin} onChange={(e) => setPinForm((f) => ({ ...f, current_pin: e.target.value.replace(/\D/g, '') }))} placeholder="Current PIN" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
-              <input type="password" inputMode="numeric" maxLength={8} value={pinForm.new_pin} onChange={(e) => setPinForm((f) => ({ ...f, new_pin: e.target.value.replace(/\D/g, '') }))} placeholder="New PIN (4–8 digits)" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+              <input type="password" inputMode="numeric" maxLength={8} value={pinForm.new_pin} onChange={(e) => setPinForm((f) => ({ ...f, new_pin: e.target.value.replace(/\D/g, '') }))} placeholder="New PIN (6–8 digits)" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
               <button type="submit" className="px-4 py-2 text-sm text-white bg-[#1e3a5f] rounded-lg hover:bg-[#162a45]">Update PIN</button>
             </form>
           </div>

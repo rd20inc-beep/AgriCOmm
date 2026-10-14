@@ -45,16 +45,18 @@ router.use('/ai', authenticate, require('../modules/ai/ai.routes'));
 router.use('/chat', authenticate, require('../modules/chat/chat.routes'));
 router.use('/sync', authenticate, require('../modules/sync/sync.routes'));
 
-// Chat attachment serving — query-token auth (so <img src> works without headers);
-// the chat service checks the requester is a participant.
-const authenticateEventSource = require('../middleware/authEventSource');
+// Chat attachment serving — short-lived single-purpose ticket in ?ticket= (so
+// <img src> works without headers; never the session JWT); the chat service checks
+// the requester is a participant.
+const { authenticateTicket } = require('../middleware/authEventSource');
 const chatService = require('../modules/chat/chat.service');
-router.get('/chat-attachments/:id', authenticateEventSource, async (req, res) => {
+router.get('/chat-attachments/:id', authenticateTicket('chat-attachment'), async (req, res) => {
   try {
     const a = await chatService.getAttachment(req.params.id, req.user.id);
     if (!require('fs').existsSync(a.filePath)) return res.status(404).json({ success: false, message: 'File no longer available.' });
-    res.setHeader('Content-Type', a.mimeType);
-    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(a.fileName)}"`);
+    // Type from the stored file's extension, never the uploader's claim; only
+    // raster images render inline, everything else downloads (P1-09).
+    require('../middleware/uploadFilter').setSafeFileHeaders(res, a.filePath, a.fileName);
     return res.sendFile(a.filePath);
   } catch (e) { return res.status(e.statusCode || 500).json({ success: false, message: e.message }); }
 });

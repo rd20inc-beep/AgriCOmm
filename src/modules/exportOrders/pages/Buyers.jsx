@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import PartyLink from '../../../shared/components/PartyLink';
 import { Users, Plus, Search, Globe, Mail, Phone, Edit2, Trash2, DollarSign, CreditCard, Building2, BookOpen } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
+import { useAuth } from '../../../context/AuthContext';
 import { useBuyers, useSaveBuyer, useDeleteBuyer } from '../../../api/queries';
 import SlideDrawer from '../../../components/SlideDrawer';
 import FieldError from '../../../shared/components/FieldError';
@@ -21,6 +22,10 @@ const emptyForm = {
 
 export default function Buyers() {
   const { addToast } = useApp();
+  const { hasPermission } = useAuth();
+  // Deleting a buyer is master-data administration (backend: DELETE
+  // /api/customers needs admin.manage_master_data).
+  const canDeleteBuyer = hasPermission('admin', 'manage_master_data');
   const navigate = useNavigate();
   const { data: buyers = [], isLoading: loading } = useBuyers({ type: 'export' });
   const saveBuyerMut = useSaveBuyer();
@@ -213,9 +218,11 @@ export default function Buyers() {
                       <button onClick={() => openEdit(b)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Edit" aria-label={`Edit ${b.name}`}>
                         <Edit2 className="w-4 h-4" />
                       </button>
-                      <button onClick={() => handleDelete(b)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Delete" aria-label={`Delete ${b.name}`}>
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      {canDeleteBuyer && (
+                        <button onClick={() => handleDelete(b)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Delete" aria-label={`Delete ${b.name}`}>
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>

@@ -5,6 +5,7 @@ import { useCreateProduct, useUpdateProduct, useDeleteProduct } from '../../../.
 import Modal from '../../components/AdminDrawer';
 import FieldError from '../../../../shared/components/FieldError';
 import useConfirm from '../../../../hooks/useConfirm';
+import { useAdminCanWrite } from './adminWrite';
 
 // Note: broken % is a per-order quality target (export_order_items.
 // broken_pct_target), not a product-level attribute, so it isn't on
@@ -12,6 +13,7 @@ import useConfirm from '../../../../hooks/useConfirm';
 const EMPTY = { name: '', code: '', grade: 'Premium', category: '', description: '', hsCode: '' };
 
 export default function ProductsTab() {
+  const canWrite = useAdminCanWrite();
   const { productsList, addToast } = useApp();
   const createMut = useCreateProduct();
   const updateMut = useUpdateProduct();
@@ -89,13 +91,15 @@ export default function ProductsTab() {
             <Package className="w-5 h-5 text-indigo-600" />
             Products
           </h2>
-          <button
-            onClick={openCreate}
-            className="inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors font-medium text-sm"
-          >
-            <Plus className="w-4 h-4" />
-            Add New
-          </button>
+          {canWrite && (
+            <button
+              onClick={openCreate}
+              className="inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors font-medium text-sm"
+            >
+              <Plus className="w-4 h-4" />
+              Add New
+            </button>
+          )}
         </div>
         <div className="px-4 py-2 flex gap-4 text-xs text-gray-500 border-b border-gray-100">
           <span>Rice Products: <strong className="text-gray-900">{productsList.filter(p => !p.isByproduct).length}</strong></span>
@@ -135,12 +139,16 @@ export default function ProductsTab() {
                   </td>
                   <td data-label="Actions" className="px-4 py-3 text-right">
                     <div className="inline-flex gap-1">
-                      <button onClick={() => openEdit(p)} className="p-1.5 rounded hover:bg-blue-50 text-blue-600" title="Edit" aria-label={`Edit ${p.name}`}>
-                        <Pencil className="w-4 h-4" />
-                      </button>
-                      <button onClick={() => handleDelete(p)} className="p-1.5 rounded hover:bg-red-50 text-red-600" title="Delete" aria-label={`Delete ${p.name}`}>
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      {canWrite && (
+                        <button onClick={() => openEdit(p)} className="p-1.5 rounded hover:bg-blue-50 text-blue-600" title="Edit" aria-label={`Edit ${p.name}`}>
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                      )}
+                      {canWrite && (
+                        <button onClick={() => handleDelete(p)} className="p-1.5 rounded hover:bg-red-50 text-red-600" title="Delete" aria-label={`Delete ${p.name}`}>
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>

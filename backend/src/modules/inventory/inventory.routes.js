@@ -1,8 +1,16 @@
 const express = require('express');
 const router = express.Router();
-const { authorize, authorizeRole } = require('../../middleware/rbac');
+const { authorize } = require('../../middleware/rbac');
 const auditAction = require('../../middleware/audit');
+const retired = require('../../middleware/retired');
 const inventoryController = require('./inventory.controller');
+const { redactCostInResponses } = require('../../utils/costVisibility');
+
+// Hide-cost decision (2026-10-05): these legacy handlers return raw lot,
+// movement and reservation rows. A user without reports.view_cost /
+// finance.view gets every money key nulled (AppContext loads GET / for every
+// user, so this is the one that matters most).
+router.use(redactCostInResponses());
 
 // --- Lot queries ---
 router.get(
@@ -44,20 +52,25 @@ router.post(
   inventoryController.createLot
 );
 
-// --- Record manual movement ---
+// --- Record manual movement --- RETIRED (410). No screen calls it; it took
+// any movement type (write-offs included) with only inventory.create and no
+// validation. Stock moves through purchase / milling / sale / transfer /
+// adjustment-request screens, which post the ledger.
 router.post(
   '/movements',
+  retired('Manual stock movements are retired. Use a stock adjustment request, a transfer or the owning screen.'),
   authorize('inventory', 'create'),
   auditAction('create_movement', 'inventory_movement', (req, data) => data.data && data.data.movement ? data.data.movement.id : null),
   inventoryController.createMovement
 );
 
 // --- Stock adjustment ---
-// A direct lot write-off with no approval step, so it is Owner-only (owner
-// decision 2026-10-05). authorizeRole has no bypass, so Super Admin is listed.
+// A direct lot write-off with no approval step. Owner decision 2026-10-05: write-offs are Owner-only. The gate is
+// inventory.approve_write_off, held by Owner and Super Admin only (mig 339) —
+// the same people the old hard-coded role list let through.
 router.post(
   '/adjust',
-  authorizeRole('Owner', 'Super Admin'),
+  authorize('inventory', 'approve_write_off'),
   auditAction('adjust_stock', 'inventory_lot', (req) => req.body.lot_id),
   inventoryController.adjustStock
 );

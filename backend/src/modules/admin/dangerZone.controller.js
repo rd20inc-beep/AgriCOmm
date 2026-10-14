@@ -1,5 +1,6 @@
 const db = require('../../config/database');
 const { nextDocNo } = require('../../utils/docNumber');
+const { redactSecrets } = require('../../utils/redactSecrets');
 
 /**
  * Super-Admin "Danger Zone" — permanent, cascading hard-deletes and manual
@@ -21,7 +22,7 @@ async function auditDanger(trx, req, action, entityType, entityId, details) {
     action,
     entity_type: entityType,
     entity_id: String(entityId),
-    details: JSON.stringify(details || {}),
+    details: JSON.stringify(redactSecrets(details || {})),
     ip_address: req.ip || req.headers['x-forwarded-for'] || null,
   });
 }

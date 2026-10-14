@@ -114,8 +114,15 @@ const automationService = {
   async runReportEmail(task) {
     const reportingService = require('../analytics/reporting.service');
     let cfg = {}; try { cfg = typeof task.config === 'string' ? JSON.parse(task.config) : (task.config || {}); } catch (e) { cfg = {}; }
-    const recipients = (cfg.recipients || []).filter(Boolean);
-    if (!recipients.length) return { processed: 0, details: { message: 'No recipients configured' } };
+    const policy = require('../analytics/reportEmailPolicy');
+    const configured = (cfg.recipients || []).filter(Boolean);
+    if (!configured.length) return { processed: 0, details: { message: 'No recipients configured' } };
+    // Re-checked at send time (P1-11): a schedule created before the internal-
+    // domain rule, or a domain since removed from the allowlist, never mails out.
+    const { allowed: recipients, external, invalid } = policy.partitionRecipients(configured, await policy.allowedDomains(db));
+    const skipped = [...external, ...invalid];
+    if (skipped.length) console.warn(`Scheduled report ${task.id}: skipped ${skipped.length} recipient(s) outside the internal-domain allowlist`);
+    if (!recipients.length) return { processed: 0, details: { message: 'No internal recipients', skipped: skipped.length } };
 
     const report = await reportingService.buildScheduledReport(cfg.reportType, cfg.filters || {});
     if (!report) return { processed: 0, details: { message: `Unknown report type: ${cfg.reportType}` } };
@@ -127,15 +134,19 @@ const automationService = {
     } catch (e) { /* table may not exist — use default */ }
 
     const periodLabel = cfg.frequency ? `${cfg.frequency.charAt(0).toUpperCase()}${cfg.frequency.slice(1)} report` : null;
-    const html = reportingService.renderReportEmailHtml(report, { companyName, periodLabel });
     const subject = `${report.title} — ${new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}`;
 
     let sent = 0;
     for (const to of recipients) {
-      try { await emailService.sendEmail({ to, subject, body: html }); sent += 1; }
-      catch (e) { console.error('Scheduled report email failed for', to, e.message); }
+      try {
+        // Each recipient gets the report redacted for their own role: cost /
+        // profit columns only for a user who may see them on screen.
+        const visible = policy.redactReportColumns(report, await policy.recipientVisibility(db, to));
+        const html = reportingService.renderReportEmailHtml(visible, { companyName, periodLabel });
+        await emailService.sendEmail({ to, subject, body: html }); sent += 1;
+      } catch (e) { console.error('Scheduled report email failed for a recipient:', e.message); }
     }
-    return { processed: sent, details: { reportType: cfg.reportType, recipients: recipients.length, sent, rows: (report.rows || []).length } };
+    return { processed: sent, details: { reportType: cfg.reportType, recipients: recipients.length, sent, skipped: skipped.length, rows: (report.rows || []).length } };
   },
 
   // ============================================================

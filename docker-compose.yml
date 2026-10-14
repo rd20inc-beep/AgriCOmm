@@ -51,6 +51,10 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      # AI natural-language queries run as a separate read-only DB role (migration
+      # 333). Unset = AI querying reports "not configured"; it never uses DB_USER.
+      AI_DB_USER: ${AI_DB_USER:-agri_ai_query}
+      AI_DB_PASSWORD: ${AI_DB_PASSWORD:-}
       TURNSTILE_SECRET: ${TURNSTILE_SECRET:-}
       # In-app calling TURN relay (coturn on the host). Backend mints ephemeral
       # REST credentials from TURN_SECRET; set both in the server's .env.

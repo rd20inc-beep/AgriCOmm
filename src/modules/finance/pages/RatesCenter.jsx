@@ -141,8 +141,8 @@ export default function RatesCenter() {
           ) : (
             <TypeChip icon={Check}>Source: {latestFx.source || 'manual'}</TypeChip>
           )}
-          {/* Adding / refreshing rates is finance.confirm_payment (finance.routes.js). */}
-          <PermissionGate module="finance" action="confirm_payment">
+          {/* Adding / refreshing rates is finance.set_rates (finance.routes.js, mig 339). */}
+          <PermissionGate module="finance" action="set_rates">
             <button type="button" onClick={handleRefreshFx} data-action="refresh-fx" className={btnSecondary}>
               <RefreshCw size={14} aria-hidden="true" /> Refresh open orders
             </button>
@@ -168,7 +168,7 @@ export default function RatesCenter() {
       {subTab === 'fx' && (
         <>
           {/* Actions */}
-          <PermissionGate module="finance" action="confirm_payment">
+          <PermissionGate module="finance" action="set_rates">
             <div className="flex gap-2">
               <button type="button" onClick={() => setShowFxForm(!showFxForm)} data-action="add-fx-rate" aria-expanded={showFxForm}
                 className={showFxForm ? btnSecondary : btnPrimary}>
@@ -229,7 +229,7 @@ export default function RatesCenter() {
               subtitle="Distinct categories" status="neutral" loading={crLoading} />
           </div>
 
-          <PermissionGate module="finance" action="confirm_payment">
+          <PermissionGate module="finance" action="set_rates">
             <div className="flex gap-2">
               <button type="button" onClick={() => setShowCrForm(!showCrForm)} data-action="add-commodity-rate" aria-expanded={showCrForm}
                 className={showCrForm ? btnSecondary : btnPrimary}>

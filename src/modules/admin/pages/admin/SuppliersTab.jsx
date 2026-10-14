@@ -7,6 +7,7 @@ import { useCreateSupplier, useUpdateSupplier, useDeleteSupplier } from '../../.
 import Modal from '../../components/AdminDrawer';
 import FieldError from '../../../../shared/components/FieldError';
 import useConfirm from '../../../../hooks/useConfirm';
+import { useAdminCanWrite } from './adminWrite';
 
 // Note: the suppliers table column is `address` (matching customers).
 // We label it "Location" in the UI for our trade convention but post
@@ -15,6 +16,7 @@ import useConfirm from '../../../../hooks/useConfirm';
 const EMPTY = { name: '', type: 'Rice Supplier', address: '', contact_person: '' };
 
 export default function SuppliersTab() {
+  const canWrite = useAdminCanWrite();
   const { suppliersList, addToast } = useApp();
   const navigate = useNavigate();
   const createMut = useCreateSupplier();
@@ -107,13 +109,15 @@ export default function SuppliersTab() {
             <Truck className="w-5 h-5 text-amber-600" />
             Suppliers
           </h2>
-          <button
-            onClick={openCreate}
-            className="inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors font-medium text-sm"
-          >
-            <Plus className="w-4 h-4" />
-            Add New
-          </button>
+          {canWrite && (
+            <button
+              onClick={openCreate}
+              className="inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors font-medium text-sm"
+            >
+              <Plus className="w-4 h-4" />
+              Add New
+            </button>
+          )}
         </div>
         <div className="overflow-x-auto mobile-cards">
           <table className="w-full text-sm">
@@ -164,12 +168,16 @@ export default function SuppliersTab() {
                       <button onClick={() => navigate(`/finance/accounting/statements?type=supplier&id=${s.id}`)} className="p-1.5 rounded hover:bg-emerald-50 text-emerald-600" title="View ledger" aria-label={`View ledger for ${s.name}`}>
                         <BookOpen className="w-4 h-4" />
                       </button>
-                      <button onClick={() => openEdit(s)} className="p-1.5 rounded hover:bg-blue-50 text-blue-600" title="Edit" aria-label={`Edit ${s.name}`}>
-                        <Pencil className="w-4 h-4" />
-                      </button>
-                      <button onClick={() => handleDelete(s)} className="p-1.5 rounded hover:bg-red-50 text-red-600" title="Delete" aria-label={`Delete ${s.name}`}>
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      {canWrite && (
+                        <button onClick={() => openEdit(s)} className="p-1.5 rounded hover:bg-blue-50 text-blue-600" title="Edit" aria-label={`Edit ${s.name}`}>
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                      )}
+                      {canWrite && (
+                        <button onClick={() => handleDelete(s)} className="p-1.5 rounded hover:bg-red-50 text-red-600" title="Delete" aria-label={`Delete ${s.name}`}>
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>

@@ -67,7 +67,7 @@ function AskTab({ enabled }) {
     'Total local sales this month',
     'Top 5 suppliers by amount owed',
     'Which lots have the lowest yield?',
-    'Salaries paid in the last 30 days',
+    'Expenses paid in the last 30 days',
   ];
 
   return (

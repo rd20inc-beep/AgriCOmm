@@ -20,6 +20,7 @@ const notificationService = require('../../services/notificationService');
 // #9-scoping: per-user warehouse restriction, applied to stock READ paths only
 // (the dispatch/reservation engine is never scoped).
 const whScope = require('../../utils/warehouseScope');
+const { canSeeCost, redactMoney } = require('../../utils/costVisibility');
 const { MONEY_EPSILON, settledAmount, getStepForStatus, getAllowedActions, deriveFinancialStatus } = workflowService;
 
 /**
@@ -870,6 +871,13 @@ const exportOrderController = {
             byproductRecovery: (byBatch[bid] || []).filter(o => o.type === 'byproduct').reduce((s, o) => s + o.recoveryValue, 0),
           })).filter(x => x.outputs.length);
         }
+      }
+
+      // Lot and batch cost is hidden from cost-blind roles (owner decision
+      // 2026-10-05), as /available-stock already does. The order's own contract
+      // price is not lot cost and stays.
+      if (!(await canSeeCost(req))) {
+        redactMoney({ purchaseLots, millingBatch, batchByproducts }, { cost: false, profit: true });
       }
 
       return res.json({
