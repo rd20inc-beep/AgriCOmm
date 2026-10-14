@@ -163,10 +163,10 @@ jobs:
       - name: Build
         run: npm run build
 
-  # Lint only the JS/JSX files this push/PR changes. The codebase carries
-  # pre-existing lint errors (≈293 in src/), so a whole-repo gate would be red
-  # on day one; this gate keeps every file you touch clean instead, and the
-  # backlog shrinks as files are edited. Warnings never fail the job.
+  # Lint only the lines this push/PR adds or changes. The codebase carries
+  # pre-existing lint errors (≈293 in src/), so a whole-repo or whole-file gate
+  # would go red on unrelated legacy code and block deploys; new code must be
+  # clean (scripts/lint-changed-lines.mjs). Warnings never fail the job.
   lint-changed:
     name: Lint Changed Files
     runs-on: ubuntu-latest
@@ -201,15 +201,7 @@ jobs:
             RANGE="HEAD~1..HEAD"
           fi
           echo "Diff range: $RANGE"
-          git diff --name-only --diff-filter=ACMR "$RANGE" -- '*.js' '*.jsx' \
-            | grep -E '^(src|backend/src)/' > /tmp/changed-files.txt || true
-          if [ ! -s /tmp/changed-files.txt ]; then
-            echo "No changed JS/JSX files under src/ or backend/src/ — nothing to lint."
-            exit 0
-          fi
-          echo "Linting $(wc -l < /tmp/changed-files.txt) changed file(s):"
-          cat /tmp/changed-files.txt
-          xargs -d '\n' npx eslint --no-warn-ignored < /tmp/changed-files.txt
+          node scripts/lint-changed-lines.mjs "$RANGE"
 
   deploy:
     name: Deploy to Production

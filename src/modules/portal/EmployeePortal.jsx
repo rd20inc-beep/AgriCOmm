@@ -40,7 +40,7 @@ table{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px}th{text-
 .net{display:flex;justify-content:space-between;align-items:center;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 12px;margin-top:12px}.net b{font-size:16px;color:#065f46}.words{font-size:10.5px;color:#6b7280;font-style:italic}
 .sign{display:flex;justify-content:space-between;margin-top:42px;font-size:10px;color:#6b7280}.sign .l{width:150px;border-top:1px solid #9ca3af;padding-top:3px;margin-top:24px;text-align:center}`;
 function openDoc(title, inner) {
-  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>${escapeHtml(title)}</title><style>${DOC_CSS}</style></head><body>${inner}<script>window.addEventListener('load',function(){setTimeout(function(){window.focus();window.print();},300)});<\/script></body></html>`;
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>${escapeHtml(title)}</title><style>${DOC_CSS}</style></head><body>${inner}<script>window.addEventListener('load',function(){setTimeout(function(){window.focus();window.print();},300)});<\/script></body></html>`; // eslint-disable-line no-useless-escape -- keeps "</script>" from closing an enclosing tag
   const w = window.open('', '_blank', 'width=840,height=1120');
   if (!w) return;
   w.document.write(html); w.document.close();

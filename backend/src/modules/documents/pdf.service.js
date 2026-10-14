@@ -1,3 +1,4 @@
+/* global document -- page.evaluate callbacks run inside the headless browser */
 /**
  * Server-side PDF rendering for export documents.
  *
