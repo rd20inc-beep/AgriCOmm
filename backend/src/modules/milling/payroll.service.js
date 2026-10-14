@@ -4,6 +4,19 @@
 const db = require('../../config/database');
 const { resolveCashAccountId } = require('../../shared/cashAccounts');
 
+// Owner decision D-12 (2026-10-15): a monthly employee's day rate is the
+// monthly salary ÷ 30 — for proration, unpaid-leave docking, overtime (when no
+// per-hour rate is set) and settlement leave encashment alike. It used to be
+// ÷ 26 in one place, ÷ days-in-month in another and ÷ 30 in a third. The rule
+// is printed on the payslip.
+const MONTHLY_DAY_DIVISOR = 30;
+const MONTHLY_DAY_RULE = `monthly salary ÷ ${MONTHLY_DAY_DIVISOR}`;
+
+// The month (YYYY-MM) it is now in Pakistan — payroll months are PKT months.
+function currentPayrollMonth(now = new Date()) {
+  return new Date(now.getTime() + 5 * 3600 * 1000).toISOString().slice(0, 7);
+}
+
 // Normalise a date column (node-pg may hand back a Date or a string) to a plain
 // YYYY-MM-DD string so date comparisons stay lexicographic = chronological.
 function ymd(d) {
@@ -55,10 +68,11 @@ function advanceCap({ gross, bonusTotal = 0, deductionTotal = 0, statutoryTotal 
   return Math.max(0, Math.round((gross || 0) + (bonusTotal || 0) - (deductionTotal || 0) - (statutoryTotal || 0)));
 }
 
-// Net pay is always derived on the server: gross + bonus − advance − deductions
-// − statutory, clamped at 0. A client never supplies it.
-function computeNetPay({ grossPay, bonusTotal = 0, advanceDeduction = 0, deductionTotal = 0, statutoryTotal = 0 }) {
-  return Math.max(0, Math.round((grossPay || 0) + (bonusTotal || 0) - (advanceDeduction || 0) - (deductionTotal || 0) - (statutoryTotal || 0)));
+// Net pay is always derived on the server: gross + bonus + short pay brought
+// forward − advance − deductions − statutory, clamped at 0. A client never
+// supplies it.
+function computeNetPay({ grossPay, bonusTotal = 0, advanceDeduction = 0, deductionTotal = 0, statutoryTotal = 0, shortPayBroughtForward = 0 }) {
+  return Math.max(0, Math.round((grossPay || 0) + (bonusTotal || 0) + (shortPayBroughtForward || 0) - (advanceDeduction || 0) - (deductionTotal || 0) - (statutoryTotal || 0)));
 }
 
 // Resolve one requested prepare line against the worker's computed summary row.
@@ -87,7 +101,8 @@ function resolvePrepareLine(w, ln = {}) {
     if (asked < computedNet - 1) netPay = Math.round(asked);
   }
   // Owner decision B3: paying LESS than the computed net needs a reason, kept
-  // on the line (the shortfall itself is not tracked).
+  // on the line. D-12: the shortfall is tracked on the line and carried
+  // forward — it is added back to the employee's next net pay.
   let netOverrideReason = null;
   if (netPay < computedNet) {
     netOverrideReason = String(ln.net_override_reason || '').trim() || null;
@@ -98,7 +113,8 @@ function resolvePrepareLine(w, ln = {}) {
   }
   const scheduled = Math.round(w.advanceScheduled != null ? w.advanceScheduled : w.advanceDeduction);
   const changed = advanceDeduction !== scheduled;
-  return { advanceDeduction, netPay, computedNet, netOverrideReason, skipReason: changed ? (ln.skip_reason || ln.reason || null) : null };
+  const shortPay = Math.max(0, computedNet - netPay);
+  return { advanceDeduction, netPay, computedNet, shortPay, netOverrideReason, skipReason: changed ? (ln.skip_reason || ln.reason || null) : null };
 }
 
 // Compute the month's payroll for every ACTIVE employee — the single source of
@@ -136,6 +152,19 @@ async function computePayrollSummary(month, entity = 'mill') {
     const due = (parseFloat(s.scheduled_amount) || 0) - (parseFloat(s.recovered_amount) || 0);
     if (due > 0) schedDueByAdvance.set(s.advance_id, (schedDueByAdvance.get(s.advance_id) || 0) + due);
   }
+
+  // Short pay carried forward (D-12): what earlier live lines paid below their
+  // computed net, less what later lines already added back.
+  const spRows = workers.length ? await db('mill_payroll_lines')
+    .whereIn('worker_id', workers.map((w) => w.id)).where('active', true)
+    .where('period', '<', period)
+    .select('worker_id', 'short_pay_amount', 'short_pay_carried_in') : [];
+  const shortPayByWorker = new Map();
+  for (const r of spRows) {
+    const bal = (parseFloat(r.short_pay_amount) || 0) - (parseFloat(r.short_pay_carried_in) || 0);
+    shortPayByWorker.set(r.worker_id, (shortPayByWorker.get(r.worker_id) || 0) + bal);
+  }
+  for (const [k, v] of shortPayByWorker) shortPayByWorker.set(k, Math.max(0, Math.round(v)));
 
   // Per-worker bonuses (+) and deductions (−) for this period: recurring ones
   // plus any tagged to this exact month. Active only.
@@ -184,25 +213,29 @@ async function computePayrollSummary(month, entity = 'mill') {
     // PRORATION: a monthly-salaried employee who joined or left partway through
     // the month is paid only for the days they were employed within it.
     const daysInMonth = parseInt(endDate.slice(8, 10), 10) || 30;
+    const monthlySalary = parseFloat(w.monthly_salary) || 0;
+    // D-12: monthly staff day rate = salary ÷ 30; daily staff = their wage.
+    const dayRate = w.pay_type === 'monthly' ? monthlySalary / MONTHLY_DAY_DIVISOR : dailyWage;
     const empStart = (w.joined_date && ymd(w.joined_date) > startDate) ? ymd(w.joined_date) : startDate;
     const leftYmd = w.left_date ? ymd(w.left_date) : null;
     const empEnd = (leftYmd && leftYmd < endDate) ? leftYmd : endDate;
     const employedDays = Math.max(0, Math.round((Date.parse(empEnd) - Date.parse(empStart)) / 86400000) + 1);
     const proratable = w.pay_type === 'monthly' && employedDays < daysInMonth;
-    const proRatio = proratable ? Math.min(1, employedDays / daysInMonth) : 1;
+    // A part month pays day rate × days employed, never above the salary.
     let basicPay = w.pay_type === 'monthly'
-      ? Math.round((parseFloat(w.monthly_salary) || 0) * proRatio)
+      ? (proratable ? Math.min(monthlySalary, Math.round(dayRate * employedDays)) : monthlySalary)
       : effectiveDays * dailyWage;
     // Leave adjustment: monthly → dock unpaid-leave days (dailyRate × days);
     // daily → add paid-leave days (dailyWage × days). Paid leave doesn't dock a
     // monthly salary; unpaid leave doesn't pay a daily worker.
     const lv = leaveByWorker.get(w.id) || { paid: 0, unpaid: 0 };
     let leaveAdjust = 0;
-    if (w.pay_type === 'monthly') leaveAdjust = -Math.round(((parseFloat(w.monthly_salary) || 0) / daysInMonth) * lv.unpaid);
+    if (w.pay_type === 'monthly') leaveAdjust = -Math.round(dayRate * lv.unpaid);
     else leaveAdjust = Math.round(dailyWage * lv.paid);
     basicPay = Math.max(0, basicPay + leaveAdjust);
-    // Overtime: per-worker ot_rate_per_hour if set, else 1.5× the daily hourly rate.
-    const otRate = parseFloat(w.ot_rate_per_hour) > 0 ? parseFloat(w.ot_rate_per_hour) : (dailyWage / 8 * 1.5);
+    // Overtime: per-worker ot_rate_per_hour if set, else 1.5× the hourly rate
+    // (day rate ÷ 8).
+    const otRate = parseFloat(w.ot_rate_per_hour) > 0 ? parseFloat(w.ot_rate_per_hour) : (dayRate / 8 * 1.5);
     const otPay = totalOT * otRate;
     const gross = basicPay + otPay;
 
@@ -240,7 +273,8 @@ async function computePayrollSummary(month, entity = 'mill') {
     const advanceDeduction = Math.min(scheduled, advanceCap({ gross, bonusTotal, deductionTotal, statutoryTotal: stat.total }));
     // Only when deductions alone exceed pay does statutory need scaling down —
     // clamp the total (scaling the breakdown) so net pay can't go negative.
-    const beforeStat = Math.round(gross + bonusTotal - advanceDeduction - deductionTotal);
+    const shortPayBroughtForward = shortPayByWorker.get(w.id) || 0;
+    const beforeStat = Math.round(gross + bonusTotal + shortPayBroughtForward - advanceDeduction - deductionTotal);
     let statutoryTotal = stat.total;
     let statutoryLines = stat.lines;
     if (statutoryTotal > Math.max(0, beforeStat)) {
@@ -255,6 +289,9 @@ async function computePayrollSummary(month, entity = 'mill') {
       basicPay: Math.round(basicPay), otPay: Math.round(otPay),
       grossPay: Math.round(gross), // earned (basic + OT); bonus shown separately
       prorated: proratable, employedDays, daysInMonth,
+      dailyRate: Math.round(dayRate * 100) / 100,
+      dailyRateRule: w.pay_type === 'monthly' ? MONTHLY_DAY_RULE : 'daily wage',
+      shortPayBroughtForward,
       leaveDaysPaid: lv.paid, leaveDaysUnpaid: lv.unpaid, leaveAdjust,
       bonusTotal, deductionTotal,
       statutoryTotal, statutoryLines,
@@ -272,7 +309,7 @@ async function computePayrollSummary(month, entity = 'mill') {
   const grandDeduction = summary.reduce((s, w) => s + w.deductionTotal, 0);
   const grandStatutory = summary.reduce((s, w) => s + w.statutoryTotal, 0);
   const grandTotal = summary.reduce((s, w) => s + w.netPay, 0);
-  return { summary, grandGross, grandAdvance, grandBonus, grandDeduction, grandStatutory, grandTotal, period: { startDate, endDate } };
+  return { summary, grandGross, grandAdvance, grandBonus, grandDeduction, grandStatutory, grandTotal, period: { startDate, endDate }, dailyRateRule: MONTHLY_DAY_RULE };
 }
 
 // Per-worker payroll commitment for a month. A worker is 'paid' if in a paid/
@@ -305,9 +342,17 @@ async function committedWorkerStatus(month, entity = 'mill', conn = db) {
 // `lines` for per-employee overrides; omit to prepare every not-yet-committed
 // active employee. Throws Error with `.httpStatus` (and `.code='NONE'` when
 // there is simply nobody to prepare) so callers can branch.
-async function preparePayrollRun({ month, lines, pay_method, bank_account_id, pay_date, notes, entity = 'mill' }, userId) {
+// `pay_type` ('monthly' | 'daily') limits an automatic prepare to that group.
+async function preparePayrollRun({ month, lines, pay_method, bank_account_id, pay_date, notes, entity = 'mill', pay_type = null }, userId) {
   if (!/^\d{4}-\d{2}$/.test(month || '')) { const e = new Error('A valid month (YYYY-MM) is required.'); e.httpStatus = 400; throw e; }
   const ent = entity === 'general' ? 'general' : 'mill'; // Head Office vs Mill
+  // A month that has not ended yet (P2-26): monthly staff may be prepared for
+  // it (their salary does not depend on days worked), but a daily-wage worker
+  // may not — committing them now would leave the rest of the month's days
+  // unpaid forever. They are prepared once the month has closed.
+  const nowMonth = currentPayrollMonth();
+  if (month > nowMonth) { const e = new Error(`${month} has not started yet.`); e.httpStatus = 400; throw e; }
+  const openMonth = month === nowMonth;
 
   const { summary } = await computePayrollSummary(month, ent);
   const byId = new Map(summary.map((w) => [w.id, w]));
@@ -320,8 +365,11 @@ async function preparePayrollRun({ month, lines, pay_method, bank_account_id, pa
     for (const ln of lines) {
       const w = byId.get(ln.worker_id);
       if (!w) continue;
+      if (openMonth && w.pay_type !== 'monthly') {
+        const e = new Error(`${w.name} is paid by the day — ${month} has not ended, so their pay can only be prepared once the month closes.`); e.httpStatus = 400; throw e;
+      }
       const r = resolvePrepareLine(w, ln);
-      requested.push({ ...w, advanceDeduction: r.advanceDeduction, netPay: r.netPay, skipReason: r.skipReason, netOverrideReason: r.netOverrideReason });
+      requested.push({ ...w, advanceDeduction: r.advanceDeduction, netPay: r.netPay, shortPay: r.shortPay, skipReason: r.skipReason, netOverrideReason: r.netOverrideReason });
     }
   }
 
@@ -347,9 +395,15 @@ async function preparePayrollRun({ month, lines, pay_method, bank_account_id, pa
       toPay = requested;
     } else {
       // All not-yet-committed active employees with pay due.
-      toPay = summary.filter((w) => !committed.has(w.id) && w.grossPay > 0);
+      toPay = summary.filter((w) => !committed.has(w.id) && w.grossPay > 0
+        && (!openMonth || w.pay_type === 'monthly') && (!pay_type || w.pay_type === pay_type));
     }
-    if (!toPay.length) { const e = new Error('No employees to prepare (everyone is already in a run for this month).'); e.httpStatus = 400; e.code = 'NONE'; throw e; }
+    if (!toPay.length) {
+      const msg = openMonth
+        ? `No employees to prepare for ${month} yet (salaried staff are already in a run; daily-wage staff are prepared once the month closes).`
+        : 'No employees to prepare (everyone is already in a run for this month).';
+      const e = new Error(msg); e.httpStatus = 400; e.code = 'NONE'; throw e;
+    }
 
     const grossTotal = toPay.reduce((s, w) => s + w.grossPay, 0);
     const advanceTotal = toPay.reduce((s, w) => s + w.advanceDeduction, 0);
@@ -362,32 +416,64 @@ async function preparePayrollRun({ month, lines, pay_method, bank_account_id, pa
       status: 'prepared', notes: notes || null, created_by: userId || null,
     }).returning('*');
     for (const w of toPay) {
-      await trx('mill_payroll_lines').insert({
-        run_id: r.id, worker_id: w.id, worker_name: w.name, role: w.role, department: w.department || null, pay_type: w.pay_type,
-        effective_days: w.effectiveDays || 0, ot_hours: w.totalOT || 0,
-        basic_pay: w.basicPay, ot_pay: w.otPay, gross_pay: w.grossPay,
-        employed_days: w.employedDays != null ? w.employedDays : null,
-        days_in_month: w.daysInMonth != null ? w.daysInMonth : null,
-        bonus_total: w.bonusTotal || 0, deduction_total: w.deductionTotal || 0,
-        statutory_total: w.statutoryTotal || 0,
-        statutory_json: JSON.stringify(w.statutoryLines || []),
-        advance_deducted: w.advanceDeduction, net_pay: w.netPay, skip_reason: w.skipReason || null,
-        net_override_reason: w.netOverrideReason || null,
-      });
+      try {
+        await trx('mill_payroll_lines').insert({
+          run_id: r.id, worker_id: w.id, worker_name: w.name, role: w.role, department: w.department || null, pay_type: w.pay_type,
+          effective_days: w.effectiveDays || 0, ot_hours: w.totalOT || 0,
+          basic_pay: w.basicPay, ot_pay: w.otPay, gross_pay: w.grossPay,
+          employed_days: w.employedDays != null ? w.employedDays : null,
+          days_in_month: w.daysInMonth != null ? w.daysInMonth : null,
+          bonus_total: w.bonusTotal || 0, deduction_total: w.deductionTotal || 0,
+          statutory_total: w.statutoryTotal || 0,
+          statutory_json: JSON.stringify(w.statutoryLines || []),
+          advance_deducted: w.advanceDeduction, net_pay: w.netPay, skip_reason: w.skipReason || null,
+          net_override_reason: w.netOverrideReason || null,
+          period: month, active: true,
+          short_pay_amount: w.shortPay || 0,
+          short_pay_carried_in: w.shortPayBroughtForward || 0,
+          daily_rate: w.dailyRate != null ? w.dailyRate : null,
+          daily_rate_rule: w.dailyRateRule || null,
+        });
+      } catch (err) {
+        // uq_mill_payroll_lines_worker_period (mig 359): another live line
+        // already pays this employee for the month.
+        if (err && err.code === '23505') { const e = new Error(`${w.name} is already in a payroll run for ${month}.`); e.httpStatus = 409; throw e; }
+        throw err;
+      }
     }
     return r;
   });
 }
 
-// Next date (UTC) on which to auto-prepare, given a day-of-month (1-28). Returns
-// this month's day if it's still ahead, else next month's.
-function nextPrepareDate(dayOfMonth) {
-  const day = Math.min(28, Math.max(1, parseInt(dayOfMonth, 10) || 28));
-  const now = new Date();
-  let y = now.getUTCFullYear(); let m = now.getUTCMonth();
-  // If today is already past the target day this month, roll to next month.
-  if (now.getUTCDate() > day) { m += 1; if (m > 11) { m = 0; y += 1; } }
-  return new Date(Date.UTC(y, m, day, 6, 0, 0)); // 06:00 UTC ≈ 11:00 PKT
+// The scheduled (or "run now") auto-prepare for one entity. Two runs at most,
+// both only PREPARED (approval and payment stay human):
+//   1. the month just closed, for daily-wage staff not yet in a run — they
+//      cannot be prepared while their month is open (see preparePayrollRun);
+//   2. the current month, for salaried staff not yet in a run (as before).
+// userId null = the system (the run then has no preparer, so any approver may
+// approve it). Returns [{ month, run | null, message }].
+async function prepareScheduledPayroll({ entity = 'mill', pay_method = 'cash', userId = null, now = new Date() } = {}) {
+  const ent = entity === 'general' ? 'general' : 'mill';
+  const cur = currentPayrollMonth(now);
+  const d = new Date(Date.UTC(Number(cur.slice(0, 4)), Number(cur.slice(5, 7)) - 2, 1));
+  const prev = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+  const out = [];
+  for (const [month, payType] of [[prev, 'daily'], [cur, 'monthly']]) {
+    try {
+      const run = await preparePayrollRun({ month, pay_method, entity: ent, pay_type: payType, notes: `Payroll auto-prepared for ${month}` }, userId);
+      out.push({ month, payType, run });
+    } catch (e) {
+      if (e.code !== 'NONE') throw e;
+      out.push({ month, payType, run: null, message: e.message });
+    }
+  }
+  return out;
+}
+
+// Next date (UTC) on which to auto-prepare: the first day-of-month slot
+// (1-28, 06:00 UTC ≈ 11:00 PKT) strictly after `after` (P2-27).
+function nextPrepareDate(dayOfMonth, after = new Date()) {
+  return require('../admin/schedulerSlots').nextMonthlyDaySlot(dayOfMonth, after);
 }
 
 // Derived leave balances for a worker in a year (shared by the admin routes +
@@ -446,4 +532,8 @@ async function computeLeaveBalances(workerId, year, asOf = null) {
   });
 }
 
-module.exports = { computePayrollSummary, committedWorkerStatus, preparePayrollRun, nextPrepareDate, computeLeaveBalances, resolvePrepareLine, computeNetPay, advanceCap };
+module.exports = {
+  computePayrollSummary, committedWorkerStatus, preparePayrollRun, nextPrepareDate, computeLeaveBalances,
+  resolvePrepareLine, computeNetPay, advanceCap, currentPayrollMonth, MONTHLY_DAY_DIVISOR, MONTHLY_DAY_RULE,
+  prepareScheduledPayroll,
+};

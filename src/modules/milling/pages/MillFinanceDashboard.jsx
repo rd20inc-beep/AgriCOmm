@@ -12,7 +12,7 @@ import { useOwnerAuth } from '../../../context/OwnerAuthContext';
 import {
   useMillExpenses, useCreateMillExpense, useRecurringExpenses, useMaterializeRecurring, useRunDueRecurring, useCategorizeExpense, useMillWorkers, useCreateMillWorker,
   useUpdateMillWorker, useDeleteMillWorker, useSetWorkerPortalPin, useCreateWorkerAdvance, useWorkerAdvances, useWorkerLedger,
-  useDeleteWorkerAdvance, useAdvanceLedger,
+  useDeleteWorkerAdvance, useVoidWorkerAdvance, useAdvanceLedger, useStopRecurring,
   usePendingAdvances, useApproveAdvance, useRejectAdvance, usePayAdvance,
   useWorkerAdjustments, useCreateWorkerAdjustment, useDeleteWorkerAdjustment,
   usePayrollSummary, useRecordAttendance, useAttendance, useBulkAttendance, useImportAttendance, useAttendanceHolidays, useInventory, useExpenseVendors,
@@ -58,12 +58,12 @@ const PKR = (v) => fmtPKR(v || 0, { decimals: 2 });
 const COMPACT_PKR = (v) => fmtPKR(v || 0);
 
 const EXPENSE_CATS = [
-  'salaries', 'utilities', 'rent', 'maintenance', 'insurance',
+  'utilities', 'rent', 'maintenance', 'insurance',
   'transport', 'fuel', 'packaging', 'inspection', 'freight',
   'commission', 'miscellaneous',
 ];
 // Category-specific extra field for the Add Expense drawer → saved to subcategory.
-// 'salaries' is special-cased (employee picker), so it's not here.
+// Salaries are paid only through Payroll (P2-25), so they are not a head here.
 const CAT_DETAIL = {
   utilities:   { label: 'Utility type', options: ['Electricity', 'Water', 'Gas', 'Internet'] },
   fuel:        { label: 'Vehicle / equipment', placeholder: 'e.g. Generator, Truck LEX-123' },
@@ -302,6 +302,19 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
       addToast(`Posted ${r.category} ${PKR(r.amount)} for ${r.nextDue}`, 'success');
     } catch (e) { addToast(e.message, 'error'); }
   }
+  const stopRecurringMut = useStopRecurring();
+  async function handleStopRecurring(r) {
+    const ok = await confirm({
+      title: `Stop the recurring ${r.category} for ${r.payee || 'this payee'}?`,
+      consequence: 'No occurrence after today is posted. Occurrences already posted stay as they are.',
+      amount: PKR(r.amount),
+      confirmLabel: 'Stop series',
+      cancelLabel: 'Go back',
+    });
+    if (!ok) return;
+    try { await stopRecurringMut.mutateAsync({ id: r.id, data: {} }); addToast('Recurring series stopped', 'success'); }
+    catch (e) { addToast(e.message, 'error'); }
+  }
   // Head Office ('general') vs Mill ('mill') payroll scope — the toggle. Default
   // to Head Office on the /finance/payroll view, Mill on the mill dashboard.
   const [payrollEntity, setPayrollEntity] = useState(payrollOnly ? 'general' : 'mill');
@@ -462,10 +475,10 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
     try { await rejectAdvanceMut.mutateAsync({ id: a.id, data: { reason: ok.reason || null } }); addToast('Advance request rejected', 'success'); }
     catch (e) { addToast(e?.response?.data?.message || e?.message || 'Could not reject the advance.', 'error'); }
   }
-  async function handlePayAdvance(a) {
-    try { await payAdvanceMut.mutateAsync({ id: a.id, data: {} }); addToast(`Advance of ${PKR(a.amount)} paid to ${a.workerName}`, 'success'); }
-    catch (e) { addToast(e?.response?.data?.message || e?.message || 'Could not pay the advance.', 'error'); }
-  }
+  // Pay opens a drawer: the method, the account and the payment date are
+  // chosen there (P2-09) — the payout used to take the request date and Mill Cash.
+  const [payAdvanceRow, setPayAdvanceRow] = useState(null);
+  function handlePayAdvance(a) { setPayAdvanceRow(a); }
 
   const expenses = expData?.expenses || [];
   const expSummary = expData?.summary || [];
@@ -504,7 +517,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
   const [showExpDrawer, setShowExpDrawer] = useState(false);
   const [showWorkerDrawer, setShowWorkerDrawer] = useState(false);
   const [showTransfer, setShowTransfer] = useState(false);
-  const EMPTY_EXP = { category: 'salaries', vendor_preset: '', vendor_name: '', subcategory: '', employee_id: '', is_recurring: false, recurrence: 'monthly', description: '', amount: '', expense_date: todayLocalISO(), reference: '', notes: '' };
+  const EMPTY_EXP = { category: 'utilities', vendor_preset: '', vendor_name: '', subcategory: '', employee_id: '', is_recurring: false, recurrence: 'monthly', description: '', amount: '', expense_date: todayLocalISO(), reference: '', notes: '' };
   const [expForm, setExpForm] = useState(EMPTY_EXP);
   const EMPTY_WORKER = { id: null, name: '', role: '', entity: payrollEntity, department: '', pay_type: 'daily', daily_wage: '', monthly_salary: '', ot_rate_per_hour: '', phone: '', cnic: '', bank_name: '', bank_account_number: '', iban: '', joined_date: todayLocalISO(), left_date: '', notes: '', portal_enabled: false };
   const [workerForm, setWorkerForm] = useState(EMPTY_WORKER);
@@ -682,7 +695,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
   function openExpDrawer(prefill) {
     setExpForm({
       ...EMPTY_EXP,
-      category: prefill?.category || 'salaries',
+      category: prefill?.category || 'utilities',
       description: prefill?.description || '',
       amount: prefill?.amount != null ? String(prefill.amount) : '',
     });
@@ -1637,7 +1650,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
       {activeTab === 'recurring' && (
         <div className="space-y-4">
           <div className="flex items-center justify-between flex-wrap gap-2">
-            <p className="text-xs text-gray-500">Expenses you marked recurring. These auto-post daily once due (accrued as a payable + GL); use the button below to catch up every missed period now.</p>
+            <p className="text-xs text-gray-500">Expenses you marked recurring. Nothing posts by itself — when a period is due, post it here (accrued as a payable + GL). A stopped series posts nothing after its end date.</p>
             {recurring.some(r => r.due) && (
               <button
                 onClick={async () => { try { const r = await runDueMut.mutateAsync(); addToast(`Auto-posted ${r?.created ?? r?.processed ?? 0} due recurring expense(s).`, 'success'); } catch (e) { addToast(e?.message || 'Could not post the due expenses.', 'error'); } }}
@@ -1676,18 +1689,24 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
                     <td data-label="Last paid" className="mob-hide px-4 py-3 text-gray-500">{fmtDate(r.lastDate)}</td>
                     <td data-label="Next due" className="px-4 py-3">
                       <span className={`inline-flex items-center gap-1 ${r.due ? 'text-amber-700 font-medium' : 'text-gray-600'}`}>
-                        {fmtDate(r.nextDue)}
+                        {r.payrollOnly ? 'Paid through Payroll' : r.ended ? `Ended ${fmtDate(r.endDate)}` : fmtDate(r.nextDue)}
                         {r.due && <span className="px-1.5 py-0.5 rounded text-[9px] bg-amber-100 text-amber-700 uppercase">Due</span>}
                       </span>
                     </td>
                     <td data-label="Action" className="px-4 py-3 text-right no-print">
-                      <button
-                        onClick={() => handleMaterialize(r)}
-                        disabled={!r.due || materializeMut.isPending}
-                        className={`px-2.5 py-1 text-xs font-medium rounded-lg ${r.due ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-gray-100 text-gray-400 cursor-not-allowed'} disabled:opacity-60`}
-                      >
-                        {r.due ? 'Post now' : 'Not due'}
-                      </button>
+                      <span className="inline-flex items-center gap-1.5">
+                        <button
+                          onClick={() => handleMaterialize(r)}
+                          disabled={!r.due || materializeMut.isPending}
+                          className={`px-2.5 py-1 text-xs font-medium rounded-lg ${r.due ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-gray-100 text-gray-400 cursor-not-allowed'} disabled:opacity-60`}
+                        >
+                          {r.due ? 'Post now' : r.ended ? 'Stopped' : 'Not due'}
+                        </button>
+                        {!r.ended && !r.payrollOnly && (
+                          <button onClick={() => handleStopRecurring(r)} disabled={stopRecurringMut.isPending}
+                            className="px-2 py-1 text-xs font-medium rounded-lg text-red-600 bg-red-50 hover:bg-red-100 disabled:opacity-60">Stop</button>
+                        )}
+                      </span>
                     </td>
                   </tr>
                 ))}
@@ -1699,7 +1718,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
           </div>
           <p className="text-[11px] text-gray-400 flex items-start gap-1.5">
             <RefreshCw className="w-3.5 h-3.5 flex-shrink-0 mt-0.5 text-gray-400" />
-            "Post now" creates the next expense dated at its due date and rolls the schedule forward. A series is keyed by category + payee + cadence; editing an occurrence's amount changes the next one too.
+            "Post now" creates the next expense dated at its due date — only once it is due, and never twice for the same date. A series is keyed by category + payee + cadence. To change the amount, stop the series and start a new recurring expense.
           </p>
         </div>
       )}
@@ -2031,13 +2050,16 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
                       )}
                       {a.approvalStatus === 'approved' && canPayPayroll && (
                         <button onClick={() => handlePayAdvance(a)} disabled={payAdvanceMut.isPending}
-                          className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-white bg-amber-600 rounded-lg hover:bg-amber-700 disabled:opacity-60"><Banknote className="w-3.5 h-3.5" /> Pay now</button>
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-white bg-amber-600 rounded-lg hover:bg-amber-700 disabled:opacity-60"><Banknote className="w-3.5 h-3.5" /> Pay…</button>
                       )}
                     </div>
                   </div>
                 ))}
               </div>
             </div>
+          )}
+          {payAdvanceRow && (
+            <AdvancePayDrawer advance={payAdvanceRow} bankAccounts={bankAccountsList} payMut={payAdvanceMut} addToast={addToast} onClose={() => setPayAdvanceRow(null)} />
           )}
           <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
             <table className="w-full text-sm mobile-cards">
@@ -2972,6 +2994,70 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
 // (TransactionDocument), and the payment form. Pays the expense's linked payable
 // via recordPayment (which also marks the business_expense Paid + moves the bank).
 const EXP_METHOD_LABEL = { bank_transfer: 'Bank Transfer', cheque: 'Cheque', cash: 'Cash', online: 'Online', mobile: 'Mobile' };
+// Pay an approved salary advance (P2-09): the method, the account it is paid
+// from and the payment date are chosen here; the payout is booked to 1330 Staff
+// Advances on that date (D-11) and recovered from salary later.
+function AdvancePayDrawer({ advance, bankAccounts = [], payMut, addToast, onClose }) {
+  const entity = advance.workerEntity === 'general' ? 'general' : 'mill';
+  const cashAccounts = accountsForCurrency((bankAccounts || []).filter((a) => a.type === 'cash'), 'PKR');
+  const banks = accountsForCurrency((bankAccounts || []).filter((a) => a.type !== 'cash'), 'PKR');
+  const defaultCash = cashAccounts.find((a) => a.entity === entity) || cashAccounts[0];
+  const [form, setForm] = useState({ method: 'cash', accountId: defaultCash ? String(defaultCash.id) : '', payDate: todayLocalISO(), reference: '' });
+  const set = (p) => setForm((f) => ({ ...f, ...p }));
+  const choices = form.method === 'cash' ? cashAccounts : banks;
+  async function submit() {
+    if (!form.accountId) { addToast('Choose the account the advance is paid from', 'error'); return; }
+    if (!form.payDate) { addToast('Enter the payment date', 'error'); return; }
+    try {
+      await payMut.mutateAsync({ id: advance.id, data: { payment_method: form.method, bank_account_id: Number(form.accountId), pay_date: form.payDate, payment_reference: form.reference || null } });
+      addToast(`Advance of ${PKR(advance.amount)} paid to ${advance.workerName}`, 'success');
+      onClose();
+    } catch (e) { addToast(e?.data?.message || e?.message || 'Could not pay the advance.', 'error'); }
+  }
+  return (
+    <SlideDrawer open onClose={onClose} title="Pay salary advance" subtitle={`${advance.workerName || 'Worker'} · ${PKR(advance.amount)}`} icon={Banknote}
+      footer={(
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
+          <button onClick={submit} disabled={payMut.isPending} className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-amber-600 rounded-lg hover:bg-amber-700 disabled:opacity-50">
+            <Banknote className="w-4 h-4" /> {payMut.isPending ? 'Paying…' : `Pay ${PKR(advance.amount)}`}
+          </button>
+        </div>
+      )}
+    >
+      <div className="space-y-4">
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-[11px] text-gray-500 mb-1">Method</label>
+            <select value={form.method} onChange={(e) => { const m = e.target.value; const first = (m === 'cash' ? (defaultCash || cashAccounts[0]) : banks[0]); set({ method: m, accountId: first ? String(first.id) : '' }); }} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white">
+              <option value="cash">Cash</option>
+              <option value="bank_transfer">Bank transfer</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-[11px] text-gray-500 mb-1">Payment date</label>
+            <input type="date" value={form.payDate} max={todayLocalISO()} onChange={(e) => set({ payDate: e.target.value })} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+          </div>
+          <div className="col-span-2">
+            <label className="block text-[11px] text-gray-500 mb-1">Paid from</label>
+            <select value={form.accountId} onChange={(e) => set({ accountId: e.target.value })} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white">
+              <option value="">Choose an account…</option>
+              {choices.map((a) => <option key={a.id} value={a.id}>{favStar(a)}{a.name}{a.currentBalance != null ? ` · ${PKR(a.currentBalance)}` : ''}</option>)}
+            </select>
+          </div>
+          {form.method !== 'cash' && (
+            <div className="col-span-2">
+              <label className="block text-[11px] text-gray-500 mb-1">Reference (optional)</label>
+              <input value={form.reference} onChange={(e) => set({ reference: e.target.value })} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+            </div>
+          )}
+        </div>
+        <p className="text-[11px] text-gray-400">Booked as a staff advance (DR 1330 Staff Advances / CR the account above) on the payment date, then recovered from salary — each recovery moves it to Salaries &amp; Wages.</p>
+      </div>
+    </SlideDrawer>
+  );
+}
+
 function ExpensePayDrawer({ expense, bankAccounts = [], companyProfile, addToast, onClose }) {
   const recordMut = useRecordPayment();
   const payableId = expense?.payableId || null;
@@ -3619,18 +3705,40 @@ function recoveryPlanLine(a) {
 function WorkerAdvancesPanel({ worker, onClose, onGiveAdvance, addToast }) {
   const { data: advances = [], isLoading } = useWorkerAdvances(worker.id);
   const deleteAdvanceMut = useDeleteWorkerAdvance();
+  const voidAdvanceMut = useVoidWorkerAdvance();
+  const { requestOwnerApproval } = useOwnerAuth();
+  const [confirm, confirmDialog] = useConfirm();
   const [confirmId, setConfirmId] = useState(null);
   const [ledgerId, setLedgerId] = useState(null);
   const outstanding = advances
     .filter(a => a.status === 'outstanding')
     .reduce((s, a) => s + ((parseFloat(a.amount) || 0) - (parseFloat(a.recoveredAmount) || 0)), 0);
 
-  async function handleDelete(id) {
+  // A request that was never paid is deleted. A PAID advance is voided (D-23):
+  // its payout is reversed and the advance kept — a payment reversal, so it
+  // needs a reason and the Owner. Once any of it is recovered from salary the
+  // server refuses (409).
+  async function handleDelete(a) {
     try {
-      await deleteAdvanceMut.mutateAsync(id);
-      addToast('Advance deleted and cash-out reversed', 'success');
+      if (a.approvalStatus === 'paid') {
+        setConfirmId(null);
+        const ok = await confirm({
+          title: `Void this ${PKR(a.amount)} advance?`,
+          consequence: 'The payout is reversed back into the account it was paid from. The advance stays on record as voided. The Owner must authorize it.',
+          amount: PKR(a.amount),
+          reason: 'required',
+          confirmLabel: 'Void advance',
+          cancelLabel: 'Go back',
+        });
+        if (!ok) return;
+        await requestOwnerApproval((ownerId) => voidAdvanceMut.mutateAsync({ id: a.id, data: { reason: ok.reason, authorized_by_owner_id: ownerId } }));
+        addToast('Advance voided and payout reversed', 'success');
+        return;
+      }
+      await deleteAdvanceMut.mutateAsync(a.id);
+      addToast('Advance request deleted', 'success');
       setConfirmId(null);
-    } catch (e) { addToast(e.message, 'error'); }
+    } catch (e) { if (e?.message !== 'Owner authorization cancelled') addToast(e?.data?.message || e.message, 'error'); }
   }
 
   return (
@@ -3671,18 +3779,20 @@ function WorkerAdvancesPanel({ worker, onClose, onGiveAdvance, addToast }) {
                     <span className="px-2 py-0.5 rounded text-[11px] font-medium bg-blue-100 text-blue-700">Approved · unpaid</span>
                   ) : a.approvalStatus === 'rejected' ? (
                     <StatusBadge status="Rejected" />
+                  ) : a.approvalStatus === 'voided' ? (
+                    <span className="px-2 py-0.5 rounded text-[11px] font-medium bg-gray-100 text-gray-500" title={a.voidReason || ''}>Voided</span>
                   ) : (
                     <span className={`px-2 py-0.5 rounded text-[11px] font-medium ${a.status === 'outstanding' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
                       {a.status === 'outstanding' ? `${PKR(out)} due` : 'Recovered'}
                     </span>
                   )}
-                  {confirmId === a.id ? (
+                  {a.approvalStatus === 'voided' || (parseFloat(a.recoveredAmount) || 0) > 0 ? null : confirmId === a.id ? (
                     <span className="flex items-center gap-1">
-                      <button onClick={() => handleDelete(a.id)} disabled={deleteAdvanceMut.isPending} className="px-2 py-1 text-[11px] text-white bg-red-600 rounded hover:bg-red-700">Confirm</button>
+                      <button onClick={() => handleDelete(a)} disabled={deleteAdvanceMut.isPending || voidAdvanceMut.isPending} className="px-2 py-1 text-[11px] text-white bg-red-600 rounded hover:bg-red-700">{a.approvalStatus === 'paid' ? 'Void…' : 'Confirm'}</button>
                       <button aria-label="Cancel" onClick={() => setConfirmId(null)} className="p-1 text-gray-400 hover:text-gray-600"><X className="w-3.5 h-3.5" /></button>
                     </span>
                   ) : (
-                    <button aria-label="Delete & reverse" title="Delete & reverse" onClick={() => setConfirmId(a.id)} className="p-1.5 rounded-md text-red-500 hover:bg-red-50"><Trash2 className="w-3.5 h-3.5" /></button>
+                    <button aria-label={a.approvalStatus === 'paid' ? 'Void & reverse payout' : 'Delete request'} title={a.approvalStatus === 'paid' ? 'Void & reverse payout' : 'Delete request'} onClick={() => setConfirmId(a.id)} className="p-1.5 rounded-md text-red-500 hover:bg-red-50"><Trash2 className="w-3.5 h-3.5" /></button>
                   )}
                 </div>
               </div>
@@ -3697,6 +3807,7 @@ function WorkerAdvancesPanel({ worker, onClose, onGiveAdvance, addToast }) {
         </div>
       )}
       {ledgerId && <AdvanceLedgerDrawer advanceId={ledgerId} onClose={() => setLedgerId(null)} />}
+      {confirmDialog}
     </SlideDrawer>
   );
 }
@@ -3894,6 +4005,7 @@ function payslipBody(run, line, company) {
   const advBal = parseFloat(line.advanceOutstanding) || 0;
   const bonus = parseFloat(line.bonusTotal) || 0; const otherDed = parseFloat(line.deductionTotal) || 0;
   const statTotal = parseFloat(line.statutoryTotal) || 0;
+  const shortIn = parseFloat(line.shortPayCarriedIn) || 0; const shortOut = parseFloat(line.shortPayAmount) || 0;
   let statLines = line.statutoryJson;
   if (typeof statLines === 'string') { try { statLines = JSON.parse(statLines); } catch { statLines = []; } }
   if (!Array.isArray(statLines)) statLines = [];
@@ -3917,6 +4029,7 @@ function payslipBody(run, line, company) {
       ${ot > 0 ? `<tr><td>Overtime${parseFloat(line.otHours) ? ` (${line.otHours} hrs)` : ''}</td><td class="r">${rs(line.otPay)}</td></tr>` : ''}
       ${bonus > 0 ? `<tr><td>Bonuses &amp; allowances</td><td class="r">${rs(bonus)}</td></tr>` : ''}
       <tr style="border-top:1px solid #e5e7eb"><td style="font-weight:700;padding-top:7px">Gross pay</td><td class="r" style="font-weight:700;padding-top:7px">${rs((parseFloat(line.grossPay) || 0) + bonus)}</td></tr>
+      ${shortIn > 0 ? `<tr><td>Short pay brought forward from earlier months</td><td class="r">+ ${rs(shortIn)}</td></tr>` : ''}
     </tbody></table>
 
     ${(adv > 0 || otherDed > 0 || statTotal > 0) ? `<div class="sec">Deductions</div>
@@ -3929,9 +4042,11 @@ function payslipBody(run, line, company) {
     <div class="net"><div><div style="font-size:10px;text-transform:uppercase;color:#047857">Net Paid</div><b>${rs(line.netPay)}</b></div>
       <div style="text-align:right;max-width:55%"><div class="words">Rupees ${amountInWords(line.netPay)} Only</div></div></div>
     ${line.netOverrideReason ? `<div class="muted" style="margin-top:6px">Paid less than the computed net — ${line.netOverrideReason}</div>` : ''}
+    ${shortOut > 0 ? `<div class="muted" style="margin-top:4px">Short by ${rs(shortOut)} — carried forward and added to the next salary.</div>` : ''}
 
     <div class="sec">Attendance &amp; advance</div>
     <table><tbody>
+      ${line.dailyRateRule ? `<tr><td>Day rate (${line.dailyRateRule})</td><td class="r">${rs(line.dailyRate)}</td></tr>` : ''}
       <tr><td>Effective days worked</td><td class="r">${line.effectiveDays || 0}${line.payType === 'monthly' ? ' (salary fixed)' : ''}</td></tr>
       <tr><td>Overtime hours</td><td class="r">${line.otHours || 0}</td></tr>
       <tr><td>Advance recovered this month</td><td class="r">${rs(adv)}</td></tr>
@@ -4780,7 +4895,10 @@ function printSettlement(w, s, company) { return openPayslipWindow(`Final Settle
 // + gratuity − advances (all editable), pays the net out (6135/cash GL), clears
 // advances, and deactivates the worker.
 function FinalSettlementDrawer({ worker, bankAccounts = [], company, onClose, addToast }) {
-  const { data: calc, isLoading } = useFinalSettlement(worker.id);
+  // The server recomputes the final salary + leave encashment for the chosen
+  // last day; a figure above it is refused, a lower one needs a reason (P2-11).
+  const [leftDate, setLeftDate] = useState(null);
+  const { data: calc, isLoading } = useFinalSettlement(worker.id, leftDate);
   const finalizeMut = useFinalizeSettlement();
   // Mill payments are PKR — a non-PKR (e.g. USD) account cannot carry them.
   const payBanks = accountsForCurrency((bankAccounts || []).filter((a) => a.type !== 'cash'), 'PKR');
@@ -4789,19 +4907,21 @@ function FinalSettlementDrawer({ worker, bankAccounts = [], company, onClose, ad
   useEffect(() => {
     if (calc) setForm({
       final_salary: calc.finalSalary, leave_encashment: calc.leaveEncashment, gratuity: calc.gratuity,
-      advances_deducted: calc.advancesOutstanding, other_deductions: 0,
+      advances_deducted: calc.advancesOutstanding, other_deductions: 0, adjustment_reason: '',
       pay_method: 'cash', bank_account_id: '', left_date: calc.left, settlement_date: calc.today, service_years: calc.serviceYears, notes: '',
     });
   }, [calc]);
+  const lowered = form && calc && ((parseFloat(form.final_salary) || 0) < calc.finalSalary - 1 || (parseFloat(form.leave_encashment) || 0) < calc.leaveEncashment - 1);
   const set = (p) => setForm((f) => ({ ...f, ...p }));
   const n = (v) => parseFloat(v) || 0;
   const net = form ? Math.max(0, n(form.final_salary) + n(form.leave_encashment) + n(form.gratuity) - n(form.advances_deducted) - n(form.other_deductions)) : 0;
 
   async function finalize() {
     if (form.pay_method === 'bank' && !form.bank_account_id) { addToast('Select a bank account', 'error'); return; }
+    if (lowered && !String(form.adjustment_reason || '').trim()) { addToast('Give a reason for paying less than the computed figures', 'error'); return; }
     if (!await confirm({
       title: `Pay the final settlement and deactivate ${worker.name}?`,
-      consequence: 'The net is paid out (DR 6135 / CR Cash & Bank), the outstanding advances are recovered, the last working day is set and the employee is deactivated.',
+      consequence: 'The net is paid out (DR 6135 / CR Cash & Bank), the advances entered are recovered (any rest stays outstanding), the last working day is set and the employee is deactivated.',
       amount: PKR(net),
       confirmLabel: 'Pay & close employment',
     })) return;
@@ -4834,14 +4954,14 @@ function FinalSettlementDrawer({ worker, bankAccounts = [], company, onClose, ad
             <div>Joined {fmtDate(calc.worker.joinedDate)} · last day {fmtDate(form.left_date)} · <span className="font-medium">{calc.serviceYears} yrs service ({calc.completedYears} completed)</span></div>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Final salary (prorated)" value={form.final_salary} onChange={(v) => set({ final_salary: v })} />
+            <Field label="Final salary (prorated)" value={form.final_salary} onChange={(v) => set({ final_salary: v })} hint={calc.monthAlreadyPaid ? 'This month is already in a payroll run' : `${PKR(calc.dailyRate)}/day (${calc.dailyRateRule})`} />
             <Field label="Leave encashment" value={form.leave_encashment} onChange={(v) => set({ leave_encashment: v })} hint={calc.leaveLines.length ? calc.leaveLines.map((l) => `${l.name} ${l.days}d`).join(', ') : 'no unused paid leave'} />
-            <Field label="Gratuity" value={form.gratuity} onChange={(v) => set({ gratuity: v })} hint={`${calc.completedYears} completed yr(s)`} />
+            <Field label="Gratuity" value={form.gratuity} onChange={(v) => set({ gratuity: v })} hint={`${calc.completedYears} completed yr(s) · suggested at 30 days/yr — formula pending the accountant`} />
             <Field label="Advances recovered (−)" value={form.advances_deducted} onChange={(v) => set({ advances_deducted: v })} />
             <Field label="Other deductions (−)" value={form.other_deductions} onChange={(v) => set({ other_deductions: v })} />
             <div>
               <label className="block text-[11px] text-gray-500 mb-1">Last working day</label>
-              <input type="date" value={form.left_date} onChange={(e) => set({ left_date: e.target.value })} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+              <input type="date" value={form.left_date} onChange={(e) => { set({ left_date: e.target.value }); if (e.target.value) setLeftDate(e.target.value); }} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
             </div>
             <div>
               <label className="block text-[11px] text-gray-500 mb-1">Pay via</label>
@@ -4855,11 +4975,17 @@ function FinalSettlementDrawer({ worker, bankAccounts = [], company, onClose, ad
               <input type="date" value={form.settlement_date} onChange={(e) => set({ settlement_date: e.target.value })} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
             </div>
           </div>
+          {lowered && (
+            <div>
+              <label className="block text-[11px] text-gray-500 mb-1">Reason for paying less than computed</label>
+              <input value={form.adjustment_reason} onChange={(e) => set({ adjustment_reason: e.target.value })} className="w-full border border-amber-300 rounded-lg px-3 py-2 text-sm" />
+            </div>
+          )}
           <div>
             <label className="block text-[11px] text-gray-500 mb-1">Notes</label>
             <textarea rows={2} value={form.notes} onChange={(e) => set({ notes: e.target.value })} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
           </div>
-          <p className="text-[11px] text-gray-400">Pays the net via a salaries expense (DR 6135 / CR Cash &amp; Bank), recovers the outstanding advances, sets the last working day and deactivates the employee. A settlement voucher prints on confirm.</p>
+          <p className="text-[11px] text-gray-400">Pays the net via a salaries expense (DR 6135 / CR Cash &amp; Bank), recovers exactly the advances entered, sets the last working day and deactivates the employee. The final salary and leave encashment are the system's figures for that last day — you may pay less with a reason, not more. A settlement voucher prints on confirm.</p>
         </div>
       )}
     </SlideDrawer>

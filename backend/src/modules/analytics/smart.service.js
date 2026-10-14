@@ -12,8 +12,10 @@ const smartService = {
 
   /**
    * Predict cost per MT for a product based on 6-month weighted historical data.
+   * A read: GET /cost/predict used to insert a cost_predictions row on every
+   * call (P2-27 — writes only on POST). `persist: true` keeps a snapshot.
    */
-  async predictCostPerMT(productId) {
+  async predictCostPerMT(productId, { persist = false } = {}) {
     // 1. Get the product
     const product = await db('products').where({ id: productId }).first();
     if (!product) throw new Error(`Product ${productId} not found`);
@@ -156,7 +158,9 @@ const smartService = {
       }),
     };
 
-    const [saved] = await db('cost_predictions').insert(predictionRecord).returning('*');
+    const saved = persist
+      ? (await db('cost_predictions').insert(predictionRecord).returning('*'))[0]
+      : predictionRecord;
 
     return {
       prediction: saved,

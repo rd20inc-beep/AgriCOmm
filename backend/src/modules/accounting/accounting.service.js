@@ -403,6 +403,8 @@ const accountingService = {
     // Optional credit-account override (e.g. credit Salaries Payable instead of
     // the rule's generic Supplier Payable for an accrued payroll expense).
     creditAccountId = null,
+    // Optional journal date (YYYY-MM-DD); defaults to today.
+    date = null,
   }) {
     // Wrap in a transaction if one was not provided, to ensure
     // posting rule lookup + journal creation + posting are atomic.
@@ -471,7 +473,7 @@ const accountingService = {
       }
 
       const journal = await accountingService.createJournal(knex, {
-        date: new Date().toISOString().slice(0, 10),
+        date: date || new Date().toISOString().slice(0, 10),
         entity: entity || rule.entity,
         refType,
         refNo,

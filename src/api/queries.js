@@ -1757,6 +1757,14 @@ export function useSummarizeReport() {
   return useMutation({ mutationFn: (body) => api.post('/api/ai/summarize-report', body) });
 }
 
+export function useStopRecurring() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }) => millingApi.stopRecurring(id, data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['recurring-expenses'] }),
+  });
+}
+
 export function useRunDueRecurring() {
   const qc = useQueryClient();
   return useMutation({
@@ -1860,8 +1868,8 @@ export function useApproveLeaveRequest() { const qc = useQueryClient(); return u
 export function useRejectLeaveRequest() { const qc = useQueryClient(); return useMutation({ mutationFn: (id) => millingApi.rejectLeaveRequest(id), onSuccess: () => invalidateLeave(qc) }); }
 export function useDeleteLeaveRequest() { const qc = useQueryClient(); return useMutation({ mutationFn: (id) => millingApi.deleteLeaveRequest(id), onSuccess: () => invalidateLeave(qc) }); }
 // ── Final settlement (Phase 25) ──
-export function useFinalSettlement(workerId) {
-  return useQuery({ queryKey: ['final-settlement', workerId], enabled: !!workerId, queryFn: async () => { const r = await millingApi.computeFinalSettlement(workerId); return r?.data || null; } });
+export function useFinalSettlement(workerId, leftDate = null) {
+  return useQuery({ queryKey: ['final-settlement', workerId, leftDate || null], enabled: !!workerId, queryFn: async () => { const r = await millingApi.computeFinalSettlement(workerId, leftDate); return r?.data || null; } });
 }
 export function useFinalSettlements() {
   return useQuery({ queryKey: ['final-settlements'], queryFn: async () => { const r = await millingApi.listFinalSettlements(); return transformKeys(r?.data || []); } });
@@ -1870,7 +1878,7 @@ function invalidateSettlement(qc) {
   ['final-settlements', 'mill-workers', 'payroll-summary', 'worker-advances'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
 }
 export function useFinalizeSettlement() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ workerId, data }) => millingApi.finalizeSettlement(workerId, data), onSuccess: () => invalidateSettlement(qc) }); }
-export function useReverseSettlement() { const qc = useQueryClient(); return useMutation({ mutationFn: (id) => millingApi.reverseFinalSettlement(id), onSuccess: () => invalidateSettlement(qc) }); }
+export function useReverseSettlement() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ id, data }) => millingApi.reverseFinalSettlement(id, data), onSuccess: () => invalidateSettlement(qc) }); }
 // Payroll audit (Phase 26) — keep raw (entity_type/user_name/details), no transformKeys.
 export function usePayrollAudit(params = {}) {
   return useQuery({ queryKey: ['payroll-audit', params], queryFn: async () => { const r = await millingApi.payrollAudit(params); return r?.data || { logs: [], actions: [] }; } });
@@ -1936,6 +1944,17 @@ export function useCreateWorkerAdvance() {
       qc.invalidateQueries({ queryKey: ['worker-advances'] });
       qc.invalidateQueries({ queryKey: ['mill-expenses'] });
       qc.invalidateQueries({ queryKey: ['payables'] });
+    },
+  });
+}
+
+// Void a PAID advance (D-23): the payout is reversed, the advance kept as voided.
+export function useVoidWorkerAdvance() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }) => millingApi.voidWorkerAdvance(id, data),
+    onSuccess: () => {
+      ['mill-workers', 'payroll-summary', 'worker-advances', 'mill-expenses', 'payables'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
     },
   });
 }
