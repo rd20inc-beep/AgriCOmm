@@ -1754,7 +1754,10 @@ COL mill_workers.ot_rate_per_hour:numeric:NULL
 COL mill_workers.pay_type:character varying:NOT NULL
 COL mill_workers.phone:character varying:NULL
 COL mill_workers.portal_enabled:boolean:NOT NULL
+COL mill_workers.portal_failed_attempts:integer:NOT NULL
+COL mill_workers.portal_locked_until:timestamp with time zone:NULL
 COL mill_workers.portal_pin_hash:character varying:NULL
+COL mill_workers.portal_pin_version:integer:NOT NULL
 COL mill_workers.role:character varying:NULL
 COL mill_workers.updated_at:timestamp with time zone:NOT NULL
 COL milling_batch_packaging.batch_id:integer:NOT NULL

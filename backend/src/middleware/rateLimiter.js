@@ -22,7 +22,7 @@ const apiLimiter = rateLimit({
 // per-account lockout lives in the auth service.
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 30,
+  max: 100,
   skipSuccessfulRequests: true,
   standardHeaders: true,
   legacyHeaders: false,
@@ -45,4 +45,19 @@ const passwordResetLimiter = rateLimit({
   },
 });
 
-module.exports = { apiLimiter, loginLimiter, passwordResetLimiter };
+// Employee-portal login (P1-07): per-IP ceiling on FAILED sign-ins, successful
+// ones not counted. A whole mill can sit behind one address, so this is a brake on
+// top of the per-worker lockout, not the lockout itself.
+const portalLoginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  message: {
+    success: false,
+    message: 'Too many sign-in attempts from this network. Please wait 15 minutes and try again.',
+  },
+});
+
+module.exports = { apiLimiter, loginLimiter, passwordResetLimiter, portalLoginLimiter };

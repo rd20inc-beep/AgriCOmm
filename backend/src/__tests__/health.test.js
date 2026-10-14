@@ -20,6 +20,7 @@ jest.mock('../middleware/rateLimiter', () => ({
   apiLimiter: (req, res, next) => next(),
   loginLimiter: (req, res, next) => next(),
   passwordResetLimiter: (req, res, next) => next(),
+  portalLoginLimiter: (req, res, next) => next(),
 }));
 
 const createApp = require('../app');

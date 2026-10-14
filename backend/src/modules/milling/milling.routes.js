@@ -969,12 +969,35 @@ function plannedScheduleRows(advance) {
   return rows;
 }
 
+// A CNIC identifies one employee at portal login, so two ACTIVE workers may not
+// share it (P1-07 / PAY-30). Returns the clash message, or null.
+async function activeCnicClash(cnic, exceptId) {
+  const c = String(cnic || '').trim();
+  if (!c) return null;
+  const q = db('mill_workers').where('cnic', c).where('is_active', true);
+  if (exceptId) q.whereNot('id', exceptId);
+  const other = await q.first('id', 'name');
+  return other ? `CNIC ${c} is already used by active employee ${other.name}.` : null;
+}
+
+// A unique-index hit (CNIC / phone already on another worker) is a 409 the
+// admin can act on, not a 500.
+function sendWorkerSaveError(res, err) {
+  if (err && err.code === '23505') {
+    const field = /cnic/i.test(err.constraint || err.message || '') ? 'CNIC' : /phone/i.test(err.constraint || err.message || '') ? 'phone number' : 'value';
+    return res.status(409).json({ success: false, message: `Another employee already has this ${field}.` });
+  }
+  return res.status(500).json({ success: false, message: err.message });
+}
+
 router.post('/workers', authorize('payroll', 'create'), auditAction('create', 'mill_worker', (req, d) => d.data?.worker?.id), async (req, res) => {
   try {
     const { name, role, phone, cnic, joined_date, left_date, mill_id, notes, bank_name, bank_account_number, iban, department } = req.body;
     const entity = req.body.entity === 'general' ? 'general' : 'mill'; // Head Office vs Mill
     const { pay_type, monthly_salary, daily_wage } = normalizeWorkerPay(req.body);
     if (!name) return res.status(400).json({ success: false, message: 'name is required.' });
+    const cnicClash = await activeCnicClash(cnic);
+    if (cnicClash) return res.status(409).json({ success: false, message: cnicClash });
     if (pay_type === 'monthly' && !(monthly_salary > 0)) return res.status(400).json({ success: false, message: 'monthly_salary required for salaried workers.' });
     if (pay_type === 'daily' && !(daily_wage > 0)) return res.status(400).json({ success: false, message: 'daily_wage required for daily-wage workers.' });
     const ot_rate_per_hour = req.body.ot_rate_per_hour != null && req.body.ot_rate_per_hour !== '' ? parseFloat(req.body.ot_rate_per_hour) : null;
@@ -990,7 +1013,7 @@ router.post('/workers', authorize('payroll', 'create'), auditAction('create', 'm
       mill_id: mill_id || null, notes: notes || null,
     }).returning('*');
     return res.json({ success: true, data: { worker } });
-  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+  } catch (err) { return sendWorkerSaveError(res, err); }
 });
 
 // Edit a worker — pay type/rate, contact, or activate/deactivate. Deactivating
@@ -1009,6 +1032,17 @@ router.put('/workers/:id', authorize('payroll', 'edit'), auditAction('update', '
     }
     if (req.body.is_active !== undefined) updates.is_active = !!req.body.is_active;
     if (req.body.entity !== undefined) updates.entity = req.body.entity === 'general' ? 'general' : 'mill';
+    const nextActive = updates.is_active !== undefined ? updates.is_active : worker.is_active;
+    const nextCnic = updates.cnic !== undefined ? updates.cnic : worker.cnic;
+    if (nextActive && (updates.cnic !== undefined || updates.is_active === true)) {
+      const cnicClash = await activeCnicClash(nextCnic, worker.id);
+      if (cnicClash) return res.status(409).json({ success: false, message: cnicClash });
+    }
+    // Deactivating, or changing the login CNIC, ends the worker's portal sessions.
+    if ((updates.is_active === false && worker.is_active)
+      || (updates.cnic !== undefined && (updates.cnic || null) !== (worker.cnic || null))) {
+      updates.portal_pin_version = db.raw('portal_pin_version + 1');
+    }
     let payRevision = null;
     if (req.body.pay_type !== undefined || req.body.daily_wage !== undefined || req.body.monthly_salary !== undefined) {
       const pay = normalizeWorkerPay({ ...worker, ...req.body });
@@ -1022,8 +1056,9 @@ router.put('/workers/:id', authorize('payroll', 'edit'), auditAction('update', '
       if (payRevision) await recordSalaryRevision(trx, worker, payRevision, { reason: req.body.revision_reason || 'Edited via employee form', userId: req.user?.id });
       return trx('mill_workers').where('id', req.params.id).update(updates).returning('*');
     });
+    if (updated) delete updated.portal_pin_hash; // never send the PIN hash back
     return res.json({ success: true, data: { worker: updated } });
-  } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+  } catch (err) { return sendWorkerSaveError(res, err); }
 });
 
 // Dedicated "Revise salary" — records a revision (old→new) WITH an effective date
@@ -1170,11 +1205,14 @@ function unwindAdvanceExpense(trx, expenseId, opts = {}) {
   return reverseExpenseTrail(trx, expenseId, opts);
 }
 
-// Set / reset / disable a worker's self-service portal PIN (Phase 19). A 4+ digit
-// PIN is bcrypt-hashed; `enabled:false` (or no pin) turns the portal off.
+// Set / reset / disable a worker's self-service portal PIN (Phase 19). A new PIN
+// must be 6–8 digits and is bcrypt-hashed; `enabled:false` turns the portal off.
+// A reset or disable bumps portal_pin_version, ending every portal session the
+// worker already has, and a reset clears any wrong-PIN lockout (P1-07).
 router.post('/workers/:id/portal-pin', authorize('payroll', 'edit'), async (req, res) => {
   try {
     const bcrypt = require('bcryptjs');
+    const { newPinError } = require('../portal/portalAuth');
     const worker = await db('mill_workers').where('id', req.params.id).first();
     if (!worker) return res.status(404).json({ success: false, message: 'Worker not found.' });
     const enabled = req.body?.enabled !== false;
@@ -1182,11 +1220,16 @@ router.post('/workers/:id/portal-pin', authorize('payroll', 'edit'), async (req,
     const updates = { updated_at: db.fn.now() };
     if (!enabled) {
       updates.portal_enabled = false;
+      updates.portal_pin_version = db.raw('portal_pin_version + 1');
     } else {
       if (!worker.cnic) return res.status(400).json({ success: false, message: 'Add a CNIC first — the employee logs in with CNIC + PIN.' });
       if (pin) {
-        if (!/^\d{4,8}$/.test(pin)) return res.status(400).json({ success: false, message: 'PIN must be 4–8 digits.' });
+        const pinErr = newPinError(pin);
+        if (pinErr) return res.status(400).json({ success: false, message: pinErr });
         updates.portal_pin_hash = await bcrypt.hash(pin, 10);
+        updates.portal_pin_version = db.raw('portal_pin_version + 1');
+        updates.portal_failed_attempts = 0;
+        updates.portal_locked_until = null;
       } else if (!worker.portal_pin_hash) {
         return res.status(400).json({ success: false, message: 'Set a PIN to enable self-service.' });
       }
