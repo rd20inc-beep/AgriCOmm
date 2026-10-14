@@ -48,6 +48,10 @@ const RETIRED = [
   ['modules/milling/milling.routes', 'post', '/reprocessing'],
   ['modules/milling/milling.routes', 'put', '/reprocessing/:id/complete'],
   ['modules/analytics/control.routes', 'post', '/approvals/submit'],
+  // P2-14: legacy customer advances — export advances are the order's receivable.
+  ['routes/advances', 'get', '/'],
+  ['routes/advances', 'post', '/'],
+  ['routes/advances', 'put', '/:id/allocate'],
 ];
 
 describe('retired endpoints answer 410 before anything else runs', () => {
