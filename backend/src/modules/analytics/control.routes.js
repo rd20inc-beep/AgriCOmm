@@ -4,6 +4,7 @@ const controller = require('../../controllers/controlController');
 const authorize = require('../../middleware/rbac');
 const { authorizeRole } = require('../../middleware/rbac');
 const auditAction = require('../../middleware/audit');
+const retired = require('../../middleware/retired');
 const validate = require('../../middleware/validate');
 const schemas = require('../../middleware/schemas');
 
@@ -18,8 +19,12 @@ const schemas = require('../../middleware/schemas');
 // ═══════════════════════════════════════════════════════════════════
 router.get('/approvals/pending', authorize('admin', 'view'), controller.getPendingApprovals);
 router.get('/approvals/requests', authorize('admin', 'view'), controller.getMyRequests);
+// Submit RETIRED (410): no screen submits to this generic queue, and approval
+// no longer applies a proposed change (see control.service approveRequest).
+// Approve / reject stay so any request already pending can be closed.
 router.post(
   '/approvals/submit',
+  retired('The generic approval queue is retired. Changes are approved in their own module.'),
   authorize('admin', 'manage_settings'),
   validate(schemas.submitApproval),
   auditAction('submit_approval', 'approval_queue'),

@@ -11,16 +11,19 @@ const healthService = {
   // ═══════════════════════════════════════════════════════════════════
 
   /**
-   * Execute all health checks and persist results.
+   * Execute all health checks. Read-only unless `persist: true` — only a
+   * scheduled snapshot should write system_health rows, never a request.
    */
-  async runAllChecks() {
+  async runAllChecks({ persist = false } = {}) {
     const checks = [];
     checks.push(await this.checkDatabase());
-    checks.push(await this.checkMemory());
+    checks.push(await this.checkSystemMemory());
     checks.push(await this.checkMemory());
     checks.push(await this.checkApiResponse());
     checks.push(await this.checkPendingJobs());
     checks.push(await this.checkOverdueAlerts());
+
+    if (!persist) return checks;
 
     // Persist each check
     for (const check of checks) {
@@ -76,8 +79,9 @@ const healthService = {
   /**
    * Memory pressure check using OS memory stats.
    * Healthy < 80% used, Warning < 90%, Critical >= 90%.
+   * (Was a second `checkMemory`, silently shadowed by the heap check below.)
    */
-  async checkMemory() {
+  async checkSystemMemory() {
     try {
       const totalMem = os.totalmem();
       const freeMem = os.freemem();
@@ -88,7 +92,7 @@ const healthService = {
       else if (usedPercent >= 80) status = 'Warning';
 
       return {
-        checkType: 'memory',
+        checkType: 'system_memory',
         status,
         value: `${usedPercent}% used`,
         threshold: '<80% Healthy, <90% Warning',
@@ -100,7 +104,7 @@ const healthService = {
       };
     } catch (err) {
       return {
-        checkType: 'memory',
+        checkType: 'system_memory',
         status: 'Warning',
         value: 'unknown',
         threshold: '<80% Healthy, <90% Warning',

@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { authorize, authorizeRole } = require('../../middleware/rbac');
 const auditAction = require('../../middleware/audit');
+const retired = require('../../middleware/retired');
 const inventoryController = require('./inventory.controller');
 
 // --- Lot queries ---
@@ -44,9 +45,13 @@ router.post(
   inventoryController.createLot
 );
 
-// --- Record manual movement ---
+// --- Record manual movement --- RETIRED (410). No screen calls it; it took
+// any movement type (write-offs included) with only inventory.create and no
+// validation. Stock moves through purchase / milling / sale / transfer /
+// adjustment-request screens, which post the ledger.
 router.post(
   '/movements',
+  retired('Manual stock movements are retired. Use a stock adjustment request, a transfer or the owning screen.'),
   authorize('inventory', 'create'),
   auditAction('create_movement', 'inventory_movement', (req, data) => data.data && data.data.movement ? data.data.movement.id : null),
   inventoryController.createMovement

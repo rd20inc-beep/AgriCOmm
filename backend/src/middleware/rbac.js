@@ -1,5 +1,13 @@
 const db = require('../config/database');
 
+// Every guard carries a description of what it checks (`guard.authz`), so the
+// route-permission inventory test can prove each mutating route is guarded and
+// the Admin › Permissions matrix can be compared with the real gates.
+function tagGuard(authz, fn) {
+  fn.authz = authz;
+  return fn;
+}
+
 /**
  * Granular permission-based authorization middleware.
  * Checks if the authenticated user's role has the specified module+action permission.
@@ -7,7 +15,7 @@ const db = require('../config/database');
  * Usage: authorize('export_orders', 'create')
  */
 function authorize(module, action) {
-  return async (req, res, next) => {
+  return tagGuard({ kind: 'authorize', perms: [[module, action]] }, async (req, res, next) => {
     if (!req.user) {
       return res.status(401).json({
         success: false,
@@ -79,7 +87,7 @@ function authorize(module, action) {
         message: 'Internal server error during authorization.',
       });
     }
-  };
+  });
 }
 
 /**
@@ -91,7 +99,7 @@ function authorize(module, action) {
  * Usage: authorizeAny(['inventory','create'], ['export_orders','create'])
  */
 function authorizeAny(...pairs) {
-  return async (req, res, next) => {
+  return tagGuard({ kind: 'authorizeAny', perms: pairs }, async (req, res, next) => {
     if (!req.user) {
       return res.status(401).json({ success: false, message: 'Access denied. Not authenticated.' });
     }
@@ -128,7 +136,7 @@ function authorizeAny(...pairs) {
       console.error('Authorization error:', err);
       return res.status(500).json({ success: false, message: 'Internal server error during authorization.' });
     }
-  };
+  });
 }
 
 /**
@@ -138,7 +146,7 @@ function authorizeAny(...pairs) {
  * Usage: authorizeRole('Super Admin', 'Finance Manager')
  */
 function authorizeRole(...roles) {
-  return async (req, res, next) => {
+  return tagGuard({ kind: 'authorizeRole', roles }, async (req, res, next) => {
     if (!req.user) {
       return res.status(401).json({
         success: false,
@@ -180,7 +188,7 @@ function authorizeRole(...roles) {
         message: 'Internal server error during authorization.',
       });
     }
-  };
+  });
 }
 
 /**
@@ -192,7 +200,7 @@ function authorizeRole(...roles) {
  * Usage: denyRoles('Mill Operator')
  */
 function denyRoles(...roles) {
-  return async (req, res, next) => {
+  return tagGuard({ kind: 'denyRoles', roles }, async (req, res, next) => {
     if (!req.user) {
       return res.status(401).json({ success: false, message: 'Access denied. Not authenticated.' });
     }
@@ -218,7 +226,7 @@ function denyRoles(...roles) {
       console.error('denyRoles error:', err);
       return res.status(500).json({ success: false, message: 'Internal server error during authorization.' });
     }
-  };
+  });
 }
 
 /**

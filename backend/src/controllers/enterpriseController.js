@@ -80,7 +80,9 @@ const enterpriseController = {
 
   async createImport(req, res) {
     try {
-      const { import_type, file_name, file_path, data: rawData } = req.body;
+      // file_path is never taken from the client: the server writes the
+      // import file itself (inline `data` below) and reads only from there.
+      const { import_type, file_name, data: rawData } = req.body;
       if (!import_type) {
         return res.status(400).json({ success: false, message: 'import_type is required.' });
       }
@@ -103,7 +105,7 @@ const enterpriseController = {
         .insert({
           import_type,
           file_name: file_name || null,
-          file_path: file_path || null,
+          file_path: null,
           status: 'Pending',
           job_id: job.id,
           created_by: req.user.id,
@@ -257,30 +259,16 @@ const enterpriseController = {
   // SYSTEM HEALTH
   // ═══════════════════════════════════════════════════════════════════
 
+  // Public (no auth): a read-only database ping and the overall status only.
+  // No per-check detail, memory figures or error text, and no rows written.
   async healthCheck(req, res) {
-    try {
-      const checks = await healthService.runAllChecks();
-      const overallStatus = checks.some((c) => c.status === 'Critical')
-        ? 'Critical'
-        : checks.some((c) => c.status === 'Warning')
-          ? 'Warning'
-          : 'Healthy';
-
-      return res.json({
-        success: true,
-        status: overallStatus,
-        checks,
-        timestamp: new Date().toISOString(),
-      });
-    } catch (err) {
-      console.error('Health check error:', err);
-      return res.status(500).json({
-        success: false,
-        status: 'Critical',
-        message: 'Health check failed.',
-        error: err.message,
-      });
-    }
+    const dbCheck = await healthService.checkDatabase();
+    const ok = dbCheck.status !== 'Critical';
+    return res.status(ok ? 200 : 503).json({
+      success: ok,
+      status: ok ? 'ok' : 'unavailable',
+      timestamp: new Date().toISOString(),
+    });
   },
 
   async healthDetailed(req, res) {

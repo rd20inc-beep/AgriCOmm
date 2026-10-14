@@ -75,29 +75,11 @@ const controlService = {
     if (approval.status !== 'Pending') throw new Error(`Cannot approve: status is ${approval.status}.`);
     if (approval.requested_by === approvedBy) throw new Error('Maker-checker violation: approver cannot be the same as requester.');
 
-    // Apply the proposed change to the actual entity
-    if (approval.proposed_data) {
-      const proposed = typeof approval.proposed_data === 'string' ? JSON.parse(approval.proposed_data) : approval.proposed_data;
-
-      const entityTableMap = {
-        export_order: 'export_orders',
-        milling_batch: 'milling_batches',
-        inventory_lot: 'inventory_lots',
-        journal_entry: 'journal_entries',
-        internal_transfer: 'internal_transfers',
-        receivable: 'receivables',
-        payable: 'payables',
-      };
-
-      const table = entityTableMap[approval.entity_type];
-      if (table) {
-        const exists = await knex.schema.hasTable(table);
-        if (exists) {
-          await knex(table).where({ id: approval.entity_id }).update(proposed);
-        }
-      }
-    }
-
+    // The decision is recorded only. Approving no longer writes proposed_data
+    // into the target table: a raw UPDATE on export_orders / journal_entries /
+    // receivables / payables / inventory_lots bypassed the GL, stock and
+    // workflow engines (P1-15, ADM-06). The change itself is made through the
+    // owning screen, which posts what it must.
     const [updated] = await knex('approval_queue')
       .where({ id: approvalId })
       .update({
