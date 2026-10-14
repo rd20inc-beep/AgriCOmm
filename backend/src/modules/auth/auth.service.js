@@ -5,9 +5,42 @@ const config = require('../../config');
 const db = require('../../config/database');
 const repo = require('./auth.repository');
 const auditService = require('../../services/auditService');
+const throttle = require('./loginThrottle');
+const { issueTicket } = require('../../middleware/authEventSource');
 const { NotFoundError, ValidationError, ForbiddenError, ConflictError } = require('../../shared/errors');
 
-const MAX_FAILED_LOGINS = 5; // #9 auto-lock threshold
+const MAX_FAILED_LOGINS = throttle.MAX_FAILURES; // #9 lockout threshold (5)
+const LOCKOUT_MS = throttle.LOCKOUT_MS;           // P1-10 lockout length (15 min)
+const RESET_TOKEN_TTL_MS = 60 * 60 * 1000;
+
+// One message for unknown email AND wrong password (no account enumeration).
+function invalidCredentials() {
+  const err = new Error('Invalid email or password.');
+  err.statusCode = 401;
+  return err;
+}
+function tooManyAttempts() {
+  const err = new Error('Too many failed sign-in attempts. Please wait 15 minutes, or reset your password.');
+  err.statusCode = 429;
+  return err;
+}
+
+// A bcrypt hash compared against when the email is unknown, so both paths cost
+// the same time.
+let dummyHashPromise = null;
+function dummyHash() {
+  if (!dummyHashPromise) dummyHashPromise = bcrypt.hash('not-a-real-password', 12);
+  return dummyHashPromise;
+}
+
+// Status 'locked' set by the OLD rule (lock until an admin acts) carries the
+// failure counter at the threshold; an admin's deliberate lock does not. Those
+// legacy auto-locks now expire like the new time-based lockout.
+function isLegacyAutoLock(user) {
+  return user.status === 'locked'
+    && (parseInt(user.failed_login_count, 10) || 0) >= MAX_FAILED_LOGINS
+    && !!user.locked_at && (new Date(user.locked_at).getTime() + LOCKOUT_MS) <= Date.now();
+}
 
 function generateToken(user) {
   return jwt.sign(
@@ -24,10 +57,50 @@ function statusBlockMessage(status) {
   switch (status) {
     case 'deactivated': return 'Account is deactivated. Contact an administrator.';
     case 'suspended': return 'Account is suspended. Contact an administrator.';
-    case 'locked': return 'Account is locked after too many failed sign-ins. Contact an administrator.';
+    case 'locked': return 'Account is locked. Contact an administrator.';
     case 'invited': return 'Account invitation is pending — set your password via the invite link.';
     default: return 'Account is not permitted to sign in. Contact an administrator.';
   }
+}
+
+// The reset link goes to the configured app URL (never the request's Host) with
+// the token in the #fragment, which browsers don't send to servers — so it
+// never lands in an access log. The email body logged to email_logs is redacted.
+function resetLink(token) {
+  return `${config.appUrl}/reset-password#token=${token}`;
+}
+
+async function sendResetEmail(user, token) {
+  if (!config.smtp.user) {
+    console.warn('password reset requested but SMTP is not configured — no email sent');
+    return;
+  }
+  // Lazy: keeps nodemailer out of the login path / unit tests.
+  const emailService = require('../communications/email.service');
+  const link = resetLink(token);
+  const subject = 'Reset your AgriRice password';
+  const html = (href) => `<p>Hello ${String(user.full_name || '').replace(/[<>&"]/g, '')},</p>`
+    + '<p>We received a request to reset your password. This link works once and expires in 1 hour:</p>'
+    + `<p><a href="${href}">${href}</a></p>`
+    + '<p>If you did not ask for this, ignore this email — your password stays the same.</p>';
+  let status = 'Sent';
+  let errorMessage = null;
+  try {
+    await emailService.getTransporter().sendMail({
+      from: `${config.smtp.senderName} <${config.smtp.senderEmail}>`,
+      to: user.email,
+      subject,
+      html: html(link),
+    });
+  } catch (e) {
+    status = 'Failed';
+    errorMessage = e.message;
+  }
+  await db('email_logs').insert({
+    from_email: config.smtp.senderEmail, to_email: user.email, subject,
+    body: html('[reset link redacted]'), template_used: 'password_reset',
+    linked_type: 'user', linked_id: user.id, status, error_message: errorMessage, sent_by: null,
+  }).catch(() => {});
 }
 
 const authService = {
@@ -36,35 +109,49 @@ const authService = {
       throw new ValidationError('Email and password are required.');
     }
 
+    // Per-account throttle — applies identically to unknown emails.
+    if (throttle.isLocked(email)) throw tooManyAttempts();
+
     const user = await repo.findUserByEmail(email);
     if (!user) {
-      throw new NotFoundError('Invalid email or password.');
-      // Use generic message to prevent enumeration
+      await bcrypt.compare(String(password), await dummyHash());
+      throw throttle.recordFailure(email) ? tooManyAttempts() : invalidCredentials();
+    }
+
+    // P1-10 time-based lockout (users.locked_until) — refused even with the right
+    // password until it expires.
+    if (user.locked_until && new Date(user.locked_until).getTime() > Date.now()) {
+      throw tooManyAttempts();
+    }
+
+    const validPassword = await bcrypt.compare(String(password), user.password_hash);
+    if (!validPassword) {
+      // Track failed attempts; the 5th starts a 15-minute lockout and resets the
+      // counter (the account itself stays 'active' — no admin needed).
+      const failed = (parseInt(user.failed_login_count, 10) || 0) + 1;
+      const patch = { failed_login_count: failed, updated_at: db.fn.now() };
+      const locks = failed >= MAX_FAILED_LOGINS;
+      if (locks) { patch.locked_until = new Date(Date.now() + LOCKOUT_MS); patch.failed_login_count = 0; }
+      await db('users').where({ id: user.id }).update(patch);
+      const memLocked = throttle.recordFailure(email);
+      throw (locks || memLocked) ? tooManyAttempts() : invalidCredentials();
     }
 
     // #9 Status lifecycle gate — only 'active' may sign in (falls back to the
-    // is_active boolean for any row that predates the status backfill).
-    const status = user.status || (user.is_active ? 'active' : 'deactivated');
+    // is_active boolean for any row that predates the status backfill). Checked
+    // only AFTER the password matched, so it reveals nothing to a guesser.
+    const legacyLockExpired = isLegacyAutoLock(user);
+    const status = legacyLockExpired ? 'active'
+      : (user.status || (user.is_active ? 'active' : 'deactivated'));
     if (status !== 'active') {
       throw new ForbiddenError(statusBlockMessage(status));
     }
 
-    const validPassword = await bcrypt.compare(password, user.password_hash);
-    if (!validPassword) {
-      // #9 Track failed attempts and auto-lock after MAX_FAILED_LOGINS.
-      const failed = (parseInt(user.failed_login_count, 10) || 0) + 1;
-      const patch = { failed_login_count: failed, updated_at: db.fn.now() };
-      if (failed >= MAX_FAILED_LOGINS) { patch.status = 'locked'; patch.is_active = false; patch.locked_at = db.fn.now(); }
-      await db('users').where({ id: user.id }).update(patch);
-      const err = new Error(failed >= MAX_FAILED_LOGINS
-        ? 'Account locked after too many failed sign-ins. Contact an administrator.'
-        : 'Invalid email or password.');
-      err.statusCode = failed >= MAX_FAILED_LOGINS ? 403 : 401;
-      throw err;
-    }
-
-    // Success → clear the failed-attempt counter + stamp last_login.
-    await db('users').where({ id: user.id }).update({ failed_login_count: 0, last_login: db.fn.now() });
+    // Success → clear the failed-attempt counter + lockout, stamp last_login.
+    const success = { failed_login_count: 0, locked_until: null, last_login: db.fn.now() };
+    if (legacyLockExpired) Object.assign(success, { status: 'active', is_active: true, locked_at: null });
+    await db('users').where({ id: user.id }).update(success);
+    throttle.clear(email);
 
     const token = generateToken(user);
     const permissions = await repo.getPermissionsForRole(user.role_id);
@@ -153,9 +240,18 @@ const authService = {
       throw error;
     }
 
+    // Same rules as every authenticated request: portal/ticket tokens are not
+    // session tokens, and a suspended/locked/inactive user or a revoked session
+    // (stale token_version) can't mint a fresh token.
+    if (!decoded || decoded.portal || decoded.typ) {
+      const error = new Error('Invalid or expired token.');
+      error.statusCode = 401;
+      throw error;
+    }
     const user = await repo.findUserById(decoded.id);
-    if (!user || !user.is_active) {
-      const error = new Error('User not found or deactivated.');
+    const status = user && (user.status || (user.is_active ? 'active' : 'deactivated'));
+    if (!user || status !== 'active' || (decoded.tv || 0) !== (user.token_version || 0)) {
+      const error = new Error('Session is no longer valid. Please sign in again.');
       error.statusCode = 401;
       throw error;
     }
@@ -209,6 +305,8 @@ const authService = {
     const salt = await bcrypt.genSalt(12);
     const password_hash = await bcrypt.hash(newPassword, salt);
 
+    // Ends every session (token_version bump), including this one — a fresh
+    // token for the caller is returned below so they stay signed in here.
     await repo.updatePassword(userId, password_hash);
     // #9 Clear the forced-change flag once the user has set their own password.
     await db('users').where({ id: userId }).update({ force_password_change: false, password_changed_at: db.fn.now() });
@@ -221,6 +319,9 @@ const authService = {
       details: { note: 'Password changed by user' },
       ipAddress,
     });
+
+    const fresh = await repo.findUserById(userId);
+    return { token: generateToken(fresh) };
   },
 
   async requestPasswordReset(email, ipAddress) {
@@ -228,15 +329,22 @@ const authService = {
       throw new ValidationError('Email is required.');
     }
 
-    const user = await repo.findUserByEmail(email);
+    const user = await repo.findUserByEmail(String(email));
 
-    // Always return success to prevent enumeration
+    // Always return success to prevent enumeration; suspended/deactivated
+    // accounts get no link (an admin must reinstate them first).
     if (!user) return;
+    const status = user.status || (user.is_active ? 'active' : 'deactivated');
+    if (status === 'suspended' || status === 'deactivated') return;
 
     const token = crypto.randomBytes(32).toString('hex');
-    const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
+    const expiresAt = new Date(Date.now() + RESET_TOKEN_TTL_MS);
 
     await repo.createPasswordResetToken(user.id, token, expiresAt);
+
+    // Fire-and-forget so the response time doesn't reveal whether the email
+    // exists; a send failure is logged, never surfaced.
+    sendResetEmail(user, token).catch((e) => console.error('password reset email failed:', e.message));
 
     await auditService.log({
       userId: user.id,
@@ -257,7 +365,7 @@ const authService = {
       throw new ValidationError('New password must be at least 8 characters.');
     }
 
-    const resetToken = await repo.findValidResetToken(token);
+    const resetToken = await repo.findValidResetToken(String(token));
     if (!resetToken) {
       throw new ValidationError('Invalid or expired reset token.');
     }
@@ -275,6 +383,13 @@ const authService = {
       details: { note: 'Password reset via token' },
       ipAddress,
     });
+    const u = await repo.findUserById(resetToken.user_id);
+    if (u) throttle.clear(u.email);
+  },
+
+  // P1-04: a short-lived single-purpose ticket for a stream / attachment URL.
+  issueStreamTicket(user, purpose, resourceId) {
+    return issueTicket(user, purpose, resourceId);
   },
 
   async updateProfile(userId, { full_name }, ipAddress) {
@@ -301,3 +416,4 @@ const authService = {
 };
 
 module.exports = authService;
+module.exports.resetLink = resetLink;

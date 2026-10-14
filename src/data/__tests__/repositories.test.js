@@ -78,3 +78,59 @@ describe('realtimeRepo (replaces raw EventSource)', () => {
     expect(closed).toBe(true);
   });
 });
+
+describe('realtimeRepo stream tickets (P1-04: no session JWT in URLs)', () => {
+  afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); localStorage.clear(); });
+
+  const flush = () => new Promise((r) => setTimeout(r, 0));
+
+  test('call signals: fetches a ticket with Bearer auth, opens ?ticket= and never puts the JWT in the URL', async () => {
+    localStorage.setItem('riceflow_token', 'SESSION-JWT-FAKE');
+    const opened = [];
+    globalThis.EventSource = class { constructor(url) { this.url = url; opened.push(this); } close() { this.closed = true; } };
+    let ticketReq;
+    mockFetch(async (url, opts) => { ticketReq = { url, opts }; return { ok: true, status: 200, json: async () => ({ data: { ticket: 'TICKET-1' } }) }; });
+    const close = realtimeRepo.subscribeCallSignals({ onMessage: () => {} });
+    await flush(); await flush();
+    expect(ticketReq.url).toContain('/api/auth/stream-ticket');
+    expect(ticketReq.opts.headers.Authorization).toBe('Bearer SESSION-JWT-FAKE');
+    expect(JSON.parse(ticketReq.opts.body).purpose).toBe('call-signals');
+    expect(opened).toHaveLength(1);
+    expect(opened[0].url).toContain('/api/streams/call-signals?ticket=TICKET-1');
+    expect(opened[0].url).not.toContain('SESSION-JWT-FAKE');
+    close();
+    expect(opened[0].closed).toBe(true);
+  });
+
+  test('export order: ticket is bound to the order id; a CLOSED stream gets a fresh ticket', async () => {
+    vi.useFakeTimers();
+    localStorage.setItem('riceflow_token', 'SESSION-JWT-FAKE');
+    const opened = [];
+    globalThis.EventSource = class { constructor(url) { this.url = url; this.readyState = 0; opened.push(this); } close() { this.closed = true; } };
+    let n = 0; const bodies = [];
+    mockFetch(async (url, opts) => { bodies.push(JSON.parse(opts.body)); n += 1; return { ok: true, status: 200, json: async () => ({ data: { ticket: `T${n}` } }) }; });
+    const close = realtimeRepo.subscribeExportOrder(42, {});
+    await vi.advanceTimersByTimeAsync(0);
+    expect(bodies[0]).toEqual({ purpose: 'export-order', resource_id: '42' });
+    expect(opened[0].url).toContain('/api/streams/export-orders/42?ticket=T1');
+    // Browser gave up (e.g. expired ticket on reconnect) → refetch + reopen.
+    opened[0].readyState = 2;
+    opened[0].onerror({ target: opened[0] });
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(opened).toHaveLength(2);
+    expect(opened[1].url).toContain('ticket=T2');
+    close();
+  });
+
+  test('signed out (401 from the ticket endpoint): stops, does not loop', async () => {
+    vi.useFakeTimers();
+    localStorage.setItem('riceflow_token', 'SESSION-JWT-FAKE');
+    const fetchSpy = vi.fn(async () => ({ ok: false, status: 401, json: async () => ({}) }));
+    globalThis.fetch = fetchSpy;
+    globalThis.EventSource = class { constructor() { throw new Error('should not open'); } };
+    const close = realtimeRepo.subscribeCallSignals({});
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    close();
+  });
+});

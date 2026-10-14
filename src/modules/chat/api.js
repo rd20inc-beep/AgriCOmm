@@ -1,4 +1,4 @@
-import api from '../../api/client';
+import api, { API_BASE } from '../../api/client';
 
 export const chatApi = {
   users: () => api.get('/api/chat/users'),
@@ -17,8 +17,9 @@ export const chatApi = {
     return api.post('/api/chat/messages', fd);
   },
   markRead: (scope) => api.post('/api/chat/read', { scope }),
-  attachmentUrl: (id) => `/api/chat-attachments/${id}?token=${encodeURIComponent(localStorage.getItem('riceflow_token') || '')}`,
+  // Attachments are fetched with a short-lived chat-attachment ticket (never the
+  // session token — URLs end up in logs/history). See useAttachmentTicket.
+  attachmentUrl: (id, ticket) => `${API_BASE}/api/chat-attachments/${id}?ticket=${encodeURIComponent(ticket || '')}`,
   // WebRTC call signaling
   signal: (data) => api.post('/api/chat/signal', data),
-  callStreamUrl: () => `/api/streams/call-signals?token=${encodeURIComponent(localStorage.getItem('riceflow_token') || '')}`,
 };

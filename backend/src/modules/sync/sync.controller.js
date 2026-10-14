@@ -223,8 +223,16 @@ async function revokeDevice(req, res) {
     const { id } = req.params;
     const dev = await db('devices').where({ id }).first();
     if (!dev) return res.status(404).json({ success: false, message: 'Device not found' });
-    await db('devices').where({ id }).update({
-      status: 'revoked', revoked_at: db.fn.now(), revoked_by: req.user.id,
+    await db.transaction(async (trx) => {
+      await trx('devices').where({ id }).update({
+        status: 'revoked', revoked_at: db.fn.now(), revoked_by: req.user.id,
+      });
+      // P1-04: end the device owner's sessions too, so a token copied off the
+      // revoked device stops working for reads as well (deviceGuard only sees
+      // requests that volunteer X-Device-Id). The owner signs in again elsewhere.
+      if (dev.user_id && dev.status !== 'revoked') {
+        await trx('users').where({ id: dev.user_id }).increment('token_version', 1);
+      }
     });
     const updated = await db('devices').where({ id }).first();
     return res.json({ success: true, data: { device: updated } });

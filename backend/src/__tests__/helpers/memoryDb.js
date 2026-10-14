@@ -113,6 +113,12 @@ class Query {
     return new Mutation(rows);
   }
 
+  increment(col, by = 1) {
+    const rows = this.rows();
+    rows.forEach((r) => { r[col] = (Number(r[col]) || 0) + by; });
+    return new Mutation(rows);
+  }
+
   del() {
     const rows = this.rows();
     state.tables[this.table] = state.tables[this.table].filter((r) => !rows.includes(r));
