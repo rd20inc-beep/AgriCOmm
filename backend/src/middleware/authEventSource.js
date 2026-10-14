@@ -55,7 +55,7 @@ function authenticateTicket(purpose, { resourceParam } = {}) {
     let decoded;
     try {
       decoded = jwt.verify(String(raw), config.jwt.secret);
-    } catch (err) {
+    } catch {
       return res.status(401).json({ success: false, code: 'ticket_invalid', message: 'Invalid or expired ticket.' });
     }
     if (!decoded || decoded.typ !== TICKET_TYPE || decoded.pur !== purpose) {
