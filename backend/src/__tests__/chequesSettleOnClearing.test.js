@@ -231,7 +231,7 @@ describe('Purchases tab (payPurchase): a cheque', () => {
     );
     accounting.journals.length = 0;
     const r = res();
-    await financeController.reversePayment({ params: { id: String(p.id) }, body: {}, user: { id: 1 } }, r);
+    await financeController.reversePayment({ params: { id: String(p.id) }, body: { reason: 'test reversal' }, user: { id: 1 } }, r);
     expect(r.statusCode).toBe(200);
     expect(row('inventory_lots', 5).paid_amount).toBe(0);
     expect(row('bank_accounts', 8).current_balance).toBe(2000);

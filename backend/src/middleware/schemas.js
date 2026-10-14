@@ -581,6 +581,17 @@ const replaceContraTransfer = Joi.object({
     'string.empty': 'A reason is required to edit a transfer',
   }),
 });
+// P2-19 / D-3: a payment reversal always carries its reason. The Owner's
+// approval (authorized_by_owner_id + X-Owner-Credential) is read by
+// ownerApproval BEFORE this runs, so it need not survive stripUnknown.
+const reversePayment = Joi.object({
+  reason: Joi.string().trim().min(1).max(2000).required().messages({
+    'any.required': 'A reason is required to reverse a payment',
+    'string.empty': 'A reason is required to reverse a payment',
+  }),
+  authorized_by_owner_id: Joi.number().integer().positive().allow(null, ''),
+});
+
 const reverseFundTransfer = Joi.object({
   reason: Joi.string().trim().min(1).max(2000).required().messages({
     'any.required': 'A reason is required to reverse a transfer',
@@ -1018,6 +1029,7 @@ module.exports = {
   createContraTransfer,
   replaceContraTransfer,
   reverseFundTransfer,
+  reversePayment,
   createJournal,
   stockAdjustment,
   submitApproval,

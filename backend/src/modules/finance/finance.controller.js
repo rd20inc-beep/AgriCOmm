@@ -25,7 +25,7 @@ const {
   applyReceivableDelta, pendingChequeTotal, postDeltaOf, round2,
   isCheque, hasPaymentJournal, postPaymentJournal, settleDocuments, SOURCES, LOT_SUPPLIER_LINES,
 } = require('./paymentSettlement');
-const { recordMoneyMovement, postAccountMovement } = require('./paymentEngine');
+const { recordMoneyMovement, postAccountMovement, assertDocumentCurrency } = require('./paymentEngine');
 const { postBankTransaction } = require('../../shared/bankBalance');
 const { bankTieOut } = require('./bankTieOut');
 const { bounceCheque } = require('./chequeBounce');
@@ -1278,6 +1278,9 @@ const financeController = {
         if (!linkedRow) {
           const e = new Error(`${isReceipt ? 'Receivable' : 'Payable'} not found.`); e.statusCode = 404; throw e;
         }
+        // The money is in the document's own currency (a USD receivable is
+        // never settled with a rupee figure) — checked before any branch.
+        assertDocumentCurrency(linkedRow, currency || linkedRow.currency, isReceipt ? 'receivable' : 'payable');
 
         // An export order's advance / balance receivable is settled by the
         // order's own maker-checker flow: Money In records it as 'Pending
@@ -1306,9 +1309,9 @@ const financeController = {
 
         // A foreign amount converts at today's rate for its currency (the
         // engine's default; export-order receipts never reach here).
-        const cur = (currency || 'PKR').toUpperCase();
+        const cur = String(currency || linkedRow.currency || 'PKR').toUpperCase();
 
-        const { payment } = await recordMoneyMovement(trx, {
+        const { payment, overdraft } = await recordMoneyMovement(trx, {
           type,
           payable: isReceipt ? null : linkedRow,
           receivable: isReceipt ? linkedRow : null,
@@ -1329,12 +1332,13 @@ const financeController = {
           millOnly,
           bt: { notes: `${isReceipt ? 'Receipt' : 'Payment'} for ${isReceipt ? 'receivable' : 'payable'} ${linkedRow.recv_no || linkedRow.pay_no || `#${entity_id}`}` },
         });
-        return { payment, pendingConfirmation: false };
+        return { payment, pendingConfirmation: false, overdraft };
       });
 
       return res.status(201).json({
         success: true,
-        data: { payment: result.payment, pending_confirmation: result.pendingConfirmation },
+        // P2-31: an overdraft goes through, with the warning alongside (as contra transfers).
+        data: { payment: result.payment, pending_confirmation: result.pendingConfirmation, ...(result.overdraft ? { warning: result.overdraft } : {}) },
         ...(result.pendingConfirmation ? { message: 'Recorded — pending Finance confirmation.' } : {}),
       });
     } catch (err) {
@@ -1362,8 +1366,11 @@ const financeController = {
   async reversePayment(req, res) {
     try {
       const paymentId = parseInt(req.params.id, 10);
-      const reason = (req.body && req.body.reason) || null;
+      // D-3: a reversal always says why (the route also needs the Owner's
+      // approval — ownerApproval('payment_reversal')).
+      const reason = String((req.body && req.body.reason) || '').trim() || null;
       if (!paymentId) return res.status(400).json({ success: false, message: 'Invalid payment id.' });
+      if (!reason) return res.status(400).json({ success: false, message: 'A reason is required to reverse a payment.' });
       const fail = (msg, code = 400) => { const e = new Error(msg); e.statusCode = code; return e; };
 
       const out = await db.transaction(async (trx) => {
@@ -1445,13 +1452,22 @@ const financeController = {
         //    nothing to mirror and it is simply marked Reversed — except one
         //    recorded under the old rules (post-dated cheques used to journal
         //    at recording), whose journal is found here and undone.
+        // A reversal journal already posted under this number (a payment whose
+        // status was flipped back by hand) is never posted twice.
+        const priorReversal = await trx('journal_entries')
+          .where({ ref_no: pay.payment_no, ref_type: 'Payment Reversal', status: 'Posted' }).first('id');
+        if (priorReversal) throw fail('This payment already has a posted reversal journal — it cannot be reversed again.', 409);
+        // Any journal under the payment's number, whatever its status: one that
+        // was status-flipped to Reversed earlier has already been undone in the
+        // GL, so no inverse may be built for it below.
+        const anyOwnJournal = await trx('journal_entries').where({ ref_no: pay.payment_no }).first('id');
         try {
           const mirrored = await postDeltaOf(trx, {
             refNo: pay.payment_no, refTypes: ownJournalTypes,
             refType: 'Payment Reversal', description: label, userId: req.user?.id, date: today,
             cashAccountId: pay.bank_account_id || null,
           });
-          if (!mirrored && wasCleared && isPayment) {
+          if (!mirrored && !anyOwnJournal && wasCleared && isPayment) {
             // A Purchases-tab payment (journalled under the lot / purchase
             // label): Dr net Cash (+ Dr WHT + Dr Discount) / Cr Payable (gross).
             const cashAndBank = await glAccountFor(trx, pay.bank_account_id || null);
@@ -1474,7 +1490,7 @@ const financeController = {
             }
             revLines.push({ account_id: counterAcc.id, account: counterAcc.name, debit: 0, credit: amtPkr, narration: `CR ${counterAcc.code} ${counterAcc.name} — reversal ${pay.payment_no}` });
             const j = await accountingService.createJournal(trx, {
-              date: today, entity: 'mill',
+              date: today, entity: payable?.entity || 'mill',
               refType: 'Payment Reversal', refNo: pay.payment_no,
               description: label,
               currency: 'PKR', fxRate: 1, isAuto: true, userId: req.user?.id, partyType, partyId,

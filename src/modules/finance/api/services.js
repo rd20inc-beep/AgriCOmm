@@ -11,7 +11,8 @@ export const financeApi = {
   purchasePaymentTrail: (source, sourceId) => api.get(`/api/finance/purchases/${source}/${sourceId}/payments`),
   payables: (params) => api.get('/api/finance/payables', params),
   recordPayment: (data) => api.post('/api/finance/payments', data),
-  reversePayment: (id, reason) => api.post(`/api/finance/payments/${id}/reverse`, { reason }),
+  // D-3: a reason, and the Owner's approval (ownerId + X-Owner-Credential via OwnerAuthContext).
+  reversePayment: (id, reason, ownerId) => api.post(`/api/finance/payments/${id}/reverse`, { reason, authorized_by_owner_id: ownerId }),
   payments: (params) => api.get('/api/finance/payments', params),
   purchases: (params) => api.get('/api/finance/purchases', params),
   payPurchase: (data) => api.post('/api/finance/purchases/pay', data),

@@ -928,7 +928,7 @@ export function useRecordPayment() {
 export function useReversePayment() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, reason }) => financeApi.reversePayment(id, reason),
+    mutationFn: ({ id, reason, ownerId }) => financeApi.reversePayment(id, reason, ownerId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: queryKeys.payables.all });
       qc.invalidateQueries({ queryKey: queryKeys.financeOverview });

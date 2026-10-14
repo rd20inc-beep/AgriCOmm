@@ -56,7 +56,7 @@ d('payment engine convergence (DB-gated)', () => {
     const config = require('../config');
 
     const roleId = async (name) => (await db('roles').where({ name }).first()).id;
-    for (const [key, role] of [['sa', 'Super Admin'], ['fm', 'Finance Manager']]) {
+    for (const [key, role] of [['sa', 'Super Admin'], ['fm', 'Finance Manager'], ['owner', 'Owner']]) {
       const [u] = await db('users').insert({
         email: `zz-p1-${key}-${run}@test.local`, full_name: `ZZ ${role} ${run}`,
         password_hash: 'x', role_id: await roleId(role), is_active: true, status: 'active',
@@ -194,7 +194,7 @@ d('payment engine convergence (DB-gated)', () => {
     expect(gl.map((l) => [l.code, l.debit, l.credit])).toEqual([['2010', 60000, 0], [glCode.pkr, 0, 60000]]);
     expect(gl[0]).toMatchObject({ party_type: 'supplier', party_id: ids.sup });
 
-    const rev = await post('sa', `/api/finance/payments/${p.id}/reverse`, { reason: 'test' });
+    const rev = await post('owner', `/api/finance/payments/${p.id}/reverse`, { reason: 'test' });
     expect(rev.status).toBe(200);
     expect(Number((await db('payables').where({ id: rice.id }).first()).paid_amount)).toBe(0);
     expect(Number((await db('inventory_lots').where({ id: lot.id }).first()).paid_amount)).toBe(0);

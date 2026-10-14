@@ -31,8 +31,12 @@ d('permission matrix after mig 339 (DB-gated)', () => {
 
   afterAll(async () => { await db.destroy(); });
 
-  test('reversal and rate-setting follow confirm_payment exactly', () => {
-    expect(matrix['finance.reverse_payment']).toEqual(matrix['finance.confirm_payment']);
+  test('rate-setting follows confirm_payment; reversal does too minus Mill / Export Manager (D-3, mig 364)', () => {
+    expect(matrix['finance.reverse_payment']).toEqual(
+      matrix['finance.confirm_payment'].filter((r) => !['Mill Manager', 'Export Manager'].includes(r)),
+    );
+    expect(matrix['finance.reverse_payment']).not.toContain('Mill Manager');
+    expect(matrix['finance.reverse_payment']).not.toContain('Export Manager');
     expect(matrix['finance.set_rates']).toEqual(matrix['finance.confirm_payment']);
   });
 

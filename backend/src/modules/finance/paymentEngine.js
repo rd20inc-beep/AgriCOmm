@@ -76,6 +76,20 @@ async function assertWithinOutstanding(trx, { row, isReceipt, amount }) {
 }
 
 /**
+ * A payment / receipt settles a document in that document's own currency
+ * (P2-19): a USD receivable is never settled with a PKR figure, nor a PKR
+ * payable with a USD one. A document with no currency is PKR.
+ */
+function assertDocumentCurrency(doc, currency, what = 'document') {
+  if (!doc) return;
+  const docCur = String(doc.currency || 'PKR').toUpperCase();
+  const cur = String(currency || 'PKR').toUpperCase();
+  if (cur !== docCur) {
+    throw httpError(`This ${what} is in ${docCur} — record the ${what === 'receivable' ? 'receipt' : 'payment'} in ${docCur}, not ${cur}.`);
+  }
+}
+
+/**
  * Move a cash / bank account and write its bank_transactions row — the one way
  * money enters or leaves an account (the engine, and the statutory remittance,
  * which pays a liability account rather than a document).
@@ -161,6 +175,7 @@ async function recordMoneyMovement(trx, opts) {
     // A receivable raised from a local sale is the mill's (it posts to 1120).
     assertMillEntity(linked.local_sale_id ? 'mill' : linked.entity, isReceipt ? 'receivables' : 'payables');
   }
+  if (linked) assertDocumentCurrency(linked, currency, isReceipt ? 'receivable' : 'payable');
   if (linked && checkOutstanding) await assertWithinOutstanding(trx, { row: linked, isReceipt, amount: amt });
 
   const source = sourceIn || (!isReceipt && payable ? await resolveSource(trx, { payable }) : null);
@@ -252,4 +267,6 @@ async function recordMoneyMovement(trx, opts) {
   return { payment, accountId, isPostDated, bankMove, journal, settled, overdraft };
 }
 
-module.exports = { recordMoneyMovement, postAccountMovement, generatePaymentNo, assertWithinOutstanding };
+module.exports = {
+  recordMoneyMovement, postAccountMovement, generatePaymentNo, assertWithinOutstanding, assertDocumentCurrency,
+};

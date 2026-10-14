@@ -8,6 +8,7 @@ const authorize = require('../../middleware/rbac');
 const { authorizeAny, authorizeRole } = require('../../middleware/rbac');
 const db = require('../../config/database');
 const auditAction = require('../../middleware/audit');
+const ownerApproval = require('../../middleware/ownerApproval');
 const validate = require('../../middleware/validate');
 const schemas = require('../../middleware/schemas');
 const fundTransfers = require('../finance/fundTransfers.service');
@@ -225,11 +226,15 @@ router.post(
   auditAction('record_payment', 'finance', (req, data) => data.data && data.data.id ? data.data.id : null),
   controller.recordPayment
 );
-// Reversal is its own permission (split from confirm_payment, mig 339 —
-// granted to every confirm_payment holder; the owner may revoke it per role).
+// Reversal is its own permission (split from confirm_payment, mig 339). Owner
+// decision D-3: it also needs a reason and the Owner's approval — the Owner
+// self-approves, anyone else has an Owner enter their password (mig 364 takes
+// the permission away from Mill Manager and Export Manager).
 router.post(
   '/payments/:id/reverse',
   authorize('finance', 'reverse_payment'),
+  ownerApproval('payment_reversal'),
+  validate(schemas.reversePayment),
   auditAction('reverse_payment', 'payment', (req) => req.params.id),
   controller.reversePayment
 );
