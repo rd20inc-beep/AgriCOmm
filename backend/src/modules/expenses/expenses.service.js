@@ -5,7 +5,10 @@ const { normalizePaymentMethod } = require('../../shared/constants/paymentMethod
 const { pendingChequeTotal, round2 } = require('../finance/paymentSettlement');
 const { recordMoneyMovement } = require('../finance/paymentEngine');
 const { postProcessingDelta } = require('../milling/millingCompletionJournal');
-const { ledgerFailure } = require('../../shared/ledgerFailure');
+const { ledgerFailure, missingAccounts } = require('../../shared/ledgerFailure');
+
+// Owner's Drawings (equity) — migration 350, owner decision D-9.
+const DRAWINGS_CODE = '3030';
 
 const CATEGORY_MAP = {
   general: [
@@ -53,6 +56,14 @@ const expensesService = {
     if (!amount || Number(amount) <= 0) throw new ValidationError('Amount must be positive.');
     if (!expense_date) throw new ValidationError('Expense date is required.');
 
+    // "Personal / Owner" arrives as a general expense with subcategory
+    // 'personal' (the form's payload). It is the owner's, not the business's:
+    // never costed to a batch or an order.
+    const personal = subcategory === 'personal';
+    if (personal && (batch_id || order_id)) {
+      throw new ValidationError("An owner's personal expense cannot be charged to a batch or an export order.");
+    }
+
     const amountNum = Number(amount);
     // Paying at create goes through the payment engine once the expense and
     // its payable exist (a cheque records but settles nothing until it clears).
@@ -78,6 +89,16 @@ const expensesService = {
         ]);
         if (salDr) salaryDebitAccountId = salDr.id;
         if (salCr) salaryCreditAccountId = salCr.id;
+      }
+
+      // The Owner's personal expenses are drawings, not operating expense
+      // (owner decision D-9): Dr 3030 Owner's Drawings (equity) instead of
+      // 6000. No fallback to 6000 — that would understate profit silently.
+      let drawingsAccountId = null;
+      if (personal) {
+        const dr = await trx('chart_of_accounts').where('code', DRAWINGS_CODE).first();
+        if (!dr) throw missingAccounts([DRAWINGS_CODE], 'The expense');
+        drawingsAccountId = dr.id;
       }
 
       const [expense] = await trx('business_expenses').insert({
@@ -230,7 +251,7 @@ const expensesService = {
           userId,
           partyType: supplier_id ? 'supplier' : null,
           partyId: supplier_id || null,
-          debitAccountId: salaryDebitAccountId,
+          debitAccountId: drawingsAccountId || salaryDebitAccountId,
           creditAccountId: salaryCreditAccountId,
         });
       } catch (e) {
