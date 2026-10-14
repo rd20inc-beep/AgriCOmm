@@ -10,7 +10,7 @@ import {
   exportOrdersApi, millingApi, inventoryApi, financeApi, accountingApi,
   documentsApi, adminApi, communicationApi, reportingApi, procurementApi,
   auditApi, approvalsApi, intelligenceApi, controlApi, smartApi, lotInventoryApi,
-  localSalesApi, usersApi, advancesApi, customersApi,
+  localSalesApi, usersApi, customersApi,
 } from './services';
 import {
   transformOrders, transformOrder, transformBatches, transformBatch,
@@ -1574,43 +1574,6 @@ export function useDeleteBuyer() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['buyers'] });
       qc.invalidateQueries({ queryKey: queryKeys.customers.all });
-    },
-  });
-}
-
-// ===================== ADVANCES =====================
-
-export function useAdvances(params = {}) {
-  return useQuery({
-    queryKey: ['advances', 'list', params],
-    queryFn: async () => {
-      const res = await advancesApi.list({ limit: 200, ...params });
-      return unwrap(res, 'advances') || [];
-    },
-    staleTime: 10 * 1000,
-    refetchOnMount: 'always',
-  });
-}
-
-export function useCreateAdvance() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (data) => advancesApi.create(data),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['advances'] });
-      qc.invalidateQueries({ queryKey: queryKeys.financeOverview });
-    },
-  });
-}
-
-export function useAllocateAdvance() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id, data }) => advancesApi.allocate(id, data),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['advances'] });
-      qc.invalidateQueries({ queryKey: queryKeys.orders.all });
-      qc.invalidateQueries({ queryKey: queryKeys.financeOverview });
     },
   });
 }

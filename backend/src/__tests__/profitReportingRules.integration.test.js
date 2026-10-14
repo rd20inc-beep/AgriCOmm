@@ -247,8 +247,14 @@ d('package C rules (DB-gated)', () => {
 
   test('C5: receivables carry a PKR equivalent at each row\'s booked rate, apart from the native figures', async () => {
     const before = await financeService.getOverviewSummary(PERIOD);
+    // A Balance receivable belongs to an order (chk_receivables_export_parent, P2-18).
+    const [eqOrder] = await db('export_orders').insert({
+      order_no: `ZZC-EQ-${run}`, customer_id: ids.customer, created_by: ids.user, currency: 'GBP', status: 'Shipped',
+      booked_fx_rate: 360, product_id: ids.pShip,
+    }).returning('*');
+    ids.orders.push(eqOrder.id);
     const [r] = await db('receivables').insert({
-      recv_no: `ZZC-EQ-${run}`, entity: 'export', customer_id: ids.customer, type: 'Balance', currency: 'GBP', status: 'Partial',
+      recv_no: `ZZC-EQ-${run}`, entity: 'export', order_id: eqOrder.id, customer_id: ids.customer, type: 'Balance', currency: 'GBP', status: 'Partial',
       expected_amount: 1000, received_amount: 250, outstanding: 750, base_amount_pkr: 360000, fx_rate: 360, aging: 0, due_date: '2099-01-01',
     }).returning('*');
     ids.recv.push(r.id);

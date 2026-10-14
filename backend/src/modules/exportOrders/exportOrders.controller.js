@@ -9,8 +9,12 @@ const workflowService = require('../../services/exportOrderWorkflowService');
 const { resolveShipmentField, resolveRequiredField } = require('./shipmentField');
 const { billableFreight, balanceExpectedFor, freightChanges } = require('./billableFreight');
 const debitNoteService = require('./debitNote.service');
+const { contractCommittedReason, issuedDebitNotesTotal } = require('./contractLock');
+const { advanceTermDays, dueInDays } = require('./receiptSettings');
 const { unwindOrderReceipts } = require('./unwindReceipts');
-const { recordPendingExportReceipt, postExportReceipt, confirmPendingExportReceipt, assertNotSelfConfirm } = require('./exportReceipts');
+const {
+  recordPendingExportReceipt, postExportReceipt, confirmPendingExportReceipt, assertNotSelfConfirm, writeOffShortBalance,
+} = require('./exportReceipts');
 const { fillSingleLineBagSpec, linePackaging } = require('./orderLines');
 const { syncBalanceDueDate } = require('./balanceDueDate');
 const { balanceTermDaysSetting } = require('../finance/collectionRate');
@@ -375,9 +379,10 @@ function packingCapacityError(qtyMt, palletized, packingType) {
 // has none. Submit fills in whichever is missing; existing rows are left alone.
 async function ensureOrderReceivables(trx, order) {
   const currency = order.currency || 'USD';
+  const advanceDays = await advanceTermDays(trx);
   const rate = parseFloat(order.booked_fx_rate) || 280;
   const wanted = [
-    { type: 'Advance', prefix: 'RCV-ADV', amount: parseFloat(order.advance_expected) || 0, days: 14,
+    { type: 'Advance', prefix: 'RCV-ADV', amount: parseFloat(order.advance_expected) || 0, days: advanceDays,
       notes: `Advance ${order.advance_pct}% for order ${order.order_no}` },
     { type: 'Balance', prefix: 'RCV-BAL', amount: parseFloat(order.balance_expected) || 0, days: 60,
       notes: `Balance payment for order ${order.order_no} (against BL)` },
@@ -1177,8 +1182,9 @@ const exportOrderController = {
 
         // Auto-create receivables for advance and balance
         if (order.advance_expected > 0) {
-          const advDueDate = new Date();
-          advDueDate.setDate(advDueDate.getDate() + 14); // 14 days for advance
+          // Due the configured advance term after the order (setting
+          // export_advance_term_days, default 14).
+          const advDue = dueInDays(await advanceTermDays(trx));
           await trx('receivables').insert({
             recv_no: `RCV-ADV-${orderNo}`,
             entity: 'export',
@@ -1188,7 +1194,7 @@ const exportOrderController = {
             expected_amount: order.advance_expected,
             received_amount: 0,
             outstanding: order.advance_expected,
-            due_date: advDueDate.toISOString().split('T')[0],
+            due_date: advDue,
             status: 'Pending',
             currency: order.currency || 'USD',
             aging: 0,
@@ -1363,7 +1369,9 @@ const exportOrderController = {
       // The one P.I. line to rescale when qty/price are edited without items[].
       let rescaleItem = null;
       if (safeUpdates.qty_mt != null || safeUpdates.price_per_mt != null || safeUpdates.advance_pct != null
-          || safeUpdates.currency != null || safeUpdates.customer_id != null) {
+          || safeUpdates.currency != null || safeUpdates.customer_id != null
+          || safeUpdates.freight_display !== undefined || safeUpdates.freight_per_mt !== undefined
+          || safeUpdates.insurance_per_mt !== undefined) {
         const existing = await db('export_orders').where({ id }).first();
         if (!existing) {
           return res.status(404).json({ success: false, message: 'Export order not found.' });
@@ -1392,15 +1400,13 @@ const exportOrderController = {
           // change would. Freight shown INSIDE the price moves nothing, but the
           // display flag can flip between the two, so it is checked as well.
           freightChanges(safeUpdates, existing);
-        const committed =
-          settledAmount(existing.advance_received) > MONEY_EPSILON ||
-          settledAmount(existing.balance_received) > MONEY_EPSILON ||
-          existing.revenue_posted === true ||
-          ['Shipped', 'Closed', 'Cancelled'].includes(existing.status);
+        // Pending receipts and 'Arrived' count as committed too (EXP-01); the
+        // same check runs again under the order's lock inside the transaction.
+        const committed = changesContract ? await contractCommittedReason(db, existing) : null;
         if (changesContract && committed) {
           return res.status(400).json({
             success: false,
-            message: 'Cannot change the customer, currency, quantity, price, or advance % after a payment has been received or the order has shipped/closed. Reverse the receipts first.',
+            message: `Cannot change the customer, currency, quantity, price, freight or advance % now: ${committed}. Reverse the receipts first.`,
           });
         }
 
@@ -1435,11 +1441,17 @@ const exportOrderController = {
           insurance_per_mt: safeUpdates.insurance_per_mt !== undefined ? safeUpdates.insurance_per_mt : existing.insurance_per_mt,
           qty_mt: qty,
         };
-        safeUpdates.contract_value = contractValue;
-        safeUpdates.advance_expected = contractValue * (advPct / 100);
-        safeUpdates.balance_expected = balanceExpectedFor({
-          contractValue, advanceExpected: safeUpdates.advance_expected, order: freightState,
-        });
+        // A save that changes none of the contract (the editor always sends
+        // advance % and the freight fields, so a port or ETA edit carries them
+        // unchanged) recomputes nothing and leaves the receivables alone:
+        // rebuilding them reset paid receivables to fully owing (EXP-01).
+        if (changesContract) {
+          safeUpdates.contract_value = contractValue;
+          safeUpdates.advance_expected = contractValue * (advPct / 100);
+          safeUpdates.balance_expected = balanceExpectedFor({
+            contractValue, advanceExpected: safeUpdates.advance_expected, order: freightState,
+          });
+        }
 
         // Keep the locked PKR revenue basis in step with the new contract value,
         // valued at the order's booked FX rate (fall back to the prior locked
@@ -1448,10 +1460,10 @@ const exportOrderController = {
           || (parseFloat(existing.contract_value) > 0
               ? (parseFloat(existing.contract_value_pkr_locked) || 0) / parseFloat(existing.contract_value)
               : 0);
-        if (bookedRate > 0) {
+        if (changesContract && bookedRate > 0) {
           safeUpdates.contract_value_pkr_locked = contractValue * bookedRate;
         }
-        resyncReceivables = true;
+        resyncReceivables = changesContract;
       }
 
       // Batch 7 — re-check the container-capacity rule if qty/palletization/type changed.
@@ -1471,6 +1483,23 @@ const exportOrderController = {
       safeUpdates.updated_at = db.fn.now();
 
       const result = await db.transaction(async (trx) => {
+        if (resyncReceivables) {
+          // Re-check under the order's lock: a receipt confirmed (or recorded)
+          // since the check above must stop the rebuild. Confirmation locks the
+          // same row, so the two cannot interleave.
+          const locked = await trx('export_orders').where({ id }).forUpdate().first();
+          if (!locked) return null;
+          const committedNow = await contractCommittedReason(trx, locked);
+          if (committedNow) {
+            const e = new Error(`Cannot change the contract now: ${committedNow}. Reload the order.`);
+            e.statusCode = 409;
+            throw e;
+          }
+          // Debit notes still Issued stay on the balance (each has its own
+          // Dr 1110 / Cr 4070 journal).
+          const notes = await issuedDebitNotesTotal(trx, id);
+          if (notes > 0) safeUpdates.balance_expected = Math.round((safeUpdates.balance_expected + notes) * 100) / 100;
+        }
         const [order] = await trx('export_orders')
           .where({ id })
           .update(safeUpdates)
@@ -1529,8 +1558,9 @@ const exportOrderController = {
         }
 
         // Resync the advance/balance receivables to the new contract value.
-        // The committed-guard above guarantees nothing has been received yet,
-        // so outstanding == expected and base_amount_pkr can be rebased cleanly.
+        // The committed-guard above (re-run under the lock) means nothing has
+        // been received; outstanding is still written as expected − received,
+        // never as expected, so a receivable can never be reset to fully owing.
         if (resyncReceivables) {
           const bookedRate = parseFloat(order.booked_fx_rate)
             || (parseFloat(order.contract_value) > 0
@@ -1547,7 +1577,7 @@ const exportOrderController = {
             .where({ order_id: id, type: 'Advance' })
             .update({
               expected_amount: order.advance_expected,
-              outstanding: order.advance_expected,
+              outstanding: trx.raw('?::numeric - received_amount', [order.advance_expected]),
               base_amount_pkr: order.advance_expected * bookedRate,
               fx_rate: order.booked_fx_rate,
               ...partyFields,
@@ -1557,7 +1587,7 @@ const exportOrderController = {
             .where({ order_id: id, type: 'Balance' })
             .update({
               expected_amount: order.balance_expected,
-              outstanding: order.balance_expected,
+              outstanding: trx.raw('?::numeric - received_amount', [order.balance_expected]),
               base_amount_pkr: order.balance_expected * bookedRate,
               fx_rate: order.booked_fx_rate,
               ...partyFields,
@@ -1631,6 +1661,7 @@ const exportOrderController = {
         data: { order: result },
       });
     } catch (err) {
+      if (err.statusCode) return res.status(err.statusCode).json({ success: false, message: err.message });
       console.error('Export order update error:', err);
       return res.status(500).json({ success: false, message: 'Internal server error.' });
     }
@@ -2428,7 +2459,7 @@ const exportOrderController = {
     try {
       const rawId = req.params.id;
       const whereClause = /^\d+$/.test(rawId) ? { id: parseInt(rawId, 10) } : { order_no: rawId };
-      const { amount, payment_date, payment_method, reference, bank_reference, bank_account_id, notes, fx_rate } = req.body;
+      const { amount, payment_date, payment_method, reference, bank_reference, bank_account_id, notes, fx_rate, bank_charges } = req.body;
       if (!amount || parseFloat(amount) <= 0) {
         return res.status(400).json({ success: false, message: 'A positive amount is required.' });
       }
@@ -2451,6 +2482,7 @@ const exportOrderController = {
         bankReference: bank_reference || reference || null,
         notes: notes || null,
         userId: req.user.id,
+        bankCharges: bank_charges || 0,
       }));
       await runReceiptAutomation(ctx, kind === 'advance', req.user.id);
       const updated = await db('export_orders').where({ id: ctx.orderId }).first();
@@ -2474,9 +2506,11 @@ const exportOrderController = {
     try {
       const rawId = req.params.id;
       const whereClause = /^\d+$/.test(rawId) ? { id: parseInt(rawId, 10) } : { order_no: rawId };
-      const { kind, amount, bank_account_id, fx_rate, payment_date, payment_method, bank_reference, notes } = req.body || {};
+      const { kind, amount, bank_account_id, fx_rate, payment_date, payment_method, bank_reference, notes, bank_charges } = req.body || {};
       const out = await db.transaction(async (trx) => {
-        const order = await trx('export_orders').where(whereClause).first();
+        // Locked like a confirmation, so a contract edit can't rebuild the
+        // receivables between the outstanding check and the insert (EXP-01).
+        const order = await lockRow(trx('export_orders').where(whereClause)).first();
         if (!order) { const e = new Error('Export order not found.'); e.statusCode = 404; throw e; }
         const row = await recordPendingExportReceipt(trx, {
           order,
@@ -2489,6 +2523,7 @@ const exportOrderController = {
           bankReference: bank_reference || null,
           notes: notes || null,
           userId: req.user?.id || null,
+          bankCharges: bank_charges || 0,
         });
         return { order, row };
       });
@@ -2507,12 +2542,13 @@ const exportOrderController = {
   async confirmExportReceipt(req, res) {
     try {
       const paymentId = parseInt(req.params.paymentId, 10);
-      const { fx_rate, bank_account_id, payment_method } = req.body || {};
+      const { fx_rate, bank_account_id, payment_method, bank_charges } = req.body || {};
       const ctx = await db.transaction((trx) => confirmPendingExportReceipt(trx, {
         paymentId,
         fxRate: fx_rate,
         bankAccountId: bank_account_id || null,
         paymentMethod: payment_method || null,
+        bankCharges: bank_charges,
         userId: req.user?.id || null,
       }));
       await runReceiptAutomation(ctx, ctx.isAdvance, req.user?.id);
@@ -2528,38 +2564,62 @@ const exportOrderController = {
   },
 
   // Finance REJECTS a pending receipt (not actually received). Keeps the row.
+  // One transaction, the pending row locked, so a confirm and a reject of the
+  // same receipt cannot both go through (P2-18). The order's financial_status
+  // is DERIVED from its receivables and their receipts (migration 342): a
+  // rejection after an earlier confirmed receipt leaves it Partially Confirmed
+  // rather than stamping 'Rejected' over money already in.
   async rejectExportReceipt(req, res) {
     try {
       const paymentId = parseInt(req.params.paymentId, 10);
-      const pending = await db('payments').where({ id: paymentId }).first();
-      if (!pending) return res.status(404).json({ success: false, message: 'Payment not found.' });
-      if (pending.status !== 'Pending Finance Confirmation') {
-        return res.status(409).json({ success: false, message: `This receipt is already ${pending.status}.` });
-      }
-      await db('payments').where({ id: paymentId }).update({
-        status: 'Rejected',
-        reject_reason: req.body?.reason || null,
-        confirmed_by: req.user?.id || null,
-        confirmed_at: db.fn.now(),
-        updated_at: db.fn.now(),
-      });
-
-      // #2 financial track: a rejected ADVANCE receipt marks the order's
-      // financial_status 'Rejected' (visible + audited; keeps dispatch blocked).
-      // Resolve the order via the receivable; balance rejections don't touch it.
-      const recv = pending.linked_receivable_id
-        ? await db('receivables').where({ id: pending.linked_receivable_id }).first()
-        : null;
-      if (recv && recv.order_id && recv.type !== 'Balance') {
-        await db('export_orders').where({ id: recv.order_id }).update({
-          financial_status: 'Rejected',
-          updated_at: db.fn.now(),
+      const reason = String((req.body && req.body.reason) || '').trim();
+      const out = await db.transaction(async (trx) => {
+        const pending = await lockRow(trx('payments').where({ id: paymentId })).first();
+        if (!pending) { const e = new Error('Payment not found.'); e.statusCode = 404; throw e; }
+        if (pending.status !== 'Pending Finance Confirmation') {
+          const e = new Error(`This receipt is already ${pending.status}.`); e.statusCode = 409; throw e;
+        }
+        const recv = pending.linked_receivable_id
+          ? await trx('receivables').where({ id: pending.linked_receivable_id }).first()
+          : null;
+        const orderId = (recv && recv.order_id) || (pending.source_table === 'export_orders' ? pending.source_id : null);
+        // Same lock order as a confirmation: the payment, then its order.
+        if (orderId) await lockRow(trx('export_orders').where({ id: orderId })).first();
+        await trx('payments').where({ id: paymentId }).update({
+          status: 'Rejected',
+          reject_reason: reason || null,
+          confirmed_by: req.user?.id || null,
+          confirmed_at: trx.fn.now(),
+          updated_at: trx.fn.now(),
         });
-      }
+        return { orderId };
+      });
+      if (out.orderId) emitExportOrderUpdate(out.orderId, 'receipt_rejected');
       return res.json({ success: true, message: 'Receipt marked as not received.' });
     } catch (err) {
+      if (err.statusCode) return res.status(err.statusCode).json({ success: false, message: err.message });
       console.error('rejectExportReceipt error:', err);
-      return res.status(500).json({ success: false, message: err.message });
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
+  // Write off a shipped order's short balance (D-8). The route is behind
+  // ownerApproval; ≤ the tolerance it is a bank charge (6200), above it the
+  // configured write-off account (refused while none is set).
+  async writeOffBalance(req, res) {
+    try {
+      const id = await resolveExportOrderId(req.params.id);
+      if (!id) return res.status(404).json({ success: false, message: 'Export order not found.' });
+      const { amount, reason } = req.body || {};
+      const out = await db.transaction((trx) => writeOffShortBalance(trx, {
+        orderId: id, amount, reason, userId: req.user?.id || null, ownerId: req.ownerAuth?.ownerId || null,
+      }));
+      emitExportOrderUpdate(id, 'balance_written_off');
+      return res.json({ success: true, data: out });
+    } catch (err) {
+      if (err.statusCode) return res.status(err.statusCode).json({ success: false, message: err.message });
+      console.error('writeOffBalance error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
     }
   },
 
@@ -2574,7 +2634,7 @@ const exportOrderController = {
         .leftJoin('bank_accounts as ba', 'p.bank_account_id', 'ba.id')
         .where('p.status', 'Pending Finance Confirmation')
         .select(
-          'p.id', 'p.payment_no', 'p.amount', 'p.currency', 'p.fx_rate', 'p.payment_date',
+          'p.id', 'p.payment_no', 'p.amount', 'p.bank_charges', 'p.currency', 'p.fx_rate', 'p.payment_date',
           'p.bank_account_id', 'p.notes', 'p.created_at', 'p.created_by', 'u.full_name as recorded_by_name',
           'r.type as receipt_type', 'eo.id as order_id', 'eo.order_no', 'eo.booked_fx_rate',
           'c.name as customer_name',

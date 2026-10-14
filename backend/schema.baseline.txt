@@ -837,6 +837,19 @@ COL export_quotations.total_amount:numeric:NOT NULL
 COL export_quotations.updated_at:timestamp with time zone:NOT NULL
 COL export_quotations.uuid:uuid:NULL
 COL export_quotations.valid_until:date:NULL
+COL export_receivable_write_offs.account_code:character varying:NOT NULL
+COL export_receivable_write_offs.amount:numeric:NOT NULL
+COL export_receivable_write_offs.amount_pkr:numeric:NOT NULL
+COL export_receivable_write_offs.approved_by_owner_id:integer:NULL
+COL export_receivable_write_offs.created_at:timestamp with time zone:NOT NULL
+COL export_receivable_write_offs.created_by:integer:NULL
+COL export_receivable_write_offs.currency:character varying:NOT NULL
+COL export_receivable_write_offs.fx_rate:numeric:NULL
+COL export_receivable_write_offs.id:integer:NOT NULL
+COL export_receivable_write_offs.journal_id:integer:NULL
+COL export_receivable_write_offs.order_id:integer:NOT NULL
+COL export_receivable_write_offs.reason:text:NOT NULL
+COL export_receivable_write_offs.receivable_id:integer:NOT NULL
 COL follow_ups.created_at:timestamp with time zone:NULL
 COL follow_ups.follow_up_date:date:NOT NULL
 COL follow_ups.id:integer:NOT NULL
@@ -2033,6 +2046,7 @@ COL payments.amount:numeric:NOT NULL
 COL payments.attachment_name:text:NULL
 COL payments.attachment_url:text:NULL
 COL payments.bank_account_id:integer:NULL
+COL payments.bank_charges:numeric:NOT NULL
 COL payments.bank_reference:character varying:NULL
 COL payments.base_amount_pkr:numeric:NOT NULL
 COL payments.bounce_reason:text:NULL
@@ -3103,6 +3117,13 @@ CON export_quotations.export_quotations_customer_id_foreign(f)
 CON export_quotations.export_quotations_pkey(p)
 CON export_quotations.export_quotations_quotation_no_unique(u)
 CON export_quotations.uq_export_quotations_uuid(u)
+CON export_receivable_write_offs.chk_erwo_amount_pos(c)
+CON export_receivable_write_offs.export_receivable_write_offs_approved_by_owner_id_foreign(f)
+CON export_receivable_write_offs.export_receivable_write_offs_created_by_foreign(f)
+CON export_receivable_write_offs.export_receivable_write_offs_journal_id_foreign(f)
+CON export_receivable_write_offs.export_receivable_write_offs_order_id_foreign(f)
+CON export_receivable_write_offs.export_receivable_write_offs_pkey(p)
+CON export_receivable_write_offs.export_receivable_write_offs_receivable_id_foreign(f)
 CON follow_ups.chk_follow_ups_status_valid(c)
 CON follow_ups.follow_ups_pkey(p)
 CON follow_ups.follow_ups_user_id_foreign(f)
@@ -3582,9 +3603,12 @@ CON payables.payables_pkey(p)
 CON payables.payables_supplier_id_foreign(f)
 CON payables.uq_payables_uuid(u)
 CON payments.chk_payments_amount_nonneg(c)
+CON payments.chk_payments_bank_charges_nonneg(c)
 CON payments.chk_payments_base_amount_pkr_nonneg(c)
 CON payments.chk_payments_currency_valid(c)
+CON payments.chk_payments_payable_is_payment(c)
 CON payments.chk_payments_payment_method_valid(c)
+CON payments.chk_payments_receivable_is_receipt(c)
 CON payments.chk_payments_status_valid(c)
 CON payments.payments_bank_account_id_foreign(f)
 CON payments.payments_bounced_by_foreign(f)
@@ -3689,8 +3713,11 @@ CON purchase_returns.purchase_returns_status_check(c)
 CON purchase_returns.purchase_returns_supplier_id_foreign(f)
 CON receivables.chk_receivables_base_amount_pkr_nonneg(c)
 CON receivables.chk_receivables_currency_valid(c)
+CON receivables.chk_receivables_export_parent(c)
+CON receivables.chk_receivables_outstanding_equation(c)
 CON receivables.chk_receivables_outstanding_nonneg(c)
 CON receivables.chk_receivables_received_amount_nonneg(c)
+CON receivables.chk_receivables_service_parent(c)
 CON receivables.chk_receivables_status_valid(c)
 CON receivables.chk_recv_expected_nonneg(c)
 CON receivables.receivables_created_by_foreign(f)

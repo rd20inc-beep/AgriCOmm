@@ -56,8 +56,3 @@ export const financeApi = {
   commodityRates: (params) => api.get('/api/finance/commodity-rates', params),
   addCommodityRate: (data) => api.post('/api/finance/commodity-rates', data),
 };
-export const advancesApi = {
-  list: (params) => api.get('/api/advances', params),
-  create: (data) => api.post('/api/advances', data),
-  allocate: (id, data) => api.put(`/api/advances/${id}/allocate`, data),
-};

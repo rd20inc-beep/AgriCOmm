@@ -145,6 +145,9 @@ export function paymentRequest(variant, ctx = {}, form) {
           amount: num(form.amount),
           // An estimate; Finance sets the rate the bank applied when confirming.
           fx_rate: num(form.fxRate) > 0 ? num(form.fxRate) : null,
+          // What the banks deducted (USD only, up to the tolerance — D-8): the
+          // buyer paid amount + charges; the charge is expensed to 6200.
+          bank_charges: num(form.bankCharges) > 0 ? num(form.bankCharges) : 0,
           payment_date: form.date,
           payment_method: form.method,
           bank_account_id: form.bankAccountId ? parseInt(form.bankAccountId, 10) : null,
