@@ -98,7 +98,7 @@ describe('payments feed totals — the rules (no DB)', () => {
     expect(PENDING_CHEQUE).toMatch(/'Bounced'/);
     expect(SETTLED).toMatch(/p\.cleared IS NOT FALSE/);
     expect(PENDING_CHEQUE).toMatch(/p\.cleared IS FALSE/);
-    expect(NEVER_MONEY).toEqual(['Pending Finance Confirmation', 'Rejected']);
+    expect(NEVER_MONEY).toEqual(['Pending Finance Confirmation', 'Rejected', 'Superseded']); // Superseded: P2-15
   });
   test('the controller no longer sums a page of rows into one PKR figure', () => {
     const src = require('fs').readFileSync(require('path').join(__dirname, '../modules/finance/finance.controller.js'), 'utf8');

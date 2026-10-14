@@ -264,15 +264,42 @@ async function closeProblems(conn, order) {
   return problems;
 }
 
-// A shipment that locked no COGS (the lock failed, or nothing to cost it
-// from) posts no 5020/1230 journal and shows the full contract as profit. Tell
-// the Owner — never Finance, who must not see order numbers (notifyFinance
-// guardrail). Best-effort in its own savepoint: it never blocks the shipment.
-async function flagMissingCogs(trx, order, err) {
+// A shipment and its journals are ONE event (P2-03). The lock / postings used
+// to fail in a savepoint that only logged: the order shipped, the stock left,
+// revenue_posted stayed false and the P&L silently missed the sale. Any failure
+// now rolls the whole Shipped transition back — status, history, dispatch — and
+// the user is told why. Revenue dating (D-16) is undecided, so there is
+// deliberately no "ship now, post later" retry.
+//
+// A rule failure (missing posting rule / account, closed period, unbalanced
+// lines, no booked rate) is the user's to fix → 400 with the reason. A database
+// error (Postgres SQLSTATE in err.code) stays a server fault → 500.
+function shipmentPostingFailure(order, err, what) {
+  if (err && err.statusCode && err.shipmentPosting) return err;
   const ref = order.order_no || `#${order.id}`;
-  const why = err
-    ? `the COGS lock failed (${String(err.message || err).slice(0, 160)})`
-    : 'nothing was reserved or allocated to cost it from';
+  if (err && typeof err.code === 'string' && /^[0-9A-Z]{5}$/.test(err.code)) return err;
+  const e = new Error(
+    `Cannot ship ${ref}: ${what} (${String((err && err.message) || err).slice(0, 240)}). ` +
+    'Nothing was shipped and no stock was dispatched — fix the cause and mark it shipped again.'
+  );
+  e.statusCode = 400;
+  e.shipmentPosting = true;
+  e.cause = err;
+  return e;
+}
+
+function postingRuleMissing(triggerEvent) {
+  return new Error(`no active '${triggerEvent}' posting rule (Accounting ▸ Posting Rules)`);
+}
+
+// A shipment with nothing reserved or allocated to cost it from posts no
+// 5020/1230 journal and shows the full contract as profit. That is not a
+// posting failure, so the shipment goes — and the Owner is told (never Finance,
+// who must not see order numbers: notifyFinance guardrail). Best-effort in its
+// own savepoint: the alert never blocks the shipment.
+async function flagMissingCogs(trx, order) {
+  const ref = order.order_no || `#${order.id}`;
+  const why = 'nothing was reserved or allocated to cost it from';
   console.warn(`[shipment] ${ref} shipped with COGS 0 — ${why}.`);
   try {
     await trx.transaction((sp) => notificationService.createForRole(sp, {
@@ -327,33 +354,26 @@ async function runTransitionSideEffects(trx, order, toStatus, userId) {
   // The reservations above are Consumed by now; calculateOrderCOGS counts
   // Consumed + Active, so this is Σ dispatched kg × lot cost/kg, locked once.
   //
-  // In a SAVEPOINT: a SQL error inside the lock used to abort the whole
-  // Postgres transaction (the shipment then failed with an unrelated-looking
-  // error), and a JS error shipped silently with COGS 0 and no 5020 journal.
-  // Now a failure rolls back only the COGS write, the shipment goes through,
-  // and a missing COGS is raised to the Owner (it already counts in the
-  // Finance summary's shippedMissingCogs warning) instead of being swallowed.
+  // A lock that throws fails the shipment (see shipmentPostingFailure): it used
+  // to ship with COGS 0 and no 5020 journal. A lock that finds nothing to cost
+  // is not an error — the Owner is alerted and it counts in the Finance
+  // summary's shippedMissingCogs warning.
   let cogs = null;
-  let cogsError = null;
   try {
-    cogs = await trx.transaction((sp) => inventoryService.lockOrderCOGS(sp, order.id, parseFloat(order.booked_fx_rate) || null));
+    cogs = await inventoryService.lockOrderCOGS(trx, order.id, parseFloat(order.booked_fx_rate) || null);
   } catch (e) {
-    cogsError = e;
-    console.error(`[shipment] COGS lock failed for ${order.order_no || order.id} — shipped without COGS:`, e.message);
+    throw shipmentPostingFailure(order, e, 'its cost of goods could not be locked');
   }
-  if (cogsError || !(parseFloat(cogs && cogs.totalCOGS) > 0)) {
-    await flagMissingCogs(trx, order, cogsError);
+  if (!(parseFloat(cogs && cogs.totalCOGS) > 0)) {
+    await flagMissingCogs(trx, order);
   }
 
   // Recognize revenue + matching COGS at shipment (control transfer).
   // Posting rules export_revenue (DR 1110 Export AR / CR 4010 Sales) and
-  // export_shipment (DR 5020 COGS / CR 1230 Finished Rice) exist but were
-  // never fired — so AR only ever saw receipt credits and customer ledgers
-  // ran negative. Guarded by revenue_posted so a re-driven Shipped
-  // transition can't double-post. Wrapped in a SAVEPOINT (nested trx) so a
-  // posting failure or a closed-period rejection rolls back ONLY the
-  // journals, never the shipment itself (matches the non-blocking accounting
-  // pattern used by advance/balance receipts).
+  // export_shipment (DR 5020 COGS / CR 1230 Finished Rice). Guarded by
+  // revenue_posted so a re-driven Shipped transition can't double-post. The
+  // nested transaction is only a savepoint: any failure inside it is rethrown
+  // and rolls back the shipment with it (P2-03) — never swallowed.
   if (!order.revenue_posted) {
     try {
       await trx.transaction(async (sp) => {
@@ -367,13 +387,19 @@ async function runTransitionSideEffects(trx, order, toStatus, userId) {
         // 6210 (G-7), so AR nets to zero once the order is paid.
         const contractVal = parseFloat(o.contract_value) || 0;
         const bookedRate = parseFloat(o.booked_fx_rate) || 0;
+        const foreign = (o.currency || 'PKR') !== 'PKR';
+        // A foreign order with no booked figure has no PKR revenue to post — it
+        // used to fall back to the raw USD amount booked as rupees. Postings
+        // are blocked until a rate is entered (D-10).
+        if (foreign && contractVal > 0 && !(parseFloat(o.contract_value_pkr_locked) > 0) && !(bookedRate > 0)) {
+          throw new Error(`the order has no booked ${o.currency}/PKR rate — enter the booked FX rate first`);
+        }
         const revenuePkr = parseFloat(o.contract_value_pkr_locked)
           || (bookedRate ? contractVal * bookedRate : 0)
-          || contractVal;
-        const foreign = (o.currency || 'PKR') !== 'PKR';
+          || (foreign ? 0 : contractVal);
 
         if (revenuePkr > 0) {
-          await accountingService.autoPost(sp, {
+          const revJe = await accountingService.autoPost(sp, {
             triggerEvent: 'export_revenue', entity: 'export',
             amount: revenuePkr, currency: 'PKR',
             refType: 'Export Order', refNo: o.order_no,
@@ -386,6 +412,9 @@ async function runTransitionSideEffects(trx, order, toStatus, userId) {
             origCurrency: foreign ? o.currency : null,
             origFxRate: foreign ? bookedRate : null,
           });
+          // autoPost returns null when the rule is missing or inactive — that
+          // used to leave the sale off the P&L with nothing said.
+          if (!revJe) throw postingRuleMissing('export_revenue');
         }
 
         // Freight charged BESIDE an FOB price is revenue too, and AR was just
@@ -398,6 +427,9 @@ async function runTransitionSideEffects(trx, order, toStatus, userId) {
         // billableFreight returns 0 and nothing posts here.
         const freightForeign = billableFreight(o);
         if (freightForeign > 0) {
+          if (foreign && !(bookedRate > 0)) {
+            throw new Error(`the order has no booked ${o.currency}/PKR rate to value its freight — enter the booked FX rate first`);
+          }
           const freightPkr = parseFloat((freightForeign * (bookedRate || 1)).toFixed(2));
           const [exportAR, freightRev] = await Promise.all([
             sp('chart_of_accounts').where({ code: '1110' }).first(),
@@ -422,14 +454,14 @@ async function runTransitionSideEffects(trx, order, toStatus, userId) {
               ],
             });
             if (jrnl?.id) await accountingService.postJournal(sp, jrnl.id);
-          } else {
-            console.warn(`Freight recovery skipped for ${o.order_no}: chart_of_accounts missing 1110/4070`);
+          } else if (!exportAR || !freightRev) {
+            throw new Error('the chart of accounts is missing 1110 Export AR / 4070 Freight & Insurance Recovered');
           }
         }
 
         const cogsPkr = parseFloat(o.inventory_cogs_total_pkr) || 0;
         if (cogsPkr > 0) {
-          await accountingService.autoPost(sp, {
+          const cogsJe = await accountingService.autoPost(sp, {
             triggerEvent: 'export_shipment', entity: 'export',
             amount: cogsPkr, currency: 'PKR',
             refType: 'Export Order', refNo: o.order_no,
@@ -438,6 +470,7 @@ async function runTransitionSideEffects(trx, order, toStatus, userId) {
             partyType: o.customer_id ? 'customer' : null,
             partyId: o.customer_id || null,
           });
+          if (!cogsJe) throw postingRuleMissing('export_shipment');
         }
 
         // Apply the customer advance against AR. The advance was banked as a
@@ -489,14 +522,14 @@ async function runTransitionSideEffects(trx, order, toStatus, userId) {
             });
             if (jrnl?.id) await accountingService.postJournal(sp, jrnl.id);
           } else {
-            console.warn(`Advance application skipped for ${o.order_no}: chart_of_accounts missing 1310/1110`);
+            throw new Error('the chart of accounts is missing 1310 Customer Advances / 1110 Export AR');
           }
         }
 
         await sp('export_orders').where({ id: o.id }).update({ revenue_posted: true });
       });
     } catch (e) {
-      console.warn(`Revenue recognition failed for order ${order.order_no} (non-blocking):`, e.message);
+      throw shipmentPostingFailure(order, e, 'its revenue and cost-of-sales journals could not be posted');
     }
   }
 

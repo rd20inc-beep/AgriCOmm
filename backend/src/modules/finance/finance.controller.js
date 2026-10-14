@@ -400,7 +400,7 @@ const financeController = {
       const base = () => db('payments as p')
         .leftJoin('bank_accounts as ba', 'ba.id', 'p.bank_account_id')
         // Exclude pending/rejected export receipts — not banked money yet (item 14).
-        .whereNotIn('p.status', ['Pending Finance Confirmation', 'Rejected'])
+        .whereNotIn('p.status', ['Pending Finance Confirmation', 'Rejected', 'Superseded'])
         .select(
           'p.id', 'p.payment_no', 'p.amount', 'p.currency', 'p.payment_method',
           'p.payment_date', 'p.bank_reference', 'p.notes', 'p.bank_account_id', 'p.type',
@@ -533,7 +533,7 @@ const financeController = {
         // was recorded (it still has to be cleared here before it counts).
         .where('p.payment_method', 'cheque').where('p.cleared', false)
         // A reversed, rejected or bounced cheque is not coming — don't count it down.
-        .whereNotIn('p.status', ['Reversed', 'Rejected', 'Bounced'])
+        .whereNotIn('p.status', ['Reversed', 'Rejected', 'Bounced', 'Superseded'])
         .select('p.id', 'p.type', 'p.amount', 'p.currency', 'p.fx_rate', 'p.base_amount_pkr', 'p.due_date', 'p.payment_date', 'p.payment_no', 'p.bank_account_id', 'p.bank_reference',
           'p.local_sale_id', 'r.local_sale_id as recv_local_sale_id',
           'r.customer_id as recv_customer_id', 'pa.supplier_id as pay_supplier_id', 'ls.customer_id as ls_customer_id',
@@ -653,7 +653,7 @@ const financeController = {
         // Locked so a clear cannot race a reversal of the same cheque.
         const p = await trx('payments').where({ id }).forUpdate().first();
         if (!p) throw fail('Payment not found.', 404);
-        if (p.status === 'Reversed' || p.status === 'Rejected' || p.status === 'Bounced') {
+        if (p.status === 'Reversed' || p.status === 'Rejected' || p.status === 'Bounced' || p.status === 'Superseded') {
           throw fail(`Cheque ${p.payment_no} was ${String(p.status).toLowerCase()} — it cannot be cleared.`, p.status === 'Bounced' ? 409 : 400);
         }
         if (p.cleared) return { alreadyCleared: true };
@@ -1046,7 +1046,7 @@ const financeController = {
       }
 
       // Cheques past their clearing date but not yet cleared.
-      const oc = await safe(() => db('payments').where('payment_method', 'cheque').where('cleared', false).whereNotIn('status', ['Reversed', 'Rejected', 'Bounced']).whereNotNull('due_date').where('due_date', '<', today).count('id as c').sum('amount as t').first(), { c: 0, t: 0 });
+      const oc = await safe(() => db('payments').where('payment_method', 'cheque').where('cleared', false).whereNotIn('status', ['Reversed', 'Rejected', 'Bounced', 'Superseded']).whereNotNull('due_date').where('due_date', '<', today).count('id as c').sum('amount as t').first(), { c: 0, t: 0 });
       if (parseInt(oc.c, 10) > 0) alerts.push({ id: 'overdue_cheques', type: 'cheque', severity: 'warning', title: 'Cheques awaiting clearance', message: `${oc.c} cheque(s) are past their clearing date — ${rs(oc.t)}.`, count: parseInt(oc.c, 10), total: num(oc.t), link: '/finance/due-dates' });
 
       // Due within the next 7 days (heads-up, info).
@@ -1372,7 +1372,7 @@ const financeController = {
         if (!pay) throw fail('Payment not found.', 404);
         if (pay.status === 'Reversed') throw fail('This payment has already been reversed.');
         if (pay.status === 'Bounced') throw fail('This cheque bounced — it never moved any money, so there is nothing to reverse.', 409);
-        if (pay.status === 'Rejected' || pay.status === 'Pending Finance Confirmation') {
+        if (pay.status === 'Rejected' || pay.status === 'Superseded' || pay.status === 'Pending Finance Confirmation') {
           throw fail('Only a confirmed payment can be reversed — this one never moved any money.');
         }
         const isPayment = pay.type === 'payment' && (pay.linked_payable_id || (pay.source_table && pay.source_id));

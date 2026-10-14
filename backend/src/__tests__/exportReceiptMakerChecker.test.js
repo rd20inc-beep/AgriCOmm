@@ -93,7 +93,10 @@ describe('confirming a pending export receipt', () => {
     seed(3);
     const r = await confirm(4);
     expect(r.statusCode).toBe(200);
-    expect(db.tables.payments[0]).toMatchObject({ created_by: 3, confirmed_by: 4 });
+    // The pending row is kept as Superseded (P2-15); the posted row follows it.
+    const posted = db.tables.payments.find((p) => p.status !== 'Superseded');
+    expect(posted).toMatchObject({ created_by: 3, confirmed_by: 4 });
+    expect(db.tables.payments.find((p) => p.status === 'Superseded')).toMatchObject({ superseded_by_payment_id: posted.id });
   });
 
   test.each([[9, 'Owner'], [1, 'Super Admin']])('user %i (%s) may confirm a receipt they recorded', async (uid) => {

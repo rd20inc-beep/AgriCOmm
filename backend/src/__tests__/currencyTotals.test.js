@@ -283,9 +283,9 @@ describe('Cash forecast — per currency; reversed / bounced / uncleared kept ou
     expect(recvQ.whereNotIns).toEqual([['status', ['Paid', 'Received', 'Written Off']]]);
     const payQ = db.__queries.find((x) => x.table === 'payables');
     expect(payQ.whereNotIns).toEqual([['status', ['Paid', 'Written Off', 'Reversed']]]);
-    // Unconfirmed / rejected receipts never count; PENDING_CHEQUE (whereRaw)
+    // Unconfirmed / rejected / superseded (P2-15) receipts never count; PENDING_CHEQUE (whereRaw)
     // drops Reversed / Bounced and keeps only cleared = false.
     const chqQ = db.__queries.find((x) => x.table === 'payments as p');
-    expect(chqQ.whereNotIns).toEqual([['p.status', ['Pending Finance Confirmation', 'Rejected']]]);
+    expect(chqQ.whereNotIns).toEqual([['p.status', ['Pending Finance Confirmation', 'Rejected', 'Superseded']]]);
   });
 });

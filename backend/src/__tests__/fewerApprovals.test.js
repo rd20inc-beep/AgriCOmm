@@ -95,7 +95,13 @@ describe('A. export receipts post on Finance confirmation alone', () => {
   });
 
   test('cancelling an order is still owner-approved (not part of this decision)', () => {
-    expect(ownerKinds(routeLayer(router, 'post', '/:id/cancel'))).toEqual(['export_cancel']);
+    // One gate that picks the plain cancel approval, or the forfeit one when
+    // the money received is being forfeited (P2-15 / D-7).
+    const gates = routeLayer(router, 'post', '/:id/cancel').route.stack
+      .map((s) => s.handle.ownerApprovalGates).filter(Boolean);
+    expect(gates).toHaveLength(1);
+    expect(gates[0].other.ownerApprovalKind).toBe('export_cancel');
+    expect(gates[0].forfeit.ownerApprovalKind).toBe('export_cancel_forfeit');
   });
 });
 

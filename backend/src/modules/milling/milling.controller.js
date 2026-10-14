@@ -1624,40 +1624,11 @@ const millingController = {
           });
         }
 
-        if (batch.linked_export_order_id && batchCostTotal > 0) {
-          const existingCost = await trx('export_order_costs')
-            .where({ order_id: batch.linked_export_order_id, category: 'milling' })
-            .first();
-
-          // batchCostTotal is in PKR — convert to order currency using order's locked FX rate
-          const linkedOrder = await trx('export_orders').where('id', batch.linked_export_order_id).first();
-          const orderFxRate = parseFloat(linkedOrder?.booked_fx_rate) || 280;
-          const costInOrderCurrency = batchCostTotal / orderFxRate;
-
-          if (existingCost) {
-            await trx('export_order_costs')
-              .where({ id: existingCost.id })
-              .update({
-                amount: parseFloat(existingCost.amount || 0) + costInOrderCurrency,
-                currency: linkedOrder?.currency || 'USD',
-                base_amount_pkr: (parseFloat(existingCost.amount || 0) + costInOrderCurrency) * orderFxRate,
-                fx_rate: orderFxRate,
-                notes: `Updated from milling batch ${batch.batch_no} (PKR ${Math.round(batchCostTotal).toLocaleString()} ÷ ${orderFxRate})`,
-                updated_at: trx.fn.now(),
-              });
-          } else {
-            await trx('export_order_costs').insert({
-              order_id: batch.linked_export_order_id,
-              category: 'milling',
-              amount: costInOrderCurrency,
-              currency: linkedOrder?.currency || 'USD',
-              base_amount_pkr: batchCostTotal,
-              fx_rate: orderFxRate,
-              notes: `From milling batch ${batch.batch_no} (PKR ${Math.round(batchCostTotal).toLocaleString()} ÷ ${orderFxRate})`,
-              created_by: req.user?.id || null,
-            });
-          }
-        }
+        // The linked export order's milling cost is NOT copied onto
+        // export_order_costs any more (P2-05): it was written once, in the
+        // order's currency (÷ the booked rate or a literal 280), and never
+        // refreshed. The order page derives it from this batch's milling_costs
+        // on read (exportCosts.derivedMillingCosts).
 
         // Trigger automation when this save moved the batch to Completed. (It
         // used to test the pre-yield statuses against `batch` AFTER

@@ -278,6 +278,32 @@ const cancelExportDebitNote = Joi.object({
   reason: Joi.string().allow('', null),
 });
 
+// P2-05: one row per vendor bill, PKR (a foreign bill is converted at entry).
+// rice / raw_rice / milling are not order expenses — the rice is costed at
+// shipment from stock (5020/1230) and milling is derived from the batch.
+const addExportOrderCost = Joi.object({
+  category: Joi.string().trim().lowercase().max(50).required()
+    .invalid('rice', 'raw_rice', 'milling')
+    .messages({ 'any.invalid': 'Rice and milling are costed from stock at shipment and from the milling batch — they cannot be added as an order expense.' }),
+  amount: Joi.number().positive().precision(2).max(1e12).required(),
+  currency: Joi.string().trim().uppercase().length(3).default('PKR'),
+  fx_rate: Joi.number().positive().allow(null, ''),
+  notes: Joi.string().max(2000).allow('', null),
+  supplier_id: Joi.number().integer().positive().allow(null, ''),
+  vendor_name: Joi.string().trim().max(200).allow('', null),
+  bill_ref: Joi.string().trim().max(100).allow('', null),
+});
+
+// P2-15 / D-7: what happens to money already received when an order is cancelled.
+const cancelExportOrder = Joi.object({
+  reason: Joi.string().max(2000).allow('', null),
+  money_disposition: Joi.string().valid('refund', 'credit', 'forfeit').allow(null, ''),
+  refund_bank_account_id: Joi.number().integer().positive().allow(null, ''),
+  refund_date: Joi.date().iso().allow(null, ''),
+  refund_reference: Joi.string().max(100).allow('', null),
+  authorized_by_owner_id: Joi.number().integer().positive().allow(null, ''),
+});
+
 const exportOrderDocumentAction = Joi.object({
   doc_type: Joi.string().required(),
   file_path: Joi.string().allow('', null),
@@ -1043,6 +1069,8 @@ module.exports = {
   saveBatchPackaging,
   issueExportDebitNote,
   cancelExportDebitNote,
+  addExportOrderCost,
+  cancelExportOrder,
   exportOrderDocumentAction,
   confirmAdvance,
   confirmBalance,

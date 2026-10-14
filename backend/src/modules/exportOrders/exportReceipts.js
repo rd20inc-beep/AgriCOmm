@@ -372,9 +372,9 @@ async function postExportReceipt(trx, {
 }
 
 /**
- * Finance confirms a pending receipt: posts it (postExportReceipt) and removes
- * the pending placeholder in the SAME transaction, so a posting failure leaves
- * the pending row for another try. The posted row keeps the recorder as
+ * Finance confirms a pending receipt: posts it (postExportReceipt) and marks
+ * the pending placeholder Superseded in the SAME transaction, so a posting
+ * failure leaves the pending row for another try. The posted row keeps the recorder as
  * created_by and the confirmer as confirmed_by — never the same person unless
  * an Owner / Super Admin (403 otherwise).
  */
@@ -403,9 +403,15 @@ async function confirmPendingExportReceipt(trx, {
     // Finance may correct the charge the recorder entered.
     bankCharges: bankCharges != null && bankCharges !== '' ? bankCharges : pending.bank_charges,
   });
-  // The confirmed PAY row now exists; drop the pending placeholder so it isn't
-  // double-counted.
-  await trx('payments').where({ id: pending.id }).del();
+  // The confirmed PAY row now exists. The pending placeholder is kept as
+  // history (P2-15: receipts are never deleted), marked Superseded and pointing
+  // at the posted row — like Rejected, every money reader leaves it out, so it
+  // is not double-counted.
+  await trx('payments').where({ id: pending.id }).update({
+    status: 'Superseded',
+    superseded_by_payment_id: ctx.payment ? ctx.payment.id : null,
+    updated_at: trx.fn.now(),
+  });
   return { ...ctx, isAdvance: !(recv && recv.type === 'Balance') };
 }
 

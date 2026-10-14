@@ -37,6 +37,7 @@ test('the owner-approved routes', () => {
     'POST accounting /journals/:id/reverse [journal_reversal]',
     'POST admin /approvals/:type/:id/approve [master_data]',
     'POST exportOrders /:id/cancel [export_cancel]',
+    'POST exportOrders /:id/cancel [export_cancel_forfeit]', // forfeiting money received (P2-15 / D-7)
     'POST exportOrders /:id/debit-notes/:noteId/cancel [export_balance]',
     'POST exportOrders /:id/packing-weight/resolve [packing_variance]',
     'POST exportOrders /:id/write-off-balance [export_short_write_off]',

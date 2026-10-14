@@ -10,6 +10,7 @@ const { ledgerFailure, missingAccounts } = require('../../shared/ledgerFailure')
 
 // Owner's Drawings (equity) — migration 350, owner decision D-9.
 const DRAWINGS_CODE = '3030';
+const { isInternalCostCategory } = require('../exportOrders/exportCosts');
 
 const CATEGORY_MAP = {
   general: [
@@ -58,6 +59,11 @@ const expensesService = {
 
     if (!amount || Number(amount) <= 0) throw new ValidationError('Amount must be positive.');
     if (!expense_date) throw new ValidationError('Expense date is required.');
+    // P2-05: rice / milling are costed at shipment from stock and from the
+    // milling batch — booking them as an export-order expense counts them twice.
+    if (order_id && expense_type === 'export' && isInternalCostCategory(category)) {
+      throw new ValidationError('Rice and milling are costed from stock at shipment and from the milling batch — they cannot be added as an export-order expense.');
+    }
 
     // "Personal / Owner" arrives as a general expense with subcategory
     // 'personal' (the form's payload). It is the owner's, not the business's:
@@ -169,6 +175,10 @@ const expensesService = {
           notes: `From business expense ${expenseNo}`,
           business_expense_id: expense.id,
           created_by: userId || null,
+          // One bill, with its vendor (P2-05).
+          supplier_id: supplier_id || null,
+          vendor_name: vendor_name || null,
+          bill_ref: invoice_reference || null,
         });
       }
 
