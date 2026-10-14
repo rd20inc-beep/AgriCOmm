@@ -40,6 +40,20 @@ d('export cost double-count scripts (DB-gated)', () => {
         order_id: o.id, category: 'rice', amount: 500000, currency: 'PKR', base_amount_pkr: 500000, fx_rate: 1,
         paid_amount: paid, payment_status: paid > 0 ? 'Partial' : 'Pending',
       }).returning('*');
+      // …and the accrual it was posted with then (Dr 6000 / Cr 2010).
+      const accounting = require('../modules/accounting/accounting.service');
+      const [exp, ap] = await Promise.all([db('chart_of_accounts').where({ code: '6000' }).first(), db('chart_of_accounts').where({ code: '2010' }).first()]);
+      await db.transaction(async (trx) => {
+        const je = await accounting.createJournal(trx, {
+          date: new Date().toISOString().slice(0, 10), entity: 'export', refType: 'Export Order Cost', refNo: `${o.order_no} rice`,
+          description: 'legacy rice cost', currency: 'PKR', fxRate: 1, isAuto: true, userId: u.id,
+          lines: [
+            { account_id: exp.id, account: exp.name, debit: 500000, credit: 0, narration: 'DR 6000' },
+            { account_id: ap.id, account: ap.name, debit: 0, credit: 500000, narration: 'CR 2010' },
+          ],
+        });
+        await accounting.postJournal(trx, je.id);
+      });
       const [pay] = await db('payables').insert({
         pay_no: `PAY-ZZX-${run}-${row.id}`, entity: 'export', category: 'rice', original_amount: 500000, paid_amount: paid,
         outstanding: 500000 - paid, currency: 'PKR', due_date: '2026-10-01', status: paid > 0 ? 'Partial' : 'Pending',
