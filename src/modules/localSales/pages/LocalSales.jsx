@@ -28,6 +28,7 @@ import useConfirm from '../../../hooks/useConfirm';
 import { paymentWord, groupPaymentWord, payableDue, localToday, readLastCustomerId, rememberLastCustomerId, defaultBankAccountId } from '../utils/saleStatus';
 import { todayLocalISO, fmtPKR as fmtPKRExact, fmtNum, fmtDate, fmtDateTime } from '../../../shared/utils/format';
 import { accountTakesCurrency } from '../../../shared/utils/accountCurrency';
+import { saleLineTotal, isFullyPaid, isOverPaid } from '../utils/saleMoney';
 
 // Local-sale money is shown to the paisa (2 dp), exact, en-PK grouping.
 const fmtPKR = (v) => fmtPKRExact(parseFloat(v) || 0, { decimals: 2 });
@@ -603,7 +604,8 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
   const lineRate = parseFloat(line.rate_input) || 0;
   const lineQtyKg = isPkg ? lineCount : toKg(line.quantity_input, line.quantity_unit, lineBagWt);
   const lineRatePerKg = isPkg ? lineRate : rateToPerKg(line.rate_input, line.rate_unit, lineBagWt);
-  const lineTotal = Math.round(isPkg ? lineCount * lineRate : lineQtyKg * lineRatePerKg);
+  // Whole rupees — the same rule the server applies (utils/saleMoney, P2-24).
+  const lineTotal = saleLineTotal(isPkg ? lineCount * lineRate : lineQtyKg * lineRatePerKg);
   const selectedLot = safeLots.find(l => String(l.id) === String(line.lot_id));
   const selectedPkg = pkgItems.find(i => String(i.id) === String(line.mill_item_id));
   const cartQtyForLot = (lotId) => cart.filter(c => lotId && String(c.lot_id) === String(lotId)).reduce((s, c) => s + c.qtyKg, 0);
@@ -689,7 +691,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
       quantity_input: 1, quantity_unit: 'kg', bag_weight_kg: 1,
       rate_input: amount, rate_unit: 'kg',
       qtyKg: 0,            // not goods — must not count toward rice sold
-      ratePerKg: amount, total: amount, category: 'Charge',
+      ratePerKg: amount, total: saleLineTotal(amount), category: 'Charge',
     }]);
     setCharge({ desc: '', amount: '' });
   }
@@ -730,8 +732,10 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
   const paidNum = paidAmount === '' ? null : (parseFloat(paidAmount) || 0);
   // A cheque is not money until it clears, so a cheque sale is owed in full.
   const owesBalance = form.payment_mode === 'cheque' ? grandTotal > 0.01
-    : form.payment_mode === 'credit' ? (paidNum == null || paidNum < grandTotal - 0.01)
-      : (paidNum != null && paidNum < grandTotal - 0.01);
+    : form.payment_mode === 'credit' ? (paidNum == null || !isFullyPaid(paidNum, grandTotal))
+      : (paidNum != null && !isFullyPaid(paidNum, grandTotal));
+  // More than the total is refused by the server — say so before submit.
+  const overPaid = paidNum != null && isOverPaid(paidNum, grandTotal);
   // A walk-in credit buyer is identified by their phone number.
   const needsPhone = isWalkIn && owesBalance;
 
@@ -747,6 +751,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
     // Step-2 fields are on screen when this runs, so they get an inline message.
     if (form.payment_mode === 'bank_transfer' && !form.bank_account_id) { setErrors({ bank_account_id: 'Select the bank account that received the payment' }); return; }
     if (form.payment_mode === 'cheque' && !form.cheque_no.trim()) { setErrors({ cheque_no: 'Enter the cheque number' }); return; }
+    if (overPaid) { setErrors({ paid_amount: `Amount received cannot be more than the sale total (${fmtPKR(grandTotal)}).` }); return; }
     if (needsPhone && !String(form.buyer_phone || '').replace(/\D/g, '')) { addToast('A walk-in credit sale needs the buyer\'s phone number — it is how their balance is tracked.', 'error'); return; }
     // The mode saved is the mode chosen. An empty amount means "in full" for
     // cash / bank / cheque (the server reads it the same way) and "nothing yet"
@@ -1243,6 +1248,8 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
                 placeholder={grandTotal > 0 ? `${fmtPKR(grandTotal)} (full)` : 'Rs'} />
               {form.payment_mode === 'credit' && <p className="text-xs text-amber-600 mt-1">Leave empty or partial for credit sale</p>}
               {form.payment_mode !== 'credit' && form.payment_mode !== 'cheque' && owesBalance && <p className="text-xs text-amber-600 mt-1">{fmtPKR(grandTotal - (paidNum || 0))} will be owed on this sale</p>}
+              {overPaid && <p className="text-xs text-red-600 mt-1" data-testid="overpaid">Cannot be more than the sale total ({fmtPKR(grandTotal)}).</p>}
+              {errors.paid_amount && !overPaid && <p className="text-xs text-red-600 mt-1">{errors.paid_amount}</p>}
             </div>
           </div>
           {owesBalance && isWalkIn && (

@@ -581,6 +581,24 @@ const replaceContraTransfer = Joi.object({
     'string.empty': 'A reason is required to edit a transfer',
   }),
 });
+// P2-24: a local sale's money fields. Only these are checked — every other
+// field (items[], repacking, buyer, vehicle …) passes through untouched
+// (.unknown), so the controller still sees the whole body. The cap paid ≤
+// total needs the priced lines, so it is enforced in the controller.
+const LOCAL_SALE_MODES = ['cash', 'credit', 'cheque', 'bank_transfer', 'online', 'lc', 'tt', 'wire', 'mobile'];
+const localSaleCreate = Joi.object({
+  payment_mode: Joi.string().valid(...LOCAL_SALE_MODES).default('cash').messages({
+    'any.only': `payment_mode must be one of: ${LOCAL_SALE_MODES.join(', ')}`,
+  }),
+  paid_amount: Joi.number().min(0).allow(null, ''),
+  bank_account_id: Joi.number().integer().positive().allow(null, ''),
+  gate_pass_no: Joi.string().trim().max(60).allow(null, ''),
+}).unknown(true);
+const localSaleReceipt = Joi.object({
+  amount: Joi.number().positive().required(),
+  payment_method: Joi.string().lowercase().valid(...LOCAL_SALE_MODES.filter((m) => m !== 'credit')).default('cash'),
+}).unknown(true);
+
 // P2-19 / D-3: a payment reversal always carries its reason. The Owner's
 // approval (authorized_by_owner_id + X-Owner-Credential) is read by
 // ownerApproval BEFORE this runs, so it need not survive stripUnknown.
@@ -1030,6 +1048,8 @@ module.exports = {
   replaceContraTransfer,
   reverseFundTransfer,
   reversePayment,
+  localSaleCreate,
+  localSaleReceipt,
   createJournal,
   stockAdjustment,
   submitApproval,
