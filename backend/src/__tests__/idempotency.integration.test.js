@@ -5,11 +5,14 @@
 const hasDb = !!process.env.DB_HOST;
 const d = hasDb ? describe : describe.skip;
 
-const mockReq = (key, method, url, body) => ({
+// The signed-in caller (set in beforeAll): a replay re-checks the token.
+const auth = { userId: 7, header: undefined };
+const mockReq = (key, method, url, body, authHeader = auth.header) => ({
   method, originalUrl: url, url, body,
+  headers: authHeader ? { authorization: authHeader } : {},
   get: (h) => (h.toLowerCase() === 'idempotency-key' ? key : undefined),
   is: (t) => t === 'application/json',
-  user: { id: 7 },
+  user: { id: auth.userId },
 });
 const mockRes = () => ({
   statusCode: 200, _status: undefined, _body: undefined,
@@ -19,8 +22,8 @@ const mockRes = () => ({
 const settle = () => new Promise((r) => setTimeout(r, 150));
 
 // Run the middleware; if it calls next(), simulate the handler responding.
-async function runRequest(middleware, { key, method = 'POST', url = '/api/local-sales', body = { qty: 5 } }, handler) {
-  const req = mockReq(key, method, url, body);
+async function runRequest(middleware, { key, method = 'POST', url = '/api/local-sales', body = { qty: 5 }, authHeader }, handler) {
+  const req = mockReq(key, method, url, body, authHeader === undefined ? auth.header : authHeader);
   const res = mockRes();
   let nexted = false;
   await middleware(req, res, () => { nexted = true; });
@@ -38,9 +41,21 @@ d('idempotency middleware (DB-gated)', () => {
     middleware = require('../middleware/idempotency');
     pruneOldKeys = middleware.pruneOldKeys;
     await db('idempotency_keys').where('key', 'like', 'ZZTEST%').del();
+    const jwt = require('jsonwebtoken');
+    const config = require('../config');
+    const role = await db('roles').first('id');
+    await db('users').whereIn('email', ['zztest-idem-a@local.test', 'zztest-idem-b@local.test']).del();
+    const [a, b] = await db('users').insert([
+      { email: 'zztest-idem-a@local.test', full_name: 'ZZ Idem A', password_hash: 'x', role_id: role.id, is_active: true, status: 'active' },
+      { email: 'zztest-idem-b@local.test', full_name: 'ZZ Idem B', password_hash: 'x', role_id: role.id, is_active: true, status: 'active' },
+    ]).returning('*');
+    auth.userId = a.id;
+    auth.header = `Bearer ${jwt.sign({ id: a.id, tv: a.token_version || 0 }, config.jwt.secret)}`;
+    auth.otherHeader = `Bearer ${jwt.sign({ id: b.id, tv: b.token_version || 0 }, config.jwt.secret)}`;
   });
   afterAll(async () => {
     await db('idempotency_keys').where('key', 'like', 'ZZTEST%').del();
+    await db('users').whereIn('email', ['zztest-idem-a@local.test', 'zztest-idem-b@local.test']).del();
     await db.destroy();
   });
   beforeEach(() => { executions = 0; });
@@ -61,6 +76,16 @@ d('idempotency middleware (DB-gated)', () => {
     expect(executions).toBe(0);
     expect(r.status).toBe(201);
     expect(r.body.saleNo).toBe('LS-9999'); // original response
+  });
+
+  test("another user's key (or no token) never replays the stored response", async () => {
+    await runRequest(middleware, { key: 'ZZTEST-OWN' }, handler);
+    executions = 0;
+    const other = await runRequest(middleware, { key: 'ZZTEST-OWN', authHeader: auth.otherHeader }, handler);
+    expect([other.status, other.nexted, executions]).toEqual([401, false, 0]);
+    expect(JSON.stringify(other.body)).not.toContain('LS-9999');
+    const anon = await runRequest(middleware, { key: 'ZZTEST-OWN', authHeader: null }, handler);
+    expect([anon.status, anon.nexted, executions]).toEqual([401, false, 0]);
   });
 
   test('a key stuck in-progress → 409 (never re-runs → no double-post)', async () => {

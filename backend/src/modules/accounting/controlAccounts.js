@@ -13,7 +13,8 @@
  * Covered:
  *   - Cash & Bank: 1000, every account under it (1000–1099 and its children),
  *     and every account a bank_accounts row posts to (its own GL)
- *   - Receivables: 1100, 1110 Export AR, 1120 Local AR; 1310 Customer Advances
+ *   - Receivables: 1100, 1110 Export AR, 1120 Local AR; 1310 Customer Advances;
+ *     1330 Staff Advances (paid out and recovered through payroll, D-11)
  *   - Payables: 2000, 2010 Supplier Payable, 2040 Salaries Payable
  *   - Stock: every 12xx account except 1290 Suspense (which is cleared by
  *     manual reclassification by design)
@@ -21,7 +22,7 @@
 const { cashGroupAccountIds } = require('../../shared/accountGl');
 const { LedgerPostingError } = require('../../shared/errors');
 
-const FIXED_CODES = new Set(['1100', '1110', '1120', '1310', '2000', '2010', '2040']);
+const FIXED_CODES = new Set(['1100', '1110', '1120', '1310', '1330', '2000', '2010', '2040']);
 const NOT_CONTROL = new Set(['1290']);
 
 function isControlCode(code) {

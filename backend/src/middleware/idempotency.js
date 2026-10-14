@@ -25,6 +25,8 @@
 // money-creating POSTs: a request without a key is refused (428) instead of
 // being processed non-idempotently.
 const crypto = require('crypto');
+const jwt = require('jsonwebtoken');
+const config = require('../config');
 const db = require('../config/database');
 
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
@@ -61,6 +63,20 @@ function maybePrune() {
   pruneOldKeys().catch((e) => console.error('idempotency prune error:', e.message));
 }
 
+// A stored response belongs to the user who made the request. This middleware
+// runs before the route's auth, so a replay re-checks the caller's token itself:
+// holding someone else's key must never hand back their response.
+async function callerOwnsKey(req, existing) {
+  if (!existing.user_id) return true; // stored before sign-in (or by a public route)
+  const header = req.headers.authorization || '';
+  if (!header.startsWith('Bearer ')) return false;
+  let decoded;
+  try { decoded = jwt.verify(header.split(' ')[1], config.jwt.secret); } catch { return false; }
+  if (!decoded || decoded.portal || decoded.typ || Number(decoded.id) !== Number(existing.user_id)) return false;
+  const { checkLiveAccount } = require('./auth');
+  return (await checkLiveAccount(decoded)).ok;
+}
+
 module.exports = async function idempotency(req, res, next) {
   const key = req.get('Idempotency-Key');
   if (!key || key.length > 200 || !MUTATING.has(req.method)) return next();
@@ -83,6 +99,9 @@ module.exports = async function idempotency(req, res, next) {
         return res.status(422).json({ success: false, code: 'idempotency_key_reused', message: 'Idempotency-Key reused with a different request.' });
       }
       if (existing.status === 'completed') {
+        if (!(await callerOwnsKey(req, existing))) {
+          return res.status(401).json({ success: false, message: 'Invalid or expired token.' });
+        }
         if (typeof res.set === 'function') res.set('Idempotent-Replayed', 'true');
         return res.status(existing.response_status || 200).json(existing.response_body);
       }

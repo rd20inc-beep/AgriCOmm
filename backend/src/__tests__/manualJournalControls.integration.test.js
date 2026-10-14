@@ -62,7 +62,7 @@ d('manual journal controls (DB-gated)', () => {
     ids.fm = (await user('fm', fmRole.id)).id;
     const roleOf = { [ids.owner]: ownerRole.id, [ids.fm]: fmRole.id };
 
-    for (const code of ['1000', '1110', '1250', '2010', '3000', '6000', '6200', '1290']) {
+    for (const code of ['1000', '1110', '1250', '1330', '2010', '3000', '6000', '6200', '1290']) {
       acc[code] = await db('chart_of_accounts').where({ code }).first();
     }
 
@@ -95,7 +95,7 @@ d('manual journal controls (DB-gated)', () => {
     expect(r2.status).toBe(400);
   });
 
-  test.each([['1000'], ['1110'], ['1250'], ['2010']])('a manual line on control account %s is refused and nothing is saved', async (code) => {
+  test.each([['1000'], ['1110'], ['1250'], ['1330'], ['2010']])('a manual line on control account %s is refused and nothing is saved', async (code) => {
     const before = Number((await db('journal_entries').count({ c: '*' }).first()).c);
     const res = await post('fm', '/api/accounting/journals', journalBody([line('6000', 50, 0), line(code, 0, 50)]));
     expect(res.status).toBe(400);
