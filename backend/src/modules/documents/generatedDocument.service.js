@@ -257,6 +257,16 @@ const generatedDocumentService = {
       if (!(GEN_DOC_TRANSITIONS[row.status] || []).includes('Approved')) {
         const e = new Error(`Cannot approve a ${row.status} document.`); e.status = 409; throw e;
       }
+      // Maker-checker (P2-32 / EXP-39): whoever generated this version may not
+      // also approve it — unless they are the Owner, who may sign off alone.
+      if (row.generated_by != null && userId != null && Number(row.generated_by) === Number(userId)) {
+        const user = await trx('users').where({ id: userId }).first();
+        const role = user && user.role_id != null ? await trx('roles').where({ id: user.role_id }).first() : null;
+        if (role?.name !== 'Owner') {
+          const e = new Error('You generated this document version — a different person must approve it (or the Owner).');
+          e.status = 403; e.code = 'MAKER_CHECKER'; throw e;
+        }
+      }
       // Re-assemble fresh (bank re-resolved from the selected account) and validate.
       const doc = await this._assembledForRow(row, trx);
       const errors = validateForApproval(doc);

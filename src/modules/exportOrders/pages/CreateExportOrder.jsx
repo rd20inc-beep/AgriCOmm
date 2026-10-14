@@ -1263,10 +1263,12 @@ export default function CreateExportOrder() {
                   if (newCust.id) {
                     // Edit existing buyer → applies now + flagged for admin review.
                     const res = await api.put(`/api/admin/customers/${newCust.id}/submit-edit`, newCust);
-                    const c = res?.data?.data?.customer;
-                    set('country', (c?.country) || newCust.country || '');
+                    const body = res?.data?.customer ? res.data : (res?.data?.data || {});
+                    const c = body.customer;
+                    // A proposal leaves the live buyer unchanged until an approver applies it.
+                    if (!body.pending) set('country', (c?.country) || newCust.country || '');
                     qc.invalidateQueries({ queryKey: ['customers'] });
-                    addToast(res?.data?.data?.pending ? `Changes to "${newCust.name}" sent for admin review` : `Buyer "${newCust.name}" updated`, 'success');
+                    addToast(body.pending ? `Changes to "${newCust.name}" sent for admin review — they apply once approved` : `Buyer "${newCust.name}" updated`, 'success');
                   } else {
                     const res = await api.post('/api/customers', newCust);
                     const created = res?.data?.data?.customer || res?.data?.customer || res?.data;

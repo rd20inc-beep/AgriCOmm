@@ -29,7 +29,8 @@ d('payment engine convergence (DB-gated)', () => {
   const ids = {};
   const TODAY = new Date().toISOString().slice(0, 10);
 
-  const auth = (who) => ({ Authorization: `Bearer ${tok[who]}` });
+  // Every write carries a fresh per-submit Idempotency-Key, as the web client does (P2-12).
+  const auth = (who) => ({ Authorization: `Bearer ${tok[who]}`, 'Idempotency-Key': require('crypto').randomUUID() });
   const post = (who, url, body) => request(app).post(url).set(auth(who)).send(body);
   const get = (who, url) => request(app).get(url).set(auth(who));
   const bal = async (id) => Number((await db('bank_accounts').where({ id }).first()).current_balance);

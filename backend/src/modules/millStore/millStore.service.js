@@ -35,6 +35,7 @@ function packagingDefaults(item) {
   return out;
 }
 const { NotFoundError, ValidationError, ConflictError } = require('../../shared/errors');
+const { supplierRefusal } = require('../../shared/partyGate');
 
 const millStoreService = {
   // ─── Items ───
@@ -137,6 +138,12 @@ const millStoreService = {
           }).returning('id');
           resolvedSupplierId = s.id || s;
         }
+      }
+      // A supplier rejected in master-data review cannot be bought from — also
+      // when a typed walk-in name matched one (P2-32).
+      const refusal = await supplierRefusal(trx, resolvedSupplierId);
+      if (refusal) {
+        throw new ConflictError(refusal.message);
       }
 
       const purchaseNo = await repo.generatePurchaseNo(trx);

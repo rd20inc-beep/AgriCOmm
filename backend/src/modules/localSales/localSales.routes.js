@@ -3,6 +3,7 @@ const router = express.Router();
 const controller = require('../../controllers/localSalesController');
 const { authorize, authorizeRole, authorizeAny } = require('../../middleware/rbac');
 const auditAction = require('../../middleware/audit');
+const { requireIdempotencyKey } = require('../../middleware/idempotency');
 
 // Admin invoice copy exposes internal cost/margin — restrict to these roles.
 // (Owner & Super Admin must be listed explicitly; authorizeRole has no bypass.)
@@ -24,6 +25,7 @@ router.get('/:id', canReadSales, controller.getById);
 router.post(
   '/',
   authorize('inventory', 'create'),
+  requireIdempotencyKey, // money-creating: one record per submit (P2-12)
   auditAction('create_local_sale', 'local_sale'),
   controller.create
 );
@@ -43,6 +45,7 @@ router.post(
   // Operator (milling.edit) takes receipts on MILL sales only, through a mill
   // account — enforced in the handler (shared/millPayer).
   authorizeAny(['inventory', 'create'], ['finance', 'confirm_payment'], ['milling', 'edit']),
+  requireIdempotencyKey,
   auditAction('accept_local_sale_payment', 'local_sale'),
   controller.acceptPayment
 );
@@ -51,6 +54,7 @@ router.post(
 router.post(
   '/group/:groupNo/payments',
   authorizeAny(['inventory', 'create'], ['finance', 'confirm_payment'], ['milling', 'edit']),
+  requireIdempotencyKey,
   auditAction('accept_local_sale_group_payment', 'local_sale', (req) => req.params.groupNo),
   controller.acceptGroupPayment
 );

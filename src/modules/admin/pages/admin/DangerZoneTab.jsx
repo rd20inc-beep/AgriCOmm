@@ -8,13 +8,15 @@ import useConfirm from '../../../../hooks/useConfirm';
 import { fmtPKR, fmtMoney, fmtKg } from '../../../../shared/utils/format';
 
 const TXN_TYPES = [
-  { value: 'local_sale',     label: 'Local Sale',     hint: 'restocks the lot, deletes its payment/receivable/journal' },
-  { value: 'export_order',   label: 'Export Order',   hint: 'frees reservations, restocks dispatch, deletes items/costs/journals' },
-  { value: 'milling_batch',  label: 'Milling Batch',  hint: 'deletes the batch + its raw/output lots, vehicles, costs & quality' },
-  { value: 'payment',        label: 'Payment',        hint: 'restores the linked payable/receivable outstanding' },
-  { value: 'mill_purchase',  label: 'Mill Purchase',  hint: 'reverses mill-store stock + deletes the payable' },
-  { value: 'journal_entry',  label: 'Journal Entry',  hint: 'deletes the entry and its lines' },
-  { value: 'lot_transaction',label: 'Lot Transaction',hint: 'deletes a single inventory-ledger row' },
+  // Posted GL is never deleted: what a document posted is netted to zero by
+  // signed-delta journals dated today, so the books stay balanced (P2-23).
+  { value: 'local_sale',     label: 'Local Sale',     hint: 'restocks the lot, deletes its payment/receivable and nets its GL to zero (reversing journals)' },
+  { value: 'export_order',   label: 'Export Order',   hint: 'frees reservations, restocks dispatch, puts receipts back, nets its GL to zero — refused with credit/debit notes or printed-bag orders' },
+  { value: 'milling_batch',  label: 'Milling Batch',  hint: 'same as deleting it in Milling — refused once yielded, Completed or a transporter is paid' },
+  { value: 'payment',        label: 'Payment',        hint: 'restores the linked payable/receivable outstanding and the bank balance, nets its GL to zero' },
+  { value: 'mill_purchase',  label: 'Mill Purchase',  hint: 'reverses mill-store stock + deletes the payable, nets its GL to zero' },
+  { value: 'journal_entry',  label: 'Journal Entry',  hint: 'deletes an unposted DRAFT only — a Posted journal is reversed in Accounting' },
+  { value: 'lot_transaction',label: 'Lot Transaction',hint: 'deletes a zero-quantity ledger row only — correct stock with an adjustment' },
   { value: 'customer',       label: 'Customer (master)', hint: 'deletes a customer — refused if still referenced by live data' },
   { value: 'supplier',       label: 'Supplier (master)', hint: 'deletes a supplier — refused if still referenced by live data' },
   { value: 'product',        label: 'Product (master)',  hint: 'deletes a product — refused if still referenced by live data' },
@@ -78,6 +80,7 @@ export default function DangerZoneTab() {
     catch (e) { addToast(errOf(e), 'error'); }
   }
   async function deleteLot() {
+    if (lotImpact?.financialBlockers?.length > 0) { addToast(`Cannot delete: ${lotImpact.financialBlockers.join('; ')}`, 'error'); return; }
     const blocked = lotImpact?.blockers?.length > 0;
     const lot = lots.find(l => String(l.id) === String(lotId));
     if (!await confirm({
@@ -129,24 +132,28 @@ export default function DangerZoneTab() {
   const [mode, setMode] = useState('add');
   const [amount, setAmount] = useState('');
   const [reason, setReason] = useState('');
+  const [fxRate, setFxRate] = useState('');
   const [bankBusy, setBankBusy] = useState(false);
+  const bankAcct = bankAccountsList.find(b => String(b.id) === String(bankId));
+  const foreign = !!bankAcct && (bankAcct.currency || 'PKR') !== 'PKR';
 
   async function submitBalance() {
     if (!bankId || amount === '') { addToast('Pick an account and enter an amount', 'error'); return; }
-    const acct = bankAccountsList.find(b => String(b.id) === String(bankId));
+    if (foreign && !(Number(fxRate) > 0)) { addToast(`Enter the PKR rate for ${bankAcct.currency} — the correction is posted to the GL in PKR`, 'error'); return; }
+    const acct = bankAcct;
     if (!await confirm({
       title: `${mode === 'set' ? 'Set' : 'Adjust'} the balance on ${acct?.name || 'this account'}?`,
       consequence: mode === 'set'
-        ? 'The account balance is overwritten with this figure and the difference is posted as an adjustment. Nothing reconciles it back to a bank statement.'
-        : 'This amount is posted to the account as a manual adjustment, outside any payment or receipt.',
+        ? 'The account balance is overwritten with this figure; the difference is posted as an adjustment and a GL journal against 1290 Suspense, for Finance to classify. Nothing reconciles it back to a bank statement.'
+        : 'This amount is posted to the account as a manual adjustment, outside any payment or receipt, with a GL journal against 1290 Suspense for Finance to classify.',
       amount: fmtPKR(Number(amount) || 0, { decimals: 2 }),
       confirmLabel: mode === 'set' ? 'Set balance' : 'Post adjustment',
     })) return;
     setBankBusy(true);
     try {
-      const r = await adminApi.dangerAdjustBalance(bankId, { mode, amount: Number(amount), reason });
+      const r = await adminApi.dangerAdjustBalance(bankId, { mode, amount: Number(amount), reason, ...(foreign ? { fx_rate: Number(fxRate) } : {}) });
       addToast(r?.message || 'Balance updated', 'success');
-      setAmount(''); setReason('');
+      setAmount(''); setReason(''); setFxRate('');
     } catch (e) { addToast(errOf(e), 'error'); }
     finally { setBankBusy(false); }
   }
@@ -162,7 +169,7 @@ export default function DangerZoneTab() {
       </div>
 
       {/* Delete a lot */}
-      <Card icon={Box} title="Delete inventory lot" subtitle="Removes the lot and all its movements, ledger entries & reservations">
+      <Card icon={Box} title="Delete inventory lot" subtitle="Removes a lot with no money attached, with its movements & reservations">
         <div>
           <label className={LABEL}>Lot</label>
           <select className={INPUT} value={lotId} onChange={e => previewLot(e.target.value)}>
@@ -178,12 +185,15 @@ export default function DangerZoneTab() {
             <p className="text-gray-600">
               {Object.entries(lotImpact.counts || {}).filter(([, c]) => c > 0).map(([t, c]) => `${c} ${t.replace(/_/g, ' ')}`).join(', ') || 'no child records'}
             </p>
+            {lotImpact.financialBlockers?.length > 0 && (
+              <p className="text-red-700 font-medium flex items-center gap-1"><AlertTriangle size={13} /> Has money attached: {lotImpact.financialBlockers.join('; ')} — cannot be deleted</p>
+            )}
             {lotImpact.blockers?.length > 0 && (
               <p className="text-red-700 font-medium flex items-center gap-1"><AlertTriangle size={13} /> In use: {lotImpact.blockers.join('; ')} — requires force delete</p>
             )}
           </div>
         )}
-        <button disabled={!lotId || lotBusy} onClick={deleteLot}
+        <button disabled={!lotId || lotBusy || lotImpact?.financialBlockers?.length > 0} onClick={deleteLot}
           className="inline-flex items-center gap-2 px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 disabled:opacity-40">
           <Trash2 size={15} /> {lotBusy ? 'Deleting…' : 'Permanently delete lot'}
         </button>
@@ -218,7 +228,7 @@ export default function DangerZoneTab() {
       </Card>
 
       {/* Adjust bank balance */}
-      <Card icon={Landmark} title="Adjust bank / cash balance" subtitle="Add to or set an account balance (manual correction)">
+      <Card icon={Landmark} title="Adjust bank / cash balance" subtitle="Add to or set an account balance (manual correction, posted to GL against 1290 Suspense)">
         <div className="grid grid-cols-2 gap-3">
           <div className="col-span-2">
             <label className={LABEL}>Account</label>
@@ -240,6 +250,12 @@ export default function DangerZoneTab() {
             <label className={LABEL}>Amount</label>
             <input className={INPUT} type="number" step="any" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0.00" />
           </div>
+          {foreign && (
+            <div className="col-span-2">
+              <label className={LABEL}>PKR per {bankAcct.currency} (for the GL journal)</label>
+              <input className={INPUT} type="number" step="any" value={fxRate} onChange={e => setFxRate(e.target.value)} placeholder="e.g. 279.50" />
+            </div>
+          )}
           <div className="col-span-2">
             <label className={LABEL}>Reason</label>
             <input className={INPUT} type="text" value={reason} onChange={e => setReason(e.target.value)} placeholder="e.g. opening balance / correction" />

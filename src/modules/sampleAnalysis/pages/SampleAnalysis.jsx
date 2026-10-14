@@ -14,6 +14,7 @@ import SupplierPicker from '../../../components/SupplierPicker';
 import RiceTypePicker from '../../../components/RiceTypePicker';
 import { useSuppliers, useProducts } from '../../../api/queries';
 import { useApp } from '../../../context/AppContext';
+import { useAuth } from '../../../context/AuthContext';
 import { sampleApi } from '../api/services';
 import { documentsApi } from '../../documents/api/services';
 import { todayLocalISO, fmtKg, fmtPKR, fmtNum, fmtDate } from '../../../shared/utils/format';
@@ -42,6 +43,9 @@ const rs = (v) => (v == null ? '—' : fmtPKR(parseFloat(v) || 0, { decimals: 2 
 
 export default function SampleAnalysis() {
   const { addToast } = useApp();
+  const { hasPermission } = useAuth();
+  // Converting creates a purchase lot — inventory.create only (P2-32).
+  const mayConvert = typeof hasPermission === 'function' && hasPermission('inventory', 'create');
   const qc = useQueryClient();
   const [confirm, confirmDialog] = useConfirm();
   const [tab, setTab] = useState('All');
@@ -152,7 +156,7 @@ export default function SampleAnalysis() {
                 : filtered.length === 0 ? <tr><td colSpan={9} className="px-3 py-6 text-center text-gray-400">No samples yet.</td></tr>
                 : filtered.map((s) => {
                   const m = s.metrics || {};
-                  const canConvert = ['Shortlisted', 'Approved for Purchase'].includes(s.status);
+                  const canConvert = mayConvert && ['Shortlisted', 'Approved for Purchase'].includes(s.status);
                   const editable = s.status !== 'Converted';
                   return (
                     <tr key={s.id} className="hover:bg-gray-50">
