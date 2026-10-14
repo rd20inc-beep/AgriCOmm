@@ -589,6 +589,7 @@ COL export_debit_notes.updated_at:timestamp with time zone:NOT NULL
 COL export_order_costs.amount:numeric:NOT NULL
 COL export_order_costs.bank_account_id:integer:NULL
 COL export_order_costs.base_amount_pkr:numeric:NOT NULL
+COL export_order_costs.bill_ref:character varying:NULL
 COL export_order_costs.category:character varying:NOT NULL
 COL export_order_costs.created_at:timestamp with time zone:NOT NULL
 COL export_order_costs.created_by:integer:NULL
@@ -602,7 +603,9 @@ COL export_order_costs.paid_at:timestamp with time zone:NULL
 COL export_order_costs.payment_method:character varying:NULL
 COL export_order_costs.payment_reference:character varying:NULL
 COL export_order_costs.payment_status:character varying:NOT NULL
+COL export_order_costs.supplier_id:integer:NULL
 COL export_order_costs.updated_at:timestamp with time zone:NOT NULL
+COL export_order_costs.vendor_name:character varying:NULL
 COL export_order_documents.created_at:timestamp with time zone:NOT NULL
 COL export_order_documents.doc_type:character varying:NOT NULL
 COL export_order_documents.file_path:text:NULL
@@ -836,6 +839,21 @@ COL export_quotations.total_amount:numeric:NOT NULL
 COL export_quotations.updated_at:timestamp with time zone:NOT NULL
 COL export_quotations.uuid:uuid:NULL
 COL export_quotations.valid_until:date:NULL
+COL export_receipt_dispositions.amount:numeric:NOT NULL
+COL export_receipt_dispositions.amount_pkr:numeric:NOT NULL
+COL export_receipt_dispositions.authorized_by_owner_id:integer:NULL
+COL export_receipt_dispositions.created_at:timestamp with time zone:NOT NULL
+COL export_receipt_dispositions.created_by:integer:NULL
+COL export_receipt_dispositions.credit_status:character varying:NULL
+COL export_receipt_dispositions.currency:character varying:NOT NULL
+COL export_receipt_dispositions.customer_id:integer:NULL
+COL export_receipt_dispositions.disposition:character varying:NOT NULL
+COL export_receipt_dispositions.id:integer:NOT NULL
+COL export_receipt_dispositions.journal_id:integer:NULL
+COL export_receipt_dispositions.order_id:integer:NOT NULL
+COL export_receipt_dispositions.payment_id:integer:NOT NULL
+COL export_receipt_dispositions.reason:text:NULL
+COL export_receipt_dispositions.refund_payment_id:integer:NULL
 COL follow_ups.created_at:timestamp with time zone:NULL
 COL follow_ups.follow_up_date:date:NOT NULL
 COL follow_ups.id:integer:NOT NULL
@@ -2052,6 +2070,7 @@ COL payments.payment_date:date:NOT NULL
 COL payments.payment_method:character varying:NULL
 COL payments.payment_no:character varying:NOT NULL
 COL payments.record_version:integer:NOT NULL
+COL payments.refund_of_payment_id:integer:NULL
 COL payments.reject_reason:text:NULL
 COL payments.reversal_reason:text:NULL
 COL payments.reversed_at:timestamp with time zone:NULL
@@ -2061,6 +2080,7 @@ COL payments.service_invoice_id:integer:NULL
 COL payments.source_id:integer:NULL
 COL payments.source_table:character varying:NULL
 COL payments.status:character varying:NOT NULL
+COL payments.superseded_by_payment_id:integer:NULL
 COL payments.sync_status:character varying:NOT NULL
 COL payments.type:character varying:NOT NULL
 COL payments.updated_at:timestamp with time zone:NULL
@@ -3036,6 +3056,7 @@ CON export_order_costs.export_order_costs_bank_account_id_foreign(f)
 CON export_order_costs.export_order_costs_created_by_fk(f)
 CON export_order_costs.export_order_costs_order_id_foreign(f)
 CON export_order_costs.export_order_costs_pkey(p)
+CON export_order_costs.export_order_costs_supplier_id_foreign(f)
 CON export_order_documents.chk_export_order_documents_status_valid(c)
 CON export_order_documents.chk_export_order_documents_version_nn(c)
 CON export_order_documents.export_order_documents_order_id_foreign(f)
@@ -3096,6 +3117,19 @@ CON export_quotations.export_quotations_customer_id_foreign(f)
 CON export_quotations.export_quotations_pkey(p)
 CON export_quotations.export_quotations_quotation_no_unique(u)
 CON export_quotations.uq_export_quotations_uuid(u)
+CON export_receipt_dispositions.chk_export_receipt_dispositions_amount_pos(c)
+CON export_receipt_dispositions.chk_export_receipt_dispositions_credit_status(c)
+CON export_receipt_dispositions.chk_export_receipt_dispositions_disposition(c)
+CON export_receipt_dispositions.chk_export_receipt_dispositions_refund_link(c)
+CON export_receipt_dispositions.export_receipt_dispositions_authorized_by_owner_id_foreign(f)
+CON export_receipt_dispositions.export_receipt_dispositions_created_by_foreign(f)
+CON export_receipt_dispositions.export_receipt_dispositions_customer_id_foreign(f)
+CON export_receipt_dispositions.export_receipt_dispositions_journal_id_foreign(f)
+CON export_receipt_dispositions.export_receipt_dispositions_order_id_foreign(f)
+CON export_receipt_dispositions.export_receipt_dispositions_payment_id_foreign(f)
+CON export_receipt_dispositions.export_receipt_dispositions_pkey(p)
+CON export_receipt_dispositions.export_receipt_dispositions_refund_payment_id_foreign(f)
+CON export_receipt_dispositions.uq_export_receipt_dispositions_payment(u)
 CON follow_ups.chk_follow_ups_status_valid(c)
 CON follow_ups.follow_ups_pkey(p)
 CON follow_ups.follow_ups_user_id_foreign(f)
@@ -3585,8 +3619,10 @@ CON payments.payments_linked_receivable_id_foreign(f)
 CON payments.payments_local_sale_id_foreign(f)
 CON payments.payments_payment_no_unique(u)
 CON payments.payments_pkey(p)
+CON payments.payments_refund_of_payment_id_foreign(f)
 CON payments.payments_reversed_by_foreign(f)
 CON payments.payments_service_invoice_id_foreign(f)
+CON payments.payments_superseded_by_payment_id_foreign(f)
 CON payments.payments_type_check(c)
 CON payments.uq_payments_uuid(u)
 CON permissions.permissions_module_action_unique(u)

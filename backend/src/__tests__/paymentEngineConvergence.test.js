@@ -178,9 +178,11 @@ describe('R8 · a Money In receipt on an export receivable goes through the orde
     const order = row('export_orders', 1);
     expect(order).toMatchObject({ advance_received: 2650, advance_fx_rate: 281.5, financial_status: 'Confirmed', status: 'Advance Received' });
     expect(row('receivables', 1)).toMatchObject({ received_amount: 2650, outstanding: 0, status: 'Paid' });
-    // The pending placeholder is replaced by the posted row: maker kept, checker stamped.
-    expect(db.tables.payments).toHaveLength(1);
-    const posted = db.tables.payments[0];
+    // The pending placeholder is kept, Superseded by the posted row (P2-15: never
+    // deleted); the posted row keeps the maker and stamps the checker.
+    expect(db.tables.payments).toHaveLength(2);
+    const [placeholder, posted] = db.tables.payments;
+    expect(placeholder).toMatchObject({ status: 'Superseded', superseded_by_payment_id: posted.id });
     expect(posted).toMatchObject({ created_by: 3, confirmed_by: 4, linked_receivable_id: 1, base_amount_pkr: 745975, bank_account_id: 9, bank_reference: 'SWIFT-1', source_table: 'export_orders' });
     // USD account banks the native USD; the BT row carries the same figure.
     expect(row('bank_accounts', 9).current_balance).toBe(2650);

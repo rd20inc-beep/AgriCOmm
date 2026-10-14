@@ -35,6 +35,7 @@ test('the owner-approved routes', () => {
   expect(gated.map((g) => `${g.verb.toUpperCase()} ${g.file.split(path.sep)[0]} ${g.route} [${g.kind}]`).sort()).toEqual([
     'POST admin /approvals/:type/:id/approve [master_data]',
     'POST exportOrders /:id/cancel [export_cancel]',
+    'POST exportOrders /:id/cancel [export_cancel_forfeit]', // forfeiting money received (P2-15 / D-7)
     'POST exportOrders /:id/debit-notes/:noteId/cancel [export_balance]',
     'POST exportOrders /:id/packing-weight/resolve [packing_variance]',
     'POST milling /advances/:id/approve [salary_advance]',

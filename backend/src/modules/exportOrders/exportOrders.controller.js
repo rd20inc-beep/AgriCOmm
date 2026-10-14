@@ -9,8 +9,26 @@ const workflowService = require('../../services/exportOrderWorkflowService');
 const { resolveShipmentField, resolveRequiredField } = require('./shipmentField');
 const { billableFreight, balanceExpectedFor, freightChanges } = require('./billableFreight');
 const debitNoteService = require('./debitNote.service');
-const { unwindOrderReceipts } = require('./unwindReceipts');
+const { disposeOrderReceipts } = require('./unwindReceipts');
+const { cancelNotesForOrder } = require('./debitNote.service');
 const { recordOrderCost, derivedMillingCosts } = require('./exportCosts');
+
+// What a cancellation leaves open for a person to settle with the vendor
+// (P2-15): counts only, never touched — an incurred cost stays payable.
+async function flaggedOnCancel(trx, orderId) {
+  const n = (row) => parseInt(row && row.n, 10) || 0;
+  const [costs, bags, prs, docs] = await Promise.all([
+    trx('payables as pa')
+      .join('export_order_costs as c', function () { this.on('c.id', '=', 'pa.source_id').andOn('pa.source_table', '=', trx.raw('?', ['export_order_costs'])); })
+      .where('c.order_id', orderId)
+      .whereNotIn('pa.status', ['Paid', 'Written Off', 'Reversed'])
+      .count('pa.id as n').first(),
+    trx('printed_bag_orders').where({ order_id: orderId }).whereNot('status', 'Cancelled').count('id as n').first(),
+    trx('purchase_requisitions').where({ linked_export_order_id: orderId }).where('status', 'Ordered').count('id as n').first(),
+    trx('generated_documents').where({ order_id: orderId }).whereNotIn('status', ['Cancelled', 'Revised']).count('id as n').first(),
+  ]);
+  return { openCostPayables: n(costs), printedBagOrders: n(bags), orderedRequisitions: n(prs), liveDocuments: n(docs) };
+}
 const { recordPendingExportReceipt, postExportReceipt, confirmPendingExportReceipt, assertNotSelfConfirm } = require('./exportReceipts');
 const { fillSingleLineBagSpec, linePackaging } = require('./orderLines');
 const { syncBalanceDueDate } = require('./balanceDueDate');
@@ -1685,14 +1703,19 @@ const exportOrderController = {
   // Danger Zone hard-delete). Closes the audit gap where a force-set 'Cancelled'
   // would orphan reservations, receivables and receipt journals. Allowed only
   // before dispatch — once Shipped the goods have moved (use returns / Danger
-  // Zone). The unwind: release held stock, reverse the order's own Posted GL
-  // (receipts; revenue/COGS can't exist pre-Shipped) leaving incurred vendor
-  // costs payable, refund banked advance/balance cash + void those payments,
-  // write off the receivables, and reset the order's money state.
+  // Zone). The unwind: release held stock; dispose of each confirmed receipt
+  // as a refund / customer credit / Owner-approved forfeit (D-7) WITHOUT
+  // deleting or reversing it (P2-15); void unconfirmed receipts; cancel debit
+  // notes by delta; write off what is still owed; cancel un-ordered PRs and
+  // flag costs, printed bags and documents; reset the order's money state.
+  // Validated by schemas.cancelExportOrder; Owner-approved (route).
   async cancelOrder(req, res) {
     try {
       const id = await resolveExportOrderId(req.params.id);
       if (!id) return res.status(404).json({ success: false, message: 'Export order not found.' });
+      const {
+        money_disposition, refund_bank_account_id, refund_date, refund_reference,
+      } = req.body || {};
       const reason = (req.body && req.body.reason) || null;
 
       const result = await db.transaction(async (trx) => {
@@ -1717,38 +1740,52 @@ const exportOrderController = {
           }
         }
 
-        // 2) Reverse the order's own Posted GL (ref_type 'Export Order' scopes to
-        //    receipts/revenue/COGS/advance-application; the separate
-        //    'Export Order Cost' journals for incurred vendor costs are left
-        //    intact — cancelling the order doesn't void a freight bill already run).
-        const journals = await trx('journal_entries')
-          .where({ ref_type: 'Export Order', ref_no: order.order_no, status: 'Posted' })
-          .select('id');
-        for (const j of journals) {
-          await accountingService.reverseJournal(trx, {
-            journalId: j.id,
-            reason: `Order ${order.order_no} cancelled${reason ? ': ' + reason : ''}`,
-            userId: req.user.id,
-          });
-        }
-
-        // 3) Refund the cash actually banked for CONFIRMED receipts (mirror the
-        //    currency-aware credit used at confirm time) and drop them; receipts
-        //    still pending Finance never touched a bank, so they are only marked
-        //    Rejected — see unwindReceipts.js.
+        // 2) Money received (P2-15, D-7). Receipts, their bank rows and their
+        //    journals are never deleted or reversed: each CONFIRMED receipt gets
+        //    one disposition — a refund (money-out payment linked to it), a
+        //    customer credit (held in 1310), or an Owner-approved forfeit to
+        //    4080 — posted as new signed entries. Receipts still pending Finance
+        //    never moved money and are marked Rejected. See unwindReceipts.js.
         const recvIds = (await trx('receivables').where({ order_id: id }).select('id')).map((r) => r.id);
-        let unwound = { refunded: 0, voided: 0 };
-        if (recvIds.length) {
-          const payments = await trx('payments').whereIn('linked_receivable_id', recvIds);
-          unwound = await unwindOrderReceipts(trx, payments, { orderNo: order.order_no, userId: req.user.id });
-        }
-
-        // 4) Write off the receivables (constraint has no 'Cancelled' status).
-        await trx('receivables').where({ order_id: id }).update({
-          status: 'Written Off', outstanding: 0, received_amount: 0, updated_at: trx.fn.now(),
+        const payments = recvIds.length ? await trx('payments').whereIn('linked_receivable_id', recvIds) : [];
+        const disposed = await disposeOrderReceipts(trx, {
+          order,
+          payments,
+          disposition: money_disposition || null,
+          refundBankAccountId: refund_bank_account_id || null,
+          refundDate: refund_date || null,
+          refundReference: refund_reference || null,
+          userId: req.user.id,
+          ownerId: req.ownerAuth ? req.ownerAuth.ownerId : null,
+          reason,
         });
 
-        // 5) Reset the order's money state and mark it Cancelled + history.
+        // 3) Freight debit notes: each cancelled by a signed-delta journal.
+        const cancelledNotes = await cancelNotesForOrder(trx, { order, userId: req.user.id, reason });
+
+        // 4) Write off what is still owed on the receivables (constraint has no
+        //    'Cancelled' status). received_amount is history and is kept.
+        await trx('receivables').where({ order_id: id }).update({
+          status: 'Written Off', outstanding: 0, updated_at: trx.fn.now(),
+        });
+
+        // 5) Purchase requisitions not yet ordered are cancelled; everything
+        //    with a vendor or a document behind it is flagged, not touched:
+        //    incurred costs stay payable, printed bags may already be printed,
+        //    issued documents are already out.
+        const cancelledPrs = await trx('purchase_requisitions')
+          .where({ linked_export_order_id: id })
+          .whereIn('status', ['Draft', 'Submitted', 'Approved'])
+          .update({
+            status: 'Cancelled',
+            notes: trx.raw("COALESCE(notes || ' — ', '') || ?", [`Export order ${order.order_no} cancelled`]),
+            updated_at: trx.fn.now(),
+          });
+        const flagged = await flaggedOnCancel(trx, id);
+
+        // 6) Reset the order's money state and mark it Cancelled + history. The
+        //    order no longer holds the money — the receipts and their
+        //    dispositions above do.
         await trx('export_orders').where({ id }).update({
           status: 'Cancelled',
           advance_received: 0, advance_received_pkr: 0,
@@ -1764,17 +1801,34 @@ const exportOrderController = {
         return {
           orderNo: order.order_no,
           freedReservations: reservations.length,
-          reversedJournals: journals.length,
-          refundedPayments: unwound.refunded,
-          voidedPendingReceipts: unwound.voided,
+          moneyDisposition: disposed.receipts.length ? money_disposition : null,
+          refundedReceipts: disposed.refunded,
+          creditedReceipts: disposed.credited,
+          forfeitedReceipts: disposed.forfeited,
+          voidedPendingReceipts: disposed.voided,
+          cancelledDebitNotes: cancelledNotes,
+          cancelledRequisitions: cancelledPrs || 0,
+          flagged,
         };
       });
 
       emitExportOrderUpdate(id, 'cancelled', { status: 'Cancelled' });
+      const money = [
+        result.refundedReceipts ? `${result.refundedReceipts} receipt(s) refunded` : null,
+        result.creditedReceipts ? `${result.creditedReceipts} receipt(s) kept as customer credit` : null,
+        result.forfeitedReceipts ? `${result.forfeitedReceipts} receipt(s) forfeited to other income` : null,
+        result.voidedPendingReceipts ? `${result.voidedPendingReceipts} unconfirmed receipt(s) voided` : null,
+      ].filter(Boolean);
+      const open = [
+        result.flagged.openCostPayables ? `${result.flagged.openCostPayables} unpaid cost bill(s)` : null,
+        result.flagged.printedBagOrders ? `${result.flagged.printedBagOrders} printed-bag order(s)` : null,
+        result.flagged.orderedRequisitions ? `${result.flagged.orderedRequisitions} ordered requisition(s)` : null,
+        result.flagged.liveDocuments ? `${result.flagged.liveDocuments} generated document(s)` : null,
+      ].filter(Boolean);
       return res.json({
         success: true,
         data: result,
-        message: `Export order ${result.orderNo} cancelled — ${result.freedReservations} reservation(s) freed, ${result.reversedJournals} journal(s) reversed, ${result.refundedPayments} payment(s) refunded${result.voidedPendingReceipts ? `, ${result.voidedPendingReceipts} unconfirmed receipt(s) voided` : ''}.`,
+        message: `Export order ${result.orderNo} cancelled — ${result.freedReservations} reservation(s) freed${money.length ? `, ${money.join(', ')}` : ''}.${open.length ? ` Still open, review with the vendor: ${open.join(', ')}.` : ''}`,
       });
     } catch (err) {
       const code = err.statusCode || 500;

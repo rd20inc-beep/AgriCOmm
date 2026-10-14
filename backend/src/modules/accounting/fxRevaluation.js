@@ -89,7 +89,7 @@ async function openReceivables(knex, currency, monthEnd, rate) {
     if (!rev) continue;
     const paid = await knex('payments')
       .where({ linked_receivable_id: r.id, type: 'receipt' })
-      .whereNotIn('status', ['Reversed', 'Rejected', 'Pending Finance Confirmation'])
+      .whereNotIn('status', ['Reversed', 'Rejected', 'Superseded', 'Pending Finance Confirmation'])
       .where((w) => w.where('cleared', true).orWhereNull('cleared'))
       .where('payment_date', '<=', monthEnd)
       .sum('amount as s').first();

@@ -28,7 +28,6 @@ import {
 import { useCreateMillingBatch } from '../../../api/queries';
 import { exportOrdersApi } from '../api/services';
 import { duplicateStateFromOrder } from '../utils/createOrderForm';
-import useConfirm from '../../../hooks/useConfirm';
 import PaymentFormDrawer from '../../../components/payments/PaymentFormDrawer';
 import { FinanceDrawersProvider } from '../../finance/drawers/FinanceDrawers';
 import { fmtPKR, fmtUSD, fmtNum, fmtMoney } from '../../../shared/utils/format';
@@ -47,6 +46,7 @@ import {
   MillingDemandModal,
   ShipmentModal,
   ExpenseModal,
+  CancelOrderDrawer,
   InvoicePreviewModal,
   getVisibleTabs,
   documentLabels,
@@ -58,7 +58,6 @@ export default function ExportOrderDetail() {
   const qc = useQueryClient();
   const { token } = useAuth();
   const { requestOwnerApproval } = useOwnerAuth();
-  const [confirm, confirmDialog] = useConfirm();
   const { millingBatches, addToast, exportCostCategories, companyProfileData, bankAccountsList, suppliersList } = useApp();
 
   // Fetch order detail via TanStack Query
@@ -85,6 +84,7 @@ export default function ExportOrderDetail() {
   const [showMillingModal, setShowMillingModal] = useState(false);
   const [showShipmentModal, setShowShipmentModal] = useState(false);
   const [showExpenseModal, setShowExpenseModal] = useState(false);
+  const [showCancelDrawer, setShowCancelDrawer] = useState(false);
   const [submittingDraft, setSubmittingDraft] = useState(false);
   // "Send Email" in the header hands off to the Document Center, which renders
   // the Proforma, attaches it as a PDF and sends it from the server. The header
@@ -587,29 +587,23 @@ export default function ExportOrderDetail() {
     }
   };
 
-  const handleCancelOrder = async () => {
+  // Cancel opens a drawer: when money has been received the person cancelling
+  // chooses refund / customer credit / forfeit (P2-15, D-7) — receipts are
+  // never deleted. The Owner authorises on submit.
+  const handleCancelOrder = () => {
     setShowActions(false);
-    const ok = await confirm({
-      title: `Cancel export order ${order.orderNo || order.id}?`,
-      consequence: 'Reserved stock is freed, receipt journals are reversed, banked advance and balance cash is refunded, and the receivables are written off. Costs already incurred with vendors stay payable.',
-      // The contract value is the exposure being unwound — the figure the person
-      // cancelling should see before an owner is asked to authorise it.
-      amount: order.contractValue != null
-        ? fmtMoney(parseFloat(order.contractValue) || 0, order.currency || 'USD')
-        : undefined,
-      reason: 'optional',
-      confirmLabel: 'Cancel order',
-      cancelLabel: 'Keep the order',
-    });
-    if (!ok) return;
+    setShowCancelDrawer(true);
+  };
+  const submitCancelOrder = async (data) => {
     try {
-      await requestOwnerApproval((ownerId) => cancelOrderMut.mutateAsync({
+      const res = await requestOwnerApproval((ownerId) => cancelOrderMut.mutateAsync({
         id: orderId,
-        data: { reason: ok.reason || undefined, authorized_by_owner_id: ownerId },
+        data: { ...data, authorized_by_owner_id: ownerId },
       }));
-      addToast(`Order ${order.orderNo || order.id} cancelled`);
+      addToast(res?.message || `Order ${order.orderNo || order.id} cancelled`);
+      setShowCancelDrawer(false);
     } catch (err) {
-      addToast(`Failed to cancel order: ${err.message || 'Server error'}`, 'error');
+      addToast(`Failed to cancel order: ${err?.data?.message || err.message || 'Server error'}`, 'error');
     }
   };
 
@@ -1019,6 +1013,18 @@ export default function ExportOrderDetail() {
         pending={addCostMut.isPending}
       />
 
+      <CancelOrderDrawer
+        key={showCancelDrawer ? 'cancel-open' : 'cancel-closed'}
+        isOpen={showCancelDrawer}
+        onClose={() => setShowCancelDrawer(false)}
+        order={order}
+        moneyReceived={(parseFloat(order.advanceReceived) || 0) + (parseFloat(order.balanceReceived) || 0)}
+        currencyLabel={fmtMoney((parseFloat(order.advanceReceived) || 0) + (parseFloat(order.balanceReceived) || 0), order.currency || 'USD')}
+        bankAccountsList={bankAccountsList || []}
+        onConfirm={submitCancelOrder}
+        pending={cancelOrderMut.isPending}
+      />
+
       <InvoicePreviewModal
         isOpen={showInvoicePreview}
         onClose={() => setShowInvoicePreview(false)}
@@ -1026,7 +1032,6 @@ export default function ExportOrderDetail() {
         companyProfile={companyProfileData}
       />
 
-      {confirmDialog}
     </div>
   );
 }

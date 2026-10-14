@@ -28,7 +28,7 @@ const { bounceBlockedReason } = require('./chequeBounce');
 const SOURCE_TABLES = Object.keys(SOURCES);
 
 const num = (v) => parseFloat(v) || 0;
-const NOT_MONEY = ['Pending Finance Confirmation', 'Rejected'];
+const NOT_MONEY = ['Pending Finance Confirmation', 'Rejected', 'Superseded'];
 
 // Whether POST /payments/:id/reverse will take this payment, and if not, why —
 // the same conditions reversePayment checks, read without a lock. The handler

@@ -7,6 +7,16 @@ const validate = require('../../middleware/validate');
 const schemas = require('../../middleware/schemas');
 const ownerApproval = require('../../middleware/ownerApproval');
 
+// The cancel route's Owner gate: the forfeit gate when the money received is
+// being forfeited (P2-15 / D-7), the plain cancel gate otherwise.
+function cancelOwnerApproval(forfeitGate, cancelGate) {
+  const gate = (req, res, next) => (
+    req.body && req.body.money_disposition === 'forfeit' ? forfeitGate : cancelGate
+  )(req, res, next);
+  gate.ownerApprovalGates = { forfeit: forfeitGate, other: cancelGate };
+  return gate;
+}
+
 // Multi-permission gates use the shared rbac authorizeAny (Owner / Super Admin
 // bypass and user module scopes, like every other gate). It replaces a local
 // copy that only Super Admin bypassed.
@@ -109,17 +119,13 @@ router.post(
   auditAction('add_cost', 'export_order', (req) => req.params.id),
   controller.addCost
 );
-// Cancelling is always Owner-authorised. Forfeiting money the buyer paid to
-// other income (D-7) is logged as its own kind of approval, so the Owner's
-// approval trail says that is what they authorised.
-const cancelApproval = {
-  forfeit: ownerApproval('export_cancel_forfeit'),
-  other: ownerApproval('export_cancel'),
-};
 router.post(
   '/:id/cancel',
   authorize('export_orders', 'approve'),
-  (req, res, next) => (req.body && req.body.money_disposition === 'forfeit' ? cancelApproval.forfeit : cancelApproval.other)(req, res, next),
+  // Cancelling is always Owner-authorised. Forfeiting money the buyer paid to
+  // other income (D-7) is logged as its own kind of approval, so the Owner's
+  // approval trail says that is what they authorised.
+  cancelOwnerApproval(ownerApproval('export_cancel_forfeit'), ownerApproval('export_cancel')),
   validate(schemas.cancelExportOrder),
   auditAction('cancel', 'export_order', (req) => req.params.id),
   controller.cancelOrder

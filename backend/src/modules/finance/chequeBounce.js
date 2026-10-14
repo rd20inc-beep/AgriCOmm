@@ -40,7 +40,7 @@ function bounceBlockedReason(p) {
   if (String(p.payment_method || '').toLowerCase() !== 'cheque') return 'Only a cheque can bounce.';
   if (p.status === 'Bounced') return 'This cheque has already bounced.';
   if (p.status === 'Reversed') return 'This cheque was reversed — it cannot bounce.';
-  if (p.status === 'Rejected' || p.status === 'Pending Finance Confirmation') return 'This cheque was never confirmed — it cannot bounce.';
+  if (p.status === 'Rejected' || p.status === 'Superseded' || p.status === 'Pending Finance Confirmation') return 'This cheque was never confirmed — it cannot bounce.';
   if (p.cleared !== false) return 'This cheque has cleared — reverse the payment instead.';
   return null;
 }

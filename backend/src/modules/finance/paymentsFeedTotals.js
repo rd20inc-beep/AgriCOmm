@@ -10,7 +10,7 @@
 
 // Statuses that never moved money at all (unconfirmed / rejected export
 // receipts) — excluded from the feed entirely, as before.
-const NEVER_MONEY = ['Pending Finance Confirmation', 'Rejected'];
+const NEVER_MONEY = ['Pending Finance Confirmation', 'Rejected', 'Superseded'];
 
 // A bounced cheque (B1) never moved money and is no longer pending either: it
 // is listed, but counted in neither the totals nor the pending cheques.
