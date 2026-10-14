@@ -38,6 +38,8 @@ jobs:
       DB_PASSWORD: riceflow
       # Throwaway value for the test run only — not a real secret.
       JWT_SECRET: FAKE-ci-test-secret
+      # Lets the AI read-only role log in so its DB-gated suite runs (fake value).
+      AI_DB_PASSWORD: FAKE-ci-ai-secret
     steps:
       - uses: actions/checkout@v5
 

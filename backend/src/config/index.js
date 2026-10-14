@@ -94,7 +94,10 @@ const config = {
 };
 
 // Refuse to boot production with a missing or well-known JWT secret.
-function assertSecureConfig(cfg, rawSecret = process.env.JWT_SECRET) {
+function assertSecureConfig(cfg, ...secret) {
+  // An explicit undefined means "unset" — a default parameter would swap in the
+  // environment's value and hide it.
+  const rawSecret = secret.length ? secret[0] : process.env.JWT_SECRET;
   if (cfg.env !== 'production') return;
   if (!rawSecret || INSECURE_JWT_SECRETS.has(rawSecret)) {
     throw new Error('[config] JWT_SECRET is unset or set to a default value. Refusing to start in production — set a strong, unique JWT_SECRET.');

@@ -10,12 +10,7 @@
  *   NODE_ENV=development npx knex migrate:latest
  *   npx jest bankAccountBalanceGuard.integration
  */
-jest.mock('../middleware/rateLimiter', () => ({
-  authLimiter: (req, res, next) => next(),
-  apiLimiter: (req, res, next) => next(),
-  loginLimiter: (req, res, next) => next(),
-  passwordResetLimiter: (req, res, next) => next(),
-}));
+jest.mock('../middleware/rateLimiter', () => require('./helpers/passThroughLimiters'));
 
 const hasDb = !!process.env.DB_HOST;
 const d = hasDb ? describe : describe.skip;
