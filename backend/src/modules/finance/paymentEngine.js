@@ -195,7 +195,10 @@ async function recordMoneyMovement(trx, opts) {
   if (accountId && !acct) throw httpError('Bank account not found.');
   if (acct) assertAccountCurrency(acct, cur);
 
-  const fx = cur === 'PKR' ? 1 : (num(fxRate) > 0 ? num(fxRate) : num((await fxRateService.getLatestRate(cur)).rate));
+  // A foreign amount converts at the rate given, else the currency's rate for
+  // the payment date — never a made-up one (D-10: no rate on file → refused).
+  const fx = cur === 'PKR' ? 1 : (num(fxRate) > 0 ? num(fxRate)
+    : await fxRateService.requireRate(cur, paymentDate || new Date(), { what: `This ${isReceipt ? 'receipt' : 'payment'}`, knex: trx }));
   const basePkr = round2(cur === 'PKR' ? amt : amt * fx);
   const no = paymentNo || await generatePaymentNo(trx);
 

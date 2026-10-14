@@ -28,6 +28,8 @@ function resetState() {
     // The receipt moves the order's bank account and journals Dr 1000 / Cr 1310·1110.
     bank_accounts: [{ id: 1, name: 'USD Account', currency: 'USD', current_balance: 0, type: 'bank', entity: 'export', is_active: true }],
     bank_transactions: [],
+    // P2-20 / D-10: an order is booked at the rate on file — never a made-up one.
+    fx_rates: [{ id: 1, from_currency: 'USD', to_currency: 'PKR', rate: 280, effective_date: '2026-01-01', is_active: true }],
     chart_of_accounts: [
       { id: 101, code: '1000', name: 'Cash & Bank' },
       { id: 102, code: '1110', name: 'Export AR (USD)' },

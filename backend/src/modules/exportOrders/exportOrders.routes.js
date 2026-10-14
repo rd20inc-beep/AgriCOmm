@@ -41,6 +41,7 @@ router.post(
 router.put(
   '/:id',
   authorize('export_orders', 'edit'),
+  validate(schemas.updateExportOrder),
   auditAction('update', 'export_order', (req) => req.params.id),
   controller.update
 );

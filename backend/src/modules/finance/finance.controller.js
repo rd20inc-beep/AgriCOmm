@@ -33,8 +33,8 @@ const { recordPendingExportReceipt } = require('../exportOrders/exportReceipts')
 
 // Resolve a payment row to its PKR equivalent using the strongest
 // signal we have: stored base_amount_pkr first, then amount × fx_rate
-// when the rate is real (>1), then amount × 280 as a final fallback
-// for legacy non-PKR rows missing a rate. PKR rows pass through.
+// when the rate is real (>1). A legacy non-PKR row with neither has NO
+// known PKR figure (null) — never a made-up rate (D-10). PKR rows pass through.
 function paymentToPkr(p) {
   const base = parseFloat(p.base_amount_pkr);
   if (base && base > 0) return base;
@@ -43,7 +43,7 @@ function paymentToPkr(p) {
   if (cur === 'PKR') return amount;
   const rate = parseFloat(p.fx_rate);
   if (rate && rate > 1) return amount * rate;
-  return amount * 280;
+  return null;
 }
 
 /**
@@ -578,15 +578,29 @@ const financeController = {
 
       // Each row carries its native currency + a PKR equivalent (for totals).
       // Payables have no stored fx_rate column, so a foreign payable converts at
-      // the LIVE USD rate (not a stale flat 280) — receivables/cheques still use
-      // their own stored rate.
+      // the latest rate for ITS currency (an estimate, D-10) — receivables /
+      // cheques use their own stored rate. A currency with no rate on file has
+      // no PKR equivalent (null) and is left out of the PKR totals.
       const live = await fxRateService.getLatestRate('USD');
-      const liveUsd = live.rate || 280;
-      const toPkr = (amt, cur, fx) => ((cur || 'PKR').toUpperCase() === 'PKR' ? amt : amt * (parseFloat(fx) || liveUsd));
+      const liveUsd = live.rate || null;
+      const curs = new Set([...cheques, ...recv, ...pay].map((x) => String(x.currency || 'PKR').toUpperCase()).filter((c) => c !== 'PKR'));
+      const latestOf = { USD: liveUsd };
+      for (const c of curs) if (!(c in latestOf)) latestOf[c] = (await fxRateService.getLatestRate(c)).rate || null;
+      const toPkr = (amt, cur, fx) => {
+        const c = (cur || 'PKR').toUpperCase();
+        if (c === 'PKR') return amt;
+        const r = parseFloat(fx) > 0 ? parseFloat(fx) : latestOf[c];
+        return r ? amt * r : null;
+      };
       // C5: which rate each row's amountPkr used — 'booked' (the row's own
       // booked figure / rate), 'today' (the live rate, for rows with none) or
       // 'native' (a PKR row). The UI labels the equivalent accordingly.
-      const basisOf = (cur, fx) => ((cur || 'PKR').toUpperCase() === 'PKR' ? 'native' : (parseFloat(fx) > 0 ? 'booked' : 'today'));
+      const basisOf = (cur, fx) => {
+        const c = (cur || 'PKR').toUpperCase();
+        if (c === 'PKR') return 'native';
+        if (parseFloat(fx) > 0) return 'booked';
+        return latestOf[c] ? 'today' : 'none';
+      };
       // A receivable's booked PKR scaled to what is still outstanding.
       const recvPkr = (x, amount, currency) => {
         if (currency === 'PKR') return { amountPkr: amount, pkrBasis: 'native' };
@@ -616,7 +630,7 @@ const financeController = {
       ].sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
       const giving = [
         ...chq('payment'),
-        ...pay.map((x) => { const amount = parseFloat(x.amount) || 0; const currency = (x.currency || 'PKR').toUpperCase(); return { kind: 'credit', label: 'Payable', dueDate: x.due_date, amount, currency, amountPkr: toPkr(amount, currency, liveUsd), pkrBasis: currency === 'PKR' ? 'native' : 'today', party: x.party, reference: x.ref, partyType: 'supplier', partyId: x.supplier_id || null }; }),
+        ...pay.map((x) => { const amount = parseFloat(x.amount) || 0; const currency = (x.currency || 'PKR').toUpperCase(); return { kind: 'credit', label: 'Payable', dueDate: x.due_date, amount, currency, amountPkr: toPkr(amount, currency, null), pkrBasis: basisOf(currency, null), party: x.party, reference: x.ref, partyType: 'supplier', partyId: x.supplier_id || null }; }),
       ].sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
 
       return res.json({ success: true, data: {
@@ -626,6 +640,7 @@ const financeController = {
         totalReceiving: receiving.reduce((s, x) => s + (x.amountPkr || 0), 0),
         totalGiving: giving.reduce((s, x) => s + (x.amountPkr || 0), 0),
         todayRate: liveUsd,
+        todayRateStale: !!live.stale, // D-10: the latest rate is an estimate; flag an old one
         todayRateDate: require('../exportOrders/balanceDueDate').dayOf(live.effectiveDate),
       } });
     } catch (err) {
@@ -657,6 +672,8 @@ const financeController = {
         if (p.cleared) return { alreadyCleared: true };
         const amount = parseFloat(p.amount) || 0;
         const amountPkr = paymentToPkr(p);
+        // A foreign cheque with no booked rate has no PKR figure to post (D-10).
+        if (amountPkr == null) throw fail(`Cheque ${p.payment_no} is in ${p.currency} with no booked rate — it cannot be posted until its rate is recorded.`, 422);
         // The money moves today, so it has to move through an account: the one
         // picked in Due Dates, else the one named when the cheque was recorded.
         const acctId = bank_account_id || p.bank_account_id || null;
@@ -1207,7 +1224,7 @@ const financeController = {
       });
 
       // Each row keeps a PKR-equivalent for its own display (base_amount_pkr →
-      // amount × fx_rate → 280 fallback; see paymentToPkr). It is NOT summed:
+      // amount × fx_rate → none, see paymentToPkr). It is NOT summed:
       // the totals are per currency, from SQL over the whole filtered set.
       for (const r of enriched) {
         r.base_amount_pkr_normalized = paymentToPkr(r);

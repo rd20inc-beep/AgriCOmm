@@ -150,9 +150,11 @@ async function postExportReceipt(trx, {
   const isPkrOrder = currency === 'PKR';
   const requested = parseFloat(fxRate);
   const fallbackRate = isAdvance
-    ? (parseFloat(order.booked_fx_rate) || 280)
-    : (parseFloat(order.advance_fx_rate) || parseFloat(order.booked_fx_rate) || 280);
+    ? (parseFloat(order.booked_fx_rate) || null)
+    : (parseFloat(order.advance_fx_rate) || parseFloat(order.booked_fx_rate) || null);
   const effectiveFxRate = isPkrOrder ? 1 : (Number.isFinite(requested) && requested > 0 ? requested : fallbackRate);
+  // D-10: never posted at a made-up rate — Finance enters the bank's rate.
+  if (!(effectiveFxRate > 0)) throw httpError(`Enter the ${currency}→PKR rate the bank applied — this order has no booked rate.`);
   const receiptPkr = settledAmount(confirmedAmount * effectiveFxRate);
 
   const receivable = await lockRow(trx('receivables').where({ order_id: order.id, type: isAdvance ? 'Advance' : 'Balance' })).first();

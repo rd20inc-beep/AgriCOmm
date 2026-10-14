@@ -440,6 +440,7 @@ router.post('/fx-rates', authorize('finance', 'set_rates'),
     });
     return res.json({ success: true, data: row });
   } catch (err) {
+    if (err.statusCode && err.statusCode < 500) return res.status(err.statusCode).json({ success: false, message: err.message });
     console.error('Add FX rate error:', err);
     return res.status(500).json({ success: false, message: err.message });
   }

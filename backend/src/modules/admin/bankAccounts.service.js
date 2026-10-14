@@ -139,7 +139,8 @@ async function createBankAccount(trx, body = {}, userId = null) {
       fxRate = Number(body.opening_fx_rate);
       if (!(fxRate > 0)) throw httpError(400, 'opening_fx_rate must be a positive number.');
     } else {
-      fxRate = (await fxRates.getRateForDate(cur, today)).rate;
+      // D-10: the opening is a posting — refused without a rate on file.
+      fxRate = await fxRates.requireRate(cur, today, { what: 'The opening balance', knex: trx });
     }
   }
   const pkr = r2(opening * fxRate);

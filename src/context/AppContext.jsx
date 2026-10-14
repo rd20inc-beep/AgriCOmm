@@ -21,7 +21,7 @@ const defaultSettings = {
   defaultAdvancePct: 20,
   defaultCurrency: 'USD',
   millCurrency: 'PKR',
-  pkrRate: 280,
+  pkrRate: null, // no default FX rate (D-10) — rates live in Finance › Rates
   paymentReminderDays: 7,
   lowMarginThreshold: 5,
   minMarginPct: 5,

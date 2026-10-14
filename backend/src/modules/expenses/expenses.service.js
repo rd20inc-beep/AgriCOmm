@@ -1,4 +1,5 @@
 const db = require('../../config/database');
+const fxRateService = require('../finance/fxRate.service');
 const { NotFoundError, ValidationError } = require('../../shared/errors');
 const accountingService = require('../accounting/accounting.service');
 const { normalizePaymentMethod } = require('../../shared/constants/paymentMethods');
@@ -55,8 +56,13 @@ const expensesService = {
     const amountNum = Number(amount);
     // Paying at create goes through the payment engine once the expense and
     // its payable exist (a cheque records but settles nothing until it clears).
-    const rate = Number(fx_rate) || (currency === 'PKR' ? 1 : 280);
-    const amountPkr = currency === 'PKR' ? amountNum : Number((amountNum * rate).toFixed(2));
+    // No currency means PKR (it is stored that way below). A foreign expense
+    // converts at the rate given, else the currency's rate for the expense
+    // date — refused when none is on file (D-10), never a flat 280.
+    const cur = String(currency || 'PKR').toUpperCase();
+    const rate = cur === 'PKR' ? 1
+      : (Number(fx_rate) > 0 ? Number(fx_rate) : await fxRateService.requireRate(cur, expense_date, { what: 'This expense' }));
+    const amountPkr = cur === 'PKR' ? amountNum : Number((amountNum * rate).toFixed(2));
 
     // Run inside a caller-supplied transaction when given, so the expense +
     // cash-out + GL commit atomically with the caller's own work (e.g. payroll

@@ -5,7 +5,7 @@ import { FinanceKPI, FinanceTable, FinanceChart } from '../../../components/fina
 import { useProfitabilitySummary, useLocalSales } from '../../../api/queries';
 import { useFinanceDateRange, overviewSummaryParams } from '../hooks/useFinanceDateRange';
 import { rangeLabel } from '../financeNav';
-import { DEFAULT_FX_RATE } from '../utils/fx';
+import { fxRateLabel } from '../utils/fx';
 import { useApp } from '../../../context/AppContext';
 import StatusBadge from '../../../shared/components/StatusBadge';
 import { fmtPKR, fmtMoney, fmtPct, fmtDate, fmtDateTime, fmtKg } from '../../../shared/utils/format';
@@ -63,7 +63,8 @@ export default function Profit() {
 
   const exportRows = summary.export?.rows || [];
   const millRows = summary.mill?.rows || [];
-  const currentFxRate = summary.currentFxRate || DEFAULT_FX_RATE;
+  // The latest rate on file, an estimate (D-10) — none → "No USD rate on file".
+  const fxLabel = fxRateLabel(summary.currentFxRate, { stale: summary.fxRateStale, date: summary.fxRateDate });
 
   // KPIs — Booked / Realised / Pipeline / FX (export), mill realised (sales of
   // mill output − their COGS), local other, consolidated. PKR.
@@ -206,7 +207,7 @@ export default function Profit() {
             <div className="text-right">
               <div className="text-lg font-bold">Profitability — {tab}</div>
               <div className="text-xs text-gray-600">
-                Consolidated {fmtPKR(consolidatedPkr)} · Margin {fmtPct(overallMargin)} · 1 USD = {currentFxRate}
+                Consolidated {fmtPKR(consolidatedPkr)} · Margin {fmtPct(overallMargin)} · {fxLabel}
               </div>
             </div>
           </div>
@@ -229,7 +230,7 @@ export default function Profit() {
         </>}
         right={<>
           <TypeChip icon={Activity}>Margin {fmtPct(overallMargin)}</TypeChip>
-          <TypeChip>Base PKR · 1 USD = {currentFxRate}</TypeChip>
+          <TypeChip>Base PKR · {fxLabel}</TypeChip>
         </>}
       />
 

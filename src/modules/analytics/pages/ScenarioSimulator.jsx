@@ -9,6 +9,7 @@ import { useRunScenario, useCostPredict } from '../../../api/queries';
 import { useCommodityPrices } from '../../../modules/milling/hooks/useCommodityPrices';
 import { INCOTERMS } from '../../../shared/constants/incoterms';
 import { fmtMoney, fmtKg, fmtPKR } from '../../../shared/utils/format';
+import { useFxRate } from '../../finance/utils/fx';
 
 function formatCurrency(v, cur = 'USD') {
   return fmtMoney(v, cur, { decimals: 2 });
@@ -93,9 +94,13 @@ function CostSimulator() {
 }
 
 function FxSimulator() {
-  const { exportOrders, settings } = useApp();
-  const [fxRate, setFxRate] = useState(settings?.pkrRate || 280);
-  const baseRate = settings?.pkrRate || 280;
+  const { exportOrders } = useApp();
+  // The latest USD rate on file (D-10) — the simulation starts there; with
+  // none on file the user types one.
+  const latestRate = useFxRate();
+  const [typedRate, setFxRate] = useState(null);
+  const baseRate = latestRate || 0;
+  const fxRate = typedRate ?? baseRate;
 
   const impact = useMemo(() => {
     const totalContractUSD = exportOrders.reduce((s, o) => s + (o.contractValue || 0), 0);
@@ -103,8 +108,12 @@ function FxSimulator() {
     const basePKREquiv = totalContractUSD * baseRate;
     const newPKREquiv = totalContractUSD * fxRate;
     const gainLoss = newPKREquiv - basePKREquiv;
-    return { totalContractUSD, basePKREquiv, newPKREquiv, gainLoss, rateChange: ((fxRate - baseRate) / baseRate * 100).toFixed(1) };
+    return { totalContractUSD, basePKREquiv, newPKREquiv, gainLoss, rateChange: baseRate > 0 ? ((fxRate - baseRate) / baseRate * 100).toFixed(1) : '0.0' };
   }, [exportOrders, fxRate, baseRate]);
+
+  if (!(baseRate > 0)) {
+    return <p className="text-sm text-gray-500">No USD rate on file — add one in Finance › Rates to run this simulation.</p>;
+  }
 
   return (
     <div className="space-y-5">

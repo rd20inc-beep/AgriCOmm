@@ -218,7 +218,8 @@ export default function ExportOrderDetail() {
   const totalCosts = Object.values(order.costs || {}).reduce((sum, c) => sum + (parseFloat(c) || 0), 0);
   const contractValuePkr = (parseFloat(order.contractValuePkrLocked) || 0) > 0
     ? parseFloat(order.contractValuePkrLocked)
-    : (parseFloat(order.contractValue) || 0) * (parseFloat(order.bookedFxRate) || 280);
+    // No booked rate → no PKR figure (0, margin shown as —), never 280 (D-10).
+    : (parseFloat(order.contractValue) || 0) * (parseFloat(order.bookedFxRate) || (order.currency === 'PKR' ? 1 : 0));
   const grossProfit = contractValuePkr - totalCosts;
   const marginPct = contractValuePkr > 0 ? ((grossProfit / contractValuePkr) * 100).toFixed(1) : '0.0';
   const currencySymbols = { USD: '$', EUR: '€', GBP: '£' };

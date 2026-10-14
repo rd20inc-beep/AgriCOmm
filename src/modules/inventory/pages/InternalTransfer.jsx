@@ -14,7 +14,6 @@ import { fmtPKR, fmtUSD, fmtNum, fmtDate, fmtDateTime } from '../../../shared/ut
 import { transferKg } from '../utils/stockMath';
 import { perMtToPerKg } from '../../../shared/utils/unitConversion';
 
-const PKR_RATE = 280; // PKR per USD (display fallback for old rows)
 const formatPKR = (value) => fmtPKR(parseFloat(value) || 0, { decimals: 2 });
 const formatUSD = (value) => fmtUSD(parseFloat(value) || 0);
 
@@ -160,7 +159,7 @@ function TransferDetailDrawer({ transferId, onClose, canLinkOrder = true }) {
             <Fact label="Total (PKR)" value={formatPKR(t.totalValuePkr)} />
             <Fact label="Total (USD)" value={formatUSD(t.usdEquivalent)} />
             <Fact label="Created by" value={t.createdByName || '—'} />
-            <Fact label="FX rate" value={`1 USD = ${parseFloat(t.pkrRate) || PKR_RATE} PKR`} />
+            <Fact label="FX rate" value={parseFloat(t.pkrRate) > 0 ? `1 USD = ${parseFloat(t.pkrRate)} PKR` : '—'} />
           </div>
 
           {/* Timeline */}

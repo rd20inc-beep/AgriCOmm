@@ -39,7 +39,9 @@ function fakeKnex(seed = {}) {
             filters.push((r) => String(r[colOf(a)] ?? '').startsWith(pre));
           } else {
             const cmp = { '>': (x, y) => x > y, '<': (x, y) => x < y, '>=': (x, y) => x >= y, '<=': (x, y) => x <= y, '=': (x, y) => x === y }[op];
-            filters.push((r) => cmp(Number(r[colOf(a)]), Number(c)));
+            // Numbers compare as numbers; anything else (an ISO date) as text.
+            const val = (v) => (v !== null && v !== '' && Number.isFinite(Number(v)) ? Number(v) : String(v instanceof Date ? v.toISOString().slice(0, 10) : v));
+            filters.push((r) => cmp(val(r[colOf(a)]), val(c)));
           }
         }
         return b;

@@ -23,17 +23,16 @@ export default function SettingsTab() {
   // the snake_case keys their readers use (backend schemas.updateSettings):
   //   payment_reminder_days → overdue-advance scan + Finance › Confirmations
   //   min_margin_pct        → low-margin order alerts (automation)
-  //   pkr_rate              → FX fallback when no rate is on file for a date
+  // (No FX fallback rate any more — owner decision D-10: rates live per
+  // currency in Finance › Rates; a posting with no rate on file is refused.)
   const [paymentReminderDays, setPaymentReminderDays] = useState(settings.paymentReminderDays);
   const [minMarginPct, setMinMarginPct] = useState(settings.minMarginPct);
-  const [pkrRate, setPkrRate] = useState(settings.pkrRate);
   const [saving, setSaving] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
 
   // Settings arrive after mount on a cold load — follow them until edited.
   useEffect(() => { setPaymentReminderDays(settings.paymentReminderDays); }, [settings.paymentReminderDays]);
   useEffect(() => { setMinMarginPct(settings.minMarginPct); }, [settings.minMarginPct]);
-  useEffect(() => { setPkrRate(settings.pkrRate); }, [settings.pkrRate]);
 
   const errMsg = (err) => {
     const first = err?.data?.errors?.[0] || err?.errors?.[0];
@@ -47,7 +46,6 @@ export default function SettingsTab() {
       await updateSettings({
         payment_reminder_days: Number(paymentReminderDays),
         min_margin_pct: Number(minMarginPct),
-        pkr_rate: Number(pkrRate),
       });
       addToast('Settings saved', 'success');
     } catch (err) {
@@ -194,25 +192,10 @@ export default function SettingsTab() {
             </div>
           </div>
 
-          <div className="border-t border-gray-200 pt-6">
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Fallback USD → PKR Rate
-            </label>
-            <p className="text-xs text-gray-500 mb-2">
-              Used only when no FX rate is on file for a date. Daily rates are managed in Finance.
-            </p>
-            <div className="flex items-center gap-3">
-              <input
-                type="number"
-                step="0.01"
-                min="0.01"
-                value={pkrRate ?? ''}
-                onChange={(e) => setPkrRate(parseFloat(e.target.value) || 0)}
-                className="w-32 border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-              />
-              <span className="text-sm text-gray-500">PKR per USD</span>
-            </div>
-          </div>
+          <p className="border-t border-gray-200 pt-6 text-xs text-gray-500">
+            Exchange rates are kept per currency in Finance › Rates. There is no fallback rate:
+            a foreign-currency entry with no rate on file is refused until one is entered.
+          </p>
 
           <div className="pt-4">
             <button

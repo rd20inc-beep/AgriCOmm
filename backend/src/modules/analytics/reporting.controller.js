@@ -1301,7 +1301,9 @@ const reportingController = {
         const out = parseFloat(r.outstanding) || 0;
         const cur = String(r.currency || 'PKR').toUpperCase();
         const stamped = parseFloat(r.base_amount_pkr) || 0;
-        const fxRate = parseFloat(r.fx_rate) || 280;
+        // Stamped PKR, else the row's own rate; with neither the row has no PKR
+        // figure and adds nothing to the PKR buckets (D-10: no flat 280).
+        const fxRate = parseFloat(r.fx_rate) || 0;
         const outPkr = cur === 'PKR' ? out : (stamped > 0 ? stamped * (out / parseFloat(r.outstanding || 1)) : out * fxRate);
         buckets[bucket].count += 1;
         buckets[bucket].totalPkr += outPkr;
@@ -2243,13 +2245,13 @@ const reportingController = {
         const qty = parseFloat(o.qty_mt) || 0;
         const perMt = (parseFloat(o.freight_per_mt) || 0) + (parseFloat(o.insurance_per_mt) || 0);
         // The booked rate is what the revenue was recognised at, so it is the
-        // rate the recovery has to be measured at too. 280 is the same last-ditch
-        // fallback the order controller uses when an order has no rate at all.
+        // rate the recovery has to be measured at too. An order with no rate at
+        // all has no PKR figure (0) — never a made-up 280 (D-10).
         const rate = parseFloat(o.booked_fx_rate)
           || (parseFloat(o.contract_value) > 0
             ? (parseFloat(o.contract_value_pkr_locked) || 0) / parseFloat(o.contract_value)
             : 0)
-          || 280;
+          || (String(o.currency || 'USD').toUpperCase() === 'PKR' ? 1 : 0);
         const notes = notesBy[o.id] || { amount: 0, pkr: 0, count: 0 };
         const baseCharged = perMt * qty;
         const basePkr = baseCharged * rate;

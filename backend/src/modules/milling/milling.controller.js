@@ -1631,7 +1631,13 @@ const millingController = {
 
           // batchCostTotal is in PKR — convert to order currency using order's locked FX rate
           const linkedOrder = await trx('export_orders').where('id', batch.linked_export_order_id).first();
-          const orderFxRate = parseFloat(linkedOrder?.booked_fx_rate) || 280;
+          // The order's booked rate (PKR orders: 1). None → refused (D-10):
+          // a cost is never put on an order at a made-up rate.
+          const orderFxRate = String(linkedOrder?.currency || 'USD').toUpperCase() === 'PKR' ? 1 : parseFloat(linkedOrder?.booked_fx_rate);
+          if (!(orderFxRate > 0)) {
+            const e = new Error(`Export order ${linkedOrder?.order_no || batch.linked_export_order_id} has no booked ${linkedOrder?.currency || 'USD'}→PKR rate — set it on the order before this batch's cost can be added to it.`);
+            e.status = 422; e.statusCode = 422; throw e;
+          }
           const costInOrderCurrency = batchCostTotal / orderFxRate;
 
           if (existingCost) {

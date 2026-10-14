@@ -160,6 +160,19 @@ const exportOrderItemDraft = exportOrderItem.keys({
   qty_mt: Joi.number().min(0).allow(...DRAFT_BLANK),
   price_per_mt: Joi.number().min(0).allow(...DRAFT_BLANK),
 });
+// P2-20: an order edit checks its money / currency fields; every other field
+// passes through untouched (.unknown) to the controller's own allow-list.
+// booked_fx_rate is read only with a currency change, which re-locks the rate.
+const BLANK = ['', null];
+const updateExportOrder = Joi.object({
+  currency: Joi.string().valid('USD', 'EUR', 'GBP', 'PKR'), // an existing PKR order may re-send its own
+  booked_fx_rate: Joi.number().positive().allow(...BLANK),
+  qty_mt: Joi.number().min(0).allow(...BLANK),
+  price_per_mt: Joi.number().min(0).allow(...BLANK),
+  advance_pct: Joi.number().min(0).max(100).allow(...BLANK),
+  customer_id: Joi.number().integer().positive().allow(...BLANK),
+}).unknown(true);
+
 const createExportOrderDraft = createExportOrder.keys({
   qty_mt: Joi.number().min(0).allow(...DRAFT_BLANK),
   price_per_mt: Joi.number().min(0).allow(...DRAFT_BLANK),
@@ -1012,7 +1025,10 @@ const updateSettings = Joi.object({
   payment_reminder_days: Joi.number().integer().min(1).max(365),
   // automation.service scanLowMarginOrders
   min_margin_pct: Joi.number().min(0).max(100),
-  // fxRate.service fallback when no fx_rates row exists
+  // Legacy key, kept so older clients can still save settings. Nothing
+  // converts with it any more (D-10: no fallback FX rate — rates are kept per
+  // currency in fx_rates through POST /finance/fx-rates; addRate mirrors the
+  // latest USD rate here for display only).
   pkr_rate: Joi.number().positive().max(100000),
   // finance/collectionRate.js
   export_balance_term_days: Joi.number().integer().min(0).max(365),
@@ -1044,6 +1060,7 @@ module.exports = {
   bundleDocuments,
   createExportOrder,
   createExportOrderDraft,
+  updateExportOrder,
   updateExportShipment,
   exportPackingWeight,
   exportOrderAction,
