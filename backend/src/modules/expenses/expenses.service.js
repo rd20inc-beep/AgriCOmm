@@ -5,6 +5,11 @@ const { normalizePaymentMethod } = require('../../shared/constants/paymentMethod
 const { pendingChequeTotal, round2 } = require('../finance/paymentSettlement');
 const { recordMoneyMovement } = require('../finance/paymentEngine');
 const { postProcessingDelta } = require('../milling/millingCompletionJournal');
+const auditService = require('../admin/audit.service');
+const { ledgerFailure, missingAccounts } = require('../../shared/ledgerFailure');
+
+// Owner's Drawings (equity) — migration 350, owner decision D-9.
+const DRAWINGS_CODE = '3030';
 
 const CATEGORY_MAP = {
   general: [
@@ -40,7 +45,9 @@ async function generateExpenseNo(trx) {
 const expensesService = {
   // `millOnly` (a mill route's caller without finance.confirm_payment): a
   // pay-now may only draw on one of the mill's own accounts (paymentEngine).
-  async create(data, userId, existingTrx = null, { millOnly = false } = {}) {
+  // `req` (the HTTP request, when there is one): the audit row is written
+  // inside this transaction (P2-30) instead of after the response.
+  async create(data, userId, existingTrx = null, { millOnly = false, req = null } = {}) {
     const {
       expense_type, category, subcategory, amount, currency, fx_rate,
       supplier_id, vendor_name, expense_date, due_date, invoice_reference,
@@ -51,6 +58,14 @@ const expensesService = {
 
     if (!amount || Number(amount) <= 0) throw new ValidationError('Amount must be positive.');
     if (!expense_date) throw new ValidationError('Expense date is required.');
+
+    // "Personal / Owner" arrives as a general expense with subcategory
+    // 'personal' (the form's payload). It is the owner's, not the business's:
+    // never costed to a batch or an order.
+    const personal = subcategory === 'personal';
+    if (personal && (batch_id || order_id)) {
+      throw new ValidationError("An owner's personal expense cannot be charged to a batch or an export order.");
+    }
 
     const amountNum = Number(amount);
     // Paying at create goes through the payment engine once the expense and
@@ -77,6 +92,16 @@ const expensesService = {
         ]);
         if (salDr) salaryDebitAccountId = salDr.id;
         if (salCr) salaryCreditAccountId = salCr.id;
+      }
+
+      // The Owner's personal expenses are drawings, not operating expense
+      // (owner decision D-9): Dr 3030 Owner's Drawings (equity) instead of
+      // 6000. No fallback to 6000 — that would understate profit silently.
+      let drawingsAccountId = null;
+      if (personal) {
+        const dr = await trx('chart_of_accounts').where('code', DRAWINGS_CODE).first();
+        if (!dr) throw missingAccounts([DRAWINGS_CODE], 'The expense');
+        drawingsAccountId = dr.id;
       }
 
       const [expense] = await trx('business_expenses').insert({
@@ -112,23 +137,17 @@ const expensesService = {
       }).returning('*');
 
       // ─── Link to batch costs if mill ───
+      // Its OWN cost row, stamped with the expense (P2-21). It used to be
+      // merged into the batch's row for the category, which the payables feed
+      // then re-derived as a second bill (MC-…) next to this expense's own
+      // payable — paying one left the other outstanding. A stamped row counts
+      // in the batch costing but is never a bill: the expense's payable is.
       if (batch_id && expense_type === 'mill') {
-        const costCat = category || 'miscellaneous';
-        const existing = await trx('milling_costs')
-          .where({ batch_id, category: costCat })
-          .first();
-        if (existing) {
-          await trx('milling_costs').where('id', existing.id).update({
-            amount: trx.raw('amount + ?', [amountPkr]),
-            notes: `Updated via business expense ${expenseNo}`,
-            updated_at: trx.fn.now(),
-          });
-        } else {
-          await trx('milling_costs').insert({
-            batch_id, category: costCat, amount: amountPkr,
-            currency: 'PKR', notes: `From business expense ${expenseNo}`,
-          });
-        }
+        await trx('milling_costs').insert({
+          batch_id, category: category || 'miscellaneous', amount: amountPkr,
+          currency: 'PKR', notes: `From business expense ${expenseNo}`,
+          business_expense_id: expense.id, created_by: userId || null,
+        });
       }
 
       // ─── Link to order costs if export ───
@@ -138,6 +157,8 @@ const expensesService = {
         // applied at write or read time. Whatever the user entered in
         // PKR goes straight in. (Foreign-currency expenses get
         // converted to PKR via amount_pkr at the top of this method.)
+        // Stamped with the expense (P2-21): it is paid through the expense's
+        // payable, never as an export-cost bill of its own.
         await trx('export_order_costs').insert({
           order_id,
           category: category || 'miscellaneous',
@@ -146,6 +167,8 @@ const expensesService = {
           fx_rate: 1,
           base_amount_pkr: amountPkr,
           notes: `From business expense ${expenseNo}`,
+          business_expense_id: expense.id,
+          created_by: userId || null,
         });
       }
 
@@ -213,8 +236,12 @@ const expensesService = {
 
       // ─── Auto-post journal entry ───
       // expense_recorded rule: DR Operating Expenses, CR Supplier Payable.
-      // Wrapped in try/catch so accounting failures never block the
-      // user-facing expense save (matches the pattern in other flows).
+      // The expense and its journal are one event (P2-02): a journal that
+      // cannot be posted (no rule, closed period, missing account) used to be
+      // logged and swallowed, so the expense and its payable committed with
+      // nothing in the GL — or, on a database error, the whole transaction
+      // silently rolled back at COMMIT. It now rolls the expense back and the
+      // user is told why.
       try {
         await accountingService.autoPost(trx, {
           triggerEvent: 'expense_recorded',
@@ -227,11 +254,11 @@ const expensesService = {
           userId,
           partyType: supplier_id ? 'supplier' : null,
           partyId: supplier_id || null,
-          debitAccountId: salaryDebitAccountId,
+          debitAccountId: drawingsAccountId || salaryDebitAccountId,
           creditAccountId: salaryCreditAccountId,
         });
       } catch (e) {
-        console.warn('Expense journal post failed:', e.message);
+        throw ledgerFailure(e, 'The expense');
       }
 
       // A mill expense booked against a batch whose completion is already on
@@ -246,6 +273,13 @@ const expensesService = {
             counterCode: salaryDebitAccountId ? '6135' : '6000',
           });
         }
+      }
+
+      if (req) {
+        await auditService.logInTrx(trx, req, {
+          action: 'create', entityType: 'business_expense', entityId: expense.id,
+          result: { expense_no: expenseNo, amount_pkr: amountPkr, pay_now: !!pay_now },
+        });
       }
 
       return pay_now ? trx('business_expenses').where('id', expense.id).first() : expense;
@@ -377,6 +411,9 @@ const expensesService = {
         })
         : 0;
 
+      // The audit row commits with the link (P2-30) and is NOT caught: inside a
+      // transaction a failed insert aborts it, so swallowing the error used to
+      // make COMMIT silently roll the link back while the user saw success.
       await trx('audit_logs').insert({
         user_id: userId || null,
         action: supplier ? 'link_supplier' : 'unlink_supplier',
@@ -390,7 +427,7 @@ const expensesService = {
           journals_stamped: stamped,
           journal_refs: refs,
         }),
-      }).catch(() => { /* audit is best-effort; the link still stands */ });
+      });
 
       return trx('business_expenses').where('id', id).first();
     });
@@ -398,7 +435,7 @@ const expensesService = {
 
   // `existingTrx` lets a caller (payroll settle) commit the payment atomically
   // with its own writes, as create() already allows.
-  async markPaid(id, { amount, bank_account_id, payment_method, payment_reference, paid_date, due_date, notes }, userId, existingTrx = null, { millOnly = false } = {}) {
+  async markPaid(id, { amount, bank_account_id, payment_method, payment_reference, paid_date, due_date, notes }, userId, existingTrx = null, { millOnly = false, req = null } = {}) {
     // Joi parses paid_date into a Date; normalize to a YYYY-MM-DD string so the
     // GL journal's date math (createJournal does string ops) doesn't choke.
     const rawPayDate = paid_date || new Date().toISOString().split('T')[0];
@@ -456,6 +493,12 @@ const expensesService = {
           notes: notes || `Payment for ${expense.expense_no}`,
         },
       });
+      if (req) {
+        await auditService.logInTrx(trx, req, {
+          action: 'pay', entityType: 'business_expense', entityId: expense.id,
+          result: { expense_no: expense.expense_no, amount: payAmt, method: payment_method || null },
+        });
+      }
       return trx('business_expenses').where('id', id).first();
     };
     return existingTrx ? run(existingTrx) : db.transaction(run);

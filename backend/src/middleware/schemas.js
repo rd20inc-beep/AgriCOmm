@@ -624,22 +624,46 @@ const recordPayment = Joi.object({
 
 // ===================== JOURNAL ENTRIES =====================
 
+// Manual journal (POST /api/accounting/journals). The fields are the ones the
+// controller reads — this schema existed but was never wired, and its old
+// field names (reference_type / reference_id / line description) were not the
+// controller's. Lines are PKR (the GL is PKR-base); each carries a debit OR a
+// credit. Control accounts are refused by the controller (D-2).
 const createJournal = Joi.object({
   date: Joi.date().iso().required(),
-  description: Joi.string().min(3).required(),
+  description: Joi.string().trim().min(3).max(1000).required(),
   entity: Joi.string().valid('export', 'mill', 'general').required(),
+  ref_type: Joi.string().trim().max(50).allow('', null),
+  ref_no: Joi.string().trim().max(50).allow('', null),
   lines: Joi.array().items(
     Joi.object({
       account_id: Joi.number().integer().positive().required(),
-      debit: Joi.number().min(0).default(0),
-      credit: Joi.number().min(0).default(0),
-      description: Joi.string().allow('', null),
+      debit: Joi.number().min(0).precision(2).default(0),
+      credit: Joi.number().min(0).precision(2).default(0),
+      narration: Joi.string().max(240).allow('', null),
+      description: Joi.string().max(240).allow('', null),
+    }).custom((line, helpers) => {
+      const dr = Number(line.debit) || 0;
+      const cr = Number(line.credit) || 0;
+      if ((dr > 0) === (cr > 0)) return helpers.message('Each journal line needs a debit or a credit (not both, not neither).');
+      return line;
     })
   ).min(2).required().messages({
     'array.min': 'Journal entry must have at least 2 lines',
   }),
-  reference_type: Joi.string().allow('', null),
-  reference_id: Joi.number().integer().allow(null),
+});
+
+// Reversing a journal (D-2): a reason is mandatory. `authorized_by_owner_id`
+// is read by ownerApproval (which runs first) and kept for the audit row.
+const reverseJournal = Joi.object({
+  reason: Joi.string().trim().min(5).max(500).required(),
+  date: Joi.date().iso().allow(null),
+  authorized_by_owner_id: Joi.number().integer().positive().allow(null),
+});
+
+const reopenPeriod = Joi.object({
+  reason: Joi.string().trim().min(5).max(500).required(),
+  authorized_by_owner_id: Joi.number().integer().positive().allow(null),
 });
 
 // ===================== STOCK ADJUSTMENT =====================
@@ -1019,6 +1043,8 @@ module.exports = {
   replaceContraTransfer,
   reverseFundTransfer,
   createJournal,
+  reverseJournal,
+  reopenPeriod,
   stockAdjustment,
   submitApproval,
   rejectApproval,

@@ -35,6 +35,29 @@ const auditService = {
   },
 
   /**
+   * Write the audit row INSIDE the caller's transaction (P2-30), so it commits
+   * with the change it records and rolls back with it — a rolled-back change
+   * leaves no audit row, a committed one leaves exactly one. It is awaited and
+   * NOT caught: if the audit row cannot be written, the change is not saved.
+   *
+   * Marks the request (req.auditedInTrx) so the route's auditAction middleware
+   * does not write a second, after-the-fact row for the same request. Details
+   * default to the same { body, result } shape the middleware writes.
+   */
+  async logInTrx(trx, req, { action, entityType, entityId, details, result }) {
+    if (req) req.auditedInTrx = true;
+    await auditService.log({
+      userId: req?.user ? req.user.id : null,
+      action,
+      entityType,
+      entityId,
+      details: details || { body: req?.body, result },
+      ipAddress: req?.ip,
+      db_instance: trx,
+    });
+  },
+
+  /**
    * Get audit logs for a specific entity.
    */
   async getByEntity(entityType, entityId, limit = 50) {

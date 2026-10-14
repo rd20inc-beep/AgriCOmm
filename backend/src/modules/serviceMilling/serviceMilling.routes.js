@@ -8,7 +8,7 @@ const auditAction = require('../../middleware/audit');
 // New Batch form's client picker works for Mill/Inventory users. Never exposes
 // export customers.
 router.get('/clients', authorize('service_milling', 'view'), controller.listClients);
-router.post('/clients', authorize('service_milling', 'create_batch'), controller.createClient);
+router.post('/clients', authorize('service_milling', 'create_batch'), auditAction('create_client', 'service_client'), controller.createClient);
 
 // Invoice/billing endpoints — gated by the invoice-side perms (Finance + Owner +
 // Mill Manager), NOT service_milling.view (which is the milling/stock side). This

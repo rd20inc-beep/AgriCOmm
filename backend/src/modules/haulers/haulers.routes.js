@@ -1,4 +1,5 @@
 const express = require('express');
+const auditAction = require('../../middleware/audit');
 const router = express.Router();
 const { authorize, authorizeAny } = require('../../middleware/rbac');
 const ctrl = require('./haulers.controller');
@@ -15,8 +16,8 @@ const canWrite = authorizeAny(['admin', 'manage_master_data'], ['inventory', 'cr
 router.get('/', canRead, ctrl.list);
 router.get('/:id/ledger', canRead, ctrl.getLedger);
 router.get('/:id', canRead, ctrl.getOne);
-router.post('/', canWrite, ctrl.create);
-router.put('/:id', canWrite, ctrl.update);
-router.delete('/:id', authorize('admin', 'manage_master_data'), ctrl.remove);
+router.post('/', canWrite, auditAction('create', 'hauler'), ctrl.create);
+router.put('/:id', canWrite, auditAction('update', 'hauler'), ctrl.update);
+router.delete('/:id', authorize('admin', 'manage_master_data'), auditAction('delete', 'hauler'), ctrl.remove);
 
 module.exports = router;

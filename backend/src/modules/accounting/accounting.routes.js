@@ -6,6 +6,7 @@ const auditAction = require('../../middleware/audit');
 const validate = require('../../middleware/validate');
 const schemas = require('../../middleware/schemas');
 const fxRevaluation = require('./fxRevaluation');
+const ownerApproval = require('../../middleware/ownerApproval');
 
 // ═══════════════════════════════════════════════════════════════════
 // Chart of Accounts
@@ -28,9 +29,12 @@ router.put(
 // Journal Entries
 // ═══════════════════════════════════════════════════════════════════
 router.get('/journals', authorize('finance', 'view'), controller.listJournals);
+// Manual journals (D-2): Finance Manager creates and posts; control accounts
+// are refused; each writes its audit row inside its own transaction (P2-30).
 router.post(
   '/journals',
   authorize('finance', 'post_journal'),
+  validate(schemas.createJournal),
   auditAction('create_journal', 'journal_entries'),
   controller.createJournal
 );
@@ -40,22 +44,21 @@ router.put(
   auditAction('post_journal', 'journal_entries'),
   controller.postJournal
 );
+// A reversal needs a reason and the Owner's approval, and is posted as a dated
+// signed-delta journal (never a status flip of a closed period's entry).
+// ownerApproval runs BEFORE validate (which would strip its fields).
 router.post(
   '/journals/:id/reverse',
   authorize('finance', 'post_journal'),
+  ownerApproval('journal_reversal'),
+  validate(schemas.reverseJournal),
   auditAction('reverse_journal', 'journal_entries'),
   controller.reverseJournal
 );
 
-// ═══════════════════════════════════════════════════════════════════
-// Auto-Posting (testing endpoint)
-// ═══════════════════════════════════════════════════════════════════
-router.post(
-  '/auto-post',
-  authorize('finance', 'post_journal'),
-  auditAction('auto_post', 'journal_entries'),
-  controller.triggerAutoPost
-);
+// The '/auto-post' "testing endpoint" is gone (P2-13): it let anyone with
+// finance.post_journal fire any posting rule for any amount — a GL entry with
+// no document behind it.
 
 // ═══════════════════════════════════════════════════════════════════
 // Posting Rules
@@ -84,9 +87,13 @@ router.put(
   auditAction('close_period', 'accounting_periods'),
   controller.closePeriod
 );
+// Reopening a closed period changes books already reported on: it needs a
+// reason and the Owner's approval (P2-13).
 router.put(
   '/periods/:id/reopen',
   authorize('finance', 'post_journal'),
+  ownerApproval('period_reopen'),
+  validate(schemas.reopenPeriod),
   auditAction('reopen_period', 'accounting_periods'),
   controller.reopenPeriod
 );

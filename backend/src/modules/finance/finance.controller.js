@@ -107,6 +107,9 @@ async function loadPayablesFeed(query = {}) {
       db.raw('COALESCE(s.name, mb.supplier_name) as supplier_name'),
     )
     .where('mc.amount', '>', 0)
+    // A cost row a business expense owns is paid through that expense's own
+    // payable (PAY-EXP…, stored above) — never re-derived as a second bill (P2-21).
+    .whereNull('mc.business_expense_id')
     .orderBy('mc.created_at', 'desc');
 
   const exportCosts = await db('export_order_costs as eoc')
@@ -118,6 +121,7 @@ async function loadPayablesFeed(query = {}) {
       'eoc.created_at', 'eo.order_no', 'c.name as customer_name',
     )
     .where('eoc.amount', '>', 0)
+    .whereNull('eoc.business_expense_id') // its expense's payable is the bill (P2-21)
     .orderBy('eoc.created_at', 'desc');
 
   const millExpenses = await db('mill_expenses')
@@ -1994,6 +1998,8 @@ financeController.listPurchases = async (req, res) => {
         .leftJoin('export_orders as eo', 'eoc.order_id', 'eo.id')
         .leftJoin('users as creator', 'eoc.created_by', 'creator.id')
         .where('eoc.amount', '>', 0)
+        // An expense's own cost row is listed (and paid) as that expense (P2-21).
+        .whereNull('eoc.business_expense_id')
         .select(
           db.raw("'export_cost' AS source"),
           'eoc.id as ref_id',
@@ -2191,6 +2197,12 @@ financeController.payPurchase = async (req, res) => {
     const result = await db.transaction(async (trx) => {
       const row = await trx(spec.table).where({ id }).forUpdate().first();
       if (!row) { const e = new Error(spec.notFound); e.statusCode = 404; throw e; }
+      // An export cost a business expense wrote is that expense's bill: paying
+      // it here as well paid the same bill twice (P2-21).
+      if (source === 'export_cost' && row.business_expense_id) {
+        const exp = await trx('business_expenses').where({ id: row.business_expense_id }).first('expense_no');
+        throw fail(`This cost belongs to expense ${exp?.expense_no || `#${row.business_expense_id}`} — pay the expense instead.`);
+      }
       const payables = await purchasePayables(trx, source, row);
       // The paying side of the business: the payable's when there is one, else
       // the source's own (a lot carries its entity, a mill-store purchase is

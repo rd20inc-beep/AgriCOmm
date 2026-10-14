@@ -1,6 +1,7 @@
 const db = require('../../config/database');
 const fxRateService = require('../finance/fxRate.service');
 const { cashGroupAccountIds } = require('../../shared/accountGl');
+const { LedgerPostingError } = require('../../shared/errors');
 
 /**
  * Currency conversion helpers for party statements. Journals are stored in
@@ -129,8 +130,9 @@ const accountingService = {
       totalCredit = parseFloat(totalCredit.toFixed(2));
 
       if (Math.abs(totalDebit - totalCredit) > 0.01) {
-        throw new Error(
-          `Journal is unbalanced: debit=${totalDebit}, credit=${totalCredit}. Difference=${(totalDebit - totalCredit).toFixed(2)}`
+        throw new LedgerPostingError(
+          `Journal is unbalanced: debit=${totalDebit}, credit=${totalCredit}. Difference=${(totalDebit - totalCredit).toFixed(2)}`,
+          'unbalanced',
         );
       }
 
@@ -140,7 +142,7 @@ const accountingService = {
       const existingIds = new Set(existing.map((r) => r.id));
       for (const id of accountIds) {
         if (!existingIds.has(id)) {
-          throw new Error(`Account ID ${id} does not exist in chart of accounts.`);
+          throw new LedgerPostingError(`Account ID ${id} does not exist in chart of accounts.`, 'unknown_account');
         }
       }
 
@@ -152,7 +154,7 @@ const accountingService = {
         .first();
 
       if (period && period.status !== 'Open') {
-        throw new Error(`Accounting period '${period.name}' is ${period.status}. Cannot post journals.`);
+        throw new LedgerPostingError(`Accounting period '${period.name}' is ${period.status}. Cannot post journals.`, 'period_closed');
       }
 
       // ── Generate journal number: JE-YYYYMM-XXXX ──
@@ -226,9 +228,9 @@ const accountingService = {
     const knex = trx || db;
 
     const journal = await knex('journal_entries').where({ id: journalId }).first();
-    if (!journal) throw new Error(`Journal entry ${journalId} not found.`);
-    if (journal.status === 'Posted') throw new Error('Journal is already posted.');
-    if (journal.status === 'Reversed') throw new Error('Cannot post a reversed journal.');
+    if (!journal) throw new LedgerPostingError(`Journal entry ${journalId} not found.`, 'not_found');
+    if (journal.status === 'Posted') throw new LedgerPostingError('Journal is already posted.', 'invalid_state');
+    if (journal.status === 'Reversed') throw new LedgerPostingError('Cannot post a reversed journal.', 'invalid_state');
 
     // Verify balanced
     const totals = await knex('journal_lines')
@@ -242,7 +244,7 @@ const accountingService = {
     const td = parseFloat(totals.total_debit);
     const tc = parseFloat(totals.total_credit);
     if (Math.abs(td - tc) > 0.01) {
-      throw new Error(`Cannot post unbalanced journal: debit=${td}, credit=${tc}`);
+      throw new LedgerPostingError(`Cannot post unbalanced journal: debit=${td}, credit=${tc}`, 'unbalanced');
     }
 
     const [updated] = await knex('journal_entries')
@@ -276,6 +278,9 @@ const accountingService = {
       const original = await knex('journal_entries').where({ id: journalId }).first();
       if (!original) throw new Error(`Journal entry ${journalId} not found.`);
       if (original.status !== 'Posted') throw new Error('Only posted journals can be reversed.');
+      // Flipping the status changes the books of the period the journal is
+      // dated in, so it honours that period's lock exactly as posting does.
+      await accountingService.assertPeriodOpen(knex, original, 'reverse');
 
       const note = reason ? ` [Reversed: ${reason}]` : ' [Reversed]';
       await knex('journal_entries')
@@ -292,6 +297,87 @@ const accountingService = {
     if (trx) {
       return execute(trx);
     }
+    return db.transaction(async (autoTrx) => execute(autoTrx));
+  },
+
+  /**
+   * Refuse to change a journal whose accounting period is not Open. The period
+   * is the one it was stamped with, else the one its date falls in.
+   */
+  async assertPeriodOpen(knex, journal, verb = 'change') {
+    let period = journal.period_id
+      ? await knex('accounting_periods').where({ id: journal.period_id }).first()
+      : null;
+    if (!period && journal.date) {
+      const d = journal.date instanceof Date ? journal.date.toISOString().slice(0, 10) : String(journal.date).slice(0, 10);
+      period = await knex('accounting_periods').where('period_start', '<=', d).andWhere('period_end', '>=', d).first();
+    }
+    if (period && period.status !== 'Open') {
+      throw new LedgerPostingError(
+        `Accounting period '${period.name}' is ${period.status}. Cannot ${verb} ${journal.journal_no || 'this journal'}; post a correcting journal in an open period instead.`,
+        'period_closed',
+      );
+    }
+  },
+
+  /**
+   * Reverse ONE posted journal by its signed delta — the period-safe reversal
+   * (P2-13). A fresh Posted journal with every line's debit and credit swapped,
+   * dated `date` (default today; createJournal refuses a closed period), points
+   * back at the original through reversal_of. The original stays Posted and
+   * untouched, so a closed period's books never change and the trial balance
+   * (Posted-only) nets the pair to zero. Never reverse-and-repost.
+   *
+   * Idempotent on reversal_of: the original is locked, and if it already has a
+   * Posted delta that delta is returned (alreadyReversed: true) — a double
+   * click or a retry posts one reversal, not two. A journal that is itself a
+   * reversal is refused (reversing it would re-post the original).
+   *
+   * Returns { journal, alreadyReversed }.
+   */
+  async postReversalDelta(trx, { journalId, date, reason, userId, refType = 'Journal Reversal' }) {
+    const execute = async (knex) => {
+      const original = await knex('journal_entries').where({ id: journalId }).forUpdate().first();
+      if (!original) throw new LedgerPostingError(`Journal entry ${journalId} not found.`, 'not_found');
+      if (original.status !== 'Posted') {
+        throw new LedgerPostingError('Only posted journals can be reversed.', 'invalid_state');
+      }
+      if (original.reversal_of) {
+        throw new LedgerPostingError(`${original.journal_no} is itself a reversal; it cannot be reversed again.`, 'invalid_state');
+      }
+      const done = await knex('journal_entries')
+        .where({ reversal_of: original.id, status: 'Posted' }).orderBy('id').first();
+      if (done) return { journal: done, alreadyReversed: true };
+
+      const lines = await knex('journal_lines').where({ journal_id: original.id }).orderBy('id');
+      const note = reason ? `: ${String(reason).slice(0, 500)}` : '';
+      const delta = await accountingService.createJournal(knex, {
+        date: date || new Date().toISOString().slice(0, 10),
+        entity: original.entity || null,
+        refType,
+        refNo: original.ref_no || original.journal_no,
+        description: `Reversal of ${original.journal_no}${note}`.slice(0, 1000),
+        currency: 'PKR',
+        fxRate: 1,
+        isAuto: original.is_auto,
+        userId: userId || null,
+        partyType: original.party_type || null,
+        partyId: original.party_id || null,
+        origCurrency: original.orig_currency || null,
+        origFxRate: original.orig_fx_rate || null,
+        lines: lines.map((l) => ({
+          account_id: l.account_id,
+          account: l.account,
+          debit: parseFloat(l.credit) || 0,
+          credit: parseFloat(l.debit) || 0,
+          narration: `Reversal — ${l.narration || original.journal_no}`.slice(0, 240),
+        })),
+      });
+      await knex('journal_entries').where({ id: delta.id }).update({ reversal_of: original.id });
+      const posted = await accountingService.postJournal(knex, delta.id);
+      return { journal: { ...posted, lines: delta.lines }, alreadyReversed: false };
+    };
+    if (trx) return execute(trx);
     return db.transaction(async (autoTrx) => execute(autoTrx));
   },
 
@@ -331,11 +417,22 @@ const accountingService = {
         });
       }
 
-      const rule = await query.first();
-      if (!rule) return null;
-
+      // Nothing to post for a zero amount — the one case that returns null.
       const parsedAmount = parseFloat(amount);
       if (!parsedAmount || parsedAmount <= 0) return null;
+
+      // A missing rule is a configuration fault, not "nothing to post": it used
+      // to return null, so the business record committed with no journal and
+      // nobody was told (P2-02). Throw instead — the caller's transaction rolls
+      // back and the user sees which rule is missing.
+      const rule = await query.first();
+      if (!rule) {
+        throw new LedgerPostingError(
+          `No active posting rule for '${triggerEvent}'${entity ? ` (${entity})` : ''}. Set it up under Finance ▸ Accounts ▸ Posting Rules before recording this.`,
+          'missing_rule',
+          { triggerEvent, entity: entity || null },
+        );
+      }
 
       // Allow the caller to override the rule's debit/credit accounts (e.g.
       // salaries → DR 6135 Salaries & Wages / CR 2040 Salaries Payable).

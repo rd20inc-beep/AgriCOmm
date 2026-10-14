@@ -36,7 +36,7 @@ import SlideDrawer from '../../../components/SlideDrawer';
 import SearchSelect from '../../../shared/components/SearchSelect';
 import MillSupplierStatement from '../components/MillSupplierStatement';
 import MillSupplierPayDrawer from '../components/MillSupplierPayDrawer';
-import { UNASSIGNED, isStoredPayable } from '../utils/payableBuckets';
+import { UNASSIGNED, isStoredPayable, isSupplierDebt } from '../utils/payableBuckets';
 import { buildCustomerRows } from '../utils/customerDirectory';
 import MillCustomerStatement from '../components/MillCustomerStatement';
 import MillCustomerPayDrawer from '../components/MillCustomerPayDrawer';
@@ -641,7 +641,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
       // is the allocation of bags already bought — the money owed for them sits
       // on the store purchase, under that vendor. Offering to "pay" the
       // allocation as well would pay for the same bags twice.
-      if (!key) continue;
+      if (!key || !isSupplierDebt(p)) continue;
       if (!map[key]) {
         map[key] = {
           id: name ? (p.supplierId || null) : UNASSIGNED,
@@ -5180,12 +5180,12 @@ function StatutoryRemittancePanel({ canPay, entity = 'mill', bankAccounts = [], 
             {history.map((r) => (
               <div key={r.id} className="rounded-lg border border-gray-200 p-3 flex items-center justify-between">
                 <div>
-                  <div className="text-sm font-semibold text-gray-900">{r.remittanceNo} · {PKR(r.amount)} <span className="text-[10px] font-normal text-gray-400">{r.accountName}</span></div>
+                  <div className="text-sm font-semibold text-gray-900">{r.remittanceNo} · {PKR(r.amount)} <span className="text-[10px] font-normal text-gray-400">{r.accountName}</span>{r.status === 'Reversed' && <span className="ml-1.5 text-[10px] font-medium px-1.5 py-0.5 rounded bg-red-50 text-red-600" title={r.reversalReason || undefined}>Reversed</span>}</div>
                   <div className="text-xs text-gray-500">{fmtDate(r.remitDate)} · {r.payMethod === 'bank' ? (r.bankName || 'bank') : 'cash'}{r.authority ? ` · ${r.authority}` : ''}{r.reference ? ` · ${r.reference}` : ''}</div>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <button onClick={() => printStatutoryRemittance(r, company)} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-indigo-700 bg-indigo-50 rounded-lg hover:bg-indigo-100" title="Print remittance voucher"><Receipt className="w-3.5 h-3.5" /> Voucher</button>
-                  {canPay && <button aria-label="Reverse remittance" onClick={() => reverse(r)} disabled={deleteMut.isPending} className="p-1.5 rounded-md text-red-500 hover:bg-red-50" title="Reverse remittance"><Trash2 className="w-3.5 h-3.5" /></button>}
+                  {canPay && r.status !== 'Reversed' && <button aria-label="Reverse remittance" onClick={() => reverse(r)} disabled={deleteMut.isPending} className="p-1.5 rounded-md text-red-500 hover:bg-red-50" title="Reverse remittance"><Trash2 className="w-3.5 h-3.5" /></button>}
                 </div>
               </div>
             ))}

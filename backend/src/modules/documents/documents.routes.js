@@ -131,6 +131,7 @@ router.put(
 router.put(
   '/:id/request-delete',
   authorize('documents', 'edit'),
+  auditAction('request_delete', 'document'),
   // audited inside the service (in the same transaction), not here
   controller.requestDelete
 );
@@ -140,6 +141,7 @@ router.put(
 router.delete(
   '/:id',
   authorize('documents', 'edit'),
+  auditAction('delete', 'document'),
   controller.remove
 );
 

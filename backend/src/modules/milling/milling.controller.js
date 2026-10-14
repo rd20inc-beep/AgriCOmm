@@ -1773,9 +1773,11 @@ const millingController = {
       }
 
       const cost = await db.transaction(async (trx) => {
-        // Upsert by batch_id + category
+        // Upsert by batch_id + category — never onto a row a business expense
+        // owns (P2-21): editing the cost sheet must not rewrite the expense.
         const existing = await trx('milling_costs')
           .where({ batch_id: id, category })
+          .whereNull('business_expense_id')
           .first();
         const oldAmt = existing ? (parseFloat(existing.amount) || 0) : 0;
         const newAmt = parseFloat(amount);

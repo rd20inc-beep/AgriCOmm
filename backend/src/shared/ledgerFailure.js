@@ -14,13 +14,21 @@
  * account — which are the user's to fix, so they become a 400. A database error
  * (a Postgres SQLSTATE in err.code) is a server fault and is passed through
  * unchanged, to be reported as a 500 by the handler.
+ *
+ * The accounting service now throws a typed LedgerPostingError (already a 400,
+ * with a `reason` such as 'missing_rule' or 'period_closed'); it is still
+ * re-worded here so the user is told WHICH record was not saved, and keeps its
+ * reason. Any other error that already carries a status passes through as is.
  */
 function ledgerFailure(err, what = 'The payment') {
-  if (!err || err.statusCode) return err;
+  if (!err || err.ledgerWrapped) return err;
+  if (err.statusCode && !err.isLedgerError) return err;
   if (typeof err.code === 'string' && /^[0-9A-Z]{5}$/.test(err.code)) return err;
   const e = new Error(`${what} was not saved: its ledger entry could not be posted. ${err.message}`);
   e.statusCode = 400;
   e.cause = err;
+  e.ledgerWrapped = true;
+  if (err.isLedgerError) { e.isLedgerError = true; e.reason = err.reason; }
   return e;
 }
 

@@ -37,7 +37,8 @@ const consumptionController = {
         req.params.id,
         value.lines,
         req.user?.id,
-        value.allow_negative
+        value.allow_negative,
+        { req },
       );
       res.json({ success: true, data: result });
     } catch (err) { next(err); }

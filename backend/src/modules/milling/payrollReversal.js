@@ -176,6 +176,7 @@ async function remittedStatutoryForRun(trx, run, statRefs) {
   for (const r of rows) {
     const rem = await trx('mill_statutory_remittances')
       .where({ liability_account_code: r.code, entity })
+      .whereNot('status', 'Reversed') // a reversed remittance paid nothing
       .where('created_at', '>=', r.created_at)
       .select('remittance_no', 'period_from', 'period_to');
     for (const m of rem) {

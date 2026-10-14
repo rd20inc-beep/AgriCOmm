@@ -8,7 +8,7 @@ const packingController = {
       const { value, error } = packSchema.validate(req.body, { abortEarly: false, stripUnknown: true });
       if (error) throw new ValidationError(error.details.map((d) => d.message).join('; '));
 
-      const log = await packingService.pack(req.params.id, value, req.user?.id);
+      const log = await packingService.pack(req.params.id, value, req.user?.id, { req });
       res.status(201).json({ success: true, data: log });
     } catch (err) { next(err); }
   },

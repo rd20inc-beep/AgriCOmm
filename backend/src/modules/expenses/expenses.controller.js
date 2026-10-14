@@ -55,7 +55,7 @@ const expensesController = {
   async create(req, res, next) {
     try {
       const data = validate(createSchema, req.body);
-      const expense = await service.create(data, req.user?.id);
+      const expense = await service.create(data, req.user?.id, null, { req });
       res.status(201).json({ success: true, data: { expense } });
     } catch (err) { next(err); }
   },
@@ -89,13 +89,15 @@ const expensesController = {
       const raw = req.body?.supplier_id;
       const supplierId = raw === null || raw === '' || raw === undefined ? null : Number(raw);
       const row = await service.linkSupplier(parseInt(req.params.id, 10), supplierId, req.user?.id);
+      // Its audit row was written inside the link's own transaction.
+      req.auditedInTrx = true;
       return res.json({ success: true, data: row });
     } catch (err) { return next(err); }
   },
   async markPaid(req, res, next) {
     try {
       const data = validate(paySchema, req.body);
-      const expense = await service.markPaid(req.params.id, data, req.user?.id);
+      const expense = await service.markPaid(req.params.id, data, req.user?.id, null, { req });
       res.json({ success: true, data: { expense } });
     } catch (err) { next(err); }
   },

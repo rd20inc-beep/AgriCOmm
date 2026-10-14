@@ -163,7 +163,8 @@ const transportCostsController = {
           if (!lot) { const e = new Error('Lot not found.'); e.statusCode = 404; throw e; }
           amount = parseFloat(lot.transport_cost) || 0; lotId = srcId; refNo = lot.lot_no;
         } else {
-          const mc = await trx('milling_costs').where({ batch_id: srcId, category: 'transport' }).first();
+          // Not an expense's own row (P2-21): that transport is the expense's bill.
+          const mc = await trx('milling_costs').where({ batch_id: srcId, category: 'transport' }).whereNull('business_expense_id').first();
           const mb = await trx('milling_batches').where({ id: srcId }).first();
           if (!mc || !mb) { const e = new Error('Batch transport cost not found.'); e.statusCode = 404; throw e; }
           amount = parseFloat(mc.amount) || 0; batchId = srcId; refNo = mb.batch_no;

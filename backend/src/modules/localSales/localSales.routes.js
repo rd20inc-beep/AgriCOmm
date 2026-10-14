@@ -59,6 +59,6 @@ router.get('/:id/invoice', canReadSales, controller.getInvoice);
 // Gate pass — refused (409) while the sale awaits a manager's confirmation.
 router.get('/:id/gate-pass', canReadSales, controller.getGatePass);
 router.get('/:id/invoice-admin', authorizeRole(...ADMIN_INVOICE_ROLES), controller.getInvoiceAdmin);
-router.post('/:id/email-invoice', authorize('inventory', 'create'), controller.emailInvoice);
+router.post('/:id/email-invoice', authorize('inventory', 'create'), auditAction('email_invoice', 'local_sale'), controller.emailInvoice);
 
 module.exports = router;
