@@ -352,6 +352,7 @@ export default function LotDetail() {
           && lot.supplierName
           && outboundTxns.length === 0
           && reservedKg < 1
+          && showCost
           && (netKg - availKg) < 1 && (
           <button onClick={() => setShowAddPurchase(true)} className="btn btn-sm btn-secondary">
             <Plus className="w-4 h-4" /> Add Purchase

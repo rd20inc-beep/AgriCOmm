@@ -107,7 +107,26 @@ function requireCostVisibility(req, res, next) {
   }).catch(next);
 }
 
+/**
+ * Router middleware: redact every JSON body this router sends, the same way
+ * redactForUser does. For legacy routers whose handlers each return raw rows
+ * (e.g. /api/inventory) — one line covers every endpoint, present and future.
+ * Visibility is resolved up front so res.json stays synchronous; a user who
+ * sees both cost and profit gets the body untouched.
+ */
+function redactCostInResponses(opts = {}) {
+  return (req, res, next) => {
+    moneyVisibility(req).then((vis) => {
+      if (!(vis.cost && vis.profit)) {
+        const json = res.json.bind(res);
+        res.json = (body) => json(redactMoney(body, { ...vis, ...opts }));
+      }
+      next();
+    }).catch(next);
+  };
+}
+
 module.exports = {
   isCostKey, isProfitKey, redactMoney, canSeeCost, canSeeProfit, moneyVisibility,
-  redactForUser, requireCostVisibility,
+  redactForUser, requireCostVisibility, redactCostInResponses,
 };
