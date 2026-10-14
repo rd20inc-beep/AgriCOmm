@@ -162,7 +162,7 @@ d('payroll run undo (DB-gated)', () => {
     expect((await call('delete', '/payroll/runs/:id', { params: { id: String(r.id) } })).statusCode).toBe(200);
   });
 
-  test('deleting a salary advance reverses its cash-out instead of deleting it', async () => {
+  test('voiding a paid salary advance reverses its cash-out and keeps the advance (D-23)', async () => {
     const expensesService = require('../modules/expenses/expenses.service');
     const exp = await db.transaction((trx) => expensesService.create({
       expense_type: 'mill', category: 'salaries', amount: 5000, currency: 'PKR', expense_date: '2026-09-15',
@@ -174,9 +174,13 @@ d('payroll run undo (DB-gated)', () => {
     }).returning('*');
     const balBefore = parseFloat((await db('bank_accounts').where('id', ids.bank).first()).current_balance);
 
-    const res = await call('delete', '/advances/:id', { params: { id: String(adv.id) } });
+    // A paid advance is not deleted (409) — it is voided, with a reason.
+    const del = await call('delete', '/advances/:id', { params: { id: String(adv.id) } });
+    expect(del.statusCode).toBe(409);
+    const res = await call('post', '/advances/:id/void', { params: { id: String(adv.id) }, body: { reason: 'paid in error' } });
     expect(res.statusCode).toBe(200);
-    expect(await db('mill_worker_advances').where('id', adv.id).first()).toBeUndefined();
+    const voided = await db('mill_worker_advances').where('id', adv.id).first();
+    expect(voided).toMatchObject({ approval_status: 'voided', status: 'voided', void_reason: 'paid in error', voided_by: ids.user });
     const kept = await db('business_expenses').where('id', exp.id).first();
     expect(kept.payment_status).toBe('Reversed');
     const pay = await db('payments as p').join('payables as pa', 'pa.id', 'p.linked_payable_id')
