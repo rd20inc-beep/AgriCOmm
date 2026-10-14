@@ -325,7 +325,7 @@ describe('login rate limiter', () => {
     app.set('trust proxy', 1);
     app.post('/login', loginLimiter, (req, res) => res.status(401).json({}));
     let last;
-    for (let i = 0; i < 31; i += 1) {
+    for (let i = 0; i < 101; i += 1) {
       last = await request(app).post('/login')
         .set('X-Forwarded-For', '198.51.100.7')
         .set('cf-connecting-ip', `10.0.0.${i}`)

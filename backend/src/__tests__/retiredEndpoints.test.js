@@ -29,7 +29,10 @@ jest.mock('../config/database', () => {
   return db;
 });
 jest.mock('../config', () => ({ port: 3001, corsOrigin: '*', jwtSecret: 'FAKE-test-secret-1', db: {} }));
-jest.mock('../middleware/rateLimiter', () => ({ authLimiter: (q, r, n) => n(), apiLimiter: (q, r, n) => n() }));
+const mockPass = (q, r, n) => n();
+jest.mock('../middleware/rateLimiter', () => ({
+  authLimiter: mockPass, apiLimiter: mockPass, loginLimiter: mockPass, passwordResetLimiter: mockPass, portalLoginLimiter: mockPass,
+}));
 jest.mock('../services/auditService', () => ({ log: async () => {} }));
 
 const request = require('supertest');
