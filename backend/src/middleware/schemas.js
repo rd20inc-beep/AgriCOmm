@@ -692,6 +692,26 @@ const rejectApproval = Joi.object({
 
 // ===================== MILLING =====================
 
+// PUT /milling/batches/:id — the generic batch edit (EDITABLE_BATCH_FIELDS +
+// custom_tags). Status is not editable here; raw qty / supplier / fee are
+// further locked once the yield is recorded (P2-08 / MIL-38).
+const updateBatch = Joi.object({
+  supplier_id: Joi.number().integer().positive().allow(null),
+  raw_qty_kg: Joi.number().positive(),
+  planned_finished_kg: Joi.number().min(0).allow(null),
+  milling_fee_per_kg: Joi.number().min(0).allow(null),
+  mill_id: Joi.number().integer().positive(),
+  machine_line: Joi.string().max(100).allow('', null),
+  shift: Joi.string().valid('Day', 'Night', 'Full'),
+  notes: Joi.string().allow('', null),
+  variance_status: Joi.string().max(50).allow('', null),
+  batch_name: Joi.string().max(200).allow('', null),
+  custom_tags: Joi.alternatives().try(
+    Joi.array().items(Joi.string().max(60)),
+    Joi.string().allow('', null),
+  ),
+});
+
 const createBatch = Joi.object({
   supplier_id: Joi.number().integer().positive().allow(null),
   // Required for a single-source batch; for a blend it's omitted and the
@@ -1023,6 +1043,7 @@ module.exports = {
   submitApproval,
   rejectApproval,
   createBatch,
+  updateBatch,
   recordYield,
   saveDocumentOverrides,
   saveDocumentRendering,

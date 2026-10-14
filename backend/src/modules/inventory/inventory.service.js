@@ -2932,6 +2932,19 @@ const inventoryService = {
     const batchIds = [...new Set([...sourceRows.map((r) => r.batch_id), ...(refBatchId != null ? [refBatchId] : [])])];
     if (batchIds.length === 0) return { affectedBatches: 0 };
 
+    // P2-08 (INV-08): a batch that has yielded built its output lots, its
+    // completion journal and any COGS on the old cost. Re-costing them here moved
+    // lot / COGS figures with no GL, so the cascade is refused (the edit that
+    // called it rolls back with it). Only un-yielded batches are re-costed.
+    const { batchYielded } = require('../milling/costEditLocks');
+    for (const batchId of batchIds) {
+      const b = await trx('milling_batches').where({ id: batchId }).first('id', 'batch_no');
+      if (b && await batchYielded(trx, b)) {
+        const e = new Error(`Lot ${lot.lot_no} has already been milled in batch ${b.batch_no} (yield recorded), so its cost can no longer change — the finished rice and its costing were built on it.`);
+        e.status = 409; e.statusCode = 409; throw e;
+      }
+    }
+
     const summary = { affectedBatches: 0, reallocated: 0, cogsUpdated: 0, cogsLockedSkipped: 0 };
 
     for (const batchId of batchIds) {

@@ -14,6 +14,7 @@ const { blendPurchaseIntoLot, computeLotLanded, repriceLotPurchase, normalizeTra
 const { nextDocNo } = require('../../utils/docNumber');
 const { inventoryAccountForLot } = require('../localSales/inventoryAccount');
 const { commitLotToBatch } = require('../milling/batchLifecycle');
+const { assertLotCostEditable } = require('../milling/costEditLocks');
 // #9-scoping: per-user warehouse restriction, applied to READ paths only.
 const whScope = require('../../utils/warehouseScope');
 const stockValuation = require('./stockValuation');
@@ -401,6 +402,56 @@ async function postPurchaseDelta(trx, { delta, refType, refNo, description, narr
   });
   if (adj?.id) await accountingService.postJournal(trx, adj.id);
   return adj;
+}
+
+// Move one payable "key" (the row(s) of one cost component) to `target` IN
+// PLACE — ids and pay_nos never change (INV-13). An increase lands on the newest
+// row (or a new row when there is none); a decrease comes off unpaid balances,
+// newest first, and is refused below what has already been paid (a payment is
+// never orphaned). A row brought to 0 with nothing paid is 'Reversed'. Returns
+// the signed change, which the caller books as ONE signed-delta journal.
+async function adjustPayableKeyInPlace(trx, rows, target, { label, insertRow }) {
+  const num = (v) => parseFloat(v) || 0;
+  const old = uc.round2(rows.reduce((s, r) => s + num(r.original_amount), 0));
+  const d = uc.round2(target - old);
+  if (Math.abs(d) <= 0.01) return 0;
+  const statusOf = (orig, paid) => {
+    const out = uc.round2(orig - paid);
+    if (orig <= 0.01 && paid <= 0.01) return 'Reversed';
+    if (out <= 0.01) return 'Paid';
+    return paid > 0.01 ? 'Partial' : 'Pending';
+  };
+  if (d > 0) {
+    if (!rows.length) { await insertRow(d); return d; }
+    const r = rows[rows.length - 1];
+    const orig = uc.round2(num(r.original_amount) + d);
+    const paid = num(r.paid_amount);
+    await trx('payables').where({ id: r.id }).update({
+      original_amount: orig, outstanding: Math.max(0, uc.round2(orig - paid)),
+      status: statusOf(orig, paid), updated_at: trx.fn.now(),
+    });
+    return d;
+  }
+  let remaining = -d;
+  for (const r of [...rows].reverse()) {
+    if (remaining <= 0.01) break;
+    const orig = num(r.original_amount);
+    const paid = num(r.paid_amount);
+    const take = uc.round2(Math.min(Math.max(0, orig - paid), remaining));
+    if (take <= 0.01) continue;
+    const newOrig = uc.round2(orig - take);
+    await trx('payables').where({ id: r.id }).update({
+      original_amount: newOrig, outstanding: Math.max(0, uc.round2(newOrig - paid)),
+      status: statusOf(newOrig, paid), updated_at: trx.fn.now(),
+    });
+    remaining = uc.round2(remaining - take);
+  }
+  if (remaining > 0.01) {
+    const paidTotal = uc.round2(rows.reduce((s, r) => s + num(r.paid_amount), 0));
+    const e = new Error(`Rs ${paidTotal.toLocaleString()} of the ${label} has already been paid — it can't be reduced below that. Reverse the payment first.`);
+    e.status = 409; throw e;
+  }
+  return d;
 }
 
 // OPENING STOCK = a lot created by the go-live opening-balance load. That load
@@ -1335,7 +1386,16 @@ module.exports = {
             notes: `Transport (hauler) for lot ${lotNo} — recovered from supplier`,
           }).returning('*');
           // Reduce the supplier's rice ('Raw Material') payable by the freight.
+          // The GL below debits the supplier's AP by the FULL freight, so the
+          // bill must be able to absorb it: more freight than the unpaid rice
+          // bill (or no bill) used to clamp the payable at 0 while the GL took
+          // the whole amount — AP subledger ≠ 2010 (P2-08 / INV-12). Refused.
           const ricePay = await trx('payables').where({ linked_ref: lotNo, category: 'Raw Material', supplier_id }).first();
+          const riceUnpaid = ricePay ? uc.round2((parseFloat(ricePay.original_amount) || 0) - (parseFloat(ricePay.paid_amount) || 0)) : 0;
+          if (transportCost > riceUnpaid + 0.01) {
+            const e = new Error(`Freight Rs ${uc.round2(transportCost).toLocaleString()} is more than the supplier's unpaid rice bill (Rs ${riceUnpaid.toLocaleString()}), so it can't all be deducted from the supplier. Lower the freight to deduct, or record it as company-paid transport.`);
+            e.status = 400; throw e;
+          }
           if (ricePay) {
             const paid = parseFloat(ricePay.paid_amount) || 0;
             const newAmt = Math.max(0, uc.round2((parseFloat(ricePay.original_amount) || 0) - transportCost));
@@ -1475,6 +1535,7 @@ module.exports = {
             : 'Could not allocate a lot number (other purchases were being saved at the same time) — please save again.',
         });
       }
+      if (err.status && err.status < 500) return res.status(err.status).json({ success: false, message: err.message });
       console.error('createPurchaseLot error:', err);
       return res.status(500).json({ success: false, message: err.message });
     }
@@ -2103,6 +2164,14 @@ module.exports = {
           : (transport_vendor_id != null && transport_vendor_id !== '' ? transport_vendor_id : null);
         const haulerId = rawHauler != null ? parseInt(rawHauler, 10) : (lot.hauler_id || null);
 
+        // P2-08 (INV-08): once rice has left the lot (milled with yield, sold,
+        // moved) its costs are locked. Re-saving unchanged costs still passes.
+        const costsChange = [[tc, lot.transport_cost], [lc, lot.labor_cost], [ulc, lot.unloading_cost],
+          [pc, lot.packing_cost], [oc, lot.other_cost], [bcpb, lot.bag_cost_per_bag]]
+          .some(([a, b]) => Math.abs(a - (parseFloat(b) || 0)) > 0.01)
+          || (haulerId || null) !== (lot.hauler_id || null);
+        if (costsChange) await assertLotCostEditable(trx, lot);
+
         // Who bears the freight is what create recorded on the lot's
         // transport_costs row (no row → company, the create default). The edit
         // follows the SAME rule as create: company-paid freight is capitalised
@@ -2184,8 +2253,12 @@ module.exports = {
               }).returning('*');
             }
           } else if (existingTp) {
-            // Freight cleared and nothing paid (guarded above) → drop the payable.
-            await trx('payables').where({ id: existingTp.id }).del();
+            // Freight cleared and nothing paid (guarded above) → the payable is
+            // owed by no one: zeroed + 'Reversed' in place, never deleted, so its
+            // id / pay_no stay (INV-13). A later freight revives the same row.
+            await trx('payables').where({ id: existingTp.id }).update({
+              original_amount: 0, outstanding: 0, status: 'Reversed', updated_at: trx.fn.now(),
+            });
             tPayable = null;
           }
 
@@ -2236,8 +2309,8 @@ module.exports = {
         // reaches Accounts Payable / Money Out.
         //
         // A signed-delta GL keeps the books balanced without reverse+repost
-        // (Dr 1210 Raw Inventory / Cr 2010 Supplier Payable), only for the UNPAID
-        // change so a settled payment is never orphaned.
+        // (Dr 1210 Raw Inventory / Cr 2010 Supplier Payable) for exactly the
+        // change made to the payables (a reduction below what was paid is refused).
         const postSupplierDelta = (delta) => postPurchaseDelta(trx, {
           delta, refType: 'Purchase Lot', refNo: lot.lot_no,
           description: `Lot ${lot.lot_no} cost adjustment (Rs ${delta >= 0 ? '+' : ''}${uc.round2(delta)})`,
@@ -2250,36 +2323,24 @@ module.exports = {
           const SUP_CATS = ['Raw Material', 'Labor', 'Unloading', 'Packing', 'Other Cost', 'Bags'];
           const supRows = await trx('payables')
             .where({ linked_ref: lot.lot_no, entity: 'mill', supplier_id: lot.supplier_id })
-            .whereIn('category', SUP_CATS);
+            .whereIn('category', SUP_CATS)
+            .whereNot('status', 'Reversed')
+            .orderBy('id');
           const isPaid = (r) => (parseFloat(r.paid_amount) || 0) > 0.01;
           const hasItemised = supRows.some((r) => ['lot_labor', 'lot_unloading', 'lot_packing', 'lot_other', 'lot_bag'].includes(r.source_table));
           const bundled = supRows.find((r) => r.category === 'Raw Material' && !r.source_table);
 
-          if (!hasItemised && bundled && isPaid(bundled)) {
-            // LEGACY paid bundled lot — do NOT re-split a settled payable. Keep the
-            // single 'Raw Material' payable and update it to the supplier-owed
-            // total (NOT landed: freight + commission belong to hauler/broker).
-            const supTotal = uc.round2(landed.supplierRicePayable + landed.supplierDirect + totalBagCost);
-            const oldSup = parseFloat(bundled.original_amount) || 0;
-            const paid = parseFloat(bundled.paid_amount) || 0;
-            if (Math.abs(supTotal - oldSup) > 0.01) {
-              await trx('payables').where({ id: bundled.id }).update({
-                original_amount: supTotal,
-                outstanding: Math.max(0, uc.round2(supTotal - paid)),
-                status: (supTotal - paid) <= 0.01 ? 'Paid' : (paid > 0 ? 'Partial' : 'Pending'),
-                updated_at: trx.fn.now(),
-              });
-              // paid → no GL delta (would orphan the settlement).
-            }
-          } else {
-            // ITEMISE: keep any PAID component untouched, re-split the UNPAID rest.
-            const paidRows = supRows.filter(isPaid);
-            const unpaidRows = supRows.filter((r) => !isPaid(r));
-            const oldUnpaidBilled = unpaidRows.reduce((s, r) => s + (parseFloat(r.original_amount) || 0), 0);
-            const paidKeys = new Set(paidRows.map((r) => r.source_table || 'raw'));
-            for (const r of unpaidRows) await trx('payables').where({ id: r.id }).del();
-
-            const components = [
+          // Each payable is moved to its new amount IN PLACE (INV-13): ids and
+          // pay_nos never change, paid rows included, and the GL follows the
+          // exact change on every row — before, unpaid rows were deleted and
+          // re-inserted under new numbers and a paid bundled payable moved with
+          // no journal.
+          const targets = (!hasItemised && bundled && isPaid(bundled))
+            // LEGACY paid bundled lot — do NOT re-split a settled payable: the
+            // single 'Raw Material' payable carries the supplier-owed total (NOT
+            // landed: freight + commission belong to hauler/broker).
+            ? [{ amount: uc.round2(landed.supplierRicePayable + landed.supplierDirect + totalBagCost), category: 'Raw Material', sourceTable: null, label: 'Rice purchase' }]
+            : [
               { amount: landed.supplierRicePayable, category: 'Raw Material', sourceTable: null, label: 'Rice purchase' },
               { amount: lc, category: 'Labor', sourceTable: 'lot_labor', label: 'Labor' },
               { amount: ulc, category: 'Unloading', sourceTable: 'lot_unloading', label: 'Unloading' },
@@ -2287,25 +2348,22 @@ module.exports = {
               { amount: oc, category: 'Other Cost', sourceTable: 'lot_other', label: 'Other cost' },
               { amount: totalBagCost, category: 'Bags', sourceTable: 'lot_bag', label: 'Bags' },
             ];
-            let newUnpaidBilled = 0;
-            for (const c of components) {
-              const key = c.sourceTable || 'raw';
-              if (paidKeys.has(key)) continue; // already exists & settled — leave it
-              const amt = uc.round2(c.amount);
-              if (amt <= 0.01) continue;
-              const compPayNo = await generatePayNo(trx);
-              await trx('payables').insert({
-                pay_no: compPayNo, entity: 'mill', payable_type: 'vendor', category: c.category,
+          let supplierDelta = 0;
+          for (const c of targets) {
+            const rows = supRows.filter((r) => (r.source_table || null) === c.sourceTable);
+            supplierDelta += await adjustPayableKeyInPlace(trx, rows, uc.round2(c.amount), {
+              label: `${c.label} for lot ${lot.lot_no}`,
+              insertRow: async (amt) => trx('payables').insert({
+                pay_no: await generatePayNo(trx), entity: 'mill', payable_type: 'vendor', category: c.category,
                 supplier_id: lot.supplier_id, linked_ref: lot.lot_no,
                 source_table: c.sourceTable, source_id: lotId,
                 original_amount: amt, paid_amount: 0, outstanding: amt, status: 'Pending',
                 due_date: addDays(lot.purchase_date, 30), currency: 'PKR',
                 notes: `${c.label} — purchase lot ${lot.lot_no}`,
-              });
-              newUnpaidBilled += amt;
-            }
-            await postSupplierDelta(newUnpaidBilled - oldUnpaidBilled);
+              }),
+            });
           }
+          await postSupplierDelta(supplierDelta);
         }
 
         // Cascade the corrected cost into any batch that already consumed this
@@ -2354,6 +2412,8 @@ module.exports = {
         // landed total onto the rice payable while the extras' own payables
         // still stood — the supplier was owed the extras twice.
         const newPurchaseAmount = uc.round2(receivedKg * newRate);
+        // P2-08 (INV-08): refused once the lot's rice was milled (yield) or sold.
+        if (Math.abs(newRate - (parseFloat(lot.rate_per_kg) || 0)) > 1e-6) await assertLotCostEditable(trx, lot);
         const { payableUpdated, isOpeningStock } = await applyRicePurchaseChange(trx, lot, {
           newPurchaseAmount, kg: receivedKg,
           lotFields: { rate_per_kg: newRate },
@@ -2434,6 +2494,9 @@ module.exports = {
         if (lot.type !== 'raw') { const e = new Error('Only raw purchase lots have a received quantity.'); e.status = 400; throw e; }
 
         const oldReceived = parseFloat(lot.received_net_weight_kg) || parseFloat(lot.net_weight_kg) || 0;
+        // P2-08 (INV-08): the bill follows what arrived, but once the lot's rice
+        // was milled (yield) or sold the re-bill would re-cost stock that left.
+        if (Math.abs(newReceivedKg - oldReceived) > 0.001) await assertLotCostEditable(trx, lot);
         const curNet = parseFloat(lot.net_weight_kg) || 0;
         const utilized = Math.max(0, uc.round2(oldReceived - curNet)); // already milled/sold/transferred out
         const reservedKg = parseFloat(lot.reserved_qty) || 0;

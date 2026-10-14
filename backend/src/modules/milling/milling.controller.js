@@ -13,6 +13,7 @@ const { nextDocNo } = require('../../utils/docNumber');
 const { redactForUser, canSeeCost } = require('../../utils/costVisibility');
 const { batchOutputValues } = require('./batchOutputValues');
 const { rawPurchaseToBook } = require('./rawPurchasePayable');
+const { assertBatchRawCostEditable, assertBatchOutputsUnsold } = require('./costEditLocks');
 // Packing-cost subtotals carry no "cost" in their names.
 const BATCH_EXTRA_COST_KEYS = ['bagsTotal', 'mastersTotal', 'polytheneTotal'];
 const batchPackagingService = require('./batchPackaging.service');
@@ -1046,6 +1047,12 @@ const millingController = {
           const existingCost = await trx('milling_costs')
             .where({ batch_id: id, category: 'raw_rice' })
             .first();
+          // After yield the raw cost is what the supplier bill and the finished
+          // rice were booked at — re-pricing it here moved lot values with no
+          // journal (P2-08 / MIL-07). Refused then; re-saving the same price passes.
+          if (Math.abs(rawRiceCost - (parseFloat(existingCost?.amount) || 0)) > 0.01) {
+            await assertBatchRawCostEditable(trx, batch);
+          }
 
           if (existingCost) {
             await trx('milling_costs')
@@ -1109,6 +1116,7 @@ const millingController = {
         },
       });
     } catch (err) {
+      if (err.status && err.status < 500) return res.status(err.status).json({ success: false, message: err.message });
       console.error('Milling saveQuality error:', err);
       return res.status(500).json({ success: false, message: 'Internal server error.' });
     }
@@ -1762,6 +1770,15 @@ const millingController = {
         const oldAmt = existing ? (parseFloat(existing.amount) || 0) : 0;
         const newAmt = parseFloat(amount);
 
+        // P2-08: the raw rice cost is locked once the yield is recorded (MIL-07 —
+        // the supplier bill and finished stock were booked at it); any other
+        // cost may still change after yield (the signed delta below books it)
+        // until an output lot has been sold or used.
+        if (Math.abs(newAmt - oldAmt) > 0.01) {
+          if (category === 'raw_rice') await assertBatchRawCostEditable(trx, batch);
+          else await assertBatchOutputsUnsold(trx, batch);
+        }
+
         let row;
         if (existing) {
           [row] = await trx('milling_costs')
@@ -1923,6 +1940,7 @@ const millingController = {
         data: { cost },
       });
     } catch (err) {
+      if (err.status && err.status < 500) return res.status(err.status).json({ success: false, message: err.message });
       console.error('Milling addCost error:', err);
       return res.status(500).json({ success: false, message: 'Internal server error.' });
     }
