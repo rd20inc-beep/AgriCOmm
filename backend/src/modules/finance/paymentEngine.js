@@ -30,8 +30,9 @@ const { assertAccountCurrency } = require('../../shared/accountCurrency');
 const { assertMillEntity, assertMillAccount } = require('../../shared/millPayer');
 const {
   isCheque, postPaymentJournal, settleDocuments, resolveSource,
-  pendingChequeTotal, nextBtNo, round2,
+  pendingChequeTotal, round2,
 } = require('./paymentSettlement');
+const { postBankTransaction } = require('../../shared/bankBalance');
 
 const num = (v) => parseFloat(v) || 0;
 const httpError = (message, statusCode = 400) => { const e = new Error(message); e.statusCode = statusCode; return e; };
@@ -83,15 +84,11 @@ async function postAccountMovement(trx, {
   account, direction, amount, date, reference = null, paymentId = null, userId = null,
   source, notes = null, counterparty = null, category = null,
 }) {
-  const amt = round2(amount);
-  await trx('bank_accounts').where({ id: account.id })[direction === 'in' ? 'increment' : 'decrement']('current_balance', amt);
-  const [row] = await trx('bank_transactions').insert({
-    transaction_no: await nextBtNo(trx),
-    bank_account_id: account.id,
+  return postBankTransaction(trx, {
+    accountId: account.id,
     type: direction === 'in' ? 'credit' : 'debit',
-    amount: amt,
+    amount: round2(amount),
     currency: account.currency || 'PKR',
-    status: 'posted',
     transaction_date: date || new Date(),
     reference,
     counterparty,
@@ -100,8 +97,7 @@ async function postAccountMovement(trx, {
     source,
     linked_payment_id: paymentId,
     created_by: userId || null,
-  }).returning('*');
-  return row;
+  });
 }
 
 /**
@@ -128,7 +124,8 @@ async function postAccountMovement(trx, {
  *   bt               { source, notes, counterparty, category } for the bank row
  *   stamp            extra fields for a source row that records how it was paid
  *
- * Returns { payment, accountId, isPostDated, bankMove, journal, settled }.
+ * Returns { payment, accountId, isPostDated, bankMove, journal, settled, overdraft }
+ * (overdraft: the warning when the payment left its account below zero, else null).
  */
 async function recordMoneyMovement(trx, opts) {
   const {
@@ -225,13 +222,14 @@ async function recordMoneyMovement(trx, opts) {
   });
 
   let bankMove = 0;
+  let overdraft = null;
   if (acct) {
     // Native when the account holds the payment's currency, else the PKR
     // figure stamped on the payment; only the NET (after WHT + discount)
     // leaves the bank. The bank row carries the same figure, so the Cash tab's
     // balance = Σ(transactions).
     bankMove = round2((String(acct.currency || 'PKR').toUpperCase() === cur ? amt : basePkr) - whtNum - discNum);
-    await postAccountMovement(trx, {
+    const bankRow = await postAccountMovement(trx, {
       account: acct,
       direction: isReceipt ? 'in' : 'out',
       amount: bankMove,
@@ -244,13 +242,14 @@ async function recordMoneyMovement(trx, opts) {
       counterparty: bt.counterparty || null,
       category: bt.category || null,
     });
+    overdraft = bankRow.overdraft || null;
   }
 
   const journal = await postPaymentJournal(trx, {
     payment, userId, date: paymentDate || new Date(), overrides: journalOpts,
   });
 
-  return { payment, accountId, isPostDated, bankMove, journal, settled };
+  return { payment, accountId, isPostDated, bankMove, journal, settled, overdraft };
 }
 
 module.exports = { recordMoneyMovement, postAccountMovement, generatePaymentNo, assertWithinOutstanding };

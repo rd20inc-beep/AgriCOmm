@@ -52,6 +52,8 @@ function res() {
 
 beforeEach(() => {
   mockState.rows = {}; mockState.updates = []; mockState.inserts = []; mockState.lists = {};
+  // The receiving account the single balance writer reads back (P2-17).
+  mockState.rows.bank_accounts = { id: 3, name: 'ZZ Bank', currency: 'PKR', current_balance: 0 };
   jest.clearAllMocks();
 });
 

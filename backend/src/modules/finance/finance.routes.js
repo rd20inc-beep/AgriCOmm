@@ -12,6 +12,7 @@ const validate = require('../../middleware/validate');
 const schemas = require('../../middleware/schemas');
 const fundTransfers = require('../finance/fundTransfers.service');
 const { isMillOnlyPayer } = require('../../shared/millPayer');
+const { bankTieOut } = require('./bankTieOut');
 
 // #14 Phase 1e — supporting-document upload for payments (WHT certificate,
 // vendor invoice, receipt). Disk storage under uploads/payments, mirroring the
@@ -194,6 +195,16 @@ router.get('/purchases/:source/:sourceId/payments', authorize('finance', 'view')
 router.get('/mill-lot-costs', authorize('finance', 'view'), controller.getMillLotCosts);
 router.get('/journal-entries', authorize('finance', 'view'), controller.getJournalEntries);
 router.get('/alerts', authorize('finance', 'view'), controller.getAlerts);
+// Cash tie-out (P2-17): balance vs Σ posted bank rows vs GL, per account.
+// Read-only; the accounting roles that can post a correcting journal see it.
+router.get('/bank-tie-out', authorize('finance', 'post_journal'), async (req, res) => {
+  try {
+    return res.json({ success: true, data: await bankTieOut() });
+  } catch (err) {
+    console.error('bank tie-out error:', err);
+    return res.status(500).json({ success: false, message: 'Internal server error.' });
+  }
+});
 router.get('/overview', authorize('finance', 'view'), controller.getOverview);
 router.get('/upcoming', authorize('finance', 'view'), controller.getUpcoming);
 router.post('/payments/:id/clear', authorize('finance', 'confirm_payment'), controller.clearCheque);

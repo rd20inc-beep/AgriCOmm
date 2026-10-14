@@ -22,10 +22,12 @@ const { normalizePaymentMethod } = require('../../shared/constants/paymentMethod
 const { ledgerFailure, missingAccounts } = require('../../shared/ledgerFailure');
 const { glAccountFor } = require('../../shared/accountGl');
 const {
-  applyReceivableDelta, pendingChequeTotal, nextBtNo, postDeltaOf, round2,
+  applyReceivableDelta, pendingChequeTotal, postDeltaOf, round2,
   isCheque, hasPaymentJournal, postPaymentJournal, settleDocuments, SOURCES, LOT_SUPPLIER_LINES,
 } = require('./paymentSettlement');
-const { recordMoneyMovement } = require('./paymentEngine');
+const { recordMoneyMovement, postAccountMovement } = require('./paymentEngine');
+const { postBankTransaction } = require('../../shared/bankBalance');
+const { bankTieOut } = require('./bankTieOut');
 const { bounceCheque } = require('./chequeBounce');
 const { recordPendingExportReceipt } = require('../exportOrders/exportReceipts');
 
@@ -716,16 +718,14 @@ const financeController = {
           const wht = p.type === 'payment' ? (parseFloat(p.wht_amount) || 0) : 0;
           const disc = p.type === 'payment' ? (parseFloat(p.discount_amount) || 0) : 0;
           const bankMove = round2((acct && acct.currency === (p.currency || 'PKR') ? amount : amountPkr) - wht - disc);
-          const dir = p.type === 'receipt' ? 'increment' : 'decrement';
-          await trx('bank_accounts').where({ id: acctId })[dir]('current_balance', bankMove);
-          await trx('bank_transactions').insert({
-            transaction_no: await nextBtNo(trx), bank_account_id: acctId,
-            type: p.type === 'receipt' ? 'credit' : 'debit', amount: bankMove, currency: acct?.currency || 'PKR', status: 'posted',
-            transaction_date: new Date(), reference: p.bank_reference || null,
-            notes: `Cheque cleared (${p.payment_no})`, source: 'cheque_clear', linked_payment_id: p.id, created_by: req.user?.id || null,
+          // The engine's own account move (balance + bank row, one helper).
+          const bankRow = await postAccountMovement(trx, {
+            account: acct, direction: p.type === 'receipt' ? 'in' : 'out', amount: bankMove,
+            date: new Date(), reference: p.bank_reference || null, paymentId: p.id, userId: req.user?.id || null,
+            source: 'cheque_clear', notes: `Cheque cleared (${p.payment_no})`,
           });
+          return { cleared: true, overdraft: bankRow.overdraft || null };
         }
-        return { cleared: true };
       });
       return res.json({ success: true, data: result });
     } catch (err) {
@@ -1050,6 +1050,11 @@ const financeController = {
       if (parseInt(dueRecv.c, 10) > 0) alerts.push({ id: 'due_recv', type: 'receivable', severity: 'info', title: 'Receivables due this week', message: `${dueRecv.c} receivable(s) due within 7 days — ${rs(dueRecv.t)}.`, count: parseInt(dueRecv.c, 10), total: num(dueRecv.t), link: '/finance/due-dates' });
       const duePay = await safe(() => db('payables').whereBetween('due_date', [today, in7]).whereNot('status', 'Paid').where('outstanding', '>', 0).count('id as c').sum('outstanding as t').first(), { c: 0, t: 0 });
       if (parseInt(duePay.c, 10) > 0) alerts.push({ id: 'due_pay', type: 'payable', severity: 'info', title: 'Payables due this week', message: `${duePay.c} bill(s) due within 7 days — ${rs(duePay.t)}.`, count: parseInt(duePay.c, 10), total: num(duePay.t), link: '/finance/due-dates' });
+
+      // Cash tie-out (P2-17): a balance no bank row explains, or a PKR account
+      // whose balance disagrees with its own GL account.
+      const tie = await safe(() => bankTieOut(), null);
+      if (tie && tie.drift_count > 0) alerts.push({ id: 'bank_tie_out', type: 'bank', severity: 'danger', title: 'Cash does not tie out', message: `${tie.drift_count} cash / bank account(s) disagree with their bank rows or GL — see the cash tie-out report.`, count: tie.drift_count, link: '/finance/cash' });
 
       // Export orders awaiting action.
       const po = await safe(() => db('export_orders').whereIn('status', ['Draft', 'Awaiting Advance']).count('id as c').first(), { c: 0 });
@@ -1426,18 +1431,13 @@ const financeController = {
         if (wasCleared && pay.bank_account_id) {
           const acct = await trx('bank_accounts').where({ id: pay.bank_account_id }).first();
           const bankMove = round2((acct && acct.currency === pay.currency ? amt : amtPkr) - whtR - discR);
-          await trx('bank_accounts').where({ id: pay.bank_account_id })
-            .increment('current_balance', isReceipt ? -bankMove : bankMove);
-          if (await trx.schema.hasTable('bank_transactions')) {
-            await trx('bank_transactions').insert({
-              transaction_no: await nextBtNo(trx),
-              bank_account_id: pay.bank_account_id, type: isReceipt ? 'debit' : 'credit', amount: bankMove,
-              currency: acct?.currency || 'PKR', status: 'posted', transaction_date: new Date(),
-              reference: pay.payment_no, counterparty: null,
-              notes: label, source: 'payment_reversal',
-              linked_payment_id: pay.id, created_by: req.user?.id || null,
-            });
-          }
+          await postBankTransaction(trx, {
+            accountId: pay.bank_account_id, type: isReceipt ? 'debit' : 'credit', amount: bankMove,
+            currency: acct?.currency || 'PKR', transaction_date: new Date(),
+            reference: pay.payment_no, counterparty: null,
+            notes: label, source: 'payment_reversal',
+            linked_payment_id: pay.id, created_by: req.user?.id || null,
+          });
         }
 
         // 3) The GL: the signed delta of whatever this payment posted. An

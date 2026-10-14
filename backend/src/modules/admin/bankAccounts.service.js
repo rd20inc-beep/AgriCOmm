@@ -23,6 +23,7 @@ const accounting = require('../accounting/accounting.service');
 const fxRates = require('../finance/fxRate.service');
 const { nextDocNo } = require('../../utils/docNumber');
 const { ensureAccountGl } = require('../../shared/accountGl');
+const { postBankTransaction } = require('../../shared/bankBalance');
 
 // Descriptive columns an edit may change (schema.baseline.txt bank_accounts).
 // Never: id, uid, created_at, updated_at, current_balance.
@@ -118,7 +119,9 @@ async function createBankAccount(trx, body = {}, userId = null) {
 
   const row = {};
   for (const k of [...EDITABLE, ...LOCKED_ONCE_USED]) if (body[k] !== undefined) row[k] = body[k];
-  row.current_balance = opening;
+  // Opens at zero; the opening balance is booked below as a bank row by the
+  // single balance writer (P2-17), which moves current_balance with it.
+  row.current_balance = 0;
 
   if (row.is_export_default) {
     await trx('bank_accounts').update({ is_export_default: false }).where('is_export_default', true);
@@ -146,9 +149,9 @@ async function createBankAccount(trx, body = {}, userId = null) {
   if (!cashCoa || !equityCoa) throw httpError(500, "COA 1000 Cash & Bank / 3000 Owner's Equity missing — cannot book the opening balance.");
 
   const btNo = await nextDocNo(trx, { table: 'bank_transactions', column: 'transaction_no', prefix: 'BT-', pad: 4 });
-  await trx('bank_transactions').insert({
-    transaction_no: btNo,
-    bank_account_id: acct.id,
+  await postBankTransaction(trx, {
+    transactionNo: btNo,
+    accountId: acct.id,
     type: opening >= 0 ? 'credit' : 'debit',
     amount: Math.abs(opening),
     currency: cur,
@@ -156,12 +159,11 @@ async function createBankAccount(trx, body = {}, userId = null) {
     reference: 'OB-BANK',
     category: 'Opening Balance',
     counterparty: "Owner's Equity",
-    running_balance: opening,
-    status: 'posted',
     source: 'opening_balance',
     notes: `Opening balance of ${acct.name}`,
     created_by: userId,
   });
+  acct.current_balance = opening;
 
   const fxNote = cur !== 'PKR' ? ` (${cur} ${opening} @ ${fxRate})` : '';
   const journal = await accounting.createJournal(trx, {

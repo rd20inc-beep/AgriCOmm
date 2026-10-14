@@ -3,6 +3,7 @@
 // SALES. Revenue posts to 4050 Service Milling Revenue (never rice-sale revenue),
 // AR to 1120; payments settle the receivable. No inventory/COGS GL (client-owned).
 const db = require('../../config/database');
+const { deleteBankTransaction } = require('../../shared/bankBalance');
 const accountingService = require('../accounting/accounting.service');
 const inventoryService = require('../../services/inventoryService');
 const { resolveCashAccountId } = require('../../shared/cashAccounts');
@@ -345,11 +346,7 @@ module.exports = {
         const payments = await trx('payments').where({ service_invoice_id: inv.id });
         for (const pay of payments) {
           const bts = await trx('bank_transactions').where({ linked_payment_id: pay.id });
-          for (const bt of bts) {
-            const amt = parseFloat(bt.amount) || 0;
-            await trx('bank_accounts').where({ id: bt.bank_account_id })[bt.type === 'debit' ? 'increment' : 'decrement']('current_balance', amt);
-            await trx('bank_transactions').where({ id: bt.id }).del();
-          }
+          for (const bt of bts) await deleteBankTransaction(trx, bt);
           // The receipt's own journal (Dr 1000 / Cr 1120) and any reversal of
           // it — marked Reversed, like the revenue journal below.
           const own = await trx('journal_entries').where({ ref_no: pay.payment_no, status: 'Posted' });

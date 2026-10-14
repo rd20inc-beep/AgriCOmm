@@ -14,6 +14,8 @@ const { isMillOnlyPayer, assertMillEntity, assertMillReceipt } = require('../../
 const { inventoryAccountForLot } = require('./inventoryAccount');
 const { postLocalReceiptJournal } = require('./receiptJournal');
 const { assertAccountCurrency } = require('../../shared/accountCurrency');
+const { postBankTransaction } = require('../../shared/bankBalance');
+const { missingAccounts } = require('../../shared/ledgerFailure');
 const { resolveLineCost, priceSaleLine, salePaymentStatus } = require('./salePricing');
 const { buildRateIndex, rateForLot } = require('../inventory/stockValuation');
 
@@ -59,21 +61,17 @@ async function unclearedChequesBySale(trx, saleIds) {
 }
 
 // Move a receiving account's balance by the amount received and drop a Cash &
-// Bank sub-ledger row (linked to the payment so a delete can reverse it).
+// Bank sub-ledger row (linked to the payment so a delete can reverse it) — the
+// balance and its row are written together by the one helper (P2-17).
 async function postReceiptToAccount(trx, { accountId, amount, paymentId, reference, notes, date, userId }) {
   if (!accountId || !(amount > 0)) return;
+  const acct = await trx('bank_accounts').where({ id: accountId }).first();
   // A PKR receipt: a non-PKR (e.g. USD) account must not be moved by a rupee figure.
-  assertAccountCurrency(await trx('bank_accounts').where({ id: accountId }).first(), 'PKR');
-  await trx('bank_accounts').where({ id: accountId }).increment('current_balance', amount);
-  // Collision-safe BT- number (MAX trailing-digit + 1) — the hand-rolled
-  // orderBy-id-desc + parse could regenerate an existing number under concurrent
-  // receipts and collide on the unique transaction_no.
-  const btNo = await nextDocNo(trx, { table: 'bank_transactions', column: 'transaction_no', prefix: 'BT-', pad: 4 });
-  await trx('bank_transactions').insert({
-    transaction_no: btNo, bank_account_id: accountId,
-    type: 'credit', amount, currency: 'PKR', status: 'posted',
-    transaction_date: date || new Date(), reference: reference || null,
-    notes: notes || null, source: 'local_sale', linked_payment_id: paymentId, created_by: userId || null,
+  assertAccountCurrency(acct, 'PKR');
+  await postBankTransaction(trx, {
+    accountId, type: 'credit', amount, currency: 'PKR', transaction_date: date || new Date(),
+    reference: reference || null, notes: notes || null, source: 'local_sale',
+    linked_payment_id: paymentId, created_by: userId || null,
   });
 }
 
@@ -186,10 +184,17 @@ async function postSaleSideEffects(trx, saleRows, { userId } = {}) {
           trx('chart_of_accounts').where({ code: '5000' }).first(),
           trx('chart_of_accounts').where({ code: invCode }).first(),
         ]);
-        if (cogsAcc && invAcc) {
+        // A sale that relieves stock without its COGS journal would leave the
+        // GL holding inventory the lots no longer have — refuse it (P2-17).
+        if (!cogsAcc || !invAcc) {
+          throw missingAccounts([!cogsAcc ? '5000' : null, !invAcc ? invCode : null].filter(Boolean), 'The sale');
+        }
+        {
+          // The lot's own entity carries its stock (an export-entity lot sold
+          // locally relieves the export books), not always the mill's.
           const j = await accountingService.createJournal(trx, {
             date: (sale.sale_date ? new Date(sale.sale_date) : new Date()).toISOString().slice(0, 10),
-            entity: 'mill', refType: 'Local Sale COGS', refNo: sale.sale_no,
+            entity: lot.entity || 'mill', refType: 'Local Sale COGS', refNo: sale.sale_no,
             description: `COGS — local sale ${sale.sale_no} — ${sale.item_name}`.slice(0, 240),
             currency: 'PKR', fxRate: 1, isAuto: true, userId,
             lines: [
