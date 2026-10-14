@@ -49,6 +49,7 @@ import { valueInventory } from '../utils/inventoryValue';
 import useConfirm from '../../../hooks/useConfirm';
 import PaymentDrawer from '../../../components/payments/PaymentDrawer';
 import { toLocalISODate, todayLocalISO, fmtPKR, fmtNum, fmtPct, fmtKg, fmtDate, fmtDateTime } from '../../../shared/utils/format';
+import { escapeHtml, escapeFields } from '../../../shared/utils/html';
 import { batchByproductRevenuePKR } from '../utils/byproductPrices';
 import { isNetLowered, rowsMissingNetReason, netOverrideReasonFor } from '../utils/payrollNet';
 
@@ -3881,7 +3882,9 @@ function periodLabel(period) {
 
 // One slip's HTML body — shared by single + bulk printing.
 function payslipBody(run, line, company) {
-  const co = company || {};
+  // P1-09: every user-entered string is HTML-escaped before it is interpolated.
+  run = escapeFields(run || {}); line = escapeFields(line || {});
+  const co = escapeFields(company || {});
   const name = co.legalName || co.name || 'AGRI COMMODITIES';
   const logo = co.logo ? (String(co.logo).startsWith('http') ? co.logo : `${typeof location !== 'undefined' ? location.origin : ''}${co.logo}`) : null;
   const rs = (v) => fmtPKR(parseFloat(v) || 0, { decimals: 2 });
@@ -3919,13 +3922,13 @@ function payslipBody(run, line, company) {
     ${(adv > 0 || otherDed > 0 || statTotal > 0) ? `<div class="sec">Deductions</div>
     <table><tbody>
       ${adv > 0 ? `<tr><td>Advance recovered</td><td class="r">− ${rs(adv)}</td></tr>` : ''}
-      ${statLines.map((s) => `<tr><td>${s.name || 'Statutory'}</td><td class="r">− ${rs(s.amount)}</td></tr>`).join('')}
+      ${statLines.map((s) => `<tr><td>${escapeHtml(s.name || 'Statutory')}</td><td class="r">− ${rs(s.amount)}</td></tr>`).join('')}
       ${otherDed > 0 ? `<tr><td>Other deductions</td><td class="r">− ${rs(otherDed)}</td></tr>` : ''}
     </tbody></table>` : ''}
 
     <div class="net"><div><div style="font-size:10px;text-transform:uppercase;color:#047857">Net Paid</div><b>${rs(line.netPay)}</b></div>
       <div style="text-align:right;max-width:55%"><div class="words">Rupees ${amountInWords(line.netPay)} Only</div></div></div>
-    ${line.netOverrideReason ? `<div class="muted" style="margin-top:6px">Paid less than the computed net — ${String(line.netOverrideReason).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))}</div>` : ''}
+    ${line.netOverrideReason ? `<div class="muted" style="margin-top:6px">Paid less than the computed net — ${line.netOverrideReason}</div>` : ''}
 
     <div class="sec">Attendance &amp; advance</div>
     <table><tbody>
@@ -3941,7 +3944,7 @@ function payslipBody(run, line, company) {
 }
 
 function openPayslipWindow(title, inner) {
-  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>${title}</title><style>${PAYSLIP_CSS}</style></head>
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>${escapeHtml(title)}</title><style>${PAYSLIP_CSS}</style></head>
     <body>${inner}<script>window.addEventListener('load',function(){setTimeout(function(){window.focus();window.print();},300)});</script></body></html>`;
   const w = window.open('', '_blank', 'width=840,height=1120');
   if (!w) return false;
@@ -3961,7 +3964,9 @@ function printAllPayslips(run, lines, company) {
 // Shared A4 document header (logo + company + a doc title with up to two
 // right-aligned sub-lines). Used by the payment voucher + salary receipt.
 function docHeaderHtml(company, docTitle, sub1, sub2) {
-  const co = company || {};
+  // Company fields are escaped here; docTitle/sub1/sub2 are the caller's,
+  // already-safe HTML (callers escape their own data first).
+  const co = escapeFields(company || {});
   const name = co.legalName || co.name || 'AGRI COMMODITIES';
   const logo = co.logo ? (String(co.logo).startsWith('http') ? co.logo : `${typeof location !== 'undefined' ? location.origin : ''}${co.logo}`) : null;
   return `<div class="hd">
@@ -3979,7 +3984,9 @@ const receiptNo = (run, line) => `SR/${run.period}/${String(run.id || 0).padStar
 
 // PAYMENT VOUCHER — the formal cash/bank disbursement record for a PAID run.
 function paymentVoucherBody(run, lines, company) {
-  const co = company || {};
+  // P1-09: every user-entered string is HTML-escaped before it is interpolated.
+  run = escapeFields(run || {}); lines = escapeFields(lines || []);
+  const co = escapeFields(company || {});
   const name = co.legalName || co.name || 'AGRI COMMODITIES';
   const method = run.payMethod === 'bank' ? (run.bankName || 'Bank transfer') : 'Cash';
   const account = run.payMethod === 'bank' ? (run.bankName || 'Bank') : 'Mill Cash';
@@ -4022,7 +4029,9 @@ function paymentVoucherBody(run, lines, company) {
 
 // SALARY RECEIPT — per-employee acknowledgment of net pay received.
 function salaryReceiptBody(run, line, company) {
-  const co = company || {};
+  // P1-09: every user-entered string is HTML-escaped before it is interpolated.
+  run = escapeFields(run || {}); line = escapeFields(line || {});
+  const co = escapeFields(company || {});
   const name = co.legalName || co.name || 'AGRI COMMODITIES';
   const method = run.payMethod === 'bank' ? (run.bankName || 'Bank transfer') : 'Cash';
   const net = parseFloat(line.netPay) || 0;
@@ -4063,13 +4072,15 @@ function taxYearLabel(meta) {
   return Number.isFinite(y) ? `1 July ${y} – 30 June ${y + 1}` : (meta.taxYear || '');
 }
 function taxCertificateBody(emp, meta, company) {
-  const co = company || {};
+  // P1-09: every user-entered string is HTML-escaped before it is interpolated.
+  emp = escapeFields(emp || {}); meta = escapeFields(meta || {});
+  const co = escapeFields(company || {});
   const name = co.legalName || co.name || 'AGRI COMMODITIES';
   const monthName = (p) => periodLabel(p);
   const rows = (emp.months || []).map((m) => `<tr><td>${monthName(m.period)}</td><td class="r">${rsAmt(m.gross)}</td><td class="r">${rsAmt(m.statutory)}</td><td class="r">${rsAmt(m.net)}</td></tr>`).join('');
   const t = emp.totals || {};
   const breakdown = Object.entries(t.byStatutory || {}).filter(([, v]) => (parseFloat(v) || 0) > 0)
-    .map(([k, v]) => `<tr><td>${k}</td><td class="r">${rsAmt(v)}</td></tr>`).join('');
+    .map(([k, v]) => `<tr><td>${escapeHtml(k)}</td><td class="r">${rsAmt(v)}</td></tr>`).join('');
   return `<div class="slip">
     ${docHeaderHtml(company, 'Salary &amp; Tax Certificate', `Tax year ${meta.taxYear || ''}`, taxYearLabel(meta))}
     <div class="meta">
@@ -4101,7 +4112,9 @@ function printAllTaxCertificates(employees, meta, company) {
 // STATUTORY REMITTANCE CHALLAN / PAYMENT VOUCHER — proof of a tax/EOBI payment
 // to the authority (the one payroll money-out that lacked a document).
 function statutoryRemittanceBody(r, company) {
-  const co = company || {};
+  // P1-09: every user-entered string is HTML-escaped before it is interpolated.
+  r = escapeFields(r || {});
+  const co = escapeFields(company || {});
   const name = co.legalName || co.name || 'AGRI COMMODITIES';
   const amt = parseFloat(r.amount) || 0;
   const method = r.payMethod === 'bank' ? (r.bankName || 'Bank transfer') : 'Cash';
@@ -4577,7 +4590,9 @@ function StatutoryDeductionsDrawer({ canPay, entity = 'mill', bankAccounts = [],
 
 // Printable salary increment / revision letter.
 function incrementLetterBody(w, rev, company) {
-  const co = company || {};
+  // P1-09: every user-entered string is HTML-escaped before it is interpolated.
+  w = escapeFields(w || {});
+  const co = escapeFields(company || {});
   const name = co.legalName || co.name || 'AGRI COMMODITIES';
   const monthly = rev.newPayType === 'monthly';
   const oldAmt = monthly ? rev.prevMonthlySalary : rev.prevDailyWage;
@@ -4593,7 +4608,7 @@ function incrementLetterBody(w, rev, company) {
       <span><div class="k">Effective date</div><div class="v">${docDate(rev.effectiveDate)}</div></span>
     </div>
     <p style="margin:14px 0;font-size:12px;line-height:1.7">Dear <b>${w.name}</b>,</p>
-    <p style="font-size:12px;line-height:1.7">We are pleased to inform you that, effective <b>${docDate(rev.effectiveDate)}</b>, your ${unit} has been revised from <b>${rsAmt(oldAmt)}</b> to <b>${rsAmt(newAmt)}</b>${pct != null ? ` (${pct >= 0 ? '+' : ''}${pct}%)` : ''}.${rev.reason ? ` Reason: ${rev.reason}.` : ''}</p>
+    <p style="font-size:12px;line-height:1.7">We are pleased to inform you that, effective <b>${docDate(rev.effectiveDate)}</b>, your ${unit} has been revised from <b>${rsAmt(oldAmt)}</b> to <b>${rsAmt(newAmt)}</b>${pct != null ? ` (${pct >= 0 ? '+' : ''}${pct}%)` : ''}.${rev.reason ? ` Reason: ${escapeHtml(rev.reason)}.` : ''}</p>
     <div class="net"><div><div style="font-size:10px;text-transform:uppercase;color:#047857">Revised ${unit}</div><b>${rsAmt(newAmt)}</b></div>
       <div style="text-align:right;max-width:55%"><div class="words">Rupees ${amountInWords(newAmt)} Only${monthly ? ' per month' : ' per day'}</div></div></div>
     <div class="sign"><div><div class="l">Employee</div></div><div><div class="l">Authorized By</div></div></div>
@@ -4727,7 +4742,9 @@ function PayrollAuditDrawer({ onClose }) {
 
 // Printable end-of-service settlement voucher.
 function settlementVoucherBody(w, s, company) {
-  const co = company || {};
+  // P1-09: every user-entered string is HTML-escaped before it is interpolated.
+  w = escapeFields(w || {}); s = escapeFields(s || {});
+  const co = escapeFields(company || {});
   const name = co.legalName || co.name || 'AGRI COMMODITIES';
   const rows = [
     ['Final salary (prorated)', s.final_salary],
@@ -5371,7 +5388,9 @@ function PayslipsPanel({ runId, companyProfile, canApprove, canPay, canDelete, a
 
 // Printable A4 payroll report — every run + its payslip lines, with grand totals.
 function printPayrollReport(runs, totals, company, range) {
-  const co = company || {};
+  // P1-09: every user-entered string is HTML-escaped before it is interpolated.
+  runs = escapeFields(runs || []); range = range ? escapeHtml(range) : range;
+  const co = escapeFields(company || {});
   const name = co.legalName || co.name || 'AGRI COMMODITIES';
   const rs = (v) => fmtPKR(parseFloat(v) || 0, { decimals: 2 });
   const d = (x) => (x ? fmtDate(x) : '');
