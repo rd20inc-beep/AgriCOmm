@@ -14,7 +14,7 @@ const { lacksFinancePayment } = require('../../shared/millPayer');
 // Documentation Officer do not, so they never see it. Company-wide finance is
 // closed to the Mill Operator by role in the reporting + ai modules, not here:
 // nothing in this router is company-wide.
-const { requireCostVisibility } = require('../../utils/costVisibility');
+const { requireCostVisibility, redactCostInResponses } = require('../../utils/costVisibility');
 // Payroll routes are gated by the dedicated `payroll.*` permission module
 // (migration 203). Mill Operator holds no payroll permissions, so the old
 // denyRoles('Mill Operator') guard is no longer needed.
@@ -375,7 +375,8 @@ router.put(
 // Utility Consumption
 // =============================================================================
 
-router.get('/utilities', authorize('milling', 'view'), advancedController.listUtilities);
+// Utility readings carry rate_per_unit / total_cost — redacted for cost-blind roles.
+router.get('/utilities', authorize('milling', 'view'), redactCostInResponses(), advancedController.listUtilities);
 router.post(
   '/utilities',
   authorize('milling', 'create'),
@@ -440,7 +441,9 @@ router.get('/analytics/batch-profitability/:id', authorize('milling', 'view'), r
 // Product Pricing — confirm byproduct prices per batch
 // =============================================================================
 
-router.get('/last-prices', authorize('milling', 'view'), async (req, res) => {
+// Last confirmed per-kg prices (finished cost included). Its keys are bare grade
+// names (finished, b1, bran…), so the whole object is named as money.
+router.get('/last-prices', authorize('milling', 'view'), redactCostInResponses({ extraCostKeys: ['lastPrices'] }), async (req, res) => {
   try {
     // Get the most recent batch with confirmed prices
     const last = await db('milling_batches')
@@ -469,7 +472,9 @@ router.get('/last-prices', authorize('milling', 'view'), async (req, res) => {
   }
 });
 
-router.put('/batches/:id/prices', authorize('milling', 'edit'),
+// Confirming by-product prices + manual costs re-costs the batch's outputs, so it
+// needs reports.view_cost like every other cost input (the drawer is cost-gated).
+router.put('/batches/:id/prices', authorize('milling', 'edit'), requireCostVisibility,
   auditAction('confirm_prices', 'milling_batch', (req) => req.params.id),
   async (req, res) => {
     try {
@@ -2890,15 +2895,19 @@ router.get(
 // =============================================================================
 const packingCtrl = require('../millStore/packing.controller');
 
+// Packing runs carry bag / master / poly costs: cost-blind roles may record and
+// read them, but every money figure in the response is nulled for them.
 router.post(
   '/batches/:id/packing',
   authorize('mill_store', 'record_consumption'),
+  redactCostInResponses(),
   auditAction('pack_batch', 'milling_batch', (req) => req.params.id),
   packingCtrl.pack
 );
 router.get(
   '/batches/:id/packing',
   authorize('mill_store', 'view'),
+  redactCostInResponses(),
   packingCtrl.history
 );
 // Correct / delete a packing run. The route needs the permission that records
@@ -2937,6 +2946,7 @@ const batchPackagingCtrl = require('./batchPackaging.controller');
 router.get(
   '/batches/:id/packaging',
   authorize('milling', 'view'),
+  redactCostInResponses(), // unit/total cost per line — nulled for cost-blind roles
   batchPackagingCtrl.list
 );
 // Saving moves store stock, so it sits behind the same permission as recording
@@ -2944,6 +2954,7 @@ router.get(
 router.put(
   '/batches/:id/packaging',
   authorize('mill_store', 'record_consumption'),
+  redactCostInResponses(),
   validate(schemas.saveBatchPackaging),
   auditAction('save_batch_packaging', 'milling_batch', (req) => req.params.id),
   batchPackagingCtrl.save

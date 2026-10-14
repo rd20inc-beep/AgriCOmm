@@ -459,6 +459,14 @@ const addPurchaseToLot = Joi.object({
   notes: Joi.string().allow(null, ''),
 });
 
+// Edit Received: the weighed (received) quantity of a raw purchase lot, plus the
+// ordered quantity for the short/over variance. Quantities only — the server
+// re-bills at the lot's own rate.
+const setLotReceivedQty = Joi.object({
+  received_net_weight_kg: Joi.number().positive().required(),
+  ordered_net_weight_kg: Joi.number().min(0).allow(null, ''),
+});
+
 const recordLotTransaction = Joi.object({
   transaction_type: Joi.string().required(),
   transaction_date: Joi.date().iso().allow(null, ''),
@@ -992,6 +1000,7 @@ module.exports = {
   allocateExportStock,
   createPurchaseLot,
   addPurchaseToLot,
+  setLotReceivedQty,
   recordLotTransaction,
   updateLotCosts,
   setLotPurchaseRate,

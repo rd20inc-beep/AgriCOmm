@@ -10,7 +10,12 @@ const ownerApproval = require('../../middleware/ownerApproval');
 const schemas = require('../../middleware/schemas');
 // Money-only endpoints need reports.view_cost (or finance.view): the Mill
 // Operator and QC Analyst see stock quantities, never rates or values.
-const { requireCostVisibility } = require('../../utils/costVisibility');
+const { requireCostVisibility, redactCostInResponses } = require('../../utils/costVisibility');
+
+// Every response from this router is cost-redacted for a cost-blind user —
+// the controller's own redactForUser calls stay; this also covers the inline
+// handlers below (adjustments, traces, reconciliation, templates, sources).
+router.use(redactCostInResponses());
 
 // Lot sources (dropdown for purchase lot creation)
 router.get('/sources', authorize('inventory', 'view'), controller.getLotSources);
@@ -58,10 +63,13 @@ router.post(
   controller.createPurchaseLot
 );
 
-// Add another purchase (same supplier) onto an existing untouched lot
+// Add another purchase (same supplier) onto an existing untouched lot.
+// A purchase carries a rate (required) and re-bills the supplier, so it needs
+// reports.view_cost like Edit Price — LotDetail hides the button otherwise.
 router.post(
   '/lots/:id/add-purchase',
   authorize('inventory', 'create'),
+  requireCostVisibility,
   validate(schemas.addPurchaseToLot),
   auditAction('add_purchase_to_lot', 'inventory_lot', (req) => req.params.id),
   controller.addPurchaseToLot
@@ -108,10 +116,14 @@ router.put(
   controller.renameLot
 );
 
-// Record the actual RECEIVED quantity (ordered vs received) — re-bills to received
+// Record the actual RECEIVED quantity (ordered vs received) — re-bills to received.
+// No cost gate on purpose: it is a weighbridge QUANTITY, the server prices it at
+// the lot's own rate, cost-blind roles never see the bill (LotDetail hides it,
+// the response is redacted) and recording intake weight is their job.
 router.put(
   '/lots/:id/received-qty',
   authorize('inventory', 'edit'),
+  validate(schemas.setLotReceivedQty),
   auditAction('update_lot_received_qty', 'inventory_lot'),
   controller.setLotReceivedQty
 );

@@ -3,6 +3,13 @@ const router = express.Router();
 const { authorize, authorizeRole } = require('../../middleware/rbac');
 const auditAction = require('../../middleware/audit');
 const inventoryController = require('./inventory.controller');
+const { redactCostInResponses } = require('../../utils/costVisibility');
+
+// Hide-cost decision (2026-10-05): these legacy handlers return raw lot,
+// movement and reservation rows. A user without reports.view_cost /
+// finance.view gets every money key nulled (AppContext loads GET / for every
+// user, so this is the one that matters most).
+router.use(redactCostInResponses());
 
 // --- Lot queries ---
 router.get(
