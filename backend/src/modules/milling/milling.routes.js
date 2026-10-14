@@ -1449,7 +1449,7 @@ router.get('/payroll/audit', authorize('payroll', 'view'), async (req, res) => {
     const logs = await q.select('a.id', 'a.action', 'a.entity_type', 'a.entity_id', 'a.details', 'a.created_at', 'a.user_id', 'u.full_name as user_name')
       .orderBy('a.created_at', 'desc').limit(limit).offset((page - 1) * limit);
     const actions = await db('audit_logs').whereIn('entity_type', PAYROLL_AUDIT_ENTITIES).distinct('action').orderBy('action').pluck('action');
-    return res.json({ success: true, data: { logs, actions, total: parseInt(countRow?.c, 10) || 0, page, limit } });
+    return res.json({ success: true, data: { logs: require('../admin/audit.service').redactRows(logs), actions, total: parseInt(countRow?.c, 10) || 0, page, limit } });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 

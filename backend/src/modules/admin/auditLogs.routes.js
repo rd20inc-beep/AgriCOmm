@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../../config/database');
 const authorize = require('../../middleware/rbac');
+const { redactRows } = require('./audit.service');
 
 // GET /api/audit-logs — list recent audit logs (admin only) with filters
 router.get('/', authorize('admin', 'view'), async (req, res) => {
@@ -65,7 +66,7 @@ router.get('/', authorize('admin', 'view'), async (req, res) => {
     return res.json({
       success: true,
       data: {
-        logs,
+        logs: redactRows(logs),
         pagination: {
           page: parseInt(page),
           limit: parseInt(limit),
@@ -105,7 +106,7 @@ router.get('/entity/:type/:id', authorize('admin', 'view'), async (req, res) => 
 
     return res.json({
       success: true,
-      data: { logs },
+      data: { logs: redactRows(logs) },
     });
   } catch (err) {
     console.error('Get entity audit logs error:', err);
