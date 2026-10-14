@@ -1,11 +1,11 @@
-import { useState } from 'react';
-import { Settings, Server, Shield, Mail, FileText, Eye, Edit3, Building2 } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Settings, Server, Mail, FileText, Eye, Edit3, Building2 } from 'lucide-react';
 import { useApp } from '../../../../context/AppContext';
 
 export default function SettingsTab() {
   const {
     settings, updateSettings,
-    emailSettings, updateEmailSettings,
+    emailSettings,
     companyProfileData,
     addToast,
   } = useApp();
@@ -19,39 +19,49 @@ export default function SettingsTab() {
   const [companyWebsite, setCompanyWebsite] = useState(companyProfileData?.website || '');
   const [companyNtn, setCompanyNtn] = useState(companyProfileData?.ntn || '');
 
-  // Settings controlled state
-  const [qualityThreshold, setQualityThreshold] = useState(settings.qualityThreshold);
-  const [defaultAdvancePct, setDefaultAdvancePct] = useState(settings.defaultAdvancePct);
-  const [defaultCurrency, setDefaultCurrency] = useState(settings.defaultCurrency);
+  // System configuration — only settings the system actually reads, saved under
+  // the snake_case keys their readers use (backend schemas.updateSettings):
+  //   payment_reminder_days → overdue-advance scan + Finance › Confirmations
+  //   min_margin_pct        → low-margin order alerts (automation)
+  //   pkr_rate              → FX fallback when no rate is on file for a date
   const [paymentReminderDays, setPaymentReminderDays] = useState(settings.paymentReminderDays);
-  const [lowMarginThreshold, setLowMarginThreshold] = useState(settings.lowMarginThreshold);
+  const [minMarginPct, setMinMarginPct] = useState(settings.minMarginPct);
+  const [pkrRate, setPkrRate] = useState(settings.pkrRate);
+  const [saving, setSaving] = useState(false);
+  const [savingProfile, setSavingProfile] = useState(false);
 
-  // SMTP / Email settings local state
-  const [smtpHost, setSmtpHost] = useState(emailSettings.smtpHost);
-  const [smtpPort, setSmtpPort] = useState(emailSettings.smtpPort);
-  const [smtpUser, setSmtpUser] = useState(emailSettings.smtpUser);
-  const [smtpPassword, setSmtpPassword] = useState(emailSettings.smtpPassword);
-  const [senderName, setSenderName] = useState(emailSettings.senderName);
-  const [senderEmail, setSenderEmail] = useState(emailSettings.senderEmail);
-  const [enableTls, setEnableTls] = useState(emailSettings.enableTls);
+  // Settings arrive after mount on a cold load — follow them until edited.
+  useEffect(() => { setPaymentReminderDays(settings.paymentReminderDays); }, [settings.paymentReminderDays]);
+  useEffect(() => { setMinMarginPct(settings.minMarginPct); }, [settings.minMarginPct]);
+  useEffect(() => { setPkrRate(settings.pkrRate); }, [settings.pkrRate]);
 
-  const handleSaveSettings = () => {
-    updateSettings({
-      qualityThreshold,
-      defaultAdvancePct,
-      defaultCurrency,
-      paymentReminderDays,
-      lowMarginThreshold,
-    });
-    updateEmailSettings({
-      smtpHost, smtpPort, smtpUser, smtpPassword,
-      senderName, senderEmail, enableTls,
-    });
-    addToast('Settings saved successfully', 'success');
+  const errMsg = (err) => {
+    const first = err?.data?.errors?.[0] || err?.errors?.[0];
+    return first ? `${first.field}: ${first.message}` : (err?.message || 'request failed');
   };
 
-  const handleSaveCompanyProfile = () => {
-    updateSettings({
+  const handleSaveSettings = async () => {
+    if (saving) return;
+    setSaving(true);
+    try {
+      await updateSettings({
+        payment_reminder_days: Number(paymentReminderDays),
+        min_margin_pct: Number(minMarginPct),
+        pkr_rate: Number(pkrRate),
+      });
+      addToast('Settings saved', 'success');
+    } catch (err) {
+      addToast(`Settings not saved: ${errMsg(err)}`, 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSaveCompanyProfile = async () => {
+    if (savingProfile) return;
+    setSavingProfile(true);
+    try {
+      await updateSettings({
       companyProfile: {
         name:     companyName.trim(),
         tagline:  companyTagline.trim(),
@@ -61,8 +71,13 @@ export default function SettingsTab() {
         website:  companyWebsite.trim(),
         ntn:      companyNtn.trim(),
       },
-    });
-    addToast('Company profile saved — printed sheets and hero bands will use this on next refresh', 'success');
+      });
+      addToast('Company profile saved — printed sheets and hero bands will use this on next refresh', 'success');
+    } catch (err) {
+      addToast(`Company profile not saved: ${errMsg(err)}`, 'error');
+    } finally {
+      setSavingProfile(false);
+    }
   };
 
   return (
@@ -123,9 +138,9 @@ export default function SettingsTab() {
         </div>
 
         <div className="pt-5">
-          <button onClick={handleSaveCompanyProfile}
-            className="inline-flex items-center gap-2 bg-blue-600 text-white px-6 py-2.5 rounded-lg hover:bg-blue-700 transition-colors font-medium text-sm">
-            Save Company Profile
+          <button onClick={handleSaveCompanyProfile} disabled={savingProfile}
+            className="disabled:opacity-50 inline-flex items-center gap-2 bg-blue-600 text-white px-6 py-2.5 rounded-lg hover:bg-blue-700 transition-colors font-medium text-sm">
+            {savingProfile ? 'Saving…' : 'Save Company Profile'}
           </button>
         </div>
       </div>
@@ -139,79 +154,18 @@ export default function SettingsTab() {
         <div className="space-y-6 max-w-full lg:max-w-lg">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Quality Variance Threshold (%)
-            </label>
-            <p className="text-xs text-gray-500 mb-2">
-              Batches exceeding this variance between sample and arrival analysis will trigger an alert.
-            </p>
-            <div className="flex items-center gap-3">
-              <input
-                type="number"
-                step="0.1"
-                min="0"
-                max="10"
-                value={qualityThreshold}
-                onChange={(e) => setQualityThreshold(parseFloat(e.target.value) || 0)}
-                className="w-32 border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-              />
-              <span className="text-sm text-gray-500">% variance allowed</span>
-            </div>
-          </div>
-
-          <div className="border-t border-gray-200 pt-6">
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Default Advance Payment Percentage
-            </label>
-            <p className="text-xs text-gray-500 mb-2">
-              Default advance percentage applied to new export orders.
-            </p>
-            <div className="flex items-center gap-3">
-              <input
-                type="number"
-                step="5"
-                min="0"
-                max="100"
-                value={defaultAdvancePct}
-                onChange={(e) => setDefaultAdvancePct(parseFloat(e.target.value) || 0)}
-                className="w-32 border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-              />
-              <span className="text-sm text-gray-500">%</span>
-            </div>
-          </div>
-
-          <div className="border-t border-gray-200 pt-6">
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Default Export Currency
-            </label>
-            <p className="text-xs text-gray-500 mb-2">
-              Base currency for export transactions. Milling operations always use PKR.
-            </p>
-            <select
-              value={defaultCurrency}
-              onChange={(e) => setDefaultCurrency(e.target.value)}
-              className="w-48 border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white"
-            >
-              <option value="USD">USD - US Dollar</option>
-              <option value="PKR">PKR - Pakistani Rupee</option>
-              <option value="EUR">EUR - Euro</option>
-              <option value="GBP">GBP - British Pound</option>
-            </select>
-          </div>
-
-          <div className="border-t border-gray-200 pt-6">
-            <label className="block text-sm font-medium text-gray-700 mb-1">
               Payment Reminder Interval (Days)
             </label>
             <p className="text-xs text-gray-500 mb-2">
-              Number of days after due date before automatic payment reminders are sent.
+              An export order still Awaiting Advance after twice this many days is flagged as overdue.
             </p>
             <div className="flex items-center gap-3">
               <input
                 type="number"
                 step="1"
                 min="1"
-                max="60"
-                value={paymentReminderDays}
+                max="365"
+                value={paymentReminderDays ?? ''}
                 onChange={(e) => setPaymentReminderDays(parseInt(e.target.value) || 1)}
                 className="w-32 border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
               />
@@ -224,125 +178,67 @@ export default function SettingsTab() {
               Low Margin Alert Threshold (%)
             </label>
             <p className="text-xs text-gray-500 mb-2">
-              Orders with profit margin below this threshold will be flagged.
+              Open export orders with a booked margin below this are flagged.
             </p>
             <div className="flex items-center gap-3">
               <input
                 type="number"
-                step="1"
+                step="0.5"
                 min="0"
-                max="50"
-                value={lowMarginThreshold}
-                onChange={(e) => setLowMarginThreshold(parseInt(e.target.value) || 0)}
+                max="100"
+                value={minMarginPct ?? ''}
+                onChange={(e) => setMinMarginPct(parseFloat(e.target.value) || 0)}
                 className="w-32 border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
               />
               <span className="text-sm text-gray-500">%</span>
             </div>
           </div>
 
+          <div className="border-t border-gray-200 pt-6">
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Fallback USD → PKR Rate
+            </label>
+            <p className="text-xs text-gray-500 mb-2">
+              Used only when no FX rate is on file for a date. Daily rates are managed in Finance.
+            </p>
+            <div className="flex items-center gap-3">
+              <input
+                type="number"
+                step="0.01"
+                min="0.01"
+                value={pkrRate ?? ''}
+                onChange={(e) => setPkrRate(parseFloat(e.target.value) || 0)}
+                className="w-32 border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+              />
+              <span className="text-sm text-gray-500">PKR per USD</span>
+            </div>
+          </div>
+
           <div className="pt-4">
             <button
               onClick={handleSaveSettings}
-              className="inline-flex items-center gap-2 bg-blue-600 text-white px-6 py-2.5 rounded-lg hover:bg-blue-700 transition-colors font-medium text-sm"
+              disabled={saving}
+              className="disabled:opacity-50 inline-flex items-center gap-2 bg-blue-600 text-white px-6 py-2.5 rounded-lg hover:bg-blue-700 transition-colors font-medium text-sm"
             >
-              Save Settings
+              {saving ? 'Saving…' : 'Save Settings'}
             </button>
           </div>
         </div>
       </div>
 
-      {/* Email / SMTP Configuration */}
+      {/* Email / SMTP — configured on the server, shown read-only */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-        <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2 mb-6">
+        <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2 mb-2">
           <Server className="w-5 h-5 text-gray-600" />
-          Email / SMTP Configuration
+          Email / SMTP
         </h2>
-
-        <div className="space-y-6 max-w-full lg:max-w-lg">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">SMTP Host</label>
-            <input
-              type="text"
-              value={smtpHost}
-              onChange={(e) => setSmtpHost(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">SMTP Port</label>
-            <input
-              type="number"
-              value={smtpPort}
-              onChange={(e) => setSmtpPort(parseInt(e.target.value) || 587)}
-              className="w-32 border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">SMTP User / Email</label>
-            <input
-              type="text"
-              value={smtpUser}
-              onChange={(e) => setSmtpUser(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">SMTP Password</label>
-            <input
-              type="password"
-              value={smtpPassword}
-              onChange={(e) => setSmtpPassword(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-            />
-          </div>
-
-          <div className="border-t border-gray-200 pt-6">
-            <label className="block text-sm font-medium text-gray-700 mb-1">Sender Name</label>
-            <input
-              type="text"
-              value={senderName}
-              onChange={(e) => setSenderName(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Sender Email</label>
-            <input
-              type="email"
-              value={senderEmail}
-              onChange={(e) => setSenderEmail(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-            />
-          </div>
-
-          <div className="flex items-center gap-3">
-            <input
-              type="checkbox"
-              id="enableTls"
-              checked={enableTls}
-              onChange={(e) => setEnableTls(e.target.checked)}
-              className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-            />
-            <label htmlFor="enableTls" className="text-sm font-medium text-gray-700 flex items-center gap-1.5">
-              <Shield className="w-4 h-4 text-emerald-500" />
-              Enable TLS
-            </label>
-          </div>
-
-          <div className="pt-2">
-            <button
-              onClick={() => addToast('SMTP connection successful', 'success')}
-              className="inline-flex items-center gap-2 px-4 py-2.5 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 transition-colors"
-            >
-              <Mail className="w-4 h-4" />
-              Test Connection
-            </button>
-          </div>
-        </div>
+        <p className="text-sm text-gray-600">
+          Outgoing email uses the server's SMTP configuration (environment variables on the backend),
+          not a setting saved here. Ask the system administrator to change the mail server or its password.
+        </p>
+        <p className="text-xs text-gray-500 mt-2">
+          Sender shown on composed emails: {emailSettings?.senderName} &lt;{emailSettings?.senderEmail}&gt;
+        </p>
       </div>
 
       {/* Email Templates */}

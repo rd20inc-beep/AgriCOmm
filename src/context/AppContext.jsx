@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useCallback } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '../api/queryClient';
+import { transformKeys } from '../api/transforms';
 import { useAuth } from './AuthContext';
 import {
   useExportOrders, useMillingBatches, useCustomers, useSuppliers,
@@ -23,16 +24,14 @@ const defaultSettings = {
   pkrRate: 280,
   paymentReminderDays: 7,
   lowMarginThreshold: 5,
+  minMarginPct: 5,
 };
 
+// Display-only sender identity for the email composer. SMTP itself is
+// configured on the server (SMTP_* environment), not from the browser.
 const defaultEmailSettings = {
-  smtpHost: 'smtp.gmail.com',
-  smtpPort: 587,
-  smtpUser: 'info@agririce.com',
-  smtpPassword: '••••••••',
   senderName: 'AGRI COMMODITIES',
   senderEmail: 'info@agririce.com',
-  enableTls: true,
 };
 
 export function AppProvider({ children }) {
@@ -138,15 +137,15 @@ export function AppProvider({ children }) {
     setAlerts(prev => [{ id: Date.now(), date: todayLocalISO(), ...alert }, ...prev]);
   }, []);
 
-  const updateSettings = useCallback((newSettings) => {
-    setLocalSettings(prev => ({ ...prev, ...newSettings }));
-    // Persist to /api/admin/settings so the change survives reload and
-    // applies for every other user. Stored as nested JSON values per key.
-    if (isLoggedIn) {
-      updateSettingsMut.mutate(newSettings, {
-        onError: (err) => console.warn('updateSettings persist failed:', err.message),
-      });
-    }
+  // Persist to /api/admin/settings (snake_case keys the backend reads — see
+  // schemas.updateSettings). Returns the mutation promise so the caller can
+  // await it and toast success only when the server accepted the change; the
+  // local overlay is applied only after success, never optimistically.
+  const updateSettings = useCallback(async (newSettings) => {
+    if (!isLoggedIn) throw new Error('Not signed in');
+    const res = await updateSettingsMut.mutateAsync(newSettings);
+    setLocalSettings(prev => ({ ...prev, ...transformKeys(newSettings) }));
+    return res;
   }, [isLoggedIn, updateSettingsMut]);
 
   const updateEmailSettings = useCallback((newEmailSettings) => {
