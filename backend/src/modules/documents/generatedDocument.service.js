@@ -1,6 +1,7 @@
 const db = require('../../config/database');
 const { nextDocNo } = require('../../utils/docNumber');
 const { assembleDocument } = require('./exportDocument.controller');
+const { sanitizeDocumentHtml } = require('./htmlSanitizer');
 
 // Allowed status transitions for a generated document (self-contained — models
 // the pattern of exportOrders.workflow but never touches order status).
@@ -16,6 +17,44 @@ const GEN_DOC_TRANSITIONS = {
 };
 // A document is locked (immutable — edits require a Revise) once Approved or issued.
 const LOCKED_STATUSES = new Set(['Approved', 'Sent to Bank', 'Sent to Chamber', 'Issued to Customer']);
+
+// D-30: only an Approved (or already issued) document may be sent to a buyer or
+// bank — EXCEPT the Proforma Invoice, which is what gets sent to obtain the
+// advance and so must go out before the document set is approved.
+const PROFORMA_TYPES = new Set(['proforma-invoice', 'proforma_invoice', 'proforma', 'pi']);
+const isProformaType = (docType) => PROFORMA_TYPES.has(String(docType || '').toLowerCase());
+
+// The stored body a version renders from: the saved rendering, else (versions
+// saved before renderings were stored) the operator's edited HTML. Sanitized
+// again on the way out — older rows were stored before sanitizing existed.
+function storedBody(row) {
+  const body = row && (row.rendered_html || row.edited_html);
+  return body ? sanitizeDocumentHtml(body) : null;
+}
+
+function httpError(status, code, message) {
+  const e = new Error(message);
+  e.status = status;
+  e.code = code;
+  return e;
+}
+
+/**
+ * Throw unless this version may be emailed / WhatsApp-ed.
+ * @param {object|null} row  generated_documents row
+ */
+function assertSendable(row) {
+  if (!row) {
+    throw httpError(409, 'DOC_NOT_SAVED', 'This document has not been saved yet. Open it in the Document Center first.');
+  }
+  if (row.status === 'Cancelled' || row.status === 'Revised' || row.is_latest === false) {
+    throw httpError(409, 'DOC_NOT_SENDABLE', `This version is ${row.status === 'Cancelled' ? 'cancelled' : 'superseded'} and cannot be sent.`);
+  }
+  if (!isProformaType(row.doc_type) && !LOCKED_STATUSES.has(row.status)) {
+    throw httpError(409, 'DOC_NOT_APPROVED',
+      `This document is ${row.status} — it must be approved before it can be sent. Submit it for review and approve it first (only the Proforma Invoice can be sent before approval).`);
+  }
+}
 
 // Hard validation that must pass before a document can be Approved. Mirrors the
 // preview's blocking rules so the gate can't be bypassed from the client.
@@ -74,6 +113,10 @@ function mergedDocument(row) {
 const generatedDocumentService = {
   deepMerge,
   mergedDocument,
+  storedBody,
+  assertSendable,
+  isProformaType,
+  LOCKED_STATUSES,
 
   // Return the latest live version for (order, doc_type), or null.
   async getLatest(orderId, docType, trx = db) {
@@ -122,13 +165,18 @@ const generatedDocumentService = {
       if (!row) { const e = new Error('Document version not found.'); e.status = 404; throw e; }
       if (row.locked) { const e = new Error('This document is locked. Create a revision to edit it.'); e.status = 409; e.code = 'DOC_LOCKED'; throw e; }
       const merged = deepMerge(row.overrides_json || {}, overrides || {});
+      const patch = { overrides_json: JSON.stringify(merged), updated_at: db.fn.now() };
+      if (editedHtml != null) {
+        // The edited preview IS the document now — store it (sanitized) as both
+        // the edit and the rendering that PDF / send use.
+        const clean = sanitizeDocumentHtml(editedHtml);
+        patch.edited_html = clean;
+        patch.rendered_html = clean || null;
+        patch.rendered_at = db.fn.now();
+      }
       const [updated] = await trx('generated_documents')
         .where({ id: genId })
-        .update({
-          overrides_json: JSON.stringify(merged),
-          edited_html: editedHtml != null ? editedHtml : row.edited_html,
-          updated_at: db.fn.now(),
-        })
+        .update(patch)
         .returning('*');
       return updated;
     });
@@ -158,7 +206,38 @@ const generatedDocumentService = {
       if (bankAccountId !== undefined) patch.bank_account_id = bankAccountId || null;
       if (audience !== undefined) patch.audience = audience;
       if (copyLabel !== undefined) patch.copy_label = copyLabel || null;
+      // Bank / audience / copy change what the document shows, so the stored
+      // rendering is stale; the preview stores a fresh one on its next save.
+      patch.rendered_html = null;
+      patch.rendered_at = null;
       const [updated] = await trx('generated_documents').where({ id: genId }).update(patch).returning('*');
+      return updated;
+    });
+  },
+
+  /**
+   * Store the document body as the operator sees it, for PDF / send.
+   * Allowed while the version is open. Once locked it is frozen — except that a
+   * version approved before renderings were stored (none on file) may have one
+   * captured ONCE, by someone who may approve documents.
+   */
+  async saveRendering(genId, html, { canApprove = false } = {}) {
+    const clean = sanitizeDocumentHtml(html);
+    if (!clean.trim()) throw httpError(400, 'EMPTY', 'Document content is required.');
+    return db.transaction(async (trx) => {
+      const row = await trx('generated_documents').where({ id: genId }).forUpdate().first();
+      if (!row) throw httpError(404, undefined, 'Document version not found.');
+      if (row.locked) {
+        if (row.rendered_html || row.edited_html) {
+          throw httpError(409, 'DOC_LOCKED', 'This document is locked. Create a revision to change it.');
+        }
+        if (!canApprove) {
+          throw httpError(403, 'DOC_LOCKED', 'This approved document has no stored copy yet. Ask someone who can approve documents to open it once.');
+        }
+      }
+      const [updated] = await trx('generated_documents').where({ id: genId })
+        .update({ rendered_html: clean, rendered_at: db.fn.now(), updated_at: db.fn.now() })
+        .returning('*');
       return updated;
     });
   },
@@ -169,7 +248,9 @@ const generatedDocumentService = {
   },
 
   // Approve: validates the assembled document, then locks it.
-  async approve(genId, userId) {
+  // `renderedHtml` is the document as the approver sees it on approval; it is
+  // stored in the same transaction, so what was approved is what gets sent.
+  async approve(genId, userId, renderedHtml) {
     return db.transaction(async (trx) => {
       const row = await trx('generated_documents').where({ id: genId }).first();
       if (!row) { const e = new Error('Document version not found.'); e.status = 404; throw e; }
@@ -180,8 +261,11 @@ const generatedDocumentService = {
       const doc = await this._assembledForRow(row, trx);
       const errors = validateForApproval(doc);
       if (errors.length) { const e = new Error('Document failed validation.'); e.status = 422; e.code = 'VALIDATION'; e.errors = errors; throw e; }
+      const patch = { status: 'Approved', locked: true, approved_by: userId || null, approved_at: db.fn.now(), updated_at: db.fn.now() };
+      const clean = renderedHtml ? sanitizeDocumentHtml(renderedHtml) : '';
+      if (clean.trim()) { patch.rendered_html = clean; patch.rendered_at = db.fn.now(); }
       const [updated] = await trx('generated_documents').where({ id: genId })
-        .update({ status: 'Approved', locked: true, approved_by: userId || null, approved_at: db.fn.now(), updated_at: db.fn.now() })
+        .update(patch)
         .returning('*');
       return updated;
     });

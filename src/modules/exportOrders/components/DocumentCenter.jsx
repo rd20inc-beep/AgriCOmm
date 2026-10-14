@@ -2468,6 +2468,17 @@ function resolveOrientation(docType, templates) {
   return row && (row.orientation === 'landscape') ? 'landscape' : 'portrait';
 }
 
+// Statuses a document may be sent in (mirrors generatedDocument.service
+// assertSendable). The Proforma Invoice may also be sent while Draft / Under
+// Review — it is what obtains the advance (D-30).
+const SENDABLE_STATUSES = new Set(['Approved', 'Sent to Bank', 'Sent to Chamber', 'Issued to Customer']);
+function isSendableDoc(docType, version) {
+  const status = version?.status;
+  if (status === 'Cancelled' || status === 'Revised') return false;
+  if (docType === 'proforma-invoice') return true;
+  return SENDABLE_STATUSES.has(status);
+}
+
 const STATUS_BADGE = {
   'Draft': 'bg-gray-100 text-gray-600',
   'Under Review': 'bg-blue-100 text-blue-700',
@@ -2521,8 +2532,17 @@ export default function DocumentCenter({ order, request = null, onRequestHandled
   // actually changes.
   const previewInnerHtml = useMemo(() => ({ __html: previewHtml }), [previewHtml]);
   const canApprove = hasPermission('documents', 'approve');
+  // Saving a document (which creates its version + GD number) needs edit rights;
+  // a viewer previews without writing anything (P1-08 / EXP-13).
+  const canEditDocs = hasPermission('export_orders', 'edit') || hasPermission('documents', 'edit');
   const locked = !!(version && version.locked);
   const showBank = BANK_DOC_TYPES.has(previewKey);
+  // D-30: only an Approved (or issued) document is sent — except the Proforma
+  // Invoice, which is sent to obtain the advance. The server enforces this; the
+  // buttons just say so up front.
+  const sendable = isSendableDoc(previewKey, version);
+  // Settings/workflow bar state before the first save creates the version.
+  const wfVersion = version || { status: 'Draft', copy_label: 'ORIGINAL', audience: 'internal' };
 
   useEffect(() => {
     if (!order?.dbId && !order?.id) return;
@@ -2614,14 +2634,16 @@ export default function DocumentCenter({ order, request = null, onRequestHandled
     setVersion(null);
     setVersions([]);
     try {
-      // Persist (or resume) a draft — this freezes a snapshot and returns the
-      // merged + masked document. Falls back to the stateless preview if the
-      // persistence layer is unavailable so the user can still print.
-      let payload;
+      // Previewing writes nothing (P1-08 / EXP-13): open the saved version if
+      // there is one, else a stateless render. The version (and its GD number)
+      // is created the first time someone who can edit saves, changes a
+      // setting, submits, downloads or sends — see ensureVersion().
+      let payload = null;
       try {
-        const res = await api.post(`/api/export-orders/${oid}/documents/${docKey}/draft`, {});
-        payload = res?.data;
-      } catch {
+        const res = await api.get(`/api/export-orders/${oid}/documents/${docKey}/current`);
+        if (res?.data?.exists) payload = res.data;
+      } catch { /* fall through to the stateless preview */ }
+      if (!payload) {
         const res = await api.get(`/api/export-orders/${oid}/documents/generate/${docKey}`);
         payload = { document: res?.data?.document };
       }
@@ -2645,16 +2667,54 @@ export default function DocumentCenter({ order, request = null, onRequestHandled
   // generated-document id is already globally unique (see exportOrders.routes.js).
   // Passing the order id as well matched no route at all, so every save and
   // workflow action came back 404.
-  const versionUrl = (suffix) => `/api/export-orders/documents/${version.id}/${suffix}`;
+  const versionUrl = (suffix, v = version) => `/api/export-orders/documents/${v.id}/${suffix}`;
+
+  // The saved version for the open document, creating it (Draft + GD number) on
+  // first use. Only callers with edit rights create one; a viewer gets null.
+  async function ensureVersion() {
+    if (version?.id) return version;
+    if (!canEditDocs) return null;
+    const res = await api.post(`/api/export-orders/${oid}/documents/${previewKey}/draft`, {});
+    const meta = res?.data?.version || null;
+    if (meta) setVersion(meta);
+    return meta;
+  }
+
+  // Store the document exactly as it is on screen as the version's rendering —
+  // what the server renders for PDF / email / WhatsApp (it never accepts HTML
+  // with those requests). An open version is refreshed every time; a locked one
+  // keeps the copy frozen at approval (an approver may capture one for a version
+  // approved before copies were stored).
+  async function storeRendering(v) {
+    if (!v?.id) return v;
+    if (v.locked && (v.has_rendering || !canApprove)) return v;
+    if (!v.locked && !canEditDocs) return v;
+    const res = await api.put(versionUrl('rendering', v), { html: currentEditedHtml() });
+    const meta = res?.data?.version || v;
+    setVersion(meta);
+    return meta;
+  }
+
+  // The version the server renders for Download / Email / WhatsApp, with the
+  // on-screen copy stored. Throws a readable error when nothing is saved and
+  // this user cannot save it.
+  async function versionForServerRender() {
+    const v = await storeRendering(await ensureVersion());
+    if (!v?.id || !v.has_rendering) {
+      throw new Error('This document has not been saved yet. Someone who can edit documents needs to open and save it first.');
+    }
+    return v;
+  }
 
   // Persist preview edits (inline HTML + structured signatory/notes) as an
   // overrides patch — never touches the order/customer source record.
   async function saveEdits(extraOverrides = {}) {
-    if (!version?.id) { addToast('Draft not persisted; edits are local only.', 'info'); return; }
     setWfBusy(true);
     try {
+      const v = await ensureVersion();
+      if (!v?.id) { addToast('You can preview this document but not save it.', 'info'); return; }
       const editedHtml = printRef.current ? printRef.current.innerHTML : previewHtml;
-      const res = await api.put(versionUrl('overrides'), {
+      const res = await api.put(versionUrl('overrides', v), {
         overrides: extraOverrides, editedHtml,
       });
       // Keep the edited preview on screen (don't re-render from the snapshot,
@@ -2676,11 +2736,12 @@ export default function DocumentCenter({ order, request = null, onRequestHandled
   // the next time the document is revised. A pristine document still takes the
   // fresh render, so the new Copy/Audience shows immediately.
   async function saveSettings(patch) {
-    if (!version?.id) return;
     setWfBusy(true);
     try {
+      const v = await ensureVersion();
+      if (!v?.id) return;
       const onScreen = currentEditedHtml();
-      const res = await api.put(versionUrl('settings'), patch);
+      const res = await api.put(versionUrl('settings', v), patch);
       const hasEdits = !!res?.data?.editedHtml;
       applyVersion(res?.data, previewKey);
       if (hasEdits) {
@@ -2693,12 +2754,16 @@ export default function DocumentCenter({ order, request = null, onRequestHandled
   }
 
   // Run a workflow action (submit/approve/status/revise), refresh preview + list.
+  // Approve carries the document as the approver sees it, so what was approved
+  // is exactly what is later downloaded and sent.
   async function runWorkflow(kind, body = {}) {
-    if (!version?.id) return;
     setWfBusy(true);
     try {
+      const v = await ensureVersion();
+      if (!v?.id) return;
       const method = kind === 'revise' ? 'post' : 'put';
-      const res = await api[method](versionUrl(kind), body);
+      const payload = kind === 'approve' ? { ...body, renderedHtml: currentEditedHtml() } : body;
+      const res = await api[method](versionUrl(kind, v), payload);
       applyVersion(res?.data, previewKey);
       loadVersions(previewKey);
       addToast(`Document ${res?.data?.version?.status || 'updated'}`, 'success');
@@ -2725,9 +2790,11 @@ export default function DocumentCenter({ order, request = null, onRequestHandled
   async function downloadServerPdf() {
     setPdfBusy(true);
     try {
-      const html = buildDocHtml(currentEditedHtml(), previewDoc?._docType, `${previewDoc?.type || 'Document'} — ${order.id}`, { autoPrint: false, orientation: resolveOrientation(previewDoc?._docType, docTemplates) });
+      // Rendered on the server from the STORED version (the on-screen copy is
+      // stored first while the version is open) — no HTML is posted.
+      const v = await versionForServerRender();
       const filename = `${(previewDoc?.type || 'document').replace(/[^\w.\- ]+/g, '_')} — ${order.id}.pdf`;
-      await api.downloadPost(`/api/export-orders/${oid}/documents/${previewKey}/pdf`, { html, filename }, filename);
+      await api.downloadPost(`/api/export-orders/${oid}/documents/${previewKey}/pdf`, { genId: v.id, filename }, filename);
     } catch (err) {
       addToast(err?.message || 'PDF download failed', 'error');
     } finally { setPdfBusy(false); }
@@ -2785,14 +2852,17 @@ export default function DocumentCenter({ order, request = null, onRequestHandled
     }
   }, [pendingEmailDoc, generating, previewKey, previewDoc]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Email the current document: the server renders the same print HTML to a PDF
+  const NOT_SENDABLE_MSG = 'Approve this document before sending it — only the Proforma Invoice can be sent before approval.';
+
+  // Email the current document: the server renders the STORED version to a PDF
   // and emails it to the customer as an attachment.
   async function sendEmail({ email, subject }) {
+    if (!isSendableDoc(previewKey, version)) { addToast(NOT_SENDABLE_MSG, 'error'); return; }
     setEmailSending(true);
     try {
-      const html = buildDocHtml(currentEditedHtml(), previewDoc?._docType, previewDoc?.type, { autoPrint: false, orientation: resolveOrientation(previewDoc?._docType, docTemplates) });
+      await versionForServerRender();
       const filename = `${(previewDoc?.type || 'document').replace(/[^\w.\- ]+/g, '_')} — ${order.id}.pdf`;
-      const res = await api.post(`/api/export-orders/${oid}/documents/${previewKey}/send-email`, { html, to: email, subject, filename });
+      const res = await api.post(`/api/export-orders/${oid}/documents/${previewKey}/send-email`, { to: email, subject, filename });
       addToast(`Emailed to ${res?.data?.to || email}`, 'success');
       setEmailModal(null);
     } catch (err) {
@@ -2817,14 +2887,15 @@ export default function DocumentCenter({ order, request = null, onRequestHandled
   }
 
   // Send the current document to the customer over WhatsApp: the server renders
-  // the same print HTML to a PDF and sends it through the QR-paired session.
+  // the STORED version to a PDF and sends it through the QR-paired session.
   async function sendWhatsApp(digits) {
+    if (!isSendableDoc(previewKey, version)) { addToast(NOT_SENDABLE_MSG, 'error'); return; }
     setWaSending(true);
     try {
-      const html = buildDocHtml(currentEditedHtml(), previewDoc?._docType, previewDoc?.type, { autoPrint: false, orientation: resolveOrientation(previewDoc?._docType, docTemplates) });
+      await versionForServerRender();
       const filename = `${(previewDoc?.type || 'document').replace(/[^\w.\- ]+/g, '_')} — ${order.id}.pdf`;
       const caption = buildExportCaption();
-      const res = await api.post(`/api/export-orders/${oid}/documents/${previewKey}/send-whatsapp`, { html, to: digits, caption, filename });
+      const res = await api.post(`/api/export-orders/${oid}/documents/${previewKey}/send-whatsapp`, { to: digits, caption, filename });
       addToast(`Sent to ${res?.data?.to || digits} on WhatsApp`, 'success');
       setWaModal(null);
     } catch (err) {
@@ -2927,15 +2998,15 @@ export default function DocumentCenter({ order, request = null, onRequestHandled
                 {/* THE save for this document — text edits and formatting both.
                     There used to be a second, identical one inside the
                     formatting toolbar below. */}
-                {!locked && version?.id && (
+                {!locked && canEditDocs && (
                   <button onClick={() => saveEdits()} disabled={wfBusy}
                     title="Save your changes to this document"
                     className="inline-flex items-center gap-1.5 px-3 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 disabled:opacity-50">
                     {wfBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Save
                   </button>
                 )}
-                <button onClick={openEmail} disabled={emailSending}
-                  title="Email this document to the customer as a PDF"
+                <button onClick={openEmail} disabled={emailSending || !sendable}
+                  title={sendable ? "Email this document to the customer as a PDF" : "Approve this document before sending it (only the Proforma Invoice can be sent before approval)"}
                   className="inline-flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
                   {emailSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Mail className="w-4 h-4" />} Email
                 </button>
@@ -2949,8 +3020,8 @@ export default function DocumentCenter({ order, request = null, onRequestHandled
                   className="inline-flex items-center gap-2 px-3 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50">
                   <Printer className="w-4 h-4" /> Print
                 </button>
-                <button onClick={openWhatsApp} disabled={waSending}
-                  title="Send on WhatsApp" aria-label="Send on WhatsApp"
+                <button onClick={openWhatsApp} disabled={waSending || !sendable}
+                  title={sendable ? "Send on WhatsApp" : "Approve this document before sending it (only the Proforma Invoice can be sent before approval)"} aria-label="Send on WhatsApp"
                   className="inline-flex items-center justify-center w-9 h-9 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50">
                   {waSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                 </button>
@@ -3014,11 +3085,11 @@ export default function DocumentCenter({ order, request = null, onRequestHandled
             )}
 
             {/* Settings + workflow bar (persisted documents only) */}
-            {version?.id && (
+            {(version?.id || canEditDocs) && (
               <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 space-y-3">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <label className="text-xs text-gray-600">Copy
-                    <select disabled={locked || wfBusy} value={version.copy_label || 'ORIGINAL'}
+                    <select disabled={locked || wfBusy} value={wfVersion.copy_label || 'ORIGINAL'}
                       onChange={(e) => saveSettings({ copyLabel: e.target.value })}
                       className="mt-1 w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm bg-white disabled:opacity-60">
                       <option value="ORIGINAL">Original</option>
@@ -3028,7 +3099,7 @@ export default function DocumentCenter({ order, request = null, onRequestHandled
                   </label>
                   {showBank && (
                     <label className="text-xs text-gray-600">Audience
-                      <select disabled={locked || wfBusy} value={version.audience || 'internal'}
+                      <select disabled={locked || wfBusy} value={wfVersion.audience || 'internal'}
                         onChange={(e) => saveSettings({ audience: e.target.value })}
                         className="mt-1 w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm bg-white disabled:opacity-60">
                         <option value="internal">Internal</option>
@@ -3040,10 +3111,10 @@ export default function DocumentCenter({ order, request = null, onRequestHandled
                   )}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  {version.status === 'Draft' && (
+                  {wfVersion.status === 'Draft' && (
                     <button onClick={() => runWorkflow('submit')} disabled={wfBusy} className={wfBtn}>Submit for review</button>
                   )}
-                  {version.status === 'Under Review' && (
+                  {wfVersion.status === 'Under Review' && (
                     <>
                       <button onClick={() => runWorkflow('approve')} disabled={wfBusy || !canApprove || validation.errors.length > 0}
                         title={validation.errors.length ? 'Resolve validation issues first' : (!canApprove ? 'Requires document approval permission' : '')}
@@ -3051,14 +3122,14 @@ export default function DocumentCenter({ order, request = null, onRequestHandled
                       <button onClick={() => runWorkflow('status', { status: 'Draft' })} disabled={wfBusy} className={wfBtn}>Back to draft</button>
                     </>
                   )}
-                  {['Approved', 'Sent to Bank', 'Sent to Chamber'].includes(version.status) && (
+                  {['Approved', 'Sent to Bank', 'Sent to Chamber'].includes(wfVersion.status) && (
                     <>
-                      {version.status !== 'Sent to Bank' && <button onClick={() => runWorkflow('status', { status: 'Sent to Bank' })} disabled={wfBusy} className={wfBtn}>Sent to bank</button>}
-                      {version.status !== 'Sent to Chamber' && <button onClick={() => runWorkflow('status', { status: 'Sent to Chamber' })} disabled={wfBusy} className={wfBtn}>Sent to chamber</button>}
+                      {wfVersion.status !== 'Sent to Bank' && <button onClick={() => runWorkflow('status', { status: 'Sent to Bank' })} disabled={wfBusy} className={wfBtn}>Sent to bank</button>}
+                      {wfVersion.status !== 'Sent to Chamber' && <button onClick={() => runWorkflow('status', { status: 'Sent to Chamber' })} disabled={wfBusy} className={wfBtn}>Sent to chamber</button>}
                       <button onClick={() => runWorkflow('status', { status: 'Issued to Customer' })} disabled={wfBusy} className={wfBtn}>Issued to customer</button>
                     </>
                   )}
-                  {locked && version.is_latest !== false && (
+                  {locked && wfVersion.is_latest !== false && (
                     <button onClick={async () => {
                       const ok = await confirm({
                         title: `Revise ${previewDoc?.type || 'this document'}?`,
@@ -3072,7 +3143,7 @@ export default function DocumentCenter({ order, request = null, onRequestHandled
                     }} disabled={wfBusy}
                       className={`${wfBtn} border-amber-300 text-amber-700`}>Revise (new version)</button>
                   )}
-                  {!['Cancelled', 'Revised'].includes(version.status) && (
+                  {version?.id && !['Cancelled', 'Revised'].includes(wfVersion.status) && (
                     <button onClick={async () => {
                       if (!await confirm({
                         title: `Cancel ${previewDoc?.type || 'this document'}?`,

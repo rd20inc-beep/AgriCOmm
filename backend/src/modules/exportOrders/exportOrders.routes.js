@@ -273,16 +273,26 @@ router.get('/:id/documents/generate/:docType', authorize('export_orders', 'view'
 // Persisted / versioned generated documents (Phase E).
 const genDocController = require('../../modules/documents/generatedDocument.controller');
 router.put('/:id/documents/customer-style', authorize('export_orders', 'edit'), validate(schemas.documentCustomerStyle), genDocController.saveCustomerStyle);
-router.post('/:id/documents/:docType/draft', authorize('export_orders', 'view'), genDocController.createDraft);
+// P1-08 / EXP-13: previewing writes nothing. A viewer previews through GET
+// /current (an existing version) or GET /generate (a stateless render); a
+// version row — and its GD number — is created only when someone who can edit
+// documents first saves, changes a setting or stores the rendering.
+const canEditDocuments = authorize.authorizeAny(['export_orders', 'edit'], ['documents', 'edit']);
+router.post('/:id/documents/:docType/draft', canEditDocuments, genDocController.createDraft);
 router.get('/:id/documents/:docType/current', authorize('export_orders', 'view'), genDocController.getCurrent);
+// P1-08 / EXP-12: PDF and send render the STORED version on the server — the
+// request carries no HTML. Sending needs an Approved version (Proforma Invoice
+// excepted, D-30); the PDF needs the documents download permission on top of
+// order view.
 router.post('/:id/documents/:docType/send-whatsapp', authorize('export_orders', 'send_email'), validate(schemas.sendDocumentWhatsApp), genDocController.sendWhatsApp);
 router.post('/:id/documents/:docType/send-email', authorize('export_orders', 'send_email'), validate(schemas.sendDocumentEmail), genDocController.sendEmail);
-router.post('/:id/documents/:docType/pdf', authorize('export_orders', 'view'), validate(schemas.downloadDocumentPdf), genDocController.downloadPdf);
+router.post('/:id/documents/:docType/pdf', authorize('export_orders', 'view'), authorize('documents', 'download'), validate(schemas.downloadDocumentPdf), genDocController.downloadPdf);
 router.get('/:id/documents/:docType/versions', authorize('export_orders', 'view'), genDocController.listVersions);
 router.put('/documents/:genId/overrides', authorize('export_orders', 'edit'), validate(schemas.saveDocumentOverrides), genDocController.saveOverrides);
+router.put('/documents/:genId/rendering', canEditDocuments, validate(schemas.saveDocumentRendering), genDocController.saveRendering);
 router.put('/documents/:genId/settings', authorize('export_orders', 'edit'), validate(schemas.documentSettings), genDocController.updateSettings);
 router.put('/documents/:genId/submit', authorize('export_orders', 'edit'), genDocController.submit);
-router.put('/documents/:genId/approve', authorize('documents', 'approve'), genDocController.approve);
+router.put('/documents/:genId/approve', authorize('documents', 'approve'), validate(schemas.documentApprove), genDocController.approve);
 router.put('/documents/:genId/status', authorize('export_orders', 'edit'), validate(schemas.documentStatus), genDocController.setStatus);
 router.post('/documents/:genId/revise', authorize('export_orders', 'edit'), validate(schemas.documentRevise), genDocController.revise);
 router.get('/documents/:genId', authorize('export_orders', 'view'), genDocController.getVersion);

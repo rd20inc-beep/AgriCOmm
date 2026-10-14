@@ -7,6 +7,8 @@ const pdfService = require('./pdf.service');
 const whatsappQr = require('../communications/whatsappQr.service');
 const whatsappService = require('../communications/whatsapp.service');
 const emailService = require('../communications/email.service');
+const { sanitizeDocumentHtml } = require('./htmlSanitizer');
+const { buildDocumentPage, loadOrientation, maskBankInHtml } = require('./documentHtml');
 
 async function resolveOrderId(id) {
   if (/^\d+$/.test(id)) return parseInt(id, 10);
@@ -17,8 +19,62 @@ async function resolveOrderId(id) {
 // Trim heavy JSON columns off a row for list/meta responses.
 function meta(row) {
   if (!row) return row;
-  const { snapshot_json, overrides_json, edited_html, ...rest } = row; // eslint-disable-line no-unused-vars
+  const { snapshot_json, overrides_json, edited_html, rendered_html, ...rest } = row; // eslint-disable-line no-unused-vars
+  // Whether PDF / send have a stored body to render from.
+  rest.has_rendering = !!(rendered_html || edited_html);
   return rest;
+}
+
+// The operator's saved edits, sanitized on the way out too (rows saved before
+// sanitizing existed are rendered straight into the preview's innerHTML).
+function editedHtmlOf(row) {
+  return row && row.edited_html ? sanitizeDocumentHtml(row.edited_html) : null;
+}
+
+function sendError(res, err, label) {
+  if (err && err.status) return res.status(err.status).json({ success: false, code: err.code, message: err.message, errors: err.errors });
+  console.error(`${label} error:`, err);
+  return res.status(500).json({ success: false, message: 'Internal server error.' });
+}
+
+// The version a PDF request is about: the one named by genId (which must belong
+// to this order and document type), else the latest.
+async function resolveVersionRow(orderId, docType, genId) {
+  if (genId) {
+    const row = await service.getById(parseInt(genId, 10));
+    if (!row || row.order_id !== orderId || row.doc_type !== docType) {
+      const e = new Error('Document version not found.'); e.status = 404; throw e;
+    }
+    return row;
+  }
+  return service.getLatest(orderId, docType);
+}
+
+/**
+ * Render a STORED version to PDF. Never takes HTML from the request: the body
+ * is the version's sanitized stored rendering, masked for the requester, in the
+ * server's own A4 shell (documentHtml.buildDocumentPage).
+ */
+async function renderStoredPdf(row, req) {
+  let body = service.storedBody(row);
+  if (!body) {
+    const e = new Error('This document has no saved copy to render yet. Open it in the Document Center and save it (someone who can edit documents), then try again.');
+    e.status = 409; e.code = 'NOT_RENDERED';
+    throw e;
+  }
+  // The rendering was stored by whoever saved it; a requester without
+  // finance.view_bank_details gets the account / IBAN masked as the API would.
+  const canSeeFull = await userHasPermission(req, 'finance', 'view_bank_details');
+  if (!canSeeFull) {
+    const full = await service._assembledForRow(row);
+    body = maskBankInHtml(body, full && full.company && full.company.bank);
+  }
+  const order = await db('export_orders').where({ id: row.order_id }).select('order_no').first();
+  const snap = row.snapshot_json || {};
+  const title = `${snap.type || row.doc_type} — ${(order && order.order_no) || row.order_id}`;
+  const orientation = await loadOrientation(db, row.doc_type);
+  const page = buildDocumentPage(body, { docType: row.doc_type, title, orientation });
+  return pdfService.htmlToPdf(page);
 }
 
 // Merge snapshot+overrides, re-resolve the selected bank, and mask the banking
@@ -46,7 +102,7 @@ async function transition(req, res, action) {
     let row;
     let auditAction = action;
     if (action === 'submit') row = await service.submit(genId, userId);
-    else if (action === 'approve') { row = await service.approve(genId, userId); auditAction = 'approve_document'; }
+    else if (action === 'approve') { row = await service.approve(genId, userId, req.body && req.body.renderedHtml); auditAction = 'approve_document'; }
     else if (action === 'setStatus') { row = await service.setStatus(genId, req.body.status, userId); auditAction = `status:${req.body.status}`; }
     else if (action === 'revise') { row = await service.revise(genId, userId, req.body.reason); auditAction = 'revise_document'; }
     const document = await renderRow(row, req);
@@ -82,7 +138,7 @@ const generatedDocumentController = {
         details: { docType: row.doc_type, version: row.version },
         ipAddress: req.ip,
       }).catch(() => {});
-      return res.status(201).json({ success: true, data: { version: meta(row), document, editedHtml: row.edited_html || null } });
+      return res.status(201).json({ success: true, data: { version: meta(row), document, editedHtml: editedHtmlOf(row) } });
     } catch (err) {
       if (err.status) return res.status(err.status).json({ success: false, code: err.code, message: err.message });
       console.error('createDraft error:', err);
@@ -98,7 +154,7 @@ const generatedDocumentController = {
       const row = await service.getLatest(orderId, req.params.docType);
       if (!row) return res.json({ success: true, data: { exists: false } });
       const document = await renderRow(row, req);
-      return res.json({ success: true, data: { exists: true, version: meta(row), document, editedHtml: row.edited_html || null } });
+      return res.json({ success: true, data: { exists: true, version: meta(row), document, editedHtml: editedHtmlOf(row) } });
     } catch (err) {
       console.error('getCurrent error:', err);
       return res.status(500).json({ success: false, message: 'Internal server error.' });
@@ -130,6 +186,26 @@ const generatedDocumentController = {
     }
   },
 
+  // PUT /documents/:genId/rendering — store the document body as the operator
+  // sees it (sanitized). PDF / email / WhatsApp render this, never posted HTML.
+  async saveRendering(req, res) {
+    try {
+      const canApprove = await userHasPermission(req, 'documents', 'approve');
+      const row = await service.saveRendering(parseInt(req.params.genId, 10), req.body.html, { canApprove });
+      auditService.log({
+        userId: req.user ? req.user.id : null,
+        action: 'store_document_rendering',
+        entityType: 'generated_document',
+        entityId: row.doc_no,
+        details: { docType: row.doc_type, version: row.version, status: row.status, locked: !!row.locked },
+        ipAddress: req.ip,
+      }).catch(() => {});
+      return res.json({ success: true, data: { version: meta(row) } });
+    } catch (err) {
+      return sendError(res, err, 'saveRendering');
+    }
+  },
+
   // GET /:id/documents/:docType/versions — version history (meta only).
   async listVersions(req, res) {
     try {
@@ -155,7 +231,7 @@ const generatedDocumentController = {
       // `editedHtml` rides along (as it does on getCurrent) so the preview can
       // tell a hand-edited document from a pristine one and keep the operator's
       // edits on screen instead of replacing them with the fresh render.
-      return res.json({ success: true, data: { version: meta(row), document, editedHtml: row.edited_html || null } });
+      return res.json({ success: true, data: { version: meta(row), document, editedHtml: editedHtmlOf(row) } });
     } catch (err) {
       if (err.status) return res.status(err.status).json({ success: false, code: err.code, message: err.message });
       console.error('updateSettings error:', err);
@@ -196,14 +272,16 @@ const generatedDocumentController = {
     }
   },
 
-  // POST /:id/documents/:docType/send-whatsapp — render the posted document HTML
-  // to a PDF and send it to the customer's WhatsApp via the QR-paired session.
+  // POST /:id/documents/:docType/send-whatsapp — render the STORED latest
+  // version to a PDF and send it to the customer's WhatsApp via the QR-paired
+  // session. Requires Approved, except the Proforma Invoice (D-30).
   async sendWhatsApp(req, res) {
     try {
       const orderId = await resolveOrderId(req.params.id);
       if (!orderId) return res.status(404).json({ success: false, message: 'Order not found.' });
-      const { html, to, caption, filename } = req.body;
-      if (!html || !String(html).trim()) return res.status(400).json({ success: false, message: 'Document content is required.' });
+      const { to, caption, filename } = req.body;
+      const row = await service.getLatest(orderId, req.params.docType);
+      try { service.assertSendable(row); } catch (e) { return sendError(res, e, 'sendWhatsApp'); }
 
       // Recipient: explicit number, else the order's customer phone.
       let phone = to;
@@ -221,9 +299,9 @@ const generatedDocumentController = {
 
       let pdf;
       try {
-        pdf = await pdfService.htmlToPdf(html);
+        pdf = await renderStoredPdf(row, req);
       } catch (e) {
-        return res.status(e.status || 500).json({ success: false, message: e.message || 'Failed to render the document PDF.' });
+        return res.status(e.status || 500).json({ success: false, code: e.code, message: e.message || 'Failed to render the document PDF.' });
       }
 
       const safeName = String(filename || `${req.params.docType}.pdf`).replace(/[^\w.\- ]+/g, '_');
@@ -238,7 +316,7 @@ const generatedDocumentController = {
       auditService.log({
         userId: req.user ? req.user.id : null, action: 'send_document_whatsapp',
         entityType: 'export_order', entityId: orderId,
-        details: { docType: req.params.docType, to: phone, ok: result.ok }, ipAddress: req.ip,
+        details: { docType: req.params.docType, genDocNo: row.doc_no, status: row.status, to: phone, ok: result.ok }, ipAddress: req.ip,
       }).catch(() => {});
 
       if (!result.ok) return res.status(502).json({ success: false, message: result.error || 'WhatsApp send failed.' });
@@ -249,14 +327,16 @@ const generatedDocumentController = {
     }
   },
 
-  // POST /:id/documents/:docType/send-email — render the posted document HTML to
-  // a PDF and email it to the customer as an attachment.
+  // POST /:id/documents/:docType/send-email — render the STORED latest version
+  // to a PDF and email it as an attachment. Requires Approved, except the
+  // Proforma Invoice (D-30).
   async sendEmail(req, res) {
     try {
       const orderId = await resolveOrderId(req.params.id);
       if (!orderId) return res.status(404).json({ success: false, message: 'Order not found.' });
-      const { html, to, subject, message, filename } = req.body;
-      if (!html || !String(html).trim()) return res.status(400).json({ success: false, message: 'Document content is required.' });
+      const { to, subject, message, filename } = req.body;
+      const row = await service.getLatest(orderId, req.params.docType);
+      try { service.assertSendable(row); } catch (e) { return sendError(res, e, 'sendEmail'); }
 
       // Recipient: explicit email, else the order's customer email.
       let email = to && String(to).trim();
@@ -268,9 +348,9 @@ const generatedDocumentController = {
 
       let pdf;
       try {
-        pdf = await pdfService.htmlToPdf(html);
+        pdf = await renderStoredPdf(row, req);
       } catch (e) {
-        return res.status(e.status || 500).json({ success: false, message: e.message || 'Failed to render the document PDF.' });
+        return res.status(e.status || 500).json({ success: false, code: e.code, message: e.message || 'Failed to render the document PDF.' });
       }
 
       const docLabel = req.params.docType;
@@ -289,7 +369,7 @@ const generatedDocumentController = {
       auditService.log({
         userId: req.user ? req.user.id : null, action: 'send_document_email',
         entityType: 'export_order', entityId: orderId,
-        details: { docType: docLabel, to: email, ok: result.status === 'Sent' }, ipAddress: req.ip,
+        details: { docType: docLabel, genDocNo: row.doc_no, status: row.status, to: email, ok: result.status === 'Sent' }, ipAddress: req.ip,
       }).catch(() => {});
 
       if (result.status !== 'Sent') return res.status(502).json({ success: false, message: result.error_message || 'Email send failed.' });
@@ -300,21 +380,23 @@ const generatedDocumentController = {
     }
   },
 
-  // POST /:id/documents/:docType/pdf — render the posted document HTML to a PDF
-  // on the SERVER (consistent A4, independent of the browser print dialog) and
-  // return it as a download.
+  // POST /:id/documents/:docType/pdf — render the STORED version (genId, else
+  // the latest) to a PDF on the SERVER (consistent A4, independent of the
+  // browser print dialog) and return it as a download.
   async downloadPdf(req, res) {
     try {
       const orderId = await resolveOrderId(req.params.id);
       if (!orderId) return res.status(404).json({ success: false, message: 'Order not found.' });
-      const { html, filename } = req.body;
-      if (!html || !String(html).trim()) return res.status(400).json({ success: false, message: 'Document content is required.' });
+      const { filename, genId } = req.body;
+      let row;
+      try { row = await resolveVersionRow(orderId, req.params.docType, genId); } catch (e) { return sendError(res, e, 'downloadPdf'); }
+      if (!row) return res.status(409).json({ success: false, code: 'DOC_NOT_SAVED', message: 'This document has not been saved yet. Open it in the Document Center first.' });
 
       let pdf;
       try {
-        pdf = await pdfService.htmlToPdf(html);
+        pdf = await renderStoredPdf(row, req);
       } catch (e) {
-        return res.status(e.status || 503).json({ success: false, message: e.message || 'Failed to render the document PDF.' });
+        return res.status(e.status || 503).json({ success: false, code: e.code, message: e.message || 'Failed to render the document PDF.' });
       }
       const buf = Buffer.isBuffer(pdf) ? pdf : Buffer.from(pdf);
       const safeName = String(filename || `${req.params.docType}.pdf`).replace(/[^\w.\- ]+/g, '_');
@@ -322,7 +404,7 @@ const generatedDocumentController = {
       auditService.log({
         userId: req.user ? req.user.id : null, action: 'download_document_pdf',
         entityType: 'export_order', entityId: orderId,
-        details: { docType: req.params.docType }, ipAddress: req.ip,
+        details: { docType: req.params.docType, genDocNo: row.doc_no, version: row.version, status: row.status }, ipAddress: req.ip,
       }).catch(() => {});
 
       res.setHeader('Content-Type', 'application/pdf');
@@ -350,3 +432,5 @@ const generatedDocumentController = {
 };
 
 module.exports = generatedDocumentController;
+module.exports.renderStoredPdf = renderStoredPdf;
+module.exports.meta = meta;

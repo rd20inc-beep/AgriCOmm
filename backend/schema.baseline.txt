@@ -938,6 +938,8 @@ COL generated_documents.locked:boolean:NOT NULL
 COL generated_documents.order_id:integer:NOT NULL
 COL generated_documents.overrides_json:jsonb:NULL
 COL generated_documents.previous_version_id:integer:NULL
+COL generated_documents.rendered_at:timestamp with time zone:NULL
+COL generated_documents.rendered_html:text:NULL
 COL generated_documents.revision_reason:text:NULL
 COL generated_documents.snapshot_json:jsonb:NULL
 COL generated_documents.status:character varying:NOT NULL
