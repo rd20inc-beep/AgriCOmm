@@ -5,6 +5,7 @@ const { normalizePaymentMethod } = require('../../shared/constants/paymentMethod
 const { pendingChequeTotal, round2 } = require('../finance/paymentSettlement');
 const { recordMoneyMovement } = require('../finance/paymentEngine');
 const { postProcessingDelta } = require('../milling/millingCompletionJournal');
+const { isInternalCostCategory } = require('../exportOrders/exportCosts');
 
 const CATEGORY_MAP = {
   general: [
@@ -51,6 +52,11 @@ const expensesService = {
 
     if (!amount || Number(amount) <= 0) throw new ValidationError('Amount must be positive.');
     if (!expense_date) throw new ValidationError('Expense date is required.');
+    // P2-05: rice / milling are costed at shipment from stock and from the
+    // milling batch — booking them as an export-order expense counts them twice.
+    if (order_id && expense_type === 'export' && isInternalCostCategory(category)) {
+      throw new ValidationError('Rice and milling are costed from stock at shipment and from the milling batch — they cannot be added as an export-order expense.');
+    }
 
     const amountNum = Number(amount);
     // Paying at create goes through the payment engine once the expense and
@@ -146,6 +152,10 @@ const expensesService = {
           fx_rate: 1,
           base_amount_pkr: amountPkr,
           notes: `From business expense ${expenseNo}`,
+          // One bill, with its vendor (P2-05).
+          supplier_id: supplier_id || null,
+          vendor_name: vendor_name || null,
+          bill_ref: invoice_reference || null,
         });
       }
 

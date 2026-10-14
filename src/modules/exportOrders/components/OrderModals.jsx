@@ -587,6 +587,11 @@ export function ExpenseModal({
   expenseCategory, setExpenseCategory,
   expenseAmount, setExpenseAmount,
   expenseNotes, setExpenseNotes,
+  expenseSupplierId = '', setExpenseSupplierId = () => {},
+  expenseVendorName = '', setExpenseVendorName = () => {},
+  expenseBillRef = '', setExpenseBillRef = () => {},
+  suppliersList = [],
+  addToast,
   exportCostCategories,
   onConfirm,
   pending = false,
@@ -612,6 +617,40 @@ export function ExpenseModal({
               <option key={cat.key} value={cat.key}>{cat.label}</option>
             ))}
           </select>
+          <p className="text-xs text-gray-400 mt-1">Rice and milling are not added here — they are costed from stock at shipment and from the milling batch.</p>
+        </div>
+        {/* One bill per entry, with the vendor it is owed to (P2-05). */}
+        <div>
+          <SupplierPicker
+            label={<>Vendor <span className="text-red-500">*</span></>}
+            value={expenseSupplierId ? String(expenseSupplierId) : ''}
+            onChange={setExpenseSupplierId}
+            suppliers={suppliersList}
+            placeholder="Search the vendor who billed this…"
+            addToast={addToast}
+            clearable
+          />
+          {!expenseSupplierId && (
+            <input
+              type="text"
+              value={expenseVendorName}
+              onChange={e => setExpenseVendorName(e.target.value)}
+              placeholder="…or type the vendor's name"
+              maxLength={200}
+              className="mt-2 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+            />
+          )}
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Bill / Invoice No.</label>
+          <input
+            type="text"
+            value={expenseBillRef}
+            onChange={e => setExpenseBillRef(e.target.value)}
+            placeholder="Vendor's bill number"
+            maxLength={100}
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+          />
         </div>
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Amount (Rs) <span className="text-red-500">*</span></label>

@@ -3,8 +3,14 @@
  * Extracted from AppContext — these are static reference data.
  */
 
+// Never an export-order expense (P2-05): the rice is costed from stock at
+// shipment (5020/1230) and milling is derived from the batch. The server
+// refuses them; the UI doesn't offer them.
+export const INTERNAL_EXPORT_COST_CATEGORIES = ['rice', 'raw_rice', 'milling'];
+export const isInternalExportCostCategory = (key) =>
+  INTERNAL_EXPORT_COST_CATEGORIES.includes(String(key || '').trim().toLowerCase());
+
 export const EXPORT_COST_CATEGORIES = [
-  { key: 'rice', label: 'Rice Procurement' },
   { key: 'bags', label: 'Bags / Packaging' },
   { key: 'loading', label: 'Loading' },
   { key: 'clearing', label: 'Clearing Agent' },

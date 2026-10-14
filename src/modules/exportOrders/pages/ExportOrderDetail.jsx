@@ -146,9 +146,12 @@ export default function ExportOrderDetail() {
   const [shipBankAccountId, setShipBankAccountId] = useState('');
 
   // Expense form state
-  const [expenseCategory, setExpenseCategory] = useState('rice');
+  const [expenseCategory, setExpenseCategory] = useState('freight');
   const [expenseAmount, setExpenseAmount] = useState('');
   const [expenseNotes, setExpenseNotes] = useState('');
+  const [expenseSupplierId, setExpenseSupplierId] = useState('');
+  const [expenseVendorName, setExpenseVendorName] = useState('');
+  const [expenseBillRef, setExpenseBillRef] = useState('');
 
   // Helper to invalidate order + related caches after mutations
   const invalidateOrder = useCallback(() => {
@@ -320,9 +323,12 @@ export default function ExportOrderDetail() {
   };
 
   const openExpenseModal = () => {
-    setExpenseCategory('rice');
+    setExpenseCategory('freight');
     setExpenseAmount('');
     setExpenseNotes('');
+    setExpenseSupplierId('');
+    setExpenseVendorName('');
+    setExpenseBillRef('');
     setShowExpenseModal(true);
   };
 
@@ -459,16 +465,27 @@ export default function ExportOrderDetail() {
       addToast('Please enter a valid amount', 'error');
       return;
     }
+    if (!expenseSupplierId && !expenseVendorName.trim()) {
+      addToast('Choose or type the vendor who billed this', 'error');
+      return;
+    }
     try {
+      // Each entry is its own bill (a second freight bill no longer replaces the first).
       await addCostMut.mutateAsync({
         id: orderId,
-        data: { category: expenseCategory, amount, notes: expenseNotes },
+        data: {
+          category: expenseCategory, amount, notes: expenseNotes,
+          supplier_id: expenseSupplierId ? parseInt(expenseSupplierId, 10) : null,
+          vendor_name: expenseSupplierId ? null : expenseVendorName.trim(),
+          bill_ref: expenseBillRef.trim() || null,
+        },
       });
       addToast(`${fmtPKR(amount, { decimals: 2 })} added to ${expenseCategory}`);
+      setShowExpenseModal(false);
     } catch (err) {
-      addToast(err.message || 'Failed to add expense', 'error');
+      // Keep the drawer open so what was typed isn't lost.
+      addToast(err?.data?.errors?.[0]?.message || err?.data?.message || err.message || 'Failed to add expense', 'error');
     }
-    setShowExpenseModal(false);
   };
 
   // `fileOrFiles` may be one File or several: every file chosen in one go is
@@ -989,6 +1006,14 @@ export default function ExportOrderDetail() {
         setExpenseAmount={setExpenseAmount}
         expenseNotes={expenseNotes}
         setExpenseNotes={setExpenseNotes}
+        expenseSupplierId={expenseSupplierId}
+        setExpenseSupplierId={setExpenseSupplierId}
+        expenseVendorName={expenseVendorName}
+        setExpenseVendorName={setExpenseVendorName}
+        expenseBillRef={expenseBillRef}
+        setExpenseBillRef={setExpenseBillRef}
+        suppliersList={suppliersList || []}
+        addToast={addToast}
         exportCostCategories={exportCostCategories}
         onConfirm={handleAddExpense}
         pending={addCostMut.isPending}

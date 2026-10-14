@@ -13,6 +13,7 @@ import {
 // the companyProfile object saved in system_settings.
 import companyProfileDefaults from '../data/companyProfile.json';
 import { todayLocalISO } from '../shared/utils/format';
+import { isInternalExportCostCategory } from '../shared/constants/costCategories';
 
 const AppContext = createContext();
 
@@ -78,12 +79,12 @@ export function AppProvider({ children }) {
 
   const updateSettingsMut = useUpdateSettings();
 
-  // Dynamic cost categories (user can add more — local state for now)
+  // Dynamic cost categories (user can add more — local state for now).
+  // No rice / milling (P2-05): the rice is costed from stock at shipment and
+  // milling comes from the batch — a manual entry counted them twice.
   const [exportCostCategories, setExportCostCategories] = useState([
-    { key: 'rice', label: 'Rice Procurement' },
     { key: 'commission', label: 'Commission / Brokerage' },
     { key: 'transport', label: 'Transport' },
-    { key: 'milling', label: 'Milling' },
     { key: 'drying', label: 'Drying / Processing' },
     { key: 'packing', label: 'Packing' },
     { key: 'pallet', label: 'Pallet' },
@@ -120,6 +121,8 @@ export function AppProvider({ children }) {
   }, []);
 
   const addExportCostCategory = useCallback((category) => {
+    // The server refuses rice / milling as order costs, so don't offer them.
+    if (isInternalExportCostCategory(category?.key)) return;
     setExportCostCategories(prev => [...prev, category]);
   }, []);
 

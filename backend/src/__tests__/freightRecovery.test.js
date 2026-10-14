@@ -15,6 +15,8 @@
  * the in-memory database can't run, so those checks still read the controller.
  */
 jest.mock('../config/database', () => require('./helpers/memoryDb').db);
+// The in-memory db has no max(); payable numbering is not what this tests.
+jest.mock('../utils/docNumber', () => ({ nextDocNo: jest.fn(async () => 'PAY-EOC0001') }));
 const mockJournals = [];
 const mockAccounting = {
   createJournal: jest.fn(async (_trx, j) => { mockJournals.push(j); return { id: mockJournals.length }; }),

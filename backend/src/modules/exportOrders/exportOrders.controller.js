@@ -10,6 +10,7 @@ const { resolveShipmentField, resolveRequiredField } = require('./shipmentField'
 const { billableFreight, balanceExpectedFor, freightChanges } = require('./billableFreight');
 const debitNoteService = require('./debitNote.service');
 const { unwindOrderReceipts } = require('./unwindReceipts');
+const { recordOrderCost, derivedMillingCosts } = require('./exportCosts');
 const { recordPendingExportReceipt, postExportReceipt, confirmPendingExportReceipt, assertNotSelfConfirm } = require('./exportReceipts');
 const { fillSingleLineBagSpec, linePackaging } = require('./orderLines');
 const { syncBalanceDueDate } = require('./balanceDueDate');
@@ -457,14 +458,8 @@ async function resolveOrderId(raw) {
 // what is charged to buyers covers what is paid to carriers.
 //
 // A category with no account of its own still goes to 6000, which is what that
-// account is for.
-const COST_CATEGORY_ACCOUNT = {
-  freight: '6010',
-  clearing: '6020',
-  loading: '6030',
-  insurance: '6050',
-  commission: '6060',
-};
+// account is for. The map (COST_CATEGORY_ACCOUNT) lives in exportCosts.js with
+// the rest of the cost posting (P2-05).
 
 const exportOrderController = {
   // ── Freight escalation debit notes (mig 304) ──
@@ -876,15 +871,25 @@ const exportOrderController = {
       // Lot and batch cost is hidden from cost-blind roles (owner decision
       // 2026-10-05), as /available-stock already does. The order's own contract
       // price is not lot cost and stays.
-      if (!(await canSeeCost(req))) {
+      const seesCost = await canSeeCost(req);
+      if (!seesCost) {
         redactMoney({ purchaseLots, millingBatch, batchByproducts }, { cost: false, profit: true });
       }
+
+      // Milling is the linked batch's cost, derived now from its own
+      // milling_costs (P2-05) — never the stored 'milling' copy, which was
+      // written once at completion in the order's currency and never refreshed.
+      // It is batch cost, so cost-blind roles don't get it.
+      const orderCosts = [
+        ...costs.filter((c) => String(c.category || '').toLowerCase() !== 'milling'),
+        ...(seesCost ? await derivedMillingCosts(db, orderId) : []),
+      ];
 
       return res.json({
         success: true,
         data: {
           order,
-          costs,
+          costs: orderCosts,
           documents,
           statusHistory,
           millingBatch: millingBatch || null,
@@ -2143,193 +2148,31 @@ const exportOrderController = {
     }
   },
 
+  // One vendor bill (P2-05): its own row (a second freight bill no longer
+  // overwrites the first), in PKR, with its vendor, accrual journal and
+  // payable — in one transaction, so a journal that cannot post saves nothing.
+  // Rice / milling are refused (see exportCosts.js); validated by
+  // schemas.addExportOrderCost.
   async addCost(req, res) {
     try {
       const id = await resolveExportOrderId(req.params.id);
       if (!id) return res.status(404).json({ success: false, message: 'Export order not found.' });
-      const { category, amount, notes } = req.body;
-
-      if (!category || amount == null) {
-        return res.status(400).json({
-          success: false,
-          message: 'category and amount are required.',
-        });
-      }
-
-      const order = await db('export_orders').where({ id }).first();
-      if (!order) {
-        return res.status(404).json({ success: false, message: 'Export order not found.' });
-      }
-
-      // Export-order costs are stored and reported in PKR — every downstream
-      // consumer (finance/purchases roll-ups, analytics) sums `amount` as PKR.
-      // Costs are usually paid in PKR, but a foreign-currency cost must be
-      // converted first (booking it 1:1 understates it badly). Accept an
-      // optional currency + fx_rate; when the currency isn't PKR, require a
-      // rate (explicit, else the order's booked/advance rate) and convert.
-      const rawAmt = parseFloat(amount);
-      const costCurrency = String(req.body.currency || 'PKR').toUpperCase();
-      let costFxRate = 1;
-      if (costCurrency !== 'PKR') {
-        const reqRate = parseFloat(req.body.fx_rate);
-        costFxRate = Number.isFinite(reqRate) && reqRate > 0
-          ? reqRate
-          : (parseFloat(order.booked_fx_rate) || parseFloat(order.advance_fx_rate) || 0);
-        if (!(costFxRate > 0)) {
-          return res.status(400).json({
-            success: false,
-            message: `An FX rate is required to record a ${costCurrency} cost (no booked rate on the order).`,
-          });
-        }
-      }
-      const amtPkr = rawAmt * costFxRate;
-      const costNote = costCurrency !== 'PKR'
-        ? `${notes ? notes + ' — ' : ''}${costCurrency} ${rawAmt.toLocaleString()} @ ${costFxRate}`
-        : (notes || null);
+      const { category, amount, currency, fx_rate, notes, supplier_id, vendor_name, bill_ref } = req.body;
 
       const cost = await db.transaction(async (trx) => {
-        const existing = await trx('export_order_costs')
-          .where({ order_id: id, category })
-          .first();
-
-        let row;
-        let priorAmtPkr = 0;
-        if (existing) {
-          priorAmtPkr = parseFloat(existing.base_amount_pkr) || (parseFloat(existing.amount) || 0) * (parseFloat(existing.fx_rate) || 1);
-          [row] = await trx('export_order_costs')
-            .where({ id: existing.id })
-            .update({
-              amount: amtPkr,
-              base_amount_pkr: amtPkr,
-              fx_rate: 1,
-              notes: costNote,
-              updated_at: trx.fn.now(),
-            })
-            .returning('*');
-        } else {
-          [row] = await trx('export_order_costs')
-            .insert({
-              order_id: id,
-              category,
-              amount: amtPkr,
-              currency: 'PKR',
-              base_amount_pkr: amtPkr,
-              fx_rate: 1,
-              notes: costNote,
-              created_by: req.user?.id || null,
-            })
-            .returning('*');
-        }
-
-        // ─── Cost-recognition journal ───────────────────────────
-        // Recording a cost creates an obligation: DR Operating Expenses,
-        // CR Supplier Payable. The matching payment journal (DR
-        // Supplier Payable, CR Cash & Bank) is posted later by
-        // payPurchase. If the user edits an existing cost, post the
-        // *delta* so we don't double-count. Skipped silently if the
-        // GL chart isn't seeded yet.
-        try {
-          const delta = amtPkr - priorAmtPkr;
-          if (Math.abs(delta) > 0.01) {
-            // The account built for this category, falling back to 6000 when the
-            // chart has none for it — or when the seeded account is missing, so
-            // an incomplete chart still records the cost rather than dropping it.
-            const wantCode = COST_CATEGORY_ACCOUNT[category] || '6000';
-            const opExp = (wantCode !== '6000'
-              ? await trx('chart_of_accounts').where({ code: wantCode }).first()
-              : null)
-              || await trx('chart_of_accounts').where({ code: '6000' }).first();
-            const supplierPayable = await trx('chart_of_accounts').where({ code: '2010' }).first();
-            if (opExp && supplierPayable) {
-              const sign = delta > 0 ? 1 : -1;
-              const absDelta = Math.abs(delta);
-              const debitAcc  = sign > 0 ? opExp           : supplierPayable;
-              const creditAcc = sign > 0 ? supplierPayable : opExp;
-              const refLabel = `${order.order_no} ${category}`;
-              const journal = await accountingService.createJournal(trx, {
-                date: new Date().toISOString().slice(0, 10),
-                entity: 'export',
-                refType: 'Export Order Cost',
-                refNo: refLabel,
-                description: existing
-                  ? `Cost adjustment Rs ${Math.round(absDelta).toLocaleString()} for ${refLabel}${delta < 0 ? ' (reduced)' : ''}`
-                  : `Cost recorded Rs ${Math.round(absDelta).toLocaleString()} for ${refLabel}`,
-                currency: 'PKR',
-                fxRate: 1,
-                isAuto: true,
-                userId: req.user?.id || null,
-                lines: [
-                  { account_id: debitAcc.id,  account: debitAcc.name,  debit: absDelta, credit: 0,        narration: `DR ${debitAcc.code} ${debitAcc.name} — ${refLabel}` },
-                  { account_id: creditAcc.id, account: creditAcc.name, debit: 0,        credit: absDelta, narration: `CR ${creditAcc.code} ${creditAcc.name} — ${refLabel}` },
-                ],
-              });
-              if (journal?.id) await accountingService.postJournal(trx, journal.id);
-            } else {
-              console.warn(`addCost: chart_of_accounts missing 6000/2010 — journal skipped for ${order.order_no} ${category}`);
-            }
-          }
-        } catch (jeErr) {
-          console.error('addCost journal error (cost still recorded):', jeErr.message);
-        }
-
-        // ─── Mirror to payables ────────────────────────────────────
-        // Make every export-order cost show up on /finance/money-out by
-        // ensuring it has a 1:1 row in payables (source_table='export_order_costs',
-        // source_id=row.id). On edits, sync original_amount / outstanding
-        // to the new amount.
-        try {
-          const existingPayable = await trx('payables')
-            .where({ source_table: 'export_order_costs', source_id: row.id })
-            .first();
-          const paidAmt = parseFloat(row.paid_amount) || 0;
-          const status = paidAmt >= amtPkr - 0.01 ? 'Paid' : (paidAmt > 0 ? 'Partial' : 'Pending');
-          const refLabel = `${order.order_no} ${category}`;
-          if (existingPayable) {
-            await trx('payables')
-              .where({ id: existingPayable.id })
-              .update({
-                linked_ref: refLabel,
-                original_amount: amtPkr,
-                outstanding: Math.max(0, amtPkr - paidAmt),
-                status,
-                notes: notes || existingPayable.notes,
-                updated_at: trx.fn.now(),
-              });
-          } else {
-            const last = await trx('payables').where('pay_no', 'like', 'PAY-EOC%').orderBy('id', 'desc').first();
-            const nextSeq = last ? (parseInt(String(last.pay_no).replace(/^PAY-EOC/, ''), 10) || 0) + 1 : 1;
-            const payNo = `PAY-EOC${String(nextSeq).padStart(4, '0')}`;
-            await trx('payables').insert({
-              pay_no: payNo,
-              entity: 'export',
-              category: category || 'export_cost',
-              supplier_id: null,
-              linked_ref: refLabel,
-              original_amount: amtPkr,
-              paid_amount: paidAmt,
-              outstanding: Math.max(0, amtPkr - paidAmt),
-              currency: 'PKR',
-              due_date: new Date().toISOString().slice(0, 10),
-              status,
-              source_table: 'export_order_costs',
-              source_id: row.id,
-              payable_type: 'expense',
-              notes: notes || `Export order cost ${refLabel}`,
-            });
-          }
-        } catch (payErr) {
-          console.error('addCost payables sync error (cost still recorded):', payErr.message);
-        }
-
-        return row;
+        const order = await lockRow(trx('export_orders').where({ id })).first();
+        if (!order) { const e = new Error('Export order not found.'); e.statusCode = 404; throw e; }
+        return recordOrderCost(trx, {
+          order, category, amount, currency, fxRate: fx_rate, notes,
+          supplierId: supplier_id || null, vendorName: vendor_name || null, billRef: bill_ref || null,
+          userId: req.user?.id || null,
+        });
       });
 
-      emitExportOrderUpdate(order.id, 'cost_updated', { category });
-      return res.json({
-        success: true,
-        data: { cost },
-      });
+      emitExportOrderUpdate(id, 'cost_updated', { category: cost.category });
+      return res.json({ success: true, data: { cost } });
     } catch (err) {
+      if (err.statusCode) return res.status(err.statusCode).json({ success: false, message: err.message });
       console.error('Export order addCost error:', err);
       return res.status(500).json({ success: false, message: 'Internal server error.' });
     }

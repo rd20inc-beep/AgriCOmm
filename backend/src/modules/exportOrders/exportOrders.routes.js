@@ -105,13 +105,22 @@ router.post(
 router.post(
   '/:id/costs',
   authorize('export_orders', 'edit'),
+  validate(schemas.addExportOrderCost),
   auditAction('add_cost', 'export_order', (req) => req.params.id),
   controller.addCost
 );
+// Cancelling is always Owner-authorised. Forfeiting money the buyer paid to
+// other income (D-7) is logged as its own kind of approval, so the Owner's
+// approval trail says that is what they authorised.
+const cancelApproval = {
+  forfeit: ownerApproval('export_cancel_forfeit'),
+  other: ownerApproval('export_cancel'),
+};
 router.post(
   '/:id/cancel',
   authorize('export_orders', 'approve'),
-  ownerApproval('export_cancel'),
+  (req, res, next) => (req.body && req.body.money_disposition === 'forfeit' ? cancelApproval.forfeit : cancelApproval.other)(req, res, next),
+  validate(schemas.cancelExportOrder),
   auditAction('cancel', 'export_order', (req) => req.params.id),
   controller.cancelOrder
 );
