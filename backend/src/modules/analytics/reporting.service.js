@@ -7,6 +7,8 @@ const { applyWarehouseScope, isWarehouseInScope } = require('../../utils/warehou
 const { companyStock, normaliseOwnership, ON_HAND_KG } = require('../inventory/stockSql');
 // One movement-type map for every lot_transactions ledger (P4-06).
 const stockMovements = require('./stockMovements');
+// One rule for paid / earned / pending payslip lines (P4-08).
+const payrollLineStatus = require('../milling/payrollLineStatus');
 // D-14 stock value (landed cost/kg × on hand, no fallback price) — stockValue.js.
 const { lotValueSql } = require('../inventory/stockValue');
 const { exportProfit, EXCLUDED_ORDER_STATUSES } = require('../finance/profitDefinitions');
@@ -4249,16 +4251,25 @@ const reportingService = {
 
   // ── Payroll Ledger — one row per employee per payroll run, with filters. ──
   // Read-only over mill_payroll_lines/runs/workers. Reuses existing payroll data;
-  // creates none. (Finance/Reports surface; gated reports.view, no Mill Operator.)
-  async getPayrollLedger({ from, to, month, employee, role, department, payMethod, status } = {}) {
+  // creates none. (Finance/Reports surface; gated reports.view + payroll.view,
+  // no Mill Operator.)
+  //
+  // P4-08 / PAY-21: `status` is applied — paid (default) | accrued | unpaid |
+  // pending | voided | all, by the one line rule in payrollLineStatus.js;
+  // `entity` (mill | general) filters the run; bonus, statutory, other
+  // deductions and short pay are their own columns so
+  //   gross + bonus − statutory − deductions − advance = net (+ short pay)
+  // reads off the row; a cash run with no account recorded says so instead of
+  // being labelled "Mill Cash".
+  async getPayrollLedger({ from, to, month, employee, role, department, payMethod, status, entity } = {}) {
     const num = (v) => parseFloat(v) || 0;
     let q = db('mill_payroll_lines as l')
       .join('mill_payroll_runs as r', 'r.id', 'l.run_id')
       .leftJoin('mill_workers as w', 'w.id', 'l.worker_id')
       .leftJoin('bank_accounts as b', 'b.id', 'r.bank_account_id')
-      // A line counts as paid when it has paid_at (partial or normal pay) OR its
-      // run is fully paid/posted (legacy runs whose lines predate paid_at).
-      .where(function () { this.whereNotNull('l.paid_at').orWhereIn('r.status', ['paid', 'posted']); });
+      .whereRaw(payrollLineStatus.statusFilterSql(status));
+    const ent = payrollLineStatus.normaliseEntity(entity);
+    if (ent) q = q.where('r.entity', ent);
     if (month) q = q.where('r.period', month);
     if (from) q = q.where('r.period', '>=', from);
     if (to) q = q.where('r.period', '<=', to);
@@ -4267,40 +4278,53 @@ const reportingService = {
     if (department) q = q.where('l.department', department);
     if (payMethod) q = q.where('r.pay_method', payMethod);
     const rows = await q
-      .select('l.id', 'r.id as run_id', 'r.period', 'r.pay_date', 'r.pay_method', 'b.name as account_name',
+      .select('l.id', 'r.id as run_id', 'r.period', 'r.pay_date', 'r.pay_method', 'r.status as run_status', 'r.entity',
+        'l.paid_at', 'b.name as account_name',
         'l.worker_id', 'l.worker_name', 'l.role', 'l.department', 'l.pay_type', 'l.effective_days', 'l.ot_hours',
-        'l.gross_pay', 'l.advance_deducted', 'l.net_pay')
+        'l.gross_pay', 'l.bonus_total', 'l.statutory_total', 'l.deduction_total', 'l.advance_deducted', 'l.net_pay',
+        'l.short_pay_amount')
       .orderBy('r.pay_date', 'desc').orderBy('l.id', 'desc');
-    const out = rows.map((r) => ({
-      id: r.id, runId: r.run_id, period: r.period, date: r.pay_date,
-      employee: r.worker_name, workerId: r.worker_id || null, role: r.role || '—', department: r.department || '—', payType: r.pay_type || '—',
-      effectiveDays: num(r.effective_days), otHours: num(r.ot_hours),
-      gross: Math.round(num(r.gross_pay)), advanceDeducted: Math.round(num(r.advance_deducted)), net: Math.round(num(r.net_pay)),
-      payMethod: r.pay_method || 'cash', account: r.account_name || (r.pay_method === 'bank' ? '—' : 'Mill Cash'),
-      status: 'Paid',
-      employeeHref: r.worker_id ? `/milling/finance` : null,
-    }));
+    const STATE_LABEL = { paid: 'Paid', accrued: 'Accrued', pending: 'Pending', voided: 'Voided', reversed: 'Reversed' };
+    const out = rows.map((r) => {
+      const state = payrollLineStatus.lineState(r);
+      return {
+        id: r.id, runId: r.run_id, period: r.period, date: r.pay_date, entity: r.entity,
+        employee: r.worker_name, workerId: r.worker_id || null, role: r.role || '—', department: r.department || '—', payType: r.pay_type || '—',
+        effectiveDays: num(r.effective_days), otHours: num(r.ot_hours),
+        gross: Math.round(num(r.gross_pay)), bonus: Math.round(num(r.bonus_total)),
+        statutory: Math.round(num(r.statutory_total)), deductions: Math.round(num(r.deduction_total)),
+        advanceDeducted: Math.round(num(r.advance_deducted)), net: Math.round(num(r.net_pay)),
+        shortPay: Math.round(num(r.short_pay_amount)),
+        payMethod: r.pay_method || 'cash',
+        account: r.account_name || (r.pay_method === 'cash' ? 'Cash (no account recorded)' : '—'),
+        status: STATE_LABEL[state] || state, runStatus: r.run_status,
+        employeeHref: r.worker_id ? `/milling/finance` : null,
+      };
+    });
+    const sum = (k) => out.reduce((s, r) => s + r[k], 0);
     const totals = {
       count: out.length,
-      gross: out.reduce((s, r) => s + r.gross, 0),
-      advance: out.reduce((s, r) => s + r.advanceDeducted, 0),
-      net: out.reduce((s, r) => s + r.net, 0),
+      gross: sum('gross'), bonus: sum('bonus'), statutory: sum('statutory'), deductions: sum('deductions'),
+      advance: sum('advanceDeducted'), net: sum('net'), shortPay: sum('shortPay'),
+      currency: 'PKR', status: String(status || 'paid').toLowerCase(),
     };
     // Distinct roles for the filter dropdown.
     const roles = [...new Set(out.map((r) => r.role).filter((x) => x && x !== '—'))];
     const departments = [...new Set(out.map((r) => r.department).filter((x) => x && x !== '—'))];
-    return { rows: out, totals, roles, departments };
+    return { rows: out, totals, roles, departments, meta: { currency: 'PKR', entity: ent, asOf: new Date().toISOString() } };
   },
 
   // ── Payroll overview KPIs for the Head-Office Finance dashboard. ──
   // Consolidated from existing mill payroll data + salary expenses; no new data.
-  async getPayrollOverview({ month } = {}) {
+  async getPayrollOverview({ month, entity } = {}) {
     const num = (v) => parseFloat(v) || 0;
     const period = /^\d{4}-\d{2}$/.test(month || '') ? month : new Date().toISOString().slice(0, 7);
+    const ent = payrollLineStatus.normaliseEntity(entity);
+    const inEntity = (qb) => (ent ? qb.where('r.entity', ent) : qb);
     // Paid-line level so a partially_paid run contributes its paid portion.
-    const runAgg = await db('mill_payroll_lines as l').join('mill_payroll_runs as r', 'r.id', 'l.run_id')
+    const runAgg = await inEntity(db('mill_payroll_lines as l').join('mill_payroll_runs as r', 'r.id', 'l.run_id'))
       .where('r.period', period)
-      .where(function () { this.whereNotNull('l.paid_at').orWhereIn('r.status', ['paid', 'posted']); })
+      .whereRaw(payrollLineStatus.PAID_SQL)
       .select(db.raw('COALESCE(SUM(l.net_pay),0) as net'), db.raw('COALESCE(SUM(l.gross_pay),0) as gross'), db.raw('COALESCE(SUM(l.advance_deducted),0) as advance'), db.raw('COUNT(DISTINCT l.run_id) as runs')).first();
     const advOut = await db('mill_worker_advances').where('status', 'outstanding')
       .select(db.raw('COALESCE(SUM(amount - recovered_amount),0) as outstanding')).first();
@@ -4313,8 +4337,8 @@ const reportingService = {
       .whereRaw("TO_CHAR(expense_date, 'YYYY-MM') = ?", [period])
       .select(db.raw('COALESCE(SUM(COALESCE(amount_pkr, amount)),0) as total')).first();
     // 6-month net payroll trend.
-    const trendRows = await db('mill_payroll_lines as l').join('mill_payroll_runs as r', 'r.id', 'l.run_id')
-      .where(function () { this.whereNotNull('l.paid_at').orWhereIn('r.status', ['paid', 'posted']); })
+    const trendRows = await inEntity(db('mill_payroll_lines as l').join('mill_payroll_runs as r', 'r.id', 'l.run_id'))
+      .whereRaw(payrollLineStatus.PAID_SQL)
       .select('r.period as period', db.raw('COALESCE(SUM(l.net_pay),0) as net'))
       .groupBy('r.period').orderBy('r.period', 'desc').limit(6);
     const salaryTotal = num(salaryExp.total); const allTotal = num(allExp.total);
@@ -4368,8 +4392,9 @@ const reportingService = {
   // ── Payroll analytics (dashboard): trend, cost-by-role, advances, headcount,
   // top earners — over a YYYY-MM range (default last 12 months). Paid/posted
   // runs only. Read-only over the mill payroll tables.
-  async getPayrollAnalytics({ from, to } = {}) {
+  async getPayrollAnalytics({ from, to, entity } = {}) {
     const num = (v) => parseFloat(v) || 0;
+    const ent = payrollLineStatus.normaliseEntity(entity);
     const addMonth = (p, n) => { const y = +p.slice(0, 4); const m = +p.slice(5, 7); const d = new Date(Date.UTC(y, m - 1 + n, 1)); return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`; };
     const toM = /^\d{4}-\d{2}$/.test(to || '') ? to : new Date().toISOString().slice(0, 7);
     const fromM = /^\d{4}-\d{2}$/.test(from || '') ? from : addMonth(toM, -11);
@@ -4380,7 +4405,8 @@ const reportingService = {
     // partially_paid run contributes the employees it has actually paid.
     const lines = await db('mill_payroll_lines as l').join('mill_payroll_runs as r', 'r.id', 'l.run_id')
       .where('r.period', '>=', fromM).where('r.period', '<=', toM)
-      .where(function () { this.whereNotNull('l.paid_at').orWhereIn('r.status', ['paid', 'posted']); })
+      .modify((qb) => { if (ent) qb.where('r.entity', ent); })
+      .whereRaw(payrollLineStatus.PAID_SQL)
       .select('l.run_id', 'l.worker_id', 'l.worker_name', 'l.role', 'l.department', 'l.pay_type', 'l.gross_pay', 'l.net_pay', 'l.advance_deducted', 'l.ot_hours', 'r.period');
 
     // Monthly trend (fill zeros for empty months) — from paid lines.
@@ -4403,11 +4429,17 @@ const reportingService = {
     const topEarners = Object.values(earnMap).map((e) => ({ ...e, net: Math.round(e.net) })).sort((a, b) => b.net - a.net).slice(0, 8);
 
     // Headcount (current) + advances.
-    const workers = await db('mill_workers').select('is_active', 'pay_type');
+    const workers = await db('mill_workers').modify((qb) => { if (ent) qb.where('entity', ent); }).select('is_active', 'pay_type');
     const activeWorkers = workers.filter((w) => w.is_active).length;
     const byPayType = { daily: workers.filter((w) => w.is_active && w.pay_type !== 'monthly').length, monthly: workers.filter((w) => w.is_active && w.pay_type === 'monthly').length };
-    const advGivenRow = await db('mill_worker_advances').whereRaw("TO_CHAR(advance_date,'YYYY-MM') >= ?", [fromM]).whereRaw("TO_CHAR(advance_date,'YYYY-MM') <= ?", [toM]).select(db.raw('COALESCE(SUM(amount),0) as given')).first();
-    const advOutRow = await db('mill_worker_advances').where('status', 'outstanding').select(db.raw('COALESCE(SUM(amount - recovered_amount),0) as outstanding')).first();
+    // PAY-21: advances GIVEN are the ones paid out — a pending, approved-not-
+    // paid, rejected or voided request moved no money and must not lower the
+    // recovery rate.
+    const advBase = () => db('mill_worker_advances as a').join('mill_workers as w', 'w.id', 'a.worker_id')
+      .where('a.approval_status', 'paid')
+      .modify((qb) => { if (ent) qb.where('w.entity', ent); });
+    const advGivenRow = await advBase().whereRaw("TO_CHAR(a.advance_date,'YYYY-MM') >= ?", [fromM]).whereRaw("TO_CHAR(a.advance_date,'YYYY-MM') <= ?", [toM]).select(db.raw('COALESCE(SUM(a.amount),0) as given')).first();
+    const advOutRow = await advBase().where('a.status', 'outstanding').select(db.raw('COALESCE(SUM(a.amount - a.recovered_amount),0) as outstanding')).first();
 
     const totalGross = lines.reduce((s, l) => s + num(l.gross_pay), 0);
     const totalNet = lines.reduce((s, l) => s + num(l.net_pay), 0);
@@ -4417,7 +4449,7 @@ const reportingService = {
     const given = num(advGivenRow.given);
 
     return {
-      range: { from: fromM, to: toM },
+      range: { from: fromM, to: toM }, entity: ent, currency: 'PKR',
       summary: {
         totalGross: Math.round(totalGross), totalNet: Math.round(totalNet), totalAdvanceRecovered: Math.round(totalAdvanceRecovered),
         runs: runCount, paidEmployees, activeWorkers, byPayType,
