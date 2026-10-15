@@ -188,6 +188,10 @@ d('reports hub contract (DB-gated)', () => {
     // 10 MT over 31 days at 10 MT/day capacity = 3.2%.
     expect(m.utilizationDays).toBe(31);
     expect(m.utilizationPct).toBeCloseTo(3.2, 1);
+    // Tab headline from the server, not a browser sum.
+    expect(res.body.totals.yieldPct).not.toBeNull();
+    expect(res.body.totals.inputKg).toBeGreaterThanOrEqual(10000);
+    expect(res.body.meta.unit).toBe('kg');
     const lb = await get('/api/reporting/quality/recovery-leaderboard', MARCH);
     const b = lb.body.data.find((r) => r.batchNo === `ZH2${run}`.slice(0, 20));
     expect(b.rawQtyKg).toBe(9000);

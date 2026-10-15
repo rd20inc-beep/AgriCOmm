@@ -767,7 +767,27 @@ const reportingController = {
     try {
       const { dateFrom, dateTo } = req.query;
       const data = await reportingService.getProductionEfficiencyByMill({ dateFrom, dateTo });
-      return res.json({ success: true, data });
+      // Tab headline from the server (D-14): input / output KG of every batch in
+      // the period, yield Σ finished ÷ Σ raw over completed company batches.
+      const db = require('../../config/database');
+      const { yieldBatches, weightedYieldPctSql } = require('../milling/millingYield');
+      const inRange = (q) => {
+        if (dateFrom) q.where('mb.created_at', '>=', dateFrom);
+        if (dateTo) q.where('mb.created_at', '<=', dateTo);
+        return q;
+      };
+      const [all, yld] = await Promise.all([
+        inRange(db('milling_batches as mb').whereNotNull('mb.mill_id'))
+          .select(db.raw('COALESCE(SUM(mb.raw_qty_kg), 0) AS input_kg'), db.raw('COALESCE(SUM(mb.actual_finished_kg), 0) AS output_kg')).first(),
+        inRange(yieldBatches(db('milling_batches as mb'))).select(db.raw(`${weightedYieldPctSql('mb')} AS yield_pct`)).first(),
+      ]);
+      const totals = {
+        mills: data.length,
+        inputKg: parseFloat(all && all.input_kg) || 0,
+        outputKg: parseFloat(all && all.output_kg) || 0,
+        yieldPct: yld && yld.yield_pct != null ? parseFloat(yld.yield_pct) : null,
+      };
+      return res.json({ success: true, data, totals, meta: reportMeta(req.reportRange, { unit: 'kg', basis: 'yield = Σ finished ÷ Σ raw, completed company batches' }) });
     } catch (err) {
       console.error('Mill efficiency error:', err);
       return res.status(500).json({ success: false, message: 'Internal server error.' });

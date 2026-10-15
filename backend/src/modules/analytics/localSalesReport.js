@@ -31,6 +31,7 @@ function baseQuery({ dateFrom, dateTo, entity, q, payment, lotId, customerId } =
   let query = db('local_sales as ls')
     .leftJoin('customers as c', 'ls.customer_id', 'c.id')
     .leftJoin('inventory_lots as il', 'ls.lot_id', 'il.id')
+    .leftJoin('users as u', 'u.id', 'ls.created_by')
     .where('ls.status', 'Completed');
   if (dateFrom) query = query.where('ls.sale_date', '>=', dateFrom);
   if (dateTo) query = query.where('ls.sale_date', '<=', dateTo);
@@ -116,6 +117,9 @@ function shapeRow(r) {
     dueAmount: r2(r.due_amount),
     paymentWord: n(r.due_amount) <= 0.01 ? 'Paid' : (n(r.paid_amount) > 0 ? 'Partial' : 'Credit'),
     status: r.status,
+    collectionLocation: r.collection_location || null,
+    createdAt: r.created_at,
+    createdByName: r.created_by_name || null,
     // Money in PKR. cogs / grossProfit are null for a lot line with no cost.
     cogs,
     cogsPerKg: cogs != null && kg > 0 ? Math.round((cogs / kg) * 10000) / 10000 : null,
@@ -138,7 +142,7 @@ async function getLocalSalesReport(filters = {}, paging = { page: 1, limit: 100,
       .select('ls.id', 'ls.sale_no', 'ls.sale_group_no', 'ls.sale_date', 'ls.entity', 'ls.customer_id',
         'c.name as customer_name', 'ls.buyer_name', 'ls.lot_id', 'ls.lot_no', 'il.lot_no as lot_ref',
         'ls.item_name', 'ls.quantity_kg', 'ls.rate_per_kg', 'ls.total_amount', 'ls.paid_amount',
-        'ls.due_amount', 'ls.status',
+        'ls.due_amount', 'ls.status', 'ls.collection_location', 'ls.created_at', 'u.full_name as created_by_name',
         db.raw(`${COGS_SQL} AS cogs`), db.raw(`${UNCOSTED_SQL} AS uncosted`))
       .orderBy('ls.sale_date', 'desc').orderBy('ls.id', 'desc')
       .limit(paging.limit).offset(paging.offset || 0),
