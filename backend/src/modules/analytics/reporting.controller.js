@@ -12,6 +12,8 @@ const reportingService = require('../../services/reportingService');
 // to the Mill Operator by role (noFinanceForOperator) instead.
 const whScope = require('../../utils/warehouseScope');
 const stockSql = require('../inventory/stockSql');
+// D-14 stock value (landed cost/kg × on hand, no fallback price) — stockValue.js.
+const { lotValueSql, landedPerKgSql } = require('../inventory/stockValue');
 
 // Parse a milling_batches.custom_tags jsonb value into a plain array. The pg
 // driver usually returns jsonb already parsed (array/object), but a string may
@@ -1486,10 +1488,7 @@ const reportingController = {
                         THEN MAX(CASE WHEN NOT ${IS_KATTA} THEN ${PACK_KG} END) END)::numeric as bag_size_kg`),
           // Value of what's on hand = on-hand kg × cost/kg (NOT the stale
           // landed_cost_total, which carries the original intake value).
-          db.raw(`COALESCE(SUM(
-            (CASE WHEN l.net_weight_kg > 0 THEN l.net_weight_kg ELSE CAST(l.qty AS DECIMAL) END)
-            * COALESCE(NULLIF(l.landed_cost_per_kg, 0), NULLIF(l.rate_per_kg, 0), CAST(l.cost_per_unit AS DECIMAL), 0)
-          ), 0)::numeric as total_value_pkr`),
+          db.raw(`COALESCE(SUM(${lotValueSql('l')}), 0)::numeric as total_value_pkr`),
         )
         // Subtype groups by the raw CASE expression itself — passing the long
         // SQL string as a second groupBy arg makes Knex quote it as a column
@@ -1520,7 +1519,7 @@ const reportingController = {
         db.raw(`COALESCE(${KATTA_ON_HAND}, 0)::int as bags`),
         db.raw(`COALESCE(${BAGS_ON_HAND}, 0)::int as bag_units`),
         db.raw(`NULLIF(${PACK_KG}, 0)::numeric as pack_kg`),
-        db.raw('COALESCE(NULLIF(l.landed_cost_per_kg, 0), NULLIF(l.rate_per_kg, 0), CAST(l.cost_per_unit AS DECIMAL), 0)::numeric as cost_per_kg'),
+        db.raw(`${landedPerKgSql('l')}::numeric as cost_per_kg`),
         'l.supplier_id', db.raw("COALESCE(s.name, '—') as supplier"),
         db.raw("COALESCE(w.name, '—') as warehouse"),
       ).orderByRaw('on_hand_kg DESC');
@@ -1992,7 +1991,7 @@ const reportingController = {
         db.raw('COALESCE(NULLIF(l.net_weight_kg,0), l.qty) as on_hand_kg'),
         db.raw('l.available_qty as available_kg'),
         db.raw('l.reserved_qty as reserved_kg'),
-        db.raw('COALESCE(NULLIF(l.landed_cost_per_kg,0), NULLIF(l.rate_per_kg,0), l.cost_per_unit, 0) as cost_per_kg'),
+        db.raw(`${landedPerKgSql('l')} as cost_per_kg`),
       ).orderBy([{ column: 'l.type' }, { column: 'l.lot_no' }]);
       // Trace milled output (batch_ref = 'batch-<id>') back to the raw-rice supplier.
       const ids = [...new Set(lots.map((l) => l.batch_ref).filter(Boolean).map((r) => parseInt(String(r).replace(/^batch-/, ''), 10)).filter(Boolean))];
@@ -2346,13 +2345,15 @@ const reportingController = {
       let q = db('inventory_lots as l').leftJoin('suppliers as s', 'l.supplier_id', 's.id')
         .where((b) => b.where('l.item_name', 'ilike', '%sweeping%').orWhere('l.grade', 'ilike', '%sweeping%'));
       if (status && status !== 'all') q = q.where('l.status', status);
+      // Company stock only — a client's service-milling sweeping is not ours to value.
+      q = stockSql.companyStock(q, 'l', req.query.ownership);
       // #9-scoping: sweeping stock is stock — restrict to the caller's warehouses.
       q = whScope.applyWarehouseScope(q, await whScope.resolveWarehouseScope(req), 'l.warehouse_id');
       const lots = await q.select(
         'l.id', 'l.lot_no', 'l.item_name', 'l.grade', 'l.variety', 'l.batch_ref', 'l.blend_batch_no',
         'l.status', 'l.supplier_id', 'l.total_bags', 'l.available_qty', 's.name as supplier_name',
         db.raw('COALESCE(NULLIF(l.net_weight_kg,0), l.qty) as kg'),
-        db.raw('COALESCE(NULLIF(l.landed_cost_per_kg,0), NULLIF(l.rate_per_kg,0), l.cost_per_unit, 0) as cost_per_kg'),
+        db.raw(`${landedPerKgSql('l')} as cost_per_kg`),
       ).orderBy('l.lot_no');
       // Trace each sweeping lot back to its batch (batch_ref='batch-<id>') + raw supplier + raw input MT.
       const ids = [...new Set(lots.map((l) => l.batch_ref).filter(Boolean).map((r) => parseInt(String(r).replace(/^batch-/, ''), 10)).filter(Boolean))];
@@ -2421,8 +2422,10 @@ const reportingController = {
         .sum({ total: db.raw('CASE WHEN COALESCE(eoc.base_amount_pkr,0) > 0 THEN eoc.base_amount_pkr ELSE COALESCE(eoc.amount,0)*COALESCE(eoc.fx_rate,1) END') }).count({ cnt: 'eoc.id' }).first();
 
       // Memo: rice still in inventory (its cost is deferred, not yet expensed).
-      const invRow = await db('inventory_lots').whereIn('type', ['raw', 'finished']).where('status', 'Available')
-        .select(db.raw('COALESCE(SUM((CASE WHEN net_weight_kg>0 THEN net_weight_kg ELSE qty END) * COALESCE(NULLIF(landed_cost_per_kg,0),NULLIF(rate_per_kg,0),cost_per_unit,0)),0) as val')).first();
+      // Company stock only (client-owned service lots are not ours), D-14 value.
+      const invRow = await stockSql.companyStock(db('inventory_lots'), null)
+        .whereIn('type', ['raw', 'finished']).where('status', 'Available')
+        .select(db.raw(`COALESCE(SUM(${lotValueSql('inventory_lots')}),0) as val`)).first();
 
       // Inventory roll-forward: raw purchases LANDED in the period (cost basis,
       // full intake qty — this is what was added to inventory when bought).

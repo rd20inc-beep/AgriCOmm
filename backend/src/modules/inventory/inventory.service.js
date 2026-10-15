@@ -1817,8 +1817,8 @@ const inventoryService = {
       .sum('il.qty as total_qty')
       .sum('il.reserved_qty as total_reserved')
       .sum('il.available_qty as total_available')
-      .sum('il.total_value as total_value')
-      .where('il.status', '!=', 'Depleted')
+      // D-14 (stockValue.js) — not the stored total_value, which is the intake value.
+      .select(db.raw(`COALESCE(SUM(${require('./stockValue').lotValueSql('il')}), 0) as total_value`))
       // Company-owned only — client-owned Service Milling stock is physically in
       // our warehouse but must never inflate company stock counts or valuation.
       .where('il.ownership', 'company');
@@ -2383,16 +2383,20 @@ const inventoryService = {
   async takeValuationSnapshot() {
     // Company-owned only — client-owned (service-milling) stock must never
     // inflate company inventory valuation or average cost.
-    const lots = await db('inventory_lots').where('available_qty', '>', 0).where('ownership', 'company').select('type', 'entity', 'available_qty', 'rate_per_kg', 'landed_cost_per_kg', 'net_weight_kg');
+    // D-14 (stockValue.js): on-hand KG × landed cost/kg, no fallback price.
+    const lots = await db('inventory_lots').where('ownership', 'company').where((q) => q.where('net_weight_kg', '>', 0).orWhere('qty', '>', 0))
+      .select('type', 'entity', 'qty', 'landed_cost_per_kg', 'net_weight_kg');
+    const { lotValue } = require('./stockValue');
 
     const groups = {};
     for (const lot of lots) {
       const key = `${lot.entity || 'unknown'}|${lot.type || 'unknown'}`;
       if (!groups[key]) groups[key] = { entity: lot.entity, type: lot.type, totalKg: 0, totalValue: 0 };
-      const costKg = parseFloat(lot.landed_cost_per_kg) || parseFloat(lot.rate_per_kg) || 0;
-      const qtyKg = parseFloat(lot.available_qty); // KG (Phase 5c)
+      const net = parseFloat(lot.net_weight_kg) || 0;
+      const qtyKg = net > 0 ? net : (parseFloat(lot.qty) || 0);
+      if (!(qtyKg > 0)) continue;
       groups[key].totalKg += qtyKg;
-      groups[key].totalValue += costKg * qtyKg;
+      groups[key].totalValue += lotValue(lot);
     }
 
     const today = new Date().toISOString().split('T')[0];

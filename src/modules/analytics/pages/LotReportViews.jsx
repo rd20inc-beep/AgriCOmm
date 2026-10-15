@@ -33,9 +33,10 @@ function netKg(lot) {
   if (raw && raw > 0) return raw;
   return (num(lot.qty) || 0);
 }
+// D-14 stock value: landed cost/kg × kg on hand, no fallback price (the
+// backend's stockValue.js — a lot with no landed cost is worth 0).
 function lotValuePkr(lot) {
-  const landed = num(lot.landed_cost_per_kg) ?? num(lot.rate_per_kg) ?? 0;
-  return netKg(lot) * landed;
+  return netKg(lot) * (num(lot.landed_cost_per_kg) || 0);
 }
 const lotName = (lot) => lot.lot_no || `#${lot.id}`;
 

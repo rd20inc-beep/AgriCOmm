@@ -11,6 +11,7 @@ import StatusBadge from '../../../components/StatusBadge';
 import PurchaseLotDrawer from '../components/PurchaseLotDrawer';
 import useCanSeeCost from '../../../hooks/useCanSeeCost';
 import { fromKg, UNITS } from '../../../shared/utils/unitConversion';
+import { lotValue } from '../utils/stockMath';
 import { fmtPKR as fmtPKRBase, fmtKg, fmtNum } from '../../../shared/utils/format';
 
 // Lots per page. Filters, search and the KPI totals all run on the server, so
@@ -183,7 +184,7 @@ function renderLotRow(lot, displayUnit, navigate, indented, showCost = true) {
       <td data-label="Stock" className="text-right font-medium tabular-nums">{fmtQty(fromKg(netKg, displayUnit, bw), displayUnit)}</td>
       <td data-label="Available" className="text-right tabular-nums text-emerald-600 font-medium">{fmtQty(fromKg(availKg, displayUnit, bw), displayUnit)}</td>
       {showCost && <td data-label="Landed/KG" className="mob-hide text-right tabular-nums text-xs font-medium">{fmtPKR(lot.landedCostPerKg)}</td>}
-      {showCost && <td data-label="Value" className="text-right tabular-nums font-medium">{fmtPKR(lot.landedCostTotal)}</td>}
+      {showCost && <td data-label="Value" className="text-right tabular-nums font-medium">{fmtPKR(lotValue(lot))}</td>}
       <td data-label="Quality" className="mob-hide text-center">
         <div className="flex items-center justify-center gap-1 text-xs whitespace-nowrap">
           {lot.moisturePct && <span className="text-blue-600" title="Moisture">{lot.moisturePct}%M</span>}
@@ -322,7 +323,8 @@ export default function LotInventory() {
     const groups = Array.from(map.values()).map((g) => {
       const totalKg = g.lots.reduce((s, l) => s + (parseFloat(l.netWeightKg) || 0), 0);
       const availKg = g.lots.reduce((s, l) => s + ((parseFloat(l.availableQty) || 0)), 0);
-      const totalValue = g.lots.reduce((s, l) => s + (parseFloat(l.landedCostTotal) || 0), 0);
+      // D-14: landed cost × on hand (the KPI tile's basis), not the intake value.
+      const totalValue = g.lots.reduce((s, l) => s + lotValue(l), 0);
       const weightedLanded = totalKg > 0
         ? g.lots.reduce((s, l) => s + ((parseFloat(l.landedCostPerKg) || 0) * (parseFloat(l.netWeightKg) || 0)), 0) / totalKg
         : 0;

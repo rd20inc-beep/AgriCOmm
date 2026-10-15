@@ -48,6 +48,9 @@ router.get('/lots', authorize('inventory', 'view'), controller.listLots);
 router.get('/lots-report', authorize('inventory', 'view'), controller.getLotsReport);
 // Held-stock profit: cost vs selling price from commodity_rate_master.
 router.get('/valuation', authorize('inventory', 'view'), requireCostVisibility, controller.getStockValuation);
+// P3-19: stock value (D-14) per GL inventory account vs the Posted GL, with the
+// part explained by milling WIP (D-6) separated from the real gap.
+router.get('/valuation/tie-out', authorize('finance', 'view'), requireCostVisibility, controller.getStockTieOut);
 // Preview next lot number — literal path before /lots/:id so it isn't captured.
 router.get('/lots/next-lot-no', authorize('inventory', 'view'), controller.previewLotNo);
 router.get('/lots/:id', authorize('inventory', 'view'), controller.getLotDetail);

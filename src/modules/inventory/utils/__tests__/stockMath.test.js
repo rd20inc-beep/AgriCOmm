@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { splitOnHand, unitsOnHand, onHandKg, formatUnits, transferKg } from '../stockMath';
+import { splitOnHand, unitsOnHand, onHandKg, formatUnits, transferKg, lotValue } from '../stockMath';
 
 describe('Internal transfer quantity', () => {
   test('reads qtyKg (internal_transfers.qty_kg after transformKeys)', () => {
@@ -70,5 +70,16 @@ describe('units on hand (katta vs bags)', () => {
     expect(formatUnits({ katta: 1200, bags: 0 })).toBe('1,200 katta');
     expect(formatUnits({ katta: 0, bags: 0 })).toBe('');
     expect(formatUnits({ katta: 3, bags: 4 })).toBe('3 katta · 4 bags');
+  });
+});
+
+describe('lotValue (D-14: landed cost/kg × on hand, no fallback)', () => {
+  test('values on-hand kg at landed cost, snake or camel case', () => {
+    expect(lotValue({ net_weight_kg: '1000', qty: '1200', landed_cost_per_kg: '100' })).toBe(100000);
+    expect(lotValue({ netWeightKg: '0', qty: '500', landedCostPerKg: '80' })).toBe(40000);
+  });
+  test('never falls back to rate or cost_per_unit', () => {
+    expect(lotValue({ net_weight_kg: '1000', rate_per_kg: '90', cost_per_unit: '90' })).toBe(0);
+    expect(lotValue(null)).toBe(0);
   });
 });
