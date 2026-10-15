@@ -32,6 +32,12 @@ const EXEMPT = {
   // Answers 405 and changes nothing: settlements are reversed via POST …/reverse (audited).
   'modules/milling/milling.routes.js DELETE /payroll/final-settlements/:id': 'retired',
   'modules/finance/finance.routes.js POST /fund-transfers': 'retired',
+  // D-25b: the PO / GRN chain is retired in favour of purchase lots — these answer 410 and change nothing.
+  'modules/procurement/procurement.routes.js POST /requisitions': 'retired',
+  'modules/procurement/procurement.routes.js POST /purchase-orders': 'retired',
+  'modules/procurement/procurement.routes.js POST /grns': 'retired',
+  'modules/procurement/procurement.routes.js POST /invoices': 'retired',
+  'modules/procurement/procurement.routes.js POST /returns': 'retired',
   'modules/auth/auth.routes.js POST /register': 'auth',
   'modules/auth/auth.routes.js POST /refresh-token': 'auth',
   'modules/auth/auth.routes.js POST /change-password': 'auth',
