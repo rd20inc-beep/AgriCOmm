@@ -54,30 +54,35 @@ export function singleBagCountFor(form, totalKg) {
     : 0;
 }
 
-// The estimate on the review step. Freight actually entered on the order wins
-// over the old flat $65/MT guess, which is only a fallback for CIF/CNF.
-export function estimateCosting(form, items) {
-  const { qtyMT, contractValue, pricePerMT } = orderTotals(items);
-  const estimatedRawQty = qtyMT > 0 ? Math.round(qtyMT / 0.75) : 0;
-  const bagsCost = form.receivingMode === 'loose' ? 0 : qtyMT * 25;
-  const riceCost = estimatedRawQty * pricePerMT * 0.5;
-  const loadingCost = qtyMT * 15;
-  const clearingCost = qtyMT * 12;
-  const freightPerMt = parseFloat(form.freightPerMT) || 0;
-  const insurancePerMt = parseFloat(form.insurancePerMT) || 0;
-  const freightCost = (freightPerMt + insurancePerMt) > 0
-    ? qtyMT * (freightPerMt + insurancePerMt)
-    : ((form.incoterm === 'CIF' || form.incoterm === 'CNF') ? qtyMT * 65 : 0);
-  const totalEstimatedCost = riceCost + bagsCost + loadingCost + clearingCost + freightCost;
-  const estimatedGrossProfit = contractValue - totalEstimatedCost;
-  const marginPct = contractValue > 0 ? ((estimatedGrossProfit / contractValue) * 100) : 0;
+// The advance / balance split on the review step (contract arithmetic, in the
+// order's own currency). The margin is NOT estimated here any more (EXP-08):
+// it used hard-coded guesses (rice = 0.5 × sale price × raw qty, $25/MT bags,
+// $65/MT freight). profitPreviewBody() asks the server, which runs the same
+// profit definition the saved order shows.
+export function advanceSplit(form, items) {
+  const { contractValue } = orderTotals(items);
   const advPct = parseFloat(form.advancePct) || 0;
   const advanceExpected = contractValue * (advPct / 100);
   const balanceExpected = contractValue - advanceExpected;
+  return { contractValue, advPct, advanceExpected, balanceExpected };
+}
+
+// POST /api/export-orders/profit-preview body: the unsaved order as the
+// server's profit definition reads it. Printed bags are PKR (vendor bills).
+export function profitPreviewBody(form, items, printedBags = []) {
+  const { contractValue } = orderTotals(items);
+  const bagsPkr = sideCostBags(printedBags).reduce((s, b) => s + b.quantity * b.unit_cost, 0);
   return {
-    estimatedRawQty, bagsCost, riceCost, loadingCost, clearingCost, freightCost,
-    totalEstimatedCost, contractValue, estimatedGrossProfit, marginPct, advPct,
-    advanceExpected, balanceExpected,
+    currency: form.currency || 'USD',
+    booked_fx_rate: parseFloat(form.bookedFxRate) > 0 ? parseFloat(form.bookedFxRate) : null,
+    contract_value: contractValue,
+    items: items
+      .filter((it) => num(it.qtyMT) > 0)
+      .map((it) => ({ product_id: Number(it.productId) || null, qty_mt: num(it.qtyMT) })),
+    freight_display: form.freightDisplay || 'in_price',
+    freight_per_mt: parseFloat(form.freightPerMT) || null,
+    insurance_per_mt: parseFloat(form.insurancePerMT) || null,
+    printed_bags_pkr: Math.round(bagsPkr * 100) / 100,
   };
 }
 

@@ -9,7 +9,7 @@ import { useExceptions, useExceptionStats, useScanExceptions, useResolveExceptio
 import { useApp } from '../../../context/AppContext';
 import { LoadingSpinner, ErrorState } from '../../../components/LoadingState';
 import Modal from '../../../components/Modal';
-import { fmtDateTime, fmtUSD } from '../../../shared/utils/format';
+import { fmtDateTime, fmtMoney } from '../../../shared/utils/format';
 
 const SEVERITY_CONFIG = {
   critical: { color: 'bg-red-500', bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-700', icon: AlertCircle },
@@ -191,7 +191,7 @@ export default function ExceptionDashboard() {
                     <span>{formatDate(ex.detectedAt || ex.createdAt)}</span>
                     {ex.assignedToName && <span>Assigned: {ex.assignedToName}</span>}
                     {ex.amountAtRisk > 0 && (
-                      <span className="font-medium text-red-600">{fmtUSD(ex.amountAtRisk)} at risk</span>
+                      <span className="font-medium text-red-600">{fmtMoney(ex.amountAtRisk, ex.currency || 'PKR')} at risk</span>
                     )}
                   </div>
                 </div>
@@ -238,7 +238,7 @@ export default function ExceptionDashboard() {
               {selectedEx.amountAtRisk > 0 && (
                 <div>
                   <p className="text-xs font-medium text-gray-500 uppercase">Amount at Risk</p>
-                  <p className="text-sm font-semibold text-red-600 mt-1">{fmtUSD(selectedEx.amountAtRisk)}</p>
+                  <p className="text-sm font-semibold text-red-600 mt-1">{fmtMoney(selectedEx.amountAtRisk, selectedEx.currency || 'PKR')}</p>
                 </div>
               )}
             </div>

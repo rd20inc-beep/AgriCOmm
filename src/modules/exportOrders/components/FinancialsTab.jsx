@@ -7,6 +7,7 @@ import OrderReceipts from '../../finance/drawers/OrderReceipts';
 
 export default function FinancialsTab({ order, formatCurrency, formatPKR, totalCosts, grossProfit, marginPct, onConfirmAdvance, onRequestBalance, onAddExpense, canConfirmAdvance, canRequestBalance, exportCostCategories, addToast }) {
   const formatCost = formatPKR || formatCurrency;
+  const profit = order.profit || null;
   const totalReceivables = order.advanceExpected + order.balanceExpected;
   const totalReceived = order.advanceReceived + order.balanceReceived;
   const outstandingBalance = totalReceivables - totalReceived;
@@ -108,16 +109,38 @@ export default function FinancialsTab({ order, formatCurrency, formatPKR, totalC
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
         <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">Summary</h3>
         <div className="space-y-3">
+          {/* EXP-08: from the server's one profit definition (order.profit). */}
+          {profit && (
+            <>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-600">Revenue (PKR, booked rate)</span>
+                <span className="font-medium text-gray-900">{profit.revenuePkr == null ? '—' : formatCost(profit.revenuePkr)}</span>
+              </div>
+              {(profit.freightRevenuePkr > 0 || profit.debitNoteRevenuePkr > 0) && (
+                <p className="text-xs text-gray-500 text-right">
+                  incl. {profit.freightRevenuePkr > 0 ? `freight ${formatCost(profit.freightRevenuePkr)}` : ''}
+                  {profit.freightRevenuePkr > 0 && profit.debitNoteRevenuePkr > 0 ? ' · ' : ''}
+                  {profit.debitNoteRevenuePkr > 0 ? `debit notes ${formatCost(profit.debitNoteRevenuePkr)}` : ''}
+                </p>
+              )}
+              {profit.totalCostPkr != null && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600">Cost (PKR){profit.estimated ? ' — rice cost estimated' : ''}</span>
+                  <span className="font-medium text-gray-900">{formatCost(profit.totalCostPkr)}</span>
+                </div>
+              )}
+            </>
+          )}
           <div className="flex justify-between text-sm">
-            <span className="text-gray-600">Gross Profit (PKR)</span>
-            <span className={`font-semibold ${grossProfit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-              {formatCost(grossProfit)}
+            <span className="text-gray-600">{profit?.realised ? 'Realised Profit (PKR)' : 'Booked Profit (PKR)'}</span>
+            <span className={`font-semibold ${grossProfit == null ? 'text-gray-400' : grossProfit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+              {grossProfit == null ? '—' : formatCost(grossProfit)}
             </span>
           </div>
           <div className="flex justify-between text-sm">
-            <span className="text-gray-600">Margin %</span>
-            <span className={`font-semibold ${parseFloat(marginPct) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-              {marginPct}%
+            <span className="text-gray-600">Booked Margin %</span>
+            <span className={`font-semibold ${marginPct == null ? 'text-gray-400' : parseFloat(marginPct) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+              {marginPct == null ? '—' : `${marginPct}%`}
             </span>
           </div>
           <div className="flex justify-between text-sm">
@@ -126,7 +149,7 @@ export default function FinancialsTab({ order, formatCurrency, formatPKR, totalC
               {formatCurrency(outstandingBalance)}
             </span>
           </div>
-          <p className="text-xs text-gray-400 italic pt-1">Profit converts contract value to PKR at the order's booked FX rate, then subtracts PKR costs.</p>
+          <p className="text-xs text-gray-400 italic pt-1">{profit ? 'Profit = revenue (contract + separately charged freight + debit notes, at the booked rate) − op costs − printed bags − rice cost (locked at shipment, else reserved stock, else estimated). — = not priced yet.' : 'Profit is shown to roles that may see profit.'}</p>
         </div>
       </div>
 

@@ -2,6 +2,10 @@ import api from '../../../api/client';
 export const exportOrdersApi = {
   list: (params) => api.get('/api/export-orders', params),
   get: (id) => api.get(`/api/export-orders/${id}`),
+  // P4-09: the order book per currency (dashboard + Export Desk tiles), server-computed.
+  orderBook: () => api.get('/api/export-orders/order-book'),
+  // EXP-08: the create form's margin preview from the one profit definition.
+  profitPreview: (data) => api.post('/api/export-orders/profit-preview', data),
   create: (data) => api.post('/api/export-orders', data),
   update: (id, data) => api.put(`/api/export-orders/${id}`, data),
   updateStatus: (id, data) => api.put(`/api/export-orders/${id}/status`, data),

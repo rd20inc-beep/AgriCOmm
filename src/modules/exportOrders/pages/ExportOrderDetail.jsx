@@ -212,17 +212,16 @@ export default function ExportOrderDetail() {
     );
   }
 
-  // Costs are PKR; contractValue is in the order's foreign currency.
-  // To compute a meaningful gross profit, convert contract value to PKR
-  // using the locked PKR equivalent (set at order create) or the booked
-  // FX rate as a fallback. All margin numbers below are PKR.
+  // The recorded cost lines (PKR) — the Outflows table's grand total.
   const totalCosts = Object.values(order.costs || {}).reduce((sum, c) => sum + (parseFloat(c) || 0), 0);
-  const contractValuePkr = (parseFloat(order.contractValuePkrLocked) || 0) > 0
-    ? parseFloat(order.contractValuePkrLocked)
-    // No booked rate → no PKR figure (0, margin shown as —), never 280 (D-10).
-    : (parseFloat(order.contractValue) || 0) * (parseFloat(order.bookedFxRate) || (order.currency === 'PKR' ? 1 : 0));
-  const grossProfit = contractValuePkr - totalCosts;
-  const marginPct = contractValuePkr > 0 ? ((grossProfit / contractValuePkr) * 100).toFixed(1) : '0.0';
+  // EXP-08: profit and margin come from the server's ONE definition
+  // (profitDefinitions): revenue = contract + separately charged freight +
+  // debit notes at the booked rate; cost = op costs + printed bags + rice
+  // cost (locked / reserved / estimated). Realised once shipped with COGS.
+  // null (shown "—") when not priced yet or the viewer may not see profit.
+  const profit = order.profit || null;
+  const grossProfit = profit ? (profit.realised ? profit.realisedProfitPkr : profit.bookedProfitPkr) : null;
+  const marginPct = profit && profit.marginPct != null ? Number(profit.marginPct).toFixed(1) : null;
   const currencySymbols = { USD: '$', EUR: '€', GBP: '£' };
   const orderSymbol = currencySymbols[order.currency] || '$';
   const formatCurrency = (value) => (orderSymbol === '$'
@@ -777,7 +776,7 @@ export default function ExportOrderDetail() {
       {order.status === 'Closed' && (
         <div className="bg-slate-50 border border-slate-300 rounded-xl p-4">
           <p className="text-sm font-semibold text-slate-800">Order Closed</p>
-          <p className="text-xs text-slate-600">This order is complete. Final profit: {formatPKR(grossProfit)} ({marginPct}% margin).</p>
+          <p className="text-xs text-slate-600">This order is complete. {grossProfit != null ? <>{profit?.realised ? 'Realised' : 'Booked'} profit: {formatPKR(grossProfit)}{marginPct != null ? ` (booked margin ${marginPct}%)` : ''}.</> : 'Profit is not priced yet (no booked rate or no rice cost).'}</p>
         </div>
       )}
 

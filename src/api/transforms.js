@@ -251,6 +251,9 @@ export function transformOrder(dbOrder) {
     canSeeSupplierName: dbOrder.canSeeSupplierName !== false, // supplier-name privacy
     // Source-batch by-product pricing (internal/admin-only; empty for non-admin)
     batchByproducts: dbOrder.batchByproducts || [],
+    // EXP-08: Booked / Realised profit from the server's one definition (PKR,
+    // camelCase already) — null when the viewer may not see profit.
+    profit: dbOrder.profit || null,
     // Costs — convert array to keyed object if needed
     costs: transformCosts(dbOrder.costs),
     // Documents — convert array to keyed object if needed
