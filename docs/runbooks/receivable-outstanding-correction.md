@@ -27,6 +27,9 @@ docker exec -it riceflow-backend node scripts/detectReceivableOutstandingDrift.j
 | C | receivable expected ≠ the order's advance / balance expected | **review only** (e.g. a debit note erased from `balance_expected` by an old contract save — compare with `export_debit_notes` status `Issued`) |
 | D | parent-link CHECK violators | **manual review**; the CHECK stays NOT VALID until they are fixed |
 
+Mill receivables are exempt from `chk_receivables_export_parent` (migration 370): go-live opening
+balances (`RCV-OPEN-…`, entity `mill`, type `Balance`) are real customer debts with no export order.
+
 Equivalent SQL for the main count:
 
 ```sql
