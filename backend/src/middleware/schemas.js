@@ -405,6 +405,9 @@ const allocateExportStock = Joi.object({
   // here, validate()'s stripUnknown would silently drop item_id from the body.
   item_id: Joi.number().integer().positive().allow(null),
   notes: Joi.string().allow('', null),
+  // The user is confirming the system's suggested lot (D-18): recorded on the
+  // reservation as source 'suggested'.
+  suggested: Joi.boolean(),
 });
 
 // Packed-weight variance entry (Phase 1). The mill enters net rice + material kg.

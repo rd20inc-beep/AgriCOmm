@@ -258,7 +258,7 @@ describe('customer and currency are part of the locked contract', () => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 describe('allocating stock', () => {
-  const lot = { id: 5, lot_no: 'LOT-5', export_ready: true, available_qty: 200000, landed_cost_per_kg: 150, ownership: 'own' };
+  const lot = { id: 5, lot_no: 'LOT-5', type: 'finished', entity: 'mill', export_ready: true, available_qty: 200000, landed_cost_per_kg: 150, ownership: 'own' };
 
   async function allocate(qtyMt, orderOver = {}, reservations = []) {
     reset({
@@ -293,7 +293,47 @@ describe('allocating stock', () => {
   it('up to the order quantity (plus 1 kg of rounding) is allowed', async () => {
     const r = await allocate(20.0005, {}, [{ id: 1, order_id: 1, lot_id: 9, reserved_qty: 80000, status: 'Active' }]);
     expect(r.statusCode).toBe(200);
-    expect(mockInventory.reserveStock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ qtyKg: 20000.5 }));
+    expect(mockInventory.reserveStock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ qtyKg: 20000.5, source: 'manual' }));
+  });
+
+  // EXP-28: the picker lists "export-ready OR already in the export entity";
+  // allocate used to demand export_ready alone, refusing a listed lot.
+  it('takes a lot already in the export entity, as the picker lists it', async () => {
+    reset({
+      export_orders: [order({ status: 'In Milling' })],
+      inventory_lots: [{ ...lot, entity: 'export', export_ready: false }],
+      inventory_reservations: [], export_order_status_history: [],
+    });
+    const r = res();
+    await controller.allocateStock(req({ params: { id: '1' }, body: { lot_id: 5, qty_mt: 10 } }), r);
+    expect(r.statusCode).toBe(200);
+  });
+
+  it('refuses mill stock not marked export-ready, and raw rice', async () => {
+    for (const bad of [{ export_ready: false }, { type: 'raw', export_ready: true }]) {
+      reset({
+        export_orders: [order({ status: 'In Milling' })],
+        inventory_lots: [{ ...lot, ...bad }],
+        inventory_reservations: [], export_order_status_history: [],
+      });
+      const r = res();
+      await controller.allocateStock(req({ params: { id: '1' }, body: { lot_id: 5, qty_mt: 10 } }), r);
+      expect(r.statusCode).toBe(400);
+    }
+    expect(mockInventory.reserveStock).not.toHaveBeenCalled();
+  });
+
+  it('a confirmed suggested lot is recorded as the suggestion, with who confirmed it', async () => {
+    reset({
+      export_orders: [order({ status: 'In Milling' })],
+      inventory_lots: [lot], inventory_reservations: [], export_order_status_history: [],
+    });
+    const r = res();
+    await controller.allocateStock(req({ params: { id: '1' }, body: { lot_id: 5, qty_mt: 10, suggested: true } }), r);
+    expect(r.statusCode).toBe(200);
+    expect(mockInventory.reserveStock).toHaveBeenCalledWith(expect.anything(),
+      expect.objectContaining({ source: 'suggested', userId: 1, orderId: 1, lotId: 5 }));
+    expect(state.tables.export_order_status_history[0].reason).toMatch(/suggested lot, confirmed/);
   });
 });
 
@@ -305,10 +345,22 @@ describe('documents promote the order only when the REQUIRED set is approved', (
   ];
   const docs = (list) => list.map(([doc_type, status], i) => ({ id: i + 1, order_id: 1, doc_type, status }));
 
+  // D-17: the gate reads the stored files — Approved / Final and checked by a
+  // second person count; an upload still awaiting approval does not.
+  const files = (list) => list.map(([doc_type, status], i) => ({
+    id: i + 1, linked_type: 'export_order', linked_id: 1, doc_type, is_latest: true, file_path: `/u/${i}.pdf`,
+    status: status === 'Draft Uploaded' ? 'Pending Review' : status,
+    checked_by: status === 'Draft Uploaded' ? null : 9,
+  }));
+
   async function promote(list) {
     reset({
       export_orders: [order({ status: 'Docs In Preparation', advance_received: 10000 })],
       export_order_documents: docs(list),
+      document_store: files(list),
+      generated_documents: [],
+      document_checklists: [],
+      inventory_reservations: [{ id: 1, order_id: 1, lot_id: 5, reserved_qty: 100000, status: 'Active' }],
       export_order_items: [item()],
       export_order_status_history: [],
     });

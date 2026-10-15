@@ -6,6 +6,7 @@ const { isKattaItem } = require('../../shared/packagingTypes');
 const { applyWarehouseScope } = require('../../utils/warehouseScope');
 const { isReservedSource } = require('../milling/batchLifecycle');
 const { resolveBatchPackSpec } = require('../milling/batchPackSpec');
+const { lotCostPerKg } = require('./exportPool');
 
 // The GL's by-product output split for a batch (millingCompletionJournal) —
 // required lazily: the milling module requires this service.
@@ -1438,8 +1439,8 @@ const inventoryService = {
     // Shipped (the dispatch loop runs off inventory_reservations). No order ⇒
     // the lot stays available in the export pool (speculative transfer), as
     // before. reserveStock reads available_qty (just set by the TRANSFER_IN),
-    // enforces the over-reserve cap, writes the reservation row + ledger entry,
-    // and sets reserved_against — all inside this same transaction.
+    // enforces the over-reserve cap and writes the reservation row + ledger
+    // entry — all inside this same transaction.
     let reservation = null;
     if (orderId) {
       reservation = await inventoryService.reserveStock(trx, {
@@ -1447,6 +1448,7 @@ const inventoryService = {
         orderId,
         qtyKg: parsedQty,
         userId,
+        source: 'transfer',
       });
     }
 
@@ -1577,7 +1579,9 @@ const inventoryService = {
       sourceEntity: lot.entity,
       linkedRef: `order-${orderId}`,
       notes: `Export dispatch for order ${orderId}`,
-      costPerUnit: parseFloat(lot.cost_per_unit) || 0,
+      // The same cost basis COGS locks from (EXP-42): the movement's value and
+      // the 5020 journal describe the same kilos at the same rate.
+      costPerUnit: lotCostPerKg(lot),
       currency: lot.cost_currency || 'PKR',
       orderId,
       userId,
@@ -1589,7 +1593,11 @@ const inventoryService = {
   // =========================================================================
   // Reserve stock against an export order
   // =========================================================================
-  async reserveStock(trx, { lotId, orderId, qtyKg, itemId = null, userId }) {
+  // source: how the reservation came about — 'manual' (picked on the order),
+  // 'suggested' (the system's suggested lot, confirmed by the user — D-18) or
+  // 'transfer' (stock moved mill → export for this order). created_by /
+  // created_at record who confirmed it and when.
+  async reserveStock(trx, { lotId, orderId, qtyKg, itemId = null, userId, source = 'manual' }) {
     if (!trx) throw new Error('reserveStock requires a transaction');
 
     const parsedQty = parseFloat(qtyKg);
@@ -1618,6 +1626,7 @@ const inventoryService = {
         item_id: itemId || null,
         reserved_qty: parsedQty,
         status: 'Active',
+        source,
         created_by: userId || null,
       })
       .returning('*');
@@ -1633,7 +1642,6 @@ const inventoryService = {
     await trx('inventory_lots').where('id', lotId).update({
       reserved_qty: newReserved,
       available_qty: newAvailable,
-      reserved_against: `order-${orderId}`,
       updated_at: trx.fn.now(),
     });
 
@@ -2055,7 +2063,7 @@ const inventoryService = {
       // Same cost chain allocate-stock checks before it lets a lot onto an order
       // (landed → cost_per_unit → purchase rate, all per KG since mig 228), so a
       // lot that passed that guard can never cost Rs 0 here.
-      const costPerKg = parseFloat(lot.landed_cost_per_kg) || parseFloat(lot.cost_per_unit) || parseFloat(lot.rate_per_kg) || 0;
+      const costPerKg = lotCostPerKg(lot);
       const qtyKg = parseFloat(r.reserved_qty); // KG (Phase 5c)
       totalCOGS += costPerKg * qtyKg;
       totalQtyKg += qtyKg;
