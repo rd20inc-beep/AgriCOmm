@@ -4,7 +4,9 @@ const db = require('../../config/database');
 // controller resolves it once per request and passes it down; the service never
 // touches req/rbac itself.
 const { applyWarehouseScope, isWarehouseInScope } = require('../../utils/warehouseScope');
-const { companyStock } = require('../inventory/stockSql');
+const { companyStock, normaliseOwnership, ON_HAND_KG } = require('../inventory/stockSql');
+// One movement-type map for every lot_transactions ledger (P4-06).
+const stockMovements = require('./stockMovements');
 // D-14 stock value (landed cost/kg × on hand, no fallback price) — stockValue.js.
 const { lotValueSql } = require('../inventory/stockValue');
 const { exportProfit, EXCLUDED_ORDER_STATUSES } = require('../finance/profitDefinitions');
@@ -22,6 +24,12 @@ const { kgToMt, KG_PER_MT } = require('../../shared/units');
 // Parse a milling_batches.custom_tags jsonb value into a plain array. The pg
 // driver usually returns jsonb already parsed (array/object), but a string may
 // arrive from raw selects — JSON.parse with a [] fallback.
+// KG on hand of a lot row — JS twin of stockSql.onHandKg (net weight, else qty).
+function onHandOf(l) {
+  const net = parseFloat(l.net_weight_kg) || 0;
+  return net > 0 ? net : (parseFloat(l.qty) || 0);
+}
+
 function parseCustomTags(v) {
   if (v == null) return [];
   if (typeof v === 'string') { try { return JSON.parse(v); } catch { return []; } }
@@ -1206,7 +1214,10 @@ const reportingService = {
         'l.net_weight_kg', 'l.received_net_weight_kg', 'l.available_qty', 'l.reserved_qty',
         'l.landed_cost_per_kg', 'l.rate_per_kg', 'l.landed_cost_total', 'l.purchase_amount', 'l.payment_status',
         'l.paid_amount', 'l.due_amount', 'l.bag_weight_kg', 'l.total_bags', 'l.moisture_pct', 'l.broken_pct',
-        'l.quality_json', 'l.processing_type', 'l.purchase_date', 'l.created_at',
+        'l.quality_json', 'l.processing_type', 'l.purchase_date', 'l.created_at', 'l.ownership',
+        // batch_ref drives "Milled from" below (RPT-16: it was never selected,
+        // so the lineage never rendered).
+        'l.batch_ref', 'l.milling_reserved_qty',
         'l.supplier_id', 's.name as supplier_name', 'p.name as product_name', 'w.name as warehouse_name')
       .first();
     if (!lot) return null;
@@ -1234,17 +1245,6 @@ const reportingService = {
     const saleByNo = Object.fromEntries(sales.map(s => [s.sale_no, s]));
     const whById = Object.fromEntries(warehouses.map(w => [w.id, w.name]));
 
-    const TYPE_LABELS = {
-      purchase_in: 'Purchase received', warehouse_transfer_in: 'Transfer in', warehouse_transfer_out: 'Transfer out',
-      milling_issue: 'Issued to milling', milling_receipt: 'Milling output', byproduct_receipt: 'By-product output',
-      export_dispatch_out: 'Export dispatch', local_sale_out: 'Local sale', export_allocation: 'Reserved for export',
-      export_release: 'Reservation released', stock_adjustment_plus: 'Adjustment (+)', stock_adjustment_minus: 'Adjustment (−)',
-      damage_out: 'Damage write-off', shortage_out: 'Shortage write-off', return_in: 'Return', opening_balance: 'Opening balance',
-      lot_split: 'Lot split', lot_merge: 'Lot merge',
-      milling_hold: 'Committed to milling', milling_release: 'Milling commitment released',
-      purchase_correction_in: 'Received qty corrected (+)', purchase_correction_out: 'Received qty corrected (−)',
-    };
-
     const events = txns.map((t) => {
       const tt = String(t.transaction_type || '');
       let counterparty = null, href = null, batchNo = null, batchName = null, customTags = null;
@@ -1256,7 +1256,7 @@ const reportingService = {
       const qtyKg = num(t.quantity_kg);
       return {
         id: t.id, date: t.transaction_date || t.created_at, txnNo: t.transaction_no,
-        type: tt, label: TYPE_LABELS[tt] || tt.replace(/_/g, ' '),
+        type: tt, label: stockMovements.labelOf(stockMovements.movementTypeOf(tt)),
         inKg: qtyKg > 0 ? qtyKg : 0, outKg: qtyKg < 0 ? -qtyKg : 0,
         balanceKg: num(t.balance_kg), ratePerKg: num(t.rate_per_kg), costImpact: num(t.cost_impact),
         reference: t.reference_no || null, counterparty, href, batchNo, batchName, customTags, remarks: t.remarks || null,
@@ -1455,7 +1455,7 @@ const reportingService = {
           batchId: srcBatch.id,
           batchNo: srcBatch.batch_no,
           batchName: srcBatch.batch_name || null,
-          batchHref: `/milling/${srcBatch.batch_no}`,
+          batchHref: `/milling/${srcBatch.id}`, // by id — every other batch link is
           processingType: srcBatch.processing_type || null,
           varieties,
           // Every source lot, so a blend shows what actually went in and how much.
@@ -1526,13 +1526,13 @@ const reportingService = {
     const rows = await applyWarehouseScope(db('inventory_lots as l')
       .join('suppliers as s', 'l.supplier_id', 's.id')
       .where('l.type', 'raw')
-      // exclude client-owned Service Milling stock
-      .whereNot('l.ownership', 'client'), warehouseScope, 'l.warehouse_id')
+      // company stock only — client-owned Service Milling lots are not ours
+      .where('l.ownership', 'company'), warehouseScope, 'l.warehouse_id')
       .groupBy('s.id', 's.name')
       .select('s.id as supplierId', 's.name as supplier',
         db.raw('COUNT(l.id) as lot_count'),
         db.raw('COALESCE(SUM(COALESCE(l.received_net_weight_kg, l.net_weight_kg)), 0) as purchased_kg'),
-        db.raw('COALESCE(SUM(l.net_weight_kg), 0) as remaining_kg'),
+        db.raw(`COALESCE(SUM(${ON_HAND_KG}), 0) as remaining_kg`),
         db.raw(`COALESCE(SUM(${lotValueSql('l')}), 0) as stock_value`))
       .orderBy('s.name', 'asc');
     const supIds = rows.map(r => r.supplierId);
@@ -1670,14 +1670,14 @@ const reportingService = {
     const rows = await applyWarehouseScope(db('inventory_lots as l')
       .join('products as p', 'l.product_id', 'p.id')
       .where('p.is_byproduct', false)
-      // exclude client-owned Service Milling stock
-      .whereNot('l.ownership', 'client'), warehouseScope, 'l.warehouse_id')
+      // company stock only — client-owned Service Milling lots are not ours
+      .where('l.ownership', 'company'), warehouseScope, 'l.warehouse_id')
       .groupBy('p.id', 'p.name')
       .select('p.id as productId', 'p.name as riceType',
         db.raw('COUNT(l.id) as lot_count'),
         db.raw("COALESCE(SUM(CASE WHEN l.type = 'raw' THEN COALESCE(l.received_net_weight_kg, l.net_weight_kg) ELSE 0 END), 0) as purchased_kg"),
         db.raw("COALESCE(SUM(CASE WHEN l.type = 'finished' THEN COALESCE(l.received_net_weight_kg, l.net_weight_kg) ELSE 0 END), 0) as produced_kg"),
-        db.raw('COALESCE(SUM(l.net_weight_kg), 0) as remaining_kg'),
+        db.raw(`COALESCE(SUM(${ON_HAND_KG}), 0) as remaining_kg`),
         db.raw(`COALESCE(SUM(${lotValueSql('l')}), 0) as stock_value`))
       .orderBy('p.name', 'asc');
     return {
@@ -1718,7 +1718,7 @@ const reportingService = {
     const cpkOf = (l) => num(l.landed_cost_per_kg); // D-14: no fallback price
     // Company totals exclude client-owned Service Milling lots (the client's
     // stock, not ours). The lot LIST below still shows them, tagged.
-    const companyLots = lots.filter(l => l.ownership !== 'client');
+    const companyLots = lots.filter(l => l.ownership === 'company');
     const lotIds = companyLots.map(l => l.id);
     const rawIds = companyLots.filter(l => l.type === 'raw').map(l => l.id);
 
@@ -1818,15 +1818,16 @@ const reportingService = {
     const whs = await applyWarehouseScope(db('warehouses').where('is_active', true), warehouseScope, 'id')
       .orderBy('entity', 'asc').orderBy('name', 'asc')
       .select('id', 'name', 'entity', 'type');
-    const agg = await applyWarehouseScope(db('inventory_lots as l')
-      .whereNotNull('l.warehouse_id').where('l.net_weight_kg', '>', 0)
-      // exclude client-owned Service Milling stock
-      .whereNot('l.ownership', 'client'), warehouseScope, 'l.warehouse_id')
+    // Shared stock SQL (P4-06 / INV-28, RPT-32): company stock only, on hand =
+    // stockSql.onHandKg, and "reserved" counts BOTH holds — export reservations
+    // and rice committed to milling — so Available matches the Stock Summary.
+    const agg = await applyWarehouseScope(companyStock(db('inventory_lots as l')
+      .whereNotNull('l.warehouse_id').whereRaw(`${ON_HAND_KG} > 0`), 'l', 'company'), warehouseScope, 'l.warehouse_id')
       .groupBy('l.warehouse_id')
       .select('l.warehouse_id',
         db.raw('COUNT(l.id) as lot_count'),
-        db.raw('COALESCE(SUM(l.net_weight_kg), 0) as onhand_kg'),
-        db.raw('COALESCE(SUM(l.reserved_qty), 0) as reserved_kg'),
+        db.raw(`COALESCE(SUM(${ON_HAND_KG}), 0) as onhand_kg`),
+        db.raw('COALESCE(SUM(COALESCE(l.reserved_qty, 0) + COALESCE(l.milling_reserved_qty, 0)), 0) as reserved_kg'),
         db.raw(`COALESCE(SUM(${lotValueSql('l')}), 0) as stock_value`));
     const byId = Object.fromEntries(agg.map(a => [a.warehouse_id, a]));
     return {
@@ -1862,30 +1863,51 @@ const reportingService = {
     const w = await db('warehouses').where('id', id).first();
     if (!w) return null;
 
-    const lots = await db('inventory_lots as l')
+    // Every lot in the warehouse, depleted ones included — a lot that came in
+    // and went out this year is throughput even though nothing is left
+    // (RPT-32). Only lots with stock are LISTED.
+    const allLots = await db('inventory_lots as l')
       .leftJoin('products as p', 'l.product_id', 'p.id')
       .leftJoin('suppliers as s', 'l.supplier_id', 's.id')
-      .where('l.warehouse_id', id).where('l.net_weight_kg', '>', 0)
+      .where('l.warehouse_id', id)
       .select('l.id', 'l.lot_no', 'l.type', 'l.entity', 'l.item_name', 'l.grade', 'l.variety', 'l.batch_ref',
-        'l.received_net_weight_kg', 'l.net_weight_kg', 'l.reserved_qty', 'l.landed_cost_per_kg', 'l.rate_per_kg',
+        db.raw(`${ON_HAND_KG} AS on_hand_kg`), 'l.reserved_qty', 'l.milling_reserved_qty', 'l.landed_cost_per_kg',
         'p.name as product_name', 'l.supplier_id', 'l.ownership', 's.name as supplier_name', 'l.purchase_date', 'l.created_at')
       .orderBy('l.type', 'asc').orderBy('l.id', 'asc');
 
+    // In / Out per lot from the movement ledger (INV-28: Out used to be
+    // received − net, which hid what came back in, e.g. a reversed issue).
+    // Holds are zero-quantity rows and add nothing.
+    const flow = {};
+    if (allLots.length) {
+      const fr = await db('lot_transactions').whereIn('lot_id', allLots.map((l) => l.id))
+        .groupBy('lot_id')
+        .select('lot_id',
+          db.raw('COALESCE(SUM(CASE WHEN quantity_kg > 0 THEN quantity_kg ELSE 0 END), 0) AS in_kg'),
+          db.raw('COALESCE(SUM(CASE WHEN quantity_kg < 0 THEN -quantity_kg ELSE 0 END), 0) AS out_kg'));
+      for (const r of fr) flow[r.lot_id] = { inKg: num(r.in_kg), outKg: num(r.out_kg) };
+    }
+
     const cpkOf = (l) => num(l.landed_cost_per_kg); // D-14: no fallback price
-    let onHand = 0, reserved = 0, value = 0, totalIn = 0, totalOut = 0;
+    let onHand = 0, reserved = 0, value = 0, totalIn = 0, totalOut = 0, depletedLots = 0;
     const byType = {}, byRice = {};
-    const lotRows = lots.map((l) => {
-      const net = num(l.net_weight_kg);
-      const recv = num(l.received_net_weight_kg) || net;
-      const res = num(l.reserved_qty);
+    const lotRows = [];
+    for (const l of allLots) {
+      const net = num(l.on_hand_kg);
+      const res = num(l.reserved_qty) + num(l.milling_reserved_qty);
       const cpk = cpkOf(l);
       const val = net * cpk;
-      const outKg = Math.max(0, recv - net);
+      const f = flow[l.id] || { inKg: 0, outKg: 0 };
       // Client-owned Service Milling lots are shown (tagged) but excluded from
       // the warehouse's company totals + breakdowns.
       const isClient = l.ownership === 'client';
       if (!isClient) {
-        onHand += net; reserved += res; value += val; totalIn += recv; totalOut += outKg;
+        totalIn += f.inKg; totalOut += f.outKg;
+        if (net <= 0) depletedLots += 1;
+      }
+      if (net <= 0) continue;
+      if (!isClient) {
+        onHand += net; reserved += res; value += val;
         const t = l.type || 'other';
         const bt = byType[t] || (byType[t] = { type: t, onHandKg: 0, value: 0 });
         bt.onHandKg += net; bt.value += val;
@@ -1893,25 +1915,28 @@ const reportingService = {
         const br = byRice[rk] || (byRice[rk] = { riceType: rk, lots: 0, onHandKg: 0, reservedKg: 0, value: 0 });
         br.lots += 1; br.onHandKg += net; br.reservedKg += res; br.value += val;
       }
-      return {
+      lotRows.push({
         lotId: l.id, lotNo: l.lot_no, href: `/reports/lot-ledger/${l.id}`, type: l.type, entity: l.entity,
         riceType: l.product_name || l.variety || l.item_name || '—', label: l.grade || l.item_name || '—',
         batchRef: l.batch_ref || null, supplier: l.supplier_name || null, supplierId: l.supplier_id || null,
-        inKg: recv, outKg, reservedKg: res, availableKg: Math.max(0, net - res), closingKg: net,
+        inKg: f.inKg, outKg: f.outKg, reservedKg: res, availableKg: Math.max(0, net - res), closingKg: net,
+        // A lot whose quantity predates the ledger does not foot in − out; say so.
+        unreconciledKg: stockMovements.round3(net - (f.inKg - f.outKg)),
         costPerKg: cpk, value: val, date: l.purchase_date || l.created_at,
-        isServiceMilling: l.ownership === 'client',
-      };
-    });
+        isServiceMilling: isClient,
+      });
+    }
 
-    const companyLotCount = lots.filter((l) => l.ownership !== 'client').length;
+    const companyLotCount = lotRows.filter((l) => !l.isServiceMilling).length;
     return {
       warehouse: { id: w.id, name: w.name, entity: w.entity, type: w.type, lotCount: companyLotCount },
       summary: {
-        lotCount: companyLotCount, onHandKg: onHand, reservedKg: reserved,
+        lotCount: companyLotCount, depletedLotCount: depletedLots, onHandKg: onHand, reservedKg: reserved,
         availableKg: Math.max(0, onHand - reserved), stockValue: value,
         totalInKg: totalIn, totalOutKg: totalOut,
         byType: Object.values(byType).sort((a, b) => b.onHandKg - a.onHandKg),
-        costBasis: 'On-hand lots valued at landed cost/kg. In = total intake to the lot; Out = milled / sold / transferred since intake; Closing = current on-hand.',
+        unit: 'kg', currency: 'PKR', asOf: new Date().toISOString(),
+        costBasis: 'On-hand lots valued at landed cost/kg. In / Out = every movement into / out of the lots in this warehouse (depleted lots included), from the stock ledger; Reserved = export reservations + rice committed to milling; Closing = current on-hand.',
       },
       byRiceType: Object.values(byRice).sort((a, b) => b.onHandKg - a.onHandKg),
       lots: lotRows,
@@ -1935,6 +1960,9 @@ const reportingService = {
     let q = db('milling_batches as mb')
       .leftJoin('products as p', 'mb.product_id', 'p.id')
       .leftJoin('suppliers as s', 'mb.supplier_id', 's.id')
+      // Company milling only: a service (toll) batch mills the CLIENT's rice, so
+      // its loss is not the company's processing loss (RPT-32).
+      .whereRaw('mb.is_service_milling IS NOT TRUE')
       .select('mb.id', 'mb.batch_no', 'mb.batch_name', 'mb.custom_tags', 'mb.processing_type', 'mb.raw_qty_kg', 'mb.yield_pct',
         'mb.operator_name', 'mb.machine_line', 'mb.created_at', 'mb.completed_at',
         'p.name as product_name', 's.name as supplier_name');
@@ -2427,70 +2455,57 @@ const reportingService = {
    * quantity_kg) — not the legacy `inventory_movements`, which is an incomplete
    * parallel copy (missing opening balances and many milling/sale rows), so the
    * old report under-reported (P6c-A). Transaction types are mapped back to the
-   * legacy movement_type values so the API shape + the FE filter are unchanged.
+   * legacy movement_type values (stockMovements.js) so the API shape + the FE
+   * filter are unchanged.
+   *
+   * The newest `limit` rows are listed; the totals are aggregated in SQL over
+   * EVERY matching row (P4-06 / INV-27 — they used to be summed over the capped
+   * list, so they silently stopped being totals), and `truncated` says when the
+   * list is shorter than the match.
    * Read-only. Filters: dateFrom, dateTo, movementType, entity, lotId, warehouseId.
    */
   async getInventoryLedger({ dateFrom, dateTo, movementType, entity, lotId, warehouseId, warehouseScope = null, limit = 300 } = {}) {
     const num = (v) => parseFloat(v) || 0;
     const cap = Math.min(parseInt(limit, 10) || 300, 1000);
 
-    // lot_transactions.transaction_type → the legacy movement_type the FE filter
-    // dropdown + the labels below use. Keeps the response shape identical.
-    const TXN_TO_MT = {
-      purchase_in: 'purchase_receipt', warehouse_transfer_in: 'transfer_in', transfer_to_mill: 'transfer_in',
-      milling_issue: 'production_issue', milling_receipt: 'production_output', byproduct_receipt: 'byproduct_output',
-      warehouse_transfer_out: 'transfer_out', transfer_to_export: 'transfer_out',
-      export_dispatch_out: 'export_dispatch', local_sale_out: 'local_sale',
-      export_allocation: 'reservation_hold', export_release: 'reservation_release',
-      stock_adjustment_plus: 'adjustment_plus', stock_adjustment_minus: 'adjustment_minus',
-      damage_out: 'damage_writeoff', shortage_out: 'shortage_writeoff', return_in: 'return',
-      opening_balance: 'opening_balance', lot_split: 'adjustment_minus', lot_merge: 'adjustment_plus',
-      milling_hold: 'milling_hold', milling_release: 'milling_release',
-      purchase_correction_in: 'receipt_correction_in', purchase_correction_out: 'receipt_correction_out',
-    };
-    const LABELS = {
-      purchase_receipt: 'Purchase received', internal_receipt: 'Internal receipt', production_issue: 'Issued to milling',
-      production_output: 'Milling output', byproduct_output: 'By-product output', transfer_out: 'Transfer out',
-      transfer_in: 'Transfer in', export_dispatch: 'Export dispatch', local_sale: 'Local sale',
-      reservation_hold: 'Reserved', reservation_release: 'Reservation released', adjustment_plus: 'Adjustment (+)',
-      adjustment_minus: 'Adjustment (−)', damage_writeoff: 'Damage write-off', shortage_writeoff: 'Shortage write-off',
-      return: 'Return', opening_balance: 'Opening balance',
-      milling_hold: 'Committed to milling', milling_release: 'Milling commitment released',
-      receipt_correction_in: 'Received qty corrected (+)', receipt_correction_out: 'Received qty corrected (−)',
+    const filtered = () => {
+      let q = db('lot_transactions as t')
+        .leftJoin('inventory_lots as l', 't.lot_id', 'l.id')
+        .leftJoin('warehouses as wf', 't.warehouse_from_id', 'wf.id')
+        .leftJoin('warehouses as wt', 't.warehouse_to_id', 'wt.id');
+      if (dateFrom) q = q.where('t.transaction_date', '>=', dateFrom);
+      if (dateTo) q = q.where('t.transaction_date', '<=', dateTo);
+      if (movementType) q = q.whereIn('t.transaction_type', stockMovements.txnTypesFor(movementType));
+      if (entity) q = q.where(function () { this.where('t.entity_from', entity).orWhere('t.entity_to', entity).orWhere('l.entity', entity); });
+      if (lotId) q = q.where('t.lot_id', parseInt(lotId, 10));
+      if (warehouseId) { const w = parseInt(warehouseId, 10); q = q.where(function () { this.where('t.warehouse_from_id', w).orWhere('t.warehouse_to_id', w).orWhere('l.warehouse_id', w); }); }
+      // #9-scoping: keep a movement if ANY of its warehouses is in scope — a
+      // transfer OUT of a scoped warehouse is the caller's business even though
+      // the lot now lives somewhere they can't see.
+      if (warehouseScope) {
+        const ids = warehouseScope.length ? warehouseScope : [-1];
+        q = q.where(function () {
+          this.whereIn('l.warehouse_id', ids)
+            .orWhereIn('t.warehouse_from_id', ids)
+            .orWhereIn('t.warehouse_to_id', ids);
+        });
+      }
+      return q;
     };
 
-    let q = db('lot_transactions as t')
-      .leftJoin('inventory_lots as l', 't.lot_id', 'l.id')
-      .leftJoin('warehouses as wf', 't.warehouse_from_id', 'wf.id')
-      .leftJoin('warehouses as wt', 't.warehouse_to_id', 'wt.id');
-    if (dateFrom) q = q.where('t.transaction_date', '>=', dateFrom);
-    if (dateTo) q = q.where('t.transaction_date', '<=', dateTo);
-    if (movementType) {
-      // Reverse-map the requested movement_type to its lot_transaction type(s).
-      const wanted = Object.keys(TXN_TO_MT).filter((k) => TXN_TO_MT[k] === movementType);
-      q = q.whereIn('t.transaction_type', wanted.length ? wanted : [movementType]);
-    }
-    if (entity) q = q.where(function () { this.where('t.entity_from', entity).orWhere('t.entity_to', entity).orWhere('l.entity', entity); });
-    if (lotId) q = q.where('t.lot_id', parseInt(lotId, 10));
-    if (warehouseId) { const w = parseInt(warehouseId, 10); q = q.where(function () { this.where('t.warehouse_from_id', w).orWhere('t.warehouse_to_id', w).orWhere('l.warehouse_id', w); }); }
-    // #9-scoping: keep a movement if ANY of its warehouses is in scope — a
-    // transfer OUT of a scoped warehouse is the caller's business even though
-    // the lot now lives somewhere they can't see.
-    if (warehouseScope) {
-      const ids = warehouseScope.length ? warehouseScope : [-1];
-      q = q.where(function () {
-        this.whereIn('l.warehouse_id', ids)
-          .orWhereIn('t.warehouse_from_id', ids)
-          .orWhereIn('t.warehouse_to_id', ids);
-      });
-    }
-
-    const rows = await q.select(
-      't.id', 't.transaction_date', 't.created_at', 't.transaction_type', 't.quantity_kg', 't.cost_impact', 't.total_cost',
-      't.lot_id', 't.reference_module', 't.reference_id', 't.reference_no', 't.entity_from', 't.entity_to',
-      'l.lot_no', 'l.item_name', 'l.type as lot_type',
-      'wf.name as from_wh', 'wt.name as to_wh',
-    ).orderBy('t.transaction_date', 'desc').orderBy('t.id', 'desc').limit(cap);
+    const [rows, agg] = await Promise.all([
+      filtered().select(
+        't.id', 't.transaction_date', 't.created_at', 't.transaction_type', 't.quantity_kg', 't.cost_impact', 't.total_cost',
+        't.lot_id', 't.reference_module', 't.reference_id', 't.reference_no', 't.entity_from', 't.entity_to',
+        'l.lot_no', 'l.item_name', 'l.type as lot_type',
+        'wf.name as from_wh', 'wt.name as to_wh',
+      ).orderBy('t.transaction_date', 'desc').orderBy('t.created_at', 'desc').orderBy('t.id', 'desc').limit(cap),
+      filtered().first(
+        db.raw('COUNT(*)::int AS n'),
+        db.raw('COALESCE(SUM(CASE WHEN t.quantity_kg > 0 THEN t.quantity_kg ELSE 0 END), 0) AS in_kg'),
+        db.raw('COALESCE(SUM(CASE WHEN t.quantity_kg < 0 THEN -t.quantity_kg ELSE 0 END), 0) AS out_kg'),
+      ),
+    ]);
 
     // Resolve batch_no for milling-batch references (lot_transactions stores the
     // batch via reference_module='milling_batch' + reference_id, not a batch_id).
@@ -2502,8 +2517,7 @@ const reportingService = {
     }
 
     const out = rows.map((r) => {
-      const tt = String(r.transaction_type || '');
-      const mt = TXN_TO_MT[tt] || tt.replace(/_/g, ' ');
+      const mt = stockMovements.movementTypeOf(r.transaction_type);
       const qkg = num(r.quantity_kg);
       const isBatch = r.reference_module === 'milling_batch' && r.reference_id;
       const isOrder = r.reference_module === 'export_order' && r.reference_id;
@@ -2512,7 +2526,7 @@ const reportingService = {
       else if (isOrder) href = `/export/${r.reference_id}`;
       else if (r.lot_id) href = `/lot-inventory/${r.lot_id}`;
       return {
-        id: r.id, date: r.transaction_date || r.created_at, type: mt, label: LABELS[mt] || mt.replace(/_/g, ' '),
+        id: r.id, date: r.transaction_date || r.created_at, type: mt, label: stockMovements.labelOf(mt),
         lotId: r.lot_id, lotNo: r.lot_no, item: r.item_name, lotType: r.lot_type,
         batchNo: isBatch ? ((batchById[r.reference_id] || {}).batch_no || null) : null,
         batchName: isBatch ? ((batchById[r.reference_id] || {}).batch_name || null) : null,
@@ -2522,7 +2536,15 @@ const reportingService = {
         fromWh: r.from_wh, toWh: r.to_wh, entity: r.entity_to || r.entity_from || null, href,
       };
     });
-    return { rows: out, totals: { count: out.length, inKg: out.filter(r => r.direction === 'in').reduce((s, r) => s + r.qtyKg, 0), outKg: out.filter(r => r.direction === 'out').reduce((s, r) => s + r.qtyKg, 0) } };
+    const total = Number(agg && agg.n) || 0;
+    return {
+      rows: out,
+      totals: {
+        count: total, listed: out.length, truncated: total > out.length,
+        inKg: stockMovements.round3(agg && agg.in_kg), outKg: stockMovements.round3(agg && agg.out_kg),
+      },
+      meta: { unit: 'kg', currency: 'PKR', dateFrom: dateFrom || null, dateTo: dateTo || null, asOf: new Date().toISOString() },
+    };
   },
 
   // Movement ledger for a stock DIMENSION (variety | grade | byproduct | product),
@@ -2530,41 +2552,25 @@ const reportingService = {
   // Opening/Inward/Outward/Packing/Transfer/Sales columns + running Balance +
   // Source Lot / Date / User / Reference (Batch 5, item 5). Packing is derived
   // from mill_packing_logs (no rice-lot packing movement exists).
-  async getStockLedger({ dimension = 'variety', key, variety, dateFrom, dateTo, warehouseScope = null, limit = 2000 } = {}) {
+  //
+  // P4-06 / RPT-04, INV-27:
+  //  * sorted by (transaction_date, created_at, id) — events used to be sorted
+  //    by String(Date), i.e. by weekday name, so the running balance was wrong;
+  //  * the NEWEST `limit` rows are listed (the oldest were kept before), and the
+  //    balance carried in from everything older — before dateFrom AND any rows
+  //    of the period not listed — is the opening of the listed rows;
+  //  * totals are Σ over EVERY row of the period, in SQL, with signed buckets so
+  //    reversals net their originals (stockMovements.js) and the identity
+  //      balance = opening + inward − outward + transfer − sales + other
+  //    holds;
+  //  * company stock by default (stockSql.companyStock); ?ownership=client|all
+  //    for the service view;
+  //  * hold rows (reservations, milling commitments) move no quantity and are
+  //    not listed.
+  async getStockLedger({ dimension = 'variety', key, variety, dateFrom, dateTo, ownership = 'company', warehouseScope = null, limit = 2000 } = {}) {
     const num = (v) => parseFloat(v) || 0;
     const cap = Math.min(parseInt(limit, 10) || 2000, 5000);
-    if (!key && dimension !== 'variety') { /* allow empty variety */ }
-
-    const TXN_TO_MT = {
-      purchase_in: 'purchase_receipt', warehouse_transfer_in: 'transfer_in', transfer_to_mill: 'transfer_in',
-      milling_issue: 'production_issue', milling_receipt: 'production_output', byproduct_receipt: 'byproduct_output',
-      warehouse_transfer_out: 'transfer_out', transfer_to_export: 'transfer_out',
-      export_dispatch_out: 'export_dispatch', local_sale_out: 'local_sale',
-      stock_adjustment_plus: 'adjustment_plus', stock_adjustment_minus: 'adjustment_minus',
-      damage_out: 'damage_writeoff', shortage_out: 'shortage_writeoff', return_in: 'return',
-      opening_balance: 'opening_balance', lot_split: 'adjustment_minus', lot_merge: 'adjustment_plus',
-      milling_hold: 'milling_hold', milling_release: 'milling_release',
-      purchase_correction_in: 'receipt_correction_in', purchase_correction_out: 'receipt_correction_out',
-    };
-    const LABELS = {
-      purchase_receipt: 'Purchase received', production_issue: 'Issued to milling', production_output: 'Milling output',
-      byproduct_output: 'By-product output', transfer_out: 'Transfer out', transfer_in: 'Transfer in',
-      export_dispatch: 'Export dispatch', local_sale: 'Local sale', adjustment_plus: 'Adjustment (+)',
-      adjustment_minus: 'Adjustment (−)', damage_writeoff: 'Damage write-off', shortage_writeoff: 'Shortage write-off',
-      return: 'Return', opening_balance: 'Opening balance',
-      milling_hold: 'Committed to milling', milling_release: 'Milling commitment released',
-      receipt_correction_in: 'Received qty corrected (+)', receipt_correction_out: 'Received qty corrected (−)',
-    };
-    // movement_type → the ledger column bucket
-    const BUCKET = {
-      opening_balance: 'opening',
-      purchase_receipt: 'inward', production_output: 'inward', byproduct_output: 'inward', return: 'inward', adjustment_plus: 'inward',
-      receipt_correction_in: 'inward',
-      production_issue: 'outward', adjustment_minus: 'outward', damage_writeoff: 'outward', shortage_writeoff: 'outward',
-      receipt_correction_out: 'outward',
-      transfer_in: 'transfer', transfer_out: 'transfer',
-      local_sale: 'sales', export_dispatch: 'sales',
-    };
+    const r3 = stockMovements.round3;
 
     const TAG_CASE = `CASE
       WHEN l.grade IN ('B1','B2','B3','CSR','Short Grain') THEN l.grade
@@ -2580,6 +2586,7 @@ const reportingService = {
       else if (dimension === 'grade') qb.where('l.grade', key);
       else if (dimension === 'product') qb.where('l.product_id', parseInt(key, 10) || -1);
       else if (dimension === 'byproduct') { qb.where('l.type', 'byproduct').whereRaw(`(${TAG_CASE}) = ?`, [key]); if (variety) qb.where('l.variety', variety); }
+      companyStock(qb, 'l', ownership);
       // #9-scoping: applied here so it reaches BOTH the movement query and the
       // packing-log whereExists subquery, which share this predicate.
       applyWarehouseScope(qb, warehouseScope, 'l.warehouse_id');
@@ -2589,73 +2596,120 @@ const reportingService = {
       ? `${variety ? variety + ' — ' : ''}${key}`
       : (key || '(unset)');
 
-    // Movement rows (oldest → newest for the running balance).
-    let q = db('lot_transactions as t')
-      .join('inventory_lots as l', 't.lot_id', 'l.id')
-      .leftJoin('users as u', 't.created_by', 'u.id');
-    applyDim(q);
-    if (dateFrom) q = q.where('t.transaction_date', '>=', dateFrom);
-    if (dateTo) q = q.where('t.transaction_date', '<=', dateTo);
-    const txns = await q.select(
-      't.id', 't.transaction_date', 't.transaction_type', 't.quantity_kg', 't.reference_no',
-      't.reference_module', 't.reference_id', 'l.lot_no', 'l.id as lot_id', 'l.item_name', 'l.type as lot_type',
-      'u.full_name as user_name',
-    ).orderBy('t.transaction_date', 'asc').orderBy('t.id', 'asc').limit(cap);
+    // Quantity movements of the dimension (holds excluded — zero quantity).
+    const moves = () => applyDim(db('lot_transactions as t')
+      .join('inventory_lots as l', 't.lot_id', 'l.id'))
+      .whereNotIn('t.transaction_type', stockMovements.HOLD_TXN_TYPES);
+    const inPeriod = (qb) => {
+      if (dateFrom) qb.where('t.transaction_date', '>=', dateFrom);
+      if (dateTo) qb.where('t.transaction_date', '<=', dateTo);
+      return qb;
+    };
+    const packs = () => {
+      const qb = db('mill_packing_logs as pl')
+        .whereExists(function () {
+          this.select(db.raw('1')).from('inventory_lots as l')
+            .whereRaw("l.batch_ref = 'batch-' || pl.batch_id");
+          applyDim(this);
+        });
+      if (dateFrom) qb.whereRaw('pl.created_at::date >= ?', [dateFrom]);
+      if (dateTo) qb.whereRaw('pl.created_at::date <= ?', [dateTo]);
+      return qb;
+    };
 
-    // Packing rows (mill_packing_logs whose batch produced a matching lot).
-    const packLogs = await db('mill_packing_logs as pl')
-      .leftJoin('milling_batches as mb', 'mb.id', 'pl.batch_id')
-      .leftJoin('users as u', 'pl.packed_by', 'u.id')
-      .whereExists(function () {
-        this.select(db.raw('1')).from('inventory_lots as l')
-          .whereRaw("l.batch_ref = 'batch-' || pl.batch_id");
-        applyDim(this);
-      })
-      .select('pl.id', 'pl.packed_weight_kg', 'pl.bags_count', 'pl.created_at', 'mb.batch_no', 'mb.id as batch_id', 'u.full_name as user_name')
-      .orderBy('pl.created_at', 'asc').limit(cap);
+    const [carriedRow, bucketRows, packRow, txns, packLogs] = await Promise.all([
+      // Balance brought forward from before the period.
+      dateFrom
+        ? moves().where('t.transaction_date', '<', dateFrom).first(db.raw('COALESCE(SUM(t.quantity_kg), 0) AS kg'))
+        : Promise.resolve({ kg: 0 }),
+      inPeriod(moves()).groupByRaw(stockMovements.bucketCaseSql('t.transaction_type'))
+        .select(db.raw(`${stockMovements.bucketCaseSql('t.transaction_type')} AS bucket`),
+          db.raw('COALESCE(SUM(t.quantity_kg), 0) AS kg'), db.raw('COUNT(*)::int AS n')),
+      packs().first(db.raw('COALESCE(SUM(pl.packed_weight_kg), 0) AS kg'), db.raw('COUNT(*)::int AS n')),
+      // Newest rows of the period.
+      inPeriod(moves()).leftJoin('users as u', 't.created_by', 'u.id').select(
+        't.id', db.raw("to_char(t.transaction_date, 'YYYY-MM-DD') AS day"), 't.created_at',
+        't.transaction_type', 't.quantity_kg', 't.reference_no',
+        't.reference_module', 't.reference_id', 'l.lot_no', 'l.id as lot_id',
+        'u.full_name as user_name',
+      ).orderBy('t.transaction_date', 'desc').orderBy('t.created_at', 'desc').orderBy('t.id', 'desc').limit(cap),
+      packs().leftJoin('milling_batches as mb', 'mb.id', 'pl.batch_id')
+        .leftJoin('users as u', 'pl.packed_by', 'u.id')
+        .select('pl.id', 'pl.packed_weight_kg', 'pl.created_at', db.raw("to_char(pl.created_at::date, 'YYYY-MM-DD') AS day"),
+          'mb.batch_no', 'mb.id as batch_id', 'u.full_name as user_name')
+        .orderBy('pl.created_at', 'desc').orderBy('pl.id', 'desc').limit(cap),
+    ]);
 
-    // Merge into one timeline. Packing does NOT change rice qty → balance untouched.
-    const events = [];
-    for (const t of txns) {
-      const mt = TXN_TO_MT[String(t.transaction_type || '')] || String(t.transaction_type || '');
-      const qkg = num(t.quantity_kg);
-      const isBatch = t.reference_module === 'milling_batch' && t.reference_id;
-      const isOrder = t.reference_module === 'export_order' && t.reference_id;
-      events.push({
-        sort: [t.transaction_date, t.id], date: t.transaction_date, lotNo: t.lot_no,
-        type: mt, label: LABELS[mt] || mt.replace(/_/g, ' '), bucket: BUCKET[mt] || 'other',
-        deltaKg: qkg, inKg: qkg > 0 ? qkg : 0, outKg: qkg < 0 ? -qkg : 0, packedKg: 0,
-        user: t.user_name || null, reference: t.reference_no || null,
-        href: isBatch ? `/milling/${t.reference_id}` : isOrder ? `/export/${t.reference_id}` : (t.lot_id ? `/lot-inventory/${t.lot_id}` : null),
-      });
-    }
-    for (const pl of packLogs) {
-      events.push({
-        sort: [pl.created_at, 100000 + pl.id], date: pl.created_at, lotNo: pl.batch_no || null,
+    const sums = {}; let periodRows = 0;
+    for (const b of bucketRows) { sums[b.bucket] = num(b.kg); periodRows += Number(b.n) || 0; }
+    const periodNetKg = Object.values(sums).reduce((s, v) => s + v, 0);
+    const carriedKg = num(carriedRow && carriedRow.kg);
+    const signed = stockMovements.signedBucketTotals(sums);
+    const closing = carriedKg + periodNetKg;
+
+    // One timeline, newest first, then keep the newest `cap`. Sort key: the
+    // business day, then when the row was written, then id — never a string
+    // of a Date (that sorted by weekday name). Packing moves no rice quantity.
+    const ts = (v) => (v ? new Date(v).getTime() : 0);
+    const events = [
+      ...txns.map((t) => {
+        const mt = stockMovements.movementTypeOf(t.transaction_type);
+        const qkg = num(t.quantity_kg);
+        const isBatch = t.reference_module === 'milling_batch' && t.reference_id;
+        const isOrder = t.reference_module === 'export_order' && t.reference_id;
+        return {
+          day: t.day, at: ts(t.created_at), id: t.id, date: t.day, lotNo: t.lot_no,
+          type: mt, label: stockMovements.labelOf(mt), bucket: stockMovements.bucketOf(mt),
+          deltaKg: qkg, inKg: qkg > 0 ? qkg : 0, outKg: qkg < 0 ? -qkg : 0, packedKg: 0,
+          user: t.user_name || null, reference: t.reference_no || null,
+          href: isBatch ? `/milling/${t.reference_id}` : isOrder ? `/export/${t.reference_id}` : (t.lot_id ? `/lot-inventory/${t.lot_id}` : null),
+        };
+      }),
+      ...packLogs.map((pl) => ({
+        day: pl.day, at: ts(pl.created_at), id: pl.id, date: pl.day, lotNo: pl.batch_no || null,
         type: 'packing', label: 'Packed', bucket: 'packing', deltaKg: 0, inKg: 0, outKg: 0,
         packedKg: num(pl.packed_weight_kg), user: pl.user_name || null,
         reference: `PACK-${pl.id}`, href: pl.batch_id ? `/milling/${pl.batch_id}` : null,
-      });
-    }
-    events.sort((a, b) => (String(a.sort[0]) < String(b.sort[0]) ? -1 : String(a.sort[0]) > String(b.sort[0]) ? 1 : a.sort[1] - b.sort[1]));
+      })),
+    ].sort((a, b) => (a.day < b.day ? 1 : a.day > b.day ? -1 : (b.at - a.at) || (b.id - a.id)))
+      .slice(0, cap);
 
-    let bal = 0;
-    const rows = events.map((e) => { bal += e.deltaKg; return {
+    // Running balance, walking back from the closing balance: a row's balance is
+    // the closing less every LATER listed row. What is left before the oldest
+    // listed row is the balance brought forward into the list.
+    let bal = closing;
+    const desc = events.map((e) => { const row = { ...e, balanceKg: r3(bal) }; bal -= e.deltaKg; return row; });
+    const broughtForwardKg = r3(bal);
+    const rows = desc.reverse().map((e) => ({
       date: e.date, lotNo: e.lotNo, type: e.type, label: e.label, bucket: e.bucket,
-      inKg: e.inKg, outKg: e.outKg, packedKg: e.packedKg, balanceKg: Math.round(bal * 1000) / 1000,
+      inKg: e.inKg, outKg: e.outKg, packedKg: e.packedKg, balanceKg: e.balanceKg,
       user: e.user, reference: e.reference, href: e.href,
-    }; });
+    }));
 
-    const totals = rows.reduce((a, r) => ({
-      inward: a.inward + (r.bucket === 'inward' ? r.inKg : 0),
-      outward: a.outward + (r.bucket === 'outward' ? r.outKg : 0),
-      transfer: a.transfer + (r.bucket === 'transfer' ? (r.inKg - r.outKg) : 0),
-      sales: a.sales + (r.bucket === 'sales' ? r.outKg : 0),
-      packing: a.packing + r.packedKg,
-    }), { inward: 0, outward: 0, transfer: 0, sales: 0, packing: 0 });
-    const opening = rows.filter((r) => r.bucket === 'opening').reduce((s, r) => s + r.inKg - r.outKg, 0);
-
-    return { meta: { dimension, key: key || null, variety: variety || null, label }, rows, opening, balance: Math.round(bal * 1000) / 1000, totals };
+    const packCount = Number(packRow && packRow.n) || 0;
+    const totals = {
+      inward: r3(signed.inward), outward: r3(signed.outward), transfer: r3(signed.transfer),
+      sales: r3(signed.sales), other: r3(signed.other), packing: r3(num(packRow && packRow.kg)),
+    };
+    return {
+      meta: {
+        dimension, key: key || null, variety: variety || null, label,
+        dateFrom: dateFrom || null, dateTo: dateTo || null, ownership: normaliseOwnership(ownership),
+        unit: 'kg', asOf: new Date().toISOString(),
+      },
+      rows,
+      // Opening = brought forward from before dateFrom + opening-balance loads
+      // inside the period (go-live stock), so balance = opening + the columns.
+      opening: r3(carriedKg + signed.opening),
+      openingCarriedKg: r3(carriedKg),
+      openingLoadedKg: r3(signed.opening),
+      broughtForwardKg,
+      balance: r3(closing),
+      totals,
+      rowCount: periodRows + packCount,
+      listed: rows.length,
+      truncated: periodRows + packCount > rows.length,
+    };
   },
 
   /**
@@ -2675,7 +2729,7 @@ const reportingService = {
     q = applyWarehouseScope(q, warehouseScope, 'l.warehouse_id');
     const lots = await q.select(
       'l.id', 'l.lot_no', 'l.type', 'l.item_name', 'l.grade', 'l.variety', 'l.processing_type',
-      'l.net_weight_kg', 'l.received_net_weight_kg', 'l.available_qty', 'l.reserved_qty', 'l.sold_weight_kg',
+      'l.net_weight_kg', 'l.qty', 'l.received_net_weight_kg', 'l.available_qty', 'l.reserved_qty', 'l.sold_weight_kg',
       'l.landed_cost_per_kg', 'l.rate_per_kg', 'p.name as product_name',
     );
 
@@ -2686,7 +2740,7 @@ const reportingService = {
       const key = isBy ? (l.grade || l.item_name || 'By-product') : (l.product_name || l.item_name || 'Finished Rice');
       const g = groups[key] || (groups[key] = { key, type: l.type, producedKg: 0, onHandKg: 0, reservedKg: 0, soldKg: 0, valuePkr: 0, lots: [] });
       const produced = num(l.received_net_weight_kg) || num(l.net_weight_kg);
-      const onHand = num(l.net_weight_kg);
+      const onHand = onHandOf(l);
       const reserved = num(l.reserved_qty);
       const sold = num(l.sold_weight_kg) || Math.max(0, produced - onHand);
       // D-14: landed cost/kg × on hand, no fallback price (stockValue.js).
@@ -2745,7 +2799,9 @@ const reportingService = {
         ? (num(l.received_net_weight_kg) || num(l.net_weight_kg) || num(l.qty))
         : num(l.produced_ledger_kg),
       dispatchedKg: num(l.dispatched_kg),
-      onHandKg: num(l.available_qty),
+      // On hand, not available — the same basis as every other stock report
+      // (stockSql.onHandKg); available_qty drops whatever is on hold (RPT-32).
+      onHandKg: onHandOf(l),
       ageDays: Math.round(num(l.age_days)),
       href: `/lot-inventory/${l.id}`,
     }));
