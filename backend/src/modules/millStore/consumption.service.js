@@ -3,7 +3,10 @@ const auditService = require('../admin/audit.service');
 const accountingService = require('../accounting/accounting.service');
 const { postProcessingDelta } = require('../milling/millingCompletionJournal');
 const { NotFoundError, ValidationError } = require('../../shared/errors');
-const { ledgerFailure, missingAccounts } = require('../../shared/ledgerFailure');
+const { moveStock, postStoreJournal } = require('./storeStock');
+
+// A batch in one of these can no longer take store stock.
+const CLOSED_BATCH_STATUSES = ['Cancelled', 'Rejected'];
 
 const CATEGORY_MAP = {
   packaging: 'packaging',
@@ -111,18 +114,27 @@ const consumptionService = {
    * @param {number} batchId
    * @param {Array} lines - [{item_id, quantity, warehouse_id?}]
    * @param {number} userId
-   * @param {boolean} allowNegative - override for insufficient stock
+   * @param {boolean} allowNegative - override for insufficient stock: issue
+   *   what the store holds and report the rest as short. Nothing is booked for
+   *   stock that was not there (INV-44: the old override clamped the stock at
+   *   zero but still logged, costed and journalled the full quantity).
    */
   async confirm(batchId, lines, userId, allowNegative = false, { req = null } = {}) {
     if (!lines || lines.length === 0) throw new ValidationError('At least one item is required.');
 
-    const batch = await db('milling_batches').where('id', batchId).first();
-    if (!batch) throw new NotFoundError('Batch not found.');
-    if (batch.status === 'Closed') throw new ValidationError('Cannot consume against a closed batch.');
-
     return db.transaction(async (trx) => {
+      const batch = await trx('milling_batches').where('id', batchId).forUpdate().first();
+      if (!batch) throw new NotFoundError('Batch not found.');
+      // The guard used to test for 'Closed', a status batches never have, so
+      // store stock could be issued to a Cancelled or Rejected batch.
+      if (CLOSED_BATCH_STATUSES.includes(batch.status)) {
+        throw new ValidationError(`Cannot consume against a ${String(batch.status).toLowerCase()} batch.`);
+      }
+
       const logs = [];
+      const shortages = [];
       const costByCategory = {};
+      const label = batch.batch_no || `batch ${batchId}`;
 
       for (const line of lines) {
         const qty = Number(line.quantity);
@@ -130,86 +142,55 @@ const consumptionService = {
 
         const item = await trx('mill_items').where('id', line.item_id).first();
         if (!item) throw new NotFoundError(`Item id ${line.item_id} not found.`);
-
         const warehouseId = line.warehouse_id || null;
-        const costPerUnit = Number(item.avg_cost_per_unit) || 0;
-        const totalCost = Number((qty * costPerUnit).toFixed(2));
 
-        // Check stock
-        const stockRow = await trx('mill_stock')
-          .where({ item_id: item.id, warehouse_id: warehouseId })
-          .first();
-        const available = Number(stockRow?.quantity_available || 0);
-
-        if (available < qty && !allowNegative) {
-          throw new ValidationError(
-            `Insufficient stock for ${item.name}: ${available} ${item.unit} available, ${qty} requested.`
-          );
+        // Issued at the item's average cost, under a lock on its stock row and
+        // item (INV-47), never below zero.
+        const issue = await moveStock(trx, {
+          itemId: item.id, warehouseId, qty: -qty, valuation: 'avg', clamp: true,
+          movement: {
+            movement_type: 'consumption', reference_type: 'batch', reference_id: batchId,
+            performed_by: userId,
+          },
+        });
+        if (issue.short > 0) {
+          if (!allowNegative) {
+            throw new ValidationError(
+              `Insufficient stock for ${item.name}: ${Number((qty - issue.short).toFixed(3))} ${item.unit} available, ${qty} requested.`
+            );
+          }
+          shortages.push({ item: item.name, unit: item.unit, needed: qty, issued: -issue.moved, short: issue.short });
         }
+        const used = -issue.moved;
+        if (!(used > 0)) continue;
+        const totalCost = Math.abs(issue.value);
 
-        // Deduct stock
-        if (stockRow) {
-          await trx('mill_stock')
-            .where('id', stockRow.id)
-            .update({
-              quantity_available: trx.raw('GREATEST(quantity_available - ?, 0)', [qty]),
-              updated_at: trx.fn.now(),
-            });
-        }
-
-        // Consumption log
         const [log] = await trx('mill_consumption_logs').insert({
           batch_id: batchId,
           item_id: item.id,
           warehouse_id: warehouseId,
-          quantity_used: qty,
-          cost_per_unit: costPerUnit,
+          quantity_used: used,
+          cost_per_unit: issue.unitCost,
           total_cost: totalCost,
           used_by: userId,
         }).returning('*');
         logs.push(log);
 
-        // Stock movement
-        await trx('mill_stock_movements').insert({
-          item_id: item.id,
-          warehouse_id: warehouseId,
-          movement_type: 'consumption',
-          quantity: -qty,
-          cost_per_unit: costPerUnit,
-          total_cost: totalCost,
-          reference_type: 'batch',
-          reference_id: batchId,
-          performed_by: userId,
-        });
-
-        // Accumulate by milling_costs category
+        // One cost line per issue, owned by it (MIL-23). This used to ADD into
+        // the batch's first row of the category — which could be a packing
+        // run's row (wiping its tag) or the cost sheet's own figure.
         const costCat = CATEGORY_MAP[item.category] || item.category;
         costByCategory[costCat] = (costByCategory[costCat] || 0) + totalCost;
-      }
-
-      // Upsert milling_costs — one row per category
-      for (const [category, amount] of Object.entries(costByCategory)) {
-        // Never merged into a business expense's own row (P2-21).
-        const existing = await trx('milling_costs')
-          .where({ batch_id: batchId, category })
-          .whereNull('business_expense_id')
-          .first();
-
-        if (existing) {
-          await trx('milling_costs')
-            .where('id', existing.id)
-            .update({
-              amount: trx.raw('amount + ?', [amount]),
-              notes: 'Updated via mill store consumption',
-              updated_at: trx.fn.now(),
-            });
-        } else {
+        if (totalCost > 0) {
           await trx('milling_costs').insert({
             batch_id: batchId,
-            category,
-            amount,
+            category: costCat,
+            amount: totalCost,
             currency: 'PKR',
-            notes: 'Auto-created via mill store consumption',
+            notes: `Mill store issue: ${used} ${item.unit} ${item.name}`,
+            source: 'store_consumption',
+            source_id: log.id,
+            created_by: userId || null,
           });
         }
       }
@@ -227,38 +208,19 @@ const consumptionService = {
       // ── GL entry: move mill-store inventory → operating expense ──
       // store_purchase booked DR 1250 Bags & Packaging / CR 2010 Supplier
       // Payable on receipt. Consumption clears the inventory asset and
-      // recognizes the cost on the P&L:
-      //   DR 6000 Operating Expenses
-      //   CR 1250 Bags & Packaging
-      // The stock issue and its journal are one event (P2-02). A missing
-      // account or a journal that cannot be posted used to be logged and
-      // swallowed — the store stock left while 1250 kept it. Now the whole
-      // consumption rolls back and the user is told why.
-      const totalConsumed = Object.values(costByCategory).reduce((s, v) => s + v, 0);
+      // recognizes the cost on the P&L — DR 6000 / CR 1250 — for exactly what
+      // left the store. The stock issue and its journal are one event (P2-02):
+      // a journal that cannot be posted rolls the consumption back.
+      const totalConsumed = Math.round(Object.values(costByCategory).reduce((s, v) => s + v, 0) * 100) / 100;
       if (totalConsumed > 0) {
-        const opEx     = await trx('chart_of_accounts').where({ code: '6000' }).first();
-        const storeInv = await trx('chart_of_accounts').where({ code: '1250' }).first();
-        if (!opEx || !storeInv) throw missingAccounts(['6000', '1250'], 'The consumption');
-        try {
-          const journal = await accountingService.createJournal(trx, {
-            date: new Date().toISOString().slice(0, 10),
-            entity: 'mill',
-            refType: 'Mill Store Consumption',
-            refNo: batch.batch_no || `BATCH-${batchId}`,
-            description: `Mill store consumption for batch ${batch.batch_no || batchId} — ${logs.length} item${logs.length === 1 ? '' : 's'}, Rs ${Math.round(totalConsumed).toLocaleString('en-PK')}`,
-            currency: 'PKR',
-            fxRate: 1,
-            isAuto: true,
-            userId,
-            lines: [
-              { account_id: opEx.id,     account: opEx.name,     debit: totalConsumed, credit: 0,             narration: `DR 6000 Operating Expenses — ${batch.batch_no || batchId} consumption` },
-              { account_id: storeInv.id, account: storeInv.name, debit: 0,             credit: totalConsumed, narration: `CR 1250 Bags & Packaging — stock issued to ${batch.batch_no || batchId}` },
-            ],
-          });
-          if (journal?.id) await accountingService.postJournal(trx, journal.id);
-        } catch (jeErr) {
-          throw ledgerFailure(jeErr, 'The consumption');
-        }
+        await postStoreJournal(trx, {
+          amount: totalConsumed,
+          refType: 'Mill Store Consumption',
+          refNo: batch.batch_no || `BATCH-${batchId}`,
+          description: `Mill store consumption for batch ${label} — ${logs.length} item${logs.length === 1 ? '' : 's'}, Rs ${Math.round(totalConsumed).toLocaleString('en-PK')}`,
+          userId,
+          what: 'The consumption',
+        });
       }
 
       // After the batch's completion the issued stock is absorbed into its
@@ -274,7 +236,7 @@ const consumptionService = {
       if (req) {
         await auditService.logInTrx(trx, req, {
           action: 'confirm_consumption', entityType: 'milling_batch', entityId: batchId,
-          result: { lines_consumed: logs.length, total_cost: totalConsumed },
+          result: { lines_consumed: logs.length, total_cost: totalConsumed, shortages },
         });
       }
 
@@ -283,6 +245,7 @@ const consumptionService = {
         lines_consumed: logs.length,
         total_cost: totalConsumed,
         cost_by_category: costByCategory,
+        shortages,
         logs,
       };
     });
@@ -323,3 +286,4 @@ const consumptionService = {
 };
 
 module.exports = consumptionService;
+module.exports.CLOSED_BATCH_STATUSES = CLOSED_BATCH_STATUSES;

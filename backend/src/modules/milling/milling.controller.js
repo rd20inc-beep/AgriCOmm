@@ -17,6 +17,8 @@ const { assertBatchRawCostEditable, assertBatchOutputsUnsold } = require('./cost
 // Packing-cost subtotals carry no "cost" in their names.
 const BATCH_EXTRA_COST_KEYS = ['bagsTotal', 'mastersTotal', 'polytheneTotal'];
 const batchPackagingService = require('./batchPackaging.service');
+const { moveStock: moveStoreStock } = require('../millStore/storeStock');
+const { applyKattaPlan } = require('../millStore/kattaLedger');
 const {
   yieldMode, batchHasOutputLots, checkTransition, releaseBatchSources, commitLotToBatch, TRANSITIONS,
 } = require('./batchLifecycle');
@@ -1718,8 +1720,9 @@ const millingController = {
       const { hauler_id, transport_paid_by, vehicle_no, doc_no } = req.body;
       // Duplicate-post guard: the cost drawer's "Bagging / Packing" (packing) and
       // the mill-store packing flow (packaging) are the same bag cost. Canonicalize
-      // to 'packaging' so the upsert-by-(batch, category) keeps a SINGLE row instead
-      // of posting the bag cost twice (once into Other Expenses, once into Packing).
+      // to 'packaging' so the cost sheet keeps a SINGLE row of its own instead of
+      // posting the bag cost twice (once into Other Expenses, once into Packing).
+      // Packing runs / store issues keep their own lines (source column, P3-05).
       if (category === 'packing') category = 'packaging';
 
       if (!category || amount == null) {
@@ -1735,11 +1738,14 @@ const millingController = {
       }
 
       const cost = await db.transaction(async (trx) => {
-        // Upsert by batch_id + category — never onto a row a business expense
-        // owns (P2-21): editing the cost sheet must not rewrite the expense.
+        // Upsert the cost sheet's OWN row for batch_id + category — never a
+        // row a business expense owns (P2-21), nor one a packing run, a store
+        // issue or the katta reconcile wrote (MIL-23: this used to SET the
+        // first packaging row, overwriting a run's cost).
         const existing = await trx('milling_costs')
           .where({ batch_id: id, category })
           .whereNull('business_expense_id')
+          .where((q) => q.whereNull('source').orWhere('source', 'manual'))
           .first();
         const oldAmt = existing ? (parseFloat(existing.amount) || 0) : 0;
         const newAmt = parseFloat(amount);
@@ -2565,20 +2571,36 @@ async function deleteBatchTx(trx, batchId, userId) {
 
     // Reverse any mill-store consumption logged against this batch and drop
     // the logs — mill_consumption_logs.batch_id is an onDelete('RESTRICT') FK,
-    // so leaving the rows makes the batch undeletable (opaque 500). Return the
-    // consumed quantity to mill_stock and remove the consumption movements.
+    // so leaving the rows makes the batch undeletable (opaque 500). The issued
+    // stock comes back at the cost it left at, as a new 'return' movement (the
+    // issue stays in the ledger), and its 6000 / 1250 journal is reversed by
+    // its net (INV-39: the stock used to come back while 1250 kept the credit).
     const consumptionLogs = await trx('mill_consumption_logs').where({ batch_id: batchId });
     for (const cl of consumptionLogs) {
-      const stockQ = trx('mill_stock').where('item_id', cl.item_id);
-      if (cl.warehouse_id == null) stockQ.whereNull('warehouse_id'); else stockQ.where('warehouse_id', cl.warehouse_id);
-      const stockRow = await stockQ.first();
-      if (stockRow) {
-        await trx('mill_stock').where({ id: stockRow.id })
-          .update({ quantity_available: trx.raw('quantity_available + ?', [cl.quantity_used]), updated_at: trx.fn.now() });
-      }
+      const qty = parseFloat(cl.quantity_used) || 0;
+      if (!(qty > 0)) continue;
+      await moveStoreStock(trx, {
+        itemId: cl.item_id, warehouseId: cl.warehouse_id ?? null, qty,
+        valuation: 'cost', unitCost: parseFloat(cl.cost_per_unit) || 0,
+        movement: {
+          movement_type: 'return', reference_type: 'batch', reference_id: batchId,
+          reason: `Batch ${label} deleted — store issue returned`, performed_by: userId || null,
+        },
+      });
     }
-    await trx('mill_stock_movements').where({ reference_type: 'batch', reference_id: batchId }).del();
+    await reverseNetJournal(trx, {
+      refType: 'Mill Store Consumption', refNo: batch.batch_no || `BATCH-${batchId}`,
+      debitCode: '6000', creditCode: '1250', label,
+      description: `Store consumption reversed — batch ${label} deleted`, userId: userId,
+    });
     await trx('mill_consumption_logs').where({ batch_id: batchId }).del();
+
+    // Katta the yield reconcile moved for this batch (a re-reconcile with an
+    // empty plan takes back exactly what it moved; its cost is reversed with
+    // the packing journal below).
+    if (await trx('mill_stock_movements').where({ reference_type: 'batch_katta', reference_id: batchId }).first('id')) {
+      await applyKattaPlan(trx, { referenceType: 'batch_katta', referenceId: batchId, plan: [], userId });
+    }
 
     // Packaging lines (received / consumed bags). Their rows cascade with the
     // batch but the store stock they moved did not: saving an empty line set
@@ -2593,23 +2615,21 @@ async function deleteBatchTx(trx, batchId, userId) {
       const drawn = await trx('mill_stock_movements')
         .where({ reference_type: 'packing' })
         .whereIn('reference_id', packLogs.map((l) => l.id));
-      const back = [];
+      // Each draw comes back at the cost it left at (the store's value with it).
       for (const m of drawn) {
         const q = -(parseFloat(m.quantity) || 0);
         if (!q) continue;
-        await batchPackagingService.moveStock(trx, { itemId: m.item_id, warehouseId: m.warehouse_id ?? null, delta: q });
-        back.push({
-          item_id: m.item_id, warehouse_id: m.warehouse_id ?? null,
-          movement_type: q > 0 ? 'return' : 'consumption',
-          quantity: q,
-          cost_per_unit: m.cost_per_unit,
-          total_cost: Math.round(Math.abs(q) * (parseFloat(m.cost_per_unit) || 0) * 100) / 100,
-          reference_type: 'packing', reference_id: m.reference_id,
-          reason: `Batch ${label} deleted — packing run #${m.reference_id} reversed`,
-          performed_by: userId || null,
+        await moveStoreStock(trx, {
+          itemId: m.item_id, warehouseId: m.warehouse_id ?? null, qty: q,
+          valuation: 'cost', unitCost: parseFloat(m.cost_per_unit) || 0,
+          movement: {
+            movement_type: q > 0 ? 'return' : 'consumption',
+            reference_type: 'packing', reference_id: m.reference_id,
+            reason: `Batch ${label} deleted — packing run #${m.reference_id} reversed`,
+            performed_by: userId || null,
+          },
         });
       }
-      if (back.length) await trx('mill_stock_movements').insert(back);
       await reverseNetJournal(trx, {
         refType: 'Mill Packing', refNo: batch.batch_no || `BATCH-${batchId}`,
         debitCode: '6000', creditCode: '1250', label,

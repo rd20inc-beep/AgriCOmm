@@ -152,7 +152,7 @@ describe('a batch with no katta still records how its output was packed', () => 
 
   test('it still returns null when there is no katta AND no packing run', () => {
     const at = fn.indexOf('if (freed <= 0)');
-    expect(fn.slice(at, at + 1600)).toMatch(/return null; \/\/ no katta intake and nothing packed/);
+    expect(fn.slice(at, at + 2000)).toMatch(/return null; \/\/ no katta intake and nothing packed/);
   });
 
   test('the size and the per-bag weight are stamped together here too', () => {

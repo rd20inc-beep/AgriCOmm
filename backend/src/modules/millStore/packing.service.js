@@ -5,7 +5,7 @@ const { postProcessingDelta } = require('../milling/millingCompletionJournal');
 const inventoryService = require('../inventory/inventory.service');
 const { NotFoundError, ValidationError, ConflictError, ForbiddenError } = require('../../shared/errors');
 const { isKattaItem } = require('../../shared/packagingTypes');
-const { ledgerFailure, missingAccounts } = require('../../shared/ledgerFailure');
+const { moveStock, postStoreJournal } = require('./storeStock');
 const {
   LOCKED_STATUSES, isBatchCompleted, canEditBatchPacking, assertCanEditBatchPacking,
 } = require('../milling/packingGate');
@@ -29,6 +29,12 @@ const round2 = (v) => Math.round(num(v) * 100) / 100;
 //                                        at yield, which consumes this run's
 //                                        recorded katta count (reference_type=
 //                                        'batch_katta'). The log still records it.
+//
+// Cost follows the stock (P3-05): a run books what it DREW, at average cost —
+// never a shortfall — and a katta's cost is booked by the reconcile when it
+// draws the katta (katta_cost_mode 'yield'). Runs recorded before that booked
+// their katta here for the full count ('pack'); those keep their booking and
+// the reconcile draws their katta without booking it again.
 const packingService = {
   // Summary of what's already been packed for a batch + how much finished rice
   // remains unpacked.
@@ -88,7 +94,7 @@ const packingService = {
     if (!bagsCount || bagsCount <= 0) throw new ValidationError('Bag count must be greater than zero.');
 
     return db.transaction(async (trx) => {
-      const batch = await trx('milling_batches').where('id', batchId).first();
+      const batch = await trx('milling_batches').where('id', batchId).forUpdate().first();
       if (!batch) throw new NotFoundError('Batch not found.');
       if (LOCKED_STATUSES.includes(batch.status)) {
         throw new ForbiddenError(`This batch is ${batch.status} — its packing is locked.`);
@@ -107,17 +113,13 @@ const packingService = {
       // Packing material shortages are ALLOWED (non-blocking): consume what's in
       // stock, record the shortfall, and flag it so a purchase alert follows. The
       // depleted item also auto-surfaces in the low-stock alerts (reorder level).
+      // Only what is drawn is costed (INV-38 / MIL-24): the run used to credit
+      // 1250 for the full intended count, shortfall included, so 1250 fell
+      // below what the store held.
       const shortages = [];
-      // Katta is recorded on the log but drawn at yield by the katta reconcile
-      // (which flags its own shortage) — never here as well.
+      // Katta is recorded on the log but drawn — and costed — at yield by the
+      // katta reconcile (which flags its own shortage), never here as well.
       const bagIsKatta = isKattaItem(item);
-      const stockRow = bagIsKatta ? null : await trx('mill_stock')
-        .where({ item_id: bag_item_id, warehouse_id: warehouseId })
-        .first();
-      const available = Number(stockRow?.quantity_available || 0);
-      const bagsConsumed = bagIsKatta ? 0 : Math.min(available, bagsCount);
-      const bagsShort = bagIsKatta ? 0 : bagsCount - bagsConsumed;
-      if (bagsShort > 0) shortages.push({ item: item.name, unit: item.unit, needed: bagsCount, available, short: bagsShort });
 
       const packedKg = Number((bagsCount * capacity).toFixed(3));   // net rice
       const tareKg = Number((bagsCount * tare).toFixed(4));         // packaging
@@ -135,16 +137,8 @@ const packingService = {
         }
       }
 
-      const costPerBag = Number(item.avg_cost_per_unit) || 0;
-      const totalCost = Number((bagsCount * costPerBag).toFixed(2));
-
-      // Deduct only what's in stock (never below zero); the shortfall is flagged.
-      if (stockRow && bagsConsumed > 0) {
-        await trx('mill_stock').where('id', stockRow.id).update({
-          quantity_available: trx.raw('GREATEST(quantity_available - ?, 0)', [bagsConsumed]),
-          updated_at: trx.fn.now(),
-        });
-      }
+      // A katta bag is costed at yield, when the reconcile draws it.
+      const costPerBag = bagIsKatta ? 0 : (Number(item.avg_cost_per_unit) || 0);
 
       const [log] = await trx('mill_packing_logs').insert({
         batch_id: batchId,
@@ -157,66 +151,45 @@ const packingService = {
         tare_weight_kg: tareKg,
         gross_weight_kg: grossKg,
         cost_per_bag: costPerBag,
-        total_cost: totalCost,
+        total_cost: 0,
+        katta_cost_mode: 'yield',
         notes: notes || null,
         packed_by: userId,
       }).returning('*');
 
-      // Record the consumption of what was actually drawn from stock (keeps the
-      // stock ledger honest; the shortfall is not a stock movement, it's a flag).
-      if (bagsConsumed > 0) {
-        await trx('mill_stock_movements').insert({
-          item_id: bag_item_id,
-          warehouse_id: warehouseId,
-          movement_type: 'consumption',
-          quantity: -bagsConsumed,
-          cost_per_unit: costPerBag,
-          total_cost: Number((bagsConsumed * costPerBag).toFixed(2)),
-          reference_type: 'packing',
-          reference_id: log.id,
-          reason: `Packed ${bagsCount} bag(s) for ${batch.batch_no || `batch ${batchId}`}${bagsShort > 0 ? ` (${bagsShort} short)` : ''}`,
-          performed_by: userId,
-        });
-      }
-
-      // ── Optional outer master bag + polythene sheet ──────────────────────────
-      // Each is a stocked packaging item: validate, draw down stock, record a
-      // 'packing' consumption movement against this log, and return its cost.
-      // Shortage-tolerant: consume what's in stock, flag any shortfall (same
-      // policy as the main bag). `qty` on the return stays the INTENDED count so
-      // the log records what was packed; `consumed` is what stock was drawn.
-      const consumePackaging = async (itemId, count, label) => {
+      // ── Draw the bag, the optional outer master bag and polythene sheet ─────
+      // Each is a stocked packaging item: validate, draw down stock under a row
+      // lock at the item's average cost, record a 'packing' consumption
+      // movement against this log, and return what was DRAWN and its value.
+      // Shortage-tolerant: consume what's in stock, flag any shortfall. `qty`
+      // stays the INTENDED count so the log records what was packed.
+      const consumePackaging = async (itemId, count, label, pkgRow = null) => {
         const qty = Number(count);
         if (!itemId || !qty || qty <= 0) return { cost: 0, item: null, qty: 0 };
-        const pkg = await trx('mill_items').where('id', itemId).first();
+        const pkg = pkgRow || await trx('mill_items').where('id', itemId).first();
         if (!pkg) throw new NotFoundError(`${label} item not found.`);
-        const unitCostK = Number(pkg.avg_cost_per_unit) || 0;
-        // A katta used here is recorded and costed, but drawn at yield by the
+        // A katta used here is recorded, but drawn and costed at yield by the
         // katta reconcile — the one mover for katta stock.
-        if (isKattaItem(pkg)) return { cost: Number((qty * unitCostK).toFixed(2)), item: pkg, qty };
-        const stk = await trx('mill_stock').where({ item_id: itemId, warehouse_id: warehouseId }).first();
-        const avail = Number(stk?.quantity_available || 0);
-        const consumed = Math.min(avail, qty);
-        const short = qty - consumed;
-        if (short > 0) shortages.push({ item: pkg.name, unit: pkg.unit, needed: qty, available: avail, short });
-        const unitCost = Number(pkg.avg_cost_per_unit) || 0;
-        const cost = Number((qty * unitCost).toFixed(2)); // packing cost for the full intended count
-        if (stk && consumed > 0) {
-          await trx('mill_stock').where('id', stk.id).update({
-            quantity_available: trx.raw('GREATEST(quantity_available - ?, 0)', [consumed]),
-            updated_at: trx.fn.now(),
-          });
-          await trx('mill_stock_movements').insert({
-            item_id: itemId, warehouse_id: warehouseId, movement_type: 'consumption',
-            quantity: -consumed, cost_per_unit: unitCost, total_cost: Number((consumed * unitCost).toFixed(2)),
-            reference_type: 'packing', reference_id: log.id,
-            reason: `${label} (${qty} × ${pkg.name}) for ${batch.batch_no || `batch ${batchId}`}${short > 0 ? ` (${short} short)` : ''}`,
-            performed_by: userId,
-          });
+        if (isKattaItem(pkg)) return { cost: 0, item: pkg, qty };
+        const reason = `${label} (${qty} × ${pkg.name}) for ${batch.batch_no || `batch ${batchId}`}`;
+        const issue = await moveStock(trx, {
+          itemId: pkg.id, warehouseId, qty: -qty, valuation: 'avg', clamp: true,
+          movement: {
+            movement_type: 'consumption', reference_type: 'packing', reference_id: log.id,
+            reason, performed_by: userId,
+          },
+        });
+        if (issue.short > 0) {
+          shortages.push({ item: pkg.name, unit: pkg.unit, needed: qty, available: -issue.moved, short: issue.short });
+          await trx('mill_stock_movements')
+            .where({ reference_type: 'packing', reference_id: log.id, item_id: pkg.id, reason })
+            .update({ reason: `${reason} (${issue.short} short)` });
         }
-        return { cost, item: pkg, qty };
+        return { cost: Math.abs(issue.value), item: pkg, qty };
       };
 
+      const bag = await consumePackaging(bag_item_id, bagsCount, 'Packed bags', item);
+      const totalCost = bag.cost;
       const master = await consumePackaging(master_bag_item_id, master_bags_count, 'Master bag');
 
       // Polythene quantity follows where it is applied, unless the caller gave a
@@ -231,18 +204,19 @@ const packingService = {
       const poly = await consumePackaging(poly_item_id, polyQty, `Polythene sheet (${polyScope})`);
       const grandTotal = Number((totalCost + master.cost + poly.cost).toFixed(2));
 
-      // Stamp the master/poly breakdown + the full run cost onto the log.
-      // The stamped values are read back onto `log` afterwards: this returns the
-      // row from the original insert, so without that every master and polythene
-      // field came back null to the caller even though the database held them.
-      if (master.qty || poly.qty || grandTotal !== totalCost) {
+      // Stamp the master/poly breakdown + the run cost (what was drawn) onto the
+      // log. The stamped values are read back onto `log` afterwards: this returns
+      // the row from the original insert, so without that every master and
+      // polythene field came back null to the caller even though the database
+      // held them.
+      {
         const stamped = {
           master_bag_item_id: master.item ? master_bag_item_id : null,
           master_bags_count: master.qty || null,
-          master_cost: master.cost || null,
+          master_cost: master.qty ? master.cost : null,
           poly_item_id: poly.item ? poly_item_id : null,
           poly_count: poly.qty || null,
-          poly_cost: poly.cost || null,
+          poly_cost: poly.qty ? poly.cost : null,
           poly_applies_to: poly.qty > 0 ? polyScope : null,
           total_cost: grandTotal,
         };
@@ -256,39 +230,24 @@ const packingService = {
         .concat(poly.qty ? [`${poly.qty} × ${poly.item.name} (polythene, ${polyScope === 'both' ? 'bags + masters' : polyScope === 'master' ? 'masters' : 'bags'})`] : [])
         .join(' + ');
 
-      // GL: recognise the full packing cost (bag + master + polythene) — DR 6000
+      // GL: recognise the packing cost drawn (bag + master + polythene) — DR 6000
       // Operating Expenses / CR 1250 Bags & Packaging (same treatment as store
-      // consumption). Part of the packing run (P2-02): this used to be
-      // best-effort, so a failed journal left the bags drawn from the store and
-      // still sitting in 1250. Now the run rolls back and the user sees why.
+      // consumption). Part of the packing run (P2-02): a failed journal rolls
+      // the run back and the user sees why.
       if (grandTotal > 0) {
-        const opEx = await trx('chart_of_accounts').where({ code: '6000' }).first();
-        const storeInv = await trx('chart_of_accounts').where({ code: '1250' }).first();
-        if (!opEx || !storeInv) throw missingAccounts(['6000', '1250'], 'The packing run');
-        try {
-          const journal = await accountingService.createJournal(trx, {
-            date: new Date().toISOString().slice(0, 10),
-            entity: 'mill',
-            refType: 'Mill Packing',
-            refNo: batch.batch_no || `BATCH-${batchId}`,
-            description: `Packing (${breakdown}) for batch ${batch.batch_no || batchId} — Rs ${Math.round(grandTotal).toLocaleString('en-PK')}`,
-            currency: 'PKR',
-            fxRate: 1,
-            isAuto: true,
-            userId,
-            lines: [
-              { account_id: opEx.id, account: opEx.name, debit: grandTotal, credit: 0, narration: `DR 6000 Operating Expenses — ${batch.batch_no || batchId} packing` },
-              { account_id: storeInv.id, account: storeInv.name, debit: 0, credit: grandTotal, narration: `CR 1250 Bags & Packaging — ${breakdown}` },
-            ],
-          });
-          if (journal?.id) await accountingService.postJournal(trx, journal.id);
-        } catch (jeErr) {
-          throw ledgerFailure(jeErr, 'The packing run');
-        }
+        await postStoreJournal(trx, {
+          amount: grandTotal,
+          refType: 'Mill Packing',
+          refNo: batch.batch_no || `BATCH-${batchId}`,
+          description: `Packing (${breakdown}) for batch ${batch.batch_no || batchId} — Rs ${Math.round(grandTotal).toLocaleString('en-PK')}`,
+          userId,
+          what: 'The packing run',
+        });
       }
 
-      // Fold the full packing cost into the batch as a 'packaging' milling_cost so
-      // it shows in Mill Finance (Operating / Costs) and rolls into the residual
+      // Fold the packing cost into the batch as the run's own 'packaging'
+      // milling_cost line (source packing_run / log id — MIL-23) so it shows in
+      // Mill Finance (Operating / Costs) and rolls into the residual
       // finished-rice cost. The GL expenses the bags when they are drawn (the
       // 6000/1250 journal above) and ABSORBS them into finished stock once:
       // the batch's completion credits 6000 for its packaging (A3b), and a run
@@ -297,6 +256,7 @@ const packingService = {
         await trx('milling_costs').insert({
           batch_id: batchId, category: 'packaging', amount: grandTotal, currency: 'PKR',
           notes: `Packing: ${breakdown} (log #${log.id})`,
+          source: 'packing_run', source_id: log.id,
           created_by: userId || null,
         });
         await postProcessingDelta(trx, accountingService, {
@@ -452,7 +412,8 @@ async function lockRun(trx, batchId, logId, user) {
   return { batch, log };
 }
 
-// The bag / master / polythene a run names, with the count and cost of each.
+// The bag / master / polythene a run names, with the count of each and — for a
+// katta booked by the run itself ('pack' runs, before P3-05) — the cost it booked.
 function runComponents(log) {
   return [
     { role: 'bag', itemId: log.bag_item_id, qty: num(log.bags_count), cost: round2(num(log.bags_count) * num(log.cost_per_bag)) },
@@ -465,8 +426,7 @@ const has = (o, k) => Object.prototype.hasOwnProperty.call(o || {}, k);
 const same = (a, b) => a != null && b != null && String(a) === String(b);
 
 // The corrected run: fields the caller sent replace the run's, the rest stay.
-// A component keeping its item keeps the unit cost it was booked at; a new
-// item is costed at its current average.
+// Costs are filled in by applyRunChange from what the change actually draws.
 async function buildNextRun(trx, batch, log, body = {}) {
   const pick = (k, cur) => (has(body, k) ? body[k] : cur);
   const bagItemId = pick('bag_item_id', log.bag_item_id);
@@ -500,18 +460,6 @@ async function buildNextRun(trx, batch, log, body = {}) {
   const tare = sameBag ? num(log.tare_kg_per_bag) : num(bagItem.tare_weight_kg);
   if (capacity <= 0) throw new ValidationError(`Set a bag capacity (kg per bag) for "${bagItem.name}" before packing.`);
 
-  const old = runComponents(log);
-  const unitCost = (role, itemId) => {
-    const o = old.find((c) => c.role === role && same(c.itemId, itemId));
-    if (o && o.qty > 0) return o.cost / o.qty;
-    return num(items.get(Number(itemId))?.avg_cost_per_unit);
-  };
-  const bagUnit = sameBag ? num(log.cost_per_bag) : num(bagItem.avg_cost_per_unit);
-  const bagCost = round2(bagsCount * bagUnit);
-  const masterCost = masterItemId ? round2(masterCount * unitCost('master', masterItemId)) : 0;
-  const polyCost = polyItemId ? round2(polyCount * unitCost('poly', polyItemId)) : 0;
-  const totalCost = round2(bagCost + masterCost + polyCost);
-
   const packedKg = Number((bagsCount * capacity).toFixed(3));
   const tareKg = Number((bagsCount * tare).toFixed(4));
 
@@ -529,9 +477,9 @@ async function buildNextRun(trx, batch, log, body = {}) {
   }
 
   const components = [
-    { role: 'bag', itemId: Number(bagItemId), qty: bagsCount, cost: bagCost },
-    ...(masterItemId ? [{ role: 'master', itemId: Number(masterItemId), qty: masterCount, cost: masterCost }] : []),
-    ...(polyItemId ? [{ role: 'poly', itemId: Number(polyItemId), qty: polyCount, cost: polyCost }] : []),
+    { role: 'bag', itemId: Number(bagItemId), qty: bagsCount },
+    ...(masterItemId ? [{ role: 'master', itemId: Number(masterItemId), qty: masterCount }] : []),
+    ...(polyItemId ? [{ role: 'poly', itemId: Number(polyItemId), qty: polyCount }] : []),
   ];
   const nameOf = (id) => items.get(Number(id))?.name || `item ${id}`;
   const breakdown = [`${bagsCount} × ${nameOf(bagItemId)}`]
@@ -543,7 +491,6 @@ async function buildNextRun(trx, batch, log, body = {}) {
     components,
     items,
     breakdown,
-    totalCost,
     row: {
       bag_item_id: Number(bagItemId),
       bags_count: bagsCount,
@@ -552,14 +499,10 @@ async function buildNextRun(trx, batch, log, body = {}) {
       packed_weight_kg: packedKg,
       tare_weight_kg: tareKg,
       gross_weight_kg: Number((packedKg + tareKg).toFixed(3)),
-      cost_per_bag: bagUnit,
-      total_cost: totalCost,
       master_bag_item_id: masterItemId ? Number(masterItemId) : null,
       master_bags_count: masterItemId ? masterCount : null,
-      master_cost: masterItemId ? masterCost : null,
       poly_item_id: polyItemId ? Number(polyItemId) : null,
       poly_count: polyItemId ? polyCount : null,
-      poly_cost: polyItemId ? polyCost : null,
       poly_applies_to: polyItemId ? polyScope : null,
       notes: has(body, 'notes') ? (body.notes || null) : log.notes,
     },
@@ -568,9 +511,16 @@ async function buildNextRun(trx, batch, log, body = {}) {
 
 // Move stock and cost from the run as it was to the run as it will be
 // (`next` null = the run is being deleted). Returns what moved.
+//
+// Value moves with the stock: a further draw leaves the store at the item's
+// average cost, a return comes back at the cost it left at, and the GL delta
+// is exactly that value. A katta booked by a 'pack' run keeps its booking
+// rule (count × the unit it was booked at); a 'yield' run's katta carries no
+// cost here — the reconcile books it when it draws it.
 async function applyRunChange(trx, { batch, log, next, userId }) {
   const label = batch.batch_no || `batch ${batch.id}`;
   const warehouseId = log.warehouse_id ?? null;
+  const packMode = (log.katta_cost_mode || 'pack') === 'pack';
   const oldComps = runComponents(log);
   const newComps = next ? next.components : [];
 
@@ -578,16 +528,19 @@ async function applyRunChange(trx, { batch, log, next, userId }) {
   const oldQty = sumBy(oldComps);
   const newQty = sumBy(newComps);
 
-  // What the run actually drew, per item (a shortfall was flagged, not drawn).
+  // What the run actually drew, per item, and at what value (a shortfall was
+  // flagged, not drawn).
   const moves = await trx('mill_stock_movements')
     .where({ reference_type: 'packing', reference_id: log.id })
-    .select('item_id', 'warehouse_id', 'quantity', 'cost_per_unit');
+    .select('item_id', 'warehouse_id', 'quantity', 'cost_per_unit', 'total_cost');
   const drawn = new Map();
-  const drawnCost = new Map();
+  const drawnVal = new Map();
   for (const m of moves) {
     const id = Number(m.item_id);
-    drawn.set(id, (drawn.get(id) || 0) - num(m.quantity));
-    if (num(m.cost_per_unit) > 0) drawnCost.set(id, num(m.cost_per_unit));
+    const q = num(m.quantity);
+    const v = m.total_cost != null ? num(m.total_cost) : round2(Math.abs(q) * num(m.cost_per_unit));
+    drawn.set(id, (drawn.get(id) || 0) - q);
+    drawnVal.set(id, round2((drawnVal.get(id) || 0) + (q < 0 ? v : -v)));
   }
 
   const itemIds = [...new Set([...oldQty.keys(), ...newQty.keys(), ...drawn.keys()])];
@@ -595,16 +548,13 @@ async function applyRunChange(trx, { batch, log, next, userId }) {
   const missing = itemIds.filter((id) => !items.has(id));
   if (missing.length) for (const i of await trx('mill_items').whereIn('id', missing)) items.set(Number(i.id), i);
 
-  const unitOf = (id) => {
-    const c = newComps.find((x) => Number(x.itemId) === id) || oldComps.find((x) => Number(x.itemId) === id);
-    if (c && c.qty > 0) return c.cost / c.qty;
-    return drawnCost.get(id) || num(items.get(id)?.avg_cost_per_unit);
-  };
-
   const stock = [];
+  const afterVal = new Map(); // item → value the run has drawn after the change
+  let storeValueOut = 0;      // value that left (+) / came back to (−) the store now
   for (const id of itemIds) {
     const it = items.get(id) || { id, name: `item ${id}` };
     const d = drawn.get(id) || 0;
+    const v = drawnVal.get(id) || 0;
     // Katta: the yield reconcile is its one mover. A run never draws it now;
     // one logged under the old rule did, and that draw stands up to the new
     // count (the reconcile draws only the remainder) — the rest goes back.
@@ -612,56 +562,78 @@ async function applyRunChange(trx, { batch, log, next, userId }) {
       ? Math.min(d, newQty.get(id) || 0)
       : Math.max(0, d + ((newQty.get(id) || 0) - (oldQty.get(id) || 0)));
     const change = target - d; // > 0 draw more, < 0 return to store
-    if (Math.abs(change) < 1e-9) continue;
+    if (Math.abs(change) < 1e-9) { afterVal.set(id, v); continue; }
 
-    const st = await trx('mill_stock').where({ item_id: id, warehouse_id: warehouseId }).forUpdate().first();
-    const avail = num(st && st.quantity_available);
-    if (change > 0 && avail + 1e-9 < change) {
-      throw new ConflictError(
-        `Not enough ${it.name} in store: this change needs ${change} more, only ${avail} available. Receive stock first or pack fewer.`
-      );
-    }
-    if (st) {
-      await trx('mill_stock').where({ id: st.id }).update({
-        quantity_available: trx.raw('quantity_available - ?', [change]),
-        updated_at: trx.fn.now(),
-      });
-    } else {
-      await trx('mill_stock').insert({ item_id: id, warehouse_id: warehouseId, quantity_available: -change, quantity_reserved: 0 });
-    }
-    const unit = unitOf(id);
-    await trx('mill_stock_movements').insert({
-      item_id: id,
-      warehouse_id: warehouseId,
-      movement_type: change > 0 ? 'consumption' : 'return',
-      quantity: -change,
-      cost_per_unit: unit,
-      total_cost: round2(Math.abs(change) * unit),
-      reference_type: 'packing',
-      reference_id: log.id,
-      reason: next
-        ? `Packing run #${log.id} corrected for ${label}: ${change > 0 ? `${change} more drawn` : `${-change} returned`}`
-        : `Packing run #${log.id} deleted for ${label}: ${-change} returned`,
-      performed_by: userId || null,
+    const reason = next
+      ? `Packing run #${log.id} corrected for ${label}: ${change > 0 ? `${change} more drawn` : `${-change} returned`}`
+      : `Packing run #${log.id} deleted for ${label}: ${-change} returned`;
+    const res = await moveStock(trx, {
+      itemId: id, warehouseId, qty: -change,
+      // A return comes back at the cost it left at.
+      valuation: change > 0 ? 'avg' : 'cost',
+      unitCost: change > 0 ? null : (d > 0 ? v / d : num(it.avg_cost_per_unit)),
+      // A draw the store cannot cover is refused (409), never clamped.
+      shortMessage: ({ available }) => `Not enough ${it.name} in store: this change needs ${change} more, only ${available} available. Receive stock first or pack fewer.`,
+      movement: {
+        movement_type: change > 0 ? 'consumption' : 'return',
+        reference_type: 'packing', reference_id: log.id, reason, performed_by: userId || null,
+      },
     });
+    storeValueOut = round2(storeValueOut - res.value);
+    afterVal.set(id, round2(v - res.value));
     stock.push({ itemId: id, item: it.name, change: -change });
   }
 
-  // Cost: the difference against what the run booked.
-  const oldTotal = log.total_cost != null ? round2(log.total_cost) : round2(oldComps.reduce((s, c) => s + c.cost, 0));
-  const newTotal = next ? next.totalCost : 0;
-  const costDelta = round2(newTotal - oldTotal);
+  // Cost of each component after the change. A non-katta item's cost is what
+  // the run has drawn of it (split by count if one item fills two roles).
+  const unitBooked = (role, itemId) => {
+    const o = oldComps.find((c) => c.role === role && same(c.itemId, itemId));
+    if (o && o.qty > 0) return o.cost / o.qty;
+    return num(items.get(Number(itemId))?.avg_cost_per_unit);
+  };
+  let kattaBefore = 0;
+  for (const c of oldComps) if (packMode && isKattaItem(items.get(Number(c.itemId)) || {})) kattaBefore = round2(kattaBefore + c.cost);
+  let kattaAfter = 0;
+  const roleCost = {};
+  for (const c of newComps) {
+    const it = items.get(Number(c.itemId)) || {};
+    if (isKattaItem(it)) {
+      roleCost[c.role] = packMode ? round2(c.qty * unitBooked(c.role, c.itemId)) : 0;
+      kattaAfter = round2(kattaAfter + roleCost[c.role]);
+    } else {
+      const totalQty = newQty.get(Number(c.itemId)) || 0;
+      roleCost[c.role] = totalQty > 0 ? round2((afterVal.get(Number(c.itemId)) || 0) * (c.qty / totalQty)) : 0;
+    }
+  }
 
-  // The run's 'packaging' milling cost carries its total into residual costing.
+  // Cost: what the run booked, moved by exactly the value that moved. A
+  // deleted run takes back everything it booked.
+  const oldTotal = log.total_cost != null ? round2(log.total_cost) : round2(oldComps.reduce((s, c) => s + c.cost, 0));
+  const costDelta = next ? round2(storeValueOut + (kattaAfter - kattaBefore)) : round2(-oldTotal);
+  const newTotal = next ? round2(oldTotal + costDelta) : 0;
+  if (next) {
+    const bag = newComps.find((c) => c.role === 'bag');
+    Object.assign(next.row, {
+      cost_per_bag: bag && bag.qty > 0 ? Number(((roleCost.bag || 0) / bag.qty).toFixed(4)) : 0,
+      master_cost: next.row.master_bag_item_id ? (roleCost.master || 0) : null,
+      poly_cost: next.row.poly_item_id ? (roleCost.poly || 0) : null,
+      total_cost: newTotal,
+    });
+  }
+
+  // The run's own 'packaging' milling cost line carries its total into
+  // residual costing (source packing_run — MIL-23).
   const tag = `(log #${log.id})`;
   const costRows = (await trx('milling_costs').where({ batch_id: batch.id, category: 'packaging' }))
-    .filter((r) => String(r.notes || '').includes(tag));
+    .filter((r) => (r.source === 'packing_run' && same(r.source_id, log.id))
+      || (r.source == null && String(r.notes || '').includes(tag)));
   const [costRow, ...dupes] = costRows;
   for (const d of dupes) await trx('milling_costs').where({ id: d.id }).del();
   if (newTotal > 0) {
     const notes = `Packing: ${next.breakdown} ${tag}`;
-    if (costRow) await trx('milling_costs').where({ id: costRow.id }).update({ amount: newTotal, notes, updated_at: trx.fn.now() });
-    else await trx('milling_costs').insert({ batch_id: batch.id, category: 'packaging', amount: newTotal, currency: 'PKR', notes, created_by: userId || null });
+    const patch = { amount: newTotal, notes, source: 'packing_run', source_id: log.id };
+    if (costRow) await trx('milling_costs').where({ id: costRow.id }).update({ ...patch, updated_at: trx.fn.now() });
+    else await trx('milling_costs').insert({ batch_id: batch.id, category: 'packaging', currency: 'PKR', created_by: userId || null, ...patch });
   } else if (costRow) {
     await trx('milling_costs').where({ id: costRow.id }).del();
   }
@@ -677,36 +649,23 @@ async function applyRunChange(trx, { batch, log, next, userId }) {
 // Signed-delta journal for a packing-cost change, on the accounts the run
 // posted: DR 6000 / CR 1250 for an increase, DR 1250 / CR 6000 for a cut.
 // Never reverse + repost. A cut is booked only when the batch has a posted
-// packing journal to cut from (the original posting is best-effort).
+// packing journal to cut from.
 async function postPackingDelta(trx, { batch, delta, userId, what }) {
   if (Math.abs(delta) <= 0.01) return null;
   const refNo = batch.batch_no || `BATCH-${batch.id}`;
-  const opEx = await trx('chart_of_accounts').where({ code: '6000' }).first();
-  const storeInv = await trx('chart_of_accounts').where({ code: '1250' }).first();
-  if (!opEx || !storeInv) return null;
   if (delta < 0) {
     const posted = await trx('journal_entries').where({ ref_type: 'Mill Packing', ref_no: refNo, status: 'Posted' }).first();
     if (!posted) return null;
   }
   const amt = round2(Math.abs(delta));
-  const [dr, cr] = delta > 0 ? [opEx, storeInv] : [storeInv, opEx];
-  const journal = await accountingService.createJournal(trx, {
-    date: new Date().toISOString().slice(0, 10),
-    entity: 'mill',
+  return postStoreJournal(trx, {
+    amount: delta,
     refType: 'Mill Packing',
     refNo,
     description: `${what} for batch ${refNo} — Rs ${Math.round(amt).toLocaleString('en-PK')} ${delta > 0 ? 'added' : 'reduced'}`,
-    currency: 'PKR',
-    fxRate: 1,
-    isAuto: true,
-    userId: userId || null,
-    lines: [
-      { account_id: dr.id, account: dr.name, debit: amt, credit: 0, narration: `DR ${dr.code} ${dr.name} — ${refNo} packing adj` },
-      { account_id: cr.id, account: cr.name, debit: 0, credit: amt, narration: `CR ${cr.code} ${cr.name} — ${refNo} packing adj` },
-    ],
+    userId,
+    what: 'The packing change',
   });
-  if (journal && journal.id) await accountingService.postJournal(trx, journal.id);
-  return journal;
 }
 
 // A yielded batch: re-cost its outputs when the cost moved, and re-run the
