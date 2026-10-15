@@ -7,7 +7,7 @@ const { applyWarehouseScope, isWarehouseInScope } = require('../../utils/warehou
 const { companyStock } = require('../inventory/stockSql');
 // D-14 stock value (landed cost/kg × on hand, no fallback price) — stockValue.js.
 const { lotValueSql } = require('../inventory/stockValue');
-const { exportProfit, EXCLUDED_ORDER_STATUSES } = require('../finance/profitDefinitions');
+const { exportProfit, EXCLUDED_ORDER_STATUSES, batchSalesFigures } = require('../finance/profitDefinitions');
 const { collectionRate: computeCollectionRate } = require('../finance/collectionRate');
 const fxRateService = require('../finance/fxRate.service');
 const { dayOf } = require('../exportOrders/balanceDueDate');
@@ -431,7 +431,16 @@ const reportingService = {
   },
 
   /**
-   * Per-batch profitability: revenue (finished * 72800 + byproducts), costs, profit, yield%, margin.
+   * Per-batch profitability (FIN-21) — no reference prices. Per batch:
+   *   input cost   = Σ its cost sheet (milling_costs: rice, processing, bags…)
+   *   output       = what its yield booked on the output lots, at cost
+   *   sold         = its output sold to date (local sales + transfers to
+   *                  export) and the COGS those sales locked — the same figures
+   *                  as Mill Finance (profitDefinitions.batchSalesFigures)
+   *   profit       = sold revenue − sold COGS (realised); unsold output is
+   *                  stock at cost, never profit.
+   * It used to price finished rice at a fixed Rs 72,800/MT and broken at
+   * 38,000 whatever the batch actually sold for. PKR; quantities in KG / MT.
    */
   async getBatchProfitability({ dateFrom, dateTo, supplierId, page = 1, limit = 50 }) {
     const offset = (page - 1) * limit;
@@ -477,18 +486,14 @@ const reportingService = {
       if (!costMap[cost.batch_id]) costMap[cost.batch_id] = 0;
       costMap[cost.batch_id] += parseFloat(cost.amount) || 0;
     }
-
-    const FINISHED_PRICE_PKR = 72800; // PKR per MT for finished rice
-    const BROKEN_PRICE_PKR = 38000;   // PKR per MT for broken rice
+    const figures = new Map((await batchSalesFigures(db, batches)).map((f) => [Number(f.id), f]));
 
     const data = batches.map((b) => {
-      // qty columns are KG (Phase 5c); the price constants are per-MT → ÷1000 the qty.
-      const finishedRevenue = ((parseFloat(b.actual_finished_kg) || 0) / 1000) * FINISHED_PRICE_PKR;
-      const brokenRevenue = ((parseFloat(b.broken_kg) || 0) / 1000) * BROKEN_PRICE_PKR;
-      const totalRevenue = finishedRevenue + brokenRevenue;
-      const totalCost = costMap[b.id] || 0;
-      const profit = totalRevenue - totalCost;
-      const margin = totalRevenue > 0 ? parseFloat(((profit / totalRevenue) * 100).toFixed(2)) : 0;
+      const f = figures.get(Number(b.id)) || {};
+      const revenue = f.soldRevenuePkr || 0;
+      const soldCogs = f.soldCogsPkr || 0;
+      const profit = Math.round((revenue - soldCogs) * 100) / 100;
+      const margin = revenue > 0 ? parseFloat(((profit / revenue) * 100).toFixed(2)) : 0;
 
       return {
         id: b.id,
@@ -500,10 +505,19 @@ const reportingService = {
         finishedMT: kgToMt(b.actual_finished_kg),
         brokenMT: kgToMt(b.broken_kg),
         yieldPct: parseFloat(b.yield_pct) || 0,
-        revenue: totalRevenue,
-        costs: totalCost,
+        inputCostPkr: costMap[b.id] || 0,
+        outputValueAtCostPkr: f.outputValueAtCostPkr || 0,
+        soldKg: f.soldKg || 0,
+        unsoldKg: f.unsoldKg || 0,
+        unsoldValueAtCostPkr: f.unsoldValueAtCostPkr || 0,
+        uncostedSales: f.uncostedSales || 0,
+        // revenue / costs / profit / margin: REALISED — the batch's output
+        // sold so far and the COGS those sales locked.
+        revenue,
+        costs: soldCogs,
         profit,
         margin,
+        basis: 'sold_to_date',
         currency: 'PKR',
         status: b.status,
       };
