@@ -213,6 +213,17 @@ export default function ProcurementTab({ order, linkedBatch, purchaseLots = [], 
         />
       )}
 
+      {/* Shipping needs the stock reserved (D-18): what is held now, against the
+          order quantity and the tolerance the Ready to Ship / Shipped gate uses. */}
+      {order.reservationCover && !['Shipped', 'Arrived', 'Closed', 'Cancelled'].includes(order.status) && (
+        <div className={`rounded-xl border px-4 py-3 text-sm ${order.reservationCover.withinTolerance ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
+          Stock reserved for shipment: <span className="font-semibold">{fmtKg(order.reservationCover.reservedKg)}</span> of {fmtKg(order.reservationCover.orderKg)}.
+          {order.reservationCover.withinTolerance
+            ? ' Enough to ship.'
+            : ` Ready to Ship and Shipped need ${fmtKg(order.reservationCover.minKg)}–${fmtKg(order.reservationCover.maxKg)} reserved (±${order.reservationCover.tolerancePct}%).`}
+        </div>
+      )}
+
       {/* Fulfil from Existing Inventory — only when the order still needs more */}
       {remainingNeeded > 0 && (
         <div className="bg-white rounded-xl shadow-sm border border-emerald-200 p-6">

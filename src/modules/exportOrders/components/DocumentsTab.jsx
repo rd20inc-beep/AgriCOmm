@@ -43,6 +43,18 @@ const BASE_LABELS = {
   custom: 'Other / Custom Document',
 };
 
+// The seven documents the shipment gate checks (P3-17 / D-17). Each counts
+// once a stored file is approved by a second person — or, for the ones the
+// system renders, once the generated document is approved. A tick is not
+// enough: the server's answer arrives as order.documentGate.
+const GATE_KEYS = new Set(['phyto', 'blDraft', 'blFinal', 'invoice', 'packingList', 'coo', 'fumigation']);
+const GATE_STATE_LABEL = {
+  awaiting_check: 'Awaiting a second person\'s approval',
+  pending_review: 'Awaiting approval',
+  generated_unapproved: 'Approve it in the Document Center',
+  missing: 'Upload needed',
+};
+
 const POST_SHIPMENT_HINTS = {
   coo: 'Endorsed by the chamber against the shipped BL. Post-shipment: not needed to ship, required to close.',
 };
@@ -56,7 +68,7 @@ const UPLOAD_HINTS = {
   custom: 'Any additional document for this shipment.',
 };
 
-export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvoice }) {
+export default function DocumentsTab({ order, onUpload, onPreviewInvoice, onChanged }) {
   const fileInputs = useRef({});
   const { hasPermission } = useAuth();
   const { addToast } = useApp();
@@ -113,6 +125,8 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
       if (!labels[key]) labels[key] = d.label || key;
       if (!keys.includes(key)) keys.push(key);
     }
+    // Every document the shipment gate checks has a row, catalogue or not.
+    for (const k of GATE_KEYS) if (!keys.includes(k)) keys.push(k);
     // Custom stays last: it is the catch-all for anything with no slot of its own.
     keys.push('custom');
     return { DOC_KEYS: keys, LABELS: labels };
@@ -141,22 +155,17 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
   };
   const latestOf = (key) => liveOf(key) || (storedByType[key] || [])[0];
 
-  const isReady = (key) => {
-    const doc = order.documents?.[key];
-    // Green means the document is actually in place — an approved file, or the
-    // order's own confirmation. A file still awaiting approval is not yet one.
-    return (doc && ['Approved', 'Final', 'Draft Uploaded'].includes(doc.status)) || !!liveOf(key);
-  };
-  const confirmable = DOC_KEYS.filter((k) => k !== 'custom');
-  const allChecked = confirmable.every(isReady);
+  // Green means the document is actually in place. For the seven the shipment
+  // gate checks, that is the server's answer (a file a second person approved,
+  // or an approved generated document); for anything else, a live file.
+  const gate = order.documentGate || {};
+  const isReady = (key) => (GATE_KEYS.has(key) ? !!gate[key]?.fulfilled : !!liveOf(key));
+  // A live file of a gate document nobody else has approved yet.
+  const needsCheck = (key, f) => GATE_KEYS.has(key) && f.status === 'Approved' && !f.checked_by && f.pending_action !== 'delete';
+  const confirmable = [...GATE_KEYS];
+  const allChecked = confirmable.length > 0 && confirmable.every(isReady);
   const checkedCount = confirmable.filter(isReady).length;
   const anyActivity = checkedCount > 0 || Object.keys(storedByType).length > 0;
-
-  async function handleConfirm(key, e) {
-    e?.stopPropagation();
-    if (order.documents?.[key] && ['Approved', 'Final', 'Draft Uploaded'].includes(order.documents[key].status)) return;
-    try { await onApprove(key); } catch (_) { /* parent toasts */ }
-  }
 
   function pickFile(key) { fileInputs.current[key]?.click(); }
   async function onFileChosen(key, e) {
@@ -172,6 +181,7 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
     // types, so anything else was stored as its raw key ("custom - EX-006").
     if (typeof onUpload === 'function') await onUpload(key, files, LABELS[key]);
     refetchStored();
+    onChanged?.();
   }
   // Open an uploaded file in a new tab. Every stored document can be previewed,
   // not just the three the system renders itself — a green row with a file
@@ -318,7 +328,7 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
   }, [picked, storedByType]);
 
   async function act(fn, okMsg) {
-    try { await fn(); addToast?.(okMsg, 'success'); refetchStored(); }
+    try { await fn(); addToast?.(okMsg, 'success'); refetchStored(); onChanged?.(); }
     catch (e) { addToast?.(e?.data?.message || e.message || 'Action failed', 'error'); }
   }
   const requestDelete = (f) => act(() => documentsApi.requestDelete(f.id), 'Deletion requested — awaiting owner approval.');
@@ -333,7 +343,9 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
     act(() => documentsApi.remove(f.id), 'Deleted — the file is kept in the version history.');
   };
   const cancelDelete = (f) => act(() => documentsApi.cancelDelete(f.id), 'Deletion request withdrawn.');
-  const approveFile = (f) => act(() => documentsApi.approve(f.id, {}), f.pending_action === 'delete' ? 'Deletion approved — marked deleted; the file stays in the version history.' : 'Approved — this version is now live.');
+  const approveFile = (f) => act(() => documentsApi.approve(f.id, {}), f.pending_action === 'delete'
+    ? 'Deletion approved — marked deleted; the file stays in the version history.'
+    : (f.status === 'Approved' ? 'Approved — it now counts for the shipment.' : 'Approved — this version is now live.'));
   const rejectFile = (f) => act(() => documentsApi.reject(f.id, {}), 'Rejected.');
 
   async function downloadStored(key, doc) {
@@ -347,7 +359,7 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <p className="text-sm text-gray-500">Generate, upload, view and download every document for this export order.</p>
-          <p className="text-xs text-gray-400 mt-1">{checkedCount} of {confirmable.length} confirmed</p>
+          <p className="text-xs text-gray-400 mt-1">{checkedCount} of {confirmable.length} required documents in place — each needs a stored file approved by a second person, or an approved generated document</p>
         </div>
         <button onClick={onPreviewInvoice}
           className="inline-flex items-center gap-2 px-4 py-2 bg-[#1e3a5f] text-white rounded-lg text-sm font-medium hover:bg-[#2d5a87] transition-colors">
@@ -368,7 +380,7 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
       <div>
         <div className="flex justify-between text-xs text-gray-500 mb-1">
           <span>Document Checklist</span>
-          <span>{checkedCount}/{confirmable.length} {allChecked ? '— All confirmed!' : ''}</span>
+          <span>{checkedCount}/{confirmable.length} {allChecked ? '— all in place' : ''}</span>
         </div>
         <div className="w-full bg-gray-200 rounded-full h-2">
           <div className={`h-2 rounded-full transition-all ${allChecked ? 'bg-emerald-500' : 'bg-blue-500'}`}
@@ -434,7 +446,6 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
       {/* Documents list */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 divide-y divide-gray-100">
         {DOC_KEYS.map((key) => {
-          const doc = order.documents?.[key] || {};
           const files = storedByType[key] || [];
           const stored = files[0];
           const pendingCount = files.filter((f) => f.status !== 'Approved' || f.pending_action === 'delete').length;
@@ -512,6 +523,8 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
                       {/* What this file's state actually means, in words */}
                       {pendingDelete ? (
                         <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200" title={f.pending_by_name ? `Requested by ${f.pending_by_name}` : undefined}>deletion awaiting approval</span>
+                      ) : needsCheck(key, f) ? (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200" title="Live, but it counts for the shipment only once someone other than the uploader approves it">awaiting second-person approval</span>
                       ) : live ? (
                         <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">approved</span>
                       ) : f.status === 'Rejected' ? (
@@ -523,7 +536,7 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
                       <button onClick={() => downloadStored(key, f)} className="text-[11px] text-gray-500 hover:underline flex-shrink-0">download</button>
                       {canApprove ? (
                         <>
-                          {(f.status !== 'Approved' || pendingDelete) && (
+                          {(f.status !== 'Approved' || pendingDelete || needsCheck(key, f)) && (
                             <button onClick={() => approveFile(f)} className="text-[11px] text-emerald-700 hover:underline flex-shrink-0">approve</button>
                           )}
                           {!pendingDelete && f.status !== 'Rejected' && (
@@ -580,7 +593,6 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
                     )}
                   </div>
                 )}
-                {isChecked && doc.date && !stored && <p className="text-xs text-emerald-600 mt-0.5">Confirmed {doc.date}</p>}
               </div>
 
               <div className="flex items-center gap-2 flex-shrink-0">
@@ -607,12 +619,14 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
                 >
                   <Upload className="w-3.5 h-3.5" /> {stored ? 'Replace' : 'Upload'}
                 </button>
-                {key !== 'custom' && (isChecked ? (
+                {/* No 'Confirm Ready' any more (D-17): a document is in place
+                    when the server says so, never because someone ticked it. */}
+                {GATE_KEYS.has(key) && (isChecked ? (
                   <span className="text-xs font-medium text-emerald-600 bg-emerald-100 px-2 py-1 rounded-full">Ready</span>
                 ) : (
-                  <button onClick={(e) => handleConfirm(key, e)} className="inline-flex items-center gap-1 text-xs font-medium px-3 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg hover:bg-emerald-100">
-                    <CheckCircle className="w-3.5 h-3.5" /> Confirm Ready
-                  </button>
+                  <span className="text-[11px] font-medium text-gray-600 bg-gray-100 px-2 py-1 rounded-full">
+                    {GATE_STATE_LABEL[gate[key]?.state] || 'Upload needed'}
+                  </span>
                 ))}
               </div>
             </div>
@@ -623,8 +637,8 @@ export default function DocumentsTab({ order, onUpload, onApprove, onPreviewInvo
       {allChecked && (
         <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-center">
           <CheckCircle className="w-8 h-8 text-emerald-500 mx-auto mb-2" />
-          <p className="text-sm font-semibold text-emerald-800">All documents confirmed</p>
-          <p className="text-xs text-emerald-600 mt-1">Order is ready to advance to the next stage.</p>
+          <p className="text-sm font-semibold text-emerald-800">All required documents in place</p>
+          <p className="text-xs text-emerald-600 mt-1">The document gate is met; shipping also needs the advance confirmed and the stock reserved.</p>
         </div>
       )}
       {confirmDialog}
