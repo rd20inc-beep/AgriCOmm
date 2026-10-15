@@ -922,8 +922,10 @@ const financeController = {
         })
         .select('l.id', 'l.lot_no', 'l.transport_cost', 'l.labor_cost', 'l.unloading_cost',
           'l.packing_cost', 'l.total_bag_cost', 'l.other_cost',
-          db.raw('COALESCE(l.hauler_id, l.transport_vendor_id) as transport_vendor_id'),
-          db.raw('COALESCE(h.name, tv.name) as hauler_name'))
+          // A hauler id and a legacy supplier id are different parties (D-25b):
+          // only hauler_id can be paid as a transporter. The old supplier-based
+          // vendor is shown by name, flagged, never offered as a hauler id.
+          'l.hauler_id', 'h.name as hauler_name', 'tv.name as legacy_transport_vendor_name')
         .orderBy('l.lot_no', 'asc');
 
       // Stored transport payables (one per lot) for paid/outstanding on the hauler line.
@@ -949,12 +951,13 @@ const financeController = {
             const base = { lotId: l.id, lotNo: l.lot_no, amount };
             if (c.key === 'transport') {
               const p = tpByLot[l.id];
-              base.haulerId = l.transport_vendor_id || null;
-              base.haulerName = l.hauler_name || null;
+              base.haulerId = l.hauler_id || null;
+              base.haulerName = l.hauler_name || l.legacy_transport_vendor_name || null;
+              base.legacyTransportVendor = !l.hauler_id && !!l.legacy_transport_vendor_name;
               base.payableId = p ? p.id : null; // #14 — target for the Pay Transporter slider
               base.paid = p ? parseFloat(p.paid_amount) || 0 : 0;
-              base.outstanding = p ? parseFloat(p.outstanding) || 0 : (l.transport_vendor_id ? amount : 0);
-              base.unassigned = !l.transport_vendor_id; // recorded but no hauler/payable yet
+              base.outstanding = p ? parseFloat(p.outstanding) || 0 : (l.hauler_id ? amount : 0);
+              base.unassigned = !l.hauler_id; // recorded but no hauler/payable yet
             }
             return base;
           });
@@ -2241,6 +2244,8 @@ financeController.payPurchase = async (req, res) => {
         const exp = await trx('business_expenses').where({ id: row.business_expense_id }).first('expense_no');
         throw fail(`This cost belongs to expense ${exp?.expense_no || `#${row.business_expense_id}`} — pay the expense instead.`);
       }
+      // A voided purchase (P3-11) owes nothing; its bills are Reversed.
+      if (row.voided_at) throw fail(`${spec.label(row) || 'This purchase'} was voided — nothing is due on it.`);
       const payables = await purchasePayables(trx, source, row);
       // The paying side of the business: the payable's when there is one, else
       // the source's own (a lot carries its entity, a mill-store purchase is
@@ -2255,6 +2260,8 @@ financeController.payPurchase = async (req, res) => {
       // cheques), else the source row's own figure.
       const open = [];
       for (const p of payables) {
+        // A reversed / written-off bill keeps its figure but owes nothing.
+        if (['Reversed', 'Written Off'].includes(p.status)) continue;
         const pending = await pendingChequeTotal(trx, { payableId: p.id });
         const owed = Math.max(0, round2((parseFloat(p.original_amount) || 0) - (parseFloat(p.paid_amount) || 0) - pending));
         if (owed > 0.01) open.push({ payable: p, owed });

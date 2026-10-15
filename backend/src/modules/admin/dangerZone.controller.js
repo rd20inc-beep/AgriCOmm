@@ -7,6 +7,7 @@ const { glAccountFor } = require('../../shared/accountGl');
 const { deleteBatchTx } = require('../milling/milling.controller');
 const { deriveAvailable, deriveLotStatus } = require('../inventory/lotQuantity');
 const { moveStock: moveStoreStock } = require('../millStore/storeStock');
+const { creditedOnSale } = require('../localSales/saleCredits');
 
 /**
  * Super-Admin "Danger Zone" — permanent, cascading hard-deletes and manual
@@ -513,6 +514,10 @@ async function cnt(q, table, col, id) {
 async function deleteLocalSale(trx, req, id) {
   const sale = await trx('local_sales').where('id', id).first();
   if (!sale) { const e = new Error('Local sale not found.'); e.status = 404; throw e; }
+  // A return (P3-11) is its own document with its own stock, GL and refund
+  // trail; a hard delete of the sale would orphan it. Refused.
+  const ret = await trx('local_sale_returns').where({ local_sale_id: sale.id }).first('return_no');
+  if (ret) { const e = new Error(`${sale.sale_no} has a return (${ret.return_no}) on record — it cannot be hard-deleted.`); e.status = 409; throw e; }
 
   // A Pending (unconfirmed) or Cancelled (rejected) sale never moved stock/money
   // — deleting it must NOT restock (that would mint phantom inventory) or reverse
@@ -626,7 +631,8 @@ async function unmirrorLocalSale(trx, saleId, amt) {
   const sale = await trx('local_sales').where('id', saleId).first();
   if (!sale) return;
   const paid = Math.max(0, num(sale.paid_amount) - amt);
-  const due = Math.max(0, num(sale.total_amount) - paid);
+  // A return's credit (P3-11) stays off the total — it is not a payment.
+  const due = Math.max(0, num(sale.total_amount) - paid - await creditedOnSale(trx, sale.id));
   // Paid / Partial / Credit only — 'Unpaid' is not allowed by
   // chk_local_sales_payment_status_valid.
   const status = due <= 0.01 ? 'Paid' : (paid > 0.01 ? 'Partial' : 'Credit');

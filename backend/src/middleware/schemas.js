@@ -882,6 +882,25 @@ const voidServiceInvoice = Joi.object({
   authorized_by_owner_id: Joi.number().integer().positive().allow(null, ''),
 });
 
+// P3-11 / D-22: a local-sale return (credit note). The Owner's approval is
+// read by ownerApproval before validate() runs; the id is kept here too.
+const localSaleReturn = Joi.object({
+  quantity: Joi.number().positive().required(),
+  reason: Joi.string().trim().min(3).max(500).required(),
+  settlement: Joi.string().valid('refund', 'credit').allow(null, ''),
+  return_date: Joi.date().iso().max('now').allow(null, ''),
+  refund_bank_account_id: Joi.number().integer().positive().allow(null, ''),
+  refund_method: Joi.string().lowercase().valid('cash', 'bank_transfer', 'online', 'mobile', 'tt', 'wire', 'lc').allow(null, ''),
+  refund_reference: Joi.string().trim().max(120).allow(null, ''),
+  authorized_by_owner_id: Joi.number().integer().positive().allow(null, ''),
+});
+
+// P3-11 / INV-09: voiding a purchase lot or a mill-store purchase.
+const voidPurchase = Joi.object({
+  reason: Joi.string().trim().min(3).max(500).required(),
+  authorized_by_owner_id: Joi.number().integer().positive().allow(null, ''),
+});
+
 const createBatch = Joi.object({
   supplier_id: Joi.number().integer().positive().allow(null),
   // Required for a single-source batch; for a blend it's omitted and the
@@ -1230,6 +1249,8 @@ module.exports = {
   updateBatch,
   createServiceInvoice,
   voidServiceInvoice,
+  localSaleReturn,
+  voidPurchase,
   recordYield,
   saveDocumentOverrides,
   saveDocumentRendering,

@@ -61,6 +61,12 @@ async function generatePaymentNo(trx) {
  * spoken for). Refuses a fully-settled row and an amount above the rest.
  */
 async function assertWithinOutstanding(trx, { row, isReceipt, amount }) {
+  // A reversed / written-off bill keeps its figure for the record (payroll
+  // reversal, purchase void, a voided transporter bill — P3-08 / P3-11) but
+  // nothing is owed on it any more.
+  if (!isReceipt && ['Reversed', 'Written Off'].includes(row.status)) {
+    throw httpError(`This payable is ${String(row.status).toLowerCase()} — nothing is due on it.`);
+  }
   const pendingCheques = await pendingChequeTotal(trx, isReceipt ? { receivableId: row.id } : { payableId: row.id });
   const total = num(isReceipt ? row.expected_amount : row.original_amount);
   const settled = num(isReceipt ? row.received_amount : row.paid_amount);

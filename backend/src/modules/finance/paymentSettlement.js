@@ -15,6 +15,7 @@ const accountingService = require('../accounting/accounting.service');
 const { ledgerFailure, missingAccounts } = require('../../shared/ledgerFailure');
 const { glAccountFor, remapControlLines } = require('../../shared/accountGl');
 const { LOT_SUPPLIER_LINES, lotPaymentTotal } = require('../inventory/lotPayment');
+const { creditedOnSale } = require('../localSales/saleCredits');
 
 const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 const num = (v) => parseFloat(v) || 0;
@@ -118,7 +119,8 @@ async function mirrorLocalSale(trx, saleId, delta) {
   const sale = await trx('local_sales').where({ id: saleId }).forUpdate().first();
   if (!sale) return null;
   const paid = Math.max(0, round2(num(sale.paid_amount) + delta));
-  const due = Math.max(0, round2(num(sale.total_amount) - paid));
+  // A return's credit (P3-11) is off the total too — it is not a payment.
+  const due = Math.max(0, round2(num(sale.total_amount) - paid - await creditedOnSale(trx, sale.id)));
   const status = due <= 0.01 ? 'Paid' : paid > 0.01 ? 'Partial' : (sale.payment_mode === 'credit' ? 'Credit' : 'Pending');
   await trx('local_sales').where({ id: sale.id }).update({
     paid_amount: paid, due_amount: due, payment_status: status, updated_at: trx.fn.now(),

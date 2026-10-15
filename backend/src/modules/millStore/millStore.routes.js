@@ -5,6 +5,10 @@ const auditAction = require('../../middleware/audit');
 const ownerApproval = require('../../middleware/ownerApproval');
 const { requireIdempotencyKey } = require('../../middleware/idempotency');
 const ctrl = require('./millStore.controller');
+const db = require('../../config/database');
+const validate = require('../../middleware/validate');
+const schemas = require('../../middleware/schemas');
+const { voidStorePurchase } = require('./storePurchaseVoid');
 const { redactCostInResponses } = require('../../utils/costVisibility');
 
 // Cost-blind roles (QC, Inventory Officer…) see store quantities, never what the
@@ -85,6 +89,30 @@ router.post(
   requireIdempotencyKey, // money-creating: one record per submit (P2-12)
   auditAction('create', 'mill_purchase'),
   ctrl.createPurchase
+);
+// Void a store purchase entered by mistake (P3-11, D-23): stock, payable and
+// GL back out by signed deltas, the purchase kept on record. Unpaid and still
+// in the store only — see storePurchaseVoid.js. The Owner approves it.
+router.post(
+  '/purchases/:id/void',
+  authorize('mill_store', 'create_purchase'),
+  ownerApproval('store_purchase_void'),
+  validate(schemas.voidPurchase),
+  auditAction('void', 'mill_purchase', (req) => req.params.id),
+  async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!id) return res.status(404).json({ success: false, message: 'Purchase not found.' });
+      const result = await db.transaction((trx) => voidStorePurchase(trx, id, {
+        reason: req.body.reason, userId: req.user?.id || null, ownerId: req.ownerAuth?.ownerId || null,
+      }));
+      return res.json({ success: true, data: result });
+    } catch (err) {
+      const status = err.statusCode || err.status || 500;
+      if (status >= 500) console.error('void store purchase error:', err);
+      return res.status(status).json({ success: false, message: status >= 500 ? 'Internal server error.' : err.message });
+    }
+  }
 );
 // Paying is a finance action, not a store one: Mill Operators hold
 // create_purchase and could settle purchases through here.

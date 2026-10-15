@@ -669,6 +669,10 @@ export default function MillingBatchDetail() {
       form[cat.key] = v != null ? String(v) : '';
     });
     setCostForm(form);
+    // P3-08: open with the transporter + payer on record. The drawer re-sends
+    // every line on save, and an empty hauler used to wipe the one stored.
+    setTransportHaulerId(batch.transport?.hauler_id ? String(batch.transport.hauler_id) : '');
+    setTransportPaidBy(batch.transport?.paid_by || 'company');
     setShowCostModal(true);
   }
 
@@ -697,7 +701,9 @@ export default function MillingBatchDetail() {
           // #14 — transport carries the transporter + who bears it, so a
           // company-paid freight raises a real transporter payable.
           const extra = norm(cat.key) === 'transport'
-            ? { hauler_id: transportHaulerId ? parseInt(transportHaulerId, 10) : null, transport_paid_by: transportPaidBy }
+            // An empty hauler is sent as absent, never as null: the server keeps
+            // the transporter on record unless a different one is chosen.
+            ? { ...(transportHaulerId ? { hauler_id: parseInt(transportHaulerId, 10) } : {}), transport_paid_by: transportPaidBy }
             : {};
           await addCostMut.mutateAsync({ id: batchId, data: { category, amount, ...extra } });
           total += amount;

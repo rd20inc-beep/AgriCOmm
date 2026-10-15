@@ -1,5 +1,31 @@
 const db = require('../../config/database');
 
+// D-25b / P3-08: one transporter, one active hauler row. Two active haulers
+// may not share a name (case / spacing ignored) or a phone number (digits
+// only) — the same rule the uq_haulers_active_* indexes (mig 393) enforce, so
+// the user gets a clear 409 naming the existing transporter instead of a
+// constraint error, and a race still cannot slip a duplicate through.
+const phoneDigits = (p) => String(p || '').replace(/[^0-9]/g, '');
+async function duplicateHauler({ name, phone, excludeId = null }) {
+  const n = String(name || '').trim().toLowerCase();
+  const digits = phoneDigits(phone);
+  if (!n && !digits) return null;
+  const q = db('haulers').where('is_active', true)
+    .where((w) => {
+      if (n) w.whereRaw('lower(btrim(name)) = ?', [n]);
+      if (digits) w.orWhereRaw("regexp_replace(COALESCE(phone, ''), '[^0-9]', '', 'g') = ?", [digits]);
+    });
+  if (excludeId) q.whereNot('id', excludeId);
+  return q.first('id', 'name', 'phone');
+}
+function duplicateMessage(dup, name) {
+  const sameName = String(dup.name || '').trim().toLowerCase() === String(name || '').trim().toLowerCase();
+  return sameName
+    ? `A transporter named "${dup.name}" already exists — pick it instead of adding it again.`
+    : `Transporter "${dup.name}" already has this phone number — pick it instead of adding a second one.`;
+}
+const isUniqueViolation = (err) => err && err.code === '23505' && /uq_haulers_active_/.test(String(err.constraint || err.message || ''));
+
 // Transport / Hauler master (item #5). A dedicated registry of transport
 // contractors, distinct from suppliers. CRUD + basic history (lots carried,
 // weight, freight charges) — the per-hauler payment/outstanding engine is
@@ -65,7 +91,9 @@ const haulersController = {
       const totals = {
         lots: lots.length,
         weight_kg: lots.reduce((a, l) => a + (parseFloat(l.received_net_weight_kg) || parseFloat(l.net_weight_kg) || 0), 0),
-        freight_total: freight.reduce((a, f) => a + (parseFloat(f.original_amount) || 0), 0),
+        // A reversed / written-off bill (voided freight, P3-08) is history, not freight owed.
+        freight_total: freight.filter((f) => !['Reversed', 'Written Off'].includes(f.status))
+          .reduce((a, f) => a + (parseFloat(f.original_amount) || 0), 0),
         freight_outstanding: freight.reduce((a, f) => a + (parseFloat(f.outstanding) || 0), 0),
       };
 
@@ -111,7 +139,9 @@ const haulersController = {
       // Build one entry stream: charge (debit) / payment (credit).
       const entries = [];
       for (const c of charges) {
-        const companyPayable = c.paid_by === 'company';
+        // A cancelled / reversed freight record (transport removed, payer
+        // switched, purchase voided) owes nothing any more (P3-08).
+        const companyPayable = c.paid_by === 'company' && !['cancelled', 'reversed'].includes(c.status);
         entries.push({
           kind: 'charge',
           date: c.expense_date,
@@ -166,6 +196,8 @@ const haulersController = {
       if (!name || !String(name).trim()) {
         return res.status(400).json({ success: false, message: 'Hauler name is required.' });
       }
+      const dup = await duplicateHauler({ name, phone });
+      if (dup) return res.status(409).json({ success: false, code: 'DUPLICATE_HAULER', message: duplicateMessage(dup, name), data: { hauler: dup } });
       const [row] = await db('haulers')
         .insert({
           name: String(name).trim(),
@@ -183,6 +215,7 @@ const haulersController = {
         .returning('*');
       return res.json({ success: true, data: { hauler: row } });
     } catch (err) {
+      if (isUniqueViolation(err)) return res.status(409).json({ success: false, code: 'DUPLICATE_HAULER', message: 'This transporter already exists — pick it instead of adding it again.' });
       console.error('hauler create error:', err);
       return res.status(500).json({ success: false, message: err.message });
     }
@@ -204,10 +237,22 @@ const haulersController = {
       if (req.body.opening_balance !== undefined) patch.opening_balance = parseFloat(req.body.opening_balance) || 0;
       if (is_active !== undefined) patch.is_active = !!is_active;
       patch.updated_at = db.fn.now();
+      // Renaming / re-numbering (or re-activating) onto another active
+      // transporter would make a duplicate.
+      const current = await db('haulers').where({ id }).first();
+      if (!current) return res.status(404).json({ success: false, message: 'Hauler not found.' });
+      const willBeActive = patch.is_active !== undefined ? patch.is_active : current.is_active;
+      if (willBeActive) {
+        const nextName = patch.name !== undefined ? patch.name : current.name;
+        const nextPhone = patch.phone !== undefined ? patch.phone : current.phone;
+        const dup = await duplicateHauler({ name: nextName, phone: nextPhone, excludeId: current.id });
+        if (dup) return res.status(409).json({ success: false, code: 'DUPLICATE_HAULER', message: duplicateMessage(dup, nextName), data: { hauler: dup } });
+      }
       const [row] = await db('haulers').where({ id }).update(patch).returning('*');
       if (!row) return res.status(404).json({ success: false, message: 'Hauler not found.' });
       return res.json({ success: true, data: { hauler: row } });
     } catch (err) {
+      if (isUniqueViolation(err)) return res.status(409).json({ success: false, code: 'DUPLICATE_HAULER', message: 'Another active transporter already has this name or phone number.' });
       console.error('hauler update error:', err);
       return res.status(500).json({ success: false, message: err.message });
     }

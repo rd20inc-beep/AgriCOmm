@@ -316,6 +316,8 @@ export function transformBatch(dbBatch) {
     approvedAt: dbBatch.approved_at || null,
     costs: dbBatch.costs || {},
     packingBreakdown: dbBatch.packingBreakdown || null,
+    // { hauler_id, hauler_name, paid_by, status, payable_id } or null (P3-08).
+    transport: dbBatch.transport || null,
     awaitingArrivalRate: !!dbBatch.awaitingArrivalRate,
     sampleAnalysis: dbBatch.sampleAnalysis || null,
     arrivalAnalysis: dbBatch.arrivalAnalysis || null,

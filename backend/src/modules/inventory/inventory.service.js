@@ -83,6 +83,9 @@ const MOVEMENT_TYPES = {
   ADJUSTMENT_MINUS: 'adjustment_minus',
   DAMAGE_WRITEOFF: 'damage_writeoff',
   SHORTAGE_WRITEOFF: 'shortage_writeoff',
+  // A purchase voided before anything was drawn from it (P3-11): the whole
+  // lot leaves at its own cost. Not a write-off — the purchase never stood.
+  PURCHASE_VOID: 'purchase_void',
 };
 
 // Movement types that reduce stock
@@ -97,6 +100,7 @@ const OUTBOUND_TYPES = new Set([
   MOVEMENT_TYPES.SHORTAGE_WRITEOFF,
   MOVEMENT_TYPES.LOT_SPLIT,
   MOVEMENT_TYPES.RECEIPT_CORRECTION_OUT,
+  MOVEMENT_TYPES.PURCHASE_VOID,
 ]);
 
 // Movement types that increase stock
@@ -157,6 +161,7 @@ const LOT_TRANSACTION_TYPE_MAP = {
   [MOVEMENT_TYPES.SHORTAGE_WRITEOFF]: 'shortage_out',
   [MOVEMENT_TYPES.RETURN]: 'return_in',
   [MOVEMENT_TYPES.OPENING_BALANCE]: 'opening_balance',
+  [MOVEMENT_TYPES.PURCHASE_VOID]: 'purchase_void_out',
 };
 
 function getMovementDirection(movementType) {

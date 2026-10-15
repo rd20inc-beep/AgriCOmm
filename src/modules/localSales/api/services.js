@@ -14,6 +14,9 @@ export const localSalesApi = {
   confirm: (id, data) => api.post(`/api/local-sales/${id}/confirm`, data || {}),
   reject: (id, data) => api.post(`/api/local-sales/${id}/reject`, data || {}),
   getPayments: (id) => api.get(`/api/local-sales/${id}/payments`),
+  // Returns / credit notes (P3-11). createReturn is Owner-approved.
+  returns: (id) => api.get(`/api/local-sales/${id}/returns`),
+  createReturn: (id, data) => api.post(`/api/local-sales/${id}/returns`, data),
   getInvoice: (id) => api.get(`/api/local-sales/${id}/invoice`),
   getGatePass: (id) => api.get(`/api/local-sales/${id}/gate-pass`),
   getInvoiceAdmin: (id) => api.get(`/api/local-sales/${id}/invoice-admin`),

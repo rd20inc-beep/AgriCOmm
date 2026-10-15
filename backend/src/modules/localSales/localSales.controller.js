@@ -22,6 +22,7 @@ const {
 const { pendingHoldKg } = require('./saleReservation');
 const { moveStock: moveStoreStock, postStoreJournal } = require('../millStore/storeStock');
 const { saleLineTotal, isFullyPaid, settledTender } = require('./saleMoney');
+const { creditedOnSale } = require('./saleCredits');
 const { buildRateIndex, rateForLot } = require('../inventory/stockValuation');
 
 async function generateSaleNo(trx) {
@@ -726,7 +727,8 @@ async function applyReceiptToSale(trx, sale, {
 }) {
   const payAmount = uc.round2(parseFloat(amount) || 0);
   const newPaid = (parseFloat(sale.paid_amount) || 0) + payAmount;
-  const newDue = Math.max(0, (parseFloat(sale.total_amount) || 0) - newPaid);
+  // A return's credit (P3-11) comes off the total as well — it is not a payment.
+  const newDue = Math.max(0, (parseFloat(sale.total_amount) || 0) - newPaid - await creditedOnSale(trx, sale.id));
 
   if (!isUncleared) {
     await trx('local_sales').where({ id: sale.id }).update({
