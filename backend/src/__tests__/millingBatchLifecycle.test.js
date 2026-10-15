@@ -30,6 +30,8 @@ function builder(conn, table) {
     },
     whereIn(col, vals) { filters.push((r) => vals.includes(r[col])); return qb; },
     whereRaw() { return qb; }, // lot txn-no lookup (postMovement)
+    whereNull(col) { filters.push((r) => r[String(col).split('.').pop()] == null); return qb; },
+    whereNotExists() { return qb; },
     forUpdate() { conn.locks.push(table); return qb; },
     select() { return qb; },
     join() { return qb; },

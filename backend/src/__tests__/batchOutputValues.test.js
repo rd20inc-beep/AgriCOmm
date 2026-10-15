@@ -101,7 +101,7 @@ describe('batchOutputValues', () => {
     expect(calls.queries).toBe(1);
     expect(calls.tables).toEqual(['inventory_lots as l']);
     expect(calls.whereIn).toContainEqual(['l.batch_ref', ['batch-1', 'batch-3', 'batch-7']]);
-    expect(calls.whereIn).toContainEqual(['t.transaction_type', ['milling_receipt', 'byproduct_receipt']]);
+    expect(calls.whereIn).toContainEqual(['t.transaction_type', ['milling_receipt', 'byproduct_receipt', 'milling_receipt_reversal', 'byproduct_receipt_reversal']]);
     expect(m.get(1).byproductValue).toBe(179000);
     expect(m.get(3).byproductValue).toBe(393750);
     expect(m.has(7)).toBe(false); // no stored output → caller falls back

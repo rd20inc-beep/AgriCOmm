@@ -926,6 +926,30 @@ const voidPurchase = Joi.object({
   authorized_by_owner_id: Joi.number().integer().positive().allow(null, ''),
 });
 
+// POST /milling/batches/:id/reverse-yield (P3-03 / MIL-20) — Owner-approved,
+// a reason is mandatory; the owner authorization travels as
+// authorized_by_owner_id (+ X-Owner-Credential header).
+const reverseYield = Joi.object({
+  reason: Joi.string().trim().min(3).max(500).required(),
+  authorized_by_owner_id: Joi.number().integer().positive().allow(null, ''),
+});
+
+// POST /milling/batches/:id/costs/bulk (P3-07 / MIL-35) — the whole Costs
+// drawer in one transaction. Categories are checked against the canonical list
+// in the controller (milling/costCategories.js).
+const millingCostLine = Joi.object({
+  category: Joi.string().trim().max(60).required(),
+  amount: Joi.number().min(0).required(),
+  notes: Joi.string().max(1000).allow('', null),
+  hauler_id: Joi.number().integer().positive().allow(null, ''),
+  transport_paid_by: Joi.string().max(40).allow('', null),
+  vehicle_no: Joi.string().max(60).allow('', null),
+  doc_no: Joi.string().max(60).allow('', null),
+});
+const millingCostsBulk = Joi.object({
+  costs: Joi.array().items(millingCostLine).min(1).max(50).required(),
+});
+
 const createBatch = Joi.object({
   supplier_id: Joi.number().integer().positive().allow(null),
   // Required for a single-source batch; for a blend it's omitted and the
@@ -1277,6 +1301,8 @@ module.exports = {
   voidServiceInvoice,
   localSaleReturn,
   voidPurchase,
+  reverseYield,
+  millingCostsBulk,
   recordYield,
   saveDocumentOverrides,
   saveDocumentRendering,

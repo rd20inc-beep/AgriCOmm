@@ -32,6 +32,12 @@ function parseCustomTags(v) {
  * Reporting & BI Engine — Phase 9
  * Every method queries LIVE data from the real database tables.
  */
+// What a service batch's yield put into one of its output lots (`l`), from
+// the ledger: the batch's own receipts net of receipt reversals (P3-04).
+const SERVICE_PRODUCED_SQL = `(SELECT COALESCE(SUM(t.quantity_kg), 0) FROM lot_transactions t
+  WHERE t.lot_id = l.id AND t.reference_module = 'milling_batch' AND t.reference_id = l.service_batch_id
+    AND t.transaction_type IN ('milling_receipt', 'byproduct_receipt', 'milling_receipt_reversal', 'byproduct_receipt_reversal'))`;
+
 const reportingService = {
   // ═══════════════════════════════════════════════════════════════════
   // EXECUTIVE DASHBOARDS
@@ -2716,6 +2722,7 @@ const reportingService = {
         db.raw('COALESCE(c1.name, c2.name) as client_name'),
         db.raw('COALESCE(l.owner_customer_id, mb.client_customer_id) as client_id'),
         db.raw('(SELECT COALESCE(SUM(d.qty_kg), 0) FROM service_milling_dispatches d WHERE d.lot_id = l.id) as dispatched_kg'),
+        db.raw(`${SERVICE_PRODUCED_SQL} as produced_ledger_kg`),
         db.raw("GREATEST(0, DATE_PART('day', NOW() - COALESCE(mb.date_received, l.created_at))) as age_days"),
       )
       .orderBy('l.lot_no', 'asc');
@@ -2731,7 +2738,12 @@ const reportingService = {
       batchName: l.batch_name || null,
       warehouseId: l.warehouse_id || null,
       warehouseName: l.warehouse_name || 'Unassigned warehouse',
-      producedKg: num(l.received_net_weight_kg) || num(l.net_weight_kg) || num(l.qty),
+      // Output lots: what the batch's yield put in, from the ledger (receipts
+      // net of receipt reversals) — a re-yield or a reversed dispatch can't
+      // inflate it (MIL-34). The client's unmilled raw remainder: its intake.
+      producedKg: l.type === 'raw'
+        ? (num(l.received_net_weight_kg) || num(l.net_weight_kg) || num(l.qty))
+        : num(l.produced_ledger_kg),
       dispatchedKg: num(l.dispatched_kg),
       onHandKg: num(l.available_qty),
       ageDays: Math.round(num(l.age_days)),
@@ -2828,34 +2840,52 @@ const reportingService = {
       .orderBy('mb.batch_no', 'asc');
     const ids = batches.map((b) => b.id);
 
+    // Output lots only (finished + by-product) — the client's raw lot used to
+    // be counted as "produced" at its intake weight, so every milled batch
+    // showed unreconciled (MIL-34). Produced comes from the ledger: the batch's
+    // own receipts net of receipt reversals, so a re-recorded yield or a
+    // reversed dispatch can't inflate it. On-hand is the lots' physical qty.
     const lotAgg = ids.length
       // #9-scoping: reconcile only the client stock the caller can see, so the
       // produced/on-hand legs match the other Service Milling reports.
       ? await applyWarehouseScope(
-          db('inventory_lots').whereIn('service_batch_id', ids).where('ownership', 'client'),
-          warehouseScope, 'warehouse_id')
-          .select('service_batch_id')
-          .sum({ produced: db.raw('COALESCE(received_net_weight_kg, net_weight_kg, qty)') })
-          .sum({ onhand: 'available_qty' })
-          .groupBy('service_batch_id')
+          db('inventory_lots as l').whereIn('l.service_batch_id', ids).where('l.ownership', 'client')
+            .whereIn('l.type', ['finished', 'byproduct']),
+          warehouseScope, 'l.warehouse_id')
+          .select('l.service_batch_id')
+          .sum({ produced: db.raw(SERVICE_PRODUCED_SQL) })
+          .sum({ onhand: 'l.qty' })
+          .groupBy('l.service_batch_id')
+      : [];
+    const rawAgg = ids.length
+      ? await applyWarehouseScope(
+          db('inventory_lots as l').whereIn('l.service_batch_id', ids).where('l.ownership', 'client').where('l.type', 'raw'),
+          warehouseScope, 'l.warehouse_id')
+          .select('l.service_batch_id').sum({ rawonhand: 'l.qty' }).groupBy('l.service_batch_id')
       : [];
     const dispAgg = ids.length
-      ? await db('service_milling_dispatches').whereIn('service_batch_id', ids).select('service_batch_id').sum({ d: 'qty_kg' }).groupBy('service_batch_id')
+      ? await db('service_milling_dispatches as d').join('inventory_lots as l', 'l.id', 'd.lot_id')
+        .whereIn('d.service_batch_id', ids).whereIn('l.type', ['finished', 'byproduct'])
+        .select('d.service_batch_id').sum({ d: 'd.qty_kg' }).groupBy('d.service_batch_id')
       : [];
     const producedBy = Object.fromEntries(lotAgg.map((r) => [r.service_batch_id, r]));
+    const rawBy = Object.fromEntries(rawAgg.map((r) => [r.service_batch_id, num(r.rawonhand)]));
     const dispBy = Object.fromEntries(dispAgg.map((r) => [r.service_batch_id, num(r.d)]));
 
     const rows = batches.map((b) => {
       const rawKg = round2(b.raw_qty_kg);
       const producedKg = round2(producedBy[b.id]?.produced);
-      const milledKg = b.milled_qty_kg != null ? round2(b.milled_qty_kg) : producedKg;
+      // A full mill (no milled qty declared) milled everything received — once
+      // it has produced anything; an unmilled batch has milled nothing yet.
+      const milledKg = b.milled_qty_kg != null ? round2(b.milled_qty_kg) : (producedKg > 0 ? rawKg : 0);
       const dispatchedKg = round2(dispBy[b.id]);
       const onHandKg = round2(producedBy[b.id]?.onhand);
+      const rawOnHandKg = round2(rawBy[b.id]);
       const balanceKg = round2(producedKg - dispatchedKg - onHandKg); // should be ~0
       const millingLossKg = round2(milledKg - producedKg); // process loss (bran/husk/wastage)
       return {
         batchId: b.id, batchNo: b.batch_no, batchName: b.batch_name || null, clientName: b.client_name || 'Unassigned client',
-        rawKg, milledKg, producedKg, dispatchedKg, onHandKg, balanceKg, millingLossKg,
+        rawKg, milledKg, producedKg, dispatchedKg, onHandKg, rawOnHandKg, balanceKg, millingLossKg,
         reconciled: Math.abs(balanceKg) < 0.5,
         href: `/service-milling/${b.id}`,
       };

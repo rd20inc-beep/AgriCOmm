@@ -404,12 +404,20 @@ async function postSplitCompletion(trx, accountingService, { batch, target, cred
   return journal;
 }
 
-/** True once a batch has a Posted completion on the books (its yield was taken). */
+/**
+ * True once a batch has a Posted completion on the books (its yield was taken)
+ * that has not been reversed. A reversed yield (P3-03) posts a signed-delta
+ * reversal of each 'Milling Batch' journal (reversal_of → the original), so
+ * the batch counts as un-yielded again once every original has its reversal.
+ */
 async function hasPostedCompletion(q, batchNo) {
-  const row = await q('journal_entries')
+  // A reversal carries the original's ref_type / ref_no, so one read answers.
+  const rows = await q('journal_entries')
     .where({ ref_type: MILLING_REF_TYPE, ref_no: batchNo, status: 'Posted' })
-    .first('id');
-  return !!row;
+    .select('id', 'reversal_of');
+  const list = Array.isArray(rows) ? rows : (rows ? [rows] : []);
+  const reversed = new Set(list.filter((r) => r.reversal_of != null).map((r) => Number(r.reversal_of)));
+  return list.some((r) => r.reversal_of == null && !reversed.has(Number(r.id)));
 }
 
 module.exports = {

@@ -28,7 +28,7 @@ const aiService = require('../ai/ai.service');
 const { pickBatchEdits } = require('./batchLifecycle');
 const { listRicePurchases } = require('./ricePurchasesLedger');
 const { listQualityComparison } = require('./qualityVariance');
-const { batchYielded, assertBatchOutputsUnsold } = require('./costEditLocks');
+const { batchYielded, ricePurchaseBooked, assertBatchOutputsUnsold } = require('./costEditLocks');
 const { reverseExpenseTrail, reverseStatutoryJournal, remittedStatutoryForRun, mirrorJournals } = require('./payrollReversal');
 const { buildLastPrices, findImplausiblePrices, implausiblePriceMessage } = require('./byproductPrices');
 
@@ -76,7 +76,9 @@ router.put('/batches/:id', authorize('milling', 'edit'),
       const changed = LOCKED_AFTER_YIELD.filter((k) => updates[k] !== undefined
         && String(updates[k] ?? '') !== String(current[k] ?? '')
         && !(updates[k] != null && current[k] != null && Math.abs(Number(updates[k]) - Number(current[k])) < 1e-6));
-      if (changed.length && await batchYielded(db, current)) {
+      // A reversed yield (P3-03) keeps its booked rice purchase, so the
+      // figures it was booked at stay locked too.
+      if (changed.length && (await batchYielded(db, current) || await ricePurchaseBooked(db, current))) {
         return res.status(409).json({
           success: false,
           message: `Batch ${current.batch_no} already has its yield recorded — its ${changed.map((k) => ({ raw_qty_kg: 'raw quantity', supplier_id: 'supplier', milling_fee_per_kg: 'milling fee' }[k])).join(', ')} can no longer be changed.`,
@@ -145,11 +147,31 @@ router.post(
   auditAction('record_yield', 'milling_batch', (req) => req.params.id),
   controller.recordYield
 );
+// Reverse a recorded yield (P3-03 / MIL-20): Owner approval + a mandatory
+// reason; refused once any output has been sold, reserved, moved or (service)
+// dispatched / invoiced. Nothing is deleted — every step is a new movement or
+// a signed-delta journal.
+router.post(
+  '/batches/:id/reverse-yield',
+  authorize('milling', 'record_yield'),
+  ownerApproval('milling_yield_reversal'),
+  validate(schemas.reverseYield),
+  auditAction('reverse_yield', 'milling_batch', (req) => req.params.id),
+  controller.reverseYield
+);
 router.post(
   '/batches/:id/costs',
   authorize('milling', 'manage_costs'),
   auditAction('add_cost', 'milling_batch', (req) => req.params.id),
   controller.addCost
+);
+// The whole Costs drawer in ONE transaction (P3-07 / MIL-35).
+router.post(
+  '/batches/:id/costs/bulk',
+  authorize('milling', 'manage_costs'),
+  validate(schemas.millingCostsBulk),
+  auditAction('add_costs_bulk', 'milling_batch', (req) => req.params.id),
+  controller.addCostsBulk
 );
 router.post(
   '/batches/:id/vehicles',

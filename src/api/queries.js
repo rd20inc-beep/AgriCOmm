@@ -484,6 +484,28 @@ export function useAddBatchCost() {
   });
 }
 
+// Save the whole Costs drawer in one call (one server transaction).
+export function useSaveBatchCosts() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }) => millingApi.saveCosts(id, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.batches.all });
+    },
+  });
+}
+
+export function useReverseYield() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }) => millingApi.reverseYield(id, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.batches.all });
+      qc.invalidateQueries({ queryKey: queryKeys.inventory.all });
+    },
+  });
+}
+
 export function useAddVehicle() {
   const qc = useQueryClient();
   return useMutation({

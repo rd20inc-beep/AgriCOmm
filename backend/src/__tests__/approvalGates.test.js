@@ -63,6 +63,7 @@ const OWNER_MODAL_SCREENS = {
   // mill-store purchase — checked below).
   'modules/localSales/components/SaleReturnsPanel.jsx': ['post', '/local-sales/:id/returns'],
   'shared/components/VoidPurchaseButton.jsx': ['post', '/lot-inventory/lots/:id/void'],
+  'modules/milling/pages/MillingBatchDetail.jsx': ['post', '/milling/batches/:id/reverse-yield'],
 };
 
 function frontendFilesCalling(dir, needle, out = []) {

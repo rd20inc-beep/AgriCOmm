@@ -1962,6 +1962,10 @@ COL milling_batches.variance_pct:numeric:NULL
 COL milling_batches.variance_status:character varying:NULL
 COL milling_batches.wastage_kg:numeric:NOT NULL
 COL milling_batches.yield_pct:numeric:NOT NULL
+COL milling_batches.yield_reversal_authorized_by:integer:NULL
+COL milling_batches.yield_reversal_reason:character varying:NULL
+COL milling_batches.yield_reversed_at:timestamp with time zone:NULL
+COL milling_batches.yield_reversed_by:integer:NULL
 COL milling_costs.amount:numeric:NOT NULL
 COL milling_costs.batch_id:integer:NOT NULL
 COL milling_costs.business_expense_id:integer:NULL
@@ -3667,6 +3671,8 @@ CON milling_batches.milling_batches_pkey(p)
 CON milling_batches.milling_batches_product_id_foreign(f)
 CON milling_batches.milling_batches_rejected_by_foreign(f)
 CON milling_batches.milling_batches_supplier_id_foreign(f)
+CON milling_batches.milling_batches_yield_reversal_authorized_by_foreign(f)
+CON milling_batches.milling_batches_yield_reversed_by_foreign(f)
 CON milling_batches.uq_milling_batches_uuid(u)
 CON milling_costs.chk_mc_amount_nonneg(c)
 CON milling_costs.chk_milling_costs_source_valid(c)

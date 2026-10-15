@@ -15,7 +15,8 @@
  * - The lot's per-kg, not the receipt's rate: a later price confirmation /
  *   source-lot re-price (reallocateBatchCosts) re-costs the lots in place but
  *   leaves the receipt row's rate as it was; a re-recorded yield
- *   (resyncBatchOutputsFromBatch) rewrites both. The lot is the value the books
+ *   (resyncBatchOutputsFromBatch) re-costs the lot and posts the qty change
+ *   as a new receipt / receipt-reversal row. The lot is the value the books
  *   carry for that output — stock valuation and COGS-on-sale both read it.
  *
  * Client-owned lots (service milling) and Closed lots (voided duplicates,
@@ -24,7 +25,9 @@
  * toll batch — has no stored value; callers fall back to the computed figure.
  */
 
-const RECEIPT_TYPES = ['milling_receipt', 'byproduct_receipt'];
+// A receipt and its reversals (a re-recorded yield that produced less, or a
+// reversed yield — P3-03). quantity_kg is signed, so the SUM is the net yield.
+const RECEIPT_TYPES = ['milling_receipt', 'byproduct_receipt', 'milling_receipt_reversal', 'byproduct_receipt_reversal'];
 
 // Label a by-product lot: its grade (B1/B2/CSR…) when it has one, else the
 // by-product name (a blend's lot is "<blend label> — Powder" → "Powder").

@@ -31,14 +31,15 @@ function yieldMode({ status, hasOutputs, hasCompletion = false }) {
 
 // A batch's yield outputs are the finished/by-product lots stamped with
 // batch_ref = 'batch-<id>' (the raw lot a truck receipt creates carries the
-// same ref, so type filters it out).
+// same ref, so type filters it out). An output lot a reversed yield (or a
+// re-yield that dropped it) took to zero is Closed and empty — it no longer
+// counts, so a reversed batch takes the first-yield path again (P3-03).
 async function batchHasOutputLots(q, batchId) {
-  const row = await q('inventory_lots')
+  const rows = await q('inventory_lots')
     .where({ batch_ref: `batch-${batchId}` })
     .whereIn('type', ['finished', 'byproduct'])
-    .count('id as c')
-    .first();
-  return (parseInt(row && row.c, 10) || 0) > 0;
+    .select('id', 'qty', 'status');
+  return (rows || []).some((l) => l.status !== 'Closed' || (parseFloat(l.qty) || 0) > 0);
 }
 
 // Fields the generic PUT /batches/:id may change. 'status' is deliberately
