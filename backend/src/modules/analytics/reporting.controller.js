@@ -1438,56 +1438,36 @@ const reportingController = {
   },
 
   // ──── AR Aging (printable) ─────────────────────────────────────
-  // Open receivables bucketed by age (0-30 / 31-60 / 61-90 / 90+ days
-  // since due). Always reflects current state — no period filter.
+  // Open receivables AS AT ?as_of (default today), by days past their
+  // effective due date, per currency (P4-04 / RPT-06): the same rows as Money
+  // In (finance/receivablesAsAt.js). Closed statuses never count; a partly
+  // paid USD row is outstanding × its booked rate share, never the full
+  // base_amount_pkr; dollars and rupees are separate totals.
   async printableArAging(req, res) {
     try {
       const db = require('../../config/database');
-      const today = new Date();
-      const rows = await db('receivables as r')
-        .leftJoin('customers as c', 'r.customer_id', 'c.id')
-        .leftJoin('export_orders as eo', 'r.order_id', 'eo.id')
-        .whereNotIn('r.status', ['Paid', 'Written Off'])
-        .where('r.outstanding', '>', 0)
-        .select(
-          'r.id', 'r.recv_no', 'r.due_date', 'r.outstanding', 'r.customer_id',
-          'r.currency', 'r.fx_rate', 'r.base_amount_pkr', 'r.type',
-          db.raw('COALESCE(c.name, eo.order_no) as counterparty'),
-          'eo.order_no'
-        )
-        .orderBy('r.due_date', 'asc');
-
-      const buckets = { '0-30': { count: 0, totalPkr: 0 }, '31-60': { count: 0, totalPkr: 0 }, '61-90': { count: 0, totalPkr: 0 }, '90+': { count: 0, totalPkr: 0 } };
-      let totalPkr = 0;
-      const detail = rows.map((r) => {
-        const due = r.due_date ? new Date(r.due_date) : null;
-        const days = due ? Math.floor((today - due) / (1000 * 60 * 60 * 24)) : 0;
-        const bucket = days <= 30 ? '0-30' : days <= 60 ? '31-60' : days <= 90 ? '61-90' : '90+';
-        const out = parseFloat(r.outstanding) || 0;
-        const cur = String(r.currency || 'PKR').toUpperCase();
-        const stamped = parseFloat(r.base_amount_pkr) || 0;
-        // Stamped PKR, else the row's own rate; with neither the row has no PKR
-        // figure and adds nothing to the PKR buckets (D-10: no flat 280).
-        const fxRate = parseFloat(r.fx_rate) || 0;
-        const outPkr = cur === 'PKR' ? out : (stamped > 0 ? stamped * (out / parseFloat(r.outstanding || 1)) : out * fxRate);
-        buckets[bucket].count += 1;
-        buckets[bucket].totalPkr += outPkr;
-        totalPkr += outPkr;
-        return {
-          recvNo: r.recv_no, dueDate: r.due_date,
-          counterparty: r.counterparty || '—', customerId: r.customer_id,
-          type: r.type, currency: cur,
-          outstanding: out, outstandingPkr: outPkr,
-          ageDays: days, bucket,
-        };
-      });
-
+      const { receivablesAsAt, summarizeReceivables, BUCKETS } = require('../finance/receivablesAsAt');
+      const asOf = req.query.as_of && /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.as_of)) ? req.query.as_of : null;
+      const { asOf: d, rows } = await receivablesAsAt(db, { asOf });
+      const ids = [...new Set(rows.map((r) => r.customerId).filter(Boolean))];
+      const names = ids.length
+        ? Object.fromEntries((await db('customers').whereIn('id', ids).select('id', 'name')).map((c) => [c.id, c.name]))
+        : {};
+      const summary = summarizeReceivables(rows, { asOf: d });
       return res.json({
         success: true,
         data: {
-          asOf: today.toISOString(),
-          buckets, totalPkr,
-          rows: detail,
+          asOf: d,
+          bucketKeys: BUCKETS,
+          byCurrency: summary.byCurrency,
+          pkrEquiv: summary.pkrEquiv.outstanding,
+          rows: rows.map((r) => ({
+            recvNo: r.recvNo, dueDate: r.dueDate,
+            counterparty: names[r.customerId] || '—', customerId: r.customerId,
+            type: r.type, currency: r.currency,
+            outstanding: r.outstanding, outstandingPkr: r.outstandingPkr,
+            ageDays: r.daysPastDue, bucket: r.bucket,
+          })),
         },
       });
     } catch (err) {
@@ -1497,46 +1477,49 @@ const reportingController = {
   },
 
   // ──── AP Aging (printable) ─────────────────────────────────────
+  // Open payables by days past due, per currency (RPT-06: a USD payable is
+  // never printed as rupees). Point in time (today).
   async printableApAging(req, res) {
     try {
       const db = require('../../config/database');
-      const today = new Date();
+      const { PAYABLE_CLOSED } = require('../finance/currencyFigures');
+      const { bucketOf, daysPastDue, BUCKETS } = require('../finance/receivablesAsAt');
+      const { dayOf } = require('../../shared/fiscalYear');
+      const today = dayOf(new Date());
       const rows = await db('payables as p')
         .leftJoin('suppliers as s', 'p.supplier_id', 's.id')
-        .whereNotIn('p.status', ['Paid', 'Written Off'])
+        .whereNotIn('p.status', PAYABLE_CLOSED)
         .where('p.outstanding', '>', 0)
         .select(
-          'p.id', 'p.pay_no', 'p.due_date', 'p.outstanding', 'p.source_table', 'p.supplier_id',
+          'p.id', 'p.pay_no', 'p.due_date', 'p.outstanding', 'p.currency', 'p.source_table', 'p.supplier_id',
           db.raw("COALESCE(s.name, p.linked_ref, 'Vendor') as counterparty")
         )
         .orderBy('p.due_date', 'asc');
 
-      const buckets = { '0-30': { count: 0, totalPkr: 0 }, '31-60': { count: 0, totalPkr: 0 }, '61-90': { count: 0, totalPkr: 0 }, '90+': { count: 0, totalPkr: 0 } };
-      let totalPkr = 0;
+      const byCurrency = {};
       const detail = rows.map((r) => {
-        const due = r.due_date ? new Date(r.due_date) : null;
-        const days = due ? Math.floor((today - due) / (1000 * 60 * 60 * 24)) : 0;
-        const bucket = days <= 30 ? '0-30' : days <= 60 ? '31-60' : days <= 90 ? '61-90' : '90+';
-        const outPkr = parseFloat(r.outstanding) || 0;
-        buckets[bucket].count += 1;
-        buckets[bucket].totalPkr += outPkr;
-        totalPkr += outPkr;
+        const days = daysPastDue(dayOf(r.due_date), today);
+        const bucket = bucketOf(days);
+        const out = Math.round((parseFloat(r.outstanding) || 0) * 100) / 100;
+        const cur = String(r.currency || 'PKR').toUpperCase();
+        const c = byCurrency[cur] || (byCurrency[cur] = {
+          count: 0, outstanding: 0, buckets: Object.fromEntries(BUCKETS.map((k) => [k, 0])),
+        });
+        c.count += 1;
+        c.outstanding = Math.round((c.outstanding + out) * 100) / 100;
+        c.buckets[bucket] = Math.round((c.buckets[bucket] + out) * 100) / 100;
         return {
-          payableNo: r.pay_no, dueDate: r.due_date,
+          payableNo: r.pay_no, dueDate: dayOf(r.due_date),
           counterparty: r.counterparty || '—', supplierId: r.supplier_id,
-          sourceTable: r.source_table,
-          outstandingPkr: outPkr,
-          ageDays: days, bucket,
+          sourceTable: r.source_table, currency: cur,
+          outstanding: out,
+          ageDays: days != null && days > 0 ? days : 0, bucket,
         };
       });
 
       return res.json({
         success: true,
-        data: {
-          asOf: today.toISOString(),
-          buckets, totalPkr,
-          rows: detail,
-        },
+        data: { asOf: today, bucketKeys: BUCKETS, byCurrency, rows: detail },
       });
     } catch (err) {
       console.error('Printable AP aging report error:', err);

@@ -188,6 +188,8 @@ router.delete('/fund-transfers/:id', authorizeRole('Owner', 'Super Admin'),
   reverseTransferHandler);
 
 router.get('/receivables', authorize('finance', 'view'), controller.getReceivables);
+// Server-side as-at tiles + aging for Money In (P4-04), per currency.
+router.get('/receivables/summary', authorize('finance', 'view'), controller.getReceivablesSummary);
 router.get('/receivables/:id/receipts', authorize('finance', 'view'), controller.getReceivableReceipts);
 router.get('/payables', authorize('finance', 'view'), controller.getPayables);
 router.get('/payables/:id/payments', authorize('finance', 'view'), controller.getPayablePayments);

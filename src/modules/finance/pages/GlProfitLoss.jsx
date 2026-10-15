@@ -6,7 +6,7 @@ import { useProfitLoss } from '../../../api/queries';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { useGlEntity, glParams, pkr } from '../utils/glStatements';
 import {
-  EntityFilter, PeriodLine, StatementHeader, StateBox, AccountSection,
+  EntityFilter, PeriodLine, PeriodStatusBadge, StatementHeader, StateBox, AccountSection,
 } from '../components/GlStatementParts';
 import { ServerCsvButton } from '../../analytics/components/ReportChrome';
 
@@ -27,7 +27,7 @@ export function ProfitLossView({ data, isLoading, error, onRetry, entity, onEnti
   return (
     <div className="print-report space-y-4 pb-4">
       <StatementHeader title="Profit & loss (general ledger)">
-        <PeriodLine mode="period" from={from} to={to} /> · PKR · Posted journals only
+        <PeriodLine mode="period" from={from} to={to} /> · PKR · Posted journals only{data?.periodStatus && <> · <PeriodStatusBadge status={data.periodStatus} /></>}
       </StatementHeader>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <EntityFilter entity={entity} onChange={onEntity} />

@@ -757,6 +757,27 @@ export function useReceivables(params = {}, { enabled = true } = {}) {
   });
 }
 
+// Money In ▸ tiles + aging (P4-04), computed on the server: outstanding,
+// overdue and aging AS AT params.as_of, collected from params.from_date —
+// per currency, never summed.
+export function useReceivablesSummary(params = {}, { enabled = true } = {}) {
+  return useQuery({
+    queryKey: [...queryKeys.receivables.all, 'summary', params],
+    queryFn: async () => transformKeys(unwrap(await financeApi.receivablesSummary(params)) || {}),
+    enabled,
+    staleTime: 5 * 1000,
+    refetchOnMount: 'always',
+  });
+}
+
+// Accounting periods (D-1) — every month, or one fiscal year (params.fy).
+export function useAccountingPeriods(params = {}) {
+  return useQuery({
+    queryKey: ['accounting-periods', params],
+    queryFn: async () => transformKeys(unwrap(await accountingApi.periods(params)) || {}),
+  });
+}
+
 // The mill's own receivables (entity 'mill'), read-only, for mill roles without
 // finance.view — Mill Finance ▸ Customers for the Mill Operator.
 export function useMillReceivables(params = {}, { enabled = true } = {}) {

@@ -6,7 +6,7 @@ import { useBalanceSheet } from '../../../api/queries';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { useGlEntity, glParams, pkr } from '../utils/glStatements';
 import {
-  EntityFilter, PeriodLine, StatementHeader, BalancedBadge, StateBox, AccountSection,
+  EntityFilter, PeriodLine, PeriodStatusBadge, StatementHeader, BalancedBadge, StateBox, AccountSection,
 } from '../components/GlStatementParts';
 import { ServerCsvButton } from '../../analytics/components/ReportChrome';
 
@@ -28,7 +28,7 @@ export function BalanceSheetView({ data, isLoading, error, onRetry, entity, onEn
   return (
     <div className="print-report space-y-4 pb-4">
       <StatementHeader title="Balance sheet">
-        <PeriodLine mode="asOf" to={asOf} /> · PKR · Posted journals only
+        <PeriodLine mode="asOf" to={asOf} /> · PKR · Posted journals only{data?.periodStatus && <> · <PeriodStatusBadge status={data.periodStatus} /></>}
       </StatementHeader>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <EntityFilter entity={entity} onChange={onEntity} />

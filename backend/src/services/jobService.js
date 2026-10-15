@@ -1,5 +1,6 @@
 const path = require('path');
 const db = require('../config/database');
+const { assertDateOpen } = require('../modules/accounting/periods');
 
 /**
  * Background Job Processor — Phase 10 (Enterprise)
@@ -408,6 +409,9 @@ const jobService = {
           errors.push({ row: processed, field: 'account_code', error: `Account ${row.account_code} not found` });
           continue;
         }
+
+        // D-1: an opening balance dated in a closed accounting period is refused.
+        await assertDateOpen(db, row.date || new Date(), 'import an opening balance');
 
         const seqNum = imported.length + 1;
         const [journal] = await db('journal_entries').insert({

@@ -64,7 +64,7 @@ describe('six workspaces', () => {
 
   it('Accounting hides the GL statement views when finance.view is missing, and keeps the rest', () => {
     const acc = (perms) => visibleWorkspaces(perms).find((w) => w.key === 'accounting').views.map((v) => v.key);
-    expect(acc(allow('finance.view'))).toEqual(['journal', 'trial-balance', 'pnl', 'balance-sheet', 'profit', 'statements', 'rates', 'stock-transfers']);
+    expect(acc(allow('finance.view'))).toEqual(['journal', 'trial-balance', 'pnl', 'balance-sheet', 'periods', 'profit', 'statements', 'rates', 'stock-transfers']);
     expect(acc(allow())).toEqual(['journal', 'profit', 'statements', 'rates']);
   });
 

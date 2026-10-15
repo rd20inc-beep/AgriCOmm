@@ -131,6 +131,7 @@ const BankReconciliation = lazyWithReload(() => import('./modules/finance/pages/
 const TrialBalance = lazyWithReload(() => import('./modules/finance/pages/TrialBalance'));
 const GlProfitLoss = lazyWithReload(() => import('./modules/finance/pages/GlProfitLoss'));
 const BalanceSheet = lazyWithReload(() => import('./modules/finance/pages/BalanceSheet'));
+const AccountingPeriods = lazyWithReload(() => import('./modules/finance/pages/Periods'));
 
 function FinanceRoutes() {
   return (
@@ -157,6 +158,7 @@ function FinanceRoutes() {
         <Route path="accounting/trial-balance" element={<ProtectedRoute module="finance" action="view"><TrialBalance /></ProtectedRoute>} />
         <Route path="accounting/pnl" element={<ProtectedRoute module="finance" action="view"><GlProfitLoss /></ProtectedRoute>} />
         <Route path="accounting/balance-sheet" element={<ProtectedRoute module="finance" action="view"><BalanceSheet /></ProtectedRoute>} />
+        <Route path="accounting/periods" element={<ProtectedRoute module="finance" action="view"><AccountingPeriods /></ProtectedRoute>} />
         <Route path="accounting/profit" element={<Profit />} />
         <Route path="accounting/statements" element={<PartyLedger />} />
         <Route path="accounting/rates" element={<RatesCenter />} />

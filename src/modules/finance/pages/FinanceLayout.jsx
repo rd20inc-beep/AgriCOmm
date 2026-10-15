@@ -7,6 +7,7 @@ import { usePendingExportReceipts } from '../../../api/queries';
 import { SkeletonPage } from '../../../shared/components/Skeleton';
 import {
   visibleWorkspaces, matchFinanceLocation, withRange, visibleHeaderActions, PERIOD_PRESETS, primaryHeaderAction,
+  CUSTOM_RANGE, customRangeKey,
 } from '../financeNav';
 import { btnPrimary, btnSecondary } from '../utils/uiClasses';
 import { FinanceDrawersProvider } from '../drawers/FinanceDrawers';
@@ -250,27 +251,59 @@ function CountBadge({ n }) {
 
 // The period selector. Pages that are not filtered by period say so instead
 // of showing a control that does nothing; balance pages read it as "as at
-// the end of the period".
-function PeriodControl({ period, value, onChange }) {
+// the end of the period". "Custom range…" shows two dates; the range travels
+// as ?range=YYYY-MM-DD..YYYY-MM-DD (financeNav CUSTOM_RANGE).
+export function PeriodControl({ period, value, onChange }) {
+  const custom = String(value || '').match(CUSTOM_RANGE);
+  const [editing, setEditing] = useState(false);
   if (!period) {
     return (
       <span data-testid="period-off" className="text-xs text-gray-500 px-1 whitespace-nowrap">Not filtered by period</span>
     );
   }
+  const showDates = editing || !!custom;
   return (
-    <div className="flex items-center gap-1.5 bg-white rounded-lg px-2.5 min-h-10 sm:min-h-9 border border-gray-200 focus-within:ring-2 focus-within:ring-blue-500 shrink-0">
+    <div className="flex items-center gap-1.5 bg-white rounded-lg px-2.5 min-h-10 sm:min-h-9 border border-gray-200 focus-within:ring-2 focus-within:ring-blue-500 shrink-0 flex-wrap">
       <Clock size={14} className="text-gray-400" aria-hidden="true" />
       {period === 'asOf' && <span className="text-xs text-gray-500 whitespace-nowrap">As at end of</span>}
       <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
+        value={showDates ? 'custom' : value}
+        onChange={(e) => {
+          if (e.target.value === 'custom') { setEditing(true); return; }
+          setEditing(false);
+          onChange(e.target.value);
+        }}
         aria-label="Period"
         className="text-sm bg-transparent border-none focus:outline-none text-gray-700 font-medium cursor-pointer pr-1"
       >
         {PERIOD_PRESETS.map((p) => (
           <option key={p.value} value={p.value}>{p.label}</option>
         ))}
+        <option value="custom">Custom range…</option>
       </select>
+      {showDates && (
+        // Keyed by the range so the two dates restart from the URL's range
+        // whenever it changes (Back, a shared link).
+        <CustomRangeInputs key={value} custom={custom}
+          onApply={(key) => { onChange(key); setEditing(false); }} />
+      )}
     </div>
+  );
+}
+
+function CustomRangeInputs({ custom, onApply }) {
+  const [from, setFrom] = useState(custom ? custom[1] : '');
+  const [to, setTo] = useState(custom ? custom[2] : '');
+  const apply = (f, t) => { const key = customRangeKey(f, t); if (key) onApply(key); };
+  return (
+    <span className="flex items-center gap-1" data-testid="period-custom">
+      <input type="date" aria-label="From" value={from} max={to || undefined}
+        onChange={(e) => { setFrom(e.target.value); apply(e.target.value, to); }}
+        className="text-xs border border-gray-200 rounded px-1 py-0.5" />
+      <span className="text-xs text-gray-400">–</span>
+      <input type="date" aria-label="To" value={to} min={from || undefined}
+        onChange={(e) => { setTo(e.target.value); apply(from, e.target.value); }}
+        className="text-xs border border-gray-200 rounded px-1 py-0.5" />
+    </span>
   );
 }
