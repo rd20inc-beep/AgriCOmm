@@ -9,7 +9,7 @@ import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import PartyLink from '../../../shared/components/PartyLink';
 import { shortenRef } from '../utils/refs';
-import { moneyOutTiles } from '../utils/moneyTiles';
+import { moneyOutTiles, isOverdueRow } from '../utils/moneyTiles';
 import { isDerivedPayable, derivedPayableHint } from '../../../shared/utils/derivedPayables';
 import { isSettleable, canRecordVariant, contextForDocument } from '../../../components/payments/paymentVariants';
 import { useFinanceDrawers } from '../drawers/drawersContext';
@@ -40,7 +40,9 @@ export default function MoneyOut() {
   const filtered = useMemo(() => payables.filter((p) => {
     if (entityFilter !== 'All' && p.entity !== entityFilter.toLowerCase()) return false;
     if (categoryFilter !== 'All' && p.category !== categoryFilter) return false;
-    if (statusFilter !== 'All' && !eqStatus(p.status, statusFilter)) return false;
+    // 'Overdue' is the server's D-15 flag (past due, still owed), not a status word.
+    if (statusFilter === 'Overdue') { if (!isOverdueRow(p)) return false; }
+    else if (statusFilter !== 'All' && !eqStatus(p.status, statusFilter)) return false;
     return true;
   }), [payables, entityFilter, categoryFilter, statusFilter]);
 

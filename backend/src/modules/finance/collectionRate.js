@@ -15,8 +15,11 @@
  *   - Overdue = the outstanding on the due rows — the warning the tiles show.
  */
 
+// The effective due date is the D-15 overdue rule's (kpi/overdue.js), so the
+// collection rate and every overdue tile agree on when a balance falls due.
+const { effectiveDueSql, balanceTermDays, DEFAULT_BALANCE_TERM_DAYS } = require('../kpi/overdue');
+
 const DEFAULT_TARGET_PCT = 95;
-const DEFAULT_BALANCE_TERM_DAYS = 30;
 
 const num = (v) => {
   const n = parseFloat(v);
@@ -31,8 +34,9 @@ async function settingNumber(conn, key, fallback) {
   return Number.isFinite(n) && n >= 0 ? n : fallback;
 }
 
+// The term itself is the overdue rule's (kpi/overdue.js).
 async function balanceTermDaysSetting(conn) {
-  return settingNumber(conn, 'export_balance_term_days', DEFAULT_BALANCE_TERM_DAYS);
+  return balanceTermDays(conn);
 }
 
 /** { default, USD?, PKR?, ... } target percentages. */
@@ -109,16 +113,11 @@ async function collectionRate(conn, { asOf } = {}) {
   const rows = rowsOf(await conn.raw(`
     SELECT COALESCE(r.currency, 'PKR') AS currency,
            r.expected_amount AS expected, r.received_amount AS received, r.outstanding,
-           (CASE
-              WHEN r.type = 'Balance' AND r.order_id IS NOT NULL THEN
-                CASE WHEN COALESCE(o.bl_date, o.atd) IS NULL THEN NULL
-                     ELSE COALESCE(o.bl_date, o.atd) + COALESCE(o.balance_term_days, ?)::int END
-              ELSE r.due_date
-            END)::text AS effective_due
+           ${effectiveDueSql({ r: 'r', o: 'o', termDays })}::text AS effective_due
       FROM receivables r
       LEFT JOIN export_orders o ON o.id = r.order_id
      WHERE r.status <> 'Written Off'
-       AND (o.id IS NULL OR o.status NOT IN ('Cancelled', 'Draft'))`, [termDays]));
+       AND (o.id IS NULL OR o.status NOT IN ('Cancelled', 'Draft'))`));
   return foldCollection(rows, { asOf, targets });
 }
 

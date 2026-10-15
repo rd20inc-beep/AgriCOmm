@@ -15,7 +15,7 @@ import {
   useDeleteWorkerAdvance, useVoidWorkerAdvance, useAdvanceLedger, useStopRecurring,
   usePendingAdvances, useApproveAdvance, useRejectAdvance, usePayAdvance,
   useWorkerAdjustments, useCreateWorkerAdjustment, useDeleteWorkerAdjustment,
-  usePayrollSummary, useRecordAttendance, useAttendance, useBulkAttendance, useImportAttendance, useAttendanceHolidays, useInventory, useExpenseVendors,
+  usePayrollSummary, useRecordAttendance, useAttendance, useBulkAttendance, useImportAttendance, useAttendanceHolidays, useExpenseVendors,
   usePayrollRuns, usePostPayrollRun, useDeletePayrollRun, usePayrollRun, usePayrollReport,
   useApprovePayrollRun, usePayPayrollRun, useVoidPayrollRun, useAccruePayrollRun, useSettlePayrollRun,
   useStatutoryDeductions, useCreateStatutoryDeduction, useUpdateStatutoryDeduction, useDeleteStatutoryDeduction,
@@ -25,13 +25,12 @@ import {
   useApproveLeaveRequest, useRejectLeaveRequest,
   useFinalSettlement, useFinalizeSettlement, usePayrollAudit, useSalaryRevisions, useReviseSalary,
   usePayrollSchedule, useSavePayrollSchedule, useRunPayrollNow,
-  usePayables, useReceivables, useMillPayables, useMillReceivables, useSuppliers, useCustomers, usePurchases, useLocalSalesSummary, useMillCashFlow, useAcceptFundTransfer,
+  usePayables, useReceivables, useMillPayables, useMillReceivables, useSuppliers, useCustomers, useMillCashFlow, useMillFinanceKpis, useMillFinanceKpiDetail, useAcceptFundTransfer,
   useMillLotCosts, useLocalSales, useRecordPayment, usePayablePayments, useBankAccounts, useHeldStockProfit, useProfitLoss, useMillExpenseHeads, useCreateMillExpenseHead } from '../../../api/queries';
 import TransactionDocument from '../../../components/TransactionDocument';
 import NewPurchaseDrawer from '../../../components/NewPurchaseDrawer';
 import { downloadCSV } from '../../../utils/csvExport';
 import StatusBadge from '../../../components/StatusBadge';
-import { useCommodityPrices } from '../hooks/useCommodityPrices';
 import SlideDrawer from '../../../components/SlideDrawer';
 import SearchSelect from '../../../shared/components/SearchSelect';
 import MillSupplierStatement from '../components/MillSupplierStatement';
@@ -45,17 +44,17 @@ import TransferFundsDrawer from '../../finance/components/TransferFundsDrawer';
 import AnomalyWatchCard from '../../ai/components/AnomalyWatchCard';
 import { favStar } from '../../../shared/utils/favorites';
 import { accountsForCurrency } from '../../../shared/utils/accountCurrency';
-import { valueInventory, onHandKg } from '../utils/inventoryValue';
 import useConfirm from '../../../hooks/useConfirm';
 import PaymentDrawer from '../../../components/payments/PaymentDrawer';
-import { toLocalISODate, todayLocalISO, fmtPKR, fmtNum, fmtPct, fmtKg, fmtDate, fmtDateTime } from '../../../shared/utils/format';
+import { todayLocalISO, fmtPKR, fmtNum, fmtPct, fmtKg, fmtDate, fmtDateTime } from '../../../shared/utils/format';
 import { escapeHtml, escapeFields } from '../../../shared/utils/html';
-import { batchByproductRevenuePKR } from '../utils/byproductPrices';
 import { isNetLowered, rowsMissingNetReason, netOverrideReasonFor } from '../utils/payrollNet';
 
 const PKR = (v) => fmtPKR(v || 0, { decimals: 2 });
 // Was a Cr/L/k abbreviator; KPI cards now show the exact rupee figure.
 const COMPACT_PKR = (v) => fmtPKR(v || 0);
+// The dashboard period (resolved on the server; fiscal year July–June).
+const PERIOD_OPTIONS = [['month', 'This month'], ['quarter', 'Quarter'], ['fytd', 'FY to date'], ['all', 'All time']];
 
 const EXPENSE_CATS = [
   'utilities', 'rent', 'maintenance', 'insurance',
@@ -199,17 +198,30 @@ function PayPayableDrawer({ payTarget, onClose, addToast }) {
 // dashboard (/finance/payroll) — payroll is a single set of mill workers.
 export default function MillFinanceDashboard({ payrollOnly = false }) {
   const { millingBatches, addToast, companyProfileData, bankAccountsList } = useApp();
-  const cp = useCommodityPrices();
-  const DEFAULT_PRICES = { finished: cp.finished, broken: cp.broken, bran: cp.bran, husk: cp.husk };
-  const batchPrice = (b, product) => b[`${product}PricePerMT`] || DEFAULT_PRICES[product];
-  const { data: directInventory = [] } = useInventory({});
   const [confirm, confirmDialog] = useConfirm();
+  // ONE period for the whole dashboard (fiscal year July–June, D-1); the
+  // server resolves it to dates. Profit, production and cash are all for it.
+  const [period, setPeriod] = useState('month');
+  // Every KPI on this page comes from the backend (kpi/millFinance.js,
+  // docs/AGRIRICE_KPI_CONTRACTS.md) — no profit, stock value or yield is
+  // computed in the browser any more (P4-01 / P4-02).
+  const { data: kpiData } = useMillFinanceKpis({ period }, { enabled: !payrollOnly });
+  const mk = useMemo(() => {
+    const p = kpiData?.profit || {};
+    const pr = kpiData?.production || {};
+    const wc = kpiData?.workingCapital || {};
+    return { period: kpiData?.period || null, profit: p, production: pr, wc, loaded: !!kpiData };
+  }, [kpiData]);
   // THE BOOKS. The cards below this row are derived from milling batches, which
   // only count once a batch is Completed — so with a batch still pending, they
   // reported Revenue 0 and a loss equal to the month's expenses while real sales
   // sat posted in the ledger. This is the ledger's own answer, and it cannot
   // double-count the way adding estimated batch revenue to actual sales would.
-  const { data: glPnl } = useProfitLoss({ entity: 'mill' });
+  const { data: glPnl } = useProfitLoss({
+    entity: 'mill',
+    ...(mk.period?.from ? { period_start: mk.period.from } : {}),
+    ...(mk.period?.to ? { period_end: mk.period.to } : {}),
+  });
   const books = useMemo(() => ({
     revenue: parseFloat(glPnl?.revenue?.total) || 0,
     cogs: parseFloat(glPnl?.cogs?.total) || 0,
@@ -231,14 +243,6 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
       ratesConfigured: valuation?.ratesConfigured || 0,
     };
   }, [valuation]);
-  const inventory = Array.isArray(directInventory) ? directInventory : [];
-  // Quantities are KG, so they must NOT be multiplied by 1000 — see
-  // utils/inventoryValue.js for why the lot's "MT" unit label is a trap.
-  const inventoryValue = useMemo(() => valueInventory(inventory), [inventory]);
-  // KG on hand per type, on the same basis as the value above (mill, company).
-  const millKgOnHand = (type) => inventory
-    .filter((i) => i.type === type && (!i.entity || i.entity === 'mill') && (!i.ownership || i.ownership === 'company'))
-    .reduce((s, i) => s + onHandKg(i), 0);
 
   const { data: vendorData } = useExpenseVendors();
   // category → [{ id, name, ... }] for the Provider dropdown
@@ -378,8 +382,6 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
     return arr.filter((p) => String(p.entity || '').toLowerCase() === 'mill');
   }, [payablesRaw]);
   const { data: suppliers = [] } = useSuppliers();
-  const { data: storePurchaseData } = usePurchases();
-  const { data: localSalesSummary } = useLocalSalesSummary();
   const [selectedSupplier, setSelectedSupplier] = useState(null);
   const { data: localCustomers = [] } = useCustomers({ type: 'local' });
   const { data: allLocalSales = [] } = useLocalSales(); // every page (P4-11)
@@ -419,24 +421,16 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
   const [cashEntry, setCashEntry] = useState(null); // view a cash-ledger entry's voucher/receipt
   const [showNewPurchase, setShowNewPurchase] = useState(false); // mill-store purchase drawer
 
-  // ── Cash account: actual money in/out ledger with a period filter ──
-  const [cashRange, setCashRange] = useState('all'); // all | month | quarter | ytd
-  const cashParams = useMemo(() => {
-    if (cashRange === 'all') return {};
-    const now = new Date();
-    const y = now.getFullYear();
-    let from;
-    if (cashRange === 'month') from = new Date(y, now.getMonth(), 1);
-    else if (cashRange === 'quarter') from = new Date(y, Math.floor(now.getMonth() / 3) * 3, 1);
-    else from = new Date(y, 0, 1); // ytd
-    return { from_date: toLocalISODate(from) };
-  }, [cashRange]);
-  const { data: cashFlow } = useMillCashFlow(cashParams);
+  // ── Cash account: actual money in/out ledger for the dashboard period ──
+  // The server applies the finance status rule (mill_cash_flow.v1): a Reversed
+  // or Bounced payment and an uncleared cheque are listed but never counted.
+  const { data: cashFlow } = useMillCashFlow({ period });
   const cashLedger = useMemo(() => {
     const rows = cashFlow?.ledger || [];
     return rows.reduce((acc, r) => {
       const prev = acc.length ? acc[acc.length - 1].balance : 0;
-      acc.push({ ...r, balance: prev + (r.direction === 'in' ? r.amount_pkr : -r.amount_pkr) });
+      const move = r.counted === false ? 0 : (r.direction === 'in' ? r.amount_pkr : -r.amount_pkr);
+      acc.push({ ...r, balance: prev + move });
       return acc;
     }, []);
   }, [cashFlow]);
@@ -503,6 +497,11 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
   const anyUnpaid = unpaidEmployees.length > 0;
 
   const [activeTab, setActiveTab] = useState(payrollOnly ? 'payroll' : 'overview');
+  // Efficiency: the period's completed company batches, from the server
+  // (the rows behind yield.v1 / production_value.v1), not the newest 200.
+  const EFF_LIMIT = 500;
+  const { data: effDetail } = useMillFinanceKpiDetail({ part: 'batches', period, limit: EFF_LIMIT }, { enabled: activeTab === 'efficiency' });
+  const effBatches = effDetail?.rows || [];
   const [openGroup, setOpenGroup] = useState(null);
   // Deep-link from the Mill Customers/Suppliers pages: ?tab=customers&customer=ID
   // (or tab=suppliers&supplier=ID) opens the right tab with the party selected.
@@ -531,63 +530,13 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
 
   const completed = useMemo(() => millingBatches.filter(b => b.status === 'Completed'), [millingBatches]);
 
-  const RAW_KEYS = new Set(['rawRice', 'raw_rice', 'rawrice']);
-  const getRawCost = (costs) => {
-    if (!costs) return 0;
-    for (const [k, v] of Object.entries(costs)) {
-      if (RAW_KEYS.has(k)) return parseFloat(v) || 0;
-    }
-    return 0;
-  };
-
-  // A blend re-mills already-owned finished rice, so its raw_rice cost is the
-  // internal value of stock already counted as raw material on its source
-  // batches — excluding it stops the raw-material/cost KPIs double-counting.
-  const isBlendBatch = (b) => b.processingType === 'blended';
-
-  const kpis = useMemo(() => {
-    const totalRaw = completed.reduce((s, b) => s + (isBlendBatch(b) ? 0 : getRawCost(b.costs)), 0);
-    const totalOtherCosts = completed.reduce((s, b) => {
-      return s + Object.entries(b.costs || {}).reduce((cs, [k, v]) => RAW_KEYS.has(k) ? cs : cs + (parseFloat(v) || 0), 0);
-    }, 0);
-    // Packing / bags is part of Other costs — split out so it's visible.
-    const totalPacking = completed.reduce((s, b) => s + (parseFloat(b.costs?.packaging) || 0), 0);
-    // Milling cost = the processing/milling fee (Rs/kg × raw qty). It lives on the
-    // batch (milling_fee_per_kg), not as a milling_costs row, so the batch-cost
-    // sums above miss it. Own production only — a service-milled batch's fee is
-    // revenue (counted in serviceFees), not a cost.
-    const totalMilling = completed.reduce((s, b) =>
-      s + (b.isServiceMilling ? 0 : (parseFloat(b.millingFeePerKg) || 0) * (parseFloat(b.rawQtyMT) || 0) * 1000), 0);
-    // Count only finished output NOT re-milled into a downstream blend (sellable
-    // rice) — otherwise the blend's output double-counts its source batches', as
-    // that rice can only be sold once.
-    const sellableFinishedMT = (b) => Math.max(0, b.actualFinishedMT - (b.finishedConsumedMT || 0));
-    const finishedRev = completed.reduce((s, b) => s + sellableFinishedMT(b) * batchPrice(b, 'finished'), 0);
-    // By-products at what the yield booked on the output lots (server-side
-    // batchOutputValues). Only a batch with no stored output is recomputed —
-    // each by-product at the batch's own price, per broken grade when the
-    // batch recorded the split (never brokenMT × the aggregate broken price).
-    const byproductRev = completed.reduce((s, b) =>
-      s + batchByproductRevenuePKR(b, DEFAULT_PRICES.broken), 0);
-    const totalRev = finishedRev + byproductRev;
-    const totalCost = totalRaw + totalMilling + totalOtherCosts + totalOverhead;
-    const totalFinishedKg = completed.reduce((s, b) => s + sellableFinishedMT(b) * 1000, 0);
-    const costPerKg = totalFinishedKg > 0 ? totalCost / totalFinishedKg : 0;
-    return { totalRev, totalRaw, totalMilling, totalOtherCosts, totalPacking, totalCost, netProfit: totalRev - totalCost, costPerKg, finishedRev, byproductRev };
-  }, [completed, totalOverhead]);
-
-  const efficiency = useMemo(() => {
-    if (completed.length === 0) return { avgYield: 0, avgWastage: 0, costPerKg: 0 };
-    const totalRaw = completed.reduce((s, b) => s + b.rawQtyMT, 0);
-    const totalFinished = completed.reduce((s, b) => s + b.actualFinishedMT, 0);
-    const totalWastage = completed.reduce((s, b) => s + (b.wastageMT || 0), 0);
-    return {
-      avgYield: totalRaw > 0 ? (totalFinished / totalRaw * 100).toFixed(1) : 0,
-      avgWastage: totalRaw > 0 ? (totalWastage / totalRaw * 100).toFixed(1) : 0,
-      costPerKg: kpis.costPerKg.toFixed(2),
-      totalRaw, totalFinished, totalWastage,
-    };
-  }, [completed, kpis]);
+  // Mill profit (D-13): the profitDefinitions "Mill (net)" figure — sales of
+  // mill output − their COGS − the period's overheads. It used to be built
+  // here from the newest 200 batches: all-time, unsold output at selling
+  // price, a phantom Rs 5/kg fee, overheads already in batch costs and payroll
+  // subtracted twice (RPT-07, MIL-02, MIL-29, MIL-31).
+  const margin = mk.profit.marginPct != null ? mk.profit.marginPct.toFixed(1) : '0.0';
+  const periodLabel = mk.period?.label || '';
 
   const lossData = useMemo(() => {
     return completed.map(b => {
@@ -599,48 +548,6 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
       return { ...b, expected, variance, variancePct, flagged };
     }).sort((a, b) => a.variancePct - b.variancePct);
   }, [completed]);
-
-  const margin = kpis.totalRev > 0 ? (kpis.netProfit / kpis.totalRev * 100).toFixed(1) : 0;
-
-  // ── Money In / Out streams ──
-  // Service-milling fees: batches we milled for outside clients (flagged in
-  // notes by the create form). Fee = raw qty (kg) × fee/kg.
-  const serviceFees = useMemo(() => millingBatches.reduce((s, b) => {
-    if (!String(b.notes || '').includes('[SERVICE MILLING]')) return s;
-    return s + (parseFloat(b.millingFeePerKg) || 0) * (parseFloat(b.rawQtyMT) || 0) * 1000;
-  }, 0), [millingBatches]);
-
-  // usePurchases() returns totals raw (snake_case); total_pkr spans ALL purchase
-  // sources (mill store + export costs + lots), so use by_source.mill_store for
-  // the mill-store consumables figure only.
-  const storePurchaseTotal = parseFloat(
-    storePurchaseData?.totals?.by_source?.mill_store ?? storePurchaseData?.totals?.bySource?.mill_store ?? 0
-  ) || 0;
-  // useLocalSalesSummary() shape: { all: { total, due }, profit: { revenue, collected } }
-  const localSalesRevenue = parseFloat(
-    localSalesSummary?.all?.total ?? localSalesSummary?.profit?.revenue ?? 0
-  ) || 0;
-  const localSalesCollected = parseFloat(localSalesSummary?.profit?.collected ?? 0) || 0;
-
-  const moneyFlow = useMemo(() => {
-    const out = {
-      paddy: kpis.totalRaw,
-      milling: kpis.totalMilling,
-      batchCosts: kpis.totalOtherCosts,
-      overhead: totalOverhead,
-      payroll: payrollTotal,
-      store: storePurchaseTotal,
-    };
-    out.total = out.paddy + out.milling + out.batchCosts + out.overhead + out.payroll + out.store;
-    const inc = {
-      output: kpis.totalRev,
-      finished: kpis.finishedRev,
-      byproduct: kpis.byproductRev,
-      localSales: localSalesRevenue,
-      serviceFees,
-    };
-    return { out, inc, netProduction: inc.output - out.total };
-  }, [kpis, totalOverhead, payrollTotal, storePurchaseTotal, localSalesRevenue, serviceFees]);
 
   // ── Supplier directory (money owed to mill suppliers) ──
   const supplierRows = useMemo(() => {
@@ -862,22 +769,35 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
         <div className="relative flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
           <div className="min-w-0">
             <div className="flex items-center gap-2 text-[11px] uppercase tracking-wider opacity-80 mb-1">
-              <Factory size={13} /> Mill finance · {curMonth}
+              <Factory size={13} /> Mill profit (net) · {periodLabel || '…'}
             </div>
-            <div className="text-3xl sm:text-4xl font-bold leading-tight tabular-nums">
-              {COMPACT_PKR(kpis.netProfit)}
+            {/* D-13 headline: profitDefinitions "Mill (net)" — sales of mill
+                output − their COGS − the period's overheads. PKR. */}
+            <div className="text-3xl sm:text-4xl font-bold leading-tight tabular-nums" data-testid="mill-profit-headline">
+              {mk.loaded ? COMPACT_PKR(mk.profit.netProfitPkr) : '—'}
             </div>
             <div className="text-xs opacity-90 mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
               <span className="inline-flex items-center gap-1">
-                {kpis.netProfit >= 0 ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}
-                Net profit · margin {margin}%
+                {(mk.profit.netProfitPkr || 0) >= 0 ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}
+                margin {margin}%
               </span>
               <span className="opacity-70">·</span>
-              <span>{completed.length} completed batches</span>
+              <span>Sales {COMPACT_PKR(mk.profit.revenuePkr)}</span>
               <span className="opacity-70">·</span>
-              <span>Revenue {COMPACT_PKR(kpis.totalRev)}</span>
+              <span>COGS {COMPACT_PKR(mk.profit.cogsPkr)}</span>
               <span className="opacity-70">·</span>
-              <span>Cost {COMPACT_PKR(kpis.totalCost)}</span>
+              <span>Overheads {COMPACT_PKR(mk.profit.overheadsPkr)}</span>
+            </div>
+            {/* Secondary (D-13), labelled: NOT profit and not revenue. */}
+            <div className="text-[11px] opacity-75 mt-1">
+              Production value at selling price (not profit): {COMPACT_PKR(mk.production.valueAtSellingPricePkr)}
+              {' '}· {mk.production.batchCount || 0} completed batch(es) · PKR · as of {kpiData?.asOf || '—'}
+            </div>
+            <div className="mt-2 flex items-center gap-0.5 rounded-lg bg-white/10 p-0.5 w-fit no-print" role="group" aria-label="Period">
+              {PERIOD_OPTIONS.map(([k, l]) => (
+                <button key={k} type="button" onClick={() => setPeriod(k)} aria-pressed={period === k}
+                  className={`px-2.5 py-1 text-xs rounded-md ${period === k ? 'bg-white text-gray-900 font-medium' : 'text-white/80 hover:text-white'}`}>{l}</button>
+              ))}
             </div>
           </div>
           <div className="flex items-center gap-2 no-print">
@@ -1039,16 +959,29 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
       {/* ─── OVERVIEW ──────────────────────────────────────────────── */}
       {activeTab === 'overview' && (
         <div className="space-y-5">
-          {/* Top KPI row */}
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
-            <Stat tone="blue"   icon={TrendingUp}   label="Production Value" value={PKR(kpis.totalRev)} sub={completed.length ? `${completed.length} completed batch(es)` : 'no completed batches'} />
-            <Stat tone="red"    icon={TrendingDown} label="Raw Material"   value={PKR(kpis.totalRaw)}   sub="Rice purchase" />
-            <Stat tone="purple" icon={Factory}      label="Milling Cost"   value={PKR(kpis.totalMilling)} sub="Processing fee" />
-            <Stat tone="amber"  icon={DollarSign}   label="Operating"      value={PKR(kpis.totalOtherCosts + totalOverhead)} sub={`Batch ${COMPACT_PKR(kpis.totalOtherCosts)} · OH ${COMPACT_PKR(totalOverhead)}`} />
-            <Stat tone={kpis.netProfit >= 0 ? 'green' : 'red'} icon={TrendingUp} label="Production Margin" value={PKR(kpis.netProfit)} sub={`Margin ${margin}% · milling only`} />
-            <Stat tone="slate"  icon={DollarSign}   label="Cost/kg"        value={fmtPKR(kpis.costPerKg, { decimals: 2 })} sub="All-in" />
-            <Stat tone="purple" icon={Package}      label="Inventory"      value={PKR(inventoryValue.total)} sub={`Raw ${COMPACT_PKR(inventoryValue.raw)}`} />
+          {/* Top KPI row — mill profit (D-13) and how it is made, for the
+              period, from the backend (mill_profit.v1). PKR. */}
+          <p className="text-[11px] text-gray-500">
+            {periodLabel || '…'}{mk.period?.from ? ` (${fmtDate(mk.period.from)} – ${fmtDate(mk.period.to)})` : ''} · PKR · quantities in kg · stock as of {kpiData?.asOf ? fmtDate(kpiData.asOf) : '—'}
+          </p>
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+            <Stat tone={(mk.profit.netProfitPkr || 0) >= 0 ? 'green' : 'red'} icon={TrendingUp} label="Mill Profit (net)"
+                  value={PKR(mk.profit.netProfitPkr)} sub={`margin ${margin}% · sales − COGS − overheads`} />
+            <Stat tone="blue"   icon={Receipt}      label="Sales of Mill Output" value={PKR(mk.profit.revenuePkr)}
+                  sub={`${mk.profit.saleCount || 0} sale(s) · ${mk.profit.transferCount || 0} transfer(s) to export`} />
+            <Stat tone="red"    icon={TrendingDown} label="Cost of Those Sales" value={PKR(mk.profit.cogsPkr)} sub="COGS locked at sale / transfer" />
+            <Stat tone="amber"  icon={DollarSign}   label="Mill Overheads"  value={PKR(mk.profit.overheadsPkr)}
+                  sub={`${mk.profit.overheadCount || 0} expense(s) not tied to a batch`} />
+            <Stat tone="slate"  icon={Factory}      label="Batch Cost / kg" value={mk.production.batchCostPerKgPkr != null ? fmtPKR(mk.production.batchCostPerKgPkr, { decimals: 2 }) : '—'}
+                  sub="cost sheet ÷ sellable finished kg" />
+            <Stat tone="purple" icon={Package}      label="Working Capital" value={PKR(mk.wc.totalPkr)} sub="mill stock at landed cost" />
           </div>
+          {(mk.profit.uncostedCount > 0 || mk.profit.overheadsUnconvertedCount > 0) && (
+            <p className="text-[11px] text-amber-700">
+              {mk.profit.uncostedCount > 0 && `${mk.profit.uncostedCount} sale(s) / transfer(s) of mill output have no cost yet — ${PKR(mk.profit.uncostedRevenuePkr)} left out of the profit until costed. `}
+              {mk.profit.overheadsUnconvertedCount > 0 && `${mk.profit.overheadsUnconvertedCount} foreign-currency overhead(s) have no PKR figure and are not counted.`}
+            </p>
+          )}
 
           {/* ── The books. Straight from the general ledger, so it agrees with the
                trial balance and includes sales the batch figures above cannot
@@ -1066,13 +999,14 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
                   sub={`after ${COMPACT_PKR(books.expenses)} expenses`} />
           </div>
 
-          {/* Inventory breakdown */}
+          {/* Working capital — mill company stock on hand × landed cost per kg
+              (D-14, stock_value.v1), from the backend. No fallback prices. */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            <Stat tone="amber"  label="Raw Rice"      value={PKR(inventoryValue.raw)} sub={fmtKg(millKgOnHand('raw'), { decimals: 2 })} />
-            <Stat tone="green"  label="Finished Rice" value={PKR(inventoryValue.fin)} sub={fmtKg(millKgOnHand('finished'), { decimals: 2 })} />
-            <Stat tone="purple" label="Byproducts"    value={PKR(inventoryValue.bp)}  sub={fmtKg(millKgOnHand('byproduct'), { decimals: 2 })} />
-            <Stat tone="blue"   label="Working Cap."  value={PKR(inventoryValue.total)}
-                  sub={inventoryValue.unpricedLots ? `${inventoryValue.unpricedLots} lot(s) have no cost — valued at 0` : 'Locked in stock (landed cost × on hand)'} />
+            <Stat tone="amber"  label="Raw Rice"      value={PKR(mk.wc.rawPkr)} sub={fmtKg(mk.wc.rawKg || 0, { decimals: 2 })} />
+            <Stat tone="green"  label="Finished Rice" value={PKR(mk.wc.finishedPkr)} sub={fmtKg(mk.wc.finishedKg || 0, { decimals: 2 })} />
+            <Stat tone="purple" label="Byproducts"    value={PKR(mk.wc.byproductPkr)}  sub={fmtKg(mk.wc.byproductKg || 0, { decimals: 2 })} />
+            <Stat tone="blue"   label="Working Cap."  value={PKR(mk.wc.totalPkr)}
+                  sub={mk.wc.unpricedLots ? `${mk.wc.unpricedLots} lot(s) have no cost — valued at 0` : `Locked in stock (landed cost × on hand)${mk.wc.committedToMillingPkr ? ` · ${COMPACT_PKR(mk.wc.committedToMillingPkr)} in milling` : ''}`} />
           </div>
 
           {/* Held-stock profit — what the stock on hand is worth at SELLING price,
@@ -1098,43 +1032,60 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
                   sub="per grade / variety" />
           </div>
 
-          {/* Net profit & margin breakdown */}
+          {/* Mill profit breakdown (mill_profit.v1) and, apart from it, the
+              period's production (production_value.v1) — the secondary
+              figure D-13 allows, labelled so it is never read as profit. */}
           <div className="bg-white rounded-xl border border-gray-100 p-5">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-semibold text-gray-800">Net Profit &amp; Margin</h3>
-              <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${kpis.netProfit >= 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>
+              <h3 className="text-sm font-semibold text-gray-800">Mill Profit (net) — how it is made</h3>
+              <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${(mk.profit.netProfitPkr || 0) >= 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>
                 Margin {margin}%
               </span>
             </div>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-10 gap-y-1.5">
               <div className="space-y-1.5">
-                <div className="flex justify-between text-sm font-semibold text-gray-900"><span>Revenue</span><span className="tabular-nums text-emerald-600">{PKR(kpis.totalRev)}</span></div>
-                <div className="flex justify-between text-xs text-gray-500 pl-3"><span>Finished rice (sellable)</span><span className="tabular-nums">{PKR(kpis.finishedRev)}</span></div>
-                <div className="flex justify-between text-xs text-gray-500 pl-3"><span>By-products</span><span className="tabular-nums">{PKR(kpis.byproductRev)}</span></div>
+                <div className="flex justify-between text-sm font-semibold text-gray-900"><span>Sales of mill output</span><span className="tabular-nums text-emerald-600">{PKR(mk.profit.revenuePkr)}</span></div>
+                <div className="flex justify-between text-xs text-gray-500 pl-3"><span>Local sales</span><span className="tabular-nums">{PKR(mk.profit.localSalesRevenuePkr)}</span></div>
+                <div className="flex justify-between text-xs text-gray-500 pl-3"><span>Transfers to export (at transfer price)</span><span className="tabular-nums">{PKR(mk.profit.transferRevenuePkr)}</span></div>
               </div>
               <div className="space-y-1.5">
-                <div className="flex justify-between text-sm font-semibold text-gray-900"><span>Costs</span><span className="tabular-nums text-red-600">{PKR(kpis.totalCost)}</span></div>
-                <div className="flex justify-between text-xs text-gray-500 pl-3"><span>Raw material</span><span className="tabular-nums">−{PKR(kpis.totalRaw)}</span></div>
-                <div className="flex justify-between text-xs text-gray-500 pl-3"><span>Milling cost</span><span className="tabular-nums">−{PKR(kpis.totalMilling)}</span></div>
-                {(kpis.totalOtherCosts - kpis.totalPacking) > 0 && (
-                  <div className="flex justify-between text-xs text-gray-500 pl-3"><span>Batch costs</span><span className="tabular-nums">−{PKR(kpis.totalOtherCosts - kpis.totalPacking)}</span></div>
-                )}
-                {kpis.totalPacking > 0 && (
-                  <div className="flex justify-between text-xs text-gray-500 pl-3"><span>Packing / bags</span><span className="tabular-nums">−{PKR(kpis.totalPacking)}</span></div>
-                )}
-                <div className="flex justify-between text-xs text-gray-500 pl-3"><span>Overhead</span><span className="tabular-nums">−{PKR(totalOverhead)}</span></div>
+                <div className="flex justify-between text-sm font-semibold text-gray-900"><span>Costs</span><span className="tabular-nums text-red-600">{PKR((mk.profit.cogsPkr || 0) + (mk.profit.overheadsPkr || 0))}</span></div>
+                <div className="flex justify-between text-xs text-gray-500 pl-3"><span>Cost of goods sold</span><span className="tabular-nums">−{PKR(mk.profit.cogsPkr)}</span></div>
+                <div className="flex justify-between text-xs text-gray-500 pl-3"><span>Overheads (incl. paid payroll)</span><span className="tabular-nums">−{PKR(mk.profit.overheadsPkr)}</span></div>
               </div>
             </div>
             <div className="mt-4 pt-3 border-t border-gray-200 flex items-center justify-between">
-              <span className="text-sm font-semibold text-gray-800">Net Profit</span>
-              <span className={`text-lg font-bold tabular-nums ${kpis.netProfit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{PKR(kpis.netProfit)}</span>
+              <span className="text-sm font-semibold text-gray-800">Mill Profit (net)</span>
+              <span className={`text-lg font-bold tabular-nums ${(mk.profit.netProfitPkr || 0) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{PKR(mk.profit.netProfitPkr)}</span>
             </div>
-            {payrollTotal > 0 && (
-              <div className="mt-1 flex items-center justify-between text-xs text-gray-400">
-                <span>After payroll (−{PKR(payrollTotal)})</span>
-                <span className="tabular-nums">{PKR(kpis.netProfit - payrollTotal)}</span>
-              </div>
+            <p className="mt-1 text-[11px] text-gray-400">
+              Unsold output is stock (Working Capital above), not profit. A batch-linked expense is in that batch's cost, so it reaches profit through COGS — never twice.
+            </p>
+          </div>
+
+          <div className="bg-white rounded-xl border border-gray-100 p-5">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-gray-800">Production this period <span className="text-xs font-normal text-gray-400">— secondary, not profit</span></h3>
+              <span className="text-xs text-gray-500">{mk.production.batchCount || 0} completed batch(es)</span>
+            </div>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <Stat tone="slate" label="Production value at selling price" value={PKR(mk.production.valueAtSellingPricePkr)}
+                    sub={`finished ${COMPACT_PKR(mk.production.finishedValuePkr)} · by-products ${COMPACT_PKR(mk.production.byproductValuePkr)}`} />
+              <Stat tone="slate" label="Batch costs (cost sheet)" value={PKR(mk.production.batchCostPkr)}
+                    sub={`rice ${COMPACT_PKR(mk.production.rawCostPkr)} · bags ${COMPACT_PKR(mk.production.packagingCostPkr)} · other ${COMPACT_PKR(mk.production.otherCostPkr)}`} />
+              <Stat tone="slate" label="Yield (weighted)" value={mk.production.yieldPct != null ? fmtPct(mk.production.yieldPct) : '—'}
+                    sub={`${fmtKg(mk.production.finishedKg || 0)} finished of ${fmtKg(mk.production.rawKg || 0)} raw`} />
+              <Stat tone="slate" label="Sellable finished" value={fmtKg(mk.production.sellableFinishedKg || 0)}
+                    sub={mk.production.blendCount ? `${mk.production.blendCount} blend(s) — re-milled rice counted once` : 'not re-milled into a blend'} />
+            </div>
+            {mk.production.unpricedFinishedBatches > 0 && (
+              <p className="mt-2 text-[11px] text-amber-700">
+                {mk.production.unpricedFinishedBatches} batch(es) have no finished-rice selling price — {fmtKg(mk.production.unpricedFinishedKg)} left out of the production value.
+              </p>
             )}
+            <p className="mt-2 text-[11px] text-gray-400">
+              Each batch's output at its own recorded selling prices (by-products at what the yield booked). A measure of output, not revenue: nothing here is sold yet.
+            </p>
           </div>
 
           {/* AI Anomaly Watch */}
@@ -1202,18 +1153,21 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
           <div className="flex items-center justify-between flex-wrap gap-2">
             <h3 className="text-sm font-semibold text-gray-700">Mill cash account — money in &amp; out</h3>
             <div className="flex items-center gap-0.5 rounded-lg bg-gray-100 p-0.5">
-              {[['all', 'All'], ['ytd', 'YTD'], ['quarter', 'Quarter'], ['month', 'This month']].map(([k, l]) => (
-                <button key={k} onClick={() => setCashRange(k)}
-                  className={`px-2.5 py-1 text-xs rounded-md ${cashRange === k ? 'bg-white shadow-sm font-medium text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}>{l}</button>
+              {PERIOD_OPTIONS.map(([k, l]) => (
+                <button key={k} type="button" onClick={() => setPeriod(k)} aria-pressed={period === k}
+                  className={`px-2.5 py-1 text-xs rounded-md ${period === k ? 'bg-white shadow-sm font-medium text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}>{l}</button>
               ))}
             </div>
           </div>
 
           {/* Realized cash summary */}
           <div className="grid grid-cols-3 gap-3">
-            <Stat label="Cash in (received)" value={PKR(cashSummary.cashIn)} sub="receipts" tone="green" icon={ArrowDownRight} />
-            <Stat label="Cash out (paid)" value={PKR(cashSummary.cashOut)} sub="payments made" tone="red" icon={ArrowUpRight} />
-            <Stat label="Net cash flow" value={PKR(cashSummary.net)} sub={`${cashSummary.count} transaction(s)`} tone={cashSummary.net >= 0 ? 'green' : 'red'} icon={Wallet} />
+            <Stat label="Cash in (received)" value={PKR(cashSummary.cashIn)}
+                  sub={cashSummary.pendingChequesIn ? `+ ${COMPACT_PKR(cashSummary.pendingChequesIn)} in uncleared cheques` : 'settled receipts'} tone="green" icon={ArrowDownRight} />
+            <Stat label="Cash out (paid)" value={PKR(cashSummary.cashOut)}
+                  sub={cashSummary.pendingChequesOut ? `+ ${COMPACT_PKR(cashSummary.pendingChequesOut)} in uncleared cheques` : 'settled payments'} tone="red" icon={ArrowUpRight} />
+            <Stat label="Net cash flow" value={PKR(cashSummary.net)}
+                  sub={`${cashSummary.count} transaction(s)${cashSummary.notMoneyCount ? ` · ${cashSummary.notMoneyCount} reversed / bounced not counted` : ''}`} tone={cashSummary.net >= 0 ? 'green' : 'red'} icon={Wallet} />
           </div>
 
           {/* Money OUT — paid vs outstanding */}
@@ -1350,8 +1304,10 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
                           <span className="text-[10px] text-gray-400 ml-1.5">{r.category}{r.ref ? ` · ${r.ref}` : ''}</span>
                         </td>
                         <td data-label="Method" className="mob-hide px-3 py-1.5 text-gray-500 capitalize">{r.payment_method || '—'}</td>
-                        <td data-label="Out" className="px-3 py-1.5 text-right tabular-nums text-red-600">{r.direction === 'out' ? PKR(r.amount_pkr) : ''}</td>
-                        <td data-label="In" className="px-3 py-1.5 text-right tabular-nums text-emerald-600">{r.direction === 'in' ? PKR(r.amount_pkr) : ''}</td>
+                        <td data-label="Out" className={`px-3 py-1.5 text-right tabular-nums ${r.counted === false ? 'text-gray-400 line-through' : 'text-red-600'}`}
+                            title={r.counted === false ? `${r.status || 'Uncleared cheque'} — not counted` : undefined}>{r.direction === 'out' ? PKR(r.amount_pkr) : ''}</td>
+                        <td data-label="In" className={`px-3 py-1.5 text-right tabular-nums ${r.counted === false ? 'text-gray-400 line-through' : 'text-emerald-600'}`}
+                            title={r.counted === false ? `${r.status || 'Uncleared cheque'} — not counted` : undefined}>{r.direction === 'in' ? PKR(r.amount_pkr) : ''}</td>
                         <td data-label="Balance" className={`px-3 py-1.5 text-right tabular-nums ${r.balance < 0 ? 'text-red-700' : 'text-gray-800'}`}>{PKR(r.balance)}</td>
                       </tr>
                     ))}
@@ -1361,21 +1317,21 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
             </div>
           </div>
 
-          {/* Production value (accrual) — kept separate from cash */}
+          {/* Production (accrual) — kept separate from cash, and from profit
+              (production_value.v1, secondary per D-13). */}
           <div>
             <div className="flex items-center gap-2 mb-2">
               <Factory size={15} className="text-gray-400" />
-              <h3 className="text-sm font-semibold text-gray-700">Production value <span className="text-xs font-normal text-gray-400">— accrual, not cash</span></h3>
+              <h3 className="text-sm font-semibold text-gray-700">Production value <span className="text-xs font-normal text-gray-400">— accrual, not cash, not profit</span></h3>
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
-              <Stat label="Output value produced" value={COMPACT_PKR(moneyFlow.inc.output)} sub="finished + byproducts" tone="slate" icon={Wallet} />
-              <Stat label="Finished rice value" value={COMPACT_PKR(moneyFlow.inc.finished)} tone="slate" icon={TrendingUp} />
-              <Stat label="Byproduct value" value={COMPACT_PKR(moneyFlow.inc.byproduct)} sub="broken, powder, sweeping" tone="slate" icon={Package} />
-              <Stat label="Mill costs (accrued)" value={COMPACT_PKR(moneyFlow.out.total)} sub="rice + milling + overhead" tone="slate" icon={Receipt} />
-              <Stat label="Net production margin" value={COMPACT_PKR(moneyFlow.netProduction)} sub={`${margin}% margin`} tone={moneyFlow.netProduction >= 0 ? 'green' : 'red'} icon={Factory} />
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <Stat label="Output at selling price" value={COMPACT_PKR(mk.production.valueAtSellingPricePkr)} sub="finished + by-products" tone="slate" icon={Wallet} />
+              <Stat label="Finished rice value" value={COMPACT_PKR(mk.production.finishedValuePkr)} tone="slate" icon={TrendingUp} />
+              <Stat label="Byproduct value" value={COMPACT_PKR(mk.production.byproductValuePkr)} sub="broken, powder, sweeping" tone="slate" icon={Package} />
+              <Stat label="Batch costs (cost sheet)" value={COMPACT_PKR(mk.production.batchCostPkr)} sub="rice + processing + bags" tone="slate" icon={Receipt} />
             </div>
             <p className="mt-2 text-[11px] text-gray-400">
-              Production value is rice produced at confirmed prices (accrual). The cash ledger above is money actually received and paid.
+              The period's completed batches at their own selling prices. The cash ledger above is money actually received and paid; the mill's profit is on the Overview (sales − COGS − overheads).
             </p>
           </div>
         </div>
@@ -1794,10 +1750,12 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
       {activeTab === 'efficiency' && (
         <div className="space-y-4">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <Stat tone="green" icon={TrendingUp}    label="Avg Recovery"  value={`${efficiency.avgYield}%`}    sub="Finished / Raw" />
-            <Stat tone="red"   icon={AlertTriangle} label="Avg Wastage"   value={`${efficiency.avgWastage}%`}  sub="Waste / Raw" />
-            <Stat tone="blue"  icon={DollarSign}    label="Cost per KG"   value={`Rs ${efficiency.costPerKg}`} sub="All-in finished" />
-            <Stat tone="slate" icon={Factory}       label="Batches"       value={completed.length}             sub={`${fmtKg((efficiency.totalRaw || 0) * 1000)} processed`} />
+            {/* yield.v1 (D-14): Σ finished ÷ Σ raw over the period's completed
+                company batches — weighted, service milling excluded. */}
+            <Stat tone="green" icon={TrendingUp}    label="Recovery (weighted)" value={mk.production.yieldPct != null ? fmtPct(mk.production.yieldPct) : '—'} sub={`Σ finished ÷ Σ raw · ${periodLabel}`} />
+            <Stat tone="red"   icon={AlertTriangle} label="Wastage (weighted)"  value={mk.production.wastagePct != null ? fmtPct(mk.production.wastagePct) : '—'}  sub="Σ waste ÷ Σ raw" />
+            <Stat tone="blue"  icon={DollarSign}    label="Batch Cost / kg"     value={mk.production.batchCostPerKgPkr != null ? fmtPKR(mk.production.batchCostPerKgPkr, { decimals: 2 }) : '—'} sub="cost sheet ÷ sellable finished kg" />
+            <Stat tone="slate" icon={Factory}       label="Batches"             value={mk.production.batchCount || 0} sub={`${fmtKg(mk.production.rawKg || 0)} processed`} />
           </div>
           <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
             <table className="w-full text-sm mobile-cards">
@@ -1812,27 +1770,32 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {completed.map(b => {
-                  const totalCost = Object.values(b.costs || {}).reduce((s, c) => s + (parseFloat(c) || 0), 0);
-                  const costKg = b.actualFinishedMT > 0 ? totalCost / (b.actualFinishedMT * 1000) : 0;
-                  const wastePct = b.rawQtyMT > 0 ? ((b.wastageMT || 0) / b.rawQtyMT * 100).toFixed(1) : 0;
+                {effBatches.map(b => {
+                  const raw = parseFloat(b.raw_qty_kg) || 0;
+                  const fin = parseFloat(b.actual_finished_kg) || 0;
+                  const costKg = fin > 0 ? (parseFloat(b.batch_cost_pkr) || 0) / fin : 0;
+                  const yieldPct = raw > 0 ? (fin / raw) * 100 : 0;
+                  const wastePct = raw > 0 ? ((parseFloat(b.wastage_kg) || 0) / raw) * 100 : 0;
                   return (
                     <tr key={b.id} className="hover:bg-gray-50">
-                      <td data-label="Batch" className="px-4 py-3 font-medium"><Link to={`/milling/${b.id}`} className="text-blue-600">{b.id}</Link></td>
-                      <td data-label="Raw kg" className="mob-hide px-4 py-3 text-right tabular-nums">{fmtNum(Math.round(b.rawQtyKg))}</td>
-                      <td data-label="Finished kg" className="px-4 py-3 text-right tabular-nums">{fmtNum(Math.round(b.actualFinishedKg))}</td>
-                      <td data-label="Yield %" className="px-4 py-3 text-right font-medium tabular-nums">{b.yieldPct}%</td>
-                      <td data-label="Wastage %" className="px-4 py-3 text-right text-red-600 tabular-nums">{wastePct}%</td>
+                      <td data-label="Batch" className="px-4 py-3 font-medium"><Link to={`/milling/${b.batch_no}`} className="text-blue-600">{b.batch_no}</Link></td>
+                      <td data-label="Raw kg" className="mob-hide px-4 py-3 text-right tabular-nums">{fmtNum(Math.round(raw))}</td>
+                      <td data-label="Finished kg" className="px-4 py-3 text-right tabular-nums">{fmtNum(Math.round(fin))}</td>
+                      <td data-label="Yield %" className="px-4 py-3 text-right font-medium tabular-nums">{fmtPct(yieldPct)}</td>
+                      <td data-label="Wastage %" className="px-4 py-3 text-right text-red-600 tabular-nums">{fmtPct(wastePct)}</td>
                       <td data-label="Cost/KG" className="px-4 py-3 text-right tabular-nums">{fmtPKR(costKg, { decimals: 2 })}</td>
                     </tr>
                   );
                 })}
-                {completed.length === 0 && (
-                  <tr><td colSpan={6} className="px-4 py-10 text-center text-gray-400">No completed batches yet</td></tr>
+                {effBatches.length === 0 && (
+                  <tr><td colSpan={6} className="colspan-empty px-4 py-10 text-center text-gray-400">No completed batches in {periodLabel || 'this period'}</td></tr>
                 )}
               </tbody>
             </table>
           </div>
+          {effDetail && effDetail.total > effBatches.length && (
+            <p className="text-[11px] text-amber-700">Showing the first {effBatches.length} of {effDetail.total} batches — the figures above cover all {effDetail.total}.</p>
+          )}
         </div>
       )}
 

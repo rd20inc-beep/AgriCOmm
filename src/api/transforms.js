@@ -334,7 +334,7 @@ export function transformBatch(dbBatch) {
     variancePct: dbBatch.variance_pct != null ? parseFloat(dbBatch.variance_pct) : null,
     varianceStatus: dbBatch.variance_status || null,
     vehicleArrivals: dbBatch.vehicleArrivals || [],
-    millingFeePerKg: parseFloat(dbBatch.milling_fee_per_kg) || 5,
+    millingFeePerKg: parseFloat(dbBatch.milling_fee_per_kg) || 0, // MIL-02: 0 is a real fee, never 5
     finishedPricePerMT: perKgToPerMt(dbBatch.finished_price_per_kg),
     brokenPricePerMT: perKgToPerMt(dbBatch.broken_price_per_kg),
     branPricePerMT: perKgToPerMt(dbBatch.bran_price_per_kg),

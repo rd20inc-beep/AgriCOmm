@@ -269,6 +269,45 @@ router.put(
 // The MILL cash account only: payments on entity='mill' payables, receipts on
 // mill local sales, Head Office ⇄ Mill transfers and the mill cash float.
 router.get('/cash-flow', authorize('milling', 'view'), requireCostVisibility, advancedController.cashFlow);
+// Mill Finance KPIs (P4-01 / P4-02, docs/AGRIRICE_KPI_CONTRACTS.md): the D-13
+// mill profit headline, production value (secondary), yield and working
+// capital for a period (?period=month|quarter|fytd|fy|all|custom&from=&to=),
+// and the rows behind each figure (/detail?part=sales|overheads|batches|stock).
+// Profit and stock value are cost figures: View cost is required.
+router.get('/finance-kpis', authorize('milling', 'view'), requireCostVisibility, async (req, res) => {
+  try {
+    const { millFinanceKpis } = require('../kpi/millFinance');
+    const { period, from, to } = req.query;
+    return res.json({ success: true, data: await millFinanceKpis(db, { period, from, to }) });
+  } catch (err) {
+    if (err.status === 400) return res.status(400).json({ success: false, message: err.message });
+    console.error('finance-kpis error:', err);
+    return res.status(500).json({ success: false, message: 'Internal server error.' });
+  }
+});
+// yield.v1 alone (quantities, no money) — no View cost needed.
+router.get('/kpi/yield', authorize('milling', 'view'), async (req, res) => {
+  try {
+    const { yieldKpi } = require('../kpi/millFinance');
+    const { period, from, to } = req.query;
+    return res.json({ success: true, data: await yieldKpi(db, { period: period || 'all', from, to }) });
+  } catch (err) {
+    if (err.status === 400) return res.status(400).json({ success: false, message: err.message });
+    console.error('kpi/yield error:', err);
+    return res.status(500).json({ success: false, message: 'Internal server error.' });
+  }
+});
+router.get('/finance-kpis/detail', authorize('milling', 'view'), requireCostVisibility, async (req, res) => {
+  try {
+    const { millFinanceDetail } = require('../kpi/millFinance');
+    const { part, period, from, to, page, limit } = req.query;
+    return res.json({ success: true, data: await millFinanceDetail(db, { part, period, from, to, page, limit }) });
+  } catch (err) {
+    if (err.status === 400) return res.status(400).json({ success: false, message: err.message });
+    console.error('finance-kpis detail error:', err);
+    return res.status(500).json({ success: false, message: 'Internal server error.' });
+  }
+});
 router.get('/cost-trend', authorize('milling', 'view'), requireCostVisibility, controller.costTrend);
 // Mill Finance ▸ Suppliers / Customers for mill roles without finance.view (the
 // Mill Operator, owner decision 2026-10-05): the mill's OWN payables and

@@ -14,6 +14,8 @@ const db = require('../../config/database');
 const fxRateService = require('./fxRate.service');
 const { profitDefinitions, millBatchRows, EXCLUDED_ORDER_STATUSES } = require('./profitDefinitions');
 const { collectionRate: computeCollectionRate } = require('./collectionRate');
+const { payableOverdueSql } = require('../kpi/overdue');
+const { activeOrderSql } = require('../kpi/orderStatus');
 const { dayOf } = require('../exportOrders/balanceDueDate');
 
 // PKR equivalent of an open receivable's OUTSTANDING at its own booked rate
@@ -48,7 +50,8 @@ const financeService = {
     if (startDate || endDate) orderQuery = dateFilter(orderQuery, 'created_at');
     const exportStats = await orderQuery.clone().select(
       db.raw("COUNT(*) as total_orders"),
-      db.raw("COUNT(CASE WHEN status NOT IN ('Closed','Cancelled') THEN 1 END) as active_orders"),
+      // D-15 (kpi/orderStatus.js): active = not Draft / Cancelled / Closed.
+      db.raw(`COUNT(*) FILTER (WHERE ${activeOrderSql('status')}) as active_orders`),
       // Pre-shipment = workflow stages before COGS gets locked at dispatch
       db.raw("COUNT(CASE WHEN status IN ('Draft','Awaiting Advance','Advance Received','Procurement Pending','In Milling','Docs In Preparation','Awaiting Balance','Ready to Ship') THEN 1 END) as pre_shipment_orders"),
       db.raw("COUNT(CASE WHEN status IN ('Shipped','Arrived','Closed') THEN 1 END) as shipped_orders"),
@@ -137,8 +140,8 @@ const financeService = {
         db.raw("UPPER(COALESCE(currency, 'PKR')) as currency"),
         db.raw("COUNT(*) as count"),
         db.raw("COALESCE(SUM(outstanding), 0) as total_outstanding"),
-        db.raw("COUNT(CASE WHEN due_date < CURRENT_DATE THEN 1 END) as overdue_count"),
-        db.raw("COALESCE(SUM(CASE WHEN due_date < CURRENT_DATE THEN outstanding END), 0) as overdue_amount"),
+        db.raw(`COUNT(*) FILTER (WHERE ${payableOverdueSql({ p: 'payables' })}) as overdue_count`),
+        db.raw(`COALESCE(SUM(outstanding) FILTER (WHERE ${payableOverdueSql({ p: 'payables' })}), 0) as overdue_amount`),
       )
       .groupByRaw("UPPER(COALESCE(currency, 'PKR'))");
     const payByCurrency = {};

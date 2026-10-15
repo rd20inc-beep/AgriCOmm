@@ -9,7 +9,7 @@ import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import PartyLink from '../../../shared/components/PartyLink';
 import { pkrEquivText } from '../utils/currencyTiles';
-import { moneyInTilesFromSummary, AS_AT_BUCKET_LABEL, curOf } from '../utils/moneyTiles';
+import { moneyInTilesFromSummary, AS_AT_BUCKET_LABEL, curOf, isOverdueRow } from '../utils/moneyTiles';
 import { shortenRef } from '../utils/refs';
 import { isSettleable, canRecordVariant, contextForDocument } from '../../../components/payments/paymentVariants';
 import { useFinanceDrawers } from '../drawers/drawersContext';
@@ -42,10 +42,12 @@ export default function MoneyIn() {
   const [typeFilter, setTypeFilter] = useState('All');
 
   const filtered = useMemo(() => receivables.filter((r) => {
-    if (statusFilter !== 'All' && !eqStatus(r.status, statusFilter)) return false;
+    // 'Overdue' is the server's D-15 flag, not a status word (export rows never carry it).
+    if (statusFilter === 'Overdue') { if (!isOverdueRow(r)) return false; }
+    else if (statusFilter !== 'All' && !eqStatus(r.status, statusFilter)) return false;
     if (typeFilter !== 'All' && r.type !== typeFilter) return false;
     return true;
-  }).map((r) => ({ ...r, _highlight: eqStatus(r.status, 'Overdue') ? 'danger' : undefined })), [receivables, statusFilter, typeFilter]);
+  }).map((r) => ({ ...r, _highlight: isOverdueRow(r) ? 'danger' : undefined })), [receivables, statusFilter, typeFilter]);
 
   const tiles = useMemo(() => moneyInTilesFromSummary(summary || {}), [summary]);
   const aging = tiles.aging;

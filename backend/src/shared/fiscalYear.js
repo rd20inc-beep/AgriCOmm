@@ -84,12 +84,65 @@ function monthsOfFiscalYear(startYear) {
   return out;
 }
 
+/** Last day of a month as 'YYYY-MM-DD'. */
+function monthEnd(y, m) {
+  return `${y}-${pad(m)}-${pad(lastDayOfMonth(y, m))}`;
+}
+
+const PERIOD_KEYS = ['month', 'quarter', 'fytd', 'fy', 'all', 'custom'];
+
+const periodError = (message) => {
+  const e = new Error(message);
+  e.status = 400;
+  return e;
+};
+
+/**
+ * A period key → inclusive day bounds (the KPI period picker).
+ *   month   the calendar month containing `today`
+ *   quarter the fiscal quarter containing `today` (Q1 = Jul–Sep)
+ *   fytd    the fiscal year's first day → today
+ *   fy      the whole fiscal year containing `today`
+ *   all     no bounds (from / to null)
+ *   custom  the given from / to (either may be open)
+ * Returns { key, from, to, label, fiscalYear }. An unknown key is an error
+ * (status 400) — a typo must not silently become "all time".
+ */
+function resolvePeriod({ period = 'month', from = null, to = null, today = new Date() } = {}) {
+  const key = String(period || 'month').toLowerCase();
+  if (!PERIOD_KEYS.includes(key)) throw periodError(`Unknown period '${period}'. Use one of: ${PERIOD_KEYS.join(', ')}.`);
+  const t = dayOf(today);
+  const y = parseInt(t.slice(0, 4), 10);
+  const m = parseInt(t.slice(5, 7), 10);
+  const fy = fiscalYearOf(t);
+  if (key === 'month') {
+    return { key, from: `${y}-${pad(m)}-01`, to: monthEnd(y, m), label: `${MONTHS[m - 1]} ${y}`, fiscalYear: fy.label };
+  }
+  if (key === 'quarter') {
+    const qStart = Math.floor((m - 1) / 3) * 3 + 1;
+    const fq = Math.floor(((m - FY_START_MONTH + 12) % 12) / 3) + 1;
+    return { key, from: `${y}-${pad(qStart)}-01`, to: monthEnd(y, qStart + 2), label: `Q${fq} ${fy.label}`, fiscalYear: fy.label };
+  }
+  if (key === 'fytd') return { key, from: fy.start, to: t, label: `${fy.label} to date`, fiscalYear: fy.label };
+  if (key === 'fy') return { key, from: fy.start, to: fy.end, label: fy.label, fiscalYear: fy.label };
+  if (key === 'all') return { key, from: null, to: null, label: 'All time', fiscalYear: null };
+  const f = from ? dayOf(from) : null;
+  const tt = to ? dayOf(to) : null;
+  if ((from && !f) || (to && !tt)) throw periodError('from / to must be dates (YYYY-MM-DD).');
+  if (f && tt && f > tt) throw periodError('from must not be after to.');
+  return { key, from: f, to: tt, label: `${f || '…'} – ${tt || '…'}`, fiscalYear: null };
+}
+
 module.exports = {
   FY_START_MONTH,
+  PERIOD_KEYS,
   dayOf,
+  isoDay: dayOf,
   fiscalYearOf,
   fiscalYearStarting,
   fyLabelOf,
   monthOf,
+  monthEnd,
   monthsOfFiscalYear,
+  resolvePeriod,
 };

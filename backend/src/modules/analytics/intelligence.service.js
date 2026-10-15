@@ -7,6 +7,7 @@ const { exportProfit, orderRevenuePkr, costRowPkr } = require('../finance/profit
 const { collectionRate: computeCollectionRate } = require('../finance/collectionRate');
 const fxRateService = require('../finance/fxRate.service');
 const { dayOf } = require('../exportOrders/balanceDueDate');
+const { whereActiveOrder } = require('../kpi/orderStatus');
 const {
   RECEIVABLE_CLOSED, PAYABLE_CLOSED, ORDER_COST_PKR_SQL, RECV_PKR_EQUIV_SQL,
   byCurrency, cashSummary, collectionRateFields,
@@ -1452,7 +1453,7 @@ const intelligenceService = {
 
     // Export KPIs — money in each order's own currency: { USD, PKR }, never
     // added together (owner decision G-1).
-    const activeOrdersQ = db('export_orders').whereNotIn('status', ['Draft', 'Closed', 'Cancelled']);
+    const activeOrdersQ = whereActiveOrder(db('export_orders')); // D-15 (kpi/orderStatus.js)
     if (entity === 'mill') activeOrdersQ.where(db.raw('1 = 0')); // no export data for mill entity
     dateFilter(activeOrdersQ, 'created_at');
     const activeOrders = await activeOrdersQ.count('id as count').first();

@@ -12,6 +12,7 @@ import { useApp } from '../../../context/AppContext';
 import { workflowSteps, isBalanceDue } from '../components/constants';
 import { fmtKg, fmtDate } from '../../../shared/utils/format';
 import { transferKg } from '../../inventory/utils/stockMath';
+import { isActiveOrder } from '../../../shared/constants/orderStatus';
 
 // Money is exact (never K/M) and one figure per currency, from the server's
 // order book (backend exportOrders/orderBook.js) — never summed in here.
@@ -92,7 +93,7 @@ export default function ExportHomeDashboard() {
     const now = new Date();
     const in14Days = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
 
-    const active = orders.filter(o => !['Closed', 'Cancelled'].includes(o.status));
+    const active = orders.filter(isActiveOrder); // D-15: not Draft / Cancelled / Closed
 
     const shippedWithETD = orders.filter(o => o.etd && o.atd);
     const avgDaysToShip = shippedWithETD.length > 0

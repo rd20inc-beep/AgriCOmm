@@ -33,7 +33,7 @@ import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import { canSeeCost } from '../../../hooks/useCanSeeCost';
 import OrderRefLink from '../../../shared/components/OrderRefLink';
-import { useCreateMillingBatch, useMillExpenses, useCreateMillExpense, useInventory, useProducts, useMillCostTrend } from '../../../api/queries';
+import { useCreateMillingBatch, useMillExpenses, useCreateMillExpense, useInventory, useProducts, useMillCostTrend, useMillingYieldKpi } from '../../../api/queries';
 import { useCommodityPrices } from '../hooks/useCommodityPrices';
 import { useMillSummary } from '../hooks/useMillSummary';
 import KPICard from '../../../components/KPICard';
@@ -201,7 +201,7 @@ export default function MillingDashboard() {
   const resetBatchForm = () => {
     setBatchForm({
       millingType: 'own_stock', productId: '', supplierId: '', rawQtyKg: '', totalBags: '', plannedFinishedKg: '',
-      millingFeePerKg: '5',
+      millingFeePerKg: '0',
       millId: '', shift: 'Day', notes: '', batchName: '', customTags: '',
       clientCustomerId: '',
       serviceMillingRatePerKg: '', serviceRentalRatePerKatta: '', serviceLabourRatePerKatta: '',
@@ -396,12 +396,12 @@ export default function MillingDashboard() {
     ).length;
   }, [millingBatches]);
 
-  const avgYield = useMemo(() => {
-    const completed = millingBatches.filter((b) => b.status === 'Completed' && b.yieldPct > 0);
-    if (completed.length === 0) return 0;
-    const total = completed.reduce((sum, b) => sum + b.yieldPct, 0);
-    return (total / completed.length).toFixed(1);
-  }, [millingBatches]);
+  // Yield (yield.v1, D-14): Σ finished ÷ Σ raw over every completed company
+  // batch, weighted, service milling excluded — from the server. A simple
+  // average of batch yields gave a trial batch a full run's weight and
+  // counted blends (re-mills at ~95 %) (MIL-40).
+  const { data: yieldKpi } = useMillingYieldKpi({ period: 'all' });
+  const avgYield = yieldKpi?.yieldPct;
 
   // Yield Trend Data (from completed and in-progress batches)
   const yieldTrendData = useMemo(() => {
@@ -413,25 +413,8 @@ export default function MillingDashboard() {
       }));
   }, [millingBatches]);
 
-  // Calculate local sales from by-products of completed batches
-  const localSalesValue = useMemo(() => {
-    return millingBatches
-      .filter(b => b.status === 'Completed')
-      .reduce((sum, b) => sum + (b.brokenMT * MILL_PRICES_PKR.brokenPerMT), 0);
-  }, [millingBatches]);
-
-  // Calculate mill net profit from completed batches (PKR)
-  const millNetProfit = useMemo(() => {
-    return millingBatches
-      .filter(b => b.status === 'Completed')
-      .reduce((sum, b) => {
-        const revenue = (b.actualFinishedMT * MILL_PRICES_PKR.finishedRicePerMT) + (b.brokenMT * MILL_PRICES_PKR.brokenPerMT);
-        const costs = Object.values(b.costs || {}).reduce((s, c) => s + c, 0);
-        return sum + (revenue - costs);
-      }, 0);
-  }, [millingBatches]);
-
-  // By-product sales trend data (completed batches)
+  // Broken output per completed batch, valued at TODAY's rate-master price —
+  // what it would fetch, not what was sold (MIL-40: it was titled "sales").
   const byproductSalesData = useMemo(() => {
     return millingBatches
       .filter(b => b.status === 'Completed')
@@ -529,8 +512,9 @@ export default function MillingDashboard() {
           <p className="text-xl font-bold text-red-600 mt-1">{varianceAlerts}</p>
         </Link>
         <div className="bg-white rounded-xl border p-4">
-          <p className="text-xs text-gray-500 font-medium uppercase">Avg Yield</p>
-          <p className="text-xl font-bold text-gray-900 mt-1">{fmtPct(avgYield)}</p>
+          <p className="text-xs text-gray-500 font-medium uppercase">Yield (weighted)</p>
+          <p className="text-xl font-bold text-gray-900 mt-1">{avgYield != null ? fmtPct(avgYield) : '—'}</p>
+          <p className="text-[10px] text-gray-400">Σ finished ÷ Σ raw · completed batches</p>
         </div>
       </div>
 
@@ -1052,7 +1036,7 @@ export default function MillingDashboard() {
       {showMoney && byproductSalesData.length > 0 && (
         <div className="bg-white rounded-xl shadow-sm p-5">
           <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-4">
-            By-product Sales Trend
+            Broken Output Value by Batch <span className="normal-case font-normal text-gray-400">— at today's rate, not sales</span>
           </h2>
           <div className="h-48 sm:h-64 lg:h-72">
             <ResponsiveContainer width="100%" height="100%">

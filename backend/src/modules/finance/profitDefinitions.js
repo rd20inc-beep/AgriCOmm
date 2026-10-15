@@ -755,6 +755,17 @@ async function millBatchRows(conn, { startDate, endDate } = {}) {
       FROM milling_batches
      WHERE status = 'Completed'${dateClause('completed_at', p, params)}
      ORDER BY id`, params));
+  return batchSalesFigures(conn, batches);
+}
+
+/**
+ * Per batch row ({ id, batch_no, status, raw_qty_kg, actual_finished_kg,
+ * yield_pct, completed_at }): its output at cost, what of it has been sold to
+ * date (local sales + transfers to export, at their COGS) and what is still in
+ * stock. Shared by millBatchRows and Reports ▸ batch profitability (FIN-21),
+ * so a batch's sold margin is the same figure wherever it shows.
+ */
+async function batchSalesFigures(conn, batches = []) {
   if (!batches.length) return [];
   const refs = batches.map((b) => `batch-${b.id}`);
 
@@ -896,11 +907,13 @@ module.exports = {
   millOverheads,
   millAndLocalProfit,
   millBatchRows,
+  batchSalesFigures,
   foldMillAndLocal,
   isMillOutputLot,
   toDay,
   EXCLUDED_ORDER_STATUSES,
   SHIPPED_STATUSES,
   LOCAL_SALE_EXCLUDED,
+  EXPENSE_EXCLUDED,
   INTERNAL_COST_CATS,
 };
