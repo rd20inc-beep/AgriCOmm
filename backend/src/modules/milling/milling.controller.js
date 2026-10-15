@@ -62,9 +62,6 @@ async function syncServiceKattaCount(trx, batchId) {
   }
 }
 
-// M-001, M-002, … — MAX+1 over existing numbers, not "the newest row + 1":
-// ordering by created_at hands out a used number when two batches share a
-// timestamp or the newest row is deleted.
 // The raw input (trucks) is what a yield was measured against and what the
 // rice purchase was booked at: locked once the batch is yielded, and still
 // locked after a reversed yield (P3-03), which keeps its booked purchase.
@@ -75,6 +72,9 @@ async function rawInputLocked(q, batch) {
   return ricePurchaseBooked(q, batch);
 }
 
+// M-001, M-002, … — MAX+1 over existing numbers, not "the newest row + 1":
+// ordering by created_at hands out a used number when two batches share a
+// timestamp or the newest row is deleted.
 async function generateBatchNo(trx) {
   return nextDocNo(trx || db, { table: 'milling_batches', column: 'batch_no', prefix: 'M-', pad: 3 });
 }
