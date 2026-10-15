@@ -372,7 +372,7 @@ d('mill store valuation (DB-gated)', () => {
       const printed = require('../modules/exportOrders/printedBags.service');
       const cust = (await db('customers').insert({ name: `ZZ SV Buyer ${run}`, customer_type: 'export' }).returning('*'))[0];
       const [order] = await db('export_orders').insert({
-        order_no: `ZZSV-${run}`, customer_id: cust.id, product_id: ids.product, created_by: ids.user, status: 'Draft',
+        order_no: `ZZSV-${run}`, customer_id: cust.id, product_id: ids.product, created_by: ids.user, status: 'Awaiting Advance', // printed bags are refused on a Draft (P3-18)
       }).returning('*');
       const pbo = await printed.create(order.id, { quantity: 200, unit_cost: 15, bag_size_kg: 5, bag_type_name: 'BOPP' }, ids.user);
       const got = await printed.receive(pbo.id, { received_qty: 180 }, ids.user);

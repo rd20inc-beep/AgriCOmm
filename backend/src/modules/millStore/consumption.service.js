@@ -129,7 +129,7 @@ const consumptionService = {
       // The guard used to test for 'Closed', a status batches never have, so
       // store stock could be issued to a Cancelled or Rejected batch.
       if (CLOSED_BATCH_STATUSES.includes(batch.status)) {
-        throw new ValidationError(`Cannot consume against a ${String(batch.status).toLowerCase()} batch.`);
+        throw new ValidationError(`Cannot consume against a ${String(batch.status).toLowerCase()} batch — ${batch.batch_no || `batch ${batchId}`} is ${batch.status}.`);
       }
       // After the yield, a consumption re-costs the output lots — refused once
       // an output has been sold or used (the same lock the Costs tab applies).

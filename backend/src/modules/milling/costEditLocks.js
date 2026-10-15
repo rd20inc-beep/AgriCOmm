@@ -87,9 +87,15 @@ async function assertBatchRawCostEditable(q, batch) {
   }
 }
 
-/** The yield booked the batch's raw rice to its supplier ('Rice Purchase' journal Posted). */
+/**
+ * The batch's raw rice is booked to its supplier at the figures it was milled
+ * at: a yield posted its 'Rice Purchase' journal, or the yield was reversed
+ * (P3-03). Truck rice is bought at receipt since D-6, so a reversed truck
+ * batch has no 'Rice Purchase' journal — the reversal itself keeps the lock.
+ */
 async function ricePurchaseBooked(q, batch) {
   if (!batch || !batch.batch_no) return false;
+  if (batch.yield_reversed_at) return true;
   const booked = await q('journal_entries')
     .where({ ref_type: 'Rice Purchase', ref_no: batch.batch_no, status: 'Posted' }).first('id');
   return !!booked;

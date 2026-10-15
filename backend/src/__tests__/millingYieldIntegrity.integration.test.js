@@ -75,6 +75,13 @@ d('milling yield integrity (DB-gated)', () => {
     }
     return db('milling_batches').where({ id: b.id }).first();
   };
+  // The supplier's AP for a truck batch's rice, wherever it was booked: at
+  // receipt on the truck lot since D-6 ('Purchase Lot'), at yield before it
+  // ('Rice Purchase').
+  const riceAp = async (b) => {
+    const raw = await db('inventory_lots').where({ batch_ref: `batch-${b.id}`, type: 'raw' }).first();
+    return (raw ? await net(raw.lot_no, '2010', ['Purchase Lot']) : 0) + await net(b.batch_no, '2010', ['Rice Purchase']);
+  };
   const yieldOf = (batchId, body) => call(millCtl.recordYield, asAdmin({ params: { id: String(batchId) }, body }));
   const reverse = (batchId, reason = 'wrong scale ticket') => call(millCtl.reverseYield, asAdmin({
     params: { id: String(batchId) }, body: { reason }, ownerAuth: { ownerId: ids.owner },
@@ -170,7 +177,7 @@ d('milling yield integrity (DB-gated)', () => {
       expect((await yieldOf(b.id, { actual_finished_kg: 7000, b1_kg: 500, bran_kg: 1000, husk_kg: 1200, wastage_kg: 300 })).statusCode).toBe(200);
       const fin1220 = await net(b.batch_no, '1220');
       expect(fin1220).toBeGreaterThan(0);
-      const ap = await net(b.batch_no, '2010', ['Rice Purchase']);
+      const ap = await riceAp(b);
       expect(ap).toBe(-1000000);
 
       const r = await reverse(b.id);
@@ -195,7 +202,7 @@ d('milling yield integrity (DB-gated)', () => {
       for (const code of ['1220', '1240', '1210', '2110']) {
         expect(await net(b.batch_no, code, ['Milling Batch', 'Milling Output Split'])).toBe(0);
       }
-      expect(await net(b.batch_no, '2010', ['Rice Purchase'])).toBe(-1000000);
+      expect(await riceAp(b)).toBe(-1000000);
       // Nothing was deleted or status-flipped: every original is still Posted.
       expect(parseInt((await db('journal_entries').where({ ref_no: b.batch_no, status: 'Reversed' }).count('id as c').first()).c, 10)).toBe(0);
       // Raw cost / supplier stay locked to the booked purchase.
@@ -208,7 +215,7 @@ d('milling yield integrity (DB-gated)', () => {
       // Re-recording the yield takes the first-yield path again — capitalised once.
       expect((await yieldOf(b.id, { actual_finished_kg: 7100, b1_kg: 500, bran_kg: 1000, husk_kg: 1200, wastage_kg: 200 })).statusCode).toBe(200);
       expect(await net(b.batch_no, '1220', ['Milling Batch', 'Milling Output Split'])).toBeCloseTo(fin1220, 2);
-      expect(await net(b.batch_no, '2010', ['Rice Purchase'])).toBe(-1000000); // not booked twice
+      expect(await riceAp(b)).toBe(-1000000); // not booked twice
       const raw2 = await db('inventory_lots').where({ id: raw.id }).first();
       expect(num(raw2.qty)).toBe(0);
       await expectLedgerMatchesQty(b.id);
