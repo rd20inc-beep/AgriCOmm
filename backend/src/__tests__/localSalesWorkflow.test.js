@@ -51,6 +51,8 @@ let mockDocNo = 0;
 jest.mock('../utils/docNumber', () => ({ nextDocNo: jest.fn(async (_t, { prefix }) => `${prefix}${++mockDocNo}`) }));
 jest.mock('../shared/cashAccounts', () => ({ resolveCashAccountId: jest.fn(async () => 7) }));
 jest.mock('../modules/localSales/receiptJournal', () => ({ postLocalReceiptJournal: jest.fn(async () => ({ id: 1 })) }));
+// No returns in these fixtures (P3-11): nothing credited off any sale.
+jest.mock('../modules/localSales/saleCredits', () => ({ creditedOnSale: jest.fn(async () => 0) }));
 jest.mock('../modules/accounting/accounting.service', () => ({
   createJournal: jest.fn(async () => ({ id: 1 })), postJournal: jest.fn(async () => ({})), autoPost: jest.fn(async () => ({})),
 }));

@@ -31,6 +31,8 @@ jest.mock('../config/database', () => {
   return db;
 });
 jest.mock('../utils/docNumber', () => ({ nextDocNo: jest.fn(async () => 'PL-7') }));
+// No returns in these fixtures (P3-11): nothing credited off any sale.
+jest.mock('../modules/localSales/saleCredits', () => ({ creditedOnSale: jest.fn(async () => 0) }));
 jest.mock('../modules/accounting/accounting.service', () => ({
   createJournal: jest.fn(async (_trx, j) => ({ id: 501, ...j })),
   postJournal: jest.fn(async () => ({})),

@@ -17,6 +17,8 @@ export const millStoreApi = {
   listPurchases: (params) => api.get('/api/mill-store/purchases', params),
   getPurchase: (id) => api.get(`/api/mill-store/purchases/${id}`),
   createPurchase: (data) => api.post('/api/mill-store/purchases', data),
+  // Void an unpaid purchase still in the store (P3-11). Owner-approved.
+  voidPurchase: (id, data) => api.post(`/api/mill-store/purchases/${id}/void`, data),
 
   // Stock
   getStock: (params) => api.get('/api/mill-store/stock', params),

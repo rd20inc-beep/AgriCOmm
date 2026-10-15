@@ -42,6 +42,10 @@ test('the owner-approved routes', () => {
     'POST exportOrders /:id/packing-weight/resolve [packing_variance]',
     'POST exportOrders /:id/write-off-balance [export_short_write_off]',
     'POST finance /payments/:id/reverse [payment_reversal]',
+    // P3-11 / D-22, D-23: a local-sale return and voiding a purchase.
+    'POST inventory /lots/:id/void [purchase_void]',
+    'POST localSales /:id/returns [local_sale_return]',
+    'POST millStore /purchases/:id/void [store_purchase_void]',
     'POST milling /advances/:id/approve [salary_advance]',
     'POST milling /advances/:id/void [salary_advance_void]',
     'POST milling /payroll/final-settlements/:id/reverse [final_settlement_reversal]',

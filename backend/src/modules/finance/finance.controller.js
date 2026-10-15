@@ -2236,6 +2236,8 @@ financeController.payPurchase = async (req, res) => {
         const exp = await trx('business_expenses').where({ id: row.business_expense_id }).first('expense_no');
         throw fail(`This cost belongs to expense ${exp?.expense_no || `#${row.business_expense_id}`} — pay the expense instead.`);
       }
+      // A voided purchase (P3-11) owes nothing; its bills are Reversed.
+      if (row.voided_at) throw fail(`${spec.label(row) || 'This purchase'} was voided — nothing is due on it.`);
       const payables = await purchasePayables(trx, source, row);
       // The paying side of the business: the payable's when there is one, else
       // the source's own (a lot carries its entity, a mill-store purchase is
@@ -2250,6 +2252,8 @@ financeController.payPurchase = async (req, res) => {
       // cheques), else the source row's own figure.
       const open = [];
       for (const p of payables) {
+        // A reversed / written-off bill keeps its figure but owes nothing.
+        if (['Reversed', 'Written Off'].includes(p.status)) continue;
         const pending = await pendingChequeTotal(trx, { payableId: p.id });
         const owed = Math.max(0, round2((parseFloat(p.original_amount) || 0) - (parseFloat(p.paid_amount) || 0) - pending));
         if (owed > 0.01) open.push({ payable: p, owed });

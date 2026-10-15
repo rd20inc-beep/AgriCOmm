@@ -13,6 +13,7 @@ import { useAuth } from '../../../context/AuthContext';
 import { paymentWord } from '../utils/saleStatus';
 import { LoadingSpinner, ErrorState } from '../../../components/LoadingState';
 import StatusBadge from '../../../shared/components/StatusBadge';
+import SaleReturnsPanel from '../components/SaleReturnsPanel';
 import { fmtPKR, fmtKg, fmtNum, fmtPct, fmtDate } from '../../../shared/utils/format';
 
 // Money on this page is shown to the paisa, as before.
@@ -250,6 +251,9 @@ export default function LocalSaleDetail() {
           </div>
         )}
       </div>
+
+      {/* ─── Returns / credit notes (P3-11) ───────────────────────── */}
+      <SaleReturnsPanel sale={sale} canCreate={canEdit} addToast={addToast} onChanged={refetch} />
     </div>
   );
 }

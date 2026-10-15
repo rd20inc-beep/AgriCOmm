@@ -14,6 +14,9 @@ import SupplierPicker from '../../../components/SupplierPicker';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import useCanSeeCost from '../../../hooks/useCanSeeCost';
+import VoidPurchaseButton from '../../../shared/components/VoidPurchaseButton';
+import { useQueryClient } from '@tanstack/react-query';
+import { millStoreApi } from '../api/services';
 import { fmtPKR, fmtNum, fmtDate } from '../../../shared/utils/format';
 
 // Exact figures — never "M"/"K" (store values are reconciled line by line).
@@ -276,13 +279,17 @@ function PurchasePaymentsCard() {
   // mill's own accounts (full mill access, owner decision 2026-10-05).
   const { hasPermission } = useAuth();
   const canPay = hasPermission('finance', 'confirm_payment') || hasPermission('milling', 'edit');
+  // Voiding a purchase entered by mistake (P3-11) — store purchase rights + the Owner.
+  const canVoid = hasPermission('mill_store', 'create_purchase');
+  const queryClient = useQueryClient();
   const { data: purchasesRaw = [] } = useMillStorePurchases({ limit: 200 });
   const { data: bankAccounts = [] } = useBankAccounts({ millOnly: !hasPermission('finance', 'view') });
   const pay = usePayMillPurchase();
   const [target, setTarget] = useState(null);
 
   const purchases = Array.isArray(purchasesRaw) ? purchasesRaw : (purchasesRaw.purchases || purchasesRaw.data || []);
-  const unpaid = purchases.filter(p => String(p.payment_status || '').toLowerCase() !== 'paid');
+  // A voided purchase owes nothing (its bill is Reversed) — not listed as unpaid.
+  const unpaid = purchases.filter(p => !p.voided_at && String(p.payment_status || '').toLowerCase() !== 'paid');
   if (unpaid.length === 0) return null;
 
   const due = (p) => Math.max(0, (Number(p.total_amount) || 0) - (Number(p.paid_amount) || 0));
@@ -314,6 +321,14 @@ function PurchasePaymentsCard() {
                     <button onClick={() => setTarget(p)} className="px-2.5 py-1 bg-emerald-50 text-emerald-700 text-xs font-medium rounded hover:bg-emerald-100 inline-flex items-center gap-1">
                       <DollarSign size={12} /> Pay
                     </button>
+                  )}
+                  {canVoid && !(Number(p.paid_amount) > 0) && (
+                    <span className="ml-1.5 inline-block">
+                      <VoidPurchaseButton label={p.purchase_no} addToast={addToast}
+                        className="px-2.5 py-1 bg-red-50 text-red-700 text-xs font-medium rounded hover:bg-red-100 inline-flex items-center gap-1"
+                        onVoid={(body) => millStoreApi.voidPurchase(p.id, body)}
+                        onDone={() => queryClient.invalidateQueries()} />
+                    </span>
                   )}
                 </td>
               </tr>

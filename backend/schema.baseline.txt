@@ -1162,6 +1162,10 @@ COL inventory_lots.unloading_cost:numeric:NOT NULL
 COL inventory_lots.updated_at:timestamp with time zone:NOT NULL
 COL inventory_lots.uuid:uuid:NULL
 COL inventory_lots.variety:character varying:NULL
+COL inventory_lots.void_authorized_by:integer:NULL
+COL inventory_lots.void_reason:character varying:NULL
+COL inventory_lots.voided_at:timestamp with time zone:NULL
+COL inventory_lots.voided_by:integer:NULL
 COL inventory_lots.warehouse_id:integer:NOT NULL
 COL inventory_lots.whiteness:numeric:NULL
 COL inventory_reservations.created_at:timestamp with time zone:NOT NULL
@@ -1260,6 +1264,28 @@ COL local_sale_repacking.packaging_item_id:integer:NULL
 COL local_sale_repacking.packing_loss_kg:numeric:NULL
 COL local_sale_repacking.sale_group_no:character varying:NOT NULL
 COL local_sale_repacking.updated_at:timestamp with time zone:NOT NULL
+COL local_sale_returns.applied_to_receivable:numeric:NOT NULL
+COL local_sale_returns.authorized_by_owner_id:integer:NULL
+COL local_sale_returns.cogs_reversed:numeric:NOT NULL
+COL local_sale_returns.cost_per_kg:numeric:NULL
+COL local_sale_returns.created_at:timestamp with time zone:NULL
+COL local_sale_returns.created_by:integer:NULL
+COL local_sale_returns.credit_amount:numeric:NOT NULL
+COL local_sale_returns.credit_status:character varying:NULL
+COL local_sale_returns.customer_id:integer:NULL
+COL local_sale_returns.id:integer:NOT NULL
+COL local_sale_returns.inventory_account_code:character varying:NULL
+COL local_sale_returns.local_sale_id:integer:NOT NULL
+COL local_sale_returns.lot_id:integer:NULL
+COL local_sale_returns.mill_item_id:integer:NULL
+COL local_sale_returns.quantity_kg:numeric:NOT NULL
+COL local_sale_returns.reason:character varying:NOT NULL
+COL local_sale_returns.refund_amount:numeric:NOT NULL
+COL local_sale_returns.refund_payment_id:integer:NULL
+COL local_sale_returns.return_date:date:NOT NULL
+COL local_sale_returns.return_no:character varying:NOT NULL
+COL local_sale_returns.return_value:numeric:NOT NULL
+COL local_sale_returns.settlement:character varying:NOT NULL
 COL local_sales.bag_weight_kg:numeric:NULL
 COL local_sales.bank_account_id:integer:NULL
 COL local_sales.buyer_address:character varying:NULL
@@ -1642,6 +1668,10 @@ COL mill_purchases.supplier_id:integer:NULL
 COL mill_purchases.total_amount:numeric:NOT NULL
 COL mill_purchases.updated_at:timestamp with time zone:NULL
 COL mill_purchases.vendor_name:character varying:NULL
+COL mill_purchases.void_authorized_by:integer:NULL
+COL mill_purchases.void_reason:character varying:NULL
+COL mill_purchases.voided_at:timestamp with time zone:NULL
+COL mill_purchases.voided_by:integer:NULL
 COL mill_salary_revisions.created_at:timestamp with time zone:NOT NULL
 COL mill_salary_revisions.created_by:integer:NULL
 COL mill_salary_revisions.effective_date:date:NOT NULL
@@ -3318,6 +3348,8 @@ CON inventory_lots.inventory_lots_status_chk(c)
 CON inventory_lots.inventory_lots_supplier_id_foreign(f)
 CON inventory_lots.inventory_lots_transport_vendor_id_foreign(f)
 CON inventory_lots.inventory_lots_type_check(c)
+CON inventory_lots.inventory_lots_void_authorized_by_foreign(f)
+CON inventory_lots.inventory_lots_voided_by_foreign(f)
 CON inventory_lots.inventory_lots_warehouse_id_foreign(f)
 CON inventory_lots.uq_inventory_lots_uuid(u)
 CON inventory_reservations.chk_inventory_reservations_reserved_qty_nn(c)
@@ -3354,6 +3386,20 @@ CON local_sale_repacking.local_sale_repacking_created_by_foreign(f)
 CON local_sale_repacking.local_sale_repacking_local_sale_id_foreign(f)
 CON local_sale_repacking.local_sale_repacking_packaging_item_id_foreign(f)
 CON local_sale_repacking.local_sale_repacking_pkey(p)
+CON local_sale_returns.chk_lsr_amounts_nonneg(c)
+CON local_sale_returns.chk_lsr_credit_status(c)
+CON local_sale_returns.chk_lsr_line(c)
+CON local_sale_returns.chk_lsr_settlement(c)
+CON local_sale_returns.chk_lsr_value_split(c)
+CON local_sale_returns.local_sale_returns_authorized_by_owner_id_foreign(f)
+CON local_sale_returns.local_sale_returns_created_by_foreign(f)
+CON local_sale_returns.local_sale_returns_customer_id_foreign(f)
+CON local_sale_returns.local_sale_returns_local_sale_id_foreign(f)
+CON local_sale_returns.local_sale_returns_lot_id_foreign(f)
+CON local_sale_returns.local_sale_returns_mill_item_id_foreign(f)
+CON local_sale_returns.local_sale_returns_pkey(p)
+CON local_sale_returns.local_sale_returns_refund_payment_id_foreign(f)
+CON local_sale_returns.local_sale_returns_return_no_unique(u)
 CON local_sales.chk_local_sales_bag_weight_kg_nn(c)
 CON local_sales.chk_local_sales_cogs_per_kg_nn(c)
 CON local_sales.chk_local_sales_cogs_total_pkr_nonneg(c)
@@ -3491,6 +3537,8 @@ CON mill_purchases.mill_purchases_payment_status_chk(c)
 CON mill_purchases.mill_purchases_pkey(p)
 CON mill_purchases.mill_purchases_purchase_no_unique(u)
 CON mill_purchases.mill_purchases_supplier_id_foreign(f)
+CON mill_purchases.mill_purchases_void_authorized_by_foreign(f)
+CON mill_purchases.mill_purchases_voided_by_foreign(f)
 CON mill_salary_revisions.mill_salary_revisions_pkey(p)
 CON mill_salary_revisions.mill_salary_revisions_worker_id_foreign(f)
 CON mill_statutory_deductions.mill_statutory_deductions_pkey(p)

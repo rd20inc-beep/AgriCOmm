@@ -8,6 +8,7 @@ const auditAction = require('../../middleware/audit');
 const validate = require('../../middleware/validate');
 const ownerApproval = require('../../middleware/ownerApproval');
 const schemas = require('../../middleware/schemas');
+const { voidPurchaseLot } = require('./purchaseVoid');
 // Money-only endpoints need reports.view_cost (or finance.view): the Mill
 // Operator and QC Analyst see stock quantities, never rates or values.
 const { requireCostVisibility, redactCostInResponses } = require('../../utils/costVisibility');
@@ -106,6 +107,33 @@ router.put(
   validate(schemas.setLotPurchaseRate),
   auditAction('update_lot_purchase_rate', 'inventory_lot'),
   controller.setLotPurchaseRate
+);
+
+// Void a purchase lot that was entered by mistake (P3-11, D-23): stock, every
+// bill and the GL come back out by signed deltas; the lot stays on record as
+// Closed + voided. Only an untouched, unpaid purchase — see purchaseVoid.js.
+// The Owner approves it (ownerApproval runs before validate strips the id).
+router.post(
+  '/lots/:id/void',
+  authorize('inventory', 'edit'),
+  requireCostVisibility,
+  ownerApproval('purchase_void'),
+  validate(schemas.voidPurchase),
+  auditAction('void_purchase_lot', 'inventory_lot', (req) => req.params.id),
+  async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!id) return res.status(404).json({ success: false, message: 'Lot not found.' });
+      const result = await db.transaction((trx) => voidPurchaseLot(trx, id, {
+        reason: req.body.reason, userId: req.user?.id || null, ownerId: req.ownerAuth?.ownerId || null,
+      }));
+      return res.json({ success: true, data: result });
+    } catch (err) {
+      const status = err.statusCode || err.status || 500;
+      if (status >= 500) console.error('void purchase lot error:', err);
+      return res.status(status).json({ success: false, message: status >= 500 ? 'Internal server error.' : err.message });
+    }
+  }
 );
 
 // Rename a lot (custom lot number/name) — works for company + service lots.
