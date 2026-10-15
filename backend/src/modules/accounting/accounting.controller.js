@@ -3,6 +3,7 @@ const accountingService = require('../../services/accountingService');
 const bankReconciliation = require('./bankReconciliation.service');
 const auditService = require('../admin/audit.service');
 const { assertNoControlAccounts } = require('./controlAccounts');
+const periods = require('./periods');
 
 // A refusal the user can act on (typed 400/403/404/409) keeps its status and
 // message; anything else is a server fault and says nothing about internals.
@@ -112,8 +113,12 @@ const accountingController = {
       const { page = 1, limit = 20, entity, period_id, ref_type, status, date_from, date_to } = req.query;
       const offset = (Math.max(1, parseInt(page)) - 1) * parseInt(limit);
 
+      // The period a journal sits in is the one its DATE falls in (period_id
+      // can be empty or stale on older rows — migration 411).
       let query = db('journal_entries as je')
-        .leftJoin('accounting_periods as ap', 'je.period_id', 'ap.id')
+        .leftJoin('accounting_periods as ap', function () {
+          this.on('je.date', '>=', 'ap.period_start').andOn('je.date', '<=', 'ap.period_end');
+        })
         .leftJoin('users as u', 'je.created_by', 'u.id')
         .select(
           'je.*',
@@ -122,7 +127,7 @@ const accountingController = {
         );
 
       if (entity) query = query.where('je.entity', entity);
-      if (period_id) query = query.where('je.period_id', period_id);
+      if (period_id) query = query.where('ap.id', period_id);
       if (ref_type) query = query.where('je.ref_type', ref_type);
       if (status) query = query.where('je.status', status);
       if (date_from) query = query.where('je.date', '>=', date_from);
@@ -367,17 +372,47 @@ const accountingController = {
   // Periods
   // ═══════════════════════════════════════════════════════════════════
 
+  // Every period, oldest first, with its fiscal year (fy_label, D-1) — or one
+  // fiscal year's twelve with ?fy=2026-27. The current fiscal year is named so
+  // the screen can open on it.
   async listPeriods(req, res) {
     try {
-      const periods = await db('accounting_periods')
+      let q = db('accounting_periods')
         .leftJoin('users as u', 'accounting_periods.closed_by', 'u.id')
         .select('accounting_periods.*', 'u.full_name as closed_by_name')
         .orderBy('accounting_periods.period_start');
+      if (req.query.fy && /^\d{4}-\d{2}$/.test(String(req.query.fy))) q = q.where('accounting_periods.fy_label', String(req.query.fy));
+      const rows = await q;
+      const { fiscalYearOf } = require('../../shared/fiscalYear');
+      const current = fiscalYearOf(new Date());
 
-      return res.json({ success: true, data: { periods } });
+      return res.json({ success: true, data: { periods: rows, current_fiscal_year: current } });
     } catch (err) {
       console.error('List periods error:', err);
       return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
+  // Create a whole fiscal year's twelve monthly periods ahead of time (D-1),
+  // each Open. Months that already have a period keep it. Idempotent.
+  async createFiscalYear(req, res) {
+    try {
+      const startYear = parseInt(req.body?.start_year, 10);
+      const result = await db.transaction(async (trx) => {
+        const r = await periods.ensureFiscalYear(trx, startYear);
+        await auditService.logInTrx(trx, req, {
+          action: 'create_fiscal_year', entityType: 'accounting_periods', entityId: r.periods[0]?.id || null,
+          details: { fiscal_year: r.fiscalYear.label, created: r.created },
+        });
+        return r;
+      });
+      return res.status(result.created ? 201 : 200).json({
+        success: true,
+        data: { fiscal_year: result.fiscalYear, created: result.created, periods: result.periods },
+      });
+    } catch (err) {
+      console.error('Create fiscal year error:', err);
+      return res.status(400).json({ success: false, message: err.message });
     }
   },
 
@@ -610,9 +645,13 @@ const accountingController = {
         entity: entity || null,
         asOfDate: as_of_date || null,
       });
+      // D-1: say whether the as-at date sits in a closed (final) or an open
+      // (provisional) period.
+      result.period_status = await periods.periodStatusAsOf(db, as_of_date || new Date());
 
       return res.json({ success: true, data: result });
     } catch (err) {
+      if (err.isLedgerError) return res.status(err.statusCode || 400).json({ success: false, message: err.message });
       console.error('Trial balance error:', err);
       return res.status(500).json({ success: false, message: 'Internal server error.' });
     }
@@ -627,6 +666,7 @@ const accountingController = {
         periodEnd: period_end || null,
         entity: entity || null,
       });
+      result.period_status = await periods.periodStatusAsOf(db, period_end || new Date());
 
       return res.json({ success: true, data: result });
     } catch (err) {
@@ -643,6 +683,7 @@ const accountingController = {
         asOfDate: as_of_date || null,
         entity: entity || null,
       });
+      result.period_status = await periods.periodStatusAsOf(db, as_of_date || new Date());
 
       return res.json({ success: true, data: result });
     } catch (err) {

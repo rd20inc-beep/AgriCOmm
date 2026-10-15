@@ -2,6 +2,8 @@ const db = require('../../config/database');
 const fxRateService = require('../finance/fxRate.service');
 const { cashGroupAccountIds } = require('../../shared/accountGl');
 const { LedgerPostingError } = require('../../shared/errors');
+const periods = require('./periods');
+const { dayOf } = require('../../shared/fiscalYear');
 
 /**
  * Currency conversion helpers for party statements. Journals are stored in
@@ -147,15 +149,10 @@ const accountingService = {
       }
 
       // ── Resolve accounting period ──
-      const journalDate = date || new Date().toISOString().slice(0, 10);
-      const period = await knex('accounting_periods')
-        .where('period_start', '<=', journalDate)
-        .andWhere('period_end', '>=', journalDate)
-        .first();
-
-      if (period && period.status !== 'Open') {
-        throw new LedgerPostingError(`Accounting period '${period.name}' is ${period.status}. Cannot post journals.`, 'period_closed');
-      }
+      // Every journal date has a period (a month with none gets one, Open —
+      // D-1); a journal dated in a Closed / Locked period is refused.
+      const journalDate = dayOf(date) || dayOf(new Date());
+      const period = await periods.assertDateOpen(knex, journalDate, 'post a journal');
 
       // ── Generate journal number: JE-YYYYMM-XXXX ──
       const ym = journalDate.slice(0, 7).replace('-', '');
@@ -246,6 +243,8 @@ const accountingService = {
     if (Math.abs(td - tc) > 0.01) {
       throw new LedgerPostingError(`Cannot post unbalanced journal: debit=${td}, credit=${tc}`, 'unbalanced');
     }
+    // A draft dated in a period closed since it was created cannot post into it.
+    await accountingService.assertPeriodOpen(knex, journal, 'post');
 
     const [updated] = await knex('journal_entries')
       .where({ id: journalId })
@@ -305,14 +304,14 @@ const accountingService = {
    * is the one it was stamped with, else the one its date falls in.
    */
   async assertPeriodOpen(knex, journal, verb = 'change') {
-    let period = journal.period_id
+    // Both the period the journal was stamped with and the one its DATE falls
+    // in must be Open (an older stamp can be stale — see migration 411).
+    const stamped = journal.period_id
       ? await knex('accounting_periods').where({ id: journal.period_id }).first()
       : null;
-    if (!period && journal.date) {
-      const d = journal.date instanceof Date ? journal.date.toISOString().slice(0, 10) : String(journal.date).slice(0, 10);
-      period = await knex('accounting_periods').where('period_start', '<=', d).andWhere('period_end', '>=', d).first();
-    }
-    if (period && period.status !== 'Open') {
+    const dated = journal.date ? await periods.periodForDate(knex, dayOf(journal.date)) : null;
+    const period = [stamped, dated].find((p) => p && p.status !== 'Open');
+    if (period) {
       throw new LedgerPostingError(
         `Accounting period '${period.name}' is ${period.status}. Cannot ${verb} ${journal.journal_no || 'this journal'}; post a correcting journal in an open period instead.`,
         'period_closed',
@@ -515,9 +514,12 @@ const accountingService = {
     if (!period) throw new Error(`Period ${periodId} not found.`);
     if (period.status !== 'Open') throw new Error(`Period is already ${period.status}.`);
 
-    // Check for unposted journals
+    // Check for unposted journals — stamped with this period or dated in it.
     const draftCount = await knex('journal_entries')
-      .where({ period_id: periodId })
+      .where(function () {
+        this.where({ period_id: periodId })
+          .orWhereBetween('date', [dayOf(period.period_start), dayOf(period.period_end)]);
+      })
       .whereNot({ status: 'Posted' })
       .whereNot({ status: 'Reversed' })
       .count('id as count')
@@ -645,7 +647,11 @@ const accountingService = {
       .where('je.status', 'Posted');
 
     if (periodId) {
-      query = query.where('je.period_id', periodId);
+      // The period's own activity, by journal DATE (a journal's period_id can
+      // be empty or stale on older rows — migration 411).
+      const p = await db('accounting_periods').where({ id: periodId }).first();
+      if (!p) throw new LedgerPostingError(`Period ${periodId} not found.`, 'not_found');
+      query = query.whereBetween('je.date', [dayOf(p.period_start), dayOf(p.period_end)]);
     }
     if (entity) {
       query = query.where(function () {

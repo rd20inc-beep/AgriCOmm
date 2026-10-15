@@ -81,6 +81,16 @@ router.put(
 // Periods
 // ═══════════════════════════════════════════════════════════════════
 router.get('/periods', authorize('finance', 'view'), controller.listPeriods);
+// D-1: create a fiscal year's twelve monthly periods ahead of time (all Open).
+router.post(
+  '/periods/fiscal-years',
+  authorize('finance', 'post_journal'),
+  validate(schemas.createFiscalYear),
+  auditAction('create_fiscal_year', 'accounting_periods'),
+  controller.createFiscalYear
+);
+// The Finance Manager closes a month (D-1); journals and money dated in it are
+// refused from then on. Closing never alters a posted journal.
 router.put(
   '/periods/:id/close',
   authorize('finance', 'post_journal'),

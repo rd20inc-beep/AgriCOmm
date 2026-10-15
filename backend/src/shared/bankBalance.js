@@ -22,6 +22,7 @@
  * file writes current_balance.
  */
 const { nextDocNo } = require('../utils/docNumber');
+const { assertDateOpen } = require('../modules/accounting/periods');
 
 const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 const num = (v) => parseFloat(v) || 0;
@@ -77,6 +78,9 @@ async function postBankTransaction(trx, {
   if (!Number.isFinite(amt) || amt < 0) throw httpError('A bank transaction amount cannot be negative.');
   if (fields.status && fields.status !== 'posted') throw httpError('postBankTransaction writes posted rows only.');
   delete fields.status;
+  // D-1: money dated in a Closed / Locked accounting period is refused, like a
+  // journal — a closed month's bank and cash movements never change.
+  await assertDateOpen(trx, fields.transaction_date || new Date(), 'record a bank or cash movement');
 
   if (amt !== 0) await trx('bank_accounts').where({ id: accountId })[type === 'credit' ? 'increment' : 'decrement']('current_balance', amt);
   const acct = await trx('bank_accounts').where({ id: accountId }).first();

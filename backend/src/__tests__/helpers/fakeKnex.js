@@ -119,7 +119,10 @@ function fakeKnex(seed = {}) {
         const list = (Array.isArray(data) ? data : [data]).map((d) => ({ id: nextId++, ...d }));
         tables[table].push(...list);
         const out = list.map((r) => ({ ...r }));
-        return { returning: async () => out, then: (res, rej) => Promise.resolve(out).then(res, rej) };
+        const result = { returning: async () => out, then: (res, rej) => Promise.resolve(out).then(res, rej) };
+        // onConflict().ignore() / .merge(): unique keys are not modelled — the row is kept.
+        result.onConflict = () => ({ ignore: () => result, merge: () => result });
+        return result;
       },
       then(res, rej) {
         if (counted) return Promise.resolve([{ [counted]: String(rows().length) }]).then(res, rej);
