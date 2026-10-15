@@ -3,21 +3,25 @@
 // a self-contained window with a standard template (company header ·
 // filters-applied · generated-by/on · signature line) so every ledger prints
 // the same way regardless of which drawer it lives in.
-import { downloadCSV } from '../../../utils/csvExport';
+import { downloadCsv } from '../../../shared/utils/csv';
 import { fmtDate, fmtDateTime, fmtKg, fmtMT, fmtNum, fmtPKR, fmtPct } from '../../../shared/utils/format';
 
 // columns: [{ label, key?, accessor?(row), align? }]  rows: object[]
 export function exportLedgerCSV({ filename = 'ledger.csv', columns, rows }) {
-  downloadCSV(rows || [], columns || [], filename);
+  downloadCsv({ rows: rows || [], columns: columns || [], filename });
 }
 
 function esc(s) {
   return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+// Print shows figures grouped to the paisa; a raw number (the CSV form) is
+// formatted here, a missing / redacted one prints blank — never "0".
 function cellValue(col, row) {
   const v = typeof col.accessor === 'function' ? col.accessor(row) : row[col.key];
-  return v == null ? '' : v;
+  if (v == null) return '';
+  if (typeof v === 'number') return Number.isFinite(v) ? fmtNum(v) : '';
+  return v;
 }
 
 // Opens a print window with the standard ledger template and triggers print.
@@ -58,7 +62,7 @@ export function printLedger({ companyName = 'AGRI COMMODITIES', title, subtitle,
   </body></html>`;
 
   const w = window.open('', '_blank', 'width=980,height=720');
-  if (!w) return; // popup blocked
+  if (!w) return false; // popup blocked — the caller can say so
   w.document.open();
   w.document.write(html);
   w.document.close();

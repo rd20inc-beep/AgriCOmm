@@ -18,6 +18,7 @@ const {
 const { foldCashForecast, addDays } = require('./cashForecast');
 const { PENDING_CHEQUE, NEVER_MONEY } = require('../finance/paymentsFeedTotals');
 const { kgToMt, KG_PER_MT } = require('../../shared/units');
+const { inclusiveEnd, pageMeta } = require('./reportContract');
 
 // Parse a milling_batches.custom_tags jsonb value into a plain array. The pg
 // driver usually returns jsonb already parsed (array/object), but a string may
@@ -356,6 +357,8 @@ const reportingService = {
     if (dateTo) query.where('eo.created_at', '<=', dateTo);
     if (customerId) query.where('eo.customer_id', customerId);
     if (country) query.where('eo.country', country);
+    // Draft / Cancelled orders are not business (the Booked definition, profitDefinitions).
+    query.whereNotIn('eo.status', EXCLUDED_ORDER_STATUSES);
 
     const countQuery = query.clone().clearSelect().count('eo.id as total').first();
 
@@ -427,7 +430,9 @@ const reportingService = {
       };
     });
 
-    return { data, total: parseInt(total.total, 10), page, limit };
+    const t = parseInt(total.total, 10);
+    // pagination.truncated tells the hub this page is not every order (RPT-14).
+    return { data, total: t, page, limit, pagination: pageMeta(t, { page, limit }, data.length) };
   },
 
   /**
@@ -529,8 +534,12 @@ const reportingService = {
         'mb.manual_milling_cost_pkr', 'mb.manual_other_expenses_pkr');
     if (from_date) bq = bq.where('mb.created_at', '>=', from_date);
     if (to_date) bq = bq.where('mb.created_at', '<=', to_date);
-    const batches = await bq.orderBy('mb.created_at', 'desc').limit(parseInt(limit, 10));
-    if (!batches.length) return { batches: [] };
+    // How many batches match, so a capped list says so (RPT-14).
+    const [{ c: matched }] = await bq.clone().clearSelect().count('mb.id as c');
+    const cap = parseInt(limit, 10);
+    const batches = await bq.orderBy('mb.created_at', 'desc').limit(cap);
+    const pagination = pageMeta(matched, { page: 1, limit: cap }, batches.length);
+    if (!batches.length) return { batches: [], pagination };
     const ids = batches.map((b) => b.id);
 
     // Input cost must use the SAME basis the residual cost engine uses
@@ -638,161 +647,160 @@ const reportingService = {
         byproducts,
       };
     });
-    return { batches: data };
+    return { batches: data, pagination };
   },
 
   /**
-   * Aggregate by customer: total orders, revenue, profit, avg margin, outstanding receivables.
+   * Customers and countries (Reports hub, RPT-03). Both are roll-ups of the ONE
+   * export profit definition (finance/profitDefinitions exportProfit, Booked:
+   * orders not Draft / Cancelled whose ORDER DATE is in the period), so a
+   * customer's profit here is the sum of the same per-order figures the Profit
+   * page shows. Revenue and profit are PKR (the order's booked/locked rate —
+   * never a live one); an order with no booked revenue or no rice cost is
+   * counted as not costed and left out of revenue, profit and margin. Contract
+   * value is reported PER CURRENCY — USD and PKR contracts are never added.
+   *
+   * Before: revenue = SUM(contract_value) across currencies, costs = every
+   * export_order_costs row of the customer ever, no COGS, and the API's field
+   * names (revenue / profit / totalOrders) were not the ones the hub read
+   * (totalRevenuePkr / totalProfitPkr / orderCount), so every column was 0.
    */
-  async getCustomerProfitability({ dateFrom, dateTo, page = 1, limit = 50 }) {
-    const offset = (page - 1) * limit;
+  async _bookedOrdersWithParty({ dateFrom, dateTo }) {
+    const { rows } = await exportProfit(db, { startDate: dateFrom, endDate: dateTo });
+    const booked = rows.filter((r) => r.inBookedPeriod !== false);
+    if (!booked.length) return [];
+    const party = await db('export_orders as eo')
+      .leftJoin('customers as c', 'eo.customer_id', 'c.id')
+      .whereIn('eo.id', booked.map((r) => r.id))
+      .select('eo.id', 'eo.customer_id', 'c.name as customer_name', 'c.country as customer_country',
+        'eo.country', 'eo.qty_mt', 'eo.product_name');
+    const byId = new Map(party.map((p) => [Number(p.id), p]));
+    return booked.map((r) => ({ ...r, party: byId.get(Number(r.id)) || {} }));
+  },
 
-    const query = db('export_orders as eo')
-      .join('customers as c', 'eo.customer_id', 'c.id')
-      .select(
-        'c.id as customer_id',
-        'c.name as customer_name',
-        'c.country',
-        db.raw('COUNT(eo.id) as total_orders'),
-        db.raw('COALESCE(SUM(eo.contract_value), 0) as total_revenue'),
-        db.raw('COALESCE(SUM(eo.qty_mt), 0) as total_qty_mt')
-      )
-      .groupBy('c.id', 'c.name', 'c.country');
-
-    if (dateFrom) query.where('eo.created_at', '>=', dateFrom);
-    if (dateTo) query.where('eo.created_at', '<=', dateTo);
-
-    const customers = await query.orderBy('total_revenue', 'desc').limit(limit).offset(offset);
-
-    // Get costs per customer
-    const customerIds = customers.map((c) => c.customer_id);
-    const costsByCustomer = customerIds.length > 0
-      ? await db('export_order_costs as eoc')
-          .join('export_orders as eo', 'eoc.order_id', 'eo.id')
-          .whereIn('eo.customer_id', customerIds)
-          .select('eo.customer_id')
-          .sum('eoc.amount as total_costs')
-          .groupBy('eo.customer_id')
-      : [];
-
-    const costMap = {};
-    for (const c of costsByCustomer) {
-      costMap[c.customer_id] = parseFloat(c.total_costs) || 0;
+  _rollUp(orders, keyOf, init) {
+    const groups = new Map();
+    for (const o of orders) {
+      const key = keyOf(o);
+      if (key == null) continue;
+      let g = groups.get(key);
+      if (!g) {
+        g = {
+          ...init(o), orderCount: 0, pricedCount: 0, unpricedCount: 0, estimatedCount: 0,
+          qtyMt: 0, revenuePkr: 0, bookedProfitPkr: 0, contractByCurrency: {}, _products: new Map(),
+        };
+        groups.set(key, g);
+      }
+      g.orderCount += 1;
+      g.qtyMt += parseFloat(o.party.qty_mt) || 0;
+      const cur = String(o.currency || 'USD').toUpperCase();
+      g.contractByCurrency[cur] = Math.round(((g.contractByCurrency[cur] || 0) + (parseFloat(o.contractValueForeign) || 0)) * 100) / 100;
+      if (o.estimated) g.estimatedCount += 1;
+      if (o.priced) {
+        g.pricedCount += 1;
+        g.revenuePkr += o.revenuePkr || 0;
+        g.bookedProfitPkr += o.bookedProfitPkr || 0;
+      } else {
+        g.unpricedCount += 1;
+      }
+      const pn = o.party.product_name;
+      if (pn) g._products.set(pn, (g._products.get(pn) || 0) + 1);
     }
-
-    // Outstanding receivables per customer
-    const recvByCustomer = customerIds.length > 0
-      ? await db('receivables')
-          .whereIn('customer_id', customerIds)
-          .where('status', '!=', 'Closed')
-          .select('customer_id')
-          .sum('outstanding as total_outstanding')
-          .groupBy('customer_id')
-      : [];
-
-    const recvMap = {};
-    for (const r of recvByCustomer) {
-      recvMap[r.customer_id] = parseFloat(r.total_outstanding) || 0;
-    }
-
-    const countQuery = db('export_orders as eo')
-      .join('customers as c', 'eo.customer_id', 'c.id');
-    if (dateFrom) countQuery.where('eo.created_at', '>=', dateFrom);
-    if (dateTo) countQuery.where('eo.created_at', '<=', dateTo);
-    const totalCustomers = await countQuery.countDistinct('c.id as total').first();
-
-    const data = customers.map((c) => {
-      const revenue = parseFloat(c.total_revenue) || 0;
-      const costs = costMap[c.customer_id] || 0;
-      const profit = revenue - costs;
-      const avgMargin = revenue > 0 ? parseFloat(((profit / revenue) * 100).toFixed(2)) : 0;
-
+    const r2 = (n) => Math.round(n * 100) / 100;
+    return [...groups.values()].map((g) => {
+      const { _products, ...rest } = g;
       return {
-        customerId: c.customer_id,
-        customerName: c.customer_name,
-        country: c.country,
-        totalOrders: parseInt(c.total_orders, 10),
-        totalQtyMT: parseFloat(c.total_qty_mt),
-        revenue,
-        costs,
-        profit,
-        avgMargin,
-        outstandingReceivables: recvMap[c.customer_id] || 0,
+        ...rest,
+        qtyMt: Math.round(rest.qtyMt * 1000) / 1000,
+        revenuePkr: r2(rest.revenuePkr),
+        bookedProfitPkr: r2(rest.bookedProfitPkr),
+        marginPct: rest.revenuePkr > 0 ? parseFloat(((rest.bookedProfitPkr / rest.revenuePkr) * 100).toFixed(2)) : null,
+        topProducts: [..._products.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([n]) => n),
       };
     });
+  },
 
-    return { data, total: parseInt(totalCustomers.total, 10), page, limit };
+  _rollUpTotals(groups) {
+    const t = { groupCount: groups.length, orderCount: 0, pricedCount: 0, unpricedCount: 0, estimatedCount: 0, qtyMt: 0, revenuePkr: 0, bookedProfitPkr: 0, contractByCurrency: {} };
+    for (const g of groups) {
+      for (const k of ['orderCount', 'pricedCount', 'unpricedCount', 'estimatedCount', 'qtyMt', 'revenuePkr', 'bookedProfitPkr']) t[k] += g[k] || 0;
+      for (const [cur, amt] of Object.entries(g.contractByCurrency || {})) t.contractByCurrency[cur] = Math.round(((t.contractByCurrency[cur] || 0) + amt) * 100) / 100;
+    }
+    t.qtyMt = Math.round(t.qtyMt * 1000) / 1000;
+    t.revenuePkr = Math.round(t.revenuePkr * 100) / 100;
+    t.bookedProfitPkr = Math.round(t.bookedProfitPkr * 100) / 100;
+    t.marginPct = t.revenuePkr > 0 ? parseFloat(((t.bookedProfitPkr / t.revenuePkr) * 100).toFixed(2)) : null;
+    return t;
   },
 
   /**
-   * By country: orders, qty MT, revenue, avg price/MT, avg margin, top products.
+   * Aggregate by customer: orders, PKR revenue / booked profit / margin from
+   * profitDefinitions, contract value and open receivables per currency.
+   * Sorted by booked profit; totals cover every customer, not just the page.
    */
-  async getCountryAnalysis({ dateFrom, dateTo }) {
-    const query = db('export_orders as eo')
-      .select(
-        'eo.country',
-        db.raw('COUNT(eo.id) as total_orders'),
-        db.raw('COALESCE(SUM(eo.qty_mt), 0) as total_qty_mt'),
-        db.raw('COALESCE(SUM(eo.contract_value), 0) as total_revenue'),
-        db.raw('CASE WHEN SUM(eo.qty_mt) > 0 THEN SUM(eo.contract_value) / SUM(eo.qty_mt) ELSE 0 END as avg_price_per_mt')
-      )
-      .whereNotNull('eo.country')
-      .groupBy('eo.country')
-      .orderBy('total_revenue', 'desc');
+  async getCustomerProfitability({ dateFrom, dateTo, page = 1, limit = 50, all = false } = {}) {
+    const orders = await this._bookedOrdersWithParty({ dateFrom, dateTo });
+    const groups = this._rollUp(orders, (o) => (o.party.customer_id != null ? Number(o.party.customer_id) : null), (o) => ({
+      customerId: Number(o.party.customer_id),
+      customerName: o.party.customer_name || null,
+      country: o.party.customer_country || o.party.country || null,
+    }));
 
-    if (dateFrom) query.where('eo.created_at', '>=', dateFrom);
-    if (dateTo) query.where('eo.created_at', '<=', dateTo);
-
-    const countries = await query;
-
-    // Get costs by country
-    const costQuery = db('export_order_costs as eoc')
-      .join('export_orders as eo', 'eoc.order_id', 'eo.id')
-      .whereNotNull('eo.country')
-      .select('eo.country')
-      .sum('eoc.amount as total_costs')
-      .groupBy('eo.country');
-    if (dateFrom) costQuery.where('eo.created_at', '>=', dateFrom);
-    if (dateTo) costQuery.where('eo.created_at', '<=', dateTo);
-
-    const costRows = await costQuery;
-    const costMap = {};
-    for (const r of costRows) costMap[r.country] = parseFloat(r.total_costs) || 0;
-
-    // Top products by country
-    const productQuery = db('export_orders as eo')
-      .whereNotNull('eo.country')
-      .whereNotNull('eo.product_name')
-      .select('eo.country', 'eo.product_name')
-      .count('eo.id as cnt')
-      .groupBy('eo.country', 'eo.product_name')
-      .orderBy('cnt', 'desc');
-    if (dateFrom) productQuery.where('eo.created_at', '>=', dateFrom);
-    if (dateTo) productQuery.where('eo.created_at', '<=', dateTo);
-
-    const productRows = await productQuery;
-    const productMap = {};
-    for (const r of productRows) {
-      if (!productMap[r.country]) productMap[r.country] = [];
-      if (productMap[r.country].length < 3) productMap[r.country].push(r.product_name);
+    // Open receivables per customer and currency — as at today (a balance,
+    // not a period figure), closed statuses excluded (RECEIVABLE_CLOSED).
+    const ids = groups.map((g) => g.customerId);
+    const recv = ids.length ? await db('receivables')
+      .whereIn('customer_id', ids)
+      .whereNotIn('status', RECEIVABLE_CLOSED)
+      .where('outstanding', '>', 0)
+      .select('customer_id', db.raw("UPPER(COALESCE(currency, 'PKR')) as currency"))
+      .sum('outstanding as total')
+      .groupBy('customer_id', db.raw("UPPER(COALESCE(currency, 'PKR'))")) : [];
+    const recvBy = new Map();
+    for (const r of recv) {
+      const m = recvBy.get(Number(r.customer_id)) || {};
+      m[r.currency] = Math.round((parseFloat(r.total) || 0) * 100) / 100;
+      recvBy.set(Number(r.customer_id), m);
     }
+    for (const g of groups) g.outstandingByCurrency = recvBy.get(g.customerId) || {};
 
-    return countries.map((c) => {
-      const revenue = parseFloat(c.total_revenue) || 0;
-      const costs = costMap[c.country] || 0;
-      const profit = revenue - costs;
-      const avgMargin = revenue > 0 ? parseFloat(((profit / revenue) * 100).toFixed(2)) : 0;
+    groups.sort((a, b) => (b.bookedProfitPkr - a.bookedProfitPkr) || (b.orderCount - a.orderCount));
+    const p = all ? 1 : Math.max(1, parseInt(page, 10) || 1);
+    const l = all ? Math.max(1, groups.length) : Math.max(1, parseInt(limit, 10) || 50);
+    const rows = all ? groups : groups.slice((p - 1) * l, p * l);
+    return {
+      data: rows,
+      totals: this._rollUpTotals(groups),
+      pagination: pageMeta(groups.length, { page: p, limit: l }, rows.length),
+      total: groups.length, page: p, limit: l,
+    };
+  },
 
-      return {
-        country: c.country,
-        totalOrders: parseInt(c.total_orders, 10),
-        totalQtyMT: parseFloat(c.total_qty_mt),
-        totalRevenue: revenue,
-        avgPricePerMT: parseFloat(parseFloat(c.avg_price_per_kg).toFixed(2)),
-        avgMargin,
-        topProducts: productMap[c.country] || [],
-      };
-    });
+  /**
+   * By country (the order's destination country, else the customer's): the
+   * same roll-up as customers. Average price per MT is per currency.
+   */
+  async getCountryAnalysis({ dateFrom, dateTo } = {}) {
+    const orders = await this._bookedOrdersWithParty({ dateFrom, dateTo });
+    const countryOf = (o) => o.party.country || o.party.customer_country || null;
+    const groups = this._rollUp(orders, countryOf, (o) => ({ country: countryOf(o) }));
+    // Average contract price per MT, per currency (contract ÷ MT of that currency's orders).
+    const mtBy = new Map();
+    for (const o of orders) {
+      const key = countryOf(o);
+      if (!key) continue;
+      const k = `${key}|${String(o.currency || 'USD').toUpperCase()}`;
+      mtBy.set(k, (mtBy.get(k) || 0) + (parseFloat(o.party.qty_mt) || 0));
+    }
+    for (const g of groups) {
+      g.avgPricePerMtByCurrency = {};
+      for (const [cur, amt] of Object.entries(g.contractByCurrency)) {
+        const mt = mtBy.get(`${g.country}|${cur}`) || 0;
+        g.avgPricePerMtByCurrency[cur] = mt > 0 ? Math.round((amt / mt) * 100) / 100 : null;
+      }
+    }
+    groups.sort((a, b) => (b.revenuePkr - a.revenuePkr) || (b.orderCount - a.orderCount));
+    return { data: groups, totals: this._rollUpTotals(groups) };
   },
 
   /**
@@ -1005,32 +1013,7 @@ const reportingService = {
    * Batches ranked by yield %.
    */
   async getBatchRecoveryLeaderboard({ dateFrom, dateTo }) {
-    const query = db('milling_batches as mb')
-      .leftJoin('suppliers as s', 'mb.supplier_id', 's.id')
-      .leftJoin('products as p', function () {
-        this.on(db.raw('1 = 1')); // Will use product_name from batch's linked order
-      })
-      .select(
-        'mb.id',
-        'mb.batch_no',
-        's.name as supplier_name',
-        'mb.raw_qty_kg',
-        'mb.actual_finished_kg',
-        'mb.broken_kg',
-        'mb.bran_kg',
-        'mb.husk_kg',
-        'mb.wastage_kg',
-        'mb.yield_pct',
-        'mb.status'
-      )
-      .where('mb.status', 'Completed')
-      .where('mb.yield_pct', '>', 0)
-      .orderBy('mb.yield_pct', 'desc');
-
-    if (dateFrom) query.where('mb.created_at', '>=', dateFrom);
-    if (dateTo) query.where('mb.created_at', '<=', dateTo);
-
-    // Remove the incorrect join and re-query properly
+    // (A never-executed `1 = 1` cross-join query built here was removed.)
     const batches = await db('milling_batches as mb')
       .leftJoin('suppliers as s', 'mb.supplier_id', 's.id')
       .leftJoin('export_orders as eo', 'mb.linked_export_order_id', 'eo.id')
@@ -1069,7 +1052,11 @@ const reportingService = {
         customTags: parseCustomTags(b.custom_tags),
         supplierName: b.supplier_name,
         productName: b.product_name,
-        rawQtyMT: rawQty,
+        // KG canonical. rawQtyMT used to carry the KG figure under an MT name
+        // (RPT-24); both units are now what they say.
+        rawQtyKg: rawQty,
+        finishedQtyKg: parseFloat(b.actual_finished_kg) || 0,
+        rawQtyMT: kgToMt(rawQty),
         finishedQtyMT: kgToMt(b.actual_finished_kg),
         yieldPct: parseFloat(b.yield_pct) || 0,
         brokenPct,
@@ -1939,7 +1926,8 @@ const reportingService = {
         'mb.operator_name', 'mb.machine_line', 'mb.created_at', 'mb.completed_at',
         'p.name as product_name', 's.name as supplier_name');
     if (from) q = q.where('mb.created_at', '>=', from);
-    if (to) q = q.where('mb.created_at', '<=', `${to} 23:59:59`);
+    // inclusiveEnd: a date-only `to` covers the whole day (report contract).
+    if (to) q = q.where('mb.created_at', '<=', inclusiveEnd(to));
     const batches = await q.orderBy('mb.created_at', 'asc');
 
     const empty = {
@@ -3605,9 +3593,14 @@ const reportingService = {
         'm.name as mill_name',
         'm.capacity_mt_per_day',
         db.raw('COUNT(mb.id) as batches_processed'),
+        db.raw('COALESCE(SUM(mb.raw_qty_kg), 0) as total_input_kg'),
+        db.raw('COALESCE(SUM(mb.actual_finished_kg), 0) as total_output_kg'),
         db.raw(`COALESCE(SUM(mb.raw_qty_kg), 0)/${KG_PER_MT} as total_input_mt`),
         db.raw(`COALESCE(SUM(mb.actual_finished_kg), 0)/${KG_PER_MT} as total_output_mt`),
-        db.raw('COALESCE(AVG(mb.yield_pct), 0) as avg_yield'),
+        // D-14 yield: Σ finished ÷ Σ raw over completed company batches.
+        db.raw(`ROUND(100.0 * COALESCE(SUM(mb.actual_finished_kg) FILTER (WHERE mb.status = 'Completed' AND NOT COALESCE(mb.is_service_milling, false)), 0)
+          / NULLIF(SUM(mb.raw_qty_kg) FILTER (WHERE mb.status = 'Completed' AND NOT COALESCE(mb.is_service_milling, false)), 0), 2) as avg_yield`),
+        db.raw('MIN(mb.created_at) as first_batch_at'),
         db.raw('COALESCE(SUM(mb.processing_hours), 0) as total_processing_hours')
       )
       .groupBy('m.id', 'm.name', 'm.capacity_mt_per_day');
@@ -3642,17 +3635,21 @@ const reportingService = {
       };
     }
 
-    // Calculate date range days for utilization
-    let rangeDays = 30;
-    if (dateFrom && dateTo) {
-      rangeDays = Math.max(1, Math.ceil((new Date(dateTo) - new Date(dateFrom)) / (1000 * 60 * 60 * 24)));
-    }
+    // Days the utilisation is measured over: the selected period; for "all
+    // time" (or an open end) from the earliest batch in the set to today —
+    // not a fixed 30 days (RPT-24). Inclusive of both end days.
+    const DAY_MS = 1000 * 60 * 60 * 24;
+    const earliest = mills.reduce((m, r) => (r.first_batch_at && (!m || new Date(r.first_batch_at) < m) ? new Date(r.first_batch_at) : m), null);
+    const start = dateFrom ? new Date(dateFrom) : earliest;
+    const end = dateTo ? new Date(dateTo) : new Date();
+    const rangeDays = start ? Math.max(1, Math.ceil((end - start) / DAY_MS)) : 1;
 
     return mills.map((m) => {
       const capacity = parseFloat(m.capacity_mt_per_day) || 0;
       const totalCapacity = capacity * rangeDays;
       const totalInput = parseFloat(m.total_input_mt);
-      const utilization = totalCapacity > 0 ? parseFloat(((totalInput / totalCapacity) * 100).toFixed(1)) : 0;
+      // A PERCENTAGE (0–100+). The hub used to multiply it by 100 again.
+      const utilization = totalCapacity > 0 ? parseFloat(((totalInput / totalCapacity) * 100).toFixed(1)) : null;
       const downtime = downtimeMap[m.mill_id] || { minutes: 0, impactMT: 0 };
 
       return {
@@ -3660,11 +3657,15 @@ const reportingService = {
         millName: m.mill_name,
         capacityMTPerDay: capacity,
         batchesProcessed: parseInt(m.batches_processed, 10),
+        totalInputKg: parseFloat(m.total_input_kg) || 0,
+        totalOutputKg: parseFloat(m.total_output_kg) || 0,
         totalInputMT: totalInput,
         totalOutputMT: parseFloat(m.total_output_mt),
-        avgYield: parseFloat(parseFloat(m.avg_yield).toFixed(1)),
+        avgYield: m.avg_yield == null ? null : parseFloat(m.avg_yield),
         totalProcessingHours: parseFloat(m.total_processing_hours),
         utilization,
+        utilizationPct: utilization,
+        utilizationDays: rangeDays,
         downtimeHours: parseFloat((downtime.minutes / 60).toFixed(1)),
         downtimeImpactMT: downtime.impactMT,
       };
@@ -3781,13 +3782,14 @@ const reportingService = {
       })
       .orderBy('id');
 
-    const results = [];
-
-    for (const bm of benchmarks) {
+    // Each KPI is computed ONCE — several benchmarks (one per entity) may
+    // share a name — and all of them in parallel, instead of one awaited query
+    // chain per benchmark row (TEC-15 hot path). Formulas unchanged here; the
+    // KPI definitions themselves belong to the KPI contracts (P4-01).
+    const computeActual = async (kpiName) => {
       let actual = null;
-
       try {
-        switch (bm.kpi_name) {
+        switch (kpiName) {
           case 'Export Margin': {
             const orders = await db('export_orders')
               .modify((qb) => {
@@ -3970,6 +3972,14 @@ const reportingService = {
       } catch (err) {
         actual = null;
       }
+      return actual;
+    };
+    const names = [...new Set(benchmarks.map((b) => b.kpi_name))];
+    const actuals = new Map(await Promise.all(names.map(async (n) => [n, await computeActual(n)])));
+
+    const results = [];
+    for (const bm of benchmarks) {
+      const actual = actuals.get(bm.kpi_name);
 
       // Determine status
       let status = 'Unknown';

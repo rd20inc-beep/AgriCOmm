@@ -5,30 +5,24 @@ import { useAuditLogs } from '../../../api/queries';
 import { LoadingSpinner, ErrorState } from '../../../components/LoadingState';
 import Modal from '../components/AdminDrawer';
 import { todayLocalISO, fmtDateTime } from '../../../shared/utils/format';
+import { downloadCsv } from '../../../shared/utils/csv';
 
-// Build + download a CSV of the currently-filtered audit rows.
+// Download a CSV of the currently-filtered audit rows (the one exporter).
 function exportAuditCsv(rows) {
-  const esc = (v) => {
-    const s = v == null ? '' : (typeof v === 'object' ? JSON.stringify(v) : String(v));
-    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-  };
-  const header = ['Timestamp', 'User', 'Email', 'Action', 'Entity Type', 'Entity ID', 'IP Address', 'Details'];
-  const lines = [header.join(',')];
-  for (const l of rows) {
-    lines.push([
-      l.createdAt ? new Date(l.createdAt).toISOString() : '',
-      l.userName || l.userEmail || 'System', l.userEmail || '',
-      l.action || '', l.entityType || '', l.entityId || '', l.ipAddress || '',
-      l.details ? JSON.stringify(l.details) : '',
-    ].map(esc).join(','));
-  }
-  const blob = new Blob(['﻿' + lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `audit-trail-${todayLocalISO()}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
+  downloadCsv({
+    filename: `audit-trail-${todayLocalISO()}.csv`,
+    rows,
+    columns: [
+      { label: 'Timestamp', accessor: (l) => (l.createdAt ? new Date(l.createdAt).toISOString() : null) },
+      { label: 'User', accessor: (l) => l.userName || l.userEmail || 'System' },
+      { label: 'Email', key: 'userEmail' },
+      { label: 'Action', key: 'action' },
+      { label: 'Entity Type', key: 'entityType' },
+      { label: 'Entity ID', key: 'entityId' },
+      { label: 'IP Address', key: 'ipAddress' },
+      { label: 'Details', accessor: (l) => (l.details ? JSON.stringify(l.details) : null) },
+    ],
+  });
 }
 
 const ACTION_COLORS = {

@@ -15,17 +15,22 @@ import {
   LineChart, Line,
 } from 'recharts';
 import {
+  usePayments, useReceivables, usePayables, usePurchases, useWarehouses,
+} from '../../../api/queries';
+// The one report hook layer (camelCase; lists → { rows, totals, pagination, meta }).
+import {
   useExecutiveSummary, useOrderProfitability, useCustomerProfitability,
-  useCountryAnalysis, useStockAgingReport, useSupplierQualityRanking,
-  usePayments, useReceivables, usePayables, usePrintableStock,
-  useLocalSales, usePurchases, useBatchMargin, useLotTracker, useSalesTracker,
+  useCountryAnalysis, useStockAgingReport, useSupplierQualityRanking, usePrintableStock,
+  useLocalSalesReport, useBatchMargin, useLotTracker, useSalesTracker,
   useCashForecast, useKpiBenchmarks, useMillEfficiency, useRecoveryLeaderboard,
   useStockValuation, useStockTurnover,
   useOperatorProductivity, useUtilityConsumption, useRecoveryByVariety,
-  useSavedReports, useSaveReport, useDeleteSavedReport, useWarehouses,
-} from '../../../api/queries';
+  useSavedReports, useSaveReport, useDeleteSavedReport, usePageFor,
+} from '../api/reportHooks';
+import { ReportPager, ReportMetaLine, ServerCsvButton } from '../components/ReportChrome';
 import { reportingApi, aiApi } from '../api/services';
 import { exportLedgerCSV, printLedger } from '../utils/ledgerExport';
+import { csvNum } from '../../../shared/utils/csv';
 import SlideDrawer from '../../../components/SlideDrawer';
 import TransactionDocument from '../../../components/TransactionDocument';
 import StatusBadge from '../../../shared/components/StatusBadge';
@@ -34,7 +39,6 @@ import {
 } from '../../../shared/utils/format';
 import { moneyTile, netTile, currencyLines, formatCurrencyLines, cappedHint } from '../utils/moneyFeed';
 import { forecastCards, forecastRows, forecastEquivText, money as forecastMoney } from '../utils/cashForecastView';
-import { saleCogs } from '../../localSales/utils/saleLot';
 
 // ─── Formatting ────────────────────────────────────────────────────────
 // Reports are reconciled line by line, so money is always shown in full —
@@ -404,7 +408,11 @@ function NameInput({ initial = '', placeholder, onSave, onCancel, className = ''
 // (reuses LedgerExportBar) or save the layout (localStorage). Bounded — it
 // composes existing report datasets rather than being a full BI query tool
 // (the "Ask AI" analyst covers free-form questions).
-const RB_NUM = (v) => { const n = parseFloat(v); return isNaN(n) ? '' : fmtNum(Math.round(n)); };
+// Figures stay RAW numbers (null when missing / redacted) so the CSV keeps the
+// paisa and a redacted value exports blank, not 0 (RPT-22); the preview and the
+// print format them (rbCell).
+const RB_NUM = (v) => csvNum(v);
+const rbCell = (v) => (typeof v === 'number' ? fmtNum(v) : (v == null || v === '' ? '—' : v));
 const RB_DATE = (v) => v ? new Date(v).toLocaleDateString('en-GB') : '';
 const REPORT_DATASETS = {
   lots: {
@@ -588,7 +596,7 @@ function ReportBuilderDrawer() {
             <tbody className="divide-y divide-gray-100">
               {view.slice(0, 300).map((row, i) => (
                 <tr key={i} className="hover:bg-gray-50">
-                  {cols.map(c => <td data-label={c.label} key={c.key} className={`px-2 py-1.5 whitespace-nowrap ${c.align === 'right' ? 'text-right tabular-nums' : ''}`}>{c.accessor(row) || '—'}</td>)}
+                  {cols.map(c => <td data-label={c.label} key={c.key} className={`px-2 py-1.5 whitespace-nowrap ${c.align === 'right' ? 'text-right tabular-nums' : ''}`}>{rbCell(c.accessor(row))}</td>)}
                 </tr>
               ))}
               {view.length === 0 && <tr><td colSpan={cols.length || 1} className="px-2 py-6 text-center text-gray-400">No rows.</td></tr>}
@@ -662,7 +670,7 @@ export default function Reports() {
 
   // Saved views — persist the current tab + date range as a named report and
   // jump back to it (wires the saved-reports endpoints into the dashboard).
-  const { data: savedReports = [] } = useSavedReports();
+  const { data: { rows: savedReports = [] } = {} } = useSavedReports();
   const saveMut = useSaveReport();
   const delMut = useDeleteSavedReport();
   const [savedOpen, setSavedOpen] = useState(false);
@@ -930,7 +938,7 @@ export default function Reports() {
           {tab === 'margin'    && <MarginTab params={params} openDoc={openDoc} />}
           {tab === 'production' && <ProductionTab params={params} />}
           {tab === 'forecast'  && <ForecastTab />}
-          {tab === 'kpis'      && <KpiTab params={params} millScoped={millScoped} />}
+          {tab === 'kpis'      && <KpiTab params={params} />}
           {tab === 'orders'    && <OrdersTab params={params} />}
           {tab === 'customers' && <CustomersTab params={params} />}
           {tab === 'countries' && <CountriesTab params={params} />}
@@ -1114,8 +1122,7 @@ function paymentToDoc(kind, p) {
 
 // ─── Tab: Sales (local rice sales) ────────────────────────────────────
 function SalesTab({ params, statementHref, openDoc }) {
-  const { from_date, to_date, entity } = params || {};
-  const { data: sales = [], isLoading } = useSalesTracker({ from: from_date, to: to_date, ...(entity ? { entity } : {}) });
+  const { data: { rows: sales = [] } = {}, isLoading } = useSalesTracker(params);
   if (isLoading) return <Skeleton />;
   const rows = Array.isArray(sales) ? sales : [];
   if (rows.length === 0) return <Empty msg="No sales in this period." />;
@@ -1246,9 +1253,9 @@ function SaleTrackerPanel({ sale, statementHref, companyProfile }) {
 const SALE_ITEM_COLS = [
   { label: 'Item', align: 'left', accessor: (i) => i.item || '' },
   { label: 'Lot', align: 'left', accessor: (i) => i.lotNo || '' },
-  { label: 'Qty (kg)', align: 'right', accessor: (i) => Math.round(i.quantityKg) },
-  { label: 'Rate/kg (PKR)', align: 'right', accessor: (i) => i.ratePerKg > 0 ? Math.round(i.ratePerKg) : '' },
-  { label: 'Value (PKR)', align: 'right', accessor: (i) => Math.round(i.totalAmount) },
+  { label: 'Qty (kg)', align: 'right', accessor: (i) => csvNum(i.quantityKg) },
+  { label: 'Rate/kg (PKR)', align: 'right', accessor: (i) => (i.ratePerKg > 0 ? csvNum(i.ratePerKg) : null) },
+  { label: 'Value (PKR)', align: 'right', accessor: (i) => csvNum(i.totalAmount) },
 ];
 
 // Lazy-loaded Sale 360 extras — all line items (multi-item sales), the
@@ -1455,21 +1462,20 @@ function purchaseToDoc(r) {
 }
 
 // ─── Tab: Margin (buy cost + expenses vs sale price, per sold lot) ─────
-// "Cost" is the sale's COGS — for a confirmed sale the figure it locked and
-// posted to the GL (cogs_total_pkr, the lot's landed cost at confirmation),
-// for a pending one its estimate. It used to be the lot's CURRENT cost, so a
-// later lot re-price changed a closed sale's margin here but not in the P&L
-// (P3-12 / INV-54).
-function marginRow(s) {
-  const soldKg = parseFloat(s.quantityKg) || 0;
-  const sale = parseFloat(s.totalAmount) || 0;
-  const { cost, locked } = saleCogs(s);
-  const costPerKg = soldKg > 0 ? cost / soldKg : 0;
-  const hasCost = cost > 0;
-  const salePerKg = soldKg > 0 ? sale / soldKg : (parseFloat(s.ratePerKg) || 0);
-  const margin = sale - cost;
-  const marginPct = sale > 0 ? (margin / sale) * 100 : 0;
-  return { s, soldKg, costPerKg, salePerKg, cost, sale, margin, marginPct, hasCost, locked };
+// One row of GET /api/reporting/local-sales (P4-12): CONFIRMED sales only, in
+// the period, cost = the COGS the sale locked and posted to the GL. A lot line
+// with no cost is "not costed": its revenue is shown but it is left out of
+// margin (it used to count as 100% margin), and the totals say how many.
+function marginRow(r) {
+  const soldKg = parseFloat(r.quantityKg) || 0;
+  const sale = parseFloat(r.totalAmount) || 0;
+  const hasCost = r.costed !== false && r.cogs != null;
+  const cost = hasCost ? parseFloat(r.cogs) || 0 : 0;
+  const costPerKg = hasCost && soldKg > 0 ? cost / soldKg : 0;
+  const salePerKg = soldKg > 0 ? sale / soldKg : (parseFloat(r.ratePerKg) || 0);
+  const margin = hasCost ? (r.grossProfit != null ? parseFloat(r.grossProfit) : sale - cost) : null;
+  const marginPct = hasCost && sale > 0 ? (margin / sale) * 100 : null;
+  return { s: { ...r, lotRef: r.lotNo }, soldKg, costPerKg, salePerKg, cost, sale, margin, marginPct, hasCost, locked: true };
 }
 
 function MarginTab({ params, openDoc }) {
@@ -1496,25 +1502,32 @@ function MarginTab({ params, openDoc }) {
 }
 
 function MarginBySale({ params, openDoc }) {
-  const { data: sales = [], isLoading } = useLocalSales(params);
+  const [page, setPage] = usePageFor(params);
+  const { data: { rows: raw = [], totals, pagination, meta } = {}, isLoading } = useLocalSalesReport({ ...params, page });
   if (isLoading) return <Skeleton />;
-  const raw = Array.isArray(sales) ? sales : (sales?.sales || []);
-  if (raw.length === 0) return <Empty msg="No sales to analyse in this period." />;
+  if (!totals || totals.count === 0) return <Empty msg="No confirmed sales to analyse in this period." />;
   const rows = raw.map(marginRow);
-
-  const totRev = rows.reduce((a, e) => a + e.sale, 0);
-  const totCost = rows.reduce((a, e) => a + (e.hasCost ? e.cost : 0), 0);
-  const totMargin = totRev - totCost;
-  const avgPct = totRev > 0 ? (totMargin / totRev) * 100 : 0;
+  // Every figure here is the server's, over ALL confirmed sales in the period.
+  const t = totals;
 
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <SummaryCell label="Revenue" value={fmtPKR(totRev)} />
-        <SummaryCell label="Cost (buy + exp)" value={fmtPKR(totCost)} />
-        <SummaryCell label="Gross Margin" value={<span className={totMargin >= 0 ? 'text-emerald-600' : 'text-red-600'}>{fmtPKR(totMargin)}</span>} />
-        <SummaryCell label="Avg Margin" value={fmtPct(avgPct)} />
+        <SummaryCell label={`Revenue (${t.count} confirmed)`} value={fmtPKR(t.revenue)} />
+        <SummaryCell label="Cost (locked COGS)" value={fmtPKR(t.cogs)} />
+        <SummaryCell label="Gross Margin" value={t.grossProfit == null ? '—' : <span className={t.grossProfit >= 0 ? 'text-emerald-600' : 'text-red-600'}>{fmtPKR(t.grossProfit)}</span>} />
+        <SummaryCell label="Avg Margin" value={t.marginPct == null ? '—' : fmtPct(t.marginPct)} />
       </div>
+      {t.uncostedCount > 0 && (
+        <p className="text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+          {t.uncostedCount} sale{t.uncostedCount === 1 ? '' : 's'} ({fmtPKR(t.uncostedRevenue)}) from a lot with no recorded cost — in revenue, left out of margin until the lot is priced.
+        </p>
+      )}
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <ReportMetaLine meta={meta} />
+        <ServerCsvButton endpoint="/api/reporting/local-sales" params={params} filename={`sale-margin_${todayLocalISO()}`} />
+      </div>
+      <ReportPager pagination={pagination} onPage={setPage} />
       <Table
         head={['Sale No', 'Lot', 'Item', 'Sold', 'Cost/kg', 'Sale/kg', 'Cost', 'Sale', 'Margin', '%']}
         align={['left', 'left', 'left', 'right', 'right', 'right', 'right', 'right', 'right', 'right']}
@@ -1524,20 +1537,20 @@ function MarginBySale({ params, openDoc }) {
           return [
             <span className="font-mono text-xs">{s.saleNo}</span>,
             s.lotId
-              ? <Link to={`/lot-inventory/${s.lotId}`} onClick={(ev) => ev.stopPropagation()} className="text-blue-600 hover:underline text-xs">{s.lotRef || '—'}</Link>
-              : <span className="text-xs text-gray-500">{s.lotRef || '—'}</span>,
+              ? <Link to={`/lot-inventory/${s.lotId}`} onClick={(ev) => ev.stopPropagation()} className="text-blue-600 hover:underline text-xs">{s.lotNo || '—'}</Link>
+              : <span className="text-xs text-gray-500">{s.lotNo || '—'}</span>,
             <span className="text-xs">{s.itemName || '—'}</span>,
-            `${fmtNum(Math.round(e.soldKg))} kg`,
+            `${fmtNum(e.soldKg, 2)} kg`,
             e.hasCost ? fmtPKR(e.costPerKg, { decimals: 2 }) : '—',
             fmtPKR(e.salePerKg, { decimals: 2 }),
-            e.hasCost ? fmtPKR(e.cost) : '—',
+            e.hasCost ? fmtPKR(e.cost) : <span className="text-amber-600 text-xs">not costed</span>,
             <span className="font-semibold text-gray-900">{fmtPKR(e.sale)}</span>,
             e.hasCost ? <ProfitCell v={e.margin} /> : <span className="text-gray-400">—</span>,
-            e.hasCost ? <span className={`font-medium ${e.marginPct >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{fmtPct(e.marginPct)}</span> : '—',
+            e.hasCost && e.marginPct != null ? <span className={`font-medium ${e.marginPct >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{fmtPct(e.marginPct)}</span> : '—',
           ];
         })}
       />
-      <p className="text-[11px] text-gray-400">Cost = the sale's cost of goods sold: for a confirmed sale the lot's landed cost locked at confirmation (the figure posted to the ledger); for a pending sale an estimate. Open the lot for the itemised cost breakdown.</p>
+      <p className="text-[11px] text-gray-400">Confirmed (Completed) sales only, by sale date. Cost = the sale's cost of goods sold locked at confirmation — the figure posted to the ledger. Pending and rejected sales are not revenue. Open the lot for the itemised cost breakdown.</p>
     </div>
   );
 }
@@ -1565,12 +1578,12 @@ function MarginBreakdown({ e, companyProfile }) {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            <tr><td className="px-3 py-2 text-gray-600">Buying price + expenses</td><td className="px-3 py-2 text-right tabular-nums">{fmtPKR(e.costPerKg, { decimals: 2 })}</td><td className="px-3 py-2 text-right tabular-nums font-medium">{fmtPKR(e.cost)}</td></tr>
+            <tr><td className="px-3 py-2 text-gray-600">Buying price + expenses</td><td className="px-3 py-2 text-right tabular-nums">{e.hasCost ? fmtPKR(e.costPerKg, { decimals: 2 }) : '—'}</td><td className="px-3 py-2 text-right tabular-nums font-medium">{e.hasCost ? fmtPKR(e.cost) : 'not costed'}</td></tr>
             <tr><td className="px-3 py-2 text-gray-600">Selling price</td><td className="px-3 py-2 text-right tabular-nums">{fmtPKR(e.salePerKg, { decimals: 2 })}</td><td className="px-3 py-2 text-right tabular-nums font-medium">{fmtPKR(e.sale)}</td></tr>
             <tr className="bg-gray-50">
               <td className="px-3 py-2 font-semibold text-gray-800">Gross margin</td>
-              <td className={`px-3 py-2 text-right tabular-nums font-semibold ${perKgMargin >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{perKgMargin >= 0 ? '+' : ''}{fmtPKR(perKgMargin, { decimals: 2 })}</td>
-              <td className={`px-3 py-2 text-right tabular-nums font-bold ${e.margin >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{fmtPKR(e.margin)} ({fmtPct(e.marginPct)})</td>
+              <td className={`px-3 py-2 text-right tabular-nums font-semibold ${perKgMargin >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{e.hasCost ? `${perKgMargin >= 0 ? '+' : ''}${fmtPKR(perKgMargin, { decimals: 2 })}` : '—'}</td>
+              <td className={`px-3 py-2 text-right tabular-nums font-bold ${(e.margin || 0) >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{e.hasCost ? `${fmtPKR(e.margin)} (${fmtPct(e.marginPct)})` : '—'}</td>
             </tr>
           </tbody>
         </table>
@@ -1600,10 +1613,13 @@ function gradeLabel(g) {
 function MarginByBatch({ params, openDoc }) {
   // Batch margin is keyed off milling_batches (created_at) — pass only the date range.
   const { from_date, to_date } = params || {};
-  const { data: batches = [], isLoading } = useBatchMargin({ from_date, to_date });
+  const { data: { rows: batches = [], pagination: batchPaging } = {}, isLoading } = useBatchMargin({ from_date, to_date });
   if (isLoading) return <Skeleton />;
   const rows = Array.isArray(batches) ? batches : [];
   if (rows.length === 0) return <Empty msg="No milling/blending batches in this period." />;
+  const capNote = batchPaging?.truncated
+    ? `Showing the newest ${batchPaging.returned} of ${batchPaging.total} batches in this period — narrow the date range to see the rest.`
+    : null;
 
   const totInput = rows.reduce((a, b) => a + (parseFloat(b.inputCost) || 0), 0);
   const totSold = rows.reduce((a, b) => a + (parseFloat(b.soldValue) || 0), 0);
@@ -1621,6 +1637,7 @@ function MarginByBatch({ params, openDoc }) {
         <SummaryCell label="Realised margin" value={<span className={totMargin >= 0 ? 'text-emerald-600' : 'text-red-600'}>{fmtPKR(totMargin)}</span>} />
         <SummaryCell label="On-hand (at cost)" value={fmtPKR(totOnHand)} />
       </div>
+      {capNote && <p className="text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2" data-testid="batch-margin-cap">{capNote}</p>}
       <Table
         head={['Batch', 'Supplier', 'Input', 'Finished', 'Input cost', 'Output sold', 'Cost of sold', 'Margin', '%', 'Batch 360']}
         align={['left', 'left', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'center']}
@@ -1751,9 +1768,9 @@ const BATCH_OUTPUT_COLS = [
   { label: 'Lot', align: 'left', key: 'lotNo' },
   { label: 'Output', align: 'left', key: 'item' },
   { label: 'Type', align: 'left', accessor: (o) => o.type === 'byproduct' ? 'by-product' : 'finished' },
-  { label: 'Qty (kg)', align: 'right', accessor: (o) => Math.round(o.kg) },
-  { label: 'Cost/kg (PKR)', align: 'right', accessor: (o) => o.costPerKg > 0 ? Math.round(o.costPerKg) : '' },
-  { label: 'Value (PKR)', align: 'right', accessor: (o) => Math.round(o.valuePkr) },
+  { label: 'Qty (kg)', align: 'right', accessor: (o) => csvNum(o.kg) },
+  { label: 'Cost/kg (PKR)', align: 'right', accessor: (o) => (o.costPerKg > 0 ? csvNum(o.costPerKg) : null) },
+  { label: 'Value (PKR)', align: 'right', accessor: (o) => csvNum(o.valuePkr) },
 ];
 
 // Lazy-loaded batch processing ledger — inputs (source lots), recorded costs
@@ -1851,8 +1868,7 @@ const LOT_STATUS_TONE = {
 const mt2 = (kg) => fmtMT((parseFloat(kg) || 0) / 1000, { decimals: 2 });
 
 function LotsTab({ params, statementHref, openDoc }) {
-  const { from_date, to_date, entity } = params || {};
-  const { data: lots = [], isLoading } = useLotTracker({ from: from_date, to: to_date, ...(entity ? { entity } : {}) });
+  const { data: { rows: lots = [] } = {}, isLoading } = useLotTracker(params);
   if (isLoading) return <Skeleton />;
   const rows = Array.isArray(lots) ? lots : [];
   if (rows.length === 0) return <Empty msg="No purchased lots in this period." />;
@@ -2120,9 +2136,9 @@ const LOT_LEDGER_COLS = [
   { label: 'Activity', align: 'left', key: 'label' },
   { label: 'Counterparty', align: 'left', accessor: (e) => e.counterparty || '' },
   { label: 'Reference', align: 'left', accessor: (e) => e.reference || '' },
-  { label: 'In (kg)', align: 'right', accessor: (e) => e.inKg ? Math.round(e.inKg) : '' },
-  { label: 'Out (kg)', align: 'right', accessor: (e) => e.outKg ? Math.round(e.outKg) : '' },
-  { label: 'Balance (kg)', align: 'right', accessor: (e) => Math.round(e.balanceKg) },
+  { label: 'In (kg)', align: 'right', accessor: (e) => (e.inKg ? csvNum(e.inKg) : null) },
+  { label: 'Out (kg)', align: 'right', accessor: (e) => (e.outKg ? csvNum(e.outKg) : null) },
+  { label: 'Balance (kg)', align: 'right', accessor: (e) => csvNum(e.balanceKg) },
 ];
 
 function BuyerRow({ b, statementHref, showOutput }) {
@@ -2147,62 +2163,62 @@ function StatusBadgeMini({ s }) {
 }
 
 // ─── Tab: Production (mill efficiency + yield leaderboard) ─────────────
+// KG canonical (RPT-24): the leaderboard's "Input MT" used to be KG, and
+// utilisation (already a % from the server) was multiplied by 100 again.
+// Headline figures are the server's totals (yield = Σ finished ÷ Σ raw over
+// completed company batches, D-14).
 function ProductionTab({ params }) {
   const navigate = useNavigate();
-  const dr = { dateFrom: params?.from_date, dateTo: params?.to_date };
-  const { data: mills = [], isLoading } = useMillEfficiency(dr);
-  const { data: leaders = [] } = useRecoveryLeaderboard(dr);
-  const { data: operators = [] } = useOperatorProductivity(dr);
+  const dr = { from_date: params?.from_date, to_date: params?.to_date };
+  const { data: { rows: millRows = [], totals: prodTotals, meta: prodMeta } = {}, isLoading } = useMillEfficiency(dr);
+  const { data: { rows: lbRows = [] } = {} } = useRecoveryLeaderboard(dr);
+  const { data: { rows: operators = [] } = {} } = useOperatorProductivity(dr);
   const { data: utility = {} } = useUtilityConsumption(dr);
   if (isLoading) return <Skeleton />;
-  const millRows = Array.isArray(mills) ? mills : [];
-  const lbRows = Array.isArray(leaders) ? leaders : [];
   if (millRows.length === 0 && lbRows.length === 0) return <Empty msg="No production in this period." />;
-
-  const totIn = millRows.reduce((s, m) => s + (parseFloat(m.totalInputMt ?? m.totalInputMT) || 0), 0);
-  const totOut = millRows.reduce((s, m) => s + (parseFloat(m.totalOutputMt ?? m.totalOutputMT) || 0), 0);
-  const avgYield = totIn > 0 ? (totOut / totIn) * 100 : 0;
-  const avgUtil = millRows.length ? millRows.reduce((s, m) => s + (parseFloat(m.utilization) || 0), 0) / millRows.length : 0;
+  const t = prodTotals || {};
+  const kg = (v) => `${fmtNum(parseFloat(v) || 0, 0)} kg`;
 
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <SummaryCell label="Mills" value={String(millRows.length)} />
-        <SummaryCell label="Input" value={fmtMT(totIn, { decimals: 1 })} />
-        <SummaryCell label="Finished output" value={fmtMT(totOut, { decimals: 1 })} />
-        <SummaryCell label="Avg yield" value={fmtPct(avgYield)} />
+        <SummaryCell label="Mills" value={String(t.mills ?? millRows.length)} />
+        <SummaryCell label="Input" value={kg(t.inputKg)} />
+        <SummaryCell label="Finished output" value={kg(t.outputKg)} />
+        <SummaryCell label="Yield (weighted)" value={t.yieldPct == null ? '—' : fmtPct(t.yieldPct)} />
       </div>
+      <ReportMetaLine meta={prodMeta} />
 
       <div className="space-y-2">
-        <SectionHeader title="Mill efficiency" subtitle="Throughput, yield, utilisation & downtime per mill" />
+        <SectionHeader title="Mill efficiency" subtitle="Throughput, yield, utilisation & downtime per mill — utilisation = input ÷ (capacity × days in the period)" />
         <Table
-          head={['Mill', 'Capacity/day', 'Batches', 'Input MT', 'Output MT', 'Avg Yield', 'Utilisation', 'Downtime hrs']}
+          head={['Mill', 'Capacity/day', 'Batches', 'Input (kg)', 'Output (kg)', 'Yield', 'Utilisation', 'Downtime hrs']}
           align={['left', 'right', 'right', 'right', 'right', 'right', 'right', 'right']}
           rows={millRows.map(m => [
             m.millName || '—',
-            `${parseFloat(m.capacityMtPerDay ?? m.capacityMTPerDay) || 0} MT`,
+            `${parseFloat(m.capacityMtPerDay) || 0} MT`,
             m.batchesProcessed || 0,
-            fmtNum(parseFloat(m.totalInputMt ?? m.totalInputMT) || 0, 1),
-            fmtNum(parseFloat(m.totalOutputMt ?? m.totalOutputMT) || 0, 1),
-            fmtPct(m.avgYield),
-            fmtPct((parseFloat(m.utilization) || 0) * (parseFloat(m.utilization) <= 1 ? 100 : 1)),
+            fmtNum(parseFloat(m.totalInputKg) || 0, 0),
+            fmtNum(parseFloat(m.totalOutputKg) || 0, 0),
+            m.avgYield == null ? '—' : fmtPct(m.avgYield),
+            m.utilizationPct == null ? '—' : <span title={`over ${m.utilizationDays} day(s)`}>{fmtPct(m.utilizationPct)}</span>,
             fmtNum(parseFloat(m.downtimeHours) || 0, 1),
           ])}
         />
       </div>
 
       <div className="space-y-2">
-        <SectionHeader title="Yield leaderboard (by batch)" subtitle="Best recovery first" />
+        <SectionHeader title="Yield leaderboard (by batch)" subtitle="Completed batches, best recovery first" />
         <Table
-          head={['Batch', 'Supplier', 'Product', 'Input MT', 'Finished MT', 'Yield %', 'Broken %']}
+          head={['Batch', 'Supplier', 'Product', 'Input (kg)', 'Finished (kg)', 'Yield %', 'Broken %']}
           align={['left', 'left', 'left', 'right', 'right', 'right', 'right']}
           rowClick={lbRows.map(b => b.id ? () => navigate(`/milling/${b.id}`) : null)}
-          rows={[...lbRows].sort((a, b) => (parseFloat(b.yieldPct) || 0) - (parseFloat(a.yieldPct) || 0)).map(b => [
+          rows={lbRows.map(b => [
             <span className="font-mono text-xs text-blue-600">{b.batchNo}</span>,
             b.supplierName || '—',
             <span className="text-xs">{b.productName || '—'}</span>,
-            fmtNum(parseFloat(b.rawQtyMt ?? b.rawQtyMT) || 0, 1),
-            fmtNum(parseFloat(b.finishedQtyMt ?? b.finishedQtyMT) || 0, 1),
+            fmtNum(parseFloat(b.rawQtyKg) || 0, 0),
+            fmtNum(parseFloat(b.finishedQtyKg) || 0, 0),
             <span className="font-medium">{fmtPct(b.yieldPct)}</span>,
             fmtPct(b.brokenPct),
           ])}
@@ -2212,7 +2228,7 @@ function ProductionTab({ params }) {
       {/* Operator productivity */}
       <div className="space-y-2">
         <SectionHeader title="Operator productivity" subtitle="Output & yield per operator" />
-        {(Array.isArray(operators) ? operators : []).length === 0 ? (
+        {operators.length === 0 ? (
           <Empty msg="No operator data — record operators on milling batches to populate this." />
         ) : (
           <Table
@@ -2220,7 +2236,7 @@ function ProductionTab({ params }) {
             align={['left', 'right', 'right', 'right', 'right', 'right']}
             rows={operators.map(o => [
               o.operatorName || '—', o.batches || 0,
-              fmtNum(parseFloat(o.totalOutputMt ?? o.totalOutputMT) || 0, 1),
+              fmtNum(parseFloat(o.totalOutputMt) || 0, 1),
               fmtPct(o.avgYield),
               fmtNum(parseFloat(o.totalHours) || 0, 1),
               fmtNum(parseFloat(o.outputPerHour) || 0, 2),
@@ -2231,7 +2247,7 @@ function ProductionTab({ params }) {
 
       {/* Utility consumption */}
       <div className="space-y-2">
-        <SectionHeader title="Utility consumption" subtitle={`Cost per MT processed${utility.totalProcessedMt ?? utility.totalProcessedMT ? ` — ${fmtMT(parseFloat(utility.totalProcessedMt ?? utility.totalProcessedMT) || 0, { decimals: 1 })} processed` : ''}`} />
+        <SectionHeader title="Utility consumption" subtitle={`Cost per MT processed${utility.totalProcessedMt ? ` — ${fmtMT(parseFloat(utility.totalProcessedMt) || 0, { decimals: 1 })} processed` : ''}`} />
         {(Array.isArray(utility.byType) ? utility.byType : []).length === 0 ? (
           <Empty msg="No utility records — log electricity/fuel/etc. to populate this." />
         ) : (
@@ -2241,7 +2257,7 @@ function ProductionTab({ params }) {
             rows={utility.byType.map(u => [
               <span className="capitalize">{u.utilityType || '—'}</span>, u.unit || '—',
               fmtNum(parseFloat(u.totalConsumption) || 0),
-              fmtPKR(u.totalCost), fmtPKR(u.costPerMt ?? u.costPerMT),
+              fmtPKR(u.totalCost), fmtPKR(u.costPerMt),
             ])}
           />
         )}
@@ -2322,8 +2338,9 @@ function ForecastTab() {
 }
 
 // ─── Tab: KPIs (benchmark scorecard) ──────────────────────────────────
-function KpiTab({ millScoped }) {
-  const { data: rows = [], isLoading } = useKpiBenchmarks(millScoped ? { entity: 'mill' } : {});
+function KpiTab({ params }) {
+  // The period and entity now reach the benchmarks (the tab used to drop them).
+  const { data: { rows = [] } = {}, isLoading } = useKpiBenchmarks(params);
   if (isLoading) return <Skeleton />;
   const list = Array.isArray(rows) ? rows : [];
   if (list.length === 0) return <Empty msg="No KPI benchmarks configured." />;
@@ -2357,8 +2374,11 @@ function KpiTab({ millScoped }) {
 }
 
 // ─── Tab: Orders ──────────────────────────────────────────────────────
+// One page per request (server paging); the pager says when the page is not
+// every order. Draft / Cancelled orders are not listed.
 function OrdersTab({ params }) {
-  const { data: rows = [], isLoading } = useOrderProfitability(params);
+  const [page, setPage] = usePageFor(params);
+  const { data: { rows = [], pagination, meta } = {}, isLoading } = useOrderProfitability({ ...params, page, limit: 100 });
 
   const sorted = useMemo(() =>
     [...rows].sort((a, b) => (parseFloat(b.grossProfit) || 0) - (parseFloat(a.grossProfit) || 0)),
@@ -2378,7 +2398,12 @@ function OrdersTab({ params }) {
 
   return (
     <div className="space-y-4">
-      <SectionHeader title="Order-level Profitability" subtitle="Top 10 by gross profit (PKR) — revenue at locked FX rate, cost = operational + COGS" />
+      <SectionHeader title="Order-level Profitability" subtitle={`Top 10 by gross profit (PKR)${pagination?.truncated ? ' on this page' : ''} — revenue at locked FX rate, cost = operational + COGS`} />
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <ReportMetaLine meta={meta} />
+        <ServerCsvButton endpoint="/api/reporting/profitability/orders" params={params} filename={`order-profitability_${todayLocalISO()}`} />
+      </div>
+      <ReportPager pagination={pagination} onPage={setPage} totalsNote={false} />
       <ChartBlock data={chartData} />
       <Table
         head={['Order', 'Customer', 'Status', 'Contract', 'Revenue (PKR)', 'Cost (PKR)', 'Profit (PKR)', 'Margin']}
@@ -2398,28 +2423,57 @@ function OrdersTab({ params }) {
   );
 }
 
+// Per-currency amounts as stacked lines — USD and PKR are never added (RPT-03).
+function CurrencyLines({ map }) {
+  const entries = Object.entries(map || {}).filter(([, v]) => v != null);
+  if (!entries.length) return <span className="text-gray-400">—</span>;
+  return (
+    <span className="inline-flex flex-col items-end">
+      {entries.map(([cur, v]) => <span key={cur} className="text-xs tabular-nums">{fmtMoney(Number(v), cur, { decimals: 2 })}</span>)}
+    </span>
+  );
+}
+
 // ─── Tab: Customers ───────────────────────────────────────────────────
+// Roll-up of the one export profit definition (Booked, order date): revenue
+// and profit in PKR at each order's booked rate; contract value and open
+// receivables per currency. Totals are the server's, over every customer.
 function CustomersTab({ params }) {
-  const { data: rows = [], isLoading } = useCustomerProfitability(params);
+  const [page, setPage] = usePageFor(params);
+  const { data: { rows = [], totals, pagination, meta } = {}, isLoading } = useCustomerProfitability({ ...params, page, limit: 100 });
   if (isLoading) return <Skeleton />;
   if (rows.length === 0) return <Empty msg="No customer activity in this period." />;
-
-  const sorted = [...rows].sort((a, b) => (parseFloat(b.totalProfitPkr) || 0) - (parseFloat(a.totalProfitPkr) || 0));
+  const t = totals || {};
+  const offset = ((pagination?.page || 1) - 1) * (pagination?.limit || rows.length);
 
   return (
     <div className="space-y-4">
-      <SectionHeader title="Customer Profitability" subtitle="Ranked by total booked profit" />
+      <SectionHeader title="Customer Profitability" subtitle="Ranked by booked profit — orders dated in the period (Draft / Cancelled excluded)" />
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <SummaryCell label="Customers" value={String(t.groupCount ?? rows.length)} />
+        <SummaryCell label={`Revenue (PKR, ${t.pricedCount ?? 0} costed orders)`} value={fmtPKR(t.revenuePkr)} />
+        <SummaryCell label="Booked profit (PKR)" value={<ProfitCell v={t.bookedProfitPkr} />} />
+        <SummaryCell label="Margin" value={t.marginPct == null ? '—' : fmtPct(t.marginPct)} />
+      </div>
+      {(t.unpricedCount || 0) > 0 && <p className="text-xs text-amber-700">{t.unpricedCount} order(s) not costed yet — counted, left out of revenue and profit.</p>}
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <ReportMetaLine meta={meta} />
+        <ServerCsvButton endpoint="/api/reporting/profitability/customers" params={params} filename={`customer-profitability_${todayLocalISO()}`} />
+      </div>
+      <ReportPager pagination={pagination} onPage={setPage} />
       <Table
-        head={['#', 'Customer', 'Country', 'Orders', 'Revenue (PKR)', 'Profit (PKR)', 'Avg Margin']}
-        align={['left','left','left','right','right','right','right']}
-        rows={sorted.map((r, i) => [
-          i + 1,
+        head={['#', 'Customer', 'Country', 'Orders', 'Contract', 'Revenue (PKR)', 'Profit (PKR)', 'Margin', 'Open receivables']}
+        align={['left','left','left','right','right','right','right','right','right']}
+        rows={rows.map((r, i) => [
+          offset + i + 1,
           r.customerName || '—',
           r.country || '—',
-          r.orderCount || 0,
-          fmtPKR(r.totalRevenuePkr),
-          <ProfitCell v={r.totalProfitPkr} />,
-          fmtPct(r.avgMarginPct),
+          <span>{r.orderCount}{r.unpricedCount ? <span className="block text-[10px] text-amber-700">{r.unpricedCount} not costed</span> : null}</span>,
+          <CurrencyLines map={r.contractByCurrency} />,
+          fmtPKR(r.revenuePkr),
+          <ProfitCell v={r.bookedProfitPkr} />,
+          r.marginPct == null ? '—' : fmtPct(r.marginPct),
+          <CurrencyLines map={r.outstandingByCurrency} />,
         ])}
       />
     </div>
@@ -2428,31 +2482,42 @@ function CustomersTab({ params }) {
 
 // ─── Tab: Countries ───────────────────────────────────────────────────
 function CountriesTab({ params }) {
-  const { data: rows = [], isLoading } = useCountryAnalysis(params);
+  const { data: { rows = [], totals, meta } = {}, isLoading } = useCountryAnalysis(params);
   if (isLoading) return <Skeleton />;
   if (rows.length === 0) return <Empty msg="No country data for this period." />;
-
-  const sorted = [...rows].sort((a, b) => (parseFloat(b.totalRevenuePkr) || 0) - (parseFloat(a.totalRevenuePkr) || 0));
-  const chartData = sorted.slice(0, 8).map(r => ({
+  const t = totals || {};
+  const chartData = rows.slice(0, 8).map(r => ({
     name: r.country || '—',
-    Revenue: parseFloat(r.totalRevenuePkr) || 0,
-    Profit:  parseFloat(r.totalProfitPkr)  || 0,
+    Revenue: parseFloat(r.revenuePkr) || 0,
+    Profit:  parseFloat(r.bookedProfitPkr) || 0,
   }));
 
   return (
     <div className="space-y-4">
-      <SectionHeader title="Sales by Country" subtitle="Revenue and profit destination breakdown" />
+      <SectionHeader title="Sales by Country" subtitle="Booked orders by destination — revenue and profit in PKR; contract and price per currency" />
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <SummaryCell label="Countries" value={String(t.groupCount ?? rows.length)} />
+        <SummaryCell label="Quantity" value={fmtMT(t.qtyMt || 0, { decimals: 1 })} />
+        <SummaryCell label="Revenue (PKR)" value={fmtPKR(t.revenuePkr)} />
+        <SummaryCell label="Booked profit (PKR)" value={<ProfitCell v={t.bookedProfitPkr} />} />
+      </div>
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <ReportMetaLine meta={meta} />
+        <ServerCsvButton endpoint="/api/reporting/profitability/countries" params={params} filename={`country-analysis_${todayLocalISO()}`} />
+      </div>
       <ChartBlock data={chartData} />
       <Table
-        head={['Country', 'Orders', 'Quantity (MT)', 'Revenue (PKR)', 'Profit (PKR)', 'Margin']}
-        align={['left','right','right','right','right','right']}
-        rows={sorted.map(r => [
+        head={['Country', 'Orders', 'Quantity (MT)', 'Contract', 'Avg price / MT', 'Revenue (PKR)', 'Profit (PKR)', 'Margin']}
+        align={['left','right','right','right','right','right','right','right']}
+        rows={rows.map(r => [
           r.country || '—',
           r.orderCount || 0,
-          fmtNum(parseFloat(r.totalQtyMT) || 0, 1),
-          fmtPKR(r.totalRevenuePkr),
-          <ProfitCell v={r.totalProfitPkr} />,
-          fmtPct(r.avgMarginPct),
+          fmtNum(parseFloat(r.qtyMt) || 0, 1),
+          <CurrencyLines map={r.contractByCurrency} />,
+          <CurrencyLines map={r.avgPricePerMtByCurrency} />,
+          fmtPKR(r.revenuePkr),
+          <ProfitCell v={r.bookedProfitPkr} />,
+          r.marginPct == null ? '—' : fmtPct(r.marginPct),
         ])}
       />
     </div>
@@ -2506,7 +2571,7 @@ function StockBreakdown({ title, subtitle, query, groupHead, hideValue }) {
 function InventoryTab({ millScoped, hideValue }) {
   const navigate = useNavigate();
   const entity = millScoped ? 'mill' : '';
-  const { data: lots = [], isLoading } = useStockAgingReport();   // per-lot array (qty > 0 only)
+  const { data: { rows: lots = [] } = {}, isLoading } = useStockAgingReport();   // per-lot array (qty > 0 only)
   const byType = usePrintableStock('type');
   const byWarehouse = usePrintableStock('warehouse');
   const bySubtype = usePrintableStock('subtype');
@@ -2667,18 +2732,18 @@ const INVENTORY_LEDGER_COLS = [
   { label: 'Lot', align: 'left', accessor: (r) => r.lotNo || r.batchNo || '' },
   { label: 'From → To', align: 'left', accessor: (r) => [r.fromWh, r.toWh].filter(Boolean).join(' → ') || r.reference || '' },
   { label: 'Direction', align: 'left', key: 'direction' },
-  { label: 'Qty (kg)', align: 'right', accessor: (r) => Math.round(r.qtyKg) },
-  { label: 'Cost (PKR)', align: 'right', accessor: (r) => r.costPkr > 0 ? Math.round(r.costPkr) : '' },
+  { label: 'Qty (kg)', align: 'right', accessor: (r) => csvNum(r.qtyKg) },
+  { label: 'Cost (PKR)', align: 'right', accessor: (r) => (r.costPkr > 0 ? csvNum(r.costPkr) : null) },
 ];
 const FINISHED_GOODS_COLS = [
   { label: 'Output', align: 'left', accessor: (r) => gradeLabel(r.key) },
   { label: 'Type', align: 'left', accessor: (r) => r.type === 'byproduct' ? 'by-product' : 'finished' },
   { label: 'Lots', align: 'right', accessor: (r) => r.lots.length },
-  { label: 'Produced (kg)', align: 'right', accessor: (r) => Math.round(r.producedKg) },
-  { label: 'Sold (kg)', align: 'right', accessor: (r) => Math.round(r.soldKg) },
-  { label: 'On hand (kg)', align: 'right', accessor: (r) => Math.round(r.onHandKg) },
-  { label: 'Reserved (kg)', align: 'right', accessor: (r) => Math.round(r.reservedKg) },
-  { label: 'Value (PKR)', align: 'right', accessor: (r) => Math.round(r.valuePkr) },
+  { label: 'Produced (kg)', align: 'right', accessor: (r) => csvNum(r.producedKg) },
+  { label: 'Sold (kg)', align: 'right', accessor: (r) => csvNum(r.soldKg) },
+  { label: 'On hand (kg)', align: 'right', accessor: (r) => csvNum(r.onHandKg) },
+  { label: 'Reserved (kg)', align: 'right', accessor: (r) => csvNum(r.reservedKg) },
+  { label: 'Value (PKR)', align: 'right', accessor: (r) => csvNum(r.valuePkr) },
 ];
 
 // Finished Goods Ledger — finished + by-product stock register grouped by
@@ -2839,9 +2904,8 @@ function QualityScoreChip({ v }) {
 }
 
 function QualityTab({ params }) {
-  const { data: rows = [], isLoading } = useSupplierQualityRanking(params);
-  const dr = { dateFrom: params?.from_date, dateTo: params?.to_date };
-  const { data: variety = [] } = useRecoveryByVariety(dr);
+  const { data: { rows = [] } = {}, isLoading } = useSupplierQualityRanking(params);
+  const { data: { rows: variety = [] } = {} } = useRecoveryByVariety({ from_date: params?.from_date, to_date: params?.to_date });
   if (isLoading) return <Skeleton />;
   const hasRanking = Array.isArray(rows) && rows.length > 0;
   const varietyRows = Array.isArray(variety) ? variety : [];

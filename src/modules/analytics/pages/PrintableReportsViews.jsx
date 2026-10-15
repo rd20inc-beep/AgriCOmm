@@ -550,8 +550,10 @@ export function ExpandableGroupTable({ head, align = [], groups, totalRow, empty
                       </td>
                     ))}
                   </tr>
-                  {isOpen && kids.map((cr, ri) => (
-                    <tr key={ri} className="bg-gray-50/50 border-b border-gray-100 text-gray-600">
+                  {/* Collapsed groups still PRINT their rows (RPT-23): the rows are
+                      always rendered, hidden on screen until opened. */}
+                  {kids.map((cr, ri) => (
+                    <tr key={ri} className={`bg-gray-50/50 border-b border-gray-100 text-gray-600 ${isOpen ? '' : 'hidden print:table-row'}`}>
                       {cr.map((c, ci) => (
                         <td key={ci} className={`px-3 py-1 text-${align[ci] || 'left'} ${ci === 0 ? 'pl-9' : ''}`}>{c}</td>
                       ))}
@@ -1200,7 +1202,7 @@ export function AuditReportView({ data, companyName, range }) {
 // freight terms are working — and the aggregate can look covered while half the
 // shipments lose money, so the per-order rows carry the report and the ones that
 // came up short are called out rather than averaged away.
-export function FreightRecoveryView({ data, companyName }) {
+export function FreightRecoveryView({ data, companyName, range }) {
   const { rows = [], totals = {}, gl = {} } = data || {};
   const pct = (v) => (v == null ? '—' : `${v.toFixed(1)}%`);
   // Recovery reads as a percentage OF what was paid: 100% is break-even, under
@@ -1211,7 +1213,8 @@ export function FreightRecoveryView({ data, companyName }) {
 
   return (
     <div className="print-report space-y-6 text-sm text-gray-900">
-      <Header companyName={companyName} title="Freight Recovery" subtitle="Charged to buyers vs paid to carriers" />
+      <Header companyName={companyName} title="Freight Recovery"
+        subtitle={`Charged to buyers vs paid to carriers${range ? ` · orders created ${fmtDate(range.from)} – ${fmtDate(range.to)}` : ''}`} />
 
       <SummaryRow items={[
         { label: 'Charged to buyers', value: fmtPkr(totals.chargedPkr) },

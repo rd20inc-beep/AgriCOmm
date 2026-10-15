@@ -9,15 +9,17 @@ import {
 } from '../components/GlStatementParts';
 import { th, tdMoney } from '../utils/uiClasses';
 import { groupCashRows } from '../utils/ledgerStructure';
+import { ServerCsvButton } from '../../analytics/components/ReportChrome';
 
 export default function TrialBalance() {
   const { queryParams: range } = useFinanceDateRange();
   const { entity, setEntity, apiEntity } = useGlEntity();
-  const { data, isLoading, error, refetch } = useTrialBalance(glParams('asOf', range, apiEntity));
-  return <TrialBalanceView data={data} isLoading={isLoading} error={error} onRetry={refetch} entity={entity} onEntity={setEntity} asOf={range.to_date} />;
+  const params = glParams('asOf', range, apiEntity);
+  const { data, isLoading, error, refetch } = useTrialBalance(params);
+  return <TrialBalanceView data={data} isLoading={isLoading} error={error} onRetry={refetch} entity={entity} onEntity={setEntity} asOf={range.to_date} csvParams={params} />;
 }
 
-export function TrialBalanceView({ data, isLoading, error, onRetry, entity, onEntity, asOf }) {
+export function TrialBalanceView({ data, isLoading, error, onRetry, entity, onEntity, asOf, csvParams }) {
   const accounts = data?.accounts || [];
   const grandDebit = Number(data?.grandDebit) || 0;
   const grandCredit = Number(data?.grandCredit) || 0;
@@ -28,9 +30,12 @@ export function TrialBalanceView({ data, isLoading, error, onRetry, entity, onEn
       </StatementHeader>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <EntityFilter entity={entity} onChange={onEntity} />
-        {!isLoading && !error && data && (
-          <BalancedBadge balanced={!!data.isBalanced} difference={grandDebit - grandCredit} />
-        )}
+        <span className="inline-flex items-center gap-2">
+          {!isLoading && !error && data && (
+            <BalancedBadge balanced={!!data.isBalanced} difference={grandDebit - grandCredit} />
+          )}
+          {csvParams && <ServerCsvButton endpoint="/api/accounting/statements/trial-balance" params={csvParams} filename={`trial-balance${asOf ? `_${asOf}` : ''}`} label="CSV" />}
+        </span>
       </div>
       <StateBox isLoading={isLoading} error={error} onRetry={onRetry} empty={accounts.length === 0}>
         {/* Cards on phones; on desktop the header row stays in view while the list scrolls. */}

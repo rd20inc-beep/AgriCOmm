@@ -14,6 +14,7 @@ import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { EmptyLine, InlineError } from '../components/FinanceUI';
 import { btnSecondary, btnRowSecondary, btnIcon, th, tdMoney, kpiLabel, kpiValue, kpiSub, errorText } from '../utils/uiClasses';
 import { downloadCSV } from '../../../utils/csvExport';
+import { csvNum } from '../../../shared/utils/csv';
 import { useApp } from '../../../context/AppContext';
 import { shortenRef } from '../utils/refs';
 import PartyLink from '../../../shared/components/PartyLink';
@@ -154,7 +155,7 @@ export default function Purchases() {
       Ref: p.ref || '',
       Supplier: p.supplierName || '',
       Category: p.category || '',
-      Amount_PKR: Math.round(parseFloat(p.amountPkr) || 0),
+      Amount_PKR: csvNum(p.amountPkr), // raw (paisa kept), blank when missing
       Currency: p.currency || 'PKR',
       Status: p.paymentStatus || 'Pending',
       Created_By: p.createdByName || '',

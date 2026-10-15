@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import { Search, ChevronUp, ChevronDown, Download, ChevronLeft, ChevronRight, Inbox, AlertCircle, RefreshCw } from 'lucide-react';
 import StatusBadge from '../StatusBadge';
+import { downloadCsv } from '../../shared/utils/csv';
 
 /**
  * Standardized finance data table with search, sort, pagination, export.
@@ -18,7 +19,8 @@ import StatusBadge from '../StatusBadge';
  *   error / onRetry — a failed load: shows the message and a Try again button
  *                     instead of pretending the list is empty
  *   actions    — (row) => ReactNode for action column
- *   exportFilename — enables CSV export button
+ *   exportFilename — enables CSV export button (columns may carry csv(row))
+ *   onExport   — replaces the client CSV with a full server export
  *
  * Layout: money columns (align: 'right') are right-aligned with tabular
  * figures; on phones (≤767px) the table becomes the app's stacked
@@ -28,7 +30,7 @@ import StatusBadge from '../StatusBadge';
 export default function FinanceTable({
   columns = [], data = [], searchKeys = [], onRowClick,
   pageSize = 15, emptyText = 'No records found', emptyAction = null, title,
-  loading, error = null, onRetry, actions, exportFilename,
+  loading, error = null, onRetry, actions, exportFilename, onExport,
 }) {
   const [search, setSearch] = useState('');
   const [sortKey, setSortKey] = useState(null);
@@ -64,18 +66,18 @@ export default function FinanceTable({
     else { setSortKey(key); setSortDir('asc'); }
   }
 
+  // The one exporter (BOM, escaping, raw numbers, null → blank). A column may
+  // give `csv(row)` when its cell is computed rather than a field. When the
+  // table holds one page of a longer server list, the caller passes
+  // onExport to download the full result from the server instead.
   function exportCSV() {
+    if (onExport) { onExport(); return; }
     if (!exportFilename) return;
-    const header = columns.map(c => c.label).join(',');
-    const rows = filtered.map(r => columns.map(c => {
-      const v = r[c.key];
-      return typeof v === 'string' && v.includes(',') ? `"${v}"` : (v ?? '');
-    }).join(','));
-    const blob = new Blob([header + '\n' + rows.join('\n')], { type: 'text/csv' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `${exportFilename}.csv`;
-    a.click();
+    downloadCsv({
+      filename: exportFilename,
+      rows: filtered,
+      columns: columns.filter(c => c.label).map(c => ({ label: c.label, accessor: c.csv || ((r) => r[c.key]) })),
+    });
   }
 
   const SortIcon = ({ col }) => {
@@ -118,7 +120,7 @@ export default function FinanceTable({
                 />
               </div>
             )}
-            {exportFilename && (
+            {(exportFilename || onExport) && (
               <button type="button" onClick={exportCSV} aria-label="Download CSV"
                 className="inline-flex items-center justify-center gap-1 text-sm font-medium text-gray-700 px-3 min-h-10 sm:min-h-9 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
                 <Download size={14} aria-hidden="true" /> CSV

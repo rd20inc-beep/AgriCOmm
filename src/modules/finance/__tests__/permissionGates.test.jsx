@@ -41,6 +41,8 @@ vi.mock('../../../api/queries', () => ({
   useFundTransfers: listHook(FIX.fundTransfers),
   usePendingExportReceipts: listHook(FIX.pendingReceipts),
   useLocalSales: listHook(FIX.localSales),
+  // Finance ▸ Local Sales reads the server report (P4-12): rows + totals + paging.
+  useLocalSalesReport: listHook({ rows: FIX.localSales, totals: { count: 1, revenue: 100, collected: 0, outstanding: 100, grossProfit: null, marginPct: null, uncostedCount: 0 }, pagination: { page: 1, limit: 200, total: 1, totalPages: 1, returned: 1, truncated: false } }),
   useLocalSalesSummary: listHook({}),
   useReceivableReceipts: listHook({ payments: [] }),
   useFxRates: listHook({ rates: [], latest: { rate: 280, effectiveDate: '2026-10-01' } }),

@@ -8,7 +8,7 @@ import api from './client';
 import { queryKeys } from './queryClient';
 import {
   exportOrdersApi, millingApi, inventoryApi, financeApi, accountingApi,
-  documentsApi, adminApi, communicationApi, reportingApi, procurementApi,
+  documentsApi, adminApi, communicationApi, procurementApi,
   auditApi, approvalsApi, intelligenceApi, controlApi, smartApi, lotInventoryApi,
   localSalesApi, usersApi, customersApi,
 } from './services';
@@ -2389,212 +2389,17 @@ export function useDashboard() {
 }
 
 // ===================== REPORTING =====================
-
-export function useExecutiveSummary(params = {}) {
-  return useQuery({
-    queryKey: ['executive-summary', params],
-    queryFn: async () => {
-      const res = await reportingApi.executiveSummary(params);
-      return transformKeys(unwrap(res) || {});
-    },
-  });
-}
-
-export function useOrderProfitability(params = {}) {
-  return useQuery({
-    queryKey: ['order-profitability', params],
-    queryFn: async () => {
-      const res = await reportingApi.orderProfitability(params);
-      return transformKeys(unwrap(res, 'orders') || unwrap(res) || []);
-    },
-  });
-}
-
-export function useCustomerProfitability(params = {}) {
-  return useQuery({
-    queryKey: ['customer-profitability', params],
-    queryFn: async () => {
-      const res = await reportingApi.customerProfitability(params);
-      return transformKeys(unwrap(res, 'customers') || unwrap(res) || []);
-    },
-  });
-}
-
-export function useCountryAnalysis(params = {}) {
-  return useQuery({
-    queryKey: ['country-analysis', params],
-    queryFn: async () => {
-      const res = await reportingApi.countryAnalysis(params);
-      return transformKeys(unwrap(res, 'countries') || unwrap(res) || []);
-    },
-  });
-}
-
-export function useLotTracker(params = {}) {
-  return useQuery({
-    queryKey: ['lot-tracker', params],
-    queryFn: async () => {
-      const res = await reportingApi.lotTracker(params);
-      const arr = res?.rows || res?.data?.rows || [];
-      return transformKeys(Array.isArray(arr) ? arr : []);
-    },
-    staleTime: 10 * 1000,
-  });
-}
-
-export function useSalesTracker(params = {}) {
-  return useQuery({
-    queryKey: ['sales-tracker', params],
-    queryFn: async () => {
-      const res = await reportingApi.salesTracker(params);
-      const arr = res?.rows || res?.data?.rows || [];
-      return transformKeys(Array.isArray(arr) ? arr : []);
-    },
-    staleTime: 10 * 1000,
-  });
-}
-
-export function useBatchMargin(params = {}) {
-  return useQuery({
-    queryKey: ['batch-margin', params],
-    queryFn: async () => {
-      const res = await reportingApi.batchMargin(params);
-      // Controller returns { success, batches } at the top level (api.get gives
-      // the body as `res`), so read res.batches — not the nested res.data.
-      const arr = res?.batches || res?.data?.batches || [];
-      return transformKeys(Array.isArray(arr) ? arr : []);
-    },
-    staleTime: 10 * 1000,
-  });
-}
-
-export function useStockAgingReport() {
-  return useQuery({
-    queryKey: ['stock-aging-report'],
-    queryFn: async () => {
-      const res = await reportingApi.stockAging();
-      return transformKeys(unwrap(res, 'aging') || unwrap(res) || []);
-    },
-  });
-}
-
-export function usePrintableStock(groupBy = 'product', status = 'Available') {
-  return useQuery({
-    queryKey: ['printable-stock', groupBy, status],
-    queryFn: async () => {
-      const res = await reportingApi.printableStock({ group_by: groupBy, status });
-      return transformKeys(unwrap(res) || {});
-    },
-  });
-}
-
-export function useSupplierQualityRanking(params = {}) {
-  return useQuery({
-    queryKey: ['supplier-quality-ranking', params],
-    queryFn: async () => {
-      const res = await reportingApi.supplierQualityRanking(params);
-      return transformKeys(unwrap(res, 'suppliers') || unwrap(res) || []);
-    },
-  });
-}
-
-export function useCashForecast(params = {}) {
-  return useQuery({
-    queryKey: ['cash-forecast', params],
-    queryFn: async () => {
-      const res = await reportingApi.cashForecast(params);
-      return transformKeys(unwrap(res) || {});
-    },
-  });
-}
-
-export function useKpiBenchmarks(params = {}) {
-  return useQuery({
-    queryKey: ['kpi-benchmarks', params],
-    queryFn: async () => { const res = await reportingApi.kpiBenchmarks(params); return transformKeys(unwrap(res) || []); },
-    staleTime: 30 * 1000,
-  });
-}
-
-export function useMillEfficiency(params = {}) {
-  return useQuery({
-    queryKey: ['mill-efficiency', params],
-    queryFn: async () => transformKeys(unwrap(await reportingApi.millEfficiency(params)) || []),
-    staleTime: 30 * 1000,
-  });
-}
-
-export function useRecoveryLeaderboard(params = {}) {
-  return useQuery({
-    queryKey: ['recovery-leaderboard', params],
-    queryFn: async () => transformKeys(unwrap(await reportingApi.recoveryLeaderboard(params)) || []),
-    staleTime: 30 * 1000,
-  });
-}
-
-export function useStockValuation(params = {}) {
-  return useQuery({
-    queryKey: ['stock-valuation', params],
-    queryFn: async () => transformKeys(unwrap(await reportingApi.stockValuation(params)) || {}),
-    staleTime: 30 * 1000,
-  });
-}
-
-export function useStockTurnover(params = {}) {
-  return useQuery({
-    queryKey: ['stock-turnover', params],
-    queryFn: async () => transformKeys(unwrap(await reportingApi.stockTurnover(params)) || {}),
-    staleTime: 30 * 1000,
-  });
-}
-
-export function useOperatorProductivity(params = {}) {
-  return useQuery({
-    queryKey: ['operator-productivity', params],
-    queryFn: async () => transformKeys(unwrap(await reportingApi.operatorProductivity(params)) || []),
-    staleTime: 30 * 1000,
-  });
-}
-
-export function useUtilityConsumption(params = {}) {
-  return useQuery({
-    queryKey: ['utility-consumption', params],
-    queryFn: async () => transformKeys(unwrap(await reportingApi.utilityConsumption(params)) || {}),
-    staleTime: 30 * 1000,
-  });
-}
-
-export function useRecoveryByVariety(params = {}) {
-  return useQuery({
-    queryKey: ['recovery-by-variety', params],
-    queryFn: async () => transformKeys(unwrap(await reportingApi.recoveryByVariety(params)) || []),
-    staleTime: 30 * 1000,
-  });
-}
-
-export function useSavedReports() {
-  return useQuery({
-    queryKey: ['saved-reports'],
-    queryFn: async () => transformKeys(unwrap(await reportingApi.savedReports(), 'reports') || []),
-    staleTime: 30 * 1000,
-  });
-}
-
-export function useSaveReport() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (data) => reportingApi.saveReport(data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['saved-reports'] }),
-  });
-}
-
-export function useDeleteSavedReport() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (id) => reportingApi.deleteSavedReport(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['saved-reports'] }),
-  });
-}
+// The report hooks live in ONE layer — modules/analytics/api/reportHooks.js
+// (camelCase always; list reports return { rows, totals, pagination, meta }).
+// Re-exported here so existing imports keep working.
+export {
+  useReport, useExecutiveSummary, useOrderProfitability, useCustomerProfitability,
+  useCountryAnalysis, useLotTracker, useSalesTracker, useBatchMargin, useLocalSalesReport,
+  useStockAgingReport, usePrintableStock, useSupplierQualityRanking, useCashForecast,
+  useKpiBenchmarks, useMillEfficiency, useRecoveryLeaderboard, useStockValuation,
+  useStockTurnover, useOperatorProductivity, useUtilityConsumption, useRecoveryByVariety,
+  useSavedReports, useSaveReport, useDeleteSavedReport,
+} from '../modules/analytics/api/reportHooks';
 
 // ===================== NOTIFICATIONS =====================
 

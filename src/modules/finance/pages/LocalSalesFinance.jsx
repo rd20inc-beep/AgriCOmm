@@ -1,16 +1,18 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Store, TrendingUp, CheckCircle2, Clock, AlertCircle,
   Search, Download, ExternalLink, Eye, User, ShoppingCart, DollarSign, CheckCircle,
 } from 'lucide-react';
 import { FinanceKPI } from '../../../components/finance';
-import { useLocalSales, useLocalSalesSummary, useReceivableReceipts } from '../../../api/queries';
+import { useLocalSales, useLocalSalesSummary, useReceivableReceipts, useLocalSalesReport } from '../../../api/queries';
+import { usePageFor } from '../../analytics/api/reportHooks';
+import { ReportPager } from '../../analytics/components/ReportChrome';
 import { useAuth } from '../../../context/AuthContext';
 import { useFinanceDrawers } from '../drawers/drawersContext';
 import { canRecordVariant } from '../../../components/payments/paymentVariants';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
-import { downloadCSV } from '../../../utils/csvExport';
+import { downloadServerCsv } from '../../../shared/utils/csv';
 import SlideDrawer from '../../../components/SlideDrawer';
 import { paymentWord } from '../../localSales/utils/saleStatus';
 import { todayLocalISO, fmtPKR, fmtKg, fmtNum, fmtPct, fmtDate, fmtDateTime } from '../../../shared/utils/format';
@@ -24,10 +26,28 @@ const methodLabel = (m) => ({ cash: 'Cash', bank_transfer: 'Bank Transfer', cheq
 
 export default function LocalSalesFinance() {
   const { queryParams: rangeParams } = useFinanceDateRange();
-  const { data: sales = [], isLoading, error, refetch } = useLocalSales(rangeParams);
   const { data: summary = {} } = useLocalSalesSummary();
   const [statusFilter, setStatusFilter] = useState('All');
   const [searchTerm, setSearchTerm] = useState('');
+  // KPIs and list come from the server (P4-12, INV-57): CONFIRMED sales in the
+  // period, searched and filtered on the server, totals over EVERY matching
+  // sale — not the 100 newest lines of any status added up in the browser.
+  // Rejected (Cancelled) sales are never revenue: that view lists them only.
+  const rejected = statusFilter === 'Rejected';
+  const filters = {
+    ...rangeParams,
+    ...(searchTerm.trim() ? { q: searchTerm.trim() } : {}),
+    ...(['Paid', 'Partial', 'Credit'].includes(statusFilter) ? { payment: statusFilter } : {}),
+  };
+  const [page, setPage] = usePageFor(filters);
+  const report = useLocalSalesReport({ ...filters, page, limit: 200 });
+  const rejectedList = useLocalSales({ ...rangeParams, status: 'Cancelled', limit: 500, ...(searchTerm.trim() ? { search: searchTerm.trim() } : {}) });
+  const totals = report.data?.totals || null;
+  const pagination = report.data?.pagination || null;
+  const sales = rejected ? (rejectedList.data || []) : (report.data?.rows || []);
+  const isLoading = rejected ? rejectedList.isLoading : report.isLoading;
+  const error = rejected ? rejectedList.error : report.error;
+  const refetch = rejected ? rejectedList.refetch : report.refetch;
   const [detailSale, setDetailSale] = useState(null);
   // Where each payment was received (account/cash) + type, for the open sale.
   const { data: receiptData, isLoading: receiptsLoading } = useReceivableReceipts(detailSale?.id, 'local_sale', !!detailSale);
@@ -50,57 +70,20 @@ export default function LocalSalesFinance() {
     });
   }
 
-  const filtered = useMemo(() => {
-    return sales.filter(s => {
-      // Rejected (Cancelled) sales never happened — hidden unless asked for.
-      if (statusFilter === 'Rejected') { if (s.status !== 'Cancelled') return false; }
-      else if (s.status === 'Cancelled') return false;
-      else if (statusFilter !== 'All' && paymentWord(s) !== statusFilter) return false;
-      if (searchTerm) {
-        const t = searchTerm.toLowerCase();
-        if (!(
-          (s.saleNo || '').toLowerCase().includes(t) ||
-          (s.buyerName || '').toLowerCase().includes(t) ||
-          (s.itemName || '').toLowerCase().includes(t) ||
-          (s.lotNo || '').toLowerCase().includes(t)
-        )) return false;
-      }
-      return true;
-    });
-  }, [sales, statusFilter, searchTerm]);
+  const filtered = sales;
+  const filteredTotals = {
+    revenue: totals?.revenue || 0,
+    collected: totals?.collected || 0,
+    outstanding: totals?.outstanding || 0,
+    profit: totals?.grossProfit || 0,
+    count: totals?.count || 0,
+  };
+  // Margin over the COSTED revenue (a lot line with no cost is not 100% margin).
+  const marginPct = totals?.marginPct ?? null;
 
-  const filteredTotals = useMemo(() => {
-    const out = { revenue: 0, collected: 0, outstanding: 0, profit: 0, count: filtered.length };
-    for (const s of filtered) {
-      const total = parseFloat(s.totalAmount) || 0;
-      const paid  = parseFloat(s.paidAmount) || 0;
-      out.revenue     += total;
-      out.collected   += paid;
-      out.outstanding += Math.max(0, total - paid);
-      out.profit      += parseFloat(s.grossProfit || s.grossProfitPkr) || 0;
-    }
-    return out;
-  }, [filtered]);
-
-  const marginPct = filteredTotals.revenue > 0
-    ? (filteredTotals.profit / filteredTotals.revenue) * 100
-    : null;
-
+  // Every matching confirmed sale, from the server — not the page on screen.
   function exportCsv() {
-    const rows = filtered.map(s => ({
-      Sale_No: s.saleNo || '',
-      Date: s.saleDate || '',
-      Buyer: s.buyerName || '',
-      Lot: s.lotNo || '',
-      Item: s.itemName || '',
-      Qty_KG: s.quantityKg || '',
-      Total_PKR: Math.round(parseFloat(s.totalAmount) || 0),
-      Paid_PKR: Math.round(parseFloat(s.paidAmount) || 0),
-      Due_PKR: Math.round(parseFloat(s.dueAmount) || 0),
-      Status: paymentWord(s),
-      Profit_PKR: Math.round(parseFloat(s.grossProfit || s.grossProfitPkr) || 0),
-    }));
-    downloadCSV(rows, `local-sales-${todayLocalISO()}.csv`);
+    downloadServerCsv('/api/reporting/local-sales', filters, `local-sales-${todayLocalISO()}`);
   }
 
   return (
@@ -117,7 +100,7 @@ export default function LocalSalesFinance() {
           subtitle={filteredTotals.outstanding > 0 ? 'Partial / Credit' : 'Fully collected'}
           status={filteredTotals.outstanding > 0 ? 'warning' : 'good'} loading={isLoading} />
         <FinanceKPI icon={TrendingUp} title="Gross Profit (booked)" value={fmtFull(filteredTotals.profit)}
-          subtitle={`${marginPct == null ? '—' : `${fmtPct(marginPct)} margin`} · ${filteredTotals.count} ${filteredTotals.count === 1 ? 'sale' : 'sales'} in view`}
+          subtitle={`${marginPct == null ? '—' : `${fmtPct(marginPct)} margin`} · ${filteredTotals.count} confirmed ${filteredTotals.count === 1 ? 'sale' : 'sales'}${totals?.uncostedCount ? ` · ${totals.uncostedCount} not costed` : ''}`}
           status={filteredTotals.profit >= 0 ? 'good' : 'danger'} loading={isLoading} />
       </div>
 
@@ -139,9 +122,9 @@ export default function LocalSalesFinance() {
             </button>
           ))}
         </div>
-        <span className="text-xs text-gray-500 tabular-nums">{filtered.length} of {sales.length}</span>
+        <span className="text-xs text-gray-500 tabular-nums">{rejected ? `${filtered.length} rejected` : `${filtered.length} of ${pagination?.total ?? filtered.length}`}</span>
         <div className="ml-auto flex items-center gap-2">
-          <button type="button" onClick={exportCsv} className={btnSecondary}>
+          <button type="button" onClick={exportCsv} className={btnSecondary} disabled={rejected}>
             <Download size={14} aria-hidden="true" /> CSV
           </button>
           {/* Leaves Finance for the Local Sales module, so it is not this view's primary. */}
@@ -150,6 +133,8 @@ export default function LocalSalesFinance() {
           </Link>
         </div>
       </div>
+
+      {!rejected && <ReportPager pagination={pagination} onPage={setPage} />}
 
       {/* ─── Table ────────────────────────────────────────────────── */}
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
@@ -188,9 +173,11 @@ export default function LocalSalesFinance() {
                     <td data-label="Revenue" className={`px-4 py-2.5 ${tdMoney} font-medium text-gray-900`}>{fmtFull(s.totalAmount)}</td>
                     <td data-label="Collected" className={`mob-hide px-4 py-2.5 ${tdMoney} text-gray-700`}>{fmtFull(s.paidAmount)}</td>
                     <td data-label="Profit" className={`mob-hide px-4 py-2.5 ${tdMoney}`}>
-                      <span className={(parseFloat(s.grossProfit || s.grossProfitPkr) || 0) >= 0 ? 'text-emerald-700 font-medium' : 'text-red-700 font-medium'}>
-                        {fmtFull(s.grossProfit || s.grossProfitPkr)}
-                      </span>
+                      {s.grossProfit == null ? <span className="text-xs text-gray-400">{rejected ? '—' : 'not costed'}</span> : (
+                        <span className={(parseFloat(s.grossProfit) || 0) >= 0 ? 'text-emerald-700 font-medium' : 'text-red-700 font-medium'}>
+                          {fmtFull(s.grossProfit)}
+                        </span>
+                      )}
                     </td>
                     <td data-label="Status" className="px-4 py-2.5">
                       <StatusBadge status={word} />
@@ -248,7 +235,7 @@ export default function LocalSalesFinance() {
                 {s.lotNo && <Row label="Lot" value={s.lotNo} />}
                 <Row label="Qty" value={fmtKg(Math.round(parseFloat(s.quantityKg) || 0))} />
                 <Row label="Rate" value={s.ratePerKg ? `${fmtFull(s.ratePerKg)}/kg` : '—'} />
-                <Row label="Profit" value={fmtFull(s.grossProfit || s.grossProfitPkr)} />
+                <Row label="Profit" value={s.grossProfit == null ? '—' : fmtFull(s.grossProfit)} />
                 <Row label="Status" value={<StatusBadge status={paymentWord(s)} />} />
                 <Row label="Created by" value={<span className="inline-flex items-center gap-1.5"><User size={13} className="text-gray-400" />{s.createdByName || '—'}</span>} />
                 <Row label="Created at" value={fmtDateTime(s.createdAt)} />
