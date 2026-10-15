@@ -252,6 +252,7 @@ async function createSaleReturn(trx, saleId, input, { userId = null, ownerId = n
     // postMovement grows received_net_weight_kg on every inbound movement, but
     // that column is the lot's original INTAKE — a customer return is not
     // intake, so take it back off. sold_weight_kg comes down by the same kg.
+    // lot-qty-free: intake and sold weights only — the qty moved above.
     await trx('inventory_lots').where({ id: lot.id }).update({
       received_net_weight_kg: lot.received_net_weight_kg == null ? null : num(lot.received_net_weight_kg),
       sold_weight_kg: Math.max(0, uc.round2(num(lot.sold_weight_kg) - qty)),

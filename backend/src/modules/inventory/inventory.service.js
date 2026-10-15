@@ -1071,6 +1071,7 @@ const inventoryService = {
       gross_weight_kg: _gross, total_value: _value,
       ...rest
     } = row;
+    // lot-qty-free: the quantity columns were taken out of the row above.
     await trx('inventory_lots').where('id', existing.id)
       .update({ ...rest, updated_at: trx.fn.now() });
     return trx('inventory_lots').where('id', existing.id).first();
@@ -1111,6 +1112,7 @@ const inventoryService = {
     // Re-cost what the lot holds at the new allocation even when the qty did
     // not move (postMovement only re-costs on a movement).
     const c = parseFloat(costPerKg) || 0;
+    // lot-qty-free: intake weight and value only — the qty moved above.
     await trx('inventory_lots').where('id', lot.id).update({
       received_net_weight_kg: target,
       ...(c > 0 ? { cost_per_unit: c, total_value: trx.raw('? * qty', [c]) } : {}),
@@ -3933,12 +3935,17 @@ const inventoryService = {
       // A committed source lot goes back under this batch's hold, as it was
       // between commit and yield; a truck-intake raw lot is simply back in stock.
       const src = sources.find((s) => s.lot_id === lotId);
-      const fresh = await trx('inventory_lots').where({ id: lotId }).first();
       const rehold = src && isReservedSource(src) ? Math.min(kg, p(src.qty_kg)) : 0;
-      const held = p(fresh.milling_reserved_qty) + rehold;
+      if (rehold > 0.0005) {
+        await inventoryService.postMovement(trx, {
+          movementType: MOVEMENT_TYPES.MILLING_HOLD,
+          lotId, qty: rehold, sourceEntity: lot.entity || 'mill',
+          linkedRef: `batch-${batchId}`, notes: `Back under batch ${batchId}'s hold — ${why}`,
+          batchId, userId,
+        });
+      }
+      // lot-qty-free: the hold went through postMovement above.
       await trx('inventory_lots').where({ id: lotId }).update({
-        milling_reserved_qty: held,
-        available_qty: Math.max(0, p(fresh.qty) - p(fresh.reserved_qty) - held),
         milling_status: src ? 'In Milling' : null,
         status: 'Available',
         updated_at: trx.fn.now(),

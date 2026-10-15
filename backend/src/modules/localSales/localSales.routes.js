@@ -77,7 +77,7 @@ router.post(
   requireIdempotencyKey,
   validate(schemas.localSaleReturn),
   auditAction('create_local_sale_return', 'local_sale', (req) => req.params.id),
-  saleReturns.create
+  saleReturns.createReturn
 );
 router.get('/:id/payments', canReadSales, controller.getPayments);
 router.get('/:id/invoice', canReadSales, controller.getInvoice);

@@ -27,7 +27,7 @@ module.exports = {
     }
   },
 
-  async create(req, res) {
+  async createReturn(req, res) {
     try {
       const saleId = await resolveSaleId(db, req.params.id);
       if (!saleId) return res.status(404).json({ success: false, message: 'Sale not found.' });
