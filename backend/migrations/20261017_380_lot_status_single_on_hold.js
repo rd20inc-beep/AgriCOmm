@@ -12,8 +12,8 @@
  * those rows, i.e. block stock movements on them).
  */
 const NAME = 'inventory_lots_status_chk';
-const NEW = "status IN ('Available','Reserved','Closed','Sold','Damaged','On Hold')";
-const OLD = "status IN ('Available','Reserved','Closed','Sold','Damaged','OnHold','On Hold')";
+const NEW = "status IN ('Available','Reserved','Closed','Sold','Damaged','On Hold','Depleted')";
+const OLD = "status IN ('Available','Reserved','Closed','Sold','Damaged','OnHold','On Hold','Depleted')";
 
 async function swap(knex, predicate) {
   await knex.raw(`ALTER TABLE inventory_lots DROP CONSTRAINT IF EXISTS ${NAME}`);
