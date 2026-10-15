@@ -683,11 +683,12 @@ const accountingController = {
   async customerStatement(req, res) {
     try {
       const { id } = req.params;
-      const { date_from, date_to } = req.query;
+      const { date_from, date_to, entity } = req.query;
 
       const result = await accountingService.getCustomerStatement(parseInt(id), {
         dateFrom: date_from || null,
         dateTo: date_to || null,
+        entity: entity || null, // MIL-46: 'mill' for the Mill Finance statement
       });
 
       return res.json({ success: true, data: result });
@@ -700,11 +701,12 @@ const accountingController = {
   async supplierStatement(req, res) {
     try {
       const { id } = req.params;
-      const { date_from, date_to } = req.query;
+      const { date_from, date_to, entity } = req.query;
 
       const result = await accountingService.getSupplierStatement(parseInt(id), {
         dateFrom: date_from || null,
         dateTo: date_to || null,
+        entity: entity || null, // MIL-46: 'mill' for the Mill Finance statement
       });
 
       return res.json({ success: true, data: result });

@@ -39,11 +39,15 @@ export default function MillSupplierStatement({ supplierId, supplierName, params
   const [view, setView] = useState('statement'); // 'statement' | 'allocation'
   const [draftOpen, setDraftOpen] = useState(false);
   const cardRef = useRef(null);
+  // Mill-scoped (MIL-46): only the mill's bills / sales and journals, over a
+  // chosen period with its opening balance carried in.
+  const [range, setRange] = useState({ from: '', to: '' });
+  const query = { entity: 'mill', ...params, ...(range.from ? { date_from: range.from } : {}), ...(range.to ? { date_to: range.to } : {}) };
   const { data: statement, isLoading, isError, error } = useQuery({
-    queryKey: ['mill-supplier-statement', supplierId, params],
+    queryKey: ['mill-supplier-statement', supplierId, query],
     enabled: !!supplierId,
     queryFn: async () => {
-      const res = await accountingApi.supplierStatement(supplierId, params);
+      const res = await accountingApi.supplierStatement(supplierId, query);
       return res?.data ?? res;
     },
   });
@@ -101,6 +105,15 @@ export default function MillSupplierStatement({ supplierId, supplierName, params
       ) : (
       <>
       {/* KPI strip */}
+      <div className="statement-actions flex flex-wrap items-center gap-2 px-4 py-2 text-xs text-gray-500 border-b border-gray-100">
+        <span>Mill only · PKR</span>
+        <label>From <input type="date" value={range.from} onChange={(e) => setRange((r) => ({ ...r, from: e.target.value }))} className="border border-gray-200 rounded px-1.5 py-0.5" /></label>
+        <label>To <input type="date" value={range.to} onChange={(e) => setRange((r) => ({ ...r, to: e.target.value }))} className="border border-gray-200 rounded px-1.5 py-0.5" /></label>
+        {(range.from || range.to) && <button onClick={() => setRange({ from: '', to: '' })} className="text-blue-600 hover:underline">All dates</button>}
+        {statement?.entity_scope?.excluded_unscoped_lines > 0 && (
+          <span className="text-amber-700">{statement.entity_scope.excluded_unscoped_lines} journal line(s) with no entity are not shown here — see the full statement in Finance.</span>
+        )}
+      </div>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-gray-100">
         <Tile label="Opening" value={fmtCur(opening, cur)} icon={Scale} tone="text-gray-400" />
         <Tile label="Billed to us" value={fmtCur(totalCredit, cur)} icon={ArrowUpRight} tone="text-red-500" />

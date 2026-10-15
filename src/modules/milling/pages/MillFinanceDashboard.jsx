@@ -5608,7 +5608,7 @@ function PayrollReport({ companyProfile, entity = 'mill', onOpenRun }) {
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Stat tone="blue"  icon={FileText}   label="Payroll Runs" value={String(totals.runs)} sub={rangeLabel} />
-        <Stat tone="slate" icon={DollarSign} label="Gross"        value={PKR(totals.grossTotal)} sub="All runs" />
+        <Stat tone="slate" icon={DollarSign} label="Gross"        value={PKR(totals.grossTotal)} sub="Paid payslips only" />
         <Stat tone="amber" icon={HandCoins}  label="Advances Recovered" value={PKR(totals.advanceTotal)} sub="Cleared" />
         <Stat tone="green" icon={Wallet}     label="Net Paid"     value={PKR(totals.netTotal)} sub="Cash + bank" />
       </div>
@@ -5708,6 +5708,9 @@ function EmployeeLedgerDrawer({ worker, onClose }) {
             <Sm label="Salary paid" value={rs(sm.salaryPaid)} />
             <Sm label="Advances taken" value={rs(sm.advancesTaken)} />
             <Sm label="Advance deducted" value={rs(sm.advanceDeducted)} />
+            <Sm label="Bonus" value={rs(sm.bonus)} />
+            <Sm label="Tax / deductions withheld" value={rs((sm.statutoryWithheld || 0) + (sm.deductions || 0))} />
+            <Sm label="Accrued, not yet paid" value={rs(sm.accruedUnpaid)} />
             <Sm label="Advance outstanding" value={rs(sm.advanceOutstanding)} tone="amber" />
             <Sm label={bal >= 0 ? 'Salary payable' : 'Owes company'} value={rs(Math.abs(bal))} tone={bal > 0 ? 'emerald' : bal < 0 ? 'rose' : 'gray'} />
           </div>
@@ -5740,7 +5743,8 @@ function EmployeeLedgerDrawer({ worker, onClose }) {
               </table>
             </div>
           )}
-          <p className="text-[11px] text-gray-400">Debit = paid to employee (advance / net salary); Credit = salary earned (gross). Balance &gt; 0 → salary still payable; balance &lt; 0 → employee owes the company (outstanding advance).</p>
+          {sm.pendingLines > 0 && <p className="text-xs text-gray-500">{sm.pendingLines} payslip(s) awaiting approval / payment ({rs(sm.pendingNet)} net) — not on the ledger until accrued or paid.</p>}
+          <p className="text-[11px] text-gray-400">Debit = paid to or withheld for the employee (advance, net salary, tax / deductions); Credit = salary earned (gross + bonus, once accrued or paid). Balance &gt; 0 → salary still payable; balance &lt; 0 → employee owes the company (outstanding advance). Amounts in PKR.</p>
         </div>
         );
       })()}

@@ -17,10 +17,13 @@ import { todayLocalISO, fmtDate, fmtPKR, fmtKg } from '../../../shared/utils/for
 // Roles allowed to see internal by-product pricing (mirrors the invoice gates).
 const ADMIN_PRICING_ROLES = ['Super Admin', 'Owner', 'Finance Manager', 'Mill Manager'];
 
-const pkr = (v) => fmtPKR(v, { decimals: 2 });
+// null = hidden for this role (cost / profit redaction on the server).
+const pkr = (v) => (v == null ? '—' : fmtPKR(v, { decimals: 2 }));
+const rnd = (v) => (v == null ? '' : Math.round(v));
 const dt = (v) => fmtDate(v);
 const STATUS_TONE = {
   Paid: 'bg-emerald-100 text-emerald-700', Partial: 'bg-amber-100 text-amber-700', Unpaid: 'bg-red-100 text-red-700',
+  Void: 'bg-gray-200 text-gray-600 line-through', 'Written Off': 'bg-gray-100 text-gray-600',
 };
 const COLS = [
   { label: 'Invoice', key: 'invoiceNo' },
@@ -31,9 +34,11 @@ const COLS = [
   { label: 'Lots', accessor: (r) => (r.lots || []).join(' ') },
   { label: 'Batches', accessor: (r) => (r.batches || []).join(' ') },
   { label: 'Qty (kg)', align: 'right', accessor: (r) => Math.round(r.qtyKg) },
-  { label: 'Total', align: 'right', accessor: (r) => Math.round(r.total) },
-  { label: 'Received', align: 'right', accessor: (r) => Math.round(r.received) },
-  { label: 'Outstanding', align: 'right', accessor: (r) => Math.round(r.outstanding) },
+  { label: 'Currency', accessor: (r) => r.currency || 'PKR' },
+  { label: 'Total', align: 'right', accessor: (r) => rnd(r.total) },
+  { label: 'Received', align: 'right', accessor: (r) => rnd(r.received) },
+  { label: 'Returned', align: 'right', accessor: (r) => rnd(r.returned) },
+  { label: 'Outstanding', align: 'right', accessor: (r) => rnd(r.outstanding) },
   { label: 'Status', key: 'paymentStatus' },
   { label: 'Dispatch', accessor: (r) => r.dispatched ? 'Dispatched' : 'Not dispatched' },
 ];
@@ -101,8 +106,8 @@ export default function InvoiceLedger() {
   const totals = data?.totals || {};
   const stamp = todayLocalISO();
   const exportMeta = useMemo(() => [
-    `${rows.length} invoices`, q ? `Search: ${q}` : null, status ? `Status: ${status}` : null, outstanding ? 'Outstanding only' : null,
-  ].filter(Boolean), [rows.length, q, status, outstanding]);
+    `${rows.length} of ${totals.count ?? rows.length} invoices`, q ? `Search: ${q}` : null, status ? `Status: ${status}` : null, outstanding ? 'Outstanding only' : null,
+  ].filter(Boolean), [rows.length, totals.count, q, status, outstanding]);
 
   return (
     <div className="max-w-7xl mx-auto p-4 sm:p-6 space-y-4">
@@ -142,6 +147,7 @@ export default function InvoiceLedger() {
         <label><span className="text-xs text-gray-500 block mb-1">Status</span>
           <select value={status} onChange={e => set({ status: e.target.value })} className="text-sm border border-gray-200 rounded-lg px-2 py-2 bg-white outline-none">
             <option value="">All</option><option value="Paid">Paid</option><option value="Partial">Partial</option><option value="Unpaid">Unpaid</option>
+            <option value="Void">Void</option><option value="Written Off">Written Off</option>
           </select>
         </label>
         <label><span className="text-xs text-gray-500 block mb-1">From</span>
@@ -156,12 +162,20 @@ export default function InvoiceLedger() {
       </div>
 
       {/* KPI strip */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      {/* Sales revenue and purchase cost are separate figures — never added. */}
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         <Kpi label="Invoices" value={`${totals.count ?? rows.length}${totals.sales != null ? ` (${totals.sales} sale / ${totals.purchases} purch.)` : ''}`} />
-        <Kpi label="Total value" value={pkr(totals.total)} />
-        <Kpi label="Settled" value={pkr(totals.received)} tone="emerald" />
-        <Kpi label="Outstanding" value={pkr(totals.outstanding)} tone={totals.outstanding > 0 ? 'rose' : 'gray'} />
+        <Kpi label="Sales value (PKR)" value={pkr(totals.sale?.total)} />
+        <Kpi label="Sales outstanding" value={pkr(totals.sale?.outstanding)} tone={totals.sale?.outstanding > 0 ? 'rose' : 'gray'} />
+        <Kpi label="Purchases value (PKR)" value={pkr(totals.purchase?.total)} />
+        <Kpi label="Purchases outstanding" value={pkr(totals.purchase?.outstanding)} tone={totals.purchase?.outstanding > 0 ? 'rose' : 'gray'} />
       </div>
+      {totals.truncated && (
+        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+          Listing the newest {totals.listed} of {totals.count} invoices; the totals cover all {totals.count}. Narrow the search or dates to list the rest.
+        </p>
+      )}
+      <p className="text-[11px] text-gray-400">Amounts in PKR{data?.meta?.asOf ? ` · as of ${dt(data.meta.asOf)}` : ''}. Void purchases are listed but carry no money. Returns lower what is due, not the invoice total.</p>
 
       {error && <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700 inline-flex items-center gap-1.5"><AlertTriangle size={14} /> {error}</div>}
 
