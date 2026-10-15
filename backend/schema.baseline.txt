@@ -480,6 +480,8 @@ COL document_dispatch_log.id:integer:NOT NULL
 COL document_dispatch_log.notes:text:NULL
 COL document_dispatch_log.status:character varying:NOT NULL
 COL document_dispatch_log.tracking_ref:character varying:NULL
+COL document_store.checked_at:timestamp with time zone:NULL
+COL document_store.checked_by:integer:NULL
 COL document_store.created_at:timestamp with time zone:NOT NULL
 COL document_store.description:text:NULL
 COL document_store.doc_type:character varying:NOT NULL
@@ -1140,7 +1142,6 @@ COL inventory_lots.rate_per_kg:numeric:NOT NULL
 COL inventory_lots.raw_cost_component:numeric:NULL
 COL inventory_lots.received_net_weight_kg:numeric:NULL
 COL inventory_lots.record_version:integer:NOT NULL
-COL inventory_lots.reserved_against:character varying:NULL
 COL inventory_lots.reserved_qty:numeric:NOT NULL
 COL inventory_lots.sample_id:integer:NULL
 COL inventory_lots.server_ts:timestamp with time zone:NULL
@@ -1175,6 +1176,7 @@ COL inventory_reservations.order_id:integer:NULL
 COL inventory_reservations.record_version:integer:NOT NULL
 COL inventory_reservations.reserved_qty:numeric:NOT NULL
 COL inventory_reservations.server_ts:timestamp with time zone:NULL
+COL inventory_reservations.source:character varying:NOT NULL
 COL inventory_reservations.status:character varying:NOT NULL
 COL inventory_reservations.sync_status:character varying:NOT NULL
 COL inventory_reservations.updated_at:timestamp with time zone:NOT NULL
@@ -3071,6 +3073,7 @@ CON document_dispatch_log.document_dispatch_log_pkey(p)
 CON document_store.chk_document_store_pending_action_valid(c)
 CON document_store.chk_document_store_status_valid(c)
 CON document_store.chk_document_store_version_nn(c)
+CON document_store.document_store_checked_by_foreign(f)
 CON document_store.document_store_doc_uid_unique(u)
 CON document_store.document_store_pkey(p)
 CON document_store.document_store_previous_version_id_foreign(f)
@@ -3321,6 +3324,7 @@ CON inventory_lots.inventory_lots_type_check(c)
 CON inventory_lots.inventory_lots_warehouse_id_foreign(f)
 CON inventory_lots.uq_inventory_lots_uuid(u)
 CON inventory_reservations.chk_inventory_reservations_reserved_qty_nn(c)
+CON inventory_reservations.chk_inventory_reservations_source_valid(c)
 CON inventory_reservations.chk_inventory_reservations_status_valid(c)
 CON inventory_reservations.inventory_reservations_created_by_foreign(f)
 CON inventory_reservations.inventory_reservations_item_id_foreign(f)
