@@ -2103,7 +2103,8 @@ const reportingService = {
     }
     const outById = Object.fromEntries(outputs.map(o => [o.id, o]));
 
-    const inputMt = sources.reduce((s, r) => s + kgToMt(r.qty_kg), 0);
+    const inputKg = sources.reduce((s, r) => s + num(r.qty_kg), 0);
+    const inputMt = kgToMt(inputKg);
     // Prefer per-source-lot cost; fall back to the batch's raw_cost_total when
     // source rows carry no cost (older/backfilled lineage).
     const rawCostFromSources = sources.reduce((s, r) => s + num(r.cost_total_pkr), 0);
@@ -2158,8 +2159,11 @@ const reportingService = {
     });
 
     // Yield summary.
-    const finishedMt = kgToMt(outputRows.filter(o => o.type === 'finished').reduce((s, o) => s + o.producedKg, 0));
-    const byproductMt = kgToMt(outputRows.filter(o => o.type === 'byproduct').reduce((s, o) => s + o.producedKg, 0));
+    const finishedKg = outputRows.filter(o => o.type === 'finished').reduce((s, o) => s + o.producedKg, 0);
+    const byproductKg = outputRows.filter(o => o.type === 'byproduct').reduce((s, o) => s + o.producedKg, 0);
+    const lossKg = Math.max(0, inputKg - outputKg);
+    const finishedMt = kgToMt(finishedKg);
+    const byproductMt = kgToMt(byproductKg);
     const totalOutputMt = kgToMt(outputKg);
     const lossMt = Math.max(0, inputMt - totalOutputMt);
 
@@ -2191,13 +2195,19 @@ const reportingService = {
         totalCostPerKgFinished: num(batch.total_cost_per_kg_finished),
         href: `/milling/${batch.id}`,
       },
-      inputs: sources.map(r => ({ lotId: r.lot_id, lotNo: r.lot_no, item: r.item_name, variety: r.variety, supplier: r.supplier, supplierId: r.supplier_id || null, qtyMt: kgToMt(r.qty_kg), unitCostPkr: num(r.unit_cost_pkr), costTotalPkr: num(r.cost_total_pkr), ratioPct: num(r.ratio_pct), href: r.lot_id ? `/lot-inventory/${r.lot_id}` : null, supplierHref: r.supplier_id ? `/finance/statements?type=supplier&id=${r.supplier_id}` : null })),
+      inputs: sources.map(r => ({ lotId: r.lot_id, lotNo: r.lot_no, item: r.item_name, variety: r.variety, supplier: r.supplier, supplierId: r.supplier_id || null, qtyKg: num(r.qty_kg), qtyMt: kgToMt(r.qty_kg), unitCostPkr: num(r.unit_cost_pkr), costTotalPkr: num(r.cost_total_pkr), ratioPct: num(r.ratio_pct), href: r.lot_id ? `/lot-inventory/${r.lot_id}` : null, supplierHref: r.supplier_id ? `/finance/statements?type=supplier&id=${r.supplier_id}` : null })),
       costs: costs.map(c => ({ id: c.id, category: c.category, amount: num(c.amount), notes: c.notes })),
       manualCosts: { milling: num(batch.manual_milling_cost_pkr), other: num(batch.manual_other_expenses_pkr) },
       outputs: outputRows,
       sales,
       exportUse: await this._exportUseForLots(outIds),
-      yieldSummary: { inputMt, finishedMt, byproductMt, totalOutputMt, lossMt, yieldPct: inputMt > 0 ? (finishedMt / inputMt) * 100 : num(batch.yield_pct) },
+      // KG is canonical (RPT-33): the page and its print read the *Kg fields;
+      // the *Mt twins stay for older callers.
+      yieldSummary: {
+        inputKg, finishedKg, byproductKg, totalOutputKg: outputKg, lossKg,
+        inputMt, finishedMt, byproductMt, totalOutputMt, lossMt,
+        yieldPct: inputKg > 0 ? (finishedKg / inputKg) * 100 : num(batch.yield_pct),
+      },
       financialSummary: {
         rawCost, processingCost, totalInputCost: inputCostPkr,
         outputValue: outputRows.reduce((s, o) => s + o.valuePkr, 0),
@@ -2206,7 +2216,7 @@ const reportingService = {
         byproductRecovery: outputRows.filter(o => o.type === 'byproduct').reduce((s, o) => s + o.recoveryValue, 0),
         costBasis: 'Residual costing: output cost/kg distributes net purchase (raw + processing) less by-product credit (by-products valued at the per-grade sale price below). Processing cost excludes the input-rice cost.',
       },
-      totals: { inputMt, inputCostPkr, outputKg, outputMt: totalOutputMt, lossMt },
+      totals: { inputKg, inputMt, inputCostPkr, outputKg, outputMt: totalOutputMt, lossKg, lossMt },
     };
   },
 
@@ -3056,8 +3066,10 @@ const reportingService = {
       const arr = Array.isArray(lots) ? lots : (lots?.data || []);
       return {
         title: 'Stock Aging',
-        columns: ['Lot', 'Item', 'Type', 'Qty', 'Value', 'Days held'],
-        rows: arr.map(l => [l.lotNo || '—', l.itemName || '—', l.type || '—', `${num(l.qty).toLocaleString()} ${l.unit || 'MT'}`, fmtPkr(l.totalValue), String(l.daysInStock || 0)]),
+        // qty is KG for every lot (Phase 5c); the stale lot.unit column still
+        // says 'MT' on older rows, so it is not used as the label (RPT-33).
+        columns: ['Lot', 'Item', 'Type', 'Qty (kg)', 'Value', 'Days held'],
+        rows: arr.map(l => [l.lotNo || '—', l.itemName || '—', l.type || '—', fmtKg(l.qty), fmtPkr(l.totalValue), String(l.daysInStock || 0)]),
       };
     }
     if (reportType === 'recovery_by_variety') {
@@ -3581,7 +3593,7 @@ const reportingService = {
         type: l.type,
         entity: l.entity,
         qty: parseFloat(l.qty),
-        unit: l.unit,
+        unit: 'kg', // qty is KG; the lot.unit column is stale ('MT') on older rows
         costPerUnit: parseFloat(l.landed_cost_per_kg) || 0,
         totalValue: parseFloat(l.total_value) || 0,
         warehouseName: l.warehouse_name,

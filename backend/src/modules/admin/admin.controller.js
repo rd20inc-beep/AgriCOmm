@@ -75,7 +75,7 @@ function createCrud(tableName, entityName, opts = {}) {
         const countQuery = query.clone().clearSelect().clearOrder().count('id as total').first();
 
         const [rows, countResult] = await Promise.all([
-          query.orderBy('created_at', 'desc').limit(parseInt(limit)).offset(offset),
+          query.orderBy('created_at', 'desc').orderBy('id', 'desc').limit(parseInt(limit)).offset(offset),
           countQuery,
         ]);
 

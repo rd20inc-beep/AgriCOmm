@@ -68,10 +68,12 @@ module.exports = {
       const { search } = req.query;
       let q = db('customers')
         .where(function () { this.whereNot('customer_type', 'export').orWhereNull('customer_type'); })
-        .select('id', 'name', 'contact_person', 'phone', 'customer_type', 'approval_status')
-        .orderBy('name', 'asc');
+        .select('id', 'name', 'contact_person', 'phone', 'customer_type', 'approval_status', 'is_favorite')
+        // Favorites first, like every party list; no cap — the picker reads
+        // this as the whole client list (P4-11: it was the first 200 by name).
+        .orderBy('is_favorite', 'desc').orderBy('name', 'asc').orderBy('id', 'asc');
       if (search) q = q.where('name', 'ilike', `%${search}%`);
-      const rows = await q.limit(200);
+      const rows = await q;
       return res.json({ success: true, data: rows });
     } catch (err) {
       console.error('Service client list error:', err);

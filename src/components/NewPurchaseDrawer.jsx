@@ -36,7 +36,7 @@ const hasSize = (v) => v != null && v !== '' && Number(v) > 0;
  */
 export default function NewPurchaseDrawer({ open, onClose, onSaved, prefill = null }) {
   const { suppliersList, addToast } = useApp();
-  const { data: items = [] } = useMillStoreItems({ limit: 500 });
+  const { data: items = [] } = useMillStoreItems();
   const safeItems = Array.isArray(items) ? items : [];
   const createMut = useCreatePurchase();
 

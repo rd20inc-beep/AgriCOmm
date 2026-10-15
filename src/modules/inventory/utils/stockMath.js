@@ -11,6 +11,19 @@ export function onHandKg(lot) {
 }
 
 /**
+ * KG on hand summed over the lots of one type ('raw' / 'finished' / …). Takes
+ * snake_case or camelCase rows. Lot quantities are KG (Phase 5c) — never scale
+ * by 1000 (RPT-11).
+ */
+export function stockKgByType(lots, type) {
+  return (Array.isArray(lots) ? lots : []).reduce((s, l) => {
+    if (l?.type !== type) return s;
+    const net = n(l.net_weight_kg ?? l.netWeightKg);
+    return s + (net > 0 ? net : n(l.qty));
+  }, 0);
+}
+
+/**
  * D-14 stock value of a lot: landed cost per KG × KG on hand, no fallback price
  * (mirrors backend stockValue.js). Takes snake_case or camelCase rows.
  */

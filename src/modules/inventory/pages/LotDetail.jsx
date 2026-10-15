@@ -1937,7 +1937,7 @@ function AllocateToBatchModal({ isOpen, onClose, lot, addToast, refetch }) {
   const [batchId, setBatchId] = useState('');
   const [weightKg, setWeightKg] = useState(String(availableKg));
   const [notes, setNotes] = useState('');
-  const { data: batches = [] } = useMillingBatches({ limit: 200 });
+  const { data: batches = [] } = useMillingBatches();
   const allocateMut = useAllocateLotToBatch();
 
   // Reset whenever the modal opens against a different lot.

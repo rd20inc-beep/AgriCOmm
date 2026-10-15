@@ -624,6 +624,9 @@ module.exports = {
       // is for admin/debug only.
       query = stockSql.companyStock(query, 'l', ownership);
       if (inStock) query = stockSql.hasStock(query, 'l');
+      // has_available=true: only lots with KG free to sell (after export and
+      // milling holds) — what the sale / adjustment pickers can actually use.
+      if (String(req.query.has_available || '') === 'true') query = query.where('l.available_qty', '>', 0.001);
 
       if (type) query = query.where('l.type', type);
       if (entity) query = query.where('l.entity', entity);
@@ -658,7 +661,8 @@ module.exports = {
       }
 
       const [{ count: total }] = await query.clone().clearSelect().count('l.id as count');
-      const lots = await query.orderBy(`l.${sort_by}`, sort_dir).limit(limit).offset(offset);
+      // l.id breaks ties so consecutive pages never skip or repeat a lot.
+      const lots = await query.orderBy(`l.${sort_by}`, sort_dir).orderBy('l.id', sort_dir === 'asc' ? 'asc' : 'desc').limit(limit).offset(offset);
 
       return res.json({
         success: true,
@@ -923,7 +927,9 @@ module.exports = {
       // scoped user can't print lots they can't list.
       const scope = await whScope.resolveWarehouseScope(req);
 
-      let rows;
+      // The bundle is capped (each lot is a full detail build); total/truncated
+      // say so instead of letting a capped set pass for the whole (P4-11).
+      let rows; let total;
       if (ids) {
         const idList = String(ids).split(',').map(s => parseInt(s.trim(), 10)).filter(Number.isFinite);
         if (!idList.length) return res.json({ success: true, data: { lots: [], generatedAt: new Date().toISOString() } });
@@ -932,6 +938,7 @@ module.exports = {
           lotRowQuery().whereIn('l.id', idList.slice(0, cap)), scope, 'l.warehouse_id');
         const byId = new Map(fetched.map(l => [l.id, l]));
         rows = idList.map(id => byId.get(id)).filter(Boolean);
+        total = idList.length;
       } else {
         let q = whScope.applyWarehouseScope(lotRowQuery(), scope, 'l.warehouse_id');
         if (type) q = q.where('l.type', type);
@@ -948,14 +955,15 @@ module.exports = {
               .orWhere('l.grade', 'ilike', `%${search}%`);
           });
         }
-        rows = await q.orderBy('l.created_at', 'desc').limit(cap);
+        total = parseInt((await q.clone().clearSelect().clearOrder().count('l.id as n').first())?.n, 10) || 0;
+        rows = await q.orderBy('l.created_at', 'desc').orderBy('l.id', 'desc').limit(cap);
       }
 
       // Build detail sequentially to keep the connection pool sane on large sets.
       const lots = [];
       for (const row of rows) lots.push(await buildLotDetail(row));
 
-      return res.json({ success: true, data: { lots: await redactForUser(req, lots), generatedAt: new Date().toISOString() } });
+      return res.json({ success: true, data: { lots: await redactForUser(req, lots), total, truncated: total > cap, generatedAt: new Date().toISOString() } });
     } catch (err) {
       console.error('getLotsReport error:', err);
       return res.status(500).json({ success: false, message: err.message });

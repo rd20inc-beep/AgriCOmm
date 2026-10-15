@@ -18,6 +18,7 @@ import {
   transformKeys,
 } from './transforms';
 import { byFavoriteThenName } from '../shared/utils/favorites';
+import { fetchPageOrAll, attachListTotal } from '../shared/utils/fetchAllPages';
 
 // ===================== HELPERS =====================
 
@@ -52,14 +53,16 @@ function withListTotal(arr, res) {
 
 // ===================== EXPORT ORDERS =====================
 
+// Every order matching params (all pages) unless a page/limit is asked for —
+// the newest 200 used to pass for the whole book (EXP-23 / P4-11).
 export function useExportOrders(params = {}, opts = {}) {
   return useQuery({
     queryKey: queryKeys.orders.list(params),
     queryFn: async () => {
-      const res = await exportOrdersApi.list({ limit: 200, ...params });
-      const orders = unwrap(res, 'orders') || [];
-      return transformOrders(orders);
+      const orders = await fetchPageOrAll(exportOrdersApi.list, params, 'orders');
+      return attachListTotal(transformOrders(orders), orders.listTotal);
     },
+    structuralSharing: false,
     ...opts,
   });
 }
@@ -305,10 +308,11 @@ export function useMillingBatches(params = {}, opts = {}) {
   return useQuery({
     queryKey: queryKeys.batches.list(params),
     queryFn: async () => {
-      const res = await millingApi.listBatches({ limit: 200, ...params });
-      const batches = unwrap(res, 'batches') || [];
-      return transformBatches(batches);
+      // All pages unless a page/limit is asked for (P4-11: was the newest 200).
+      const batches = await fetchPageOrAll(millingApi.listBatches, params, 'batches');
+      return attachListTotal(transformBatches(batches), batches.listTotal);
     },
+    structuralSharing: false,
     ...opts,
   });
 }
@@ -1251,12 +1255,13 @@ export function useCustomers(params = {}, opts = {}) {
   return useQuery({
     queryKey: queryKeys.customers.list(params),
     queryFn: async () => {
-      const res = await customersApi.list({ limit: 3000, ...params });
-      const list = unwrap(res, 'customers') || [];
+      // Every page: the server clamps a page to 200, so 'limit: 3000' silently
+      // returned the first 200 and the 201st customer vanished (TEC-07).
+      const list = await fetchPageOrAll(customersApi.list, params, 'customers');
       // Favorites first, then alphabetical — same contract as useBankAccounts.
       // The server orders this way too; sorting here keeps the offline/site
       // replica and any pre-existing cached payload consistent.
-      return list.map(transformCustomer).sort(byFavoriteThenName);
+      return attachListTotal(list.map(transformCustomer).sort(byFavoriteThenName), list.listTotal);
     },
     staleTime: 5 * 60 * 1000,
     ...opts,
@@ -1267,9 +1272,8 @@ export function useSuppliers(params = {}, opts = {}) {
   return useQuery({
     queryKey: queryKeys.suppliers.list(params),
     queryFn: async () => {
-      const res = await api.get('/api/suppliers', { limit: 500, ...params });
-      const list = unwrap(res, 'suppliers') || [];
-      return list.map(transformSupplier).sort(byFavoriteThenName);
+      const list = await fetchPageOrAll((p) => api.get('/api/suppliers', p), params, 'suppliers');
+      return attachListTotal(list.map(transformSupplier).sort(byFavoriteThenName), list.listTotal);
     },
     staleTime: 5 * 60 * 1000,
     ...opts,
@@ -1280,9 +1284,8 @@ export function useProducts(params = {}, opts = {}) {
   return useQuery({
     queryKey: queryKeys.products.list(params),
     queryFn: async () => {
-      const res = await api.get('/api/products', { limit: 200, ...params });
-      const list = unwrap(res, 'products') || [];
-      return list.map(transformProduct);
+      const list = await fetchPageOrAll((p) => api.get('/api/products', p), params, 'products');
+      return attachListTotal(list.map(transformProduct), list.listTotal);
     },
     staleTime: 5 * 60 * 1000,
     ...opts,
@@ -1293,8 +1296,8 @@ export function useWarehouses(opts = {}) {
   return useQuery({
     queryKey: queryKeys.warehouses.all,
     queryFn: async () => {
-      const res = await adminApi.warehouses({ limit: 100 });
-      return transformKeys(unwrap(res, 'warehouses') || []);
+      // Every page (P4-11) — a single page used to pass for the whole list.
+      return transformKeys(await fetchPageOrAll(adminApi.warehouses, {}, 'warehouses'));
     },
     staleTime: 10 * 60 * 1000,
     ...opts,
@@ -1305,8 +1308,7 @@ export function useBagTypes(opts = {}) {
   return useQuery({
     queryKey: ['bag-types'],
     queryFn: async () => {
-      const res = await adminApi.bagTypes({ limit: 100 });
-      return transformKeys(unwrap(res, 'bag_types') || unwrap(res, 'bagTypes') || []);
+      return transformKeys(await fetchPageOrAll(adminApi.bagTypes, {}, 'bag_types'));
     },
     staleTime: 10 * 60 * 1000,
     ...opts,
@@ -1602,8 +1604,8 @@ export function useBuyers(params = {}) {
   return useQuery({
     queryKey: ['buyers', 'list', params],
     queryFn: async () => {
-      const res = await customersApi.list({ limit: 500, ...params });
-      return unwrap(res, 'customers') || [];
+      // Every page (P4-11): 'limit: 500' was clamped to 200 by the server.
+      return fetchPageOrAll(customersApi.list, params, 'customers');
     },
     staleTime: 30 * 1000,
   });
@@ -2329,8 +2331,8 @@ export function useProductCategories() {
   return useQuery({
     queryKey: ['product-categories'],
     queryFn: async () => {
-      const res = await adminApi.productCategories({ limit: 500 });
-      return transformKeys(unwrap(res, 'product_categories') || unwrap(res, 'productCategories') || unwrap(res, 'rows') || []);
+      // Every page (P4-11): 'limit: 500' was read as the whole list.
+      return transformKeys(await fetchPageOrAll(adminApi.productCategories, {}, 'product_categories'));
     },
     staleTime: 5 * 60 * 1000,
   });
@@ -2397,18 +2399,15 @@ export function useDashboard() {
     queryKey: queryKeys.dashboard,
     queryFn: async () => {
       // Dashboard aggregates from multiple endpoints
+      // Every order / batch, not the newest 200 (P4-11).
       const [ordersRes, batchesRes, finRes] = await Promise.allSettled([
-        exportOrdersApi.list({ limit: 200 }),
-        millingApi.listBatches({ limit: 200 }),
+        fetchPageOrAll(exportOrdersApi.list, {}, 'orders'),
+        fetchPageOrAll(millingApi.listBatches, {}, 'batches'),
         financeApi.overview(),
       ]);
 
-      const orders = ordersRes.status === 'fulfilled'
-        ? transformOrders(unwrap(ordersRes.value, 'orders') || [])
-        : [];
-      const batches = batchesRes.status === 'fulfilled'
-        ? transformBatches(unwrap(batchesRes.value, 'batches') || [])
-        : [];
+      const orders = ordersRes.status === 'fulfilled' ? transformOrders(ordersRes.value) : [];
+      const batches = batchesRes.status === 'fulfilled' ? transformBatches(batchesRes.value) : [];
       const finance = finRes.status === 'fulfilled'
         ? transformKeys(unwrap(finRes.value) || {})
         : {};
@@ -2730,13 +2729,17 @@ export function useRunScenario() {
 
 // ===================== LOT INVENTORY =====================
 
+// Every lot matching params (all pages) unless a page/limit is asked for — the
+// newest 100 used to pass for the whole inventory (INV-04). Pickers should
+// prefer useLotInventoryPage with a server search instead.
 export function useLotInventory(params = {}) {
   return useQuery({
     queryKey: ['lot-inventory', 'list', params],
     queryFn: async () => {
-      const res = await lotInventoryApi.listLots({ limit: 100, ...params });
-      return transformKeys(unwrap(res, 'lots') || []);
+      const lots = await fetchPageOrAll(lotInventoryApi.listLots, params, 'lots');
+      return attachListTotal(transformKeys(lots), lots.listTotal);
     },
+    structuralSharing: false,
     staleTime: 10 * 1000,
     refetchOnMount: 'always',
   });
@@ -2934,15 +2937,19 @@ export function useLocalSalePayments(id) {
   });
 }
 
-export function useLocalSales(params = {}) {
+// Every sale matching params (all pages, server-filtered) unless a page/limit
+// is asked for. The newest 100 used to pass for the whole ledger (P4-11).
+export function useLocalSales(params = {}, opts = {}) {
   return useQuery({
     queryKey: ['local-sales', 'list', params],
     queryFn: async () => {
-      const res = await localSalesApi.list({ limit: 100, ...params });
-      return transformKeys(unwrap(res, 'sales') || []);
+      const sales = await fetchPageOrAll(localSalesApi.list, params, 'sales');
+      return attachListTotal(transformKeys(sales), sales.listTotal);
     },
+    structuralSharing: false,
     staleTime: 10 * 1000,
     refetchOnMount: 'always',
+    ...opts,
   });
 }
 
@@ -3001,8 +3008,8 @@ export function useLocalSalesByLot(lotId) {
   return useQuery({
     queryKey: ['local-sales', 'by-lot', lotId],
     queryFn: async () => {
-      const res = await localSalesApi.list({ lot_id: lotId, limit: 200 });
-      return (unwrap(res, 'sales') || []);
+      // Every sale of the lot, not the newest 200 (P4-11).
+      return fetchPageOrAll(localSalesApi.list, { lot_id: lotId }, 'sales');
     },
     enabled: !!lotId,
     staleTime: 10 * 1000,

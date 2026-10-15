@@ -44,7 +44,7 @@ const LABEL = 'block text-[11px] font-semibold text-gray-600 uppercase mb-1';
 
 export default function DangerZoneTab() {
   const { addToast, bankAccountsList = [] } = useApp();
-  const { data: lots = [] } = useLotInventory({ limit: 200 });
+  const { data: lots = [] } = useLotInventory({}); // every lot (P4-11)
   const [confirm, confirmDialog] = useConfirm();
 
   // ── Full reset ──

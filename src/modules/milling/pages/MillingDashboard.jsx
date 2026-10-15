@@ -46,10 +46,23 @@ import CustomerPicker from '../../../components/CustomerPicker';
 import { serviceMillingApi } from '../api/services';
 import MillExpenseDrawer from '../../../components/MillExpenseDrawer';
 import { fmtPKR, fmtKg, fmtNum, fmtPct } from '../../../shared/utils/format';
+import { stockKgByType } from '../../inventory/utils/stockMath';
 import FieldError from '../../../shared/components/FieldError';
 // Chart data computed from real batch data below (no mock imports)
 
 // REMOVED: hardcoded MILL_PRICES_PKR — now uses useCommodityPrices() hook
+
+// Raw rice on hand, in KG. Lot quantities are KG (Phase 5c) — the tile used to
+// multiply by 1000 again and read 1000× too high (RPT-11).
+export function RawStockTile({ inventory }) {
+  const kg = stockKgByType(inventory, 'raw');
+  return (
+    <Link to="/lot-inventory?type=raw" className="bg-white rounded-xl border p-4 hover:shadow-sm transition-shadow">
+      <p className="text-xs text-gray-500 font-medium uppercase">Raw Stock</p>
+      <p className="text-xl font-bold text-gray-900 mt-1">{fmtKg(kg)}</p>
+    </Link>
+  );
+}
 
 export default function MillingDashboard() {
   const navigate = useNavigate();
@@ -141,7 +154,7 @@ export default function MillingDashboard() {
   // Fetched on their own, server-filtered to mill stock with free qty: the
   // general list is the newest 500 lots of every kind, so older stock (opening
   // lots) silently fell off the picker once the lot count passed 500.
-  const { data: millStock = [] } = useInventory({ entity: 'mill', in_stock: 1, limit: 5000 });
+  const { data: millStock = [] } = useInventory({ entity: 'mill', in_stock: 1 });
   const blendableLots = useMemo(() => millableLots(millStock), [millStock]);
   // Category tags present among the millable lots (SaleModal-style filter).
   const blendTags = useMemo(() => {
@@ -369,68 +382,8 @@ export default function MillingDashboard() {
   const COST_TREND_COLORS = ['#3b82f6', '#f59e0b', '#10b981', '#8b5cf6', '#ef4444', '#06b6d4', '#ec4899', '#84cc16', '#64748b'];
 
   // KPI Calculations
-  const pf = (v) => parseFloat(v) || 0;
-
-  const rawRiceStock = useMemo(() =>
-    inventory.filter(i => i.type === 'raw').reduce((s, i) => s + pf(i.qty), 0), [inventory]);
-
   // All finished rice — mill owns it regardless of where it sits
   const finishedAll = useMemo(() => inventory.filter(i => i.type === 'finished'), [inventory]);
-  const finishedRiceStock = useMemo(() => finishedAll.reduce((s, i) => s + pf(i.qty), 0), [finishedAll]);
-  const finishedInMill = useMemo(() =>
-    finishedAll.filter(i => i.entity === 'mill' && !i.reservedAgainst)
-      .reduce((s, i) => s + pf(i.availableQty), 0), [finishedAll]);
-  const finishedReserved = useMemo(() =>
-    finishedAll.filter(i => i.entity === 'mill').reduce((s, i) => s + pf(i.reservedQty), 0), [finishedAll]);
-  const finishedAtExport = useMemo(() =>
-    finishedAll.filter(i => i.entity === 'export').reduce((s, i) => s + pf(i.qty), 0), [finishedAll]);
-
-  const byproductStock = useMemo(() =>
-    inventory.filter(i => i.type === 'byproduct').reduce((s, i) => s + pf(i.qty), 0), [inventory]);
-
-  // Inventory VALUES (PKR) — money locked in stock
-  // Calculate from batch costs since lot cost fields may be empty
-  const RAW_KEYS = new Set(['rawRice', 'raw_rice']);
-  const getRawCost = (costs) => { for (const [k, v] of Object.entries(costs || {})) { if (RAW_KEYS.has(k)) return pf(v); } return 0; };
-
-  const rawInventoryValue = useMemo(() =>
-    inventory.filter(i => i.type === 'raw').reduce((s, i) => {
-      const costKg = pf(i.landedCostPerKg) || pf(i.ratePerKg) || 150; // default Rs 150/KG
-      return s + costKg * pf(i.netWeightKg || i.qty * 1000);
-    }, 0), [inventory]);
-
-  const finishedInventoryValue = useMemo(() => {
-    return finishedAll.reduce((s, i) => {
-      let costKg = pf(i.landedCostPerKg) || pf(i.ratePerKg);
-      if (!costKg && i.batchRef) {
-        const batchId = String(i.batchRef).replace('batch-', '');
-        const batch = millingBatches.find(b => String(b.dbId) === batchId);
-        if (batch) {
-          const totalBatchCost = Object.values(batch.costs || {}).reduce((cs, c) => cs + pf(c), 0);
-          const finishedKg = pf(batch.actualFinishedMT) * 1000;
-          costKg = finishedKg > 0 ? totalBatchCost / finishedKg : 0;
-        }
-      }
-      if (!costKg) costKg = 190; // default Rs 190/KG finished rice
-      return s + costKg * pf(i.availableQty);
-    }, 0);
-  }, [finishedAll, millingBatches]);
-
-  const byproductInventoryValue = useMemo(() => {
-    const lastCompleted = millingBatches.filter(b => b.status === 'Completed' && b.pricesConfirmed).sort((a, b) => (b.completedAt || '').localeCompare(a.completedAt || ''))[0];
-    const brokenRateKg = (pf(lastCompleted?.brokenPricePerMT) || 38000) / 1000;
-    const branRateKg = (pf(lastCompleted?.branPricePerMT) || 28000) / 1000;
-    const huskRateKg = (pf(lastCompleted?.huskPricePerMT) || 8400) / 1000;
-
-    return inventory.filter(i => i.type === 'byproduct').reduce((s, i) => {
-      const name = (i.itemName || '').toLowerCase();
-      const rateKg = name.includes('broken') ? brokenRateKg : name.includes('bran') ? branRateKg : huskRateKg;
-      return s + pf(i.availableQty) * rateKg; // availableQty is KG (Phase 5c)
-    }, 0);
-  }, [inventory, millingBatches]);
-
-  const totalInventoryValue = rawInventoryValue + finishedInventoryValue + byproductInventoryValue;
-
   const pendingBatches = useMemo(() => {
     return millingBatches.filter(
       (b) => b.status === 'In Progress' || b.status === 'Queued' || b.status === 'Pending Approval'
@@ -566,10 +519,7 @@ export default function MillingDashboard() {
 
       {/* Compact KPI Row */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Link to="/lot-inventory?type=raw" className="bg-white rounded-xl border p-4 hover:shadow-sm transition-shadow">
-          <p className="text-xs text-gray-500 font-medium uppercase">Raw Stock</p>
-          <p className="text-xl font-bold text-gray-900 mt-1">{fmtKg(rawRiceStock * 1000)}</p>
-        </Link>
+        <RawStockTile inventory={inventory} />
         <div className="bg-white rounded-xl border p-4">
           <p className="text-xs text-gray-500 font-medium uppercase">Pending Batches</p>
           <p className="text-xl font-bold text-gray-900 mt-1">{pendingBatches}</p>
@@ -650,34 +600,6 @@ export default function MillingDashboard() {
           </table>
         </div>
       </div>
-
-      {false && totalInventoryValue > 0 && (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
-          <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-3">Inventory Value (Working Capital)</h2>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="bg-amber-50 rounded-lg p-4">
-              <p className="text-xs font-medium text-amber-600 uppercase">Raw Rice</p>
-              <p className="text-lg font-bold text-amber-900">{fmtPKR(rawInventoryValue, { decimals: 2 })}</p>
-              <p className="text-xs text-amber-500">{fmtKg(rawRiceStock * 1000)} in stock</p>
-            </div>
-            <div className="bg-emerald-50 rounded-lg p-4">
-              <p className="text-xs font-medium text-emerald-600 uppercase">Finished Rice</p>
-              <p className="text-lg font-bold text-emerald-900">{fmtPKR(finishedInventoryValue, { decimals: 2 })}</p>
-              <p className="text-xs text-emerald-500">{fmtKg(finishedRiceStock * 1000)} in stock</p>
-            </div>
-            <div className="bg-purple-50 rounded-lg p-4">
-              <p className="text-xs font-medium text-purple-600 uppercase">Byproducts</p>
-              <p className="text-lg font-bold text-purple-900">{fmtPKR(byproductInventoryValue, { decimals: 2 })}</p>
-              <p className="text-xs text-purple-500">{fmtKg(byproductStock * 1000)} in stock</p>
-            </div>
-            <div className="bg-blue-50 rounded-lg p-4">
-              <p className="text-xs font-medium text-blue-600 uppercase">Total Inventory</p>
-              <p className="text-lg font-bold text-blue-900">{fmtPKR(totalInventoryValue, { decimals: 2 })}</p>
-              <p className="text-xs text-blue-500">Capital locked in stock</p>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Mill P&L Summary */}
       {showMoney && (

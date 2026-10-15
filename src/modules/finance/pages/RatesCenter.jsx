@@ -39,7 +39,7 @@ export default function RatesCenter() {
   const [crForm, setCrForm] = useState({ rateType: '', productId: '', productType: '', unit: 'per_kg', currency: 'PKR', rateValue: '', effectiveDate: todayLocalISO(), notes: '' });
   // Products for the picker — a rate is keyed by product (+ grade for by-products),
   // which is how held-stock profit finds the selling price for each lot.
-  const { data: productsData } = useProducts({ limit: 500 });
+  const { data: productsData } = useProducts();
   const productOptions = useMemo(() => {
     const raw = productsData?.products || productsData || [];
     return (Array.isArray(raw) ? raw : []).map((p) => ({ id: p.id, name: p.name })).sort((a, b) => String(a.name).localeCompare(String(b.name)));
