@@ -62,6 +62,12 @@ let mockCollection = { targetPct: 95, byCurrency: {}, notYetDue: {} };
 jest.mock('../modules/finance/collectionRate', () => ({
   collectionRate: jest.fn(async () => mockCollection),
 }));
+// Open receivables come from the as-at module (P4-04) — its SQL has its own
+// tests (receivablesAsAt*.test.js); here only how the overview folds its rows.
+let mockAsAtRows = [];
+jest.mock('../modules/finance/receivablesAsAt', () => ({
+  receivablesAsAt: jest.fn(async () => ({ asOf: '2026-10-16', rows: mockAsAtRows })),
+}));
 // The books' P&L (C1) reads the GL through the accounting service.
 jest.mock('../modules/accounting/accounting.service', () => ({
   getProfitAndLoss: jest.fn(async () => ({ net_profit: 0, gross_profit: 0, revenue: { total: 0 }, cogs: { total: 0 }, expenses: { total: 0 } })),
@@ -116,21 +122,24 @@ describe('Finance overview — Receivables per currency (R4)', () => {
     export_orders: zeros, export_order_costs: zeros, milling_batches: () => [], milling_costs: () => [],
     mill_expenses: zeros, local_sales: zeros, payables: zeros, bank_accounts: () => [],
   };
-  const recvRows = [
-    { currency: 'USD', count: '4', outstanding: '121621.10', overdue_count: '1', overdue_amount: '3172' },
-    { currency: 'PKR', count: '2', outstanding: '821395', overdue_count: '2', overdue_amount: '821395' },
+  // As-at rows (receivablesAsAt): 4 USD rows = 121,621.10 (one 3,172 overdue)
+  // and 2 PKR rows = 821,395 (both overdue); a local-sale row is left out
+  // (local sales have their own KPI).
+  const usd = (outstanding, overdue, outstandingPkr) => ({ kind: 'receivable', currency: 'USD', outstanding, overdue, outstandingPkr });
+  const asAtRows = [
+    usd(100000, false, 28000000), usd(15000, false, 4200000), usd(3449.1, false, 965748), usd(3172, true, 888160),
+    { kind: 'receivable', currency: 'PKR', outstanding: 800000, overdue: true, outstandingPkr: 800000 },
+    { kind: 'receivable', currency: 'PKR', outstanding: 21395, overdue: true, outstandingPkr: 21395 },
+    { kind: 'local_sale', currency: 'PKR', outstanding: 5000, overdue: true, outstandingPkr: 5000 },
   ];
   const collRows = [
     { currency: 'USD', expected: '200000', received: '78378.90' },
     { currency: 'PKR', expected: '1000000', received: '178605' },
   ];
-  const isOutstandingQ = (q) => q.raws.some((r) => r.includes('SUM(outstanding)'));
-  const receivables = (q) => {
-    if (!q.groupBy) return {};
-    return isOutstandingQ(q) ? recvRows : collRows;
-  };
+  const receivables = (q) => (q.groupBy ? collRows : {});
 
   test('USD and PKR outstanding/overdue are reported separately, in their own currency', async () => {
+    mockAsAtRows = asAtRows;
     db.__set({ ...base, receivables });
     const out = await financeService.getOverviewSummary({});
     expect(out.receivables.byCurrency.USD).toEqual({ count: 4, outstanding: 121621.1, overdueCount: 1, overdueAmount: 3172 });
@@ -143,18 +152,13 @@ describe('Finance overview — Receivables per currency (R4)', () => {
     expect(out.receivables.totalOutstandingForeign).not.toBeCloseTo(943016.1, 0);
   });
 
-  test('outstanding is read per currency from what is still owed, not base_amount_pkr', async () => {
+  test('the ≈ PKR equivalent is each open row at its booked share; closed and local-sale rows never count', async () => {
+    mockAsAtRows = [...asAtRows, usd(500, false, null)];
     db.__set({ ...base, receivables });
-    await financeService.getOverviewSummary({});
-    const q = db.__queries.find((x) => x.table === 'receivables' && x.groupBy && isOutstandingQ(x));
-    expect(q).toBeDefined();
-    expect(String(q.groupBy)).toMatch(/currency/);
-    // The outstanding figure itself is the native SUM(outstanding); base_amount_pkr
-    // is read only for the separate ≈ PKR equivalent (C5), never the figure.
-    const outstandingSel = q.raws.find((r) => /as outstanding$/.test(r));
-    expect(outstandingSel).toMatch(/SUM\(outstanding\)/);
-    expect(outstandingSel).not.toMatch(/base_amount_pkr/);
-    expect(q.raws.find((r) => /as pkr_equiv$/.test(r))).toMatch(/base_amount_pkr \* outstanding \/ expected_amount/);
+    const out = await financeService.getOverviewSummary({});
+    // RPT-10: the as-at rows are already open (RECEIVABLE_CLOSED left out on
+    // the server); the overview just folds them.
+    expect(out.receivables.pkrEquiv).toEqual({ pkr: 28000000 + 4200000 + 965748 + 888160 + 821395, basis: 'booked', missingCount: 1 });
   });
 
   const coll = (byCurrency) => ({ targetPct: 95, byCurrency, notYetDue: {} });
@@ -168,7 +172,8 @@ describe('Finance overview — Receivables per currency (R4)', () => {
 
   test('one currency only → the single rate is that currency', async () => {
     mockCollection = coll({ USD: { ratePct: 39.2 } });
-    db.__set({ ...base, receivables: (q) => (!q.groupBy ? {} : isOutstandingQ(q) ? [recvRows[0]] : [collRows[0]]) });
+    mockAsAtRows = asAtRows.slice(0, 4);
+    db.__set({ ...base, receivables: (q) => (q.groupBy ? [collRows[0]] : {}) });
     const out = await financeService.getOverviewSummary({});
     expect(out.collectionRate).toBe(39.2);
     expect(out.receivables.totalOutstandingPkr).toBe(0);

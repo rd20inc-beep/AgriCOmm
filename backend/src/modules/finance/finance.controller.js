@@ -31,6 +31,7 @@ const { postBankTransaction } = require('../../shared/bankBalance');
 const { bankTieOut } = require('./bankTieOut');
 const { bounceCheque } = require('./chequeBounce');
 const { recordPendingExportReceipt } = require('../exportOrders/exportReceipts');
+const { moneyInSummary } = require('./receivablesAsAt');
 
 // Resolve a payment row to its PKR equivalent using the strongest
 // signal we have: stored base_amount_pkr first, then amount × fx_rate
@@ -391,6 +392,24 @@ async function receivablesResponse(req, res, { entity } = {}) {
 const financeController = {
   async getReceivables(req, res) {
     return receivablesResponse(req, res, {});
+  },
+
+  // Money In ▸ tiles + aging, server-side (P4-04 / FIN-09): outstanding,
+  // overdue and aging AS AT ?as_of (default today), per currency; collected =
+  // receipts dated ?from_date … as_of. Aggregates only — no party names.
+  async getReceivablesSummary(req, res) {
+    try {
+      const asOf = req.query.as_of || req.query.to_date || null;
+      if (asOf && !/^\d{4}-\d{2}-\d{2}$/.test(String(asOf))) {
+        return res.status(400).json({ success: false, message: 'as_of must be a date (YYYY-MM-DD).' });
+      }
+      const from = req.query.from_date && /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.from_date)) ? req.query.from_date : null;
+      const summary = await moneyInSummary(db, { asOf, from });
+      return res.json({ success: true, data: summary });
+    } catch (err) {
+      console.error('Receivables summary error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
   },
 
   // Mill Finance ▸ Customers for mill roles without finance.view (the Mill
