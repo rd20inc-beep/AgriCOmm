@@ -33,7 +33,7 @@ import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import { canSeeCost } from '../../../hooks/useCanSeeCost';
 import OrderRefLink from '../../../shared/components/OrderRefLink';
-import { useCreateMillingBatch, useMillExpenses, useCreateMillExpense, useInventory, useProducts, useMillCostTrend } from '../../../api/queries';
+import { useCreateMillingBatch, useMillExpenses, useCreateMillExpense, useInventory, useProducts, useMillCostTrend, useMillingYieldKpi } from '../../../api/queries';
 import { useCommodityPrices } from '../hooks/useCommodityPrices';
 import { useMillSummary } from '../hooks/useMillSummary';
 import KPICard from '../../../components/KPICard';
@@ -188,7 +188,7 @@ export default function MillingDashboard() {
   const resetBatchForm = () => {
     setBatchForm({
       millingType: 'own_stock', productId: '', supplierId: '', rawQtyKg: '', totalBags: '', plannedFinishedKg: '',
-      millingFeePerKg: '5',
+      millingFeePerKg: '0',
       millId: '', shift: 'Day', notes: '', batchName: '', customTags: '',
       clientCustomerId: '',
       serviceMillingRatePerKg: '', serviceRentalRatePerKatta: '', serviceLabourRatePerKatta: '',
@@ -388,48 +388,10 @@ export default function MillingDashboard() {
   const byproductStock = useMemo(() =>
     inventory.filter(i => i.type === 'byproduct').reduce((s, i) => s + pf(i.qty), 0), [inventory]);
 
-  // Inventory VALUES (PKR) — money locked in stock
-  // Calculate from batch costs since lot cost fields may be empty
-  const RAW_KEYS = new Set(['rawRice', 'raw_rice']);
-  const getRawCost = (costs) => { for (const [k, v] of Object.entries(costs || {})) { if (RAW_KEYS.has(k)) return pf(v); } return 0; };
-
-  const rawInventoryValue = useMemo(() =>
-    inventory.filter(i => i.type === 'raw').reduce((s, i) => {
-      const costKg = pf(i.landedCostPerKg) || pf(i.ratePerKg) || 150; // default Rs 150/KG
-      return s + costKg * pf(i.netWeightKg || i.qty * 1000);
-    }, 0), [inventory]);
-
-  const finishedInventoryValue = useMemo(() => {
-    return finishedAll.reduce((s, i) => {
-      let costKg = pf(i.landedCostPerKg) || pf(i.ratePerKg);
-      if (!costKg && i.batchRef) {
-        const batchId = String(i.batchRef).replace('batch-', '');
-        const batch = millingBatches.find(b => String(b.dbId) === batchId);
-        if (batch) {
-          const totalBatchCost = Object.values(batch.costs || {}).reduce((cs, c) => cs + pf(c), 0);
-          const finishedKg = pf(batch.actualFinishedMT) * 1000;
-          costKg = finishedKg > 0 ? totalBatchCost / finishedKg : 0;
-        }
-      }
-      if (!costKg) costKg = 190; // default Rs 190/KG finished rice
-      return s + costKg * pf(i.availableQty);
-    }, 0);
-  }, [finishedAll, millingBatches]);
-
-  const byproductInventoryValue = useMemo(() => {
-    const lastCompleted = millingBatches.filter(b => b.status === 'Completed' && b.pricesConfirmed).sort((a, b) => (b.completedAt || '').localeCompare(a.completedAt || ''))[0];
-    const brokenRateKg = (pf(lastCompleted?.brokenPricePerMT) || 38000) / 1000;
-    const branRateKg = (pf(lastCompleted?.branPricePerMT) || 28000) / 1000;
-    const huskRateKg = (pf(lastCompleted?.huskPricePerMT) || 8400) / 1000;
-
-    return inventory.filter(i => i.type === 'byproduct').reduce((s, i) => {
-      const name = (i.itemName || '').toLowerCase();
-      const rateKg = name.includes('broken') ? brokenRateKg : name.includes('bran') ? branRateKg : huskRateKg;
-      return s + pf(i.availableQty) * rateKg; // availableQty is KG (Phase 5c)
-    }, 0);
-  }, [inventory, millingBatches]);
-
-  const totalInventoryValue = rawInventoryValue + finishedInventoryValue + byproductInventoryValue;
+  // Stock VALUE is not computed here: it is the D-14 valuation on the server
+  // (inventory/stockValue.js — landed cost/kg × on hand, no fallback price),
+  // shown on Mill Finance ▸ Overview. The old browser figures (Rs 150 / 190 /
+  // 38 / 28 / 8.4 per kg fallbacks) are gone (P4-02 / RPT-12).
 
   const pendingBatches = useMemo(() => {
     return millingBatches.filter(
@@ -443,12 +405,12 @@ export default function MillingDashboard() {
     ).length;
   }, [millingBatches]);
 
-  const avgYield = useMemo(() => {
-    const completed = millingBatches.filter((b) => b.status === 'Completed' && b.yieldPct > 0);
-    if (completed.length === 0) return 0;
-    const total = completed.reduce((sum, b) => sum + b.yieldPct, 0);
-    return (total / completed.length).toFixed(1);
-  }, [millingBatches]);
+  // Yield (yield.v1, D-14): Σ finished ÷ Σ raw over every completed company
+  // batch, weighted, service milling excluded — from the server. A simple
+  // average of batch yields gave a trial batch a full run's weight and
+  // counted blends (re-mills at ~95 %) (MIL-40).
+  const { data: yieldKpi } = useMillingYieldKpi({ period: 'all' });
+  const avgYield = yieldKpi?.yieldPct;
 
   // Yield Trend Data (from completed and in-progress batches)
   const yieldTrendData = useMemo(() => {
@@ -460,25 +422,8 @@ export default function MillingDashboard() {
       }));
   }, [millingBatches]);
 
-  // Calculate local sales from by-products of completed batches
-  const localSalesValue = useMemo(() => {
-    return millingBatches
-      .filter(b => b.status === 'Completed')
-      .reduce((sum, b) => sum + (b.brokenMT * MILL_PRICES_PKR.brokenPerMT), 0);
-  }, [millingBatches]);
-
-  // Calculate mill net profit from completed batches (PKR)
-  const millNetProfit = useMemo(() => {
-    return millingBatches
-      .filter(b => b.status === 'Completed')
-      .reduce((sum, b) => {
-        const revenue = (b.actualFinishedMT * MILL_PRICES_PKR.finishedRicePerMT) + (b.brokenMT * MILL_PRICES_PKR.brokenPerMT);
-        const costs = Object.values(b.costs || {}).reduce((s, c) => s + c, 0);
-        return sum + (revenue - costs);
-      }, 0);
-  }, [millingBatches]);
-
-  // By-product sales trend data (completed batches)
+  // Broken output per completed batch, valued at TODAY's rate-master price —
+  // what it would fetch, not what was sold (MIL-40: it was titled "sales").
   const byproductSalesData = useMemo(() => {
     return millingBatches
       .filter(b => b.status === 'Completed')
@@ -579,8 +524,9 @@ export default function MillingDashboard() {
           <p className="text-xl font-bold text-red-600 mt-1">{varianceAlerts}</p>
         </Link>
         <div className="bg-white rounded-xl border p-4">
-          <p className="text-xs text-gray-500 font-medium uppercase">Avg Yield</p>
-          <p className="text-xl font-bold text-gray-900 mt-1">{fmtPct(avgYield)}</p>
+          <p className="text-xs text-gray-500 font-medium uppercase">Yield (weighted)</p>
+          <p className="text-xl font-bold text-gray-900 mt-1">{avgYield != null ? fmtPct(avgYield) : '—'}</p>
+          <p className="text-[10px] text-gray-400">Σ finished ÷ Σ raw · completed batches</p>
         </div>
       </div>
 
@@ -651,33 +597,6 @@ export default function MillingDashboard() {
         </div>
       </div>
 
-      {false && totalInventoryValue > 0 && (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
-          <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-3">Inventory Value (Working Capital)</h2>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="bg-amber-50 rounded-lg p-4">
-              <p className="text-xs font-medium text-amber-600 uppercase">Raw Rice</p>
-              <p className="text-lg font-bold text-amber-900">{fmtPKR(rawInventoryValue, { decimals: 2 })}</p>
-              <p className="text-xs text-amber-500">{fmtKg(rawRiceStock * 1000)} in stock</p>
-            </div>
-            <div className="bg-emerald-50 rounded-lg p-4">
-              <p className="text-xs font-medium text-emerald-600 uppercase">Finished Rice</p>
-              <p className="text-lg font-bold text-emerald-900">{fmtPKR(finishedInventoryValue, { decimals: 2 })}</p>
-              <p className="text-xs text-emerald-500">{fmtKg(finishedRiceStock * 1000)} in stock</p>
-            </div>
-            <div className="bg-purple-50 rounded-lg p-4">
-              <p className="text-xs font-medium text-purple-600 uppercase">Byproducts</p>
-              <p className="text-lg font-bold text-purple-900">{fmtPKR(byproductInventoryValue, { decimals: 2 })}</p>
-              <p className="text-xs text-purple-500">{fmtKg(byproductStock * 1000)} in stock</p>
-            </div>
-            <div className="bg-blue-50 rounded-lg p-4">
-              <p className="text-xs font-medium text-blue-600 uppercase">Total Inventory</p>
-              <p className="text-lg font-bold text-blue-900">{fmtPKR(totalInventoryValue, { decimals: 2 })}</p>
-              <p className="text-xs text-blue-500">Capital locked in stock</p>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Mill P&L Summary */}
       {showMoney && (
@@ -1130,7 +1049,7 @@ export default function MillingDashboard() {
       {showMoney && byproductSalesData.length > 0 && (
         <div className="bg-white rounded-xl shadow-sm p-5">
           <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-4">
-            By-product Sales Trend
+            Broken Output Value by Batch <span className="normal-case font-normal text-gray-400">— at today's rate, not sales</span>
           </h2>
           <div className="h-48 sm:h-64 lg:h-72">
             <ResponsiveContainer width="100%" height="100%">

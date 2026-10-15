@@ -397,6 +397,47 @@ export function useMillCashFlow(params = {}) {
   });
 }
 
+// Mill Finance KPIs (P4-02): mill profit (D-13 headline), production value
+// (secondary), yield and working capital, all from the backend for a period.
+// Raw response, no key transform — the figures are read as the server names them.
+export function useMillFinanceKpis(params = {}, opts = {}) {
+  return useQuery({
+    queryKey: ['mill-finance-kpis', params],
+    queryFn: async () => {
+      const res = await millingApi.financeKpis(params);
+      return res?.data || res || null;
+    },
+    staleTime: 30 * 1000,
+    ...opts,
+  });
+}
+
+// Weighted milling yield (yield.v1) — quantities only, no cost gate.
+export function useMillingYieldKpi(params = {}, opts = {}) {
+  return useQuery({
+    queryKey: ['milling-yield-kpi', params],
+    queryFn: async () => {
+      const res = await millingApi.yieldKpi(params);
+      return res?.data || res || null;
+    },
+    staleTime: 60 * 1000,
+    ...opts,
+  });
+}
+
+// The rows behind a Mill Finance KPI, paged on the server.
+export function useMillFinanceKpiDetail(params = {}, opts = {}) {
+  return useQuery({
+    queryKey: ['mill-finance-kpi-detail', params],
+    queryFn: async () => {
+      const res = await millingApi.financeKpiDetail(params);
+      return res?.data || res || null;
+    },
+    staleTime: 30 * 1000,
+    ...opts,
+  });
+}
+
 // Mill cost trend — milling_costs summed per month and category (last N months).
 export function useMillCostTrend(params = { months: 6 }, opts = {}) {
   return useQuery({
