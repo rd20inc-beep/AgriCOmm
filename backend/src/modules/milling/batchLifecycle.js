@@ -107,7 +107,8 @@ function httpError(status, message) {
  * hard-reserves the qty (P6a): milling_reserved_qty goes up and available_qty
  * down, so the rice can't be sold or export-allocated before yield. Yield
  * (consumeForMilling) consumes exactly this qty; delete/cancel releases it
- * (releaseBatchSources).
+ * (releaseBatchSources). The GL follows (D-6): the committed value moves from
+ * the lot's stock account into 1260 Milling WIP (millingWip.syncBatchWip).
  *
  * `row` carries extra batch_source_lots columns (costs, variety, notes…).
  * Returns { lot, qty } with the lot as read before the update.
@@ -135,6 +136,8 @@ async function commitLotToBatch(trx, { batchId, lotId, qtyKg, row = {} }) {
     available_qty: Math.max(0, avail - qty),
     updated_at: trx.fn.now(),
   });
+  // D-6: the committed rice leaves its stock account for 1260 Milling WIP.
+  await require('./millingWip').syncBatchWip(trx, batchId, { reason: `lot ${lot.lot_no || lot.id} committed` });
   return { lot, qty };
 }
 

@@ -74,7 +74,8 @@ async function sourceLotBookedReason(trx, lot) {
  *   { amount, hasSources, sources: [{ lotId, lotNo, value, booked }] }
  *
  *   - blended batch / no supplier / service batch → 0
- *   - no source lots (truck intake) → the batch's whole raw_rice cost
+ *   - no source lots (truck intake) → the batch's whole raw_rice cost, unless
+ *     the truck lot was bought at receipt (D-6) → 0 with `truckTrueUp`
  *   - source lots → only the value of the source lots not yet on the books
  *     (normally 0). An unbooked lot of a DIFFERENT supplier cannot sit on this
  *     batch's single supplier payable: refused (409) rather than mis-owed.
@@ -91,6 +92,15 @@ async function rawPurchaseToBook(trx, batch) {
   if (!rows.length) {
     const raw = await trx('milling_costs').where({ batch_id: batch.id, category: 'raw_rice' })
       .sum('amount as total').first();
+    // D-6: truck rice bought at receipt (a payable on the truck lot) is not
+    // bought again — the yield only moves that same payable to the cost
+    // sheet's raw rice (`truckTrueUp`, see truckIntakePurchase).
+    const { truckLotOf, receiptBooked } = require('./truckIntakePurchase');
+    const truckLot = await truckLotOf(trx, batch.id);
+    if (truckLot && await receiptBooked(trx, truckLot)) {
+      out.truckTrueUp = { lotId: truckLot.id, lotNo: truckLot.lot_no, target: r2(raw?.total) };
+      return out;
+    }
     out.amount = r2(raw?.total);
     return out;
   }

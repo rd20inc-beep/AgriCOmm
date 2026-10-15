@@ -774,6 +774,14 @@ const inventoryService = {
       lot = await trx('inventory_lots').where('id', lot.id).first();
     }
 
+    // D-6: truck rice is bought at receipt (supplier payable + Dr 1210 /
+    // Cr 2010, like New Purchase Lot) and, being the batch's input, moves
+    // straight on into 1260 Milling WIP. Client-owned (service) intake is
+    // skipped inside. A posting failure rolls the receipt back.
+    if (lot && !svcBatch?.is_service_milling) {
+      await require('../milling/millingWip').syncBatchIntake(trx, batchId, { userId, reason: 'truck rice received' });
+    }
+
     return { lot, movement };
   },
 
@@ -2769,6 +2777,10 @@ const inventoryService = {
   // price ignores both, so for such a batch the trucks only refresh yield %,
   // and a raw cost an earlier truck recompute wrote is replaced by the lot cost.
   async recomputeRawRiceCostFromVehicles(trx, batchId, userId) {
+    // Every truck add / edit / delete lands here: re-sync the truck purchase
+    // and the batch's WIP to the raw lot as it now stands (D-6). A no-op once
+    // the batch has yielded.
+    await require('../milling/millingWip').syncBatchIntake(trx, batchId, { userId, reason: 'trucks changed' });
     const vrows = await trx('milling_vehicle_arrivals').where({ batch_id: batchId });
     if (!vrows.length) return;
     let pricedW = 0, pricedCost = 0, totalW = 0;
@@ -3013,6 +3025,10 @@ const inventoryService = {
           summary.cogsUpdated += 1;
         }
       }
+
+      // The committed rice is carried in 1260 Milling WIP at its landed cost
+      // (D-6): move the re-price there too (the lot's own edit posted it to 1210).
+      await require('../milling/millingWip').syncBatchIntake(trx, batchId, { userId, reason: `lot ${lot.lot_no} re-priced` });
 
       // 5. Audit trail.
       await trx('historical_cost_repair_log').insert({

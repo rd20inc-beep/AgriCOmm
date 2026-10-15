@@ -13,6 +13,8 @@ const { nextDocNo } = require('../../utils/docNumber');
 const { redactForUser, canSeeCost } = require('../../utils/costVisibility');
 const { batchOutputValues } = require('./batchOutputValues');
 const { rawPurchaseToBook } = require('./rawPurchasePayable');
+const { syncBatchIntake, syncBatchWip } = require('./millingWip');
+const { syncTruckIntakePurchase, voidTruckIntakePurchase } = require('./truckIntakePurchase');
 const { assertBatchRawCostEditable, assertBatchOutputsUnsold } = require('./costEditLocks');
 // Packing-cost subtotals carry no "cost" in their names.
 const BATCH_EXTRA_COST_KEYS = ['bagsTotal', 'mastersTotal', 'polytheneTotal'];
@@ -903,6 +905,8 @@ const millingController = {
         }).returning('*');
         // A rejected batch will never mill — give its source lots back.
         await releaseBatchSources(trx, id);
+        // D-6: its rice leaves WIP for stock again; truck rice stays bought.
+        await syncBatchIntake(trx, id, { userId: req.user.id, reason: 'batch rejected' });
         return row;
       });
 
@@ -945,6 +949,10 @@ const millingController = {
         if (variance && varianceByAction[action].includes(variance)) updates.variance_status = variance;
         const [row] = await trx('milling_batches').where({ id }).update(updates).returning('*');
         const released = action === 'cancel' ? await releaseBatchSources(trx, id) : [];
+        // D-6 / MIL-17: a cancelled batch's rice goes back from 1260 Milling
+        // WIP to stock; truck rice remains a valued raw lot and stays bought
+        // (booked now if it was received before purchases were booked at receipt).
+        if (action === 'cancel') await syncBatchIntake(trx, id, { userId: req.user.id, reason: 'batch cancelled' });
         return { batch: row, releasedLotIds: released };
       });
       return res.json({ success: true, data: result });
@@ -1550,6 +1558,12 @@ const millingController = {
         // finished, opening-stock, purchased or transferred lots books nothing —
         // re-booking them owed the supplier twice. Blends never book (owned stock).
         const toBook = await rawPurchaseToBook(trx, batch);
+        // Truck rice bought at receipt (D-6): what the supplier is owed is the
+        // cost sheet's raw rice — move the receipt's payable to it (signed
+        // delta, same payable). Never a second payable.
+        if (toBook.truckTrueUp && toBook.truckTrueUp.target > 0) {
+          await syncTruckIntakePurchase(trx, batch.id, { userId: req.user?.id, target: toBook.truckTrueUp.target });
+        }
         {
           const rawRiceValue = toBook.amount;
           const existingAP = await trx('journal_entries')
@@ -2540,6 +2554,10 @@ async function deleteBatchTx(trx, batchId, userId) {
     const lot = await trx('inventory_lots')
       .where({ batch_ref: `batch-${batchId}`, type: 'raw', entity: 'mill' })
       .first();
+    // D-6: everything the batch moved into 1260 Milling WIP goes back to its
+    // stock account first (signed delta), before its lots / links go.
+    await syncBatchWip(trx, batchId, { userId, release: true, reason: 'batch deleted' });
+
     if (lot) {
       // Canonical ledger equivalents of production_issue / adjustment_minus.
       const consumed = await trx('lot_transactions')
@@ -2549,6 +2567,9 @@ async function deleteBatchTx(trx, batchId, userId) {
       if (parseInt(consumed.n, 10) > 0) {
         throw refuse(400, 'Raw rice from this batch has already been consumed/adjusted; cannot delete.');
       }
+      // The truck rice was bought at receipt (D-6): void the unpaid payable and
+      // take the purchase off the books by its net. Paid → refused (409).
+      if (lot.ownership !== 'client') await voidTruckIntakePurchase(trx, lot, { userId, label });
       await trx('lot_transactions').where('lot_id', lot.id).del();
       await trx('inventory_lots').where('id', lot.id).del();
     }

@@ -10,6 +10,9 @@
 // per-lot cost_total_pkr the raw_rice cost sheet row was built from):
 //   raw lot → 1210 · finished lot → 1220 (1230 export) · by-product → 1240.
 // Any raw cost not covered by a source lot (truck intake) stays on 1210.
+// Since D-6 (P3-09) committed rice has already left those accounts for 1260
+// Milling WIP when it was committed / received, so the completion credits WIP
+// for that part (millingWip.applyWipToCredits) and the batch's WIP nets to 0.
 //
 // Processing costs (labour, transport, packaging, unloading, other ...) are
 // credited to the account they were accrued to (owner decision A3b,
@@ -251,7 +254,13 @@ async function postMillingCompletion(trx, accountingService, { batch, amount, fi
   }
   if (target <= 0) return { posted: 'none', amount: 0, alreadyPosted: 0 };
   const qty = `${Number(finishedKg || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })} kg finished`;
-  const credits = await completionCredits(trx, batch.id, target, batch.batch_no);
+  // D-6: what the batch committed is in 1260 Milling WIP, not in its stock
+  // account any more — relieve WIP for that part (and all of WIP).
+  const { applyWipToCredits, wipBookedByAccount } = require('./millingWip');
+  const credits = applyWipToCredits(
+    await completionCredits(trx, batch.id, target, batch.batch_no),
+    await wipBookedByAccount(trx, batch.batch_no),
+  );
   if (credits.some((c) => c.code !== RAW_ACCOUNT)) {
     await postSplitCompletion(trx, accountingService, { batch, target, credits, qty, userId });
     await syncOutputSplit(trx, accountingService, { batch, userId });
@@ -375,9 +384,14 @@ async function postSplitCompletion(trx, accountingService, { batch, target, cred
   for (const c of credits) {
     const acc = byCode[c.code];
     if (!acc) throw new Error(`Chart of accounts has no ${c.code} for the milling completion of ${batch.batch_no}.`);
+    // A negative credit is WIP returning more than the batch consumed from
+    // that account (applyWipToCredits) — a debit back to it.
+    const back = c.amount < 0;
     lines.push({
-      account_id: acc.id, account: acc.name, debit: 0, credit: c.amount,
-      narration: `CR ${acc.code} ${acc.name} — inputs consumed, batch ${batch.batch_no}`,
+      account_id: acc.id, account: acc.name, debit: back ? -c.amount : 0, credit: back ? 0 : c.amount,
+      narration: back
+        ? `DR ${acc.code} ${acc.name} — WIP in excess of inputs returned, batch ${batch.batch_no}`
+        : `CR ${acc.code} ${acc.name} — inputs consumed, batch ${batch.batch_no}`,
     });
   }
   const journal = await accountingService.createJournal(trx, {
