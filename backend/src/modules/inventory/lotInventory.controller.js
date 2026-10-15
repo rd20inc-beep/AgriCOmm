@@ -345,6 +345,15 @@ function lotRowQuery() {
       'h.name as hauler_name');
 }
 
+// D-25b / P3-08: transporters live in `haulers` only. transport_vendor_id (a
+// supplier id, from before the haulers registry) is no longer accepted as the
+// freight party when no hauler_id comes with it.
+const LEGACY_TRANSPORT_VENDOR_MESSAGE = 'Transporters are now chosen from the Transporters list (haulers). This form sent an old supplier-based transport vendor — pick the transporter again and save.';
+function legacyTransportVendor(haulerId, transportVendorId) {
+  const has = (v) => v != null && v !== '';
+  return !has(haulerId) && has(transportVendorId);
+}
+
 // ─── Purchase-lot cost edit helpers ───
 
 // The lot's RICE payable — the 'Raw Material' line createPurchaseLot raised for
@@ -1036,10 +1045,14 @@ module.exports = {
         ? uc.round2(commissionPerBag * totalBags)
         : (parseFloat(commissionTotalInput) || 0);
       const transportCost = parseFloat(transport_cost) || 0;
-      // Transport now points at the dedicated haulers registry (item #5). Prefer
-      // hauler_id; fall back to transport_vendor_id for legacy/offline payloads.
-      const rawHauler = (hauler_id != null && hauler_id !== '') ? hauler_id : transport_vendor_id;
-      const haulerId = (rawHauler != null && rawHauler !== '') ? parseInt(rawHauler, 10) : null;
+      // Transport points at the haulers registry only (item #5; D-25b: one
+      // transporter party source). transport_vendor_id was a SUPPLIER id — it
+      // used to be read as a hauler id here, crediting the wrong party. A
+      // payload that still names one is refused instead (P3-08).
+      if (legacyTransportVendor(hauler_id, transport_vendor_id)) {
+        return res.status(400).json({ success: false, message: LEGACY_TRANSPORT_VENDOR_MESSAGE });
+      }
+      const haulerId = (hauler_id != null && hauler_id !== '') ? parseInt(hauler_id, 10) : null;
       const brokerIdNum = (broker_id != null && broker_id !== '') ? parseInt(broker_id, 10) : null;
       // #14 — who bears the transport charge. Only 'company' creates a company
       // payable AND capitalises the cost into the lot; other responsibilities are
@@ -2163,12 +2176,13 @@ module.exports = {
         const oc = pick(other_cost, lot.other_cost);
         const bcpb = pick(bag_cost_per_bag, lot.bag_cost_per_bag);
         const totalBagCost = lot.bag_cost_included ? 0 : bcpb * totalBags;
-        // Transport now points at the dedicated haulers registry (item #5).
-        // Prefer hauler_id; fall back to legacy transport_vendor_id / stored value.
-        const rawHauler = (hauler_id != null && hauler_id !== '')
-          ? hauler_id
-          : (transport_vendor_id != null && transport_vendor_id !== '' ? transport_vendor_id : null);
-        const haulerId = rawHauler != null ? parseInt(rawHauler, 10) : (lot.hauler_id || null);
+        // Transport points at the haulers registry only (item #5; D-25b). A
+        // legacy supplier-based transport_vendor_id is refused, never read as
+        // a hauler id (P3-08); no hauler given keeps the stored one.
+        if (legacyTransportVendor(hauler_id, transport_vendor_id)) {
+          const e = new Error(LEGACY_TRANSPORT_VENDOR_MESSAGE); e.status = 400; throw e;
+        }
+        const haulerId = (hauler_id != null && hauler_id !== '') ? parseInt(hauler_id, 10) : (lot.hauler_id || null);
 
         // P2-08 (INV-08): once rice has left the lot (milled with yield, sold,
         // moved) its costs are locked. Re-saving unchanged costs still passes.

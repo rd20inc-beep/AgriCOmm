@@ -905,8 +905,10 @@ const financeController = {
         })
         .select('l.id', 'l.lot_no', 'l.transport_cost', 'l.labor_cost', 'l.unloading_cost',
           'l.packing_cost', 'l.total_bag_cost', 'l.other_cost',
-          db.raw('COALESCE(l.hauler_id, l.transport_vendor_id) as transport_vendor_id'),
-          db.raw('COALESCE(h.name, tv.name) as hauler_name'))
+          // A hauler id and a legacy supplier id are different parties (D-25b):
+          // only hauler_id can be paid as a transporter. The old supplier-based
+          // vendor is shown by name, flagged, never offered as a hauler id.
+          'l.hauler_id', 'h.name as hauler_name', 'tv.name as legacy_transport_vendor_name')
         .orderBy('l.lot_no', 'asc');
 
       // Stored transport payables (one per lot) for paid/outstanding on the hauler line.
@@ -932,12 +934,13 @@ const financeController = {
             const base = { lotId: l.id, lotNo: l.lot_no, amount };
             if (c.key === 'transport') {
               const p = tpByLot[l.id];
-              base.haulerId = l.transport_vendor_id || null;
-              base.haulerName = l.hauler_name || null;
+              base.haulerId = l.hauler_id || null;
+              base.haulerName = l.hauler_name || l.legacy_transport_vendor_name || null;
+              base.legacyTransportVendor = !l.hauler_id && !!l.legacy_transport_vendor_name;
               base.payableId = p ? p.id : null; // #14 — target for the Pay Transporter slider
               base.paid = p ? parseFloat(p.paid_amount) || 0 : 0;
-              base.outstanding = p ? parseFloat(p.outstanding) || 0 : (l.transport_vendor_id ? amount : 0);
-              base.unassigned = !l.transport_vendor_id; // recorded but no hauler/payable yet
+              base.outstanding = p ? parseFloat(p.outstanding) || 0 : (l.hauler_id ? amount : 0);
+              base.unassigned = !l.hauler_id; // recorded but no hauler/payable yet
             }
             return base;
           });

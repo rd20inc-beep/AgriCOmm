@@ -21,6 +21,7 @@ const {
   yieldMode, batchHasOutputLots, checkTransition, releaseBatchSources, commitLotToBatch, TRANSITIONS,
 } = require('./batchLifecycle');
 const { postMillingCompletion, hasPostedCompletion, sourceLotValuesByAccount, proportionalInputSplit } = require('./millingCompletionJournal');
+const { syncBatchTransport, transportAdjustmentParts } = require('./batchTransport');
 
 // Can this inventory lot be fed into a milling/blend batch? Mirrors the
 // frontend NON_MILLABLE_CATEGORIES (src/utils/lotCategory.js): any rice form is
@@ -356,7 +357,7 @@ const millingController = {
       }
 
       const batchId = batch.id; // resolved numeric ID
-      const [qualitySamples, costs, vehicles, packLogs] = await Promise.all([
+      const [qualitySamples, costs, vehicles, packLogs, transport] = await Promise.all([
         db('milling_quality_samples').where({ batch_id: batchId }).orderBy('created_at', 'asc'),
         db('milling_costs').where({ batch_id: batchId }).orderBy('created_at', 'asc'),
         db('milling_vehicle_arrivals').where({ batch_id: batchId }).orderBy('created_at', 'asc'),
@@ -368,6 +369,12 @@ const millingController = {
           .select('pl.bag_item_id', 'bg.name as bag_name', 'pl.bags_count', 'pl.total_cost',
             'pl.master_bag_item_id', 'mb.name as master_name', 'pl.master_bags_count', 'pl.master_cost',
             'pl.poly_item_id', 'po.name as poly_name', 'pl.poly_count', 'pl.poly_cost'),
+        // P3-08: the transport line's transporter + payer, so the costs drawer
+        // opens pre-filled (a re-save used to send an empty hauler).
+        db('transport_costs as tc')
+          .leftJoin('haulers as h', 'h.id', 'tc.hauler_id')
+          .where('tc.batch_id', batchId).whereNull('tc.lot_id')
+          .first('tc.hauler_id', 'h.name as hauler_name', 'tc.paid_by', 'tc.status', 'tc.payable_id'),
       ]);
 
       // Itemise the packaging cost PER ITEM — each bag / master size / polythene
@@ -434,6 +441,7 @@ const millingController = {
           costs,
           vehicles,
           packingBreakdown,
+          transport: transport || null,
           yieldStatus: { awaitingArrivalRate },
         }, { extraCostKeys: BATCH_EXTRA_COST_KEYS }),
       });
@@ -1714,8 +1722,6 @@ const millingController = {
       const id = await resolveBatchId(req.params.id);
       if (!id) return res.status(404).json({ success: false, message: 'Batch not found.' });
       let { category, amount, notes } = req.body;
-      // #14 — transport added as a milling cost can be owed to a transporter.
-      const { hauler_id, transport_paid_by, vehicle_no, doc_no } = req.body;
       // Duplicate-post guard: the cost drawer's "Bagging / Packing" (packing) and
       // the mill-store packing flow (packaging) are the same bag cost. Canonicalize
       // to 'packaging' so the upsert-by-(batch, category) keeps a SINGLE row instead
@@ -1765,44 +1771,55 @@ const millingController = {
             .returning('*');
         }
 
+        // #14 / P3-08 — a transport line can be owed to a transporter. Bring the
+        // transporter payable, its Dr 1210 / Cr 2010 accrual (signed delta per
+        // hauler) and the transport_costs record in line with the line FIRST —
+        // a lower freight, another payer or another hauler voids / moves what
+        // was owed — and learn how much of the change went through 1210.
+        const delta = newAmt - oldAmt;
+        const transport = category === 'transport'
+          ? await syncBatchTransport(trx, { batch, amount: newAmt, body: req.body, userId: req.user?.id || null })
+          : null;
+
         // If this batch already capitalized its costs into finished inventory at
         // yield (a milling_completion journal was posted), keep the GL in step with
         // the cost sheet by posting a SIGNED-DELTA journal for the change — same
         // accounts as milling_completion (DR 1220 Finished / CR the input's or the processing cost's account), reversed
         // for a reduction. Never reverse+repost. Pre-yield changes need no journal
         // (recordYield posts the whole sum). Skipped silently if the chart isn't seeded.
-        const delta = newAmt - oldAmt;
-        if (Math.abs(delta) > 0.01) {
+        if (Math.abs(delta) > 0.01 || (transport && Math.abs(transport.staged) > 0.01)) {
           const posted = await trx('journal_entries')
             .where({ ref_type: 'Milling Batch', ref_no: batch.batch_no, status: 'Posted' }).first();
           if (posted) {
             const absDelta = Math.round(Math.abs(delta) * 100) / 100;
-            // The counter-account is where the cost came from: for the raw-rice
+            const up = delta > 0;
+            // Signed parts, amount > 0 = debit. 1220 takes the change; the
+            // counter-account is where the cost came from: for the raw-rice
             // cost, the input lots' own accounts (a blend of finished lots is
             // carried in 1220, by-products in 1240), split by source-lot value;
-            // freight owed to a transporter is accrued Dr 1210 / Cr 2010 just
-            // below, so it comes off 1210; any other cost typed onto the sheet
-            // is booked nowhere else — a cost incurred, not yet paid: Cr 2110
-            // Accrued Expenses (A3b).
-            const owedToHauler = category === 'transport'
-              && (transport_paid_by == null || transport_paid_by === '' || transport_paid_by === 'company')
-              && hauler_id != null && hauler_id !== '' && newAmt > 0;
-            const parts = category === 'raw_rice'
-              ? proportionalInputSplit(absDelta, await sourceLotValuesByAccount(trx, batch.id))
-              : [{ code: owedToHauler ? '1210' : '2110', amount: absDelta }];
-            const fin = await trx('chart_of_accounts').where({ code: '1220' }).first();
+            // for transport, 1210 for what the transporter accrual just moved
+            // there (syncBatchTransport) and 2110 for the rest; any other cost
+            // typed onto the sheet is booked nowhere else — a cost incurred,
+            // not yet paid: Cr 2110 Accrued Expenses (A3b).
+            const parts = transport
+              ? transportAdjustmentParts(delta, transport.staged)
+              : [
+                { code: '1220', amount: up ? absDelta : -absDelta },
+                ...(category === 'raw_rice'
+                  ? proportionalInputSplit(absDelta, await sourceLotValuesByAccount(trx, batch.id))
+                  : [{ code: '2110', amount: absDelta }]
+                ).map((p) => ({ code: p.code, amount: up ? -p.amount : p.amount })),
+              ];
             const accs = await trx('chart_of_accounts').whereIn('code', parts.map((p) => p.code));
             const byCode = Object.fromEntries(accs.map((a) => [a.code, a]));
-            if (fin && parts.every((p) => byCode[p.code])) {
-              const up = delta > 0;
+            if (parts.length && parts.every((p) => byCode[p.code])) {
               const label = `${batch.batch_no} ${category}`;
-              const lines = [
-                { account_id: fin.id, account: fin.name, debit: up ? absDelta : 0, credit: up ? 0 : absDelta, narration: `${up ? 'DR' : 'CR'} ${fin.code} ${fin.name} — cost adj ${label}` },
-                ...parts.map((p) => {
-                  const acc = byCode[p.code];
-                  return { account_id: acc.id, account: acc.name, debit: up ? 0 : p.amount, credit: up ? p.amount : 0, narration: `${up ? 'CR' : 'DR'} ${acc.code} ${acc.name} — cost adj ${label}` };
-                }),
-              ];
+              const lines = parts.map((p) => {
+                const acc = byCode[p.code];
+                const dr = p.amount > 0;
+                const amt = Math.round(Math.abs(p.amount) * 100) / 100;
+                return { account_id: acc.id, account: acc.name, debit: dr ? amt : 0, credit: dr ? 0 : amt, narration: `${dr ? 'DR' : 'CR'} ${acc.code} ${acc.name} — cost adj ${label}` };
+              });
               const journal = await accountingService.createJournal(trx, {
                 date: new Date().toISOString().slice(0, 10), entity: 'mill',
                 refType: 'Milling Batch', refNo: batch.batch_no,
@@ -1812,86 +1829,6 @@ const millingController = {
               });
               if (journal?.id) await accountingService.postJournal(trx, journal.id);
             }
-          }
-        }
-
-        // #14 — a transport milling cost can be owed to a transporter. Record it
-        // in the transport_costs backbone, and when the COMPANY bears it, raise a
-        // real transporter payable so it is visible + payable in AP and appears on
-        // the transporter ledger. The freight is ALSO capitalised into the batch
-        // cost (via the milling_costs row → milling_completion Dr Finished/Cr Raw at
-        // yield). To avoid double-posting we accrue only Dr Raw / Cr Transporter
-        // Payable for the delta: pre-yield it stands and yield moves it to Finished;
-        // post-yield it combines with the delta journal above (Dr Finished/Cr Raw)
-        // to net Dr Finished / Cr Transporter Payable.
-        if (category === 'transport') {
-          const paidBy = ['company', 'supplier', 'customer', 'service_client', 'included_in_supplier_rate', 'deduct_from_supplier', 'other']
-            .includes(transport_paid_by) ? transport_paid_by : 'company';
-          const haulerIdNum = (hauler_id != null && hauler_id !== '') ? parseInt(hauler_id, 10) : null;
-          let payableId = null;
-
-          if (paidBy === 'company' && haulerIdNum && newAmt > 0) {
-            // Upsert the transporter payable keyed to this batch's transport.
-            const existingPay = await trx('payables')
-              .where({ source_table: 'batch_transport', source_id: id }).first();
-            const paidSoFar = existingPay ? (parseFloat(existingPay.paid_amount) || 0) : 0;
-            const payStatus = paidSoFar <= 0.01 ? 'Pending' : (paidSoFar < newAmt - 0.01 ? 'Partial' : 'Paid');
-            if (existingPay) {
-              await trx('payables').where({ id: existingPay.id }).update({
-                hauler_id: haulerIdNum, supplier_id: null, original_amount: newAmt,
-                outstanding: Math.max(0, newAmt - paidSoFar), status: payStatus,
-                linked_ref: batch.batch_no, updated_at: trx.fn.now(),
-              });
-              payableId = existingPay.id;
-            } else {
-              const payNo = await require('../../utils/docNumber').nextDocNo(trx, { table: 'payables', column: 'pay_no', prefix: 'PAY-', pad: 4 });
-              const [np] = await trx('payables').insert({
-                pay_no: payNo, entity: 'mill', payable_type: 'vendor', category: 'Transport',
-                hauler_id: haulerIdNum, supplier_id: null, linked_ref: batch.batch_no,
-                source_table: 'batch_transport', source_id: id,
-                original_amount: newAmt, paid_amount: 0, outstanding: newAmt, status: 'Pending',
-                currency: 'PKR', notes: `Transport (hauler) for batch ${batch.batch_no}`,
-              }).returning('*');
-              payableId = np.id;
-            }
-            // Accrue the DELTA: Dr Raw / Cr Transporter Payable (reversed if reduced).
-            if (Math.abs(delta) > 0.01) {
-              const raw = await trx('chart_of_accounts').where({ code: '1210' }).first();
-              const ap = await trx('chart_of_accounts').where({ code: '2010' }).first();
-              if (raw && ap) {
-                const absD = Math.abs(delta); const up = delta > 0;
-                const j = await accountingService.createJournal(trx, {
-                  date: new Date().toISOString().slice(0, 10), entity: 'mill',
-                  refType: 'Batch Transport', refNo: batch.batch_no,
-                  description: `Transport payable ${up ? '' : '(reduced) '}for batch ${batch.batch_no}`,
-                  currency: 'PKR', fxRate: 1, isAuto: true, userId: req.user?.id || null,
-                  partyType: 'hauler', partyId: haulerIdNum,
-                  lines: [
-                    { account_id: raw.id, account: raw.name, debit: up ? absD : 0, credit: up ? 0 : absD, narration: `${up ? 'DR' : 'CR'} ${raw.code} ${raw.name} — transport ${batch.batch_no}` },
-                    { account_id: ap.id, account: ap.name, debit: up ? 0 : absD, credit: up ? absD : 0, narration: `${up ? 'CR' : 'DR'} ${ap.code} ${ap.name} — transport ${batch.batch_no}` },
-                  ],
-                });
-                if (j?.id) await accountingService.postJournal(trx, j.id);
-              }
-            }
-          }
-
-          // Upsert the transport_costs record (drives AP → Transporters + ledger).
-          const existingTc = await trx('transport_costs').where({ batch_id: id }).whereNull('lot_id').first();
-          const tcStatus = payableId ? 'unpaid' : 'approved';
-          if (existingTc) {
-            await trx('transport_costs').where({ id: existingTc.id }).update({
-              hauler_id: haulerIdNum, amount: newAmt, paid_by: paidBy,
-              vehicle_no: vehicle_no || existingTc.vehicle_no || null, doc_no: doc_no || existingTc.doc_no || null,
-              payable_id: payableId || existingTc.payable_id || null, updated_at: trx.fn.now(),
-            });
-          } else {
-            await trx('transport_costs').insert({
-              batch_id: id, hauler_id: haulerIdNum, amount: newAmt, paid_by: paidBy,
-              status: tcStatus, transport_type: 'milling', vehicle_no: vehicle_no || null,
-              doc_no: doc_no || null, expense_date: new Date().toISOString().slice(0, 10),
-              entity: 'mill', payable_id: payableId, created_by: req.user?.id || null,
-            });
           }
         }
 

@@ -357,6 +357,8 @@ export function useMillingBatch(id) {
         }
         // Packing cost itemised into bags / master bags / polythene (or null).
         raw.packingBreakdown = res?.data?.packingBreakdown || null;
+        // The transport line's transporter + payer (P3-08) — pre-fills the costs drawer.
+        raw.transport = res?.data?.transport || null;
         // Yield waits for a raw-material cost (#427) — a yes/no, safe for cost-blind users.
         raw.awaitingArrivalRate = !!res?.data?.yieldStatus?.awaitingArrivalRate;
         const quality = res?.data?.quality || {};
