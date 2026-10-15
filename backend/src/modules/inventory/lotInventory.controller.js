@@ -8,6 +8,8 @@ const db = require('../../config/database');
 const { supplierRefusal } = require('../../shared/partyGate');
 const uc = require('../../services/unitConversion');
 const { lotBagKg } = require('../../shared/units');
+const { lotUnitCostPerKg } = require('../localSales/salePricing');
+const { pendingHoldKgSql } = require('../localSales/saleReservation');
 const accountingService = require('../../services/accountingService');
 // Shared lot-number generators — keeps the Purchase Lot drawer and the
 // Add Vehicle flow on the same SUP-VARIETY-YYMMDD-SEQ format.
@@ -133,6 +135,10 @@ function enrichLot(lot) {
 
   return {
     ...lot,
+    // Whether the lot has a cost to sell against — a FLAG, computed before
+    // any redaction, so a cost-blind seller (Inventory Officer) learns "this
+    // lot can be sold" without seeing the cost (P3-12 / INV-52).
+    has_cost: lotUnitCostPerKg(lot) > 0,
     // Derived quantity equivalents
     total_katta: uc.kgToKatta(netKg, bw),
     total_maund: uc.kgToMaund(netKg),
@@ -597,7 +603,10 @@ module.exports = {
           'p.name as product_name',
           'p.code as product_code',
           's.name as supplier_name',
-          'oc.name as owner_customer_name'
+          'oc.name as owner_customer_name',
+          // Kilos held by local sales awaiting confirmation (soft reservation,
+          // INV-60) — the sale form shows what is really free to sell.
+          db.raw(`${pendingHoldKgSql('l')} as pending_sale_kg`)
         );
 
       // Ownership scope: default to COMPANY-owned lots so client-owned

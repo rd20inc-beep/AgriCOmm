@@ -29,6 +29,7 @@ import { paymentWord, groupPaymentWord, payableDue, localToday, readLastCustomer
 import { todayLocalISO, fmtPKR as fmtPKRExact, fmtNum, fmtDate, fmtDateTime } from '../../../shared/utils/format';
 import { accountTakesCurrency } from '../../../shared/utils/accountCurrency';
 import { saleLineTotal, isFullyPaid, isOverPaid } from '../utils/saleMoney';
+import { lotFreeKg, lotSaleBlock } from '../utils/saleLot';
 
 // Local-sale money is shown to the paisa (2 dp), exact, en-PK grouping.
 const fmtPKR = (v) => fmtPKRExact(parseFloat(v) || 0, { decimals: 2 });
@@ -610,7 +611,8 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
   const selectedPkg = pkgItems.find(i => String(i.id) === String(line.mill_item_id));
   const cartQtyForLot = (lotId) => cart.filter(c => lotId && String(c.lot_id) === String(lotId)).reduce((s, c) => s + c.qtyKg, 0);
   const cartCountForPkg = (mid) => cart.filter(c => mid && String(c.mill_item_id) === String(mid)).reduce((s, c) => s + (c.count || 0), 0);
-  const lineAvailKg = selectedLot ? (parseFloat(selectedLot.availableQty) || 0) - cartQtyForLot(selectedLot.id) : null;
+  // Free = available less pending sales' soft holds (INV-60) less this cart.
+  const lineAvailKg = selectedLot ? lotFreeKg(selectedLot) - cartQtyForLot(selectedLot.id) : null;
   const lineAvailCount = selectedPkg ? Number(selectedPkg.quantity_available) - cartCountForPkg(selectedPkg.id) : null;
   const lineOverSell = isPkg
     ? (lineAvailCount != null && lineCount > lineAvailCount + 0.01)
@@ -659,10 +661,11 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
     // (repacking labour) are added via the repack panel, not here.
     if (!line.lot_id && !line.mill_item_id) { addToast('Select the lot (or packaging item) this is sold from', 'error'); return; }
     // A lot with no recorded cost can't be sold — COGS would be Rs 0 (100% profit).
-    // Price the lot first (set its purchase price / repair its cost), then sell.
+    // Decided by the server's has_cost flag, which a cost-blind role still
+    // receives (the cost figures themselves are redacted for it).
     if (!isPkg && selectedLot) {
-      const lotCost = parseFloat(selectedLot.landedCostPerKg) || parseFloat(selectedLot.costPerUnit) || parseFloat(selectedLot.ratePerKg) || 0;
-      if (lotCost <= 0) { addToast(`${selectedLot.lotNo || 'This lot'} has no recorded cost (Rs 0/kg). Set its purchase price before selling.`, 'error'); return; }
+      const block = lotSaleBlock(selectedLot);
+      if (block) { addToast(block, 'error'); return; }
     }
     if (lineOverSell) { addToast(isPkg ? `Only ${fmtNum(Math.round(lineAvailCount))} in stock` : `Only ${fmtNum(Math.round(lineAvailKg))} kg left for this lot`, 'error'); return; }
     setCart(c => [...c, {
@@ -986,7 +989,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
                 <select value={line.lot_id} onChange={e => pickLot(e.target.value)} className={SELECT}>
                   <option value="">No lot (manual entry)</option>
                   {filteredLots.map(l => {
-                    const avail = (parseFloat(l.availableQty) || 0) - cartQtyForLot(l.id);
+                    const avail = lotFreeKg(l) - cartQtyForLot(l.id);
                     const costKg = parseFloat(l.landedCostPerKg) || parseFloat(l.ratePerKg) || (parseFloat(l.costPerUnit) || 0) / 1000;
                     const costLabel = costKg > 0 ? ` · ${fmtPKR(costKg)}/kg cost` : '';
                     return <option key={l.id} value={l.id} disabled={avail <= 0}>{l.lotNo} — {l.itemName} ({fmtNum(Math.round(avail))} KG){costLabel}</option>;

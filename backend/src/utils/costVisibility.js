@@ -36,7 +36,7 @@ const COST_KEYS = new Set([
 ].map(norm));
 
 // Booleans / labels that merely mention cost or price — not money.
-const COST_NOT_MONEY = new Set(['costincomplete', 'costcurrency', 'bagcostincluded', 'pricesconfirmed'].map(norm));
+const COST_NOT_MONEY = new Set(['costincomplete', 'costcurrency', 'bagcostincluded', 'pricesconfirmed', 'hascost'].map(norm));
 
 const PROFIT_KEYS = new Set([
   'realizedProfit', 'realizedProfitPct', 'expectedProfitRemaining', 'revenue',

@@ -1,6 +1,7 @@
 const db = require('../../config/database');
 const uc = require('../../services/unitConversion');
 const { lotBagCount } = require('../../shared/units');
+const { lotUnitCostPerKg, lockedCogsFields } = require('../localSales/salePricing');
 const { isKattaItem } = require('../../shared/packagingTypes');
 // #9-scoping: READ-path warehouse restriction. Deliberately NOT applied to any
 // movement/posting function in this file — scoping a write would corrupt stock.
@@ -2125,7 +2126,9 @@ const inventoryService = {
     const lot = await conn('inventory_lots').where('id', sale.lot_id).first();
     if (!lot) return { totalCOGS: 0, cogsPerKg: 0 };
 
-    const costPerKg = parseFloat(lot.landed_cost_per_kg) || parseFloat(lot.rate_per_kg) || 0;
+    // Same precedence a sale is priced with (salePricing.lotUnitCostPerKg) —
+    // it skipped cost_per_unit, so a lot costed only there read Rs 0 (INV-54).
+    const costPerKg = lotUnitCostPerKg(lot);
     const saleQtyKg = parseFloat(sale.quantity_kg) || 0;
     const totalCOGS = costPerKg * saleQtyKg;
     const revenue = parseFloat(sale.total_amount) || 0;
@@ -2565,17 +2568,26 @@ const inventoryService = {
     return { lotId, oldCost: parseFloat(oldValues.rate_per_kg), newCost: newCostPerKg, repaired: newCostPerKg > 0 };
   },
 
+  // Lock a confirmed local sale's COGS (P3-12 / INV-54). The locked figure is
+  // the line's landed_cost_total — the amount its COGS journal just posted
+  // (postSaleSideEffects re-prices the line at confirmation and posts from
+  // it) — not a second re-derivation from the lot, which used to give a
+  // different number than the GL. Idempotent: an already-locked sale keeps
+  // its figure.
   async lockSaleCOGS(trx, saleId) {
-    const cogs = await inventoryService.calculateSaleCOGS(trx, saleId);
-
-    await trx('local_sales').where('id', saleId).update({
-      cogs_total_pkr: cogs.totalCOGS,
-      cogs_per_kg: cogs.cogsPerKg,
-      gross_profit_pkr: cogs.grossProfit,
-      cost_locked_at_dispatch: true,
-    });
-
-    return cogs;
+    const sale = await trx('local_sales').where('id', saleId).first();
+    if (!sale) return { totalCOGS: 0, cogsPerKg: 0, grossProfit: 0 };
+    if (sale.cost_locked_at_dispatch && sale.cogs_total_pkr != null) {
+      return {
+        totalCOGS: parseFloat(sale.cogs_total_pkr) || 0,
+        cogsPerKg: parseFloat(sale.cogs_per_kg) || 0,
+        grossProfit: parseFloat(sale.gross_profit_pkr) || 0,
+        alreadyLocked: true,
+      };
+    }
+    const fields = lockedCogsFields(sale);
+    await trx('local_sales').where('id', saleId).update({ ...fields, cost_locked_at_dispatch: true });
+    return { totalCOGS: fields.cogs_total_pkr, cogsPerKg: fields.cogs_per_kg, grossProfit: fields.gross_profit_pkr };
   },
 
   // ───────────────────────────────────────────────────────────────────────

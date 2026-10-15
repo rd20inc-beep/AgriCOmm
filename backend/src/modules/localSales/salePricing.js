@@ -1,38 +1,75 @@
 /**
- * The derived money/cost fields of one local-sale line. Shared by create and
- * by the Pending-sale edit so an edited line can never disagree with a created
- * one: confirmSale posts COGS from landed_cost_total, so a stale cost after a
- * quantity edit would post the wrong COGS and report the wrong profit.
+ * The derived money/cost fields of one local-sale line. Shared by create, by
+ * the Pending-sale edit and by confirmation, so the three can never disagree.
+ *
+ * COGS (P3-12 / INV-54): what a Pending sale carries is an ESTIMATE at the
+ * lot's cost when it was entered. Confirmation re-prices the line at the
+ * lot's cost THEN, posts the COGS journal from that figure and locks it into
+ * cogs_total_pkr (= landed_cost_total from then on). cogs_total_pkr is the one
+ * COGS every report reads.
  */
 const uc = require('../../services/unitConversion');
+const { pendingHoldKg } = require('./saleReservation');
 
-// The unit cost a line is sold against — read from its source, exactly as the
-// create path always has: a lot's landed cost per kg (falling back to its
-// cost_per_unit, then its purchase rate), or a mill-store item's average cost
-// per piece. Returns { costPerKg, lotNo }. A goods lot with no cost is rejected
-// (it would book 100% profit).
-async function resolveLineCost(trx, { lotId, millItemId, qtyKg, itemName }) {
+// A lot's unit cost per kg for selling: landed cost, else its cost_per_unit,
+// else its purchase rate. The ONE precedence — create, edit, confirm, the
+// COGS lock and the lot list's has_cost flag all use it.
+function lotUnitCostPerKg(lot) {
+  if (!lot) return 0;
+  return (parseFloat(lot.landed_cost_per_kg) || 0)
+    || (parseFloat(lot.cost_per_unit) || 0)
+    || (parseFloat(lot.rate_per_kg) || 0);
+}
+
+function noCostError(lot) {
+  const e = new Error(`${lot.lot_no} has no recorded cost (Rs 0/kg). Set the lot's purchase price before selling — a sale needs a cost basis to compute profit.`);
+  e.status = 400;
+  e.code = 'LOT_HAS_NO_COST';
+  return e;
+}
+
+// Refuse a line the lot cannot cover once OTHER pending sales' soft holds
+// are set aside (INV-60). `holds` are those pending kilos.
+function insufficientError({ itemName, qtyKg, availKg, holdKg, lotNo }) {
+  const free = Math.max(0, availKg - holdKg);
+  const held = holdKg > 0.01 ? ` (${Math.round(holdKg)} kg of it is held by sales awaiting confirmation)` : '';
+  const e = new Error(`Insufficient stock: ${itemName} needs ${Math.round(qtyKg)} kg but only ${free.toFixed(0)} kg is free in ${lotNo}${held}`);
+  e.status = 400;
+  e.code = 'INSUFFICIENT_STOCK';
+  return e;
+}
+
+// The unit cost a line is sold against — read from its source: a lot's cost
+// per kg (lotUnitCostPerKg), or a mill-store item's average cost per piece.
+// Returns { costPerKg, lotNo }. A goods lot with no cost is rejected (it would
+// book 100% profit).
+//
+// Availability honours the soft reservation of PENDING sales (INV-60): the
+// line must fit in the lot's available kg less what other pending sales hold.
+// `excludeGroupNo` leaves the sale's own lines out (an edit). Inside a
+// transaction the lot row is locked so two entries cannot both take the
+// same free kilos.
+async function resolveLineCost(trx, { lotId, millItemId, qtyKg, itemName, excludeGroupNo = null }) {
   if (millItemId) {
     const mi = await trx('mill_items').where({ id: millItemId }).first();
     if (!mi) throw new Error('Packaging item not found');
     return { costPerKg: parseFloat(mi.avg_cost_per_unit) || 0, lotNo: null }; // per piece
   }
   if (lotId) {
-    const lot = await trx('inventory_lots').where({ id: lotId }).first();
+    let lotQ = trx('inventory_lots').where({ id: lotId });
+    if (trx.isTransaction) lotQ = lotQ.forUpdate();
+    const lot = await lotQ.first();
     if (!lot) throw new Error('Inventory lot not found');
     const availKg = parseFloat(lot.available_qty) || 0;
-    if (qtyKg > availKg + 0.01) {
-      const e = new Error(`Insufficient stock: ${itemName} needs ${Math.round(qtyKg)} kg but only ${availKg.toFixed(0)} kg available in ${lot.lot_no}`);
-      e.status = 400; throw e;
+    const holdKg = await pendingHoldKg(trx, lot.id, { excludeGroupNo });
+    if (qtyKg > availKg - holdKg + 0.01) {
+      throw insufficientError({ itemName, qtyKg, availKg, holdKg, lotNo: lot.lot_no });
     }
-    const costPerKg = parseFloat(lot.landed_cost_per_kg) || (parseFloat(lot.cost_per_unit) || 0) || (parseFloat(lot.rate_per_kg) || 0);
+    const costPerKg = lotUnitCostPerKg(lot);
     // Guard: a lot with no recorded cost can't be sold — the sale would book
     // Rs 0 COGS → 100% "profit" and no real margin. Price the lot first
     // (set its purchase price / repair its cost), then sell.
-    if (costPerKg <= 0) {
-      const e = new Error(`${lot.lot_no} has no recorded cost (Rs 0/kg). Set the lot's purchase price before selling — a sale needs a cost basis to compute profit.`);
-      e.status = 400; throw e;
-    }
+    if (costPerKg <= 0) throw noCostError(lot);
     return { costPerKg, lotNo: lot.lot_no };
   }
   return { costPerKg: 0, lotNo: null }; // service line (labour etc.) — no COGS
@@ -76,4 +113,18 @@ function salePaymentStatus({ due, paid, paymentMode }) {
   return 'Credit';
 }
 
-module.exports = { resolveLineCost, priceSaleLine, salePaymentStatus };
+// The COGS fields a confirmed line locks (lockSaleCOGS): the same figure the
+// COGS journal posts, so the GL and every report agree.
+function lockedCogsFields(sale) {
+  const cogs = uc.round2(parseFloat(sale.landed_cost_total) || 0);
+  return {
+    cogs_total_pkr: cogs,
+    cogs_per_kg: parseFloat(sale.cost_per_kg) || 0,
+    gross_profit_pkr: uc.round2((parseFloat(sale.total_amount) || 0) - cogs),
+  };
+}
+
+module.exports = {
+  resolveLineCost, priceSaleLine, salePaymentStatus, lotUnitCostPerKg, lockedCogsFields,
+  noCostError, insufficientError,
+};
