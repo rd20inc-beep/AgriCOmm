@@ -5,6 +5,7 @@ const accountingService = require('../accounting/accounting.service');
 const { mirrorJournals } = require('../milling/payrollReversal');
 const { glAccountFor } = require('../../shared/accountGl');
 const { deleteBatchTx } = require('../milling/milling.controller');
+const { moveStock: moveStoreStock } = require('../millStore/storeStock');
 
 /**
  * Super-Admin "Danger Zone" — permanent, cascading hard-deletes and manual
@@ -538,11 +539,18 @@ async function deleteLocalSale(trx, req, id) {
   // Packaging (e.g. katta) sale → restock mill_stock by the count sold.
   if (posted && sale.mill_item_id) {
     const count = num(sale.quantity_kg); // count stored in quantity_kg for mill-item lines
-    const ms = await trx('mill_stock').where({ item_id: sale.mill_item_id, warehouse_id: null }).first();
-    if (ms) await trx('mill_stock').where('id', ms.id).update({ quantity_available: num(ms.quantity_available) + count, updated_at: trx.fn.now() });
-    await trx('mill_stock_movements').insert({
-      item_id: sale.mill_item_id, warehouse_id: null, movement_type: 'return', quantity: count,
-      reference_type: 'local_sale_reversal', reference_id: id, reason: `Reversed sale ${sale.sale_no}`, performed_by: req.user?.id || null,
+    // Back at the cost it was sold at — its COGS journal (ref_no = sale_no) is
+    // neutralised with the sale's other journals below, so 1250 and the
+    // store's value move back together.
+    const sold = await trx('mill_stock_movements')
+      .where({ reference_type: 'local_sale', reference_id: id, item_id: sale.mill_item_id }).first('cost_per_unit');
+    await moveStoreStock(trx, {
+      itemId: sale.mill_item_id, warehouseId: null, qty: count,
+      valuation: 'cost', unitCost: num(sold && sold.cost_per_unit),
+      movement: {
+        movement_type: 'return', reference_type: 'local_sale_reversal', reference_id: id,
+        reason: `Reversed sale ${sale.sale_no}`, performed_by: req.user?.id || null,
+      },
     });
   }
   // Delete the sale's stock ledger rows.
@@ -716,14 +724,14 @@ async function deleteMillPurchase(trx, req, id) {
   // wrong warehouse row).
   const items = await trx('mill_purchase_items').where('purchase_id', id);
   for (const it of items) {
-    const stockQ = trx('mill_stock').where('item_id', it.item_id);
-    if (it.warehouse_id == null) stockQ.whereNull('warehouse_id'); else stockQ.where('warehouse_id', it.warehouse_id);
-    const stock = await stockQ.first();
-    if (stock) {
-      await trx('mill_stock').where('id', stock.id).update({
-        quantity_available: Math.max(0, num(stock.quantity_available) - num(it.quantity)), updated_at: trx.fn.now(),
-      });
-    }
+    // Out at the cost it came in at (the store's value with it — the GL side
+    // is neutralised below), clamped at what is still there. The movement it
+    // writes is the purchase's own reference, removed with it just below.
+    await moveStoreStock(trx, {
+      itemId: it.item_id, warehouseId: it.warehouse_id ?? null, qty: -num(it.quantity),
+      valuation: 'cost', unitCost: num(it.cost_per_unit), clamp: true,
+      movement: { movement_type: 'adjustment', reference_type: 'purchase', reference_id: id, reason: `Danger Zone: purchase ${mp.purchase_no} deleted`, performed_by: req.user?.id || null },
+    });
   }
   await trx('mill_stock_movements').where({ reference_type: 'purchase', reference_id: id }).del();
   // Reverse + drop any payments made against this purchase's payable (restore the

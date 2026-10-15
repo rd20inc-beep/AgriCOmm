@@ -3,6 +3,7 @@ const { parsePagination, paginationMeta } = require('../../shared/utils/paginati
 const {
   createItemSchema,
   updateItemSchema,
+  revalueItemSchema,
   setStockSchema,
   createRatioSchema,
   updateRatioSchema,
@@ -63,6 +64,16 @@ const millStoreController = {
       const data = validate(updateItemSchema, req.body);
       const item = await service.updateItem(req.params.id, data);
       res.json({ success: true, data: { item } });
+    } catch (err) { next(err); }
+  },
+
+  // Owner-approved revaluation of the item's average cost (route carries the
+  // ownerApproval gate).
+  async revalueItem(req, res, next) {
+    try {
+      const data = validate(revalueItemSchema, req.body);
+      const result = await service.revalueItem(req.params.id, data, req.user?.id);
+      res.json({ success: true, data: { revaluation: result } });
     } catch (err) { next(err); }
   },
 

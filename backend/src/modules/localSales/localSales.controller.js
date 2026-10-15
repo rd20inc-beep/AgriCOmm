@@ -17,6 +17,7 @@ const { assertAccountCurrency } = require('../../shared/accountCurrency');
 const { postBankTransaction } = require('../../shared/bankBalance');
 const { missingAccounts } = require('../../shared/ledgerFailure');
 const { resolveLineCost, priceSaleLine, salePaymentStatus } = require('./salePricing');
+const { moveStock: moveStoreStock, postStoreJournal } = require('../millStore/storeStock');
 const { saleLineTotal, isFullyPaid, settledTender } = require('./saleMoney');
 const { buildRateIndex, rateForLot } = require('../inventory/stockValuation');
 
@@ -163,13 +164,38 @@ async function postSaleSideEffects(trx, saleRows, { userId } = {}) {
       const count = parseFloat(sale.quantity_bags) || qtyKg;
       const mi = await trx('mill_items').where({ id: sale.mill_item_id }).first();
       if (!mi) throw new Error('Packaging item not found');
-      const ms = await trx('mill_stock').where({ item_id: sale.mill_item_id, warehouse_id: null }).first();
-      const avail = parseFloat(ms && ms.quantity_available) || 0;
-      if (count > avail + 0.01) { const e = new Error(`Insufficient ${mi.name}: ${Math.round(avail)} in stock, ${count} needed.`); e.status = 400; throw e; }
-      await trx('mill_stock').where({ id: ms.id }).update({ quantity_available: trx.raw('GREATEST(quantity_available - ?, 0)', [count]), updated_at: trx.fn.now() });
-      await trx('mill_stock_movements').insert({
-        item_id: sale.mill_item_id, warehouse_id: null, movement_type: 'consumption', quantity: -count,
-        reference_type: 'local_sale', reference_id: sale.id, reason: `Sold ${count} ${mi.unit || 'pcs'} — ${sale.sale_no}`, performed_by: userId || null,
+      // Issued from the store under a row lock at the item's average cost,
+      // never below zero (INV-47), and its cost leaves 1250 as COGS — Dr 5000
+      // / Cr 1250 (INV-50: the sale used to draw the stock with no journal, so
+      // 1250 kept the value and the profit report showed a cost the GL never
+      // booked). Freed katta carry no value of their own: the item's average
+      // already spreads its value over them.
+      const issue = await moveStoreStock(trx, {
+        itemId: sale.mill_item_id, warehouseId: null, qty: -count, valuation: 'avg', clamp: true,
+        movement: {
+          movement_type: 'consumption', reference_type: 'local_sale', reference_id: sale.id,
+          reason: `Sold ${count} ${mi.unit || 'pcs'} — ${sale.sale_no}`, performed_by: userId || null,
+        },
+      });
+      if (issue.short > 0.01) {
+        const e = new Error(`Insufficient ${mi.name}: ${Math.round(count - issue.short)} in stock, ${count} needed.`); e.status = 400; throw e;
+      }
+      const cogsAmt = Math.abs(issue.value);
+      // The sale carries the cost that was booked, so its profit is the GL's.
+      const priced = priceSaleLine({ qtyKg: count, total: sale.total_amount, costPerKg: issue.unitCost, bagWt: 0, isMillItem: true });
+      const costPatch = {
+        cost_per_kg: priced.cost_per_kg, landed_cost_total: priced.landed_cost_total, gross_profit: priced.gross_profit,
+        profit_per_kg: priced.profit_per_kg, margin_pct: priced.margin_pct,
+        cogs_total_pkr: cogsAmt, gross_profit_pkr: priced.gross_profit, cost_locked_at_dispatch: true,
+      };
+      await trx('local_sales').where({ id: sale.id }).update({ ...costPatch, updated_at: trx.fn.now() });
+      Object.assign(sale, costPatch);
+      await postStoreJournal(trx, {
+        amount: cogsAmt, counterCode: '5000',
+        date: (sale.sale_date ? new Date(sale.sale_date) : new Date()).toISOString().slice(0, 10),
+        refType: 'Local Sale COGS', refNo: sale.sale_no,
+        description: `COGS — local sale ${sale.sale_no} — ${count} × ${mi.name}`.slice(0, 240),
+        userId, what: 'The sale',
       });
     } else if (sale.lot_id) {
       const lot = await trx('inventory_lots').where({ id: sale.lot_id }).first();

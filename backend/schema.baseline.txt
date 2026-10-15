@@ -1521,6 +1521,7 @@ COL mill_packing_logs.cost_per_bag:numeric:NULL
 COL mill_packing_logs.created_at:timestamp with time zone:NOT NULL
 COL mill_packing_logs.gross_weight_kg:numeric:NOT NULL
 COL mill_packing_logs.id:integer:NOT NULL
+COL mill_packing_logs.katta_cost_mode:character varying:NOT NULL
 COL mill_packing_logs.master_bag_item_id:integer:NULL
 COL mill_packing_logs.master_bags_count:numeric:NULL
 COL mill_packing_logs.master_cost:numeric:NULL
@@ -1727,6 +1728,7 @@ COL mill_stock_movements.reason:text:NULL
 COL mill_stock_movements.reference_id:integer:NULL
 COL mill_stock_movements.reference_type:character varying:NULL
 COL mill_stock_movements.total_cost:numeric:NULL
+COL mill_stock_movements.valuation:character varying:NULL
 COL mill_stock_movements.warehouse_id:integer:NULL
 COL mill_worker_adjustments.amount:numeric:NOT NULL
 COL mill_worker_adjustments.created_at:timestamp with time zone:NOT NULL
@@ -1934,6 +1936,8 @@ COL milling_costs.created_by:integer:NULL
 COL milling_costs.currency:character varying:NOT NULL
 COL milling_costs.id:integer:NOT NULL
 COL milling_costs.notes:text:NULL
+COL milling_costs.source:character varying:NULL
+COL milling_costs.source_id:integer:NULL
 COL milling_costs.updated_at:timestamp with time zone:NOT NULL
 COL milling_output_market_prices.batch_id:integer:NOT NULL
 COL milling_output_market_prices.bran_price_per_kg:numeric:NULL
@@ -2184,6 +2188,7 @@ COL printed_bag_orders.created_at:timestamp with time zone:NOT NULL
 COL printed_bag_orders.created_by:integer:NULL
 COL printed_bag_orders.currency:character varying:NOT NULL
 COL printed_bag_orders.id:integer:NOT NULL
+COL printed_bag_orders.mill_item_id:integer:NULL
 COL printed_bag_orders.notes:text:NULL
 COL printed_bag_orders.order_id:integer:NOT NULL
 COL printed_bag_orders.ordered_date:date:NULL
@@ -3447,6 +3452,7 @@ CON mill_leave_requests.mill_leave_requests_pkey(p)
 CON mill_leave_requests.mill_leave_requests_worker_id_foreign(f)
 CON mill_leave_types.mill_leave_types_pkey(p)
 CON mill_packing_logs.chk_mill_packing_logs_bags_positive(c)
+CON mill_packing_logs.chk_mill_packing_logs_katta_cost_mode_valid(c)
 CON mill_packing_logs.chk_packing_poly_applies_to_valid(c)
 CON mill_packing_logs.mill_packing_logs_bag_item_id_foreign(f)
 CON mill_packing_logs.mill_packing_logs_batch_id_foreign(f)
@@ -3514,6 +3520,7 @@ CON mill_stock_adjustments.mill_stock_adjustments_requested_by_foreign(f)
 CON mill_stock_adjustments.mill_stock_adjustments_status_chk(c)
 CON mill_stock_adjustments.mill_stock_adjustments_type_chk(c)
 CON mill_stock_adjustments.mill_stock_adjustments_warehouse_id_foreign(f)
+CON mill_stock_movements.chk_mill_stock_movements_valuation_valid(c)
 CON mill_stock_movements.mill_stock_movements_approved_by_foreign(f)
 CON mill_stock_movements.mill_stock_movements_item_id_foreign(f)
 CON mill_stock_movements.mill_stock_movements_performed_by_foreign(f)
@@ -3600,6 +3607,7 @@ CON milling_batches.milling_batches_rejected_by_foreign(f)
 CON milling_batches.milling_batches_supplier_id_foreign(f)
 CON milling_batches.uq_milling_batches_uuid(u)
 CON milling_costs.chk_mc_amount_nonneg(c)
+CON milling_costs.chk_milling_costs_source_valid(c)
 CON milling_costs.milling_costs_batch_id_foreign(f)
 CON milling_costs.milling_costs_business_expense_id_foreign(f)
 CON milling_costs.milling_costs_created_by_fk(f)
@@ -3723,6 +3731,7 @@ CON pricing_simulations.pricing_simulations_product_id_foreign(f)
 CON printed_bag_orders.chk_printed_bag_orders_payment_status_valid(c)
 CON printed_bag_orders.chk_printed_bag_orders_status_valid(c)
 CON printed_bag_orders.printed_bag_orders_bag_type_id_foreign(f)
+CON printed_bag_orders.printed_bag_orders_mill_item_id_foreign(f)
 CON printed_bag_orders.printed_bag_orders_order_id_foreign(f)
 CON printed_bag_orders.printed_bag_orders_pbo_no_unique(u)
 CON printed_bag_orders.printed_bag_orders_pkey(p)

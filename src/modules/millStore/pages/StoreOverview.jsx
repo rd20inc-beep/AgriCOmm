@@ -6,7 +6,8 @@ import {
   Package, AlertTriangle, ShoppingCart, TrendingDown,
   Search, Pencil, Save, Loader2, Boxes, Wallet, DollarSign,
 } from 'lucide-react';
-import { useMillStoreItems, useMillStoreSummary, useSetMillStock, useUpdateMillStoreItem, useKattaSummary, useMillStorePurchases, usePayMillPurchase } from '../api/queries';
+import { useMillStoreItems, useMillStoreItem, useMillStoreSummary, useSetMillStock, useUpdateMillStoreItem, useRevalueMillItem, useKattaSummary, useMillStorePurchases, usePayMillPurchase } from '../api/queries';
+import { useOwnerAuth } from '../../../context/OwnerAuthContext';
 import { useBankAccounts } from '../../../api/queries';
 import NewPurchaseDrawer from '../../../components/NewPurchaseDrawer';
 import SlideDrawer from '../../../components/SlideDrawer';
@@ -349,21 +350,35 @@ function PurchasePaymentsCard() {
   );
 }
 
+// Stock rows of an item, one per location (the unassigned bucket first).
+const locKey = (loc) => (loc.warehouse_id == null ? 'main' : String(loc.warehouse_id));
+
 function StockEditDrawer({ item, onClose }) {
   const { addToast, suppliersList } = useApp();
   const setStock = useSetMillStock();
   const updateItem = useUpdateMillStoreItem();
+  const revalue = useRevalueMillItem();
+  const { requestOwnerApproval } = useOwnerAuth();
+  const { data: detail } = useMillStoreItem(item?.id);
   const [form, setForm] = useState(null);
   // Setting on-hand directly skips the approval queue, so it is an Owner
   // action (owner decision 2026-10-05); others request an adjustment.
   const { user } = useAuth();
   const canSetStock = ['Owner', 'Super Admin'].includes(user?.role);
   const showCost = useCanSeeCost();
+  // Stock is set per location (INV-42): the total across warehouses used to
+  // be typed in and land on the unassigned bucket alone.
+  const locations = useMemo(() => {
+    const rows = (detail?.stock_locations || []).filter((l) => l.warehouse_id == null || Number(l.quantity_available) > 0);
+    return rows.length ? rows : [{ warehouse_id: null, warehouse_name: null, quantity_available: item?.quantity_available || 0 }];
+  }, [detail, item]);
+  const multiLocation = locations.some((l) => l.warehouse_id != null);
 
   useEffect(() => {
     if (!item) { setForm(null); return; }
     setForm({
-      quantity: String(Number(item.quantity_available) || 0),
+      // Per-location quantities typed in; an untouched location keeps its own.
+      locQty: {},
       reorder_level: String(Number(item.reorder_level) || 0),
       capacity_kg: item.capacity_kg != null ? String(item.capacity_kg) : '',
       tare_weight_kg: item.tare_weight_kg != null ? String(item.tare_weight_kg) : '',
@@ -381,7 +396,8 @@ function StockEditDrawer({ item, onClose }) {
 
   if (!item || !form) return null;
   const isPackaging = form.category === 'packaging';
-  const saving = setStock.isPending || updateItem.isPending;
+  const saving = setStock.isPending || updateItem.isPending || revalue.isPending;
+  const onHandNow = Number(item.quantity_available) || 0;
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
 
   // Only send what actually changed - updateItemSchema is .min(1) and a no-op
@@ -391,8 +407,14 @@ function StockEditDrawer({ item, onClose }) {
 
   async function save() {
     try {
-      const newQty = parseFloat(form.quantity);
-      if (Number.isNaN(newQty) || newQty < 0) { addToast('Enter a valid quantity.', 'error'); return; }
+      // The quantity to set at each location that changed.
+      const stockSets = [];
+      for (const loc of locations) {
+        const raw = form.locQty?.[locKey(loc)];
+        const next = raw === undefined ? Number(loc.quantity_available) || 0 : parseFloat(raw);
+        if (Number.isNaN(next) || next < 0) { addToast('Enter a valid quantity.', 'error'); return; }
+        if (next !== (Number(loc.quantity_available) || 0)) stockSets.push({ warehouse_id: loc.warehouse_id ?? null, quantity_available: next });
+      }
 
       const patch = {};
       const reorder = parseFloat(form.reorder_level);
@@ -407,7 +429,14 @@ function StockEditDrawer({ item, onClose }) {
 
       const avg = numOrNull(form.avg_cost_per_unit);
       const lastCost = numOrNull(form.last_purchase_cost);
-      if (avg !== asNum(item.avg_cost_per_unit)) patch.avg_cost_per_unit = avg;
+      // With stock on hand a cost change revalues it — that moves the books,
+      // so it is its own Owner-approved action with a reason (INV-46).
+      const costChanged = avg !== asNum(item.avg_cost_per_unit) && (avg || 0) !== (Number(item.avg_cost_per_unit) || 0);
+      const revaluing = costChanged && onHandNow > 0;
+      if (revaluing && String(form.reason || '').trim().length < 3) {
+        addToast('Give a reason for the cost change — it revalues the stock on hand.', 'error'); return;
+      }
+      if (costChanged && !revaluing) patch.avg_cost_per_unit = avg;
       if (lastCost !== asNum(item.last_purchase_cost)) patch.last_purchase_cost = lastCost;
 
       const supplierId = form.preferred_supplier_id ? Number(form.preferred_supplier_id) : null;
@@ -421,8 +450,17 @@ function StockEditDrawer({ item, onClose }) {
 
       if (Object.keys(patch).length) await updateItem.mutateAsync({ id: item.id, data: patch });
 
-      if (canSetStock && newQty !== Number(item.quantity_available)) {
-        await setStock.mutateAsync({ id: item.id, data: { quantity_available: newQty, reason: form.reason || null } });
+      if (revaluing) {
+        await requestOwnerApproval((ownerId) => revalue.mutateAsync({
+          id: item.id,
+          data: { avg_cost_per_unit: avg || 0, reason: form.reason.trim(), authorized_by_owner_id: ownerId },
+        }), { label: `Revalue ${item.name}` });
+      }
+
+      if (canSetStock) {
+        for (const s of stockSets) {
+          await setStock.mutateAsync({ id: item.id, data: { ...s, reason: form.reason || null } });
+        }
       }
       addToast('Stock updated', 'success');
       onClose();
@@ -435,7 +473,7 @@ function StockEditDrawer({ item, onClose }) {
   const inp = 'w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500';
   const section = 'text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-2';
 
-  const qty = parseFloat(form.quantity) || 0;
+  const qty = onHandNow;
   const unitCost = parseFloat(form.avg_cost_per_unit) || 0;
   const stockValue = qty * unitCost;
 
@@ -459,21 +497,29 @@ function StockEditDrawer({ item, onClose }) {
         <div>
           <p className={section}>Stock</p>
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={lbl}>On-hand ({form.unit})</label>
-              <input type="number" min="0" step="0.01" value={form.quantity} onChange={(e) => set('quantity', e.target.value)} disabled={!canSetStock} className={`${inp} disabled:bg-gray-50 disabled:text-gray-500`} />
-            </div>
+            {locations.map((loc) => (
+              <div key={locKey(loc)}>
+                <label className={lbl}>
+                  On-hand ({form.unit}){multiLocation ? ` — ${loc.warehouse_name || 'Main store'}` : ''}
+                </label>
+                <input
+                  type="number" min="0" step="0.01"
+                  value={form.locQty?.[locKey(loc)] ?? String(Number(loc.quantity_available) || 0)}
+                  onChange={(e) => set('locQty', { ...form.locQty, [locKey(loc)]: e.target.value })}
+                  disabled={!canSetStock}
+                  className={`${inp} disabled:bg-gray-50 disabled:text-gray-500`}
+                />
+              </div>
+            ))}
             <div>
               <label className={lbl}>Reorder level</label>
               <input type="number" min="0" step="0.01" value={form.reorder_level} onChange={(e) => set('reorder_level', e.target.value)} className={inp} />
             </div>
           </div>
+          <label className={`${lbl} mt-3`}>Reason for change{canSetStock ? '' : ' (cost change)'}</label>
+          <input value={form.reason} onChange={(e) => set('reason', e.target.value)} className={inp} placeholder="e.g. physical count correction" />
           {canSetStock ? (
-            <>
-              <label className={`${lbl} mt-3`}>Reason for change (optional)</label>
-              <input value={form.reason} onChange={(e) => set('reason', e.target.value)} className={inp} placeholder="e.g. physical count correction" />
-              <p className="text-[11px] text-gray-400 mt-1">Sets stock directly — change is logged to the movement ledger.</p>
-            </>
+            <p className="text-[11px] text-gray-400 mt-1">Sets stock directly{multiLocation ? ', per location' : ''} — change is logged to the movement ledger.</p>
           ) : (
             <p className="text-[11px] text-gray-400 mt-2">Only the Owner can set stock directly. To correct it, request a stock adjustment — the Owner approves it.</p>
           )}
@@ -496,6 +542,7 @@ function StockEditDrawer({ item, onClose }) {
           <p className="text-[11px] text-gray-400 mt-1">
             Cost per unit values the stock and prices the purchase requests raised for export orders.
             {stockValue > 0 && <> Current stock value: <span className="font-medium text-gray-600">{fmtPKR(stockValue, { decimals: 2 })}</span>.</>}
+            {onHandNow > 0 && <> With stock on hand, changing it revalues that stock in the books — the Owner approves it and a reason is required.</>}
           </p></>}
           <label className={`${lbl} mt-3`}>Preferred supplier</label>
           <SupplierPicker
@@ -521,7 +568,7 @@ function StockEditDrawer({ item, onClose }) {
             <div>
               <label className={lbl}>Unit</label>
               <select value={form.unit} onChange={(e) => set('unit', e.target.value)} className={inp}>
-                {['piece', 'kg', 'liter', 'meter', 'roll', 'bag', 'box', 'set'].map((u) => (
+                {['piece', 'pcs', 'kg', 'liter', 'meter', 'roll', 'bag', 'box', 'set'].map((u) => (
                   <option key={u} value={u}>{u}</option>
                 ))}
               </select>

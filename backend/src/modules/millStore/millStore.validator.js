@@ -1,7 +1,9 @@
 const Joi = require('joi');
 
 const CATEGORIES = ['packaging', 'operational', 'fuel', 'maintenance'];
-const UNITS = ['piece', 'kg', 'liter', 'meter', 'roll', 'bag', 'box', 'set'];
+// 'pcs' is what the katta reconcile and printed-bag receipts create items in;
+// without it here such an item could not be saved from the edit drawer.
+const UNITS = ['piece', 'pcs', 'kg', 'liter', 'meter', 'roll', 'bag', 'box', 'set'];
 
 const createItemSchema = Joi.object({
   code: Joi.string().trim().uppercase().max(50).required(),
@@ -33,10 +35,17 @@ const updateItemSchema = Joi.object({
   is_active: Joi.boolean().optional(),
   // Costing. avg_cost_per_unit values the stock AND prices the export orders'
   // material-requirement estimates, so it has to be correctable by hand when
-  // no purchase has set it yet.
+  // no purchase has set it yet. With stock on hand a change is a revaluation
+  // (revalueItemSchema, Owner-approved) — the service refuses it here.
   avg_cost_per_unit: Joi.number().min(0).allow(null).optional(),
   last_purchase_cost: Joi.number().min(0).allow(null).optional(),
 }).min(1);
+
+// Owner-approved revaluation of an item's average cost (moves 1250).
+const revalueItemSchema = Joi.object({
+  avg_cost_per_unit: Joi.number().min(0).required(),
+  reason: Joi.string().trim().min(3).max(500).required(),
+});
 
 // Direct, audit-logged stock edit (no approval gate) — sets the on-hand
 // quantity for an item at a location (default: main store).
@@ -138,6 +147,7 @@ const rejectAdjustmentSchema = Joi.object({
 module.exports = {
   createItemSchema,
   updateItemSchema,
+  revalueItemSchema,
   setStockSchema,
   packSchema,
   createRatioSchema,
