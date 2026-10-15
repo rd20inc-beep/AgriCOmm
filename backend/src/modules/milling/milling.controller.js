@@ -140,6 +140,7 @@ const millingController = {
         limit = 20,
         status,
         linked_export_order_id,
+        search,
       } = req.query;
 
       const offset = (Math.max(1, parseInt(page)) - 1) * parseInt(limit);
@@ -162,11 +163,20 @@ const millingController = {
       if (linked_export_order_id) {
         query = query.where('mb.linked_export_order_id', linked_export_order_id);
       }
+      // Server search (P4-11): the list used to be the 200 newest batches,
+      // searched in the browser, so an older batch could not be found.
+      if (search) {
+        query = query.where(function () {
+          this.whereILike('mb.batch_no', `%${search}%`)
+            .orWhereILike('mb.batch_name', `%${search}%`)
+            .orWhereILike('s.name', `%${search}%`);
+        });
+      }
 
       const countQuery = query.clone().clearSelect().clearOrder().count('mb.id as total').first();
 
       const [batches, countResult] = await Promise.all([
-        query.orderBy('mb.created_at', 'desc').limit(parseInt(limit)).offset(offset),
+        query.orderBy('mb.created_at', 'desc').orderBy('mb.id', 'desc').limit(parseInt(limit)).offset(offset),
         countQuery,
       ]);
 

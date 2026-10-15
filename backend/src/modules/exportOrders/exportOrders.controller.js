@@ -614,7 +614,8 @@ const exportOrderController = {
       const countQuery = query.clone().clearSelect().clearOrder().count('eo.id as total').first();
 
       const [orders, countResult] = await Promise.all([
-        query.orderBy('eo.created_at', 'desc').limit(parseInt(limit)).offset(offset),
+        // id breaks created_at ties so paging never skips or repeats an order.
+        query.orderBy('eo.created_at', 'desc').orderBy('eo.id', 'desc').limit(parseInt(limit)).offset(offset),
         countQuery,
       ]);
 

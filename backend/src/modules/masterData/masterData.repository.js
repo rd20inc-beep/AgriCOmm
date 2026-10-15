@@ -11,7 +11,8 @@ const masterDataRepository = {
       query = query.where(function () {
         this.whereILike('name', `%${search}%`)
           .orWhereILike('email', `%${search}%`)
-          .orWhereILike('contact_person', `%${search}%`);
+          .orWhereILike('contact_person', `%${search}%`)
+          .orWhereILike('phone', `%${search}%`);
       });
     }
     if (country) query = query.where('country', country);
@@ -20,7 +21,9 @@ const masterDataRepository = {
     const [items, countResult] = await Promise.all([
       // Starred parties first (mig 131), then alphabetical — same contract as
       // the bank-account list (mig 293): the pickers show them at the top.
-      query.orderBy('is_favorite', 'desc').orderBy('name', 'asc').limit(limit).offset(offset),
+      // id breaks name ties so consecutive pages never skip or repeat a row
+      // (the pickers walk every page — P4-11).
+      query.orderBy('is_favorite', 'desc').orderBy('name', 'asc').orderBy('id', 'asc').limit(limit).offset(offset),
       countQuery,
     ]);
     return { items, total: parseInt(countResult.total) };
@@ -76,13 +79,15 @@ const masterDataRepository = {
     let query = db('suppliers').where('archived', false);
     if (search) {
       query = query.where(function () {
-        this.whereILike('name', `%${search}%`);
+        this.whereILike('name', `%${search}%`)
+          .orWhereILike('supplier_code', `%${search}%`)
+          .orWhereILike('phone', `%${search}%`);
       });
     }
 
     const countQuery = query.clone().clearSelect().clearOrder().count('id as total').first();
     const [items, countResult] = await Promise.all([
-      query.orderBy('is_favorite', 'desc').orderBy('name', 'asc').limit(limit).offset(offset),
+      query.orderBy('is_favorite', 'desc').orderBy('name', 'asc').orderBy('id', 'asc').limit(limit).offset(offset),
       countQuery,
     ]);
     return { items, total: parseInt(countResult.total) };
@@ -108,13 +113,14 @@ const masterDataRepository = {
     let query = db('products');
     if (search) {
       query = query.where(function () {
-        this.whereILike('name', `%${search}%`);
+        this.whereILike('name', `%${search}%`)
+          .orWhereILike('code', `%${search}%`);
       });
     }
 
     const countQuery = query.clone().clearSelect().clearOrder().count('id as total').first();
     const [items, countResult] = await Promise.all([
-      query.orderBy('name', 'asc').limit(limit).offset(offset),
+      query.orderBy('name', 'asc').orderBy('id', 'asc').limit(limit).offset(offset),
       countQuery,
     ]);
     return { items, total: parseInt(countResult.total) };

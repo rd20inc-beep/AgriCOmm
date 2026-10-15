@@ -2142,16 +2142,28 @@ router.get('/payroll/tax-statement', authorize('payroll', 'view'), async (req, r
 
 router.get('/attendance', authorize('payroll', 'view'), async (req, res) => {
   try {
-    const { month, worker_id } = req.query;
+    const { month, worker_id, entity } = req.query;
+    // The register is one month × one entity's employees. It used to read the
+    // 500 newest rows of every entity, so once employees × days passed 500 the
+    // older days showed blank and were re-marked (PAY-10). A month (or one
+    // employee) is now required and nothing is capped.
+    if (!/^\d{4}-\d{2}$/.test(String(month || '')) && !worker_id) {
+      return res.status(400).json({ success: false, message: 'month (YYYY-MM) or worker_id is required.' });
+    }
     let query = db('mill_attendance as a')
       .leftJoin('mill_workers as w', 'a.worker_id', 'w.id')
-      .select('a.*', 'w.name as worker_name', 'w.daily_wage')
-      .orderBy('a.date', 'desc');
-    // Match the calendar month directly — `${month}-32` is an invalid date and
-    // Postgres throws "date/time field value out of range".
-    if (month) query = query.whereRaw("TO_CHAR(a.date, 'YYYY-MM') = ?", [month]);
+      .select('a.*', 'w.name as worker_name', 'w.daily_wage', 'w.entity as worker_entity')
+      .orderBy('a.date', 'desc').orderBy('a.id', 'desc');
+    // Match the calendar month as a date range — `${month}-32` is an invalid
+    // date and Postgres throws "date/time field value out of range".
+    if (month) {
+      const [y, m] = String(month).split('-').map(Number);
+      const next = m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, '0')}-01`;
+      query = query.where('a.date', '>=', `${month}-01`).where('a.date', '<', next);
+    }
     if (worker_id) query = query.where('a.worker_id', worker_id);
-    const records = await query.limit(500);
+    if (entity === 'mill' || entity === 'general') query = query.where('w.entity', entity);
+    const records = await query;
     return res.json({ success: true, data: { attendance: records } });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
