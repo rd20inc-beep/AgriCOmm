@@ -59,6 +59,23 @@ function redactReport(req, data, opts) {
 }
 
 
+// Invoice Ledger money (P4-07 / RPT-17). A purchase bill's amounts are what
+// the rice COST — hidden without the cost right; a sale's are revenue and
+// receivables — hidden without the profit right. The generic key-name redaction
+// cannot tell them apart (both are `total`), so this goes by row kind.
+const INVOICE_MONEY_KEYS = ['total', 'received', 'returned', 'outstanding'];
+function redactInvoiceLedger(data, { cost, profit }) {
+  if (cost && profit) return data;
+  const blind = { purchase: !cost, sale: !profit };
+  for (const r of data.rows || []) {
+    if (blind[r.kind]) for (const k of INVOICE_MONEY_KEYS) r[k] = null;
+  }
+  const t = data.totals || {};
+  if (blind.purchase && t.purchase) t.purchase = { count: t.purchase.count, redacted: true };
+  if (blind.sale && t.sale) t.sale = { count: t.sale.count, redacted: true };
+  return data;
+}
+
 // A packaging size as the mill says it — "25 KG", "8 LBS".
 //
 // This was a byte-identical copy of formatPackSize, kept local on the reasoning
@@ -189,7 +206,8 @@ const reportingController = {
 
   async invoiceLedger(req, res) {
     try {
-      const data = await reportingService.getInvoiceLedger(req.query || {});
+      const data = redactInvoiceLedger(await reportingService.getInvoiceLedger(req.query || {}),
+        await require('../../utils/costVisibility').moneyVisibility(req));
       return res.json({ success: true, ...data });
     } catch (err) {
       console.error('Invoice ledger error:', err);
@@ -2545,3 +2563,5 @@ const reportingController = {
 };
 
 module.exports = reportingController;
+// Exported for tests.
+module.exports.redactInvoiceLedger = redactInvoiceLedger;

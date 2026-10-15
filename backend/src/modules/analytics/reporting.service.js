@@ -30,6 +30,10 @@ function onHandOf(l) {
   return net > 0 ? net : (parseFloat(l.qty) || 0);
 }
 
+// The Invoice Ledger's one payment-status vocabulary (P4-07 / RPT-17).
+const INVOICE_STATUSES = ['Paid', 'Partial', 'Unpaid', 'Void', 'Written Off'];
+const NOT_INVOICED_SALE_STATUSES = ['Draft', 'Pending', 'Cancelled', 'Voided'];
+
 function parseCustomTags(v) {
   if (v == null) return [];
   if (typeof v === 'string') { try { return JSON.parse(v); } catch { return []; } }
@@ -2197,108 +2201,122 @@ const reportingService = {
    */
   /**
    * Invoice Ledger — one row per local-sale invoice (multi-line sales grouped
-   * by sale_group_no), searchable by invoice no / customer / rice type / lot /
-   * batch / truck / payment reference, filterable by date, payment status and
-   * outstanding-only. Each row links to the Invoice 360 + customer ledger.
-   * Read-only. Commercial figures only (no COGS/margin).
+   * by sale_group_no) plus one per purchased rice lot, searchable by invoice
+   * no / customer / rice type / lot / batch / truck / payment reference,
+   * filterable by date, payment status and outstanding-only. Each row links to
+   * the Invoice 360 + party ledger. Read-only. Commercial figures only (no
+   * COGS/margin).
+   *
+   * P4-07 / RPT-17:
+   *  * ONE status vocabulary for both kinds — Paid / Partial / Unpaid, plus
+   *    Void (a voided purchase or a reversed bill) and Written Off — derived
+   *    from the amounts, so the filter matches purchases too (the payable's own
+   *    Pending / Overdue never matched "Unpaid");
+   *  * lines are GROUPED into invoices before anything is limited, a search
+   *    that hits one line brings the whole invoice, and the status /
+   *    outstanding filters apply to the invoice, not to a line;
+   *  * company purchases only — a client's (service milling) rice is not a
+   *    purchase of ours;
+   *  * totals are per kind over the WHOLE filtered result (sales revenue and
+   *    purchase cost are never added together) and `truncated` says when the
+   *    list is shorter. Voided purchases are listed but carry no money.
+   * Money redaction for cost / profit-blind roles is applied by the controller.
    */
   async getInvoiceLedger({ q, from, to, status, outstanding, entity, kind, limit = 500 } = {}) {
     const num = (v) => parseFloat(v) || 0;
     const cap = Math.min(parseInt(limit, 10) || 500, 2000);
     const term = String(q || '').trim();
     const wantOutstanding = (outstanding === '1' || outstanding === true || outstanding === 'true');
+    const statusOf = (out, paid) => (out > 0.01 ? (paid > 0.01 ? 'Partial' : 'Unpaid') : 'Paid');
     let saleInvoices = []; let purchaseInvoices = [];
 
     // ── SALES invoices (local_sales) ──
     if (kind !== 'purchase') {
-    // Resolve batch numbers matching the search term → their lot batch_ref tags.
-    let batchRefs = [];
-    if (term) {
-      const bms = await db('milling_batches')
-        .where('batch_no', 'ilike', `%${term}%`)
-        .orWhere('batch_name', 'ilike', `%${term}%`)
-        .select('id');
-      batchRefs = bms.map(b => `batch-${b.id}`);
-    }
+      // Resolve batch numbers matching the search term → their lot batch_ref tags.
+      let batchRefs = [];
+      if (term) {
+        const bms = await db('milling_batches')
+          .where('batch_no', 'ilike', `%${term}%`)
+          .orWhere('batch_name', 'ilike', `%${term}%`)
+          .select('id');
+        batchRefs = bms.map(b => `batch-${b.id}`);
+      }
+      const KEY = 'COALESCE(ls.sale_group_no, ls.sale_no)';
+      const lines = () => db('local_sales as ls')
+        .leftJoin('customers as c', 'ls.customer_id', 'c.id')
+        .leftJoin('inventory_lots as il', 'ls.lot_id', 'il.id')
+        .leftJoin('warehouses as w', 'il.warehouse_id', 'w.id')
+        // Only issued invoices: not a Draft, an unconfirmed (Pending), a
+        // rejected (Cancelled) or a Voided sale.
+        .whereNotIn('ls.status', NOT_INVOICED_SALE_STATUSES);
+      // The invoices that match (any line), then EVERY line of those invoices.
+      const matching = lines();
+      if (entity) matching.where('ls.entity', entity);
+      if (from) matching.where('ls.sale_date', '>=', from);
+      if (to) matching.where('ls.sale_date', '<=', to);
+      if (term) {
+        const like = `%${term}%`;
+        matching.where(function () {
+          this.where('ls.sale_no', 'ilike', like)
+            .orWhere('ls.sale_group_no', 'ilike', like)
+            .orWhere('c.name', 'ilike', like)
+            .orWhere('ls.buyer_name', 'ilike', like)
+            .orWhere('ls.item_name', 'ilike', like)
+            .orWhere('ls.lot_no', 'ilike', like)
+            .orWhere('il.lot_no', 'ilike', like)
+            .orWhere('ls.vehicle_no', 'ilike', like)
+            .orWhere('ls.payment_reference', 'ilike', like);
+          if (batchRefs.length) this.orWhereIn('il.batch_ref', batchRefs);
+        });
+      }
+      const groups = await lines()
+        .whereIn(db.raw(KEY), matching.distinct(db.raw(`${KEY} AS k`)))
+        .groupByRaw(KEY)
+        .select(
+          db.raw(`${KEY} AS key`), db.raw('MIN(ls.id) AS min_id'), db.raw('MIN(ls.sale_date) AS date'),
+          db.raw("MAX(COALESCE(c.name, ls.buyer_name, 'Walk-in')) AS customer"), db.raw('MAX(ls.customer_id) AS customer_id'),
+          db.raw('COALESCE(SUM(ls.total_amount), 0) AS total'), db.raw('COALESCE(SUM(ls.paid_amount), 0) AS received'),
+          db.raw('COALESCE(SUM(ls.due_amount), 0) AS outstanding'), db.raw('COALESCE(SUM(ls.quantity_kg), 0) AS qty_kg'),
+          db.raw('COUNT(*)::int AS line_count'),
+          db.raw('ARRAY_REMOVE(ARRAY_AGG(DISTINCT ls.item_name), NULL) AS items'),
+          db.raw('ARRAY_REMOVE(ARRAY_AGG(DISTINCT COALESCE(ls.lot_no, il.lot_no)), NULL) AS lots'),
+          db.raw('ARRAY_REMOVE(ARRAY_AGG(DISTINCT il.batch_ref), NULL) AS refs'),
+          db.raw('ARRAY_REMOVE(ARRAY_AGG(DISTINCT w.name), NULL) AS warehouses'),
+          db.raw('MAX(ls.vehicle_no) AS vehicle'), db.raw('BOOL_OR(ls.dispatched) AS dispatched'),
+          db.raw("MAX(COALESCE(ls.currency, 'PKR')) AS currency"),
+          // Goods returned against the invoice: a return lowers what is due,
+          // never the invoice total, so total = received + returned + outstanding.
+          db.raw(`COALESCE(SUM((SELECT COALESCE(SUM(r.return_value), 0) FROM local_sale_returns r
+            WHERE r.local_sale_id = ls.id)), 0) AS returned`),
+        );
 
-    let qb = db('local_sales as ls')
-      .leftJoin('customers as c', 'ls.customer_id', 'c.id')
-      .leftJoin('inventory_lots as il', 'ls.lot_id', 'il.id')
-      .leftJoin('warehouses as w', 'il.warehouse_id', 'w.id');
-    // Unconfirmed (Pending) and rejected (Cancelled) sales aren't realized revenue.
-    qb = qb.whereNotIn('ls.status', ['Pending', 'Cancelled']);
-    if (entity) qb = qb.where('ls.entity', entity);
-    if (from) qb = qb.where('ls.sale_date', '>=', from);
-    if (to) qb = qb.where('ls.sale_date', '<=', to);
-    if (wantOutstanding) qb = qb.where('ls.due_amount', '>', 0);
-    if (term) {
-      const like = `%${term}%`;
-      qb = qb.where(function () {
-        this.where('ls.sale_no', 'ilike', like)
-          .orWhere('ls.sale_group_no', 'ilike', like)
-          .orWhere('c.name', 'ilike', like)
-          .orWhere('ls.buyer_name', 'ilike', like)
-          .orWhere('ls.item_name', 'ilike', like)
-          .orWhere('ls.lot_no', 'ilike', like)
-          .orWhere('il.lot_no', 'ilike', like)
-          .orWhere('ls.vehicle_no', 'ilike', like)
-          .orWhere('ls.payment_reference', 'ilike', like);
-        if (batchRefs.length) this.orWhereIn('il.batch_ref', batchRefs);
+      const allRefs = new Set(groups.flatMap((g) => g.refs || []));
+      const batchIds = [...allRefs].map(ref => parseInt(String(ref).replace(/^batch-/, ''), 10)).filter(Boolean);
+      const batchByRef = {};
+      if (batchIds.length) {
+        const bs = await db('milling_batches').whereIn('id', batchIds).select('id', 'batch_no', 'batch_name');
+        for (const b of bs) batchByRef[`batch-${b.id}`] = b;
+      }
+
+      saleInvoices = groups.map((g) => {
+        const lots = g.lots || []; const items = g.items || []; const refs = g.refs || [];
+        const received = num(g.received); const out = num(g.outstanding);
+        return {
+          id: g.min_id, kind: 'sale', invoiceNo: g.key, isGroup: g.line_count > 1,
+          date: g.date, party: g.customer, partyType: 'Customer', customer: g.customer, customerId: g.customer_id || null,
+          items, lots,
+          batches: refs.map(ref => (batchByRef[ref] || {}).batch_no).filter(Boolean),
+          batchNames: refs.map(ref => (batchByRef[ref] || {}).batch_name).filter(Boolean),
+          warehouses: g.warehouses || [], vehicle: g.vehicle || null, dispatched: !!g.dispatched,
+          qtyKg: num(g.qty_kg), currency: g.currency || 'PKR',
+          total: num(g.total), received, returned: num(g.returned), outstanding: out,
+          paymentStatus: statusOf(out, received),
+          href: `/local-sales/${g.min_id}/invoice`,
+          partyHref: g.customer_id ? `/finance/statements?type=customer&id=${g.customer_id}` : null,
+          customerHref: g.customer_id ? `/finance/statements?type=customer&id=${g.customer_id}` : null,
+        };
       });
     }
-    const rows = await qb.select(
-      'ls.id', 'ls.sale_no', 'ls.sale_group_no', 'ls.sale_date', 'ls.item_name',
-      'ls.quantity_kg', 'ls.total_amount', 'ls.paid_amount', 'ls.due_amount',
-      'ls.vehicle_no', 'ls.dispatched', 'ls.customer_id', 'ls.lot_no',
-      db.raw("COALESCE(c.name, ls.buyer_name, 'Walk-in') as customer"),
-      'il.lot_no as lot_ref', 'il.batch_ref', 'w.name as warehouse_name',
-    ).orderBy('ls.id', 'desc').limit(cap * 4);
-
-    // Group lines into one row per invoice (sale_group_no, else sale_no).
-    const groups = {}; const allRefs = new Set();
-    for (const r of rows) {
-      const key = r.sale_group_no || r.sale_no;
-      const g = groups[key] || (groups[key] = {
-        key, minId: r.id, date: r.sale_date, customer: r.customer, customerId: r.customer_id || null,
-        total: 0, received: 0, outstanding: 0, qtyKg: 0,
-        items: new Set(), lots: new Set(), refs: new Set(), warehouses: new Set(),
-        vehicle: r.vehicle_no || null, dispatched: false,
-      });
-      g.minId = Math.min(g.minId, r.id);
-      g.total += num(r.total_amount); g.received += num(r.paid_amount); g.outstanding += num(r.due_amount);
-      g.qtyKg += num(r.quantity_kg);
-      if (r.item_name) g.items.add(r.item_name);
-      const lot = r.lot_no || r.lot_ref; if (lot) g.lots.add(lot);
-      if (r.batch_ref) { g.refs.add(r.batch_ref); allRefs.add(r.batch_ref); }
-      if (r.warehouse_name) g.warehouses.add(r.warehouse_name);
-      if (r.vehicle_no && !g.vehicle) g.vehicle = r.vehicle_no;
-      if (r.dispatched) g.dispatched = true;
-    }
-
-    const batchIds = [...allRefs].map(ref => parseInt(String(ref).replace(/^batch-/, ''), 10)).filter(Boolean);
-    const batchNoByRef = {}; const batchNameByRef = {};
-    if (batchIds.length) {
-      const bs = await db('milling_batches').whereIn('id', batchIds).select('id', 'batch_no', 'batch_name');
-      const byId = Object.fromEntries(bs.map(b => [b.id, b.batch_no]));
-      const nameById = Object.fromEntries(bs.map(b => [b.id, b.batch_name]));
-      for (const ref of allRefs) { const id = parseInt(String(ref).replace(/^batch-/, ''), 10); if (byId[id]) batchNoByRef[ref] = byId[id]; if (nameById[id]) batchNameByRef[ref] = nameById[id]; }
-    }
-
-    saleInvoices = Object.values(groups).map(g => ({
-      id: g.minId, kind: 'sale', invoiceNo: g.key, isGroup: [...g.lots].length + g.items.size > 1 || g.refs.size > 1 || false,
-      date: g.date, party: g.customer, partyType: 'Customer', customer: g.customer, customerId: g.customerId,
-      items: [...g.items], lots: [...g.lots],
-      batches: [...g.refs].map(ref => batchNoByRef[ref]).filter(Boolean),
-      batchNames: [...g.refs].map(ref => batchNameByRef[ref]).filter(Boolean),
-      warehouses: [...g.warehouses], vehicle: g.vehicle, dispatched: g.dispatched,
-      qtyKg: g.qtyKg, total: g.total, received: g.received, outstanding: g.outstanding,
-      paymentStatus: g.outstanding > 0.01 ? (g.received > 0.01 ? 'Partial' : 'Unpaid') : 'Paid',
-      href: `/local-sales/${g.minId}/invoice`,
-      partyHref: g.customerId ? `/finance/statements?type=customer&id=${g.customerId}` : null,
-      customerHref: g.customerId ? `/finance/statements?type=customer&id=${g.customerId}` : null,
-    }));
-    if (status) saleInvoices = saleInvoices.filter(i => i.paymentStatus === status);
-    } // end sales block
 
     // ── PURCHASE invoices (purchased rice lots) ──
     if (kind !== 'sale') {
@@ -2307,10 +2325,10 @@ const reportingService = {
         const vs = await db('milling_vehicle_arrivals').where('vehicle_no', 'ilike', `%${term}%`).whereNotNull('lot_id').select('lot_id');
         vehLotIds = vs.map(v => v.lot_id);
       }
-      let pq = db('inventory_lots as l')
+      let pq = companyStock(db('inventory_lots as l')
         .leftJoin('suppliers as s', 'l.supplier_id', 's.id')
         .leftJoin('warehouses as w', 'l.warehouse_id', 'w.id')
-        .where('l.type', 'raw');
+        .where('l.type', 'raw'), 'l', 'company');
       if (entity) pq = pq.where('l.entity', entity);
       if (from) pq = pq.where('l.purchase_date', '>=', from);
       if (to) pq = pq.where('l.purchase_date', '<=', to);
@@ -2327,23 +2345,27 @@ const reportingService = {
       const lots = await pq.select(
         'l.id', 'l.lot_no', 'l.purchase_date', 'l.variety', 'l.item_name', 'l.grade',
         'l.net_weight_kg', 'l.received_net_weight_kg', 'l.total_bags', 'l.purchase_amount',
-        'l.landed_cost_total', 'l.paid_amount', 'l.due_amount', 'l.payment_status',
+        'l.landed_cost_total', 'l.paid_amount', 'l.due_amount', 'l.voided_at', 'l.cost_currency',
         'l.supplier_id', 's.name as supplier_name', 'w.name as warehouse_name',
-      ).orderBy('l.id', 'desc').limit(cap);
+      );
 
       // Payable (source of truth for paid/outstanding) keyed by lot_no.
       const lotNos = lots.map(l => l.lot_no);
       const payByRef = {};
       if (lotNos.length) {
         const pbs = await db('payables').whereIn('linked_ref', lotNos).andWhere('category', 'Raw Material')
-          .select('linked_ref', 'original_amount', 'paid_amount', 'outstanding', 'status');
+          .select('linked_ref', 'original_amount', 'paid_amount', 'outstanding', 'status', 'currency');
         for (const pb of pbs) payByRef[pb.linked_ref] = pb;
       }
       purchaseInvoices = lots.map(l => {
         const pb = payByRef[l.lot_no];
+        const isVoid = !!l.voided_at || (pb && pb.status === 'Reversed');
         const landed = pb ? (num(pb.original_amount) || num(l.landed_cost_total)) : (num(l.landed_cost_total) || num(l.purchase_amount));
         const paid = pb ? num(pb.paid_amount) : num(l.paid_amount);
         const out = pb ? num(pb.outstanding) : num(l.due_amount);
+        let paymentStatus = statusOf(out, paid);
+        if (isVoid) paymentStatus = 'Void';
+        else if (pb && pb.status === 'Written Off') paymentStatus = 'Written Off';
         return {
           id: l.id, kind: 'purchase', invoiceNo: l.lot_no, isGroup: false,
           date: l.purchase_date, party: l.supplier_name || '—', partyType: 'Supplier',
@@ -2351,35 +2373,54 @@ const reportingService = {
           items: [l.variety || l.item_name || '—'], lots: [l.lot_no], batches: [],
           warehouses: l.warehouse_name ? [l.warehouse_name] : [], vehicle: null, dispatched: false,
           qtyKg: num(l.received_net_weight_kg) || num(l.net_weight_kg),
-          total: landed, received: paid, outstanding: out,
-          paymentStatus: pb ? pb.status : (out > 0.01 ? (paid > 0.01 ? 'Partial' : 'Unpaid') : 'Paid'),
+          currency: (pb && pb.currency) || l.cost_currency || 'PKR',
+          // A void bill is the record of what was billed; it owes nothing.
+          total: landed, received: paid, returned: 0, outstanding: isVoid ? 0 : out,
+          paymentStatus,
           href: `/lot-inventory/${l.id}/purchase-invoice`,
           partyHref: l.supplier_id ? `/finance/statements?type=supplier&id=${l.supplier_id}` : null,
           customerHref: l.supplier_id ? `/finance/statements?type=supplier&id=${l.supplier_id}` : null,
         };
       });
-      if (wantOutstanding) purchaseInvoices = purchaseInvoices.filter(i => i.outstanding > 0.01);
-      if (status) purchaseInvoices = purchaseInvoices.filter(i => i.paymentStatus === status);
     }
 
-    // ── Combine, sort newest-first, cap ──
-    let invoices = [...saleInvoices, ...purchaseInvoices].sort((a, b) => {
+    // ── Invoice-level filters, newest first, totals over all, then cap ──
+    let invoices = [...saleInvoices, ...purchaseInvoices];
+    if (wantOutstanding) invoices = invoices.filter((i) => i.outstanding > 0.01);
+    if (status) invoices = invoices.filter((i) => i.paymentStatus === status);
+    invoices.sort((a, b) => {
       const da = a.date ? new Date(a.date).getTime() : 0;
       const dbb = b.date ? new Date(b.date).getTime() : 0;
       if (da !== dbb) return dbb - da;
       return b.id - a.id;
-    }).slice(0, cap);
-
+    });
+    // Per kind and per currency — PKR and USD are never added together. The
+    // flat fields are the PKR figures; any other currency is in byCurrency.
+    const money = (k) => {
+      const r2 = (n) => Math.round(n * 100) / 100;
+      const byCurrency = {};
+      for (const i of invoices) {
+        if (i.kind !== k || i.paymentStatus === 'Void') continue;
+        const c = byCurrency[i.currency] || (byCurrency[i.currency] = { total: 0, received: 0, returned: 0, outstanding: 0 });
+        c.total += i.total; c.received += i.received; c.returned += i.returned; c.outstanding += i.outstanding;
+      }
+      for (const c of Object.values(byCurrency)) for (const f of Object.keys(c)) c[f] = r2(c[f]);
+      const pkr = byCurrency.PKR || { total: 0, received: 0, returned: 0, outstanding: 0 };
+      return { count: invoices.filter((i) => i.kind === k).length, currency: 'PKR', ...pkr, byCurrency };
+    };
+    const totals = {
+      count: invoices.length,
+      sales: invoices.filter((i) => i.kind === 'sale').length,
+      purchases: invoices.filter((i) => i.kind === 'purchase').length,
+      sale: money('sale'),
+      purchase: money('purchase'),
+      listed: Math.min(invoices.length, cap),
+      truncated: invoices.length > cap,
+    };
     return {
-      rows: invoices,
-      totals: {
-        count: invoices.length,
-        sales: invoices.filter(i => i.kind === 'sale').length,
-        purchases: invoices.filter(i => i.kind === 'purchase').length,
-        total: invoices.reduce((s, i) => s + i.total, 0),
-        received: invoices.reduce((s, i) => s + i.received, 0),
-        outstanding: invoices.reduce((s, i) => s + i.outstanding, 0),
-      },
+      rows: invoices.slice(0, cap),
+      totals,
+      meta: { currency: 'PKR', unit: 'kg', from: from || null, to: to || null, asOf: new Date().toISOString(), statuses: INVOICE_STATUSES },
     };
   },
 

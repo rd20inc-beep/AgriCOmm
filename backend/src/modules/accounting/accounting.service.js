@@ -82,6 +82,58 @@ function receiptsWithoutJournal(payments, journaledPaymentNos) {
   return (payments || []).filter((p) => !covered.has(p.payment_no));
 }
 
+// ── Entity-scoped party statements (P4-07 / MIL-46) ──────────────────────
+// The Mill Finance supplier / customer statements used the company-wide
+// statement, so a party that also trades with Export showed its export bills in
+// the mill statement and the statement never matched the mill directory.
+//
+// Scoping rule (the conservative choice — it invents no allocation):
+//   * documents (payables, receivables, local sales, export orders) count only
+//     when their own `entity` is the requested one;
+//   * a journal counts when its `entity` is the requested one, or when it has
+//     NO entity and its ref_no is one of those in-scope documents (or a
+//     payment against one);
+//   * a journal with no entity that cannot be tied to an in-scope document is
+//     LEFT OUT — never guessed into the mill — and counted in
+//     entity_scope.excluded_unscoped_lines so the statement says so.
+// Without `entity` the statement is the unchanged company-wide one.
+const STATEMENT_ENTITIES = new Set(['mill', 'export', 'general']);
+function normaliseStatementEntity(entity) {
+  const e = String(entity || '').toLowerCase();
+  return STATEMENT_ENTITIES.has(e) ? e : null;
+}
+
+function entityScoped(qb, entity, refs) {
+  if (!entity) return qb;
+  return qb.where((q) => {
+    q.where('je.entity', entity);
+    if (refs && refs.length) q.orWhere((q2) => q2.whereNull('je.entity').whereIn('je.ref_no', refs));
+  });
+}
+
+async function unscopedLineCount(qb, entity, refs) {
+  if (!entity) return 0;
+  qb.whereNull('je.entity');
+  if (refs && refs.length) qb.whereNotIn('je.ref_no', refs);
+  const r = await qb.count('jl.id as n').first();
+  return parseInt(r && r.n, 10) || 0;
+}
+
+// Sale and receipt numbers of a customer's local sales in one entity (linked by
+// id, or walk-in sales under the customer's name — the statement's own rule).
+async function localSaleRefsFor(customerId, customerName, entity) {
+  const sales = await db('local_sales')
+    .where('entity', entity)
+    .where(function () {
+      this.where('customer_id', customerId);
+      if (customerName) this.orWhere(function () { this.whereNull('customer_id').whereRaw('LOWER(buyer_name) = LOWER(?)', [customerName]); });
+    })
+    .select('id', 'sale_no', 'sale_group_no');
+  if (!sales.length) return [];
+  const pays = await db('payments').whereIn('local_sale_id', sales.map((s) => s.id)).pluck('payment_no');
+  return [...new Set([...sales.map((s) => s.sale_no), ...sales.map((s) => s.sale_group_no), ...pays].filter(Boolean))];
+}
+
 const accountingService = {
   // ═══════════════════════════════════════════════════════════════════
   // Journal Posting
@@ -951,19 +1003,22 @@ const accountingService = {
   /**
    * Customer statement: opening balance + transactions + closing balance.
    */
-  async getCustomerStatement(customerId, { dateFrom, dateTo }) {
+  async getCustomerStatement(customerId, { dateFrom, dateTo, entity = null }) {
     const cid = parseInt(customerId);
+    entity = normaliseStatementEntity(entity); // MIL-46 — see entityScoped()
     // Journals are matched to a customer in two ways:
     //   1. Authoritatively, via party_type/party_id stamped at post time.
     //   2. For older / unstamped journals, by the legacy ref_no heuristic —
     //      export order numbers, receivable numbers, and the payment numbers
     //      of receipts against this customer's receivables.
     // The ref set below feeds the fallback only; stamped journals win.
-    const orders = await db('export_orders')
+    // Export orders are the export entity's; a mill / general statement has none.
+    const orders = (entity && entity !== 'export') ? [] : await db('export_orders')
       .where({ customer_id: cid })
       .select('order_no');
     const receivables = await db('receivables')
       .where({ customer_id: cid })
+      .modify((q) => { if (entity) q.where('entity', entity); })
       .select('id', 'recv_no');
     const recvIds = receivables.map((r) => r.id);
     const payments = recvIds.length
@@ -990,7 +1045,7 @@ const accountingService = {
     // unstamped legacy journals) its ref_no matches the heuristic set. The
     // party stamp is authoritative, so a journal stamped to another party is
     // never pulled in by a coincidental ref match.
-    const lineBase = () => db('journal_lines as jl')
+    const partyLines = () => db('journal_lines as jl')
       .join('journal_entries as je', 'jl.journal_id', 'je.id')
       .where('je.status', 'Posted')
       .whereIn('jl.account_id', arIds)
@@ -1000,6 +1055,12 @@ const accountingService = {
           qb.orWhere((q) => q.whereNull('je.party_id').whereIn('je.ref_no', refNos));
         }
       });
+    // In an entity-scoped statement an unlabelled journal also belongs when it
+    // is one of the customer's local sales of that entity or a receipt against
+    // one (their numbers, not the party stamp, tie them to the sale).
+    const custForScope = entity ? await db('customers').where({ id: cid }).first('name') : null;
+    const scopeRefs = entity ? [...refNos, ...(await localSaleRefsFor(cid, custForScope && custForScope.name, entity))] : refNos;
+    const lineBase = () => entityScoped(partyLines(), entity, scopeRefs);
 
     // Ledgers are presented in PKR base (primary), with a USD equivalent shown
     // as a sub-line on every amount. usdOf is EXACT when the journal carries its
@@ -1047,7 +1108,9 @@ const accountingService = {
     // the customer record that was registered later.
     const custRow = await db('customers').where({ id: cid }).first();
     const localSalesRows = await db('local_sales')
-      .whereNotIn('status', ['Pending', 'Cancelled'])
+      // Issued invoices only — a Draft or Voided sale is not a charge (P4-07).
+      .whereNotIn('status', ['Draft', 'Pending', 'Cancelled', 'Voided'])
+      .modify((q) => { if (entity) q.where('entity', entity); })
       .where(function () {
         this.where('customer_id', cid);
         if (custRow && custRow.name) {
@@ -1284,6 +1347,7 @@ const accountingService = {
     const openRecv = await db('receivables as r')
       .leftJoin('export_orders as o', 'o.id', 'r.order_id')
       .where('r.customer_id', cid)
+      .modify((q) => { if (entity) q.where('r.entity', entity); })
       .whereNot('r.status', 'Paid')
       .where('r.outstanding', '>', 0)
       .whereNull('r.local_sale_id')
@@ -1311,6 +1375,8 @@ const accountingService = {
 
     return {
       customer_id: cid,
+      entity_scope: entity ? { entity, excluded_unscoped_lines: await unscopedLineCount(partyLines(), entity, scopeRefs) } : null,
+      period: { date_from: dateFrom || null, date_to: dateTo || null },
       currency: statementCurrency,
       usd_rate: usdRate,
       opening_balance: parseFloat(openingBalance.toFixed(2)),
@@ -1328,8 +1394,11 @@ const accountingService = {
   /**
    * Supplier statement: opening balance + transactions + closing balance.
    */
-  async getSupplierStatement(supplierId, { dateFrom, dateTo }) {
+  async getSupplierStatement(supplierId, { dateFrom, dateTo, entity = null }) {
     const sid = parseInt(supplierId);
+    // MIL-46: an `entity` ('mill' | 'export' | 'general') scopes the statement
+    // to that entity's bills and journals — see entityScoped() below.
+    entity = normaliseStatementEntity(entity);
     // Journals are matched to a supplier in two ways:
     //   1. Authoritatively, via party_type/party_id stamped at post time.
     //   2. For older / unstamped journals, by the legacy ref_no heuristic —
@@ -1338,6 +1407,7 @@ const accountingService = {
     // The ref set below feeds the fallback only; stamped journals win.
     const payables = await db('payables')
       .where({ supplier_id: sid })
+      .modify((q) => { if (entity) q.where('entity', entity); })
       .select('id', 'pay_no', 'linked_ref', 'original_amount', 'paid_amount',
         'currency', 'due_date', 'created_at', 'category', 'source_table', 'source_id', 'notes');
 
@@ -1472,7 +1542,7 @@ const accountingService = {
 
     // Stamped-to-this-supplier OR (unstamped legacy journal whose ref_no
     // matches the heuristic set). Party stamp is authoritative.
-    const lineBase = () => db('journal_lines as jl')
+    const partyLines = () => db('journal_lines as jl')
       .join('journal_entries as je', 'jl.journal_id', 'je.id')
       .where('je.status', 'Posted')
       .whereIn('jl.account_id', apIds)
@@ -1482,6 +1552,7 @@ const accountingService = {
           qb.orWhere((q) => q.whereNull('je.party_id').whereIn('je.ref_no', refNos));
         }
       });
+    const lineBase = () => entityScoped(partyLines(), entity, refNos);
 
     // PKR base (primary) with a USD sub-line on every amount. usdOf is exact
     // from the journal's original-currency metadata; see the customer note.
@@ -1690,6 +1761,7 @@ const accountingService = {
     // owed" aging that mirrors the Due Dates list.
     const openPay = await db('payables')
       .where('supplier_id', sid)
+      .modify((q) => { if (entity) q.where('entity', entity); })
       .whereNot('status', 'Paid')
       .where('outstanding', '>', 0)
       .orderBy('due_date')
@@ -1719,6 +1791,8 @@ const accountingService = {
 
     return {
       supplier_id: sid,
+      entity_scope: entity ? { entity, excluded_unscoped_lines: await unscopedLineCount(partyLines(), entity, refNos) } : null,
+      period: { date_from: dateFrom || null, date_to: dateTo || null },
       currency: statementCurrency,
       usd_rate: usdRate,
       opening_balance: parseFloat(openingBalance.toFixed(2)),
