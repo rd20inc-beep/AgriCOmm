@@ -27,6 +27,7 @@ const ownerApproval = require('../../middleware/ownerApproval');
 const aiService = require('../ai/ai.service');
 const { pickBatchEdits } = require('./batchLifecycle');
 const { listRicePurchases } = require('./ricePurchasesLedger');
+const { listQualityComparison } = require('./qualityVariance');
 const { batchYielded, assertBatchOutputsUnsold } = require('./costEditLocks');
 const { reverseExpenseTrail, reverseStatutoryJournal, remittedStatutoryForRun, mirrorJournals } = require('./payrollReversal');
 const { buildLastPrices, findImplausiblePrices, implausiblePriceMessage } = require('./byproductPrices');
@@ -36,6 +37,18 @@ const { buildLastPrices, findImplausiblePrices, implausiblePriceMessage } = requ
 // =============================================================================
 
 router.get('/batches', authorize('milling', 'view'), controller.list);
+// Quality Comparison: every batch's latest sample / arrival analysis and its
+// stored variance in one call (was 50 parallel detail fetches, MIL-36).
+// Agreed prices are nulled for cost-blind roles (e.g. the QC Analyst).
+router.get('/quality-comparison', authorize('milling', 'view'), redactCostInResponses(), async (req, res) => {
+  try {
+    const batches = await listQualityComparison(db, req.query);
+    return res.json({ success: true, data: { batches } });
+  } catch (err) {
+    console.error('Quality comparison list error:', err);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
 // Service-milling (toll/job-work) dashboard feed — gated by the dedicated
 // service_milling.view perm (Milling/Inventory roles), not the generic milling perm.
 router.get('/service-batches', authorize('service_milling', 'view'), controller.listServiceBatches);

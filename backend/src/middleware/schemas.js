@@ -842,7 +842,8 @@ const updateBatch = Joi.object({
   machine_line: Joi.string().max(100).allow('', null),
   shift: Joi.string().valid('Day', 'Night', 'Full'),
   notes: Joi.string().allow('', null),
-  variance_status: Joi.string().max(50).allow('', null),
+  // QC decision on the sample-vs-arrival variance (CHECK, mig 381); '' clears nothing.
+  variance_status: Joi.string().valid('Pending', 'Approved', 'On Hold', 'Renegotiation', 'Rejected').empty('').allow(null),
   batch_name: Joi.string().max(200).allow('', null),
   custom_tags: Joi.alternatives().try(
     Joi.array().items(Joi.string().max(60)),
