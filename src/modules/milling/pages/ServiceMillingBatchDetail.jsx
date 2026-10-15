@@ -552,8 +552,13 @@ export default function ServiceMillingBatchDetail() {
         <div className="space-y-4">
         <MillingQtyCard receivedKg={num(batch.rawQtyKg)} milledQtyKg={batch.milledQtyKg} milledKg={milledKg} onSave={saveMilledQty} />
         <Card title="Yield Output (client-owned)" icon={Boxes} action={
-          // The backend refuses yield on held / cancelled / rejected batches.
-          ['On Hold', 'Cancelled', 'Rejected'].includes(batch.status) ? null : (
+          // The backend refuses yield on held / cancelled / rejected batches,
+          // and a re-yield once client stock has been dispatched (P3-04): the
+          // handed-over rice would come back as stock.
+          ['On Hold', 'Cancelled', 'Rejected'].includes(batch.status) ? null
+          : (producedKg > 0 && ['Partially Dispatched', 'Fully Dispatched'].includes(batch.serviceLotStatus)) ? (
+            <span className="text-xs text-gray-500">Dispatched — reverse the dispatch(es) to change the yield</span>
+          ) : (
           <button onClick={openYieldModal} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 text-white text-xs font-medium rounded-lg hover:bg-emerald-700">
             <Boxes size={14} /> {producedKg > 0 ? 'Update Yield' : 'Record Yield Output'}
           </button>
