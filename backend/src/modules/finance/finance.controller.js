@@ -4,6 +4,7 @@ const fxRateService = require('./fxRate.service');
 const { postLocalReceiptJournal } = require('../localSales/receiptJournal');
 const { buildLocalReceivablesQuery } = require('./localReceivablesQuery');
 const { feedBase, feedTotals } = require('./paymentsFeedTotals');
+const { nativeMoneyText, byCurrency, ORDER_COST_PKR_SQL } = require('./currencyFigures');
 
 // Finance-dashboard confidentiality: every role EXCEPT Super Admin / Owner sees
 // reference NUMBERS (export order, mill batch, lot) but NOT the trading-party
@@ -1063,34 +1064,50 @@ const financeController = {
       const today = new Date().toISOString().slice(0, 10);
       const in7 = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
       const num = (v) => parseFloat(v) || 0;
-      const rs = (v) => 'Rs ' + Math.round(num(v)).toLocaleString();
       const safe = async (fn, dflt) => { try { return await fn(); } catch { return dflt; } };
       const alerts = [];
+      // PLT-12: every amount per currency, in that currency ("USD 1,200.00 +
+      // Rs 50,000.00") — never one Rs figure over dollars and rupees. `totals`
+      // is { CUR: amount }; `total` is kept only when one currency is present.
+      const byCur = (q, sumCol) => q.clone()
+        .select(db.raw("UPPER(COALESCE(currency, 'PKR')) as cur"))
+        .count('id as c').sum(`${sumCol} as t`)
+        .groupByRaw("UPPER(COALESCE(currency, 'PKR'))");
+      const fold = (rows) => {
+        const totals = {}; let count = 0;
+        for (const r of rows || []) { totals[r.cur] = num(r.t); count += parseInt(r.c, 10) || 0; }
+        const curs = Object.keys(totals).sort((a, b) => (a === 'PKR' ? -1 : b === 'PKR' ? 1 : a.localeCompare(b)));
+        return {
+          count, totals,
+          text: curs.map((c) => nativeMoneyText(totals[c], c)).join(' + '),
+          total: curs.length === 1 ? totals[curs[0]] : null,
+        };
+      };
+      const moneyAlert = (f, base) => ({ ...base, count: f.count, totals: f.totals, total: f.total });
 
       // Overdue receivables (money owed to us, past due).
-      const orr = await safe(() => db('receivables').where('due_date', '<', today).whereNot('status', 'Paid').count('id as c').sum('outstanding as t').first(), { c: 0, t: 0 });
-      if (parseInt(orr.c, 10) > 0) alerts.push({ id: 'overdue_receivables', type: 'receivable', severity: 'warning', title: 'Overdue receivables', message: `${orr.c} receivable(s) past due — ${rs(orr.t)} still to collect.`, count: parseInt(orr.c, 10), total: num(orr.t), link: '/finance/money-in' });
+      const orr = fold(await safe(() => byCur(db('receivables').where('due_date', '<', today).whereNot('status', 'Paid'), 'outstanding'), []));
+      if (orr.count > 0) alerts.push(moneyAlert(orr, { id: 'overdue_receivables', type: 'receivable', severity: 'warning', title: 'Overdue receivables', message: `${orr.count} receivable(s) past due — ${orr.text} still to collect.`, link: '/finance/money-in' }));
 
       // Overdue payables (we owe, past due).
-      const orp = await safe(() => db('payables').where('due_date', '<', today).whereNot('status', 'Paid').where('outstanding', '>', 0).count('id as c').sum('outstanding as t').first(), { c: 0, t: 0 });
-      if (parseInt(orp.c, 10) > 0) alerts.push({ id: 'overdue_payables', type: 'payable', severity: 'danger', title: 'Overdue payables', message: `${orp.c} bill(s) past due — ${rs(orp.t)} owed.`, count: parseInt(orp.c, 10), total: num(orp.t), link: '/finance/money-out' });
+      const orp = fold(await safe(() => byCur(db('payables').where('due_date', '<', today).whereNot('status', 'Paid').where('outstanding', '>', 0), 'outstanding'), []));
+      if (orp.count > 0) alerts.push(moneyAlert(orp, { id: 'overdue_payables', type: 'payable', severity: 'danger', title: 'Overdue payables', message: `${orp.count} bill(s) past due — ${orp.text} owed.`, link: '/finance/money-out' }));
 
       // Overdrawn bank/cash accounts.
       const negBanks = await safe(() => db('bank_accounts').where('current_balance', '<', 0).where('is_active', true).select('name', 'current_balance', 'currency'), []);
       for (const b of negBanks) {
-        const pfx = (b.currency === 'USD') ? '$' : 'Rs ';
-        alerts.push({ id: `neg_bank_${b.name}`, type: 'bank', severity: 'danger', title: 'Account overdrawn', message: `${b.name} balance is negative: ${pfx}${Math.round(num(b.current_balance)).toLocaleString()}.`, link: '/finance/cash' });
+        alerts.push({ id: `neg_bank_${b.name}`, type: 'bank', severity: 'danger', title: 'Account overdrawn', message: `${b.name} balance is negative: ${nativeMoneyText(b.current_balance, b.currency)}.`, link: '/finance/cash' });
       }
 
       // Cheques past their clearing date but not yet cleared.
-      const oc = await safe(() => db('payments').where('payment_method', 'cheque').where('cleared', false).whereNotIn('status', ['Reversed', 'Rejected', 'Bounced', 'Superseded']).whereNotNull('due_date').where('due_date', '<', today).count('id as c').sum('amount as t').first(), { c: 0, t: 0 });
-      if (parseInt(oc.c, 10) > 0) alerts.push({ id: 'overdue_cheques', type: 'cheque', severity: 'warning', title: 'Cheques awaiting clearance', message: `${oc.c} cheque(s) are past their clearing date — ${rs(oc.t)}.`, count: parseInt(oc.c, 10), total: num(oc.t), link: '/finance/due-dates' });
+      const oc = fold(await safe(() => byCur(db('payments').where('payment_method', 'cheque').where('cleared', false).whereNotIn('status', ['Reversed', 'Rejected', 'Bounced', 'Superseded']).whereNotNull('due_date').where('due_date', '<', today), 'amount'), []));
+      if (oc.count > 0) alerts.push(moneyAlert(oc, { id: 'overdue_cheques', type: 'cheque', severity: 'warning', title: 'Cheques awaiting clearance', message: `${oc.count} cheque(s) are past their clearing date — ${oc.text}.`, link: '/finance/due-dates' }));
 
       // Due within the next 7 days (heads-up, info).
-      const dueRecv = await safe(() => db('receivables').whereBetween('due_date', [today, in7]).whereNot('status', 'Paid').count('id as c').sum('outstanding as t').first(), { c: 0, t: 0 });
-      if (parseInt(dueRecv.c, 10) > 0) alerts.push({ id: 'due_recv', type: 'receivable', severity: 'info', title: 'Receivables due this week', message: `${dueRecv.c} receivable(s) due within 7 days — ${rs(dueRecv.t)}.`, count: parseInt(dueRecv.c, 10), total: num(dueRecv.t), link: '/finance/due-dates' });
-      const duePay = await safe(() => db('payables').whereBetween('due_date', [today, in7]).whereNot('status', 'Paid').where('outstanding', '>', 0).count('id as c').sum('outstanding as t').first(), { c: 0, t: 0 });
-      if (parseInt(duePay.c, 10) > 0) alerts.push({ id: 'due_pay', type: 'payable', severity: 'info', title: 'Payables due this week', message: `${duePay.c} bill(s) due within 7 days — ${rs(duePay.t)}.`, count: parseInt(duePay.c, 10), total: num(duePay.t), link: '/finance/due-dates' });
+      const dueRecv = fold(await safe(() => byCur(db('receivables').whereBetween('due_date', [today, in7]).whereNot('status', 'Paid'), 'outstanding'), []));
+      if (dueRecv.count > 0) alerts.push(moneyAlert(dueRecv, { id: 'due_recv', type: 'receivable', severity: 'info', title: 'Receivables due this week', message: `${dueRecv.count} receivable(s) due within 7 days — ${dueRecv.text}.`, link: '/finance/due-dates' }));
+      const duePay = fold(await safe(() => byCur(db('payables').whereBetween('due_date', [today, in7]).whereNot('status', 'Paid').where('outstanding', '>', 0), 'outstanding'), []));
+      if (duePay.count > 0) alerts.push(moneyAlert(duePay, { id: 'due_pay', type: 'payable', severity: 'info', title: 'Payables due this week', message: `${duePay.count} bill(s) due within 7 days — ${duePay.text}.`, link: '/finance/due-dates' }));
 
       // Cash tie-out (P2-17): a balance no bank row explains, or a PKR account
       // whose balance disagrees with its own GL account.
@@ -1123,18 +1140,22 @@ const financeController = {
           .whereNotIn('status', ['Closed', 'Cancelled'])
           .count('id as count')
           .first(),
+        // Per currency (P4-09): one SUM over USD and PKR rows was meaningless.
         db('export_orders')
           .where('status', 'Closed')
+          .select(db.raw("UPPER(COALESCE(currency, 'USD')) as currency"))
           .sum('contract_value as total')
-          .first(),
+          .groupByRaw("UPPER(COALESCE(currency, 'USD'))"),
         db('receivables')
           .whereNot('status', 'Paid')
+          .select(db.raw("UPPER(COALESCE(currency, 'PKR')) as currency"))
           .sum('outstanding as total')
-          .first(),
+          .groupByRaw("UPPER(COALESCE(currency, 'PKR'))"),
         db('payables')
           .whereNot('status', 'Paid')
+          .select(db.raw("UPPER(COALESCE(currency, 'PKR')) as currency"))
           .sum('outstanding as total')
-          .first(),
+          .groupByRaw("UPPER(COALESCE(currency, 'PKR'))"),
         db('milling_batches')
           .whereNotIn('status', ['Completed', 'Cancelled'])
           .count('id as count')
@@ -1147,9 +1168,10 @@ const financeController = {
           overview: {
             total_orders: parseInt(totalOrders.count) || 0,
             active_orders: parseInt(activeOrders.count) || 0,
-            total_revenue: parseFloat(totalRevenue.total) || 0,
-            outstanding_receivables: parseFloat(totalReceivables.total) || 0,
-            outstanding_payables: parseFloat(totalPayables.total) || 0,
+            // { CUR: amount } — one figure per currency, never summed.
+            total_revenue_by_currency: byCurrency(totalRevenue, 'total'),
+            outstanding_receivables_by_currency: byCurrency(totalReceivables, 'total'),
+            outstanding_payables_by_currency: byCurrency(totalPayables, 'total'),
             active_milling_batches: parseInt(millingBatches.count) || 0,
           },
         },
@@ -2058,7 +2080,9 @@ financeController.listPurchases = async (req, res) => {
           'eoc.id as ref_id',
           'eo.order_no as ref',
           db.raw('eoc.created_at::date as date'),
-          db.raw('CASE WHEN COALESCE(eoc.base_amount_pkr, 0) > 0 THEN eoc.base_amount_pkr ELSE COALESCE(eoc.amount, 0) * COALESCE(eoc.fx_rate, 1) END as amount_pkr'),
+          // RPT-09: a foreign cost with no booked figure has NO rupee amount
+          // (null, counted below) — it was its dollar amount × 1 under Rs.
+          db.raw(`${ORDER_COST_PKR_SQL} as amount_pkr`),
           'eoc.amount',
           'eoc.currency',
           db.raw('NULL::int as supplier_id'),
@@ -2131,13 +2155,14 @@ financeController.listPurchases = async (req, res) => {
     // Aggregate totals across the FILTERED set so the FE can show
     // top-line spend without a second round-trip.
     const totals = sliced.reduce((acc, r) => {
+      if (r.amount_pkr == null) { acc.unconverted_count += 1; return acc; }
       const pkr = parseFloat(r.amount_pkr) || 0;
       acc.total_pkr += pkr;
       acc.by_source[r.source] = (acc.by_source[r.source] || 0) + pkr;
       const k = String(r.payment_status || 'Pending').toLowerCase();
       acc.by_status[k] = (acc.by_status[k] || 0) + pkr;
       return acc;
-    }, { total_pkr: 0, count: sliced.length, by_source: {}, by_status: {} });
+    }, { total_pkr: 0, count: sliced.length, by_source: {}, by_status: {}, unconverted_count: 0 });
 
     return res.json({ success: true, data: { purchases: sliced, totals } });
   } catch (err) {

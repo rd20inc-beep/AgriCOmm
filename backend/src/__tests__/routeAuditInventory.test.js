@@ -50,6 +50,9 @@ const EXEMPT = {
   // Employee self-service: the request row IS the record; resolving it is audited.
   'modules/portal/portal.routes.js POST /requests': 'self-service record',
   'modules/portal/portal.routes.js POST /leave': 'self-service record',
+  // A read sent as POST (the unsaved order travels in the body): computes the
+  // create form's margin preview and writes nothing (EXP-08).
+  'modules/exportOrders/exportOrders.routes.js POST /profit-preview': 'read-only',
   // Messaging / collaboration notes — not money, stock or configuration.
   'modules/chat/chat.routes.js POST /messages': 'messaging',
   'modules/chat/chat.routes.js POST /read': 'messaging',

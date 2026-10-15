@@ -14,6 +14,8 @@ const whScope = require('../../utils/warehouseScope');
 const stockSql = require('../inventory/stockSql');
 // D-14 stock value (landed cost/kg × on hand, no fallback price) — stockValue.js.
 const { lotValueSql, landedPerKgSql } = require('../inventory/stockValue');
+const { exportRevenueInPeriod } = require('../finance/profitDefinitions');
+const { feedBase, SETTLED, PENDING_CHEQUE } = require('../finance/paymentsFeedTotals');
 
 // Parse a milling_batches.custom_tags jsonb value into a plain array. The pg
 // driver usually returns jsonb already parsed (array/object), but a string may
@@ -97,6 +99,25 @@ function emptyFreightTotals() {
     orders: 0, withFreight: 0, chargedPkr: 0, paidPkr: 0, gapPkr: 0,
     recoveryPct: null, shortOrders: 0, unbilledOrders: 0, debitNotes: 0, debitNotePkr: 0,
   };
+}
+
+// exportRevenueInPeriod rows → the printable P&L's export lines (customer and
+// product added), in the rows' order. amount_pkr / rev = PKR revenue (goods +
+// freight + debit notes); cogs = the locked COGS (0 until shipped with one).
+async function exportLinesFor(db, rows) {
+  if (!rows.length) return [];
+  const meta = await db('export_orders as o').leftJoin('customers as c', 'o.customer_id', 'c.id')
+    .whereIn('o.id', rows.map((r) => r.id))
+    .select('o.id', 'o.product_name', 'o.customer_id', db.raw("COALESCE(c.name,'—') as customer"));
+  const byId = new Map(meta.map((m) => [Number(m.id), m]));
+  return rows.map((r) => {
+    const m = byId.get(Number(r.id)) || {};
+    return {
+      id: r.id, order_no: r.orderNo, product_name: m.product_name || null, customer_id: m.customer_id || null,
+      customer: m.customer || '—', revenue_date: r.revenueDate,
+      amount_pkr: r.revenuePkr, rev: r.revenuePkr, cogs: r.riceCostBasis === 'locked' ? r.riceCostPkr : 0,
+    };
+  });
 }
 
 const reportingController = {
@@ -1044,13 +1065,12 @@ const reportingController = {
       }
 
       // ─── Revenue ────────────────────────────────────────────────
-      // Export: shipped/closed orders booked in PKR at locked rate
-      const exportRevRow = await db('export_orders')
-        .whereIn('status', ['Shipped', 'Arrived', 'Closed'])
-        .whereBetween('updated_at', [fromDate, toDate])
-        .sum({ revenuePkr: 'contract_value_pkr_locked' })
-        .count({ cnt: 'id' })
-        .first();
+      // Export: shipped orders whose REVENUE DATE (D-16: BL date, else the
+      // Shipped transition) is in the period, at the PKR revenue the one
+      // profit definition uses (goods + freight + debit notes, booked rate).
+      // It was dated by updated_at, so any later edit moved the sale.
+      const exportRev = await exportRevenueInPeriod(db, { startDate: from, endDate: to });
+      const exportRevRow = { revenuePkr: exportRev.revenuePkr, cnt: exportRev.count };
 
       // Local sales — completed sales in PKR
       const localRevRow = await db('local_sales')
@@ -1131,10 +1151,7 @@ const reportingController = {
       const marginPct = revenue.totalPkr > 0 ? (netProfitPkr / revenue.totalPkr) * 100 : 0;
 
       // ─── Line-item detail (clickable drill-downs) ───────────────
-      const exportLines = await db('export_orders as o').leftJoin('customers as c', 'o.customer_id', 'c.id')
-        .whereIn('o.status', ['Shipped', 'Arrived', 'Closed']).whereBetween('o.updated_at', [fromDate, toDate])
-        .select('o.id', 'o.order_no', 'o.product_name', 'o.customer_id', db.raw('COALESCE(o.contract_value_pkr_locked,0) as amount_pkr'), db.raw("COALESCE(c.name,'—') as customer"))
-        .orderByRaw('amount_pkr desc').limit(200);
+      const exportLines = await exportLinesFor(db, exportRev.rows.slice(0, 200));
       const localLines = await db('local_sales as ls').leftJoin('customers as c', 'ls.customer_id', 'c.id')
         .where('ls.status', 'Completed').whereBetween('ls.sale_date', [fromDate, toDate])
         .select('ls.id', 'ls.sale_no', 'ls.lot_id', 'ls.item_name', 'ls.total_amount', 'ls.customer_id', db.raw("COALESCE(c.name, ls.buyer_name, 'Walk-in') as customer"))
@@ -1186,63 +1203,84 @@ const reportingController = {
         return res.status(400).json({ success: false, message: 'Invalid from/to date.' });
       }
 
-      const totals = await db('payments')
-        .whereBetween('payment_date', [fromDate, toDate])
-        .select('type')
-        .sum({ totalPkr: 'base_amount_pkr' })
-        .count({ cnt: 'id' })
-        .groupBy('type');
+      // RPT-05: SETTLED money only — the same set Money In / Money Out total
+      // (paymentsFeedTotals): no unconfirmed / rejected receipts, no reversed
+      // or bounced payments, no uncleared cheque (listed apart). And per
+      // currency, in that currency: a USD receipt is never folded into Rs.
+      const filters = { from_date: from, to_date: to };
+      const CUR = "UPPER(COALESCE(p.currency, 'PKR'))";
+      const num = (v) => Math.round((parseFloat(v) || 0) * 100) / 100;
+      const [totals, pending, daily] = await Promise.all([
+        feedBase(db, filters).whereRaw(SETTLED)
+          .select('p.type', db.raw(`${CUR} as currency`))
+          .sum({ amt: 'p.amount' }).count({ cnt: 'p.id' })
+          .groupBy('p.type').groupByRaw(CUR),
+        feedBase(db, filters).whereRaw(PENDING_CHEQUE)
+          .select('p.type', db.raw(`${CUR} as currency`))
+          .sum({ amt: 'p.amount' }).count({ cnt: 'p.id' })
+          .groupBy('p.type').groupByRaw(CUR),
+        feedBase(db, filters).whereRaw(SETTLED)
+          .select(db.raw('p.payment_date::date::text as day'), 'p.type', db.raw(`${CUR} as currency`))
+          .sum({ amt: 'p.amount' })
+          .groupByRaw(`p.payment_date::date, p.type, ${CUR}`)
+          .orderByRaw('p.payment_date::date asc'),
+      ]);
 
-      const summary = { inPkr: 0, outPkr: 0, inCount: 0, outCount: 0 };
+      const byCurrency = {};
+      const slot = (c) => (byCurrency[c] = byCurrency[c] || { in: 0, out: 0, net: 0, inCount: 0, outCount: 0 });
       for (const t of totals) {
-        if (t.type === 'receipt') {
-          summary.inPkr = parseFloat(t.totalPkr) || 0;
-          summary.inCount = parseInt(t.cnt, 10) || 0;
-        } else if (t.type === 'payment') {
-          summary.outPkr = parseFloat(t.totalPkr) || 0;
-          summary.outCount = parseInt(t.cnt, 10) || 0;
-        }
+        const s = slot(t.currency);
+        if (t.type === 'receipt') { s.in = num(t.amt); s.inCount = parseInt(t.cnt, 10) || 0; }
+        else if (t.type === 'payment') { s.out = num(t.amt); s.outCount = parseInt(t.cnt, 10) || 0; }
       }
-      summary.netPkr = summary.inPkr - summary.outPkr;
+      for (const s of Object.values(byCurrency)) s.net = num(s.in - s.out);
+      const pendingCheques = {};
+      for (const t of pending) {
+        const p = (pendingCheques[t.currency] = pendingCheques[t.currency] || { in: 0, out: 0, count: 0 });
+        p[t.type === 'receipt' ? 'in' : 'out'] = num(t.amt);
+        p.count += parseInt(t.cnt, 10) || 0;
+      }
+      const pkr = byCurrency.PKR || { in: 0, out: 0, net: 0, inCount: 0, outCount: 0 };
+      // inPkr / outPkr / netPkr: the RUPEE payments only (kept for callers).
+      const summary = {
+        inPkr: pkr.in, outPkr: pkr.out, netPkr: pkr.net, inCount: pkr.inCount, outCount: pkr.outCount,
+        byCurrency, pendingCheques, basis: 'settled', currencies: Object.keys(byCurrency).sort(),
+      };
 
-      // Daily buckets — keep it client-friendly for charts.
-      const daily = await db('payments')
-        .whereBetween('payment_date', [fromDate, toDate])
-        .select(db.raw('payment_date::date as day'))
-        .select('type')
-        .sum({ amt: 'base_amount_pkr' })
-        .groupBy('day', 'type')
-        .orderBy('day', 'asc');
-
+      // Daily buckets, one row per day and currency.
       const byDay = new Map();
       for (const r of daily) {
-        const key = (r.day instanceof Date ? r.day.toISOString().slice(0, 10) : String(r.day).slice(0, 10));
-        if (!byDay.has(key)) byDay.set(key, { day: key, In: 0, Out: 0 });
-        if (r.type === 'receipt') byDay.get(key).In += parseFloat(r.amt) || 0;
-        else if (r.type === 'payment') byDay.get(key).Out += parseFloat(r.amt) || 0;
+        const key = `${String(r.day).slice(0, 10)}|${r.currency}`;
+        if (!byDay.has(key)) byDay.set(key, { day: String(r.day).slice(0, 10), currency: r.currency, In: 0, Out: 0 });
+        if (r.type === 'receipt') byDay.get(key).In += num(r.amt);
+        else if (r.type === 'payment') byDay.get(key).Out += num(r.amt);
       }
-      const days = Array.from(byDay.values()).map((b) => ({ ...b, Net: b.In - b.Out }));
+      const days = Array.from(byDay.values()).map((b) => ({ ...b, Net: num(b.In - b.Out) }));
 
-      // Top 10 receipts + top 10 payments for the body of the report
-      const topReceipts = await db('payments as p')
-        .leftJoin('receivables as r', 'p.linked_receivable_id', 'r.id')
-        .leftJoin('customers as c',   'r.customer_id', 'c.id')
-        .where('p.type', 'receipt')
-        .whereBetween('p.payment_date', [fromDate, toDate])
-        .select('p.payment_no', 'p.payment_date', 'p.base_amount_pkr', 'p.payment_method', 'c.id as customer_id')
-        .select(db.raw("COALESCE(c.name, 'Counterparty') as counterparty"))
-        .orderBy('p.base_amount_pkr', 'desc')
+      // The largest settled receipts / payments, each in its own currency.
+      const top = (type) => feedBase(db, { ...filters, type }).whereRaw(SETTLED)
+        .leftJoin('customers as c', 'r.customer_id', 'c.id')
+        .leftJoin('suppliers as s', 'pa.supplier_id', 's.id')
+        .select('p.payment_no', 'p.payment_date', 'p.amount', 'p.currency', 'p.base_amount_pkr', 'p.payment_method',
+          'c.id as customer_id', 's.id as supplier_id')
+        .select(db.raw(type === 'receipt'
+          ? "COALESCE(c.name, ls.buyer_name, 'Counterparty') as counterparty"
+          : "COALESCE(s.name, pa.linked_ref, 'Vendor') as counterparty"))
+        .orderByRaw('COALESCE(p.base_amount_pkr, p.amount) DESC')
         .limit(200);
-
-      const topPayments = await db('payments as p')
-        .leftJoin('payables as pay', 'p.linked_payable_id', 'pay.id')
-        .leftJoin('suppliers as s',  'pay.supplier_id', 's.id')
-        .where('p.type', 'payment')
-        .whereBetween('p.payment_date', [fromDate, toDate])
-        .select('p.payment_no', 'p.payment_date', 'p.base_amount_pkr', 'p.payment_method', 's.id as supplier_id')
-        .select(db.raw("COALESCE(s.name, pay.linked_ref, 'Vendor') as counterparty"))
-        .orderBy('p.base_amount_pkr', 'desc')
-        .limit(200);
+      const [topReceipts, topPayments] = await Promise.all([top('receipt'), top('payment')]);
+      const line = (r) => ({
+        paymentNo: r.payment_no,
+        date: r.payment_date,
+        counterparty: r.counterparty,
+        customerId: r.customer_id || null,
+        supplierId: r.supplier_id || null,
+        method: r.payment_method,
+        currency: String(r.currency || 'PKR').toUpperCase(),
+        amount: num(r.amount),
+        // Rupee lines only; a foreign line has its own amount + currency.
+        amountPkr: String(r.currency || 'PKR').toUpperCase() === 'PKR' ? num(r.amount) : null,
+      });
 
       return res.json({
         success: true,
@@ -1250,22 +1288,8 @@ const reportingController = {
           range: { from: fromDate.toISOString(), to: toDate.toISOString() },
           summary,
           daily: days,
-          topReceipts: topReceipts.map((r) => ({
-            paymentNo: r.payment_no,
-            date: r.payment_date,
-            counterparty: r.counterparty,
-            customerId: r.customer_id,
-            method: r.payment_method,
-            amountPkr: parseFloat(r.base_amount_pkr) || 0,
-          })),
-          topPayments: topPayments.map((r) => ({
-            paymentNo: r.payment_no,
-            date: r.payment_date,
-            counterparty: r.counterparty,
-            supplierId: r.supplier_id,
-            method: r.payment_method,
-            amountPkr: parseFloat(r.base_amount_pkr) || 0,
-          })),
+          topReceipts: topReceipts.map(line),
+          topPayments: topPayments.map(line),
         },
       });
     } catch (err) {
@@ -2392,8 +2416,11 @@ const reportingController = {
       const num = (v) => parseFloat(v) || 0;
 
       // Revenue + matched COGS (recognized when sold/shipped).
-      const exportRow = await db('export_orders').whereIn('status', ['Shipped', 'Arrived', 'Closed']).whereBetween('updated_at', [fromDate, toDate])
-        .sum({ rev: 'contract_value_pkr_locked' }).sum({ cogs: 'inventory_cogs_total_pkr' }).count({ cnt: 'id' }).first();
+      // Export: dated by the REVENUE DATE (D-16: BL date, else the Shipped
+      // transition), at the one definition's PKR revenue — not updated_at.
+      const exportRev = await exportRevenueInPeriod(db, { startDate: from, endDate: to });
+      const exportRow = { rev: exportRev.revenuePkr, cogs: exportRev.cogsPkr, cnt: exportRev.count };
+      const shippedIds = exportRev.rows.map((r) => r.id);
       const localRow = await db('local_sales').where('status', 'Completed').whereBetween('sale_date', [fromDate, toDate])
         .sum({ rev: 'total_amount' }).sum({ cogs: 'cogs_total_pkr' }).count({ cnt: 'id' }).first();
 
@@ -2416,7 +2443,7 @@ const reportingController = {
       // still in progress stay deferred (WIP), keeping the accrual matching clean.
       const sellingRow = await db('export_order_costs as eoc')
         .join('export_orders as eo', 'eoc.order_id', 'eo.id')
-        .whereIn('eo.status', ['Shipped', 'Arrived', 'Closed']).whereBetween('eo.updated_at', [fromDate, toDate])
+        .whereIn('eo.id', shippedIds.length ? shippedIds : [0])
         .where('eoc.amount', '>', 0)
         .whereRaw("COALESCE(eoc.notes,'') NOT ILIKE 'From business expense%'")
         .sum({ total: db.raw('CASE WHEN COALESCE(eoc.base_amount_pkr,0) > 0 THEN eoc.base_amount_pkr ELSE COALESCE(eoc.amount,0)*COALESCE(eoc.fx_rate,1) END') }).count({ cnt: 'eoc.id' }).first();
@@ -2444,9 +2471,7 @@ const reportingController = {
       const netMarginPct = revenue.totalPkr > 0 ? (netProfitPkr / revenue.totalPkr) * 100 : 0;
 
       // Per-sale detail (revenue, COGS, gross) — clickable.
-      const exportLines = await db('export_orders as o').leftJoin('customers as c', 'o.customer_id', 'c.id')
-        .whereIn('o.status', ['Shipped', 'Arrived', 'Closed']).whereBetween('o.updated_at', [fromDate, toDate])
-        .select('o.id', 'o.order_no', 'o.product_name', 'o.customer_id', db.raw('COALESCE(o.contract_value_pkr_locked,0) as rev'), db.raw('COALESCE(o.inventory_cogs_total_pkr,0) as cogs'), db.raw("COALESCE(c.name,'—') as customer")).orderByRaw('rev DESC').limit(200);
+      const exportLines = await exportLinesFor(db, exportRev.rows.slice(0, 200));
       const localLines = await db('local_sales as ls').leftJoin('customers as c', 'ls.customer_id', 'c.id')
         .where('ls.status', 'Completed').whereBetween('ls.sale_date', [fromDate, toDate])
         .select('ls.id', 'ls.sale_no', 'ls.lot_id', 'ls.item_name', 'ls.total_amount', 'ls.cogs_total_pkr', 'ls.customer_id', db.raw("COALESCE(c.name, ls.buyer_name, 'Walk-in') as customer")).orderBy('ls.total_amount', 'desc').limit(200);
