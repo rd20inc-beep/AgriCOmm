@@ -1,5 +1,6 @@
 const db = require('../../config/database');
 const uc = require('../../services/unitConversion');
+const { lotBagCount } = require('../../shared/units');
 const { isKattaItem } = require('../../shared/packagingTypes');
 // #9-scoping: READ-path warehouse restriction. Deliberately NOT applied to any
 // movement/posting function in this file — scoping a write would corrupt stock.
@@ -220,11 +221,9 @@ function reconcileRow(lot, ledgerTotalKg) {
   return {
     lotId: lot.id,
     lotNo: lot.lot_no,
-    systemQtyMT: systemBalanceKg / 1000,
     systemQtyKg: systemBalanceKg,
     ledgerQtyKg: ledgerBalanceKg,
     discrepancyKg,
-    discrepancyMT: discrepancyKg / 1000,
     isReconciled: Math.abs(discrepancyKg) < 1, // within 1 KG tolerance
   };
 }
@@ -505,14 +504,14 @@ const inventoryService = {
       input_unit: 'KG',
       input_qty: parsedQty,
       quantity_kg: direction * movementQtyKg,
-      quantity_bags: direction * Math.round(movementQtyKg / (parseFloat(lot.bag_weight_kg) || 50)),
+      quantity_bags: direction * lotBagCount(lot, movementQtyKg),
       rate_input_unit: 'KG',
       rate_input_value: parsedCost || null,
       rate_per_kg: parsedCost > 0 ? parsedCost : null,
       cost_impact: totalCost,
       currency: currency || 'PKR',
       balance_kg: newNetWeightKg,
-      balance_bags: Math.round(newNetWeightKg / (parseFloat(lot.bag_weight_kg) || 50)),
+      balance_bags: lotBagCount(lot, newNetWeightKg),
       remarks: notes || null,
       created_by: userId || null,
       // Phase 1 new columns

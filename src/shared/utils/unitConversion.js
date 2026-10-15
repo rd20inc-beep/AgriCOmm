@@ -108,3 +108,23 @@ export const mtToKg = (mt) => num(mt) * KG_PER_MT;
 export const kgToMt = (kg) => num(kg) / KG_PER_MT;
 export const perMtToPerKg = (ratePerMt) => num(ratePerMt) / KG_PER_MT;
 export const perKgToPerMt = (ratePerKg) => num(ratePerKg) * KG_PER_MT;
+
+// ─── A lot's bag (katta) weight ───
+// Twin of lotBagKg in backend/src/shared/units.js: bag_weight_kg, then
+// bag_size_kg, then the 50 kg standard katta. Every kg ↔ katta/bag figure for a
+// lot (or a group of lots — convert each lot with its OWN weight, then sum)
+// goes through this, never a literal 50.
+export function lotBagKg(lot) {
+  if (!lot) return DEFAULT_KATTA_KG;
+  const w = num(lot.bagWeightKg ?? lot.bag_weight_kg);
+  if (w > 0) return w;
+  const s = num(lot.bagSizeKg ?? lot.bag_size_kg);
+  if (s > 0) return s;
+  return DEFAULT_KATTA_KG;
+}
+
+// Σ fromKg over several lots, each converted with its own bag weight — the
+// figure a grouped row shows. pickKg(lot) returns the KG to convert.
+export function sumLotsFromKg(lots, pickKg, unit) {
+  return (lots || []).reduce((s, l) => s + fromKg(pickKg(l), unit, lotBagKg(l)), 0);
+}

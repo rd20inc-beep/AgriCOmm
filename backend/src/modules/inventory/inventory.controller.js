@@ -280,7 +280,8 @@ const inventoryController = {
           entity: entity || 'mill',
           warehouseId: warehouse_id || null,
           qty: parseFloat(qty),
-          unit: unit || 'MT',
+          // qty is KG (mig 228); 'MT' here only mislabelled a KG figure.
+          unit: unit || 'KG',
           productId: product_id || null,
           batchRef: batch_ref || null,
           costPerUnit: parseFloat(cost_per_unit) || 0,

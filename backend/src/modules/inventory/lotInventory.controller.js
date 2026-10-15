@@ -7,6 +7,7 @@
 const db = require('../../config/database');
 const { supplierRefusal } = require('../../shared/partyGate');
 const uc = require('../../services/unitConversion');
+const { lotBagKg } = require('../../shared/units');
 const accountingService = require('../../services/accountingService');
 // Shared lot-number generators — keeps the Purchase Lot drawer and the
 // Add Vehicle flow on the same SUP-VARIETY-YYMMDD-SEQ format.
@@ -120,7 +121,7 @@ function addDays(dateValue, days) {
 /** Compute derived unit fields from KG-based lot */
 function enrichLot(lot) {
   if (!lot) return lot;
-  const bw = parseFloat(lot.bag_weight_kg) || 50;
+  const bw = lotBagKg(lot); // the lot's own bag weight, not a flat 50 (INV-31)
   const rawNetKg = parseFloat(lot.net_weight_kg) || 0;
   const netKg = rawNetKg > 0 ? rawNetKg : (parseFloat(lot.qty) || 0); // qty is KG (Phase 5c)
   const availKg = parseFloat(lot.available_qty) || 0; // KG
@@ -1619,7 +1620,7 @@ module.exports = {
         }
 
         // ── Landed cost of the added purchase (same math as createPurchaseLot) ──
-        const bagWt = parseFloat(bag_weight_kg) || parseFloat(lot.bag_weight_kg) || 50;
+        const bagWt = parseFloat(bag_weight_kg) || lotBagKg(lot);
         const addNetKg = uc.toKg(quantity_input, quantity_unit, bagWt);
         const addRatePerKg = uc.rateToPerKg(rate_input, rate_unit, bagWt);
         const addBags = inputTotalBags
@@ -1914,7 +1915,7 @@ module.exports = {
       const { lot_id } = req.params;
       const {
         transaction_type, transaction_date,
-        quantity_input, quantity_unit = 'kg', bag_weight_kg = 50,
+        quantity_input, quantity_unit = 'kg', bag_weight_kg,
         warehouse_from_id, warehouse_to_id,
         reference_module, reference_id, reference_no,
         rate_input, rate_unit,
@@ -1937,12 +1938,13 @@ module.exports = {
         return res.status(400).json({ success: false, message: `"${transaction_type}" cannot be recorded from the lot screen.` });
       }
 
-      const bagWt = parseFloat(bag_weight_kg) || 50;
-      const qtyKg = uc.toKg(quantity_input, quantity_unit, bagWt);
-
       const result = await db.transaction(async (trx) => {
         const lot = await trx('inventory_lots').where({ id: lot_id }).first();
         if (!lot) { const e = new Error('Lot not found'); e.status = 404; throw e; }
+        // A katta/bag quantity converts with the weight the caller names, else
+        // the lot's OWN bag weight — a 25 kg lot's "10 bags" is 250 kg, not 500.
+        const bagWt = parseFloat(bag_weight_kg) || lotBagKg(lot);
+        const qtyKg = uc.toKg(quantity_input, quantity_unit, bagWt);
         const scope = await whScope.resolveWarehouseScope(req);
         if (!whScope.isWarehouseInScope(scope, lot.warehouse_id)) {
           const e = new Error('This lot is outside your warehouses.'); e.status = 403; throw e;
@@ -2003,7 +2005,7 @@ module.exports = {
       const { id } = req.params;
       // #9-scoping: same rule as getLotDetail — a lot outside the caller's
       // warehouses must not have its ledger readable by direct id.
-      const lot = await db('inventory_lots').where({ id }).select('id', 'warehouse_id').first();
+      const lot = await db('inventory_lots').where({ id }).select('id', 'warehouse_id', 'bag_weight_kg', 'bag_size_kg').first();
       if (!lot) return res.status(404).json({ success: false, message: 'Lot not found.' });
       const scope = await whScope.resolveWarehouseScope(req);
       if (whScope.denyOutOfScope(res, scope, lot.warehouse_id)) return undefined;
@@ -2013,8 +2015,9 @@ module.exports = {
         .orderBy('created_at', 'desc');
 
       // Enrich with unit equivalents
+      // Katta equivalents use the lot's own bag weight (INV-31).
+      const bw = lotBagKg(lot);
       const enriched = txns.map(t => {
-        const bw = 50; // default
         const absKg = Math.abs(parseFloat(t.quantity_kg) || 0);
         return {
           ...t,
