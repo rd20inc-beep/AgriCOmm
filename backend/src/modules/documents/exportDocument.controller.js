@@ -2,6 +2,7 @@ const db = require('../../config/database');
 const { maskBank } = require('../../utils/bankMasking');
 const { userHasPermission } = require('../../middleware/rbac');
 const auditService = require('../admin/audit.service');
+const { postShipmentProblem, POST_SHIPMENT_GENERATED, SHIPPED_STATUSES } = require('../exportOrders/documentGate');
 
 // Legacy hardcoded bank — used ONLY as a last resort when no bank account is
 // configured, so existing installs keep rendering a bank block until an admin
@@ -187,6 +188,14 @@ const exportDocumentController = {
       }
 
       const { order, containers, debitNotes, settings, items, packingWeight, bankAccount } = data;
+
+      // Post-shipment documents (Certificate / Statement of Origin, covering
+      // letters) exist only once the goods have sailed (P3-17 / EXP-34): they
+      // used to be generatable, and sendable, at any stage.
+      const postShip = postShipmentProblem(order, docType, 'generated');
+      if (postShip) {
+        return res.status(409).json({ success: false, code: 'POST_SHIPMENT_DOCUMENT', message: postShip });
+      }
 
       // Single source of truth for HS code: first item → order (legacy) →
       // settings default. Item-level wins because that's where the user
@@ -769,11 +778,11 @@ const exportDocumentController = {
    * GET /api/export-orders/:id/documents/available
    * Returns the catalogue of documents for an order.
    *
-   * Nothing here is gated: every document generates from whatever data the
-   * order has, leaving the fields that are not known yet blank. `availableFrom`
-   * is the workflow step at which a document normally becomes relevant, and is
-   * used only for the hint under a card in the Document Center — it does not
-   * withhold anything.
+   * Every document generates from whatever data the order has, leaving the
+   * fields that are not known yet blank — except the post-shipment documents,
+   * which are not ready (lockedReason) until the order has shipped.
+   * `availableFrom` is the workflow step at which a document normally becomes
+   * relevant, used for the hint under a card in the Document Center.
    */
   async available(req, res) {
     try {
@@ -817,6 +826,16 @@ const exportDocumentController = {
       // offered: it exists only once a claim has actually been raised, and an
       // empty one would say nothing to the buyer. Everything else generates with
       // blanks, which is why the rest of this list is unconditional.
+      // Post-shipment documents wait for the order to ship (EXP-34).
+      if (!SHIPPED_STATUSES.has(order.status)) {
+        for (const d of docs) {
+          if (POST_SHIPMENT_GENERATED.has(d.key)) {
+            d.ready = false;
+            d.lockedReason = 'After shipment — available once the order is Shipped';
+          }
+        }
+      }
+
       const hasDebitNote = await db('export_debit_notes')
         .where({ order_id: order.id, status: 'Issued' }).first('id');
       if (hasDebitNote) {

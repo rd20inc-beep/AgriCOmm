@@ -98,7 +98,9 @@ describe('re-upload replaces the live file', () => {
     expect(row(1)).toMatchObject({ status: 'Superseded', is_latest: false });
     expect(fs.existsSync(before)).toBe(true);
     expect(db.tables.document_store).toHaveLength(2);
-    expect(db.tables.document_checklists[0]).toMatchObject({ document_id: fresh.id, is_fulfilled: true });
+    // The checklist follows the new file — which is live but not yet checked
+    // by a second person, so the export document gate is not met (D-17).
+    expect(db.tables.document_checklists[0]).toMatchObject({ document_id: fresh.id, is_fulfilled: false });
 
     // Live list shows only the new one; the history shows the old one + who replaced it.
     const live = await docs.getDocumentsByRef('export_order', 5);
