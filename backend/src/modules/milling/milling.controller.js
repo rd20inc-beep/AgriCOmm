@@ -19,22 +19,15 @@ const BATCH_EXTRA_COST_KEYS = ['bagsTotal', 'mastersTotal', 'polytheneTotal'];
 const batchPackagingService = require('./batchPackaging.service');
 const {
   yieldMode, batchHasOutputLots, checkTransition, releaseBatchSources, commitLotToBatch, TRANSITIONS,
+  isMillableLot,
 } = require('./batchLifecycle');
 const { postMillingCompletion, hasPostedCompletion, sourceLotValuesByAccount, proportionalInputSplit } = require('./millingCompletionJournal');
 
-// Can this inventory lot be fed into a milling/blend batch? Mirrors the
-// frontend NON_MILLABLE_CATEGORIES (src/utils/lotCategory.js): any rice form is
-// millable — raw paddy, finished rice, and re-blendable byproduct fractions
-// (broken grades / powder / sweeping / sortex) — but NOT non-rice residue
-// (bran, husk) or packaging.
-function isMillableLot(lot) {
-  if (lot.type === 'raw' || lot.type === 'finished') return true;
-  if (lot.type === 'byproduct') {
-    const name = (lot.item_name || '').toLowerCase();
-    return !(name.includes('bran') || name.includes('husk'));
-  }
-  return false; // packaging / unknown
-}
+// isMillableLot (batchLifecycle) mirrors the frontend NON_MILLABLE_CATEGORIES
+// (src/utils/lotCategory.js): any rice form is millable — raw paddy, finished
+// rice, and re-blendable byproduct fractions (broken grades / powder / sweeping
+// / sortex) — but NOT non-rice residue (bran, husk) or packaging. It lives
+// beside commitLotToBatch, which enforces it on every path.
 
 /** Resolve batch param to numeric ID (supports both "9" and "M-226") */
 async function resolveBatchId(idParam) {
@@ -521,9 +514,12 @@ const millingController = {
       let resolvedMillId = mill_id ? parseInt(mill_id) : null;
       if (!resolvedMillId) {
         let fallback = null;
+        // mills.status: 'Active' / 'Maintenance' / 'Inactive' — there is no
+        // is_active column (MIL-43: that query always failed and the catch fell
+        // through to the lowest-id mill of ANY status).
         try {
-          fallback = await db('mills').where({ is_active: true }).orderBy('id', 'asc').first('id');
-        } catch (_) { /* mills table or column may be unavailable in some envs */ }
+          fallback = await db('mills').where({ status: 'Active' }).orderBy('id', 'asc').first('id');
+        } catch (_) { /* mills table may be unavailable in some envs */ }
         if (!fallback) {
           try { fallback = await db('mills').orderBy('id', 'asc').first('id'); } catch (_) { /* ignore */ }
         }
@@ -739,6 +735,7 @@ const millingController = {
               batchId: batch.id,
               lotId: b.lot.id,
               qtyKg: b.qty,
+              userId: req.user.id,
               row: {
                 lot_type: b.lot_type,
                 unit_cost_pkr: b.unit_cost_pkr,
@@ -902,7 +899,7 @@ const millingController = {
           updated_at: trx.fn.now(),
         }).returning('*');
         // A rejected batch will never mill — give its source lots back.
-        await releaseBatchSources(trx, id);
+        await releaseBatchSources(trx, id, { userId: req.user.id });
         return row;
       });
 
@@ -944,7 +941,7 @@ const millingController = {
         const updates = { status: TRANSITIONS[action].to, updated_at: trx.fn.now() };
         if (variance && varianceByAction[action].includes(variance)) updates.variance_status = variance;
         const [row] = await trx('milling_batches').where({ id }).update(updates).returning('*');
-        const released = action === 'cancel' ? await releaseBatchSources(trx, id) : [];
+        const released = action === 'cancel' ? await releaseBatchSources(trx, id, { userId: req.user?.id }) : [];
         return { batch: row, releasedLotIds: released };
       });
       return res.json({ success: true, data: result });
@@ -1956,6 +1953,18 @@ const millingController = {
           message: 'This batch is already milled & yielded — its raw trucks are locked. Record the extra rice as a new batch (or reverse the yield first to change the raw input).',
         });
       }
+      // A batch milled from source lots takes its rice from those lots: yield
+      // consumes the committed lot qty only. A truck here used to replace
+      // raw_qty_kg with the truck total and create a separate batch raw lot
+      // that yield never consumes — stranded raw stock and a wrong yield %
+      // (MIL-15). The truck belongs on the purchase lot, or on a new batch.
+      const sourceLot = await db('batch_source_lots').where({ batch_id: batchId }).first('id');
+      if (sourceLot) {
+        return res.status(409).json({
+          success: false,
+          message: 'This batch is milled from purchase lots, so it takes no trucks. Add the truck to its purchase lot (Lot ▸ Vehicles), or record the rice as a new batch.',
+        });
+      }
 
       const vehicle = await db.transaction(async (trx) => {
         // Accept either weight_kg (canonical) or legacy weight_mt — store KG (Phase 5c).
@@ -2557,7 +2566,7 @@ async function deleteBatchTx(trx, batchId, userId) {
     // and hard-reserved when the batch was created but (for a non-Completed
     // batch) never consumed — otherwise they'd stay reserved and vanish
     // from the New-Batch picker forever.
-    await releaseBatchSources(trx, batchId);
+    await releaseBatchSources(trx, batchId, { userId });
     await trx('batch_source_lots').where({ batch_id: batchId }).del();
 
     await trx('milling_vehicle_arrivals').where({ batch_id: batchId }).del();

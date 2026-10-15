@@ -43,6 +43,7 @@ function mockBuilder(name) {
     orWhereNull() { return b; },
     orderBy() { return b; },
     orderByRaw() { return b; },
+    forUpdate() { return b; },
     select() { return b; },
     join() { return b; },
     rows() {
@@ -103,10 +104,35 @@ jest.mock('../services/accountingService', () => ({
   createJournal: jest.fn(async (trx, opts) => { mockJournals.push({ kind: 'journal', ...opts }); return { id: mockJournals.length }; }),
   postJournal: jest.fn(async () => {}),
 }));
+// postMovement stand-in: moves the quantity columns the way the real engine
+// does (P3-01 — the controller no longer writes them itself) and records the
+// movement for assertions.
+const mockMovements = [];
+const MOCK_INBOUND = ['purchase_receipt', 'receipt_correction_in', 'lot_merge'];
+function mockApplyMovement(m) {
+  const lot = (mockTables.inventory_lots || []).find((l) => String(l.id) === String(m.lotId));
+  const sign = MOCK_INBOUND.includes(m.movementType) ? 1 : -1;
+  const n = (v) => parseFloat(v) || 0;
+  lot.qty = n(lot.qty) + sign * m.qty;
+  lot.net_weight_kg = n(lot.net_weight_kg) + sign * m.qty;
+  lot.gross_weight_kg = lot.net_weight_kg;
+  lot.available_qty = lot.qty - n(lot.reserved_qty) - n(lot.milling_reserved_qty);
+  if (sign > 0) {
+    lot.received_net_weight_kg = n(lot.received_net_weight_kg) + m.qty;
+    if (n(m.costPerUnit) > 0) lot.cost_per_unit = m.costPerUnit;
+  }
+  mockMovements.push(m);
+  return { lot_id: lot.id, movement_type: m.movementType, qty: m.qty };
+}
 jest.mock('../modules/inventory/inventory.service', () => ({
   generateRiceLotNo: jest.fn(async () => 'SUP-RICE-261005-01'),
   generateLotNo: jest.fn(async () => 'LOT-1'),
   propagateLotCostToBatches: jest.fn(async () => ({ affectedBatches: 0 })),
+  postMovement: jest.fn(async (trx, m) => mockApplyMovement(m)),
+  MOVEMENT_TYPES: {
+    PURCHASE_RECEIPT: 'purchase_receipt', RECEIPT_CORRECTION_IN: 'receipt_correction_in',
+    RECEIPT_CORRECTION_OUT: 'receipt_correction_out', LOT_SPLIT: 'lot_split', LOT_MERGE: 'lot_merge',
+  },
 }));
 let mockDocSeq = 0;
 jest.mock('../utils/docNumber', () => ({ nextDocNo: jest.fn(async () => `TXN-${++mockDocSeq}`) }));
