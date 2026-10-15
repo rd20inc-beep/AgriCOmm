@@ -352,9 +352,9 @@ export default function PrintableReports() {
           <PnlReportView data={data} companyName={companyName} range={range} preset={preset} />
         ) : reportType === 'cashflow' && data.summary ? (
           <CashflowReportView data={data} companyName={companyName} range={range} preset={preset} />
-        ) : reportType === 'ar_aging' && data.buckets ? (
+        ) : reportType === 'ar_aging' && data.byCurrency ? (
           <AgingReportView data={data} companyName={companyName} kind="receivable" />
-        ) : reportType === 'ap_aging' && data.buckets ? (
+        ) : reportType === 'ap_aging' && data.byCurrency ? (
           <AgingReportView data={data} companyName={companyName} kind="payable" />
         ) : reportType === 'purchase_ledger' && data.rows && data.totals ? (
           <PurchaseLedgerView data={data} companyName={companyName} range={range} />

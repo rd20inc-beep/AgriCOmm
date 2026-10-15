@@ -64,6 +64,8 @@ const OWNER_MODAL_SCREENS = {
   'modules/localSales/components/SaleReturnsPanel.jsx': ['post', '/local-sales/:id/returns'],
   'shared/components/VoidPurchaseButton.jsx': ['post', '/lot-inventory/lots/:id/void'],
   'modules/milling/pages/MillingBatchDetail.jsx': ['post', '/milling/batches/:id/reverse-yield'],
+  // D-1: only the Owner reopens a closed accounting month.
+  'modules/finance/pages/Periods.jsx': ['put', '/accounting/periods/:id/reopen'],
 };
 
 function frontendFilesCalling(dir, needle, out = []) {

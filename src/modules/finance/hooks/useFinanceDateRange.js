@@ -32,9 +32,46 @@ function isoDateOnly(d) {
   return toLocalISODate(d);
 }
 
-function resolveRange(key) {
+// The fiscal year (owner decision D-1): the Pakistani tax year, 1 July –
+// 30 June. Returns the July that starts the fiscal year `d` falls in.
+export function fiscalYearStart(d = new Date()) {
+  const y = d.getMonth() >= 6 ? d.getFullYear() : d.getFullYear() - 1;
+  return new Date(y, 6, 1);
+}
+
+// Exported for the tests; `now` is injectable for the same reason.
+export function resolveRange(key, now = new Date()) {
   if (!key) return null;
-  const now = new Date();
+  const custom = String(key).match(/^(\d{4})-(\d{2})-(\d{2})\.\.(\d{4})-(\d{2})-(\d{2})$/);
+  if (custom) {
+    const [, y1, m1, d1, y2, m2, d2] = custom.map(Number);
+    const from = new Date(y1, m1 - 1, d1);
+    const to = new Date(y2, m2 - 1, d2);
+    if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) return null;
+    return from <= to ? { from: startOfDay(from), to: endOfDay(to) } : { from: startOfDay(to), to: endOfDay(from) };
+  }
+  switch (key) {
+    case 'last_month': {
+      const first = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const last  = new Date(now.getFullYear(), now.getMonth(), 0);
+      return { from: startOfDay(first), to: endOfDay(last) };
+    }
+    case 'last_quarter': {
+      const q = Math.floor(now.getMonth() / 3) - 1;
+      const first = new Date(now.getFullYear(), q * 3, 1);
+      const last  = new Date(now.getFullYear(), q * 3 + 3, 0);
+      return { from: startOfDay(first), to: endOfDay(last) };
+    }
+    case 'fy':
+    case 'last_fy': {
+      const start = fiscalYearStart(now);
+      if (key === 'last_fy') start.setFullYear(start.getFullYear() - 1);
+      const end = new Date(start.getFullYear() + 1, 6, 0); // 30 June
+      return { from: startOfDay(start), to: endOfDay(end) };
+    }
+    default:
+      break;
+  }
   switch (key) {
     case 'today': {
       return { from: startOfDay(now), to: endOfDay(now) };

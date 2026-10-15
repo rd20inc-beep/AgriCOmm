@@ -33,6 +33,7 @@ const listHook = (data) => () => ({ data, isLoading: false, isError: false, refe
 const mut = () => ({ mutateAsync: vi.fn(), mutate: vi.fn(), isPending: false });
 vi.mock('../../../api/queries', () => ({
   useReceivables: listHook(FIX.receivables),
+  useReceivablesSummary: listHook({ asOf: '2026-10-16', byCurrency: {}, collected: {}, openCount: 0 }),
   usePayables: listHook(FIX.payables),
   usePurchases: listHook(FIX.purchases),
   useUpcoming: listHook(FIX.upcoming),
