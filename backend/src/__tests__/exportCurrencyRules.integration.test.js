@@ -100,9 +100,10 @@ d('export profit + currency rules (DB-gated)', () => {
     await recv('UB', { order_id: U.id, type: 'Balance', currency: 'USD', expected_amount: 8300, received_amount: 0, outstanding: 8300, status: 'Pending', due_date: '2092-04-04', fx_rate: 280 });
     await recv('KA', { order_id: K.id, type: 'Advance', currency: 'PKR', expected_amount: 1000000, received_amount: 1000000, outstanding: 0, status: 'Paid', due_date: '2092-01-20' });
     await recv('DA', { order_id: D.id, type: 'Advance', currency: 'USD', expected_amount: 500, received_amount: 500, outstanding: 0, status: 'Paid', due_date: '2092-01-20' });
-    // Overdue today, one per currency (for the alerts).
+    // Overdue today, one per currency (for the alerts). Advances: under D-15 a
+    // balance on an order that has not sailed is not yet due.
     await recv('OU', { order_id: N.id, type: 'Advance', currency: 'USD', expected_amount: 700, received_amount: 0, outstanding: 700, status: 'Pending', due_date: '2020-01-01' });
-    await recv('OP', { order_id: K.id, type: 'Balance', currency: 'PKR', expected_amount: 90000, received_amount: 0, outstanding: 90000, status: 'Pending', due_date: '2020-01-01' });
+    await recv('OP', { order_id: K.id, type: 'Advance', currency: 'PKR', expected_amount: 90000, received_amount: 0, outstanding: 90000, status: 'Pending', due_date: '2020-01-01' });
 
     // Payments in April 2092: settled USD + PKR receipts; a reversed payment,
     // an uncleared cheque and an unconfirmed receipt that are NOT cash flow.

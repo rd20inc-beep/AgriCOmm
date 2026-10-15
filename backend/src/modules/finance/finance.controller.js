@@ -1113,7 +1113,9 @@ const financeController = {
           total: curs.length === 1 ? totals[curs[0]] : null,
         };
       };
-      const moneyAlert = (f, base) => ({ ...base, count: f.count, totals: f.totals, total: f.total });
+      // totalsByCurrency: the same map under the name the D-15 golden test and
+      // earlier clients read.
+      const moneyAlert = (f, base) => ({ ...base, count: f.count, totals: f.totals, totalsByCurrency: f.totals, total: f.total });
 
       // Overdue receivables (money owed to us, past due).
       // D-15 (kpi/overdue.js): past the EFFECTIVE due date (an export balance
