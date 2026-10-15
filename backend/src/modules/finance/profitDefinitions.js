@@ -60,8 +60,10 @@
  * the period by sale / movement / expense date:
  *
  *   - local sales of a company mill-output lot (entity 'mill', type finished or
- *     byproduct): revenue total_amount, cost cogs_total_pkr (the COGS the sale
- *     posted to 5000). A sale of such a lot with no COGS is left out and counted.
+ *     byproduct): revenue total_amount, cost cogs_total_pkr — locked at
+ *     confirmation from the same figure the sale's COGS journal posted to 5000
+ *     (lockSaleCOGS, P3-12), so this cost equals the GL's. A sale of such a lot
+ *     with no COGS is left out and counted.
  *   - transfers of mill output to export (lot_transactions warehouse_transfer_out
  *     tied to internal_transfers): revenue = kg × the transfer price, cost =
  *     kg × the moved lot's cost per kg.

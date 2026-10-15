@@ -14,6 +14,7 @@ const { redactForUser, canSeeCost } = require('../../utils/costVisibility');
 const { batchOutputValues } = require('./batchOutputValues');
 const { rawPurchaseToBook } = require('./rawPurchasePayable');
 const { assertBatchRawCostEditable, assertBatchOutputsUnsold } = require('./costEditLocks');
+const { refreshBatchVariance } = require('./qualityVariance');
 // Packing-cost subtotals carry no "cost" in their names.
 const BATCH_EXTRA_COST_KEYS = ['bagsTotal', 'mastersTotal', 'polytheneTotal'];
 const batchPackagingService = require('./batchPackaging.service');
@@ -65,15 +66,22 @@ async function generateBatchNo(trx) {
 
 // Whitelist + coerce the per-vehicle quality payload so we don't store
 // arbitrary keys in the JSONB column. Returns null when nothing usable.
+// The per-truck grade split (B1/B2/B3/C.S/short grain/Choba/N.B/O.V) is
+// stored un-suffixed (b1, csr, short_grain …) — the key the vehicle drawers
+// send and every reader looks up. It used to be missing here, so typed grade
+// percentages were silently dropped (P3-16 / MIL-14).
+const VEHICLE_GRADE_KEYS = ['b1', 'b2', 'b3', 'csr', 'short_grain', 'cobba', 'nb', 'ov'];
 const VEHICLE_QUALITY_KEYS = [
   'moisture', 'broken', 'foreign_matter', 'chalky', 'discoloration',
   'purity', 'grain_size', 'price_per_mt', 'price_per_kg', 'notes',
+  ...VEHICLE_GRADE_KEYS,
 ];
 function sanitizeVehicleQuality(raw) {
   if (!raw || typeof raw !== 'object') return null;
   const out = {};
   for (const k of VEHICLE_QUALITY_KEYS) {
-    const v = raw[k];
+    // A grade may also arrive in the sample-table spelling (b1_pct …).
+    const v = raw[k] ?? (VEHICLE_GRADE_KEYS.includes(k) ? raw[`${k}_pct`] : undefined);
     if (v == null || v === '') continue;
     if (k === 'notes') {
       out[k] = String(v).slice(0, 500);
@@ -1105,7 +1113,11 @@ const millingController = {
           }
         }
 
-        return { sample, variance };
+        // The stored sample-vs-arrival variance the QC panel, the Quality
+        // Comparison list and the dashboard KPI read (P3-16).
+        const variancePct = await refreshBatchVariance(trx, id);
+
+        return { sample, variance, variancePct };
       });
 
       return res.json({
@@ -1113,6 +1125,7 @@ const millingController = {
         data: {
           qualitySample: result.sample,
           variance: result.variance,
+          variancePct: result.variancePct,
         },
       });
     } catch (err) {
@@ -2138,8 +2151,9 @@ const millingController = {
           total_bags: totalBags,
           arrival_date: arrival_date || existing.arrival_date,
           notes: notes !== undefined ? (notes || null) : existing.notes,
+          // (milling_vehicle_arrivals has no updated_at column — writing one
+          // made every Edit Vehicle fail with a 500.)
           quality_json: cleanQuality,
-          updated_at: trx.fn.now(),
         });
 
         // Adjust inventory by the weight delta only.
@@ -2729,3 +2743,4 @@ async function reverseNetJournal(trx, {
 
 module.exports = millingController;
 module.exports.deleteBatchTx = deleteBatchTx;
+module.exports.sanitizeVehicleQuality = sanitizeVehicleQuality;

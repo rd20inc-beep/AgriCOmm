@@ -13,6 +13,7 @@ const mockState = { rows: {}, updates: [], inserts: [] };
 function mockBuilder(table) {
   const b = {
     where: () => b, whereNot: () => b, whereIn: () => b, whereNotIn: () => b, forUpdate: () => b,
+    whereRaw: () => b, whereNull: () => b, sum: () => b, // pending-hold lookup (P3-12)
     orderBy: () => b, select: () => b, returning: async () => [{ id: 99 }],
     first: async () => mockState.rows[table],
     update: async (patch) => { mockState.updates.push({ table, patch }); return 1; },

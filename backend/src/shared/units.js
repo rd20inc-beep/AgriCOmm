@@ -53,8 +53,38 @@ const roundKg = (kg) => roundTo(kg, 3);
 const roundMt = (mt) => roundTo(mt, 3);
 const roundRate = (rate) => roundTo(rate, 4);
 
+// ─── Bags (katta) ───
+// A lot's quantity is KG; its bag count is DERIVED from the lot's own bag
+// weight, never from a hard-coded 50: a 25 kg-packed lot of 21,825 kg is 873
+// bags, not 437 katta. 50 kg (the standard jute katta) is only the fallback for
+// a lot that carries no bag spec at all. Same precedence as stockSql.packKg:
+// bag_weight_kg, then bag_size_kg, then the default. Reads snake_case DB rows
+// and camelCase API rows alike.
+const DEFAULT_BAG_KG = 50;
+
+function lotBagKg(lot) {
+  if (!lot) return DEFAULT_BAG_KG;
+  const w = toNum(lot.bag_weight_kg ?? lot.bagWeightKg);
+  if (w > 0) return w;
+  const s = toNum(lot.bag_size_kg ?? lot.bagSizeKg);
+  if (s > 0) return s;
+  return DEFAULT_BAG_KG;
+}
+
+/** KG → bags of `bagKg` each, exact (the caller rounds). 0 for a missing size. */
+function kgToBagCount(kg, bagKg = DEFAULT_BAG_KG) {
+  const b = toNum(bagKg);
+  return b > 0 ? toNum(kg) / b : 0;
+}
+
+/** Whole bags a lot's `kg` fills, using the lot's own bag weight. */
+function lotBagCount(lot, kg) {
+  return Math.round(kgToBagCount(kg, lotBagKg(lot)));
+}
+
 module.exports = {
   KG_PER_MT,
   mtToKg, kgToMt, perMtToPerKg, perKgToPerMt,
   roundKg, roundMt, roundRate,
+  DEFAULT_BAG_KG, lotBagKg, kgToBagCount, lotBagCount,
 };

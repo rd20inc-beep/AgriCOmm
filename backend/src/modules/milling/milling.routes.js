@@ -26,6 +26,8 @@ const schemas = require('../../middleware/schemas');
 const ownerApproval = require('../../middleware/ownerApproval');
 const aiService = require('../ai/ai.service');
 const { pickBatchEdits } = require('./batchLifecycle');
+const { listRicePurchases } = require('./ricePurchasesLedger');
+const { listQualityComparison } = require('./qualityVariance');
 const { batchYielded, assertBatchOutputsUnsold } = require('./costEditLocks');
 const { reverseExpenseTrail, reverseStatutoryJournal, remittedStatutoryForRun, mirrorJournals } = require('./payrollReversal');
 const { buildLastPrices, findImplausiblePrices, implausiblePriceMessage } = require('./byproductPrices');
@@ -35,6 +37,18 @@ const { buildLastPrices, findImplausiblePrices, implausiblePriceMessage } = requ
 // =============================================================================
 
 router.get('/batches', authorize('milling', 'view'), controller.list);
+// Quality Comparison: every batch's latest sample / arrival analysis and its
+// stored variance in one call (was 50 parallel detail fetches, MIL-36).
+// Agreed prices are nulled for cost-blind roles (e.g. the QC Analyst).
+router.get('/quality-comparison', authorize('milling', 'view'), redactCostInResponses(), async (req, res) => {
+  try {
+    const batches = await listQualityComparison(db, req.query);
+    return res.json({ success: true, data: { batches } });
+  } catch (err) {
+    console.error('Quality comparison list error:', err);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
 // Service-milling (toll/job-work) dashboard feed — gated by the dedicated
 // service_milling.view perm (Milling/Inventory roles), not the generic milling perm.
 router.get('/service-batches', authorize('service_milling', 'view'), controller.listServiceBatches);
@@ -174,104 +188,10 @@ router.post(
 // supplier_id, product_id.
 router.get('/rice-purchases', authorize('milling', 'view'), requireCostVisibility, async (req, res) => {
   try {
-    const { from_date, to_date, supplier_id, product_id, limit = 500 } = req.query;
-    let q = db('milling_vehicle_arrivals as va')
-      .leftJoin('milling_batches as mb', 'va.batch_id', 'mb.id')
-      .leftJoin('suppliers as s', 'mb.supplier_id', 's.id')
-      .leftJoin('products as p', 'mb.product_id', 'p.id')
-      // The raw rice lot for this batch (one per batch with our new
-      // merge logic) — picked deterministically.
-      .leftJoin(
-        db('inventory_lots')
-          .select('lot_no', 'batch_ref', 'id as lot_id')
-          .where({ type: 'raw', entity: 'mill' })
-          .as('lot'),
-        'lot.batch_ref', db.raw("'batch-' || mb.id")
-      )
-      // Arrival analysis carries the agreed price/MT + moisture/broken for the
-      // batch (entered after the truck arrives). The ledger surfaces these —
-      // they live in milling_quality_samples, not the vehicle row's quality_json.
-      .leftJoin(
-        db.raw(`(SELECT DISTINCT ON (batch_id) batch_id, moisture, broken, price_per_kg, price_per_mt
-                 FROM milling_quality_samples WHERE analysis_type = 'arrival'
-                 ORDER BY batch_id, created_at DESC) as aq`),
-        'aq.batch_id', 'mb.id'
-      )
-      .select(
-        'va.id',
-        'va.vehicle_no',
-        'va.driver_name',
-        'va.driver_phone',
-        'va.weight_kg',
-        'va.bag_size_kg',
-        'va.total_bags',
-        'va.arrival_date',
-        'va.quality_json',
-        'va.notes',
-        'va.created_at',
-        'mb.id as batch_id',
-        'mb.batch_no',
-        'mb.status as batch_status',
-        's.id as supplier_id',
-        's.name as supplier_name',
-        'p.id as product_id',
-        'p.code as product_code',
-        'p.name as product_name',
-        'lot.lot_no',
-        'lot.lot_id',
-        'aq.moisture as aq_moisture',
-        'aq.broken as aq_broken',
-        'aq.price_per_kg as aq_price_per_kg',
-        'aq.price_per_mt as aq_price_per_mt'
-      )
-      .orderBy('va.arrival_date', 'desc')
-      .orderBy('va.created_at', 'desc')
-      .limit(Math.min(parseInt(limit, 10) || 500, 2000));
-
-    if (from_date) q = q.where('va.arrival_date', '>=', from_date);
-    if (to_date) q = q.where('va.arrival_date', '<=', to_date);
-    if (supplier_id) q = q.where('mb.supplier_id', supplier_id);
-    if (product_id) q = q.where('mb.product_id', product_id);
-
-    const rawRows = await q;
-    // Merge the arrival analysis (price/MT, moisture, broken) into quality_json so
-    // the ledger's Price/MT, Value and Moisture columns populate. A value already
-    // on the vehicle row's own quality_json wins.
-    const rows = rawRows.map((r) => {
-      const qj = r.quality_json || {};
-      const { aq_moisture, aq_broken, aq_price_per_mt, aq_price_per_kg, ...rest } = r;
-      return {
-        ...rest,
-        quality_json: {
-          ...qj,
-          price_per_mt: qj.price_per_mt ?? (aq_price_per_mt != null ? parseFloat(aq_price_per_mt) : null),
-          price_per_kg: qj.price_per_kg ?? (aq_price_per_kg != null ? parseFloat(aq_price_per_kg) : null),
-          moisture: qj.moisture ?? (aq_moisture != null ? parseFloat(aq_moisture) : null),
-          broken: qj.broken ?? (aq_broken != null ? parseFloat(aq_broken) : null),
-        },
-      };
-    });
-
-    // Summary totals
-    const totalWeight = rows.reduce((s, r) => s + (parseFloat(r.weight_kg) || 0), 0);
-    const totalValue = rows.reduce((s, r) => {
-      const w = parseFloat(r.weight_kg) || 0;
-      const p = r.quality_json && r.quality_json.price_per_mt
-        ? parseFloat(r.quality_json.price_per_mt) : 0;
-      return s + (w * p);
-    }, 0);
-
-    return res.json({
-      success: true,
-      data: {
-        purchases: rows,
-        summary: {
-          count: rows.length,
-          totalWeightMT: totalWeight,
-          totalValuePKR: totalValue,
-        },
-      },
-    });
+    // KG × Rs/kg; lot-first trucks resolve supplier / variety via their lot
+    // (P3-14). See ricePurchasesLedger.js.
+    const data = await listRicePurchases(db, req.query);
+    return res.json({ success: true, data });
   } catch (err) {
     console.error('Rice purchases ledger error:', err);
     return res.status(500).json({ success: false, message: err.message });

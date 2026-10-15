@@ -10,7 +10,7 @@ import { LoadingSpinner, ErrorState, EmptyState } from '../../../components/Load
 import StatusBadge from '../../../components/StatusBadge';
 import PurchaseLotDrawer from '../components/PurchaseLotDrawer';
 import useCanSeeCost from '../../../hooks/useCanSeeCost';
-import { fromKg, UNITS } from '../../../shared/utils/unitConversion';
+import { fromKg, UNITS, lotBagKg, sumLotsFromKg } from '../../../shared/utils/unitConversion';
 import { fmtPKR as fmtPKRBase, fmtKg, fmtNum } from '../../../shared/utils/format';
 
 // Lots per page. Filters, search and the KPI totals all run on the server, so
@@ -125,7 +125,7 @@ function riceTypeName(lot) {
 function renderLotRow(lot, displayUnit, navigate, indented, showCost = true) {
   const netKg = parseFloat(lot.netWeightKg) || parseFloat(lot.qty) || 0;
   const availKg = (parseFloat(lot.availableQty) || 0);
-  const bw = parseFloat(lot.bagWeightKg) || 50;
+  const bw = lotBagKg(lot);
   const variety = riceTypeName(lot);
   const grade = lot.grade;
   // By-products are named by category in item_name (B1, Powder, …) which already
@@ -559,7 +559,9 @@ export default function LotInventory() {
                           click to expand the individual lots beneath. */}
                       {visualGroups.groups.map((g) => {
                         const open = expandedGroups.has(g.key);
-                        const bw = 50;
+                        // Each lot converts with its OWN bag weight, then the
+                        // group sums — a 25 kg lot's bags are not 50 kg katta.
+                        const groupQty = (pick) => sumLotsFromKg(g.lots, pick, displayUnit);
                         return (
                           <React.Fragment key={g.key}>
                             <tr
@@ -600,8 +602,8 @@ export default function LotInventory() {
                               </td>
                               <td className="mob-hide text-gray-400 text-xs">—</td>
                               <td className="mob-hide text-gray-400 text-xs">—</td>
-                              <td data-label="Stock" className="text-right font-semibold tabular-nums">{fmtQty(fromKg(g.totalKg, displayUnit, bw), displayUnit)}</td>
-                              <td data-label="Available" className="text-right tabular-nums text-emerald-700 font-semibold">{fmtQty(fromKg(g.availKg, displayUnit, bw), displayUnit)}</td>
+                              <td data-label="Stock" className="text-right font-semibold tabular-nums">{fmtQty(groupQty((l) => parseFloat(l.netWeightKg) || 0), displayUnit)}</td>
+                              <td data-label="Available" className="text-right tabular-nums text-emerald-700 font-semibold">{fmtQty(groupQty((l) => parseFloat(l.availableQty) || 0), displayUnit)}</td>
                               {showCost && <td className="mob-hide text-right tabular-nums text-xs">{g.weightedLanded ? fmtPKR(g.weightedLanded) : '—'}</td>}
                               {showCost && <td data-label="Value" className="text-right tabular-nums font-semibold">{fmtPKR(g.totalValue)}</td>}
                               <td className="mob-hide text-center text-xs text-gray-400">—</td>

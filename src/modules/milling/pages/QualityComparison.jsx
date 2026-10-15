@@ -32,6 +32,17 @@ const filterOptions = [
 
 const pf = (v) => v != null ? parseFloat(v) || null : null;
 
+// A server analysis row (snake_case) → the shape the comparison grid reads.
+function toAnalysis(a) {
+  if (!a) return null;
+  return {
+    moisture: pf(a.moisture), broken: pf(a.broken), chalky: pf(a.chalky),
+    foreignMatter: pf(a.foreign_matter), discoloration: pf(a.discoloration),
+    purity: pf(a.purity), grainSize: pf(a.grain_size),
+    pricePerKg: pf(a.price_per_kg), pricePerMT: pf(a.price_per_mt),
+  };
+}
+
 export default function QualityComparison() {
   const { millingBatches: rawBatches, addToast } = useApp();
   const updateBatchMut = useUpdateMillingBatch();
@@ -44,71 +55,31 @@ export default function QualityComparison() {
   const [batchQuality, setBatchQuality] = useState({}); // { batchId: { sample, arrival, variance } }
   const [loading, setLoading] = useState(false);
 
-  // Fetch quality data for ALL batches from detail API
+  // One server list (P3-16 / MIL-36): every batch's latest sample / arrival
+  // analysis and its STORED variance — it used to be 50 parallel detail
+  // fetches with the variance computed here. Keyed by the numeric batch id.
   useEffect(() => {
-    if (millingBatches.length === 0) return;
+    let live = true;
     setLoading(true);
-
-    const fetchAll = async () => {
-      const qualityMap = {};
-      // Fetch in parallel, max 10 at a time
-      const batches = millingBatches.slice(0, 50);
-      const results = await Promise.allSettled(
-        batches.map(b =>
-          api.get(`/api/milling/batches/${b.dbId || b.id}`)
-            .then(res => ({ batchId: b.id, data: res?.data }))
-            .catch(() => ({ batchId: b.id, data: null }))
-        )
-      );
-
-      results.forEach(r => {
-        if (r.status !== 'fulfilled' || !r.value.data) return;
-        const { batchId, data } = r.value;
-        const quality = data.quality || {};
-        const sample = quality.sample?.[0] || null;
-        const arrival = quality.arrival?.[0] || null;
-
-        let sampleObj = null, arrivalObj = null, variancePct = null;
-
-        if (sample) {
-          sampleObj = {
-            moisture: pf(sample.moisture), broken: pf(sample.broken), chalky: pf(sample.chalky),
-            foreignMatter: pf(sample.foreign_matter), discoloration: pf(sample.discoloration),
-            purity: pf(sample.purity), grainSize: pf(sample.grain_size),
-            pricePerKg: pf(sample.price_per_kg), pricePerMT: pf(sample.price_per_mt),
-          };
+    api.get('/api/milling/quality-comparison', { limit: 500 })
+      .then((res) => {
+        if (!live) return;
+        const rows = res?.data?.batches || res?.batches || [];
+        const map = {};
+        for (const r of rows) {
+          map[r.id] = { sample: toAnalysis(r.sample), arrival: toAnalysis(r.arrival), variancePct: r.variance_pct };
         }
-        if (arrival) {
-          arrivalObj = {
-            moisture: pf(arrival.moisture), broken: pf(arrival.broken), chalky: pf(arrival.chalky),
-            foreignMatter: pf(arrival.foreign_matter), discoloration: pf(arrival.discoloration),
-            purity: pf(arrival.purity), grainSize: pf(arrival.grain_size),
-            pricePerKg: pf(arrival.price_per_kg), pricePerMT: pf(arrival.price_per_mt),
-          };
-        }
-
-        // Calculate variance
-        if (sampleObj && arrivalObj) {
-          const diffs = qualityParams
-            .map(p => (sampleObj[p.key] != null && arrivalObj[p.key] != null) ? Math.abs(arrivalObj[p.key] - sampleObj[p.key]) : null)
-            .filter(d => d !== null);
-          variancePct = diffs.length > 0 ? parseFloat(Math.max(...diffs).toFixed(2)) : 0;
-        }
-
-        qualityMap[batchId] = { sample: sampleObj, arrival: arrivalObj, variancePct };
-      });
-
-      setBatchQuality(qualityMap);
-      setLoading(false);
-    };
-
-    fetchAll();
+        setBatchQuality(map);
+      })
+      .catch(() => { if (live) setBatchQuality({}); })
+      .finally(() => { if (live) setLoading(false); });
+    return () => { live = false; };
   }, [millingBatches.length]);
 
   // Merge batch list with quality data
   const enrichedBatches = useMemo(() => {
     return millingBatches.map(b => {
-      const q = batchQuality[b.id];
+      const q = batchQuality[b.dbId ?? b.id];
       return {
         ...b,
         sampleAnalysis: q?.sample || b.sampleAnalysis || null,
