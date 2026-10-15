@@ -166,6 +166,8 @@ describe('legacy /finance/* paths', () => {
     ['/finance/payables', '/finance/money-out'],
     ['/finance/ledger', '/finance/accounting'],
     ['/finance/transfers', '/finance/accounting/stock-transfers'],
+    ['/finance/costs', '/finance/accounting/profit'],
+    ['/finance/reconciliation', '/finance/money-in'],
   ];
   it.each(TABLE)('%s → %s', (from, to) => {
     const [path, query = ''] = from.split('?');
@@ -177,8 +179,8 @@ describe('legacy /finance/* paths', () => {
     expect([...segs].sort()).toEqual(Object.keys(LEGACY_FINANCE_REDIRECTS).sort());
   });
 
-  it('new paths, alerts and the kept orphans are not redirected', () => {
-    for (const p of ['/finance', '/finance/money-in', '/finance/alerts', '/finance/costs', '/finance/reconciliation', '/finance/accounting/statements', '/finance/accounting/stock-transfers']) {
+  it('new paths and alerts are not redirected', () => {
+    for (const p of ['/finance', '/finance/money-in', '/finance/alerts', '/finance/accounting/statements', '/finance/accounting/stock-transfers']) {
       expect(legacyFinanceTarget(p, '')).toBeNull();
     }
   });

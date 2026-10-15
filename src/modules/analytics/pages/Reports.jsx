@@ -2398,7 +2398,7 @@ function OrdersTab({ params }) {
 
   return (
     <div className="space-y-4">
-      <SectionHeader title="Order-level Profitability" subtitle={`Top 10 by gross profit (PKR)${pagination?.truncated ? ' on this page' : ''} — revenue at locked FX rate, cost = operational + COGS`} />
+      <SectionHeader title="Order-level Profitability" subtitle="Booked profit per order (PKR) from the one profit definition — revenue (goods + freight + debit notes) at the booked rate, cost = operational + printed bags + rice cost. — = not priced yet (no booked rate or no rice cost)." />
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <ReportMetaLine meta={meta} />
         <ServerCsvButton endpoint="/api/reporting/profitability/orders" params={params} filename={`order-profitability_${todayLocalISO()}`} />
@@ -2415,8 +2415,8 @@ function OrdersTab({ params }) {
           <span className="text-xs text-gray-600">{fmtMoney(Number(r.contractValue || 0), r.currency || 'PKR', { decimals: 2 })}</span>,
           fmtPKR(r.revenuePkr),
           fmtPKR(r.costs),
-          <ProfitCell v={r.grossProfit} />,
-          fmtPct(r.margin),
+          r.grossProfit == null ? '—' : <span><ProfitCell v={r.grossProfit} />{r.estimated ? <span className="ml-1 text-[10px] text-amber-600">est.</span> : null}</span>,
+          r.margin == null ? '—' : fmtPct(r.margin),
         ])}
       />
     </div>

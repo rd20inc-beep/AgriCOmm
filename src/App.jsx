@@ -121,9 +121,7 @@ const RatesCenter = lazyWithReload(() => import('./modules/finance/pages/RatesCe
 const FinanceAlerts = lazyWithReload(() => import('./modules/finance/pages/Alerts'));
 // Legacy routes (still accessible via direct URL)
 const FinanceConfirmations = lazyWithReload(() => import('./modules/finance/pages/Confirmations'));
-const CostAllocation = lazyWithReload(() => import('./modules/finance/pages/CostAllocation'));
 const FinanceTransfers = lazyWithReload(() => import('./modules/finance/pages/InternalTransfers'));
-const Reconciliation = lazyWithReload(() => import('./modules/finance/pages/Reconciliation'));
 const Expenses = lazyWithReload(() => import('./modules/finance/pages/Expenses'));
 const Purchases = lazyWithReload(() => import('./modules/finance/pages/Purchases'));
 const LocalSalesFinance = lazyWithReload(() => import('./modules/finance/pages/LocalSalesFinance'));
@@ -168,10 +166,10 @@ function FinanceRoutes() {
         <Route path="payroll" element={<ProtectedRoute module="payroll" action="view"><FinancePayroll /></ProtectedRoute>} />
         {/* Reached from Home's alerts panel (Needs Attention replaces it later). */}
         <Route path="alerts" element={<FinanceAlerts />} />
-        {/* URL-only pages, kept until their removal is proven safe. */}
-        <Route path="costs" element={<CostAllocation />} />
-        <Route path="reconciliation" element={<Reconciliation />} />
-        {/* Every pre-redesign path → its new view, query string kept. */}
+        {/* Every pre-redesign path → its new view, query string kept. The
+            orphan Cost Allocation (/finance/costs) and Reconciliation
+            (/finance/reconciliation) pages summed PKR and USD (FIN-23) and are
+            deleted; their URLs redirect too (Profit, Money In). */}
         {Object.keys(LEGACY_FINANCE_REDIRECTS).map((seg) => (
           <Route key={seg} path={seg} element={<LegacyFinanceRedirect />} />
         ))}

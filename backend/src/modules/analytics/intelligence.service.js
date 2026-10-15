@@ -516,11 +516,19 @@ const intelligenceService = {
         .select('exception_type')
         .count('id as count')
         .groupBy('exception_type'),
+      // Per currency (RPT-08): each exception carries its own currency; USD and
+      // PKR amounts at risk are never added together.
       db('exception_inbox')
         .whereIn('status', ['Open', 'Acknowledged', 'In Progress', 'Escalated'])
-        .select(db.raw('COALESCE(SUM(amount_at_risk), 0) as total_at_risk'))
-        .first(),
+        .select(db.raw("UPPER(COALESCE(currency, 'PKR')) as currency"), db.raw('COALESCE(SUM(amount_at_risk), 0) as total_at_risk'))
+        .groupByRaw("UPPER(COALESCE(currency, 'PKR'))"),
     ]);
+    const atRiskByCurrency = {};
+    for (const r of amountAtRisk || []) {
+      const v = parseFloat(r.total_at_risk) || 0;
+      if (v) atRiskByCurrency[r.currency] = Math.round(v * 100) / 100;
+    }
+    const atRiskCurs = Object.keys(atRiskByCurrency);
 
     // The tiles' contract (RPT-18): the dashboard read stats.high and
     // stats.resolvedToday, which were never returned, and filtered on
@@ -533,9 +541,9 @@ const intelligenceService = {
       db('exception_inbox').where('status', 'Resolved')
         .whereRaw('resolved_at::date = CURRENT_DATE').count('id as count').first(),
       db('exception_inbox').whereIn('status', OPEN).where('amount_at_risk', '>', 0)
-        .select(db.raw("UPPER(COALESCE(currency, 'USD')) as currency"))
+        .select(db.raw("UPPER(COALESCE(currency, 'PKR')) as currency"))
         .sum('amount_at_risk as total').count('id as count')
-        .groupByRaw("UPPER(COALESCE(currency, 'USD'))"),
+        .groupByRaw("UPPER(COALESCE(currency, 'PKR'))"),
     ]);
     const sev = bySeverity.reduce((acc, r) => { acc[r.severity] = parseInt(r.count, 10); return acc; }, {});
     const status = byStatus.reduce((acc, r) => { acc[r.status] = parseInt(r.count, 10); return acc; }, {});
@@ -544,7 +552,8 @@ const intelligenceService = {
       byStatus: status,
       bySeverity: sev,
       byType: byType.reduce((acc, r) => { acc[r.exception_type] = parseInt(r.count, 10); return acc; }, {}),
-      totalAmountAtRisk: parseFloat(amountAtRisk.total_at_risk),
+      // A single figure only when one currency is at risk (else null — read the map).
+      totalAmountAtRisk: atRiskCurs.length === 1 ? atRiskByCurrency[atRiskCurs[0]] : (atRiskCurs.length ? null : 0),
       open: OPEN.reduce((s, k) => s + (status[k] || 0), 0),
       critical: sev.critical || 0,
       warning: sev.warning || 0,

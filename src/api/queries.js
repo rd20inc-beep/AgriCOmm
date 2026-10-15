@@ -80,6 +80,7 @@ export function useExportOrder(id) {
         packingLines: res?.data?.packingLines || [],
         purchaseLots: res?.data?.purchaseLots || [],
         batchByproducts: res?.data?.batchByproducts || [],
+        profit: res?.data?.profit ?? null, // EXP-08: the one profit definition's row
         canSeeSupplierName: res?.data?.canSeeSupplierName !== false, // supplier privacy
       };
       return transformOrder(raw);
@@ -656,6 +657,36 @@ export function useProfitHeadline(params = {}, options = {}) {
       return unwrap(res) || {};
     },
     staleTime: 60 * 1000,
+    ...options,
+  });
+}
+
+// P4-09: the export order book, one figure per currency (never summed), from
+// the server (backend exportOrders/orderBook.js). Received / outstanding are
+// null for a caller without the profit permission.
+export function useExportOrderBook(options = {}) {
+  return useQuery({
+    queryKey: ['export-order-book'],
+    queryFn: async () => {
+      const res = await exportOrdersApi.orderBook();
+      return unwrap(res) || {};
+    },
+    staleTime: 30 * 1000,
+    ...options,
+  });
+}
+
+// EXP-08: the create form's margin preview — the same per-order row the order
+// page shows once saved (rice cost estimated from stock / the rate master).
+export function useExportProfitPreview(body, options = {}) {
+  return useQuery({
+    queryKey: ['export-profit-preview', body],
+    queryFn: async () => {
+      const res = await exportOrdersApi.profitPreview(body);
+      return unwrap(res) || null;
+    },
+    staleTime: 30 * 1000,
+    retry: false,
     ...options,
   });
 }

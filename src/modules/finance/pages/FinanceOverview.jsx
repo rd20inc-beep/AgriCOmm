@@ -26,7 +26,7 @@ import AnomalyWatchCard from '../../ai/components/AnomalyWatchCard';
 import PurchaseRequirementsPanel from '../../purchaseRequirements/components/PurchaseRequirementsPanel';
 import { fmtPKR, fmtUSD, fmtMoney, fmtDate, fmtPct } from '../../../shared/utils/format';
 import {
-  nativeTotals, receivablesTile, collectionTile, pkrEquivText, upcomingPkrEquiv,
+  nativeTotals, receivablesTile, collectionTile, pkrEquivText, upcomingPkrEquiv, byCurrencyText,
 } from '../utils/currencyTiles';
 import { Section, HeadlineCard, TypeChip, EmptyLine, MoreSection, PkrEquivLine } from '../components/FinanceUI';
 import { btnQuiet, kpiLabel, kpiValue, kpiSub, sectionTitle } from '../utils/uiClasses';
@@ -120,12 +120,16 @@ export default function FinanceOverview() {
           hintBad={!!recvSplit.overdue}
           onClick={() => navigate(fl('/finance/money-in'))}
         />
+        {/* RPT-09: rupees are the headline; a foreign payable is its own
+            figure beside it (server byCurrency), never added in. */}
         <KpiTile
           icon={ArrowUpRight}
           label="Payables"
           basis="all open"
           primary={fmtPKR(pay.totalOutstandingPkr || 0)}
-          secondary={`${pay.count || 0} outstanding`}
+          secondary={[`${pay.count || 0} outstanding`,
+            ...Object.entries(pay.byCurrency || {}).filter(([c, p]) => c !== 'PKR' && p.outstanding)
+              .map(([c, p]) => `+ ${fmtMoney(p.outstanding, c)}`)].join(' · ')}
           hint={(pay.overdueAmountPkr || 0) > 0 ? `${fmtPKR(pay.overdueAmountPkr)} overdue` : 'All current'}
           hintBad={(pay.overdueAmountPkr || 0) > 0}
           onClick={() => navigate(fl('/finance/money-out'))}
@@ -270,7 +274,7 @@ export default function FinanceOverview() {
           subtitle={`${exp.activeOrders || 0} active · ${exp.totalOrders || 0} total`}
           revenueLabel="Revenue (PKR)"
           revenue={fmtPKR(exp.revenuePkrBooked || 0)}
-          revenueSub={`${fmtUSD(exp.revenueForeign || 0)} foreign`}
+          revenueSub={`Contracts ${byCurrencyText(exp.revenueByCurrency || (exp.revenueForeign ? { USD: exp.revenueForeign } : {})).all}`}
           profitLabel="Booked Profit"
           profit={fmtPKR(exp.bookedProfitPkr || 0)}
           profitSub={[

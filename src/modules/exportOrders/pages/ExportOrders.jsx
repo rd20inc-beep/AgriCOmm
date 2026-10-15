@@ -96,13 +96,13 @@ export default function ExportOrders() {
     return 'Not Booked';
   };
 
+  // EXP-08: the order's Booked margin from the server's one profit definition
+  // (PKR at the booked rate) — it was a USD contract minus PKR costs. '—' when
+  // the order is not priced yet or the viewer may not see profit.
   const getMargin = (order) => {
-    const totalCosts = Object.values(order.costs || {}).reduce((sum, c) => sum + (parseFloat(c) || 0), 0);
-    if (totalCosts === 0) return '—';
-    const cv = parseFloat(order.contractValue) || 0;
-    if (cv === 0) return '—';
-    const margin = ((cv - totalCosts) / cv) * 100;
-    return fmtPct(margin);
+    const m = order.profit?.marginPct;
+    if (m == null) return '—';
+    return `${fmtPct(m)}${order.profit.estimated ? ' est.' : ''}`;
   };
 
   return (

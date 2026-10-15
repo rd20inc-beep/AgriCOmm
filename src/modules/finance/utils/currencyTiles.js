@@ -153,3 +153,18 @@ export function nativeTotals(items) {
     .map((cur) => fmtMoney(by[cur], cur, { decimals: 0 }));
   return parts.length ? parts.join(' · ') : fmtPKR(0);
 }
+
+/**
+ * A server { CUR: amount } map as tile text — the first currency (USD, then
+ * PKR, then the rest) is the primary figure, the others follow as "+ Rs …".
+ * Formatting only: nothing is added across currencies. An empty / null map is
+ * `empty` (default "—").
+ */
+export function byCurrencyText(by, { decimals = 0, empty = '—' } = {}) {
+  const map = by || {};
+  const curs = Object.keys(map).filter((c) => Number(map[c]) !== 0);
+  const order = ['USD', 'PKR', ...curs.filter((c) => c !== 'USD' && c !== 'PKR').sort()].filter((c) => curs.includes(c));
+  if (!order.length) return { primary: by == null ? empty : fmtMoney(0, 'USD', { decimals }), rest: null, all: by == null ? empty : fmtMoney(0, 'USD', { decimals }) };
+  const parts = order.map((c) => fmtMoney(map[c], c, { decimals }));
+  return { primary: parts[0], rest: parts.length > 1 ? parts.slice(1).map((p) => `+ ${p}`).join(' ') : null, all: parts.join(' · ') };
+}

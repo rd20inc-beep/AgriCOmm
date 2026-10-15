@@ -21,7 +21,7 @@ const SEVERITY_CONFIG = {
 };
 const SEVERITIES = ['critical', 'warning', 'info'];
 // Money at risk is in the exception's own currency — never shown as $ by default.
-const atRisk = (ex) => fmtMoney(Number(ex.amountAtRisk) || 0, ex.currency || 'USD', { decimals: 2 });
+const atRisk = (ex) => fmtMoney(Number(ex.amountAtRisk) || 0, ex.currency || 'PKR', { decimals: 2 });
 const entityHref = (ex) => (ex.linkedType === 'export_order' ? `/export/${ex.linkedRef}` : ex.linkedType === 'milling_batch' ? `/milling/${ex.linkedId || ex.linkedRef}` : null);
 
 const TYPE_ICONS = {

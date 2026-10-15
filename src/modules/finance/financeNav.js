@@ -95,13 +95,11 @@ export const WORKSPACES = [
 ];
 
 // Pages that keep a route but sit in no workspace. Alerts is reached from
-// Home's alerts panel; the two orphans stay URL-only (nothing links to them).
-// The old stock-transfer orphan (/finance/transfers) is now Accounting's
-// "Stock transfers" view; its URL redirects there.
+// Home's alerts panel. The old stock-transfer orphan (/finance/transfers) is
+// now Accounting's "Stock transfers" view; the Cost Allocation and
+// Reconciliation orphans are deleted (FIN-23) — their URLs redirect.
 const UNLISTED = [
   { path: '/finance/alerts', workspace: 'home', period: false },
-  { path: '/finance/costs', workspace: 'home', period: false },
-  { path: '/finance/reconciliation', workspace: 'home', period: false },
 ];
 
 // Every pre-redesign /finance/<segment> → its new home. The query string is
@@ -123,6 +121,9 @@ export const LEGACY_FINANCE_REDIRECTS = {
   'statements': '/finance/accounting/statements',
   'ledger': '/finance/accounting',
   'transfers': '/finance/accounting/stock-transfers',
+  // FIN-23: deleted orphans (they summed PKR and USD) → the views that own them.
+  'costs': '/finance/accounting/profit',
+  'reconciliation': '/finance/money-in',
 };
 
 const has = (hasPermission, p) => !p || hasPermission(p.module, p.action);

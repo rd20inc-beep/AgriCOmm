@@ -7,7 +7,7 @@ const { applyWarehouseScope, isWarehouseInScope } = require('../../utils/warehou
 const { companyStock } = require('../inventory/stockSql');
 // D-14 stock value (landed cost/kg × on hand, no fallback price) — stockValue.js.
 const { lotValueSql } = require('../inventory/stockValue');
-const { exportProfit, EXCLUDED_ORDER_STATUSES } = require('../finance/profitDefinitions');
+const { exportProfit, exportOrderProfit, costRowPkr, EXCLUDED_ORDER_STATUSES } = require('../finance/profitDefinitions');
 const { collectionRate: computeCollectionRate } = require('../finance/collectionRate');
 const fxRateService = require('../finance/fxRate.service');
 const { dayOf } = require('../exportOrders/balanceDueDate');
@@ -348,6 +348,7 @@ const reportingService = {
         'eo.currency',
         'eo.contract_value',
         'eo.contract_value_pkr_locked',
+        'eo.booked_fx_rate',
         'eo.inventory_cogs_total_pkr',
         'eo.status',
         'eo.created_at'
@@ -370,7 +371,7 @@ const reportingService = {
     const costs = orderIds.length > 0
       ? await db('export_order_costs')
           .whereIn('order_id', orderIds)
-          .select('order_id', 'category', 'amount')
+          .select('order_id', 'category', 'amount', 'currency', 'base_amount_pkr', 'fx_rate')
       : [];
 
     // Each order's line prices: on a multi-line order price_per_mt is the
@@ -378,28 +379,32 @@ const reportingService = {
     const { linePricesByOrder, priceSummary } = require('../exportOrders/orderLines');
     const linePrices = await linePricesByOrder(db, orderIds);
 
-    // Group costs by order
+    // Cost breakdown per order, each row in PKR (the definition's costRowPkr).
+    const bookedRateOf = Object.fromEntries(orders.map((o) => [o.id, parseFloat(o.booked_fx_rate) || 0]));
     const costMap = {};
     for (const cost of costs) {
-      if (!costMap[cost.order_id]) costMap[cost.order_id] = { total: 0, breakdown: {} };
-      const amt = parseFloat(cost.amount) || 0;
-      costMap[cost.order_id].total += amt;
+      if (!costMap[cost.order_id]) costMap[cost.order_id] = { breakdown: {} };
+      const amt = costRowPkr(cost, bookedRateOf[cost.order_id]);
       costMap[cost.order_id].breakdown[cost.category] = (costMap[cost.order_id].breakdown[cost.category] || 0) + amt;
     }
 
+    // RPT-25 / EXP-08: each order's figures from the ONE profit definition
+    // (profitDefinitions) — PKR at the order's booked rate, revenue incl.
+    // freight + debit notes, rice cost locked / reserved / estimated. A USD
+    // contract with no booked figure is UNPRICED (null), never read as rupees.
+    const profitRows = await exportOrderProfit(db, orderIds);
+
     const data = orders.map((o) => {
-      // Revenue must be in PKR to compare against PKR costs. Use the locked PKR
-      // contract value (contract_value_pkr_locked, set when the FX rate was
-      // booked); fall back to the raw contract value only if it's missing.
       const contractCur = parseFloat(o.contract_value) || 0;          // original currency
-      const revenuePkr = parseFloat(o.contract_value_pkr_locked) || contractCur;
+      const pr = profitRows.get(Number(o.id)) || {};
+      const revenuePkr = pr.revenuePkr ?? null;
       const orderCosts = costMap[o.id] || { total: 0, breakdown: {} };
-      const opCostsPkr = orderCosts.total;                            // export operational costs (PKR)
-      const cogsPkr = parseFloat(o.inventory_cogs_total_pkr) || 0;    // rice COGS (PKR, 0 until milled)
-      const totalCost = opCostsPkr + cogsPkr;
-      const grossProfit = revenuePkr - totalCost;
-      const margin = revenuePkr > 0 ? parseFloat(((grossProfit / revenuePkr) * 100).toFixed(2)) : 0;
-      const costPerMT = parseFloat(o.qty_mt) > 0 ? parseFloat((totalCost / parseFloat(o.qty_mt)).toFixed(2)) : 0;
+      const opCostsPkr = pr.opCostsPkr ?? 0;                          // op costs + printed bags (PKR)
+      const cogsPkr = pr.riceCostPkr ?? null;                         // rice cost (PKR), basis below
+      const totalCost = pr.totalCostPkr ?? null;
+      const grossProfit = pr.bookedProfitPkr ?? null;
+      const margin = pr.marginPct ?? null;
+      const costPerMT = totalCost != null && parseFloat(o.qty_mt) > 0 ? parseFloat((totalCost / parseFloat(o.qty_mt)).toFixed(2)) : null;
       const ps = priceSummary(o, linePrices[o.id] || []);
 
       return {
@@ -426,7 +431,10 @@ const reportingService = {
         margin,
         costPerMT,
         status: o.status,
-        riskFlags: margin < 10 ? ['low_margin'] : [],
+        riceCostBasis: pr.riceCostBasis || 'unpriced',
+        estimated: !!pr.estimated,
+        priced: !!pr.priced,
+        riskFlags: margin != null && margin < 10 ? ['low_margin'] : [],
       };
     });
 
@@ -1524,16 +1532,26 @@ const reportingService = {
       .orderBy('s.name', 'asc');
     const supIds = rows.map(r => r.supplierId);
     const pay = supIds.length
-      ? await db('payables').whereIn('supplier_id', supIds).groupBy('supplier_id')
-        .select('supplier_id', db.raw('COALESCE(SUM(outstanding), 0) as outstanding'))
+      ? await db('payables').whereIn('supplier_id', supIds)
+        .groupBy('supplier_id').groupByRaw("UPPER(COALESCE(currency, 'PKR'))")
+        .select('supplier_id', db.raw("UPPER(COALESCE(currency, 'PKR')) as currency"),
+          db.raw('COALESCE(SUM(outstanding), 0) as outstanding'))
       : [];
-    const payBy = Object.fromEntries(pay.map(p => [p.supplier_id, num(p.outstanding)]));
+    // RPT-09: per currency — payableOutstanding is the RUPEE figure; a foreign
+    // payable is in payableOutstandingByCurrency, never added into it.
+    const payBy = {};
+    const payByCur = {};
+    for (const p of pay) {
+      if (p.currency === 'PKR') payBy[p.supplier_id] = num(p.outstanding);
+      (payByCur[p.supplier_id] = payByCur[p.supplier_id] || {})[p.currency] = num(p.outstanding);
+    }
     return {
       rows: rows.map(r => ({
         supplierId: r.supplierId, supplier: r.supplier, href: `/reports/supplier-ledger/${r.supplierId}`,
         lotCount: Number(r.lot_count) || 0, purchasedKg: num(r.purchased_kg),
         remainingKg: num(r.remaining_kg), stockValue: num(r.stock_value),
         payableOutstanding: payBy[r.supplierId] || 0,
+        payableOutstandingByCurrency: payByCur[r.supplierId] || {},
       })),
     };
   },
@@ -1606,10 +1624,17 @@ const reportingService = {
     }
 
     // Outstanding payable + payments to this supplier (all payable sources).
-    const payRow = await db('payables').where('supplier_id', id)
-      .select(db.raw('COALESCE(SUM(original_amount), 0) as billed'),
+    // Per currency (RPT-09): the payable* fields are the RUPEE figures; every
+    // currency is in payableByCurrency, never summed together.
+    const payRows = await db('payables').where('supplier_id', id)
+      .groupByRaw("UPPER(COALESCE(currency, 'PKR'))")
+      .select(db.raw("UPPER(COALESCE(currency, 'PKR')) as currency"),
+        db.raw('COALESCE(SUM(original_amount), 0) as billed'),
         db.raw('COALESCE(SUM(paid_amount), 0) as paid'),
-        db.raw('COALESCE(SUM(outstanding), 0) as outstanding')).first();
+        db.raw('COALESCE(SUM(outstanding), 0) as outstanding'));
+    const payableByCurrency = Object.fromEntries(payRows.map((r) => [r.currency,
+      { billed: num(r.billed), paid: num(r.paid), outstanding: num(r.outstanding) }]));
+    const payRow = payRows.find((r) => r.currency === 'PKR');
 
     // Yield / quality performance across batches that consumed this supplier's lots.
     const lotIds = lots.map(l => l.id);
@@ -1638,6 +1663,7 @@ const reportingService = {
         realizedProfitPct: agg.revenue > 0 ? (agg.realizedProfit / agg.revenue) * 100 : 0,
         payableBilled: num(payRow && payRow.billed), payablePaid: num(payRow && payRow.paid),
         payableOutstanding: num(payRow && payRow.outstanding),
+        payableByCurrency,
         avgYieldPct, avgMoisture, batchesUsing,
         costBasis: 'Per-lot financials reuse the Lot 360 (residual costing); processing cost allocated by batch share — approximate where blended.',
       },
@@ -3791,24 +3817,11 @@ const reportingService = {
       try {
         switch (kpiName) {
           case 'Export Margin': {
-            const orders = await db('export_orders')
-              .modify((qb) => {
-                if (periodStart) qb.where('created_at', '>=', periodStart);
-                if (periodEnd) qb.where('created_at', '<=', periodEnd);
-              })
-              .select(db.raw('COALESCE(SUM(contract_value), 0) as revenue'))
-              .first();
-            const costs = await db('export_order_costs as eoc')
-              .join('export_orders as eo', 'eoc.order_id', 'eo.id')
-              .modify((qb) => {
-                if (periodStart) qb.where('eo.created_at', '>=', periodStart);
-                if (periodEnd) qb.where('eo.created_at', '<=', periodEnd);
-              })
-              .sum('eoc.amount as total')
-              .first();
-            const rev = parseFloat(orders.revenue) || 0;
-            const cost = parseFloat(costs.total) || 0;
-            actual = rev > 0 ? parseFloat((((rev - cost) / rev) * 100).toFixed(2)) : 0;
+            // RPT-25: the Booked margin of the one profit definition (PKR at
+            // booked rates, priced orders only) — it was USD + PKR contract
+            // minus PKR costs. null when no order in the period is priced.
+            const { totals } = await exportProfit(db, { startDate: periodStart, endDate: periodEnd });
+            actual = totals.bookedMarginPct;
             break;
           }
 
@@ -3827,14 +3840,12 @@ const reportingService = {
           }
 
           case 'Collection Rate': {
-            const recv = await db('receivables')
-              .select(
-                db.raw('COALESCE(SUM(expected_amount), 0) as expected'),
-                db.raw('COALESCE(SUM(received_amount), 0) as received')
-              )
-              .first();
-            const expected = parseFloat(recv.expected) || 0;
-            actual = expected > 0 ? parseFloat(((parseFloat(recv.received) / expected) * 100).toFixed(2)) : 0;
+            // C6 per currency (received ÷ due); one rate only when one
+            // currency is due — dollars and rupees were summed here.
+            const { collectionRate: computeCollection } = require('../finance/collectionRate');
+            const fields = collectionRateFields(await computeCollection(db));
+            actual = fields.collectionRate;
+            bm.actualByCurrency = fields.collectionRateByCurrency;
             break;
           }
 
@@ -4009,6 +4020,7 @@ const reportingService = {
         status,
         variance: actual !== null ? parseFloat((actual - target).toFixed(2)) : null,
         period: bm.period,
+        ...(bm.actualByCurrency ? { actualByCurrency: bm.actualByCurrency } : {}),
       });
     }
 

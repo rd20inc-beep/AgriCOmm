@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
 import CustomerPicker from '../../../components/CustomerPicker';
-import { useRunScenario, useCostPredict } from '../../../api/queries';
+import { useRunScenario, useCostPredict, useFinanceOverviewSummary } from '../../../api/queries';
 import { useCommodityPrices } from '../../../modules/milling/hooks/useCommodityPrices';
 import { INCOTERMS } from '../../../shared/constants/incoterms';
 import { fmtMoney, fmtKg, fmtPKR } from '../../../shared/utils/format';
@@ -32,9 +32,18 @@ function CostSimulator() {
   const [productId, setProductId] = useState('');
   const { data: prediction = {}, isLoading } = useCostPredict(productId || null);
 
-  const [overrides, setOverrides] = useState({ rice: 0, bags: 0, freight: 0, misc: 0 });
+  const [overrides, setOverrides] = useState({});
 
-  const baseCosts = prediction.costBreakdown || prediction.breakdown || {};
+  // RPT-29: the server's prediction row (PKR per MT, the export boundary) —
+  // this read costBreakdown / breakdown, which the response never carried, so
+  // every figure was zero.
+  const baseCosts = useMemo(() => (prediction && prediction.predictedTotalCostPerMt != null ? {
+    rawMaterial: Number(prediction.predictedRawCostPerMt) || 0,
+    milling: Number(prediction.predictedMillingCostPerMt) || 0,
+    bags: Number(prediction.predictedBagsPerMt) || 0,
+    freight: Number(prediction.predictedFreightPerMt) || 0,
+    clearing: Number(prediction.predictedClearingPerMt) || 0,
+  } : {}), [prediction]);
   const adjustedCosts = useMemo(() => {
     const result = {};
     Object.entries(baseCosts).forEach(([k, v]) => {
@@ -65,7 +74,7 @@ function CostSimulator() {
           <div className="bg-gray-50 rounded-xl p-4">
             <h3 className="text-sm font-semibold text-gray-700 mb-3">Adjust Cost Categories (%)</h3>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              {['rice', 'bags', 'freight', 'misc'].map(cat => (
+              {Object.keys(baseCosts).map(cat => (
                 <div key={cat} className="form-group">
                   <label className="form-label capitalize">{cat}</label>
                   <div className="flex items-center gap-2">
@@ -73,7 +82,7 @@ function CostSimulator() {
                       onChange={e => setOverrides(prev => ({ ...prev, [cat]: parseInt(e.target.value) }))}
                       className="flex-1" />
                     <span className={`text-sm font-semibold w-12 text-right ${overrides[cat] > 0 ? 'text-red-600' : overrides[cat] < 0 ? 'text-emerald-600' : 'text-gray-500'}`}>
-                      {overrides[cat] > 0 ? '+' : ''}{overrides[cat]}%
+                      {overrides[cat] > 0 ? '+' : ''}{overrides[cat] || 0}%
                     </span>
                   </div>
                 </div>
@@ -82,10 +91,10 @@ function CostSimulator() {
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <ResultCard label="Base Cost/MT" value={formatCurrency(totalBase)} />
-            <ResultCard label="Adjusted Cost/MT" value={formatCurrency(totalAdjusted)} />
-            <ResultCard label="Impact" value={formatCurrency(Math.abs(impact))} subtitle={impact > 0 ? 'Increase' : impact < 0 ? 'Decrease' : 'No change'} positive={impact <= 0} />
-            <ResultCard label="Confidence" value={prediction.confidence ? prediction.confidence + '%' : '—'} />
+            <ResultCard label="Base Cost / MT (PKR)" value={formatCurrency(totalBase, 'PKR')} />
+            <ResultCard label="Adjusted Cost / MT (PKR)" value={formatCurrency(totalAdjusted, 'PKR')} />
+            <ResultCard label="Impact" value={formatCurrency(Math.abs(impact), 'PKR')} subtitle={impact > 0 ? 'Increase' : impact < 0 ? 'Decrease' : 'No change'} positive={impact <= 0} />
+            <ResultCard label="Confidence" value={prediction.confidencePct != null ? prediction.confidencePct + '%' : '—'} />
           </div>
         </>
       )}
@@ -94,22 +103,23 @@ function CostSimulator() {
 }
 
 function FxSimulator() {
-  const { exportOrders } = useApp();
-  // The latest USD rate on file (D-10) — the simulation starts there; with
-  // none on file the user types one.
+  // RPT-29: the exposure is the server's OPEN USD receivables (Finance
+  // overview, USD only) — it used to add every order's contract value, PKR
+  // orders included, as dollars. The latest USD rate on file (D-10) is the
+  // starting point; with none on file the user types one.
+  const { data: summary = {} } = useFinanceOverviewSummary();
   const latestRate = useFxRate();
   const [typedRate, setFxRate] = useState(null);
   const baseRate = latestRate || 0;
   const fxRate = typedRate ?? baseRate;
 
   const impact = useMemo(() => {
-    const totalContractUSD = exportOrders.reduce((s, o) => s + (o.contractValue || 0), 0);
-    const totalMillCostsPKR = 0; // would come from batches
+    const totalContractUSD = Number(summary?.receivables?.byCurrency?.USD?.outstanding) || 0;
     const basePKREquiv = totalContractUSD * baseRate;
     const newPKREquiv = totalContractUSD * fxRate;
     const gainLoss = newPKREquiv - basePKREquiv;
     return { totalContractUSD, basePKREquiv, newPKREquiv, gainLoss, rateChange: baseRate > 0 ? ((fxRate - baseRate) / baseRate * 100).toFixed(1) : '0.0' };
-  }, [exportOrders, fxRate, baseRate]);
+  }, [summary, fxRate, baseRate]);
 
   if (!(baseRate > 0)) {
     return <p className="text-sm text-gray-500">No USD rate on file — add one in Finance › Rates to run this simulation.</p>;
@@ -136,7 +146,7 @@ function FxSimulator() {
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <ResultCard label="Total Export (USD)" value={formatCurrency(impact.totalContractUSD)} />
+        <ResultCard label="Open USD Receivables" value={formatCurrency(impact.totalContractUSD)} subtitle="USD only — PKR is not exposed" />
         <ResultCard label="Base PKR Equiv" value={formatCurrency(impact.basePKREquiv, 'PKR')} />
         <ResultCard label="New PKR Equiv" value={formatCurrency(impact.newPKREquiv, 'PKR')} />
         <ResultCard label="FX Gain/Loss" value={formatCurrency(Math.abs(impact.gainLoss), 'PKR')}

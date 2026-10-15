@@ -5,7 +5,7 @@
 import { useState, Fragment } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  fmtNum, fmtPKR, fmtUSD, fmtPct as houseFmtPct, fmtDate as houseFmtDate, fmtDateTime as fmtStamp,
+  fmtNum, fmtPKR, fmtUSD, fmtMoney, fmtPct as houseFmtPct, fmtDate as houseFmtDate, fmtDateTime as fmtStamp,
 } from '../../../shared/utils/format';
 
 // A reference that's a clickable link on screen but prints as plain text.
@@ -293,33 +293,49 @@ export function PnlReportView({ data, companyName, range, preset }) {
 export function CashflowReportView({ data, companyName, range, preset }) {
   const { summary, daily, topReceipts, topPayments } = data;
   const periodLabel = preset === 'daily' ? 'Daily' : preset === 'weekly' ? 'Weekly' : preset === 'monthly' ? 'Monthly' : 'Custom Range';
+  // RPT-05: settled money only, one block per currency (never summed). An
+  // older payload without byCurrency is read as rupees.
+  const byCur = summary.byCurrency || { PKR: { in: summary.inPkr, out: summary.outPkr, net: summary.netPkr, inCount: summary.inCount, outCount: summary.outCount } };
+  const curs = Object.keys(byCur).sort((a, b) => (a === 'PKR' ? -1 : b === 'PKR' ? 1 : a.localeCompare(b)));
+  const money = (v, cur) => fmtMoney(parseFloat(v) || 0, cur || 'PKR');
+  const pending = Object.entries(summary.pendingCheques || {});
   return (
     <div className="print-report space-y-6 text-sm text-gray-900">
-      <Header companyName={companyName} title={`${periodLabel} Cashflow`} subtitle={range ? `${fmtDate(range.from)} – ${fmtDate(range.to)}` : ''} />
-      <SummaryRow items={[
-        { label: 'Money In', value: fmtPkr(summary.inPkr) },
-        { label: 'Money Out', value: fmtPkr(summary.outPkr) },
-        { label: 'Net Cashflow', value: fmtPkr(summary.netPkr) },
-        { label: 'Receipts', value: summary.inCount },
-        { label: 'Payments', value: summary.outCount },
-      ]} />
+      <Header companyName={companyName} title={`${periodLabel} Cashflow`} subtitle={range ? `${fmtDate(range.from)} – ${fmtDate(range.to)} · settled payments only, per currency` : ''} />
+      {(curs.length ? curs : ['PKR']).map((cur) => {
+        const s = byCur[cur] || {};
+        return (
+          <SummaryRow key={cur} items={[
+            { label: `Money In (${cur})`, value: money(s.in, cur) },
+            { label: `Money Out (${cur})`, value: money(s.out, cur) },
+            { label: `Net Cashflow (${cur})`, value: money(s.net, cur) },
+            { label: 'Receipts', value: s.inCount || 0 },
+            { label: 'Payments', value: s.outCount || 0 },
+          ]} />
+        );
+      })}
+      {pending.length > 0 && (
+        <p className="text-xs text-gray-500">
+          Not included — cheques not yet cleared: {pending.map(([cur, p]) => `${p.count} (${money((p.in || 0), cur)} in / ${money((p.out || 0), cur)} out)`).join('; ')}.
+        </p>
+      )}
       <Section title="Daily Movement">
         <Table
-          head={['Date', 'In (PKR)', 'Out (PKR)', 'Net (PKR)']}
-          align={['left', 'right', 'right', 'right']}
-          rows={(daily || []).map(d => [d.day, fmtPkr(d.In), fmtPkr(d.Out), fmtPkr(d.Net)])}
-          empty="No payments recorded in this period."
+          head={['Date', 'Currency', 'In', 'Out', 'Net']}
+          align={['left', 'left', 'right', 'right', 'right']}
+          rows={(daily || []).map(d => [d.day, d.currency || 'PKR', money(d.In, d.currency), money(d.Out, d.currency), money(d.Net, d.currency)])}
+          empty="No settled payments in this period."
         />
       </Section>
       {(topReceipts || []).length > 0 && (
         <Section title="Receipts (largest first)">
           <Table
-            head={['Payment', 'Date', 'Received From', 'Method', 'Amount (PKR)']}
+            head={['Payment', 'Date', 'Received From', 'Method', 'Amount']}
             align={['left', 'left', 'left', 'left', 'right']}
             rows={topReceipts.map(r => [
               r.paymentNo, fmtDate(r.date),
               r.customerId ? <RefLink to={`/finance/accounting/statements?type=customer&id=${r.customerId}`}>{r.counterparty}</RefLink> : r.counterparty,
-              r.method || '—', fmtPkr(r.amountPkr),
+              r.method || '—', r.currency ? fmtMoney(r.amount, r.currency) : fmtPkr(r.amountPkr),
             ])}
             empty=""
           />
@@ -328,12 +344,12 @@ export function CashflowReportView({ data, companyName, range, preset }) {
       {(topPayments || []).length > 0 && (
         <Section title="Payments (largest first)">
           <Table
-            head={['Payment', 'Date', 'Paid To', 'Method', 'Amount (PKR)']}
+            head={['Payment', 'Date', 'Paid To', 'Method', 'Amount']}
             align={['left', 'left', 'left', 'left', 'right']}
             rows={topPayments.map(r => [
               r.paymentNo, fmtDate(r.date),
               r.supplierId ? <RefLink to={`/finance/accounting/statements?type=supplier&id=${r.supplierId}`}>{r.counterparty}</RefLink> : r.counterparty,
-              r.method || '—', fmtPkr(r.amountPkr),
+              r.method || '—', r.currency ? fmtMoney(r.amount, r.currency) : fmtPkr(r.amountPkr),
             ])}
             empty=""
           />
