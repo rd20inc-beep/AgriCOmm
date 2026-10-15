@@ -23,6 +23,8 @@ export const millStoreApi = {
   getAlerts: () => api.get('/api/mill-store/stock/alerts'),
   getItemMovements: (id, params) => api.get(`/api/mill-store/items/${id}/movements`, params),
   setStock: (id, data) => api.put(`/api/mill-store/items/${id}/stock`, data),
+  // Owner-approved: revalues the stock on hand (moves 1250).
+  revalueItem: (id, data) => api.put(`/api/mill-store/items/${id}/revalue`, data),
 
   // Summary
   getSummary: () => api.get('/api/mill-store/summary'),

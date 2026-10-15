@@ -80,24 +80,27 @@ describe('creditFreedKatta writes a movement the table accepts', () => {
     throw new Error('creditFreedKatta not found');
   })();
 
+  // The movement itself is written by the katta ledger (P3-05), which applies
+  // only the difference against what the reference already credited.
+  const ledger = fs.readFileSync(path.join(__dirname, '../modules/millStore/kattaLedger.js'), 'utf8');
+
   test("movement_type is 'return', the only inbound value the CHECK allows", () => {
-    expect(fn).toContain("movement_type: 'return'");
+    expect(fn).toContain("family: 'freed'");
+    expect(ledger).toContain("freed: 'return'");
     expect(fn).not.toContain("movement_type: 'in'");
   });
 
-  test('the MOVEMENT insert uses reason/performed_by, the columns that exist', () => {
-    // Scoped to the mill_stock_movements insert: mill_items legitimately has a
-    // `notes` and a `created_by`, and asserting across the whole function
-    // flagged those as violations.
-    const at = fn.indexOf("mill_stock_movements').insert(");
-    const movement = fn.slice(at, fn.indexOf('});', at));
-    expect(movement).toMatch(/reason:/);
+  test('the MOVEMENT row uses reason/performed_by, the columns that exist', () => {
+    const at = ledger.indexOf('const movement = {');
+    const movement = ledger.slice(at, ledger.indexOf('};', at));
+    expect(movement).toMatch(/reason,/);
     expect(movement).toMatch(/performed_by:/);
     expect(movement).not.toMatch(/notes:/);
     expect(movement).not.toMatch(/created_by:/);
   });
 
-  test('it never touches cost — freed katta are valued at zero until sold', () => {
+  test('it never sets a cost — freed katta are valued at zero until sold', () => {
     expect(fn).not.toMatch(/cost_per_unit|total_cost|avg_cost/);
+    expect(fn).toContain("cls: 'zero'");
   });
 });

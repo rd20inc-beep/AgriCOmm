@@ -3192,8 +3192,9 @@ const inventoryService = {
    * stock (one mill_item per size, code `KATTA-<kg>`), and the outputs are PACKED
    * into katta of the batch's PREDOMINANT raw size, consuming them back. Freed
    * bags are grouped by each vehicle's bag_size_kg (fallback = its kg ÷ bags).
-   * Idempotent: reverses ALL of the batch's prior katta movements (across any
-   * size item) first, so re-recording reconciles cleanly. No-op for batches with
+   * Idempotent: works out what the batch SHOULD have moved and applies only the
+   * difference against what it has moved (new rows, never a delete), clamped at
+   * the stock there is (millStore/kattaLedger.js, P3-05). No-op for batches with
    * no vehicle-bag intake (blends / lot-started).
    */
   /**
@@ -3204,62 +3205,47 @@ const inventoryService = {
    * own of a different size, and the originals come back empty. Same store item
    * (`KATTA-<size>`), same movement ledger, so the two sources are one stock.
    *
-   * Freed katta enter at ZERO value and are worth something only when sold, so
-   * nothing here touches item cost — only the quantity.
+   * Freed katta enter at ZERO value and are worth something only when sold:
+   * the item keeps its value and its average is re-spread over the new count
+   * (P3-05 — they used to raise the store's value at the purchased average
+   * with nothing in 1250 behind it).
    *
-   * Idempotent on (referenceType, referenceId): a prior credit for the same
-   * reference is reversed before the new one is applied, so editing a sale does
-   * not stack duplicate sacks into the store.
+   * Idempotent on (referenceType, referenceId): only the difference against
+   * what this reference already credited is applied, as new movement rows.
+   * Sacks it credited that have since been sold are ledgered as a shortfall,
+   * never taken below zero (MIL-22).
    */
   async creditFreedKatta(trx, { sizeKg, count, referenceType, referenceId, userId, notes }) {
+    const { applyKattaPlan } = require('../millStore/kattaLedger');
     const size = uc.snapBagSizeKg(parseFloat(sizeKg) || 0);
     const bags = Math.round(parseFloat(count) || 0);
 
-    // Reverse any earlier credit for this same reference first.
-    const prior = await trx('mill_stock_movements')
-      .where({ reference_type: referenceType, reference_id: referenceId })
-      .select('item_id', 'quantity');
-    for (const m of prior) {
-      await trx('mill_stock').where({ item_id: m.item_id, warehouse_id: null })
-        .update({ quantity_available: trx.raw('quantity_available - ?', [parseFloat(m.quantity) || 0]), updated_at: trx.fn.now() });
+    let item = null;
+    if (size > 0 && bags > 0) {
+      const code = `KATTA-${size}`;
+      item = await trx('mill_items').where('code', code).first();
+      if (!item) {
+        [item] = await trx('mill_items').insert({
+          code, name: `Katta ${size}kg`, category: 'packaging', unit: 'pcs',
+          capacity_kg: size, reorder_level: 0, is_active: true,
+          notes: 'Auto-managed: empty bags freed from milled raw or repacked stock.',
+          created_by: userId || null,
+        }).returning('*');
+      }
     }
-    if (prior.length) {
-      await trx('mill_stock_movements').where({ reference_type: referenceType, reference_id: referenceId }).del();
-    }
-
-    if (size <= 0 || bags <= 0) return null;   // nothing to return
-
-    const code = `KATTA-${size}`;
-    let item = await trx('mill_items').where('code', code).first();
-    if (!item) {
-      [item] = await trx('mill_items').insert({
-        code, name: `Katta ${size}kg`, category: 'packaging', unit: 'pcs',
-        capacity_kg: size, reorder_level: 0, is_active: true,
-        notes: 'Auto-managed: empty bags freed from milled raw or repacked stock.',
-        created_by: userId || null,
-      }).returning('*');
-    }
-    const stock = await trx('mill_stock').where({ item_id: item.id, warehouse_id: null }).first();
-    if (!stock) {
-      await trx('mill_stock').insert({ item_id: item.id, warehouse_id: null, quantity_available: bags, quantity_reserved: 0 });
-    } else {
-      await trx('mill_stock').where({ item_id: item.id, warehouse_id: null })
-        .update({ quantity_available: trx.raw('quantity_available + ?', [bags]), updated_at: trx.fn.now() });
-    }
-    // 'return' is the movement type the milling katta path uses, and the only
-    // inbound value the movement_type CHECK allows ('purchase', 'consumption',
-    // 'adjustment', 'reservation', 'return'). The columns are `reason` and
-    // `performed_by` — there is no notes/created_by on this table.
-    await trx('mill_stock_movements').insert({
-      item_id: item.id, warehouse_id: null, movement_type: 'return', quantity: bags,
-      reference_type: referenceType, reference_id: referenceId,
-      reason: notes || `Empty ${size}kg katta freed (${bags})`,
-      performed_by: userId || null,
-    });
-    return { itemId: item.id, code, sizeKg: size, bags };
+    // 'return' is the movement type for freed katta (the movement_type CHECK
+    // allows 'purchase', 'consumption', 'adjustment', 'reservation', 'return').
+    const plan = item ? [{
+      itemId: item.id, warehouseId: null, family: 'freed', cls: 'zero', qty: bags,
+      reason: notes || `Empty ${size}kg katta freed (${bags})`, item,
+    }] : [];
+    const res = await applyKattaPlan(trx, { referenceType, referenceId, plan, userId });
+    if (!item) return null;   // nothing to return
+    return { itemId: item.id, code: item.code, sizeKg: size, bags, ledgered: res.ledgered };
   },
 
   async reconcileBatchKatta(trx, batchId, userId) {
+    const { applyKattaPlan } = require('../millStore/kattaLedger');
     const num = (v) => parseFloat(v) || 0;
     const vehs = await trx('milling_vehicle_arrivals').where('batch_id', batchId)
       .select('total_bags', 'bag_size_kg', 'weight_kg');
@@ -3339,18 +3325,23 @@ const inventoryService = {
     // stock (packing.service skips katta), so that katta is consumed below as a
     // batch_katta movement, by the run's own recorded count. P.P. bags, master
     // bags and polythene are not katta: the packing run draws those itself.
+    // A run's katta_cost_mode says who books its cost: 'yield' runs (P3-05 on)
+    // are booked here at average cost for exactly what is drawn ('gl'); 'pack'
+    // runs booked their katta themselves, so here it only leaves the store at
+    // its value ('prepaid').
     const runRows = await trx('mill_packing_logs').where({ batch_id: batchId })
       .select('id', 'bag_item_id', 'bags_count', 'master_bag_item_id', 'master_bags_count',
-        'poly_item_id', 'poly_count', 'warehouse_id');
-    const runUse = new Map(); // `${item}|${warehouse}` → { itemId, warehouseId, need }
+        'poly_item_id', 'poly_count', 'warehouse_id', 'katta_cost_mode');
+    const runUse = new Map(); // `${item}|${warehouse}|${cls}` → { itemId, warehouseId, cls, need }
     for (const r of runRows) {
+      const cls = r.katta_cost_mode === 'yield' ? 'gl' : 'prepaid';
       for (const [itemId, count] of [[r.bag_item_id, r.bags_count],
         [r.master_bag_item_id, r.master_bags_count], [r.poly_item_id, r.poly_count]]) {
         const n = num(count);
         if (!itemId || n <= 0) continue;
         const warehouseId = r.warehouse_id ?? null;
-        const key = `${itemId}|${warehouseId ?? ''}`;
-        if (!runUse.has(key)) runUse.set(key, { itemId: Number(itemId), warehouseId, need: 0 });
+        const key = `${itemId}|${warehouseId ?? ''}|${cls}`;
+        if (!runUse.has(key)) runUse.set(key, { itemId: Number(itemId), warehouseId, cls, need: 0 });
         runUse.get(key).need += n;
       }
     }
@@ -3371,40 +3362,33 @@ const inventoryService = {
         legacyDrawn.set(key, (legacyDrawn.get(key) || 0) - num(m.quantity));
       }
     }
-    // Consume the packing runs' katta from store — clamped at zero, shortfall
-    // flagged — onto the same movement list the rest of the reconcile writes.
-    const consumeKattaRuns = async (movements, shortages) => {
-      for (const [key, u] of runUse) {
+    // The packing runs' katta, as draws on the plan. The legacy draw counts
+    // against the 'pack' runs first (they are the ones that made it).
+    const planKattaRuns = (plan) => {
+      const left = new Map(legacyDrawn);
+      const uses = [...runUse.values()].sort((a, b) => (a.cls === 'prepaid' ? -1 : 0) - (b.cls === 'prepaid' ? -1 : 0));
+      for (const u of uses) {
         const it = kattaRunItem.get(u.itemId);
         if (!it) continue;
-        const need = Math.max(0, Math.round(u.need - (legacyDrawn.get(key) || 0)));
+        const lk = `${u.itemId}|${u.warehouseId ?? ''}`;
+        const already = Math.min(u.need, left.get(lk) || 0);
+        left.set(lk, (left.get(lk) || 0) - already);
+        const need = Math.max(0, Math.round(u.need - already));
         if (need <= 0) continue;
-        let st = await trx('mill_stock').where({ item_id: it.id, warehouse_id: u.warehouseId }).first();
-        if (!st) [st] = await trx('mill_stock').insert({ item_id: it.id, warehouse_id: u.warehouseId, quantity_available: 0, quantity_reserved: 0 }).returning('*');
-        const avail = num(st.quantity_available);
-        const used = Math.min(need, Math.max(0, avail));
-        if (used > 0) {
-          await trx('mill_stock').where({ id: st.id }).update({ quantity_available: trx.raw('GREATEST(quantity_available - ?, 0)', [used]), updated_at: trx.fn.now() });
-          movements.push({ item_id: it.id, warehouse_id: u.warehouseId, movement_type: 'consumption', quantity: -used, reference_type: 'batch_katta', reference_id: batchId, reason: `${it.name} used by packing run(s) (batch ${batchId})`, performed_by: userId || null });
-        }
-        if (need > used) shortages.push({ size: num(it.capacity_kg), item: it.name, needed: need, available: avail, short: need - used });
+        plan.push({ itemId: it.id, warehouseId: u.warehouseId, family: 'draw', cls: u.cls, qty: need, item: it, reason: `${it.name} used by packing run(s) (batch ${batchId})` });
       }
     };
 
-    // Undo the batch's prior katta movements on whatever item(s) they hit —
-    // BEFORE any early exit, so a re-run always starts from a clean slate.
-    const prior = await trx('mill_stock_movements').where({ reference_type: 'batch_katta', reference_id: batchId }).select('item_id', 'warehouse_id', 'quantity');
-    const reverseByItem = new Map();
-    for (const m of prior) {
-      const key = `${m.item_id}|${m.warehouse_id ?? ''}`;
-      const cur = reverseByItem.get(key) || { itemId: m.item_id, warehouseId: m.warehouse_id ?? null, q: 0 };
-      cur.q += num(m.quantity);
-      reverseByItem.set(key, cur);
-    }
-    for (const { itemId, warehouseId, q } of reverseByItem.values()) {
-      await trx('mill_stock').where({ item_id: itemId, warehouse_id: warehouseId }).update({ quantity_available: trx.raw('quantity_available - ?', [q]), updated_at: trx.fn.now() });
-    }
-    await trx('mill_stock_movements').where({ reference_type: 'batch_katta', reference_id: batchId }).del();
+    const batchRow = await trx('milling_batches').where('id', batchId).first();
+    // Apply the plan — only its difference against what the batch has already
+    // moved — and keep the outputs' cost in step with any katta cost it booked.
+    const applyPlan = async (plan) => {
+      const res = await applyKattaPlan(trx, { referenceType: 'batch_katta', referenceId: batchId, plan, userId, batch: batchRow });
+      if (Math.abs(res.costDelta) >= 0.01 && batchRow && num(batchRow.actual_finished_kg) > 0) {
+        await inventoryService.recomputeBatchOutputsAfterPriceChange(trx, batchId, { userId });
+      }
+      return res;
+    };
 
     let freed = 0; bySize.forEach((b) => { freed += b; });
     if (freed <= 0) {
@@ -3413,6 +3397,8 @@ const inventoryService = {
       // packing run is still the truth about how the output is bagged, and used
       // to be lost here: M-002 packed 960 × 25kg and its output lot carried no
       // bag spec at all, because this returned before the stamping below.
+      const plan = [];
+      planKattaRuns(plan);
       if (packedSpec) {
         const finishedLots = await trx('inventory_lots')
           .where({ batch_ref: `batch-${batchId}` }).where('type', 'finished');
@@ -3428,15 +3414,15 @@ const inventoryService = {
             updated_at: trx.fn.now(),
           });
         }
-        const movements = []; const shortages = [];
-        await consumeKattaRuns(movements, shortages);
-        if (movements.length) await trx('mill_stock_movements').insert(movements);
+        const { shortages, ledgered } = await applyPlan(plan);
         return {
           capacityKg: packedSpec.sizeKg, rawBags: 0, freed: 0,
           outputBags: stamped, packed: 0, net: 0,
-          sizes: [], shortages, packedFromRun: true,
+          sizes: [], shortages, ledgered, packedFromRun: true,
         };
       }
+      // Still undo whatever an earlier reconcile of this batch moved.
+      await applyPlan(plan);
       return null; // no katta intake and nothing packed
     }
 
@@ -3451,7 +3437,6 @@ const inventoryService = {
     // FIBC, container → bulk (no bags). See milling/batchPackSpec.js.
     // Byproducts + batches with no spec keep the predominant-size logic.
     let exportPack = null; // { packSize:number|null }
-    const batchRow = await trx('milling_batches').where('id', batchId).first();
     if (batchRow) {
       const spec = await resolveBatchPackSpec(trx, batchRow);
       // Only override when we actually have a distinct target size (or container bulk).
@@ -3463,7 +3448,7 @@ const inventoryService = {
       }
     }
 
-    // find/create the KATTA packaging item + stock row for a given size.
+    // find/create the KATTA packaging item for a given size.
     //
     // It must be a katta, not merely something of that size. This used to key on
     // the size alone — `KATTA-${size}` — and so minted "Katta 25kg" the first
@@ -3491,9 +3476,7 @@ const inventoryService = {
           created_by: userId || null,
         }).returning('*');
       }
-      let st = await trx('mill_stock').where({ item_id: it.id, warehouse_id: null }).first();
-      if (!st) [st] = await trx('mill_stock').insert({ item_id: it.id, warehouse_id: null, quantity_available: 0, quantity_reserved: 0 }).returning('*');
-      return { it, st };
+      return { it };
     };
 
     const outLots = await trx('inventory_lots').where({ batch_ref: `batch-${batchId}` }).whereIn('type', ['finished', 'byproduct']);
@@ -3502,7 +3485,7 @@ const inventoryService = {
       // ── Standard path: byproducts go into the predominant raw katta. Finished
       // rice goes into whatever the packing run actually used, when there was
       // one — those bags are consumed by the run's own count (katta here via
-      // consumeKattaRuns, anything else by the packing service), so they must
+      // planKattaRuns, anything else by the packing service), so they must
       // NOT also consume freed katta by weight. Without a packing run the old
       // behaviour stands: everything into the predominant katta.
       let packed = 0;
@@ -3518,23 +3501,22 @@ const inventoryService = {
         await trx('inventory_lots').where('id', l.id).update({ total_bags: bags, bag_size_kg: size, bag_weight_kg: size, updated_at: trx.fn.now() });
       }
 
-      // Apply per size: +freed (return); the predominant size also -packed (consumption).
-      const movements = [];
+      // Per size: +freed (return); the predominant size also −packed by
+      // weight (consumption). Both unvalued — today's basis for katta that is
+      // not a packing run's. A by-weight draw the store cannot cover (a mixed
+      // intake packing more than it freed) is flagged, never driven negative.
+      const plan = [];
       for (const [size, bags] of bySize) {
-        const { it, st } = await itemForSize(size);
-        const consume = size === predSize ? packed : 0;
-        // Clamp at 0: on a mixed-size intake the predominant size can pack MORE
-        // output bags than it freed (bags − consume < 0), which would drive its
-        // stock negative. Never let mill_stock go below zero.
-        await trx('mill_stock').where({ id: st.id }).update({ quantity_available: trx.raw('GREATEST(quantity_available + ?, 0)', [bags - consume]), updated_at: trx.fn.now() });
-        movements.push({ item_id: it.id, warehouse_id: null, movement_type: 'return', quantity: bags, reference_type: 'batch_katta', reference_id: batchId, reason: `Empty ${size}kg katta freed from milled raw (batch ${batchId})`, performed_by: userId || null });
-        if (consume > 0) movements.push({ item_id: it.id, warehouse_id: null, movement_type: 'consumption', quantity: -consume, reference_type: 'batch_katta', reference_id: batchId, reason: `${size}kg katta used to pack outputs (batch ${batchId})`, performed_by: userId || null });
+        const { it } = await itemForSize(size);
+        plan.push({ itemId: it.id, warehouseId: null, family: 'freed', cls: 'zero', qty: bags, item: it, reason: `Empty ${size}kg katta freed from milled raw (batch ${batchId})` });
+        if (size === predSize && packed > 0) {
+          plan.push({ itemId: it.id, warehouseId: null, family: 'draw', cls: 'zero', qty: packed, item: it, reason: `${size}kg katta used to pack outputs (batch ${batchId})` });
+        }
       }
-      const shortages = [];
-      await consumeKattaRuns(movements, shortages);
-      await trx('mill_stock_movements').insert(movements);
+      planKattaRuns(plan);
+      const { shortages, ledgered } = await applyPlan(plan);
 
-      return { capacityKg: predSize, rawBags: freed, freed, outputBags: packed, packed, net: freed - packed, sizes: [...bySize.keys()], shortages };
+      return { capacityKg: predSize, rawBags: freed, freed, outputBags: packed, packed, net: freed - packed, sizes: [...bySize.keys()], shortages, ledgered };
     }
 
     // ── Export path: FINISHED rice packs into the customer's spec; byproducts keep
@@ -3547,7 +3529,7 @@ const inventoryService = {
       const kg = num(l.net_weight_kg) > 0 ? num(l.net_weight_kg) : num(l.qty);
       if (l.type === 'finished' && packedSpec) {
         // A packing run is the truth about the export bags too. Its bags are
-        // consumed by the run's own count (katta below via consumeKattaRuns,
+        // consumed by the run's own count (katta below via planKattaRuns,
         // anything else by the packing service) — never again here by weight,
         // which used to draw the same export bags twice.
         const runBags = Math.ceil(kg / packedSpec.sizeKg);
@@ -3567,31 +3549,21 @@ const inventoryService = {
       await trx('inventory_lots').where('id', l.id).update({ total_bags: bags, bag_size_kg: size, bag_weight_kg: size, updated_at: trx.fn.now() });
     }
 
-    const movements = [];
+    const plan = [];
     // 1) Return freed raw katta to its own size's stock.
     for (const [size, bags] of bySize) {
-      const { it, st } = await itemForSize(size);
-      await trx('mill_stock').where({ id: st.id }).update({ quantity_available: trx.raw('quantity_available + ?', [bags]), updated_at: trx.fn.now() });
-      movements.push({ item_id: it.id, warehouse_id: null, movement_type: 'return', quantity: bags, reference_type: 'batch_katta', reference_id: batchId, reason: `Empty ${size}kg katta freed from milled raw (batch ${batchId})`, performed_by: userId || null });
+      const { it } = await itemForSize(size);
+      plan.push({ itemId: it.id, warehouseId: null, family: 'freed', cls: 'zero', qty: bags, item: it, reason: `Empty ${size}kg katta freed from milled raw (batch ${batchId})` });
     }
     // 2) Consume the packing item for each output size; short-tolerant + flag.
-    const shortages = [];
     for (const [size, need] of consumeBySize) {
-      const { it, st } = await itemForSize(size);
-      const cur = await trx('mill_stock').where({ id: st.id }).first('quantity_available');
-      const avail = num(cur && cur.quantity_available);
-      const consumed = Math.min(need, avail);
-      if (consumed > 0) {
-        await trx('mill_stock').where({ id: st.id }).update({ quantity_available: trx.raw('GREATEST(quantity_available - ?, 0)', [consumed]), updated_at: trx.fn.now() });
-        movements.push({ item_id: it.id, warehouse_id: null, movement_type: 'consumption', quantity: -consumed, reference_type: 'batch_katta', reference_id: batchId, reason: `${size}kg bags used to pack export outputs (batch ${batchId})`, performed_by: userId || null });
-      }
-      const short = Math.max(0, need - avail);
-      if (short > 0) shortages.push({ size, item: it.name, needed: need, available: avail, short });
+      const { it } = await itemForSize(size);
+      plan.push({ itemId: it.id, warehouseId: null, family: 'draw', cls: 'zero', qty: need, item: it, reason: `${size}kg bags used to pack export outputs (batch ${batchId})` });
     }
-    await consumeKattaRuns(movements, shortages);
-    await trx('mill_stock_movements').insert(movements);
+    planKattaRuns(plan);
+    const { shortages, ledgered } = await applyPlan(plan);
 
-    return { capacityKg: exportPack.packSize || predSize, rawBags: freed, freed, outputBags: packed, packed, net: freed - packed, sizes: [...bySize.keys()], shortages, exportPacked: true, orderNo: exportPack.orderNo };
+    return { capacityKg: exportPack.packSize || predSize, rawBags: freed, freed, outputBags: packed, packed, net: freed - packed, sizes: [...bySize.keys()], shortages, ledgered, exportPacked: true, orderNo: exportPack.orderNo };
   },
 
   /**

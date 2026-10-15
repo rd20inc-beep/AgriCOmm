@@ -37,6 +37,16 @@ function packagingDefaults(item) {
 const { NotFoundError, ValidationError, ConflictError } = require('../../shared/errors');
 const { supplierRefusal } = require('../../shared/partyGate');
 
+// On hand across every bucket, from getItemById's stock_locations.
+function itemOnHandOf(item) {
+  return Number(((item && item.stock_locations) || [])
+    .reduce((s, r) => s + (Number(r.quantity_available) || 0), 0).toFixed(3));
+}
+
+function retireRefusal(item, onHand) {
+  return `${item.name} still has ${onHand} ${item.unit} in store. Use it, sell it or write it off (stock adjustment) before retiring the item.`;
+}
+
 const millStoreService = {
   // ─── Items ───
   async listItems(params) {
@@ -58,16 +68,43 @@ const millStoreService = {
   async updateItem(id, data) {
     const existing = await repo.getItemById(id);
     if (!existing) throw new NotFoundError('Item not found.');
+    const onHand = itemOnHandOf(existing);
+    // The average cost values every unit on hand: changing it while there is
+    // stock revalues the store, which moves 1250 — that is an Owner-approved
+    // revaluation with its own journal (INV-46), not an item edit. With nothing
+    // on hand it only prices the next estimate, so it stays an edit.
+    if (data.avg_cost_per_unit !== undefined && onHand > 0
+      && Number(data.avg_cost_per_unit || 0) !== Number(existing.avg_cost_per_unit || 0)) {
+      throw new ConflictError(
+        `${existing.name} has ${onHand} ${existing.unit} on hand — changing its cost revalues that stock. Use Revalue (Owner-approved) instead.`
+      );
+    }
+    if (data.is_active === false && existing.is_active !== false && onHand > 0) {
+      throw new ConflictError(retireRefusal(existing, onHand));
+    }
     // Derive from the MERGED row: a rename can reveal a size, and a type that was
     // never set should be filled in rather than left for a later migration.
     const derived = packagingDefaults({ ...existing, ...data });
     return repo.updateItem(id, { ...derived, ...data });
   },
 
+  // Retiring an item with stock dropped that stock out of the store's value
+  // while 1250 kept it (INV-45): use it up, sell it or write it off first.
   async deleteItem(id) {
     const existing = await repo.getItemById(id);
     if (!existing) throw new NotFoundError('Item not found.');
+    const onHand = itemOnHandOf(existing);
+    if (onHand > 0) throw new ConflictError(retireRefusal(existing, onHand));
     await repo.softDeleteItem(id);
+  },
+
+  // Owner-approved revaluation of an item's average cost (INV-46): the value
+  // of what is on hand moves by on-hand × (new − old) and so does 1250 —
+  // DR 1250 / CR 6000 for an increase, the reverse for a cut (the same
+  // counter-account as a stock count adjustment). Recorded as a zero-quantity
+  // 'revaluation' movement so the item's ledger shows it.
+  async revalueItem(id, { avg_cost_per_unit, reason }, userId) {
+    return db.transaction((trx) => repo.revalueItem(trx, id, { avgCost: avg_cost_per_unit, reason }, userId));
   },
 
   // ─── Ratios ───

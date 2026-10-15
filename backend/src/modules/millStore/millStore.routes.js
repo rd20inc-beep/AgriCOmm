@@ -27,6 +27,14 @@ router.put(
   auditAction('update', 'mill_item', (req) => req.params.id),
   ctrl.updateItem
 );
+// Revaluing the stock on hand moves 1250, so the Owner approves it (INV-46).
+router.put(
+  '/items/:id/revalue',
+  authorize('mill_store', 'manage_items'),
+  ownerApproval('mill_item_revaluation'),
+  auditAction('revalue', 'mill_item', (req) => req.params.id),
+  ctrl.revalueItem
+);
 router.delete(
   '/items/:id',
   authorize('mill_store', 'manage_items'),

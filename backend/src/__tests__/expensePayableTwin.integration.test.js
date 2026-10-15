@@ -113,10 +113,13 @@ d('expense with order / batch: no payable twin (DB-gated)', () => {
     expect(twins.map((p) => Number(p.original_amount))).toEqual([700]);
   });
 
-  test('store consumption merges into the batch\'s own row, never the expense\'s', async () => {
+  test('store consumption writes its own cost line, never onto the expense\'s (or any other) row', async () => {
     await consumption.confirm(batch.id, [{ item_id: item.id, quantity: 2 }], user.id);
     const mcs = await db('milling_costs').where({ batch_id: batch.id, category: 'diesel' }).orderBy('id');
-    expect(mcs.map((r) => [Number(r.amount), r.business_expense_id])).toEqual([[900, null], [4000, millExp.id]]);
+    // P3-05 (MIL-23): one owner per cost line — the issue is a line of its own.
+    expect(mcs.map((r) => [Number(r.amount), r.business_expense_id, r.source])).toEqual([
+      [700, null, null], [4000, millExp.id, null], [200, null, 'store_consumption'],
+    ]);
   });
 
   test('scripts/linkExpenseCostRows: a legacy row is found and stamped; a merged one is only listed', async () => {

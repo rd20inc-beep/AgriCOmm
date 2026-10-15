@@ -47,6 +47,7 @@ test('the owner-approved routes', () => {
     'POST milling /payroll/final-settlements/:id/reverse [final_settlement_reversal]',
     'POST serviceMilling /invoices/:id/void [service_invoice_void]',
     'PUT accounting /periods/:id/reopen [period_reopen]',
+    'PUT millStore /items/:id/revalue [mill_item_revaluation]', // P3-06 / INV-46: revaluing stock moves 1250
   ]);
 });
 

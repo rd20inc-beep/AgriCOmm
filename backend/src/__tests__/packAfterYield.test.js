@@ -69,10 +69,12 @@ describe('a packing run reaches the lot', () => {
 describe('re-running the reconcile is safe, which is why it can be called again', () => {
   const rec = methodBody(INVENTORY, 'reconcileBatchKatta');
 
-  it('it reverses its own prior movements before recomputing', () => {
+  it('it applies only the difference against what it already moved — never a delete', () => {
     // Without this, each packing run would add another set of katta movements.
-    expect(rec).toContain("where({ reference_type: 'batch_katta', reference_id: batchId })");
-    expect(rec).toContain('.del()');
+    // It used to undo + delete its prior rows; the undo hit the non-negative
+    // CHECK once freed katta had been sold (MIL-22). Now it is a signed delta.
+    expect(rec).toContain("applyKattaPlan(trx, { referenceType: 'batch_katta', referenceId: batchId");
+    expect(rec).not.toContain('.del()');
   });
 
   it('bags are derived from the lot weight, not by summing packing runs', () => {

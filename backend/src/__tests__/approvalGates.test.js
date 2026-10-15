@@ -58,6 +58,7 @@ const OWNER_MODAL_SCREENS = {
   'modules/finance/drawers/TransactionDrawer.jsx': ['post', '/finance/payments/:id/reverse'],
   'modules/exportOrders/components/ShortBalanceWriteOff.jsx': ['post', '/export-orders/:id/write-off-balance'],
   'modules/milling/components/ServiceBillingTab.jsx': ['post', '/service-milling/invoices/:id/void'],
+  'modules/millStore/pages/StoreOverview.jsx': ['put', '/mill-store/items/:id/revalue'],
 };
 
 function frontendFilesCalling(dir, needle, out = []) {
