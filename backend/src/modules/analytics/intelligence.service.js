@@ -522,11 +522,39 @@ const intelligenceService = {
         .first(),
     ]);
 
+    // The tiles' contract (RPT-18): the dashboard read stats.high and
+    // stats.resolvedToday, which were never returned, and filtered on
+    // High/Medium/Low while the scan stores critical / warning / info — so two
+    // tiles were always 0 and the filter never matched. Counts here are over
+    // the whole inbox (not the page the list loaded); money at risk is per
+    // currency, never one summed figure.
+    const OPEN = ['Open', 'Acknowledged', 'In Progress', 'Escalated'];
+    const [resolvedToday, riskByCurrency] = await Promise.all([
+      db('exception_inbox').where('status', 'Resolved')
+        .whereRaw('resolved_at::date = CURRENT_DATE').count('id as count').first(),
+      db('exception_inbox').whereIn('status', OPEN).where('amount_at_risk', '>', 0)
+        .select(db.raw("UPPER(COALESCE(currency, 'USD')) as currency"))
+        .sum('amount_at_risk as total').count('id as count')
+        .groupByRaw("UPPER(COALESCE(currency, 'USD'))"),
+    ]);
+    const sev = bySeverity.reduce((acc, r) => { acc[r.severity] = parseInt(r.count, 10); return acc; }, {});
+    const status = byStatus.reduce((acc, r) => { acc[r.status] = parseInt(r.count, 10); return acc; }, {});
+
     return {
-      byStatus: byStatus.reduce((acc, r) => { acc[r.status] = parseInt(r.count, 10); return acc; }, {}),
-      bySeverity: bySeverity.reduce((acc, r) => { acc[r.severity] = parseInt(r.count, 10); return acc; }, {}),
+      byStatus: status,
+      bySeverity: sev,
       byType: byType.reduce((acc, r) => { acc[r.exception_type] = parseInt(r.count, 10); return acc; }, {}),
       totalAmountAtRisk: parseFloat(amountAtRisk.total_at_risk),
+      open: OPEN.reduce((s, k) => s + (status[k] || 0), 0),
+      critical: sev.critical || 0,
+      warning: sev.warning || 0,
+      info: sev.info || 0,
+      resolvedToday: parseInt(resolvedToday && resolvedToday.count, 10) || 0,
+      amountAtRiskByCurrency: riskByCurrency.reduce((acc, r) => {
+        acc[r.currency] = { amount: Math.round((parseFloat(r.total) || 0) * 100) / 100, count: parseInt(r.count, 10) || 0 };
+        return acc;
+      }, {}),
+      severities: ['critical', 'warning', 'info'],
     };
   },
 
