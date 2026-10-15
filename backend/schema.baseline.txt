@@ -1923,6 +1923,8 @@ COL milling_batches.total_cost_per_kg_finished:numeric:NULL
 COL milling_batches.transport_mode:character varying:NOT NULL
 COL milling_batches.updated_at:timestamp with time zone:NOT NULL
 COL milling_batches.uuid:uuid:NULL
+COL milling_batches.variance_pct:numeric:NULL
+COL milling_batches.variance_status:character varying:NULL
 COL milling_batches.wastage_kg:numeric:NOT NULL
 COL milling_batches.yield_pct:numeric:NOT NULL
 COL milling_costs.amount:numeric:NOT NULL
@@ -3585,6 +3587,7 @@ CON milling_batches.chk_milling_batches_service_lot_status_valid(c)
 CON milling_batches.chk_milling_batches_sortex_rejects_price_per_mt_nn(c)
 CON milling_batches.chk_milling_batches_status_valid(c)
 CON milling_batches.chk_milling_batches_total_cost_per_kg_finished_nonneg(c)
+CON milling_batches.chk_milling_batches_variance_status(c)
 CON milling_batches.chk_milling_batches_yield_pct_range(c)
 CON milling_batches.milling_batches_approved_by_foreign(f)
 CON milling_batches.milling_batches_batch_no_unique(u)
