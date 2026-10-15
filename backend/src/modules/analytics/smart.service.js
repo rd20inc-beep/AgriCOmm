@@ -471,11 +471,10 @@ const smartService = {
         .first();
 
       // Milling yield from batches supplied by this supplier
-      const yieldData = await db('milling_batches')
-        .where({ supplier_id: supplierId })
-        .whereNotNull('yield_pct')
-        .where('yield_pct', '>', 0)
-        .select(db.raw('AVG(yield_pct) as avg_yield'))
+      // D-14: weighted (Σ finished ÷ Σ raw), completed company batches only.
+      const { yieldBatches, weightedYieldPctSql } = require('../milling/millingYield');
+      const yieldData = await yieldBatches(db('milling_batches as mb').where('mb.supplier_id', supplierId), 'mb')
+        .select(db.raw(`${weightedYieldPctSql('mb')} as avg_yield`))
         .first();
 
       // Delivery timing
