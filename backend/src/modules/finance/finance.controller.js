@@ -23,8 +23,9 @@ const { ledgerFailure, missingAccounts } = require('../../shared/ledgerFailure')
 const { glAccountFor } = require('../../shared/accountGl');
 const {
   applyReceivableDelta, pendingChequeTotal, postDeltaOf, round2,
-  isCheque, hasPaymentJournal, postPaymentJournal, settleDocuments, SOURCES, LOT_SUPPLIER_LINES,
+  isCheque, hasPaymentJournal, postPaymentJournal, settleDocuments, SOURCES,
 } = require('./paymentSettlement');
+const { lotSupplierPayables, lotPaymentTotal } = require('../inventory/lotPayment');
 const { recordMoneyMovement, postAccountMovement, assertDocumentCurrency } = require('./paymentEngine');
 const { postBankTransaction } = require('../../shared/bankBalance');
 const { bankTieOut } = require('./bankTieOut');
@@ -807,8 +808,11 @@ const financeController = {
       const row = await db(cfg.table).where({ id }).first();
       if (!row) return res.status(404).json({ success: false, message: 'Purchase not found.' });
 
-      const total = cfg.totalCol ? (parseFloat(row[cfg.totalCol]) || 0)
-        : (parseFloat(row.base_amount_pkr) || (parseFloat(row.amount) || 0) * (parseFloat(row.fx_rate) || 1));
+      // A lot is measured against its supplier bills (P3-10): freight and
+      // commission are the hauler's / broker's, paid on their own payables.
+      const total = source === 'lot' ? await lotPaymentTotal(db, row)
+        : cfg.totalCol ? (parseFloat(row[cfg.totalCol]) || 0)
+          : (parseFloat(row.base_amount_pkr) || (parseFloat(row.amount) || 0) * (parseFloat(row.fx_rate) || 1));
       const paid = parseFloat(row.paid_amount) || 0;
       const outstanding = Math.max(0, total - paid);
       const refToken = cfg.refCol ? row[cfg.refCol] : null;
@@ -817,13 +821,15 @@ const financeController = {
       // source_table+source_id (payPurchase) AND linked_ref=token (a lot's Raw
       // Material payable is keyed by lot_no), excluding the separate transport
       // payable.
-      const payableIds = (await db('payables').where(function () {
-        this.where({ source_table: cfg.table, source_id: id });
-        if (refToken) this.orWhere(function () {
-          this.where('linked_ref', refToken)
-            .andWhere(function () { this.whereNull('source_table').orWhereNot('source_table', 'lot_transport'); });
-        });
-      }).select('id')).map((r) => r.id);
+      const payableIds = source === 'lot'
+        ? (await lotSupplierPayables(db, row, { includeReversed: true })).map((r) => r.id)
+        : (await db('payables').where(function () {
+          this.where({ source_table: cfg.table, source_id: id });
+          if (refToken) this.orWhere(function () {
+            this.where('linked_ref', refToken)
+              .andWhere(function () { this.whereNull('source_table').orWhereNot('source_table', 'lot_transport'); });
+          });
+        }).select('id')).map((r) => r.id);
       let viaPayments = [];
       if (payableIds.length) {
         viaPayments = await db('payments as p')
@@ -2192,21 +2198,9 @@ async function purchasePayables(trx, source, row) {
     const p = await trx('payables').where({ source_table: table, source_id: row.id }).forUpdate().first();
     return p ? [p] : [];
   }
-  const byLot = await trx('payables').where({ source_id: row.id }).forUpdate().select('*');
-  const byLotNo = row.lot_no
-    ? await trx('payables').where({ linked_ref: row.lot_no, category: 'Raw Material' }).forUpdate().select('*')
-    : [];
-  const isRice = (p) => !p.source_table && p.category === 'Raw Material';
-  const seen = new Set();
-  const rows = [
-    ...(Array.isArray(byLot) ? byLot : []).filter((p) => isRice(p) || p.source_table === 'inventory_lots' || LOT_SUPPLIER_LINES.includes(p.source_table)),
-    ...(Array.isArray(byLotNo) ? byLotNo : []).filter(isRice),
-  ].filter((p) => (seen.has(p.id) ? false : seen.add(p.id)));
-  const list = (Array.isArray(rows) ? rows : [])
-    .filter((p) => !row.supplier_id || !p.supplier_id || String(p.supplier_id) === String(row.supplier_id))
-    .filter((p) => !p.hauler_id);
-  // The rice line first, then the itemised lines in the order they were raised.
-  return list.sort((a, b) => (a.category === 'Raw Material' ? 0 : 1) - (b.category === 'Raw Material' ? 0 : 1) || a.id - b.id);
+  // The rice line first, then the itemised lines in the order they were raised
+  // — the same lookup the lot's payment status and Purchase Invoice use (P3-10).
+  return lotSupplierPayables(trx, row, { forUpdate: true, includeReversed: true });
 }
 
 financeController.payPurchase = async (req, res) => {

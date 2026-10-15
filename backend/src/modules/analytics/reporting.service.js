@@ -1233,6 +1233,8 @@ const reportingService = {
       export_release: 'Reservation released', stock_adjustment_plus: 'Adjustment (+)', stock_adjustment_minus: 'Adjustment (−)',
       damage_out: 'Damage write-off', shortage_out: 'Shortage write-off', return_in: 'Return', opening_balance: 'Opening balance',
       lot_split: 'Lot split', lot_merge: 'Lot merge',
+      milling_hold: 'Committed to milling', milling_release: 'Milling commitment released',
+      purchase_correction_in: 'Received qty corrected (+)', purchase_correction_out: 'Received qty corrected (−)',
     };
 
     const events = txns.map((t) => {
@@ -2439,6 +2441,8 @@ const reportingService = {
       stock_adjustment_plus: 'adjustment_plus', stock_adjustment_minus: 'adjustment_minus',
       damage_out: 'damage_writeoff', shortage_out: 'shortage_writeoff', return_in: 'return',
       opening_balance: 'opening_balance', lot_split: 'adjustment_minus', lot_merge: 'adjustment_plus',
+      milling_hold: 'milling_hold', milling_release: 'milling_release',
+      purchase_correction_in: 'receipt_correction_in', purchase_correction_out: 'receipt_correction_out',
     };
     const LABELS = {
       purchase_receipt: 'Purchase received', internal_receipt: 'Internal receipt', production_issue: 'Issued to milling',
@@ -2447,6 +2451,8 @@ const reportingService = {
       reservation_hold: 'Reserved', reservation_release: 'Reservation released', adjustment_plus: 'Adjustment (+)',
       adjustment_minus: 'Adjustment (−)', damage_writeoff: 'Damage write-off', shortage_writeoff: 'Shortage write-off',
       return: 'Return', opening_balance: 'Opening balance',
+      milling_hold: 'Committed to milling', milling_release: 'Milling commitment released',
+      receipt_correction_in: 'Received qty corrected (+)', receipt_correction_out: 'Received qty corrected (−)',
     };
 
     let q = db('lot_transactions as t')
@@ -2533,6 +2539,8 @@ const reportingService = {
       stock_adjustment_plus: 'adjustment_plus', stock_adjustment_minus: 'adjustment_minus',
       damage_out: 'damage_writeoff', shortage_out: 'shortage_writeoff', return_in: 'return',
       opening_balance: 'opening_balance', lot_split: 'adjustment_minus', lot_merge: 'adjustment_plus',
+      milling_hold: 'milling_hold', milling_release: 'milling_release',
+      purchase_correction_in: 'receipt_correction_in', purchase_correction_out: 'receipt_correction_out',
     };
     const LABELS = {
       purchase_receipt: 'Purchase received', production_issue: 'Issued to milling', production_output: 'Milling output',
@@ -2540,12 +2548,16 @@ const reportingService = {
       export_dispatch: 'Export dispatch', local_sale: 'Local sale', adjustment_plus: 'Adjustment (+)',
       adjustment_minus: 'Adjustment (−)', damage_writeoff: 'Damage write-off', shortage_writeoff: 'Shortage write-off',
       return: 'Return', opening_balance: 'Opening balance',
+      milling_hold: 'Committed to milling', milling_release: 'Milling commitment released',
+      receipt_correction_in: 'Received qty corrected (+)', receipt_correction_out: 'Received qty corrected (−)',
     };
     // movement_type → the ledger column bucket
     const BUCKET = {
       opening_balance: 'opening',
       purchase_receipt: 'inward', production_output: 'inward', byproduct_output: 'inward', return: 'inward', adjustment_plus: 'inward',
+      receipt_correction_in: 'inward',
       production_issue: 'outward', adjustment_minus: 'outward', damage_writeoff: 'outward', shortage_writeoff: 'outward',
+      receipt_correction_out: 'outward',
       transfer_in: 'transfer', transfer_out: 'transfer',
       local_sale: 'sales', export_dispatch: 'sales',
     };

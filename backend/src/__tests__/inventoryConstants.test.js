@@ -14,8 +14,9 @@ const {
 
 describe('Inventory Movement Taxonomy', () => {
   describe('MOVEMENT_TYPES', () => {
-    it('defines all 17 movement types', () => {
-      expect(Object.keys(MOVEMENT_TYPES)).toHaveLength(17);
+    it('defines all 23 movement types', () => {
+      // 17 + milling hold/release, lot split/merge, receipt correction in/out (P3-01)
+      expect(Object.keys(MOVEMENT_TYPES)).toHaveLength(23);
     });
 
     it('has unique values', () => {

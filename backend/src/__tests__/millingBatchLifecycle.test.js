@@ -29,6 +29,7 @@ function builder(conn, table) {
       return qb;
     },
     whereIn(col, vals) { filters.push((r) => vals.includes(r[col])); return qb; },
+    whereRaw() { return qb; }, // lot txn-no lookup (postMovement)
     forUpdate() { conn.locks.push(table); return qb; },
     select() { return qb; },
     join() { return qb; },

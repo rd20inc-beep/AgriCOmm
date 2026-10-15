@@ -5,6 +5,7 @@ const accountingService = require('../accounting/accounting.service');
 const { mirrorJournals } = require('../milling/payrollReversal');
 const { glAccountFor } = require('../../shared/accountGl');
 const { deleteBatchTx } = require('../milling/milling.controller');
+const { deriveAvailable, deriveLotStatus } = require('../inventory/lotQuantity');
 
 /**
  * Super-Admin "Danger Zone" — permanent, cascading hard-deletes and manual
@@ -525,12 +526,19 @@ async function deleteLocalSale(trx, req, id) {
       // available_qty via postMovement, so the reversal must add back `kg` too.
       // (This was ÷1000, restocking MT → a 1000× under-restock that silently
       // destroyed the sold stock and left available_qty ≠ net_weight_kg.)
+      // Danger Zone hard-delete: the sale's ledger rows go with it, so the
+      // restock is written straight back (not a new movement) — but with
+      // available derived from the holds and the status from the quantity,
+      // the same rule as postMovement (lotQuantity, P3-01).
       const kg = num(sale.quantity_kg);
+      const qty = num(lot.qty) + kg;
+      // lot-qty-writer: hard-delete restock (the sale's ledger rows go too).
       await trx('inventory_lots').where('id', lot.id).update({
-        qty: num(lot.qty) + kg,
-        available_qty: num(lot.available_qty) + kg,
+        qty,
+        available_qty: deriveAvailable({ ...lot, qty }),
         sold_weight_kg: Math.max(0, num(lot.sold_weight_kg) - kg),
         net_weight_kg: num(lot.net_weight_kg) + kg,
+        status: deriveLotStatus(lot.status, qty),
         updated_at: trx.fn.now(),
       });
     }
@@ -781,7 +789,13 @@ async function deleteExportOrder(trx, req, id) {
     const lot = await trx('inventory_lots').where('id', r.lot_id).first();
     if (lot) {
       const newReserved = Math.max(0, num(lot.reserved_qty) - num(r.reserved_qty));
-      await trx('inventory_lots').where('id', lot.id).update({ reserved_qty: newReserved, available_qty: num(lot.qty) - newReserved, updated_at: trx.fn.now() });
+      // available keeps the lot's milling holds out (lotQuantity, P3-01).
+      // lot-qty-writer: hard-delete release (allocation rows are deleted below).
+      await trx('inventory_lots').where('id', lot.id).update({
+        reserved_qty: newReserved,
+        available_qty: deriveAvailable({ ...lot, reserved_qty: newReserved }),
+        updated_at: trx.fn.now(),
+      });
     }
   }
   await trx('inventory_reservations').where('order_id', id).del();
@@ -792,7 +806,17 @@ async function deleteExportOrder(trx, req, id) {
   for (const m of dispatched) {
     const restoreKg = Math.abs(num(m.quantity_kg));
     const lot = await trx('inventory_lots').where('id', m.lot_id).first();
-    if (lot) await trx('inventory_lots').where('id', lot.id).update({ qty: num(lot.qty) + restoreKg, available_qty: num(lot.available_qty) + restoreKg, net_weight_kg: num(lot.net_weight_kg) + restoreKg, updated_at: trx.fn.now() });
+    if (lot) {
+      const qty = num(lot.qty) + restoreKg;
+      // lot-qty-writer: hard-delete restock (dispatch rows are deleted below).
+      await trx('inventory_lots').where('id', lot.id).update({
+        qty,
+        available_qty: deriveAvailable({ ...lot, qty }),
+        net_weight_kg: num(lot.net_weight_kg) + restoreKg,
+        status: deriveLotStatus(lot.status, qty),
+        updated_at: trx.fn.now(),
+      });
+    }
   }
   await trx('lot_transactions').where('reference_no', orderNo).whereIn('transaction_type', ['export_dispatch_out', 'export_allocation', 'export_release']).del();
 

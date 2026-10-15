@@ -6,6 +6,7 @@ const { isKattaItem } = require('../../shared/packagingTypes');
 const { applyWarehouseScope } = require('../../utils/warehouseScope');
 const { isReservedSource } = require('../milling/batchLifecycle');
 const { resolveBatchPackSpec } = require('../milling/batchPackSpec');
+const { deriveAvailable, deriveLotStatus, weightedInboundCost } = require('./lotQuantity');
 
 // The GL's by-product output split for a batch (millingCompletionJournal) —
 // required lazily: the milling module requires this service.
@@ -64,6 +65,17 @@ const MOVEMENT_TYPES = {
   // Reservations (no qty change, reservation_effect only)
   RESERVATION_HOLD: 'reservation_hold',
   RESERVATION_RELEASE: 'reservation_release',
+  // Milling commitments (P6a / P3-01): rice committed to a batch is held on the
+  // lot (milling_reserved_qty) until yield consumes it or the batch releases it.
+  MILLING_HOLD: 'milling_hold',
+  MILLING_RELEASE: 'milling_release',
+  // An added purchase on a lot already committed to milling splits the
+  // un-milled remainder off into a new lot (addPurchaseToLot).
+  LOT_SPLIT: 'lot_split',
+  LOT_MERGE: 'lot_merge',
+  // Edit Received: the weight that actually arrived is corrected (P3-01).
+  RECEIPT_CORRECTION_IN: 'receipt_correction_in',
+  RECEIPT_CORRECTION_OUT: 'receipt_correction_out',
   // Adjustments
   ADJUSTMENT_PLUS: 'adjustment_plus',
   ADJUSTMENT_MINUS: 'adjustment_minus',
@@ -81,6 +93,8 @@ const OUTBOUND_TYPES = new Set([
   MOVEMENT_TYPES.ADJUSTMENT_MINUS,
   MOVEMENT_TYPES.DAMAGE_WRITEOFF,
   MOVEMENT_TYPES.SHORTAGE_WRITEOFF,
+  MOVEMENT_TYPES.LOT_SPLIT,
+  MOVEMENT_TYPES.RECEIPT_CORRECTION_OUT,
 ]);
 
 // Movement types that increase stock
@@ -94,13 +108,25 @@ const INBOUND_TYPES = new Set([
   MOVEMENT_TYPES.RETURN,
   MOVEMENT_TYPES.OPENING_BALANCE,
   MOVEMENT_TYPES.SERVICE_DISPATCH_REVERSE,
+  MOVEMENT_TYPES.LOT_MERGE,
+  MOVEMENT_TYPES.RECEIPT_CORRECTION_IN,
 ]);
 
 // Reservation types — no qty change, only reservation_effect
 const RESERVATION_TYPES = new Set([
   MOVEMENT_TYPES.RESERVATION_HOLD,
   MOVEMENT_TYPES.RESERVATION_RELEASE,
+  MOVEMENT_TYPES.MILLING_HOLD,
+  MOVEMENT_TYPES.MILLING_RELEASE,
 ]);
+
+// Which hold column each reservation type moves, and in which direction.
+const HOLD_EFFECTS = {
+  [MOVEMENT_TYPES.RESERVATION_HOLD]: { column: 'reserved_qty', sign: 1 },
+  [MOVEMENT_TYPES.RESERVATION_RELEASE]: { column: 'reserved_qty', sign: -1 },
+  [MOVEMENT_TYPES.MILLING_HOLD]: { column: 'milling_reserved_qty', sign: 1 },
+  [MOVEMENT_TYPES.MILLING_RELEASE]: { column: 'milling_reserved_qty', sign: -1 },
+};
 
 // Canonical mapping: internal movement code → stored lot_transactions.transaction_type
 const LOT_TRANSACTION_TYPE_MAP = {
@@ -117,6 +143,12 @@ const LOT_TRANSACTION_TYPE_MAP = {
   [MOVEMENT_TYPES.SERVICE_DISPATCH_REVERSE]: 'service_dispatch_in',
   [MOVEMENT_TYPES.RESERVATION_HOLD]: 'export_allocation',
   [MOVEMENT_TYPES.RESERVATION_RELEASE]: 'export_release',
+  [MOVEMENT_TYPES.MILLING_HOLD]: 'milling_hold',
+  [MOVEMENT_TYPES.MILLING_RELEASE]: 'milling_release',
+  [MOVEMENT_TYPES.LOT_SPLIT]: 'lot_split',
+  [MOVEMENT_TYPES.LOT_MERGE]: 'lot_merge',
+  [MOVEMENT_TYPES.RECEIPT_CORRECTION_IN]: 'purchase_correction_in',
+  [MOVEMENT_TYPES.RECEIPT_CORRECTION_OUT]: 'purchase_correction_out',
   [MOVEMENT_TYPES.ADJUSTMENT_PLUS]: 'stock_adjustment_plus',
   [MOVEMENT_TYPES.ADJUSTMENT_MINUS]: 'stock_adjustment_minus',
   [MOVEMENT_TYPES.DAMAGE_WRITEOFF]: 'damage_out',
@@ -362,6 +394,28 @@ const inventoryService = {
 
   // =========================================================================
   // CORE: Post a stock movement
+  //
+  // The ONE writer of a lot's quantity columns (P3-01): qty, available_qty,
+  // reserved_qty, milling_reserved_qty, net_weight_kg / gross_weight_kg and
+  // status change only here, always together, always with a lot_transactions
+  // row, always under a row lock. Holds (export reservations, milling
+  // commitments) are movements too: they move a hold column, leave qty alone
+  // and write a zero-quantity ledger row carrying reservation_effect.
+  //
+  //   available_qty = qty − reserved_qty − milling_reserved_qty   (lotQuantity)
+  //
+  // Cost: only an inbound movement changes the lot's cost — the weighted
+  // average of what is on the lot and what arrives. Outbound movements carry
+  // their cost into the ledger row (cost_impact) but never rewrite the lot's
+  // cost (INV-22).
+  //
+  // Optional (all backward compatible):
+  //   ledger         — what the user entered, for the ledger row
+  //                    (transactionDate, inputUnit, inputQty, quantityBags,
+  //                    balanceBags, rateInputUnit, rateInputValue, costImpact,
+  //                    referenceModule, referenceId)
+  //   flagZeroCost   — false: an inbound with no cost does not set
+  //                    cost_incomplete (a purchase recorded before its price)
   // =========================================================================
   async postMovement(trx, {
     movementType,
@@ -379,11 +433,16 @@ const inventoryService = {
     orderId,
     transferId,
     userId,
+    ledger = {},
+    flagZeroCost = true,
   }) {
     if (!trx) throw new Error('postMovement requires a transaction');
     if (!movementType) throw new Error('movementType is required');
     if (!lotId) throw new Error('lotId is required');
     if (qty == null || qty <= 0) throw new Error('qty must be a positive number');
+    if (!INBOUND_TYPES.has(movementType) && !OUTBOUND_TYPES.has(movementType) && !RESERVATION_TYPES.has(movementType)) {
+      throw new Error(`Unknown movement type: ${movementType}`);
+    }
 
     // Units (Phase 5c): qty is now KG and costPerUnit is per-KG — so qty/cost
     // columns are stored natively in KG. totalCost = cost × qty is invariant
@@ -403,12 +462,22 @@ const inventoryService = {
       throw new Error(`Lot ${lotId} not found`);
     }
 
+    const currentQty = parseFloat(lot.qty) || 0;
+    const currentReserved = parseFloat(lot.reserved_qty) || 0;
+    const currentMillingReserved = parseFloat(lot.milling_reserved_qty) || 0; // P6a
+    // What may still be drawn: the derived figure, or the stored one when that
+    // is lower — a lot whose stored availability drifted below its holds (an
+    // old "Use in Batch") must not hand the same rice out a second time.
+    const freeQty = Math.min(
+      parseFloat(lot.available_qty) || 0,
+      deriveAvailable({ qty: currentQty, reserved_qty: currentReserved, milling_reserved_qty: currentMillingReserved }),
+    );
+
     // 2. For outbound movements: check sufficient available qty
     if (OUTBOUND_TYPES.has(movementType)) {
-      const availableQty = parseFloat(lot.available_qty) || 0;
-      if (availableQty < parsedQty) {
+      if (freeQty + 1e-6 < parsedQty) {
         throw new Error(
-          `Insufficient stock in lot ${lot.lot_no}: available ${availableQty} ${lot.unit}, required ${parsedQty}`
+          `Insufficient stock in lot ${lot.lot_no}: available ${freeQty} ${lot.unit}, required ${parsedQty}`
         );
       }
     }
@@ -436,20 +505,35 @@ const inventoryService = {
       created_by: userId || null,
     };
 
-    // 4. Update lot qty
-    const currentQty = parseFloat(lot.qty) || 0;
-    const currentReserved = parseFloat(lot.reserved_qty) || 0;
-    const currentMillingReserved = parseFloat(lot.milling_reserved_qty) || 0; // P6a
-    let newQty;
+    // 4. New quantities.
+    let newQty = currentQty;
+    let newReserved = currentReserved;
+    let newMillingReserved = currentMillingReserved;
+    let holdEffect = null;
 
     if (INBOUND_TYPES.has(movementType)) {
       newQty = currentQty + parsedQty;
     } else if (OUTBOUND_TYPES.has(movementType)) {
       newQty = currentQty - parsedQty;
-    } else if (RESERVATION_TYPES.has(movementType)) {
-      newQty = currentQty; // no qty change for reservations
     } else {
-      throw new Error(`Unknown movement type: ${movementType}`);
+      // A hold moves one hold column; qty is untouched.
+      const { column, sign } = HOLD_EFFECTS[movementType];
+      if (sign > 0) {
+        if (freeQty + 1e-6 < parsedQty) {
+          throw new Error(
+            `Cannot hold ${parsedQty} kg on lot ${lot.lot_no}: only ${freeQty} kg available (qty ${currentQty}, reserved ${currentReserved}, in milling ${currentMillingReserved})`
+          );
+        }
+        holdEffect = parsedQty;
+      } else {
+        // Release what is actually held, never more: a legacy row can name more
+        // than the lot still holds, and a hold must not go negative.
+        const held = column === 'reserved_qty' ? currentReserved : currentMillingReserved;
+        holdEffect = -Math.min(parsedQty, held);
+      }
+      if (column === 'reserved_qty') newReserved = Math.max(0, currentReserved + holdEffect);
+      else newMillingReserved = Math.max(0, currentMillingReserved + holdEffect);
+      movement.hold_effect = holdEffect;
     }
 
     // HARD ENFORCEMENT: no negative stock
@@ -458,22 +542,28 @@ const inventoryService = {
     }
 
     // 5. available_qty = qty - reserved_qty (export) - milling_reserved_qty (P6a)
-    const newAvailable = newQty - currentReserved - currentMillingReserved;
+    const newAvailable = deriveAvailable({ qty: newQty, reserved_qty: newReserved, milling_reserved_qty: newMillingReserved });
     const currentNetWeightKg = parseFloat(lot.net_weight_kg) || currentQty;
     const newNetWeightKg = currentNetWeightKg + (direction * movementQtyKg);
     const newGrossWeightKg = newNetWeightKg;
 
-    // 6. Recalculate total_value
-    const newCostPerUnit = parsedCost > 0 ? parsedCost : parseFloat(lot.cost_per_unit) || 0;
+    // 6. Cost: inbound → weighted average; outbound / holds → unchanged.
+    const lotCost = parseFloat(lot.cost_per_unit) || 0;
+    const newCostPerUnit = INBOUND_TYPES.has(movementType)
+      ? weightedInboundCost({ currentQty, currentCost: lotCost, inQty: parsedQty, inCost: parsedCost })
+      : lotCost;
     const newTotalValue = newCostPerUnit * newQty;
 
     const lotUpdate = {
       qty: newQty,
       available_qty: newAvailable,
+      reserved_qty: newReserved,
+      milling_reserved_qty: newMillingReserved,
       cost_per_unit: newCostPerUnit,
       total_value: newTotalValue,
       net_weight_kg: newNetWeightKg,
       gross_weight_kg: newGrossWeightKg,
+      status: deriveLotStatus(lot.status, newQty),
       updated_at: trx.fn.now(),
     };
     // received_net_weight_kg = immutable original intake: grows on inbound
@@ -482,37 +572,40 @@ const inventoryService = {
     if (INBOUND_TYPES.has(movementType)) {
       lotUpdate.received_net_weight_kg = trx.raw('COALESCE(received_net_weight_kg, 0) + ?', [movementQtyKg]);
     }
-    await trx('inventory_lots').where('id', lotId).update(lotUpdate);
-
     // Flag zero-cost lots on inbound movements — EXCEPT client-owned
     // (service-milling) lots, which are correctly zero-cost (the client owns the
     // rice; the mill only earns a service fee) and must not be flagged incomplete.
-    if (INBOUND_TYPES.has(movementType) && parsedCost === 0 && lot.ownership !== 'client') {
-      await trx('inventory_lots').where('id', lotId).update({ cost_incomplete: true });
+    if (INBOUND_TYPES.has(movementType) && parsedCost === 0 && lot.ownership !== 'client' && flagZeroCost) {
+      lotUpdate.cost_incomplete = true;
     }
+    // lot-qty-writer: postMovement — the one writer (lotQuantity invariant).
+    await trx('inventory_lots').where('id', lotId).update(lotUpdate);
 
+    const bagKg = parseFloat(lot.bag_weight_kg) || 50;
     const txnNo = await generateLotTxnNo(trx);
-    await trx('lot_transactions').insert({
+    const [txn] = await trx('lot_transactions').insert({
       transaction_no: txnNo,
-      transaction_date: new Date().toISOString().slice(0, 10),
+      transaction_date: ledger.transactionDate || new Date().toISOString().slice(0, 10),
       lot_id: lotId,
       transaction_type: LOT_TRANSACTION_TYPE_MAP[movementType] || movementType,
-      reference_module: resolveReferenceModule({ orderId, batchId, transferId, sourceEntity }),
-      reference_id: orderId || batchId || transferId || null,
+      reference_module: ledger.referenceModule || resolveReferenceModule({ orderId, batchId, transferId, sourceEntity }),
+      reference_id: ledger.referenceId || orderId || batchId || transferId || null,
       reference_no: linkedRef || null,
       warehouse_from_id: fromWarehouseId || null,
       warehouse_to_id: toWarehouseId || null,
-      input_unit: 'KG',
-      input_qty: parsedQty,
+      input_unit: ledger.inputUnit || 'KG',
+      input_qty: ledger.inputQty != null ? ledger.inputQty : parsedQty,
       quantity_kg: direction * movementQtyKg,
-      quantity_bags: direction * Math.round(movementQtyKg / (parseFloat(lot.bag_weight_kg) || 50)),
-      rate_input_unit: 'KG',
-      rate_input_value: parsedCost || null,
+      quantity_bags: ledger.quantityBags != null
+        ? direction * Math.abs(ledger.quantityBags)
+        : direction * Math.round(movementQtyKg / bagKg),
+      rate_input_unit: ledger.rateInputUnit || 'KG',
+      rate_input_value: ledger.rateInputValue != null ? ledger.rateInputValue : (parsedCost || null),
       rate_per_kg: parsedCost > 0 ? parsedCost : null,
-      cost_impact: totalCost,
+      cost_impact: ledger.costImpact != null ? ledger.costImpact : totalCost,
       currency: currency || 'PKR',
       balance_kg: newNetWeightKg,
-      balance_bags: Math.round(newNetWeightKg / (parseFloat(lot.bag_weight_kg) || 50)),
+      balance_bags: ledger.balanceBags != null ? ledger.balanceBags : Math.round(newNetWeightKg / bagKg),
       remarks: notes || null,
       created_by: userId || null,
       // Phase 1 new columns
@@ -522,8 +615,9 @@ const inventoryService = {
       entity_to: destEntity || lot.entity || null,
       performed_by: userId || null,
       performed_at: new Date(),
-      reservation_effect: null,
-    });
+      reservation_effect: holdEffect,
+    }).returning('id');
+    movement.lot_transaction_id = txn && typeof txn === 'object' ? txn.id : txn;
 
     // 7. Return the movement record
     return movement;
@@ -707,6 +801,7 @@ const inventoryService = {
         productId: resolvedProductId,
       });
 
+      // lot-qty-free: created empty; the receipt below fills it.
       [lot] = await trx('inventory_lots')
         .insert({
           lot_no: lotNo,
@@ -814,11 +909,17 @@ const inventoryService = {
             + 'Adjust the batch quantity or the lot before recording yield.',
           );
         }
-        if (heldNow !== heldAfter) {
-          await trx('inventory_lots').where({ id: lot.id }).update({
-            milling_reserved_qty: heldAfter,
-            available_qty: avail,
-            updated_at: trx.fn.now(),
+        if (release > 0) {
+          // The hold comes off through the movement engine (lock + ledger row).
+          await inventoryService.postMovement(trx, {
+            movementType: MOVEMENT_TYPES.MILLING_RELEASE,
+            lotId: lot.id,
+            qty: release,
+            sourceEntity: 'mill',
+            linkedRef: `batch-${batchId}`,
+            notes: `Milling hold released for consumption — batch ${batchId}`,
+            batchId,
+            userId,
           });
         }
         if (consume <= 0) continue;
@@ -919,12 +1020,15 @@ const inventoryService = {
   async upsertOutputLot(trx, match, row) {
     const existing = await trx('inventory_lots').where(match).first();
     if (!existing) {
+      // lot-qty-writer: callers pass an empty row (qty 0); the output movement fills it.
       const [created] = await trx('inventory_lots').insert(row).returning('*');
       return created;
     }
     // Keep what belongs to the lot rather than to this yield: its number (which
     // may have been renamed by hand) and its identity.
     const { lot_no: _generated, ...rest } = row;
+    // lot-qty-writer: re-yield resets the output lot to 0 after its batch rows
+    // were cleared (resyncBatchOutputsFromBatch) — P3-03 owns this path.
     await trx('inventory_lots').where('id', existing.id)
       .update({ ...rest, updated_at: trx.fn.now() });
     return trx('inventory_lots').where('id', existing.id).first();
@@ -1593,20 +1697,15 @@ const inventoryService = {
     if (!trx) throw new Error('reserveStock requires a transaction');
 
     const parsedQty = parseFloat(qtyKg);
+    if (!(parsedQty > 0)) throw new Error('Reservation qty must be greater than zero');
 
-    const lot = await trx('inventory_lots').where('id', lotId).first();
+    // Locked: the availability checked here is the availability held below.
+    const lot = await trx('inventory_lots').where('id', lotId).forUpdate().first();
     if (!lot) throw new Error(`Lot ${lotId} not found`);
     // Client-owned (service-milling) stock can only be dispatched back to its
     // client — it can never be reserved/sold as company stock (export or local).
     if (lot.ownership === 'client') {
       throw new Error(`Lot ${lot.lot_no} is client-owned (service milling) and cannot be reserved or sold as company stock.`);
-    }
-
-    const availableQty = parseFloat(lot.available_qty) || 0;
-    if (availableQty < parsedQty) {
-      throw new Error(
-        `Insufficient available stock in lot ${lot.lot_no}: available ${availableQty} ${lot.unit}, required ${parsedQty}`
-      );
     }
 
     // Insert reservation. item_id ties it to a specific export_order_items line
@@ -1622,36 +1721,29 @@ const inventoryService = {
       })
       .returning('*');
 
-    // HARD ENFORCEMENT: no over-reservation (account for milling holds too, P6a)
-    const millingReserved = parseFloat(lot.milling_reserved_qty) || 0;
-    const newReserved = parseFloat(lot.reserved_qty) + parsedQty;
-    if (newReserved + millingReserved > parseFloat(lot.qty) + 1e-6) {
-      throw new Error(`Cannot reserve ${parsedQty} kg — would exceed available on lot ${lot.lot_no} (qty ${lot.qty}, already reserved ${lot.reserved_qty} + ${millingReserved} in milling)`);
+    // The hold itself — through the movement engine, which refuses more than
+    // is available (export + milling holds, P6a) and writes the ledger row.
+    try {
+      await inventoryService.postMovement(trx, {
+        movementType: MOVEMENT_TYPES.RESERVATION_HOLD,
+        lotId,
+        qty: parsedQty,
+        sourceEntity: lot.entity,
+        linkedRef: `order-${orderId}`,
+        notes: `Reserved ${parsedQty} KG for order ${orderId}`,
+        orderId,
+        userId,
+      });
+    } catch (err) {
+      if (/Cannot hold/.test(err.message)) {
+        throw new Error(`Insufficient available stock in lot ${lot.lot_no}: ${err.message}`);
+      }
+      throw err;
     }
-    const newAvailable = parseFloat(lot.qty) - newReserved - millingReserved;
 
     await trx('inventory_lots').where('id', lotId).update({
-      reserved_qty: newReserved,
-      available_qty: newAvailable,
       reserved_against: `order-${orderId}`,
       updated_at: trx.fn.now(),
-    });
-
-    // Write reservation ledger entry
-    const txnNo = await generateLotTxnNo(trx);
-    await trx('lot_transactions').insert({
-      transaction_no: txnNo,
-      transaction_date: new Date().toISOString().slice(0, 10),
-      lot_id: lotId,
-      transaction_type: LOT_TRANSACTION_TYPE_MAP[MOVEMENT_TYPES.RESERVATION_HOLD],
-      reference_module: 'export_order',
-      reference_id: orderId,
-      quantity_kg: 0, // no physical movement
-      reservation_effect: parsedQty,
-      remarks: `Reserved ${parsedQty} KG for order ${orderId}`,
-      created_by: userId || null, // NOT NULL since migration 066 — must be set
-      performed_by: userId || null,
-      performed_at: new Date(),
     });
 
     return reservation;
@@ -1663,8 +1755,10 @@ const inventoryService = {
   async releaseReservation(trx, { reservationId, userId }) {
     if (!trx) throw new Error('releaseReservation requires a transaction');
 
+    // Locked so two releases of one reservation can't both give the qty back.
     const reservation = await trx('inventory_reservations')
       .where('id', reservationId)
+      .forUpdate()
       .first();
 
     if (!reservation) {
@@ -1679,15 +1773,21 @@ const inventoryService = {
     if (!lot) throw new Error(`Lot ${reservation.lot_id} not found`);
 
     const releasedQty = parseFloat(reservation.reserved_qty);
-    const newReserved = Math.max(0, parseFloat(lot.reserved_qty) - releasedQty);
-    const millingReserved = parseFloat(lot.milling_reserved_qty) || 0; // P6a
-    const newAvailable = parseFloat(lot.qty) - newReserved - millingReserved;
-
-    await trx('inventory_lots').where('id', lot.id).update({
-      reserved_qty: newReserved,
-      available_qty: newAvailable,
-      updated_at: trx.fn.now(),
-    });
+    // The release is a movement too: it locks the lot, gives the qty back to
+    // available and writes an export_release ledger row (INV-23 — the release
+    // used to leave no trace).
+    if (releasedQty > 0) {
+      await inventoryService.postMovement(trx, {
+        movementType: MOVEMENT_TYPES.RESERVATION_RELEASE,
+        lotId: lot.id,
+        qty: releasedQty,
+        sourceEntity: lot.entity,
+        linkedRef: reservation.order_id ? `order-${reservation.order_id}` : null,
+        notes: `Released reservation #${reservationId}${reservation.order_id ? ` for order ${reservation.order_id}` : ''}`,
+        orderId: reservation.order_id || null,
+        userId: userId || reservation.created_by || null,
+      });
+    }
 
     await trx('inventory_reservations').where('id', reservationId).update({
       status: 'Released',

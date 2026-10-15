@@ -282,13 +282,17 @@ export function printPurchaseInvoice(data, company) {
     </table>
     <table class="totals">
       <tr><td>Rice cost</td><td class="r">${pkr(costs.riceCost ?? p.amount)}</td></tr>
-      ${costs.transport ? `<tr><td>Transport${costs.transportVendor ? ' (' + esc(costs.transportVendor) + ')' : ''}</td><td class="r">${pkr(costs.transport)}</td></tr>` : ''}
-      ${costs.unloading ? `<tr><td>Unloading</td><td class="r">${pkr(costs.unloading)}</td></tr>` : ''}
       ${costs.labor ? `<tr><td>Labour</td><td class="r">${pkr(costs.labor)}</td></tr>` : ''}
+      ${costs.unloading ? `<tr><td>Unloading</td><td class="r">${pkr(costs.unloading)}</td></tr>` : ''}
       ${costs.packing ? `<tr><td>Packing</td><td class="r">${pkr(costs.packing)}</td></tr>` : ''}
       ${costs.other ? `<tr><td>Other</td><td class="r">${pkr(costs.other)}</td></tr>` : ''}
+      ${costs.bags ? `<tr><td>Bags</td><td class="r">${pkr(costs.bags)}</td></tr>` : ''}
+      ${costs.commission ? `<tr><td>Commission (broker)</td><td class="r">${pkr(costs.commission)}</td></tr>` : ''}
+      ${costs.transport ? `<tr><td>Transport${costs.transportVendor ? ' (' + esc(costs.transportVendor) + ')' : ''}${costs.transportCapitalised === false ? ' — not in landed cost' : ''}</td><td class="r">${pkr(costs.transport)}</td></tr>` : ''}
+      ${Math.abs(costs.adjustment || 0) >= 0.01 ? `<tr><td>Blend / split adjustment</td><td class="r">${pkr(costs.adjustment)}</td></tr>` : ''}
       <tr class="grand"><td>Landed total</td><td class="r">${pkr(p.landedTotal)}</td></tr>
-      <tr><td>Paid</td><td class="r">${pkr(p.paid)}</td></tr>
+      <tr><td>Owed to supplier</td><td class="r">${pkr(p.supplierTotal ?? p.landedTotal)}</td></tr>
+      <tr><td>Paid to supplier</td><td class="r">${pkr(p.paid)}</td></tr>
       <tr><td>Outstanding</td><td class="r">${pkr(p.outstanding)}</td></tr>
     </table>
     <div class="sec"><h4>Inbound (purchase) vehicles</h4>

@@ -11,10 +11,10 @@ const accountingService = require('../../services/accountingService');
 // Shared lot-number generators — keeps the Purchase Lot drawer and the
 // Add Vehicle flow on the same SUP-VARIETY-YYMMDD-SEQ format.
 const inventoryService = require('./inventory.service');
-const { blendPurchaseIntoLot, computeLotLanded, repriceLotPurchase, normalizeTransportPaidBy } = require('./lotCosting');
+const { blendPurchaseIntoLot, computeLotLanded, repriceLotPurchase, normalizeTransportPaidBy, isTransportCapitalised } = require('./lotCosting');
 const { nextDocNo } = require('../../utils/docNumber');
 const { inventoryAccountForLot } = require('../localSales/inventoryAccount');
-const { commitLotToBatch } = require('../milling/batchLifecycle');
+const { commitLotToBatch, batchHasOutputLots } = require('../milling/batchLifecycle');
 const { assertLotCostEditable } = require('../milling/costEditLocks');
 // #9-scoping: per-user warehouse restriction, applied to READ paths only.
 const whScope = require('../../utils/warehouseScope');
@@ -23,6 +23,7 @@ const stockValuation = require('./stockValuation');
 // reports.view_cost (QC Analyst / Inventory Officer / Documentation Officer) — same rule as the reports.
 const { redactForUser, canSeeCost } = require('../../utils/costVisibility');
 const stockSql = require('./stockSql');
+const { restateLotPayment, lotSupplierPayables, paymentState } = require('./lotPayment');
 const movementConstants = require('./inventory.constants');
 
 // Lot screen "Record Transaction" → canonical movement type. Every type goes
@@ -41,12 +42,6 @@ const SOLD_TXN_TYPES = new Set(['sales_allocation', 'dispatch_out']);
 const ADJUSTMENT_ONLY_TXN_TYPES = new Set([
   'stock_adjustment_plus', 'stock_adjustment_minus', 'wastage', 'damage', 'shortage',
 ]);
-
-async function generateTxnNo(trx) {
-  const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-  // Per-day sequence, collision-safe (MAX+1, not count+1 which reuses a deleted no.).
-  return nextDocNo(trx, { table: 'lot_transactions', column: 'transaction_no', prefix: `TXN-${today}-` });
-}
 
 // Whitelist + coerce the extended quality payload for inventory_lots.quality_json.
 // Numeric percentages are clamped to 0–100 implicitly by parseFloat; keys are
@@ -549,6 +544,8 @@ async function applyRicePurchaseChange(trx, lot, { newPurchaseAmount, kg, lotFie
     const e = new Error(`Lot ${lot.lot_no} has no supplier bill and is not opening stock, so changing its price or quantity would move stock value with nothing on the other side of the books. Correct it through a stock adjustment instead.`);
     e.status = 409; throw e;
   }
+  // lot-qty-free: lotFields carry rate / ordered weight only — stock moves
+  // through postMovement.
   await trx('inventory_lots').where({ id: lot.id }).update({
     ...lotFields,
     purchase_amount: uc.round2(newPurchaseAmount),
@@ -571,6 +568,8 @@ async function applyRicePurchaseChange(trx, lot, { newPurchaseAmount, kg, lotFie
   if (Math.abs(r.equityDelta) > 0.01) {
     await postOpeningStockDelta(trx, { lot, delta: r.equityDelta, userId });
   }
+  // The supplier bill moved: restate paid / due against it (P3-10).
+  await restateLotPayment(trx, lot.id);
   return { payableUpdated: !!pay, isOpeningStock, ...r };
 }
 
@@ -711,41 +710,67 @@ module.exports = {
           'mva.departure_date', 'mva.gate_pass_no', db.raw('h.name as hauler_name'))
         .orderBy('mva.id', 'asc');
 
-      // Supplier payable for this lot (auto-created with linked_ref = lot_no).
-      // The payable is the source of truth for what's been paid — the lot's own
-      // paid_amount/due_amount can be stale (not synced on later finance payments).
-      const payable = await db('payables')
-        .where('linked_ref', lot.lot_no).andWhere('category', 'Raw Material').first();
+      // The supplier's bills for this lot — the rice line(s) and the itemised
+      // lines, ordered, this supplier only (the same lookup as Finance ▸
+      // Purchases and the lot's payment status, P3-10 / INV-10). They are the
+      // source of truth for what is owed and paid: the old lookup took ONE
+      // unordered 'Raw Material' row by lot number, so the extras, an added
+      // purchase and its payments were missing.
+      const payables = await lotSupplierPayables(db, lot, { includeReversed: true });
+      const live = payables.filter((p) => p.status !== 'Reversed');
+      const payableIds = payables.map((p) => p.id);
       const pays = await db('payments')
-        .andWhere('type', 'payment')
+        .where('type', 'payment')
+        .whereNotIn('status', ['Reversed', 'Rejected', 'Bounced', 'Superseded'])
         .where(function () {
-          if (payable) {
-            this.where('linked_payable_id', payable.id)
-              .orWhere(function () { this.where('source_table', 'inventory_lots').andWhere('source_id', lot.id); });
-          } else {
-            // Legacy fallback only when no payable exists.
-            this.where(function () { this.where('source_table', 'inventory_lots').andWhere('source_id', lot.id); })
-              .orWhere('notes', 'ilike', `%${lot.lot_no}%`);
-          }
+          this.where(function () { this.where('source_table', 'inventory_lots').andWhere('source_id', lot.id); });
+          if (payableIds.length) this.orWhereIn('linked_payable_id', payableIds);
+          // Legacy fallback only when the lot has no bill at all.
+          else this.orWhere('notes', 'ilike', `%${lot.lot_no}%`);
         })
-        .select('id', 'payment_no', 'payment_date', 'payment_method', 'amount', 'bank_reference', 'cleared', 'notes')
+        .select('id', 'payment_no', 'payment_date', 'payment_method', 'amount', 'bank_reference', 'cleared', 'notes', 'linked_payable_id')
         .orderBy('payment_date', 'asc').orderBy('id', 'asc');
 
       const qtyKg = num(lot.received_net_weight_kg) || num(lot.net_weight_kg);
       const amount = num(lot.purchase_amount) || num(lot.rate_per_kg) * qtyKg;
-      const landed = payable ? num(payable.original_amount) || num(lot.landed_cost_total) || amount
-        : num(lot.landed_cost_total) || amount;
-      // Prefer the payable (authoritative); fall back to the lot's own fields.
-      const paid = payable ? num(payable.paid_amount) : num(lot.paid_amount);
-      const outstanding = payable ? num(payable.outstanding) : num(lot.due_amount);
-      const paymentStatus = payable ? payable.status : lot.payment_status;
+      const landed = uc.round2(num(lot.landed_cost_total) || amount);
 
-      const timeline = [{ kind: 'created', date: lot.purchase_date || lot.created_at, label: 'Purchase recorded', amount: landed, balance: landed }];
-      let bal = landed;
+      // What the supplier is owed: Σ of the live bills; a lot with no bill
+      // (opening stock, legacy) is owed its landed total — what it was paid against.
+      const supplierTotal = live.length
+        ? uc.round2(live.reduce((s, p) => s + num(p.original_amount), 0)) : landed;
+      const paid = live.length
+        ? uc.round2(live.reduce((s, p) => s + num(p.paid_amount), 0)) : num(lot.paid_amount);
+      const { payment_status: paymentStatus, due_amount: outstanding } = paymentState(supplierTotal, paid);
+
+      const timeline = [{ kind: 'created', date: lot.purchase_date || lot.created_at, label: 'Purchase recorded', amount: supplierTotal, balance: supplierTotal }];
+      let bal = supplierTotal;
       for (const p of pays) {
-        bal = Math.max(0, bal - num(p.amount));
-        timeline.push({ kind: 'payment', date: p.payment_date, paymentNo: p.payment_no, mode: p.payment_method, reference: p.bank_reference || null, cleared: p.cleared !== false, amount: num(p.amount), balance: bal });
+        // An uncleared cheque is listed but has not reduced the bill yet.
+        const cleared = p.cleared !== false;
+        if (cleared) bal = Math.max(0, uc.round2(bal - num(p.amount)));
+        timeline.push({ kind: 'payment', date: p.payment_date, paymentNo: p.payment_no, mode: p.payment_method, reference: p.bank_reference || null, cleared, amount: num(p.amount), balance: bal });
       }
+
+      // Landed cost, line by line — every component that is in landed_cost_total,
+      // so the breakdown foots. Freight is in only when the company pays the
+      // hauler (computeLotLanded); a blended / split lot's cost columns don't
+      // partition its landed total, and the remainder shows as an adjustment.
+      const tRec = await findLotTransportRecord(db, lot.id);
+      const transportCapitalised = isTransportCapitalised(tRec?.paid_by);
+      const costLines = {
+        riceCost: uc.round2(amount),
+        labor: num(lot.labor_cost), unloading: num(lot.unloading_cost),
+        packing: num(lot.packing_cost), other: num(lot.other_cost),
+        bags: num(lot.total_bag_cost), commission: num(lot.commission_total),
+        transport: num(lot.transport_cost),
+      };
+      const componentsTotal = uc.round2(costLines.riceCost + costLines.labor + costLines.unloading + costLines.packing
+        + costLines.other + costLines.bags + costLines.commission + (transportCapitalised ? costLines.transport : 0));
+      const supplierBill = live.map((p) => ({
+        payNo: p.pay_no, category: p.category, sourceTable: p.source_table || null,
+        amount: num(p.original_amount), paid: num(p.paid_amount), outstanding: num(p.outstanding), status: p.status,
+      }));
 
       // Produced by-product pricing (INTERNAL/ADMIN ONLY — gated by role, mirrors
       // the sales invoice): the per-grade output valuation of the milling batches
@@ -836,20 +861,26 @@ module.exports = {
             bags: lot.total_bags != null ? Number(lot.total_bags) : null, bagWeightKg: num(lot.bag_weight_kg) || null,
             ratePerKg: num(lot.rate_per_kg), landedCostPerKg: num(lot.landed_cost_per_kg),
             amount, landedTotal: landed, paymentStatus,
-            paid, outstanding,
+            // paid / outstanding are against the SUPPLIER's bill (supplierTotal),
+            // not landed: freight and commission are other parties' bills.
+            supplierTotal, paid, outstanding,
             supplierHref: lot.supplier_id ? `/finance/statements?type=supplier&id=${lot.supplier_id}` : null,
             lotHref: `/lot-inventory/${lot.id}`,
           },
           costs: {
-            riceCost: num(lot.purchase_amount) || num(lot.rate_per_kg) * qtyKg,
-            transport: num(lot.transport_cost), transportVendor: lot.transport_vendor_name || null,
-            unloading: num(lot.unloading_cost), labor: num(lot.labor_cost),
-            packing: num(lot.packing_cost), other: num(lot.other_cost),
+            ...costLines,
+            transportVendor: lot.transport_vendor_name || null,
+            transportPaidBy: tRec?.paid_by || 'company',
+            transportCapitalised,
+            // Blended / split lots: what the columns above don't explain.
+            adjustment: uc.round2(landed - componentsTotal),
             landedTotal: landed,
           },
+          supplierBill: { lines: supplierBill, total: supplierTotal, paid, outstanding },
           intakeVehicles: vehs.map(v => ({ vehicleNo: v.vehicle_no, driverName: v.driver_name || null, driverPhone: v.driver_phone || null, weightKg: num(v.weight_kg), weighbridgeKg: num(v.weighbridge_kg), acceptedKg: num(v.accepted_kg), totalBags: v.total_bags != null ? Number(v.total_bags) : null, arrivalDate: v.arrival_date || null, departureDate: v.departure_date || null, gatePassNo: v.gate_pass_no || null, haulerName: v.hauler_name || null })),
           payments: timeline,
-          payable: payable ? { payNo: payable.pay_no, outstanding: num(payable.outstanding), status: payable.status } : null,
+          // The rice line (kept for older clients); supplierBill has them all.
+          payable: live[0] ? { payNo: live[0].pay_no, outstanding: num(live[0].outstanding), status: live[0].status } : null,
           producedByproducts, // INTERNAL/ADMIN ONLY — empty for non-admin viewers
         },
       });
@@ -1171,7 +1202,9 @@ module.exports = {
           entity,
           warehouse_id: resolvedWarehouseId,
           product_id: resolvedProductId,
-          qty: netWeightKg, // KG since mig 228
+          // Quantities start at 0: the receipt below moves them (P3-01 — every
+          // quantity change goes through postMovement with its ledger row).
+          qty: 0,
           unit: 'KG', // qty is KG; unit is a display label only (nothing converts on it)
           status: 'Available',
           // #7 back-link to the originating rice sample (when converted).
@@ -1206,9 +1239,10 @@ module.exports = {
           standard_unit_type: quantity_unit || 'katta',
           bag_weight_kg: bagWt,
           total_bags: totalBags,
-          gross_weight_kg: netWeightKg,
-          net_weight_kg: netWeightKg,
-          received_net_weight_kg: netWeightKg, // what actually arrived (drives stock + bill)
+          gross_weight_kg: 0,
+          net_weight_kg: 0,
+          // what actually arrived (drives stock + bill) — the receipt adds it
+          received_net_weight_kg: 0,
           ordered_net_weight_kg: orderedKg,    // what was ordered (for the short/over variance)
           // Pricing
           rate_input_unit: rate_unit,
@@ -1229,12 +1263,12 @@ module.exports = {
           landed_cost_total: landedCostTotal,
           landed_cost_per_kg: landedCostPerKg,
           // Stock
-          available_qty: netWeightKg, // legacy field in MT
+          available_qty: 0,
           reserved_qty: 0,
           sold_weight_kg: 0,
           damaged_weight_kg: 0,
-          cost_per_unit: landedCostPerKg, // per MT for legacy
-          total_value: landedCostTotal,
+          cost_per_unit: 0,
+          total_value: 0,
           // Payment — always starts unpaid; the payment flow settles it.
           payment_status: 'Pending',
           paid_amount: 0,
@@ -1243,33 +1277,40 @@ module.exports = {
           created_by: req.user?.id || null,
         }).returning('*');
 
-        // Create initial purchase_in transaction
-        const txnNo = await generateTxnNo(trx);
-        await trx('lot_transactions').insert({
-          transaction_no: txnNo,
-          transaction_date: purchase_date || new Date().toISOString().slice(0, 10),
-          lot_id: lot.id,
-          transaction_type: 'purchase_in',
-          reference_module: 'purchase',
-          warehouse_to_id: resolvedWarehouseId,
-          input_unit: quantity_unit,
-          input_qty: parseFloat(quantity_input),
-          quantity_kg: netWeightKg,
-          quantity_bags: totalBags,
-          rate_input_unit: rate_unit,
-          rate_input_value: parseFloat(rate_input) || 0,
-          rate_per_kg: ratePerKg,
-          cost_impact: landedCostTotal,
-          currency: 'PKR',
-          balance_kg: netWeightKg,
-          balance_bags: totalBags,
-          remarks: ratePerKg > 0
-            ? `Purchase: ${parseFloat(quantity_input)} ${quantity_unit} @ ${parseFloat(rate_input)}/${rate_unit}`
-            : `Purchase: ${parseFloat(quantity_input)} ${quantity_unit} (price not yet set)`,
-          created_by: req.user?.id || null,
-          performed_by: req.user?.id || null,
-          performed_at: new Date(),
-        });
+        // The purchase receipt: the lot's stock + its purchase_in ledger row,
+        // through the one movement writer (P3-01). The lot's cost is the landed
+        // cost per kg; a purchase recorded before its price stays unflagged
+        // (the price edit sets it).
+        if (netWeightKg > 0) {
+          await inventoryService.postMovement(trx, {
+            movementType: inventoryService.MOVEMENT_TYPES.PURCHASE_RECEIPT,
+            lotId: lot.id,
+            qty: netWeightKg,
+            toWarehouseId: resolvedWarehouseId,
+            destEntity: entity,
+            notes: ratePerKg > 0
+              ? `Purchase: ${parseFloat(quantity_input)} ${quantity_unit} @ ${parseFloat(rate_input)}/${rate_unit}`
+              : `Purchase: ${parseFloat(quantity_input)} ${quantity_unit} (price not yet set)`,
+            costPerUnit: landedCostPerKg,
+            currency: 'PKR',
+            userId: req.user?.id || null,
+            flagZeroCost: false,
+            ledger: {
+              transactionDate: purchase_date || null,
+              referenceModule: 'purchase',
+              inputUnit: quantity_unit,
+              inputQty: parseFloat(quantity_input),
+              quantityBags: totalBags,
+              balanceBags: totalBags,
+              rateInputUnit: rate_unit,
+              rateInputValue: parseFloat(rate_input) || 0,
+              costImpact: landedCostTotal,
+            },
+          });
+          // The landed total is exact; postMovement's cost × qty may differ by
+          // rounding of the per-kg figure.
+          await trx('inventory_lots').where({ id: lot.id }).update({ total_value: landedCostTotal });
+        }
 
         if (landedPayableAmount > 0 && supplier_id) {
           // #14 — ITEMISED supplier payables: rice + each additional cost is its
@@ -1510,7 +1551,10 @@ module.exports = {
           });
         }
 
-        return lot;
+        // Payment status / due against the supplier bills just raised (P3-10).
+        await restateLotPayment(trx, lot.id);
+        // The row as the receipt left it (quantities, cost, status).
+        return trx('inventory_lots').where({ id: lot.id }).first();
       };
 
       let result;
@@ -1580,7 +1624,9 @@ module.exports = {
       }
 
       const result = await db.transaction(async (trx) => {
-        const lot = await trx('inventory_lots').where({ id: lotId }).first();
+        // Locked: the "wholly intact" guard below must hold until the purchase
+        // is folded in (INV-23).
+        const lot = await trx('inventory_lots').where({ id: lotId }).forUpdate().first();
         if (!lot) { const e = new Error('Lot not found.'); e.status = 404; throw e; }
 
         // ── Guards ──────────────────────────────────────────────────────
@@ -1672,13 +1718,29 @@ module.exports = {
             else await trx('milling_costs').insert({ batch_id: bid, category: 'raw_rice', amount: total, notes: 'Raw rice cost (locked at add-purchase split)' });
           }
 
-          // 2) Shrink THIS lot to the committed portion (cost rate unchanged).
+          // 2) Shrink THIS lot to the committed portion (cost rate unchanged):
+          //    the remainder leaves through a lot_split movement (P3-01).
           const committedBags = Math.max(0, Math.round(committedKg / bagWt));
           const committedLanded = uc.round2(oldRate * committedKg);
+          const splitDate = purchase_date || new Date().toISOString().slice(0, 10);
+          if (remainderKg > 0.001) {
+            await inventoryService.postMovement(trx, {
+              movementType: inventoryService.MOVEMENT_TYPES.LOT_SPLIT,
+              lotId,
+              qty: remainderKg,
+              fromWarehouseId: lot.warehouse_id,
+              notes: `Split off ${(remainderKg / 1000).toFixed(2)} MT un-milled remainder into a new lot for an added purchase`,
+              costPerUnit: oldRate,
+              currency: 'PKR',
+              userId: req.user?.id || null,
+              ledger: {
+                transactionDate: splitDate, referenceModule: 'purchase', inputUnit: 'kg',
+                quantityBags: Math.round(remainderKg / bagWt), balanceBags: committedBags,
+              },
+            });
+          }
           await trx('inventory_lots').where({ id: lotId }).update({
-            qty: committedKg,
-            net_weight_kg: committedKg, gross_weight_kg: committedKg,
-            available_qty: committedKg, total_bags: committedBags,
+            total_bags: committedBags,
             received_net_weight_kg: committedKg,
             purchase_amount: scale(oldPurchaseAmt, cf),
             labor_cost: scale(lot.labor_cost, cf), unloading_cost: scale(lot.unloading_cost, cf),
@@ -1687,15 +1749,6 @@ module.exports = {
             landed_cost_total: committedLanded, total_value: committedLanded,
             cost_per_unit: oldRate,
             updated_at: trx.fn.now(),
-          });
-          const splitTxn = await generateTxnNo(trx);
-          await trx('lot_transactions').insert({
-            transaction_no: splitTxn, transaction_date: purchase_date || new Date().toISOString().slice(0, 10),
-            lot_id: lotId, transaction_type: 'lot_split', reference_module: 'purchase',
-            input_unit: 'kg', input_qty: remainderKg, quantity_kg: -remainderKg, quantity_bags: -Math.round(remainderKg / bagWt),
-            balance_kg: committedKg, balance_bags: committedBags, currency: 'PKR',
-            remarks: `Split off ${(remainderKg / 1000).toFixed(2)} MT un-milled remainder into a new lot for an added purchase`,
-            created_by: req.user?.id || null, performed_by: req.user?.id || null, performed_at: new Date(),
           });
 
           // 3) New lot = remainder (at old rate) + the new purchase (blended).
@@ -1707,13 +1760,16 @@ module.exports = {
           const newLotNo = await inventoryService.generateRiceLotNo(trx, { supplierId: lot.supplier_id, productId: lot.product_id, date: purchase_date });
           const newPaid = addPaid;
           // eslint-disable-next-line no-unused-vars
-          const { id: _oid, created_at: _oc, updated_at: _ou, ...clone } = lot;
+          const { id: _oid, created_at: _oc, updated_at: _ou, uuid: _uu, ...clone } = lot;
+          // Quantities start at 0 — the two movements below fill the new lot
+          // (P3-01). milling_reserved_qty too: the original's milling hold
+          // stays with the original lot.
           const [newLot] = await trx('inventory_lots').insert({
             ...clone,
             lot_no: newLotNo,
-            qty: newNetKg, net_weight_kg: newNetKg, gross_weight_kg: newNetKg,
-            available_qty: newNetKg, reserved_qty: 0, sold_weight_kg: 0, damaged_weight_kg: 0,
-            total_bags: newBags, received_net_weight_kg: newNetKg,
+            qty: 0, net_weight_kg: 0, gross_weight_kg: 0,
+            available_qty: 0, reserved_qty: 0, milling_reserved_qty: 0, sold_weight_kg: 0, damaged_weight_kg: 0,
+            total_bags: newBags, received_net_weight_kg: 0,
             purchase_amount: newPurchaseAmt,
             // Blended purchase rate — keep rate_per_kg AND the displayed "Original
             // Rate" (rate_input_value) in sync so they never disagree on a blended lot.
@@ -1738,37 +1794,48 @@ module.exports = {
             payment_status: newPaid >= addLandedTotal - 0.01 ? 'Paid' : newPaid > 0 ? 'Partial' : 'Pending',
           }).returning('*');
 
-          // Ledger leg 1: the un-milled remainder carried over from the split (at
+          // Movement 1: the un-milled remainder carried over from the split (at
           // the original lot's rate) — so the new lot's ledger reconciles to its
           // full balance and shows the right price for every kg.
-          if (remainderKg > 0.5) {
-            const splitInTxn = await generateTxnNo(trx);
-            await trx('lot_transactions').insert({
-              transaction_no: splitInTxn, transaction_date: purchase_date || new Date().toISOString().slice(0, 10),
-              lot_id: newLot.id, transaction_type: 'lot_merge', reference_module: 'purchase',
-              warehouse_to_id: newLot.warehouse_id,
-              input_unit: 'kg', input_qty: remainderKg, quantity_kg: remainderKg, quantity_bags: Math.round(remainderKg / bagWt),
-              rate_input_unit: 'kg', rate_input_value: uc.round4(oldRate), rate_per_kg: uc.round4(oldRate),
-              cost_impact: uc.round2(oldRate * remainderKg), currency: 'PKR',
-              balance_kg: remainderKg, balance_bags: Math.round(remainderKg / bagWt),
-              remarks: `Un-milled remainder split from ${lot.lot_no} (${(remainderKg / 1000).toFixed(2)} MT @ ${uc.round4(oldRate)}/kg)`,
-              created_by: req.user?.id || null, performed_by: req.user?.id || null, performed_at: new Date(),
+          if (remainderKg > 0.001) {
+            await inventoryService.postMovement(trx, {
+              movementType: inventoryService.MOVEMENT_TYPES.LOT_MERGE,
+              lotId: newLot.id,
+              qty: remainderKg,
+              toWarehouseId: newLot.warehouse_id,
+              notes: `Un-milled remainder split from ${lot.lot_no} (${(remainderKg / 1000).toFixed(2)} MT @ ${uc.round4(oldRate)}/kg)`,
+              costPerUnit: uc.round4(oldRate),
+              currency: 'PKR',
+              userId: req.user?.id || null,
+              ledger: {
+                transactionDate: splitDate, referenceModule: 'purchase', inputUnit: 'kg',
+                rateInputUnit: 'kg', rateInputValue: uc.round4(oldRate),
+                costImpact: uc.round2(oldRate * remainderKg),
+                quantityBags: Math.round(remainderKg / bagWt), balanceBags: Math.round(remainderKg / bagWt),
+              },
             });
           }
-          // Ledger leg 2: the new purchase tranche.
-          const newTxn = await generateTxnNo(trx);
-          await trx('lot_transactions').insert({
-            transaction_no: newTxn, transaction_date: purchase_date || new Date().toISOString().slice(0, 10),
-            lot_id: newLot.id, transaction_type: 'purchase_in', reference_module: 'purchase',
-            warehouse_to_id: newLot.warehouse_id,
-            input_unit: quantity_unit, input_qty: parseFloat(quantity_input),
-            quantity_kg: addNetKg, quantity_bags: addBags,
-            rate_input_unit: rate_unit, rate_input_value: parseFloat(rate_input), rate_per_kg: addRatePerKg,
-            cost_impact: addLandedTotal, currency: 'PKR',
-            balance_kg: newNetKg, balance_bags: newBags,
-            remarks: `Added purchase: ${parseFloat(quantity_input)} ${quantity_unit} @ ${parseFloat(rate_input)}/${rate_unit}`,
-            created_by: req.user?.id || null, performed_by: req.user?.id || null, performed_at: new Date(),
+          // Movement 2: the new purchase tranche.
+          await inventoryService.postMovement(trx, {
+            movementType: inventoryService.MOVEMENT_TYPES.PURCHASE_RECEIPT,
+            lotId: newLot.id,
+            qty: addNetKg,
+            toWarehouseId: newLot.warehouse_id,
+            notes: `Added purchase: ${parseFloat(quantity_input)} ${quantity_unit} @ ${parseFloat(rate_input)}/${rate_unit}`,
+            costPerUnit: addNetKg > 0 ? addLandedTotal / addNetKg : 0,
+            currency: 'PKR',
+            userId: req.user?.id || null,
+            ledger: {
+              transactionDate: splitDate, referenceModule: 'purchase',
+              inputUnit: quantity_unit, inputQty: parseFloat(quantity_input),
+              quantityBags: addBags, balanceBags: newBags,
+              rateInputUnit: rate_unit, rateInputValue: parseFloat(rate_input),
+              costImpact: addLandedTotal,
+            },
           });
+          // The blended figures are exact; the movements' weighted average may
+          // differ in the last decimal.
+          await trx('inventory_lots').where({ id: newLot.id }).update({ cost_per_unit: newRate, total_value: newLanded });
           if (addLandedTotal > 0) {
             const payNo = await generatePayNo(trx);
             await trx('payables').insert({
@@ -1791,13 +1858,15 @@ module.exports = {
           // location — the original purchase payable stays as-is, and the new lot is
           // only newly billed for its added tranche. The remainder it carries was
           // already invoiced on the original lot's purchase.
-          return { __split: true, newLot: enrichLot(newLot), newLotNo, remainderMt: uc.kgToTon(remainderKg), committedMt: uc.kgToTon(committedKg) };
+          await restateLotPayment(trx, newLot.id);
+          const splitLot = await trx('inventory_lots').where({ id: newLot.id }).first();
+          return { __split: true, newLot: enrichLot(splitLot), newLotNo, remainderMt: uc.kgToTon(remainderKg), committedMt: uc.kgToTon(committedKg) };
         }
 
         // ── Blend into the existing lot (weighted-average landed cost) ──
         const {
-          newNetKg, newBags, newLandedTotal, newPurchaseAmount,
-          newLandedPerKg, newRatePerKg, newPaid, newDue, newPaymentStatus,
+          newBags, newLandedTotal, newPurchaseAmount,
+          newLandedPerKg, newRatePerKg,
         } = blendPurchaseIntoLot(lot, {
           netKg: addNetKg,
           bags: addBags,
@@ -1806,13 +1875,29 @@ module.exports = {
           paid: addPaid,
         });
 
+        // The added rice: a purchase receipt through the movement engine (qty,
+        // availability, received weight and the purchase_in ledger row).
+        await inventoryService.postMovement(trx, {
+          movementType: inventoryService.MOVEMENT_TYPES.PURCHASE_RECEIPT,
+          lotId,
+          qty: addNetKg,
+          toWarehouseId: lot.warehouse_id,
+          notes: `Added purchase: ${parseFloat(quantity_input)} ${quantity_unit} @ ${parseFloat(rate_input)}/${rate_unit}`
+            + (notes ? ` — ${String(notes).slice(0, 200)}` : ''),
+          costPerUnit: addNetKg > 0 ? addLandedTotal / addNetKg : 0,
+          currency: 'PKR',
+          userId: req.user?.id || null,
+          ledger: {
+            transactionDate: purchase_date || null, referenceModule: 'purchase',
+            inputUnit: quantity_unit, inputQty: parseFloat(quantity_input),
+            quantityBags: addBags, balanceBags: newBags,
+            rateInputUnit: rate_unit, rateInputValue: parseFloat(rate_input),
+            costImpact: addLandedTotal,
+          },
+        });
+
         await trx('inventory_lots').where({ id: lotId }).update({
-          qty: newNetKg,
-          net_weight_kg: newNetKg,
-          gross_weight_kg: newNetKg,
-          received_net_weight_kg: trx.raw('COALESCE(received_net_weight_kg, 0) + ?', [addNetKg]),
           total_bags: newBags,
-          available_qty: newNetKg,
           purchase_amount: newPurchaseAmount,
           rate_per_kg: newRatePerKg,
           // Keep the displayed "Original Rate" in sync with the blended per-kg rate.
@@ -1827,37 +1912,9 @@ module.exports = {
           landed_cost_per_kg: newLandedPerKg,
           cost_per_unit: newLandedPerKg,
           total_value: newLandedTotal,
-          paid_amount: newPaid,
-          due_amount: newDue,
-          payment_status: newPaymentStatus,
           updated_at: trx.fn.now(),
         });
 
-        const txnNo = await generateTxnNo(trx);
-        await trx('lot_transactions').insert({
-          transaction_no: txnNo,
-          transaction_date: purchase_date || new Date().toISOString().slice(0, 10),
-          lot_id: lotId,
-          transaction_type: 'purchase_in',
-          reference_module: 'purchase',
-          warehouse_to_id: lot.warehouse_id,
-          input_unit: quantity_unit,
-          input_qty: parseFloat(quantity_input),
-          quantity_kg: addNetKg,
-          quantity_bags: addBags,
-          rate_input_unit: rate_unit,
-          rate_input_value: parseFloat(rate_input),
-          rate_per_kg: addRatePerKg,
-          cost_impact: addLandedTotal,
-          currency: 'PKR',
-          balance_kg: newNetKg,
-          balance_bags: newBags,
-          remarks: `Added purchase: ${parseFloat(quantity_input)} ${quantity_unit} @ ${parseFloat(rate_input)}/${rate_unit}`
-            + (notes ? ` — ${String(notes).slice(0, 200)}` : ''),
-          created_by: req.user?.id || null,
-          performed_by: req.user?.id || null,
-          performed_at: new Date(),
-        });
 
         if (addLandedTotal > 0) {
           const payNo = await generatePayNo(trx);
@@ -1890,6 +1947,8 @@ module.exports = {
           });
         }
 
+        // paid / due / status against the supplier bills, the new one included (P3-10).
+        await restateLotPayment(trx, lotId);
         return trx('inventory_lots').where({ id: lotId }).first();
       });
 
@@ -2137,7 +2196,9 @@ module.exports = {
       const { transport_cost, labor_cost, unloading_cost, packing_cost, other_cost, bag_cost_per_bag, transport_vendor_id, hauler_id } = req.body;
 
       const result = await db.transaction(async (trx) => {
-        const lot = await trx('inventory_lots').where({ id }).first();
+        // Locked for the whole edit: the GL / payable deltas below are computed
+        // from this read, so a concurrent edit must wait, not double-post (INV-23).
+        const lot = await trx('inventory_lots').where({ id }).forUpdate().first();
         if (!lot) { const e = new Error('Lot not found.'); e.status = 404; throw e; }
         await assertLotEditableByOperator(req, lot, trx);
         const lotId = lot.id;
@@ -2370,6 +2431,8 @@ module.exports = {
             });
           }
           await postSupplierDelta(supplierDelta);
+          // The supplier's bills moved: restate paid / due against them (P3-10).
+          await restateLotPayment(trx, lotId);
         }
 
         // Cascade the corrected cost into any batch that already consumed this
@@ -2403,7 +2466,9 @@ module.exports = {
       }
 
       const result = await db.transaction(async (trx) => {
-        const lot = await trx('inventory_lots').where({ id }).first();
+        // Locked for the whole edit: the GL / payable deltas below are computed
+        // from this read, so a concurrent edit must wait, not double-post (INV-23).
+        const lot = await trx('inventory_lots').where({ id }).forUpdate().first();
         if (!lot) { const e = new Error('Lot not found.'); e.status = 404; throw e; }
         await assertLotEditableByOperator(req, lot, trx);
         if (lot.type !== 'raw') { const e = new Error('Only raw purchase lots can be re-priced.'); e.status = 400; throw e; }
@@ -2494,7 +2559,9 @@ module.exports = {
         return res.status(400).json({ success: false, message: 'received_net_weight_kg must be a positive number (in kg).' });
       }
       const result = await db.transaction(async (trx) => {
-        const lot = await trx('inventory_lots').where({ id }).first();
+        // Locked for the whole edit: the GL / payable deltas below are computed
+        // from this read, so a concurrent edit must wait, not double-post (INV-23).
+        const lot = await trx('inventory_lots').where({ id }).forUpdate().first();
         if (!lot) { const e = new Error('Lot not found.'); e.status = 404; throw e; }
         await assertLotEditableByOperator(req, lot, trx);
         if (lot.type !== 'raw') { const e = new Error('Only raw purchase lots have a received quantity.'); e.status = 400; throw e; }
@@ -2506,9 +2573,13 @@ module.exports = {
         const curNet = parseFloat(lot.net_weight_kg) || 0;
         const utilized = Math.max(0, uc.round2(oldReceived - curNet)); // already milled/sold/transferred out
         const reservedKg = parseFloat(lot.reserved_qty) || 0;
+        const millingReservedKg = parseFloat(lot.milling_reserved_qty) || 0;
         const newNet = uc.round2(newReceivedKg - utilized);
         if (newNet < 0) { const e = new Error(`Received quantity is below what has already been used from this lot (${Math.round(utilized).toLocaleString()} kg).`); e.status = 409; throw e; }
-        if (newNet < reservedKg - 0.01) { const e = new Error(`Received quantity is below the amount already reserved (${Math.round(reservedKg).toLocaleString()} kg). Release reservations first.`); e.status = 409; throw e; }
+        if (newNet < reservedKg + millingReservedKg - 0.01) {
+          const e = new Error(`Received quantity is below the amount already reserved or committed to milling (${Math.round(reservedKg + millingReservedKg).toLocaleString()} kg). Release those first.`);
+          e.status = 409; throw e;
+        }
 
         const rate = parseFloat(lot.rate_per_kg) || 0;
         const newPurchaseAmount = uc.round2(newReceivedKg * rate);
@@ -2518,26 +2589,41 @@ module.exports = {
           ? Math.max(0, parseFloat(orderedInput))
           : (parseFloat(lot.ordered_net_weight_kg) || oldReceived);
 
-        // available_qty = qty − reserved − milling-reserved (the engine's invariant);
-        // writing the full newNet here would re-expose already-reserved stock as
-        // available and allow it to be over-allocated.
-        const millingReservedKg = parseFloat(lot.milling_reserved_qty) || 0;
-        const newAvailable = Math.max(0, uc.round2(newNet - reservedKg - millingReservedKg));
-
         // Re-bill the rice only (same as setLotPurchaseRate): landed cost keeps
         // freight + commission + extras; the rice payable and the GL move by the
-        // change in purchase amount — signed delta, never reverse+repost.
+        // change in purchase amount — signed delta, never reverse+repost. First,
+        // so a refused re-bill (409) writes nothing.
         const { payableUpdated, isOpeningStock } = await applyRicePurchaseChange(trx, lot, {
           newPurchaseAmount, kg: newReceivedKg,
-          lotFields: {
-            received_net_weight_kg: newReceivedKg,
-            ordered_net_weight_kg: orderedKg,
-            net_weight_kg: newNet, gross_weight_kg: newNet,
-            qty: newNet, available_qty: newAvailable,
-          },
+          lotFields: { ordered_net_weight_kg: orderedKg },
           description: (d) => `Lot ${lot.lot_no} received qty set to ${Math.round(newReceivedKg).toLocaleString()} kg (bill Rs ${d >= 0 ? '+' : ''}${d})`,
           narration: 'received qty adj', userId: req.user?.id,
         });
+
+        // The stock change is a receipt correction movement (P3-01 / INV-20):
+        // it moves qty, net weight and availability together and leaves an
+        // adjustment row in the lot ledger, so the ledger still reconciles to
+        // the lot after the edit. Valued at the re-billed landed cost per kg.
+        const stockDelta = uc.round2(newNet - curNet);
+        if (Math.abs(stockDelta) > 0.001) {
+          const repriced = await trx('inventory_lots').where({ id: lot.id }).first('landed_cost_per_kg', 'cost_per_unit');
+          await inventoryService.postMovement(trx, {
+            movementType: stockDelta > 0
+              ? inventoryService.MOVEMENT_TYPES.RECEIPT_CORRECTION_IN
+              : inventoryService.MOVEMENT_TYPES.RECEIPT_CORRECTION_OUT,
+            lotId: lot.id,
+            qty: Math.abs(stockDelta),
+            ...(stockDelta > 0 ? { toWarehouseId: lot.warehouse_id } : { fromWarehouseId: lot.warehouse_id }),
+            notes: `Received quantity corrected ${Math.round(oldReceived).toLocaleString()} → ${Math.round(newReceivedKg).toLocaleString()} kg`,
+            costPerUnit: parseFloat(repriced?.landed_cost_per_kg) || parseFloat(repriced?.cost_per_unit) || 0,
+            currency: 'PKR',
+            userId: req.user?.id || null,
+            ledger: { referenceModule: 'purchase', referenceId: lot.id },
+          });
+        }
+        // The intake itself is what was received — set, not incremented by the
+        // correction movement.
+        await trx('inventory_lots').where({ id: lot.id }).update({ received_net_weight_kg: newReceivedKg });
 
         const propagation = await inventoryService.propagateLotCostToBatches(trx, parseInt(id, 10), { userId: req.user?.id });
         const updated = await trx('inventory_lots').where({ id }).first();
@@ -2629,6 +2715,7 @@ module.exports = {
       }
       update.updated_at = db.fn.now();
 
+      // lot-qty-free: quality / product fields only.
       await db('inventory_lots').where({ id }).update(update);
       const updated = await db('inventory_lots').where({ id }).first();
       return res.json({ success: true, data: { lot: await redactForUser(req, enrichLot(updated)) } });
@@ -2828,11 +2915,18 @@ module.exports = {
     }
   },
 
-  // ─── Allocate a raw lot into an existing milling batch ────────────
-  // Lets the user feed a Purchase Lot (created via /lot-inventory →
-  // New Purchase Lot) into a batch's raw input. Decrements the lot's
-  // available_qty, increments batch.raw_qty_kg, and writes a vehicle
-  // arrival row so the batch traces back to the source lot.
+  // ─── Use a raw lot in an existing milling batch ("Use in Batch") ────
+  // Commits part / all of a purchase lot to a batch that is already milled
+  // from purchase lots — through commitLotToBatch, the same guarded path as
+  // the New Batch drawer and Start Milling (P3-02 / INV-05). The lot is linked
+  // in batch_source_lots and the qty is HELD for the batch (milling_hold, with
+  // its ledger row); yield consumes it, cancel/delete releases it. The old
+  // version only lowered available_qty and wrote a fake truck arrival — the
+  // lot was never consumed and the kg came back as available on the next
+  // movement.
+  //
+  // A truck-fed batch is refused: yield consumes EITHER the batch's source
+  // lots OR its truck raw lot, never both, so mixing them would strand one.
   async allocateLotToBatch(req, res) {
     try {
       const lotId = parseInt(req.params.id, 10);
@@ -2844,79 +2938,81 @@ module.exports = {
       if (!batchId)             return res.status(400).json({ success: false, message: 'batch_id is required.' });
       if (!weightKg || weightKg <= 0) return res.status(400).json({ success: false, message: 'weight_kg must be positive.' });
 
+      const refuse = (status, message) => { const e = new Error(message); e.status = status; return e; };
       const result = await db.transaction(async (trx) => {
+        // Batch first, locked, so two commitments to one batch serialise.
+        const batch = await trx('milling_batches').where({ id: batchId }).forUpdate().first();
+        if (!batch) throw refuse(404, 'Milling batch not found.');
+        if (['Completed', 'Cancelled', 'Rejected'].includes(batch.status)) {
+          throw refuse(409, `Batch ${batch.batch_no} is ${batch.status} — it can't take more rice.`);
+        }
+        if (await batchHasOutputLots(trx, batchId)) {
+          throw refuse(409, `Batch ${batch.batch_no} already has yield recorded — start a new batch for this rice.`);
+        }
+        const trucks = await trx('milling_vehicle_arrivals').where({ batch_id: batchId }).count('id as c').first();
+        const truckRaw = await trx('inventory_lots')
+          .where({ batch_ref: `batch-${batchId}`, type: 'raw' }).first('id');
+        if ((parseInt(trucks?.c, 10) || 0) > 0 || truckRaw) {
+          throw refuse(409, `Batch ${batch.batch_no} is fed by trucks, not purchase lots — yield would mill only one of them. Start a new batch from this lot instead.`);
+        }
+
         const lot = await trx('inventory_lots').where({ id: lotId }).first();
-        if (!lot)                throw new Error('Lot not found.');
-        if (lot.type !== 'raw')  throw new Error(`Lot is type "${lot.type}" — only raw lots can be allocated to a milling batch.`);
-        const available = parseFloat(lot.available_qty) || 0;
-        if (weightKg > available + 0.0001) {
-          throw new Error(`Lot has only ${available} KG available, can't allocate ${weightKg} KG.`);
-        }
+        if (!lot) throw refuse(404, 'Lot not found.');
+        if (lot.type !== 'raw') throw refuse(400, `Lot is type "${lot.type}" — only raw lots can be allocated to a milling batch.`);
+        const scope = await whScope.resolveWarehouseScope(req);
+        if (!whScope.isWarehouseInScope(scope, lot.warehouse_id)) throw refuse(403, 'This lot is outside your warehouses.');
 
-        const batch = await trx('milling_batches').where({ id: batchId }).first();
-        if (!batch)              throw new Error('Milling batch not found.');
-        const lockedStatuses = ['Completed', 'Cancelled', 'Rejected'];
-        if (lockedStatuses.includes(batch.status)) {
-          throw new Error(`Batch is ${batch.status} — can't add raw material.`);
-        }
-
-        // 1. Reduce the source lot's available qty. If we fully consume
-        //    it, mark milling_status = 'Consumed' so it drops off raw
-        //    stock filters.
-        const newAvailable = parseFloat((available - weightKg).toFixed(4));
-        const fullyConsumed = newAvailable <= 0.0001;
-        await trx('inventory_lots').where({ id: lotId }).update({
-          available_qty: Math.max(0, newAvailable),
-          // 'Partial' is NOT a legal value — the CHECK allows only null,
-          // 'In Milling' and 'Consumed' — so `|| 'Partial'` would have thrown
-          // whenever the source lot had no status yet. Keep whatever it has.
-          milling_status: fullyConsumed ? 'Consumed' : (lot.milling_status || null),
-          updated_at: trx.fn.now(),
-        });
-
-        // 2. Vehicle-arrival row so the batch shows where its raw came
-        //    from. Uses the lot's lot_no as the vehicle identifier so
-        //    the audit trail reads "received from LOT-XXX".
-        const [arrival] = await trx('milling_vehicle_arrivals')
-          .insert({
-            batch_id: batchId,
-            vehicle_no: lot.lot_no,
-            driver_name: null,
-            weight_kg: weightKg,
-            bag_size_kg: lot.bag_weight_kg || null,
-            total_bags: lot.total_bags || null,
-            arrival_date: trx.fn.now(),
+        const costKg = parseFloat(lot.landed_cost_per_kg) || parseFloat(lot.rate_per_kg) || 0;
+        const costTotal = uc.round2(costKg * weightKg);
+        // Ownership / entity / millable / availability checked under the lot
+        // lock inside commitLotToBatch.
+        await commitLotToBatch(trx, {
+          batchId,
+          lotId,
+          qtyKg: weightKg,
+          userId: req.user?.id || null,
+          row: {
+            lot_type: lot.type,
+            unit_cost_pkr: costKg,
+            cost_total_pkr: costTotal,
+            variety: lot.variety || null,
             notes: notes || `Allocated from purchase lot ${lot.lot_no}`,
-            created_by: req.user?.id || null,
-          })
-          .returning('*');
-
-        // 3. Refresh the batch's raw_qty_kg to the sum of every arrival
-        //    so it reflects what physically arrived (matches addVehicle
-        //    behaviour).
-        const totalArrivals = await trx('milling_vehicle_arrivals')
-          .where({ batch_id: batchId })
-          .sum('weight_kg as total').first();
-        const newRawQty = parseFloat(totalArrivals?.total) || 0;
-        await trx('milling_batches').where({ id: batchId }).update({
-          raw_qty_kg: newRawQty,
-          updated_at: trx.fn.now(),
+          },
         });
 
+        // The batch's raw input is what its source lots commit.
+        const committed = await trx('batch_source_lots').where({ batch_id: batchId }).sum('qty_kg as total').first();
+        const newRawQty = parseFloat(committed?.total) || 0;
+        await trx('milling_batches').where({ id: batchId }).update({ raw_qty_kg: newRawQty, updated_at: trx.fn.now() });
+        // A raw-rice cost pool already set (at create) grows by this lot's cost;
+        // when there is none yet, yield builds it from every source lot
+        // (ensureRawCostFromSourceLots), this one included.
+        const pool = await trx('milling_costs').where({ batch_id: batchId, category: 'raw_rice' }).first('id');
+        if (pool && costTotal > 0) {
+          await trx('milling_costs').insert({
+            batch_id: batchId, category: 'raw_rice', amount: costTotal,
+            notes: `Raw rice from lot ${lot.lot_no}×${weightKg}KG (Use in Batch)`,
+            created_by: req.user?.id || null,
+          });
+        }
+
+        const after = await trx('inventory_lots').where({ id: lotId }).first('available_qty');
+        const remaining = parseFloat(after?.available_qty) || 0;
         return {
           lot_id: lotId,
           batch_id: batchId,
           weight_kg: weightKg,
-          lot_remaining_kg: Math.max(0, newAvailable),
+          lot_remaining_kg: remaining,
           batch_raw_qty_kg: newRawQty,
-          fully_consumed: fullyConsumed,
+          fully_consumed: remaining <= 0.0001,
         };
       });
 
       return res.json({ success: true, data: result });
     } catch (err) {
-      console.error('allocateLotToBatch error:', err);
-      return res.status(400).json({ success: false, message: err.message || 'Failed to allocate lot.' });
+      const status = err.status || err.statusCode || 400;
+      if (status >= 500) console.error('allocateLotToBatch error:', err);
+      return res.status(status).json({ success: false, message: err.message || 'Failed to allocate lot.' });
     }
   },
 
@@ -2939,6 +3035,7 @@ module.exports = {
         const n = req.body.export_display_name;
         update.export_display_name = (n && String(n).trim()) ? String(n).trim() : null;
       }
+      // lot-qty-free: export-ready flag + display name only.
       const [updated] = await db('inventory_lots').where('id', lot.id).update(update).returning('*');
       return res.json({ success: true, data: { lot: await redactForUser(req, enrichLot(updated)) } });
     } catch (err) {
@@ -3426,6 +3523,7 @@ module.exports = {
           batchId: batch.id,
           lotId: lot.id,
           qtyKg: rawQtyMT,
+          userId: req.user?.id || null,
           row: { notes: notes || null },
         });
 
@@ -3497,22 +3595,10 @@ module.exports = {
           await inventoryService.recomputeRawRiceCostFromVehicles(trx, batch.id, req.user?.id);
         }
 
-        // Roll the lot's total received weight up to the batch — same
-        // truth-from-the-scale rule we use in receiveRice. Skip if the
-        // operator already supplied an override.
-        if (!overrideQty) {
-          const totals = await trx('milling_vehicle_arrivals')
-            .where({ batch_id: batch.id })
-            .sum('weight_kg as total').first();
-          const actualReceived = parseFloat(totals?.total) || 0;
-          if (actualReceived > 0 && actualReceived !== rawQtyMT) {
-            await trx('milling_batches').where({ id: batch.id }).update({
-              raw_qty_kg: actualReceived,
-              updated_at: trx.fn.now(),
-            });
-            batch.raw_qty_kg = actualReceived;
-          }
-        }
+        // raw_qty_kg stays the committed qty. It used to be overwritten with
+        // the sum of the lot's inherited trucks when no qty was sent, while
+        // the lot commitment (what yield consumes) stayed at the available qty
+        // — two different raw inputs and a wrong yield % (MIL-42).
 
         return { batch, lot, passNumber, parentBatchId, inheritedVehicles };
       });
