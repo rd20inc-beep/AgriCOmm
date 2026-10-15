@@ -31,6 +31,7 @@ const {
 const { postMillingCompletion, hasPostedCompletion, sourceLotValuesByAccount, proportionalInputSplit } = require('./millingCompletionJournal');
 const { syncBatchTransport, transportAdjustmentParts } = require('./batchTransport');
 const { canonicalCostCategory, unknownCategoryError } = require('./costCategories');
+const { feePerKg } = require('./millingFee');
 
 // isMillableLot (batchLifecycle) mirrors the frontend NON_MILLABLE_CATEGORIES
 // (src/utils/lotCategory.js): any rice form is millable — raw paddy, finished
@@ -656,7 +657,7 @@ const millingController = {
             raw_qty_kg: resolvedRawQty,
             processing_type: processingType,
             planned_finished_kg: planned_finished_kg ? parseFloat(planned_finished_kg) : null,
-            milling_fee_per_kg: milling_fee_per_kg ? parseFloat(milling_fee_per_kg) : 5,
+            milling_fee_per_kg: feePerKg(milling_fee_per_kg),
             transport_mode: transport_mode || 'with',
             purchase_price_per_kg: purchase_price_per_kg ? parseFloat(purchase_price_per_kg) : null,
             product_id: resolvedProductId,
@@ -2133,7 +2134,7 @@ const millingController = {
               mill_id: mill_id || null,
               machine_line: machine_line || null,
               shift: shift || 'Day',
-              milling_fee_per_kg: milling_fee_per_kg ? parseFloat(milling_fee_per_kg) : 5,
+              milling_fee_per_kg: feePerKg(milling_fee_per_kg),
               raw_qty_kg: 0,
               status: 'Queued',
               notes: notes || null,
