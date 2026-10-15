@@ -9,12 +9,23 @@ import { reportingApi } from '../api/services';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import { exportLedgerCSV, printBatchLedger } from '../utils/ledgerExport';
-import { fmtDate, fmtKg, fmtMT, fmtPKR, fmtPct } from '../../../shared/utils/format';
+import { fmtDate, fmtKg, fmtPKR, fmtPct } from '../../../shared/utils/format';
 
 const pkr = (v) => fmtPKR(v, { decimals: 2 });
 const kg = (v) => fmtKg(v);
-const mt = (v) => fmtMT(v, { decimals: 2 });
 const dt = (v) => fmtDate(v);
+
+// Defined at module scope so React does not remount them on every render.
+const Cell = ({ label, value, sub, tone = 'gray' }) => {
+  const t = { emerald: 'text-emerald-700', rose: 'text-red-600', gray: 'text-gray-900' }[tone] || 'text-gray-900';
+  return <div><p className="text-[11px] uppercase tracking-wider text-gray-400">{label}</p><p className={`text-sm font-medium ${t}`}>{value}</p>{sub && <p className="text-[11px] text-gray-400">{sub}</p>}</div>;
+};
+const Section = ({ icon: Icon, title, children }) => (
+  <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+    <div className="px-4 py-3 border-b border-gray-100"><h3 className="text-sm font-semibold text-gray-700 inline-flex items-center gap-1.5">{Icon && <Icon size={15} />} {title}</h3></div>
+    {children}
+  </div>
+);
 
 export default function BatchLedger() {
   const { id } = useParams();
@@ -52,16 +63,6 @@ export default function BatchLedger() {
     rows: outputs,
   });
 
-  const Cell = ({ label, value, sub, tone = 'gray' }) => {
-    const t = { emerald: 'text-emerald-700', rose: 'text-red-600', gray: 'text-gray-900' }[tone] || 'text-gray-900';
-    return <div><p className="text-[11px] uppercase tracking-wider text-gray-400">{label}</p><p className={`text-sm font-medium ${t}`}>{value}</p>{sub && <p className="text-[11px] text-gray-400">{sub}</p>}</div>;
-  };
-  const Section = ({ icon: Icon, title, children }) => (
-    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-      <div className="px-4 py-3 border-b border-gray-100"><h3 className="text-sm font-semibold text-gray-700 inline-flex items-center gap-1.5">{Icon && <Icon size={15} />} {title}</h3></div>
-      {children}
-    </div>
-  );
 
   return (
     <div className="max-w-6xl mx-auto p-4 sm:p-6 space-y-5">
@@ -107,11 +108,11 @@ export default function BatchLedger() {
       {/* Yield summary */}
       <Section icon={Factory} title="Yield summary">
         <div className="p-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
-          <Cell label="Input" value={mt(ys.inputMt)} />
-          <Cell label="Finished" value={mt(ys.finishedMt)} tone="emerald" />
-          <Cell label="By-product" value={mt(ys.byproductMt)} />
-          <Cell label="Total output" value={mt(ys.totalOutputMt)} />
-          <Cell label="Processing loss" value={mt(ys.lossMt)} />
+          <Cell label="Input" value={kg(ys.inputKg)} />
+          <Cell label="Finished" value={kg(ys.finishedKg)} tone="emerald" />
+          <Cell label="By-product" value={kg(ys.byproductKg)} />
+          <Cell label="Total output" value={kg(ys.totalOutputKg)} />
+          <Cell label="Processing loss" value={kg(ys.lossKg)} />
           <Cell label="Yield %" value={fmtPct(ys.yieldPct ?? 0)} />
         </div>
       </Section>
@@ -138,7 +139,7 @@ export default function BatchLedger() {
       {/* Inputs */}
       <Section icon={Package} title="Inputs — source rice lots">
         <Tbl head={['Lot', 'Rice', 'Supplier', { t: 'Qty', r: 1 }, { t: 'Cost', r: 1 }]}
-          rows={inputs.map(i => [i.href ? <Link to={i.href} className="font-mono text-blue-600 hover:underline">{i.lotNo}</Link> : i.lotNo, `${i.item || '—'}${i.variety && i.variety !== i.item ? ` · ${i.variety}` : ''}`, i.supplierHref ? <Link to={i.supplierHref} className="text-blue-600 hover:underline">{i.supplier}</Link> : i.supplier, mt(i.qtyMt), pkr(i.costTotalPkr)])}
+          rows={inputs.map(i => [i.href ? <Link to={i.href} className="font-mono text-blue-600 hover:underline">{i.lotNo}</Link> : i.lotNo, `${i.item || '—'}${i.variety && i.variety !== i.item ? ` · ${i.variety}` : ''}`, i.supplierHref ? <Link to={i.supplierHref} className="text-blue-600 hover:underline">{i.supplier}</Link> : i.supplier, kg(i.qtyKg), pkr(i.costTotalPkr)])}
           empty="No source lots recorded." />
       </Section>
 
