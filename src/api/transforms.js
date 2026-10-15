@@ -213,6 +213,8 @@ export function transformOrder(dbOrder) {
     packingType: dbOrder.packing_type || 'retail',
     bagMaterial: dbOrder.bag_material || '',
     palletized: !!dbOrder.palletized,
+    // P3-18: printed bags / pallet cost a Draft holds until it is submitted.
+    draftSideCosts: dbOrder.draft_side_costs || null,
     // Packing / receiving mode
     receivingMode: dbOrder.receiving_mode || '',
     quantityUnit: dbOrder.quantity_unit || '',

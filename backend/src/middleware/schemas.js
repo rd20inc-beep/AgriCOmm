@@ -29,6 +29,21 @@ const exportOrderItem = Joi.object({
   notes: Joi.string().allow('', null),
 });
 
+// P3-18 (EXP-17): printed-bag orders and the pallet cost captured on the create
+// form travel WITH the order — posted inside create() for a live order, held on
+// a Draft until Submit. Mirrors the printed-bag service's fields.
+const exportOrderPrintedBag = Joi.object({
+  bag_type_id: Joi.number().integer().positive().allow(null, ''),
+  bag_type_name: Joi.string().max(255).allow('', null),
+  bag_size_kg: Joi.number().min(0).allow(null, ''),
+  vendor_id: Joi.number().integer().positive().allow(null, ''),
+  quantity: Joi.number().integer().positive().required(),
+  unit_cost: Joi.number().min(0).allow(null, ''),
+  printing: Joi.string().max(255).allow('', null),
+  brand_marking: Joi.string().max(255).allow('', null),
+  notes: Joi.string().max(2000).allow('', null),
+});
+
 const createExportOrder = Joi.object({
   customer_id: Joi.number().integer().positive().required(),
   product_id: Joi.number().integer().positive().required(),
@@ -149,6 +164,8 @@ const createExportOrder = Joi.object({
   })).allow(null),
   // Multi-line P.I. items — each line carries its own product/qty/price/HS code/packing
   items: Joi.array().items(exportOrderItem).allow(null),
+  printed_bags: Joi.array().items(exportOrderPrintedBag).max(50).allow(null),
+  pallet_cost: Joi.number().min(0).precision(2).max(1e12).allow(null, ''),
 });
 
 // A Draft is a work in progress: the order is saved so it can be finished later,
@@ -305,6 +322,11 @@ const addExportOrderCost = Joi.object({
   supplier_id: Joi.number().integer().positive().allow(null, ''),
   vendor_name: Joi.string().trim().max(200).allow('', null),
   bill_ref: Joi.string().trim().max(100).allow('', null),
+});
+
+// P3-18: cancelling an open purchase requirement needs a reason.
+const cancelPurchaseRequirement = Joi.object({
+  reason: Joi.string().trim().min(3).max(2000).required(),
 });
 
 // P2-15 / D-7: what happens to money already received when an order is cancelled.
@@ -1192,6 +1214,7 @@ module.exports = {
   cancelExportDebitNote,
   addExportOrderCost,
   cancelExportOrder,
+  cancelPurchaseRequirement,
   exportOrderDocumentAction,
   confirmAdvance,
   confirmBalance,

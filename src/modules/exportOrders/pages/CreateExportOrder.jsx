@@ -16,7 +16,7 @@ import BagTypePicker from '../../../components/BagTypePicker';
 import SupplierPicker from '../../../components/SupplierPicker';
 import SlideDrawer from '../../../components/SlideDrawer';
 import FieldError from '../../../shared/components/FieldError';
-import { printedBagsApi, exportOrdersApi } from '../api/services';
+import { exportOrdersApi } from '../api/services';
 import { INCOTERMS, incotermHint, advancePctForIncoterm } from '../../../shared/constants/incoterms';
 import { WEIGHT_UNITS, weightUnit } from '../../../shared/constants/weightUnits';
 import { FREIGHT_DISPLAYS, incotermCarriesFreight } from '../../../shared/constants/exportFreight';
@@ -53,8 +53,8 @@ export default function CreateExportOrder() {
   const createOrderMut = useCreateExportOrder();
   // One submit at a time. The ref blocks a second click in the same tick (state
   // hasn't re-rendered yet); the state drives the disabled buttons. It stays set
-  // through the follow-up printed-bag/pallet calls and the navigate, so a click
-  // while those run can't create a second order either.
+  // through the navigate, so a click while it runs can't create a second order
+  // either.
   const submittingRef = useRef(false);
   const [submitting, setSubmitting] = useState(false);
   const navigate = useNavigate();
@@ -258,7 +258,7 @@ export default function CreateExportOrder() {
   }
 
   // ─── Build API payload ─── (pure; see utils/createOrderForm.js)
-  const buildPayload = (status) => buildCreateOrderPayload({ form, items, products, packingLines, status });
+  const buildPayload = (status) => buildCreateOrderPayload({ form, items, products, packingLines, printedBags, status });
 
   // ─── Submit handlers ───
   async function handleSubmit(status) {
@@ -267,39 +267,13 @@ export default function CreateExportOrder() {
     submittingRef.current = true;
     setSubmitting(true);
     try {
+      // One call: the order, its printed-bag orders and its pallet cost are
+      // saved together (a Draft holds the last two until it is submitted).
       const res = await createOrderMut.mutateAsync(buildPayload(status));
-      const newOrderId = res.data?.order?.id;
-      // Arrange any printed-bag orders captured during creation against the new order.
-      const validBags = printedBags.filter(b => (parseInt(b.quantity, 10) || 0) > 0);
-      if (newOrderId && validBags.length) {
-        try {
-          for (const b of validBags) {
-            await printedBagsApi.create({
-              order_id: newOrderId,
-              bag_type_id: b.bagTypeId || null,
-              bag_type_name: b.bagType || null,
-              bag_size_kg: b.bagSizeKg || null,
-              vendor_id: b.vendorId || null,
-              quantity: parseInt(b.quantity, 10),
-              unit_cost: parseFloat(b.unitCost) || 0,
-              printing: b.printing || null,
-              brand_marking: b.brand || null,
-            });
-          }
-          addToast(`${validBags.length} printed-bag order(s) arranged`, 'success');
-        } catch (bagErr) {
-          addToast(`Order created, but a printed-bag order failed: ${bagErr.message}`, 'error');
-        }
-      }
-      // Batch 7 — record the pallet cost as a 'pallet' cost line (GL + payable via addCost).
-      const palletCost = parseFloat(form.palletCost) || 0;
-      if (newOrderId && form.palletized && palletCost > 0) {
-        try {
-          await exportOrdersApi.addCost(newOrderId, { category: 'pallet', amount: palletCost, notes: 'Pallet cost' });
-        } catch (pErr) {
-          addToast(`Order created, but the pallet cost failed to post: ${pErr.message}`, 'error');
-        }
-      }
+      const bagCount = res.data?.printedBagOrders?.length || 0;
+      if (bagCount) addToast(`${bagCount} printed-bag order(s) arranged`, 'success');
+      const held = res.data?.order?.draft_side_costs;
+      if (status === 'Draft' && held) addToast('Printed bags / pallet cost are held on the draft and post when it is submitted', 'info');
       addToast(`Order ${res.data?.order?.order_no || ''} ${status === 'Draft' ? 'saved as draft' : 'created'}`, 'success');
       navigate(`/export/${res.data?.order?.order_no || res.data?.order?.id || ''}`);
     } catch (err) {
@@ -1104,7 +1078,7 @@ export default function CreateExportOrder() {
           <h2 className="text-sm font-semibold text-violet-700 uppercase tracking-wider flex items-center gap-2"><ShoppingBag className="w-4 h-4" /> Printed Bags <span className="normal-case text-gray-400 font-normal">(optional)</span></h2>
           <button type="button" onClick={addPrintedBag} className="btn btn-sm btn-secondary"><Plus className="w-3.5 h-3.5" /> Add</button>
         </div>
-        <p className="text-xs text-gray-500 mb-4">If you need to order printed / branded bags from a vendor for this order, arrange them here. Each becomes a payable to the vendor; you can also add or receive these later on the order's Printed Bags tab.</p>
+        <p className="text-xs text-gray-500 mb-4">If you need to order printed / branded bags from a vendor for this order, arrange them here. Each becomes a payable to the vendor when the order is created — a draft holds them until it is submitted. You can also add or receive these later on the order's Printed Bags tab.</p>
         {printedBags.length === 0 ? (
           <p className="text-sm text-gray-400">No printed-bag orders. Click “Add” if you need printed bags for this shipment.</p>
         ) : (

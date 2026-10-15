@@ -571,6 +571,15 @@ export default function ExportOrderDetail() {
   const canSubmitDraft = backendActions.canSubmitDraft ?? (order.status === 'Draft');
   const canCancel = backendActions.canCancel ?? !['Shipped', 'Arrived', 'Closed', 'Cancelled'].includes(order.status);
 
+  // A Draft's printed bags / pallet cost wait on the order and post at Submit.
+  const heldSideCosts = (() => {
+    const h = order.draftSideCosts;
+    if (!h) return null;
+    const bags = Array.isArray(h.printed_bags) ? h.printed_bags.length : 0;
+    const pallet = parseFloat(h.pallet_cost) || 0;
+    return bags || pallet ? { bags, pallet } : null;
+  })();
+
   // Draft → Awaiting Advance (or Advance Received at 0% advance). The server
   // validates the whole order at this point and says what is missing.
   const handleSubmitDraft = async () => {
@@ -579,7 +588,13 @@ export default function ExportOrderDetail() {
     try {
       const res = await exportOrdersApi.submit(orderId);
       const prs = res?.data?.materialRequests || [];
-      addToast(`Order submitted — now ${res?.data?.order?.status || 'in the workflow'}${prs.length ? ` (${prs.length} purchase request${prs.length > 1 ? 's' : ''} raised)` : ''}`);
+      const bags = res?.data?.printedBagOrders || [];
+      const extras = [
+        prs.length ? `${prs.length} purchase request${prs.length > 1 ? 's' : ''} raised` : null,
+        bags.length ? `${bags.length} printed-bag order${bags.length > 1 ? 's' : ''} arranged` : null,
+        res?.data?.palletCostId ? 'pallet cost posted' : null,
+      ].filter(Boolean);
+      addToast(`Order submitted — now ${res?.data?.order?.status || 'in the workflow'}${extras.length ? ` (${extras.join(', ')})` : ''}`);
       invalidateOrder();
     } catch (err) {
       addToast(err?.data?.message || err?.message || 'Could not submit the draft', 'error');
@@ -678,6 +693,15 @@ export default function ExportOrderDetail() {
           <div>
             <p className="text-sm font-semibold text-gray-800">Draft Order</p>
             <p className="text-xs text-gray-600">Complete the order details and submit to begin the workflow. Submitting checks every line has a product, quantity and price, and that an Incoterm and bank account are set.</p>
+            {heldSideCosts && (
+              <p className="text-xs text-gray-700 mt-1">
+                Held until submit (nothing is owed to the vendor yet):{' '}
+                {[
+                  heldSideCosts.bags ? `${heldSideCosts.bags} printed-bag order${heldSideCosts.bags > 1 ? 's' : ''}` : null,
+                  heldSideCosts.pallet ? `pallet cost ${fmtPKR(heldSideCosts.pallet)}` : null,
+                ].filter(Boolean).join(' · ')}
+              </p>
+            )}
           </div>
           {canSubmitDraft && (
             <button onClick={handleSubmitDraft} disabled={submittingDraft} className="shrink-0 px-4 py-2 bg-gray-900 text-white rounded-lg text-sm font-medium hover:bg-gray-800 disabled:opacity-50">

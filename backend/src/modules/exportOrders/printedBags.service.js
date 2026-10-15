@@ -1,5 +1,6 @@
 const db = require('../../config/database');
 const accountingService = require('../../services/accountingService');
+const { ledgerFailure, missingAccounts } = require('../../shared/ledgerFailure');
 
 // Printed-bag procurement for export orders. Each order owes a bag vendor, so it
 // mirrors the export-order-cost money pattern: a 1:1 payable
@@ -37,15 +38,21 @@ async function nextPboPayNo(trx) {
 // Post a signed cost-recognition journal for `delta` PKR against the printed-bag
 // payable: +delta => Dr 6000 Operating Expenses / Cr 2010 Supplier Payable;
 // -delta swaps the sides. Stamped to the vendor so it lands on their statement.
-// Silently skipped if the GL chart isn't seeded.
+// A journal that cannot post rolls the whole change back (P3-18) — it used to
+// be skipped with a warning, leaving a payable with no GL behind it.
 async function postCostDelta(trx, { delta, order, pbo, vendorId, userId, reduced }) {
   if (Math.abs(delta) <= 0.01) return;
   const opExp = await trx('chart_of_accounts').where({ code: '6000' }).first();
   const supplierPayable = await trx('chart_of_accounts').where({ code: '2010' }).first();
-  if (!opExp || !supplierPayable) {
-    console.warn(`printedBags: chart_of_accounts missing 6000/2010 — journal skipped for ${pbo.pbo_no}`);
-    return;
+  if (!opExp || !supplierPayable) throw missingAccounts(['6000', '2010'], 'The printed-bag order');
+  try {
+    await postCostJournal(trx, { delta, order, pbo, vendorId, userId, reduced, opExp, supplierPayable });
+  } catch (e) {
+    throw ledgerFailure(e, 'The printed-bag order');
   }
+}
+
+async function postCostJournal(trx, { delta, order, pbo, vendorId, userId, reduced, opExp, supplierPayable }) {
   const up = delta > 0;
   const amt = Math.abs(delta);
   const debitAcc = up ? opExp : supplierPayable;
@@ -148,45 +155,65 @@ async function list(orderRef) {
   });
 }
 
+// A Draft carries no vendor bills (P3-18, EXP-17): it may still change or be
+// abandoned, and a payable raised for it stayed behind when it was. Printed
+// bags typed on the create form are held on the draft and posted at Submit.
+function assertNotDraft(order) {
+  if (order.status === 'Draft') {
+    const e = new Error('This order is still a Draft. Submit it first — printed-bag orders are posted once the order is live.');
+    e.statusCode = 409; throw e;
+  }
+}
+
 async function create(orderRef, body, userId) {
   const orderId = await resolveOrderId(orderRef);
-  const order = orderId ? await db('export_orders').where({ id: orderId }).first() : null;
-  if (!order) { const e = new Error('Export order not found.'); e.statusCode = 404; throw e; }
+  return db.transaction(async (trx) => {
+    const order = orderId ? await trx('export_orders').where({ id: orderId }).forUpdate().first() : null;
+    if (!order) { const e = new Error('Export order not found.'); e.statusCode = 404; throw e; }
+    assertNotDraft(order);
+    return createInTrx(trx, order, body, userId);
+  });
+}
 
+// One printed-bag order, its payable and its GL bill, in the caller's
+// transaction (also used by export-order create / submit, so the order and its
+// bag orders are saved together or not at all).
+async function createInTrx(trx, order, body, userId) {
+  if (['Closed', 'Cancelled'].includes(order.status)) {
+    const e = new Error(`Cannot order printed bags for an order in '${order.status}' status.`); e.statusCode = 400; throw e;
+  }
   const quantity = parseInt(body.quantity, 10) || 0;
   const unitCost = parseFloat(body.unit_cost) || 0;
   if (quantity <= 0) { const e = new Error('Quantity (number of bags) must be greater than zero.'); e.statusCode = 400; throw e; }
   const total = round2(quantity * unitCost);
   const vendorId = body.vendor_id ? parseInt(body.vendor_id, 10) : null;
 
-  return db.transaction(async (trx) => {
-    const pboNo = await nextPboNo(trx);
-    const [row] = await trx('printed_bag_orders').insert({
-      pbo_no: pboNo,
-      order_id: orderId,
-      bag_type_id: body.bag_type_id ? parseInt(body.bag_type_id, 10) : null,
-      bag_type_name: body.bag_type_name || null,
-      bag_size_kg: body.bag_size_kg != null && body.bag_size_kg !== '' ? parseFloat(body.bag_size_kg) : null,
-      printing: body.printing || null,
-      brand_marking: body.brand_marking || null,
-      vendor_id: vendorId,
-      quantity,
-      unit_cost: unitCost,
-      total_amount: total,
-      currency: 'PKR',
-      status: 'Ordered',
-      ordered_date: body.ordered_date || new Date().toISOString().slice(0, 10),
-      paid_amount: 0,
-      payment_status: 'Unpaid',
-      notes: body.notes || null,
-      created_by: userId || null,
-    }).returning('*');
+  const pboNo = await nextPboNo(trx);
+  const [row] = await trx('printed_bag_orders').insert({
+    pbo_no: pboNo,
+    order_id: order.id,
+    bag_type_id: body.bag_type_id ? parseInt(body.bag_type_id, 10) : null,
+    bag_type_name: body.bag_type_name || null,
+    bag_size_kg: body.bag_size_kg != null && body.bag_size_kg !== '' ? parseFloat(body.bag_size_kg) : null,
+    printing: body.printing || null,
+    brand_marking: body.brand_marking || null,
+    vendor_id: vendorId,
+    quantity,
+    unit_cost: unitCost,
+    total_amount: total,
+    currency: 'PKR',
+    status: 'Ordered',
+    ordered_date: body.ordered_date || new Date().toISOString().slice(0, 10),
+    paid_amount: 0,
+    payment_status: 'Unpaid',
+    notes: body.notes || null,
+    created_by: userId || null,
+  }).returning('*');
 
-    const refLabel = `${order.order_no} ${pboNo}`;
-    await syncPayable(trx, { pbo: row, order, vendorId, total, refLabel, notes: body.notes });
-    await postCostDelta(trx, { delta: total, order, pbo: row, vendorId, userId, reduced: false });
-    return row;
-  });
+  const refLabel = `${order.order_no} ${pboNo}`;
+  await syncPayable(trx, { pbo: row, order, vendorId, total, refLabel, notes: body.notes });
+  await postCostDelta(trx, { delta: total, order, pbo: row, vendorId, userId, reduced: false });
+  return row;
 }
 
 async function update(id, body, userId) {
@@ -260,4 +287,4 @@ async function remove(id) {
   });
 }
 
-module.exports = { list, create, update, receive, remove };
+module.exports = { list, create, createInTrx, update, receive, remove, postCostDelta };

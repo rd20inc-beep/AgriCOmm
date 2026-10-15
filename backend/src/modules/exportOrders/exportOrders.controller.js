@@ -34,6 +34,77 @@ async function flaggedOnCancel(trx, orderId) {
   ]);
   return { openCostPayables: n(costs), printedBagOrders: n(bags), orderedRequisitions: n(prs), liveDocuments: n(docs) };
 }
+
+// ── Side costs typed on the create form (P3-18, EXP-17) ─────────────────────
+// Printed-bag orders and the pallet cost used to be posted by the browser AFTER
+// the order was saved — separate calls, even for a Draft — so an abandoned
+// draft left vendor payables and 6000/2010 journals behind, and a failure left
+// a half-saved order. They now travel in the create payload: a live order posts
+// them inside its own transaction; a Draft holds them (draft_side_costs) and
+// Submit posts them in the submit's transaction.
+function normalizeSideCosts({ printed_bags: bags, pallet_cost: pallet, palletized }) {
+  const printedBags = (Array.isArray(bags) ? bags : [])
+    .filter((b) => b && (parseInt(b.quantity, 10) || 0) > 0)
+    .map((b) => ({
+      bag_type_id: b.bag_type_id ? parseInt(b.bag_type_id, 10) : null,
+      bag_type_name: b.bag_type_name || null,
+      bag_size_kg: b.bag_size_kg != null && b.bag_size_kg !== '' ? parseFloat(b.bag_size_kg) : null,
+      vendor_id: b.vendor_id ? parseInt(b.vendor_id, 10) : null,
+      quantity: parseInt(b.quantity, 10),
+      unit_cost: parseFloat(b.unit_cost) || 0,
+      printing: b.printing || null,
+      brand_marking: b.brand_marking || null,
+      notes: b.notes || null,
+    }));
+  const palletCost = Math.round((parseFloat(pallet) || 0) * 100) / 100;
+  if (palletCost > 0 && !palletized) {
+    const e = new Error('A pallet cost needs a palletized load.'); e.statusCode = 400; throw e;
+  }
+  if (!printedBags.length && !(palletCost > 0)) return null;
+  return { printed_bags: printedBags, pallet_cost: palletCost > 0 ? palletCost : null };
+}
+
+// Posting a vendor bill is an order edit; the create / submit routes only check
+// export_orders.create, so a payload carrying bills also needs edit.
+async function assertCanPostSideCosts(req) {
+  const { userHasPermission } = require('../../middleware/rbac');
+  if (!(await userHasPermission(req, 'export_orders', 'edit'))) {
+    const e = new Error('Printed-bag orders and the pallet cost need the export-order edit permission.');
+    e.statusCode = 403; throw e;
+  }
+}
+
+// Post the held side costs for a LIVE order in the caller's transaction: each
+// printed-bag order (payable + Dr 6000 / Cr 2010) and the pallet cost as a
+// 'pallet' cost bill. Any failure throws, so the order is not saved either.
+async function postSideCosts(trx, order, sideCosts, userId) {
+  const out = { printedBags: [], palletCostId: null };
+  if (!sideCosts) return out;
+  const printedBagsService = require('./printedBags.service');
+  for (const b of sideCosts.printed_bags || []) {
+    // eslint-disable-next-line no-await-in-loop
+    const row = await printedBagsService.createInTrx(trx, order, b, userId);
+    out.printedBags.push(row.pbo_no);
+  }
+  // Only while the load is still palletized (a draft can be un-palletized).
+  if (parseFloat(sideCosts.pallet_cost) > 0 && order.palletized) {
+    const cost = await recordOrderCost(trx, {
+      order, category: 'pallet', amount: sideCosts.pallet_cost, notes: 'Pallet cost', userId,
+    });
+    out.palletCostId = cost.id;
+  }
+  return out;
+}
+
+// Order fields that change the packing material it needs (_materialLines).
+const MATERIAL_FIELDS = [
+  'qty_mt', 'packing_type', 'palletized', 'bag_material', 'bag_type', 'bag_size_kg',
+  'master_bag_size_kg', 'bag_printing', 'bag_brand', 'receiving_mode',
+];
+// Material requests follow a live order until it ships; not a draft (none
+// raised yet) and not one that is finished with.
+const MATERIAL_SYNC_EXCLUDED_STATUSES = ['Draft', 'Cancelled', 'Closed', 'Shipped', 'Arrived'];
+
 const { fillSingleLineBagSpec, linePackaging } = require('./orderLines');
 const { syncBalanceDueDate } = require('./balanceDueDate');
 const { balanceTermDaysSetting } = require('../finance/collectionRate');
@@ -997,6 +1068,8 @@ const exportOrderController = {
         packing_notes,
         packing_lines, // array of packing line objects for mixed mode
         items, // array of P.I. line items (multi-product)
+        printed_bags, // P3-18: printed-bag orders arranged on the create form
+        pallet_cost, // P3-18: PKR pallet cost (palletized loads)
       } = req.body;
 
       // When `items[]` is sent, derive summary fields from the lines so the
@@ -1051,6 +1124,9 @@ const exportOrderController = {
       const capacityError = packingCapacityError(effectiveQtyMt, palletized, packing_type);
       if (capacityError) return res.status(400).json({ success: false, message: capacityError });
 
+      const sideCosts = normalizeSideCosts({ printed_bags, pallet_cost, palletized: !!palletized });
+      if (sideCosts) await assertCanPostSideCosts(req);
+
       const contractValue = parseFloat(effectiveQtyMt) * parseFloat(effectivePricePerMt);
       const advancePct = parseFloat(advance_pct) || 0;
       const advanceExpected = contractValue * (advancePct / 100);
@@ -1084,6 +1160,7 @@ const exportOrderController = {
         .catch((e) => { if (e.code === 'FX_RATE_MISSING' && (!requestedStatus || requestedStatus === 'Draft')) return { rate: null }; throw e; });
       const _lockedFxRate = fxResult.rate;
 
+      let sidePosted = { printedBags: [], palletCostId: null };
       const result = await db.transaction(async (trx) => {
         const orderNo = await generateOrderNo(trx);
 
@@ -1170,6 +1247,8 @@ const exportOrderController = {
             fx_rate_source: parseFloat(req.body.booked_fx_rate) > 0 ? 'manual' : (_lockedFxRate ? 'system' : null),
             fx_rate_locked_at: _lockedFxRate || parseFloat(req.body.booked_fx_rate) > 0 ? new Date() : null,
             contract_value_pkr_locked: contractValue * ((parseFloat(req.body.booked_fx_rate) > 0 ? parseFloat(req.body.booked_fx_rate) : _lockedFxRate) || 0),
+            // A Draft only holds its printed bags / pallet cost (P3-18).
+            draft_side_costs: isDraft && sideCosts ? JSON.stringify(sideCosts) : null,
           })
           .returning('*');
 
@@ -1313,6 +1392,12 @@ const exportOrderController = {
           await trx('order_packing_lines').insert(lineRows);
         }
 
+        // A live order's printed bags and pallet cost are posted with it — one
+        // call, one transaction: a bill that cannot post saves no order.
+        if (!isDraft && sideCosts) {
+          sidePosted = await postSideCosts(trx, order, sideCosts, req.user.id);
+        }
+
         return order;
       });
 
@@ -1336,11 +1421,17 @@ const exportOrderController = {
 
       return res.status(201).json({
         success: true,
-        data: { order: result, materialRequests },
+        data: {
+          order: result,
+          materialRequests,
+          printedBagOrders: sidePosted.printedBags,
+          palletCostId: sidePosted.palletCostId,
+        },
       });
     } catch (err) {
       // D-10: no rate for the order's currency → a clear 400, not a 500.
       if (err.code === 'FX_RATE_MISSING') return res.status(err.statusCode || 400).json({ success: false, code: err.code, field: 'booked_fx_rate', message: err.message });
+      if (err.statusCode) return res.status(err.statusCode).json({ success: false, message: err.message });
       console.error('Export order create error:', err);
       return res.status(500).json({ success: false, message: 'Internal server error.' });
     }
@@ -1695,10 +1786,24 @@ const exportOrderController = {
         return res.status(404).json({ success: false, message: 'Export order not found.' });
       }
 
+      // The order's packing-material requests follow a change to what it needs
+      // (EXP-40): pending ones are resized or cancelled, approved ones are
+      // flagged for review. Outside the transaction and non-fatal, like the
+      // raise at create — a requisition problem never fails an order edit.
+      let materialSync = null;
+      const materialChanged = !!itemRowsForUpdate || MATERIAL_FIELDS.some((f) => safeUpdates[f] !== undefined);
+      if (materialChanged && !MATERIAL_SYNC_EXCLUDED_STATUSES.includes(result.status)) {
+        try {
+          materialSync = await exportOrderController._syncMaterialsFor(result, req.user?.id, `Order ${result.order_no} changed`);
+        } catch (mrErr) {
+          console.error('Material requirement sync failed for', result.order_no, mrErr.message);
+        }
+      }
+
       emitExportOrderUpdate(result.id, 'updated');
       return res.json({
         success: true,
-        data: { order: result },
+        data: { order: result, materialSync },
       });
     } catch (err) {
       // D-10: a currency change with no rate for the new currency.
@@ -1831,7 +1936,13 @@ const exportOrderController = {
             notes: trx.raw("COALESCE(notes || ' — ', '') || ?", [`Export order ${order.order_no} cancelled`]),
             updated_at: trx.fn.now(),
           });
+        // Packing-material requests raised for the order (EXP-40) are
+        // cancelled with it — approved ones too, under the Owner's cancel
+        // approval, with Finance told; purchased ones are counted for review.
+        const requirements = await require('../purchaseRequirements/purchaseRequirements.service')
+          .cancelForRef(trx, order.order_no, { userId: req.user.id, why: `Export order ${order.order_no} cancelled` });
         const flagged = await flaggedOnCancel(trx, id);
+        flagged.purchasedRequirements = requirements.purchased;
 
         // 6) Reset the order's money state and mark it Cancelled + history. The
         //    order no longer holds the money — the receipts and their
@@ -1841,6 +1952,8 @@ const exportOrderController = {
           advance_received: 0, advance_received_pkr: 0,
           balance_received: 0, balance_received_pkr: 0,
           revenue_posted: false,
+          // A draft's held printed bags / pallet cost were never posted.
+          draft_side_costs: null,
           updated_at: trx.fn.now(),
         });
         await trx('export_order_status_history').insert({
@@ -1858,6 +1971,7 @@ const exportOrderController = {
           voidedPendingReceipts: disposed.voided,
           cancelledDebitNotes: cancelledNotes,
           cancelledRequisitions: cancelledPrs || 0,
+          cancelledRequirements: requirements.cancelled,
           flagged,
         };
       });
@@ -1873,6 +1987,7 @@ const exportOrderController = {
         result.flagged.openCostPayables ? `${result.flagged.openCostPayables} unpaid cost bill(s)` : null,
         result.flagged.printedBagOrders ? `${result.flagged.printedBagOrders} printed-bag order(s)` : null,
         result.flagged.orderedRequisitions ? `${result.flagged.orderedRequisitions} ordered requisition(s)` : null,
+        result.flagged.purchasedRequirements ? `${result.flagged.purchasedRequirements} purchased material request(s)` : null,
         result.flagged.liveDocuments ? `${result.flagged.liveDocuments} generated document(s)` : null,
       ].filter(Boolean);
       return res.json({
@@ -2118,6 +2233,7 @@ const exportOrderController = {
       const id = await resolveExportOrderId(req.params.id);
       if (!id) return res.status(404).json({ success: false, message: 'Export order not found.' });
 
+      let sidePosted = { printedBags: [], palletCostId: null };
       const updated = await db.transaction(async (trx) => {
         const order = await lockRow(trx('export_orders').where({ id })).first();
         if (!order) { const e = new Error('Export order not found.'); e.statusCode = 404; throw e; }
@@ -2151,7 +2267,15 @@ const exportOrderController = {
         }
         await ensureOrderReceivables(trx, order);
         await syncBalanceDueDate(trx, order.id);
-        return moved;
+        // The printed bags / pallet cost the draft was holding are posted now,
+        // in this transaction (P3-18): a bill that cannot post submits nothing.
+        const held = typeof order.draft_side_costs === 'string' ? JSON.parse(order.draft_side_costs) : order.draft_side_costs;
+        if (held) {
+          await assertCanPostSideCosts(req);
+          sidePosted = await postSideCosts(trx, { ...order, status: moved.status }, held, req.user.id);
+          await trx('export_orders').where({ id: order.id }).update({ draft_side_costs: null });
+        }
+        return { ...moved, draft_side_costs: null };
       });
 
       let materialRequests = [];
@@ -2162,7 +2286,10 @@ const exportOrderController = {
       }
 
       emitExportOrderUpdate(updated.id, 'status_updated', { status: updated.status });
-      return res.json({ success: true, data: { order: updated, materialRequests } });
+      return res.json({
+        success: true,
+        data: { order: updated, materialRequests, printedBagOrders: sidePosted.printedBags, palletCostId: sidePosted.palletCostId },
+      });
     } catch (err) {
       if (err.statusCode) return res.status(err.statusCode).json({ success: false, message: err.message });
       console.error('Export order submitDraft error:', err);
@@ -3117,6 +3244,18 @@ const exportOrderController = {
       if (pr) raised.push(pr.pr_no);
     }
     return raised;
+  },
+
+  // Bring the order's open material requests to what it needs NOW (EXP-40):
+  // raise what is newly short, shrink or cancel pending requests no longer
+  // needed, and flag approved ones the order no longer needs in full.
+  async _syncMaterialsFor(order, userId, why) {
+    const lines = await exportOrderController._materialLines(order);
+    const prService = require('../purchaseRequirements/purchaseRequirements.service');
+    return prService.syncForRef(db, order.order_no, lines, {
+      userId: userId || null, why: why || `Order ${order.order_no} changed`,
+      reason: `Proactive material requirement for order ${order.order_no}`,
+    });
   },
 
   // Raise a Purchase Requirement for each short material (deduped per item + order).
