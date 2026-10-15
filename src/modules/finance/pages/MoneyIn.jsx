@@ -10,7 +10,7 @@ import { useAuth } from '../../../context/AuthContext';
 import PartyLink from '../../../shared/components/PartyLink';
 import { BUCKET_KEYS, bucketize } from '../utils/aging';
 import { receivablesPkrEquiv, pkrEquivText } from '../utils/currencyTiles';
-import { moneyInTiles, agingByCurrency, curOf } from '../utils/moneyTiles';
+import { moneyInTiles, agingByCurrency, curOf, isOverdueRow } from '../utils/moneyTiles';
 import { shortenRef } from '../utils/refs';
 import { isSettleable, canRecordVariant, contextForDocument } from '../../../components/payments/paymentVariants';
 import { useFinanceDrawers } from '../drawers/drawersContext';
@@ -38,10 +38,12 @@ export default function MoneyIn() {
   const [typeFilter, setTypeFilter] = useState('All');
 
   const filtered = useMemo(() => receivables.filter((r) => {
-    if (statusFilter !== 'All' && !eqStatus(r.status, statusFilter)) return false;
+    // 'Overdue' is the server's D-15 flag, not a status word (export rows never carry it).
+    if (statusFilter === 'Overdue') { if (!isOverdueRow(r)) return false; }
+    else if (statusFilter !== 'All' && !eqStatus(r.status, statusFilter)) return false;
     if (typeFilter !== 'All' && r.type !== typeFilter) return false;
     return true;
-  }).map((r) => ({ ...r, _highlight: eqStatus(r.status, 'Overdue') ? 'danger' : undefined })), [receivables, statusFilter, typeFilter]);
+  }).map((r) => ({ ...r, _highlight: isOverdueRow(r) ? 'danger' : undefined })), [receivables, statusFilter, typeFilter]);
 
   const tiles = useMemo(() => moneyInTiles(receivables), [receivables]);
   const aging = useMemo(() => agingByCurrency(receivables), [receivables]);
@@ -52,7 +54,7 @@ export default function MoneyIn() {
     const open = withCur.filter((r) => !eqStatus(r.status, 'Paid'));
     return {
       outstanding: pkrEquivText(receivablesPkrEquiv(open, 'outstanding')),
-      overdue: pkrEquivText(receivablesPkrEquiv(open.filter((r) => eqStatus(r.status, 'Overdue')), 'outstanding')),
+      overdue: pkrEquivText(receivablesPkrEquiv(open.filter(isOverdueRow), 'outstanding')),
       collected: pkrEquivText(receivablesPkrEquiv(withCur, 'receivedAmount')),
       aging: bucketize(withCur, { mode: 'mixed' }),
     };

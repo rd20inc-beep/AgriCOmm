@@ -9,6 +9,15 @@ export const curOf = (row) => (row?.kind === 'local_sale' ? 'PKR' : (row?.curren
 const eqStatus = (a, b) => String(a || '').toLowerCase() === String(b || '').toLowerCase();
 
 /**
+ * Overdue is decided by the server (owner decision D-15, backend
+ * kpi/overdue.js): past the EFFECTIVE due date — an export balance falls due
+ * sailing + term — with something outstanding. Each receivable / payable row
+ * carries it as `isOverdue`; the browser never re-derives it. The status word
+ * 'Overdue' is never written to export receivables, so it cannot be the test.
+ */
+export const isOverdueRow = (row) => row?.isOverdue === true;
+
+/**
  * Money In tiles — every figure per currency, never added across currencies
  * (owner decision: USD and PKR shown separately). Pure, for the tests.
  */
@@ -17,7 +26,7 @@ export function moneyInTiles(receivables = []) {
   const open = withCur.filter((r) => !eqStatus(r.status, 'Paid'));
   return {
     outstanding: totalsByCurrency(open, 'outstanding'),
-    overdue: totalsByCurrency(open.filter((r) => eqStatus(r.status, 'Overdue')), 'outstanding'),
+    overdue: totalsByCurrency(open.filter(isOverdueRow), 'outstanding'),
     collected: totalsByCurrency(withCur, 'receivedAmount'),
     openCount: open.length,
     pendingCount: withCur.filter((r) => eqStatus(r.status, 'Pending')).length,
@@ -39,10 +48,10 @@ export function agingByCurrency(receivables = []) {
 }
 
 /** Money Out tiles: outstanding / overdue / paid per currency, and the number of payees. */
-export function moneyOutTiles(payables = [], today = new Date()) {
+export function moneyOutTiles(payables = []) {
   const withCur = payables.map((p) => ({ ...p, currency: p.currency || 'PKR' }));
   const open = withCur.filter((p) => !eqStatus(p.status, 'Paid'));
-  const overdue = open.filter((p) => eqStatus(p.status, 'Overdue') || (p.dueDate && new Date(p.dueDate) < today));
+  const overdue = open.filter(isOverdueRow);
   return {
     outstanding: totalsByCurrency(open, 'outstanding'),
     overdue: totalsByCurrency(overdue, 'outstanding'),

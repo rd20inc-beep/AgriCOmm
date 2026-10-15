@@ -22,6 +22,7 @@ import {
   BUCKET_KEYS, BUCKET_COLORS, ageDays, ageBucket, bucketize, isOpenAR,
 } from '../utils/aging';
 import { useFxRate } from '../utils/fx';
+import { isOverdueRow } from '../utils/moneyTiles';
 import AnomalyWatchCard from '../../ai/components/AnomalyWatchCard';
 import PurchaseRequirementsPanel from '../../purchaseRequirements/components/PurchaseRequirementsPanel';
 import { fmtPKR, fmtUSD, fmtMoney, fmtDate, fmtPct } from '../../../shared/utils/format';
@@ -585,14 +586,9 @@ function onlyOpen(rows) {
       return out > 0 && status !== 'paid' && status !== 'void' && status !== 'cancelled';
     });
 }
-function isOverdue(r) {
-  const status = (r.status || '').toLowerCase();
-  if (status === 'overdue') return true;
-  const due = r.dueDate || r.due_date;
-  if (!due) return false;
-  const days = ageDays(due);
-  return days != null && days > 0 && (parseFloat(r.outstanding) || 0) > 0;
-}
+// D-15: the server flags each row (backend kpi/overdue.js) — an export balance
+// is due sailing + term, not on its placeholder due date.
+const isOverdue = isOverdueRow;
 
 // bucketize / ageDays / ageBucket / BUCKET_KEYS / BUCKET_COLORS now
 // live in ../utils/aging.js — shared with MoneyIn.

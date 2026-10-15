@@ -36,6 +36,10 @@ function buildLocalReceivablesQuery(db, { status, customer_id, from_date, to_dat
       db.raw('1::numeric as fx_rate'),
       db.raw('SUM(ls.total_amount) as base_amount_pkr'),
       db.raw(`MIN(${DUE_EXPR})::timestamptz as due_date`),
+      // D-15 (kpi/overdue.js): past due with something owed — a row here
+      // always owes (HAVING below), so it is overdue once its due day passes.
+      db.raw(`MIN(${DUE_EXPR})::date::text as effective_due_date`),
+      db.raw(`(MIN(${DUE_EXPR})::date < CURRENT_DATE) as is_overdue`),
       db.raw(`CASE
         WHEN MIN(${DUE_EXPR}) < CURRENT_DATE THEN 'Overdue'
         WHEN SUM(ls.paid_amount) > 0 THEN 'Partial'

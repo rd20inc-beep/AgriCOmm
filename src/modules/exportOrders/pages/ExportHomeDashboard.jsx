@@ -11,6 +11,7 @@ import { useApp } from '../../../context/AppContext';
 import { workflowSteps, isBalanceDue } from '../components/constants';
 import { fmtUSD, fmtKg, fmtDate } from '../../../shared/utils/format';
 import { transferKg } from '../../inventory/utils/stockMath';
+import { isActiveOrder } from '../../../shared/constants/orderStatus';
 
 // Exact figures — money is never abbreviated to K/M (see shared/utils/format.js).
 const formatUSD = (value) => fmtUSD(Number(value) || 0);
@@ -90,7 +91,7 @@ export default function ExportHomeDashboard() {
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
     const in14Days = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
 
-    const active = orders.filter(o => !['Closed', 'Cancelled'].includes(o.status));
+    const active = orders.filter(isActiveOrder); // D-15: not Draft / Cancelled / Closed
     const closed = orders.filter(o => o.status === 'Closed');
     const closedMTD = closed.filter(o => new Date(o.createdAt) >= monthStart);
 

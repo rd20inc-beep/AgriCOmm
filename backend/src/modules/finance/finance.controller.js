@@ -3,6 +3,8 @@ const accountingService = require('../../services/accountingService');
 const fxRateService = require('./fxRate.service');
 const { postLocalReceiptJournal } = require('../localSales/receiptJournal');
 const { buildLocalReceivablesQuery } = require('./localReceivablesQuery');
+const { effectiveDueSql, overdueSql, payableOverdueSql, isPayableOverdue, balanceTermDays } = require('../kpi/overdue');
+const { whereActiveOrder } = require('../kpi/orderStatus');
 const { feedBase, feedTotals } = require('./paymentsFeedTotals');
 
 // Finance-dashboard confidentiality: every role EXCEPT Super Admin / Owner sees
@@ -260,7 +262,9 @@ async function loadPayablesFeed(query = {}) {
   let filtered = all;
   if (status) filtered = filtered.filter(p => p.status === status);
   if (supplier_id) filtered = filtered.filter(p => String(p.supplier_id) === String(supplier_id));
-  if (overdue === 'true') filtered = filtered.filter(p => p.due_date && new Date(p.due_date) < new Date() && p.status !== 'Paid');
+  // D-15: overdue = past due with something outstanding (kpi/overdue.js).
+  filtered = filtered.map((p) => ({ ...p, is_overdue: isPayableOverdue(p) }));
+  if (overdue === 'true') filtered = filtered.filter((p) => p.is_overdue);
   if (from_date) filtered = filtered.filter(p => p.created_at && new Date(p.created_at) >= new Date(from_date));
   // Exclusive next-day bound: created_at carries a time, so comparing against
   // midnight of to_date would drop payables created later that day.
@@ -314,9 +318,16 @@ async function receivablesResponse(req, res, { entity } = {}) {
     const offset = (Math.max(1, parseInt(page)) - 1) * parseInt(limit);
 
     // ── Export-side receivables (existing) ────────────────────────
+    // D-15 (kpi/overdue.js): each row carries its effective due date and
+    // whether it is overdue, so every Money In tile and filter reads the same
+    // rule (an export balance falls due sailing + term, not on its placeholder).
+    const termDays = await balanceTermDays(db);
     let exportQ = db('receivables as r')
       .leftJoin('customers as c', 'r.customer_id', 'c.id')
+      .leftJoin('export_orders as eo', 'eo.id', 'r.order_id')
       .select(
+        db.raw(`${effectiveDueSql({ r: 'r', o: 'eo', termDays })}::text as effective_due_date`),
+        db.raw(`${overdueSql({ r: 'r', o: 'eo', termDays })} as is_overdue`),
         'r.id', 'r.recv_no', 'r.type', 'r.expected_amount', 'r.received_amount',
         'r.outstanding', 'r.currency', 'r.fx_rate', 'r.base_amount_pkr',
         'r.due_date', 'r.status', 'r.aging', 'r.order_id', 'r.customer_id',
@@ -331,7 +342,7 @@ async function receivablesResponse(req, res, { entity } = {}) {
     if (entity)        exportQ = exportQ.where('r.entity', entity);
     if (status)        exportQ = exportQ.where('r.status', status);
     if (customer_id)   exportQ = exportQ.where('r.customer_id', customer_id);
-    if (overdue === 'true') exportQ = exportQ.where('r.due_date', '<', db.fn.now()).where('r.status', '!=', 'Paid');
+    if (overdue === 'true') exportQ = exportQ.whereRaw(overdueSql({ r: 'r', o: 'eo', termDays }));
     if (from_date)     exportQ = exportQ.where('r.created_at', '>=', from_date);
     // Exclusive next-day bound: r.created_at is timestamptz, so `<= to_date`
     // (midnight) would drop receivables created later on the to_date day.
@@ -1068,11 +1079,22 @@ const financeController = {
       const alerts = [];
 
       // Overdue receivables (money owed to us, past due).
-      const orr = await safe(() => db('receivables').where('due_date', '<', today).whereNot('status', 'Paid').count('id as c').sum('outstanding as t').first(), { c: 0, t: 0 });
-      if (parseInt(orr.c, 10) > 0) alerts.push({ id: 'overdue_receivables', type: 'receivable', severity: 'warning', title: 'Overdue receivables', message: `${orr.c} receivable(s) past due — ${rs(orr.t)} still to collect.`, count: parseInt(orr.c, 10), total: num(orr.t), link: '/finance/money-in' });
+      // D-15 (kpi/overdue.js): past the effective due date with something
+      // outstanding — per currency, a dollar and a rupee are never added.
+      const termDays = await safe(() => balanceTermDays(db), 30);
+      const orrRows = await safe(() => db('receivables as r').leftJoin('export_orders as o', 'o.id', 'r.order_id')
+        .whereRaw(overdueSql({ r: 'r', o: 'o', termDays }))
+        .groupByRaw("UPPER(COALESCE(r.currency, 'PKR'))")
+        .select(db.raw("UPPER(COALESCE(r.currency, 'PKR')) as currency"), db.raw('COUNT(*) as c'), db.raw('COALESCE(SUM(r.outstanding), 0) as t')), []);
+      const orrCount = orrRows.reduce((s, r) => s + (parseInt(r.c, 10) || 0), 0);
+      if (orrCount > 0) {
+        const byCur = Object.fromEntries(orrRows.map((r) => [r.currency, num(r.t)]));
+        const text = orrRows.map((r) => (r.currency === 'PKR' ? rs(r.t) : `${r.currency} ${Math.round(num(r.t)).toLocaleString()}`)).join(' · ');
+        alerts.push({ id: 'overdue_receivables', type: 'receivable', severity: 'warning', title: 'Overdue receivables', message: `${orrCount} receivable(s) past due — ${text} still to collect.`, count: orrCount, totalsByCurrency: byCur, link: '/finance/money-in' });
+      }
 
       // Overdue payables (we owe, past due).
-      const orp = await safe(() => db('payables').where('due_date', '<', today).whereNot('status', 'Paid').where('outstanding', '>', 0).count('id as c').sum('outstanding as t').first(), { c: 0, t: 0 });
+      const orp = await safe(() => db('payables').whereRaw(payableOverdueSql({ p: 'payables' })).count('id as c').sum('outstanding as t').first(), { c: 0, t: 0 });
       if (parseInt(orp.c, 10) > 0) alerts.push({ id: 'overdue_payables', type: 'payable', severity: 'danger', title: 'Overdue payables', message: `${orp.c} bill(s) past due — ${rs(orp.t)} owed.`, count: parseInt(orp.c, 10), total: num(orp.t), link: '/finance/money-out' });
 
       // Overdrawn bank/cash accounts.
@@ -1119,8 +1141,8 @@ const financeController = {
         millingBatches,
       ] = await Promise.all([
         db('export_orders').count('id as count').first(),
-        db('export_orders')
-          .whereNotIn('status', ['Closed', 'Cancelled'])
+        // D-15 (kpi/orderStatus.js): active = not Draft / Cancelled / Closed.
+        whereActiveOrder(db('export_orders'))
           .count('id as count')
           .first(),
         db('export_orders')

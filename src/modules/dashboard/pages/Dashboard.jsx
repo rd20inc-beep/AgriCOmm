@@ -27,6 +27,7 @@ import { isBalanceDue } from '../../exportOrders/components/constants';
 import StatusBadge from '../../../shared/components/StatusBadge';
 import useConfirm from '../../../hooks/useConfirm';
 import { fmtUSD, fmtPKR, fmtMT, fmtKg, fmtPct, fmtDate } from '../../../shared/utils/format';
+import { isActiveOrder } from '../../../shared/constants/orderStatus';
 
 // ─── Formatting ────────────────────────────────────────────────────────
 // Exact figures from the shared formatter (en-PK locale, no abbreviation).
@@ -117,7 +118,7 @@ export default function Dashboard() {
   const totalActions = pendingApprovalBatches.length + awaitingAdvance + docsInPrep + readyToShip + varianceAlerts + masterApprovals + dashApprovals;
 
   // ─── KPIs ───
-  const activeOrders = safeOrders.filter(o => !['Draft', 'Closed', 'Cancelled'].includes(o.status)).length;
+  const activeOrders = safeOrders.filter(isActiveOrder).length; // D-15 (shared/constants/orderStatus)
   const activeBatches = safeBatches.filter(b => ['In Progress', 'Queued', 'Pending Approval'].includes(b.status)).length;
   const shipmentsInTransit = safeOrders.filter(o => o.status === 'Shipped').length;
   const totalReceivable = safeOrders.reduce((s, o) => {
