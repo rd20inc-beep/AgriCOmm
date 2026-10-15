@@ -249,8 +249,10 @@ d('Milling WIP + truck purchase at receipt (DB-gated)', () => {
   test('tie-out: 1260 WIP equals the rice committed to open batches, nothing unexplained', async () => {
     const t = await sv.inventoryTieOut(db);
     const w = t.accounts.find((a) => a.account === '1260');
-    expect(w.unexplained).toBe(0);
-    expect(w.glBalance).toBe(Math.round((w.value - (-w.wipNotBooked)) * 100) / 100);
+    // Relative to the start: the tie-out is company-wide, and other suites on
+    // the same DB leave fixtures (e.g. a source lot linked straight into
+    // batch_source_lots) that this suite did not book.
+    expect(Math.round((w.unexplained - (before['1260'] || 0)) * 100) / 100).toBe(0);
     // The truck scenarios were booked through the documents, so they add
     // nothing unexplained to raw rice (the directly-inserted test lots carry
     // no purchase journal and account for the whole 1210 change).

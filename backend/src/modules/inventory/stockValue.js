@@ -49,12 +49,20 @@ function lotValue(lot) {
 // that is not finished, cancelled or rejected and has no yield on the books (no
 // output lots, no Posted completion journal — the same facts costEditLocks
 // .batchYielded uses).
+// Open = not yet (or no longer) yielded, by the same tests as milling's
+// batchYielded: an output lot that is live (a reversed yield leaves its lots
+// Closed at 0), or a completion journal not netted by its reversal (P3-03 keeps
+// the original Posted and posts a reversal_of delta).
 const openBatchSql = (mb = 'mb') => `(${mb}.is_service_milling IS NOT TRUE
       AND ${mb}.status NOT IN ('Completed', 'Cancelled', 'Rejected')
       AND NOT EXISTS (SELECT 1 FROM inventory_lots o
-        WHERE o.batch_ref = 'batch-' || ${mb}.id AND o.type IN ('finished', 'byproduct'))
+        WHERE o.batch_ref = 'batch-' || ${mb}.id AND o.type IN ('finished', 'byproduct')
+          AND (o.status <> 'Closed' OR COALESCE(o.qty, 0) > 0))
       AND NOT EXISTS (SELECT 1 FROM journal_entries je
-        WHERE je.ref_type = 'Milling Batch' AND je.ref_no = ${mb}.batch_no AND je.status = 'Posted'))`;
+        WHERE je.ref_type = 'Milling Batch' AND je.ref_no = ${mb}.batch_no AND je.status = 'Posted'
+          AND je.reversal_of IS NULL
+          AND NOT EXISTS (SELECT 1 FROM journal_entries jr
+            WHERE jr.reversal_of = je.id AND jr.status = 'Posted')))`;
 
 /**
  * Rice committed to open milling batches, one row per (batch, lot):
