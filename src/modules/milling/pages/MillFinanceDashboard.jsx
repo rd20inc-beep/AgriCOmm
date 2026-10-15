@@ -382,7 +382,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
   const { data: localSalesSummary } = useLocalSalesSummary();
   const [selectedSupplier, setSelectedSupplier] = useState(null);
   const { data: localCustomers = [] } = useCustomers({ type: 'local' });
-  const { data: allLocalSales = [] } = useLocalSales({ limit: 1000 });
+  const { data: allLocalSales = [] } = useLocalSales(); // every page (P4-11)
   // Receivables that are NOT local sales — opening balances, and anything else
   // billed outside a sale. The endpoint returns BOTH kinds: rows from the
   // receivables table (kind 'receivable') and rows derived from local_sales
@@ -1970,6 +1970,7 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
           {payrollView === 'attendance' ? (
             <EmployeeAttendanceGrid
               month={payrollMonth}
+              entity={payrollEntity}
               employees={workers}
               recordAttMut={recordAttMut}
               addToast={addToast}
@@ -3239,8 +3240,9 @@ const ATT_STYLE = {
 const ATT_LABEL = { present: 'Present', half_day: 'Half day', leave: 'Leave', absent: 'Absent', off: 'Off / holiday' };
 const WEEKDAY = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
 
-function EmployeeAttendanceGrid({ month, employees, recordAttMut, addToast }) {
-  const { data: records = [], isLoading } = useAttendance({ month });
+function EmployeeAttendanceGrid({ month, entity = 'mill', employees, recordAttMut, addToast }) {
+  // One month of this entity's employees, uncapped on the server (PAY-10).
+  const { data: records = [], isLoading } = useAttendance({ month, entity });
   const bulkMut = useBulkAttendance();
   const { data: holidays = [] } = useAttendanceHolidays(month);
   const [optimistic, setOptimistic] = useState({}); // `${id}|${date}` → status ('' = cleared) until refetch

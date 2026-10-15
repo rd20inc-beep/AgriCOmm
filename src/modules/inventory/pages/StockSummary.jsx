@@ -9,6 +9,7 @@ import { splitOnHand, unitsOnHand, onHandKg as lotOnHandKg, formatUnits, lotValu
 import SlideDrawer from '../../../components/SlideDrawer';
 import StatusBadge from '../../../shared/components/StatusBadge';
 import { fmtKg, fmtNum, fmtPKR as fmtPKRBase, fmtDate } from '../../../shared/utils/format';
+import { fetchAllPages } from '../../../shared/utils/fetchAllPages';
 
 const n = (v) => Number(v) || 0;
 const toMT = (kg) => n(kg) / 1000;
@@ -285,17 +286,17 @@ function ProductStockDrawer({ row, showCost, entity, status, onClose, onOpenLot 
   const { data: lots = [], isLoading } = useQuery({
     queryKey: ['product-lots', row.group_id, entity, status],
     queryFn: async () => {
-      const res = await lotInventoryApi.listLots({
+      // Every page — the drawer's lots must add up to the summary row, so the
+      // newest 200 were not enough (P4-11).
+      return fetchAllPages(lotInventoryApi.listLots, {
         product_id: row.group_id,
         // Same scope as the summary row: a lot that holds nothing is not stock.
         in_stock: 'true',
-        limit: 200,
         sort_by: 'created_at',
         sort_dir: 'desc',
         ...(status && status !== 'all' ? { status } : {}),
         ...(entity ? { entity } : {}),
-      });
-      return res?.data?.lots || [];
+      }, 'lots');
     },
     enabled: !!row.group_id,
     staleTime: 10 * 1000,

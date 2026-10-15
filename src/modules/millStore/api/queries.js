@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { millStoreApi } from './services';
 import { financeApi } from '../../finance/api/services';
+import { fetchPageOrAll } from '../../../shared/utils/fetchAllPages';
 
 function unwrap(res, key) {
   const d = res?.data?.data || res?.data || res;
@@ -20,13 +21,14 @@ export const storeKeys = {
   consumption: (batchId) => ['mill-store', 'consumption', batchId],
 };
 
+// Items / purchases / adjustments: every page unless a page/limit is asked for.
+// The server's default page is 50 (max 200), so callers asking for 300 or 500
+// silently got 200 and treated them as the whole store (INV-48 / P4-11).
 export function useMillStoreItems(params = {}) {
   return useQuery({
     queryKey: storeKeys.items(params),
-    queryFn: async () => {
-      const res = await millStoreApi.listItems(params);
-      return unwrap(res, 'items') || [];
-    },
+    queryFn: () => fetchPageOrAll(millStoreApi.listItems, params, 'items'),
+    structuralSharing: false,
   });
 }
 
@@ -64,8 +66,7 @@ export function useMillStorePurchases(params = {}) {
   return useQuery({
     queryKey: storeKeys.purchases(params),
     queryFn: async () => {
-      const res = await millStoreApi.listPurchases(params);
-      return unwrap(res, 'purchases') || [];
+      return fetchPageOrAll(millStoreApi.listPurchases, params, 'purchases');
     },
   });
 }
@@ -252,8 +253,7 @@ export function useMillStoreAdjustments(params = {}) {
   return useQuery({
     queryKey: ['mill-store', 'adjustments', params],
     queryFn: async () => {
-      const res = await millStoreApi.listAdjustments(params);
-      return unwrap(res, 'adjustments') || [];
+      return fetchPageOrAll(millStoreApi.listAdjustments, params, 'adjustments');
     },
   });
 }

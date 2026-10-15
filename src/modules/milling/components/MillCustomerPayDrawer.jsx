@@ -15,7 +15,7 @@ const fmtDate = (d) => (d ? fmtDateHouse(d) : '');
 // updates the sale AND its receivable.
 export default function MillCustomerPayDrawer({ customer, onClose }) {
   const { addToast } = useApp();
-  const { data: salesData } = useLocalSales({ customer_id: customer.id, limit: 200 });
+  const { data: salesData } = useLocalSales({ customer_id: customer.id });
   const sales = Array.isArray(salesData) ? salesData : (salesData?.sales || salesData?.localSales || []);
   const payMut = useAcceptLocalSalePayment();
   const [saving, setSaving] = useState(false);

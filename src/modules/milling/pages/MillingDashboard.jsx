@@ -154,7 +154,7 @@ export default function MillingDashboard() {
   // Fetched on their own, server-filtered to mill stock with free qty: the
   // general list is the newest 500 lots of every kind, so older stock (opening
   // lots) silently fell off the picker once the lot count passed 500.
-  const { data: millStock = [] } = useInventory({ entity: 'mill', in_stock: 1, limit: 5000 });
+  const { data: millStock = [] } = useInventory({ entity: 'mill', in_stock: 1 });
   const blendableLots = useMemo(() => millableLots(millStock), [millStock]);
   // Category tags present among the millable lots (SaleModal-style filter).
   const blendTags = useMemo(() => {

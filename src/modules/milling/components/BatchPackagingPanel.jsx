@@ -58,7 +58,7 @@ export default function BatchPackagingPanel({ batchId, batchStatus, addToast }) 
   // Only packaging items can go on a packaging line. Via the shared hook rather
   // than a fresh fetch, so the response shape is unwrapped the one way the rest
   // of the app already does it.
-  const { data: items = [] } = useMillStoreItems({ category: 'packaging', limit: 300 });
+  const { data: items = [] } = useMillStoreItems({ category: 'packaging' });
 
   const save = useMutation({
     mutationFn: (lines) => api.put(`/api/milling/batches/${batchId}/packaging`, { lines }),

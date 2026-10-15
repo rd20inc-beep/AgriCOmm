@@ -5,6 +5,7 @@ import api from '../../../api/client';
 import { useApp } from '../../../context/AppContext';
 import { LotReportView } from './LotReportViews';
 import { fmtNum } from '../../../shared/utils/format';
+import ListCapHint from '../../../shared/components/ListCapHint';
 
 const TYPE_OPTIONS = [
   { k: '', l: 'All types' },
@@ -23,6 +24,7 @@ export default function LotReport() {
   // ── Lot picking ──
   const [filters, setFilters] = useState({ type: '', search: '' });
   const [lots, setLots] = useState([]);
+  const [lotTotal, setLotTotal] = useState(null); // server match count — the list shows at most 200
   const [loadingLots, setLoadingLots] = useState(false);
   const [selected, setSelected] = useState(() => new Set());
 
@@ -42,6 +44,7 @@ export default function LotReport() {
         sort_dir: 'desc',
       });
       setLots(res?.data?.lots || []);
+      setLotTotal(res?.data?.pagination?.total ?? null);
     } catch (err) {
       addToast(err.message || 'Failed to load lots', 'error');
     } finally {
@@ -201,6 +204,7 @@ export default function LotReport() {
             </tbody>
           </table>
         </div>
+        <ListCapHint rows={lots} total={lotTotal} className="mt-2" />
       </div>
 
       {/* Printable preview */}
@@ -208,7 +212,12 @@ export default function LotReport() {
         {building ? (
           <div className="text-center text-gray-400 py-12">Building report…</div>
         ) : report && report.lots?.length ? (
+          <>
+          {report.truncated && (
+            <p className="text-[11px] text-amber-700 mb-2 print:hidden">Showing {report.lots.length} of {report.total} selected lots — a report holds at most 200; print the rest separately.</p>
+          )}
           <LotReportView lots={report.lots} companyName={companyName} detail={detail} generatedAt={report.generatedAt} />
+          </>
         ) : (
           <div className="text-center text-gray-400 py-12">
             Select lots above and click <span className="font-medium text-gray-600">Generate report</span> to preview.
