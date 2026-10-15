@@ -80,4 +80,19 @@ d('receivable drift detection + correction (DB-gated)', () => {
     expect(after.reset).not.toContain(ids.recv);
     expect(after.constraints[NAME]).toBe('VALID');
   });
+
+  test('a mill opening receivable with no order is allowed; an export one is not (migration 370)', async () => {
+    const c = await db('customers').where({ name: `ZZ Drift ${run}` }).first();
+    const [open] = await db('receivables').insert({
+      recv_no: `RCV-O-ZZ-${run}`, entity: 'mill', customer_id: c.id, type: 'Balance',
+      expected_amount: 250, received_amount: 0, outstanding: 250, status: 'Pending', currency: 'PKR',
+    }).returning('*');
+    const res = await detect(db);
+    expect(res.links.chk_receivables_export_parent).not.toContain(open.id);
+    await expect(db('receivables').insert({
+      recv_no: `RCV-X-ZZ-${run}`, entity: 'export', customer_id: c.id, type: 'Advance',
+      expected_amount: 1, received_amount: 0, outstanding: 1, status: 'Pending', currency: 'USD',
+    })).rejects.toThrow(/chk_receivables_export_parent/);
+    await db('receivables').where({ id: open.id }).del();
+  });
 });

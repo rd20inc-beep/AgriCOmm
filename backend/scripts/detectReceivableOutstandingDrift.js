@@ -90,7 +90,7 @@ const EXPECTED_MISMATCH_SQL = `
    ORDER BY r.id`;
 
 const LINK_SQL = {
-  chk_receivables_export_parent: "SELECT id FROM receivables WHERE NOT (type IS NULL OR type NOT IN ('Advance', 'Balance') OR order_id IS NOT NULL) ORDER BY id",
+  chk_receivables_export_parent: "SELECT id FROM receivables WHERE NOT (entity = 'mill' OR type IS NULL OR type NOT IN ('Advance', 'Balance') OR order_id IS NOT NULL) ORDER BY id",
   chk_receivables_service_parent: "SELECT id FROM receivables WHERE NOT (type IS NULL OR type <> 'Service Milling' OR service_invoice_id IS NOT NULL) ORDER BY id",
   chk_payments_receivable_is_receipt: "SELECT id FROM payments WHERE NOT (linked_receivable_id IS NULL OR type = 'receipt') ORDER BY id",
   chk_payments_payable_is_payment: "SELECT id FROM payments WHERE NOT (linked_payable_id IS NULL OR type = 'payment') ORDER BY id",
