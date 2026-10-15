@@ -20,6 +20,9 @@ jest.setTimeout(60000);
 d('payroll reports (DB-gated)', () => {
   let db; let router; let svc; const ids = {};
   const tag = `ZZPR${`${Date.now()}`.slice(-7)}`;
+  // A payroll year of its own per run, so a re-run on the same DB starts clean
+  // (the header's "2091" is this year).
+  const Y = String(2200 + (Date.now() % 700));
 
   const layerFor = (method, path) => router.stack.find((l) => l.route && l.route.path === path && l.route.methods[method]);
   const call = async (method, path, { params = {}, query = {} } = {}) => {
@@ -64,21 +67,21 @@ d('payroll reports (DB-gated)', () => {
       return r;
     };
     const paidAt = (p) => new Date(`${p}-28T10:00:00Z`);
-    await runOf('2091-01', 'paid', 'mill', [{
+    await runOf(`${Y}-01`, 'paid', 'mill', [{
       worker_id: W.id, gross_pay: 30000, bonus_total: 2000, statutory_total: 1500, deduction_total: 500,
-      advance_deducted: 400, net_pay: 29000, short_pay_amount: 600, paid_at: paidAt('2091-01'),
+      advance_deducted: 400, net_pay: 29000, short_pay_amount: 600, paid_at: paidAt(`${Y}-01`),
     }]);
-    await runOf('2091-02', 'accrued', 'mill', [{ worker_id: W.id, gross_pay: 30000, net_pay: 30000 }]);
-    await runOf('2091-03', 'approved', 'mill', [{ worker_id: W.id, gross_pay: 30000, net_pay: 30000 }]);
-    await runOf('2091-04', 'voided', 'mill', [{ worker_id: W.id, gross_pay: 30000, net_pay: 30000 }]);
-    await runOf('2091-05', 'partially_paid', 'mill', [
-      { worker_id: W.id, gross_pay: 20000, net_pay: 20000, paid_at: paidAt('2091-05') },
+    await runOf(`${Y}-02`, 'accrued', 'mill', [{ worker_id: W.id, gross_pay: 30000, net_pay: 30000 }]);
+    await runOf(`${Y}-03`, 'approved', 'mill', [{ worker_id: W.id, gross_pay: 30000, net_pay: 30000 }]);
+    await runOf(`${Y}-04`, 'voided', 'mill', [{ worker_id: W.id, gross_pay: 30000, net_pay: 30000 }]);
+    await runOf(`${Y}-05`, 'partially_paid', 'mill', [
+      { worker_id: W.id, gross_pay: 20000, net_pay: 20000, paid_at: paidAt(`${Y}-05`) },
       { worker_id: W2.id, gross_pay: 10000, net_pay: 10000 },
     ]);
-    await runOf('2091-01', 'paid', 'general', [{ worker_id: G.id, gross_pay: 5000, net_pay: 5000, paid_at: paidAt('2091-01') }]);
+    await runOf(`${Y}-01`, 'paid', 'general', [{ worker_id: G.id, gross_pay: 5000, net_pay: 5000, paid_at: paidAt(`${Y}-01`) }]);
 
     const adv = (amount, approval_status, status, recovered = 0) => ({
-      worker_id: W.id, amount, advance_date: '2091-01-05', approval_status, status, recovered_amount: recovered,
+      worker_id: W.id, amount, advance_date: `${Y}-01-05`, approval_status, status, recovered_amount: recovered,
       recovery_method: 'full_next_salary', auto_deduct: true,
     });
     await db('mill_worker_advances').insert([
@@ -99,11 +102,11 @@ d('payroll reports (DB-gated)', () => {
     // owed = accrued Feb salary + Jan short pay − advance still outstanding
     expect(summary.currentBalance).toBe(30000 + 600 - 600);
     expect(entries.filter((e) => e.type === 'salary_paid')).toHaveLength(2);
-    expect(entries.some((e) => /2091-03|2091-04/.test(e.reference || ''))).toBe(false);
+    expect(entries.some((e) => [`${Y}-03`, `${Y}-04`].includes(e.reference))).toBe(false);
   });
 
   test('/payroll/report: totals are paid lines only; every status listed and broken out', async () => {
-    const res = await call('get', '/payroll/report', { query: { from: '2091-01', to: '2091-12', entity: 'mill' } });
+    const res = await call('get', '/payroll/report', { query: { from: `${Y}-01`, to: `${Y}-12`, entity: 'mill' } });
     const { runs, totals } = res.body.data;
     expect(runs).toHaveLength(5);
     expect(totals).toMatchObject({
@@ -111,27 +114,27 @@ d('payroll reports (DB-gated)', () => {
       deductionTotal: 500, advanceTotal: 400, netTotal: 49000, basis: 'paid lines',
     });
     expect(totals.byStatus.voided).toMatchObject({ runs: 1, netTotal: 30000 });
-    const onlyPaid = await call('get', '/payroll/report', { query: { from: '2091-01', to: '2091-12', entity: 'mill', status: 'paid' } });
+    const onlyPaid = await call('get', '/payroll/report', { query: { from: `${Y}-01`, to: `${Y}-12`, entity: 'mill', status: 'paid' } });
     expect(onlyPaid.body.data.runs).toHaveLength(1);
   });
 
   test('payroll ledger: status filter applied, entity filter, columns modelled, no invented "Mill Cash"', async () => {
-    const paid = await svc.getPayrollLedger({ from: '2091-01', to: '2091-12' });
+    const paid = await svc.getPayrollLedger({ from: `${Y}-01`, to: `${Y}-12` });
     expect(paid.rows).toHaveLength(3);
     expect(paid.totals.net).toBe(54000);
-    const mill = await svc.getPayrollLedger({ from: '2091-01', to: '2091-12', entity: 'mill' });
+    const mill = await svc.getPayrollLedger({ from: `${Y}-01`, to: `${Y}-12`, entity: 'mill' });
     expect(mill.totals).toMatchObject({ count: 2, net: 49000, gross: 50000, bonus: 2000, statutory: 1500, deductions: 500, shortPay: 600 });
-    const jan = mill.rows.find((r) => r.period === '2091-01');
+    const jan = mill.rows.find((r) => r.period === `${Y}-01`);
     expect(jan.gross + jan.bonus - jan.statutory - jan.deductions - jan.advanceDeducted - jan.shortPay).toBe(jan.net);
     expect(jan.account).toBe('Cash (no account recorded)');
-    const unpaid = await svc.getPayrollLedger({ from: '2091-01', to: '2091-12', entity: 'mill', status: 'unpaid' });
+    const unpaid = await svc.getPayrollLedger({ from: `${Y}-01`, to: `${Y}-12`, entity: 'mill', status: 'unpaid' });
     expect(unpaid.rows.map((r) => r.status).sort()).toEqual(['Accrued', 'Pending', 'Pending']);
-    const all = await svc.getPayrollLedger({ from: '2091-01', to: '2091-12', entity: 'mill', status: 'all' });
+    const all = await svc.getPayrollLedger({ from: `${Y}-01`, to: `${Y}-12`, entity: 'mill', status: 'all' });
     expect(all.rows).toHaveLength(6);
   });
 
   test('analytics: advances given = paid advances only', async () => {
-    const a = await svc.getPayrollAnalytics({ from: '2091-01', to: '2091-12', entity: 'mill' });
+    const a = await svc.getPayrollAnalytics({ from: `${Y}-01`, to: `${Y}-12`, entity: 'mill' });
     expect(a.summary.advancesGiven).toBe(1000);
     expect(a.summary.totalNet).toBe(49000);
     expect(a.summary.advanceRecoveryRate).toBe(40);
