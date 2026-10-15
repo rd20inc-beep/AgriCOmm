@@ -3923,6 +3923,9 @@ const reportingService = {
     // share a name — and all of them in parallel, instead of one awaited query
     // chain per benchmark row (TEC-15 hot path). Formulas unchanged here; the
     // KPI definitions themselves belong to the KPI contracts (P4-01).
+    // Per-KPI extras a figure carries beside `actual` (the collection rate's
+    // per-currency split), keyed by KPI name.
+    const extras = new Map();
     const computeActual = async (kpiName) => {
       let actual = null;
       try {
@@ -3956,7 +3959,7 @@ const reportingService = {
             const { collectionRate: computeCollection } = require('../finance/collectionRate');
             const fields = collectionRateFields(await computeCollection(db));
             actual = fields.collectionRate;
-            bm.actualByCurrency = fields.collectionRateByCurrency;
+            extras.set(kpiName, { actualByCurrency: fields.collectionRateByCurrency });
             break;
           }
 
@@ -4131,7 +4134,7 @@ const reportingService = {
         status,
         variance: actual !== null ? parseFloat((actual - target).toFixed(2)) : null,
         period: bm.period,
-        ...(bm.actualByCurrency ? { actualByCurrency: bm.actualByCurrency } : {}),
+        ...(extras.get(bm.kpi_name) || {}),
       });
     }
 

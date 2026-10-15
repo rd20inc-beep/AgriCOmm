@@ -1,6 +1,7 @@
 // P4-09: PKR and USD are never summed. The headline screens that used to add
 // every order's contractValue (USD and PKR alike) in the browser now read the
 // server's per-currency order book; this guards against the sums coming back.
+/* global process */
 import { describe, it, expect } from 'vitest';
 import fs from 'fs';
 import path from 'path';
