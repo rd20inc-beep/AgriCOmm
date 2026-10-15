@@ -173,7 +173,7 @@ d('reports hub contract (DB-gated)', () => {
     expect(res.status).toBe(200);
     expect(res.headers['content-type']).toMatch(/text\/csv/);
     expect(res.headers['x-row-count']).toBe(String(N_SALES + 1));
-    const text = res.text.replace(/^﻿/, '');
+    const text = res.text.replace(/^\uFEFF/, '');
     const lines = text.trim().split('\r\n');
     expect(lines).toHaveLength(N_SALES + 2); // header + rows
     expect(lines[0]).toMatch(/^Sale No,Date,Buyer/);
