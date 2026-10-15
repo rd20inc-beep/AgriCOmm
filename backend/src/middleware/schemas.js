@@ -29,6 +29,21 @@ const exportOrderItem = Joi.object({
   notes: Joi.string().allow('', null),
 });
 
+// P3-18 (EXP-17): printed-bag orders and the pallet cost captured on the create
+// form travel WITH the order — posted inside create() for a live order, held on
+// a Draft until Submit. Mirrors the printed-bag service's fields.
+const exportOrderPrintedBag = Joi.object({
+  bag_type_id: Joi.number().integer().positive().allow(null, ''),
+  bag_type_name: Joi.string().max(255).allow('', null),
+  bag_size_kg: Joi.number().min(0).allow(null, ''),
+  vendor_id: Joi.number().integer().positive().allow(null, ''),
+  quantity: Joi.number().integer().positive().required(),
+  unit_cost: Joi.number().min(0).allow(null, ''),
+  printing: Joi.string().max(255).allow('', null),
+  brand_marking: Joi.string().max(255).allow('', null),
+  notes: Joi.string().max(2000).allow('', null),
+});
+
 const createExportOrder = Joi.object({
   customer_id: Joi.number().integer().positive().required(),
   product_id: Joi.number().integer().positive().required(),
@@ -149,6 +164,8 @@ const createExportOrder = Joi.object({
   })).allow(null),
   // Multi-line P.I. items — each line carries its own product/qty/price/HS code/packing
   items: Joi.array().items(exportOrderItem).allow(null),
+  printed_bags: Joi.array().items(exportOrderPrintedBag).max(50).allow(null),
+  pallet_cost: Joi.number().min(0).precision(2).max(1e12).allow(null, ''),
 });
 
 // A Draft is a work in progress: the order is saved so it can be finished later,
@@ -307,6 +324,11 @@ const addExportOrderCost = Joi.object({
   bill_ref: Joi.string().trim().max(100).allow('', null),
 });
 
+// P3-18: cancelling an open purchase requirement needs a reason.
+const cancelPurchaseRequirement = Joi.object({
+  reason: Joi.string().trim().min(3).max(2000).required(),
+});
+
 // P2-15 / D-7: what happens to money already received when an order is cancelled.
 const cancelExportOrder = Joi.object({
   reason: Joi.string().max(2000).allow('', null),
@@ -405,6 +427,9 @@ const allocateExportStock = Joi.object({
   // here, validate()'s stripUnknown would silently drop item_id from the body.
   item_id: Joi.number().integer().positive().allow(null),
   notes: Joi.string().allow('', null),
+  // The user is confirming the system's suggested lot (D-18): recorded on the
+  // reservation as source 'suggested'.
+  suggested: Joi.boolean(),
 });
 
 // Packed-weight variance entry (Phase 1). The mill enters net rice + material kg.
@@ -842,7 +867,8 @@ const updateBatch = Joi.object({
   machine_line: Joi.string().max(100).allow('', null),
   shift: Joi.string().valid('Day', 'Night', 'Full'),
   notes: Joi.string().allow('', null),
-  variance_status: Joi.string().max(50).allow('', null),
+  // QC decision on the sample-vs-arrival variance (CHECK, mig 381); '' clears nothing.
+  variance_status: Joi.string().valid('Pending', 'Approved', 'On Hold', 'Renegotiation', 'Rejected').empty('').allow(null),
   batch_name: Joi.string().max(200).allow('', null),
   custom_tags: Joi.alternatives().try(
     Joi.array().items(Joi.string().max(60)),
@@ -879,6 +905,49 @@ const createServiceInvoice = Joi.object({
 const voidServiceInvoice = Joi.object({
   reason: Joi.string().trim().min(3).max(500).required(),
   authorized_by_owner_id: Joi.number().integer().positive().allow(null, ''),
+});
+
+// P3-11 / D-22: a local-sale return (credit note). The Owner's approval is
+// read by ownerApproval before validate() runs; the id is kept here too.
+const localSaleReturn = Joi.object({
+  quantity: Joi.number().positive().required(),
+  reason: Joi.string().trim().min(3).max(500).required(),
+  settlement: Joi.string().valid('refund', 'credit').allow(null, ''),
+  return_date: Joi.date().iso().max('now').allow(null, ''),
+  refund_bank_account_id: Joi.number().integer().positive().allow(null, ''),
+  refund_method: Joi.string().lowercase().valid('cash', 'bank_transfer', 'online', 'mobile', 'tt', 'wire', 'lc').allow(null, ''),
+  refund_reference: Joi.string().trim().max(120).allow(null, ''),
+  authorized_by_owner_id: Joi.number().integer().positive().allow(null, ''),
+});
+
+// P3-11 / INV-09: voiding a purchase lot or a mill-store purchase.
+const voidPurchase = Joi.object({
+  reason: Joi.string().trim().min(3).max(500).required(),
+  authorized_by_owner_id: Joi.number().integer().positive().allow(null, ''),
+});
+
+// POST /milling/batches/:id/reverse-yield (P3-03 / MIL-20) — Owner-approved,
+// a reason is mandatory; the owner authorization travels as
+// authorized_by_owner_id (+ X-Owner-Credential header).
+const reverseYield = Joi.object({
+  reason: Joi.string().trim().min(3).max(500).required(),
+  authorized_by_owner_id: Joi.number().integer().positive().allow(null, ''),
+});
+
+// POST /milling/batches/:id/costs/bulk (P3-07 / MIL-35) — the whole Costs
+// drawer in one transaction. Categories are checked against the canonical list
+// in the controller (milling/costCategories.js).
+const millingCostLine = Joi.object({
+  category: Joi.string().trim().max(60).required(),
+  amount: Joi.number().min(0).required(),
+  notes: Joi.string().max(1000).allow('', null),
+  hauler_id: Joi.number().integer().positive().allow(null, ''),
+  transport_paid_by: Joi.string().max(40).allow('', null),
+  vehicle_no: Joi.string().max(60).allow('', null),
+  doc_no: Joi.string().max(60).allow('', null),
+});
+const millingCostsBulk = Joi.object({
+  costs: Joi.array().items(millingCostLine).min(1).max(50).required(),
 });
 
 const createBatch = Joi.object({
@@ -1192,6 +1261,7 @@ module.exports = {
   cancelExportDebitNote,
   addExportOrderCost,
   cancelExportOrder,
+  cancelPurchaseRequirement,
   exportOrderDocumentAction,
   confirmAdvance,
   confirmBalance,
@@ -1229,6 +1299,10 @@ module.exports = {
   updateBatch,
   createServiceInvoice,
   voidServiceInvoice,
+  localSaleReturn,
+  voidPurchase,
+  reverseYield,
+  millingCostsBulk,
   recordYield,
   saveDocumentOverrides,
   saveDocumentRendering,

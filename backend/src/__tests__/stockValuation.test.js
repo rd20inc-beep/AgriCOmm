@@ -1,7 +1,7 @@
 const { toPerKg, buildRateIndex, valueLot, summarise } = require('../modules/inventory/stockValuation');
 
 // Real shapes: lot costs are per KG; the one rate row on production is per_mt.
-const B2_LOT = { type: 'byproduct', product_id: 7, grade: 'B2', available_qty: '22995', cost_per_unit: '118.83' };
+const B2_LOT = { type: 'byproduct', product_id: 7, grade: 'B2', net_weight_kg: '22995', landed_cost_per_kg: '118.83' };
 
 describe('toPerKg — the unit trap that caused the 88-billion bug', () => {
   test('per_mt is divided by 1000', () => {
@@ -72,7 +72,7 @@ describe('valueLot', () => {
   test('a loss shows as a negative profit, not zero', () => {
     // D98 B2 cost 118.83 and sold at 115.00 — the real LS-0001 case.
     const idx = buildRateIndex([{ product_id: 7, product_type: 'B2', rate_value: 115000, unit: 'per_mt', effective_date: '2026-09-26' }]);
-    const v = valueLot({ ...B2_LOT, available_qty: '3500' }, idx);
+    const v = valueLot({ ...B2_LOT, net_weight_kg: '3500' }, idx);
     expect(v.profit).toBeCloseTo(3500 * (115 - 118.83), 2);
     expect(v.profit).toBeLessThan(0);
     expect(Math.round(v.profit)).toBe(-13405);   // the exact loss booked on LS-0001
@@ -81,7 +81,7 @@ describe('valueLot', () => {
 
 describe('summarise', () => {
   const idx = buildRateIndex([{ product_id: 7, product_type: 'B2', rate_value: 130000, unit: 'per_mt', effective_date: '2026-09-25' }]);
-  const lots = [B2_LOT, { type: 'finished', product_id: 9, grade: null, available_qty: '1000', cost_per_unit: '300' }];
+  const lots = [B2_LOT, { type: 'finished', product_id: 9, grade: null, net_weight_kg: '1000', landed_cost_per_kg: '300' }];
 
   test('priced and unpriced stock are kept apart', () => {
     const s = summarise(lots, idx);

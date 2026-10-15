@@ -37,6 +37,9 @@ router.get('/', authorize('export_orders', 'view'), controller.list);
 router.get('/pending-receipts', authorize('finance', 'view'), controller.listPendingExportReceipts);
 // Export-ready stock pool (redacted for export users). Batch 4.
 router.get('/available-stock', authorizeAny(['export_orders', 'view'], ['inventory', 'view']), controller.listExportReadyStock);
+// The suggested lot per order line (D-18): a proposal the user confirms with
+// allocate-stock { suggested: true }. Reserves nothing.
+router.get('/:id/suggested-lots', authorizeAny(['export_orders', 'view'], ['milling', 'view']), controller.suggestedLots);
 router.get('/:id', authorize('export_orders', 'view'), controller.getById);
 router.post(
   '/',

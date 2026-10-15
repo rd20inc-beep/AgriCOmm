@@ -13,6 +13,12 @@ function resetState() {
     payments: [],
     export_order_documents: [],
     document_checklists: [],
+    // The document gate (P3-17) reads stored files and generated documents;
+    // the reservation gate (P3-13) reads reservations and its setting.
+    document_store: [],
+    generated_documents: [],
+    inventory_reservations: [],
+    system_settings: [],
     order_packing_lines: [],
     shipment_containers: [],
     inventory_lots: [],
@@ -45,6 +51,8 @@ function resetState() {
     payments: 1,
     export_order_documents: 1,
     document_checklists: 1,
+    document_store: 1,
+    inventory_reservations: 1,
     order_packing_lines: 1,
     shipment_containers: 1,
     inventory_lots: 1,
@@ -249,6 +257,14 @@ class Query {
     return Promise.resolve(rows.length);
   }
 
+  sum(fieldExpr) {
+    const m = fieldExpr.match(/^(.+?)\s+as\s+(.+)$/i);
+    const field = m ? m[1].trim() : fieldExpr;
+    const alias = m ? m[2].trim() : 'sum';
+    const total = this._rows().reduce((acc, row) => acc + (parseFloat(row[field]) || 0), 0);
+    return { first: () => Promise.resolve({ [alias]: total }) };
+  }
+
   count(fieldExpr) {
     const aliasMatch = fieldExpr.match(/\s+as\s+(.+)$/i);
     const alias = aliasMatch ? aliasMatch[1].trim() : 'count';
@@ -293,6 +309,7 @@ jest.mock('../utils/docNumber', () => ({
 // Jest requires mock variable names to be prefixed with "mock"
 const mockInventorySvc = {
   reserveStock: jest.fn().mockResolvedValue(null),
+  releaseReservation: jest.fn().mockResolvedValue(null),
   dispatchForShipment: jest.fn().mockResolvedValue(null),
   lockOrderCOGS: jest.fn().mockResolvedValue(null),
   MOVEMENT_TYPES: {},
@@ -403,6 +420,25 @@ beforeEach(() => {
   resetState();
 });
 
+// D-17: a document counts once its stored file is checked by a second person.
+// This is what documents.service.approveDocument does (mocked here): the file
+// is stamped checked and the order is offered its next stage.
+async function fileChecked(orderId, docType) {
+  mockState.tables.document_store.push({
+    id: mockState.seq.document_store++, linked_type: 'export_order', linked_id: orderId, doc_type: docType,
+    is_latest: true, status: 'Approved', file_path: `/uploads/${docType}.pdf`, uploaded_by: 2, checked_by: 1,
+  });
+  const order = mockState.tables.export_orders.find((o) => o.id === orderId);
+  await workflowService.maybePromoteAfterDocuments(mockDb, { order: { ...order }, userId: 1 });
+}
+
+// D-18: the order's stock reserved (allocate-stock is mocked here).
+function reserveAll(orderId, kg = 100000) {
+  mockState.tables.inventory_reservations.push({
+    id: mockState.seq.inventory_reservations++, order_id: orderId, lot_id: 1, reserved_qty: kg, status: 'Active',
+  });
+}
+
 describe('Export order workflow', () => {
   it('creates a new order with receivables, checklist, and awaiting advance status', async () => {
     const { res, order } = await createAwaitingAdvanceOrder();
@@ -455,17 +491,10 @@ describe('Export order workflow', () => {
     // Ship on the advance: the five PRE-shipment documents take the order to
     // Ready to Ship; the BL Final and the Certificate of Origin only exist once
     // the vessel has sailed.
+    reserveAll(order.id);
     const preShipmentDocs = ['phyto', 'bl_draft', 'commercial_invoice', 'packing_list', 'fumigation'];
     for (const docType of preShipmentDocs) {
-      req = makeReq({
-        params: { id: String(order.id) },
-        body: {
-          doc_type: docType,
-        },
-      });
-      res = makeRes();
-      await controller.approveDocument(req, res);
-      expect(res.statusCode).toBe(200);
+      await fileChecked(order.id, docType);
     }
 
     expect(mockState.tables.export_orders[0].status).toBe('Ready to Ship');
@@ -554,10 +583,7 @@ describe('Export order workflow', () => {
     expect(res.body.message).toMatch(/BL Final/);
     expect(res.body.message).toMatch(/Certificate of Origin/);
 
-    req = makeReq({ params: { id: String(order.id) }, body: { doc_type: 'bl_final' } });
-    res = makeRes();
-    await controller.approveDocument(req, res);
-    expect(res.statusCode).toBe(200);
+    await fileChecked(order.id, 'bl_final');
 
     // The BL Final alone is not enough: the CoO still holds Close.
     req = makeReq({
@@ -570,10 +596,7 @@ describe('Export order workflow', () => {
     expect(res.body.message).toMatch(/Cannot close: .*Certificate of Origin/);
     expect(res.body.message).not.toMatch(/BL Final/);
 
-    req = makeReq({ params: { id: String(order.id) }, body: { doc_type: 'coo' } });
-    res = makeRes();
-    await controller.approveDocument(req, res);
-    expect(res.statusCode).toBe(200);
+    await fileChecked(order.id, 'coo');
 
     req = makeReq({
       params: { id: String(order.id) },
@@ -745,6 +768,7 @@ describe('Export order workflow', () => {
     expect(res.statusCode).toBe(200);
     expect(res.body.data.order.status).toBe('Docs In Preparation');
 
+    reserveAll(order.id);
     const docTypes = ['phyto', 'bl_draft', 'bl_final', 'commercial_invoice', 'packing_list', 'coo', 'fumigation'];
     for (const docType of docTypes) {
       req = makeReq({
@@ -754,14 +778,20 @@ describe('Export order workflow', () => {
       res = makeRes();
       await controller.uploadDocument(req, res);
       expect(res.statusCode).toBe(200);
+      // An upload marker alone moves nothing; the checked file does.
+      expect(mockState.tables.export_orders[0].status).toBe('Docs In Preparation');
 
+      // The old 'Confirm Ready' tick is refused (D-17) …
       req = makeReq({
         params: { id: String(order.id) },
         body: { doc_type: docType },
       });
       res = makeRes();
       await controller.approveDocument(req, res);
-      expect(res.statusCode).toBe(200);
+      expect(res.statusCode).toBe(400);
+
+      // … a second person approving the stored file is what counts.
+      await fileChecked(order.id, docType);
     }
 
     expect(mockState.tables.export_orders[0].status).toBe('Ready to Ship');

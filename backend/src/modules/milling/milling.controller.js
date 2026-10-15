@@ -13,28 +13,30 @@ const { nextDocNo } = require('../../utils/docNumber');
 const { redactForUser, canSeeCost } = require('../../utils/costVisibility');
 const { batchOutputValues } = require('./batchOutputValues');
 const { rawPurchaseToBook } = require('./rawPurchasePayable');
-const { assertBatchRawCostEditable, assertBatchOutputsUnsold } = require('./costEditLocks');
+const { syncBatchIntake, syncBatchWip } = require('./millingWip');
+const { syncTruckIntakePurchase, voidTruckIntakePurchase } = require('./truckIntakePurchase');
+const {
+  assertBatchRawCostEditable, assertBatchOutputsUnsold, ricePurchaseBooked, batchYielded,
+} = require('./costEditLocks');
+const { refreshBatchVariance } = require('./qualityVariance');
 // Packing-cost subtotals carry no "cost" in their names.
 const BATCH_EXTRA_COST_KEYS = ['bagsTotal', 'mastersTotal', 'polytheneTotal'];
 const batchPackagingService = require('./batchPackaging.service');
+const { moveStock: moveStoreStock } = require('../millStore/storeStock');
+const { applyKattaPlan } = require('../millStore/kattaLedger');
 const {
   yieldMode, batchHasOutputLots, checkTransition, releaseBatchSources, commitLotToBatch, TRANSITIONS,
+  isMillableLot,
 } = require('./batchLifecycle');
 const { postMillingCompletion, hasPostedCompletion, sourceLotValuesByAccount, proportionalInputSplit } = require('./millingCompletionJournal');
+const { syncBatchTransport, transportAdjustmentParts } = require('./batchTransport');
+const { canonicalCostCategory, unknownCategoryError } = require('./costCategories');
 
-// Can this inventory lot be fed into a milling/blend batch? Mirrors the
-// frontend NON_MILLABLE_CATEGORIES (src/utils/lotCategory.js): any rice form is
-// millable — raw paddy, finished rice, and re-blendable byproduct fractions
-// (broken grades / powder / sweeping / sortex) — but NOT non-rice residue
-// (bran, husk) or packaging.
-function isMillableLot(lot) {
-  if (lot.type === 'raw' || lot.type === 'finished') return true;
-  if (lot.type === 'byproduct') {
-    const name = (lot.item_name || '').toLowerCase();
-    return !(name.includes('bran') || name.includes('husk'));
-  }
-  return false; // packaging / unknown
-}
+// isMillableLot (batchLifecycle) mirrors the frontend NON_MILLABLE_CATEGORIES
+// (src/utils/lotCategory.js): any rice form is millable — raw paddy, finished
+// rice, and re-blendable byproduct fractions (broken grades / powder / sweeping
+// / sortex) — but NOT non-rice residue (bran, husk) or packaging. It lives
+// beside commitLotToBatch, which enforces it on every path.
 
 /** Resolve batch param to numeric ID (supports both "9" and "M-226") */
 async function resolveBatchId(idParam) {
@@ -61,6 +63,16 @@ async function syncServiceKattaCount(trx, batchId) {
   }
 }
 
+// The raw input (trucks) is what a yield was measured against and what the
+// rice purchase was booked at: locked once the batch is yielded, and still
+// locked after a reversed yield (P3-03), which keeps its booked purchase.
+const RAW_INPUT_LOCKED_MESSAGE = 'This batch has been milled & yielded (or its rice purchase is already booked to the supplier) — its raw trucks are locked. Record the extra rice as a new batch.';
+async function rawInputLocked(q, batch) {
+  if (batch.status === 'Completed') return true;
+  if (await batchHasOutputLots(q, batch.id)) return true;
+  return ricePurchaseBooked(q, batch);
+}
+
 // M-001, M-002, … — MAX+1 over existing numbers, not "the newest row + 1":
 // ordering by created_at hands out a used number when two batches share a
 // timestamp or the newest row is deleted.
@@ -70,15 +82,22 @@ async function generateBatchNo(trx) {
 
 // Whitelist + coerce the per-vehicle quality payload so we don't store
 // arbitrary keys in the JSONB column. Returns null when nothing usable.
+// The per-truck grade split (B1/B2/B3/C.S/short grain/Choba/N.B/O.V) is
+// stored un-suffixed (b1, csr, short_grain …) — the key the vehicle drawers
+// send and every reader looks up. It used to be missing here, so typed grade
+// percentages were silently dropped (P3-16 / MIL-14).
+const VEHICLE_GRADE_KEYS = ['b1', 'b2', 'b3', 'csr', 'short_grain', 'cobba', 'nb', 'ov'];
 const VEHICLE_QUALITY_KEYS = [
   'moisture', 'broken', 'foreign_matter', 'chalky', 'discoloration',
   'purity', 'grain_size', 'price_per_mt', 'price_per_kg', 'notes',
+  ...VEHICLE_GRADE_KEYS,
 ];
 function sanitizeVehicleQuality(raw) {
   if (!raw || typeof raw !== 'object') return null;
   const out = {};
   for (const k of VEHICLE_QUALITY_KEYS) {
-    const v = raw[k];
+    // A grade may also arrive in the sample-table spelling (b1_pct …).
+    const v = raw[k] ?? (VEHICLE_GRADE_KEYS.includes(k) ? raw[`${k}_pct`] : undefined);
     if (v == null || v === '') continue;
     if (k === 'notes') {
       out[k] = String(v).slice(0, 500);
@@ -356,7 +375,7 @@ const millingController = {
       }
 
       const batchId = batch.id; // resolved numeric ID
-      const [qualitySamples, costs, vehicles, packLogs] = await Promise.all([
+      const [qualitySamples, costs, vehicles, packLogs, transport] = await Promise.all([
         db('milling_quality_samples').where({ batch_id: batchId }).orderBy('created_at', 'asc'),
         db('milling_costs').where({ batch_id: batchId }).orderBy('created_at', 'asc'),
         db('milling_vehicle_arrivals').where({ batch_id: batchId }).orderBy('created_at', 'asc'),
@@ -368,6 +387,12 @@ const millingController = {
           .select('pl.bag_item_id', 'bg.name as bag_name', 'pl.bags_count', 'pl.total_cost',
             'pl.master_bag_item_id', 'mb.name as master_name', 'pl.master_bags_count', 'pl.master_cost',
             'pl.poly_item_id', 'po.name as poly_name', 'pl.poly_count', 'pl.poly_cost'),
+        // P3-08: the transport line's transporter + payer, so the costs drawer
+        // opens pre-filled (a re-save used to send an empty hauler).
+        db('transport_costs as tc')
+          .leftJoin('haulers as h', 'h.id', 'tc.hauler_id')
+          .where('tc.batch_id', batchId).whereNull('tc.lot_id')
+          .first('tc.hauler_id', 'h.name as hauler_name', 'tc.paid_by', 'tc.status', 'tc.payable_id'),
       ]);
 
       // Itemise the packaging cost PER ITEM — each bag / master size / polythene
@@ -434,6 +459,7 @@ const millingController = {
           costs,
           vehicles,
           packingBreakdown,
+          transport: transport || null,
           yieldStatus: { awaitingArrivalRate },
         }, { extraCostKeys: BATCH_EXTRA_COST_KEYS }),
       });
@@ -521,9 +547,12 @@ const millingController = {
       let resolvedMillId = mill_id ? parseInt(mill_id) : null;
       if (!resolvedMillId) {
         let fallback = null;
+        // mills.status: 'Active' / 'Maintenance' / 'Inactive' — there is no
+        // is_active column (MIL-43: that query always failed and the catch fell
+        // through to the lowest-id mill of ANY status).
         try {
-          fallback = await db('mills').where({ is_active: true }).orderBy('id', 'asc').first('id');
-        } catch (_) { /* mills table or column may be unavailable in some envs */ }
+          fallback = await db('mills').where({ status: 'Active' }).orderBy('id', 'asc').first('id');
+        } catch (_) { /* mills table may be unavailable in some envs */ }
         if (!fallback) {
           try { fallback = await db('mills').orderBy('id', 'asc').first('id'); } catch (_) { /* ignore */ }
         }
@@ -739,6 +768,7 @@ const millingController = {
               batchId: batch.id,
               lotId: b.lot.id,
               qtyKg: b.qty,
+              userId: req.user.id,
               row: {
                 lot_type: b.lot_type,
                 unit_cost_pkr: b.unit_cost_pkr,
@@ -902,7 +932,9 @@ const millingController = {
           updated_at: trx.fn.now(),
         }).returning('*');
         // A rejected batch will never mill — give its source lots back.
-        await releaseBatchSources(trx, id);
+        await releaseBatchSources(trx, id, { userId: req.user.id });
+        // D-6: its rice leaves WIP for stock again; truck rice stays bought.
+        await syncBatchIntake(trx, id, { userId: req.user.id, reason: 'batch rejected' });
         return row;
       });
 
@@ -944,7 +976,11 @@ const millingController = {
         const updates = { status: TRANSITIONS[action].to, updated_at: trx.fn.now() };
         if (variance && varianceByAction[action].includes(variance)) updates.variance_status = variance;
         const [row] = await trx('milling_batches').where({ id }).update(updates).returning('*');
-        const released = action === 'cancel' ? await releaseBatchSources(trx, id) : [];
+        const released = action === 'cancel' ? await releaseBatchSources(trx, id, { userId: req.user?.id }) : [];
+        // D-6 / MIL-17: a cancelled batch's rice goes back from 1260 Milling
+        // WIP to stock; truck rice remains a valued raw lot and stays bought
+        // (booked now if it was received before purchases were booked at receipt).
+        if (action === 'cancel') await syncBatchIntake(trx, id, { userId: req.user.id, reason: 'batch cancelled' });
         return { batch: row, releasedLotIds: released };
       });
       return res.json({ success: true, data: result });
@@ -1106,7 +1142,11 @@ const millingController = {
           }
         }
 
-        return { sample, variance };
+        // The stored sample-vs-arrival variance the QC panel, the Quality
+        // Comparison list and the dashboard KPI read (P3-16).
+        const variancePct = await refreshBatchVariance(trx, id);
+
+        return { sample, variance, variancePct };
       });
 
       return res.json({
@@ -1114,6 +1154,7 @@ const millingController = {
         data: {
           qualitySample: result.sample,
           variance: result.variance,
+          variancePct: result.variancePct,
         },
       });
     } catch (err) {
@@ -1194,36 +1235,44 @@ const millingController = {
       const wastage = parseFloat(wastage_kg) || 0;
       const totalOutput = finished + broken + bran + husk + sortex + powder + sweeping + choba + ov + stone + wastage;
 
-      // Raw input for the yield = the batch's maintained raw_qty_mt (Σ current
+      // Raw input for the yield = the batch's maintained raw_qty_kg (Σ current
       // vehicle weights / blend qty). Do NOT sum the lot's purchase_in
       // transactions — that double-counts receipts from trucks that were later
-      // deleted (their reversal is a separate adjustment_minus), inflating raw and
-      // skewing yield% and the over-yield check (e.g. 30+30 reversed trucks made
-      // raw look like 114 MT instead of 54).
+      // deleted (their reversal is a separate adjustment_minus).
       const actualRawQty = parseFloat(batch.raw_qty_kg) || 0;
+      // The MILLING basis (P3-03 / MIL-16): a partial mill consumes only the
+      // declared milled_qty_kg (see consumeForMilling below), so the over-yield
+      // cap and the stored yield % are measured against that, not against
+      // everything received — otherwise up to 102 % of the RECEIVED rice could
+      // come out of a mill that consumed far less.
+      const partial = batch.milled_qty_kg != null;
+      const millBasis = partial ? (parseFloat(batch.milled_qty_kg) || 0) : actualRawQty;
 
-      const yieldPct = actualRawQty > 0
-        ? ((finished / actualRawQty) * 100).toFixed(2)
+      const yieldPct = millBasis > 0
+        ? ((finished / millBasis) * 100).toFixed(2)
         : 0;
 
       // Yield tolerance check — warn if output differs from input by more than 0.5%
-      const outputDiffPct = actualRawQty > 0
-        ? Math.abs((totalOutput - actualRawQty) / actualRawQty * 100)
+      const outputDiffPct = millBasis > 0
+        ? Math.abs((totalOutput - millBasis) / millBasis * 100)
         : 0;
       const yieldWarning = outputDiffPct > 0.5
-        ? `Output differs from input by ${outputDiffPct.toFixed(1)}% (${totalOutput.toFixed(2)} MT output vs ${actualRawQty.toFixed(2)} MT input)`
+        ? `Output differs from input by ${outputDiffPct.toFixed(1)}% (${totalOutput.toFixed(2)} kg output vs ${millBasis.toFixed(2)} kg ${partial ? 'milled' : 'input'})`
         : null;
 
-      // Hard stop: total milling output can't exceed the raw input — you can't
-      // get more rice out than went in. Compare against the batch's maintained
-      // raw_qty_mt (kept = Σ current vehicle weights / blend qty), with a small
-      // tolerance for scale noise. Previously this was only a soft warning, so
-      // an over-100% yield (e.g. 42 MT out of 40 milled) could be saved.
-      const rawCap = parseFloat(batch.raw_qty_kg) || actualRawQty;
-      if (rawCap > 0 && totalOutput > rawCap * 1.02) {
+      // Hard stop: total milling output can't exceed what was milled — with a
+      // small tolerance for scale noise. A partial mill declared at 0 kg consumes
+      // nothing, so it can produce nothing either.
+      if (partial && millBasis <= 0 && totalOutput > 0) {
         return res.status(400).json({
           success: false,
-          message: `Total output ${totalOutput.toFixed(2)} MT exceeds the raw input ${rawCap.toFixed(2)} MT. Output can't be more than what was milled — check the finished / broken / by-product quantities (and that all raw trucks are recorded).`,
+          message: `Batch ${batch.batch_no} is set to mill 0 kg of its raw rice. Set the milling quantity before recording output.`,
+        });
+      }
+      if (millBasis > 0 && totalOutput > millBasis * 1.02) {
+        return res.status(400).json({
+          success: false,
+          message: `Total output ${totalOutput.toFixed(2)} kg exceeds the ${partial ? 'milled quantity' : 'raw input'} ${millBasis.toFixed(2)} kg. Output can't be more than what was milled — check the finished / broken / by-product quantities${partial ? ' (or the milling quantity)' : ' (and that all raw trucks are recorded)'}.`,
         });
       }
 
@@ -1394,13 +1443,12 @@ const millingController = {
           a = { finishedCostPerKg: 0, byCostPerKg: {}, rawFrac: 0, millFrac: 0, netPurchase: 0, byproductValue: 0, clamped: false };
           finAlloc = { qty: finished, costPerKg: 0 };
         } else {
-          // Lot-started batches carry no raw_rice milling_cost — derive it from the
-          // source lots so Net Purchase has its raw component.
-          await inventoryService.ensureRawCostFromSourceLots(trx, batch.id);
-          const rawCostTotal = parseFloat(
-            (await trx('milling_costs').where({ batch_id: batch.id })
-              .where('category', 'raw_rice').sum('amount as total').first())?.total
-          ) || 0;
+          // One allocation entry point (P3-07 / MIL-04) — the same inputs a
+          // re-yield / re-price loads, so the path taken can't change the cost.
+          // Lot-started batches carry no raw_rice milling_cost; the loader
+          // derives it from the source lots.
+          const loaded = await inventoryService.loadBatchAllocation(trx, batch.id, { batch });
+          const rawCostTotal = loaded.rawCostTotal;
           // Guard (#427): a company (non-service) batch must be fully priced before
           // yield — otherwise the finished/by-product lots inherit Rs 0 cost and any
           // later sale books 100% "profit". Checked per source lot, so a blend with
@@ -1408,15 +1456,7 @@ const millingController = {
           if (finished + broken + bran + husk + sortex + powder + sweeping + choba > 0) {
             await inventoryService.assertBatchRawPriced(trx, batch.id, rawCostTotal);
           }
-          const processingCosts = parseFloat(
-            (await trx('milling_costs').where({ batch_id: batch.id })
-              .whereNotIn('category', ['raw_rice', 'packaging']).sum('amount as total').first())?.total
-          ) || 0;
-          const packingCost = parseFloat(
-            (await trx('milling_costs').where({ batch_id: batch.id, category: 'packaging' }).sum('amount as total').first())?.total
-          ) || 0;
-
-          a = inventoryService.computeResidualAllocation(batch, rawCostTotal, processingCosts, packingCost);
+          a = loaded.a;
           finAlloc = { qty: finished, costPerKg: a.finishedCostPerKg };
           for (const [k, perKg] of Object.entries(a.byCostPerKg)) allocations[k] = { costPerKg: perKg };
 
@@ -1447,9 +1487,12 @@ const millingController = {
           });
         }
 
-        // 7. Mark raw lots as consumed
+        // 7. Mark raw lots as consumed — only the ones milling actually emptied.
+        // A partial mill leaves the unmilled remainder as raw stock that can be
+        // milled later (MIL-16): flagging it Consumed hid it from every picker.
         await trx('inventory_lots')
           .where({ batch_ref: `batch-${batch.id}`, type: 'raw' })
+          .where('qty', '<=', 0.001)
           .update({ milling_status: 'Consumed' });
 
         // 8. Record finished goods + byproducts with ALLOCATED costs
@@ -1524,19 +1567,15 @@ const millingController = {
             type: 'milling',
             linkedRef: kattaInfo.orderNo || batch.batch_no,
           });
-          // Raise a Purchase Requirement per short bag size (Phase 3), deduped by
-          // item + batch. Mill/Owner approves → Finance gets a masked request.
-          const prService = require('../purchaseRequirements/purchaseRequirements.service');
-          for (const s of kattaInfo.shortages) {
-            const item = await trx('mill_items').where('code', `KATTA-${s.size}`).first('id', 'name', 'unit', 'avg_cost_per_unit');
-            await prService.raise(trx, {
-              itemId: item?.id || null, itemName: item?.name || `Katta ${s.size}kg`, unit: item?.unit || 'pcs',
-              qtyNeeded: s.needed, availableQty: s.available, shortageQty: s.short,
-              estUnitCost: item?.avg_cost_per_unit != null ? parseFloat(item.avg_cost_per_unit) : null,
-              department: 'Packing', linkedRef: batch.batch_no, reason: `Packing shortage on batch ${batch.batch_no}`,
-              raisedBy: req.user?.id || null,
-            });
-          }
+        }
+        // Every packing shortage raises a Purchase Requirement (MIL-48) — not
+        // only an export batch's: a local batch short of katta needs buying too.
+        // One per short item, deduped by item + batch. Mill/Owner approves →
+        // Finance gets a masked request.
+        if (kattaInfo && kattaInfo.shortages && kattaInfo.shortages.length) {
+          await require('../purchaseRequirements/purchaseRequirements.service').raiseForShortages(trx, kattaInfo.shortages, {
+            linkedRef: batch.batch_no, reason: `Packing shortage on batch ${batch.batch_no}`, raisedBy: req.user?.id || null,
+          });
         }
 
         // Recognize the supplier payable for the raw rice purchase so the
@@ -1550,6 +1589,12 @@ const millingController = {
         // finished, opening-stock, purchased or transferred lots books nothing —
         // re-booking them owed the supplier twice. Blends never book (owned stock).
         const toBook = await rawPurchaseToBook(trx, batch);
+        // Truck rice bought at receipt (D-6): what the supplier is owed is the
+        // cost sheet's raw rice — move the receipt's payable to it (signed
+        // delta, same payable). Never a second payable.
+        if (toBook.truckTrueUp && toBook.truckTrueUp.target > 0) {
+          await syncTruckIntakePurchase(trx, batch.id, { userId: req.user?.id, target: toBook.truckTrueUp.target });
+        }
         {
           const rawRiceValue = toBook.amount;
           const existingAP = await trx('journal_entries')
@@ -1713,15 +1758,7 @@ const millingController = {
     try {
       const id = await resolveBatchId(req.params.id);
       if (!id) return res.status(404).json({ success: false, message: 'Batch not found.' });
-      let { category, amount, notes } = req.body;
-      // #14 — transport added as a milling cost can be owed to a transporter.
-      const { hauler_id, transport_paid_by, vehicle_no, doc_no } = req.body;
-      // Duplicate-post guard: the cost drawer's "Bagging / Packing" (packing) and
-      // the mill-store packing flow (packaging) are the same bag cost. Canonicalize
-      // to 'packaging' so the upsert-by-(batch, category) keeps a SINGLE row instead
-      // of posting the bag cost twice (once into Other Expenses, once into Packing).
-      if (category === 'packing') category = 'packaging';
-
+      const { category, amount } = req.body || {};
       if (!category || amount == null) {
         return res.status(400).json({
           success: false,
@@ -1735,177 +1772,8 @@ const millingController = {
       }
 
       const cost = await db.transaction(async (trx) => {
-        // Upsert by batch_id + category — never onto a row a business expense
-        // owns (P2-21): editing the cost sheet must not rewrite the expense.
-        const existing = await trx('milling_costs')
-          .where({ batch_id: id, category })
-          .whereNull('business_expense_id')
-          .first();
-        const oldAmt = existing ? (parseFloat(existing.amount) || 0) : 0;
-        const newAmt = parseFloat(amount);
-
-        // P2-08: the raw rice cost is locked once the yield is recorded (MIL-07 —
-        // the supplier bill and finished stock were booked at it); any other
-        // cost may still change after yield (the signed delta below books it)
-        // until an output lot has been sold or used.
-        if (Math.abs(newAmt - oldAmt) > 0.01) {
-          if (category === 'raw_rice') await assertBatchRawCostEditable(trx, batch);
-          else await assertBatchOutputsUnsold(trx, batch);
-        }
-
-        let row;
-        if (existing) {
-          [row] = await trx('milling_costs')
-            .where({ id: existing.id })
-            .update({ amount: newAmt, notes: notes || null, updated_at: trx.fn.now() })
-            .returning('*');
-        } else {
-          [row] = await trx('milling_costs')
-            .insert({ batch_id: id, category, amount: newAmt, notes: notes || null, created_by: req.user?.id || null })
-            .returning('*');
-        }
-
-        // If this batch already capitalized its costs into finished inventory at
-        // yield (a milling_completion journal was posted), keep the GL in step with
-        // the cost sheet by posting a SIGNED-DELTA journal for the change — same
-        // accounts as milling_completion (DR 1220 Finished / CR the input's or the processing cost's account), reversed
-        // for a reduction. Never reverse+repost. Pre-yield changes need no journal
-        // (recordYield posts the whole sum). Skipped silently if the chart isn't seeded.
-        const delta = newAmt - oldAmt;
-        if (Math.abs(delta) > 0.01) {
-          const posted = await trx('journal_entries')
-            .where({ ref_type: 'Milling Batch', ref_no: batch.batch_no, status: 'Posted' }).first();
-          if (posted) {
-            const absDelta = Math.round(Math.abs(delta) * 100) / 100;
-            // The counter-account is where the cost came from: for the raw-rice
-            // cost, the input lots' own accounts (a blend of finished lots is
-            // carried in 1220, by-products in 1240), split by source-lot value;
-            // freight owed to a transporter is accrued Dr 1210 / Cr 2010 just
-            // below, so it comes off 1210; any other cost typed onto the sheet
-            // is booked nowhere else — a cost incurred, not yet paid: Cr 2110
-            // Accrued Expenses (A3b).
-            const owedToHauler = category === 'transport'
-              && (transport_paid_by == null || transport_paid_by === '' || transport_paid_by === 'company')
-              && hauler_id != null && hauler_id !== '' && newAmt > 0;
-            const parts = category === 'raw_rice'
-              ? proportionalInputSplit(absDelta, await sourceLotValuesByAccount(trx, batch.id))
-              : [{ code: owedToHauler ? '1210' : '2110', amount: absDelta }];
-            const fin = await trx('chart_of_accounts').where({ code: '1220' }).first();
-            const accs = await trx('chart_of_accounts').whereIn('code', parts.map((p) => p.code));
-            const byCode = Object.fromEntries(accs.map((a) => [a.code, a]));
-            if (fin && parts.every((p) => byCode[p.code])) {
-              const up = delta > 0;
-              const label = `${batch.batch_no} ${category}`;
-              const lines = [
-                { account_id: fin.id, account: fin.name, debit: up ? absDelta : 0, credit: up ? 0 : absDelta, narration: `${up ? 'DR' : 'CR'} ${fin.code} ${fin.name} — cost adj ${label}` },
-                ...parts.map((p) => {
-                  const acc = byCode[p.code];
-                  return { account_id: acc.id, account: acc.name, debit: up ? 0 : p.amount, credit: up ? p.amount : 0, narration: `${up ? 'CR' : 'DR'} ${acc.code} ${acc.name} — cost adj ${label}` };
-                }),
-              ];
-              const journal = await accountingService.createJournal(trx, {
-                date: new Date().toISOString().slice(0, 10), entity: 'mill',
-                refType: 'Milling Batch', refNo: batch.batch_no,
-                description: `Cost adjustment Rs ${Math.round(absDelta).toLocaleString()} for ${label}${delta < 0 ? ' (reduced)' : ''}`,
-                currency: 'PKR', fxRate: 1, isAuto: true, userId: req.user?.id || null,
-                lines,
-              });
-              if (journal?.id) await accountingService.postJournal(trx, journal.id);
-            }
-          }
-        }
-
-        // #14 — a transport milling cost can be owed to a transporter. Record it
-        // in the transport_costs backbone, and when the COMPANY bears it, raise a
-        // real transporter payable so it is visible + payable in AP and appears on
-        // the transporter ledger. The freight is ALSO capitalised into the batch
-        // cost (via the milling_costs row → milling_completion Dr Finished/Cr Raw at
-        // yield). To avoid double-posting we accrue only Dr Raw / Cr Transporter
-        // Payable for the delta: pre-yield it stands and yield moves it to Finished;
-        // post-yield it combines with the delta journal above (Dr Finished/Cr Raw)
-        // to net Dr Finished / Cr Transporter Payable.
-        if (category === 'transport') {
-          const paidBy = ['company', 'supplier', 'customer', 'service_client', 'included_in_supplier_rate', 'deduct_from_supplier', 'other']
-            .includes(transport_paid_by) ? transport_paid_by : 'company';
-          const haulerIdNum = (hauler_id != null && hauler_id !== '') ? parseInt(hauler_id, 10) : null;
-          let payableId = null;
-
-          if (paidBy === 'company' && haulerIdNum && newAmt > 0) {
-            // Upsert the transporter payable keyed to this batch's transport.
-            const existingPay = await trx('payables')
-              .where({ source_table: 'batch_transport', source_id: id }).first();
-            const paidSoFar = existingPay ? (parseFloat(existingPay.paid_amount) || 0) : 0;
-            const payStatus = paidSoFar <= 0.01 ? 'Pending' : (paidSoFar < newAmt - 0.01 ? 'Partial' : 'Paid');
-            if (existingPay) {
-              await trx('payables').where({ id: existingPay.id }).update({
-                hauler_id: haulerIdNum, supplier_id: null, original_amount: newAmt,
-                outstanding: Math.max(0, newAmt - paidSoFar), status: payStatus,
-                linked_ref: batch.batch_no, updated_at: trx.fn.now(),
-              });
-              payableId = existingPay.id;
-            } else {
-              const payNo = await require('../../utils/docNumber').nextDocNo(trx, { table: 'payables', column: 'pay_no', prefix: 'PAY-', pad: 4 });
-              const [np] = await trx('payables').insert({
-                pay_no: payNo, entity: 'mill', payable_type: 'vendor', category: 'Transport',
-                hauler_id: haulerIdNum, supplier_id: null, linked_ref: batch.batch_no,
-                source_table: 'batch_transport', source_id: id,
-                original_amount: newAmt, paid_amount: 0, outstanding: newAmt, status: 'Pending',
-                currency: 'PKR', notes: `Transport (hauler) for batch ${batch.batch_no}`,
-              }).returning('*');
-              payableId = np.id;
-            }
-            // Accrue the DELTA: Dr Raw / Cr Transporter Payable (reversed if reduced).
-            if (Math.abs(delta) > 0.01) {
-              const raw = await trx('chart_of_accounts').where({ code: '1210' }).first();
-              const ap = await trx('chart_of_accounts').where({ code: '2010' }).first();
-              if (raw && ap) {
-                const absD = Math.abs(delta); const up = delta > 0;
-                const j = await accountingService.createJournal(trx, {
-                  date: new Date().toISOString().slice(0, 10), entity: 'mill',
-                  refType: 'Batch Transport', refNo: batch.batch_no,
-                  description: `Transport payable ${up ? '' : '(reduced) '}for batch ${batch.batch_no}`,
-                  currency: 'PKR', fxRate: 1, isAuto: true, userId: req.user?.id || null,
-                  partyType: 'hauler', partyId: haulerIdNum,
-                  lines: [
-                    { account_id: raw.id, account: raw.name, debit: up ? absD : 0, credit: up ? 0 : absD, narration: `${up ? 'DR' : 'CR'} ${raw.code} ${raw.name} — transport ${batch.batch_no}` },
-                    { account_id: ap.id, account: ap.name, debit: up ? 0 : absD, credit: up ? absD : 0, narration: `${up ? 'CR' : 'DR'} ${ap.code} ${ap.name} — transport ${batch.batch_no}` },
-                  ],
-                });
-                if (j?.id) await accountingService.postJournal(trx, j.id);
-              }
-            }
-          }
-
-          // Upsert the transport_costs record (drives AP → Transporters + ledger).
-          const existingTc = await trx('transport_costs').where({ batch_id: id }).whereNull('lot_id').first();
-          const tcStatus = payableId ? 'unpaid' : 'approved';
-          if (existingTc) {
-            await trx('transport_costs').where({ id: existingTc.id }).update({
-              hauler_id: haulerIdNum, amount: newAmt, paid_by: paidBy,
-              vehicle_no: vehicle_no || existingTc.vehicle_no || null, doc_no: doc_no || existingTc.doc_no || null,
-              payable_id: payableId || existingTc.payable_id || null, updated_at: trx.fn.now(),
-            });
-          } else {
-            await trx('transport_costs').insert({
-              batch_id: id, hauler_id: haulerIdNum, amount: newAmt, paid_by: paidBy,
-              status: tcStatus, transport_type: 'milling', vehicle_no: vehicle_no || null,
-              doc_no: doc_no || null, expense_date: new Date().toISOString().slice(0, 10),
-              entity: 'mill', payable_id: payableId, created_by: req.user?.id || null,
-            });
-          }
-        }
-
-        // Re-run the residual cost engine so this cost actually flows into the
-        // finished cost sheet (total_cost_per_kg_finished), the output lots'
-        // landed cost, and any non-locked order/sale COGS — mirroring the
-        // /prices route. Without this, a Costs-tab addition wrote the milling_costs
-        // row but the stored per-kg cost stayed stale, so the View Costing Sheet
-        // never reflected it. No-op pre-yield (reallocateBatchCosts skips no-yield).
-        const inventoryService = require('../inventory/inventory.service');
-        const realloc = await inventoryService.recomputeBatchOutputsAfterPriceChange(trx, id, { userId: req.user?.id });
-        if (realloc && realloc.finishedCostPerKg != null) {
-          await trx('milling_batches').where({ id }).update({ finished_price_per_kg: realloc.finishedCostPerKg });
-        }
+        const row = await applyCostLine(trx, batch, req.body, req.user?.id);
+        await reallocateAfterCostChange(trx, id, req.user?.id);
         return row;
       });
 
@@ -1916,6 +1784,41 @@ const millingController = {
     } catch (err) {
       if (err.status && err.status < 500) return res.status(err.status).json({ success: false, message: err.message });
       console.error('Milling addCost error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
+  // Save the whole Costs drawer in ONE transaction (P3-07 / MIL-35): every line
+  // is applied, then the allocation re-runs once. Any refused line rolls the
+  // whole save back — the sheet is never left half-saved.
+  async addCostsBulk(req, res) {
+    try {
+      const id = await resolveBatchId(req.params.id);
+      if (!id) return res.status(404).json({ success: false, message: 'Batch not found.' });
+      const lines = Array.isArray(req.body?.costs) ? req.body.costs : [];
+      if (!lines.length) return res.status(400).json({ success: false, message: 'costs must list at least one category.' });
+      const seen = new Set();
+      for (const l of lines) {
+        const c = canonicalCostCategory(l && l.category);
+        if (!c) return res.status(400).json({ success: false, message: unknownCategoryError(l && l.category).message });
+        if (seen.has(c)) return res.status(400).json({ success: false, message: `Category ${c} appears more than once.` });
+        seen.add(c);
+      }
+
+      const batch = await db('milling_batches').where({ id }).first();
+      if (!batch) return res.status(404).json({ success: false, message: 'Milling batch not found.' });
+
+      const costs = await db.transaction(async (trx) => {
+        const rows = [];
+        for (const l of lines) rows.push(await applyCostLine(trx, batch, l, req.user?.id));
+        await reallocateAfterCostChange(trx, id, req.user?.id);
+        return rows;
+      });
+      const total = costs.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
+      return res.json({ success: true, data: { costs, total } });
+    } catch (err) {
+      if (err.status && err.status < 500) return res.status(err.status).json({ success: false, message: err.message });
+      console.error('Milling addCostsBulk error:', err);
       return res.status(500).json({ success: false, message: 'Internal server error.' });
     }
   },
@@ -1948,12 +1851,22 @@ const millingController = {
       // raw_qty_mt above what was actually milled (so recorded output ends up
       // exceeding the milled raw, e.g. 48 MT out of 40 milled), and the extra
       // rice just sits as unmilled raw stock. New raw rice goes in a new batch.
-      const alreadyYielded = await db('inventory_lots')
-        .where({ batch_ref: `batch-${batchId}` }).whereIn('type', ['finished', 'byproduct']).first('id');
-      if (batch.status === 'Completed' || alreadyYielded) {
+      if (await rawInputLocked(db, batch)) {
         return res.status(409).json({
           success: false,
-          message: 'This batch is already milled & yielded — its raw trucks are locked. Record the extra rice as a new batch (or reverse the yield first to change the raw input).',
+          message: RAW_INPUT_LOCKED_MESSAGE,
+        });
+      }
+      // A batch milled from source lots takes its rice from those lots: yield
+      // consumes the committed lot qty only. A truck here used to replace
+      // raw_qty_kg with the truck total and create a separate batch raw lot
+      // that yield never consumes — stranded raw stock and a wrong yield %
+      // (MIL-15). The truck belongs on the purchase lot, or on a new batch.
+      const sourceLot = await db('batch_source_lots').where({ batch_id: batchId }).first('id');
+      if (sourceLot) {
+        return res.status(409).json({
+          success: false,
+          message: 'This batch is milled from purchase lots, so it takes no trucks. Add the truck to its purchase lot (Lot ▸ Vehicles), or record the rice as a new batch.',
         });
       }
 
@@ -2069,12 +1982,10 @@ const millingController = {
       const batch = await db('milling_batches').where({ id: batchId }).first();
       if (!batch) return res.status(404).json({ success: false, message: 'Milling batch not found.' });
 
-      const alreadyYielded = await db('inventory_lots')
-        .where({ batch_ref: `batch-${batchId}` }).whereIn('type', ['finished', 'byproduct']).first('id');
-      if (batch.status === 'Completed' || alreadyYielded) {
+      if (await rawInputLocked(db, batch)) {
         return res.status(409).json({
           success: false,
-          message: 'This batch is already milled & yielded — its raw trucks are locked. Reverse the yield first to change the raw input.',
+          message: RAW_INPUT_LOCKED_MESSAGE,
         });
       }
 
@@ -2123,8 +2034,9 @@ const millingController = {
           total_bags: totalBags,
           arrival_date: arrival_date || existing.arrival_date,
           notes: notes !== undefined ? (notes || null) : existing.notes,
+          // (milling_vehicle_arrivals has no updated_at column — writing one
+          // made every Edit Vehicle fail with a 500.)
           quality_json: cleanQuality,
-          updated_at: trx.fn.now(),
         });
 
         // Adjust inventory by the weight delta only.
@@ -2342,10 +2254,10 @@ const millingController = {
       // has already been consumed into the output lots.
       const batch = await db('milling_batches').where({ id: batchId }).first();
       if (!batch) return res.status(404).json({ success: false, message: 'Milling batch not found.' });
-      if (batch.status === 'Completed' || await batchHasOutputLots(db, batchId)) {
+      if (await rawInputLocked(db, batch)) {
         return res.status(409).json({
           success: false,
-          message: 'This batch is already milled & yielded — its raw trucks are locked. Reverse the yield first to change the raw input.',
+          message: RAW_INPUT_LOCKED_MESSAGE,
         });
       }
 
@@ -2428,6 +2340,13 @@ const millingController = {
       if (val != null && (Number.isNaN(val) || val < 0)) {
         return res.status(400).json({ success: false, message: 'Milling quantity must be zero or more.' });
       }
+      // The milled qty is what the yield consumed and was measured against
+      // (MIL-16): fixed once the yield is recorded.
+      const unchanged = (val == null && batch.milled_qty_kg == null)
+        || (val != null && batch.milled_qty_kg != null && Math.abs(val - parseFloat(batch.milled_qty_kg)) < 1e-6);
+      if (!unchanged && await batchYielded(db, batch)) {
+        return res.status(409).json({ success: false, message: `Batch ${batch.batch_no} already has its yield recorded — the milling quantity it consumed can no longer change.` });
+      }
       const received = parseFloat(batch.raw_qty_kg) || 0;
       if (val != null && received > 0 && val - received > 0.001) {
         return res.status(400).json({ success: false, message: `Milling quantity cannot exceed the received quantity (${Math.round(received).toLocaleString()} kg).` });
@@ -2469,6 +2388,32 @@ const millingController = {
     }
   },
 
+  // Reverse a recorded yield (P3-03 / MIL-20). Register choice — the
+  // conservative one: a CONTROLLED un-yield, Owner-approved with a reason, and
+  // only while no output has been sold, reserved, moved, re-milled or (service)
+  // dispatched / invoiced; otherwise refused with the step to take first.
+  // inventoryService.reverseBatchYield does the work in one transaction.
+  async reverseYield(req, res) {
+    try {
+      const batchId = await resolveBatchId(req.params.id);
+      if (!batchId) return res.status(404).json({ success: false, message: 'Milling batch not found.' });
+      const reason = String(req.body?.reason || '').trim();
+      if (reason.length < 3) return res.status(400).json({ success: false, message: 'A reason is required to reverse a yield.' });
+      const result = await db.transaction((trx) => inventoryService.reverseBatchYield(trx, batchId, {
+        userId: req.user?.id || null, reason, ownerId: req.ownerAuth?.ownerId || null,
+      }));
+      return res.json({
+        success: true,
+        data: { ...result, batch: await db('milling_batches').where({ id: batchId }).first() },
+        message: `Yield of ${result.reversed} reversed — the batch is back In Progress.`,
+      });
+    } catch (err) {
+      const status = err.statusCode || err.status || 500;
+      if (status >= 500) console.error('Milling reverseYield error:', err);
+      return res.status(status).json({ success: false, message: status >= 500 ? 'Internal server error.' : err.message });
+    }
+  },
+
   // Delete an entire batch (admin/manager only). Everything the batch moved is
   // put back in the same transaction — the raw lot it received, the holds on its
   // source lots, the packaging and packing bags it drew from (or freed into)
@@ -2490,6 +2435,126 @@ const millingController = {
   },
 };
 
+// One cost-sheet line, inside the caller's transaction: upsert the batch's
+// milling_costs row for a CANONICAL category (P3-07 / MIL-11), post the signed
+// delta once the completion is on the books, and keep the transporter payable
+// in step. Shared by the single-line and bulk cost endpoints; the caller re-runs
+// the allocation once afterwards. Throws an Error with status on a refusal.
+async function applyCostLine(trx, batch, line, userId) {
+  const id = batch.id;
+  const category = canonicalCostCategory(line.category);
+  if (!category) throw unknownCategoryError(line.category);
+  const { amount, notes } = line;
+  if (amount == null || amount === '' || !Number.isFinite(parseFloat(amount)) || parseFloat(amount) < 0) {
+    const e = new Error(`Amount for ${category} must be zero or more.`);
+    e.status = 400;
+    throw e;
+  }
+  // Upsert the cost sheet's OWN row for batch_id + category — never a row a
+  // business expense owns (P2-21), nor one a packing run, a store issue or the
+  // katta reconcile wrote (MIL-23: this used to SET the first packaging row,
+  // overwriting a run's cost).
+  const existing = await trx('milling_costs')
+    .where({ batch_id: id, category })
+    .whereNull('business_expense_id')
+    .where((q) => q.whereNull('source').orWhere('source', 'manual'))
+    .first();
+  const oldAmt = existing ? (parseFloat(existing.amount) || 0) : 0;
+  const newAmt = parseFloat(amount);
+
+  // P2-08: the raw rice cost is locked once the yield is recorded (MIL-07 —
+  // the supplier bill and finished stock were booked at it); any other
+  // cost may still change after yield (the signed delta below books it)
+  // until an output lot has been sold or used.
+  if (Math.abs(newAmt - oldAmt) > 0.01) {
+    if (category === 'raw_rice') await assertBatchRawCostEditable(trx, batch);
+    else await assertBatchOutputsUnsold(trx, batch);
+  }
+
+  let row;
+  if (existing) {
+    [row] = await trx('milling_costs')
+      .where({ id: existing.id })
+      .update({ amount: newAmt, notes: notes || null, updated_at: trx.fn.now() })
+      .returning('*');
+  } else {
+    [row] = await trx('milling_costs')
+      .insert({ batch_id: id, category, amount: newAmt, notes: notes || null, created_by: userId || null })
+      .returning('*');
+  }
+
+  // #14 / P3-08 — a transport line can be owed to a transporter. Bring the
+  // transporter payable, its Dr 1210 / Cr 2010 accrual (signed delta per
+  // hauler) and the transport_costs record in line with the line FIRST — a
+  // lower freight, another payer or another hauler voids / moves what was
+  // owed — and learn how much of the change went through 1210.
+  const delta = newAmt - oldAmt;
+  const transport = category === 'transport'
+    ? await syncBatchTransport(trx, { batch, amount: newAmt, body: line, userId: userId || null })
+    : null;
+
+  // If this batch already capitalized its costs into finished inventory at
+  // yield (a live milling_completion journal), keep the GL in step with the
+  // cost sheet by posting a SIGNED-DELTA journal for the change — same
+  // accounts as milling_completion (DR 1220 Finished / CR the input's or the
+  // processing cost's account), reversed for a reduction. Never
+  // reverse+repost. Pre-yield changes need no journal (recordYield posts the
+  // whole sum). Skipped silently if the chart isn't seeded.
+  if ((Math.abs(delta) > 0.01 || (transport && Math.abs(transport.staged) > 0.01))
+      && await hasPostedCompletion(trx, batch.batch_no)) {
+    const absDelta = Math.round(Math.abs(delta) * 100) / 100;
+    const up = delta > 0;
+    // Signed parts, amount > 0 = debit. 1220 takes the change; the
+    // counter-account is where the cost came from: for the raw-rice cost, the
+    // input lots' own accounts (a blend of finished lots is carried in 1220,
+    // by-products in 1240), split by source-lot value; for transport, 1210 for
+    // what the transporter accrual just moved there (syncBatchTransport) and
+    // 2110 for the rest; any other cost typed onto the sheet is booked nowhere
+    // else — a cost incurred, not yet paid: Cr 2110 Accrued Expenses (A3b).
+    const parts = transport
+      ? transportAdjustmentParts(delta, transport.staged)
+      : [
+        { code: '1220', amount: up ? absDelta : -absDelta },
+        ...(category === 'raw_rice'
+          ? proportionalInputSplit(absDelta, await sourceLotValuesByAccount(trx, batch.id))
+          : [{ code: '2110', amount: absDelta }]
+        ).map((p) => ({ code: p.code, amount: up ? -p.amount : p.amount })),
+      ];
+    const accs = await trx('chart_of_accounts').whereIn('code', parts.map((p) => p.code));
+    const byCode = Object.fromEntries(accs.map((a) => [a.code, a]));
+    if (parts.length && parts.every((p) => byCode[p.code])) {
+      const label = `${batch.batch_no} ${category}`;
+      const lines = parts.map((p) => {
+        const acc = byCode[p.code];
+        const dr = p.amount > 0;
+        const amt = Math.round(Math.abs(p.amount) * 100) / 100;
+        return { account_id: acc.id, account: acc.name, debit: dr ? amt : 0, credit: dr ? 0 : amt, narration: `${dr ? 'DR' : 'CR'} ${acc.code} ${acc.name} — cost adj ${label}` };
+      });
+      const journal = await accountingService.createJournal(trx, {
+        date: new Date().toISOString().slice(0, 10), entity: 'mill',
+        refType: 'Milling Batch', refNo: batch.batch_no,
+        description: `Cost adjustment Rs ${Math.round(absDelta).toLocaleString()} for ${label}${delta < 0 ? ' (reduced)' : ''}`,
+        currency: 'PKR', fxRate: 1, isAuto: true, userId: userId || null,
+        lines,
+      });
+      if (journal?.id) await accountingService.postJournal(trx, journal.id);
+    }
+  }
+  return row;
+}
+
+// Re-run the residual cost engine after a cost-sheet change so it flows into
+// the finished cost sheet (total_cost_per_kg_finished), the output lots' landed
+// cost and any non-locked order/sale COGS — mirroring the /prices route.
+// No-op pre-yield (reallocateBatchCosts skips a batch with no yield).
+async function reallocateAfterCostChange(trx, id, userId) {
+  const realloc = await inventoryService.recomputeBatchOutputsAfterPriceChange(trx, id, { userId });
+  if (realloc && realloc.finishedCostPerKg != null) {
+    await trx('milling_batches').where({ id }).update({ finished_price_per_kg: realloc.finishedCostPerKg });
+  }
+  return realloc;
+}
+
 // The body of deleteBatch, inside the caller's transaction — shared with the
 // Super-Admin Danger Zone (P2-23) so a batch is only ever removed through the
 // same refusals and signed-delta reversals. Throws an Error carrying
@@ -2506,10 +2571,19 @@ async function deleteBatchTx(trx, batchId, userId) {
     const label = batch.batch_no || `batch ${batchId}`;
 
     if (batch.status === 'Completed') {
-      throw refuse(400, 'Completed batches cannot be deleted. Reverse the yield first.');
+      throw refuse(400, 'Completed batches cannot be deleted. Reverse the yield first (Reverse Yield on the batch, Owner-approved).');
     }
     if (await batchHasOutputLots(trx, batchId)) {
-      throw refuse(409, `${label} already has yield output lots. Reverse the yield first.`);
+      throw refuse(409, `${label} already has yield output lots. Reverse the yield first (Reverse Yield on the batch, Owner-approved).`);
+    }
+    // A reversed yield leaves its issue / receipt movements and journals on
+    // the books (D-23: never deleted) — such a batch is cancelled, not deleted.
+    const milled = await trx('lot_transactions')
+      .where({ reference_module: 'milling_batch', reference_id: batchId })
+      .whereIn('transaction_type', ['milling_issue', 'milling_issue_reversal', 'milling_receipt_reversal', 'byproduct_receipt_reversal'])
+      .first('id');
+    if (milled) {
+      throw refuse(409, `${label} was milled and its yield reversed — that history stays on the books, so the batch can't be deleted. Cancel it instead.`);
     }
 
     // Service batches: invoices and dispatches reference the batch with a
@@ -2540,6 +2614,10 @@ async function deleteBatchTx(trx, batchId, userId) {
     const lot = await trx('inventory_lots')
       .where({ batch_ref: `batch-${batchId}`, type: 'raw', entity: 'mill' })
       .first();
+    // D-6: everything the batch moved into 1260 Milling WIP goes back to its
+    // stock account first (signed delta), before its lots / links go.
+    await syncBatchWip(trx, batchId, { userId, release: true, reason: 'batch deleted' });
+
     if (lot) {
       // Canonical ledger equivalents of production_issue / adjustment_minus.
       const consumed = await trx('lot_transactions')
@@ -2549,6 +2627,9 @@ async function deleteBatchTx(trx, batchId, userId) {
       if (parseInt(consumed.n, 10) > 0) {
         throw refuse(400, 'Raw rice from this batch has already been consumed/adjusted; cannot delete.');
       }
+      // The truck rice was bought at receipt (D-6): void the unpaid payable and
+      // take the purchase off the books by its net. Paid → refused (409).
+      if (lot.ownership !== 'client') await voidTruckIntakePurchase(trx, lot, { userId, label });
       await trx('lot_transactions').where('lot_id', lot.id).del();
       await trx('inventory_lots').where('id', lot.id).del();
     }
@@ -2557,7 +2638,7 @@ async function deleteBatchTx(trx, batchId, userId) {
     // and hard-reserved when the batch was created but (for a non-Completed
     // batch) never consumed — otherwise they'd stay reserved and vanish
     // from the New-Batch picker forever.
-    await releaseBatchSources(trx, batchId);
+    await releaseBatchSources(trx, batchId, { userId });
     await trx('batch_source_lots').where({ batch_id: batchId }).del();
 
     await trx('milling_vehicle_arrivals').where({ batch_id: batchId }).del();
@@ -2565,20 +2646,36 @@ async function deleteBatchTx(trx, batchId, userId) {
 
     // Reverse any mill-store consumption logged against this batch and drop
     // the logs — mill_consumption_logs.batch_id is an onDelete('RESTRICT') FK,
-    // so leaving the rows makes the batch undeletable (opaque 500). Return the
-    // consumed quantity to mill_stock and remove the consumption movements.
+    // so leaving the rows makes the batch undeletable (opaque 500). The issued
+    // stock comes back at the cost it left at, as a new 'return' movement (the
+    // issue stays in the ledger), and its 6000 / 1250 journal is reversed by
+    // its net (INV-39: the stock used to come back while 1250 kept the credit).
     const consumptionLogs = await trx('mill_consumption_logs').where({ batch_id: batchId });
     for (const cl of consumptionLogs) {
-      const stockQ = trx('mill_stock').where('item_id', cl.item_id);
-      if (cl.warehouse_id == null) stockQ.whereNull('warehouse_id'); else stockQ.where('warehouse_id', cl.warehouse_id);
-      const stockRow = await stockQ.first();
-      if (stockRow) {
-        await trx('mill_stock').where({ id: stockRow.id })
-          .update({ quantity_available: trx.raw('quantity_available + ?', [cl.quantity_used]), updated_at: trx.fn.now() });
-      }
+      const qty = parseFloat(cl.quantity_used) || 0;
+      if (!(qty > 0)) continue;
+      await moveStoreStock(trx, {
+        itemId: cl.item_id, warehouseId: cl.warehouse_id ?? null, qty,
+        valuation: 'cost', unitCost: parseFloat(cl.cost_per_unit) || 0,
+        movement: {
+          movement_type: 'return', reference_type: 'batch', reference_id: batchId,
+          reason: `Batch ${label} deleted — store issue returned`, performed_by: userId || null,
+        },
+      });
     }
-    await trx('mill_stock_movements').where({ reference_type: 'batch', reference_id: batchId }).del();
+    await reverseNetJournal(trx, {
+      refType: 'Mill Store Consumption', refNo: batch.batch_no || `BATCH-${batchId}`,
+      debitCode: '6000', creditCode: '1250', label,
+      description: `Store consumption reversed — batch ${label} deleted`, userId: userId,
+    });
     await trx('mill_consumption_logs').where({ batch_id: batchId }).del();
+
+    // Katta the yield reconcile moved for this batch (a re-reconcile with an
+    // empty plan takes back exactly what it moved; its cost is reversed with
+    // the packing journal below).
+    if (await trx('mill_stock_movements').where({ reference_type: 'batch_katta', reference_id: batchId }).first('id')) {
+      await applyKattaPlan(trx, { referenceType: 'batch_katta', referenceId: batchId, plan: [], userId });
+    }
 
     // Packaging lines (received / consumed bags). Their rows cascade with the
     // batch but the store stock they moved did not: saving an empty line set
@@ -2593,23 +2690,21 @@ async function deleteBatchTx(trx, batchId, userId) {
       const drawn = await trx('mill_stock_movements')
         .where({ reference_type: 'packing' })
         .whereIn('reference_id', packLogs.map((l) => l.id));
-      const back = [];
+      // Each draw comes back at the cost it left at (the store's value with it).
       for (const m of drawn) {
         const q = -(parseFloat(m.quantity) || 0);
         if (!q) continue;
-        await batchPackagingService.moveStock(trx, { itemId: m.item_id, warehouseId: m.warehouse_id ?? null, delta: q });
-        back.push({
-          item_id: m.item_id, warehouse_id: m.warehouse_id ?? null,
-          movement_type: q > 0 ? 'return' : 'consumption',
-          quantity: q,
-          cost_per_unit: m.cost_per_unit,
-          total_cost: Math.round(Math.abs(q) * (parseFloat(m.cost_per_unit) || 0) * 100) / 100,
-          reference_type: 'packing', reference_id: m.reference_id,
-          reason: `Batch ${label} deleted — packing run #${m.reference_id} reversed`,
-          performed_by: userId || null,
+        await moveStoreStock(trx, {
+          itemId: m.item_id, warehouseId: m.warehouse_id ?? null, qty: q,
+          valuation: 'cost', unitCost: parseFloat(m.cost_per_unit) || 0,
+          movement: {
+            movement_type: q > 0 ? 'return' : 'consumption',
+            reference_type: 'packing', reference_id: m.reference_id,
+            reason: `Batch ${label} deleted — packing run #${m.reference_id} reversed`,
+            performed_by: userId || null,
+          },
         });
       }
-      if (back.length) await trx('mill_stock_movements').insert(back);
       await reverseNetJournal(trx, {
         refType: 'Mill Packing', refNo: batch.batch_no || `BATCH-${batchId}`,
         debitCode: '6000', creditCode: '1250', label,
@@ -2700,3 +2795,4 @@ async function reverseNetJournal(trx, {
 
 module.exports = millingController;
 module.exports.deleteBatchTx = deleteBatchTx;
+module.exports.sanitizeVehicleQuality = sanitizeVehicleQuality;

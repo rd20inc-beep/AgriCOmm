@@ -28,6 +28,7 @@ import { lotInventoryApi } from '../../../api/services';
 import useCanSeeCost from '../../../hooks/useCanSeeCost';
 import { todayLocalISO, fmtPKR as fmtPKRBase, fmtNum, fmtPct, fmtDate } from '../../../shared/utils/format';
 import useConfirm from '../../../hooks/useConfirm';
+import VoidPurchaseButton from '../../../shared/components/VoidPurchaseButton';
 
 // Lot money is exact to the paisa; a missing figure reads Rs 0.00 here.
 const fmtPKR = (v, opts) => fmtPKRBase(parseFloat(v) || 0, { decimals: 2, ...opts });
@@ -335,6 +336,8 @@ export default function LotDetail() {
             the header focused. */}
         {millingBatches.length === 0
           && lot.type === 'raw'
+          && lot.entity === 'mill'
+          && lot.ownership !== 'client'
           && (parseFloat(lot.availableQty) > 0) && (
           <button onClick={() => setShowAllocateModal(true)} className="btn btn-sm btn-secondary">
             <Factory className="w-4 h-4" /> Use in Batch
@@ -724,7 +727,17 @@ export default function LotDetail() {
                 <div className="flex items-center gap-2">
                   <button onClick={() => setShowReceivedModal(true)} className="btn btn-sm btn-secondary"><Scale className="w-3.5 h-3.5" /> Edit Received</button>
                   {showCost && <button onClick={() => setShowPriceModal(true)} className="btn btn-sm btn-secondary"><Edit3 className="w-3.5 h-3.5" /> Edit Price</button>}
+                  {/* P3-11: a purchase entered by mistake is voided, never deleted. */}
+                  {showCost && !lot.voidedAt && hasPermission('inventory', 'edit') && (
+                    <VoidPurchaseButton label={`purchase ${lot.lotNo}`} addToast={addToast} onDone={() => refetch?.()}
+                      onVoid={(body) => lotInventoryApi.voidPurchaseLot(lot.id, body)} />
+                  )}
                 </div>
+              )}
+              {lot.voidedAt && (
+                <span className="text-xs font-medium text-red-700 bg-red-50 ring-1 ring-red-200 rounded-md px-2 py-0.5" title={lot.voidReason || ''}>
+                  Purchase voided {fmtDate(lot.voidedAt)}{lot.voidReason ? ` — ${lot.voidReason}` : ''}
+                </span>
               )}
               {lot.type === 'raw' && !canEditLot && editLockMsg && (
                 <span className="text-xs text-amber-600 flex items-center gap-1"><Lock className="w-3.5 h-3.5" /> {editLockMsg}</span>
@@ -1914,10 +1927,11 @@ function LotLineage({ lotId, lotNo }) {
 }
 
 // ─── Allocate to batch modal ──────────────────────────────────────────
-// Lets the user feed part / all of a raw Purchase Lot into an existing
-// open milling batch. Calls /api/lot-inventory/lots/:id/allocate-to-batch
-// which decrements the lot's available_qty, increments batch.raw_qty_mt,
-// and writes a milling_vehicle_arrivals row so the batch traces back.
+// Commits part / all of a raw Purchase Lot to an open milling batch that is
+// milled from purchase lots. Calls /api/lot-inventory/lots/:id/allocate-to-batch,
+// which links the lot as a batch source and HOLDS the qty for the batch (the
+// same path as Start Milling): yield consumes it, cancel releases it. A batch
+// fed by trucks is refused by the server.
 function AllocateToBatchModal({ isOpen, onClose, lot, addToast, refetch }) {
   const availableKg = parseFloat(lot?.availableQty) || 0; // availableQty is KG (post-5c)
   const [batchId, setBatchId] = useState('');
@@ -1977,6 +1991,7 @@ function AllocateToBatchModal({ isOpen, onClose, lot, addToast, refetch }) {
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-800">
           <p className="truncate" title={`${lot.itemName || ''}${lot.variety ? ` — ${lot.variety}` : ''}`}><strong>{lot.itemName}</strong>{lot.variety ? ` — ${lot.variety}` : ''}</p>
           <p>Available: <strong>{fmtNum(Math.round(availableKg))} kg</strong></p>
+          <p className="mt-1 text-blue-700">The weight is held for the batch and milled at yield. Batches that take trucks can't take a lot — start a new batch from this lot instead.</p>
         </div>
 
         <div>

@@ -29,6 +29,7 @@ function builder(conn, table) {
       return qb;
     },
     whereIn(col, vals) { filters.push((r) => vals.includes(r[col])); return qb; },
+    whereRaw() { return qb; }, // lot txn-no lookup (postMovement)
     whereNull(col) { filters.push((r) => r[col] == null); return qb; },
     forUpdate() { conn.locks.push(table); return qb; },
     select() { return qb; },
@@ -103,6 +104,14 @@ jest.mock('../services/accountingService', () => ({
   autoPost: jest.fn(), createJournal: jest.fn(), postJournal: jest.fn(),
 }));
 jest.mock('../services/automationService', () => ({ onBatchCompleted: jest.fn() }));
+// The GL side of a commitment / cancel / delete (D-6 WIP, truck purchase) is
+// covered against a real DB in millingWip.integration.test.js.
+jest.mock('../modules/milling/millingWip', () => ({
+  syncBatchWip: jest.fn(async () => null), syncBatchIntake: jest.fn(async () => null),
+}));
+jest.mock('../modules/milling/truckIntakePurchase', () => ({
+  syncTruckIntakePurchase: jest.fn(async () => null), voidTruckIntakePurchase: jest.fn(async () => null),
+}));
 jest.mock('../services/exportOrderWorkflowService', () => ({}));
 jest.mock('../services/notificationService', () => ({}));
 jest.mock('../services/exportOrderEventBus', () => ({ publishExportOrderUpdate: jest.fn() }));
@@ -171,7 +180,9 @@ describe('startMillingForLot reserves the committed qty', () => {
       inventory_lots: [{ id: 30, qty: '1000', reserved_qty: '0', milling_reserved_qty: '400', available_qty: '600', milling_status: 'In Milling' }],
     });
     await lifecycle.releaseBatchSources(mockDb, 4);
-    expect(lot(30)).toMatchObject({ milling_reserved_qty: 400, available_qty: 600, milling_status: 'In Milling' });
+    expect(Number(lot(30).milling_reserved_qty)).toBe(400);
+    expect(Number(lot(30).available_qty)).toBe(600);
+    expect(lot(30).milling_status).toBe('In Milling');
     await lifecycle.releaseBatchSources(mockDb, 3);
     expect(lot(30)).toMatchObject({ milling_reserved_qty: 0, available_qty: 1000, milling_status: null });
   });
@@ -187,8 +198,10 @@ describe('consumeForMilling', () => {
     });
     jest.spyOn(realInventory, 'postMovement').mockResolvedValue({ id: 1 });
     await realInventory.consumeForMilling(mockDb, { batchId: 7, userId: 1 });
-    expect(realInventory.postMovement).toHaveBeenCalledWith(mockDb, expect.objectContaining({ lotId: 70, qty: 400 }));
-    expect(lot(70).milling_reserved_qty).toBe(0);
+    // P3-01: the hold comes off as a milling_release movement, then the rice
+    // is issued — both through the movement engine.
+    const calls = realInventory.postMovement.mock.calls.map(([, m]) => [m.movementType, m.lotId, m.qty]);
+    expect(calls).toEqual([['milling_release', 70, 400], ['production_issue', 70, 400]]);
   });
 
   test('throws 400 with the lot and shortfall when the lot no longer holds the qty', async () => {

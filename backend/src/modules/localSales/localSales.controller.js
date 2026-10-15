@@ -16,8 +16,13 @@ const { postLocalReceiptJournal } = require('./receiptJournal');
 const { assertAccountCurrency } = require('../../shared/accountCurrency');
 const { postBankTransaction } = require('../../shared/bankBalance');
 const { missingAccounts } = require('../../shared/ledgerFailure');
-const { resolveLineCost, priceSaleLine, salePaymentStatus } = require('./salePricing');
+const {
+  resolveLineCost, priceSaleLine, salePaymentStatus, lotUnitCostPerKg, noCostError, insufficientError,
+} = require('./salePricing');
+const { pendingHoldKg } = require('./saleReservation');
+const { moveStock: moveStoreStock, postStoreJournal } = require('../millStore/storeStock');
 const { saleLineTotal, isFullyPaid, settledTender } = require('./saleMoney');
+const { creditedOnSale } = require('./saleCredits');
 const { buildRateIndex, rateForLot } = require('../inventory/stockValuation');
 
 async function generateSaleNo(trx) {
@@ -55,6 +60,13 @@ async function resolveReceiptAccountId(trx, { paymentMode, bankAccountId, amount
 
 // A cheque never counts as money until it clears (owner decision 2026-10-07),
 // whatever its date — so every cheque receipt is recorded uncleared.
+// A completed line's COGS for reporting (P3-12 / INV-54): the locked
+// cogs_total_pkr; a lot line confirmed before the lock existed falls back to
+// landed_cost_total (what its COGS journal was posted from); a line with no
+// lot (service / packaging) posted no COGS, so 0. Twin of saleCogs() in
+// src/modules/localSales/utils/saleLot.js.
+const LOCKED_COGS_SQL = 'COALESCE(cogs_total_pkr, CASE WHEN lot_id IS NOT NULL THEN landed_cost_total END, 0)';
+
 function isChequeMode(mode) { return String(mode || '').toLowerCase() === 'cheque'; }
 
 // Uncleared cheques already taken against these sale lines, by line id. They
@@ -163,24 +175,73 @@ async function postSaleSideEffects(trx, saleRows, { userId } = {}) {
       const count = parseFloat(sale.quantity_bags) || qtyKg;
       const mi = await trx('mill_items').where({ id: sale.mill_item_id }).first();
       if (!mi) throw new Error('Packaging item not found');
-      const ms = await trx('mill_stock').where({ item_id: sale.mill_item_id, warehouse_id: null }).first();
-      const avail = parseFloat(ms && ms.quantity_available) || 0;
-      if (count > avail + 0.01) { const e = new Error(`Insufficient ${mi.name}: ${Math.round(avail)} in stock, ${count} needed.`); e.status = 400; throw e; }
-      await trx('mill_stock').where({ id: ms.id }).update({ quantity_available: trx.raw('GREATEST(quantity_available - ?, 0)', [count]), updated_at: trx.fn.now() });
-      await trx('mill_stock_movements').insert({
-        item_id: sale.mill_item_id, warehouse_id: null, movement_type: 'consumption', quantity: -count,
-        reference_type: 'local_sale', reference_id: sale.id, reason: `Sold ${count} ${mi.unit || 'pcs'} — ${sale.sale_no}`, performed_by: userId || null,
+      // Issued from the store under a row lock at the item's average cost,
+      // never below zero (INV-47), and its cost leaves 1250 as COGS — Dr 5000
+      // / Cr 1250 (INV-50: the sale used to draw the stock with no journal, so
+      // 1250 kept the value and the profit report showed a cost the GL never
+      // booked). Freed katta carry no value of their own: the item's average
+      // already spreads its value over them.
+      const issue = await moveStoreStock(trx, {
+        itemId: sale.mill_item_id, warehouseId: null, qty: -count, valuation: 'avg', clamp: true,
+        movement: {
+          movement_type: 'consumption', reference_type: 'local_sale', reference_id: sale.id,
+          reason: `Sold ${count} ${mi.unit || 'pcs'} — ${sale.sale_no}`, performed_by: userId || null,
+        },
+      });
+      if (issue.short > 0.01) {
+        const e = new Error(`Insufficient ${mi.name}: ${Math.round(count - issue.short)} in stock, ${count} needed.`); e.status = 400; throw e;
+      }
+      const cogsAmt = Math.abs(issue.value);
+      // The sale carries the cost that was booked, so its profit is the GL's.
+      const priced = priceSaleLine({ qtyKg: count, total: sale.total_amount, costPerKg: issue.unitCost, bagWt: 0, isMillItem: true });
+      const costPatch = {
+        cost_per_kg: priced.cost_per_kg, landed_cost_total: priced.landed_cost_total, gross_profit: priced.gross_profit,
+        profit_per_kg: priced.profit_per_kg, margin_pct: priced.margin_pct,
+        cogs_total_pkr: cogsAmt, gross_profit_pkr: priced.gross_profit, cost_locked_at_dispatch: true,
+      };
+      await trx('local_sales').where({ id: sale.id }).update({ ...costPatch, updated_at: trx.fn.now() });
+      Object.assign(sale, costPatch);
+      await postStoreJournal(trx, {
+        amount: cogsAmt, counterCode: '5000',
+        date: (sale.sale_date ? new Date(sale.sale_date) : new Date()).toISOString().slice(0, 10),
+        refType: 'Local Sale COGS', refNo: sale.sale_no,
+        description: `COGS — local sale ${sale.sale_no} — ${count} × ${mi.name}`.slice(0, 240),
+        userId, what: 'The sale',
       });
     } else if (sale.lot_id) {
-      const lot = await trx('inventory_lots').where({ id: sale.lot_id }).first();
+      const lot = await trx('inventory_lots').where({ id: sale.lot_id }).forUpdate().first();
       if (!lot) throw new Error('Inventory lot not found');
+      // Older pending sales keep their soft hold on this lot (INV-60): a sale
+      // is confirmed out of what is left after them.
       const availKg = parseFloat(lot.available_qty) || 0;
-      if (qtyKg > availKg + 0.01) { const e = new Error(`Insufficient stock: ${sale.item_name} needs ${Math.round(qtyKg)} kg but only ${availKg.toFixed(0)} kg available in ${lot.lot_no}`); e.status = 400; throw e; }
+      const holdKg = await pendingHoldKg(trx, lot.id, {
+        excludeGroupNo: sale.sale_group_no || sale.sale_no, olderThanId: sale.id,
+      });
+      if (qtyKg > availKg - holdKg + 0.01) {
+        throw insufficientError({ itemName: sale.item_name, qtyKg, availKg, holdKg, lotNo: lot.lot_no });
+      }
+
+      // Re-price at confirmation (INV-60 / INV-54): the cost a Pending sale
+      // carried was the lot's cost when it was ENTERED. The stock leaves now,
+      // at the lot's cost now — the same figure goes to the line, the stock
+      // movement, the COGS journal and (lockSaleCOGS) cogs_total_pkr.
+      const costPerKg = lotUnitCostPerKg(lot);
+      if (costPerKg <= 0) throw noCostError(lot);
+      const priced = priceSaleLine({
+        qtyKg, total: sale.total_amount, costPerKg, bagWt: parseFloat(sale.bag_weight_kg) || 0, isMillItem: false,
+      });
+      const repriced = {
+        cost_per_kg: priced.cost_per_kg, landed_cost_total: priced.landed_cost_total, gross_profit: priced.gross_profit,
+        profit_per_kg: priced.profit_per_kg, margin_pct: priced.margin_pct,
+      };
+      await trx('local_sales').where({ id: sale.id }).update({ ...repriced, updated_at: trx.fn.now() });
+      Object.assign(sale, repriced);
+
       await inventoryService.postMovement(trx, {
         movementType: 'local_sale', lotId: lot.id, qty: qtyKg,
         fromWarehouseId: lot.warehouse_id, sourceEntity: lot.entity, linkedRef: sale.sale_no,
         notes: `Local sale ${sale.sale_no} to ${sale.buyer_name || 'customer'}${sale.gate_pass_no ? ` · Gate Pass ${sale.gate_pass_no}` : ''}`,
-        costPerUnit: parseFloat(lot.cost_per_unit) || 0, currency: 'PKR', userId,
+        costPerUnit: costPerKg, currency: 'PKR', userId,
       });
       await trx('inventory_lots').where({ id: sale.lot_id }).update({ sold_weight_kg: (parseFloat(lot.sold_weight_kg) || 0) + qtyKg });
 
@@ -189,7 +250,7 @@ async function postSaleSideEffects(trx, saleRows, { userId } = {}) {
       // Cr the lot's inventory account — raw 1210, finished mill 1220 / export
       // 1230, by-product 1240. Without this the sale only posted revenue → P&L
       // showed 100% margin.
-      const cogsAmt = uc.round2(parseFloat(sale.landed_cost_total) || (parseFloat(sale.cost_per_kg) || 0) * qtyKg);
+      const cogsAmt = priced.landed_cost_total;
       if (cogsAmt > 0) {
         const invCode = inventoryAccountForLot(lot);
         const [cogsAcc, invAcc] = await Promise.all([
@@ -358,7 +419,9 @@ async function assembleInvoice(id, includeAdmin = false) {
       sourceLots: batchId ? (srcByBatch[batchId] || []) : [],
     };
     if (includeAdmin) {
-      const cogs = num(r.cogs_total_pkr) || num(r.landed_cost_total) || num(r.cost_per_kg) * num(r.quantity_kg);
+      // A confirmed sale's COGS is the locked cogs_total_pkr (what the GL
+      // posted); a Pending one shows its estimate.
+      const cogs = r.cogs_total_pkr != null ? num(r.cogs_total_pkr) : (num(r.landed_cost_total) || num(r.cost_per_kg) * num(r.quantity_kg));
       item.costPerKg = num(r.cost_per_kg);
       item.cogs = cogs;
       item.grossMargin = num(r.total_amount) - cogs;
@@ -664,7 +727,8 @@ async function applyReceiptToSale(trx, sale, {
 }) {
   const payAmount = uc.round2(parseFloat(amount) || 0);
   const newPaid = (parseFloat(sale.paid_amount) || 0) + payAmount;
-  const newDue = Math.max(0, (parseFloat(sale.total_amount) || 0) - newPaid);
+  // A return's credit (P3-11) comes off the total as well — it is not a payment.
+  const newDue = Math.max(0, (parseFloat(sale.total_amount) || 0) - newPaid - await creditedOnSale(trx, sale.id));
 
   if (!isUncleared) {
     await trx('local_sales').where({ id: sale.id }).update({
@@ -1280,6 +1344,7 @@ module.exports = {
         });
       }
 
+      let repriceLine = null;
       if (isPending && moneyFields.length) {
         for (const f of PENDING_ONLY) if (body[f] !== undefined) patch[f] = body[f] === '' ? null : body[f];
         if (patch.sale_date != null) {
@@ -1307,32 +1372,35 @@ module.exports = {
           return res.status(400).json({ success: false, message: `Rs ${paid.toLocaleString()} has already been taken against this sale — the new total of Rs ${total.toLocaleString()} is lower. Refund or cancel instead.` });
         }
 
-        // Re-read the cost basis the way create does — it also refuses to sell
-        // more than the lot holds (create enforces it; an edit must not walk
-        // past it) and refuses an uncosted lot. Then recompute every derived
-        // figure, because confirm posts COGS from landed_cost_total.
-        let cost;
-        try {
-          cost = await resolveLineCost(db, { lotId: sale.lot_id, millItemId: sale.mill_item_id, qtyKg, itemName: patch.item_name ?? sale.item_name });
-        } catch (e) {
-          if (e.status === 400) return res.status(400).json({ success: false, message: e.message });
-          throw e;
-        }
-        const priced = priceSaleLine({ qtyKg, total, costPerKg: cost.costPerKg, bagWt, isMillItem });
-
         patch.bag_weight_kg = isMillItem ? null : bagWt;
         patch.quantity_kg = qtyKg;
         patch.rate_per_kg = ratePerKg;
         patch.total_amount = total;
         patch.due_amount = uc.round2(Math.max(0, total - paid));
-        Object.assign(patch, priced);
         patch.payment_status = salePaymentStatus({ due: patch.due_amount, paid, paymentMode: sale.payment_mode });
+        // The cost estimate is re-read inside the write's transaction (below).
+        repriceLine = { qtyKg, total, bagWt, isMillItem, itemName: patch.item_name ?? sale.item_name };
       }
 
       if (!Object.keys(patch).length && !Object.keys(presentation).length) {
         return res.status(400).json({ success: false, message: 'Nothing to change.' });
       }
       await db.transaction(async (trx) => {
+        if (repriceLine) {
+          // Re-read the cost basis the way create does — it also refuses to
+          // sell more than the lot holds less what OTHER pending sales hold
+          // (INV-60; the lot row is locked) and refuses an uncosted lot. Then
+          // recompute the derived figures. This is the Pending estimate;
+          // confirmation re-prices at the lot's cost then.
+          const cost = await resolveLineCost(trx, {
+            lotId: sale.lot_id, millItemId: sale.mill_item_id, qtyKg: repriceLine.qtyKg,
+            itemName: repriceLine.itemName, excludeGroupNo: groupKey || sale.sale_no,
+          });
+          Object.assign(patch, priceSaleLine({
+            qtyKg: repriceLine.qtyKg, total: repriceLine.total, costPerKg: cost.costPerKg,
+            bagWt: repriceLine.bagWt, isMillItem: repriceLine.isMillItem,
+          }));
+        }
         if (Object.keys(presentation).length) {
           await trx('local_sales')
             .where(groupKey ? { sale_group_no: groupKey } : { id: sale.id })
@@ -1348,6 +1416,7 @@ module.exports = {
       if (isGatePassUniqueViolation(err)) {
         return res.status(409).json({ success: false, code: 'GATE_PASS_DUPLICATE', message: 'That gate pass number is already on another sale.' });
       }
+      if (err.status === 400) return res.status(400).json({ success: false, code: err.code, message: err.message });
       console.error('update local sale error:', err);
       return res.status(500).json({ success: false, message: err.message });
     }
@@ -1612,7 +1681,9 @@ module.exports = {
         db('local_sales').where('status', 'Completed')
           .select(db.raw('COUNT(*) as count, COALESCE(SUM(total_amount),0) as total, COALESCE(SUM(due_amount),0) as due')).first(),
         db('local_sales').where('status', 'Completed')
-          .select(db.raw('COALESCE(SUM(total_amount),0) as revenue, COALESCE(SUM(landed_cost_total),0) as cost, COALESCE(SUM(gross_profit),0) as profit, COALESCE(SUM(paid_amount),0) as collected')).first(),
+          // Cost = the COGS each confirmed sale locked (cogs_total_pkr) — the
+          // figure its COGS journal posted (P3-12). See LOCKED_COGS_SQL.
+          .select(db.raw(`COALESCE(SUM(total_amount),0) as revenue, COALESCE(SUM(${LOCKED_COGS_SQL}),0) as cost, COALESCE(SUM(total_amount - ${LOCKED_COGS_SQL}),0) as profit, COALESCE(SUM(paid_amount),0) as collected`)).first(),
       ]);
 
       return res.json({

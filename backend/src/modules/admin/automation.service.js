@@ -569,38 +569,42 @@ const automationService = {
   },
 
   async scanStockShortages() {
-    const reservedLots = await db('inventory_lots')
-      .where('status', 'Reserved')
-      .whereNotNull('reserved_against')
-      .select('*');
+    // A lot whose physical stock no longer covers what is held on it (export
+    // reservations + milling holds). Read from inventory_reservations — the
+    // reserved_against string on the lot was dropped (migration 389) — so each
+    // order holding the lot gets its own alert.
+    const held = await db('inventory_reservations as r')
+      .join('inventory_lots as l', 'l.id', 'r.lot_id')
+      .join('export_orders as o', 'o.id', 'r.order_id')
+      .where('r.status', 'Active')
+      .whereRaw('COALESCE(l.qty, 0) + 0.000001 < COALESCE(l.reserved_qty, 0) + COALESCE(l.milling_reserved_qty, 0)')
+      .select('l.id', 'l.lot_no', 'l.qty', 'l.reserved_qty', 'o.order_no');
 
     let processed = 0;
-    for (const lot of reservedLots) {
-      if (parseFloat(lot.available_qty || 0) < parseFloat(lot.reserved_qty || 0)) {
-        const existingAlert = await db('alerts')
-          .where({ linked_ref: lot.reserved_against, title: 'Stock Shortage' })
-          .where('status', 'Open')
-          .first();
+    for (const lot of held) {
+      const existingAlert = await db('alerts')
+        .where({ linked_ref: lot.order_no, title: 'Stock Shortage' })
+        .where('status', 'Open')
+        .first();
 
-        if (!existingAlert) {
-          await db('alerts').insert({
-            severity: 'high',
-            entity: 'export',
-            linked_ref: lot.reserved_against,
-            title: 'Stock Shortage',
-            summary: `Reservation for ${lot.reserved_against} cannot be fulfilled. Available: ${lot.available_qty} MT, Reserved: ${lot.reserved_qty} MT`,
-            amount_at_risk: 0,
-            age_days: 0,
-            recommended_action: 'Arrange additional stock or revise order quantity',
-            status: 'Open',
-          });
-        }
-
-        processed++;
+      if (!existingAlert) {
+        await db('alerts').insert({
+          severity: 'high',
+          entity: 'export',
+          linked_ref: lot.order_no,
+          title: 'Stock Shortage',
+          summary: `Reservation for ${lot.order_no} on lot ${lot.lot_no} cannot be fulfilled. On hand: ${lot.qty} kg, reserved: ${lot.reserved_qty} kg`,
+          amount_at_risk: 0,
+          age_days: 0,
+          recommended_action: 'Arrange additional stock or revise order quantity',
+          status: 'Open',
+        });
       }
+
+      processed++;
     }
 
-    return { processed, details: { lots_checked: reservedLots.length } };
+    return { processed, details: { lots_checked: held.length } };
   },
 
   async scanUnallocatedCosts() {

@@ -1,5 +1,7 @@
 const db = require('../../config/database');
 const accountingService = require('../../services/accountingService');
+const { moveStock: moveStoreStock } = require('../millStore/storeStock');
+const { ledgerFailure, missingAccounts } = require('../../shared/ledgerFailure');
 
 // Printed-bag procurement for export orders. Each order owes a bag vendor, so it
 // mirrors the export-order-cost money pattern: a 1:1 payable
@@ -37,15 +39,21 @@ async function nextPboPayNo(trx) {
 // Post a signed cost-recognition journal for `delta` PKR against the printed-bag
 // payable: +delta => Dr 6000 Operating Expenses / Cr 2010 Supplier Payable;
 // -delta swaps the sides. Stamped to the vendor so it lands on their statement.
-// Silently skipped if the GL chart isn't seeded.
+// A journal that cannot post rolls the whole change back (P3-18) — it used to
+// be skipped with a warning, leaving a payable with no GL behind it.
 async function postCostDelta(trx, { delta, order, pbo, vendorId, userId, reduced }) {
   if (Math.abs(delta) <= 0.01) return;
   const opExp = await trx('chart_of_accounts').where({ code: '6000' }).first();
   const supplierPayable = await trx('chart_of_accounts').where({ code: '2010' }).first();
-  if (!opExp || !supplierPayable) {
-    console.warn(`printedBags: chart_of_accounts missing 6000/2010 — journal skipped for ${pbo.pbo_no}`);
-    return;
+  if (!opExp || !supplierPayable) throw missingAccounts(['6000', '2010'], 'The printed-bag order');
+  try {
+    await postCostJournal(trx, { delta, order, pbo, vendorId, userId, reduced, opExp, supplierPayable });
+  } catch (e) {
+    throw ledgerFailure(e, 'The printed-bag order');
   }
+}
+
+async function postCostJournal(trx, { delta, order, pbo, vendorId, userId, reduced, opExp, supplierPayable }) {
   const up = delta > 0;
   const amt = Math.abs(delta);
   const debitAcc = up ? opExp : supplierPayable;
@@ -148,45 +156,65 @@ async function list(orderRef) {
   });
 }
 
+// A Draft carries no vendor bills (P3-18, EXP-17): it may still change or be
+// abandoned, and a payable raised for it stayed behind when it was. Printed
+// bags typed on the create form are held on the draft and posted at Submit.
+function assertNotDraft(order) {
+  if (order.status === 'Draft') {
+    const e = new Error('This order is still a Draft. Submit it first — printed-bag orders are posted once the order is live.');
+    e.statusCode = 409; throw e;
+  }
+}
+
 async function create(orderRef, body, userId) {
   const orderId = await resolveOrderId(orderRef);
-  const order = orderId ? await db('export_orders').where({ id: orderId }).first() : null;
-  if (!order) { const e = new Error('Export order not found.'); e.statusCode = 404; throw e; }
+  return db.transaction(async (trx) => {
+    const order = orderId ? await trx('export_orders').where({ id: orderId }).forUpdate().first() : null;
+    if (!order) { const e = new Error('Export order not found.'); e.statusCode = 404; throw e; }
+    assertNotDraft(order);
+    return createInTrx(trx, order, body, userId);
+  });
+}
 
+// One printed-bag order, its payable and its GL bill, in the caller's
+// transaction (also used by export-order create / submit, so the order and its
+// bag orders are saved together or not at all).
+async function createInTrx(trx, order, body, userId) {
+  if (['Closed', 'Cancelled'].includes(order.status)) {
+    const e = new Error(`Cannot order printed bags for an order in '${order.status}' status.`); e.statusCode = 400; throw e;
+  }
   const quantity = parseInt(body.quantity, 10) || 0;
   const unitCost = parseFloat(body.unit_cost) || 0;
   if (quantity <= 0) { const e = new Error('Quantity (number of bags) must be greater than zero.'); e.statusCode = 400; throw e; }
   const total = round2(quantity * unitCost);
   const vendorId = body.vendor_id ? parseInt(body.vendor_id, 10) : null;
 
-  return db.transaction(async (trx) => {
-    const pboNo = await nextPboNo(trx);
-    const [row] = await trx('printed_bag_orders').insert({
-      pbo_no: pboNo,
-      order_id: orderId,
-      bag_type_id: body.bag_type_id ? parseInt(body.bag_type_id, 10) : null,
-      bag_type_name: body.bag_type_name || null,
-      bag_size_kg: body.bag_size_kg != null && body.bag_size_kg !== '' ? parseFloat(body.bag_size_kg) : null,
-      printing: body.printing || null,
-      brand_marking: body.brand_marking || null,
-      vendor_id: vendorId,
-      quantity,
-      unit_cost: unitCost,
-      total_amount: total,
-      currency: 'PKR',
-      status: 'Ordered',
-      ordered_date: body.ordered_date || new Date().toISOString().slice(0, 10),
-      paid_amount: 0,
-      payment_status: 'Unpaid',
-      notes: body.notes || null,
-      created_by: userId || null,
-    }).returning('*');
+  const pboNo = await nextPboNo(trx);
+  const [row] = await trx('printed_bag_orders').insert({
+    pbo_no: pboNo,
+    order_id: order.id,
+    bag_type_id: body.bag_type_id ? parseInt(body.bag_type_id, 10) : null,
+    bag_type_name: body.bag_type_name || null,
+    bag_size_kg: body.bag_size_kg != null && body.bag_size_kg !== '' ? parseFloat(body.bag_size_kg) : null,
+    printing: body.printing || null,
+    brand_marking: body.brand_marking || null,
+    vendor_id: vendorId,
+    quantity,
+    unit_cost: unitCost,
+    total_amount: total,
+    currency: 'PKR',
+    status: 'Ordered',
+    ordered_date: body.ordered_date || new Date().toISOString().slice(0, 10),
+    paid_amount: 0,
+    payment_status: 'Unpaid',
+    notes: body.notes || null,
+    created_by: userId || null,
+  }).returning('*');
 
-    const refLabel = `${order.order_no} ${pboNo}`;
-    await syncPayable(trx, { pbo: row, order, vendorId, total, refLabel, notes: body.notes });
-    await postCostDelta(trx, { delta: total, order, pbo: row, vendorId, userId, reduced: false });
-    return row;
-  });
+  const refLabel = `${order.order_no} ${pboNo}`;
+  await syncPayable(trx, { pbo: row, order, vendorId, total, refLabel, notes: body.notes });
+  await postCostDelta(trx, { delta: total, order, pbo: row, vendorId, userId, reduced: false });
+  return row;
 }
 
 async function update(id, body, userId) {
@@ -225,15 +253,73 @@ async function update(id, body, userId) {
   });
 }
 
+// ── Received bags go into the mill store (EXP-35) ───────────────────────────
+// "Received" used to change only the order's status: the bags never reached
+// the store, so nobody could see them and a material requirement could buy
+// them again. They now land in a store item of their own (the print belongs to
+// this order). Their cost was already expensed when the order was placed
+// (Dr 6000 / Cr 2010 above), so they enter the store at ZERO value — today's
+// expense-at-order treatment is kept; moving that cost into stock instead is
+// an owner decision (register EXP-35 / INV-37), not made here.
+const PBO_REF = 'printed_bag_order';
+
+async function storeItemFor(trx, row, order, userId) {
+  if (row.mill_item_id) {
+    const it = await trx('mill_items').where({ id: row.mill_item_id }).first();
+    if (it) return it;
+  }
+  const size = parseFloat(row.bag_size_kg) || null;
+  const label = [row.bag_type_name, size ? `${size}kg` : null].filter(Boolean).join(' ') || 'bags';
+  const [it] = await trx('mill_items').insert({
+    code: `PB-${row.pbo_no}`.toUpperCase().slice(0, 50),
+    name: `Printed ${label} — ${order.order_no}${row.brand_marking ? ` (${row.brand_marking})` : ''}`.slice(0, 255),
+    category: 'packaging', unit: 'pcs', pack_type: 'pp_bag',
+    capacity_kg: size, size_value: size, size_unit: 'kg',
+    bag_type_id: row.bag_type_id || null,
+    avg_cost_per_unit: 0, reorder_level: 0, is_active: true,
+    notes: `Printed bags for export order ${order.order_no} (${row.pbo_no}). Cost expensed when ordered — held at zero store value.`,
+    created_by: userId || null,
+  }).returning('*');
+  return it;
+}
+
+// Bring the store to `qty` received bags for this order (signed delta against
+// what it already received; a cut below what has been drawn is refused).
+async function syncStoreReceipt(trx, row, item, qty, userId) {
+  const prior = await trx('mill_stock_movements')
+    .where({ reference_type: PBO_REF, reference_id: row.id, item_id: item.id })
+    .sum({ q: 'quantity' }).first();
+  const delta = Math.round(((parseFloat(qty) || 0) - (parseFloat(prior && prior.q) || 0)) * 1000) / 1000;
+  if (!delta) return 0;
+  await moveStoreStock(trx, {
+    itemId: item.id, warehouseId: null, qty: delta, valuation: 'zero',
+    shortMessage: ({ available }) => `${row.pbo_no}: only ${available} of these bags are still in the store — the rest have been used. Record what was really received, or adjust the store first.`,
+    movement: {
+      movement_type: delta > 0 ? 'purchase' : 'adjustment',
+      reference_type: PBO_REF, reference_id: row.id,
+      reason: delta > 0
+        ? `Printed bags received — ${row.pbo_no} (cost expensed at order)`
+        : `Printed bags receipt corrected — ${row.pbo_no}`,
+      performed_by: userId || null,
+    },
+  });
+  return delta;
+}
+
 async function receive(id, body, userId) {
   return db.transaction(async (trx) => {
-    const row = await trx('printed_bag_orders').where({ id }).first();
+    const row = await trx('printed_bag_orders').where({ id }).forUpdate().first();
     if (!row) { const e = new Error('Printed bag order not found.'); e.statusCode = 404; throw e; }
     const receivedQty = body.received_qty != null ? parseInt(body.received_qty, 10) : row.quantity;
+    if (!(receivedQty >= 0)) { const e = new Error('Received quantity cannot be negative.'); e.statusCode = 400; throw e; }
+    const order = await trx('export_orders').where({ id: row.order_id }).first();
+    const item = await storeItemFor(trx, row, order || { order_no: `order ${row.order_id}` }, userId);
+    await syncStoreReceipt(trx, row, item, receivedQty, userId);
     const [updated] = await trx('printed_bag_orders').where({ id }).update({
       status: 'Received',
       received_qty: receivedQty,
       received_date: body.received_date || new Date().toISOString().slice(0, 10),
+      mill_item_id: item.id,
       updated_at: trx.fn.now(),
     }).returning('*');
     return updated;
@@ -252,6 +338,10 @@ async function remove(id) {
       e.statusCode = 409; throw e;
     }
     const order = await trx('export_orders').where({ id: row.order_id }).first();
+    // Bags it put into the store come back out (refused if they have been used).
+    if (row.mill_item_id) {
+      await syncStoreReceipt(trx, row, { id: row.mill_item_id }, 0, null);
+    }
     // Reverse the cost bill with a signed negative delta, then drop the payable.
     await postCostDelta(trx, { delta: -(parseFloat(row.total_amount) || 0), order, pbo: row, vendorId: row.vendor_id, userId: null, reduced: true });
     if (payable) await trx('payables').where({ id: payable.id }).del();
@@ -260,4 +350,4 @@ async function remove(id) {
   });
 }
 
-module.exports = { list, create, update, receive, remove };
+module.exports = { list, create, createInTrx, update, receive, remove, postCostDelta };

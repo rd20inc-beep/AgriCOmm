@@ -100,7 +100,10 @@ export function AppProvider({ children }) {
   ]);
 
   const [millingCostCategories, setMillingCostCategories] = useState([
-    { key: 'rawRice', label: 'Raw Rice Purchase', section: 'material' },
+    // Keys are the server's canonical cost categories (backend
+    // milling/costCategories.js) — 'rawRice' was stored verbatim and booked
+    // the rice purchase as a processing cost (MIL-11).
+    { key: 'raw_rice', label: 'Raw Rice Purchase', section: 'material' },
     { key: 'transport', label: 'Transport / Freight', section: 'process' },
     { key: 'unloading', label: 'Unloading', section: 'process' },
     { key: 'labor', label: 'Labor / Wages', section: 'process' },

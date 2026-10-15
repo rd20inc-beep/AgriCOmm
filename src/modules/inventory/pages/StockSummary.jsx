@@ -5,7 +5,7 @@ import { Boxes, Package, Wallet, ArrowRight, Layers, AlertTriangle, Check, X, Pe
 import { lotInventoryApi } from '../api/services';
 import { useHeldStockProfit } from '../../../api/queries';
 import useCanSeeCost from '../../../hooks/useCanSeeCost';
-import { splitOnHand, unitsOnHand, onHandKg as lotOnHandKg, formatUnits } from '../utils/stockMath';
+import { splitOnHand, unitsOnHand, onHandKg as lotOnHandKg, formatUnits, lotValue } from '../utils/stockMath';
 import SlideDrawer from '../../../components/SlideDrawer';
 import StatusBadge from '../../../shared/components/StatusBadge';
 import { fmtKg, fmtNum, fmtPKR as fmtPKRBase, fmtDate } from '../../../shared/utils/format';
@@ -325,8 +325,8 @@ function ProductStockDrawer({ row, showCost, entity, status, onClose, onOpenLot 
           ) : (
             lots.map((l) => {
               const onHand = onHandKg(l);
-              const perKg = n(l.landed_cost_per_kg) || n(l.rate_per_kg) || n(l.cost_per_unit) || 0;
-              const value = onHand * perKg; // value of what's on hand now, not the original intake
+              const perKg = n(l.landed_cost_per_kg); // D-14: no fallback price
+              const value = lotValue(l); // landed cost × on hand now, not the original intake
               const unitsLabel = formatUnits(unitsOnHand(l)); // intake scaled by weight left
               const millingKg = n(l.milling_reserved_qty);
               const receivedKg = n(l.received_net_weight_kg);

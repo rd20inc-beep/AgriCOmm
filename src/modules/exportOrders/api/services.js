@@ -26,8 +26,10 @@ export const exportOrdersApi = {
   submit: (id, data) => api.post(`/api/export-orders/${id}/submit`, data || {}),
   startDocs: (id, data) => api.post(`/api/export-orders/${id}/start-docs`, data),
   uploadDocument: (id, data) => api.post(`/api/export-orders/${id}/documents/upload`, data),
-  approveDocument: (id, data) => api.post(`/api/export-orders/${id}/documents/approve`, data),
   allocateStock: (id, data) => api.post(`/api/export-orders/${id}/allocate-stock`, data),
+  // The suggested lot per order line (D-18) — a proposal; confirming it is an
+  // allocateStock call with { suggested: true }.
+  suggestedLots: (id) => api.get(`/api/export-orders/${id}/suggested-lots`),
   sourceFromStock: (id) => api.post(`/api/export-orders/${id}/source-from-stock`, {}),
 };
 

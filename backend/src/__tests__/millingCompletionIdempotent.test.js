@@ -62,7 +62,8 @@ describe('postMillingCompletion (no DB)', () => {
         join: () => b, leftJoin: () => b, where: () => b, whereIn: () => b, groupBy: () => b, select: () => b, sum: () => b,
         pluck: async () => [],
         // A batch with no source lots (direct truck intake): all CR 1210.
-        then: (resolve) => resolve([]),
+        // journal_entries lists the batch's Posted completion when there is one.
+        then: (resolve) => resolve(table === 'journal_entries' && posted ? [{ id: 55, reversal_of: null }] : []),
         first: async () => {
           if (table === 'journal_entries') return posted ? { id: 55 } : undefined;
           if (table === 'journal_lines as jl') return { net };

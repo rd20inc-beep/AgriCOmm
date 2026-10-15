@@ -230,7 +230,7 @@ export default function StockAdjustments() {
                   {reconciliation.discrepancies.map((d) => (
                     <tr key={d.lotId} className="border-b border-gray-100 hover:bg-red-50">
                       <td data-label="Lot" className="py-2 font-medium text-blue-600">{d.lotNo}</td>
-                      <td data-label="System (kg)" className="py-2 text-right">{fmtKg(Math.round((d.systemQtyMT || 0) * 1000))}</td>
+                      <td data-label="System (kg)" className="py-2 text-right">{fmtKg(Math.round(d.systemQtyKg || 0))}</td>
                       <td data-label="Ledger (KG)" className="py-2 text-right">{fmtKg(d.ledgerQtyKg)}</td>
                       <td data-label="Discrepancy" className="py-2 text-right text-red-600 font-medium">{fmtKg(d.discrepancyKg)}</td>
                     </tr>

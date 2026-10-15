@@ -77,6 +77,29 @@ describe('the create payload', () => {
     expect(p).toMatchObject({ status: 'Draft', qty_mt: 0, price_per_mt: 0, contract_value: 0, bank_account_id: null });
   });
 
+  // P3-18: printed bags and the pallet cost go IN the create call (posted with a
+  // live order, held on a Draft) — never as follow-up calls from the browser.
+  it('carries the printed bags and the pallet cost in the one create payload', () => {
+    const p = buildCreateOrderPayload({
+      form: { ...baseForm, palletized: true, palletCost: '15000' }, items, products, status: 'Draft',
+      printedBags: [
+        { bagType: 'PP', bagTypeId: 4, bagSizeKg: '25', vendorId: '9', quantity: '2000', unitCost: '60', printing: 'Buyer Logo', brand: 'ACME' },
+        { bagType: '', quantity: '', unitCost: '5' }, // no quantity → not an order
+      ],
+    });
+    expect(p.printed_bags).toEqual([{
+      bag_type_id: 4, bag_type_name: 'PP', bag_size_kg: 25, vendor_id: 9, quantity: 2000, unit_cost: 60,
+      printing: 'Buyer Logo', brand_marking: 'ACME',
+    }]);
+    expect(p.pallet_cost).toBe(15000);
+    // No pallet cost unless the load is palletized (a container never is).
+    expect(build({ ...baseForm, palletized: false, palletCost: '15000' }).pallet_cost).toBeNull();
+    expect(build({ ...baseForm, packingType: 'container', palletized: true, palletCost: '15000' }).pallet_cost).toBeNull();
+    // The page makes no separate printed-bag / pallet calls any more.
+    const PAGE = read('src/modules/exportOrders/pages/CreateExportOrder.jsx');
+    expect(PAGE).not.toMatch(/printedBagsApi\.create|exportOrdersApi\.addCost/);
+  });
+
   it('every key it sends is declared in the backend schema, or Joi would strip it', () => {
     const SCHEMAS = read('backend/src/middleware/schemas.js');
     const itemBlock = SCHEMAS.slice(SCHEMAS.indexOf('const exportOrderItem ='), SCHEMAS.indexOf('const createExportOrder ='));

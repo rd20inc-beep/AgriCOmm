@@ -42,11 +42,17 @@ test('the owner-approved routes', () => {
     'POST exportOrders /:id/packing-weight/resolve [packing_variance]',
     'POST exportOrders /:id/write-off-balance [export_short_write_off]',
     'POST finance /payments/:id/reverse [payment_reversal]',
+    // P3-11 / D-22, D-23: a local-sale return and voiding a purchase.
+    'POST inventory /lots/:id/void [purchase_void]',
+    'POST localSales /:id/returns [local_sale_return]',
+    'POST millStore /purchases/:id/void [store_purchase_void]',
     'POST milling /advances/:id/approve [salary_advance]',
     'POST milling /advances/:id/void [salary_advance_void]',
+    'POST milling /batches/:id/reverse-yield [milling_yield_reversal]', // P3-03 / MIL-20
     'POST milling /payroll/final-settlements/:id/reverse [final_settlement_reversal]',
     'POST serviceMilling /invoices/:id/void [service_invoice_void]',
     'PUT accounting /periods/:id/reopen [period_reopen]',
+    'PUT millStore /items/:id/revalue [mill_item_revaluation]', // P3-06 / INV-46: revaluing stock moves 1250
   ]);
 });
 

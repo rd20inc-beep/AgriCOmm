@@ -326,7 +326,8 @@ const documentController = {
       return res.json({ success: true, data: { document: result } });
     } catch (err) {
       console.error('Document approve error:', err);
-      return res.status(400).json({ success: false, message: err.message || 'Internal server error.' });
+      // 403 for maker/checker (the uploader approving their own file).
+      return res.status(err.statusCode || 400).json({ success: false, code: err.code, message: err.message || 'Internal server error.' });
     }
   },
 

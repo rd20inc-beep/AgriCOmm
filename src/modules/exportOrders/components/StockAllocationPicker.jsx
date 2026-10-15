@@ -5,7 +5,7 @@
 // (capped at the shortfall). Used by the Procurement tab and the Create Milling
 // Demand modal so both share one implementation.
 import { useEffect, useMemo, useState } from 'react';
-import { Plus, Search, RefreshCw } from 'lucide-react';
+import { Plus, Search, RefreshCw, Sparkles } from 'lucide-react';
 import { exportOrdersApi } from '../api/services';
 import { fmtNum } from '../../../shared/utils/format';
 
@@ -42,6 +42,46 @@ export default function StockAllocationPicker({
   const [showOther, setShowOther] = useState(false);
   const [customQty, setCustomQty] = useState({});
   const [allocatingId, setAllocatingId] = useState(null);
+  // The system's suggested lot for this line (D-18). It replaces the old
+  // auto-reserve on advance confirmation: nothing is held until a user
+  // confirms it here, and the reservation records who did and when.
+  const [suggestion, setSuggestion] = useState(null);
+  const [cover, setCover] = useState(null);
+
+  useEffect(() => {
+    if (!orderId) return;
+    exportOrdersApi.suggestedLots(orderId)
+      .then((res) => {
+        const data = res?.data || res || {};
+        const list = data.suggestions || [];
+        const mine = list.find((x) => (lineId ? String(x.item_id) === String(lineId) : true)) || null;
+        setSuggestion(mine && mine.lot ? mine : null);
+        setCover(data.reservation_cover || null);
+      })
+      .catch(() => { setSuggestion(null); setCover(null); });
+  }, [orderId, lineId, fetchTrigger]);
+
+  async function confirmSuggestion() {
+    if (!suggestion?.lot) return;
+    const qtyKg = Math.min(suggestion.qty_kg || 0, Math.max(0, remainingNeededKg));
+    if (qtyKg <= 0) return;
+    setAllocatingId(`s-${suggestion.lot.id}`);
+    try {
+      await exportOrdersApi.allocateStock(orderId, {
+        lot_id: suggestion.lot.id,
+        qty_mt: qtyKg / 1000,
+        item_id: suggestion.item_id || lineId || undefined,
+        suggested: true,
+      });
+      addToast?.(`${kg(qtyKg)} kg reserved from the suggested lot`, 'success');
+      onAllocated?.();
+      setFetchTrigger((t) => t + 1);
+    } catch (err) {
+      addToast?.(err.message || 'Reservation failed', 'error');
+    } finally {
+      setAllocatingId(null);
+    }
+  }
 
   useEffect(() => {
     setLoading(true);
@@ -103,8 +143,40 @@ export default function StockAllocationPicker({
   const visible = [...matching, ...(showOther ? other : [])];
   const capKg = Math.max(0, remainingNeededKg);
 
+  const suggestedKg = suggestion ? Math.min(suggestion.qty_kg || 0, Math.max(0, remainingNeededKg)) : 0;
+
   return (
     <div>
+      {cover && (
+        <p className={`mb-2 text-xs ${cover.withinTolerance ? 'text-emerald-700' : 'text-amber-700'}`}>
+          Reserved {kg(cover.reservedKg)} of {kg(cover.orderKg)} kg
+          {cover.withinTolerance
+            ? ' — enough to ship.'
+            : ` — shipping needs ${kg(cover.minKg)}–${kg(cover.maxKg)} kg reserved (±${cover.tolerancePct}%).`}
+        </p>
+      )}
+      {suggestion && suggestedKg > 0 && (
+        <div className="mb-3 rounded-lg border-2 border-blue-200 bg-blue-50/40 p-3 flex items-start justify-between gap-3">
+          <div className="min-w-0 text-xs">
+            <p className="flex items-center gap-1.5 text-sm font-semibold text-blue-900">
+              <Sparkles className="w-3.5 h-3.5" /> Suggested lot: {suggestion.lot.export_display_name}
+              {suggestion.lot.lot_no && <span className="text-[10px] text-gray-500 bg-white px-1.5 py-0.5 rounded">{suggestion.lot.lot_no}</span>}
+            </p>
+            <p className="text-gray-600 mt-0.5">
+              {[suggestion.lot.grade || suggestion.lot.variety, suggestion.lot.type === 'byproduct' ? 'by-product' : null,
+                suggestion.lot.warehouse_name, `${kg(suggestion.lot.available_qty)} kg free`].filter(Boolean).join(' · ')}
+            </p>
+            <p className="text-gray-500 mt-0.5">Same product as the order line. Nothing is reserved until you confirm.</p>
+          </div>
+          <button
+            onClick={confirmSuggestion}
+            disabled={allocatingId === `s-${suggestion.lot.id}`}
+            className="flex-shrink-0 inline-flex items-center gap-1.5 px-3 py-2 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 disabled:opacity-40"
+          >
+            Confirm — reserve {kg(suggestedKg)} kg
+          </button>
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-2 mb-3">
         <div className="relative flex-1 min-w-[12rem]">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />

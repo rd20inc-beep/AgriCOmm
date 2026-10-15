@@ -286,18 +286,6 @@ export function useUploadDocument() {
   });
 }
 
-export function useApproveDocument() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id, data }) => exportOrdersApi.approveDocument(id, data),
-    onSuccess: (_, { id }) => {
-      qc.invalidateQueries({ queryKey: queryKeys.orders.all });
-      qc.invalidateQueries({ queryKey: queryKeys.orders.detail(id) });
-      qc.invalidateQueries({ queryKey: queryKeys.documents.all });
-    },
-  });
-}
-
 export function useAllocateStock() {
   const qc = useQueryClient();
   return useMutation({
@@ -357,6 +345,8 @@ export function useMillingBatch(id) {
         }
         // Packing cost itemised into bags / master bags / polythene (or null).
         raw.packingBreakdown = res?.data?.packingBreakdown || null;
+        // The transport line's transporter + payer (P3-08) — pre-fills the costs drawer.
+        raw.transport = res?.data?.transport || null;
         // Yield waits for a raw-material cost (#427) — a yes/no, safe for cost-blind users.
         raw.awaitingArrivalRate = !!res?.data?.yieldStatus?.awaitingArrivalRate;
         const quality = res?.data?.quality || {};
@@ -490,6 +480,28 @@ export function useAddBatchCost() {
     // "M-004"), so detail(id) would miss and the costing sheet would stay stale.
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: queryKeys.batches.all });
+    },
+  });
+}
+
+// Save the whole Costs drawer in one call (one server transaction).
+export function useSaveBatchCosts() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }) => millingApi.saveCosts(id, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.batches.all });
+    },
+  });
+}
+
+export function useReverseYield() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }) => millingApi.reverseYield(id, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.batches.all });
+      qc.invalidateQueries({ queryKey: queryKeys.inventory.all });
     },
   });
 }

@@ -83,7 +83,7 @@ export function estimateCosting(form, items) {
 
 // The POST /api/export-orders body. Every key here must also be declared in
 // backend createExportOrder (Joi stripUnknown) and written by create().
-export function buildCreateOrderPayload({ form, items, products = [], packingLines = [], status }) {
+export function buildCreateOrderPayload({ form, items, products = [], packingLines = [], printedBags = [], status }) {
   const { qtyMT, totalKg, contractValue, pricePerMT } = orderTotals(items);
   const advPct = parseFloat(form.advancePct) || 0;
   const advExpected = contractValue * (advPct / 100);
@@ -239,7 +239,30 @@ export function buildCreateOrderPayload({ form, items, products = [], packingLin
     payload.total_loose_weight_kg = totalKg;
   }
 
+  // Printed-bag orders and the pallet cost go WITH the order (P3-18): the
+  // server posts them in the order's own transaction, or holds them on a Draft
+  // until Submit. They used to be separate calls after the save, so a Draft
+  // left vendor payables behind and a failure half-saved the order.
+  payload.printed_bags = sideCostBags(printedBags);
+  payload.pallet_cost = payload.palletized && num(form.palletCost) > 0 ? num(form.palletCost) : null;
+
   return payload;
+}
+
+// The printed-bag rows worth sending: a quantity is what makes one an order.
+export function sideCostBags(printedBags = []) {
+  return printedBags
+    .filter((b) => (parseInt(b.quantity, 10) || 0) > 0)
+    .map((b) => ({
+      bag_type_id: b.bagTypeId || null,
+      bag_type_name: b.bagType || null,
+      bag_size_kg: b.bagSizeKg ? parseFloat(b.bagSizeKg) : null,
+      vendor_id: b.vendorId ? Number(b.vendorId) : null,
+      quantity: parseInt(b.quantity, 10),
+      unit_cost: num(b.unitCost),
+      printing: b.printing || null,
+      brand_marking: b.brand || null,
+    }));
 }
 
 // What picking a buyer fills in: the country (always), and the buyer's port and

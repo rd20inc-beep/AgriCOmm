@@ -13,6 +13,7 @@ const mockState = { rows: {}, updates: [], inserts: [] };
 function mockBuilder(table) {
   const b = {
     where: () => b, whereNot: () => b, whereIn: () => b, whereNotIn: () => b, forUpdate: () => b,
+    whereRaw: () => b, whereNull: () => b, sum: () => b, // pending-hold lookup (P3-12)
     orderBy: () => b, select: () => b, returning: async () => [{ id: 99 }],
     first: async () => mockState.rows[table],
     update: async (patch) => { mockState.updates.push({ table, patch }); return 1; },
@@ -31,6 +32,8 @@ jest.mock('../config/database', () => {
   return db;
 });
 jest.mock('../utils/docNumber', () => ({ nextDocNo: jest.fn(async () => 'PL-7') }));
+// No returns in these fixtures (P3-11): nothing credited off any sale.
+jest.mock('../modules/localSales/saleCredits', () => ({ creditedOnSale: jest.fn(async () => 0) }));
 jest.mock('../modules/accounting/accounting.service', () => ({
   createJournal: jest.fn(async (_trx, j) => ({ id: 501, ...j })),
   postJournal: jest.fn(async () => ({})),

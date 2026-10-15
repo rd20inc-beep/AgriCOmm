@@ -213,6 +213,8 @@ export function transformOrder(dbOrder) {
     packingType: dbOrder.packing_type || 'retail',
     bagMaterial: dbOrder.bag_material || '',
     palletized: !!dbOrder.palletized,
+    // P3-18: printed bags / pallet cost a Draft holds until it is submitted.
+    draftSideCosts: dbOrder.draft_side_costs || null,
     // Packing / receiving mode
     receivingMode: dbOrder.receiving_mode || '',
     quantityUnit: dbOrder.quantity_unit || '',
@@ -253,6 +255,11 @@ export function transformOrder(dbOrder) {
     costs: transformCosts(dbOrder.costs),
     // Documents — convert array to keyed object if needed
     documents: transformDocuments(dbOrder.documents),
+    // The shipment gates as the server evaluates them (P3-17 / P3-13): per
+    // required document { fulfilled, state, source, … }, and how the order's
+    // reservations cover it { orderKg, reservedKg, tolerancePct, withinTolerance }.
+    documentGate: dbOrder.document_gate || dbOrder.documentGate || null,
+    reservationCover: dbOrder.reservation_cover || dbOrder.reservationCover || null,
     // Activity log — normalize export_order_status_history rows (from_status /
     // to_status / changed_by / reason / created_at) into the {action,date,by}
     // shape the TimelineTab renders. Already-shaped entries (mock data) pass through.
@@ -316,6 +323,8 @@ export function transformBatch(dbBatch) {
     approvedAt: dbBatch.approved_at || null,
     costs: dbBatch.costs || {},
     packingBreakdown: dbBatch.packingBreakdown || null,
+    // { hauler_id, hauler_name, paid_by, status, payable_id } or null (P3-08).
+    transport: dbBatch.transport || null,
     awaitingArrivalRate: !!dbBatch.awaitingArrivalRate,
     sampleAnalysis: dbBatch.sampleAnalysis || null,
     arrivalAnalysis: dbBatch.arrivalAnalysis || null,

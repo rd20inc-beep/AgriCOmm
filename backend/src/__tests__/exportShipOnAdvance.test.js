@@ -75,6 +75,8 @@ function order(over = {}) {
     balance_expected: 40000, balance_received: 0, revenue_posted: false,
     booked_fx_rate: 280, contract_value_pkr_locked: 14000000,
     freight_display: 'in_price', bank_account_id: 3, status: 'Ready to Ship', current_step: 8,
+    // The shipment's own facts the Shipped gate needs (EXP-16).
+    atd: '2026-10-07', gate_pass_no: 'GP-1',
     ...over,
   };
 }
@@ -95,14 +97,29 @@ const DOC_ROWS = [
 ];
 const docs = (list = DOC_ROWS) => list.map(([doc_type, status], i) => ({ id: i + 1, order_id: 1, doc_type, status }));
 
-function seed({ o = {}, unfulfilled, documents = [] } = {}) {
+// The gate reads the evidence (P3-17 / D-17): every checklist document NOT in
+// `unfulfilled` has a stored file, live and checked by a second person.
+// `unchecked` lists types whose file is live but nobody else has approved yet.
+function storedFiles({ unfulfilled = ['bl_final', 'coo'], unchecked = [] } = {}) {
+  return CHECKLIST.filter((t) => !unfulfilled.includes(t)).map((doc_type, i) => ({
+    id: 100 + i, linked_type: 'export_order', linked_id: 1, doc_type, is_latest: true,
+    status: 'Approved', file_path: `/uploads/${doc_type}.pdf`, uploaded_by: 5,
+    checked_by: unchecked.includes(doc_type) ? null : 9,
+  }));
+}
+
+// D-18: the order's 100 MT reserved by default.
+function seed({ o = {}, unfulfilled, unchecked, documents = [], reservedKg = 100000, settings = [] } = {}) {
   reset({
     export_orders: [order(o)],
     export_order_items: [],
     export_order_status_history: [],
     export_order_documents: documents,
     document_checklists: checklist({ unfulfilled }),
-    inventory_reservations: [],
+    document_store: storedFiles({ unfulfilled, unchecked }),
+    generated_documents: [],
+    inventory_reservations: reservedKg > 0 ? [{ id: 1, order_id: 1, lot_id: 7, reserved_qty: reservedKg, status: 'Active' }] : [],
+    system_settings: settings,
     export_packing_weights: [],
     // The advance re-class at shipment needs 1310 / 1110 (a missing account now
     // refuses the shipment rather than skipping the journal, P2-03).
@@ -197,6 +214,126 @@ describe('shipping on the advance', () => {
     expect(r.statusCode).toBe(200);
     expect(state.tables.export_orders[0].status).toBe('Shipped');
     expect(state.tables.export_orders[0].balance_received).toBe(0);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+describe('the document gate needs a stored file a second person approved (P3-17 / D-17)', () => {
+  it('a Confirm Ready tick with no file behind it does not count', async () => {
+    seed({
+      unfulfilled: ['phyto', 'bl_final', 'coo'],
+      documents: docs([...DOC_ROWS, ['phyto', 'Approved']]),
+    });
+    const r = await setStatus('Shipped');
+    expect(r.statusCode).toBe(400);
+    expect(r.body.message).toMatch(/not all in place \(Phytosanitary Certificate\)/);
+  });
+
+  it('a live file nobody else has checked does not count', async () => {
+    seed({ unchecked: ['fumigation'] });
+    const r = await setStatus('Shipped');
+    expect(r.statusCode).toBe(400);
+    expect(r.body.message).toMatch(/Fumigation Certificate/);
+  });
+
+  it('an approved generated Commercial Invoice stands in for the uploaded one', async () => {
+    seed({ unfulfilled: ['commercial_invoice', 'bl_final', 'coo'] });
+    state.tables.generated_documents = [{
+      id: 1, order_id: 1, doc_type: 'commercial-invoice', is_latest: true, status: 'Approved',
+      approved_by: 9, rendered_html: '<p>CI</p>',
+    }];
+    const r = await setStatus('Shipped');
+    expect(r.statusCode).toBe(200);
+  });
+
+  it('a generated document still Under Review does not', async () => {
+    seed({ unfulfilled: ['commercial_invoice', 'bl_final', 'coo'] });
+    state.tables.generated_documents = [{
+      id: 1, order_id: 1, doc_type: 'commercial-invoice', is_latest: true, status: 'Under Review', approved_by: null,
+    }];
+    const r = await setStatus('Shipped');
+    expect(r.statusCode).toBe(400);
+    expect(r.body.message).toMatch(/Commercial Invoice/);
+  });
+
+  it('the old Confirm Ready endpoint refuses to mark a document ready', async () => {
+    seed();
+    const r = res();
+    await controller.approveDocument(req({ body: { doc_type: 'phyto' } }), r);
+    expect(r.statusCode).toBe(400);
+    expect(r.body.message).toMatch(/D-17/);
+  });
+
+  it('the gate is what the order page shows', async () => {
+    seed({ unchecked: ['fumigation'] });
+    const gate = await require('../modules/exportOrders/documentGate').evaluateDocumentGate(db, 1);
+    expect(gate.phyto).toMatchObject({ fulfilled: true, source: 'file', documentId: 100 });
+    expect(gate.fumigation).toMatchObject({ fulfilled: false, state: 'awaiting_check' });
+    expect(gate.coo).toMatchObject({ fulfilled: false, postShipment: true, state: 'missing' });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+describe('shipping needs the stock reserved (P3-13 / D-18)', () => {
+  it('is refused with nothing reserved', async () => {
+    seed({ reservedKg: 0 });
+    const r = await setStatus('Shipped');
+    expect(r.statusCode).toBe(400);
+    expect(r.body.message).toMatch(/no stock is reserved for this order/);
+    expect(state.tables.export_orders[0].status).toBe('Ready to Ship');
+    expect(mockInventory.dispatchForShipment).not.toHaveBeenCalled();
+  });
+
+  it('is refused when the reservation is short by more than 2%', async () => {
+    seed({ reservedKg: 97000 });
+    const r = await setStatus('Shipped');
+    expect(r.statusCode).toBe(400);
+    expect(r.body.message).toMatch(/97,000 kg is reserved, short of the order's 100,000 kg by more than the ±2%/);
+  });
+
+  it('ships within the 2% tolerance either way', async () => {
+    seed({ reservedKg: 98000 });
+    expect((await setStatus('Shipped')).statusCode).toBe(200);
+    seed({ reservedKg: 102000 });
+    expect((await setStatus('Shipped')).statusCode).toBe(200);
+  });
+
+  it('the tolerance is a system setting', async () => {
+    seed({ reservedKg: 98000, settings: [{ id: 1, key: 'export_reservation_tolerance_pct', value: '1' }] });
+    const r = await setStatus('Shipped');
+    expect(r.statusCode).toBe(400);
+    expect(r.body.message).toMatch(/±1%/);
+  });
+
+  it('Ready to Ship is held to it too', async () => {
+    seed({ o: { status: 'Docs In Preparation' }, reservedKg: 0 });
+    const r = await setStatus('Ready to Ship');
+    expect(r.statusCode).toBe(400);
+    expect(r.body.message).toMatch(/Cannot mark Ready to Ship: no stock is reserved/);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+describe('the status API cannot skip the shipment checks (EXP-16)', () => {
+  it('refuses Shipped without a gate pass', async () => {
+    seed({ o: { gate_pass_no: null } });
+    const r = await setStatus('Shipped');
+    expect(r.statusCode).toBe(400);
+    expect(r.body.message).toMatch(/gate pass number is required/);
+  });
+
+  it('refuses Shipped without the departure date', async () => {
+    seed({ o: { atd: null } });
+    const r = await setStatus('Shipped');
+    expect(r.statusCode).toBe(400);
+    expect(r.body.message).toMatch(/actual departure date \(ATD\)/);
+  });
+
+  it('refuses Arrived without the arrival date', async () => {
+    seed({ o: { status: 'Shipped', ata: null } });
+    const r = await setStatus('Arrived');
+    expect(r.statusCode).toBe(400);
+    expect(r.body.message).toMatch(/actual arrival date \(ATA\)/);
   });
 });
 

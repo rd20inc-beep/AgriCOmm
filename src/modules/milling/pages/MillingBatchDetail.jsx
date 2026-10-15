@@ -22,6 +22,7 @@ import {
   Truck,
   Trash2,
   Layers,
+  RotateCcw,
 } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
@@ -30,9 +31,9 @@ import { useOwnerAuth } from '../../../context/OwnerAuthContext';
 import { queryKeys } from '../../../api/queryClient';
 import {
   useMillingBatch, useSaveQuality, useRecordYield,
-  useAddBatchCost, useAddVehicle, useUpdateMillingBatch,
+  useAddVehicle, useUpdateMillingBatch,
   useUpdateVehicle, useDeleteVehicle, useDeleteBatch, useBatchSourceLots,
-  useBatchStatusAction,
+  useBatchStatusAction, useSaveBatchCosts, useReverseYield,
 } from '../../../api/queries';
 import useConfirm from '../../../hooks/useConfirm';
 import { millingApi } from '../../../api/services';
@@ -128,7 +129,8 @@ export default function MillingBatchDetail() {
   // Mutations
   const saveQualityMut = useSaveQuality();
   const recordYieldMut = useRecordYield();
-  const addCostMut = useAddBatchCost();
+  const saveCostsMut = useSaveBatchCosts();
+  const reverseYieldMut = useReverseYield();
   const addVehicleMut = useAddVehicle();
   const updateVehicleMut = useUpdateVehicle();
   const updateBatchMut = useUpdateMillingBatch();
@@ -669,6 +671,10 @@ export default function MillingBatchDetail() {
       form[cat.key] = v != null ? String(v) : '';
     });
     setCostForm(form);
+    // P3-08: open with the transporter + payer on record. The drawer re-sends
+    // every line on save, and an empty hauler used to wipe the one stored.
+    setTransportHaulerId(batch.transport?.hauler_id ? String(batch.transport.hauler_id) : '');
+    setTransportPaidBy(batch.transport?.paid_by || 'company');
     setShowCostModal(true);
   }
 
@@ -683,32 +689,66 @@ export default function MillingBatchDetail() {
     for (const k of Object.keys(safeCosts)) existingKeyByNorm[norm(k)] = k;
     if (savingCosts) return;
     setSavingCosts(true);
-    try {
-      let total = 0;
-      for (const cat of millingCostCategories) {
-        const amount = parseFloat(costForm[cat.key]) || 0;
-        // Send a category when it has a value OR when it already had one and is
-        // now being cleared. `amount > 0` alone skipped every clear-to-zero, so
-        // emptying a cost appeared to save and the old figure stayed. Untouched
-        // empty categories are still skipped, so no spurious zero rows.
-        const hadStored = existingKeyByNorm[norm(cat.key)] != null;
-        if (amount > 0 || hadStored) {
-          const category = existingKeyByNorm[norm(cat.key)] || cat.key;
-          // #14 — transport carries the transporter + who bears it, so a
-          // company-paid freight raises a real transporter payable.
-          const extra = norm(cat.key) === 'transport'
-            ? { hauler_id: transportHaulerId ? parseInt(transportHaulerId, 10) : null, transport_paid_by: transportPaidBy }
-            : {};
-          await addCostMut.mutateAsync({ id: batchId, data: { category, amount, ...extra } });
-          total += amount;
-        }
+    // One request, one server transaction (P3-07): the drawer is saved whole
+    // or not at all — it used to post one call per category and close even
+    // when one failed, leaving the cost sheet half-saved.
+    const costs = [];
+    for (const cat of millingCostCategories) {
+      const amount = parseFloat(costForm[cat.key]) || 0;
+      // Send a category when it has a value OR when it already had one and is
+      // now being cleared. `amount > 0` alone skipped every clear-to-zero, so
+      // emptying a cost appeared to save and the old figure stayed. Untouched
+      // empty categories are still skipped, so no spurious zero rows.
+      const hadStored = existingKeyByNorm[norm(cat.key)] != null;
+      if (amount > 0 || hadStored) {
+        const category = existingKeyByNorm[norm(cat.key)] || cat.key;
+        // #14 — transport carries the transporter + who bears it, so a
+        // company-paid freight raises a real transporter payable.
+        const extra = norm(cat.key) === 'transport'
+          // An empty hauler is sent as absent, never as null: the server keeps
+          // the transporter on record unless a different one is chosen.
+          ? { ...(transportHaulerId ? { hauler_id: parseInt(transportHaulerId, 10) } : {}), transport_paid_by: transportPaidBy }
+          : {};
+        costs.push({ category, amount, ...extra });
       }
+    }
+    if (!costs.length) {
+      setSavingCosts(false);
+      setShowCostModal(false);
+      return;
+    }
+    try {
+      const res = await saveCostsMut.mutateAsync({ id: batchId, data: { costs } });
+      const total = res?.data?.total ?? costs.reduce((t, c) => t + c.amount, 0);
       addToast(`Costs updated for ${batch.id} — Total: ${pkr2(total)}`);
+      setShowCostModal(false);
     } catch (err) {
-      addToast(`Failed to save costs: ${err.message}`, 'error');
+      // Nothing was saved — keep the drawer open so the entries aren't lost.
+      addToast(`Costs not saved: ${err?.response?.data?.message || err.message}`, 'error');
     }
     setSavingCosts(false);
-    setShowCostModal(false);
+  }
+
+  // Reverse a recorded yield (P3-03): Owner-approved, with a reason. The server
+  // refuses once any output has been sold, reserved, moved or re-milled.
+  async function handleReverseYield() {
+    const ok = await confirm({
+      title: `Reverse the yield of ${batch.id}?`,
+      consequence: 'The output lots go back to zero, the raw rice returns to stock (a blend\'s source lots back under this batch), freed katta go back, and the milling journals get offsetting entries. The rice purchase stays booked. The batch returns to In Progress so the yield can be recorded again. Refused if any output has been sold, reserved or moved. Needs the Owner\'s authorization.',
+      reason: 'required',
+      confirmLabel: 'Reverse yield',
+      cancelLabel: 'Keep it',
+    });
+    if (!ok) return;
+    try {
+      await requestOwnerApproval((ownerId) => reverseYieldMut.mutateAsync({
+        id: batchId, data: { reason: ok.reason, authorized_by_owner_id: ownerId },
+      }), { label: `Reverse yield of batch ${batch.id}` });
+      addToast(`Yield of ${batch.id} reversed — the batch is back In Progress`, 'success');
+      invalidateBatch();
+    } catch (err) {
+      addToast(`Yield not reversed: ${err?.response?.data?.message || err.message}`, 'error');
+    }
   }
 
   async function handleApproveAnyway() {
@@ -1656,6 +1696,16 @@ export default function MillingBatchDetail() {
                 >
                   <Edit3 size={14} />
                   {batch.actualFinishedMT > 0 ? 'Update Yield' : 'Record Yield Output'}
+                </button>
+                )}
+                {batch.actualFinishedMT > 0 && batch.status === 'Completed' && hasPermission('milling', 'record_yield') && (
+                <button
+                  onClick={handleReverseYield}
+                  disabled={reverseYieldMut.isPending}
+                  className="ml-2 inline-flex items-center gap-1.5 px-3 py-1.5 border border-red-300 text-red-700 text-xs font-medium rounded-lg hover:bg-red-50 transition-colors disabled:opacity-50"
+                >
+                  <RotateCcw size={14} />
+                  Reverse Yield
                 </button>
                 )}
               </div>

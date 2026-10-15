@@ -45,7 +45,7 @@ import TransferFundsDrawer from '../../finance/components/TransferFundsDrawer';
 import AnomalyWatchCard from '../../ai/components/AnomalyWatchCard';
 import { favStar } from '../../../shared/utils/favorites';
 import { accountsForCurrency } from '../../../shared/utils/accountCurrency';
-import { valueInventory } from '../utils/inventoryValue';
+import { valueInventory, onHandKg } from '../utils/inventoryValue';
 import useConfirm from '../../../hooks/useConfirm';
 import PaymentDrawer from '../../../components/payments/PaymentDrawer';
 import { toLocalISODate, todayLocalISO, fmtPKR, fmtNum, fmtPct, fmtKg, fmtDate, fmtDateTime } from '../../../shared/utils/format';
@@ -232,11 +232,13 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
     };
   }, [valuation]);
   const inventory = Array.isArray(directInventory) ? directInventory : [];
-  const pf = (v) => parseFloat(v) || 0;
-
   // Quantities are KG, so they must NOT be multiplied by 1000 — see
   // utils/inventoryValue.js for why the lot's "MT" unit label is a trap.
   const inventoryValue = useMemo(() => valueInventory(inventory), [inventory]);
+  // KG on hand per type, on the same basis as the value above (mill, company).
+  const millKgOnHand = (type) => inventory
+    .filter((i) => i.type === type && (!i.entity || i.entity === 'mill') && (!i.ownership || i.ownership === 'company'))
+    .reduce((s, i) => s + onHandKg(i), 0);
 
   const { data: vendorData } = useExpenseVendors();
   // category → [{ id, name, ... }] for the Provider dropdown
@@ -1066,10 +1068,11 @@ export default function MillFinanceDashboard({ payrollOnly = false }) {
 
           {/* Inventory breakdown */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            <Stat tone="amber"  label="Raw Rice"      value={PKR(inventoryValue.raw)} sub={fmtKg(inventory.filter(i => i.type === 'raw').reduce((s, i) => s + pf(i.qty), 0), { decimals: 2 })} />
-            <Stat tone="green"  label="Finished Rice" value={PKR(inventoryValue.fin)} sub={fmtKg(inventory.filter(i => i.type === 'finished').reduce((s, i) => s + pf(i.availableQty), 0), { decimals: 2 })} />
-            <Stat tone="purple" label="Byproducts"    value={PKR(inventoryValue.bp)}  sub={fmtKg(inventory.filter(i => i.type === 'byproduct').reduce((s, i) => s + pf(i.availableQty), 0), { decimals: 2 })} />
-            <Stat tone="blue"   label="Working Cap."  value={PKR(inventoryValue.total)} sub="Locked in stock" />
+            <Stat tone="amber"  label="Raw Rice"      value={PKR(inventoryValue.raw)} sub={fmtKg(millKgOnHand('raw'), { decimals: 2 })} />
+            <Stat tone="green"  label="Finished Rice" value={PKR(inventoryValue.fin)} sub={fmtKg(millKgOnHand('finished'), { decimals: 2 })} />
+            <Stat tone="purple" label="Byproducts"    value={PKR(inventoryValue.bp)}  sub={fmtKg(millKgOnHand('byproduct'), { decimals: 2 })} />
+            <Stat tone="blue"   label="Working Cap."  value={PKR(inventoryValue.total)}
+                  sub={inventoryValue.unpricedLots ? `${inventoryValue.unpricedLots} lot(s) have no cost — valued at 0` : 'Locked in stock (landed cost × on hand)'} />
           </div>
 
           {/* Held-stock profit — what the stock on hand is worth at SELLING price,

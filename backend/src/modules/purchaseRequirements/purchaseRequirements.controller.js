@@ -59,9 +59,12 @@ module.exports = {
       const pr = await db('purchase_requirements').where('id', req.params.id).first();
       if (!pr) return res.status(404).json({ success: false, message: 'Purchase requirement not found.' });
       if (pr.status !== 'pending') return res.status(409).json({ success: false, message: `Already ${pr.status}.` });
-      const [row] = await db('purchase_requirements').where('id', pr.id).update({
+      // Guarded on 'pending': an approve racing a reject, a cancel or an order
+      // sync must not resurrect a request that changed meanwhile.
+      const [row] = await db('purchase_requirements').where({ id: pr.id, status: 'pending' }).update({
         status: 'approved', approved_by: req.user?.id || null, approved_at: db.fn.now(), updated_at: db.fn.now(),
       }).returning('*');
+      if (!row) return res.status(409).json({ success: false, message: 'This requirement changed meanwhile — refresh and try again.' });
       // Masked message — item, qty, est amount, PR no only. No customer/order/rice.
       const amt = row.est_amount != null ? ` (est ${row.currency} ${Math.round(row.est_amount).toLocaleString()})` : '';
       await notificationService.notifyFinance(null, {
@@ -78,9 +81,10 @@ module.exports = {
       const pr = await db('purchase_requirements').where('id', req.params.id).first();
       if (!pr) return res.status(404).json({ success: false, message: 'Purchase requirement not found.' });
       if (pr.status !== 'pending') return res.status(409).json({ success: false, message: `Already ${pr.status}.` });
-      const [row] = await db('purchase_requirements').where('id', pr.id).update({
+      const [row] = await db('purchase_requirements').where({ id: pr.id, status: 'pending' }).update({
         status: 'rejected', notes: req.body.reason || pr.notes, approved_by: req.user?.id || null, approved_at: db.fn.now(), updated_at: db.fn.now(),
       }).returning('*');
+      if (!row) return res.status(409).json({ success: false, message: 'This requirement changed meanwhile — refresh and try again.' });
       return res.json({ success: true, data: { requirement: row } });
     } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
   },
@@ -96,9 +100,43 @@ module.exports = {
         const why = pr.status === 'pending' ? ' — it has to be approved first' : '';
         return res.status(409).json({ success: false, message: `Cannot mark a ${pr.status} requirement as purchased${why}.` });
       }
-      const [row] = await db('purchase_requirements').where({ id: pr.id, status: 'approved' }).update({ status: 'purchased', updated_at: db.fn.now() }).returning('*');
+      const [row] = await db('purchase_requirements').where({ id: pr.id, status: 'approved' }).update({ status: 'purchased', review_required: false, updated_at: db.fn.now() }).returning('*');
       if (!row) return res.status(409).json({ success: false, message: 'This requirement changed meanwhile — refresh and try again.' });
       return res.json({ success: true, data: { requirement: row } });
     } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
+  },
+
+  // Cancel an open (pending or approved) requirement — the material is no
+  // longer needed, e.g. one flagged for review after its order shrank. The
+  // reason is required (schemas.cancelPurchaseRequirement). Finance is told
+  // when an approved one, which it may be about to buy, is cancelled.
+  async cancelRequirement(req, res) {
+    try {
+      const reason = String(req.body.reason || '').trim();
+      const row = await db.transaction(async (trx) => {
+        const pr = await trx('purchase_requirements').where('id', req.params.id).forUpdate().first();
+        if (!pr) { const e = new Error('Purchase requirement not found.'); e.statusCode = 404; throw e; }
+        if (!prService.OPEN_STATUSES.includes(pr.status)) {
+          const e = new Error(`Cannot cancel a ${pr.status} requirement.`); e.statusCode = 409; throw e;
+        }
+        const [updated] = await trx('purchase_requirements').where('id', pr.id).update({
+          status: 'cancelled', cancelled_at: trx.fn.now(), cancelled_by: req.user?.id || null, review_required: false,
+          notes: pr.notes ? `${pr.notes}\nCancelled: ${reason}` : `Cancelled: ${reason}`,
+          updated_at: trx.fn.now(),
+        }).returning('*');
+        if (pr.status === 'approved') {
+          await notificationService.notifyFinance(trx, {
+            title: 'Purchase request cancelled',
+            message: `${pr.pr_no}: ${pr.item_name} — cancelled, do not purchase.`,
+            linkedRef: pr.pr_no,
+          });
+        }
+        return updated;
+      });
+      return res.json({ success: true, data: { requirement: row } });
+    } catch (err) {
+      if (err.statusCode) return res.status(err.statusCode).json({ success: false, message: err.message });
+      return res.status(500).json({ success: false, message: err.message });
+    }
   },
 };

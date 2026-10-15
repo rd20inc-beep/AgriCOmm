@@ -3,17 +3,18 @@ import { Link } from 'react-router-dom';
 import { Truck, Search, Filter, Download } from 'lucide-react';
 import api from '../../../api/client';
 import { favStar } from '../../../shared/utils/favorites';
-import { toLocalISODate, todayLocalISO, fmtPKR, fmtMT } from '../../../shared/utils/format';
+import { toLocalISODate, todayLocalISO, fmtPKR, fmtKg } from '../../../shared/utils/format';
+import { purchaseFigures, purchasesCsv } from '../ricePurchases';
 
 function formatPKR(value) {
   if (!value) return '—';
   return fmtPKR(value, { decimals: 2 });
 }
 
-function formatMT(value) {
+function formatKg(value) {
   const n = parseFloat(value);
   if (!n) return '—';
-  return fmtMT(n, { decimals: 2 });
+  return fmtKg(n);
 }
 
 function todayISO() {
@@ -28,7 +29,7 @@ function daysAgoISO(days) {
 
 export default function RicePurchasesLedger() {
   const [purchases, setPurchases] = useState([]);
-  const [summary, setSummary] = useState({ count: 0, totalWeightMT: 0, totalValuePKR: 0 });
+  const [summary, setSummary] = useState({ count: 0, totalWeightKg: 0, totalValuePKR: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -66,7 +67,7 @@ export default function RicePurchasesLedger() {
       const res = await api.get('/api/milling/rice-purchases', params);
       const data = res?.data || res;
       setPurchases(data.purchases || []);
-      setSummary(data.summary || { count: 0, totalWeightMT: 0, totalValuePKR: 0 });
+      setSummary(data.summary || { count: 0, totalWeightKg: 0, totalValuePKR: 0 });
     } catch (err) {
       setError(err.message || 'Failed to load purchases');
     } finally {
@@ -87,34 +88,13 @@ export default function RicePurchasesLedger() {
       (r.driver_name || '').toLowerCase().includes(q) ||
       (r.lot_no || '').toLowerCase().includes(q) ||
       (r.batch_no || '').toLowerCase().includes(q) ||
-      (r.supplier_name || '').toLowerCase().includes(q)
+      (r.supplier_name || '').toLowerCase().includes(q) ||
+      (r.gate_pass_no || '').toLowerCase().includes(q)
     );
   }, [purchases, filters.search]);
 
   function exportCSV() {
-    const header = ['Date', 'Vehicle', 'Driver', 'Supplier', 'Variety', 'Batch', 'Lot No', 'Weight (MT)', 'Bags', 'Price/MT', 'Value (PKR)', 'Moisture %', 'Broken %', 'Notes'];
-    const rows = filteredRows.map(r => {
-      const q = r.quality_json || {};
-      const price = parseFloat(q.price_per_mt) || 0;
-      const wt = parseFloat(r.weight_mt) || 0;
-      return [
-        r.arrival_date ? new Date(r.arrival_date).toISOString().split('T')[0] : '',
-        r.vehicle_no || '',
-        r.driver_name || '',
-        r.supplier_name || '',
-        r.product_name || r.product_code || '',
-        r.batch_no || '',
-        r.lot_no || '',
-        wt.toFixed(2),
-        r.total_bags || '',
-        price || '',
-        price && wt ? Math.round(price * wt) : '',
-        q.moisture ?? '',
-        q.broken ?? '',
-        (r.notes || '').replace(/[\r\n,]/g, ' '),
-      ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(',');
-    });
-    const csv = [header.join(','), ...rows].join('\n');
+    const csv = purchasesCsv(filteredRows);
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -149,12 +129,15 @@ export default function RicePurchasesLedger() {
           <div className="text-2xl font-bold text-gray-900 mt-1">{summary.count}</div>
         </div>
         <div className="bg-white rounded-lg border border-gray-200 p-4">
-          <div className="text-xs text-gray-500 uppercase">Total Weight</div>
-          <div className="text-2xl font-bold text-gray-900 mt-1">{formatMT(summary.totalWeightMT)}</div>
+          <div className="text-xs text-gray-500 uppercase">Total Weight (KG)</div>
+          <div className="text-2xl font-bold text-gray-900 mt-1">{formatKg(summary.totalWeightKg)}</div>
         </div>
         <div className="bg-white rounded-lg border border-gray-200 p-4">
           <div className="text-xs text-gray-500 uppercase">Total Value</div>
           <div className="text-2xl font-bold text-gray-900 mt-1">{formatPKR(summary.totalValuePKR)}</div>
+          {summary.unpricedCount > 0 && (
+            <div className="text-xs text-amber-600 mt-1">{summary.unpricedCount} truck{summary.unpricedCount === 1 ? '' : 's'} not priced yet</div>
+          )}
         </div>
       </div>
 
@@ -226,9 +209,9 @@ export default function RicePurchasesLedger() {
                   <th className="px-3 py-2">Variety</th>
                   <th className="px-3 py-2">Lot No</th>
                   <th className="px-3 py-2">Batch</th>
-                  <th className="px-3 py-2 text-right">Weight</th>
+                  <th className="px-3 py-2 text-right">Weight (KG)</th>
                   <th className="px-3 py-2 text-right">Bags</th>
-                  <th className="px-3 py-2 text-right">Price/MT</th>
+                  <th className="px-3 py-2 text-right">Price/KG</th>
                   <th className="px-3 py-2 text-right">Value</th>
                   <th className="px-3 py-2 text-right">Moisture</th>
                   <th className="px-3 py-2 text-right">Broken</th>
@@ -236,61 +219,62 @@ export default function RicePurchasesLedger() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {filteredRows.map(r => {
-                  const q = r.quality_json || {};
-                  const price = parseFloat(q.price_per_mt) || 0;
-                  const wt = parseFloat(r.weight_mt) || 0;
-                  return (
-                    <tr key={r.id} className="hover:bg-gray-50">
-                      <td data-label="Date" className="px-3 py-2 text-gray-700">
-                        {r.arrival_date ? new Date(r.arrival_date).toISOString().split('T')[0] : '—'}
-                      </td>
-                      <td data-label="Vehicle" className="px-3 py-2 font-medium text-gray-900">{r.vehicle_no || '—'}</td>
-                      <td data-label="Supplier" className="px-3 py-2 text-gray-700 max-w-[14rem] truncate" title={r.supplier_name || undefined}>{r.supplier_name || '—'}</td>
-                      <td data-label="Variety" className="mob-hide px-3 py-2">
-                        {r.product_name || r.product_code ? (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-50 text-amber-700">
-                            {r.product_name || r.product_code}
-                          </span>
-                        ) : '—'}
-                      </td>
-                      <td data-label="Lot No" className="px-3 py-2">
-                        {r.lot_id ? (
-                          <Link to={`/lot-inventory/${r.lot_id}`} className="text-blue-600 hover:underline font-mono text-xs">
-                            {r.lot_no}
-                          </Link>
-                        ) : (
-                          <span className="font-mono text-xs text-gray-400">{r.lot_no || '—'}</span>
-                        )}
-                      </td>
-                      <td data-label="Batch" className="mob-hide px-3 py-2">
-                        {r.batch_id ? (
-                          <Link to={`/milling/${r.batch_id}`} className="text-blue-600 hover:underline">
-                            {r.batch_no}
-                          </Link>
-                        ) : '—'}
-                      </td>
-                      <td data-label="Weight" className="px-3 py-2 text-right font-medium">{wt ? wt.toFixed(2) : '—'}</td>
-                      <td data-label="Bags" className="mob-hide px-3 py-2 text-right">{r.total_bags || '—'}</td>
-                      <td data-label="Price/MT" className="mob-hide px-3 py-2 text-right">{price ? formatPKR(price) : '—'}</td>
-                      <td data-label="Value" className="px-3 py-2 text-right font-medium">
-                        {price && wt ? formatPKR(price * wt) : '—'}
-                      </td>
-                      <td data-label="Moisture" className="mob-hide px-3 py-2 text-right">
-                        {q.moisture != null ? `${q.moisture}%` : '—'}
-                      </td>
-                      <td data-label="Broken" className="mob-hide px-3 py-2 text-right">
-                        {q.broken != null ? `${q.broken}%` : '—'}
-                      </td>
-                      <td data-label="Driver" className="mob-hide px-3 py-2 text-gray-600">{r.driver_name || '—'}</td>
-                    </tr>
-                  );
-                })}
+                {filteredRows.map(r => <PurchaseRow key={r.id} r={r} />)}
               </tbody>
             </table>
           </div>
         )}
       </div>
     </div>
+  );
+}
+
+export function PurchaseRow({ r }) {
+  const q = r.quality_json || {};
+  const f = purchaseFigures(r);
+  return (
+    <tr className="hover:bg-gray-50">
+      <td data-label="Date" className="px-3 py-2 text-gray-700">
+        {r.arrival_date ? new Date(r.arrival_date).toISOString().split('T')[0] : '—'}
+      </td>
+      <td data-label="Vehicle" className="px-3 py-2 font-medium text-gray-900">{r.vehicle_no || '—'}</td>
+      <td data-label="Supplier" className="px-3 py-2 text-gray-700 max-w-[14rem] truncate" title={r.supplier_name || undefined}>{r.supplier_name || '—'}</td>
+      <td data-label="Variety" className="mob-hide px-3 py-2">
+        {f.variety ? (
+          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-50 text-amber-700">
+            {f.variety}
+          </span>
+        ) : '—'}
+      </td>
+      <td data-label="Lot No" className="px-3 py-2">
+        {r.lot_id ? (
+          <Link to={`/lot-inventory/${r.lot_id}`} className="text-blue-600 hover:underline font-mono text-xs">
+            {r.lot_no}
+          </Link>
+        ) : (
+          <span className="font-mono text-xs text-gray-400">{r.lot_no || '—'}</span>
+        )}
+      </td>
+      <td data-label="Batch" className="mob-hide px-3 py-2">
+        {r.batch_id ? (
+          <Link to={`/milling/${r.batch_id}`} className="text-blue-600 hover:underline">
+            {r.batch_no}
+          </Link>
+        ) : '—'}
+      </td>
+      <td data-label="Weight (KG)" className="px-3 py-2 text-right font-medium">{formatKg(f.weightKg)}</td>
+      <td data-label="Bags" className="mob-hide px-3 py-2 text-right">{r.total_bags || '—'}</td>
+      <td data-label="Price/KG" className="mob-hide px-3 py-2 text-right">{f.pricePerKg ? formatPKR(f.pricePerKg) : '—'}</td>
+      <td data-label="Value" className="px-3 py-2 text-right font-medium">
+        {f.valuePkr ? formatPKR(f.valuePkr) : '—'}
+      </td>
+      <td data-label="Moisture" className="mob-hide px-3 py-2 text-right">
+        {q.moisture != null ? `${q.moisture}%` : '—'}
+      </td>
+      <td data-label="Broken" className="mob-hide px-3 py-2 text-right">
+        {q.broken != null ? `${q.broken}%` : '—'}
+      </td>
+      <td data-label="Driver" className="mob-hide px-3 py-2 text-gray-600">{r.driver_name || '—'}</td>
+    </tr>
   );
 }

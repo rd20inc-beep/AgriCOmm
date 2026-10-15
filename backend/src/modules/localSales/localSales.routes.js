@@ -6,6 +6,8 @@ const auditAction = require('../../middleware/audit');
 const { requireIdempotencyKey } = require('../../middleware/idempotency');
 const validate = require('../../middleware/validate');
 const schemas = require('../../middleware/schemas');
+const ownerApproval = require('../../middleware/ownerApproval');
+const saleReturns = require('./saleReturns.handlers');
 
 // Admin invoice copy exposes internal cost/margin — restrict to these roles.
 // (Owner & Super Admin must be listed explicitly; authorizeRole has no bypass.)
@@ -62,6 +64,20 @@ router.post(
   validate(schemas.localSaleReceipt),
   auditAction('accept_local_sale_group_payment', 'local_sale', (req) => req.params.groupNo),
   controller.acceptGroupPayment
+);
+// Returns / credit notes (P3-11, owner decision D-22): a NEW document linked
+// to the confirmed sale — stock back to its lot at the original cost, revenue
+// and COGS reversed by signed deltas, the paid part refunded or held as the
+// customer's credit. Moves stock, revenue and money, so the Owner approves it.
+router.get('/:id/returns', canReadSales, saleReturns.list);
+router.post(
+  '/:id/returns',
+  authorize('inventory', 'create'),
+  ownerApproval('local_sale_return'),
+  requireIdempotencyKey,
+  validate(schemas.localSaleReturn),
+  auditAction('create_local_sale_return', 'local_sale', (req) => req.params.id),
+  saleReturns.createReturn
 );
 router.get('/:id/payments', canReadSales, controller.getPayments);
 router.get('/:id/invoice', canReadSales, controller.getInvoice);

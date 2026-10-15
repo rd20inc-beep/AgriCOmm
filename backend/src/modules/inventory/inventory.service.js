@@ -1,11 +1,15 @@
 const db = require('../../config/database');
 const uc = require('../../services/unitConversion');
+const { lotBagCount } = require('../../shared/units');
+const { lotUnitCostPerKg, lockedCogsFields } = require('../localSales/salePricing');
 const { isKattaItem } = require('../../shared/packagingTypes');
 // #9-scoping: READ-path warehouse restriction. Deliberately NOT applied to any
 // movement/posting function in this file — scoping a write would corrupt stock.
 const { applyWarehouseScope } = require('../../utils/warehouseScope');
 const { isReservedSource } = require('../milling/batchLifecycle');
 const { resolveBatchPackSpec } = require('../milling/batchPackSpec');
+const { deriveAvailable, deriveLotStatus, weightedInboundCost } = require('./lotQuantity');
+const { lotCostPerKg } = require('./exportPool');
 
 // The GL's by-product output split for a batch (millingCompletionJournal) —
 // required lazily: the milling module requires this service.
@@ -48,6 +52,12 @@ const MOVEMENT_TYPES = {
   PRODUCTION_ISSUE: 'production_issue',
   PRODUCTION_OUTPUT: 'production_output',
   BYPRODUCT_OUTPUT: 'byproduct_output',
+  // Reversals of the three above (P3-03) — a re-recorded yield that produces
+  // less, or a reversed yield, posts these as NEW ledger rows instead of
+  // deleting the original receipt / issue.
+  PRODUCTION_ISSUE_REVERSE: 'production_issue_reverse',
+  PRODUCTION_OUTPUT_REVERSE: 'production_output_reverse',
+  BYPRODUCT_OUTPUT_REVERSE: 'byproduct_output_reverse',
   // Transfers
   TRANSFER_OUT: 'transfer_out',
   TRANSFER_IN: 'transfer_in',
@@ -64,16 +74,32 @@ const MOVEMENT_TYPES = {
   // Reservations (no qty change, reservation_effect only)
   RESERVATION_HOLD: 'reservation_hold',
   RESERVATION_RELEASE: 'reservation_release',
+  // Milling commitments (P6a / P3-01): rice committed to a batch is held on the
+  // lot (milling_reserved_qty) until yield consumes it or the batch releases it.
+  MILLING_HOLD: 'milling_hold',
+  MILLING_RELEASE: 'milling_release',
+  // An added purchase on a lot already committed to milling splits the
+  // un-milled remainder off into a new lot (addPurchaseToLot).
+  LOT_SPLIT: 'lot_split',
+  LOT_MERGE: 'lot_merge',
+  // Edit Received: the weight that actually arrived is corrected (P3-01).
+  RECEIPT_CORRECTION_IN: 'receipt_correction_in',
+  RECEIPT_CORRECTION_OUT: 'receipt_correction_out',
   // Adjustments
   ADJUSTMENT_PLUS: 'adjustment_plus',
   ADJUSTMENT_MINUS: 'adjustment_minus',
   DAMAGE_WRITEOFF: 'damage_writeoff',
   SHORTAGE_WRITEOFF: 'shortage_writeoff',
+  // A purchase voided before anything was drawn from it (P3-11): the whole
+  // lot leaves at its own cost. Not a write-off — the purchase never stood.
+  PURCHASE_VOID: 'purchase_void',
 };
 
 // Movement types that reduce stock
 const OUTBOUND_TYPES = new Set([
   MOVEMENT_TYPES.PRODUCTION_ISSUE,
+  MOVEMENT_TYPES.PRODUCTION_OUTPUT_REVERSE,
+  MOVEMENT_TYPES.BYPRODUCT_OUTPUT_REVERSE,
   MOVEMENT_TYPES.TRANSFER_OUT,
   MOVEMENT_TYPES.EXPORT_DISPATCH,
   MOVEMENT_TYPES.LOCAL_SALE,
@@ -81,6 +107,9 @@ const OUTBOUND_TYPES = new Set([
   MOVEMENT_TYPES.ADJUSTMENT_MINUS,
   MOVEMENT_TYPES.DAMAGE_WRITEOFF,
   MOVEMENT_TYPES.SHORTAGE_WRITEOFF,
+  MOVEMENT_TYPES.LOT_SPLIT,
+  MOVEMENT_TYPES.RECEIPT_CORRECTION_OUT,
+  MOVEMENT_TYPES.PURCHASE_VOID,
 ]);
 
 // Movement types that increase stock
@@ -94,13 +123,36 @@ const INBOUND_TYPES = new Set([
   MOVEMENT_TYPES.RETURN,
   MOVEMENT_TYPES.OPENING_BALANCE,
   MOVEMENT_TYPES.SERVICE_DISPATCH_REVERSE,
+  MOVEMENT_TYPES.LOT_MERGE,
+  MOVEMENT_TYPES.RECEIPT_CORRECTION_IN,
+  MOVEMENT_TYPES.PRODUCTION_ISSUE_REVERSE,
+]);
+
+// Inbound movements that UNDO an earlier outbound one. They put stock back but
+// are not intake, so they never grow received_net_weight_kg (the lot's
+// original intake): a reversed service dispatch inflated the client's
+// "produced" figure (MIL-34), a reversed milling issue would inflate the raw
+// lot's received weight.
+const REVERSAL_INBOUND_TYPES = new Set([
+  MOVEMENT_TYPES.SERVICE_DISPATCH_REVERSE,
+  MOVEMENT_TYPES.PRODUCTION_ISSUE_REVERSE,
 ]);
 
 // Reservation types — no qty change, only reservation_effect
 const RESERVATION_TYPES = new Set([
   MOVEMENT_TYPES.RESERVATION_HOLD,
   MOVEMENT_TYPES.RESERVATION_RELEASE,
+  MOVEMENT_TYPES.MILLING_HOLD,
+  MOVEMENT_TYPES.MILLING_RELEASE,
 ]);
+
+// Which hold column each reservation type moves, and in which direction.
+const HOLD_EFFECTS = {
+  [MOVEMENT_TYPES.RESERVATION_HOLD]: { column: 'reserved_qty', sign: 1 },
+  [MOVEMENT_TYPES.RESERVATION_RELEASE]: { column: 'reserved_qty', sign: -1 },
+  [MOVEMENT_TYPES.MILLING_HOLD]: { column: 'milling_reserved_qty', sign: 1 },
+  [MOVEMENT_TYPES.MILLING_RELEASE]: { column: 'milling_reserved_qty', sign: -1 },
+};
 
 // Canonical mapping: internal movement code → stored lot_transactions.transaction_type
 const LOT_TRANSACTION_TYPE_MAP = {
@@ -109,6 +161,9 @@ const LOT_TRANSACTION_TYPE_MAP = {
   [MOVEMENT_TYPES.PRODUCTION_ISSUE]: 'milling_issue',
   [MOVEMENT_TYPES.PRODUCTION_OUTPUT]: 'milling_receipt',
   [MOVEMENT_TYPES.BYPRODUCT_OUTPUT]: 'byproduct_receipt',
+  [MOVEMENT_TYPES.PRODUCTION_ISSUE_REVERSE]: 'milling_issue_reversal',
+  [MOVEMENT_TYPES.PRODUCTION_OUTPUT_REVERSE]: 'milling_receipt_reversal',
+  [MOVEMENT_TYPES.BYPRODUCT_OUTPUT_REVERSE]: 'byproduct_receipt_reversal',
   [MOVEMENT_TYPES.TRANSFER_OUT]: 'warehouse_transfer_out',
   [MOVEMENT_TYPES.TRANSFER_IN]: 'warehouse_transfer_in',
   [MOVEMENT_TYPES.EXPORT_DISPATCH]: 'export_dispatch_out',
@@ -117,12 +172,19 @@ const LOT_TRANSACTION_TYPE_MAP = {
   [MOVEMENT_TYPES.SERVICE_DISPATCH_REVERSE]: 'service_dispatch_in',
   [MOVEMENT_TYPES.RESERVATION_HOLD]: 'export_allocation',
   [MOVEMENT_TYPES.RESERVATION_RELEASE]: 'export_release',
+  [MOVEMENT_TYPES.MILLING_HOLD]: 'milling_hold',
+  [MOVEMENT_TYPES.MILLING_RELEASE]: 'milling_release',
+  [MOVEMENT_TYPES.LOT_SPLIT]: 'lot_split',
+  [MOVEMENT_TYPES.LOT_MERGE]: 'lot_merge',
+  [MOVEMENT_TYPES.RECEIPT_CORRECTION_IN]: 'purchase_correction_in',
+  [MOVEMENT_TYPES.RECEIPT_CORRECTION_OUT]: 'purchase_correction_out',
   [MOVEMENT_TYPES.ADJUSTMENT_PLUS]: 'stock_adjustment_plus',
   [MOVEMENT_TYPES.ADJUSTMENT_MINUS]: 'stock_adjustment_minus',
   [MOVEMENT_TYPES.DAMAGE_WRITEOFF]: 'damage_out',
   [MOVEMENT_TYPES.SHORTAGE_WRITEOFF]: 'shortage_out',
   [MOVEMENT_TYPES.RETURN]: 'return_in',
   [MOVEMENT_TYPES.OPENING_BALANCE]: 'opening_balance',
+  [MOVEMENT_TYPES.PURCHASE_VOID]: 'purchase_void_out',
 };
 
 function getMovementDirection(movementType) {
@@ -220,11 +282,9 @@ function reconcileRow(lot, ledgerTotalKg) {
   return {
     lotId: lot.id,
     lotNo: lot.lot_no,
-    systemQtyMT: systemBalanceKg / 1000,
     systemQtyKg: systemBalanceKg,
     ledgerQtyKg: ledgerBalanceKg,
     discrepancyKg,
-    discrepancyMT: discrepancyKg / 1000,
     isReconciled: Math.abs(discrepancyKg) < 1, // within 1 KG tolerance
   };
 }
@@ -362,6 +422,28 @@ const inventoryService = {
 
   // =========================================================================
   // CORE: Post a stock movement
+  //
+  // The ONE writer of a lot's quantity columns (P3-01): qty, available_qty,
+  // reserved_qty, milling_reserved_qty, net_weight_kg / gross_weight_kg and
+  // status change only here, always together, always with a lot_transactions
+  // row, always under a row lock. Holds (export reservations, milling
+  // commitments) are movements too: they move a hold column, leave qty alone
+  // and write a zero-quantity ledger row carrying reservation_effect.
+  //
+  //   available_qty = qty − reserved_qty − milling_reserved_qty   (lotQuantity)
+  //
+  // Cost: only an inbound movement changes the lot's cost — the weighted
+  // average of what is on the lot and what arrives. Outbound movements carry
+  // their cost into the ledger row (cost_impact) but never rewrite the lot's
+  // cost (INV-22).
+  //
+  // Optional (all backward compatible):
+  //   ledger         — what the user entered, for the ledger row
+  //                    (transactionDate, inputUnit, inputQty, quantityBags,
+  //                    balanceBags, rateInputUnit, rateInputValue, costImpact,
+  //                    referenceModule, referenceId)
+  //   flagZeroCost   — false: an inbound with no cost does not set
+  //                    cost_incomplete (a purchase recorded before its price)
   // =========================================================================
   async postMovement(trx, {
     movementType,
@@ -379,11 +461,16 @@ const inventoryService = {
     orderId,
     transferId,
     userId,
+    ledger = {},
+    flagZeroCost = true,
   }) {
     if (!trx) throw new Error('postMovement requires a transaction');
     if (!movementType) throw new Error('movementType is required');
     if (!lotId) throw new Error('lotId is required');
     if (qty == null || qty <= 0) throw new Error('qty must be a positive number');
+    if (!INBOUND_TYPES.has(movementType) && !OUTBOUND_TYPES.has(movementType) && !RESERVATION_TYPES.has(movementType)) {
+      throw new Error(`Unknown movement type: ${movementType}`);
+    }
 
     // Units (Phase 5c): qty is now KG and costPerUnit is per-KG — so qty/cost
     // columns are stored natively in KG. totalCost = cost × qty is invariant
@@ -403,12 +490,22 @@ const inventoryService = {
       throw new Error(`Lot ${lotId} not found`);
     }
 
+    const currentQty = parseFloat(lot.qty) || 0;
+    const currentReserved = parseFloat(lot.reserved_qty) || 0;
+    const currentMillingReserved = parseFloat(lot.milling_reserved_qty) || 0; // P6a
+    // What may still be drawn: the derived figure, or the stored one when that
+    // is lower — a lot whose stored availability drifted below its holds (an
+    // old "Use in Batch") must not hand the same rice out a second time.
+    const freeQty = Math.min(
+      parseFloat(lot.available_qty) || 0,
+      deriveAvailable({ qty: currentQty, reserved_qty: currentReserved, milling_reserved_qty: currentMillingReserved }),
+    );
+
     // 2. For outbound movements: check sufficient available qty
     if (OUTBOUND_TYPES.has(movementType)) {
-      const availableQty = parseFloat(lot.available_qty) || 0;
-      if (availableQty < parsedQty) {
+      if (freeQty + 1e-6 < parsedQty) {
         throw new Error(
-          `Insufficient stock in lot ${lot.lot_no}: available ${availableQty} ${lot.unit}, required ${parsedQty}`
+          `Insufficient stock in lot ${lot.lot_no}: available ${freeQty} ${lot.unit}, required ${parsedQty}`
         );
       }
     }
@@ -436,20 +533,35 @@ const inventoryService = {
       created_by: userId || null,
     };
 
-    // 4. Update lot qty
-    const currentQty = parseFloat(lot.qty) || 0;
-    const currentReserved = parseFloat(lot.reserved_qty) || 0;
-    const currentMillingReserved = parseFloat(lot.milling_reserved_qty) || 0; // P6a
-    let newQty;
+    // 4. New quantities.
+    let newQty = currentQty;
+    let newReserved = currentReserved;
+    let newMillingReserved = currentMillingReserved;
+    let holdEffect = null;
 
     if (INBOUND_TYPES.has(movementType)) {
       newQty = currentQty + parsedQty;
     } else if (OUTBOUND_TYPES.has(movementType)) {
       newQty = currentQty - parsedQty;
-    } else if (RESERVATION_TYPES.has(movementType)) {
-      newQty = currentQty; // no qty change for reservations
     } else {
-      throw new Error(`Unknown movement type: ${movementType}`);
+      // A hold moves one hold column; qty is untouched.
+      const { column, sign } = HOLD_EFFECTS[movementType];
+      if (sign > 0) {
+        if (freeQty + 1e-6 < parsedQty) {
+          throw new Error(
+            `Cannot hold ${parsedQty} kg on lot ${lot.lot_no}: only ${freeQty} kg available (qty ${currentQty}, reserved ${currentReserved}, in milling ${currentMillingReserved})`
+          );
+        }
+        holdEffect = parsedQty;
+      } else {
+        // Release what is actually held, never more: a legacy row can name more
+        // than the lot still holds, and a hold must not go negative.
+        const held = column === 'reserved_qty' ? currentReserved : currentMillingReserved;
+        holdEffect = -Math.min(parsedQty, held);
+      }
+      if (column === 'reserved_qty') newReserved = Math.max(0, currentReserved + holdEffect);
+      else newMillingReserved = Math.max(0, currentMillingReserved + holdEffect);
+      movement.hold_effect = holdEffect;
     }
 
     // HARD ENFORCEMENT: no negative stock
@@ -458,61 +570,69 @@ const inventoryService = {
     }
 
     // 5. available_qty = qty - reserved_qty (export) - milling_reserved_qty (P6a)
-    const newAvailable = newQty - currentReserved - currentMillingReserved;
+    const newAvailable = deriveAvailable({ qty: newQty, reserved_qty: newReserved, milling_reserved_qty: newMillingReserved });
     const currentNetWeightKg = parseFloat(lot.net_weight_kg) || currentQty;
     const newNetWeightKg = currentNetWeightKg + (direction * movementQtyKg);
     const newGrossWeightKg = newNetWeightKg;
 
-    // 6. Recalculate total_value
-    const newCostPerUnit = parsedCost > 0 ? parsedCost : parseFloat(lot.cost_per_unit) || 0;
+    // 6. Cost: inbound → weighted average; outbound / holds → unchanged.
+    const lotCost = parseFloat(lot.cost_per_unit) || 0;
+    const newCostPerUnit = INBOUND_TYPES.has(movementType)
+      ? weightedInboundCost({ currentQty, currentCost: lotCost, inQty: parsedQty, inCost: parsedCost })
+      : lotCost;
     const newTotalValue = newCostPerUnit * newQty;
 
     const lotUpdate = {
       qty: newQty,
       available_qty: newAvailable,
+      reserved_qty: newReserved,
+      milling_reserved_qty: newMillingReserved,
       cost_per_unit: newCostPerUnit,
       total_value: newTotalValue,
       net_weight_kg: newNetWeightKg,
       gross_weight_kg: newGrossWeightKg,
+      status: deriveLotStatus(lot.status, newQty),
       updated_at: trx.fn.now(),
     };
     // received_net_weight_kg = immutable original intake: grows on inbound
     // (purchase receipt / production output), never shrinks on consumption — so a
     // lot remembers how much it started with even after milling/sales draw it down.
-    if (INBOUND_TYPES.has(movementType)) {
+    if (INBOUND_TYPES.has(movementType) && !REVERSAL_INBOUND_TYPES.has(movementType)) {
       lotUpdate.received_net_weight_kg = trx.raw('COALESCE(received_net_weight_kg, 0) + ?', [movementQtyKg]);
     }
-    await trx('inventory_lots').where('id', lotId).update(lotUpdate);
-
     // Flag zero-cost lots on inbound movements — EXCEPT client-owned
     // (service-milling) lots, which are correctly zero-cost (the client owns the
     // rice; the mill only earns a service fee) and must not be flagged incomplete.
-    if (INBOUND_TYPES.has(movementType) && parsedCost === 0 && lot.ownership !== 'client') {
-      await trx('inventory_lots').where('id', lotId).update({ cost_incomplete: true });
+    if (INBOUND_TYPES.has(movementType) && parsedCost === 0 && lot.ownership !== 'client' && flagZeroCost) {
+      lotUpdate.cost_incomplete = true;
     }
+    // lot-qty-writer: postMovement — the one writer (lotQuantity invariant).
+    await trx('inventory_lots').where('id', lotId).update(lotUpdate);
 
     const txnNo = await generateLotTxnNo(trx);
-    await trx('lot_transactions').insert({
+    const [txn] = await trx('lot_transactions').insert({
       transaction_no: txnNo,
-      transaction_date: new Date().toISOString().slice(0, 10),
+      transaction_date: ledger.transactionDate || new Date().toISOString().slice(0, 10),
       lot_id: lotId,
       transaction_type: LOT_TRANSACTION_TYPE_MAP[movementType] || movementType,
-      reference_module: resolveReferenceModule({ orderId, batchId, transferId, sourceEntity }),
-      reference_id: orderId || batchId || transferId || null,
+      reference_module: ledger.referenceModule || resolveReferenceModule({ orderId, batchId, transferId, sourceEntity }),
+      reference_id: ledger.referenceId || orderId || batchId || transferId || null,
       reference_no: linkedRef || null,
       warehouse_from_id: fromWarehouseId || null,
       warehouse_to_id: toWarehouseId || null,
-      input_unit: 'KG',
-      input_qty: parsedQty,
+      input_unit: ledger.inputUnit || 'KG',
+      input_qty: ledger.inputQty != null ? ledger.inputQty : parsedQty,
       quantity_kg: direction * movementQtyKg,
-      quantity_bags: direction * Math.round(movementQtyKg / (parseFloat(lot.bag_weight_kg) || 50)),
-      rate_input_unit: 'KG',
-      rate_input_value: parsedCost || null,
+      quantity_bags: ledger.quantityBags != null
+        ? direction * Math.abs(ledger.quantityBags)
+        : direction * lotBagCount(lot, movementQtyKg),
+      rate_input_unit: ledger.rateInputUnit || 'KG',
+      rate_input_value: ledger.rateInputValue != null ? ledger.rateInputValue : (parsedCost || null),
       rate_per_kg: parsedCost > 0 ? parsedCost : null,
-      cost_impact: totalCost,
+      cost_impact: ledger.costImpact != null ? ledger.costImpact : totalCost,
       currency: currency || 'PKR',
       balance_kg: newNetWeightKg,
-      balance_bags: Math.round(newNetWeightKg / (parseFloat(lot.bag_weight_kg) || 50)),
+      balance_bags: ledger.balanceBags != null ? ledger.balanceBags : lotBagCount(lot, newNetWeightKg),
       remarks: notes || null,
       created_by: userId || null,
       // Phase 1 new columns
@@ -522,8 +642,9 @@ const inventoryService = {
       entity_to: destEntity || lot.entity || null,
       performed_by: userId || null,
       performed_at: new Date(),
-      reservation_effect: null,
-    });
+      reservation_effect: holdEffect,
+    }).returning('id');
+    movement.lot_transaction_id = txn && typeof txn === 'object' ? txn.id : txn;
 
     // 7. Return the movement record
     return movement;
@@ -707,6 +828,7 @@ const inventoryService = {
         productId: resolvedProductId,
       });
 
+      // lot-qty-free: created empty; the receipt below fills it.
       [lot] = await trx('inventory_lots')
         .insert({
           lot_no: lotNo,
@@ -774,6 +896,14 @@ const inventoryService = {
       lot = await trx('inventory_lots').where('id', lot.id).first();
     }
 
+    // D-6: truck rice is bought at receipt (supplier payable + Dr 1210 /
+    // Cr 2010, like New Purchase Lot) and, being the batch's input, moves
+    // straight on into 1260 Milling WIP. Client-owned (service) intake is
+    // skipped inside. A posting failure rolls the receipt back.
+    if (lot && !svcBatch?.is_service_milling) {
+      await require('../milling/millingWip').syncBatchIntake(trx, batchId, { userId, reason: 'truck rice received' });
+    }
+
     return { lot, movement };
   },
 
@@ -814,11 +944,17 @@ const inventoryService = {
             + 'Adjust the batch quantity or the lot before recording yield.',
           );
         }
-        if (heldNow !== heldAfter) {
-          await trx('inventory_lots').where({ id: lot.id }).update({
-            milling_reserved_qty: heldAfter,
-            available_qty: avail,
-            updated_at: trx.fn.now(),
+        if (release > 0) {
+          // The hold comes off through the movement engine (lock + ledger row).
+          await inventoryService.postMovement(trx, {
+            movementType: MOVEMENT_TYPES.MILLING_RELEASE,
+            lotId: lot.id,
+            qty: release,
+            sourceEntity: 'mill',
+            linkedRef: `batch-${batchId}`,
+            notes: `Milling hold released for consumption — batch ${batchId}`,
+            batchId,
+            userId,
           });
         }
         if (consume <= 0) continue;
@@ -919,15 +1055,71 @@ const inventoryService = {
   async upsertOutputLot(trx, match, row) {
     const existing = await trx('inventory_lots').where(match).first();
     if (!existing) {
+      // lot-qty-writer: callers pass an empty row (qty 0); the output movement fills it.
       const [created] = await trx('inventory_lots').insert(row).returning('*');
       return created;
     }
     // Keep what belongs to the lot rather than to this yield: its number (which
-    // may have been renamed by hand) and its identity.
-    const { lot_no: _generated, ...rest } = row;
+    // may have been renamed by hand) and its identity — and its quantities.
+    // The row carries qty 0 for a NEW lot; zeroing an existing one here and
+    // re-posting the full yield on top was a balance rewrite with no ledger row
+    // (P3-03 / MIL-06). The caller moves the qty to the new yield with a
+    // receipt or receipt-reversal movement (postOutputToTarget).
+    const {
+      lot_no: _generated,
+      qty: _qty, available_qty: _avail, reserved_qty: _res, net_weight_kg: _net,
+      gross_weight_kg: _gross, total_value: _value,
+      ...rest
+    } = row;
+    // lot-qty-free: the quantity columns were taken out of the row above.
     await trx('inventory_lots').where('id', existing.id)
       .update({ ...rest, updated_at: trx.fn.now() });
     return trx('inventory_lots').where('id', existing.id).first();
+  },
+
+  /**
+   * Move an output lot of a batch to `targetKg` through the ledger: post the
+   * receipt for an increase, a receipt REVERSAL for a decrease, nothing when
+   * it already holds the target. Every change is a new lot_transactions row,
+   * so Σ ledger = qty for every output, across any number of re-yields.
+   * received_net_weight_kg (what the batch produced into the lot) is set to
+   * the target. Returns the movement, or null when nothing moved.
+   */
+  async postOutputToTarget(trx, { lot, targetKg, byproduct, costPerKg, warehouseId, batchId, notes, userId }) {
+    const current = parseFloat(lot.qty) || 0;
+    const target = Math.max(0, parseFloat(targetKg) || 0);
+    const delta = Math.round((target - current) * 1000) / 1000;
+    let movement = null;
+    if (Math.abs(delta) >= 0.001) {
+      const up = delta > 0;
+      movement = await inventoryService.postMovement(trx, {
+        movementType: up
+          ? (byproduct ? MOVEMENT_TYPES.BYPRODUCT_OUTPUT : MOVEMENT_TYPES.PRODUCTION_OUTPUT)
+          : (byproduct ? MOVEMENT_TYPES.BYPRODUCT_OUTPUT_REVERSE : MOVEMENT_TYPES.PRODUCTION_OUTPUT_REVERSE),
+        lotId: lot.id,
+        qty: Math.abs(delta),
+        toWarehouseId: up ? warehouseId : null,
+        fromWarehouseId: up ? null : warehouseId,
+        destEntity: 'mill',
+        linkedRef: `batch-${batchId}`,
+        notes: up ? notes : `${notes} — re-recorded yield, ${Math.abs(delta)} kg less`,
+        costPerUnit: costPerKg,
+        currency: 'PKR',
+        batchId,
+        userId,
+      });
+    }
+    // Re-cost what the lot holds at the new allocation even when the qty did
+    // not move (postMovement only re-costs on a movement).
+    const c = parseFloat(costPerKg) || 0;
+    // lot-qty-free: intake weight and value only — the qty moved above.
+    await trx('inventory_lots').where('id', lot.id).update({
+      received_net_weight_kg: target,
+      ...(c > 0 ? { cost_per_unit: c, total_value: trx.raw('? * qty', [c]) } : {}),
+      ...(target <= 0 ? { status: 'Closed' } : {}),
+      updated_at: trx.fn.now(),
+    });
+    return movement;
   },
 
   async recordMillingOutput(trx, {
@@ -1146,23 +1338,20 @@ const inventoryService = {
           ...svcOwnership,
       });
 
-      const movement = await inventoryService.postMovement(trx, {
-        movementType: MOVEMENT_TYPES.PRODUCTION_OUTPUT,
-        lotId: lot.id,
-        qty: finishedQty,
-        toWarehouseId: fgWarehouse.id,
-        destEntity: 'mill',
-        linkedRef: `batch-${batchId}`,
-        notes: `Finished rice output from milling batch ${batchId}`,
-        costPerUnit: parsedCost,
-        currency: 'PKR',
+      const movement = await inventoryService.postOutputToTarget(trx, {
+        lot,
+        targetKg: finishedQty,
+        byproduct: false,
+        costPerKg: parsedCost,
+        warehouseId: fgWarehouse.id,
         batchId,
+        notes: `Finished rice output from milling batch ${batchId}`,
         userId,
       });
 
       const updatedLot = await trx('inventory_lots').where('id', lot.id).first();
       results.lots.push(updatedLot);
-      results.movements.push(movement);
+      if (movement) results.movements.push(movement);
     }
 
     // --- By-products: broken (per grade), bran, husk — with ALLOCATED costs ---
@@ -1278,26 +1467,53 @@ const inventoryService = {
           ...svcOwnership,
       });
 
-      const movement = await inventoryService.postMovement(trx, {
-        movementType: MOVEMENT_TYPES.BYPRODUCT_OUTPUT,
-        lotId: lot.id,
-        qty: bp.qty,
-        toWarehouseId: bpWarehouse.id,
-        destEntity: 'mill',
-        linkedRef: `batch-${batchId}`,
-        notes: `${bp.name} from milling batch ${batchId}`,
-        costPerUnit: bpCostPerKg,
-        currency: 'PKR',
+      const movement = await inventoryService.postOutputToTarget(trx, {
+        lot,
+        targetKg: bp.qty,
+        byproduct: true,
+        costPerKg: bpCostPerKg,
+        warehouseId: bpWarehouse.id,
         batchId,
+        notes: `${bp.name} from milling batch ${batchId}`,
         userId,
       });
 
       const updatedLot = await trx('inventory_lots').where('id', lot.id).first();
       results.lots.push(updatedLot);
-      results.movements.push(movement);
+      if (movement) results.movements.push(movement);
     }
 
-    // 9. Create lot lineage: raw lots → output lots
+    // 8b. An output this batch produced before but not on this yield — a grade
+    // or by-product zeroed on a re-recorded yield — goes to zero through a
+    // receipt reversal (MIL-06). It used to keep its old qty after its ledger
+    // rows were deleted: phantom stock with no history.
+    const producedIds = results.lots.map((l) => l.id);
+    const dropped = await trx('inventory_lots')
+      .where({ batch_ref: `batch-${batchId}` })
+      .whereIn('type', ['finished', 'byproduct'])
+      .modify((q) => { if (producedIds.length) q.whereNotIn('id', producedIds); })
+      .where('qty', '>', 0);
+    results.retired = [];
+    for (const lot of dropped) {
+      const movement = await inventoryService.postOutputToTarget(trx, {
+        lot,
+        targetKg: 0,
+        byproduct: lot.type === 'byproduct',
+        costPerKg: parseFloat(lot.cost_per_unit) || 0,
+        warehouseId: lot.warehouse_id,
+        batchId,
+        notes: `${lot.item_name || 'Output'} from milling batch ${batchId} no longer produced`,
+        userId,
+      });
+      if (movement) results.movements.push(movement);
+      results.retired.push(lot.id);
+    }
+
+    // 9. Create lot lineage: raw lots → output lots. Lineage is derived from
+    // the yield, so a re-recorded yield replaces this batch's mapping rather
+    // than stacking a second copy of it.
+    await trx('lot_source_mapping')
+      .where({ source_batch_id: batchId, mapping_type: 'milling_input_to_output' }).del();
     const rawLots = await trx('inventory_lots')
       .where({ batch_ref: `batch-${batchId}`, type: 'raw' });
 
@@ -1438,8 +1654,8 @@ const inventoryService = {
     // Shipped (the dispatch loop runs off inventory_reservations). No order ⇒
     // the lot stays available in the export pool (speculative transfer), as
     // before. reserveStock reads available_qty (just set by the TRANSFER_IN),
-    // enforces the over-reserve cap, writes the reservation row + ledger entry,
-    // and sets reserved_against — all inside this same transaction.
+    // enforces the over-reserve cap and writes the reservation row + ledger
+    // entry — all inside this same transaction.
     let reservation = null;
     if (orderId) {
       reservation = await inventoryService.reserveStock(trx, {
@@ -1447,6 +1663,7 @@ const inventoryService = {
         orderId,
         qtyKg: parsedQty,
         userId,
+        source: 'transfer',
       });
     }
 
@@ -1577,7 +1794,9 @@ const inventoryService = {
       sourceEntity: lot.entity,
       linkedRef: `order-${orderId}`,
       notes: `Export dispatch for order ${orderId}`,
-      costPerUnit: parseFloat(lot.cost_per_unit) || 0,
+      // The same cost basis COGS locks from (EXP-42): the movement's value and
+      // the 5020 journal describe the same kilos at the same rate.
+      costPerUnit: lotCostPerKg(lot),
       currency: lot.cost_currency || 'PKR',
       orderId,
       userId,
@@ -1589,24 +1808,23 @@ const inventoryService = {
   // =========================================================================
   // Reserve stock against an export order
   // =========================================================================
-  async reserveStock(trx, { lotId, orderId, qtyKg, itemId = null, userId }) {
+  // source: how the reservation came about — 'manual' (picked on the order),
+  // 'suggested' (the system's suggested lot, confirmed by the user — D-18) or
+  // 'transfer' (stock moved mill → export for this order). created_by /
+  // created_at record who confirmed it and when.
+  async reserveStock(trx, { lotId, orderId, qtyKg, itemId = null, userId, source = 'manual' }) {
     if (!trx) throw new Error('reserveStock requires a transaction');
 
     const parsedQty = parseFloat(qtyKg);
+    if (!(parsedQty > 0)) throw new Error('Reservation qty must be greater than zero');
 
-    const lot = await trx('inventory_lots').where('id', lotId).first();
+    // Locked: the availability checked here is the availability held below.
+    const lot = await trx('inventory_lots').where('id', lotId).forUpdate().first();
     if (!lot) throw new Error(`Lot ${lotId} not found`);
     // Client-owned (service-milling) stock can only be dispatched back to its
     // client — it can never be reserved/sold as company stock (export or local).
     if (lot.ownership === 'client') {
       throw new Error(`Lot ${lot.lot_no} is client-owned (service milling) and cannot be reserved or sold as company stock.`);
-    }
-
-    const availableQty = parseFloat(lot.available_qty) || 0;
-    if (availableQty < parsedQty) {
-      throw new Error(
-        `Insufficient available stock in lot ${lot.lot_no}: available ${availableQty} ${lot.unit}, required ${parsedQty}`
-      );
     }
 
     // Insert reservation. item_id ties it to a specific export_order_items line
@@ -1618,41 +1836,30 @@ const inventoryService = {
         item_id: itemId || null,
         reserved_qty: parsedQty,
         status: 'Active',
+        source,
         created_by: userId || null,
       })
       .returning('*');
 
-    // HARD ENFORCEMENT: no over-reservation (account for milling holds too, P6a)
-    const millingReserved = parseFloat(lot.milling_reserved_qty) || 0;
-    const newReserved = parseFloat(lot.reserved_qty) + parsedQty;
-    if (newReserved + millingReserved > parseFloat(lot.qty) + 1e-6) {
-      throw new Error(`Cannot reserve ${parsedQty} kg — would exceed available on lot ${lot.lot_no} (qty ${lot.qty}, already reserved ${lot.reserved_qty} + ${millingReserved} in milling)`);
+    // The hold itself — through the movement engine, which refuses more than
+    // is available (export + milling holds, P6a) and writes the ledger row.
+    try {
+      await inventoryService.postMovement(trx, {
+        movementType: MOVEMENT_TYPES.RESERVATION_HOLD,
+        lotId,
+        qty: parsedQty,
+        sourceEntity: lot.entity,
+        linkedRef: `order-${orderId}`,
+        notes: `Reserved ${parsedQty} KG for order ${orderId}`,
+        orderId,
+        userId,
+      });
+    } catch (err) {
+      if (/Cannot hold/.test(err.message)) {
+        throw new Error(`Insufficient available stock in lot ${lot.lot_no}: ${err.message}`);
+      }
+      throw err;
     }
-    const newAvailable = parseFloat(lot.qty) - newReserved - millingReserved;
-
-    await trx('inventory_lots').where('id', lotId).update({
-      reserved_qty: newReserved,
-      available_qty: newAvailable,
-      reserved_against: `order-${orderId}`,
-      updated_at: trx.fn.now(),
-    });
-
-    // Write reservation ledger entry
-    const txnNo = await generateLotTxnNo(trx);
-    await trx('lot_transactions').insert({
-      transaction_no: txnNo,
-      transaction_date: new Date().toISOString().slice(0, 10),
-      lot_id: lotId,
-      transaction_type: LOT_TRANSACTION_TYPE_MAP[MOVEMENT_TYPES.RESERVATION_HOLD],
-      reference_module: 'export_order',
-      reference_id: orderId,
-      quantity_kg: 0, // no physical movement
-      reservation_effect: parsedQty,
-      remarks: `Reserved ${parsedQty} KG for order ${orderId}`,
-      created_by: userId || null, // NOT NULL since migration 066 — must be set
-      performed_by: userId || null,
-      performed_at: new Date(),
-    });
 
     return reservation;
   },
@@ -1663,8 +1870,10 @@ const inventoryService = {
   async releaseReservation(trx, { reservationId, userId }) {
     if (!trx) throw new Error('releaseReservation requires a transaction');
 
+    // Locked so two releases of one reservation can't both give the qty back.
     const reservation = await trx('inventory_reservations')
       .where('id', reservationId)
+      .forUpdate()
       .first();
 
     if (!reservation) {
@@ -1679,15 +1888,21 @@ const inventoryService = {
     if (!lot) throw new Error(`Lot ${reservation.lot_id} not found`);
 
     const releasedQty = parseFloat(reservation.reserved_qty);
-    const newReserved = Math.max(0, parseFloat(lot.reserved_qty) - releasedQty);
-    const millingReserved = parseFloat(lot.milling_reserved_qty) || 0; // P6a
-    const newAvailable = parseFloat(lot.qty) - newReserved - millingReserved;
-
-    await trx('inventory_lots').where('id', lot.id).update({
-      reserved_qty: newReserved,
-      available_qty: newAvailable,
-      updated_at: trx.fn.now(),
-    });
+    // The release is a movement too: it locks the lot, gives the qty back to
+    // available and writes an export_release ledger row (INV-23 — the release
+    // used to leave no trace).
+    if (releasedQty > 0) {
+      await inventoryService.postMovement(trx, {
+        movementType: MOVEMENT_TYPES.RESERVATION_RELEASE,
+        lotId: lot.id,
+        qty: releasedQty,
+        sourceEntity: lot.entity,
+        linkedRef: reservation.order_id ? `order-${reservation.order_id}` : null,
+        notes: `Released reservation #${reservationId}${reservation.order_id ? ` for order ${reservation.order_id}` : ''}`,
+        orderId: reservation.order_id || null,
+        userId: userId || reservation.created_by || null,
+      });
+    }
 
     await trx('inventory_reservations').where('id', reservationId).update({
       status: 'Released',
@@ -1809,8 +2024,8 @@ const inventoryService = {
       .sum('il.qty as total_qty')
       .sum('il.reserved_qty as total_reserved')
       .sum('il.available_qty as total_available')
-      .sum('il.total_value as total_value')
-      .where('il.status', '!=', 'Depleted')
+      // D-14 (stockValue.js) — not the stored total_value, which is the intake value.
+      .select(db.raw(`COALESCE(SUM(${require('./stockValue').lotValueSql('il')}), 0) as total_value`))
       // Company-owned only — client-owned Service Milling stock is physically in
       // our warehouse but must never inflate company stock counts or valuation.
       .where('il.ownership', 'company');
@@ -2055,7 +2270,7 @@ const inventoryService = {
       // Same cost chain allocate-stock checks before it lets a lot onto an order
       // (landed → cost_per_unit → purchase rate, all per KG since mig 228), so a
       // lot that passed that guard can never cost Rs 0 here.
-      const costPerKg = parseFloat(lot.landed_cost_per_kg) || parseFloat(lot.cost_per_unit) || parseFloat(lot.rate_per_kg) || 0;
+      const costPerKg = lotCostPerKg(lot);
       const qtyKg = parseFloat(r.reserved_qty); // KG (Phase 5c)
       totalCOGS += costPerKg * qtyKg;
       totalQtyKg += qtyKg;
@@ -2126,7 +2341,9 @@ const inventoryService = {
     const lot = await conn('inventory_lots').where('id', sale.lot_id).first();
     if (!lot) return { totalCOGS: 0, cogsPerKg: 0 };
 
-    const costPerKg = parseFloat(lot.landed_cost_per_kg) || parseFloat(lot.rate_per_kg) || 0;
+    // Same precedence a sale is priced with (salePricing.lotUnitCostPerKg) —
+    // it skipped cost_per_unit, so a lot costed only there read Rs 0 (INV-54).
+    const costPerKg = lotUnitCostPerKg(lot);
     const saleQtyKg = parseFloat(sale.quantity_kg) || 0;
     const totalCOGS = costPerKg * saleQtyKg;
     const revenue = parseFloat(sale.total_amount) || 0;
@@ -2375,16 +2592,20 @@ const inventoryService = {
   async takeValuationSnapshot() {
     // Company-owned only — client-owned (service-milling) stock must never
     // inflate company inventory valuation or average cost.
-    const lots = await db('inventory_lots').where('available_qty', '>', 0).where('ownership', 'company').select('type', 'entity', 'available_qty', 'rate_per_kg', 'landed_cost_per_kg', 'net_weight_kg');
+    // D-14 (stockValue.js): on-hand KG × landed cost/kg, no fallback price.
+    const lots = await db('inventory_lots').where('ownership', 'company').where((q) => q.where('net_weight_kg', '>', 0).orWhere('qty', '>', 0))
+      .select('type', 'entity', 'qty', 'landed_cost_per_kg', 'net_weight_kg');
+    const { lotValue } = require('./stockValue');
 
     const groups = {};
     for (const lot of lots) {
       const key = `${lot.entity || 'unknown'}|${lot.type || 'unknown'}`;
       if (!groups[key]) groups[key] = { entity: lot.entity, type: lot.type, totalKg: 0, totalValue: 0 };
-      const costKg = parseFloat(lot.landed_cost_per_kg) || parseFloat(lot.rate_per_kg) || 0;
-      const qtyKg = parseFloat(lot.available_qty); // KG (Phase 5c)
+      const net = parseFloat(lot.net_weight_kg) || 0;
+      const qtyKg = net > 0 ? net : (parseFloat(lot.qty) || 0);
+      if (!(qtyKg > 0)) continue;
       groups[key].totalKg += qtyKg;
-      groups[key].totalValue += costKg * qtyKg;
+      groups[key].totalValue += lotValue(lot);
     }
 
     const today = new Date().toISOString().split('T')[0];
@@ -2566,17 +2787,26 @@ const inventoryService = {
     return { lotId, oldCost: parseFloat(oldValues.rate_per_kg), newCost: newCostPerKg, repaired: newCostPerKg > 0 };
   },
 
+  // Lock a confirmed local sale's COGS (P3-12 / INV-54). The locked figure is
+  // the line's landed_cost_total — the amount its COGS journal just posted
+  // (postSaleSideEffects re-prices the line at confirmation and posts from
+  // it) — not a second re-derivation from the lot, which used to give a
+  // different number than the GL. Idempotent: an already-locked sale keeps
+  // its figure.
   async lockSaleCOGS(trx, saleId) {
-    const cogs = await inventoryService.calculateSaleCOGS(trx, saleId);
-
-    await trx('local_sales').where('id', saleId).update({
-      cogs_total_pkr: cogs.totalCOGS,
-      cogs_per_kg: cogs.cogsPerKg,
-      gross_profit_pkr: cogs.grossProfit,
-      cost_locked_at_dispatch: true,
-    });
-
-    return cogs;
+    const sale = await trx('local_sales').where('id', saleId).first();
+    if (!sale) return { totalCOGS: 0, cogsPerKg: 0, grossProfit: 0 };
+    if (sale.cost_locked_at_dispatch && sale.cogs_total_pkr != null) {
+      return {
+        totalCOGS: parseFloat(sale.cogs_total_pkr) || 0,
+        cogsPerKg: parseFloat(sale.cogs_per_kg) || 0,
+        grossProfit: parseFloat(sale.gross_profit_pkr) || 0,
+        alreadyLocked: true,
+      };
+    }
+    const fields = lockedCogsFields(sale);
+    await trx('local_sales').where('id', saleId).update({ ...fields, cost_locked_at_dispatch: true });
+    return { totalCOGS: fields.cogs_total_pkr, cogsPerKg: fields.cogs_per_kg, grossProfit: fields.gross_profit_pkr };
   },
 
   // ───────────────────────────────────────────────────────────────────────
@@ -2769,6 +2999,10 @@ const inventoryService = {
   // price ignores both, so for such a batch the trucks only refresh yield %,
   // and a raw cost an earlier truck recompute wrote is replaced by the lot cost.
   async recomputeRawRiceCostFromVehicles(trx, batchId, userId) {
+    // Every truck add / edit / delete lands here: re-sync the truck purchase
+    // and the batch's WIP to the raw lot as it now stands (D-6). A no-op once
+    // the batch has yielded.
+    await require('../milling/millingWip').syncBatchIntake(trx, batchId, { userId, reason: 'trucks changed' });
     const vrows = await trx('milling_vehicle_arrivals').where({ batch_id: batchId });
     if (!vrows.length) return;
     let pricedW = 0, pricedCost = 0, totalW = 0;
@@ -2825,23 +3059,10 @@ const inventoryService = {
     const finished = parseFloat(batch.actual_finished_kg) || 0;
     if (finished <= 0) return { skipped: 'no-yield' };
 
-    await inventoryService.ensureRawCostFromSourceLots(trx, batchId);
-    const rawCostTotal = parseFloat(
-      (await trx('milling_costs').where({ batch_id: batchId }).where('category', 'raw_rice').sum('amount as t').first())?.t
-    ) || 0;
-    const processingCosts = parseFloat(
-      (await trx('milling_costs').where({ batch_id: batchId }).whereNotIn('category', ['raw_rice', 'packaging']).sum('amount as t').first())?.t
-    ) || 0;
-    const packingCost = parseFloat(
-      (await trx('milling_costs').where({ batch_id: batchId, category: 'packaging' }).sum('amount as t').first())?.t
-    ) || 0;
+    // Service milling: client-owned output stays at zero cost.
+    if (batch.is_service_milling) return { skipped: 'service' };
 
-    // The "Milling / Processing" category on its own, so the engine can let the
-    // manual Milling Cost override it rather than add to it.
-    const millingCategoryCost = parseFloat(
-      (await trx('milling_costs').where({ batch_id: batchId, category: 'processing' }).sum('amount as t').first())?.t,
-    ) || 0;
-    const a = inventoryService.computeResidualAllocation(batch, rawCostTotal, processingCosts, packingCost, millingCategoryCost);
+    const { rawCostTotal, a } = await inventoryService.loadBatchAllocation(trx, batchId, { batch });
     const alloc = { finished: { qty: finished, costPerKg: a.finishedCostPerKg } };
     for (const [k, perKg] of Object.entries(a.byCostPerKg)) alloc[k] = { qty: 1, costPerKg: perKg };
     const brokenTierCostPerKg = a.brokenTierCostPerKg;
@@ -3014,6 +3235,10 @@ const inventoryService = {
         }
       }
 
+      // The committed rice is carried in 1260 Milling WIP at its landed cost
+      // (D-6): move the re-price there too (the lot's own edit posted it to 1210).
+      await require('../milling/millingWip').syncBatchIntake(trx, batchId, { userId, reason: `lot ${lot.lot_no} re-priced` });
+
       // 5. Audit trail.
       await trx('historical_cost_repair_log').insert({
         lot_id: lotId,
@@ -3092,8 +3317,9 @@ const inventoryService = {
    * stock (one mill_item per size, code `KATTA-<kg>`), and the outputs are PACKED
    * into katta of the batch's PREDOMINANT raw size, consuming them back. Freed
    * bags are grouped by each vehicle's bag_size_kg (fallback = its kg ÷ bags).
-   * Idempotent: reverses ALL of the batch's prior katta movements (across any
-   * size item) first, so re-recording reconciles cleanly. No-op for batches with
+   * Idempotent: works out what the batch SHOULD have moved and applies only the
+   * difference against what it has moved (new rows, never a delete), clamped at
+   * the stock there is (millStore/kattaLedger.js, P3-05). No-op for batches with
    * no vehicle-bag intake (blends / lot-started).
    */
   /**
@@ -3104,62 +3330,47 @@ const inventoryService = {
    * own of a different size, and the originals come back empty. Same store item
    * (`KATTA-<size>`), same movement ledger, so the two sources are one stock.
    *
-   * Freed katta enter at ZERO value and are worth something only when sold, so
-   * nothing here touches item cost — only the quantity.
+   * Freed katta enter at ZERO value and are worth something only when sold:
+   * the item keeps its value and its average is re-spread over the new count
+   * (P3-05 — they used to raise the store's value at the purchased average
+   * with nothing in 1250 behind it).
    *
-   * Idempotent on (referenceType, referenceId): a prior credit for the same
-   * reference is reversed before the new one is applied, so editing a sale does
-   * not stack duplicate sacks into the store.
+   * Idempotent on (referenceType, referenceId): only the difference against
+   * what this reference already credited is applied, as new movement rows.
+   * Sacks it credited that have since been sold are ledgered as a shortfall,
+   * never taken below zero (MIL-22).
    */
   async creditFreedKatta(trx, { sizeKg, count, referenceType, referenceId, userId, notes }) {
+    const { applyKattaPlan } = require('../millStore/kattaLedger');
     const size = uc.snapBagSizeKg(parseFloat(sizeKg) || 0);
     const bags = Math.round(parseFloat(count) || 0);
 
-    // Reverse any earlier credit for this same reference first.
-    const prior = await trx('mill_stock_movements')
-      .where({ reference_type: referenceType, reference_id: referenceId })
-      .select('item_id', 'quantity');
-    for (const m of prior) {
-      await trx('mill_stock').where({ item_id: m.item_id, warehouse_id: null })
-        .update({ quantity_available: trx.raw('quantity_available - ?', [parseFloat(m.quantity) || 0]), updated_at: trx.fn.now() });
+    let item = null;
+    if (size > 0 && bags > 0) {
+      const code = `KATTA-${size}`;
+      item = await trx('mill_items').where('code', code).first();
+      if (!item) {
+        [item] = await trx('mill_items').insert({
+          code, name: `Katta ${size}kg`, category: 'packaging', unit: 'pcs',
+          capacity_kg: size, reorder_level: 0, is_active: true,
+          notes: 'Auto-managed: empty bags freed from milled raw or repacked stock.',
+          created_by: userId || null,
+        }).returning('*');
+      }
     }
-    if (prior.length) {
-      await trx('mill_stock_movements').where({ reference_type: referenceType, reference_id: referenceId }).del();
-    }
-
-    if (size <= 0 || bags <= 0) return null;   // nothing to return
-
-    const code = `KATTA-${size}`;
-    let item = await trx('mill_items').where('code', code).first();
-    if (!item) {
-      [item] = await trx('mill_items').insert({
-        code, name: `Katta ${size}kg`, category: 'packaging', unit: 'pcs',
-        capacity_kg: size, reorder_level: 0, is_active: true,
-        notes: 'Auto-managed: empty bags freed from milled raw or repacked stock.',
-        created_by: userId || null,
-      }).returning('*');
-    }
-    const stock = await trx('mill_stock').where({ item_id: item.id, warehouse_id: null }).first();
-    if (!stock) {
-      await trx('mill_stock').insert({ item_id: item.id, warehouse_id: null, quantity_available: bags, quantity_reserved: 0 });
-    } else {
-      await trx('mill_stock').where({ item_id: item.id, warehouse_id: null })
-        .update({ quantity_available: trx.raw('quantity_available + ?', [bags]), updated_at: trx.fn.now() });
-    }
-    // 'return' is the movement type the milling katta path uses, and the only
-    // inbound value the movement_type CHECK allows ('purchase', 'consumption',
-    // 'adjustment', 'reservation', 'return'). The columns are `reason` and
-    // `performed_by` — there is no notes/created_by on this table.
-    await trx('mill_stock_movements').insert({
-      item_id: item.id, warehouse_id: null, movement_type: 'return', quantity: bags,
-      reference_type: referenceType, reference_id: referenceId,
-      reason: notes || `Empty ${size}kg katta freed (${bags})`,
-      performed_by: userId || null,
-    });
-    return { itemId: item.id, code, sizeKg: size, bags };
+    // 'return' is the movement type for freed katta (the movement_type CHECK
+    // allows 'purchase', 'consumption', 'adjustment', 'reservation', 'return').
+    const plan = item ? [{
+      itemId: item.id, warehouseId: null, family: 'freed', cls: 'zero', qty: bags,
+      reason: notes || `Empty ${size}kg katta freed (${bags})`, item,
+    }] : [];
+    const res = await applyKattaPlan(trx, { referenceType, referenceId, plan, userId });
+    if (!item) return null;   // nothing to return
+    return { itemId: item.id, code: item.code, sizeKg: size, bags, ledgered: res.ledgered };
   },
 
   async reconcileBatchKatta(trx, batchId, userId) {
+    const { applyKattaPlan } = require('../millStore/kattaLedger');
     const num = (v) => parseFloat(v) || 0;
     const vehs = await trx('milling_vehicle_arrivals').where('batch_id', batchId)
       .select('total_bags', 'bag_size_kg', 'weight_kg');
@@ -3239,18 +3450,23 @@ const inventoryService = {
     // stock (packing.service skips katta), so that katta is consumed below as a
     // batch_katta movement, by the run's own recorded count. P.P. bags, master
     // bags and polythene are not katta: the packing run draws those itself.
+    // A run's katta_cost_mode says who books its cost: 'yield' runs (P3-05 on)
+    // are booked here at average cost for exactly what is drawn ('gl'); 'pack'
+    // runs booked their katta themselves, so here it only leaves the store at
+    // its value ('prepaid').
     const runRows = await trx('mill_packing_logs').where({ batch_id: batchId })
       .select('id', 'bag_item_id', 'bags_count', 'master_bag_item_id', 'master_bags_count',
-        'poly_item_id', 'poly_count', 'warehouse_id');
-    const runUse = new Map(); // `${item}|${warehouse}` → { itemId, warehouseId, need }
+        'poly_item_id', 'poly_count', 'warehouse_id', 'katta_cost_mode');
+    const runUse = new Map(); // `${item}|${warehouse}|${cls}` → { itemId, warehouseId, cls, need }
     for (const r of runRows) {
+      const cls = r.katta_cost_mode === 'yield' ? 'gl' : 'prepaid';
       for (const [itemId, count] of [[r.bag_item_id, r.bags_count],
         [r.master_bag_item_id, r.master_bags_count], [r.poly_item_id, r.poly_count]]) {
         const n = num(count);
         if (!itemId || n <= 0) continue;
         const warehouseId = r.warehouse_id ?? null;
-        const key = `${itemId}|${warehouseId ?? ''}`;
-        if (!runUse.has(key)) runUse.set(key, { itemId: Number(itemId), warehouseId, need: 0 });
+        const key = `${itemId}|${warehouseId ?? ''}|${cls}`;
+        if (!runUse.has(key)) runUse.set(key, { itemId: Number(itemId), warehouseId, cls, need: 0 });
         runUse.get(key).need += n;
       }
     }
@@ -3271,40 +3487,33 @@ const inventoryService = {
         legacyDrawn.set(key, (legacyDrawn.get(key) || 0) - num(m.quantity));
       }
     }
-    // Consume the packing runs' katta from store — clamped at zero, shortfall
-    // flagged — onto the same movement list the rest of the reconcile writes.
-    const consumeKattaRuns = async (movements, shortages) => {
-      for (const [key, u] of runUse) {
+    // The packing runs' katta, as draws on the plan. The legacy draw counts
+    // against the 'pack' runs first (they are the ones that made it).
+    const planKattaRuns = (plan) => {
+      const left = new Map(legacyDrawn);
+      const uses = [...runUse.values()].sort((a, b) => (a.cls === 'prepaid' ? -1 : 0) - (b.cls === 'prepaid' ? -1 : 0));
+      for (const u of uses) {
         const it = kattaRunItem.get(u.itemId);
         if (!it) continue;
-        const need = Math.max(0, Math.round(u.need - (legacyDrawn.get(key) || 0)));
+        const lk = `${u.itemId}|${u.warehouseId ?? ''}`;
+        const already = Math.min(u.need, left.get(lk) || 0);
+        left.set(lk, (left.get(lk) || 0) - already);
+        const need = Math.max(0, Math.round(u.need - already));
         if (need <= 0) continue;
-        let st = await trx('mill_stock').where({ item_id: it.id, warehouse_id: u.warehouseId }).first();
-        if (!st) [st] = await trx('mill_stock').insert({ item_id: it.id, warehouse_id: u.warehouseId, quantity_available: 0, quantity_reserved: 0 }).returning('*');
-        const avail = num(st.quantity_available);
-        const used = Math.min(need, Math.max(0, avail));
-        if (used > 0) {
-          await trx('mill_stock').where({ id: st.id }).update({ quantity_available: trx.raw('GREATEST(quantity_available - ?, 0)', [used]), updated_at: trx.fn.now() });
-          movements.push({ item_id: it.id, warehouse_id: u.warehouseId, movement_type: 'consumption', quantity: -used, reference_type: 'batch_katta', reference_id: batchId, reason: `${it.name} used by packing run(s) (batch ${batchId})`, performed_by: userId || null });
-        }
-        if (need > used) shortages.push({ size: num(it.capacity_kg), item: it.name, needed: need, available: avail, short: need - used });
+        plan.push({ itemId: it.id, warehouseId: u.warehouseId, family: 'draw', cls: u.cls, qty: need, item: it, reason: `${it.name} used by packing run(s) (batch ${batchId})` });
       }
     };
 
-    // Undo the batch's prior katta movements on whatever item(s) they hit —
-    // BEFORE any early exit, so a re-run always starts from a clean slate.
-    const prior = await trx('mill_stock_movements').where({ reference_type: 'batch_katta', reference_id: batchId }).select('item_id', 'warehouse_id', 'quantity');
-    const reverseByItem = new Map();
-    for (const m of prior) {
-      const key = `${m.item_id}|${m.warehouse_id ?? ''}`;
-      const cur = reverseByItem.get(key) || { itemId: m.item_id, warehouseId: m.warehouse_id ?? null, q: 0 };
-      cur.q += num(m.quantity);
-      reverseByItem.set(key, cur);
-    }
-    for (const { itemId, warehouseId, q } of reverseByItem.values()) {
-      await trx('mill_stock').where({ item_id: itemId, warehouse_id: warehouseId }).update({ quantity_available: trx.raw('quantity_available - ?', [q]), updated_at: trx.fn.now() });
-    }
-    await trx('mill_stock_movements').where({ reference_type: 'batch_katta', reference_id: batchId }).del();
+    const batchRow = await trx('milling_batches').where('id', batchId).first();
+    // Apply the plan — only its difference against what the batch has already
+    // moved — and keep the outputs' cost in step with any katta cost it booked.
+    const applyPlan = async (plan) => {
+      const res = await applyKattaPlan(trx, { referenceType: 'batch_katta', referenceId: batchId, plan, userId, batch: batchRow });
+      if (Math.abs(res.costDelta) >= 0.01 && batchRow && num(batchRow.actual_finished_kg) > 0) {
+        await inventoryService.recomputeBatchOutputsAfterPriceChange(trx, batchId, { userId });
+      }
+      return res;
+    };
 
     let freed = 0; bySize.forEach((b) => { freed += b; });
     if (freed <= 0) {
@@ -3313,6 +3522,8 @@ const inventoryService = {
       // packing run is still the truth about how the output is bagged, and used
       // to be lost here: M-002 packed 960 × 25kg and its output lot carried no
       // bag spec at all, because this returned before the stamping below.
+      const plan = [];
+      planKattaRuns(plan);
       if (packedSpec) {
         const finishedLots = await trx('inventory_lots')
           .where({ batch_ref: `batch-${batchId}` }).where('type', 'finished');
@@ -3328,15 +3539,15 @@ const inventoryService = {
             updated_at: trx.fn.now(),
           });
         }
-        const movements = []; const shortages = [];
-        await consumeKattaRuns(movements, shortages);
-        if (movements.length) await trx('mill_stock_movements').insert(movements);
+        const { shortages, ledgered } = await applyPlan(plan);
         return {
           capacityKg: packedSpec.sizeKg, rawBags: 0, freed: 0,
           outputBags: stamped, packed: 0, net: 0,
-          sizes: [], shortages, packedFromRun: true,
+          sizes: [], shortages, ledgered, packedFromRun: true,
         };
       }
+      // Still undo whatever an earlier reconcile of this batch moved.
+      await applyPlan(plan);
       return null; // no katta intake and nothing packed
     }
 
@@ -3351,7 +3562,6 @@ const inventoryService = {
     // FIBC, container → bulk (no bags). See milling/batchPackSpec.js.
     // Byproducts + batches with no spec keep the predominant-size logic.
     let exportPack = null; // { packSize:number|null }
-    const batchRow = await trx('milling_batches').where('id', batchId).first();
     if (batchRow) {
       const spec = await resolveBatchPackSpec(trx, batchRow);
       // Only override when we actually have a distinct target size (or container bulk).
@@ -3363,7 +3573,7 @@ const inventoryService = {
       }
     }
 
-    // find/create the KATTA packaging item + stock row for a given size.
+    // find/create the KATTA packaging item for a given size.
     //
     // It must be a katta, not merely something of that size. This used to key on
     // the size alone — `KATTA-${size}` — and so minted "Katta 25kg" the first
@@ -3391,9 +3601,7 @@ const inventoryService = {
           created_by: userId || null,
         }).returning('*');
       }
-      let st = await trx('mill_stock').where({ item_id: it.id, warehouse_id: null }).first();
-      if (!st) [st] = await trx('mill_stock').insert({ item_id: it.id, warehouse_id: null, quantity_available: 0, quantity_reserved: 0 }).returning('*');
-      return { it, st };
+      return { it };
     };
 
     const outLots = await trx('inventory_lots').where({ batch_ref: `batch-${batchId}` }).whereIn('type', ['finished', 'byproduct']);
@@ -3402,7 +3610,7 @@ const inventoryService = {
       // ── Standard path: byproducts go into the predominant raw katta. Finished
       // rice goes into whatever the packing run actually used, when there was
       // one — those bags are consumed by the run's own count (katta here via
-      // consumeKattaRuns, anything else by the packing service), so they must
+      // planKattaRuns, anything else by the packing service), so they must
       // NOT also consume freed katta by weight. Without a packing run the old
       // behaviour stands: everything into the predominant katta.
       let packed = 0;
@@ -3418,23 +3626,22 @@ const inventoryService = {
         await trx('inventory_lots').where('id', l.id).update({ total_bags: bags, bag_size_kg: size, bag_weight_kg: size, updated_at: trx.fn.now() });
       }
 
-      // Apply per size: +freed (return); the predominant size also -packed (consumption).
-      const movements = [];
+      // Per size: +freed (return); the predominant size also −packed by
+      // weight (consumption). Both unvalued — today's basis for katta that is
+      // not a packing run's. A by-weight draw the store cannot cover (a mixed
+      // intake packing more than it freed) is flagged, never driven negative.
+      const plan = [];
       for (const [size, bags] of bySize) {
-        const { it, st } = await itemForSize(size);
-        const consume = size === predSize ? packed : 0;
-        // Clamp at 0: on a mixed-size intake the predominant size can pack MORE
-        // output bags than it freed (bags − consume < 0), which would drive its
-        // stock negative. Never let mill_stock go below zero.
-        await trx('mill_stock').where({ id: st.id }).update({ quantity_available: trx.raw('GREATEST(quantity_available + ?, 0)', [bags - consume]), updated_at: trx.fn.now() });
-        movements.push({ item_id: it.id, warehouse_id: null, movement_type: 'return', quantity: bags, reference_type: 'batch_katta', reference_id: batchId, reason: `Empty ${size}kg katta freed from milled raw (batch ${batchId})`, performed_by: userId || null });
-        if (consume > 0) movements.push({ item_id: it.id, warehouse_id: null, movement_type: 'consumption', quantity: -consume, reference_type: 'batch_katta', reference_id: batchId, reason: `${size}kg katta used to pack outputs (batch ${batchId})`, performed_by: userId || null });
+        const { it } = await itemForSize(size);
+        plan.push({ itemId: it.id, warehouseId: null, family: 'freed', cls: 'zero', qty: bags, item: it, reason: `Empty ${size}kg katta freed from milled raw (batch ${batchId})` });
+        if (size === predSize && packed > 0) {
+          plan.push({ itemId: it.id, warehouseId: null, family: 'draw', cls: 'zero', qty: packed, item: it, reason: `${size}kg katta used to pack outputs (batch ${batchId})` });
+        }
       }
-      const shortages = [];
-      await consumeKattaRuns(movements, shortages);
-      await trx('mill_stock_movements').insert(movements);
+      planKattaRuns(plan);
+      const { shortages, ledgered } = await applyPlan(plan);
 
-      return { capacityKg: predSize, rawBags: freed, freed, outputBags: packed, packed, net: freed - packed, sizes: [...bySize.keys()], shortages };
+      return { capacityKg: predSize, rawBags: freed, freed, outputBags: packed, packed, net: freed - packed, sizes: [...bySize.keys()], shortages, ledgered };
     }
 
     // ── Export path: FINISHED rice packs into the customer's spec; byproducts keep
@@ -3447,7 +3654,7 @@ const inventoryService = {
       const kg = num(l.net_weight_kg) > 0 ? num(l.net_weight_kg) : num(l.qty);
       if (l.type === 'finished' && packedSpec) {
         // A packing run is the truth about the export bags too. Its bags are
-        // consumed by the run's own count (katta below via consumeKattaRuns,
+        // consumed by the run's own count (katta below via planKattaRuns,
         // anything else by the packing service) — never again here by weight,
         // which used to draw the same export bags twice.
         const runBags = Math.ceil(kg / packedSpec.sizeKg);
@@ -3467,45 +3674,40 @@ const inventoryService = {
       await trx('inventory_lots').where('id', l.id).update({ total_bags: bags, bag_size_kg: size, bag_weight_kg: size, updated_at: trx.fn.now() });
     }
 
-    const movements = [];
+    const plan = [];
     // 1) Return freed raw katta to its own size's stock.
     for (const [size, bags] of bySize) {
-      const { it, st } = await itemForSize(size);
-      await trx('mill_stock').where({ id: st.id }).update({ quantity_available: trx.raw('quantity_available + ?', [bags]), updated_at: trx.fn.now() });
-      movements.push({ item_id: it.id, warehouse_id: null, movement_type: 'return', quantity: bags, reference_type: 'batch_katta', reference_id: batchId, reason: `Empty ${size}kg katta freed from milled raw (batch ${batchId})`, performed_by: userId || null });
+      const { it } = await itemForSize(size);
+      plan.push({ itemId: it.id, warehouseId: null, family: 'freed', cls: 'zero', qty: bags, item: it, reason: `Empty ${size}kg katta freed from milled raw (batch ${batchId})` });
     }
     // 2) Consume the packing item for each output size; short-tolerant + flag.
-    const shortages = [];
     for (const [size, need] of consumeBySize) {
-      const { it, st } = await itemForSize(size);
-      const cur = await trx('mill_stock').where({ id: st.id }).first('quantity_available');
-      const avail = num(cur && cur.quantity_available);
-      const consumed = Math.min(need, avail);
-      if (consumed > 0) {
-        await trx('mill_stock').where({ id: st.id }).update({ quantity_available: trx.raw('GREATEST(quantity_available - ?, 0)', [consumed]), updated_at: trx.fn.now() });
-        movements.push({ item_id: it.id, warehouse_id: null, movement_type: 'consumption', quantity: -consumed, reference_type: 'batch_katta', reference_id: batchId, reason: `${size}kg bags used to pack export outputs (batch ${batchId})`, performed_by: userId || null });
-      }
-      const short = Math.max(0, need - avail);
-      if (short > 0) shortages.push({ size, item: it.name, needed: need, available: avail, short });
+      const { it } = await itemForSize(size);
+      plan.push({ itemId: it.id, warehouseId: null, family: 'draw', cls: 'zero', qty: need, item: it, reason: `${size}kg bags used to pack export outputs (batch ${batchId})` });
     }
-    await consumeKattaRuns(movements, shortages);
-    await trx('mill_stock_movements').insert(movements);
+    planKattaRuns(plan);
+    const { shortages, ledgered } = await applyPlan(plan);
 
-    return { capacityKg: exportPack.packSize || predSize, rawBags: freed, freed, outputBags: packed, packed, net: freed - packed, sizes: [...bySize.keys()], shortages, exportPacked: true, orderNo: exportPack.orderNo };
+    return { capacityKg: exportPack.packSize || predSize, rawBags: freed, freed, outputBags: packed, packed, net: freed - packed, sizes: [...bySize.keys()], shortages, ledgered, exportPacked: true, orderNo: exportPack.orderNo };
   },
 
   /**
-   * Re-sync a yielded batch's OUTPUT lots to its current quantity fields.
-   * Editing yield on an already-completed batch updates the batch `_mt` summary
-   * columns but historically left the output lots untouched, so they drifted
-   * (e.g. batch says 67 MT finished while the lot still holds 32). This deletes
-   * the existing output lots and recreates them from the batch's (just-updated)
-   * quantities via the SAME recordMillingOutput used at first yield — so lots,
-   * grades and residual costs all match. It touches ONLY the output side: raw
-   * consumption and accounting journals already happened and are left alone.
+   * Re-sync a yielded batch's OUTPUT lots to its current quantity fields
+   * (a re-recorded yield). Each output lot is moved to its new quantity through
+   * the ledger — a receipt for more, a receipt reversal for less, a full
+   * reversal for an output no longer produced — via the SAME
+   * recordMillingOutput used at first yield, so lots, grades and residual costs
+   * match a fresh yield and Σ ledger = qty for every output (P3-03). Nothing is
+   * deleted. It touches ONLY the output side: raw consumption and the
+   * completion journal already happened; the 1220 ↔ 1240 split follows as a
+   * signed delta.
    *
-   * Refuses (409) if any output lot has been reserved, sold or re-milled — you
-   * can't silently resize stock that has already moved.
+   * Refuses (409) once any output has moved — reserved, sold, re-milled,
+   * transferred, adjusted or (service milling) handed back to the client: a
+   * re-yield can't silently resize stock that has already left. MIL-08: the
+   * old resync deleted the batch's own movement rows, which included service
+   * dispatches (they carry the batch reference), and re-added the full yield —
+   * client stock that had been handed over came back and could go out twice.
    */
   async resyncBatchOutputsFromBatch(trx, batchId, { userId } = {}) {
     const p = (v) => parseFloat(v) || 0;
@@ -3518,71 +3720,39 @@ const inventoryService = {
     const bran = p(batch.bran_kg), husk = p(batch.husk_kg), sortex = p(batch.sortex_rejects_kg);
     const powder = p(batch.powder_kg), sweeping = p(batch.sweeping_kg), choba = p(batch.choba_kg);
 
-    // 1. Existing output lots + safety: must be untouched (not reserved/sold/consumed).
-    const resyncStartedAt = new Date();
-    const outLots = await trx('inventory_lots')
-      .where({ batch_ref: `batch-${batchId}` }).whereIn('type', ['finished', 'byproduct'])
-      .select('id', 'reserved_qty', 'sold_weight_kg');
-    const outIds = outLots.map((l) => l.id);
-    if (outIds.length) {
-      const cnt = async (t) => parseInt((await trx(t).whereIn('lot_id', outIds).count('id as c').first()).c, 10) || 0;
-      const touched = outLots.some((l) => p(l.reserved_qty) > 0 || p(l.sold_weight_kg) > 0);
-      const refd = (await cnt('inventory_reservations')) + (await cnt('local_sales')) + (await cnt('batch_source_lots'));
-      if (touched || refd > 0) {
-        const e = new Error('This batch\'s output has already been reserved, sold or re-milled, so its yield can\'t be re-recorded. Reverse those movements first, or use a stock adjustment.');
-        e.status = 409; throw e;
-      }
-      // 2. The lots are NOT deleted. recordMillingOutput below matches each
-      // output to the lot this batch already produced and updates it, so the
-      // lot keeps its number (which may have been renamed by hand), its id and
-      // its ledger. Deleting and re-inserting is what turned
-      // "WHITE HORSE D98 2.5 TON LOT" back into M-001-FIN-01 and left the
-      // re-yielded lot looking like it had no history.
-      //
-      // Only the movement rows this batch itself wrote are cleared, so the
-      // re-recorded yield does not stack a second production receipt on top of
-      // the first. Anything else on the lot is left alone — and the guard above
-      // has already refused if the output was reserved, sold or re-milled.
-      await trx('lot_transactions').whereIn('lot_id', outIds)
-        .where({ reference_module: 'milling_batch', reference_id: batchId }).del();
-    }
+    // 1. Safety: the outputs must not have moved since the yield.
+    await inventoryService.assertBatchOutputsUntouched(trx, batch, 're-recorded');
 
-    // 3. Residual allocation from the batch's current state (same as fresh yield).
-    await inventoryService.ensureRawCostFromSourceLots(trx, batchId);
-    const rawCostTotal = p((await trx('milling_costs').where({ batch_id: batchId }).where('category', 'raw_rice').sum('amount as t').first())?.t);
+    // 2. Residual allocation from the batch's current state (same as fresh yield).
+    const { rawCostTotal, a } = await inventoryService.loadBatchAllocation(trx, batchId, { batch });
     // Same #427 guard as a fresh yield: no re-recorded output costed at Rs 0.
     if (!batch.is_service_milling && finished + broken + bran + husk + sortex + powder + sweeping + choba > 0) {
       await inventoryService.assertBatchRawPriced(trx, batchId, rawCostTotal);
     }
-    const processingCosts = p((await trx('milling_costs').where({ batch_id: batchId }).whereNotIn('category', ['raw_rice', 'packaging']).sum('amount as t').first())?.t);
-    const packingCost = p((await trx('milling_costs').where({ batch_id: batchId, category: 'packaging' }).sum('amount as t').first())?.t);
-    // The "Milling / Processing" category on its own, so the engine can let the
-    // manual Milling Cost override it rather than add to it.
-    const millingCategoryCost = parseFloat(
-      (await trx('milling_costs').where({ batch_id: batchId, category: 'processing' }).sum('amount as t').first())?.t,
-    ) || 0;
-    const a = inventoryService.computeResidualAllocation(batch, rawCostTotal, processingCosts, packingCost, millingCategoryCost);
-    const alloc = {};
-    for (const [k, perKg] of Object.entries(a.byCostPerKg)) alloc[k] = perKg;
+    // Service milling: client-owned output, zero cost (as at first yield).
+    const alloc = batch.is_service_milling ? {} : { ...a.byCostPerKg };
+    const finishedCostPerKg = batch.is_service_milling ? 0 : a.finishedCostPerKg;
 
-    await trx('milling_batches').where({ id: batchId }).update({
-      raw_cost_total: rawCostTotal,
-      raw_cost_per_kg_finished: a.finishedCostPerKg * a.rawFrac,
-      milling_cost_per_kg_finished: a.finishedCostPerKg * a.millFrac,
-      total_cost_per_kg_finished: a.finishedCostPerKg,
-      finished_price_per_kg: a.finishedCostPerKg,
-    });
+    if (!batch.is_service_milling) {
+      await trx('milling_batches').where({ id: batchId }).update({
+        raw_cost_total: rawCostTotal,
+        raw_cost_per_kg_finished: a.finishedCostPerKg * a.rawFrac,
+        milling_cost_per_kg_finished: a.finishedCostPerKg * a.millFrac,
+        total_cost_per_kg_finished: a.finishedCostPerKg,
+        finished_price_per_kg: a.finishedCostPerKg,
+      });
+    }
 
-    // 4. Recreate output lots (finished + by-products) with the allocated costs.
+    // 3. Move every output lot to the new quantities (finished + by-products).
     const batchProduct = batch.product_id
       ? await trx('products').where('id', batch.product_id).select('name').first() : null;
     const riceTypeName = batchProduct?.name || null;
     const arrivalQuality = await trx('milling_quality_samples').where({ batch_id: batchId, analysis_type: 'arrival' }).first();
-    await inventoryService.recordMillingOutput(trx, {
+    const out = await inventoryService.recordMillingOutput(trx, {
       batchId, finishedKg: finished, brokenKg: broken, branKg: bran, huskKg: husk,
       sortexKg: sortex, powderKg: powder, sweepingKg: sweeping, chobaKg: choba,
-      productName: riceTypeName || 'Finished Rice', costPerKg: a.finishedCostPerKg,
-      rawCostComponent: a.finishedCostPerKg * a.rawFrac, millingCostComponent: a.finishedCostPerKg * a.millFrac,
+      productName: riceTypeName || 'Finished Rice', costPerKg: finishedCostPerKg,
+      rawCostComponent: finishedCostPerKg * (a.rawFrac || 0), millingCostComponent: finishedCostPerKg * (a.millFrac || 0),
       byproductCosts: {
         broken: alloc.broken || 0, b1: alloc.b1 || 0, b2: alloc.b2 || 0, b3: alloc.b3 || 0,
         csr: alloc.csr || 0, short_grain: alloc.short_grain || 0, bran: alloc.bran || 0,
@@ -3601,32 +3771,263 @@ const inventoryService = {
     // Re-account katta (freed from raw / consumed packing the new outputs).
     const katta = await inventoryService.reconcileBatchKatta(trx, batchId, userId);
 
-    // An output that is no longer produced at all — a grade zeroed out on the
-    // edited yield — is retired rather than left behind as a phantom lot. Only
-    // ones this resync did not just touch, and only while they hold nothing.
-    let retired = 0;
-    if (outIds.length) {
-      const stale = await trx('inventory_lots')
-        .whereIn('id', outIds)
-        .where('updated_at', '<', resyncStartedAt)
-        .whereRaw('COALESCE(qty, 0) = 0')
-        .select('id');
-      if (stale.length) {
-        const staleIds = stale.map((r) => r.id);
-        await trx('lot_source_mapping').where((q) => q.whereIn('parent_lot_id', staleIds).orWhereIn('child_lot_id', staleIds)).del();
-        await trx('lot_transactions').whereIn('lot_id', staleIds).del();
-        await trx('stock_adjustments').whereIn('lot_id', staleIds).del();
-        await trx('stock_count_items').whereIn('lot_id', staleIds).del();
-        retired = await trx('inventory_lots').whereIn('id', staleIds).del();
-      }
-    }
-
     // A re-recorded yield can move value between finished and by-product lots:
     // post the 1220 ↔ 1240 signed delta (A3a).
     const outputSplit = await syncBatchOutputSplit(trx, batchId, userId);
-    return { resynced: true, updatedInPlace: outIds.length, retired, finishedCostPerKg: a.finishedCostPerKg, netPurchase: a.netPurchase, byproductValue: a.byproductValue, katta, outputSplit };
+    return {
+      resynced: true, updatedInPlace: out.lots.length, retired: (out.retired || []).length,
+      movements: out.movements.length,
+      finishedCostPerKg, netPurchase: a.netPurchase, byproductValue: a.byproductValue, katta, outputSplit,
+    };
+  },
+
+  /**
+   * Refuse (409) when any output lot of the batch has moved since its yield:
+   * reserved, sold, re-milled, held for milling, or carrying any ledger row
+   * other than this batch's own production receipts / receipt reversals —
+   * a transfer, an adjustment, a service dispatch (or its reversal). Service
+   * batches are also refused once a dispatch has been recorded at all.
+   * `what` completes "…so its yield can't be <what>".
+   */
+  async assertBatchOutputsUntouched(trx, batch, what) {
+    const p = (v) => parseFloat(v) || 0;
+    const refuse = (message) => { const e = new Error(message); e.status = 409; e.statusCode = 409; return e; };
+    const label = batch.batch_no || `batch ${batch.id}`;
+    if (batch.is_service_milling) {
+      const disp = await trx('service_milling_dispatches').where({ service_batch_id: batch.id }).first('dispatch_no');
+      if (disp) {
+        throw refuse(`${label} has client dispatch ${disp.dispatch_no} recorded, so its yield can't be ${what} — the handed-over rice would come back as stock. Reverse the dispatch(es) first.`);
+      }
+    }
+    const outLots = await trx('inventory_lots')
+      .where({ batch_ref: `batch-${batch.id}` }).whereIn('type', ['finished', 'byproduct'])
+      .select('id', 'lot_no', 'reserved_qty', 'milling_reserved_qty', 'sold_weight_kg');
+    if (!outLots.length) return;
+    const ids = outLots.map((l) => l.id);
+    const moved = outLots.find((l) => p(l.reserved_qty) > 0 || p(l.milling_reserved_qty) > 0 || p(l.sold_weight_kg) > 0);
+    const cnt = async (t) => parseInt((await trx(t).whereIn('lot_id', ids).count('id as c').first()).c, 10) || 0;
+    const refd = (await cnt('inventory_reservations')) + (await cnt('local_sales')) + (await cnt('batch_source_lots'));
+    const foreign = await trx('lot_transactions').whereIn('lot_id', ids)
+      .where((q) => q
+        .whereNotIn('transaction_type', BATCH_OUTPUT_TXN_TYPES)
+        .orWhereNot('reference_module', 'milling_batch')
+        .orWhereNull('reference_module')
+        .orWhereRaw('reference_id IS DISTINCT FROM ?', [batch.id]))
+      .first('lot_id', 'transaction_type');
+    if (moved || refd > 0 || foreign) {
+      const lot = moved || outLots.find((l) => foreign && l.id === foreign.lot_id) || outLots[0];
+      throw refuse(`Output lot ${lot.lot_no} of ${label} has already been reserved, sold, moved or re-milled, so its yield can't be ${what}. Reverse those movements first, or use a stock adjustment.`);
+    }
+  },
+
+  /**
+   * THE residual-allocation entry point (P3-07 / MIL-04): load every input the
+   * engine needs — raw-rice cost (derived from source lots when missing),
+   * processing costs, packing cost and the "Milling / Processing" category on
+   * its own — and run computeResidualAllocation. First yield, re-yield,
+   * re-price and post-yield cost changes all come through here, so a batch
+   * costs the same whichever path it took (first yield used to skip the
+   * milling-category netting). `batch` may be passed when the caller holds a
+   * fresher row than it could read (first yield, mid-transaction).
+   */
+  async loadBatchAllocation(trx, batchId, { batch = null } = {}) {
+    const b = batch || await trx('milling_batches').where({ id: batchId }).first();
+    if (!b) return null;
+    await inventoryService.ensureRawCostFromSourceLots(trx, batchId);
+    const rows = await trx('milling_costs').where({ batch_id: batchId })
+      .select('category').sum('amount as t').groupBy('category');
+    let rawCostTotal = 0; let packingCost = 0; let millingCategoryCost = 0; let processingCosts = 0;
+    for (const r of rows) {
+      const t = parseFloat(r.t) || 0;
+      if (r.category === 'raw_rice') rawCostTotal += t;
+      else if (r.category === 'packaging') packingCost += t;
+      else {
+        processingCosts += t;
+        if (r.category === 'processing') millingCategoryCost += t;
+      }
+    }
+    const a = inventoryService.computeResidualAllocation(b, rawCostTotal, processingCosts, packingCost, millingCategoryCost);
+    return { batch: b, rawCostTotal, processingCosts, packingCost, millingCategoryCost, a };
+  },
+
+  /**
+   * Reverse a recorded yield (P3-03 / MIL-20) — the CONTROLLED un-yield. Only
+   * while nothing has happened to the output (assertBatchOutputsUntouched) and,
+   * for service milling, no live invoice or any dispatch exists. Every step is a
+   * NEW record, nothing is deleted:
+   *   - each output lot goes to 0 through a receipt reversal (status Closed);
+   *   - each raw / source lot gets back what the yield issued from it (an
+   *     issue reversal at the issue's own cost); a blend's source lot is put
+   *     back under this batch's milling hold, as before the yield;
+   *   - freed / packed katta is returned through compensating batch_katta
+   *     movements (refused if the freed bags were already used);
+   *   - every un-reversed 'Milling Batch' journal (completion + post-yield cost
+   *     adjustments) and 'Milling Output Split' journal gets its signed-delta
+   *     reversal (postReversalDelta) — the GL is back to before the yield;
+   *   - the batch returns to In Progress with its yield figures cleared and
+   *     the reversal stamped (who, when, why, which Owner authorised).
+   * Kept on purpose: the raw-rice purchase (payable + 'Rice Purchase' journal —
+   * the rice was bought and is back in raw stock), the cost sheet, the
+   * vehicle arrivals and quality records. Re-recording the yield then takes the
+   * first-yield path again.
+   */
+  async reverseBatchYield(trx, batchId, { userId = null, reason, ownerId = null } = {}) {
+    const p = (v) => parseFloat(v) || 0;
+    const refuse = (status, message) => { const e = new Error(message); e.status = status; e.statusCode = status; return e; };
+    const batch = await trx('milling_batches').where({ id: batchId }).forUpdate().first();
+    if (!batch) throw refuse(404, 'Milling batch not found.');
+    const label = batch.batch_no || `batch ${batchId}`;
+    const { batchHasOutputLots, isReservedSource } = require('../milling/batchLifecycle');
+    const {
+      hasPostedCompletion, MILLING_REF_TYPE, OUTPUT_SPLIT_REF_TYPE,
+    } = require('../milling/millingCompletionJournal');
+    const yielded = (await batchHasOutputLots(trx, batchId)) || (await hasPostedCompletion(trx, batch.batch_no));
+    if (!yielded) throw refuse(409, `${label} has no recorded yield to reverse.`);
+    if (batch.is_service_milling) {
+      const inv = await trx('service_milling_invoices').where({ service_batch_id: batchId })
+        .whereNot('status', 'Void').first('invoice_no');
+      if (inv) throw refuse(409, `${label} has service invoice ${inv.invoice_no}. Void the invoice first, then reverse the yield.`);
+    }
+    await inventoryService.assertBatchOutputsUntouched(trx, batch, 'reversed');
+
+    const accountingService = require('../accounting/accounting.service');
+    const why = `Yield of ${label} reversed — ${String(reason || '').trim()}`.slice(0, 480);
+
+    // 1. Output lots → 0 (receipt reversals).
+    const outLots = await trx('inventory_lots')
+      .where({ batch_ref: `batch-${batchId}` }).whereIn('type', ['finished', 'byproduct']);
+    let outputsReversed = 0;
+    for (const lot of outLots) {
+      const m = await inventoryService.postOutputToTarget(trx, {
+        lot, targetKg: 0, byproduct: lot.type === 'byproduct',
+        costPerKg: p(lot.cost_per_unit), warehouseId: lot.warehouse_id, batchId, notes: why, userId,
+      });
+      if (m) outputsReversed += 1;
+    }
+    await trx('lot_source_mapping')
+      .where({ source_batch_id: batchId, mapping_type: 'milling_input_to_output' }).del();
+
+    // 2. Raw / source lots get back what the yield issued (issue reversals).
+    const issued = await trx('lot_transactions')
+      .where({ reference_module: 'milling_batch', reference_id: batchId })
+      .whereIn('transaction_type', ['milling_issue', 'milling_issue_reversal'])
+      .select('lot_id', 'transaction_type', 'quantity_kg', 'rate_per_kg', 'unit_cost');
+    const byLot = new Map();
+    for (const t of issued) {
+      const cur = byLot.get(t.lot_id) || { kg: 0, cost: 0 };
+      cur.kg += -p(t.quantity_kg); // issue rows are negative, reversals positive
+      if (t.transaction_type === 'milling_issue' && !cur.cost) cur.cost = p(t.rate_per_kg) || p(t.unit_cost);
+      byLot.set(t.lot_id, cur);
+    }
+    const sources = await trx('batch_source_lots').where({ batch_id: batchId });
+    let issuesReversed = 0;
+    for (const [lotId, { kg, cost }] of byLot) {
+      if (kg <= 0.0005) continue;
+      const lot = await trx('inventory_lots').where({ id: lotId }).first();
+      await inventoryService.postMovement(trx, {
+        movementType: MOVEMENT_TYPES.PRODUCTION_ISSUE_REVERSE,
+        lotId, qty: kg, toWarehouseId: lot.warehouse_id, destEntity: lot.entity || 'mill',
+        linkedRef: `batch-${batchId}`, notes: why,
+        costPerUnit: cost || p(lot.landed_cost_per_kg) || p(lot.rate_per_kg),
+        currency: lot.cost_currency || 'PKR', batchId, userId,
+      });
+      issuesReversed += 1;
+      // A committed source lot goes back under this batch's hold, as it was
+      // between commit and yield; a truck-intake raw lot is simply back in stock.
+      const src = sources.find((s) => s.lot_id === lotId);
+      const rehold = src && isReservedSource(src) ? Math.min(kg, p(src.qty_kg)) : 0;
+      if (rehold > 0.0005) {
+        await inventoryService.postMovement(trx, {
+          movementType: MOVEMENT_TYPES.MILLING_HOLD,
+          lotId, qty: rehold, sourceEntity: lot.entity || 'mill',
+          linkedRef: `batch-${batchId}`, notes: `Back under batch ${batchId}'s hold — ${why}`,
+          batchId, userId,
+        });
+      }
+      // lot-qty-free: the hold went through postMovement above.
+      await trx('inventory_lots').where({ id: lotId }).update({
+        milling_status: src ? 'In Milling' : null,
+        status: 'Available',
+        updated_at: trx.fn.now(),
+      });
+    }
+    // Truck-intake raw lots flagged Consumed at yield: clear the flag.
+    await trx('inventory_lots').where({ batch_ref: `batch-${batchId}`, type: 'raw' })
+      .where('milling_status', 'Consumed').update({ milling_status: null, updated_at: trx.fn.now() });
+
+    // 3. Katta: return the store to where it was before the yield.
+    const katta = await trx('mill_stock_movements').where({ reference_type: 'batch_katta', reference_id: batchId })
+      .select('item_id', 'warehouse_id').sum('quantity as q').groupBy('item_id', 'warehouse_id');
+    const kattaBack = [];
+    for (const k of katta) {
+      const q = p(k.q);
+      if (Math.abs(q) < 0.0005) continue;
+      const stock = await trx('mill_stock').where({ item_id: k.item_id })
+        .modify((qb) => (k.warehouse_id == null ? qb.whereNull('warehouse_id') : qb.where('warehouse_id', k.warehouse_id)))
+        .forUpdate().first();
+      if (q > 0 && p(stock && stock.quantity_available) < q - 0.0005) {
+        const item = await trx('mill_items').where({ id: k.item_id }).first('name');
+        throw refuse(409, `The ${q} empty ${item ? item.name : 'katta'} freed by ${label}'s yield have since been used, so the yield can't be reversed — the store would go negative. Correct the katta stock first.`);
+      }
+      if (stock) {
+        await trx('mill_stock').where({ id: stock.id })
+          .update({ quantity_available: trx.raw('quantity_available - ?', [q]), updated_at: trx.fn.now() });
+      }
+      kattaBack.push({
+        item_id: k.item_id, warehouse_id: k.warehouse_id ?? null,
+        movement_type: q > 0 ? 'consumption' : 'return', quantity: -q,
+        reference_type: 'batch_katta', reference_id: batchId, reason: why, performed_by: userId,
+      });
+    }
+    if (kattaBack.length) await trx('mill_stock_movements').insert(kattaBack);
+
+    // 4. GL: signed-delta reversal of every un-reversed journal the yield (and
+    // later cost changes) posted under the batch — never a status flip.
+    const journals = await trx('journal_entries as je')
+      .where({ 'je.ref_no': batch.batch_no, 'je.status': 'Posted' })
+      .whereIn('je.ref_type', [MILLING_REF_TYPE, OUTPUT_SPLIT_REF_TYPE])
+      .whereNull('je.reversal_of')
+      .whereNotExists(function unreversed() {
+        this.select('r.id').from('journal_entries as r')
+          .whereRaw('r.reversal_of = je.id').where('r.status', 'Posted');
+      })
+      .orderBy('je.id', 'desc')
+      .select('je.id', 'je.ref_type');
+    const { ledgerFailure } = require('../../shared/ledgerFailure');
+    for (const j of journals) {
+      try {
+        await accountingService.postReversalDelta(trx, {
+          journalId: j.id, reason: why, userId, refType: j.ref_type,
+        });
+      } catch (jeErr) {
+        throw ledgerFailure(jeErr, 'The yield reversal');
+      }
+    }
+
+    // 5. The batch is back to running, its yield figures cleared.
+    await trx('milling_batches').where({ id: batchId }).update({
+      status: 'In Progress', completed_at: null,
+      actual_finished_kg: 0, broken_kg: 0, b1_kg: 0, b2_kg: 0, b3_kg: 0, csr_kg: 0, short_grain_kg: 0,
+      bran_kg: 0, husk_kg: 0, sortex_rejects_kg: 0, powder_kg: 0, sweeping_kg: 0, choba_kg: 0,
+      ov_kg: 0, stone_kg: 0, wastage_kg: 0, yield_pct: 0,
+      raw_cost_per_kg_finished: 0, milling_cost_per_kg_finished: 0, total_cost_per_kg_finished: 0,
+      yield_reversed_at: trx.fn.now(), yield_reversed_by: userId,
+      yield_reversal_reason: String(reason || '').trim().slice(0, 500),
+      yield_reversal_authorized_by: ownerId,
+      ...(batch.is_service_milling ? { service_lot_status: 'Received' } : {}),
+      updated_at: trx.fn.now(),
+    });
+
+    return {
+      reversed: label, outputsReversed, issuesReversed,
+      journalsReversed: journals.length, kattaMovements: kattaBack.length,
+    };
   },
 };
+
+// The ledger rows a batch's own yield writes on its output lots: receipts and
+// their reversals. Anything else on an output lot means the rice has moved.
+const BATCH_OUTPUT_TXN_TYPES = ['milling_receipt', 'byproduct_receipt', 'milling_receipt_reversal', 'byproduct_receipt_reversal'];
 
 // Shared with Sample Analysis so a sample number and the lot it becomes derive
 // the supplier / variety codes identically.

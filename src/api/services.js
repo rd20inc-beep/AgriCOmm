@@ -27,16 +27,13 @@ export const enterpriseApi = {
   updatePreferences: (data) => api.put('/api/enterprise/preferences', data),
 };
 
-// Procurement stays here (minor module)
+// Procurement stays here (minor module). Read-only: the PO / GRN chain is
+// retired in favour of purchase lots (D-25b) — its create endpoints answer 410.
 export const procurementApi = {
   requisitions: (params) => api.get('/api/procurement/requisitions', params),
-  createRequisition: (data) => api.post('/api/procurement/requisitions', data),
   purchaseOrders: (params) => api.get('/api/procurement/purchase-orders', params),
-  createPO: (data) => api.post('/api/procurement/purchase-orders', data),
   grns: (params) => api.get('/api/procurement/grns', params),
-  createGRN: (data) => api.post('/api/procurement/grns', data),
   approveGRNQuality: (id, data) => api.put(`/api/procurement/grns/${id}/quality`, data),
   invoices: (params) => api.get('/api/procurement/invoices', params),
-  createInvoice: (data) => api.post('/api/procurement/invoices', data),
   supplierPerformance: (id) => api.get(`/api/procurement/suppliers/${id}/performance`),
 };

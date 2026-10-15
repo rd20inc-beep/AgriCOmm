@@ -29,6 +29,9 @@ function builder(conn, table) {
       return qb;
     },
     whereIn(col, vals) { filters.push((r) => vals.includes(r[col])); return qb; },
+    whereRaw() { return qb; }, // lot txn-no lookup (postMovement)
+    whereNull(col) { filters.push((r) => r[String(col).split('.').pop()] == null); return qb; },
+    whereNotExists() { return qb; },
     forUpdate() { conn.locks.push(table); return qb; },
     select() { return qb; },
     join() { return qb; },
@@ -88,6 +91,11 @@ jest.mock('../services/inventoryService', () => ({
 }));
 jest.mock('../services/accountingService', () => ({ autoPost: jest.fn() }));
 jest.mock('../services/automationService', () => ({ onBatchCompleted: jest.fn() }));
+// The GL side of cancel (D-6 WIP, truck purchase) is covered against a real DB
+// in millingWip.integration.test.js.
+jest.mock('../modules/milling/millingWip', () => ({
+  syncBatchWip: jest.fn(async () => null), syncBatchIntake: jest.fn(async () => null),
+}));
 jest.mock('../services/exportOrderWorkflowService', () => ({}));
 jest.mock('../services/notificationService', () => ({}));
 jest.mock('../services/exportOrderEventBus', () => ({ publishExportOrderUpdate: jest.fn() }));

@@ -10,6 +10,7 @@ import { useApp } from '../../../context/AppContext';
 import StatusBadge from '../../../shared/components/StatusBadge';
 import { fmtPKR, fmtMoney, fmtPct, fmtDate, fmtDateTime, fmtKg } from '../../../shared/utils/format';
 import { HeadlineCard, TypeChip } from '../components/FinanceUI';
+import { saleCogs } from '../../localSales/utils/saleLot';
 
 const TABS = ['Export', 'Mill', 'Local', 'Consolidated'];
 
@@ -151,8 +152,9 @@ export default function Profit() {
         .map(s => ({
           name: s.saleNo,
           Revenue: parseFloat(s.totalAmount) || 0,
-          Cost:    parseFloat(s.cogsTotalPkr || s.landedCostTotal) || 0,
-          Profit:  parseFloat(s.grossProfit || s.grossProfitPkr) || 0,
+          // The locked COGS the GL posted (pending: estimate) — P3-12.
+          Cost:    saleCogs(s).cost,
+          Profit:  (parseFloat(s.totalAmount) || 0) - saleCogs(s).cost,
         }));
     }
     if (tab === 'Consolidated') {
@@ -178,9 +180,9 @@ export default function Profit() {
     { key: 'itemName', label: 'Item', render: (v) => v || '—' },
     { key: 'quantityKg', label: 'Qty (kg)', sortable: true, align: 'right', render: (v) => fmtKg(parseFloat(v) || 0) },
     { key: 'totalAmount', label: 'Revenue', sortable: true, align: 'right', render: (v) => fmtPKR(v) },
-    { key: 'cogsTotalPkr', label: 'Cost', align: 'right', render: (v, row) => fmtPKR(v || row.landedCostTotal) },
+    { key: 'cogsTotalPkr', label: 'Cost', align: 'right', render: (v, row) => fmtPKR(saleCogs(row).cost) },
     { key: 'grossProfit', label: 'Profit', sortable: true, align: 'right', render: (v, row) => {
-      const n = parseFloat(v || row.grossProfitPkr) || 0;
+      const n = (parseFloat(row.totalAmount) || 0) - saleCogs(row).cost;
       return <span className={n >= 0 ? 'text-emerald-600 font-medium' : 'text-red-600 font-medium'}>{fmtPKR(n)}</span>;
     }},
     { key: 'marginPct', label: 'Margin', sortable: true, align: 'right', render: (v) => fmtPct(v) },

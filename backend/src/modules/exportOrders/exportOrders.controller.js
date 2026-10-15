@@ -34,6 +34,77 @@ async function flaggedOnCancel(trx, orderId) {
   ]);
   return { openCostPayables: n(costs), printedBagOrders: n(bags), orderedRequisitions: n(prs), liveDocuments: n(docs) };
 }
+
+// ── Side costs typed on the create form (P3-18, EXP-17) ─────────────────────
+// Printed-bag orders and the pallet cost used to be posted by the browser AFTER
+// the order was saved — separate calls, even for a Draft — so an abandoned
+// draft left vendor payables and 6000/2010 journals behind, and a failure left
+// a half-saved order. They now travel in the create payload: a live order posts
+// them inside its own transaction; a Draft holds them (draft_side_costs) and
+// Submit posts them in the submit's transaction.
+function normalizeSideCosts({ printed_bags: bags, pallet_cost: pallet, palletized }) {
+  const printedBags = (Array.isArray(bags) ? bags : [])
+    .filter((b) => b && (parseInt(b.quantity, 10) || 0) > 0)
+    .map((b) => ({
+      bag_type_id: b.bag_type_id ? parseInt(b.bag_type_id, 10) : null,
+      bag_type_name: b.bag_type_name || null,
+      bag_size_kg: b.bag_size_kg != null && b.bag_size_kg !== '' ? parseFloat(b.bag_size_kg) : null,
+      vendor_id: b.vendor_id ? parseInt(b.vendor_id, 10) : null,
+      quantity: parseInt(b.quantity, 10),
+      unit_cost: parseFloat(b.unit_cost) || 0,
+      printing: b.printing || null,
+      brand_marking: b.brand_marking || null,
+      notes: b.notes || null,
+    }));
+  const palletCost = Math.round((parseFloat(pallet) || 0) * 100) / 100;
+  if (palletCost > 0 && !palletized) {
+    const e = new Error('A pallet cost needs a palletized load.'); e.statusCode = 400; throw e;
+  }
+  if (!printedBags.length && !(palletCost > 0)) return null;
+  return { printed_bags: printedBags, pallet_cost: palletCost > 0 ? palletCost : null };
+}
+
+// Posting a vendor bill is an order edit; the create / submit routes only check
+// export_orders.create, so a payload carrying bills also needs edit.
+async function assertCanPostSideCosts(req) {
+  const { userHasPermission } = require('../../middleware/rbac');
+  if (!(await userHasPermission(req, 'export_orders', 'edit'))) {
+    const e = new Error('Printed-bag orders and the pallet cost need the export-order edit permission.');
+    e.statusCode = 403; throw e;
+  }
+}
+
+// Post the held side costs for a LIVE order in the caller's transaction: each
+// printed-bag order (payable + Dr 6000 / Cr 2010) and the pallet cost as a
+// 'pallet' cost bill. Any failure throws, so the order is not saved either.
+async function postSideCosts(trx, order, sideCosts, userId) {
+  const out = { printedBags: [], palletCostId: null };
+  if (!sideCosts) return out;
+  const printedBagsService = require('./printedBags.service');
+  for (const b of sideCosts.printed_bags || []) {
+    // eslint-disable-next-line no-await-in-loop
+    const row = await printedBagsService.createInTrx(trx, order, b, userId);
+    out.printedBags.push(row.pbo_no);
+  }
+  // Only while the load is still palletized (a draft can be un-palletized).
+  if (parseFloat(sideCosts.pallet_cost) > 0 && order.palletized) {
+    const cost = await recordOrderCost(trx, {
+      order, category: 'pallet', amount: sideCosts.pallet_cost, notes: 'Pallet cost', userId,
+    });
+    out.palletCostId = cost.id;
+  }
+  return out;
+}
+
+// Order fields that change the packing material it needs (_materialLines).
+const MATERIAL_FIELDS = [
+  'qty_mt', 'packing_type', 'palletized', 'bag_material', 'bag_type', 'bag_size_kg',
+  'master_bag_size_kg', 'bag_printing', 'bag_brand', 'receiving_mode',
+];
+// Material requests follow a live order until it ships; not a draft (none
+// raised yet) and not one that is finished with.
+const MATERIAL_SYNC_EXCLUDED_STATUSES = ['Draft', 'Cancelled', 'Closed', 'Shipped', 'Arrived'];
+
 const { fillSingleLineBagSpec, linePackaging } = require('./orderLines');
 const { syncBalanceDueDate } = require('./balanceDueDate');
 const { balanceTermDaysSetting } = require('../finance/collectionRate');
@@ -44,6 +115,10 @@ const notificationService = require('../../services/notificationService');
 // (the dispatch/reservation engine is never scoped).
 const whScope = require('../../utils/warehouseScope');
 const { canSeeCost, redactMoney } = require('../../utils/costVisibility');
+const documentGate = require('./documentGate');
+const { reservationCover } = require('./reservationGate');
+const { applyExportPool, exportPoolProblem, lotCostPerKg } = require('../inventory/exportPool');
+const { suggestLots } = require('./lotSuggestion');
 const { MONEY_EPSILON, settledAmount, getStepForStatus, getAllowedActions, deriveFinancialStatus } = workflowService;
 
 /**
@@ -183,26 +258,24 @@ async function runReceiptAutomation(ctx, isAdvance, userId) {
   } catch (e) { console.warn(`${isAdvance ? 'Advance' : 'Balance'} automation failed:`, e.message); }
 }
 
-// Map frontend camelCase doc keys to checklist snake_case doc_type values
-const DOC_TYPE_TO_CHECKLIST = {
-  'phyto': 'phyto',
-  'blDraft': 'bl_draft',
-  'bl_draft': 'bl_draft',
-  'blFinal': 'bl_final',
-  'bl_final': 'bl_final',
-  'invoice': 'commercial_invoice',
-  'commercial_invoice': 'commercial_invoice',
-  'packingList': 'packing_list',
-  'packing_list': 'packing_list',
-  'coo': 'coo',
-  'fumigation': 'fumigation',
-};
-
 // Map short frontend keys to all possible DB doc_type values. Shared with the
 // workflow, which uses the same table to decide when the required set is done.
 const { DOC_TYPE_ALIASES } = workflowService;
 
+// The order's own document marker (export_order_documents). Since D-17 it
+// records only that something was uploaded — it decides nothing. A tick can no
+// longer make a document ready: Approved / Final are refused here, and the
+// gate (documentGate) reads the stored file and its second-person approval.
+// The checklist cache is re-derived from that evidence, never set from a tick.
 async function applyDocumentAction({ orderRef, userId, docType, targetStatus, filePath, version, notes }) {
+  if (['Approved', 'Final'].includes(targetStatus)) {
+    const err = new Error(
+      'A document can no longer be confirmed ready without a file (owner decision D-17). Upload the document on the Documents tab; '
+      + 'it counts once a second person has approved the stored file, or once the generated document is approved in the Document Center.'
+    );
+    err.statusCode = 400;
+    throw err;
+  }
   const isNumeric = /^\d+$/.test(String(orderRef));
   const whereClause = isNumeric ? { id: parseInt(orderRef) } : { order_no: orderRef };
   const order = await db('export_orders').where(whereClause).first();
@@ -220,14 +293,13 @@ async function applyDocumentAction({ orderRef, userId, docType, targetStatus, fi
     .first();
 
   let doc;
-  let orderStatusChanged = false;
-
   await db.transaction(async (trx) => {
     if (existing) {
       [doc] = await trx('export_order_documents')
         .where({ id: existing.id })
         .update({
-          status: targetStatus || existing.status,
+          // The marker follows uploads only; it never steps an older row back.
+          status: ['Approved', 'Final'].includes(existing.status) ? existing.status : (targetStatus || existing.status),
           file_path: filePath || existing.file_path,
           version: version || existing.version,
           notes: notes != null ? notes : existing.notes,
@@ -248,27 +320,10 @@ async function applyDocumentAction({ orderRef, userId, docType, targetStatus, fi
         })
         .returning('*');
     }
-
-    const fulfilledStatuses = new Set(['Approved', 'Final']);
-    const checklistDocType = DOC_TYPE_TO_CHECKLIST[docType] || docType;
-    await trx('document_checklists')
-      .where({ linked_type: 'export_order', linked_id: order.id, doc_type: checklistDocType })
-      .update({
-        is_fulfilled: fulfilledStatuses.has(doc.status),
-        updated_at: trx.fn.now(),
-      });
-
-    if (fulfilledStatuses.has(doc.status)) {
-      const transition = await workflowService.maybePromoteAfterDocuments(trx, {
-        order,
-        userId,
-        reason: 'All required documents approved',
-      });
-      orderStatusChanged = transition.changed;
-    }
+    await documentGate.syncChecklist(trx, order.id);
   });
 
-  return { doc, orderStatusChanged, orderId: order.id };
+  return { doc, orderStatusChanged: false, orderId: order.id };
 }
 
 // Normalize an `items[]` payload into rows for `export_order_items`.
@@ -691,9 +746,17 @@ const exportOrderController = {
       order.shipmentContainers = withLots;
       order.allowed_actions = getAllowedActions(order);
       order.allowedActions = order.allowed_actions;
+      // The two shipment gates as the server sees them, so the page shows the
+      // same answer the transition will give (P3-13 / P3-17).
+      const [docGate, cover] = await Promise.all([
+        documentGate.evaluateDocumentGate(db, orderId),
+        reservationCover(db, order),
+      ]);
+      order.document_gate = docGate;
+      order.reservation_cover = cover;
 
       // Fetch purchase lots linked to this order via multiple paths:
-      // 1. reserved_against matching the order_no
+      // 1. inventory_reservations held (Active) or shipped (Consumed) for it
       // 2. lot_transactions with reference_module='export_order'
       // 3. lot_transactions with type='export_allocation' (even without reference_id)
       //    matched via milling batch linkage
@@ -716,15 +779,17 @@ const exportOrderController = {
       ];
 
       const [reservedLots, allocatedTxns, millingOutputLots] = await Promise.all([
-        // Path 1: Lots explicitly reserved against this order
+        // Path 1: Lots reserved for this order. inventory_reservations is the
+        // order→lot link (the reserved_against string was dropped, mig 389).
         db('inventory_lots as l')
           .leftJoin('suppliers as s', 'l.supplier_id', 's.id')
           .leftJoin('warehouses as w', 'l.warehouse_id', 'w.id')
           .leftJoin('products as p', 'l.product_id', 'p.id')
           .select(...lotSelectFields)
-          // reserveStock tags the lot 'order-<id>', while older code used the
-          // order_no ('EX-001') — match both so reserved stock always surfaces.
-          .whereIn('l.reserved_against', [order.order_no, `order-${orderId}`]),
+          .whereIn('l.id', db('inventory_reservations')
+            .where({ order_id: orderId })
+            .whereIn('status', ['Active', 'Consumed'])
+            .select('lot_id')),
 
         // Path 2: Lots with allocation transactions for THIS order only
         // Exclude outbound transfers (warehouse_transfer_out) — those are the source side
@@ -802,10 +867,10 @@ const exportOrderController = {
         // Skip mill-entity finished lots when an export-entity lot from the same batch
         // already exists (it was transferred — showing both would double-count)
         if (lot.entity === 'mill' && lot.type === 'finished' && lot.batch_ref && exportBatchRefs.has(lot.batch_ref)) continue;
-        const isReservedForUs = lot.reserved_against === order.order_no || lot.reserved_against === `order-${orderId}`;
+        // Not reserved for this order (a reserved lot is already in the map).
         lotMap.set(lot.id, {
           ...lot,
-          allocated_qty_kg: isReservedForUs ? (parseFloat(lot.net_weight_kg) || (parseFloat(lot.qty) || 0)) : 0,
+          allocated_qty_kg: 0,
           source: 'milling_output',
         });
       }
@@ -997,6 +1062,8 @@ const exportOrderController = {
         packing_notes,
         packing_lines, // array of packing line objects for mixed mode
         items, // array of P.I. line items (multi-product)
+        printed_bags, // P3-18: printed-bag orders arranged on the create form
+        pallet_cost, // P3-18: PKR pallet cost (palletized loads)
       } = req.body;
 
       // When `items[]` is sent, derive summary fields from the lines so the
@@ -1051,6 +1118,9 @@ const exportOrderController = {
       const capacityError = packingCapacityError(effectiveQtyMt, palletized, packing_type);
       if (capacityError) return res.status(400).json({ success: false, message: capacityError });
 
+      const sideCosts = normalizeSideCosts({ printed_bags, pallet_cost, palletized: !!palletized });
+      if (sideCosts) await assertCanPostSideCosts(req);
+
       const contractValue = parseFloat(effectiveQtyMt) * parseFloat(effectivePricePerMt);
       const advancePct = parseFloat(advance_pct) || 0;
       const advanceExpected = contractValue * (advancePct / 100);
@@ -1084,6 +1154,7 @@ const exportOrderController = {
         .catch((e) => { if (e.code === 'FX_RATE_MISSING' && (!requestedStatus || requestedStatus === 'Draft')) return { rate: null }; throw e; });
       const _lockedFxRate = fxResult.rate;
 
+      let sidePosted = { printedBags: [], palletCostId: null };
       const result = await db.transaction(async (trx) => {
         const orderNo = await generateOrderNo(trx);
 
@@ -1170,6 +1241,8 @@ const exportOrderController = {
             fx_rate_source: parseFloat(req.body.booked_fx_rate) > 0 ? 'manual' : (_lockedFxRate ? 'system' : null),
             fx_rate_locked_at: _lockedFxRate || parseFloat(req.body.booked_fx_rate) > 0 ? new Date() : null,
             contract_value_pkr_locked: contractValue * ((parseFloat(req.body.booked_fx_rate) > 0 ? parseFloat(req.body.booked_fx_rate) : _lockedFxRate) || 0),
+            // A Draft only holds its printed bags / pallet cost (P3-18).
+            draft_side_costs: isDraft && sideCosts ? JSON.stringify(sideCosts) : null,
           })
           .returning('*');
 
@@ -1313,6 +1386,12 @@ const exportOrderController = {
           await trx('order_packing_lines').insert(lineRows);
         }
 
+        // A live order's printed bags and pallet cost are posted with it — one
+        // call, one transaction: a bill that cannot post saves no order.
+        if (!isDraft && sideCosts) {
+          sidePosted = await postSideCosts(trx, order, sideCosts, req.user.id);
+        }
+
         return order;
       });
 
@@ -1336,11 +1415,17 @@ const exportOrderController = {
 
       return res.status(201).json({
         success: true,
-        data: { order: result, materialRequests },
+        data: {
+          order: result,
+          materialRequests,
+          printedBagOrders: sidePosted.printedBags,
+          palletCostId: sidePosted.palletCostId,
+        },
       });
     } catch (err) {
       // D-10: no rate for the order's currency → a clear 400, not a 500.
       if (err.code === 'FX_RATE_MISSING') return res.status(err.statusCode || 400).json({ success: false, code: err.code, field: 'booked_fx_rate', message: err.message });
+      if (err.statusCode) return res.status(err.statusCode).json({ success: false, message: err.message });
       console.error('Export order create error:', err);
       return res.status(500).json({ success: false, message: 'Internal server error.' });
     }
@@ -1695,10 +1780,24 @@ const exportOrderController = {
         return res.status(404).json({ success: false, message: 'Export order not found.' });
       }
 
+      // The order's packing-material requests follow a change to what it needs
+      // (EXP-40): pending ones are resized or cancelled, approved ones are
+      // flagged for review. Outside the transaction and non-fatal, like the
+      // raise at create — a requisition problem never fails an order edit.
+      let materialSync = null;
+      const materialChanged = !!itemRowsForUpdate || MATERIAL_FIELDS.some((f) => safeUpdates[f] !== undefined);
+      if (materialChanged && !MATERIAL_SYNC_EXCLUDED_STATUSES.includes(result.status)) {
+        try {
+          materialSync = await exportOrderController._syncMaterialsFor(result, req.user?.id, `Order ${result.order_no} changed`);
+        } catch (mrErr) {
+          console.error('Material requirement sync failed for', result.order_no, mrErr.message);
+        }
+      }
+
       emitExportOrderUpdate(result.id, 'updated');
       return res.json({
         success: true,
-        data: { order: result },
+        data: { order: result, materialSync },
       });
     } catch (err) {
       // D-10: a currency change with no rate for the new currency.
@@ -1782,13 +1881,6 @@ const exportOrderController = {
         for (const r of reservations) {
           await inventoryService.releaseReservation(trx, { reservationId: r.id, userId: req.user.id });
         }
-        // Clear stale reserved_against tags on now fully-unreserved lots.
-        for (const lid of [...new Set(reservations.map((r) => r.lot_id))]) {
-          const lot = await trx('inventory_lots').where({ id: lid }).first();
-          if (lot && parseFloat(lot.reserved_qty) <= 0.0001) {
-            await trx('inventory_lots').where({ id: lid }).update({ reserved_against: null, updated_at: trx.fn.now() });
-          }
-        }
 
         // 2) Money received (P2-15, D-7). Receipts, their bank rows and their
         //    journals are never deleted or reversed: each CONFIRMED receipt gets
@@ -1831,7 +1923,13 @@ const exportOrderController = {
             notes: trx.raw("COALESCE(notes || ' — ', '') || ?", [`Export order ${order.order_no} cancelled`]),
             updated_at: trx.fn.now(),
           });
+        // Packing-material requests raised for the order (EXP-40) are
+        // cancelled with it — approved ones too, under the Owner's cancel
+        // approval, with Finance told; purchased ones are counted for review.
+        const requirements = await require('../purchaseRequirements/purchaseRequirements.service')
+          .cancelForRef(trx, order.order_no, { userId: req.user.id, why: `Export order ${order.order_no} cancelled` });
         const flagged = await flaggedOnCancel(trx, id);
+        flagged.purchasedRequirements = requirements.purchased;
 
         // 6) Reset the order's money state and mark it Cancelled + history. The
         //    order no longer holds the money — the receipts and their
@@ -1841,6 +1939,8 @@ const exportOrderController = {
           advance_received: 0, advance_received_pkr: 0,
           balance_received: 0, balance_received_pkr: 0,
           revenue_posted: false,
+          // A draft's held printed bags / pallet cost were never posted.
+          draft_side_costs: null,
           updated_at: trx.fn.now(),
         });
         await trx('export_order_status_history').insert({
@@ -1858,6 +1958,7 @@ const exportOrderController = {
           voidedPendingReceipts: disposed.voided,
           cancelledDebitNotes: cancelledNotes,
           cancelledRequisitions: cancelledPrs || 0,
+          cancelledRequirements: requirements.cancelled,
           flagged,
         };
       });
@@ -1873,6 +1974,7 @@ const exportOrderController = {
         result.flagged.openCostPayables ? `${result.flagged.openCostPayables} unpaid cost bill(s)` : null,
         result.flagged.printedBagOrders ? `${result.flagged.printedBagOrders} printed-bag order(s)` : null,
         result.flagged.orderedRequisitions ? `${result.flagged.orderedRequisitions} ordered requisition(s)` : null,
+        result.flagged.purchasedRequirements ? `${result.flagged.purchasedRequirements} purchased material request(s)` : null,
         result.flagged.liveDocuments ? `${result.flagged.liveDocuments} generated document(s)` : null,
       ].filter(Boolean);
       return res.json({
@@ -2046,6 +2148,7 @@ const exportOrderController = {
           eta: resolveShipmentField(eta, order.eta),
           ata: resolveShipmentField(ata, order.ata),
           destination_port: resolveShipmentField(destination_port, order.destination_port),
+          gate_pass_no: resolveShipmentField(gate_pass_no, order.gate_pass_no),
         };
 
         if (ata) {
@@ -2064,13 +2167,8 @@ const exportOrderController = {
           }
         } else if (atd) {
           if (currentOrder.status === 'Ready to Ship') {
-            // A gate pass is required to release the goods out the gate.
-            const gatePass = (gate_pass_no || order.gate_pass_no || '').toString().trim();
-            if (!gatePass) {
-              const err = new Error('A gate pass number is required to mark the shipment as shipped (goods leaving the premises).');
-              err.statusCode = 400;
-              throw err;
-            }
+            // The gate pass, ATD, reservation and document checks live in the
+            // workflow's Shipped gate, so PUT /:id/status is held to them too.
             currentOrder = await workflowService.transitionOrder(trx, {
               order: currentOrder,
               toStatus: 'Shipped',
@@ -2118,6 +2216,7 @@ const exportOrderController = {
       const id = await resolveExportOrderId(req.params.id);
       if (!id) return res.status(404).json({ success: false, message: 'Export order not found.' });
 
+      let sidePosted = { printedBags: [], palletCostId: null };
       const updated = await db.transaction(async (trx) => {
         const order = await lockRow(trx('export_orders').where({ id })).first();
         if (!order) { const e = new Error('Export order not found.'); e.statusCode = 404; throw e; }
@@ -2151,7 +2250,15 @@ const exportOrderController = {
         }
         await ensureOrderReceivables(trx, order);
         await syncBalanceDueDate(trx, order.id);
-        return moved;
+        // The printed bags / pallet cost the draft was holding are posted now,
+        // in this transaction (P3-18): a bill that cannot post submits nothing.
+        const held = typeof order.draft_side_costs === 'string' ? JSON.parse(order.draft_side_costs) : order.draft_side_costs;
+        if (held) {
+          await assertCanPostSideCosts(req);
+          sidePosted = await postSideCosts(trx, { ...order, status: moved.status }, held, req.user.id);
+          await trx('export_orders').where({ id: order.id }).update({ draft_side_costs: null });
+        }
+        return { ...moved, draft_side_costs: null };
       });
 
       let materialRequests = [];
@@ -2162,7 +2269,10 @@ const exportOrderController = {
       }
 
       emitExportOrderUpdate(updated.id, 'status_updated', { status: updated.status });
-      return res.json({ success: true, data: { order: updated, materialRequests } });
+      return res.json({
+        success: true,
+        data: { order: updated, materialRequests, printedBagOrders: sidePosted.printedBags, palletCostId: sidePosted.palletCostId },
+      });
     } catch (err) {
       if (err.statusCode) return res.status(err.statusCode).json({ success: false, message: err.message });
       console.error('Export order submitDraft error:', err);
@@ -2592,7 +2702,7 @@ const exportOrderController = {
       const rawId = req.params.id;
       const isNumeric = /^\d+$/.test(rawId);
       const whereClause = isNumeric ? { id: parseInt(rawId) } : { order_no: rawId };
-      const { lot_id, qty_mt, notes, item_id } = req.body;
+      const { lot_id, qty_mt, notes, item_id, suggested } = req.body;
 
       if (!lot_id) {
         return res.status(400).json({ success: false, message: 'lot_id is required.' });
@@ -2647,26 +2757,20 @@ const exportOrderController = {
           throw err;
         }
 
-        // Client-owned service-milling stock is not ours to sell/export.
-        if (lot.ownership === 'client') {
-          const err = new Error('Client-owned Service Milling stock cannot be allocated to an export order.');
-          err.statusCode = 422;
-          throw err;
-        }
-
-        // Only export-ready stock can be allocated to an export order (Batch 4).
-        // Mill marks finished rice ready first; export then selects from the pool.
-        if (!lot.export_ready) {
-          const err = new Error('Only export-ready stock can be allocated. Ask the mill to mark this lot Ready for Export first.');
-          err.statusCode = 400;
+        // The same pool the picker lists (EXP-28): export-ready mill stock or
+        // stock already in the export entity, finished or by-product, never
+        // client-owned service-milling stock.
+        const poolProblem = exportPoolProblem(lot);
+        if (poolProblem) {
+          const err = new Error(poolProblem);
+          err.statusCode = lot.ownership === 'client' ? 422 : 400;
           throw err;
         }
 
         // A lot with no recorded cost can't be allocated/shipped — COGS at shipment
         // (locked from the lot's cost) would be Rs 0 → 100% phantom margin on the
         // export P&L. Price the lot first. Mirrors the local-sale / yield guards.
-        const lotCostPerKg = parseFloat(lot.landed_cost_per_kg) || parseFloat(lot.cost_per_unit) || parseFloat(lot.rate_per_kg) || 0;
-        if (lotCostPerKg <= 0) {
+        if (lotCostPerKg(lot) <= 0) {
           const err = new Error(`${lot.lot_no} has no recorded cost (Rs 0/kg). Set the lot's price before allocating it to an export order — the shipment needs a cost basis for COGS/profit.`);
           err.statusCode = 400;
           throw err;
@@ -2690,12 +2794,17 @@ const exportOrderController = {
           }
         }
 
+        // A suggested lot is still a user's decision: it is reserved only here,
+        // when they confirm it, and the reservation records that it was the
+        // suggestion along with who confirmed it and when (D-18).
+        const source = suggested === true || suggested === 'true' ? 'suggested' : 'manual';
         await inventoryService.reserveStock(trx, {
           lotId: lot.id,
           orderId: order.id,
           qtyKg,
           itemId,
           userId: req.user?.id,
+          source,
         });
 
         // reserveStock now handles: lot update, reservation record, AND ledger entry
@@ -2706,7 +2815,9 @@ const exportOrderController = {
           from_status: order.status,
           to_status: order.status,
           changed_by: req.user?.id,
-          reason: `${qtyMT} MT allocated from ${lot.lot_no}`,
+          reason: source === 'suggested'
+            ? `${qtyMT} MT reserved from ${lot.lot_no} (suggested lot, confirmed)`
+            : `${qtyMT} MT allocated from ${lot.lot_no}`,
         });
 
         // Let the export manager know the mill has fulfilled (part of) this order
@@ -3119,6 +3230,18 @@ const exportOrderController = {
     return raised;
   },
 
+  // Bring the order's open material requests to what it needs NOW (EXP-40):
+  // raise what is newly short, shrink or cancel pending requests no longer
+  // needed, and flag approved ones the order no longer needs in full.
+  async _syncMaterialsFor(order, userId, why) {
+    const lines = await exportOrderController._materialLines(order);
+    const prService = require('../purchaseRequirements/purchaseRequirements.service');
+    return prService.syncForRef(db, order.order_no, lines, {
+      userId: userId || null, why: why || `Order ${order.order_no} changed`,
+      reason: `Proactive material requirement for order ${order.order_no}`,
+    });
+  },
+
   // Raise a Purchase Requirement for each short material (deduped per item + order).
   async raiseMaterialRequirements(req, res) {
     try {
@@ -3145,7 +3268,10 @@ const exportOrderController = {
 
       // #9-scoping: a warehouse-scoped user can only source from their warehouses.
       const stockScope = await whScope.resolveWarehouseScope(req);
-      const lots = await whScope.applyWarehouseScope(db('inventory_lots as l')
+      // The export pool (exportPool.applyExportPool) — the same predicate
+      // allocate-stock checks: export-ready mill stock, or anything already in
+      // the export entity; finished or by-product; never client-owned stock.
+      const lots = await whScope.applyWarehouseScope(applyExportPool(db('inventory_lots as l'), 'l')
         .leftJoin('products as p', 'l.product_id', 'p.id')
         .leftJoin('suppliers as s', 'l.supplier_id', 's.id')
         .leftJoin('warehouses as w', 'l.warehouse_id', 'w.id'), stockScope, 'l.warehouse_id')
@@ -3153,15 +3279,8 @@ const exportOrderController = {
         // — surfaces batch no / name / custom tags so the stock pool is searchable
         // by batch + tag (#3 fulfil-from-inventory search filters).
         .leftJoin('milling_batches as mb', db.raw("l.batch_ref = 'batch-' || mb.id"))
-        // Available = mill stock explicitly marked export-ready, OR anything
-        // already sitting in the export entity (transferred lots are ready by
-        // definition), so a transferred lot is pickable on the order.
-        .where(function () { this.where('l.export_ready', true).orWhere('l.entity', 'export'); })
-        // Client-owned (service milling) stock never enters the export pool.
-        .whereNot('l.ownership', 'client')
-        .whereIn('l.type', ['finished', 'byproduct'])
         .whereRaw('COALESCE(l.available_qty, 0) > 0')
-        .select('l.id', 'l.lot_no', 'l.item_name', 'l.type', 'l.entity', 'l.variety', 'l.grade',
+        .select('l.id', 'l.lot_no', 'l.item_name', 'l.type', 'l.entity', 'l.variety', 'l.grade', 'l.product_id',
           'l.available_qty', 'l.net_weight_kg', 'l.total_bags', 'l.bag_size_kg', 'l.export_display_name',
           'l.landed_cost_per_kg', 'l.supplier_id', 's.name as supplier_name', 's.supplier_code as supplier_code',
           'p.name as product_name', 'w.name as warehouse_name',
@@ -3181,7 +3300,7 @@ const exportOrderController = {
           available_mt: kgToMt(availKg),
           packing_status: (parseFloat(l.total_bags) || 0) > 0 ? 'Packed' : 'Loose',
           transfer_status: l.entity === 'export' ? 'Transferred' : 'At mill',
-          variety: l.variety, grade: l.grade, type: l.type,
+          variety: l.variety, grade: l.grade, type: l.type, product_id: l.product_id,
           warehouse_name: l.warehouse_name,
           batch_no: l.batch_no || null, batch_name: l.batch_name || null,
           custom_tags: tags,
@@ -3199,6 +3318,42 @@ const exportOrderController = {
     } catch (err) {
       console.error('listExportReadyStock error:', err);
       return res.status(500).json({ success: false, message: err.message });
+    }
+  },
+
+  // GET /:id/suggested-lots — the lot (per order line) a user would most likely
+  // reserve, for them to confirm (D-18). Reserves nothing. Lot number and cost
+  // follow the same visibility as /available-stock.
+  async suggestedLots(req, res) {
+    try {
+      const id = await resolveExportOrderId(req.params.id);
+      if (!id) return res.status(404).json({ success: false, message: 'Export order not found.' });
+      const result = await suggestLots(db, id);
+      if (!result) return res.status(404).json({ success: false, message: 'Export order not found.' });
+
+      let roleName = req.user && req.user._roleName;
+      if (!roleName && req.user && req.user.role_id) {
+        const rr = await db('roles').where({ id: req.user.role_id }).select('name').first();
+        roleName = rr && rr.name;
+      }
+      const full = ['Super Admin', 'Owner', 'Mill Manager', 'Mill Operator'].includes(roleName);
+      const seesCost = await canSeeCost(req);
+      const redact = (lot) => {
+        if (!lot) return lot;
+        const out = { ...lot };
+        if (!full) delete out.lot_no;
+        if (!full || !seesCost) delete out.landed_cost_per_kg;
+        return out;
+      };
+      for (const sgt of result.suggestions) {
+        sgt.lot = redact(sgt.lot);
+        sgt.alternatives = (sgt.alternatives || []).map(redact);
+      }
+      const cover = await reservationCover(db, await db('export_orders').where({ id }).first());
+      return res.json({ success: true, data: { ...result, reservation_cover: cover } });
+    } catch (err) {
+      console.error('suggestedLots error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
     }
   },
 };

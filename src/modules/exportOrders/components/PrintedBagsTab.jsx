@@ -127,7 +127,10 @@ export default function PrintedBagsTab({ order, onUpdated }) {
           <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2"><Printer className="w-5 h-5 text-violet-600" /> Printed Bags</h3>
           <p className="text-sm text-gray-500">Order printed / branded bags from a vendor for this export order. Each order books a payable to the vendor.</p>
         </div>
-        <button onClick={() => { setDraft(blank); setShowAdd(true); }} className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700">
+        {/* A Draft books no vendor payable (P3-18): it is submitted first. */}
+        <button onClick={() => { setDraft(blank); setShowAdd(true); }} disabled={order?.status === 'Draft'}
+          title={order?.status === 'Draft' ? 'Submit the draft first — printed-bag orders are booked once the order is live' : undefined}
+          className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed">
           <Plus className="w-4 h-4" /> Order Printed Bags
         </button>
       </div>

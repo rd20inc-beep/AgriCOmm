@@ -15,6 +15,13 @@ import { fmtPKR, fmtDate, fmtNum, fmtPct } from '../../../shared/utils/format';
 const pkr = (v) => fmtPKR(parseFloat(v) || 0, { decimals: 2 });
 const dt = (v) => (v ? fmtDate(v) : '—');
 
+// One labelled figure in the summary card (module level: a component created
+// during render remounts on every render).
+function Field({ label, value, sub, tone = 'gray' }) {
+  const t = { emerald: 'text-emerald-700', rose: 'text-red-600', gray: 'text-gray-900' }[tone] || 'text-gray-900';
+  return <div><p className="text-[11px] uppercase tracking-wider text-gray-400">{label}</p><p className={`text-sm font-medium ${t}`}>{value || '—'}</p>{sub && <p className="text-[11px] text-gray-400 truncate">{sub}</p>}</div>;
+}
+
 export default function PurchaseInvoiceView() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -34,7 +41,10 @@ export default function PurchaseInvoiceView() {
     </div>
   );
 
-  const { purchase: p, costs = {}, intakeVehicles = [], payments = [], producedByproducts = [] } = data;
+  const { purchase: p, costs = {}, supplierBill = null, intakeVehicles = [], payments = [], producedByproducts = [] } = data;
+  const billLines = supplierBill?.lines || [];
+  // Freight paid by anyone but the company is recorded, not part of landed cost.
+  const transportNote = costs.transportCapitalised === false ? ' — not in landed cost' : '';
 
   const onPrint = () => { if (!printPurchaseInvoice(data, companyProfileData)) addToast?.('Pop-up blocked — allow pop-ups to print.', 'error'); };
 
@@ -43,10 +53,6 @@ export default function PurchaseInvoiceView() {
     const inner = <><Icon size={14} /> {label}</>;
     if (to) return <Link to={to} className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium ${cls}`}>{inner}</Link>;
     return <button onClick={onClick} className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium ${cls}`}>{inner}</button>;
-  };
-  const Field = ({ label, value, sub, tone = 'gray' }) => {
-    const t = { emerald: 'text-emerald-700', rose: 'text-red-600', gray: 'text-gray-900' }[tone] || 'text-gray-900';
-    return <div><p className="text-[11px] uppercase tracking-wider text-gray-400">{label}</p><p className={`text-sm font-medium ${t}`}>{value || '—'}</p>{sub && <p className="text-[11px] text-gray-400 truncate">{sub}</p>}</div>;
   };
   const Chip = ({ children }) => <span className="px-2.5 py-1 rounded-lg border bg-gray-50 border-gray-200 text-gray-600">{children}</span>;
 
@@ -75,10 +81,10 @@ export default function PurchaseInvoiceView() {
           <Field label="Purchase date" value={dt(p.date)} />
           <Field label="Payment status" value={p.paymentStatus} />
           <Field label="Warehouse" value={p.warehouse} />
-          <Field label="Landed total" value={pkr(p.landedTotal)} />
-          <Field label="Paid" value={pkr(p.paid)} tone="emerald" />
+          <Field label="Landed total" value={pkr(p.landedTotal)} sub="rice + extras + bags + commission + company freight" />
+          <Field label="Owed to supplier" value={pkr(p.supplierTotal ?? p.landedTotal)} sub="freight & commission are paid to the transporter / broker" />
+          <Field label="Paid to supplier" value={pkr(p.paid)} tone="emerald" />
           <Field label="Outstanding" value={pkr(p.outstanding)} tone={p.outstanding > 0 ? 'rose' : 'gray'} />
-          <Field label="Lot no" value={p.purchaseNo} />
         </div>
       </div>
 
@@ -106,11 +112,14 @@ export default function PurchaseInvoiceView() {
         {/* Landed cost breakdown */}
         <div className="px-4 py-3 border-t border-gray-100 grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-1 text-xs text-gray-600">
           <span>Rice cost: <b className="text-gray-800">{pkr(costs.riceCost ?? p.amount)}</b></span>
-          {costs.transport > 0 && <span>Transport{costs.transportVendor ? ` (${costs.transportVendor})` : ''}: <b className="text-gray-800">{pkr(costs.transport)}</b></span>}
-          {costs.unloading > 0 && <span>Unloading: <b className="text-gray-800">{pkr(costs.unloading)}</b></span>}
           {costs.labor > 0 && <span>Labour: <b className="text-gray-800">{pkr(costs.labor)}</b></span>}
+          {costs.unloading > 0 && <span>Unloading: <b className="text-gray-800">{pkr(costs.unloading)}</b></span>}
           {costs.packing > 0 && <span>Packing: <b className="text-gray-800">{pkr(costs.packing)}</b></span>}
           {costs.other > 0 && <span>Other: <b className="text-gray-800">{pkr(costs.other)}</b></span>}
+          {costs.bags > 0 && <span>Bags: <b className="text-gray-800">{pkr(costs.bags)}</b></span>}
+          {costs.commission > 0 && <span>Commission (broker): <b className="text-gray-800">{pkr(costs.commission)}</b></span>}
+          {costs.transport > 0 && <span>Transport{costs.transportVendor ? ` (${costs.transportVendor})` : ''}{transportNote}: <b className="text-gray-800">{pkr(costs.transport)}</b></span>}
+          {Math.abs(costs.adjustment || 0) >= 0.01 && <span>Blend / split adjustment: <b className="text-gray-800">{pkr(costs.adjustment)}</b></span>}
           <span>Landed total: <b className="text-gray-900">{pkr(p.landedTotal)}</b></span>
         </div>
       </div>
@@ -174,6 +183,40 @@ export default function PurchaseInvoiceView() {
         </div>
       )}
 
+      {/* Supplier bill — every payable owed to the supplier for this lot */}
+      {billLines.length > 0 && (
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-100"><h3 className="text-sm font-semibold text-gray-700">Supplier bill</h3></div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-gray-500 text-xs"><tr>
+                <th className="px-4 py-2 text-left font-medium">Payable</th><th className="px-4 py-2 text-left font-medium">For</th>
+                <th className="px-4 py-2 text-right font-medium">Amount</th><th className="px-4 py-2 text-right font-medium">Paid</th>
+                <th className="px-4 py-2 text-right font-medium">Outstanding</th><th className="px-4 py-2 text-left font-medium">Status</th>
+              </tr></thead>
+              <tbody className="divide-y divide-gray-100">
+                {billLines.map((b) => (
+                  <tr key={b.payNo}>
+                    <td className="px-4 py-2 font-mono text-xs">{b.payNo}</td><td className="px-4 py-2">{b.category}</td>
+                    <td className="px-4 py-2 text-right tabular-nums">{pkr(b.amount)}</td>
+                    <td className="px-4 py-2 text-right tabular-nums">{pkr(b.paid)}</td>
+                    <td className="px-4 py-2 text-right tabular-nums">{pkr(b.outstanding)}</td>
+                    <td className="px-4 py-2"><StatusBadge status={b.status} /></td>
+                  </tr>
+                ))}
+                <tr className="font-medium bg-gray-50">
+                  <td className="px-4 py-2" colSpan={2}>Total</td>
+                  <td className="px-4 py-2 text-right tabular-nums">{pkr(supplierBill.total)}</td>
+                  <td className="px-4 py-2 text-right tabular-nums">{pkr(supplierBill.paid)}</td>
+                  <td className="px-4 py-2 text-right tabular-nums">{pkr(supplierBill.outstanding)}</td>
+                  <td />
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {/* Payment timeline */}
       <div className="bg-white rounded-xl border border-gray-200 p-4">
         <h3 className="text-sm font-semibold text-gray-700 mb-3">Payment timeline (to supplier)</h3>
@@ -183,7 +226,7 @@ export default function PurchaseInvoiceView() {
               <span className={`absolute -left-1.5 w-3 h-3 rounded-full ${e.kind === 'created' ? 'bg-slate-400' : 'bg-emerald-500'}`} />
               <div className="flex items-center justify-between gap-2 flex-wrap">
                 <span className="text-sm text-gray-700">{e.kind === 'created' ? 'Purchase recorded' : <>Payment {e.paymentNo ? `· ${e.paymentNo}` : ''} <span className="text-gray-400">· {(e.mode || '').replace(/_/g, ' ')}{e.reference ? ` · ${e.reference}` : ''}</span></>}<span className="text-[11px] text-gray-400"> · {dt(e.date)}</span></span>
-                <span className="text-sm tabular-nums">{e.kind === 'payment' && <span className="text-emerald-700 mr-3">−{pkr(e.amount)}</span>}<span className="text-gray-500">Balance {pkr(e.balance)}</span></span>
+                <span className="text-sm tabular-nums">{e.kind === 'payment' && <span className={`${e.cleared === false ? 'text-amber-600' : 'text-emerald-700'} mr-3`}>−{pkr(e.amount)}{e.cleared === false ? ' (cheque not cleared)' : ''}</span>}<span className="text-gray-500">Balance {pkr(e.balance)}</span></span>
               </div>
             </li>
           ))}

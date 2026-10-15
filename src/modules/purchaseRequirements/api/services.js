@@ -7,4 +7,5 @@ export const purchaseRequirementsApi = {
   approve: (id) => api.post(`/api/purchase-requirements/${id}/approve`, {}),
   reject: (id, data) => api.post(`/api/purchase-requirements/${id}/reject`, data || {}),
   markPurchased: (id) => api.post(`/api/purchase-requirements/${id}/mark-purchased`, {}),
+  cancel: (id, data) => api.post(`/api/purchase-requirements/${id}/cancel`, data || {}),
 };

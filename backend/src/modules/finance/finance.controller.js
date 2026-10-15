@@ -23,8 +23,9 @@ const { ledgerFailure, missingAccounts } = require('../../shared/ledgerFailure')
 const { glAccountFor } = require('../../shared/accountGl');
 const {
   applyReceivableDelta, pendingChequeTotal, postDeltaOf, round2,
-  isCheque, hasPaymentJournal, postPaymentJournal, settleDocuments, SOURCES, LOT_SUPPLIER_LINES,
+  isCheque, hasPaymentJournal, postPaymentJournal, settleDocuments, SOURCES,
 } = require('./paymentSettlement');
+const { lotSupplierPayables, lotPaymentTotal } = require('../inventory/lotPayment');
 const { recordMoneyMovement, postAccountMovement, assertDocumentCurrency } = require('./paymentEngine');
 const { postBankTransaction } = require('../../shared/bankBalance');
 const { bankTieOut } = require('./bankTieOut');
@@ -96,6 +97,15 @@ async function loadPayablesFeed(query = {}) {
   const batchesFromSourceLots = new Set(
     (await db('batch_source_lots').distinct('batch_id').select('batch_id')).map((r) => r.batch_id),
   );
+  // Truck rice bought at receipt (D-6, P3-09): the payable sits on the batch's
+  // truck lot (linked_ref = lot_no), so the batch's raw_rice is already owed.
+  const storedLotRefs = new Set(storedRows.filter((r) => r.category === 'Raw Material' && r.linked_ref).map((r) => r.linked_ref));
+  const truckBookedBatchIds = new Set(
+    (await db('inventory_lots').where({ type: 'raw', entity: 'mill' }).where('batch_ref', 'like', 'batch-%')
+      .select('lot_no', 'batch_ref'))
+      .filter((l) => storedLotRefs.has(l.lot_no))
+      .map((l) => parseInt(String(l.batch_ref).slice(6), 10)),
+  );
 
   // Derive payables from cost tables. Resolve the supplier from the batch's
   // supplier_id (the denormalized supplier_name is sometimes null) and carry
@@ -160,6 +170,8 @@ async function loadPayablesFeed(query = {}) {
     // Batch fed by source lots → its raw cost is already owed via those lots'
     // purchase payables; deriving it again would double-count the supplier.
     if (mc.category === 'raw_rice' && batchesFromSourceLots.has(mc.batch_id)) return;
+    // Truck rice bought at receipt — owed on the truck lot's own payable.
+    if (mc.category === 'raw_rice' && truckBookedBatchIds.has(mc.batch_id)) return;
     // #14 — transport for this batch is a real (payable) transporter payable.
     if (mc.category === 'transport' && storedBatchTransportBatchIds.has(mc.batch_id)) return;
     derived.push({
@@ -807,8 +819,11 @@ const financeController = {
       const row = await db(cfg.table).where({ id }).first();
       if (!row) return res.status(404).json({ success: false, message: 'Purchase not found.' });
 
-      const total = cfg.totalCol ? (parseFloat(row[cfg.totalCol]) || 0)
-        : (parseFloat(row.base_amount_pkr) || (parseFloat(row.amount) || 0) * (parseFloat(row.fx_rate) || 1));
+      // A lot is measured against its supplier bills (P3-10): freight and
+      // commission are the hauler's / broker's, paid on their own payables.
+      const total = source === 'lot' ? await lotPaymentTotal(db, row)
+        : cfg.totalCol ? (parseFloat(row[cfg.totalCol]) || 0)
+          : (parseFloat(row.base_amount_pkr) || (parseFloat(row.amount) || 0) * (parseFloat(row.fx_rate) || 1));
       const paid = parseFloat(row.paid_amount) || 0;
       const outstanding = Math.max(0, total - paid);
       const refToken = cfg.refCol ? row[cfg.refCol] : null;
@@ -817,13 +832,15 @@ const financeController = {
       // source_table+source_id (payPurchase) AND linked_ref=token (a lot's Raw
       // Material payable is keyed by lot_no), excluding the separate transport
       // payable.
-      const payableIds = (await db('payables').where(function () {
-        this.where({ source_table: cfg.table, source_id: id });
-        if (refToken) this.orWhere(function () {
-          this.where('linked_ref', refToken)
-            .andWhere(function () { this.whereNull('source_table').orWhereNot('source_table', 'lot_transport'); });
-        });
-      }).select('id')).map((r) => r.id);
+      const payableIds = source === 'lot'
+        ? (await lotSupplierPayables(db, row, { includeReversed: true })).map((r) => r.id)
+        : (await db('payables').where(function () {
+          this.where({ source_table: cfg.table, source_id: id });
+          if (refToken) this.orWhere(function () {
+            this.where('linked_ref', refToken)
+              .andWhere(function () { this.whereNull('source_table').orWhereNot('source_table', 'lot_transport'); });
+          });
+        }).select('id')).map((r) => r.id);
       let viaPayments = [];
       if (payableIds.length) {
         viaPayments = await db('payments as p')
@@ -905,8 +922,10 @@ const financeController = {
         })
         .select('l.id', 'l.lot_no', 'l.transport_cost', 'l.labor_cost', 'l.unloading_cost',
           'l.packing_cost', 'l.total_bag_cost', 'l.other_cost',
-          db.raw('COALESCE(l.hauler_id, l.transport_vendor_id) as transport_vendor_id'),
-          db.raw('COALESCE(h.name, tv.name) as hauler_name'))
+          // A hauler id and a legacy supplier id are different parties (D-25b):
+          // only hauler_id can be paid as a transporter. The old supplier-based
+          // vendor is shown by name, flagged, never offered as a hauler id.
+          'l.hauler_id', 'h.name as hauler_name', 'tv.name as legacy_transport_vendor_name')
         .orderBy('l.lot_no', 'asc');
 
       // Stored transport payables (one per lot) for paid/outstanding on the hauler line.
@@ -932,12 +951,13 @@ const financeController = {
             const base = { lotId: l.id, lotNo: l.lot_no, amount };
             if (c.key === 'transport') {
               const p = tpByLot[l.id];
-              base.haulerId = l.transport_vendor_id || null;
-              base.haulerName = l.hauler_name || null;
+              base.haulerId = l.hauler_id || null;
+              base.haulerName = l.hauler_name || l.legacy_transport_vendor_name || null;
+              base.legacyTransportVendor = !l.hauler_id && !!l.legacy_transport_vendor_name;
               base.payableId = p ? p.id : null; // #14 — target for the Pay Transporter slider
               base.paid = p ? parseFloat(p.paid_amount) || 0 : 0;
-              base.outstanding = p ? parseFloat(p.outstanding) || 0 : (l.transport_vendor_id ? amount : 0);
-              base.unassigned = !l.transport_vendor_id; // recorded but no hauler/payable yet
+              base.outstanding = p ? parseFloat(p.outstanding) || 0 : (l.hauler_id ? amount : 0);
+              base.unassigned = !l.hauler_id; // recorded but no hauler/payable yet
             }
             return base;
           });
@@ -2192,21 +2212,9 @@ async function purchasePayables(trx, source, row) {
     const p = await trx('payables').where({ source_table: table, source_id: row.id }).forUpdate().first();
     return p ? [p] : [];
   }
-  const byLot = await trx('payables').where({ source_id: row.id }).forUpdate().select('*');
-  const byLotNo = row.lot_no
-    ? await trx('payables').where({ linked_ref: row.lot_no, category: 'Raw Material' }).forUpdate().select('*')
-    : [];
-  const isRice = (p) => !p.source_table && p.category === 'Raw Material';
-  const seen = new Set();
-  const rows = [
-    ...(Array.isArray(byLot) ? byLot : []).filter((p) => isRice(p) || p.source_table === 'inventory_lots' || LOT_SUPPLIER_LINES.includes(p.source_table)),
-    ...(Array.isArray(byLotNo) ? byLotNo : []).filter(isRice),
-  ].filter((p) => (seen.has(p.id) ? false : seen.add(p.id)));
-  const list = (Array.isArray(rows) ? rows : [])
-    .filter((p) => !row.supplier_id || !p.supplier_id || String(p.supplier_id) === String(row.supplier_id))
-    .filter((p) => !p.hauler_id);
-  // The rice line first, then the itemised lines in the order they were raised.
-  return list.sort((a, b) => (a.category === 'Raw Material' ? 0 : 1) - (b.category === 'Raw Material' ? 0 : 1) || a.id - b.id);
+  // The rice line first, then the itemised lines in the order they were raised
+  // — the same lookup the lot's payment status and Purchase Invoice use (P3-10).
+  return lotSupplierPayables(trx, row, { forUpdate: true, includeReversed: true });
 }
 
 financeController.payPurchase = async (req, res) => {
@@ -2236,6 +2244,8 @@ financeController.payPurchase = async (req, res) => {
         const exp = await trx('business_expenses').where({ id: row.business_expense_id }).first('expense_no');
         throw fail(`This cost belongs to expense ${exp?.expense_no || `#${row.business_expense_id}`} — pay the expense instead.`);
       }
+      // A voided purchase (P3-11) owes nothing; its bills are Reversed.
+      if (row.voided_at) throw fail(`${spec.label(row) || 'This purchase'} was voided — nothing is due on it.`);
       const payables = await purchasePayables(trx, source, row);
       // The paying side of the business: the payable's when there is one, else
       // the source's own (a lot carries its entity, a mill-store purchase is
@@ -2250,6 +2260,8 @@ financeController.payPurchase = async (req, res) => {
       // cheques), else the source row's own figure.
       const open = [];
       for (const p of payables) {
+        // A reversed / written-off bill keeps its figure but owes nothing.
+        if (['Reversed', 'Written Off'].includes(p.status)) continue;
         const pending = await pendingChequeTotal(trx, { payableId: p.id });
         const owed = Math.max(0, round2((parseFloat(p.original_amount) || 0) - (parseFloat(p.paid_amount) || 0) - pending));
         if (owed > 0.01) open.push({ payable: p, owed });

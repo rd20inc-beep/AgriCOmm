@@ -151,10 +151,29 @@ const generatedDocumentController = {
     try {
       const orderId = await resolveOrderId(req.params.id);
       if (!orderId) return res.status(404).json({ success: false, message: 'Order not found.' });
-      const row = await service.getLatest(orderId, req.params.docType);
-      if (!row) return res.json({ success: true, data: { exists: false } });
+      const latest = await service.getLatest(orderId, req.params.docType);
+      if (!latest) return res.json({ success: true, data: { exists: false } });
+      // An open version is re-assembled from the order as it is now, keeping
+      // the structured overrides (EXP-11) — stored for someone who may edit
+      // documents, shown without storing for a viewer (P1-08).
+      const canEdit = await userHasPermission(req, 'export_orders', 'edit')
+        || await userHasPermission(req, 'documents', 'edit');
+      const { row, sourceChanged, editsDiscarded } = await service.refreshOpen(latest, db, { persist: canEdit });
+      if (sourceChanged && canEdit) {
+        auditService.log({
+          userId: req.user ? req.user.id : null,
+          action: 'refresh_draft_document',
+          entityType: 'generated_document',
+          entityId: row.doc_no,
+          details: { docType: row.doc_type, version: row.version, editsDiscarded },
+          ipAddress: req.ip,
+        }).catch(() => {});
+      }
       const document = await renderRow(row, req);
-      return res.json({ success: true, data: { exists: true, version: meta(row), document, editedHtml: editedHtmlOf(row) } });
+      return res.json({
+        success: true,
+        data: { exists: true, version: meta(row), document, editedHtml: editedHtmlOf(row), sourceChanged, editsDiscarded },
+      });
     } catch (err) {
       console.error('getCurrent error:', err);
       return res.status(500).json({ success: false, message: 'Internal server error.' });

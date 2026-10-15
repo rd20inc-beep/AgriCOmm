@@ -148,6 +148,27 @@ export function useSetMillStock() {
   });
 }
 
+// One item with its stock per location (stock_locations) — the edit drawer
+// sets stock per location, never the total.
+export function useMillStoreItem(id) {
+  return useQuery({
+    queryKey: storeKeys.item(id),
+    queryFn: async () => {
+      const res = await millStoreApi.getItem(id);
+      return unwrap(res, 'item');
+    },
+    enabled: !!id,
+  });
+}
+
+export function useRevalueMillItem() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }) => millStoreApi.revalueItem(id, data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['mill-store'] }),
+  });
+}
+
 export function usePackBatch() {
   const qc = useQueryClient();
   return useMutation({

@@ -3,6 +3,7 @@ const accountingService = require('../accounting/accounting.service');
 const { NotFoundError, ValidationError, ConflictError } = require('../../shared/errors');
 const { nextDocNo } = require('../../utils/docNumber');
 const { ledgerFailure } = require('../../shared/ledgerFailure');
+const { moveStock, postStoreJournal } = require('./storeStock');
 
 // On-hand after applying a signed adjustment delta, or null when it would go
 // below zero (a 0.0001 tolerance absorbs float dust).
@@ -143,7 +144,11 @@ const millStoreRepo = {
       .first();
     if (!row) return null;
 
-    const stock = await db('mill_stock').where('item_id', id);
+    const stock = await db('mill_stock as ms')
+      .leftJoin('warehouses as w', 'w.id', 'ms.warehouse_id')
+      .where('ms.item_id', id)
+      .select('ms.*', 'w.name as warehouse_name')
+      .orderByRaw('ms.warehouse_id NULLS FIRST');
     return { ...row, stock_locations: stock };
   },
 
@@ -216,53 +221,18 @@ const millStoreRepo = {
       line.total_cost = Number((line.quantity * line.cost_per_unit).toFixed(2));
       await trx('mill_purchase_items').insert(line);
 
-      // Upsert stock
-      const existing = await trx('mill_stock')
-        .where({ item_id: line.item_id, warehouse_id: line.warehouse_id || null })
-        .first();
-
-      if (existing) {
-        await trx('mill_stock')
-          .where('id', existing.id)
-          .update({
-            quantity_available: db.raw('quantity_available + ?', [line.quantity]),
-            updated_at: trx.fn.now(),
-          });
-      } else {
-        await trx('mill_stock').insert({
-          item_id: line.item_id,
-          warehouse_id: line.warehouse_id || null,
-          quantity_available: line.quantity,
-          quantity_reserved: 0,
-        });
-      }
-
-      // Stock movement
-      await trx('mill_stock_movements').insert({
-        item_id: line.item_id,
-        warehouse_id: line.warehouse_id || null,
-        movement_type: 'purchase',
-        quantity: line.quantity,
-        cost_per_unit: line.cost_per_unit,
-        total_cost: line.total_cost,
-        reference_type: 'purchase',
-        reference_id: purchase.id,
-        performed_by: header.created_by,
+      // Receive into the bucket at the line's cost — moving average, under a
+      // lock on the stock row and the item (INV-47: two purchases of one item
+      // used to read the same average and one update was lost).
+      await moveStock(trx, {
+        itemId: line.item_id, warehouseId: line.warehouse_id || null,
+        qty: line.quantity, valuation: 'cost', unitCost: line.cost_per_unit,
+        movement: {
+          movement_type: 'purchase', reference_type: 'purchase', reference_id: purchase.id,
+          performed_by: header.created_by,
+        },
       });
-
-      // Weighted-average cost update
-      const item = await trx('mill_items').where('id', line.item_id).first();
-      const totalStock = await trx('mill_stock').where('item_id', line.item_id)
-        .sum({ total: 'quantity_available' }).first();
-      const currentQty = Number(totalStock?.total || 0);
-      const prevAvg = Number(item.avg_cost_per_unit) || 0;
-      const prevQty = Math.max(0, currentQty - line.quantity);
-      const newAvg = prevQty + line.quantity > 0
-        ? ((prevQty * prevAvg) + (line.quantity * line.cost_per_unit)) / (prevQty + line.quantity)
-        : line.cost_per_unit;
-
       await trx('mill_items').where('id', line.item_id).update({
-        avg_cost_per_unit: Number(newAvg.toFixed(4)),
         last_purchase_cost: line.cost_per_unit,
         updated_at: trx.fn.now(),
       });
@@ -569,6 +539,8 @@ const millStoreRepo = {
 
     const delta = Number(adj.quantity_delta);
     const warehouseId = adj.warehouse_id || null;
+    // The item's average values the movement and its journal (INV-47).
+    await trx('mill_items').where('id', adj.item_id).forUpdate().first();
 
     // Apply stock change. The balance and the movement ledger must move by the
     // SAME delta: an adjustment that would take stock below zero is refused,
@@ -654,10 +626,22 @@ const millStoreRepo = {
   // an item at a location and records the delta as a 'adjustment' movement.
   async setStock(itemId, { quantity_available, warehouse_id = null, reason }, userId) {
     return db.transaction(async (trx) => {
-      const item = await trx('mill_items').where('id', itemId).first();
+      const item = await trx('mill_items').where('id', itemId).forUpdate().first();
       if (!item) return null;
       const target = Math.max(0, Number(quantity_available) || 0);
       const warehouseId = warehouse_id || null;
+
+      // A set is per bucket (INV-42). The screen used to show the item's TOTAL
+      // across warehouses and the set landed on the unassigned bucket alone,
+      // so an item held in a named warehouse came out with the wrong stock.
+      // With stock in a named warehouse, the bucket must be named.
+      if (warehouseId == null) {
+        const named = await trx('mill_stock').where({ item_id: itemId })
+          .whereNotNull('warehouse_id').where('quantity_available', '>', 0).count({ n: 'id' }).first();
+        if (Number(named && named.n) > 0) {
+          throw new ConflictError(`${item.name} is held in more than one location — set the stock for each location.`);
+        }
+      }
 
       const stockRow = await trx('mill_stock')
         .where({ item_id: itemId, warehouse_id: warehouseId })
@@ -696,6 +680,39 @@ const millStoreRepo = {
 
       return { item_id: itemId, warehouse_id: warehouseId, previous: prev, quantity_available: target, delta };
     });
+  },
+
+  // Owner-approved revaluation (see millStore.service.revalueItem).
+  async revalueItem(trx, itemId, { avgCost, reason }, userId) {
+    const item = await trx('mill_items').where('id', itemId).forUpdate().first();
+    if (!item) throw new NotFoundError('Item not found.');
+    await trx('mill_stock').where({ item_id: itemId }).forUpdate();
+    const onHand = Number((await trx('mill_stock').where({ item_id: itemId }).sum({ q: 'quantity_available' }).first())?.q || 0);
+    const oldAvg = Number(item.avg_cost_per_unit) || 0;
+    const newAvg = Number(Number(avgCost).toFixed(4));
+    if (!(newAvg >= 0)) throw new ValidationError('Enter the new cost per unit.');
+    if (newAvg === oldAvg) throw new ValidationError(`${item.name} is already at ${oldAvg} per ${item.unit}.`);
+    const delta = Number((onHand * newAvg - onHand * oldAvg).toFixed(2));
+
+    await trx('mill_items').where('id', itemId).update({ avg_cost_per_unit: newAvg, updated_at: trx.fn.now() });
+    const what = `Revalued ${item.name} from ${oldAvg} to ${newAvg} per ${item.unit} (${onHand} on hand)`;
+    const [mv] = await trx('mill_stock_movements').insert({
+      item_id: itemId, warehouse_id: null, movement_type: 'adjustment', quantity: 0,
+      cost_per_unit: newAvg, total_cost: Math.abs(delta),
+      reference_type: 'revaluation', reference_id: itemId,
+      reason: `${what} — ${String(reason || '').slice(0, 300)}`,
+      performed_by: userId || null, approved_by: userId || null,
+    }).returning('*');
+    // A value increase came INTO the store: DR 1250 / CR 6000 (negative amount
+    // to postStoreJournal); a cut is the reverse.
+    const journal = await postStoreJournal(trx, {
+      amount: -delta, refType: 'Mill Store Revaluation', refNo: `MSR-${mv.id}`,
+      description: `${what} — ${String(reason || '').slice(0, 150)}`, userId, what: 'The revaluation',
+    });
+    return {
+      item_id: Number(itemId), on_hand: onHand, previous_cost: oldAvg, avg_cost_per_unit: newAvg,
+      value_change: delta, movement_id: mv.id, journal_id: journal ? journal.id : null,
+    };
   },
 };
 

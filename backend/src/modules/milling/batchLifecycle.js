@@ -31,14 +31,15 @@ function yieldMode({ status, hasOutputs, hasCompletion = false }) {
 
 // A batch's yield outputs are the finished/by-product lots stamped with
 // batch_ref = 'batch-<id>' (the raw lot a truck receipt creates carries the
-// same ref, so type filters it out).
+// same ref, so type filters it out). An output lot a reversed yield (or a
+// re-yield that dropped it) took to zero is Closed and empty — it no longer
+// counts, so a reversed batch takes the first-yield path again (P3-03).
 async function batchHasOutputLots(q, batchId) {
-  const row = await q('inventory_lots')
+  const rows = await q('inventory_lots')
     .where({ batch_ref: `batch-${batchId}` })
     .whereIn('type', ['finished', 'byproduct'])
-    .count('id as c')
-    .first();
-  return (parseInt(row && row.c, 10) || 0) > 0;
+    .select('id', 'qty', 'status');
+  return (rows || []).some((l) => l.status !== 'Closed' || (parseFloat(l.qty) || 0) > 0);
 }
 
 // Fields the generic PUT /batches/:id may change. 'status' is deliberately
@@ -100,25 +101,80 @@ function httpError(status, message) {
   return err;
 }
 
+// The movement engine — required lazily: inventory.service requires this file.
+const movements = () => require('../inventory/inventory.service');
+
+/**
+ * Can this lot be milled at all? Raw rice and finished rice (re-mill / blend)
+ * can; broken grades and the other rice by-products can be re-milled too, but
+ * bran, husk and packaging are not rice.
+ */
+function isMillableLot(lot) {
+  if (lot.type === 'raw' || lot.type === 'finished') return true;
+  if (lot.type === 'byproduct') {
+    const name = (lot.item_name || '').toLowerCase();
+    return !(name.includes('bran') || name.includes('husk'));
+  }
+  return false; // packaging / unknown
+}
+
+/**
+ * Why `lot` may not be committed to `batch`, or null when it may (MIL-19).
+ * The FE hides these lots; the API must refuse them too:
+ *  - an export-entity lot is not the mill's stock to mill;
+ *  - bran / husk / packaging are not rice;
+ *  - client-owned (service-milling) rice can only be milled on that client's
+ *    own service batch, and a service batch only mills its client's rice —
+ *    otherwise client goods become company stock, or the reverse.
+ */
+function commitRefusal(lot, batch) {
+  const label = lot.lot_no || lot.id;
+  if (lot.entity !== 'mill') return `Lot ${label} is ${lot.entity || 'not a mill'} stock — only mill lots can be milled.`;
+  if (!isMillableLot(lot)) return `Lot ${label} (${lot.item_name || lot.type}) is not rice and can't be milled.`;
+  const clientLot = lot.ownership === 'client';
+  const serviceBatch = !!(batch && batch.is_service_milling);
+  if (clientLot && !serviceBatch) {
+    return `Lot ${label} belongs to a service-milling client and can't be milled as company stock.`;
+  }
+  if (serviceBatch && !clientLot) {
+    return `Batch ${batch.batch_no || batch.id} is a service-milling batch — it can only mill its client's own rice, not company lot ${label}.`;
+  }
+  if (clientLot && serviceBatch && batch.client_customer_id && lot.owner_customer_id
+      && String(batch.client_customer_id) !== String(lot.owner_customer_id)) {
+    return `Lot ${label} belongs to a different service-milling client than batch ${batch.batch_no || batch.id}.`;
+  }
+  return null;
+}
+
 /**
  * Commit qtyKg of a lot to a milling batch — the ONE way a source lot joins a
- * batch (the New Batch drawer and Start Milling on a lot both call it). Locks
- * the lot, refuses more than is available, links it in batch_source_lots and
- * hard-reserves the qty (P6a): milling_reserved_qty goes up and available_qty
- * down, so the rice can't be sold or export-allocated before yield. Yield
- * (consumeForMilling) consumes exactly this qty; delete/cancel releases it
- * (releaseBatchSources).
+ * batch (the New Batch drawer, Start Milling on a lot and Use in Batch all call
+ * it). Locks the lot, refuses lots the batch may not mill (commitRefusal) and
+ * more than is available, links it in batch_source_lots and hard-reserves the
+ * qty (P6a) as a milling_hold movement — milling_reserved_qty goes up and
+ * available_qty down, with a ledger row, so the rice can't be sold or
+ * export-allocated before yield. Yield (consumeForMilling) consumes exactly
+ * this qty; delete/cancel releases it (releaseBatchSources). The GL follows
+ * (D-6): the committed value moves from the lot's stock account into 1260
+ * Milling WIP (millingWip.syncBatchWip).
  *
  * `row` carries extra batch_source_lots columns (costs, variety, notes…).
+ * `userId` stamps the ledger row (default: the batch's creator).
  * Returns { lot, qty } with the lot as read before the update.
  */
-async function commitLotToBatch(trx, { batchId, lotId, qtyKg, row = {} }) {
+async function commitLotToBatch(trx, { batchId, lotId, qtyKg, row = {}, userId = null }) {
   const lot = await trx('inventory_lots').where({ id: lotId }).forUpdate().first();
   if (!lot) throw httpError(404, `Source lot ${lotId} not found.`);
   const qty = num(qtyKg);
   if (!(qty > 0)) throw httpError(400, 'Quantity to mill must be greater than zero.');
+  const batch = await trx('milling_batches').where({ id: batchId }).first();
+  const refusal = commitRefusal(lot, batch);
+  if (refusal) throw httpError(400, refusal);
   const held = num(lot.milling_reserved_qty);
-  const avail = Math.max(0, num(lot.qty) - num(lot.reserved_qty) - held);
+  const avail = Math.max(0, Math.min(
+    num(lot.available_qty),
+    num(lot.qty) - num(lot.reserved_qty) - held,
+  ));
   if (qty > avail + 1e-6) {
     throw httpError(400, `Lot ${lot.lot_no || lot.id}: only ${fmtKg(avail)} kg available, requested ${fmtKg(qty)} kg.`);
   }
@@ -129,38 +185,62 @@ async function commitLotToBatch(trx, { batchId, lotId, qtyKg, row = {} }) {
     ...row,
     lot_type: row.lot_type || lot.type || 'raw',
   });
+  const svc = movements();
+  await svc.postMovement(trx, {
+    movementType: svc.MOVEMENT_TYPES.MILLING_HOLD,
+    lotId: lot.id,
+    qty,
+    sourceEntity: lot.entity || 'mill',
+    linkedRef: batch && batch.batch_no ? batch.batch_no : `batch-${batchId}`,
+    notes: `Committed to milling batch ${batch && batch.batch_no ? batch.batch_no : batchId}`,
+    batchId,
+    userId: userId || (batch && batch.created_by) || null,
+  });
   await trx('inventory_lots').where({ id: lot.id }).update({
     milling_status: 'In Milling',
-    milling_reserved_qty: held + qty,
-    available_qty: Math.max(0, avail - qty),
     updated_at: trx.fn.now(),
   });
+  // D-6: the committed rice leaves its stock account for 1260 Milling WIP.
+  await require('./millingWip').syncBatchWip(trx, batchId, { reason: `lot ${lot.lot_no || lot.id} committed` });
   return { lot, qty };
 }
 
 /**
  * Release the milling holds a batch placed on its source lots (P6a): drop the
  * batch's committed qty from milling_reserved_qty, give it back to
- * available_qty, and clear the 'In Milling' flag once nothing else holds the
- * lot. Used when a batch is deleted, cancelled or rejected — in every case
- * before yield, so nothing was drawn down. Only lots still 'In Milling' are
- * touched (a consumed lot has nothing held), and only what THIS batch reserved
- * is released (see isReservedSource). Returns the lot ids released.
+ * available_qty (a milling_release movement with its ledger row), and clear
+ * the 'In Milling' flag once nothing else holds the lot. Used when a batch is
+ * deleted, cancelled or rejected — in every case before yield, so nothing was
+ * drawn down. Only lots still 'In Milling' are touched (a consumed lot has
+ * nothing held), and only what THIS batch reserved is released (see
+ * isReservedSource). Returns the lot ids released.
  */
-async function releaseBatchSources(trx, batchId) {
+async function releaseBatchSources(trx, batchId, { userId = null } = {}) {
   const released = [];
   const sources = await trx('batch_source_lots').where({ batch_id: batchId });
+  if (!sources.length) return released;
+  const batch = await trx('milling_batches').where({ id: batchId }).first();
+  const svc = movements();
   for (const s of sources) {
     const lot = await trx('inventory_lots').where({ id: s.lot_id }).forUpdate().first();
     if (!lot || lot.milling_status !== 'In Milling') continue;
     const heldNow = num(lot.milling_reserved_qty);
     const heldQty = isReservedSource(s) ? Math.min(num(s.qty_kg), heldNow) : 0;
     const heldAfter = Math.max(0, heldNow - heldQty);
+    if (heldQty > 0) {
+      await svc.postMovement(trx, {
+        movementType: svc.MOVEMENT_TYPES.MILLING_RELEASE,
+        lotId: s.lot_id,
+        qty: heldQty,
+        sourceEntity: lot.entity || 'mill',
+        linkedRef: batch && batch.batch_no ? batch.batch_no : `batch-${batchId}`,
+        notes: `Milling hold released — batch ${batch && batch.batch_no ? batch.batch_no : batchId} will not mill it`,
+        batchId,
+        userId: userId || (batch && batch.created_by) || null,
+      });
+    }
     await trx('inventory_lots').where({ id: s.lot_id }).update({
       milling_status: heldAfter > 1e-6 ? 'In Milling' : null,
-      status: 'Available',
-      milling_reserved_qty: heldAfter,
-      available_qty: Math.max(0, num(lot.qty) - num(lot.reserved_qty) - heldAfter),
       updated_at: trx.fn.now(),
     });
     released.push(s.lot_id);
@@ -177,6 +257,8 @@ module.exports = {
   TRANSITIONS,
   checkTransition,
   isReservedSource,
+  isMillableLot,
+  commitRefusal,
   commitLotToBatch,
   releaseBatchSources,
   httpError,

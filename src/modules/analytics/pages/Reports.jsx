@@ -34,6 +34,7 @@ import {
 } from '../../../shared/utils/format';
 import { moneyTile, netTile, currencyLines, formatCurrencyLines, cappedHint } from '../utils/moneyFeed';
 import { forecastCards, forecastRows, forecastEquivText, money as forecastMoney } from '../utils/cashForecastView';
+import { saleCogs } from '../../localSales/utils/saleLot';
 
 // ─── Formatting ────────────────────────────────────────────────────────
 // Reports are reconciled line by line, so money is always shown in full —
@@ -1454,20 +1455,21 @@ function purchaseToDoc(r) {
 }
 
 // ─── Tab: Margin (buy cost + expenses vs sale price, per sold lot) ─────
-// "Cost" is the lot's LANDED cost — the purchase price plus any costs added
-// to the lot — so it already folds the expenses in. We surface it both per-kg
-// and as a total next to the sale price so the trading margin is obvious.
+// "Cost" is the sale's COGS — for a confirmed sale the figure it locked and
+// posted to the GL (cogs_total_pkr, the lot's landed cost at confirmation),
+// for a pending one its estimate. It used to be the lot's CURRENT cost, so a
+// later lot re-price changed a closed sale's margin here but not in the P&L
+// (P3-12 / INV-54).
 function marginRow(s) {
   const soldKg = parseFloat(s.quantityKg) || 0;
-  const costPerKg = parseFloat(s.lotCostPerKg) || 0;
   const sale = parseFloat(s.totalAmount) || 0;
-  // Prefer per-kg × sold qty (handles partial sales); fall back to the lot total.
-  const cost = costPerKg > 0 ? costPerKg * soldKg : (parseFloat(s.lotLandedTotal) || 0);
-  const hasCost = costPerKg > 0 || (parseFloat(s.lotLandedTotal) || 0) > 0;
+  const { cost, locked } = saleCogs(s);
+  const costPerKg = soldKg > 0 ? cost / soldKg : 0;
+  const hasCost = cost > 0;
   const salePerKg = soldKg > 0 ? sale / soldKg : (parseFloat(s.ratePerKg) || 0);
   const margin = sale - cost;
   const marginPct = sale > 0 ? (margin / sale) * 100 : 0;
-  return { s, soldKg, costPerKg, salePerKg, cost, sale, margin, marginPct, hasCost };
+  return { s, soldKg, costPerKg, salePerKg, cost, sale, margin, marginPct, hasCost, locked };
 }
 
 function MarginTab({ params, openDoc }) {
@@ -1535,7 +1537,7 @@ function MarginBySale({ params, openDoc }) {
           ];
         })}
       />
-      <p className="text-[11px] text-gray-400">Cost = the lot's landed cost (purchase price + any costs added to the lot). Open the lot for the itemised cost breakdown.</p>
+      <p className="text-[11px] text-gray-400">Cost = the sale's cost of goods sold: for a confirmed sale the lot's landed cost locked at confirmation (the figure posted to the ledger); for a pending sale an estimate. Open the lot for the itemised cost breakdown.</p>
     </div>
   );
 }

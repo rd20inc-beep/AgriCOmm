@@ -39,6 +39,10 @@ export const millingApi = {
   recordYield: (id, data) => api.post(`/api/milling/batches/${id}/yield`, data),
   setMilledQty: (id, data) => api.put(`/api/milling/batches/${id}/milled-qty`, data),
   addCost: (id, data) => api.post(`/api/milling/batches/${id}/costs`, data),
+  // The whole Costs drawer in one transaction (P3-07): { costs: [{ category, amount, ... }] }.
+  saveCosts: (id, data) => api.post(`/api/milling/batches/${id}/costs/bulk`, data),
+  // Owner-approved yield reversal (P3-03): { reason, authorized_by_owner_id }.
+  reverseYield: (id, data) => api.post(`/api/milling/batches/${id}/reverse-yield`, data),
   addVehicle: (id, data) => api.post(`/api/milling/batches/${id}/vehicles`, data),
   updateVehicle: (id, vehicleId, data) => api.put(`/api/milling/batches/${id}/vehicles/${vehicleId}`, data),
   deleteVehicle: (id, vehicleId) => api.delete(`/api/milling/batches/${id}/vehicles/${vehicleId}`),

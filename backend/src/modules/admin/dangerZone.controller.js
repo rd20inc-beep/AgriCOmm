@@ -5,6 +5,9 @@ const accountingService = require('../accounting/accounting.service');
 const { mirrorJournals } = require('../milling/payrollReversal');
 const { glAccountFor } = require('../../shared/accountGl');
 const { deleteBatchTx } = require('../milling/milling.controller');
+const { deriveAvailable, deriveLotStatus } = require('../inventory/lotQuantity');
+const { moveStock: moveStoreStock } = require('../millStore/storeStock');
+const { creditedOnSale } = require('../localSales/saleCredits');
 
 /**
  * Super-Admin "Danger Zone" — permanent, cascading hard-deletes and manual
@@ -511,6 +514,10 @@ async function cnt(q, table, col, id) {
 async function deleteLocalSale(trx, req, id) {
   const sale = await trx('local_sales').where('id', id).first();
   if (!sale) { const e = new Error('Local sale not found.'); e.status = 404; throw e; }
+  // A return (P3-11) is its own document with its own stock, GL and refund
+  // trail; a hard delete of the sale would orphan it. Refused.
+  const ret = await trx('local_sale_returns').where({ local_sale_id: sale.id }).first('return_no');
+  if (ret) { const e = new Error(`${sale.sale_no} has a return (${ret.return_no}) on record — it cannot be hard-deleted.`); e.status = 409; throw e; }
 
   // A Pending (unconfirmed) or Cancelled (rejected) sale never moved stock/money
   // — deleting it must NOT restock (that would mint phantom inventory) or reverse
@@ -525,12 +532,19 @@ async function deleteLocalSale(trx, req, id) {
       // available_qty via postMovement, so the reversal must add back `kg` too.
       // (This was ÷1000, restocking MT → a 1000× under-restock that silently
       // destroyed the sold stock and left available_qty ≠ net_weight_kg.)
+      // Danger Zone hard-delete: the sale's ledger rows go with it, so the
+      // restock is written straight back (not a new movement) — but with
+      // available derived from the holds and the status from the quantity,
+      // the same rule as postMovement (lotQuantity, P3-01).
       const kg = num(sale.quantity_kg);
+      const qty = num(lot.qty) + kg;
+      // lot-qty-writer: hard-delete restock (the sale's ledger rows go too).
       await trx('inventory_lots').where('id', lot.id).update({
-        qty: num(lot.qty) + kg,
-        available_qty: num(lot.available_qty) + kg,
+        qty,
+        available_qty: deriveAvailable({ ...lot, qty }),
         sold_weight_kg: Math.max(0, num(lot.sold_weight_kg) - kg),
         net_weight_kg: num(lot.net_weight_kg) + kg,
+        status: deriveLotStatus(lot.status, qty),
         updated_at: trx.fn.now(),
       });
     }
@@ -538,11 +552,18 @@ async function deleteLocalSale(trx, req, id) {
   // Packaging (e.g. katta) sale → restock mill_stock by the count sold.
   if (posted && sale.mill_item_id) {
     const count = num(sale.quantity_kg); // count stored in quantity_kg for mill-item lines
-    const ms = await trx('mill_stock').where({ item_id: sale.mill_item_id, warehouse_id: null }).first();
-    if (ms) await trx('mill_stock').where('id', ms.id).update({ quantity_available: num(ms.quantity_available) + count, updated_at: trx.fn.now() });
-    await trx('mill_stock_movements').insert({
-      item_id: sale.mill_item_id, warehouse_id: null, movement_type: 'return', quantity: count,
-      reference_type: 'local_sale_reversal', reference_id: id, reason: `Reversed sale ${sale.sale_no}`, performed_by: req.user?.id || null,
+    // Back at the cost it was sold at — its COGS journal (ref_no = sale_no) is
+    // neutralised with the sale's other journals below, so 1250 and the
+    // store's value move back together.
+    const sold = await trx('mill_stock_movements')
+      .where({ reference_type: 'local_sale', reference_id: id, item_id: sale.mill_item_id }).first('cost_per_unit');
+    await moveStoreStock(trx, {
+      itemId: sale.mill_item_id, warehouseId: null, qty: count,
+      valuation: 'cost', unitCost: num(sold && sold.cost_per_unit),
+      movement: {
+        movement_type: 'return', reference_type: 'local_sale_reversal', reference_id: id,
+        reason: `Reversed sale ${sale.sale_no}`, performed_by: req.user?.id || null,
+      },
     });
   }
   // Delete the sale's stock ledger rows.
@@ -610,7 +631,8 @@ async function unmirrorLocalSale(trx, saleId, amt) {
   const sale = await trx('local_sales').where('id', saleId).first();
   if (!sale) return;
   const paid = Math.max(0, num(sale.paid_amount) - amt);
-  const due = Math.max(0, num(sale.total_amount) - paid);
+  // A return's credit (P3-11) stays off the total — it is not a payment.
+  const due = Math.max(0, num(sale.total_amount) - paid - await creditedOnSale(trx, sale.id));
   // Paid / Partial / Credit only — 'Unpaid' is not allowed by
   // chk_local_sales_payment_status_valid.
   const status = due <= 0.01 ? 'Paid' : (paid > 0.01 ? 'Partial' : 'Credit');
@@ -716,14 +738,14 @@ async function deleteMillPurchase(trx, req, id) {
   // wrong warehouse row).
   const items = await trx('mill_purchase_items').where('purchase_id', id);
   for (const it of items) {
-    const stockQ = trx('mill_stock').where('item_id', it.item_id);
-    if (it.warehouse_id == null) stockQ.whereNull('warehouse_id'); else stockQ.where('warehouse_id', it.warehouse_id);
-    const stock = await stockQ.first();
-    if (stock) {
-      await trx('mill_stock').where('id', stock.id).update({
-        quantity_available: Math.max(0, num(stock.quantity_available) - num(it.quantity)), updated_at: trx.fn.now(),
-      });
-    }
+    // Out at the cost it came in at (the store's value with it — the GL side
+    // is neutralised below), clamped at what is still there. The movement it
+    // writes is the purchase's own reference, removed with it just below.
+    await moveStoreStock(trx, {
+      itemId: it.item_id, warehouseId: it.warehouse_id ?? null, qty: -num(it.quantity),
+      valuation: 'cost', unitCost: num(it.cost_per_unit), clamp: true,
+      movement: { movement_type: 'adjustment', reference_type: 'purchase', reference_id: id, reason: `Danger Zone: purchase ${mp.purchase_no} deleted`, performed_by: req.user?.id || null },
+    });
   }
   await trx('mill_stock_movements').where({ reference_type: 'purchase', reference_id: id }).del();
   // Reverse + drop any payments made against this purchase's payable (restore the
@@ -781,7 +803,13 @@ async function deleteExportOrder(trx, req, id) {
     const lot = await trx('inventory_lots').where('id', r.lot_id).first();
     if (lot) {
       const newReserved = Math.max(0, num(lot.reserved_qty) - num(r.reserved_qty));
-      await trx('inventory_lots').where('id', lot.id).update({ reserved_qty: newReserved, available_qty: num(lot.qty) - newReserved, updated_at: trx.fn.now() });
+      // available keeps the lot's milling holds out (lotQuantity, P3-01).
+      // lot-qty-writer: hard-delete release (allocation rows are deleted below).
+      await trx('inventory_lots').where('id', lot.id).update({
+        reserved_qty: newReserved,
+        available_qty: deriveAvailable({ ...lot, reserved_qty: newReserved }),
+        updated_at: trx.fn.now(),
+      });
     }
   }
   await trx('inventory_reservations').where('order_id', id).del();
@@ -792,7 +820,17 @@ async function deleteExportOrder(trx, req, id) {
   for (const m of dispatched) {
     const restoreKg = Math.abs(num(m.quantity_kg));
     const lot = await trx('inventory_lots').where('id', m.lot_id).first();
-    if (lot) await trx('inventory_lots').where('id', lot.id).update({ qty: num(lot.qty) + restoreKg, available_qty: num(lot.available_qty) + restoreKg, net_weight_kg: num(lot.net_weight_kg) + restoreKg, updated_at: trx.fn.now() });
+    if (lot) {
+      const qty = num(lot.qty) + restoreKg;
+      // lot-qty-writer: hard-delete restock (dispatch rows are deleted below).
+      await trx('inventory_lots').where('id', lot.id).update({
+        qty,
+        available_qty: deriveAvailable({ ...lot, qty }),
+        net_weight_kg: num(lot.net_weight_kg) + restoreKg,
+        status: deriveLotStatus(lot.status, qty),
+        updated_at: trx.fn.now(),
+      });
+    }
   }
   await trx('lot_transactions').where('reference_no', orderNo).whereIn('transaction_type', ['export_dispatch_out', 'export_allocation', 'export_release']).del();
 

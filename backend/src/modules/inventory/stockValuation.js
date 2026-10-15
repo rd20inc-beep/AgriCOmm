@@ -1,7 +1,7 @@
 /**
  * Value stock held at its SELLING price, to show profit on what is still on hand.
  *
- * Cost already lives on every lot (cost_per_unit, per KG). Selling prices live in
+ * Cost already lives on every lot (landed_cost_per_kg, per KG). Selling prices live in
  * commodity_rate_master, keyed here by product + grade:
  *   - by-products are priced per GRADE   (B2, B3, CSR, SWEEPING, STONE)
  *   - finished and raw are priced per PRODUCT (the variety); grade is null
@@ -58,10 +58,14 @@ function rateForLot(lot, idx) {
       || null;
 }
 
-/** Value one lot. qty is KG; cost and rate are per KG. */
+/**
+ * Value one lot. qty is KG; cost and rate are per KG. Cost is the D-14 basis
+ * (stockValue.js): KG on hand × landed cost per KG, no fallback price.
+ */
 function valueLot(lot, idx) {
-  const qtyKg = parseFloat(lot.available_qty ?? lot.availableQty) || 0;
-  const costPerKg = parseFloat(lot.cost_per_unit ?? lot.costPerUnit) || 0;
+  const net = parseFloat(lot.net_weight_kg ?? lot.netWeightKg) || 0;
+  const qtyKg = net > 0 ? net : (parseFloat(lot.qty) || 0);
+  const costPerKg = parseFloat(lot.landed_cost_per_kg ?? lot.landedCostPerKg) || 0;
   const rate = rateForLot(lot, idx);
   const costValue = qtyKg * costPerKg;
   if (!rate) {

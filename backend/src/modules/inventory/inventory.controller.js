@@ -39,7 +39,14 @@ const inventoryController = {
           'pc.group_key as category_group_key',
           'pcp.id as parent_category_id',
           'pcp.name as parent_category_name',
-          'pcp.group_key as parent_group_key'
+          'pcp.group_key as parent_group_key',
+          // The order(s) holding the lot, from its Active reservations. The lot's
+          // own reserved_against string ('order-<id>', one order only) was
+          // dropped in migration 389; this keeps the field the mill views read.
+          db.raw(`(SELECT string_agg(DISTINCT eo.order_no, ', ')
+                     FROM inventory_reservations ir
+                     JOIN export_orders eo ON eo.id = ir.order_id
+                    WHERE ir.lot_id = il.id AND ir.status = 'Active') AS reserved_against`)
         );
 
       if (type) query = query.where('il.type', type);
@@ -280,7 +287,8 @@ const inventoryController = {
           entity: entity || 'mill',
           warehouseId: warehouse_id || null,
           qty: parseFloat(qty),
-          unit: unit || 'MT',
+          // qty is KG (mig 228); 'MT' here only mislabelled a KG figure.
+          unit: unit || 'KG',
           productId: product_id || null,
           batchRef: batch_ref || null,
           costPerUnit: parseFloat(cost_per_unit) || 0,

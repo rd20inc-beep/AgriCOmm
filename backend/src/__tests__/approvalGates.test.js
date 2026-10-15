@@ -58,6 +58,12 @@ const OWNER_MODAL_SCREENS = {
   'modules/finance/drawers/TransactionDrawer.jsx': ['post', '/finance/payments/:id/reverse'],
   'modules/exportOrders/components/ShortBalanceWriteOff.jsx': ['post', '/export-orders/:id/write-off-balance'],
   'modules/milling/components/ServiceBillingTab.jsx': ['post', '/service-milling/invoices/:id/void'],
+  'modules/millStore/pages/StoreOverview.jsx': ['put', '/mill-store/items/:id/revalue'],
+  // P3-11: a local-sale return; voiding a purchase lot (the same button voids a
+  // mill-store purchase — checked below).
+  'modules/localSales/components/SaleReturnsPanel.jsx': ['post', '/local-sales/:id/returns'],
+  'shared/components/VoidPurchaseButton.jsx': ['post', '/lot-inventory/lots/:id/void'],
+  'modules/milling/pages/MillingBatchDetail.jsx': ['post', '/milling/batches/:id/reverse-yield'],
 };
 
 function frontendFilesCalling(dir, needle, out = []) {
@@ -81,6 +87,12 @@ describe('owner-password modal ⇒ ownerApproval on the route', () => {
 
   test.each(Object.entries(OWNER_MODAL_SCREENS))('%s → %s carries ownerApproval', (screen, [method, p]) => {
     const r = find(method, p);
+    expect(r).toBeDefined();
+    expect(r.owner).toBeTruthy();
+  });
+
+  it('VoidPurchaseButton → the mill-store purchase void carries ownerApproval too', () => {
+    const r = find('post', '/mill-store/purchases/:id/void');
     expect(r).toBeDefined();
     expect(r.owner).toBeTruthy();
   });

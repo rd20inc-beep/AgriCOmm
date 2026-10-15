@@ -30,8 +30,12 @@ describe('upsertOutputLot keeps what belongs to the lot', () => {
 
   test('a hand-given lot number survives the update', () => {
     // The generated lot_no is dropped from the patch; the stored one stands.
-    expect(fn).toMatch(/lot_no: _generated, \.\.\.rest/);
+    expect(fn).toMatch(/lot_no: _generated,[\s\S]*?\.\.\.rest/);
     expect(fn).not.toMatch(/\.update\(\{ \.\.\.row/);
+  });
+
+  test('an existing lot keeps its quantities — the caller moves them through the ledger', () => {
+    expect(fn).toMatch(/qty: _qty, available_qty: _avail/);
   });
 
   test('it still inserts when the batch has no such output yet', () => {
@@ -65,21 +69,24 @@ describe('the resync no longer deletes the lots', () => {
 
   test('output lots are not deleted wholesale', () => {
     expect(fn).not.toMatch(/trx\('inventory_lots'\)\.whereIn\('id', outIds\)\.del\(\)/);
+    expect(fn).not.toMatch(/\.del\(\)/);
   });
 
-  test("only this batch's own movement rows are cleared", () => {
-    // Otherwise a re-recorded yield stacks a second production receipt.
-    expect(fn).toMatch(/reference_module: 'milling_batch', reference_id: batchId \}\)\.del\(\)/);
+  test('no ledger row is deleted — the qty change is posted as a new movement (P3-03)', () => {
+    // Deleting "this batch's own" rows also deleted service dispatches (MIL-08).
+    expect(fn).not.toMatch(/lot_transactions/);
+    expect(fnBody('postOutputToTarget')).toMatch(/BYPRODUCT_OUTPUT_REVERSE|PRODUCTION_OUTPUT_REVERSE/);
   });
 
-  test('the reserved / sold / re-milled guard is still in force', () => {
-    expect(fn).toMatch(/e\.status = 409/);
-    expect(fn).toMatch(/inventory_reservations/);
+  test('the moved-output guard is in force', () => {
+    expect(fn).toMatch(/assertBatchOutputsUntouched\(trx, batch/);
+    const guard = fnBody('assertBatchOutputsUntouched');
+    expect(guard).toMatch(/inventory_reservations/);
+    expect(guard).toMatch(/service_milling_dispatches/);
   });
 
-  test('an output that is no longer produced is retired, but only if empty', () => {
-    expect(fn).toMatch(/COALESCE\(qty, 0\) = 0/);
-    expect(fn).toMatch(/resyncStartedAt/);
+  test('an output that is no longer produced is reversed to zero, not left behind', () => {
+    expect(fnBody('recordMillingOutput')).toMatch(/targetKg: 0/);
   });
 
   test('it reports what it updated rather than what it recreated', () => {

@@ -60,8 +60,10 @@
  * the period by sale / movement / expense date:
  *
  *   - local sales of a company mill-output lot (entity 'mill', type finished or
- *     byproduct): revenue total_amount, cost cogs_total_pkr (the COGS the sale
- *     posted to 5000). A sale of such a lot with no COGS is left out and counted.
+ *     byproduct): revenue total_amount, cost cogs_total_pkr — locked at
+ *     confirmation from the same figure the sale's COGS journal posted to 5000
+ *     (lockSaleCOGS, P3-12), so this cost equals the GL's. A sale of such a lot
+ *     with no COGS is left out and counted.
  *   - transfers of mill output to export (lot_transactions warehouse_transfer_out
  *     tied to internal_transfers): revenue = kg × the transfer price, cost =
  *     kg × the moved lot's cost per kg.
@@ -563,7 +565,8 @@ async function millBatchRows(conn, { startDate, endDate } = {}) {
            COALESCE(NULLIF(l.landed_cost_per_kg, 0), l.cost_per_unit, 0) AS per_kg,
            (SELECT COALESCE(SUM(t.quantity_kg), 0) FROM lot_transactions t
              WHERE t.lot_id = l.id AND t.reference_module = 'milling_batch'
-               AND t.transaction_type IN ('milling_receipt', 'byproduct_receipt')) AS yield_kg
+               AND t.transaction_type IN ('milling_receipt', 'byproduct_receipt',
+                                          'milling_receipt_reversal', 'byproduct_receipt_reversal')) AS yield_kg
       FROM inventory_lots l
      WHERE l.batch_ref = ANY(?) AND l.type IN ('finished', 'byproduct')
        AND l.status <> 'Closed' AND COALESCE(l.ownership, 'company') <> 'client'`, [refs]));
