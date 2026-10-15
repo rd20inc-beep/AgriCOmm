@@ -23,7 +23,7 @@ import { queryKeys } from '../../../api/queryClient';
 import {
   useExportOrder, useConfirmAdvance, useConfirmBalance,
   useUpdateOrderStatus, useAddOrderCost, useUpdateShipment, useCancelOrder,
-  useStartDocs, useUploadDocument, useApproveDocument,
+  useStartDocs,
 } from '../../../api/queries';
 import { useCreateMillingBatch } from '../../../api/queries';
 import { exportOrdersApi } from '../api/services';
@@ -71,8 +71,6 @@ export default function ExportOrderDetail() {
   const addCostMut = useAddOrderCost();
   const updateShipmentMut = useUpdateShipment();
   const startDocsMut = useStartDocs();
-  const uploadDocMut = useUploadDocument();
-  const approveDocMut = useApproveDocument();
   const createMillingMut = useCreateMillingBatch();
 
   const [activeTab, setActiveTab] = useState('overview');
@@ -498,45 +496,23 @@ export default function ExportOrderDetail() {
     const label = docLabel || documentLabels[docKey] || docKey;
     const files = (Array.isArray(fileOrFiles) ? fileOrFiles : [fileOrFiles]).filter(Boolean);
     const names = files.map((f) => f.name).join(', ');
-    if (files.length) {
-      const formData = new FormData();
-      for (const f of files) formData.append('files', f);
-      formData.append('doc_type', docKey);
-      formData.append('linked_type', 'export_order');
-      formData.append('linked_id', orderId);
-      formData.append('title', `${label} - ${order.id}`);
-      try {
-        await api.upload('/api/documents/upload', formData);
-      } catch (uploadErr) {
-        // Marking it uploaded anyway left a checklist tick with no file behind it.
-        addToast(`File upload failed: ${uploadErr.message}. ${label} was not marked as uploaded.`, 'error');
-        return;
-      }
-    }
+    if (!files.length) return;
+    const formData = new FormData();
+    for (const f of files) formData.append('files', f);
+    formData.append('doc_type', docKey);
+    formData.append('linked_type', 'export_order');
+    formData.append('linked_id', orderId);
+    formData.append('title', `${label} - ${order.id}`);
     try {
-      await uploadDocMut.mutateAsync({
-        id: orderId,
-        data: { doc_type: docKey, file_path: names || null },
-      });
-      addToast(`${label} uploaded${names ? ` (${names})` : ''}`);
-    } catch (err) {
-      addToast(`Failed to upload ${label}: ${err.message}`, 'error');
-    }
-  };
-
-  const handleDocumentApprove = async (docKey) => {
-    try {
-      await approveDocMut.mutateAsync({
-        id: orderId,
-        data: { doc_type: docKey, uploaded_by: 'Export Manager' },
-      });
-      addToast(`${documentLabels[docKey]} approved`);
-    } catch (err) {
-      addToast(`Failed to approve ${documentLabels[docKey]}: ${err.message}`, 'error');
-      return;
-    }
-    if (docKey === 'blDraft' && order.balanceReceived < order.balanceExpected) {
-      addToast('Balance collection reminder sent to customer', 'info');
+      // ONE call. A second "mark uploaded" call used to follow it and reset the
+      // checklist, so the order could never pass the document gate (EXP-06).
+      // The stored file is the evidence; it counts once a second person
+      // approves it (D-17).
+      await api.upload('/api/documents/upload', formData);
+      addToast(`${label} uploaded (${names}) — it counts once a second person approves it`);
+      invalidateOrder();
+    } catch (uploadErr) {
+      addToast(`File upload failed: ${uploadErr.message}`, 'error');
     }
   };
 
@@ -908,7 +884,7 @@ export default function ExportOrderDetail() {
             <DocumentsTab
               order={order}
               onUpload={handleDocumentUpload}
-              onApprove={handleDocumentApprove}
+              onChanged={invalidateOrder}
               // The checklist's Preview passes WHICH document it wants. Only the
               // invoice has a modal of its own; the Packing List and COO are
               // rendered by the Document Center below, so send the reader there

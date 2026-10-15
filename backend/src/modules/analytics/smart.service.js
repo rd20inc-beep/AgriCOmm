@@ -1055,9 +1055,13 @@ const smartService = {
       case 'packing_list': {
         docData.packingListNo = `PL-${order.order_no}`;
         // Get bag info if available
-        const bags = await db('inventory_lots')
-          .where({ reserved_against: order.order_no, type: 'packaging' })
-          .select('item_name', 'qty');
+        // Packaging held for this order: its Active reservations on packaging
+        // lots (inventory_lots.reserved_against was written as 'order-<id>'
+        // and read here as the order number, so it never matched — DAT-10).
+        const bags = await db('inventory_reservations as r')
+          .join('inventory_lots as l', 'l.id', 'r.lot_id')
+          .where({ 'r.order_id': order.id, 'r.status': 'Active', 'l.type': 'packaging' })
+          .select('l.item_name', 'r.reserved_qty as qty');
         docData.packaging = bags.length > 0 ? bags : [{ item_name: 'PP Bags', qty: Math.ceil(parseFloat(order.qty_mt || 0) * 20) }];
         docData.grossWeight = parseFloat(order.qty_mt || 0);
         docData.netWeight = parseFloat(order.qty_mt || 0);
@@ -1222,7 +1226,6 @@ const smartService = {
         'qty',
         'unit',
         'status',
-        'reserved_against',
         'updated_at'
       );
 

@@ -88,6 +88,42 @@ function validateForApproval(doc) {
   return errors;
 }
 
+// Key-order-independent JSON, to tell whether a re-assembled snapshot differs
+// from the stored one (jsonb hands keys back in its own order).
+function stableStringify(x) {
+  if (Array.isArray(x)) return `[${x.map(stableStringify).join(',')}]`;
+  if (x && typeof x === 'object') {
+    return `{${Object.keys(x).sort().map((k) => `${JSON.stringify(k)}:${stableStringify(x[k])}`).join(',')}}`;
+  }
+  return JSON.stringify(x === undefined ? null : x);
+}
+
+// Post-shipment documents (Certificate / Statement of Origin, covering
+// letters) only once the order has shipped (P3-17 / EXP-34).
+async function assertPostShipmentAllowed(trx, orderId, docType, action) {
+  const gate = require('../exportOrders/documentGate');
+  if (!gate.isPostShipmentDocType(docType)) return;
+  const order = await trx('export_orders').where({ id: orderId }).first();
+  const problem = gate.postShipmentProblem(order, docType, action);
+  if (problem) throw httpError(409, 'POST_SHIPMENT_DOCUMENT', problem);
+}
+
+// After a generated document changes state on an export order: re-derive the
+// checklist cache from the document gate and, when the approval was the last
+// thing outstanding, move the order on to Ready to Ship (P3-17).
+async function afterGateChange(trx, orderId, userId) {
+  await require('../exportOrders/documentGate').syncChecklist(trx, orderId);
+  const order = await trx('export_orders').where({ id: orderId }).first();
+  if (order) {
+    await require('../exportOrders/exportOrders.workflow').maybePromoteAfterDocuments(trx, {
+      order, userId: userId || null, reason: 'Pre-shipment documents approved',
+    });
+  }
+}
+
+// Statuses a version can still be edited in, and so re-assembled on open.
+const OPEN_STATUSES = new Set(['Draft', 'Under Review']);
+
 // ── merge helpers ──────────────────────────────────────────────────────────
 function isPlainObject(x) {
   return x && typeof x === 'object' && !Array.isArray(x);
@@ -117,6 +153,7 @@ const generatedDocumentService = {
   assertSendable,
   isProformaType,
   LOCKED_STATUSES,
+  stableStringify,
 
   // Return the latest live version for (order, doc_type), or null.
   async getLatest(orderId, docType, trx = db) {
@@ -125,37 +162,93 @@ const generatedDocumentService = {
       .first();
   },
 
-  // Create a Draft, or return the existing open version. Throws 409 when the
-  // latest version is locked (Approved / Issued) — the caller must Revise.
+  // Create a Draft, or return the existing open version — re-assembled from
+  // the order as it is now (refreshOpen). Throws 409 when the latest version is
+  // locked (Approved / Issued) — the caller must Revise. A Cancelled latest
+  // version is not reopened: a fresh version follows it (EXP-11).
   async createDraft(orderId, docType, userId) {
     return db.transaction(async (trx) => {
+      await assertPostShipmentAllowed(trx, orderId, docType, 'generated');
       const latest = await this.getLatest(orderId, docType, trx);
-      if (latest) {
+      if (latest && latest.status !== 'Cancelled') {
         if (latest.locked) {
           const e = new Error(`This document is ${latest.status} and locked. Create a revision to make changes.`);
           e.status = 409;
           e.code = 'DOC_LOCKED';
           throw e;
         }
-        return latest;
+        const { row } = await this.refreshOpen(latest, trx);
+        return row;
       }
       const snapshot = await assembleDocument(orderId, docType);
       const doc_no = await nextDocNo(trx, { table: 'generated_documents', column: 'doc_no', prefix: 'GD-', pad: 5 });
+      if (latest) {
+        await trx('generated_documents').where({ id: latest.id }).update({ is_latest: false, updated_at: db.fn.now() });
+      }
       const [row] = await trx('generated_documents')
         .insert({
           doc_no,
           order_id: orderId,
           doc_type: docType,
-          version: 1,
+          version: latest ? (latest.version || 1) + 1 : 1,
           is_latest: true,
+          previous_version_id: latest ? latest.id : null,
           status: 'Draft',
           snapshot_json: JSON.stringify(snapshot),
-          audience: 'internal',
+          audience: latest ? latest.audience : 'internal',
+          bank_account_id: latest ? latest.bank_account_id : null,
+          copy_label: latest ? latest.copy_label : null,
           generated_by: userId || null,
         })
         .returning('*');
       return row;
     });
+  },
+
+  /**
+   * Re-assemble an OPEN version (Draft / Under Review) from the order as it is
+   * now, keeping the operator's structured overrides (overrides_json), so a
+   * draft never carries prices or quantities from when it was first generated
+   * (EXP-11). When the order data changed, the stored rendering and any hand
+   * edits of the body (edited_html — a copy of the old figures) are cleared:
+   * sending them would send the stale document. Locked versions, and
+   * post-shipment documents the order may not have yet, are returned as is.
+   *
+   * persist: false (a viewer without edit rights — previewing writes nothing,
+   * P1-08) returns the refreshed row without storing it.
+   *
+   * Returns { row, sourceChanged, editsDiscarded }.
+   */
+  async refreshOpen(row, trx = db, { persist = true } = {}) {
+    if (!row || row.locked || !OPEN_STATUSES.has(row.status)) return { row, sourceChanged: false, editsDiscarded: false };
+    let fresh;
+    try {
+      fresh = await assembleDocument(row.order_id, row.doc_type);
+    } catch (e) {
+      if (e && e.status && e.status < 500) return { row, sourceChanged: false, editsDiscarded: false };
+      throw e;
+    }
+    if (stableStringify(fresh) === stableStringify(row.snapshot_json || {})) {
+      return { row, sourceChanged: false, editsDiscarded: false };
+    }
+    const editsDiscarded = !!row.edited_html;
+    if (!persist) {
+      return {
+        row: { ...row, snapshot_json: fresh, edited_html: null, rendered_html: null, rendered_at: null },
+        sourceChanged: true,
+        editsDiscarded,
+      };
+    }
+    const [updated] = await trx('generated_documents').where({ id: row.id })
+      .update({
+        snapshot_json: JSON.stringify(fresh),
+        edited_html: null,
+        rendered_html: null,
+        rendered_at: null,
+        updated_at: db.fn.now(),
+      })
+      .returning('*');
+    return { row: updated, sourceChanged: true, editsDiscarded };
   },
 
   // Save preview edits as an overrides patch. Rejects when locked.
@@ -257,6 +350,7 @@ const generatedDocumentService = {
       if (!(GEN_DOC_TRANSITIONS[row.status] || []).includes('Approved')) {
         const e = new Error(`Cannot approve a ${row.status} document.`); e.status = 409; throw e;
       }
+      await assertPostShipmentAllowed(trx, row.order_id, row.doc_type, 'approved');
       // Maker-checker (P2-32 / EXP-39): whoever generated this version may not
       // also approve it — unless they are the Owner, who may sign off alone.
       if (row.generated_by != null && userId != null && Number(row.generated_by) === Number(userId)) {
@@ -277,6 +371,7 @@ const generatedDocumentService = {
       const [updated] = await trx('generated_documents').where({ id: genId })
         .update(patch)
         .returning('*');
+      await afterGateChange(trx, updated.order_id, userId);
       return updated;
     });
   },
@@ -293,11 +388,16 @@ const generatedDocumentService = {
       if (!(GEN_DOC_TRANSITIONS[row.status] || []).includes(toStatus)) {
         const e = new Error(`Cannot move a ${row.status} document to ${toStatus}.`); e.status = 409; throw e;
       }
+      if (toStatus !== 'Cancelled' && toStatus !== 'Draft') {
+        await assertPostShipmentAllowed(trx, row.order_id, row.doc_type, 'issued');
+      }
       const patch = { status: toStatus, updated_at: db.fn.now() };
       // Moving back to Draft (rework from review) unlocks; issuing keeps locked.
       if (toStatus === 'Draft') patch.locked = false;
       if (LOCKED_STATUSES.has(toStatus)) patch.locked = true;
       const [updated] = await trx('generated_documents').where({ id: genId }).update(patch).returning('*');
+      // Cancelling an approved document takes it out of the gate.
+      await require('../exportOrders/documentGate').syncChecklist(trx, updated.order_id);
       return updated;
     });
   },
@@ -310,6 +410,7 @@ const generatedDocumentService = {
       const row = await trx('generated_documents').where({ id: genId }).first();
       if (!row) { const e = new Error('Document version not found.'); e.status = 404; throw e; }
       if (!row.is_latest) { const e = new Error('Only the latest version can be revised.'); e.status = 409; throw e; }
+      await assertPostShipmentAllowed(trx, row.order_id, row.doc_type, 'revised');
       const snapshot = await assembleDocument(row.order_id, row.doc_type);
       const doc_no = await nextDocNo(trx, { table: 'generated_documents', column: 'doc_no', prefix: 'GD-', pad: 5 });
       await trx('generated_documents').where({ id: row.id }).update({ is_latest: false, status: 'Revised', updated_at: db.fn.now() });
@@ -329,6 +430,9 @@ const generatedDocumentService = {
         generated_by: userId || null,
         locked: false,
       }).returning('*');
+      // The approved version just retired no longer fulfils the gate; the new
+      // draft must be approved in its turn.
+      await require('../exportOrders/documentGate').syncChecklist(trx, row.order_id);
       return created;
     });
   },

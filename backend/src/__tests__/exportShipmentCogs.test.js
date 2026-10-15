@@ -17,8 +17,10 @@
 jest.mock('../config/database', () => require('./helpers/memoryDb').db);
 
 const mockAccounting = {
-  autoPost: jest.fn(async (trx, { triggerEvent, amount, refNo }) => {
-    const codes = { export_shipment: ['5020', '1230'], export_revenue: ['1110', '4010'] }[triggerEvent] || ['?', '?'];
+  autoPost: jest.fn(async (trx, { triggerEvent, amount, refNo, creditAccountId }) => {
+    const codes = [...({ export_shipment: ['5020', '1230'], export_revenue: ['1110', '4010'] }[triggerEvent] || ['?', '?'])];
+    // The caller may override the rule's credit (a by-product lot → 1240).
+    if (creditAccountId) codes[1] = (await trx('chart_of_accounts').where({ id: creditAccountId }).first()).code;
     const [je] = await trx('journal_entries').insert({ ref_no: refNo, trigger_event: triggerEvent, status: 'Posted', total_debit: amount }).returning();
     await trx('journal_lines').insert([
       { journal_id: je.id, code: codes[0], debit: amount, credit: 0 },
@@ -42,11 +44,12 @@ const workflow = require('../modules/exportOrders/exportOrders.workflow');
 
 // The lot ledger write is out of scope here — deduct the kilos the way
 // postMovement would, so a second dispatch of the same stock would be visible.
-const dispatchSpy = jest.spyOn(inventoryService, 'dispatchForShipment').mockImplementation(async (trx, { lotId, qtyKg }) => {
+const dispatchImpl = async (trx, { lotId, qtyKg }) => {
   const lot = await trx('inventory_lots').where('id', lotId).first();
   await trx('inventory_lots').where('id', lotId).update({ qty: parseFloat(lot.qty) - qtyKg });
   return { lotId, qtyKg };
-});
+};
+let dispatchSpy = jest.spyOn(inventoryService, 'dispatchForShipment').mockImplementation(dispatchImpl);
 
 // Lot A is priced by landed cost; lot B only by cost_per_unit (per KG since
 // mig 228) — allocate-stock accepts both, so COGS must too. Lot C's hold was
@@ -138,6 +141,34 @@ test('after shipment, calculateOrderCOGS still sees the shipped (Consumed) stock
   expect(c.source).toBe('reservations');
 });
 
+
+// ── COGS relieves the account each lot is carried in (P3-13 / EXP-27) ───────
+test('a by-product lot on the order is relieved from 1240, finished rice from 1230 — together the locked COGS', async () => {
+  state.tables.inventory_lots[0] = { ...state.tables.inventory_lots[0], type: 'finished', entity: 'export' };
+  state.tables.inventory_lots[1] = { ...state.tables.inventory_lots[1], type: 'byproduct', entity: 'export' };
+  state.tables.chart_of_accounts = [{ id: 1240, code: '1240', name: 'By-Products' }];
+  await ship();
+
+  const lines = state.tables.journal_lines.filter((l) => cogsJournals().some((j) => j.id === l.journal_id));
+  const credit = (code) => lines.filter((l) => l.code === code).reduce((a, l) => a + l.credit, 0);
+  const debit5020 = lines.filter((l) => l.code === '5020').reduce((a, l) => a + l.debit, 0);
+  expect(cogsJournals()).toHaveLength(2);
+  expect(credit('1230')).toBe(10000 * 120);
+  expect(credit('1240')).toBe(5000 * 150);
+  expect(debit5020).toBe(EXPECTED_COGS);
+});
+
+test('dispatch values the lot movement at the same cost/kg COGS uses (landed first)', async () => {
+  dispatchSpy.mockRestore();
+  const postSpy = jest.spyOn(inventoryService, 'postMovement').mockResolvedValue({ id: 1 });
+  try {
+    await inventoryService.dispatchForShipment(db, { orderId: 1, lotId: 11, qtyKg: 100, userId: 1 });
+    expect(postSpy).toHaveBeenCalledWith(db, expect.objectContaining({ costPerUnit: 120 }));
+  } finally {
+    postSpy.mockRestore();
+    dispatchSpy = jest.spyOn(inventoryService, 'dispatchForShipment').mockImplementation(dispatchImpl);
+  }
+});
 
 // ── A shipment and its journals are one event (P2-03) ───────────────────────
 // A lock or posting failure used to be logged and the order shipped anyway with

@@ -255,6 +255,11 @@ export function transformOrder(dbOrder) {
     costs: transformCosts(dbOrder.costs),
     // Documents — convert array to keyed object if needed
     documents: transformDocuments(dbOrder.documents),
+    // The shipment gates as the server evaluates them (P3-17 / P3-13): per
+    // required document { fulfilled, state, source, … }, and how the order's
+    // reservations cover it { orderKg, reservedKg, tolerancePct, withinTolerance }.
+    documentGate: dbOrder.document_gate || dbOrder.documentGate || null,
+    reservationCover: dbOrder.reservation_cover || dbOrder.reservationCover || null,
     // Activity log — normalize export_order_status_history rows (from_status /
     // to_status / changed_by / reason / created_at) into the {action,date,by}
     // shape the TimelineTab renders. Already-shaped entries (mock data) pass through.

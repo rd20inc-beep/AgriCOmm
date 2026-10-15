@@ -286,18 +286,6 @@ export function useUploadDocument() {
   });
 }
 
-export function useApproveDocument() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id, data }) => exportOrdersApi.approveDocument(id, data),
-    onSuccess: (_, { id }) => {
-      qc.invalidateQueries({ queryKey: queryKeys.orders.all });
-      qc.invalidateQueries({ queryKey: queryKeys.orders.detail(id) });
-      qc.invalidateQueries({ queryKey: queryKeys.documents.all });
-    },
-  });
-}
-
 export function useAllocateStock() {
   const qc = useQueryClient();
   return useMutation({

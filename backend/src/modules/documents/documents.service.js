@@ -15,6 +15,29 @@ if (!fs.existsSync(UPLOAD_DIR)) {
   fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 }
 
+// Export orders keep their checklist as a cache of the document gate's answer
+// (P3-17): after any change to one of an export order's gate documents it is
+// re-derived from the evidence rather than set from the action. Lazy: the gate
+// lives with the export orders module. Returns true when it handled the change
+// (any other reference or document type keeps the plain checklist update).
+async function syncExportChecklist(conn, linkedType, linkedId, docType) {
+  if (linkedType !== 'export_order' || !linkedId) return false;
+  const gate = require('../exportOrders/documentGate');
+  if (docType && !gate.isGateFileType(docType)) return false;
+  await gate.syncChecklist(conn, linkedId);
+  return true;
+}
+
+// Owner — the one role that may check its own upload (the same rule generated
+// documents follow, P2-32): the Owner may sign off alone.
+async function isOwner(conn, userId) {
+  if (!userId) return false;
+  const u = await conn('users').where({ id: userId }).first();
+  if (!u || u.role_id == null) return false;
+  const r = await conn('roles').where({ id: u.role_id }).first();
+  return !!r && r.name === 'Owner';
+}
+
 const documentService = {
   // === Document UID generator ===
   async generateDocUid(trx) {
@@ -119,11 +142,14 @@ const documentService = {
       rows.push(doc);
     }
 
-    // The checklist points at the new version.
-    await conn('document_checklists')
-      .where(scope)
-      .whereNot({ linked_id: 0 })
-      .update({ document_id: rows[0].id, is_fulfilled: true, updated_at: conn.fn.now() });
+    // The checklist points at the new version. On an export order the new
+    // file is live but not yet CHECKED, so the gate says whether it counts.
+    if (!(await syncExportChecklist(conn, linkedType, linked, docType))) {
+      await conn('document_checklists')
+        .where(scope)
+        .whereNot({ linked_id: 0 })
+        .update({ document_id: rows[0].id, is_fulfilled: true, updated_at: conn.fn.now() });
+    }
 
     return rows;
   },
@@ -302,9 +328,11 @@ const documentService = {
     const sameType = await conn('document_store')
       .where({ linked_type: doc.linked_type, linked_id: doc.linked_id, doc_type: doc.doc_type, is_latest: true });
     const stillLive = sameType.find((d) => d.status !== DELETED && Number(d.id) !== Number(documentId));
-    await conn('document_checklists').where({ document_id: documentId }).update(
-      stillLive ? { document_id: stillLive.id } : { document_id: null, is_fulfilled: false },
-    );
+    if (!(await syncExportChecklist(conn, doc.linked_type, doc.linked_id, doc.doc_type))) {
+      await conn('document_checklists').where({ document_id: documentId }).update(
+        stillLive ? { document_id: stillLive.id } : { document_id: null, is_fulfilled: false },
+      );
+    }
     return { deleted: true, id: documentId, file_kept: true };
   },
 
@@ -370,9 +398,30 @@ const documentService = {
     if (!doc) throw new Error('Document not found');
     // Draft included: files uploaded before the approval rule existed are Draft,
     // and an approver must be able to make one live without an artificial
-    // "submit for review" step in between.
-    if (!['Draft', 'Pending Review', 'Under Review'].includes(doc.status)) {
+    // "submit for review" step in between. A live (Approved) file nobody has
+    // CHECKED yet may be approved too: that is the second person's sign-off
+    // the export document gate needs (D-17).
+    const unchecked = doc.status === 'Approved' && doc.checked_by == null;
+    if (!['Draft', 'Pending Review', 'Under Review'].includes(doc.status) && !unchecked) {
       throw new Error(`Cannot approve: document is in '${doc.status}' status`);
+    }
+
+    // The export document gate (P3-17 / D-17): a required shipping document is
+    // checked by someone other than whoever uploaded it (the Owner may sign
+    // off alone), and a post-shipment one only once the order has shipped.
+    if (doc.linked_type === 'export_order' && doc.linked_id) {
+      const gate = require('../exportOrders/documentGate');
+      if (gate.isGateFileType(doc.doc_type)) {
+        if (doc.uploaded_by != null && approverId != null && Number(doc.uploaded_by) === Number(approverId)
+          && !(await isOwner(conn, approverId))) {
+          const e = new Error('You uploaded this document — a different person must approve it (or the Owner).');
+          e.statusCode = 403; e.code = 'MAKER_CHECKER';
+          throw e;
+        }
+        const order = await conn('export_orders').where({ id: doc.linked_id }).first();
+        const problem = gate.postShipmentProblem(order, doc.doc_type, 'approved');
+        if (problem) { const e = new Error(problem); e.statusCode = 400; throw e; }
+      }
     }
 
     // Insert approval record
@@ -383,13 +432,21 @@ const documentService = {
       comments: comments || null,
     });
 
-    // Change status to Approved
+    // Change status to Approved, stamped with who checked it and when.
     await conn('document_store')
       .where({ id: documentId })
-      .update({ status: 'Approved', updated_at: conn.fn.now() });
+      .update({ status: 'Approved', checked_by: approverId || null, checked_at: conn.fn.now(), updated_at: conn.fn.now() });
 
-    // Update checklist if linked
-    if (doc.linked_type && doc.linked_id) {
+    // An export order: re-derive its checklist from the gate, and move it on
+    // to Ready to Ship if this was the last thing it was waiting for.
+    if (await syncExportChecklist(conn, doc.linked_type, doc.linked_id, doc.doc_type)) {
+      const order = await conn('export_orders').where({ id: doc.linked_id }).first();
+      if (order) {
+        await require('../exportOrders/exportOrders.workflow').maybePromoteAfterDocuments(conn, {
+          order, userId: approverId, reason: 'Pre-shipment documents approved',
+        });
+      }
+    } else if (doc.linked_type && doc.linked_id) {
       await conn('document_checklists')
         .where({
           linked_type: doc.linked_type,
@@ -425,6 +482,7 @@ const documentService = {
     await conn('document_store')
       .where({ id: documentId })
       .update({ status: 'Rejected', updated_at: conn.fn.now() });
+    await syncExportChecklist(conn, doc.linked_type, doc.linked_id, doc.doc_type);
 
     return conn('document_store').where({ id: documentId }).first();
   },
@@ -442,10 +500,11 @@ const documentService = {
       comments: comments || null,
     });
 
-    // Back to Draft for rework
+    // Back to Draft for rework; any earlier check no longer stands.
     await conn('document_store')
       .where({ id: documentId })
-      .update({ status: 'Draft', updated_at: conn.fn.now() });
+      .update({ status: 'Draft', checked_by: null, checked_at: null, updated_at: conn.fn.now() });
+    await syncExportChecklist(conn, doc.linked_type, doc.linked_id, doc.doc_type);
 
     return conn('document_store').where({ id: documentId }).first();
   },
@@ -734,11 +793,14 @@ ${priceHtml}
       })
       .returning('*');
 
-    // Update checklist
-    await conn('document_checklists')
-      .where({ linked_type: linkedType, linked_id: linkedId, doc_type: docType })
-      .whereNot({ linked_id: 0 })
-      .update({ document_id: doc.id, is_fulfilled: true, updated_at: conn.fn.now() });
+    // Update checklist (an export order's follows its gate: a Draft rendering
+    // fulfils nothing until it is approved).
+    if (!(await syncExportChecklist(conn, linkedType, linkedId, docType))) {
+      await conn('document_checklists')
+        .where({ linked_type: linkedType, linked_id: linkedId, doc_type: docType })
+        .whereNot({ linked_id: 0 })
+        .update({ document_id: doc.id, is_fulfilled: true, updated_at: conn.fn.now() });
+    }
 
     return doc;
   },

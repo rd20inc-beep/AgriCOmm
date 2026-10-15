@@ -1,10 +1,12 @@
-const documentService = require('../documents/documents.service');
 const inventoryService = require('../inventory/inventory.service');
 const automationService = require('../admin/automation.service');
 const accountingService = require('../accounting/accounting.service');
 const notificationService = require('../../services/notificationService');
 const { billableFreight } = require('./billableFreight');
 const { BALANCE_COLLECTION_STATUSES, BALANCE_OUTSTANDING_SQL } = require('./balanceCollection');
+const documentGate = require('./documentGate');
+const { reservationProblem } = require('./reservationGate');
+const { lotCostPerKg, inventoryAccountForLot } = require('../inventory/exportPool');
 
 const STATUS_TRANSITIONS = {
   'Draft': ['Awaiting Advance', 'Advance Received'],
@@ -188,6 +190,12 @@ async function ensureTransitionAllowed(trx, order, toStatus) {
     }
   }
 
+  if (toStatus === 'Arrived' && !order.ata) {
+    const err = new Error('Cannot mark Arrived: record the actual arrival date (ATA) on the shipment.');
+    err.statusCode = 400;
+    throw err;
+  }
+
   if (toStatus === 'Closed') {
     const problems = await closeProblems(trx, order);
     if (problems.length) {
@@ -208,11 +216,12 @@ function advanceConfirmed(order) {
   return settledAmount(order.advance_received) >= settledAmount(order.advance_expected);
 }
 
-// Required checklist rows still missing or unapproved. phase 'pre' leaves out
-// the documents only issued once the vessel has sailed.
+// Required documents not in place (P3-17 / D-17): a stored file checked by a
+// second person, or an approved generated document, per required type — a
+// 'Confirm Ready' tick no longer counts. phase 'pre' leaves out the documents
+// only issued once the vessel has sailed.
 async function missingChecklistDocs(conn, orderId, phase = 'all') {
-  const missing = await documentService.checkMissingDocsWithConn(conn, 'export_order', orderId);
-  return (missing || []).filter((m) => phase === 'all' || !POST_SHIPMENT_DOC_TYPES.has(m.doc_type));
+  return documentGate.missingDocs(conn, orderId, phase);
 }
 
 // Everything standing between this order and Ready to Ship / Shipped, as
@@ -228,8 +237,20 @@ async function readyToShipProblems(conn, order, toStatus = 'Shipped') {
   const missing = await missingChecklistDocs(conn, order.id, 'pre');
   if (missing.length) {
     problems.push(
-      `${verb}: required pre-shipment export documents are not all approved (${missing.map((m) => docLabel(m.doc_type)).join(', ')}). Check document checklist.`
+      `${verb}: required pre-shipment export documents are not all in place (${missing.map(docLabel).join(', ')}). Each needs a stored file approved by a second person, or an approved generated document — see the Documents tab.`
     );
+  }
+  // D-18: the stock that will leave must be reserved, within the tolerance.
+  const stock = await reservationProblem(conn, order, verb);
+  if (stock) problems.push(stock);
+  // The goods leave the gate: the departure date and the gate pass that let
+  // them out are part of the shipment, whichever route marks it Shipped — the
+  // status API used to skip both (EXP-16).
+  if (toStatus === 'Shipped') {
+    if (!order.atd) problems.push(`${verb}: record the actual departure date (ATD) on the shipment.`);
+    if (!String(order.gate_pass_no || '').trim()) {
+      problems.push(`${verb}: a gate pass number is required to mark the shipment as shipped (goods leaving the premises).`);
+    }
   }
   // Packed-weight variance gate: if the packed net rice is over/under tolerance
   // and hasn't been signed off, the order can't move to completion until
@@ -258,7 +279,7 @@ async function closeProblems(conn, order) {
   const missing = await missingChecklistDocs(conn, order.id, 'all');
   if (missing.length) {
     problems.push(
-      `Cannot close: required documents are not all approved (${missing.map((m) => docLabel(m.doc_type)).join(', ')}).`
+      `Cannot close: required documents are not all in place (${missing.map(docLabel).join(', ')}).`
     );
   }
   return problems;
@@ -314,14 +335,50 @@ async function flagMissingCogs(trx, order) {
   }
 }
 
+// The locked COGS split by the inventory account each shipped lot is carried
+// in, as [[code, PKR]] (largest last absorbs the rounding so the parts sum to
+// the locked total exactly). Weights come from the order's dispatched
+// reservations at the one cost basis dispatch and COGS share (lotCostPerKg).
+// Nothing to weigh by (an order costed from transfers or an estimate) → 1230.
+async function cogsByInventoryAccount(conn, orderId, totalPkr) {
+  const rows = await conn('inventory_reservations')
+    .where({ order_id: orderId })
+    .whereIn('status', ['Active', 'Consumed'])
+    .select('lot_id', 'reserved_qty');
+  const lotIds = [...new Set(rows.map((r) => r.lot_id))];
+  const lots = lotIds.length ? await conn('inventory_lots').whereIn('id', lotIds) : [];
+  const lotById = new Map(lots.map((l) => [Number(l.id), l]));
+  const weights = new Map();
+  for (const r of rows) {
+    const lot = lotById.get(Number(r.lot_id));
+    const value = (parseFloat(r.reserved_qty) || 0) * lotCostPerKg(lot);
+    if (!lot || !(value > 0)) continue;
+    // Pool lots are finished rice or by-products; anything else (a row with no
+    // type) stays on 1230, the rule's own credit.
+    const code = ['finished', 'byproduct'].includes(lot.type) ? inventoryAccountForLot(lot) : '1230';
+    weights.set(code, (weights.get(code) || 0) + value);
+  }
+  const total = settledAmount(totalPkr);
+  const sumW = [...weights.values()].reduce((a, b) => a + b, 0);
+  if (!(sumW > 0) || weights.size <= 1) return [[weights.size === 1 ? [...weights.keys()][0] : '1230', total]];
+  const entries = [...weights.entries()].sort((a, b) => a[1] - b[1]);
+  const out = [];
+  let assigned = 0;
+  entries.forEach(([code, w], i) => {
+    const amt = i === entries.length - 1 ? settledAmount(total - assigned) : settledAmount(total * w / sumW);
+    assigned = settledAmount(assigned + amt);
+    if (amt > 0) out.push([code, amt]);
+  });
+  return out;
+}
+
 async function runTransitionSideEffects(trx, order, toStatus, userId) {
   if (toStatus !== 'Shipped') return;
 
   // Deduct inventory for EVERY lot reserved against this order. The authoritative
   // order→lot link is inventory_reservations (populated by allocate-stock).
-  // The old lookup matched inventory_lots.reserved_against = order.order_no, but
-  // reserveStock stores 'order-<id>', so it never matched and dispatch silently
-  // skipped the deduction. Driving off the reservation rows also handles
+  // (inventory_lots.reserved_against, a single string that never matched, was
+  // dropped in migration 389.) Driving off the reservation rows also handles
   // multi-lot orders and is idempotent — once consumed, a re-driven Shipped
   // transition finds no Active reservations and won't double-deduct.
   const reservations = await trx('inventory_reservations')
@@ -341,11 +398,6 @@ async function runTransitionSideEffects(trx, order, toStatus, userId) {
     });
     // releaseReservation marks it 'Released'; record that it actually shipped.
     await trx('inventory_reservations').where('id', r.id).update({ status: 'Consumed', updated_at: trx.fn.now() });
-    // Clear the stale reserved_against tag once the lot is fully unreserved.
-    const lot = await trx('inventory_lots').where('id', r.lot_id).first();
-    if (lot && parseFloat(lot.reserved_qty) <= 0.0001) {
-      await trx('inventory_lots').where('id', r.lot_id).update({ reserved_against: null });
-    }
   }
 
   // Phase 5: Lock COGS at dispatch — value the contract in PKR at the order's
@@ -459,18 +511,32 @@ async function runTransitionSideEffects(trx, order, toStatus, userId) {
           }
         }
 
+        // COGS relieves the inventory account each lot is carried in: export
+        // finished rice 1230, by-products 1240 (EXP-27) — the rule's credit
+        // (1230) used to take all of it. One journal per account, through the
+        // export_shipment rule with the credit overridden where it differs.
         const cogsPkr = parseFloat(o.inventory_cogs_total_pkr) || 0;
         if (cogsPkr > 0) {
-          const cogsJe = await accountingService.autoPost(sp, {
-            triggerEvent: 'export_shipment', entity: 'export',
-            amount: cogsPkr, currency: 'PKR',
-            refType: 'Export Order', refNo: o.order_no,
-            description: `COGS ${o.order_no}`,
-            userId,
-            partyType: o.customer_id ? 'customer' : null,
-            partyId: o.customer_id || null,
-          });
-          if (!cogsJe) throw postingRuleMissing('export_shipment');
+          const split = await cogsByInventoryAccount(sp, o.id, cogsPkr);
+          for (const [code, amount] of split) {
+            let creditAccountId = null;
+            if (code !== '1230') {
+              const acc = await sp('chart_of_accounts').where({ code }).first();
+              if (!acc) throw new Error(`the chart of accounts is missing ${code} (the inventory account of a shipped lot)`);
+              creditAccountId = acc.id;
+            }
+            const cogsJe = await accountingService.autoPost(sp, {
+              triggerEvent: 'export_shipment', entity: 'export',
+              amount, currency: 'PKR',
+              refType: 'Export Order', refNo: o.order_no,
+              description: split.length > 1 ? `COGS ${o.order_no} (${code})` : `COGS ${o.order_no}`,
+              userId,
+              partyType: o.customer_id ? 'customer' : null,
+              partyId: o.customer_id || null,
+              creditAccountId,
+            });
+            if (!cogsJe) throw postingRuleMissing('export_shipment');
+          }
         }
 
         // Apply the customer advance against AR. The advance was banked as a
@@ -573,39 +639,16 @@ async function transitionOrder(trx, {
   };
 }
 
-// The seven checklist documents an export order needs, each with every doc_type
-// spelling that has been stored for it (checklist rows use the snake_case one).
-const DOC_TYPE_ALIASES = {
-  'phyto': ['phyto', 'Phytosanitary Certificate'],
-  'blDraft': ['blDraft', 'bl_draft', 'BL Draft'],
-  'blFinal': ['blFinal', 'bl_final', 'BL Final'],
-  'invoice': ['invoice', 'commercial_invoice', 'Commercial Invoice'],
-  'packingList': ['packingList', 'packing_list', 'Packing List'],
-  'coo': ['coo', 'Certificate of Origin'],
-  'fumigation': ['fumigation', 'Fumigation Certificate'],
-};
-const REQUIRED_DOCS = Object.keys(DOC_TYPE_ALIASES);
-// Issued only once the vessel has sailed, so they can't hold up the shipment
-// they evidence: the BL Final comes from the carrier, and the Certificate of
-// Origin is endorsed by the chamber against the shipped BL. Both are still
-// required, for Close.
-const POST_SHIPMENT_DOCS = ['blFinal', 'coo'];
-const PRE_SHIPMENT_DOCS = REQUIRED_DOCS.filter((k) => !POST_SHIPMENT_DOCS.includes(k));
-const POST_SHIPMENT_DOC_TYPES = new Set(POST_SHIPMENT_DOCS.flatMap((k) => DOC_TYPE_ALIASES[k]));
+// The checklist vocabulary lives with the document gate (documentGate.js).
+const {
+  DOC_TYPE_ALIASES, REQUIRED_DOCS, POST_SHIPMENT_DOCS, PRE_SHIPMENT_DOCS,
+} = documentGate;
 const DOC_APPROVED_STATUSES = new Set(['Approved', 'Final']);
+const docLabel = (keyOrType) => documentGate.docLabel(keyOrType);
 
-const DOC_LABELS = {
-  phyto: 'Phytosanitary Certificate', blDraft: 'BL Draft', blFinal: 'BL Final',
-  invoice: 'Commercial Invoice', packingList: 'Packing List', coo: 'Certificate of Origin',
-  fumigation: 'Fumigation Certificate',
-};
-function docLabel(docType) {
-  const key = REQUIRED_DOCS.find((k) => DOC_TYPE_ALIASES[k].includes(docType));
-  return key ? DOC_LABELS[key] : docType;
-}
-
-// True only when EACH listed document has an Approved/Final row. Counting any
-// seven rows let a draft upload, or seven optional documents, promote the order.
+// LEGACY export_order_documents reading: true only when EACH listed document
+// has an Approved/Final row. No longer decides anything — the gate reads the
+// stored evidence (documentGate) — kept for callers that still display it.
 function docsApproved(orderDocs, keys) {
   const docs = Array.isArray(orderDocs) ? orderDocs : [];
   return keys.every((key) => docs.some(
@@ -624,8 +667,7 @@ async function maybePromoteAfterDocuments(trx, { order, userId, reason }) {
     return { changed: false, order };
   }
 
-  const orderDocs = await trx('export_order_documents').where({ order_id: order.id });
-  if (!preShipmentDocsApproved(orderDocs)) {
+  if ((await missingChecklistDocs(trx, order.id, 'pre')).length) {
     return { changed: false, order };
   }
 

@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { FileText, Search, Filter, Eye, CheckCircle, RotateCcw, FileCheck } from 'lucide-react';
 import PartyLink from '../../../shared/components/PartyLink';
@@ -25,6 +26,7 @@ const allStatuses = ['All', 'Pending', 'Draft Uploaded', 'Approved', 'Under Revi
 
 export default function Documents() {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const { exportOrders, addToast, companyProfileData } = useApp();
 
   const getOrderForDoc = (orderId) => exportOrders.find(o => o.id === orderId);
@@ -70,21 +72,12 @@ export default function Documents() {
     return ['All', ...Array.from(new Set(exportOrders.map(o => o.id)))];
   }, [exportOrders]);
 
-  const handleMarkApproved = async (doc) => {
-    const order = getOrderForDoc(doc.orderId);
-    const oid = order?.dbId || doc.orderId;
-    try {
-      await exportOrdersApi.approveDocument(oid, {
-        doc_type: doc.docKey,
-        uploaded_by: 'Admin',
-      });
-      qc.invalidateQueries({ queryKey: queryKeys.orders.all });
-      qc.invalidateQueries({ queryKey: queryKeys.orders.detail(oid) });
-      qc.invalidateQueries({ queryKey: queryKeys.documents.all });
-      addToast(`${doc.docType} for ${doc.orderId} marked as Approved`, 'success');
-    } catch (err) {
-      addToast(`Failed to approve ${doc.docType}: ${err.message}`, 'error');
-    }
+  // A document can no longer be marked approved without its file (D-17): it
+  // counts once a second person approves the STORED file on the order's
+  // Documents tab, or the generated document in its Document Center.
+  const handleMarkApproved = (doc) => {
+    addToast(`Approve the stored ${doc.docType} file on ${doc.orderId}'s Documents tab — a second person must approve it.`, 'info');
+    navigate(`/export/${doc.orderId}`);
   };
 
   const handleRequestRevision = async (doc) => {
@@ -231,7 +224,7 @@ export default function Documents() {
                         <button
                           onClick={() => handleMarkApproved(doc)}
                           className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-emerald-600 hover:bg-emerald-50 rounded transition-colors"
-                          title="Mark Approved"
+                          title="Approve the file on the order"
                           aria-label={`Mark ${doc.docType} approved`}
                         >
                           <CheckCircle className="w-3.5 h-3.5" />
@@ -342,7 +335,7 @@ export default function Documents() {
                   className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 transition-colors"
                 >
                   <CheckCircle className="w-4 h-4" />
-                  Mark Approved
+                  Approve on the order
                 </button>
               )}
               {previewModal.status !== 'Pending' && (

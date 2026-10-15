@@ -18,7 +18,6 @@
  * cancelling the order still finds and reverses it, and Money Out's
  * reverse-payment still refuses it (undone from the order).
  */
-const inventoryService = require('../../services/inventoryService');
 const workflowService = require('../../services/exportOrderWorkflowService');
 const { recordMoneyMovement, generatePaymentNo } = require('../finance/paymentEngine');
 const { normalizePaymentMethod } = require('../../shared/constants/paymentMethods');
@@ -334,26 +333,11 @@ async function postExportReceipt(trx, {
     await workflowService.maybePromoteAfterAdvance(trx, {
       order, newAdvanceReceived: newReceived, userId, reason: `Advance payment of ${confirmedAmount} confirmed`,
     });
-    // Best-effort auto-reserve of the STILL-UNRESERVED portion of the order,
-    // in a savepoint so a failure cannot abort the posting transaction.
-    try {
-      await trx.transaction(async (sp) => {
-        const targetKg = (parseFloat(order.qty_mt) || 0) * 1000; // MT (doc) → KG
-        const alreadyRow = await sp('inventory_reservations')
-          .where({ order_id: order.id, status: 'Active' })
-          .sum('reserved_qty as r').first();
-        const remainingKg = targetKg - (parseFloat(alreadyRow?.r) || 0);
-        if (remainingKg > 0.0001) {
-          const availableLot = await sp('inventory_lots')
-            .where({ entity: 'export', type: 'finished', status: 'Available' })
-            .where('available_qty', '>=', remainingKg)
-            .first();
-          if (availableLot) {
-            await inventoryService.reserveStock(sp, { lotId: availableLot.id, orderId: order.id, qtyKg: remainingKg, userId });
-          }
-        }
-      });
-    } catch (e) { console.warn('Stock reservation failed:', e.message); }
+    // No stock is reserved here (D-18). This used to reserve the whole order
+    // from the first export finished lot with enough kilos — any product, any
+    // grade, any cost (EXP-03). The order now offers a SUGGESTED lot (GET
+    // /:id/suggested-lots) that a user confirms through allocate-stock, which
+    // records who confirmed it and when.
   } else {
     await workflowService.maybePromoteAfterBalance(trx, {
       order, newBalanceReceived: newReceived, userId, reason: `Balance payment of ${confirmedAmount} confirmed`,

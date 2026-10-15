@@ -17,8 +17,10 @@ order with no booked FX rate) refuses the shipment: the status, status
 history, stock dispatch and reservations all roll back and the user sees
 `Cannot ship EX-…: … Nothing was shipped and no stock was dispatched`.
 
-A shipment with *nothing reserved* to cost it from is not a posting failure:
-it still ships and the Owner gets the existing "shipped without COGS" alert.
+A shipment with *nothing reserved* is now refused before it gets here: since
+P3-13 (D-18) Ready to Ship / Shipped need the reservations within the
+tolerance — see `export-shipment-gates.md`. The Owner's "shipped without COGS"
+alert remains for a lock that finds nothing to cost.
 
 ## Finding existing cases (read-only)
 

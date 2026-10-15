@@ -2655,6 +2655,13 @@ export default function DocumentCenter({ order, request = null, onRequestHandled
       setStyleDirty(false);
       applyVersion(payload, docKey, initStyle, true);
       loadVersions(docKey);
+      // An open draft is rebuilt from the order as it is now (EXP-11): say so
+      // when that changed it, and when hand edits of the old figures went.
+      if (payload?.sourceChanged) {
+        addToast(payload.editsDiscarded
+          ? 'The order changed since this draft was edited — it was rebuilt from the current order. Text edited by hand held the old figures and was discarded; saved overrides are kept.'
+          : 'The order changed since this draft was saved — it now shows the current figures.', 'info');
+      }
     } catch (err) {
       addToast(`Failed to generate document: ${err.message}`, 'error');
     } finally {
@@ -2956,6 +2963,7 @@ export default function DocumentCenter({ order, request = null, onRequestHandled
                     <p className="text-[11px] text-gray-400 mt-0.5">
                       {doc.ready
                         ? 'Click to preview & print'
+                        : doc.lockedReason ? doc.lockedReason
                         : doc.availableFrom >= 9 ? 'Needs BL number'
                         : doc.availableFrom >= 8 ? 'Needs vessel & containers'
                         : 'Needs order data'}
