@@ -701,6 +701,7 @@ COL export_orders.destination_port:character varying:NULL
 COL export_orders.device_uuid:text:NULL
 COL export_orders.doc_address_mode:character varying:NOT NULL
 COL export_orders.doc_weight_unit:character varying:NOT NULL
+COL export_orders.draft_side_costs:jsonb:NULL
 COL export_orders.eta:date:NULL
 COL export_orders.etd:date:NULL
 COL export_orders.expiry_date:date:NULL
@@ -2322,6 +2323,8 @@ COL purchase_orders.updated_at:timestamp with time zone:NOT NULL
 COL purchase_requirements.approved_at:timestamp with time zone:NULL
 COL purchase_requirements.approved_by:integer:NULL
 COL purchase_requirements.available_qty:numeric:NOT NULL
+COL purchase_requirements.cancelled_at:timestamp with time zone:NULL
+COL purchase_requirements.cancelled_by:integer:NULL
 COL purchase_requirements.created_at:timestamp with time zone:NOT NULL
 COL purchase_requirements.currency:character varying:NOT NULL
 COL purchase_requirements.department:character varying:NOT NULL
@@ -2336,6 +2339,8 @@ COL purchase_requirements.pr_no:character varying:NOT NULL
 COL purchase_requirements.qty_needed:numeric:NOT NULL
 COL purchase_requirements.raised_by:integer:NULL
 COL purchase_requirements.reason:text:NULL
+COL purchase_requirements.review_note:text:NULL
+COL purchase_requirements.review_required:boolean:NOT NULL
 COL purchase_requirements.shortage_qty:numeric:NOT NULL
 COL purchase_requirements.status:character varying:NOT NULL
 COL purchase_requirements.unit:character varying:NOT NULL
@@ -3828,6 +3833,7 @@ CON purchase_orders.purchase_orders_product_id_foreign(f)
 CON purchase_orders.purchase_orders_requisition_id_foreign(f)
 CON purchase_orders.purchase_orders_status_check(c)
 CON purchase_orders.purchase_orders_supplier_id_foreign(f)
+CON purchase_requirements.chk_purchase_requirements_status_valid(c)
 CON purchase_requirements.purchase_requirements_item_id_foreign(f)
 CON purchase_requirements.purchase_requirements_pkey(p)
 CON purchase_requirements.purchase_requirements_pr_no_unique(u)

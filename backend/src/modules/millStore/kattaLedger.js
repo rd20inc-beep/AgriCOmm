@@ -123,7 +123,7 @@ async function applyKattaPlan(trx, {
         ledgered.push({ item: name, itemId: s.itemId, short: res.short });
       } else {
         const it = (res.item || s.item || {});
-        shortages.push({ size: Number(it.capacity_kg) || 0, item: name, needed: -delta, available: -res.moved, short: res.short });
+        shortages.push({ item_id: s.itemId, size: Number(it.capacity_kg) || 0, item: name, needed: -delta, available: -res.moved, short: res.short });
       }
     }
   }

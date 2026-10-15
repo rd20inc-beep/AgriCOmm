@@ -10,6 +10,7 @@ const {
   LOCKED_STATUSES, isBatchCompleted, canEditBatchPacking, assertCanEditBatchPacking,
 } = require('../milling/packingGate');
 const { resolveBatchPackSpec } = require('../milling/batchPackSpec');
+const prService = require('../purchaseRequirements/purchaseRequirements.service');
 
 const num = (v) => {
   const n = parseFloat(v);
@@ -180,7 +181,7 @@ const packingService = {
           },
         });
         if (issue.short > 0) {
-          shortages.push({ item: pkg.name, unit: pkg.unit, needed: qty, available: -issue.moved, short: issue.short });
+          shortages.push({ item_id: pkg.id, item: pkg.name, unit: pkg.unit, needed: qty, available: -issue.moved, short: issue.short });
           await trx('mill_stock_movements')
             .where({ reference_type: 'packing', reference_id: log.id, item_id: pkg.id, reason })
             .update({ reason: `${reason} (${issue.short} short)` });
@@ -301,7 +302,7 @@ const packingService = {
         try {
           const katta = await trx.transaction((sp) => inventoryService.reconcileBatchKatta(sp, batchId, userId));
           for (const s of (katta && katta.shortages) || []) {
-            shortages.push({ item: s.item, unit: 'pcs', needed: s.needed, available: s.available, short: s.short });
+            shortages.push({ item_id: s.item_id, size: s.size, item: s.item, unit: 'pcs', needed: s.needed, available: s.available, short: s.short, fromKatta: true });
           }
         } catch (e) { console.error('Packing katta/bag-spec reconcile failed (packing still recorded):', e.message); }
       }
@@ -315,6 +316,28 @@ const packingService = {
         await trx('mill_packing_logs').where('id', log.id)
           .update({ notes: [log.notes, summary].filter(Boolean).join(' ') });
         log.notes = [log.notes, summary].filter(Boolean).join(' ');
+
+        // …and raise a Purchase Requirement for each (MIL-48: every shortage,
+        // not only an export batch's at yield). This run's own bag / master /
+        // polythene shortfall is its own — two short runs need both buys — so
+        // it is keyed to the run; katta comes from the batch reconcile, which
+        // reports the batch's whole shortfall, so it is keyed to the batch
+        // (the same key the yield uses, so the two never double up). In a
+        // SAVEPOINT and non-fatal: the packing run stands either way.
+        const batchRef = batch.batch_no || `BATCH-${batchId}`;
+        const runShort = shortages.filter((s) => !s.fromKatta);
+        const kattaShort = shortages.filter((s) => s.fromKatta);
+        try {
+          const raised = await trx.transaction(async (sp) => {
+            const out = await prService.raiseForShortages(sp, runShort, {
+              linkedRef: `${batchRef} / run #${log.id}`, reason: `Packing shortage on batch ${batchRef} (run #${log.id})`, raisedBy: userId || null,
+            });
+            return out.concat(await prService.raiseForShortages(sp, kattaShort, {
+              linkedRef: batchRef, reason: `Packing shortage on batch ${batchRef}`, raisedBy: userId || null,
+            }));
+          });
+          log.purchase_requirements = raised;
+        } catch (e) { console.error('Packing shortage purchase requirements failed (packing still recorded):', e.message); }
       }
 
       // Audited inside the transaction (P2-30) when called over HTTP.

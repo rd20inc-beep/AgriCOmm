@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ShoppingCart, Check, X, CheckCircle2, RefreshCw } from 'lucide-react';
+import { ShoppingCart, Check, X, CheckCircle2, RefreshCw, Ban, AlertTriangle } from 'lucide-react';
 import { purchaseRequirementsApi } from '../api/services';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
@@ -9,7 +9,7 @@ import { fmtMoney, fmtNum } from '../../../shared/utils/format';
 
 // API statuses are lower-case; StatusBadge keys are Title Case.
 const statusLabel = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : '—');
-const TABS = ['pending', 'approved', 'purchased', 'all'];
+const TABS = ['pending', 'approved', 'purchased', 'cancelled', 'all'];
 
 // Shared Purchase Requirements list + actions. Used both as the standalone page
 // and embedded as a section on the Finance Dashboard (embedded). The API redacts
@@ -34,6 +34,10 @@ export default function PurchaseRequirementsPanel({ embedded = false, defaultTab
   // landed with no record of why.
   const [rejecting, setRejecting] = useState(null);
   const [rejectReason, setRejectReason] = useState('');
+  // Same inline pattern for cancelling an open (pending / approved) request —
+  // e.g. one flagged for review after its order shrank. Reason required.
+  const [cancelling, setCancelling] = useState(null);
+  const [cancelReason, setCancelReason] = useState('');
   const [rows, setRows] = useState([]);
   const [masked, setMasked] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -110,7 +114,14 @@ export default function PurchaseRequirementsPanel({ embedded = false, defaultTab
               <td data-label="Est. Amount" className="px-4 py-2.5 text-right tabular-nums">{money(r.est_amount, r.currency)}</td>
               {!masked && <td data-label="Department" className="mob-hide px-4 py-2.5 text-gray-500">{r.department}</td>}
               {!masked && <td data-label="Ref" className="mob-hide px-4 py-2.5 text-gray-500">{r.linked_ref || '—'}</td>}
-              <td data-label="Status" className="px-4 py-2.5 text-center"><StatusBadge status={statusLabel(r.status)} /></td>
+              <td data-label="Status" className="px-4 py-2.5 text-center">
+                <StatusBadge status={statusLabel(r.status)} />
+                {r.review_required && (
+                  <div className="mt-1 inline-flex items-center gap-1 text-[11px] font-medium text-amber-700" title={r.review_note || 'The need behind this request dropped — review before buying.'}>
+                    <AlertTriangle size={12} /> Review before buying
+                  </div>
+                )}
+              </td>
               <td data-label="Actions" className="px-4 py-2.5">
                 <div className="flex items-center justify-end gap-1.5">
                   {r.status === 'pending' && canApprove && (
@@ -118,6 +129,9 @@ export default function PurchaseRequirementsPanel({ embedded = false, defaultTab
                       <button disabled={busyId === r.id} onClick={() => act(purchaseRequirementsApi.approve, r.id, 'Approved — sent to Finance')} className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-white bg-emerald-600 rounded hover:bg-emerald-700 disabled:opacity-50"><Check size={13} /> Approve</button>
                       <button disabled={busyId === r.id} onClick={() => { setRejecting(r.id); setRejectReason(''); }} className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-red-600 bg-red-50 rounded hover:bg-red-100 disabled:opacity-50"><X size={13} /> Reject</button>
                     </>
+                  )}
+                  {['pending', 'approved'].includes(r.status) && canApprove && (
+                    <button disabled={busyId === r.id} onClick={() => { setCancelling(r.id); setCancelReason(''); }} title="No longer needed" className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-gray-600 bg-gray-100 rounded hover:bg-gray-200 disabled:opacity-50"><Ban size={13} /> Cancel</button>
                   )}
                   {r.status === 'approved' && canPurchase && (
                     r.item_id && canRecordStorePurchase ? (
@@ -127,6 +141,28 @@ export default function PurchaseRequirementsPanel({ embedded = false, defaultTab
                     )
                   )}
                 </div>
+                {cancelling === r.id && (
+                  <div className="mt-2 flex items-center justify-end gap-1.5">
+                    <input
+                      autoFocus
+                      value={cancelReason}
+                      onChange={(e) => setCancelReason(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Escape') setCancelling(null); }}
+                      placeholder="Why it is no longer needed…"
+                      aria-label="Reason for cancelling"
+                      className="w-56 px-2 py-1 text-xs border border-gray-300 rounded focus:ring-2 focus:ring-gray-200 focus:border-gray-400"
+                    />
+                    <button
+                      disabled={cancelReason.trim().length < 3 || busyId === r.id}
+                      onClick={async () => {
+                        await act((id) => purchaseRequirementsApi.cancel(id, { reason: cancelReason.trim() }), r.id, 'Cancelled');
+                        setCancelling(null);
+                      }}
+                      className="px-2 py-1 text-xs font-medium text-white bg-gray-700 rounded hover:bg-gray-800 disabled:opacity-50"
+                    >Confirm</button>
+                    <button onClick={() => setCancelling(null)} className="px-2 py-1 text-xs text-gray-500 hover:text-gray-700">Back</button>
+                  </div>
+                )}
                 {rejecting === r.id && (
                   <div className="mt-2 flex items-center justify-end gap-1.5">
                     <input

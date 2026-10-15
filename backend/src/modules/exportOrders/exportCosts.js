@@ -53,6 +53,12 @@ async function recordOrderCost(trx, {
   if (COST_LOCKED_STATUSES.includes(order.status)) {
     throw httpError(`Cannot add a cost to an order in '${order.status}' status.`);
   }
+  // A Draft carries no vendor bills (P3-18, EXP-17): it may be abandoned, and
+  // its payable stayed behind. The create form's pallet cost waits on the draft
+  // (export_orders.draft_side_costs) and is posted at Submit.
+  if (order.status === 'Draft') {
+    throw httpError('This order is still a Draft. Submit it first — costs are posted once the order is live.', 409);
+  }
   const rawAmt = round2(amount);
   if (!(rawAmt > 0)) throw httpError('The amount must be greater than zero.');
 
