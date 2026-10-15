@@ -14,6 +14,11 @@ const { denyRoles, authorizeAny } = require('../../middleware/rbac');
 // reports.view_cost / view_profit redaction (#535), which the operator now
 // passes (mig 314) and the QC Analyst / Inventory Officer do not.
 const noFinanceForOperator = denyRoles('Mill Operator');
+// One parameter contract for every report (P4-05): period / entity / page /
+// format validated with Joi, the period written back under every name a
+// service reads. See reportContract.js.
+const { reportQuery } = require('./reportContract');
+router.use(reportQuery);
 
 // ═══════════════════════════════════════════════════════════════════
 // Executive Dashboards
@@ -63,6 +68,10 @@ router.get('/profitability/batches', authorize('reports', 'view'), controller.ba
 router.get('/profitability/batch-margin', authorize('reports', 'view'), controller.batchMargin);
 router.get('/lot-tracker', authorize('reports', 'view'), controller.lotTracker);
 router.get('/sales-tracker', authorize('reports', 'view'), controller.salesTracker);
+// Confirmed local sales: page + server totals + CSV (Margin by Sale, Finance ▸
+// Profit ▸ Local, Finance ▸ Local Sales). Read by reports or finance roles;
+// money redacted per view_cost / view_profit, buyer masked like the sales list.
+router.get('/local-sales', authorizeAny(['reports', 'view'], ['finance', 'view']), controller.localSalesReport);
 router.get('/profitability/customers', authorize('reports', 'view'), noFinanceForOperator, controller.customerProfitability);
 router.get('/profitability/countries', authorize('reports', 'view'), noFinanceForOperator, controller.countryAnalysis);
 router.get('/profitability/products', authorize('reports', 'view'), noFinanceForOperator, controller.productProfitability);

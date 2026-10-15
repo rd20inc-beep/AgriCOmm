@@ -3,6 +3,8 @@ const accountingService = require('../../services/accountingService');
 const bankReconciliation = require('./bankReconciliation.service');
 const auditService = require('../admin/audit.service');
 const { assertNoControlAccounts } = require('./controlAccounts');
+const { sendCsv, wantsCsv } = require('../../utils/csv');
+const statementCsv = require('./statementCsv');
 
 // A refusal the user can act on (typed 400/403/404/409) keeps its status and
 // message; anything else is a server fault and says nothing about internals.
@@ -611,6 +613,10 @@ const accountingController = {
         asOfDate: as_of_date || null,
       });
 
+      // ?format=csv — the full statement as a spreadsheet (P4-14).
+      if (wantsCsv(req)) {
+        return sendCsv(res, { filename: `trial-balance${as_of_date ? `_${as_of_date}` : ''}`, columns: statementCsv.ACCOUNT_COLUMNS, rows: statementCsv.trialBalanceRows(result) });
+      }
       return res.json({ success: true, data: result });
     } catch (err) {
       console.error('Trial balance error:', err);
@@ -628,6 +634,9 @@ const accountingController = {
         entity: entity || null,
       });
 
+      if (wantsCsv(req)) {
+        return sendCsv(res, { filename: `profit-and-loss${period_start ? `_${period_start}` : ''}${period_end ? `_${period_end}` : ''}`, columns: statementCsv.ACCOUNT_COLUMNS, rows: statementCsv.profitLossRows(result) });
+      }
       return res.json({ success: true, data: result });
     } catch (err) {
       console.error('Profit & Loss error:', err);
@@ -644,6 +653,9 @@ const accountingController = {
         entity: entity || null,
       });
 
+      if (wantsCsv(req)) {
+        return sendCsv(res, { filename: `balance-sheet${as_of_date ? `_${as_of_date}` : ''}`, columns: statementCsv.ACCOUNT_COLUMNS, rows: statementCsv.balanceSheetRows(result) });
+      }
       return res.json({ success: true, data: result });
     } catch (err) {
       console.error('Balance sheet error:', err);
