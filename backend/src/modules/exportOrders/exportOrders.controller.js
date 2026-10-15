@@ -9,8 +9,31 @@ const workflowService = require('../../services/exportOrderWorkflowService');
 const { resolveShipmentField, resolveRequiredField } = require('./shipmentField');
 const { billableFreight, balanceExpectedFor, freightChanges } = require('./billableFreight');
 const debitNoteService = require('./debitNote.service');
-const { unwindOrderReceipts } = require('./unwindReceipts');
-const { recordPendingExportReceipt, postExportReceipt, confirmPendingExportReceipt, assertNotSelfConfirm } = require('./exportReceipts');
+const { contractCommittedReason, issuedDebitNotesTotal } = require('./contractLock');
+const { advanceTermDays, dueInDays } = require('./receiptSettings');
+const { disposeOrderReceipts } = require('./unwindReceipts');
+const {
+  recordPendingExportReceipt, postExportReceipt, confirmPendingExportReceipt, assertNotSelfConfirm, writeOffShortBalance,
+} = require('./exportReceipts');
+const { cancelNotesForOrder } = require('./debitNote.service');
+const { recordOrderCost, derivedMillingCosts } = require('./exportCosts');
+
+// What a cancellation leaves open for a person to settle with the vendor
+// (P2-15): counts only, never touched — an incurred cost stays payable.
+async function flaggedOnCancel(trx, orderId) {
+  const n = (row) => parseInt(row && row.n, 10) || 0;
+  const [costs, bags, prs, docs] = await Promise.all([
+    trx('payables as pa')
+      .join('export_order_costs as c', function () { this.on('c.id', '=', 'pa.source_id').andOn('pa.source_table', '=', trx.raw('?', ['export_order_costs'])); })
+      .where('c.order_id', orderId)
+      .whereNotIn('pa.status', ['Paid', 'Written Off', 'Reversed'])
+      .count('pa.id as n').first(),
+    trx('printed_bag_orders').where({ order_id: orderId }).whereNot('status', 'Cancelled').count('id as n').first(),
+    trx('purchase_requisitions').where({ linked_export_order_id: orderId }).where('status', 'Ordered').count('id as n').first(),
+    trx('generated_documents').where({ order_id: orderId }).whereNotIn('status', ['Cancelled', 'Revised']).count('id as n').first(),
+  ]);
+  return { openCostPayables: n(costs), printedBagOrders: n(bags), orderedRequisitions: n(prs), liveDocuments: n(docs) };
+}
 const { fillSingleLineBagSpec, linePackaging } = require('./orderLines');
 const { syncBalanceDueDate } = require('./balanceDueDate');
 const { balanceTermDaysSetting } = require('../finance/collectionRate');
@@ -375,9 +398,11 @@ function packingCapacityError(qtyMt, palletized, packingType) {
 // has none. Submit fills in whichever is missing; existing rows are left alone.
 async function ensureOrderReceivables(trx, order) {
   const currency = order.currency || 'USD';
-  const rate = parseFloat(order.booked_fx_rate) || 280;
+  const advanceDays = await advanceTermDays(trx);
+  // No booked rate → no PKR figure (0, flagged as unbooked), never 280 (D-10).
+  const rate = parseFloat(order.booked_fx_rate) || (String(currency).toUpperCase() === 'PKR' ? 1 : 0);
   const wanted = [
-    { type: 'Advance', prefix: 'RCV-ADV', amount: parseFloat(order.advance_expected) || 0, days: 14,
+    { type: 'Advance', prefix: 'RCV-ADV', amount: parseFloat(order.advance_expected) || 0, days: advanceDays,
       notes: `Advance ${order.advance_pct}% for order ${order.order_no}` },
     { type: 'Balance', prefix: 'RCV-BAL', amount: parseFloat(order.balance_expected) || 0, days: 60,
       notes: `Balance payment for order ${order.order_no} (against BL)` },
@@ -457,14 +482,8 @@ async function resolveOrderId(raw) {
 // what is charged to buyers covers what is paid to carriers.
 //
 // A category with no account of its own still goes to 6000, which is what that
-// account is for.
-const COST_CATEGORY_ACCOUNT = {
-  freight: '6010',
-  clearing: '6020',
-  loading: '6030',
-  insurance: '6050',
-  commission: '6060',
-};
+// account is for. The map (COST_CATEGORY_ACCOUNT) lives in exportCosts.js with
+// the rest of the cost posting (P2-05).
 
 const exportOrderController = {
   // ── Freight escalation debit notes (mig 304) ──
@@ -876,15 +895,25 @@ const exportOrderController = {
       // Lot and batch cost is hidden from cost-blind roles (owner decision
       // 2026-10-05), as /available-stock already does. The order's own contract
       // price is not lot cost and stays.
-      if (!(await canSeeCost(req))) {
+      const seesCost = await canSeeCost(req);
+      if (!seesCost) {
         redactMoney({ purchaseLots, millingBatch, batchByproducts }, { cost: false, profit: true });
       }
+
+      // Milling is the linked batch's cost, derived now from its own
+      // milling_costs (P2-05) — never the stored 'milling' copy, which was
+      // written once at completion in the order's currency and never refreshed.
+      // It is batch cost, so cost-blind roles don't get it.
+      const orderCosts = [
+        ...costs.filter((c) => String(c.category || '').toLowerCase() !== 'milling'),
+        ...(seesCost ? await derivedMillingCosts(db, orderId) : []),
+      ];
 
       return res.json({
         success: true,
         data: {
           order,
-          costs,
+          costs: orderCosts,
           documents,
           statusHistory,
           millingBatch: millingBatch || null,
@@ -1047,8 +1076,12 @@ const exportOrderController = {
       })();
 
       // Get locked FX rate via service (unless manually provided)
+      // D-10 (P2-20): booked at the typed rate, else the currency's rate on
+      // file — never a made-up one. A live order with neither is refused
+      // (400 FX_RATE_MISSING); a Draft may wait — Submit locks the rate.
       const fxRateService = require('../../services/fxRateService');
-      const fxResult = await fxRateService.lockRateForOrder(currency || 'USD', new Date().toISOString().split('T')[0], parseFloat(req.body.booked_fx_rate) || null);
+      const fxResult = await fxRateService.lockRateForOrder(currency || 'USD', new Date().toISOString().split('T')[0], parseFloat(req.body.booked_fx_rate) || null)
+        .catch((e) => { if (e.code === 'FX_RATE_MISSING' && (!requestedStatus || requestedStatus === 'Draft')) return { rate: null }; throw e; });
       const _lockedFxRate = fxResult.rate;
 
       const result = await db.transaction(async (trx) => {
@@ -1134,9 +1167,9 @@ const exportOrderController = {
               const manual = parseFloat(req.body.booked_fx_rate);
               return manual > 0 ? manual : _lockedFxRate;
             })(),
-            fx_rate_source: parseFloat(req.body.booked_fx_rate) > 0 ? 'manual' : 'system',
-            fx_rate_locked_at: new Date(),
-            contract_value_pkr_locked: contractValue * (parseFloat(req.body.booked_fx_rate) > 0 ? parseFloat(req.body.booked_fx_rate) : _lockedFxRate),
+            fx_rate_source: parseFloat(req.body.booked_fx_rate) > 0 ? 'manual' : (_lockedFxRate ? 'system' : null),
+            fx_rate_locked_at: _lockedFxRate || parseFloat(req.body.booked_fx_rate) > 0 ? new Date() : null,
+            contract_value_pkr_locked: contractValue * ((parseFloat(req.body.booked_fx_rate) > 0 ? parseFloat(req.body.booked_fx_rate) : _lockedFxRate) || 0),
           })
           .returning('*');
 
@@ -1177,8 +1210,9 @@ const exportOrderController = {
 
         // Auto-create receivables for advance and balance
         if (order.advance_expected > 0) {
-          const advDueDate = new Date();
-          advDueDate.setDate(advDueDate.getDate() + 14); // 14 days for advance
+          // Due the configured advance term after the order (setting
+          // export_advance_term_days, default 14).
+          const advDue = dueInDays(await advanceTermDays(trx));
           await trx('receivables').insert({
             recv_no: `RCV-ADV-${orderNo}`,
             entity: 'export',
@@ -1188,13 +1222,13 @@ const exportOrderController = {
             expected_amount: order.advance_expected,
             received_amount: 0,
             outstanding: order.advance_expected,
-            due_date: advDueDate.toISOString().split('T')[0],
+            due_date: advDue,
             status: 'Pending',
             currency: order.currency || 'USD',
             aging: 0,
             notes: `Advance ${order.advance_pct}% for order ${orderNo}`,
             fx_rate: order.booked_fx_rate,
-            base_amount_pkr: order.advance_expected * (order.booked_fx_rate || 280),
+            base_amount_pkr: order.advance_expected * (parseFloat(order.booked_fx_rate) || 0),
           });
         }
         if (order.balance_expected > 0) {
@@ -1215,7 +1249,7 @@ const exportOrderController = {
             aging: 0,
             notes: `Balance payment for order ${orderNo} (against BL)${freightReceivable > 0 ? ` — includes ${order.currency || 'USD'} ${freightReceivable.toLocaleString()} freight` : ''}`,
             fx_rate: order.booked_fx_rate,
-            base_amount_pkr: order.balance_expected * (order.booked_fx_rate || 280),
+            base_amount_pkr: order.balance_expected * (parseFloat(order.booked_fx_rate) || 0),
           });
         }
 
@@ -1305,6 +1339,8 @@ const exportOrderController = {
         data: { order: result, materialRequests },
       });
     } catch (err) {
+      // D-10: no rate for the order's currency → a clear 400, not a 500.
+      if (err.code === 'FX_RATE_MISSING') return res.status(err.statusCode || 400).json({ success: false, code: err.code, field: 'booked_fx_rate', message: err.message });
       console.error('Export order create error:', err);
       return res.status(500).json({ success: false, message: 'Internal server error.' });
     }
@@ -1363,7 +1399,9 @@ const exportOrderController = {
       // The one P.I. line to rescale when qty/price are edited without items[].
       let rescaleItem = null;
       if (safeUpdates.qty_mt != null || safeUpdates.price_per_mt != null || safeUpdates.advance_pct != null
-          || safeUpdates.currency != null || safeUpdates.customer_id != null) {
+          || safeUpdates.currency != null || safeUpdates.customer_id != null
+          || safeUpdates.freight_display !== undefined || safeUpdates.freight_per_mt !== undefined
+          || safeUpdates.insurance_per_mt !== undefined) {
         const existing = await db('export_orders').where({ id }).first();
         if (!existing) {
           return res.status(404).json({ success: false, message: 'Export order not found.' });
@@ -1392,15 +1430,13 @@ const exportOrderController = {
           // change would. Freight shown INSIDE the price moves nothing, but the
           // display flag can flip between the two, so it is checked as well.
           freightChanges(safeUpdates, existing);
-        const committed =
-          settledAmount(existing.advance_received) > MONEY_EPSILON ||
-          settledAmount(existing.balance_received) > MONEY_EPSILON ||
-          existing.revenue_posted === true ||
-          ['Shipped', 'Closed', 'Cancelled'].includes(existing.status);
+        // Pending receipts and 'Arrived' count as committed too (EXP-01); the
+        // same check runs again under the order's lock inside the transaction.
+        const committed = changesContract ? await contractCommittedReason(db, existing) : null;
         if (changesContract && committed) {
           return res.status(400).json({
             success: false,
-            message: 'Cannot change the customer, currency, quantity, price, or advance % after a payment has been received or the order has shipped/closed. Reverse the receipts first.',
+            message: `Cannot change the customer, currency, quantity, price, freight or advance % now: ${committed}. Reverse the receipts first.`,
           });
         }
 
@@ -1435,11 +1471,17 @@ const exportOrderController = {
           insurance_per_mt: safeUpdates.insurance_per_mt !== undefined ? safeUpdates.insurance_per_mt : existing.insurance_per_mt,
           qty_mt: qty,
         };
-        safeUpdates.contract_value = contractValue;
-        safeUpdates.advance_expected = contractValue * (advPct / 100);
-        safeUpdates.balance_expected = balanceExpectedFor({
-          contractValue, advanceExpected: safeUpdates.advance_expected, order: freightState,
-        });
+        // A save that changes none of the contract (the editor always sends
+        // advance % and the freight fields, so a port or ETA edit carries them
+        // unchanged) recomputes nothing and leaves the receivables alone:
+        // rebuilding them reset paid receivables to fully owing (EXP-01).
+        if (changesContract) {
+          safeUpdates.contract_value = contractValue;
+          safeUpdates.advance_expected = contractValue * (advPct / 100);
+          safeUpdates.balance_expected = balanceExpectedFor({
+            contractValue, advanceExpected: safeUpdates.advance_expected, order: freightState,
+          });
+        }
 
         // Keep the locked PKR revenue basis in step with the new contract value,
         // valued at the order's booked FX rate (fall back to the prior locked
@@ -1448,10 +1490,20 @@ const exportOrderController = {
           || (parseFloat(existing.contract_value) > 0
               ? (parseFloat(existing.contract_value_pkr_locked) || 0) / parseFloat(existing.contract_value)
               : 0);
-        if (bookedRate > 0) {
+        if (changesContract && bookedRate > 0) {
           safeUpdates.contract_value_pkr_locked = contractValue * bookedRate;
         }
-        resyncReceivables = true;
+        // P2-20: a new currency is a new booked rate — re-locked here (the
+        // rate typed with the edit, else that currency's rate on file), never
+        // the old currency's rate carried over. No rate → refused (D-10).
+        if (currencyChanges) {
+          const relock = await require('../finance/fxRate.service').lockRateForOrder(safeUpdates.currency, new Date().toISOString().slice(0, 10), parseFloat(updates.booked_fx_rate) || null);
+          safeUpdates.booked_fx_rate = relock.rate;
+          safeUpdates.fx_rate_source = relock.source === 'manual' ? 'manual' : 'system';
+          safeUpdates.fx_rate_locked_at = new Date();
+          safeUpdates.contract_value_pkr_locked = contractValue * relock.rate;
+        }
+        resyncReceivables = changesContract;
       }
 
       // Batch 7 — re-check the container-capacity rule if qty/palletization/type changed.
@@ -1471,6 +1523,23 @@ const exportOrderController = {
       safeUpdates.updated_at = db.fn.now();
 
       const result = await db.transaction(async (trx) => {
+        if (resyncReceivables) {
+          // Re-check under the order's lock: a receipt confirmed (or recorded)
+          // since the check above must stop the rebuild. Confirmation locks the
+          // same row, so the two cannot interleave.
+          const locked = await trx('export_orders').where({ id }).forUpdate().first();
+          if (!locked) return null;
+          const committedNow = await contractCommittedReason(trx, locked);
+          if (committedNow) {
+            const e = new Error(`Cannot change the contract now: ${committedNow}. Reload the order.`);
+            e.statusCode = 409;
+            throw e;
+          }
+          // Debit notes still Issued stay on the balance (each has its own
+          // Dr 1110 / Cr 4070 journal).
+          const notes = await issuedDebitNotesTotal(trx, id);
+          if (notes > 0) safeUpdates.balance_expected = Math.round((safeUpdates.balance_expected + notes) * 100) / 100;
+        }
         const [order] = await trx('export_orders')
           .where({ id })
           .update(safeUpdates)
@@ -1529,14 +1598,15 @@ const exportOrderController = {
         }
 
         // Resync the advance/balance receivables to the new contract value.
-        // The committed-guard above guarantees nothing has been received yet,
-        // so outstanding == expected and base_amount_pkr can be rebased cleanly.
+        // The committed-guard above (re-run under the lock) means nothing has
+        // been received; outstanding is still written as expected − received,
+        // never as expected, so a receivable can never be reset to fully owing.
         if (resyncReceivables) {
           const bookedRate = parseFloat(order.booked_fx_rate)
             || (parseFloat(order.contract_value) > 0
                 ? (parseFloat(order.contract_value_pkr_locked) || 0) / parseFloat(order.contract_value)
                 : 0)
-            || 280;
+            || (String(order.currency || 'USD').toUpperCase() === 'PKR' ? 1 : 0); // none: unbooked (D-10)
           // The receivables carry the buyer and currency too; the guard above
           // only lets those change while nothing has been received.
           const partyFields = {
@@ -1547,7 +1617,7 @@ const exportOrderController = {
             .where({ order_id: id, type: 'Advance' })
             .update({
               expected_amount: order.advance_expected,
-              outstanding: order.advance_expected,
+              outstanding: trx.raw('?::numeric - received_amount', [order.advance_expected]),
               base_amount_pkr: order.advance_expected * bookedRate,
               fx_rate: order.booked_fx_rate,
               ...partyFields,
@@ -1557,7 +1627,7 @@ const exportOrderController = {
             .where({ order_id: id, type: 'Balance' })
             .update({
               expected_amount: order.balance_expected,
-              outstanding: order.balance_expected,
+              outstanding: trx.raw('?::numeric - received_amount', [order.balance_expected]),
               base_amount_pkr: order.balance_expected * bookedRate,
               fx_rate: order.booked_fx_rate,
               ...partyFields,
@@ -1631,6 +1701,9 @@ const exportOrderController = {
         data: { order: result },
       });
     } catch (err) {
+      // D-10: a currency change with no rate for the new currency.
+      if (err.code === 'FX_RATE_MISSING') return res.status(err.statusCode || 400).json({ success: false, code: err.code, field: 'booked_fx_rate', message: err.message });
+      if (err.statusCode) return res.status(err.statusCode).json({ success: false, message: err.message });
       console.error('Export order update error:', err);
       return res.status(500).json({ success: false, message: 'Internal server error.' });
     }
@@ -1680,14 +1753,19 @@ const exportOrderController = {
   // Danger Zone hard-delete). Closes the audit gap where a force-set 'Cancelled'
   // would orphan reservations, receivables and receipt journals. Allowed only
   // before dispatch — once Shipped the goods have moved (use returns / Danger
-  // Zone). The unwind: release held stock, reverse the order's own Posted GL
-  // (receipts; revenue/COGS can't exist pre-Shipped) leaving incurred vendor
-  // costs payable, refund banked advance/balance cash + void those payments,
-  // write off the receivables, and reset the order's money state.
+  // Zone). The unwind: release held stock; dispose of each confirmed receipt
+  // as a refund / customer credit / Owner-approved forfeit (D-7) WITHOUT
+  // deleting or reversing it (P2-15); void unconfirmed receipts; cancel debit
+  // notes by delta; write off what is still owed; cancel un-ordered PRs and
+  // flag costs, printed bags and documents; reset the order's money state.
+  // Validated by schemas.cancelExportOrder; Owner-approved (route).
   async cancelOrder(req, res) {
     try {
       const id = await resolveExportOrderId(req.params.id);
       if (!id) return res.status(404).json({ success: false, message: 'Export order not found.' });
+      const {
+        money_disposition, refund_bank_account_id, refund_date, refund_reference,
+      } = req.body || {};
       const reason = (req.body && req.body.reason) || null;
 
       const result = await db.transaction(async (trx) => {
@@ -1712,38 +1790,52 @@ const exportOrderController = {
           }
         }
 
-        // 2) Reverse the order's own Posted GL (ref_type 'Export Order' scopes to
-        //    receipts/revenue/COGS/advance-application; the separate
-        //    'Export Order Cost' journals for incurred vendor costs are left
-        //    intact — cancelling the order doesn't void a freight bill already run).
-        const journals = await trx('journal_entries')
-          .where({ ref_type: 'Export Order', ref_no: order.order_no, status: 'Posted' })
-          .select('id');
-        for (const j of journals) {
-          await accountingService.reverseJournal(trx, {
-            journalId: j.id,
-            reason: `Order ${order.order_no} cancelled${reason ? ': ' + reason : ''}`,
-            userId: req.user.id,
-          });
-        }
-
-        // 3) Refund the cash actually banked for CONFIRMED receipts (mirror the
-        //    currency-aware credit used at confirm time) and drop them; receipts
-        //    still pending Finance never touched a bank, so they are only marked
-        //    Rejected — see unwindReceipts.js.
+        // 2) Money received (P2-15, D-7). Receipts, their bank rows and their
+        //    journals are never deleted or reversed: each CONFIRMED receipt gets
+        //    one disposition — a refund (money-out payment linked to it), a
+        //    customer credit (held in 1310), or an Owner-approved forfeit to
+        //    4080 — posted as new signed entries. Receipts still pending Finance
+        //    never moved money and are marked Rejected. See unwindReceipts.js.
         const recvIds = (await trx('receivables').where({ order_id: id }).select('id')).map((r) => r.id);
-        let unwound = { refunded: 0, voided: 0 };
-        if (recvIds.length) {
-          const payments = await trx('payments').whereIn('linked_receivable_id', recvIds);
-          unwound = await unwindOrderReceipts(trx, payments, { orderNo: order.order_no, userId: req.user.id });
-        }
-
-        // 4) Write off the receivables (constraint has no 'Cancelled' status).
-        await trx('receivables').where({ order_id: id }).update({
-          status: 'Written Off', outstanding: 0, received_amount: 0, updated_at: trx.fn.now(),
+        const payments = recvIds.length ? await trx('payments').whereIn('linked_receivable_id', recvIds) : [];
+        const disposed = await disposeOrderReceipts(trx, {
+          order,
+          payments,
+          disposition: money_disposition || null,
+          refundBankAccountId: refund_bank_account_id || null,
+          refundDate: refund_date || null,
+          refundReference: refund_reference || null,
+          userId: req.user.id,
+          ownerId: req.ownerAuth ? req.ownerAuth.ownerId : null,
+          reason,
         });
 
-        // 5) Reset the order's money state and mark it Cancelled + history.
+        // 3) Freight debit notes: each cancelled by a signed-delta journal.
+        const cancelledNotes = await cancelNotesForOrder(trx, { order, userId: req.user.id, reason });
+
+        // 4) Write off what is still owed on the receivables (constraint has no
+        //    'Cancelled' status). received_amount is history and is kept.
+        await trx('receivables').where({ order_id: id }).update({
+          status: 'Written Off', outstanding: 0, updated_at: trx.fn.now(),
+        });
+
+        // 5) Purchase requisitions not yet ordered are cancelled; everything
+        //    with a vendor or a document behind it is flagged, not touched:
+        //    incurred costs stay payable, printed bags may already be printed,
+        //    issued documents are already out.
+        const cancelledPrs = await trx('purchase_requisitions')
+          .where({ linked_export_order_id: id })
+          .whereIn('status', ['Draft', 'Submitted', 'Approved'])
+          .update({
+            status: 'Cancelled',
+            notes: trx.raw("COALESCE(notes || ' — ', '') || ?", [`Export order ${order.order_no} cancelled`]),
+            updated_at: trx.fn.now(),
+          });
+        const flagged = await flaggedOnCancel(trx, id);
+
+        // 6) Reset the order's money state and mark it Cancelled + history. The
+        //    order no longer holds the money — the receipts and their
+        //    dispositions above do.
         await trx('export_orders').where({ id }).update({
           status: 'Cancelled',
           advance_received: 0, advance_received_pkr: 0,
@@ -1759,17 +1851,34 @@ const exportOrderController = {
         return {
           orderNo: order.order_no,
           freedReservations: reservations.length,
-          reversedJournals: journals.length,
-          refundedPayments: unwound.refunded,
-          voidedPendingReceipts: unwound.voided,
+          moneyDisposition: disposed.receipts.length ? money_disposition : null,
+          refundedReceipts: disposed.refunded,
+          creditedReceipts: disposed.credited,
+          forfeitedReceipts: disposed.forfeited,
+          voidedPendingReceipts: disposed.voided,
+          cancelledDebitNotes: cancelledNotes,
+          cancelledRequisitions: cancelledPrs || 0,
+          flagged,
         };
       });
 
       emitExportOrderUpdate(id, 'cancelled', { status: 'Cancelled' });
+      const money = [
+        result.refundedReceipts ? `${result.refundedReceipts} receipt(s) refunded` : null,
+        result.creditedReceipts ? `${result.creditedReceipts} receipt(s) kept as customer credit` : null,
+        result.forfeitedReceipts ? `${result.forfeitedReceipts} receipt(s) forfeited to other income` : null,
+        result.voidedPendingReceipts ? `${result.voidedPendingReceipts} unconfirmed receipt(s) voided` : null,
+      ].filter(Boolean);
+      const open = [
+        result.flagged.openCostPayables ? `${result.flagged.openCostPayables} unpaid cost bill(s)` : null,
+        result.flagged.printedBagOrders ? `${result.flagged.printedBagOrders} printed-bag order(s)` : null,
+        result.flagged.orderedRequisitions ? `${result.flagged.orderedRequisitions} ordered requisition(s)` : null,
+        result.flagged.liveDocuments ? `${result.flagged.liveDocuments} generated document(s)` : null,
+      ].filter(Boolean);
       return res.json({
         success: true,
         data: result,
-        message: `Export order ${result.orderNo} cancelled — ${result.freedReservations} reservation(s) freed, ${result.reversedJournals} journal(s) reversed, ${result.refundedPayments} payment(s) refunded${result.voidedPendingReceipts ? `, ${result.voidedPendingReceipts} unconfirmed receipt(s) voided` : ''}.`,
+        message: `Export order ${result.orderNo} cancelled — ${result.freedReservations} reservation(s) freed${money.length ? `, ${money.join(', ')}` : ''}.${open.length ? ` Still open, review with the vendor: ${open.join(', ')}.` : ''}`,
       });
     } catch (err) {
       const code = err.statusCode || 500;
@@ -2028,6 +2137,18 @@ const exportOrderController = {
             ? 'Draft submitted (0% advance — advance stage skipped)'
             : 'Draft submitted'),
         });
+        // D-10: a Draft saved without a rate is booked now (after the draft's
+        // own checks above, so their messages come first) — at that
+        // currency's rate on file, else refused (400 FX_RATE_MISSING).
+        if (!(parseFloat(order.booked_fx_rate) > 0)) {
+          const lock = await require('../finance/fxRate.service').lockRateForOrder(order.currency || 'USD', new Date().toISOString().slice(0, 10));
+          const patch = {
+            booked_fx_rate: lock.rate, fx_rate_source: 'system', fx_rate_locked_at: new Date(),
+            contract_value_pkr_locked: (parseFloat(order.contract_value) || 0) * lock.rate,
+          };
+          await trx('export_orders').where({ id: order.id }).update(patch);
+          Object.assign(order, patch);
+        }
         await ensureOrderReceivables(trx, order);
         await syncBalanceDueDate(trx, order.id);
         return moved;
@@ -2143,193 +2264,31 @@ const exportOrderController = {
     }
   },
 
+  // One vendor bill (P2-05): its own row (a second freight bill no longer
+  // overwrites the first), in PKR, with its vendor, accrual journal and
+  // payable — in one transaction, so a journal that cannot post saves nothing.
+  // Rice / milling are refused (see exportCosts.js); validated by
+  // schemas.addExportOrderCost.
   async addCost(req, res) {
     try {
       const id = await resolveExportOrderId(req.params.id);
       if (!id) return res.status(404).json({ success: false, message: 'Export order not found.' });
-      const { category, amount, notes } = req.body;
-
-      if (!category || amount == null) {
-        return res.status(400).json({
-          success: false,
-          message: 'category and amount are required.',
-        });
-      }
-
-      const order = await db('export_orders').where({ id }).first();
-      if (!order) {
-        return res.status(404).json({ success: false, message: 'Export order not found.' });
-      }
-
-      // Export-order costs are stored and reported in PKR — every downstream
-      // consumer (finance/purchases roll-ups, analytics) sums `amount` as PKR.
-      // Costs are usually paid in PKR, but a foreign-currency cost must be
-      // converted first (booking it 1:1 understates it badly). Accept an
-      // optional currency + fx_rate; when the currency isn't PKR, require a
-      // rate (explicit, else the order's booked/advance rate) and convert.
-      const rawAmt = parseFloat(amount);
-      const costCurrency = String(req.body.currency || 'PKR').toUpperCase();
-      let costFxRate = 1;
-      if (costCurrency !== 'PKR') {
-        const reqRate = parseFloat(req.body.fx_rate);
-        costFxRate = Number.isFinite(reqRate) && reqRate > 0
-          ? reqRate
-          : (parseFloat(order.booked_fx_rate) || parseFloat(order.advance_fx_rate) || 0);
-        if (!(costFxRate > 0)) {
-          return res.status(400).json({
-            success: false,
-            message: `An FX rate is required to record a ${costCurrency} cost (no booked rate on the order).`,
-          });
-        }
-      }
-      const amtPkr = rawAmt * costFxRate;
-      const costNote = costCurrency !== 'PKR'
-        ? `${notes ? notes + ' — ' : ''}${costCurrency} ${rawAmt.toLocaleString()} @ ${costFxRate}`
-        : (notes || null);
+      const { category, amount, currency, fx_rate, notes, supplier_id, vendor_name, bill_ref } = req.body;
 
       const cost = await db.transaction(async (trx) => {
-        const existing = await trx('export_order_costs')
-          .where({ order_id: id, category })
-          .first();
-
-        let row;
-        let priorAmtPkr = 0;
-        if (existing) {
-          priorAmtPkr = parseFloat(existing.base_amount_pkr) || (parseFloat(existing.amount) || 0) * (parseFloat(existing.fx_rate) || 1);
-          [row] = await trx('export_order_costs')
-            .where({ id: existing.id })
-            .update({
-              amount: amtPkr,
-              base_amount_pkr: amtPkr,
-              fx_rate: 1,
-              notes: costNote,
-              updated_at: trx.fn.now(),
-            })
-            .returning('*');
-        } else {
-          [row] = await trx('export_order_costs')
-            .insert({
-              order_id: id,
-              category,
-              amount: amtPkr,
-              currency: 'PKR',
-              base_amount_pkr: amtPkr,
-              fx_rate: 1,
-              notes: costNote,
-              created_by: req.user?.id || null,
-            })
-            .returning('*');
-        }
-
-        // ─── Cost-recognition journal ───────────────────────────
-        // Recording a cost creates an obligation: DR Operating Expenses,
-        // CR Supplier Payable. The matching payment journal (DR
-        // Supplier Payable, CR Cash & Bank) is posted later by
-        // payPurchase. If the user edits an existing cost, post the
-        // *delta* so we don't double-count. Skipped silently if the
-        // GL chart isn't seeded yet.
-        try {
-          const delta = amtPkr - priorAmtPkr;
-          if (Math.abs(delta) > 0.01) {
-            // The account built for this category, falling back to 6000 when the
-            // chart has none for it — or when the seeded account is missing, so
-            // an incomplete chart still records the cost rather than dropping it.
-            const wantCode = COST_CATEGORY_ACCOUNT[category] || '6000';
-            const opExp = (wantCode !== '6000'
-              ? await trx('chart_of_accounts').where({ code: wantCode }).first()
-              : null)
-              || await trx('chart_of_accounts').where({ code: '6000' }).first();
-            const supplierPayable = await trx('chart_of_accounts').where({ code: '2010' }).first();
-            if (opExp && supplierPayable) {
-              const sign = delta > 0 ? 1 : -1;
-              const absDelta = Math.abs(delta);
-              const debitAcc  = sign > 0 ? opExp           : supplierPayable;
-              const creditAcc = sign > 0 ? supplierPayable : opExp;
-              const refLabel = `${order.order_no} ${category}`;
-              const journal = await accountingService.createJournal(trx, {
-                date: new Date().toISOString().slice(0, 10),
-                entity: 'export',
-                refType: 'Export Order Cost',
-                refNo: refLabel,
-                description: existing
-                  ? `Cost adjustment Rs ${Math.round(absDelta).toLocaleString()} for ${refLabel}${delta < 0 ? ' (reduced)' : ''}`
-                  : `Cost recorded Rs ${Math.round(absDelta).toLocaleString()} for ${refLabel}`,
-                currency: 'PKR',
-                fxRate: 1,
-                isAuto: true,
-                userId: req.user?.id || null,
-                lines: [
-                  { account_id: debitAcc.id,  account: debitAcc.name,  debit: absDelta, credit: 0,        narration: `DR ${debitAcc.code} ${debitAcc.name} — ${refLabel}` },
-                  { account_id: creditAcc.id, account: creditAcc.name, debit: 0,        credit: absDelta, narration: `CR ${creditAcc.code} ${creditAcc.name} — ${refLabel}` },
-                ],
-              });
-              if (journal?.id) await accountingService.postJournal(trx, journal.id);
-            } else {
-              console.warn(`addCost: chart_of_accounts missing 6000/2010 — journal skipped for ${order.order_no} ${category}`);
-            }
-          }
-        } catch (jeErr) {
-          console.error('addCost journal error (cost still recorded):', jeErr.message);
-        }
-
-        // ─── Mirror to payables ────────────────────────────────────
-        // Make every export-order cost show up on /finance/money-out by
-        // ensuring it has a 1:1 row in payables (source_table='export_order_costs',
-        // source_id=row.id). On edits, sync original_amount / outstanding
-        // to the new amount.
-        try {
-          const existingPayable = await trx('payables')
-            .where({ source_table: 'export_order_costs', source_id: row.id })
-            .first();
-          const paidAmt = parseFloat(row.paid_amount) || 0;
-          const status = paidAmt >= amtPkr - 0.01 ? 'Paid' : (paidAmt > 0 ? 'Partial' : 'Pending');
-          const refLabel = `${order.order_no} ${category}`;
-          if (existingPayable) {
-            await trx('payables')
-              .where({ id: existingPayable.id })
-              .update({
-                linked_ref: refLabel,
-                original_amount: amtPkr,
-                outstanding: Math.max(0, amtPkr - paidAmt),
-                status,
-                notes: notes || existingPayable.notes,
-                updated_at: trx.fn.now(),
-              });
-          } else {
-            const last = await trx('payables').where('pay_no', 'like', 'PAY-EOC%').orderBy('id', 'desc').first();
-            const nextSeq = last ? (parseInt(String(last.pay_no).replace(/^PAY-EOC/, ''), 10) || 0) + 1 : 1;
-            const payNo = `PAY-EOC${String(nextSeq).padStart(4, '0')}`;
-            await trx('payables').insert({
-              pay_no: payNo,
-              entity: 'export',
-              category: category || 'export_cost',
-              supplier_id: null,
-              linked_ref: refLabel,
-              original_amount: amtPkr,
-              paid_amount: paidAmt,
-              outstanding: Math.max(0, amtPkr - paidAmt),
-              currency: 'PKR',
-              due_date: new Date().toISOString().slice(0, 10),
-              status,
-              source_table: 'export_order_costs',
-              source_id: row.id,
-              payable_type: 'expense',
-              notes: notes || `Export order cost ${refLabel}`,
-            });
-          }
-        } catch (payErr) {
-          console.error('addCost payables sync error (cost still recorded):', payErr.message);
-        }
-
-        return row;
+        const order = await lockRow(trx('export_orders').where({ id })).first();
+        if (!order) { const e = new Error('Export order not found.'); e.statusCode = 404; throw e; }
+        return recordOrderCost(trx, {
+          order, category, amount, currency, fxRate: fx_rate, notes,
+          supplierId: supplier_id || null, vendorName: vendor_name || null, billRef: bill_ref || null,
+          userId: req.user?.id || null,
+        });
       });
 
-      emitExportOrderUpdate(order.id, 'cost_updated', { category });
-      return res.json({
-        success: true,
-        data: { cost },
-      });
+      emitExportOrderUpdate(id, 'cost_updated', { category: cost.category });
+      return res.json({ success: true, data: { cost } });
     } catch (err) {
+      if (err.statusCode) return res.status(err.statusCode).json({ success: false, message: err.message });
       console.error('Export order addCost error:', err);
       return res.status(500).json({ success: false, message: 'Internal server error.' });
     }
@@ -2426,7 +2385,7 @@ const exportOrderController = {
     try {
       const rawId = req.params.id;
       const whereClause = /^\d+$/.test(rawId) ? { id: parseInt(rawId, 10) } : { order_no: rawId };
-      const { amount, payment_date, payment_method, reference, bank_reference, bank_account_id, notes, fx_rate } = req.body;
+      const { amount, payment_date, payment_method, reference, bank_reference, bank_account_id, notes, fx_rate, bank_charges } = req.body;
       if (!amount || parseFloat(amount) <= 0) {
         return res.status(400).json({ success: false, message: 'A positive amount is required.' });
       }
@@ -2449,6 +2408,7 @@ const exportOrderController = {
         bankReference: bank_reference || reference || null,
         notes: notes || null,
         userId: req.user.id,
+        bankCharges: bank_charges || 0,
       }));
       await runReceiptAutomation(ctx, kind === 'advance', req.user.id);
       const updated = await db('export_orders').where({ id: ctx.orderId }).first();
@@ -2472,9 +2432,11 @@ const exportOrderController = {
     try {
       const rawId = req.params.id;
       const whereClause = /^\d+$/.test(rawId) ? { id: parseInt(rawId, 10) } : { order_no: rawId };
-      const { kind, amount, bank_account_id, fx_rate, payment_date, payment_method, bank_reference, notes } = req.body || {};
+      const { kind, amount, bank_account_id, fx_rate, payment_date, payment_method, bank_reference, notes, bank_charges } = req.body || {};
       const out = await db.transaction(async (trx) => {
-        const order = await trx('export_orders').where(whereClause).first();
+        // Locked like a confirmation, so a contract edit can't rebuild the
+        // receivables between the outstanding check and the insert (EXP-01).
+        const order = await lockRow(trx('export_orders').where(whereClause)).first();
         if (!order) { const e = new Error('Export order not found.'); e.statusCode = 404; throw e; }
         const row = await recordPendingExportReceipt(trx, {
           order,
@@ -2487,6 +2449,7 @@ const exportOrderController = {
           bankReference: bank_reference || null,
           notes: notes || null,
           userId: req.user?.id || null,
+          bankCharges: bank_charges || 0,
         });
         return { order, row };
       });
@@ -2505,12 +2468,13 @@ const exportOrderController = {
   async confirmExportReceipt(req, res) {
     try {
       const paymentId = parseInt(req.params.paymentId, 10);
-      const { fx_rate, bank_account_id, payment_method } = req.body || {};
+      const { fx_rate, bank_account_id, payment_method, bank_charges } = req.body || {};
       const ctx = await db.transaction((trx) => confirmPendingExportReceipt(trx, {
         paymentId,
         fxRate: fx_rate,
         bankAccountId: bank_account_id || null,
         paymentMethod: payment_method || null,
+        bankCharges: bank_charges,
         userId: req.user?.id || null,
       }));
       await runReceiptAutomation(ctx, ctx.isAdvance, req.user?.id);
@@ -2526,38 +2490,62 @@ const exportOrderController = {
   },
 
   // Finance REJECTS a pending receipt (not actually received). Keeps the row.
+  // One transaction, the pending row locked, so a confirm and a reject of the
+  // same receipt cannot both go through (P2-18). The order's financial_status
+  // is DERIVED from its receivables and their receipts (migration 342): a
+  // rejection after an earlier confirmed receipt leaves it Partially Confirmed
+  // rather than stamping 'Rejected' over money already in.
   async rejectExportReceipt(req, res) {
     try {
       const paymentId = parseInt(req.params.paymentId, 10);
-      const pending = await db('payments').where({ id: paymentId }).first();
-      if (!pending) return res.status(404).json({ success: false, message: 'Payment not found.' });
-      if (pending.status !== 'Pending Finance Confirmation') {
-        return res.status(409).json({ success: false, message: `This receipt is already ${pending.status}.` });
-      }
-      await db('payments').where({ id: paymentId }).update({
-        status: 'Rejected',
-        reject_reason: req.body?.reason || null,
-        confirmed_by: req.user?.id || null,
-        confirmed_at: db.fn.now(),
-        updated_at: db.fn.now(),
-      });
-
-      // #2 financial track: a rejected ADVANCE receipt marks the order's
-      // financial_status 'Rejected' (visible + audited; keeps dispatch blocked).
-      // Resolve the order via the receivable; balance rejections don't touch it.
-      const recv = pending.linked_receivable_id
-        ? await db('receivables').where({ id: pending.linked_receivable_id }).first()
-        : null;
-      if (recv && recv.order_id && recv.type !== 'Balance') {
-        await db('export_orders').where({ id: recv.order_id }).update({
-          financial_status: 'Rejected',
-          updated_at: db.fn.now(),
+      const reason = String((req.body && req.body.reason) || '').trim();
+      const out = await db.transaction(async (trx) => {
+        const pending = await lockRow(trx('payments').where({ id: paymentId })).first();
+        if (!pending) { const e = new Error('Payment not found.'); e.statusCode = 404; throw e; }
+        if (pending.status !== 'Pending Finance Confirmation') {
+          const e = new Error(`This receipt is already ${pending.status}.`); e.statusCode = 409; throw e;
+        }
+        const recv = pending.linked_receivable_id
+          ? await trx('receivables').where({ id: pending.linked_receivable_id }).first()
+          : null;
+        const orderId = (recv && recv.order_id) || (pending.source_table === 'export_orders' ? pending.source_id : null);
+        // Same lock order as a confirmation: the payment, then its order.
+        if (orderId) await lockRow(trx('export_orders').where({ id: orderId })).first();
+        await trx('payments').where({ id: paymentId }).update({
+          status: 'Rejected',
+          reject_reason: reason || null,
+          confirmed_by: req.user?.id || null,
+          confirmed_at: trx.fn.now(),
+          updated_at: trx.fn.now(),
         });
-      }
+        return { orderId };
+      });
+      if (out.orderId) emitExportOrderUpdate(out.orderId, 'receipt_rejected');
       return res.json({ success: true, message: 'Receipt marked as not received.' });
     } catch (err) {
+      if (err.statusCode) return res.status(err.statusCode).json({ success: false, message: err.message });
       console.error('rejectExportReceipt error:', err);
-      return res.status(500).json({ success: false, message: err.message });
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
+  // Write off a shipped order's short balance (D-8). The route is behind
+  // ownerApproval; ≤ the tolerance it is a bank charge (6200), above it the
+  // configured write-off account (refused while none is set).
+  async writeOffBalance(req, res) {
+    try {
+      const id = await resolveExportOrderId(req.params.id);
+      if (!id) return res.status(404).json({ success: false, message: 'Export order not found.' });
+      const { amount, reason } = req.body || {};
+      const out = await db.transaction((trx) => writeOffShortBalance(trx, {
+        orderId: id, amount, reason, userId: req.user?.id || null, ownerId: req.ownerAuth?.ownerId || null,
+      }));
+      emitExportOrderUpdate(id, 'balance_written_off');
+      return res.json({ success: true, data: out });
+    } catch (err) {
+      if (err.statusCode) return res.status(err.statusCode).json({ success: false, message: err.message });
+      console.error('writeOffBalance error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
     }
   },
 
@@ -2572,7 +2560,7 @@ const exportOrderController = {
         .leftJoin('bank_accounts as ba', 'p.bank_account_id', 'ba.id')
         .where('p.status', 'Pending Finance Confirmation')
         .select(
-          'p.id', 'p.payment_no', 'p.amount', 'p.currency', 'p.fx_rate', 'p.payment_date',
+          'p.id', 'p.payment_no', 'p.amount', 'p.bank_charges', 'p.currency', 'p.fx_rate', 'p.payment_date',
           'p.bank_account_id', 'p.notes', 'p.created_at', 'p.created_by', 'u.full_name as recorded_by_name',
           'r.type as receipt_type', 'eo.id as order_id', 'eo.order_no', 'eo.booked_fx_rate',
           'c.name as customer_name',
@@ -2987,7 +2975,8 @@ const exportOrderController = {
             contractValue, advanceExpected, order: { ...order, qty_mt: newQtyMt },
           });
           const bookedRate = parseFloat(order.booked_fx_rate)
-            || (parseFloat(order.contract_value) > 0 ? (parseFloat(order.contract_value_pkr_locked) || 0) / parseFloat(order.contract_value) : 0) || 280;
+            || (parseFloat(order.contract_value) > 0 ? (parseFloat(order.contract_value_pkr_locked) || 0) / parseFloat(order.contract_value) : 0)
+            || (String(order.currency || 'USD').toUpperCase() === 'PKR' ? 1 : 0); // none: unbooked (D-10)
           await trx('export_orders').where({ id }).update({
             qty_mt: newQtyMt, price_per_mt: price, contract_value: contractValue, advance_expected: advanceExpected,
             balance_expected: balanceExpected, contract_value_pkr_locked: contractValue * bookedRate, updated_at: trx.fn.now(),

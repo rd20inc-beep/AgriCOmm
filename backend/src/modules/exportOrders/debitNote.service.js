@@ -26,6 +26,7 @@ const { NotFoundError, ValidationError } = require('../../shared/errors');
 
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 const MONEY_EPSILON = 0.01;
+const ISSUABLE_STATUSES = ['Shipped', 'Arrived'];
 
 // A `date` column comes back from Postgres as a JS Date, and Date#toString gives
 // "Tue Sep 29 2026 …" — slicing that to ten characters produced "Tue Sep 29",
@@ -137,8 +138,11 @@ const debitNoteService = {
     return db.transaction(async (trx) => {
       const order = await trx('export_orders').where({ id: orderId }).forUpdate().first();
       if (!order) throw new NotFoundError('Export order not found.');
-      if (order.status === 'Cancelled') {
-        throw new ValidationError('Cannot raise a debit note against a cancelled order.');
+      // Only once the goods have sailed, as the clause says: before that the
+      // contract can still be edited, and a recompute must not meet a claim the
+      // buyer was never meant to see yet (EXP-01).
+      if (!ISSUABLE_STATUSES.includes(order.status)) {
+        throw new ValidationError(`A debit note is raised after shipment — this order is '${order.status}'. It can be issued once the order is Shipped or Arrived.`);
       }
 
       const qtyMt = parseFloat(body.qty_mt) || parseFloat(order.qty_mt) || 0;
@@ -240,5 +244,35 @@ const debitNoteService = {
   },
 };
 
+/**
+ * Cancelling the ORDER (P2-15): every Issued note on it is cancelled by a
+ * signed-delta journal (Dr 4070 / Cr 1110), in the caller's transaction. The
+ * balance is not re-figured note by note — the order's receivables are
+ * written off by the cancellation itself, and money already received is
+ * disposed of there (refund / credit / forfeit). Returns the notes cancelled.
+ */
+async function cancelNotesForOrder(trx, { order, userId, reason = null }) {
+  const notes = await trx('export_debit_notes').where({ order_id: order.id, status: 'Issued' }).forUpdate();
+  const done = [];
+  for (const note of notes) {
+    // eslint-disable-next-line no-await-in-loop
+    const cancelJournalId = await postDebitNoteJournal(trx, {
+      note, order, amountPkr: parseFloat(note.amount_pkr) || 0, userId, reversing: true,
+    });
+    // eslint-disable-next-line no-await-in-loop
+    await trx('export_debit_notes').where({ id: note.id }).update({
+      status: 'Cancelled',
+      cancel_journal_id: cancelJournalId,
+      cancel_reason: `Order ${order.order_no} cancelled${reason ? `: ${reason}` : ''}`,
+      cancelled_by: userId || null,
+      cancelled_at: trx.fn.now(),
+      updated_at: trx.fn.now(),
+    });
+    done.push(note.debit_note_no);
+  }
+  return done;
+}
+
 module.exports = debitNoteService;
+module.exports.cancelNotesForOrder = cancelNotesForOrder;
 module.exports.__test = { round2, applyToBalance };

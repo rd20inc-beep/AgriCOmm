@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { overdraftWarning } from '../../../shared/utils/overdraft';
+import { overdraftWarning, serverOverdraft } from '../../../shared/utils/overdraft';
 
 /**
  * B2 — overdraft is allowed with a warning: the shared Payment form says
@@ -55,5 +55,17 @@ describe('<PaymentDrawer /> overdraft warning', () => {
 
   it('a fixed account is checked too', () => {
     expect(render({ fixedAccountId: 3, defaultAmount: '1200' })).toContain('This will overdraw Meezan by Rs 200.00.');
+  });
+});
+
+// P2-31: every money route returns the overdraft warning; the drawer shows it.
+describe('serverOverdraft', () => {
+  it('reads the warning from any money response shape', () => {
+    const w = { message: 'This overdraws Meezan by PKR 700.00.' };
+    expect(serverOverdraft({ success: true, data: { payment: {}, warning: w } })).toBe(w.message);
+    expect(serverOverdraft({ data: { transfer: {}, warning: w } })).toBe(w.message);
+    expect(serverOverdraft({ data: { payments: [], overdraft: w } })).toBe(w.message);
+    expect(serverOverdraft({ success: true, data: { payment: {} } })).toBeNull();
+    expect(serverOverdraft(undefined)).toBeNull();
   });
 });

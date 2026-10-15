@@ -82,6 +82,26 @@ function RejectModal({ open, onClose, onConfirm, target }) {
   );
 }
 
+// A customer edit waiting for review (P2-32): the live record is unchanged
+// until Approve applies these values; Reject discards them.
+const EDIT_LABELS = { name: 'Name', contact_person: 'Contact', phone: 'Phone', email: 'Email', address: 'Address', country: 'Country', port: 'Port' };
+function ProposedEdit({ row }) {
+  let edit = row.pending_edit;
+  if (typeof edit === 'string') { try { edit = JSON.parse(edit); } catch { edit = {}; } }
+  const keys = Object.keys(edit || {}).filter((k) => EDIT_LABELS[k]);
+  if (!keys.length) return null;
+  return (
+    <div className="mt-1.5 text-xs bg-violet-50 border border-violet-200 rounded px-2 py-1 space-y-0.5">
+      <p className="font-semibold text-violet-800">Proposed edit — not applied yet</p>
+      {keys.map((k) => (
+        <p key={k} className="text-gray-700">
+          {EDIT_LABELS[k]}: <span className="line-through text-gray-400">{row[k] || '—'}</span> → <span className="font-medium">{edit[k] || '—'}</span>
+        </p>
+      ))}
+    </div>
+  );
+}
+
 function Section({ title, icon: Icon, color, rows, onApprove, onReject, busyId }) {
   const canWrite = useAdminCanWrite();
   return (
@@ -126,13 +146,14 @@ function Section({ title, icon: Icon, color, rows, onApprove, onReject, busyId }
                       </span>
                     )}
                   </div>
+                  {r.pending_edit && <ProposedEdit row={r} />}
                   {r.review_notes && (
                     <div className="mt-1.5 text-xs text-gray-600 bg-gray-50 border border-gray-200 rounded px-2 py-1">
                       <span className="font-semibold text-gray-700">Notes:</span> {r.review_notes}
                     </div>
                   )}
                 </div>
-                {r.approval_status === 'pending' && (
+                {(r.approval_status === 'pending' || r.pending_edit) && (
                   <div className="flex items-center gap-2 flex-shrink-0">
                     {canWrite && (
                       <button
@@ -283,7 +304,7 @@ export default function MasterDataApprovalsTab() {
 
       <div className="text-xs text-gray-400 border-t pt-3 flex items-start gap-1.5">
         <AlertCircle size={12} className="flex-shrink-0 mt-0.5" />
-        Pending submissions are usable in lots immediately — admins approve them retroactively. Rejected entries are deactivated and won&apos;t appear in dropdowns.
+        Pending submissions are usable in lots immediately — admins approve them retroactively. Rejected entries are deactivated and won&apos;t appear in dropdowns; a rejected supplier cannot be bought from. A proposed customer edit only applies once approved — rejecting it discards the edit and leaves the customer as it was.
       </div>
     </div>
   );

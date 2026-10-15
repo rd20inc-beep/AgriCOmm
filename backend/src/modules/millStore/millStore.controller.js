@@ -121,7 +121,7 @@ const millStoreController = {
   async createPurchase(req, res, next) {
     try {
       const data = validate(createPurchaseSchema, req.body);
-      const purchase = await service.createPurchase(data, req.user?.id);
+      const purchase = await service.createPurchase(data, req.user?.id, { req });
       res.status(201).json({ success: true, data: { purchase } });
     } catch (err) { next(err); }
   },

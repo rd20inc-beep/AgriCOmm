@@ -10,7 +10,7 @@ import {
   exportOrdersApi, millingApi, inventoryApi, financeApi, accountingApi,
   documentsApi, adminApi, communicationApi, reportingApi, procurementApi,
   auditApi, approvalsApi, intelligenceApi, controlApi, smartApi, lotInventoryApi,
-  localSalesApi, usersApi, advancesApi, customersApi,
+  localSalesApi, usersApi, customersApi,
 } from './services';
 import {
   transformOrders, transformOrder, transformBatches, transformBatch,
@@ -904,6 +904,24 @@ export function usePurchases(params = {}) {
   });
 }
 
+// P2-31: settle several invoices (payables / receivables / local-sale groups)
+// in ONE server transaction — a failure posts nothing.
+export function useSettleAcross() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data) => financeApi.settleAcross(data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.receivables.all });
+      qc.invalidateQueries({ queryKey: queryKeys.payables.all });
+      qc.invalidateQueries({ queryKey: queryKeys.financeOverview });
+      qc.invalidateQueries({ queryKey: queryKeys.journals.all });
+      qc.invalidateQueries({ queryKey: queryKeys.bankAccounts.all });
+      qc.invalidateQueries({ queryKey: ['local-sales'] });
+      qc.invalidateQueries({ queryKey: ['mill-cash-flow'] });
+      qc.invalidateQueries({ queryKey: ['finance-bank-transactions'] });
+    },
+  });
+}
 export function useRecordPayment() {
   const qc = useQueryClient();
   return useMutation({
@@ -928,7 +946,7 @@ export function useRecordPayment() {
 export function useReversePayment() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, reason }) => financeApi.reversePayment(id, reason),
+    mutationFn: ({ id, reason, ownerId }) => financeApi.reversePayment(id, reason, ownerId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: queryKeys.payables.all });
       qc.invalidateQueries({ queryKey: queryKeys.financeOverview });
@@ -973,13 +991,6 @@ function invalidateMoneyCaches(qc) {
   qc.invalidateQueries({ queryKey: ['finance-bank-transactions'] });
   qc.invalidateQueries({ queryKey: queryKeys.financeOverview });
   qc.invalidateQueries({ queryKey: ['mill-cash-flow'] });
-}
-export function useCreateFundTransfer() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (data) => financeApi.createFundTransfer(data),
-    onSuccess: () => invalidateMoneyCaches(qc),
-  });
 }
 export function useAcceptFundTransfer() {
   const qc = useQueryClient();
@@ -1578,43 +1589,6 @@ export function useDeleteBuyer() {
   });
 }
 
-// ===================== ADVANCES =====================
-
-export function useAdvances(params = {}) {
-  return useQuery({
-    queryKey: ['advances', 'list', params],
-    queryFn: async () => {
-      const res = await advancesApi.list({ limit: 200, ...params });
-      return unwrap(res, 'advances') || [];
-    },
-    staleTime: 10 * 1000,
-    refetchOnMount: 'always',
-  });
-}
-
-export function useCreateAdvance() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (data) => advancesApi.create(data),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['advances'] });
-      qc.invalidateQueries({ queryKey: queryKeys.financeOverview });
-    },
-  });
-}
-
-export function useAllocateAdvance() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id, data }) => advancesApi.allocate(id, data),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['advances'] });
-      qc.invalidateQueries({ queryKey: queryKeys.orders.all });
-      qc.invalidateQueries({ queryKey: queryKeys.financeOverview });
-    },
-  });
-}
-
 // ===================== USERS =====================
 
 export function useUsers(params = {}) {
@@ -1794,6 +1768,14 @@ export function useSummarizeReport() {
   return useMutation({ mutationFn: (body) => api.post('/api/ai/summarize-report', body) });
 }
 
+export function useStopRecurring() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }) => millingApi.stopRecurring(id, data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['recurring-expenses'] }),
+  });
+}
+
 export function useRunDueRecurring() {
   const qc = useQueryClient();
   return useMutation({
@@ -1897,8 +1879,8 @@ export function useApproveLeaveRequest() { const qc = useQueryClient(); return u
 export function useRejectLeaveRequest() { const qc = useQueryClient(); return useMutation({ mutationFn: (id) => millingApi.rejectLeaveRequest(id), onSuccess: () => invalidateLeave(qc) }); }
 export function useDeleteLeaveRequest() { const qc = useQueryClient(); return useMutation({ mutationFn: (id) => millingApi.deleteLeaveRequest(id), onSuccess: () => invalidateLeave(qc) }); }
 // ── Final settlement (Phase 25) ──
-export function useFinalSettlement(workerId) {
-  return useQuery({ queryKey: ['final-settlement', workerId], enabled: !!workerId, queryFn: async () => { const r = await millingApi.computeFinalSettlement(workerId); return r?.data || null; } });
+export function useFinalSettlement(workerId, leftDate = null) {
+  return useQuery({ queryKey: ['final-settlement', workerId, leftDate || null], enabled: !!workerId, queryFn: async () => { const r = await millingApi.computeFinalSettlement(workerId, leftDate); return r?.data || null; } });
 }
 export function useFinalSettlements() {
   return useQuery({ queryKey: ['final-settlements'], queryFn: async () => { const r = await millingApi.listFinalSettlements(); return transformKeys(r?.data || []); } });
@@ -1907,7 +1889,7 @@ function invalidateSettlement(qc) {
   ['final-settlements', 'mill-workers', 'payroll-summary', 'worker-advances'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
 }
 export function useFinalizeSettlement() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ workerId, data }) => millingApi.finalizeSettlement(workerId, data), onSuccess: () => invalidateSettlement(qc) }); }
-export function useReverseSettlement() { const qc = useQueryClient(); return useMutation({ mutationFn: (id) => millingApi.reverseFinalSettlement(id), onSuccess: () => invalidateSettlement(qc) }); }
+export function useReverseSettlement() { const qc = useQueryClient(); return useMutation({ mutationFn: ({ id, data }) => millingApi.reverseFinalSettlement(id, data), onSuccess: () => invalidateSettlement(qc) }); }
 // Payroll audit (Phase 26) — keep raw (entity_type/user_name/details), no transformKeys.
 export function usePayrollAudit(params = {}) {
   return useQuery({ queryKey: ['payroll-audit', params], queryFn: async () => { const r = await millingApi.payrollAudit(params); return r?.data || { logs: [], actions: [] }; } });
@@ -1973,6 +1955,17 @@ export function useCreateWorkerAdvance() {
       qc.invalidateQueries({ queryKey: ['worker-advances'] });
       qc.invalidateQueries({ queryKey: ['mill-expenses'] });
       qc.invalidateQueries({ queryKey: ['payables'] });
+    },
+  });
+}
+
+// Void a PAID advance (D-23): the payout is reversed, the advance kept as voided.
+export function useVoidWorkerAdvance() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }) => millingApi.voidWorkerAdvance(id, data),
+    onSuccess: () => {
+      ['mill-workers', 'payroll-summary', 'worker-advances', 'mill-expenses', 'payables'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
     },
   });
 }

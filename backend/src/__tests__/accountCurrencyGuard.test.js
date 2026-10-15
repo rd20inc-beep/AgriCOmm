@@ -19,6 +19,8 @@ jest.mock('../modules/accounting/accounting.service', () => ({
 }));
 jest.mock('../modules/finance/fxRate.service', () => ({
   getLatestRate: jest.fn(async () => ({ rate: 280, source: 'test' })),
+  // P2-20: a posting resolves its rate through requireRate (refused when none).
+  requireRate: jest.fn(async () => 280),
 }));
 
 const db = require('../config/database');

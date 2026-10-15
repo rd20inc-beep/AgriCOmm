@@ -103,6 +103,9 @@ export function buildCreateOrderPayload({ form, items, products = [], packingLin
     qty_mt: qtyMT,
     price_per_mt: pricePerMT,
     currency: form.currency,
+    // P2-20: the rate the order is booked at. Blank → the currency's latest
+    // rate on file; with none on file the server refuses a live order (D-10).
+    booked_fx_rate: parseFloat(form.bookedFxRate) > 0 ? parseFloat(form.bookedFxRate) : null,
     contract_value: contractValue,
     incoterm: form.incoterm,
     doc_address_mode: form.docAddressMode || 'country',

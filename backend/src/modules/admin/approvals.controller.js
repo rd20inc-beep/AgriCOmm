@@ -13,6 +13,10 @@
 const db = require('../../config/database');
 const { nextDocNo } = require('../../utils/docNumber');
 
+// The customer fields an edit may change (submitCustomerEdit) — and so the
+// only keys a stored proposal may apply.
+const CUSTOMER_EDIT_FIELDS = ['name', 'contact_person', 'phone', 'email', 'address', 'country', 'port'];
+
 const ALLOWED_TABLES = {
   products: { table: 'products', label: 'product' },
   suppliers: { table: 'suppliers', label: 'supplier' },
@@ -66,6 +70,15 @@ const approvalsController = {
         .whereRaw('LOWER(name) = LOWER(?)', [String(name).trim()])
         .first();
       if (existing) {
+        // A rejected supplier is not handed back for use (P2-32 / INV-18) —
+        // re-adding the same name must not quietly revive it.
+        if (existing.approval_status === 'rejected') {
+          return res.status(409).json({
+            success: false,
+            code: 'SUPPLIER_REJECTED',
+            message: `Supplier "${existing.name}" was rejected in master-data review. Ask an approver to review it again.`,
+          });
+        }
         return res.status(200).json({
           success: true,
           data: { supplier: existing, deduped: true },
@@ -131,10 +144,12 @@ const approvalsController = {
     }
   },
 
-  // ─────────────── Edit an existing customer (apply + flag for review) ───────────────
-  // An order-taker can edit a customer inline; the change applies immediately
-  // but the customer is flagged 'pending' so an admin reviews it (auto-approved
-  // when the caller already has approval rights).
+  // ─────────────── Edit an existing customer ───────────────
+  // A caller with approval rights edits live. Anyone else PROPOSES the change
+  // (P2-32 / ADM-14): it is held in customers.pending_edit and the live record
+  // is untouched until an approver applies it — Reject discards it and the
+  // customer stays as it was. A customer that is itself still awaiting review
+  // (a pending quick-add) is edited live: the whole record is under review.
   async submitCustomerEdit(req, res) {
     try {
       const { id } = req.params;
@@ -146,7 +161,7 @@ const approvalsController = {
       }
       const autoApprove = await callerCanAutoApprove(req);
       const now = db.fn.now();
-      const [customer] = await db('customers').where({ id }).update({
+      const next = {
         name: name != null ? String(name).trim() : cust.name,
         contact_person: contact_person !== undefined ? (contact_person || null) : cust.contact_person,
         phone: phone !== undefined ? (phone || null) : cust.phone,
@@ -154,6 +169,22 @@ const approvalsController = {
         address: address !== undefined ? (address || null) : cust.address,
         country: country !== undefined ? (country || null) : cust.country,
         port: port !== undefined ? (port || null) : cust.port,
+      };
+      if (!autoApprove && cust.approval_status !== 'pending') {
+        const proposal = {};
+        for (const f of CUSTOMER_EDIT_FIELDS) if ((next[f] ?? null) !== (cust[f] ?? null)) proposal[f] = next[f];
+        if (!Object.keys(proposal).length) {
+          return res.json({ success: true, data: { customer: cust, pending: false, unchanged: true } });
+        }
+        const [customer] = await db('customers').where({ id }).update({
+          pending_edit: JSON.stringify(proposal),
+          pending_edit_by: req.user?.id || null,
+          pending_edit_at: now,
+        }).returning('*');
+        return res.json({ success: true, data: { customer, pending: true } });
+      }
+      const [customer] = await db('customers').where({ id }).update({
+        ...next,
         approval_status: autoApprove ? 'approved' : 'pending',
         submitted_by: req.user?.id || null,
         submitted_at: now,
@@ -257,7 +288,10 @@ const approvalsController = {
             'rev.full_name as reviewed_by_name'
           )
           .orderBy(`${tableName}.submitted_at`, 'desc');
-        if (where) q = q.where(where);
+        // A proposed customer edit waits in the pending queue too.
+        if (where && tableName === 'customers' && status === 'pending') {
+          q = q.where((w) => w.where(`${tableName}.approval_status`, 'pending').orWhereNotNull(`${tableName}.pending_edit`));
+        } else if (where) q = q.where(where);
         return q.limit(500);
       };
 
@@ -293,7 +327,7 @@ const approvalsController = {
       const [p, s, c] = await Promise.all([
         db('products').where({ approval_status: 'pending' }).count('id as c').first(),
         db('suppliers').where({ approval_status: 'pending' }).count('id as c').first(),
-        db('customers').where({ approval_status: 'pending' }).count('id as c').first(),
+        db('customers').where((w) => w.where({ approval_status: 'pending' }).orWhereNotNull('pending_edit')).count('id as c').first(),
       ]);
       const products = parseInt(p?.c) || 0;
       const suppliers = parseInt(s?.c) || 0;
@@ -323,6 +357,25 @@ async function decide(req, res, status) {
     const row = await db(t.table).where({ id }).first();
     if (!row) {
       return res.status(404).json({ success: false, message: `${t.label} not found.` });
+    }
+    // A proposed customer edit: Approve applies it, Reject discards it. The
+    // customer's own approval status and active flag are not touched.
+    if (row.pending_edit) {
+      let proposal = row.pending_edit;
+      if (typeof proposal === 'string') { try { proposal = JSON.parse(proposal); } catch { proposal = {}; } }
+      const apply = {};
+      if (status === 'approved') {
+        for (const f of CUSTOMER_EDIT_FIELDS) if (proposal && Object.prototype.hasOwnProperty.call(proposal, f)) apply[f] = proposal[f];
+      }
+      const [updated] = await db(t.table).where({ id }).update({
+        ...apply,
+        pending_edit: null, pending_edit_by: null, pending_edit_at: null,
+        reviewed_by: req.user?.id || null,
+        reviewed_at: db.fn.now(),
+        review_notes: req.body?.notes ? String(req.body.notes).slice(0, 2000) : row.review_notes,
+        updated_at: db.fn.now(),
+      }).returning('*');
+      return res.json({ success: true, data: { [t.label]: updated, edit: status === 'approved' ? 'applied' : 'discarded' } });
     }
     if (row.approval_status === status) {
       return res.status(200).json({ success: true, data: { [t.label]: row }, message: `Already ${status}.` });

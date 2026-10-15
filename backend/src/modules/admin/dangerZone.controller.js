@@ -1,6 +1,10 @@
 const db = require('../../config/database');
-const { nextDocNo } = require('../../utils/docNumber');
+const { postBankTransaction, deleteBankTransaction } = require('../../shared/bankBalance');
 const { redactSecrets } = require('../../utils/redactSecrets');
+const accountingService = require('../accounting/accounting.service');
+const { mirrorJournals } = require('../milling/payrollReversal');
+const { glAccountFor } = require('../../shared/accountGl');
+const { deleteBatchTx } = require('../milling/milling.controller');
 
 /**
  * Super-Admin "Danger Zone" — permanent, cascading hard-deletes and manual
@@ -14,6 +18,15 @@ const { redactSecrets } = require('../../utils/redactSecrets');
  *     reduce mill_stock when a purchase is deleted, restore payable/receivable
  *     outstanding when a payment is deleted),
  *   - refuse to delete a lot that has been sold or milled unless `force` is set.
+ *
+ * The books stay balanced (P2-23, owner decision D-23). A Posted journal is
+ * NEVER hard-deleted here: the GL a deleted document posted is netted to zero
+ * by Posted signed-delta journals dated today (closed periods are never
+ * touched), so the trial balance and every account stay correct and the
+ * history survives. A record whose money cannot be unwound that way (a lot
+ * with payables / freight / open GL, a batch past the point its own delete
+ * allows, a single Posted journal) is refused with the step to take instead.
+ * A bank-balance correction posts its own delta journal against 1290 Suspense.
  */
 
 async function auditDanger(trx, req, action, entityType, entityId, details) {
@@ -39,11 +52,16 @@ const KEEP_TABLES = new Set([
   // forensic trail — keep the audit history (incl. who ran the reset) across a
   // reset; the backup schema has a copy anyway, but the live log stays continuous.
   'audit_logs',
-  // auth & user prefs
+  // auth & user prefs — incl. module/warehouse scoping (a wiped scope makes a
+  // scoped user unrestricted) and the device register (a wiped one forgets
+  // every revocation)
   'users', 'roles', 'permissions', 'role_permissions', 'user_preferences',
-  // core masters
+  'user_scopes', 'devices',
+  // core masters (haulers are a master since mig 284; a worker's salary
+  // revisions are its pay history, kept with the worker)
   'products', 'suppliers', 'customers', 'warehouses', 'bag_types', 'mills', 'mill_workers',
   'mill_items', 'mill_consumption_ratios', 'product_categories', 'expense_vendors',
+  'haulers', 'mill_salary_revisions',
   // payroll config (leave types + FBR/EOBI statutory rules) — config, not per-run
   // data; seeded once by migration so a reset would leave them empty permanently.
   'mill_leave_types', 'mill_statutory_deductions',
@@ -78,6 +96,80 @@ async function lotImpactCounts(q, lotId) {
   return counts;
 }
 
+// Net Posted GL still standing under these ref_nos, summed as |net| per
+// account (0 = nothing open: never posted, or already netted by deltas).
+async function openGlNet(q, refNos) {
+  const refs = refNos.filter(Boolean);
+  if (!refs.length) return 0;
+  const rows = await q('journal_lines as jl')
+    .join('journal_entries as je', 'je.id', 'jl.journal_id')
+    .whereIn('je.ref_no', refs)
+    .where('je.status', 'Posted')
+    .groupBy('jl.account_id')
+    .select(q.raw('COALESCE(SUM(jl.debit), 0) - COALESCE(SUM(jl.credit), 0) as net'));
+  return Math.round(rows.reduce((s, r) => s + Math.abs(num(r.net)), 0) * 100) / 100;
+}
+
+// The money a lot carries that a hard delete would strand (P2-23 / INV-07):
+// its purchase / freight / commission payables, its freight records and the
+// GL its intake posted under the lot number. A lot that is part of a milling
+// batch is removed with that batch instead.
+async function lotFinancialBlockers(q, lot) {
+  const blockers = [];
+  const payables = await q('payables')
+    .where('linked_ref', lot.lot_no)
+    .where((w) => w.where('paid_amount', '>', 0.01).orWhere('outstanding', '>', 0.01))
+    .count('id as c').first();
+  if (parseInt(payables?.c) > 0) blockers.push(`${payables.c} payable(s) (purchase / freight / commission) — reverse or void them first`);
+  if (await q.schema.hasTable('transport_costs')) {
+    const tc = await q('transport_costs').where('lot_id', lot.id)
+      .whereRaw("COALESCE(lower(status), '') NOT IN ('cancelled', 'void')")
+      .count('id as c').first();
+    if (parseInt(tc?.c) > 0) blockers.push(`${tc.c} freight record(s)`);
+  }
+  const gl = await openGlNet(q, [lot.lot_no]);
+  if (gl > 0.01) blockers.push(`Posted GL under ${lot.lot_no} still open — reverse the purchase first`);
+  if (lot.batch_ref && /^batch-\d+$/.test(lot.batch_ref)) {
+    const batch = await q('milling_batches').where('id', Number(lot.batch_ref.slice(6))).first('batch_no');
+    if (batch) blockers.push(`belongs to milling batch ${batch.batch_no} — delete the batch instead`);
+  }
+  return blockers;
+}
+
+// Net every Posted journal under these ref_nos back to zero with Posted
+// signed-delta journals dated today (never delete or edit a Posted journal;
+// never reverse + repost). Idempotent per original journal. Unposted drafts
+// are not in the books and are simply removed.
+async function neutralizeRefs(trx, refNos, { userId, reason }) {
+  const out = [];
+  for (const refNo of [...new Set(refNos.filter(Boolean))]) {
+    const refTypes = (await trx('journal_entries').where({ ref_no: refNo, status: 'Posted' })
+      .whereNull('reversal_of').distinct('ref_type')).map((r) => r.ref_type).filter(Boolean);
+    if (refTypes.length) {
+      out.push(...await mirrorJournals(trx, {
+        refNo, refTypes, refType: 'Danger Zone Reversal', description: reason, userId,
+      }));
+    }
+    // A Posted original with a NULL ref_type is outside mirrorJournals' filter.
+    const untyped = await trx('journal_entries').where({ ref_no: refNo, status: 'Posted' }).whereNull('ref_type').whereNull('reversal_of').count('id as c').first();
+    if (parseInt(untyped?.c) > 0) {
+      const e = new Error(`Journal(s) under ${refNo} have no ref type and cannot be netted automatically — reverse them in Accounting first.`);
+      e.status = 409; throw e;
+    }
+    // Every account under the ref must now net to zero — if anything still
+    // stands (an orphan delta of an original no longer Posted), refuse rather
+    // than leave the books half-unwound.
+    if (await openGlNet(trx, [refNo]) > 0.01) {
+      const e = new Error(`The GL under ${refNo} could not be netted to zero automatically — reverse it in Accounting first.`);
+      e.status = 409; throw e;
+    }
+    const drafts = trx('journal_entries').where({ ref_no: refNo, status: 'Draft' }).select('id');
+    await trx('journal_lines').whereIn('journal_id', drafts).del();
+    await trx('journal_entries').where({ ref_no: refNo, status: 'Draft' }).del();
+  }
+  return out.filter(Boolean);
+}
+
 const dangerZone = {
   async getLotImpact(req, res) {
     try {
@@ -89,7 +181,9 @@ const dangerZone = {
       if (counts.batch_source_lots > 0) blockers.push(`fed ${counts.batch_source_lots} milling batch(es)`);
       if (counts.container_lots > 0) blockers.push(`packed into ${counts.container_lots} shipment container(s)`);
       if (num(lot.reserved_qty) > 0) blockers.push(`${lot.reserved_qty} ${lot.unit || 'MT'} reserved for export`);
-      return res.json({ success: true, data: { lot, counts, blockers } });
+      // Money blockers cannot be overridden with force (P2-23).
+      const financialBlockers = await lotFinancialBlockers(db, lot);
+      return res.json({ success: true, data: { lot, counts, blockers, financialBlockers } });
     } catch (err) {
       console.error('getLotImpact error:', err);
       return res.status(500).json({ success: false, message: err.message });
@@ -112,11 +206,21 @@ const dangerZone = {
         if (counts.batch_source_lots > 0) blockers.push(`fed ${counts.batch_source_lots} milling batch(es)`);
         if (counts.container_lots > 0) blockers.push(`packed into ${counts.container_lots} shipment container(s)`);
         if (num(lot.reserved_qty) > 0) blockers.push(`${lot.reserved_qty} reserved for export`);
+        // Money the lot carries is never stranded — force does not override it.
+        const financialBlockers = await lotFinancialBlockers(trx, lot);
+        if (financialBlockers.length) {
+          const e = new Error(`Lot ${lot.lot_no} has financial records (${financialBlockers.join('; ')}). Deleting it would leave AP / GL for stock that no longer exists.`);
+          e.status = 409; e.payload = { blockers, financialBlockers, counts }; throw e;
+        }
         if (blockers.length && !force) {
           const e = new Error(`Lot ${lot.lot_no} is in use (${blockers.join('; ')}). Re-run with force to delete anyway.`);
           e.status = 409; e.payload = { blockers, counts }; throw e;
         }
 
+        // The lot's stock ledger and holds (RESTRICT since mig 368 — removed
+        // explicitly, only here, only for a lot with no money attached).
+        await trx('lot_transactions').where('lot_id', lot.id).del();
+        await trx('inventory_reservations').where('lot_id', lot.id).del();
         // Delete NO-ACTION children first (these have no cascade).
         await trx('stock_count_items').where('lot_id', lot.id).del();
         await trx('stock_adjustments').where('lot_id', lot.id).del();
@@ -125,7 +229,6 @@ const dangerZone = {
         // container_lots.lot_id is a NO-ACTION FK (a lot packed into a shipment
         // container) — clean it, else the lot delete 500s with an opaque 23503.
         await delIfExists(trx, 'container_lots', (q) => q.where('lot_id', lot.id));
-        // lot_transactions + inventory_reservations cascade on the lot delete.
         // local_sales / milling_vehicle_arrivals / historical_cost_repair_log SET NULL.
         await trx('inventory_lots').where('id', lot.id).del();
 
@@ -196,40 +299,80 @@ const dangerZone = {
       if (!['add', 'set'].includes(mode)) return res.status(400).json({ success: false, message: "mode must be 'add' or 'set'." });
 
       const result = await db.transaction(async (trx) => {
-        const acct = await trx('bank_accounts').where('id', req.params.id).first();
+        const acct = await trx('bank_accounts').where('id', req.params.id).forUpdate().first();
         if (!acct) { const e = new Error('Bank account not found.'); e.status = 404; throw e; }
         const before = num(acct.current_balance);
         const after = mode === 'set' ? amt : before + amt;
-
-        await trx('bank_accounts').where('id', acct.id).update({ current_balance: after, updated_at: trx.fn.now() });
-
-        // Trail row so the correction is visible in the account's history.
-        // type is constrained to credit/debit and status to posted/pending/reversed.
         const delta = mode === 'set' ? (after - before) : amt;
-        if (await trx.schema.hasTable('bank_transactions')) {
-          const btNo = await nextDocNo(trx, { table: 'bank_transactions', column: 'transaction_no', prefix: 'BT-', pad: 4 });
-          await trx('bank_transactions').insert({
-            transaction_no: btNo,
-            bank_account_id: acct.id,
-            type: delta >= 0 ? 'credit' : 'debit',
-            amount: Math.abs(delta),
-            currency: acct.currency || 'PKR',
-            transaction_date: new Date().toISOString().slice(0, 10),
-            reference: 'Danger Zone',
-            category: 'manual_adjustment',
-            running_balance: after,
-            status: 'posted',
-            source: 'manual_adjustment',
-            notes: reason || `Manual balance ${mode} by super admin`,
-            created_by: req.user?.id || null,
+
+        // The GL moves with the balance (P2-23 / ADM-17): a Posted delta journal
+        // between this account's own GL account and 1290 Suspense — the
+        // correction is unexplained money until Finance classifies it out of
+        // Suspense. GL is PKR-base: a foreign-currency account needs the rate
+        // (no fallback rate — D-10).
+        let journalNo = null;
+        if (Math.abs(delta) > 0.004) {
+          const ccy = acct.currency || 'PKR';
+          const rate = ccy === 'PKR' ? 1 : parseFloat(req.body?.fx_rate);
+          if (!(rate > 0)) {
+            const e = new Error(`This is a ${ccy} account — pass fx_rate (PKR per ${ccy}) so the correction can be posted to the GL.`);
+            e.status = 400; throw e;
+          }
+          const [bankGl, suspense] = await Promise.all([
+            glAccountFor(trx, acct),
+            trx('chart_of_accounts').where({ code: '1290' }).first(),
+          ]);
+          if (!bankGl || !suspense) {
+            const e = new Error('GL account for this bank account or 1290 Suspense is missing — cannot post the correction.');
+            e.status = 409; throw e;
+          }
+          const pkr = Math.round(Math.abs(delta) * rate * 100) / 100;
+          const why = `Danger Zone balance ${mode} — ${acct.name}${reason ? `: ${reason}` : ''}`.slice(0, 500);
+          const lines = delta > 0
+            ? [
+              { account_id: bankGl.id, account: bankGl.name, debit: pkr, credit: 0, narration: why },
+              { account_id: suspense.id, account: suspense.name, debit: 0, credit: pkr, narration: why },
+            ]
+            : [
+              { account_id: suspense.id, account: suspense.name, debit: pkr, credit: 0, narration: why },
+              { account_id: bankGl.id, account: bankGl.name, debit: 0, credit: pkr, narration: why },
+            ];
+          const j = await accountingService.createJournal(trx, {
+            date: new Date().toISOString().slice(0, 10),
+            entity: acct.entity || 'mill',
+            refType: 'Bank Adjustment', refNo: `BANKADJ-${acct.id}`,
+            description: why, currency: 'PKR', fxRate: 1, isAuto: true,
+            userId: req.user?.id || null, lines,
+            origCurrency: ccy === 'PKR' ? null : ccy, origFxRate: ccy === 'PKR' ? null : rate,
           });
+          if (j && j.id) await accountingService.postJournal(trx, j.id);
+          journalNo = j?.journal_no || null;
         }
-        await auditDanger(trx, req, 'adjust_balance', 'bank_account', acct.id, { name: acct.name, mode, amount: amt, before, after, reason: reason || null });
-        return { id: acct.id, name: acct.name, currency: acct.currency, before, after };
+
+        // The correction is a bank row like any other money move, written by
+        // the single balance writer (P2-17), so it is visible in the account's
+        // history and the balance stays Σ of its rows.
+        await postBankTransaction(trx, {
+          accountId: acct.id,
+          type: delta >= 0 ? 'credit' : 'debit',
+          amount: Math.abs(delta),
+          transaction_date: new Date().toISOString().slice(0, 10),
+          reference: 'Danger Zone',
+          category: 'manual_adjustment',
+          source: 'manual_adjustment',
+          notes: reason || `Manual balance ${mode} by super admin`,
+          created_by: req.user?.id || null,
+        });
+        await auditDanger(trx, req, 'adjust_balance', 'bank_account', acct.id, { name: acct.name, mode, amount: amt, before, after, reason: reason || null, journal_no: journalNo });
+        return { id: acct.id, name: acct.name, currency: acct.currency, before, after, journalNo };
       });
-      return res.json({ success: true, message: `Balance updated: ${result.before} → ${result.after}`, data: result });
+      return res.json({
+        success: true,
+        message: `Balance updated: ${result.before} → ${result.after}${result.journalNo ? ` (GL ${result.journalNo} against 1290 Suspense)` : ''}`,
+        data: result,
+      });
     } catch (err) {
-      if (err.status === 404) return res.status(404).json({ success: false, message: err.message });
+      if ([400, 404, 409].includes(err.status)) return res.status(err.status).json({ success: false, message: err.message });
       console.error('adjustBankBalance error:', err);
       return res.status(500).json({ success: false, message: err.message });
     }
@@ -324,7 +467,8 @@ async function describeTransaction(q, type, id) {
   if (type === 'journal_entry') {
     const j = await q('journal_entries').where('id', id).first();
     if (!j) return null;
-    return { type, row: j, children: { journal_lines: await cnt(q, 'journal_lines', 'journal_id', id) } };
+    return { type, row: j, children: { journal_lines: await cnt(q, 'journal_lines', 'journal_id', id) },
+      willReverse: j.status === 'Draft' ? 'unposted draft — removed' : `refused: a ${j.status} journal is never deleted — reverse it in Accounting` };
   }
   if (type === 'lot_transaction') {
     const t = await q('lot_transactions').where('id', id).first();
@@ -347,7 +491,7 @@ async function describeTransaction(q, type, id) {
   if (type === 'milling_batch') {
     const b = await q('milling_batches').where('id', id).first();
     if (!b) return null;
-    return { type, row: b, willReverse: 'delete raw + output lots and their ledger',
+    return { type, row: b, willReverse: 'same as deleting it in Milling: refused once yielded / Completed / transporter paid; otherwise raw lot, source holds, store and freight reversed (GL by signed delta)',
       children: { vehicles: await cnt(q, 'milling_vehicle_arrivals', 'batch_id', id), costs: await cnt(q, 'milling_costs', 'batch_id', id), lots: await q('inventory_lots').where('batch_ref', `batch-${id}`).count('id as c').first().then(r => parseInt(r?.c) || 0) } };
   }
   if (['customer', 'supplier', 'product'].includes(type)) {
@@ -406,25 +550,19 @@ async function deleteLocalSale(trx, req, id) {
   // Payments (+ their bank_transactions) and receivables tied to the sale.
   const payRows = await trx('payments').where('local_sale_id', id).select('id', 'payment_no');
   const payIds = payRows.map(r => r.id);
-  // Each receipt carries its own GL journal (ref_no = payment_no) — drop it with
-  // the payment, as deletePayment does, or the cash would stay in 1000.
+  // Each receipt carries its own GL journal (ref_no = payment_no) and the sale
+  // its revenue / COGS journals (ref_no = sale_no) — net them all to zero with
+  // signed deltas, as deletePayment does, or the cash would stay in the bank GL.
   const payNos = payRows.map(r => r.payment_no).filter(Boolean);
-  if (payNos.length) await trx('journal_entries').whereIn('ref_no', payNos).del();
+  await neutralizeRefs(trx, [sale.sale_no, ...payNos], { userId: req.user?.id, reason: `Danger Zone: local sale ${sale.sale_no} deleted` });
   if (payIds.length) {
     // Reverse any account-balance movement these receipts posted before removing
     // the ledger rows (a credit added cash → debit it back on delete).
-    const bts = await trx('bank_transactions').whereIn('linked_payment_id', payIds).select('bank_account_id', 'type', 'amount');
-    for (const bt of bts) {
-      if (!bt.bank_account_id) continue;
-      const delta = bt.type === 'credit' ? -num(bt.amount) : num(bt.amount);
-      await trx('bank_accounts').where('id', bt.bank_account_id).increment('current_balance', delta);
-    }
-    await trx('bank_transactions').whereIn('linked_payment_id', payIds).del();
+    const bts = await trx('bank_transactions').whereIn('linked_payment_id', payIds).select('id', 'bank_account_id', 'type', 'amount', 'status');
+    for (const bt of bts) await deleteBankTransaction(trx, bt);
   }
   await trx('payments').where('local_sale_id', id).del();
   await trx('receivables').where('local_sale_id', id).del();
-  // Journal entries posted for the sale (lines cascade).
-  await trx('journal_entries').where('ref_no', sale.sale_no).del();
   await trx('local_sales').where('id', id).del();
 
   await auditDanger(trx, req, 'hard_delete', 'local_sale', id, { sale_no: sale.sale_no, snapshot: sale });
@@ -528,7 +666,8 @@ async function deletePayment(trx, req, id) {
   // A receipt linked ONLY to a local sale (no receivable) — draw the sale back too.
   if (settled && p.local_sale_id && !p.linked_receivable_id) await unmirrorLocalSale(trx, p.local_sale_id, amt);
   await reversePaymentCash(trx, p); // restore bank balance + drop the bank trail
-  await trx('journal_entries').where('ref_no', p.payment_no).del();
+  // Net the payment's GL (and a bounce's) back to zero with signed deltas.
+  await neutralizeRefs(trx, [p.payment_no], { userId: req.user?.id, reason: `Danger Zone: payment ${p.payment_no} deleted` });
   await trx('payments').where('id', id).del();
 
   await auditDanger(trx, req, 'hard_delete', 'payment', id, { payment_no: p.payment_no, snapshot: p });
@@ -538,9 +677,17 @@ async function deletePayment(trx, req, id) {
 async function deleteJournalEntry(trx, req, id) {
   const j = await trx('journal_entries').where('id', id).first();
   if (!j) { const e = new Error('Journal entry not found.'); e.status = 404; throw e; }
+  // Only an unposted draft may go: a Posted (or Reversed) journal is the
+  // books' history — deleting it rewrites the trial balance, in any period
+  // (P2-23 / ADM-17). Reverse it in Accounting instead.
+  if (j.status !== 'Draft') {
+    const e = new Error(`Journal ${j.journal_no} is ${j.status} — it cannot be deleted. Reverse it in Accounting (a signed-delta journal) instead.`);
+    e.status = 409; throw e;
+  }
   // Null out any reversal references pointing at this entry (NO ACTION FK).
   await trx('journal_entries').where('reversal_of', id).update({ reversal_of: null });
-  await trx('journal_entries').where('id', id).del(); // journal_lines cascade
+  await trx('journal_lines').where('journal_id', id).del(); // RESTRICT since mig 368
+  await trx('journal_entries').where('id', id).del();
   await auditDanger(trx, req, 'hard_delete', 'journal_entry', id, { journal_no: j.journal_no, snapshot: j });
   return { message: `Journal entry ${j.journal_no} deleted.`, journal_no: j.journal_no };
 }
@@ -548,6 +695,14 @@ async function deleteJournalEntry(trx, req, id) {
 async function deleteLotTransaction(trx, req, id) {
   const t = await trx('lot_transactions').where('id', id).first();
   if (!t) { const e = new Error('Lot transaction not found.'); e.status = 404; throw e; }
+  // A ledger row that moved stock is what the lot's quantity is built from —
+  // deleting it leaves the lot out of step with its ledger (ADM-17). Only a
+  // zero-quantity row (a note / failed post) may go; correct stock with a
+  // stock adjustment instead.
+  if (Math.abs(num(t.quantity_kg)) > 0.0005) {
+    const e = new Error(`Lot transaction ${t.transaction_no || id} moved ${t.quantity_kg} kg — deleting it would put the lot out of step with its ledger. Post a stock adjustment instead.`);
+    e.status = 409; throw e;
+  }
   await trx('lot_transactions').where('id', id).del();
   await auditDanger(trx, req, 'hard_delete', 'lot_transaction', id, { transaction_no: t.transaction_no, snapshot: t });
   return { message: `Lot transaction ${t.transaction_no} deleted.`, transaction_no: t.transaction_no };
@@ -571,19 +726,18 @@ async function deleteMillPurchase(trx, req, id) {
     }
   }
   await trx('mill_stock_movements').where({ reference_type: 'purchase', reference_id: id }).del();
-  // Reverse the store_purchase GL journal (posted by createPurchase, keyed on
-  // purchase_no) — otherwise the DR 1250 / CR 2010 entry survives everything it
-  // described and the trial balance is left off.
-  await trx('journal_entries').where('ref_no', mp.purchase_no).del();
   // Reverse + drop any payments made against this purchase's payable (restore the
   // bank balance, drop the bank trail) before deleting the payable, so a paid
   // purchase doesn't leave orphaned payments + cash drift.
   const payableIds = (await trx('payables').where({ source_table: 'mill_purchases', source_id: id }).select('id')).map((r) => r.id);
-  if (payableIds.length) {
-    const pays = await trx('payments').whereIn('linked_payable_id', payableIds);
-    for (const pay of pays) await reversePaymentCash(trx, pay);
-    await trx('payments').whereIn('linked_payable_id', payableIds).del();
-  }
+  const pays = payableIds.length ? await trx('payments').whereIn('linked_payable_id', payableIds) : [];
+  for (const pay of pays) await reversePaymentCash(trx, pay);
+  // Net the store_purchase GL (DR 1250 / CR 2010, keyed on purchase_no) and
+  // each payment's GL to zero with signed deltas — never delete them.
+  await neutralizeRefs(trx, [mp.purchase_no, ...pays.map((p) => p.payment_no)], {
+    userId: req.user?.id, reason: `Danger Zone: mill purchase ${mp.purchase_no} deleted`,
+  });
+  if (pays.length) await trx('payments').whereIn('linked_payable_id', payableIds).del();
   await trx('payables').where({ source_table: 'mill_purchases', source_id: id }).del();
   await trx('mill_purchases').where('id', id).del(); // mill_purchase_items cascade
   await auditDanger(trx, req, 'hard_delete', 'mill_purchase', id, { purchase_no: mp.purchase_no, snapshot: mp });
@@ -610,6 +764,17 @@ async function deleteExportOrder(trx, req, id) {
   if (!order) { const e = new Error('Export order not found.'); e.status = 404; throw e; }
   const orderNo = order.order_no;
 
+  // Credit / debit notes and printed-bag orders carry their own postings and
+  // payables (RESTRICT since mig 368) — cancel / void those first.
+  for (const [t, label] of [['credit_notes', 'credit note(s)'], ['export_debit_notes', 'debit note(s)'], ['printed_bag_orders', 'printed-bag order(s)']]) {
+    if (!(await trx.schema.hasTable(t))) continue;
+    const c = await trx(t).where('order_id', id).count('id as c').first();
+    if (parseInt(c?.c) > 0) {
+      const e = new Error(`Export order ${orderNo} has ${c.c} ${label} — void or delete those first.`);
+      e.status = 409; throw e;
+    }
+  }
+
   // Free reservations + restock anything already dispatched, so inventory stays right.
   const reservations = await trx('inventory_reservations').where('order_id', id);
   for (const r of reservations) {
@@ -632,104 +797,49 @@ async function deleteExportOrder(trx, req, id) {
   await trx('lot_transactions').where('reference_no', orderNo).whereIn('transaction_type', ['export_dispatch_out', 'export_allocation', 'export_release']).del();
 
   // Payments tied to this order's receivables (+ their bank trail), then the rest.
+  // Receipts: put the bank balance back (as deletePayment does — this used to
+  // drop the bank rows without restoring the balance) and net their GL.
   const recvIds = (await trx('receivables').where('order_id', id).select('id')).map((r) => r.id);
-  if (recvIds.length) {
-    const payIds = (await trx('payments').whereIn('linked_receivable_id', recvIds).select('id')).map((p) => p.id);
-    if (payIds.length) await delIfExists(trx, 'bank_transactions', (q) => q.whereIn('linked_payment_id', payIds));
-    await trx('payments').whereIn('linked_receivable_id', recvIds).del();
-  }
+  const pays = recvIds.length ? await trx('payments').whereIn('linked_receivable_id', recvIds) : [];
+  for (const p of pays) await reversePaymentCash(trx, p);
+  // The order's own GL (revenue / COGS / advance clearing, ref_no = order_no)
+  // and each receipt's GL are netted to zero by signed deltas — never deleted.
+  await neutralizeRefs(trx, [orderNo, ...pays.map((p) => p.payment_no)], {
+    userId: req.user?.id, reason: `Danger Zone: export order ${orderNo} deleted`,
+  });
+  if (pays.length) await trx('payments').whereIn('id', pays.map((p) => p.id)).del();
   for (const t of ['export_order_items', 'export_order_status_history', 'export_order_costs', 'export_order_documents', 'order_packing_lines', 'shipment_containers', 'receivables', 'advance_allocations', 'advance_payments']) {
     await delByCol(trx, t, 'order_id', id); // skips tables without an order_id column
   }
   await delByCol(trx, 'internal_transfers', 'export_order_id', id);
-  await trx('journal_lines').whereIn('journal_id', trx('journal_entries').where('ref_no', orderNo).select('id')).del();
-  await trx('journal_entries').where('ref_no', orderNo).del();
   await trx('export_orders').where('id', id).del();
 
   await auditDanger(trx, req, 'hard_delete', 'export_order', id, { order_no: orderNo, snapshot: order });
   return { message: `Export order ${orderNo} deleted (reservations freed, dispatch restocked).`, order_no: orderNo };
 }
 
+// A milling batch goes through the milling module's own delete (P2-23 /
+// MIL-18): the same refusals (Completed / yielded / paid transporter / service
+// invoices) and the same reversals (raw lot, source-lot holds, store
+// consumption, packaging, packing GL and freight accrual as signed deltas).
+// The Danger Zone used to hard-delete the batch's journals by ref_no and its
+// raw-rice payable + payments without their GL; a batch past that point is now
+// refused with the step to take first (reverse the yield).
 async function deleteMillingBatch(trx, req, id) {
   const batch = await trx('milling_batches').where('id', id).first();
   if (!batch) { const e = new Error('Milling batch not found.'); e.status = 404; throw e; }
-  const batchNo = batch.batch_no;
-  const batchRef = `batch-${id}`;
-
-  // Source lots fed into this batch (blends / byproduct re-mills). They belong
-  // to their OWN origin batch (different batch_ref), so the output-lot cleanup
-  // below never touches them — capture them now so their consumed stock can be
-  // handed back before the source links are deleted.
-  const sources = await trx('batch_source_lots').where('batch_id', id);
-
-  // Delete the batch's inventory lots (raw + outputs) and their ledger/movements.
-  const lots = await trx('inventory_lots').where('batch_ref', batchRef).select('id');
-  const lotIds = lots.map((l) => l.id);
-  if (lotIds.length) {
-    await delIfExists(trx, 'lot_transactions', (q) => q.whereIn('lot_id', lotIds));
-    await delIfExists(trx, 'inventory_reservations', (q) => q.whereIn('lot_id', lotIds));
-    await delIfExists(trx, 'batch_source_lots', (q) => q.whereIn('lot_id', lotIds));
-    await delIfExists(trx, 'stock_adjustments', (q) => q.whereIn('lot_id', lotIds));
-    await delIfExists(trx, 'stock_count_items', (q) => q.whereIn('lot_id', lotIds));
-    await trx('inventory_lots').whereIn('id', lotIds).del();
-  }
-
-  // Hand consumed source-lot stock back. A Completed blend issued each source
-  // lot via a milling_issue ledger row (lot_id = source, reference_no = batchRef,
-  // signed quantity_kg) that decremented qty / available_qty / net_weight_kg —
-  // reverse that exactly by adding the consumed magnitude back to all three, then
-  // drop the consumption ledger. A pre-yield batch has no such row (its lots were
-  // only flagged 'In Milling'), so we just release the flag. Without this the
-  // source lots stay Consumed/'In Milling' with their stock written off and
-  // invisible to the New-Batch picker.
-  for (const s of sources) {
-    const srcLot = await trx('inventory_lots').where('id', s.lot_id).first();
-    const consumed = await trx('lot_transactions')
-      .where({ lot_id: s.lot_id, reference_no: batchRef })
-      .where('quantity_kg', '<', 0)
-      .sum('quantity_kg as q').first();
-    const consumedKg = Math.abs(num(consumed?.q)); // signed ledger → KG magnitude
-    if (srcLot) {
-      const restore = { status: 'Available', milling_status: null, updated_at: trx.fn.now() };
-      if (consumedKg > 0) {
-        restore.qty = num(srcLot.qty) + consumedKg;
-        restore.available_qty = num(srcLot.available_qty) + consumedKg;
-        restore.net_weight_kg = num(srcLot.net_weight_kg) + consumedKg;
-      }
-      await trx('inventory_lots').where('id', s.lot_id).update(restore);
+  try {
+    await deleteBatchTx(trx, batch.id, req.user?.id || null);
+  } catch (err) {
+    if (err.statusCode) {
+      const e = new Error(err.message);
+      e.status = err.statusCode === 404 ? 404 : 409;
+      throw e;
     }
-    await delIfExists(trx, 'lot_transactions', (q) => q.where({ lot_id: s.lot_id, reference_no: batchRef }));
+    throw err;
   }
-
-  for (const t of ['milling_vehicle_arrivals', 'milling_quality_samples', 'milling_quality_post', 'milling_costs', 'batch_source_lots', 'milling_output_market_prices']) {
-    await delByCol(trx, t, 'batch_id', id);
-  }
-  await delByCol(trx, 'internal_transfers', 'batch_id', id);
-
-  // Reverse the batch's GL journals — the milling-completion entry and any
-  // rice-purchase accrual are both keyed by ref_no = batch_no. Deleting both
-  // legs keeps the trial balance balanced (Posted-only basis).
-  await trx('journal_lines').whereIn('journal_id', trx('journal_entries').where('ref_no', batchNo).select('id')).del();
-  await trx('journal_entries').where('ref_no', batchNo).del();
-
-  // Drop the raw-rice purchase payable a procurement-fed batch accrues
-  // (MILL-RICE-<batchNo>, source_table 'milling_raw_rice') plus its payment trail
-  // — otherwise it dangles after the batch is gone.
-  const payableIds = (await trx('payables').where({ source_table: 'milling_raw_rice', source_id: id }).select('id')).map((p) => p.id);
-  if (payableIds.length) {
-    const payIds = (await trx('payments').whereIn('linked_payable_id', payableIds).select('id')).map((p) => p.id);
-    if (payIds.length) {
-      await delIfExists(trx, 'bank_transactions', (q) => q.whereIn('linked_payment_id', payIds));
-      await trx('payments').whereIn('linked_payable_id', payableIds).del();
-    }
-    await trx('payables').whereIn('id', payableIds).del();
-  }
-
-  await trx('milling_batches').where('id', id).del();
-
-  await auditDanger(trx, req, 'hard_delete', 'milling_batch', id, { batch_no: batchNo, snapshot: batch });
-  const restored = sources.length ? ` ${sources.length} source lot(s) restored.` : '';
-  return { message: `Milling batch ${batchNo} deleted (lots, vehicles, costs, journals & payables removed).${restored}`, batch_no: batchNo };
+  await auditDanger(trx, req, 'hard_delete', 'milling_batch', id, { batch_no: batch.batch_no, snapshot: batch, via: 'milling.deleteBatch' });
+  return { message: `Milling batch ${batch.batch_no} deleted (raw lot, holds, store and freight reversed).`, batch_no: batch.batch_no };
 }
 
 // Delete a master record only if nothing live still references it.
@@ -769,3 +879,4 @@ async function deleteMaster(trx, req, type, id) {
 }
 
 module.exports = dangerZone;
+module.exports.KEEP_TABLES = KEEP_TABLES;

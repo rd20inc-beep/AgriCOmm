@@ -36,6 +36,7 @@ jest.mock('../modules/accounting/accounting.service', () => ({
 
 jest.mock('../modules/finance/fxRate.service', () => ({
   getRateForDate: jest.fn(async () => ({ rate: 280, source: 'fx_rates' })),
+  requireRate: jest.fn(async () => 280),
 }));
 
 const db = require('../config/database');

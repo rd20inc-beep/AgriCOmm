@@ -30,8 +30,9 @@ const { assertAccountCurrency } = require('../../shared/accountCurrency');
 const { assertMillEntity, assertMillAccount } = require('../../shared/millPayer');
 const {
   isCheque, postPaymentJournal, settleDocuments, resolveSource,
-  pendingChequeTotal, nextBtNo, round2,
+  pendingChequeTotal, round2,
 } = require('./paymentSettlement');
+const { postBankTransaction } = require('../../shared/bankBalance');
 
 const num = (v) => parseFloat(v) || 0;
 const httpError = (message, statusCode = 400) => { const e = new Error(message); e.statusCode = statusCode; return e; };
@@ -75,6 +76,20 @@ async function assertWithinOutstanding(trx, { row, isReceipt, amount }) {
 }
 
 /**
+ * A payment / receipt settles a document in that document's own currency
+ * (P2-19): a USD receivable is never settled with a PKR figure, nor a PKR
+ * payable with a USD one. A document with no currency is PKR.
+ */
+function assertDocumentCurrency(doc, currency, what = 'document') {
+  if (!doc) return;
+  const docCur = String(doc.currency || 'PKR').toUpperCase();
+  const cur = String(currency || 'PKR').toUpperCase();
+  if (cur !== docCur) {
+    throw httpError(`This ${what} is in ${docCur} — record the ${what === 'receivable' ? 'receipt' : 'payment'} in ${docCur}, not ${cur}.`);
+  }
+}
+
+/**
  * Move a cash / bank account and write its bank_transactions row — the one way
  * money enters or leaves an account (the engine, and the statutory remittance,
  * which pays a liability account rather than a document).
@@ -83,15 +98,11 @@ async function postAccountMovement(trx, {
   account, direction, amount, date, reference = null, paymentId = null, userId = null,
   source, notes = null, counterparty = null, category = null,
 }) {
-  const amt = round2(amount);
-  await trx('bank_accounts').where({ id: account.id })[direction === 'in' ? 'increment' : 'decrement']('current_balance', amt);
-  const [row] = await trx('bank_transactions').insert({
-    transaction_no: await nextBtNo(trx),
-    bank_account_id: account.id,
+  return postBankTransaction(trx, {
+    accountId: account.id,
     type: direction === 'in' ? 'credit' : 'debit',
-    amount: amt,
+    amount: round2(amount),
     currency: account.currency || 'PKR',
-    status: 'posted',
     transaction_date: date || new Date(),
     reference,
     counterparty,
@@ -100,8 +111,7 @@ async function postAccountMovement(trx, {
     source,
     linked_payment_id: paymentId,
     created_by: userId || null,
-  }).returning('*');
-  return row;
+  });
 }
 
 /**
@@ -128,7 +138,8 @@ async function postAccountMovement(trx, {
  *   bt               { source, notes, counterparty, category } for the bank row
  *   stamp            extra fields for a source row that records how it was paid
  *
- * Returns { payment, accountId, isPostDated, bankMove, journal, settled }.
+ * Returns { payment, accountId, isPostDated, bankMove, journal, settled, overdraft }
+ * (overdraft: the warning when the payment left its account below zero, else null).
  */
 async function recordMoneyMovement(trx, opts) {
   const {
@@ -164,6 +175,7 @@ async function recordMoneyMovement(trx, opts) {
     // A receivable raised from a local sale is the mill's (it posts to 1120).
     assertMillEntity(linked.local_sale_id ? 'mill' : linked.entity, isReceipt ? 'receivables' : 'payables');
   }
+  if (linked) assertDocumentCurrency(linked, currency, isReceipt ? 'receivable' : 'payable');
   if (linked && checkOutstanding) await assertWithinOutstanding(trx, { row: linked, isReceipt, amount: amt });
 
   const source = sourceIn || (!isReceipt && payable ? await resolveSource(trx, { payable }) : null);
@@ -183,7 +195,10 @@ async function recordMoneyMovement(trx, opts) {
   if (accountId && !acct) throw httpError('Bank account not found.');
   if (acct) assertAccountCurrency(acct, cur);
 
-  const fx = cur === 'PKR' ? 1 : (num(fxRate) > 0 ? num(fxRate) : num((await fxRateService.getLatestRate(cur)).rate));
+  // A foreign amount converts at the rate given, else the currency's rate for
+  // the payment date — never a made-up one (D-10: no rate on file → refused).
+  const fx = cur === 'PKR' ? 1 : (num(fxRate) > 0 ? num(fxRate)
+    : await fxRateService.requireRate(cur, paymentDate || new Date(), { what: `This ${isReceipt ? 'receipt' : 'payment'}`, knex: trx }));
   const basePkr = round2(cur === 'PKR' ? amt : amt * fx);
   const no = paymentNo || await generatePaymentNo(trx);
 
@@ -225,13 +240,14 @@ async function recordMoneyMovement(trx, opts) {
   });
 
   let bankMove = 0;
+  let overdraft = null;
   if (acct) {
     // Native when the account holds the payment's currency, else the PKR
     // figure stamped on the payment; only the NET (after WHT + discount)
     // leaves the bank. The bank row carries the same figure, so the Cash tab's
     // balance = Σ(transactions).
     bankMove = round2((String(acct.currency || 'PKR').toUpperCase() === cur ? amt : basePkr) - whtNum - discNum);
-    await postAccountMovement(trx, {
+    const bankRow = await postAccountMovement(trx, {
       account: acct,
       direction: isReceipt ? 'in' : 'out',
       amount: bankMove,
@@ -244,13 +260,16 @@ async function recordMoneyMovement(trx, opts) {
       counterparty: bt.counterparty || null,
       category: bt.category || null,
     });
+    overdraft = bankRow.overdraft || null;
   }
 
   const journal = await postPaymentJournal(trx, {
     payment, userId, date: paymentDate || new Date(), overrides: journalOpts,
   });
 
-  return { payment, accountId, isPostDated, bankMove, journal, settled };
+  return { payment, accountId, isPostDated, bankMove, journal, settled, overdraft };
 }
 
-module.exports = { recordMoneyMovement, postAccountMovement, generatePaymentNo, assertWithinOutstanding };
+module.exports = {
+  recordMoneyMovement, postAccountMovement, generatePaymentNo, assertWithinOutstanding, assertDocumentCurrency,
+};

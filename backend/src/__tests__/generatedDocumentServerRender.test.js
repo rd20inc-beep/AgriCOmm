@@ -239,6 +239,41 @@ describe('stored rendering', () => {
     expect(row.locked).toBe(true);
     expect(row.rendered_html).toBe('<p>APPROVED VIEW</p>');
   });
+
+  // P2-32 / EXP-39 — maker-checker: the generator of a version may not approve
+  // it, unless they are the Owner.
+  const approvable = (generatedBy) => ({ doc_type: 'packing-list', status: 'Under Review', generated_by: generatedBy, snapshot_json: {
+    totals: { netWeightKg: 1, grossWeightKg: 2, totalPackages: 1 }, items: [],
+    company: { bank: { title: 't', account: 'a', iban: 'i', swift: 's' } },
+  } });
+
+  it('the generator of a version cannot approve it', async () => {
+    seed([approvable(5)]);
+    db.tables.users = [{ id: 5, role_id: 2 }];
+    db.tables.roles = [{ id: 2, name: 'Export Manager' }];
+    const res = mockRes();
+    await controller.approve(req({ genId: '100' }), res);
+    expect(res.statusCode).toBe(403);
+    expect(res.body.code).toBe('MAKER_CHECKER');
+    expect(db.tables.generated_documents[0].status).toBe('Under Review');
+  });
+
+  it('the Owner may approve a version they generated', async () => {
+    seed([approvable(5)]);
+    db.tables.users = [{ id: 5, role_id: 9 }];
+    db.tables.roles = [{ id: 9, name: 'Owner' }];
+    const res = mockRes();
+    await controller.approve(req({ genId: '100' }), res);
+    expect(res.statusCode).toBe(200);
+    expect(db.tables.generated_documents[0].status).toBe('Approved');
+  });
+
+  it('someone other than the generator may approve', async () => {
+    seed([approvable(77)]);
+    const res = mockRes();
+    await controller.approve(req({ genId: '100' }), res);
+    expect(res.statusCode).toBe(200);
+  });
 });
 
 describe('bundle renders stored versions only', () => {

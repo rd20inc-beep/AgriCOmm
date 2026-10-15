@@ -85,6 +85,8 @@ describe('recordPayment against a payable', () => {
   test('a foreign payment with no order rate converts at the latest rate, not 280', async () => {
     seed({ ...base(), fx_rates: [{ id: 1, from_currency: 'USD', to_currency: 'PKR', is_active: true, rate: 300, effective_date: '2026-10-01' }] });
     db.tables.payables[0].original_amount = 100000; db.tables.payables[0].paid_amount = 0;
+    // The bill itself is in USD (P2-19: a payment is in its document's currency).
+    db.tables.payables[0].currency = 'USD';
     const r = res();
     await financeController.recordPayment({ body: { ...body(10), currency: 'USD' }, user: { id: 1 } }, r);
     expect(r.statusCode).toBe(201);
@@ -183,7 +185,7 @@ describe('reversePayment', () => {
       bank_accounts: [{ id: 8, currency: 'PKR', current_balance: 0 }],
     });
     const r = res();
-    await financeController.reversePayment({ params: { id: '10' }, body: {}, user: { id: 1 } }, r);
+    await financeController.reversePayment({ params: { id: '10' }, body: { reason: 'test reversal' }, user: { id: 1 } }, r);
     expect(r.statusCode).toBe(200);
     expect(row('payables', 22)).toMatchObject({ paid_amount: 0, status: 'Pending' });
     expect(row('export_order_costs', 6)).toMatchObject({ paid_amount: 0, payment_status: 'Pending', paid_at: null });
@@ -205,7 +207,7 @@ describe('reversePayment', () => {
       ],
     });
     const r = res();
-    await financeController.reversePayment({ params: { id: '11' }, body: {}, user: { id: 1 } }, r);
+    await financeController.reversePayment({ params: { id: '11' }, body: { reason: 'test reversal' }, user: { id: 1 } }, r);
     expect(r.statusCode).toBe(200);
     expect(row('receivables', 31)).toMatchObject({ received_amount: 0, outstanding: 1000, status: 'Pending' });
     expect(row('local_sales', 3)).toMatchObject({ paid_amount: 0, due_amount: 1000, payment_status: 'Credit' });
@@ -223,7 +225,7 @@ describe('reversePayment', () => {
       bank_accounts: [{ id: 9, currency: 'USD', current_balance: 100 }],
     });
     const r = res();
-    await financeController.reversePayment({ params: { id: '12' }, body: {}, user: { id: 1 } }, r);
+    await financeController.reversePayment({ params: { id: '12' }, body: { reason: 'test reversal' }, user: { id: 1 } }, r);
     expect(r.statusCode).toBe(400);
     expect(r.body.message).toMatch(/Reverse it from the export order/);
     expect(row('bank_accounts', 9).current_balance).toBe(100);
@@ -233,7 +235,7 @@ describe('reversePayment', () => {
   test('a payment already reversed cannot be reversed again', async () => {
     seed({ payments: [{ id: 13, payment_no: 'PAY-013', type: 'payment', amount: 1, status: 'Reversed', linked_payable_id: 1 }] });
     const r = res();
-    await financeController.reversePayment({ params: { id: '13' }, body: {}, user: { id: 1 } }, r);
+    await financeController.reversePayment({ params: { id: '13' }, body: { reason: 'test reversal' }, user: { id: 1 } }, r);
     expect(r.statusCode).toBe(400);
     expect(r.body.message).toMatch(/already been reversed/);
   });

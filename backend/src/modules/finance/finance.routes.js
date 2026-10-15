@@ -8,10 +8,14 @@ const authorize = require('../../middleware/rbac');
 const { authorizeAny, authorizeRole } = require('../../middleware/rbac');
 const db = require('../../config/database');
 const auditAction = require('../../middleware/audit');
+const ownerApproval = require('../../middleware/ownerApproval');
+const retired = require('../../middleware/retired');
 const validate = require('../../middleware/validate');
 const schemas = require('../../middleware/schemas');
 const fundTransfers = require('../finance/fundTransfers.service');
 const { isMillOnlyPayer } = require('../../shared/millPayer');
+const { bankTieOut } = require('./bankTieOut');
+const { settleAcross } = require('./settleAcross');
 
 // #14 Phase 1e — supporting-document upload for payments (WHT certificate,
 // vendor invoice, receipt). Disk storage under uploads/payments, mirroring the
@@ -130,15 +134,12 @@ router.get('/fund-transfers/:id', authorize('finance', 'view'), async (req, res)
     return res.json({ success: true, data: { transfer } });
   } catch (e) { return sendTransferError(res, e); }
 });
-router.post('/fund-transfers', authorize('finance', 'confirm_payment'),
-  auditAction('fund_transfer', 'finance', (req, data) => data?.data?.transfer?.id || null),
-  async (req, res) => {
-    try {
-      const transfer = await fundTransfers.create(req.body, req.user?.id);
-      if (transfer && transfer.overdraft) return res.json({ success: true, data: { transfer, warning: transfer.overdraft } });
-      return res.json({ success: true, data: { transfer } });
-    } catch (e) { return res.status(e.statusCode || 400).json({ success: false, message: e.message }); }
-  });
+// P2-31: the legacy create (no Joi, no account lock, no direction check, no
+// client_ref) is retired. A Head Office ⇄ Mill transfer is made through POST
+// /contra-transfers, which hands a cross-entity pair to the same pending,
+// accept-to-complete flow (fundTransfers.createContra).
+router.post('/fund-transfers',
+  retired('Fund transfers are made through POST /api/finance/contra-transfers (Head Office ⇄ Mill included).'));
 // Accepting is authorised by the RECEIVING side, with no Owner step (owner
 // decision 2026-10-06): Head Office (to_entity 'general') accepts with
 // finance.confirm_payment, the Mill with milling.edit. It used to be
@@ -194,9 +195,19 @@ router.get('/purchases/:source/:sourceId/payments', authorize('finance', 'view')
 router.get('/mill-lot-costs', authorize('finance', 'view'), controller.getMillLotCosts);
 router.get('/journal-entries', authorize('finance', 'view'), controller.getJournalEntries);
 router.get('/alerts', authorize('finance', 'view'), controller.getAlerts);
+// Cash tie-out (P2-17): balance vs Σ posted bank rows vs GL, per account.
+// Read-only; the accounting roles that can post a correcting journal see it.
+router.get('/bank-tie-out', authorize('finance', 'post_journal'), async (req, res) => {
+  try {
+    return res.json({ success: true, data: await bankTieOut() });
+  } catch (err) {
+    console.error('bank tie-out error:', err);
+    return res.status(500).json({ success: false, message: 'Internal server error.' });
+  }
+});
 router.get('/overview', authorize('finance', 'view'), controller.getOverview);
 router.get('/upcoming', authorize('finance', 'view'), controller.getUpcoming);
-router.post('/payments/:id/clear', authorize('finance', 'confirm_payment'), controller.clearCheque);
+router.post('/payments/:id/clear', authorize('finance', 'confirm_payment'), auditAction('clear_cheque', 'payment'), controller.clearCheque);
 // B1: an uncleared cheque bounced — reason required, optional bank charge.
 router.post('/payments/:id/bounce', authorize('finance', 'confirm_payment'),
   validate(schemas.bounceCheque),
@@ -214,11 +225,34 @@ router.post(
   auditAction('record_payment', 'finance', (req, data) => data.data && data.data.id ? data.data.id : null),
   controller.recordPayment
 );
-// Reversal is its own permission (split from confirm_payment, mig 339 —
-// granted to every confirm_payment holder; the owner may revoke it per role).
+// P2-31: settle one party's invoices together — every part posted, or none
+// (finance/settleAcross.js). Same permission as a single payment; a mill-only
+// payer is held to mill documents and accounts by the engine.
+router.post(
+  '/settle',
+  canPayFinanceOrMill,
+  validate(schemas.settleAcross),
+  auditAction('settle_across', 'finance', (req, data) => (data && data.data && data.data.payments && data.data.payments[0] && data.data.payments[0].id) || null),
+  async (req, res) => {
+    try {
+      const millOnly = await isMillOnlyPayer(req);
+      const out = await db.transaction((trx) => settleAcross(trx, req.body, { userId: req.user?.id, millOnly }));
+      return res.status(201).json({ success: true, data: { ...out, ...(out.overdraft ? { warning: out.overdraft } : {}) } });
+    } catch (e) {
+      const code = e.statusCode || e.status || 500;
+      if (code === 500) console.error('settle across error:', e);
+      return res.status(code).json({ success: false, message: code === 500 ? 'Internal server error.' : e.message });
+    }
+  });
+// Reversal is its own permission (split from confirm_payment, mig 339). Owner
+// decision D-3: it also needs a reason and the Owner's approval — the Owner
+// self-approves, anyone else has an Owner enter their password (mig 364 takes
+// the permission away from Mill Manager and Export Manager).
 router.post(
   '/payments/:id/reverse',
   authorize('finance', 'reverse_payment'),
+  ownerApproval('payment_reversal'),
+  validate(schemas.reversePayment),
   auditAction('reverse_payment', 'payment', (req) => req.params.id),
   controller.reversePayment
 );
@@ -406,6 +440,7 @@ router.post('/fx-rates', authorize('finance', 'set_rates'),
     });
     return res.json({ success: true, data: row });
   } catch (err) {
+    if (err.statusCode && err.statusCode < 500) return res.status(err.statusCode).json({ success: false, message: err.message });
     console.error('Add FX rate error:', err);
     return res.status(500).json({ success: false, message: err.message });
   }

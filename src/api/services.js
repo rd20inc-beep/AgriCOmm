@@ -4,7 +4,7 @@
 export { exportOrdersApi } from '../modules/exportOrders/api/services';
 export { millingApi } from '../modules/milling/api/services';
 export { inventoryApi, lotInventoryApi } from '../modules/inventory/api/services';
-export { financeApi, advancesApi } from '../modules/finance/api/services';
+export { financeApi } from '../modules/finance/api/services';
 export { accountingApi } from '../modules/accounting/api/services';
 export { documentsApi } from '../modules/documents/api/services';
 export { reportingApi, intelligenceApi, controlApi, smartApi, approvalsApi } from '../modules/analytics/api/services';

@@ -22,17 +22,19 @@ const { normalizePaymentMethod } = require('../../shared/constants/paymentMethod
 const { ledgerFailure, missingAccounts } = require('../../shared/ledgerFailure');
 const { glAccountFor } = require('../../shared/accountGl');
 const {
-  applyReceivableDelta, pendingChequeTotal, nextBtNo, postDeltaOf, round2,
+  applyReceivableDelta, pendingChequeTotal, postDeltaOf, round2,
   isCheque, hasPaymentJournal, postPaymentJournal, settleDocuments, SOURCES, LOT_SUPPLIER_LINES,
 } = require('./paymentSettlement');
-const { recordMoneyMovement } = require('./paymentEngine');
+const { recordMoneyMovement, postAccountMovement, assertDocumentCurrency } = require('./paymentEngine');
+const { postBankTransaction } = require('../../shared/bankBalance');
+const { bankTieOut } = require('./bankTieOut');
 const { bounceCheque } = require('./chequeBounce');
 const { recordPendingExportReceipt } = require('../exportOrders/exportReceipts');
 
 // Resolve a payment row to its PKR equivalent using the strongest
 // signal we have: stored base_amount_pkr first, then amount × fx_rate
-// when the rate is real (>1), then amount × 280 as a final fallback
-// for legacy non-PKR rows missing a rate. PKR rows pass through.
+// when the rate is real (>1). A legacy non-PKR row with neither has NO
+// known PKR figure (null) — never a made-up rate (D-10). PKR rows pass through.
 function paymentToPkr(p) {
   const base = parseFloat(p.base_amount_pkr);
   if (base && base > 0) return base;
@@ -41,7 +43,7 @@ function paymentToPkr(p) {
   if (cur === 'PKR') return amount;
   const rate = parseFloat(p.fx_rate);
   if (rate && rate > 1) return amount * rate;
-  return amount * 280;
+  return null;
 }
 
 /**
@@ -107,6 +109,9 @@ async function loadPayablesFeed(query = {}) {
       db.raw('COALESCE(s.name, mb.supplier_name) as supplier_name'),
     )
     .where('mc.amount', '>', 0)
+    // A cost row a business expense owns is paid through that expense's own
+    // payable (PAY-EXP…, stored above) — never re-derived as a second bill (P2-21).
+    .whereNull('mc.business_expense_id')
     .orderBy('mc.created_at', 'desc');
 
   const exportCosts = await db('export_order_costs as eoc')
@@ -118,6 +123,7 @@ async function loadPayablesFeed(query = {}) {
       'eoc.created_at', 'eo.order_no', 'c.name as customer_name',
     )
     .where('eoc.amount', '>', 0)
+    .whereNull('eoc.business_expense_id') // its expense's payable is the bill (P2-21)
     .orderBy('eoc.created_at', 'desc');
 
   const millExpenses = await db('mill_expenses')
@@ -396,7 +402,7 @@ const financeController = {
       const base = () => db('payments as p')
         .leftJoin('bank_accounts as ba', 'ba.id', 'p.bank_account_id')
         // Exclude pending/rejected export receipts — not banked money yet (item 14).
-        .whereNotIn('p.status', ['Pending Finance Confirmation', 'Rejected'])
+        .whereNotIn('p.status', ['Pending Finance Confirmation', 'Rejected', 'Superseded'])
         .select(
           'p.id', 'p.payment_no', 'p.amount', 'p.currency', 'p.payment_method',
           'p.payment_date', 'p.bank_reference', 'p.notes', 'p.bank_account_id', 'p.type',
@@ -529,7 +535,7 @@ const financeController = {
         // was recorded (it still has to be cleared here before it counts).
         .where('p.payment_method', 'cheque').where('p.cleared', false)
         // A reversed, rejected or bounced cheque is not coming — don't count it down.
-        .whereNotIn('p.status', ['Reversed', 'Rejected', 'Bounced'])
+        .whereNotIn('p.status', ['Reversed', 'Rejected', 'Bounced', 'Superseded'])
         .select('p.id', 'p.type', 'p.amount', 'p.currency', 'p.fx_rate', 'p.base_amount_pkr', 'p.due_date', 'p.payment_date', 'p.payment_no', 'p.bank_account_id', 'p.bank_reference',
           'p.local_sale_id', 'r.local_sale_id as recv_local_sale_id',
           'r.customer_id as recv_customer_id', 'pa.supplier_id as pay_supplier_id', 'ls.customer_id as ls_customer_id',
@@ -576,15 +582,29 @@ const financeController = {
 
       // Each row carries its native currency + a PKR equivalent (for totals).
       // Payables have no stored fx_rate column, so a foreign payable converts at
-      // the LIVE USD rate (not a stale flat 280) — receivables/cheques still use
-      // their own stored rate.
+      // the latest rate for ITS currency (an estimate, D-10) — receivables /
+      // cheques use their own stored rate. A currency with no rate on file has
+      // no PKR equivalent (null) and is left out of the PKR totals.
       const live = await fxRateService.getLatestRate('USD');
-      const liveUsd = live.rate || 280;
-      const toPkr = (amt, cur, fx) => ((cur || 'PKR').toUpperCase() === 'PKR' ? amt : amt * (parseFloat(fx) || liveUsd));
+      const liveUsd = live.rate || null;
+      const curs = new Set([...cheques, ...recv, ...pay].map((x) => String(x.currency || 'PKR').toUpperCase()).filter((c) => c !== 'PKR'));
+      const latestOf = { USD: liveUsd };
+      for (const c of curs) if (!(c in latestOf)) latestOf[c] = (await fxRateService.getLatestRate(c)).rate || null;
+      const toPkr = (amt, cur, fx) => {
+        const c = (cur || 'PKR').toUpperCase();
+        if (c === 'PKR') return amt;
+        const r = parseFloat(fx) > 0 ? parseFloat(fx) : latestOf[c];
+        return r ? amt * r : null;
+      };
       // C5: which rate each row's amountPkr used — 'booked' (the row's own
       // booked figure / rate), 'today' (the live rate, for rows with none) or
       // 'native' (a PKR row). The UI labels the equivalent accordingly.
-      const basisOf = (cur, fx) => ((cur || 'PKR').toUpperCase() === 'PKR' ? 'native' : (parseFloat(fx) > 0 ? 'booked' : 'today'));
+      const basisOf = (cur, fx) => {
+        const c = (cur || 'PKR').toUpperCase();
+        if (c === 'PKR') return 'native';
+        if (parseFloat(fx) > 0) return 'booked';
+        return latestOf[c] ? 'today' : 'none';
+      };
       // A receivable's booked PKR scaled to what is still outstanding.
       const recvPkr = (x, amount, currency) => {
         if (currency === 'PKR') return { amountPkr: amount, pkrBasis: 'native' };
@@ -614,7 +634,7 @@ const financeController = {
       ].sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
       const giving = [
         ...chq('payment'),
-        ...pay.map((x) => { const amount = parseFloat(x.amount) || 0; const currency = (x.currency || 'PKR').toUpperCase(); return { kind: 'credit', label: 'Payable', dueDate: x.due_date, amount, currency, amountPkr: toPkr(amount, currency, liveUsd), pkrBasis: currency === 'PKR' ? 'native' : 'today', party: x.party, reference: x.ref, partyType: 'supplier', partyId: x.supplier_id || null }; }),
+        ...pay.map((x) => { const amount = parseFloat(x.amount) || 0; const currency = (x.currency || 'PKR').toUpperCase(); return { kind: 'credit', label: 'Payable', dueDate: x.due_date, amount, currency, amountPkr: toPkr(amount, currency, null), pkrBasis: basisOf(currency, null), party: x.party, reference: x.ref, partyType: 'supplier', partyId: x.supplier_id || null }; }),
       ].sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
 
       return res.json({ success: true, data: {
@@ -624,6 +644,7 @@ const financeController = {
         totalReceiving: receiving.reduce((s, x) => s + (x.amountPkr || 0), 0),
         totalGiving: giving.reduce((s, x) => s + (x.amountPkr || 0), 0),
         todayRate: liveUsd,
+        todayRateStale: !!live.stale, // D-10: the latest rate is an estimate; flag an old one
         todayRateDate: require('../exportOrders/balanceDueDate').dayOf(live.effectiveDate),
       } });
     } catch (err) {
@@ -649,12 +670,14 @@ const financeController = {
         // Locked so a clear cannot race a reversal of the same cheque.
         const p = await trx('payments').where({ id }).forUpdate().first();
         if (!p) throw fail('Payment not found.', 404);
-        if (p.status === 'Reversed' || p.status === 'Rejected' || p.status === 'Bounced') {
+        if (p.status === 'Reversed' || p.status === 'Rejected' || p.status === 'Bounced' || p.status === 'Superseded') {
           throw fail(`Cheque ${p.payment_no} was ${String(p.status).toLowerCase()} — it cannot be cleared.`, p.status === 'Bounced' ? 409 : 400);
         }
         if (p.cleared) return { alreadyCleared: true };
         const amount = parseFloat(p.amount) || 0;
         const amountPkr = paymentToPkr(p);
+        // A foreign cheque with no booked rate has no PKR figure to post (D-10).
+        if (amountPkr == null) throw fail(`Cheque ${p.payment_no} is in ${p.currency} with no booked rate — it cannot be posted until its rate is recorded.`, 422);
         // The money moves today, so it has to move through an account: the one
         // picked in Due Dates, else the one named when the cheque was recorded.
         const acctId = bank_account_id || p.bank_account_id || null;
@@ -716,16 +739,14 @@ const financeController = {
           const wht = p.type === 'payment' ? (parseFloat(p.wht_amount) || 0) : 0;
           const disc = p.type === 'payment' ? (parseFloat(p.discount_amount) || 0) : 0;
           const bankMove = round2((acct && acct.currency === (p.currency || 'PKR') ? amount : amountPkr) - wht - disc);
-          const dir = p.type === 'receipt' ? 'increment' : 'decrement';
-          await trx('bank_accounts').where({ id: acctId })[dir]('current_balance', bankMove);
-          await trx('bank_transactions').insert({
-            transaction_no: await nextBtNo(trx), bank_account_id: acctId,
-            type: p.type === 'receipt' ? 'credit' : 'debit', amount: bankMove, currency: acct?.currency || 'PKR', status: 'posted',
-            transaction_date: new Date(), reference: p.bank_reference || null,
-            notes: `Cheque cleared (${p.payment_no})`, source: 'cheque_clear', linked_payment_id: p.id, created_by: req.user?.id || null,
+          // The engine's own account move (balance + bank row, one helper).
+          const bankRow = await postAccountMovement(trx, {
+            account: acct, direction: p.type === 'receipt' ? 'in' : 'out', amount: bankMove,
+            date: new Date(), reference: p.bank_reference || null, paymentId: p.id, userId: req.user?.id || null,
+            source: 'cheque_clear', notes: `Cheque cleared (${p.payment_no})`,
           });
+          return { cleared: true, overdraft: bankRow.overdraft || null };
         }
-        return { cleared: true };
       });
       return res.json({ success: true, data: result });
     } catch (err) {
@@ -1042,7 +1063,7 @@ const financeController = {
       }
 
       // Cheques past their clearing date but not yet cleared.
-      const oc = await safe(() => db('payments').where('payment_method', 'cheque').where('cleared', false).whereNotIn('status', ['Reversed', 'Rejected', 'Bounced']).whereNotNull('due_date').where('due_date', '<', today).count('id as c').sum('amount as t').first(), { c: 0, t: 0 });
+      const oc = await safe(() => db('payments').where('payment_method', 'cheque').where('cleared', false).whereNotIn('status', ['Reversed', 'Rejected', 'Bounced', 'Superseded']).whereNotNull('due_date').where('due_date', '<', today).count('id as c').sum('amount as t').first(), { c: 0, t: 0 });
       if (parseInt(oc.c, 10) > 0) alerts.push({ id: 'overdue_cheques', type: 'cheque', severity: 'warning', title: 'Cheques awaiting clearance', message: `${oc.c} cheque(s) are past their clearing date — ${rs(oc.t)}.`, count: parseInt(oc.c, 10), total: num(oc.t), link: '/finance/due-dates' });
 
       // Due within the next 7 days (heads-up, info).
@@ -1050,6 +1071,11 @@ const financeController = {
       if (parseInt(dueRecv.c, 10) > 0) alerts.push({ id: 'due_recv', type: 'receivable', severity: 'info', title: 'Receivables due this week', message: `${dueRecv.c} receivable(s) due within 7 days — ${rs(dueRecv.t)}.`, count: parseInt(dueRecv.c, 10), total: num(dueRecv.t), link: '/finance/due-dates' });
       const duePay = await safe(() => db('payables').whereBetween('due_date', [today, in7]).whereNot('status', 'Paid').where('outstanding', '>', 0).count('id as c').sum('outstanding as t').first(), { c: 0, t: 0 });
       if (parseInt(duePay.c, 10) > 0) alerts.push({ id: 'due_pay', type: 'payable', severity: 'info', title: 'Payables due this week', message: `${duePay.c} bill(s) due within 7 days — ${rs(duePay.t)}.`, count: parseInt(duePay.c, 10), total: num(duePay.t), link: '/finance/due-dates' });
+
+      // Cash tie-out (P2-17): a balance no bank row explains, or a PKR account
+      // whose balance disagrees with its own GL account.
+      const tie = await safe(() => bankTieOut(), null);
+      if (tie && tie.drift_count > 0) alerts.push({ id: 'bank_tie_out', type: 'bank', severity: 'danger', title: 'Cash does not tie out', message: `${tie.drift_count} cash / bank account(s) disagree with their bank rows or GL — see the cash tie-out report.`, count: tie.drift_count, link: '/finance/cash' });
 
       // Export orders awaiting action.
       const po = await safe(() => db('export_orders').whereIn('status', ['Draft', 'Awaiting Advance']).count('id as c').first(), { c: 0 });
@@ -1202,7 +1228,7 @@ const financeController = {
       });
 
       // Each row keeps a PKR-equivalent for its own display (base_amount_pkr →
-      // amount × fx_rate → 280 fallback; see paymentToPkr). It is NOT summed:
+      // amount × fx_rate → none, see paymentToPkr). It is NOT summed:
       // the totals are per currency, from SQL over the whole filtered set.
       for (const r of enriched) {
         r.base_amount_pkr_normalized = paymentToPkr(r);
@@ -1273,6 +1299,9 @@ const financeController = {
         if (!linkedRow) {
           const e = new Error(`${isReceipt ? 'Receivable' : 'Payable'} not found.`); e.statusCode = 404; throw e;
         }
+        // The money is in the document's own currency (a USD receivable is
+        // never settled with a rupee figure) — checked before any branch.
+        assertDocumentCurrency(linkedRow, currency || linkedRow.currency, isReceipt ? 'receivable' : 'payable');
 
         // An export order's advance / balance receivable is settled by the
         // order's own maker-checker flow: Money In records it as 'Pending
@@ -1301,9 +1330,9 @@ const financeController = {
 
         // A foreign amount converts at today's rate for its currency (the
         // engine's default; export-order receipts never reach here).
-        const cur = (currency || 'PKR').toUpperCase();
+        const cur = String(currency || linkedRow.currency || 'PKR').toUpperCase();
 
-        const { payment } = await recordMoneyMovement(trx, {
+        const { payment, overdraft } = await recordMoneyMovement(trx, {
           type,
           payable: isReceipt ? null : linkedRow,
           receivable: isReceipt ? linkedRow : null,
@@ -1324,12 +1353,13 @@ const financeController = {
           millOnly,
           bt: { notes: `${isReceipt ? 'Receipt' : 'Payment'} for ${isReceipt ? 'receivable' : 'payable'} ${linkedRow.recv_no || linkedRow.pay_no || `#${entity_id}`}` },
         });
-        return { payment, pendingConfirmation: false };
+        return { payment, pendingConfirmation: false, overdraft };
       });
 
       return res.status(201).json({
         success: true,
-        data: { payment: result.payment, pending_confirmation: result.pendingConfirmation },
+        // P2-31: an overdraft goes through, with the warning alongside (as contra transfers).
+        data: { payment: result.payment, pending_confirmation: result.pendingConfirmation, ...(result.overdraft ? { warning: result.overdraft } : {}) },
         ...(result.pendingConfirmation ? { message: 'Recorded — pending Finance confirmation.' } : {}),
       });
     } catch (err) {
@@ -1357,8 +1387,11 @@ const financeController = {
   async reversePayment(req, res) {
     try {
       const paymentId = parseInt(req.params.id, 10);
-      const reason = (req.body && req.body.reason) || null;
+      // D-3: a reversal always says why (the route also needs the Owner's
+      // approval — ownerApproval('payment_reversal')).
+      const reason = String((req.body && req.body.reason) || '').trim() || null;
       if (!paymentId) return res.status(400).json({ success: false, message: 'Invalid payment id.' });
+      if (!reason) return res.status(400).json({ success: false, message: 'A reason is required to reverse a payment.' });
       const fail = (msg, code = 400) => { const e = new Error(msg); e.statusCode = code; return e; };
 
       const out = await db.transaction(async (trx) => {
@@ -1368,7 +1401,7 @@ const financeController = {
         if (!pay) throw fail('Payment not found.', 404);
         if (pay.status === 'Reversed') throw fail('This payment has already been reversed.');
         if (pay.status === 'Bounced') throw fail('This cheque bounced — it never moved any money, so there is nothing to reverse.', 409);
-        if (pay.status === 'Rejected' || pay.status === 'Pending Finance Confirmation') {
+        if (pay.status === 'Rejected' || pay.status === 'Superseded' || pay.status === 'Pending Finance Confirmation') {
           throw fail('Only a confirmed payment can be reversed — this one never moved any money.');
         }
         const isPayment = pay.type === 'payment' && (pay.linked_payable_id || (pay.source_table && pay.source_id));
@@ -1426,18 +1459,13 @@ const financeController = {
         if (wasCleared && pay.bank_account_id) {
           const acct = await trx('bank_accounts').where({ id: pay.bank_account_id }).first();
           const bankMove = round2((acct && acct.currency === pay.currency ? amt : amtPkr) - whtR - discR);
-          await trx('bank_accounts').where({ id: pay.bank_account_id })
-            .increment('current_balance', isReceipt ? -bankMove : bankMove);
-          if (await trx.schema.hasTable('bank_transactions')) {
-            await trx('bank_transactions').insert({
-              transaction_no: await nextBtNo(trx),
-              bank_account_id: pay.bank_account_id, type: isReceipt ? 'debit' : 'credit', amount: bankMove,
-              currency: acct?.currency || 'PKR', status: 'posted', transaction_date: new Date(),
-              reference: pay.payment_no, counterparty: null,
-              notes: label, source: 'payment_reversal',
-              linked_payment_id: pay.id, created_by: req.user?.id || null,
-            });
-          }
+          await postBankTransaction(trx, {
+            accountId: pay.bank_account_id, type: isReceipt ? 'debit' : 'credit', amount: bankMove,
+            currency: acct?.currency || 'PKR', transaction_date: new Date(),
+            reference: pay.payment_no, counterparty: null,
+            notes: label, source: 'payment_reversal',
+            linked_payment_id: pay.id, created_by: req.user?.id || null,
+          });
         }
 
         // 3) The GL: the signed delta of whatever this payment posted. An
@@ -1445,13 +1473,22 @@ const financeController = {
         //    nothing to mirror and it is simply marked Reversed — except one
         //    recorded under the old rules (post-dated cheques used to journal
         //    at recording), whose journal is found here and undone.
+        // A reversal journal already posted under this number (a payment whose
+        // status was flipped back by hand) is never posted twice.
+        const priorReversal = await trx('journal_entries')
+          .where({ ref_no: pay.payment_no, ref_type: 'Payment Reversal', status: 'Posted' }).first('id');
+        if (priorReversal) throw fail('This payment already has a posted reversal journal — it cannot be reversed again.', 409);
+        // Any journal under the payment's number, whatever its status: one that
+        // was status-flipped to Reversed earlier has already been undone in the
+        // GL, so no inverse may be built for it below.
+        const anyOwnJournal = await trx('journal_entries').where({ ref_no: pay.payment_no }).first('id');
         try {
           const mirrored = await postDeltaOf(trx, {
             refNo: pay.payment_no, refTypes: ownJournalTypes,
             refType: 'Payment Reversal', description: label, userId: req.user?.id, date: today,
             cashAccountId: pay.bank_account_id || null,
           });
-          if (!mirrored && wasCleared && isPayment) {
+          if (!mirrored && !anyOwnJournal && wasCleared && isPayment) {
             // A Purchases-tab payment (journalled under the lot / purchase
             // label): Dr net Cash (+ Dr WHT + Dr Discount) / Cr Payable (gross).
             const cashAndBank = await glAccountFor(trx, pay.bank_account_id || null);
@@ -1474,7 +1511,7 @@ const financeController = {
             }
             revLines.push({ account_id: counterAcc.id, account: counterAcc.name, debit: 0, credit: amtPkr, narration: `CR ${counterAcc.code} ${counterAcc.name} — reversal ${pay.payment_no}` });
             const j = await accountingService.createJournal(trx, {
-              date: today, entity: 'mill',
+              date: today, entity: payable?.entity || 'mill',
               refType: 'Payment Reversal', refNo: pay.payment_no,
               description: label,
               currency: 'PKR', fxRate: 1, isAuto: true, userId: req.user?.id, partyType, partyId,
@@ -1994,6 +2031,8 @@ financeController.listPurchases = async (req, res) => {
         .leftJoin('export_orders as eo', 'eoc.order_id', 'eo.id')
         .leftJoin('users as creator', 'eoc.created_by', 'creator.id')
         .where('eoc.amount', '>', 0)
+        // An expense's own cost row is listed (and paid) as that expense (P2-21).
+        .whereNull('eoc.business_expense_id')
         .select(
           db.raw("'export_cost' AS source"),
           'eoc.id as ref_id',
@@ -2191,6 +2230,12 @@ financeController.payPurchase = async (req, res) => {
     const result = await db.transaction(async (trx) => {
       const row = await trx(spec.table).where({ id }).forUpdate().first();
       if (!row) { const e = new Error(spec.notFound); e.statusCode = 404; throw e; }
+      // An export cost a business expense wrote is that expense's bill: paying
+      // it here as well paid the same bill twice (P2-21).
+      if (source === 'export_cost' && row.business_expense_id) {
+        const exp = await trx('business_expenses').where({ id: row.business_expense_id }).first('expense_no');
+        throw fail(`This cost belongs to expense ${exp?.expense_no || `#${row.business_expense_id}`} — pay the expense instead.`);
+      }
       const payables = await purchasePayables(trx, source, row);
       // The paying side of the business: the payable's when there is one, else
       // the source's own (a lot carries its entity, a mill-store purchase is
@@ -2246,22 +2291,25 @@ financeController.payPurchase = async (req, res) => {
         },
       };
       const payments = [];
+      let overdraft = null;
       if (!payables.length) {
-        const { payment } = await recordMoneyMovement(trx, {
+        const { payment, overdraft: od } = await recordMoneyMovement(trx, {
           ...common, amount: payNum, notes: notes || `Payment for ${source} ${label}`,
         });
         payments.push(payment);
+        overdraft = od || null;
       } else {
         // FIFO across the open payables, one payment row per payable.
         let left = round2(payNum);
         for (const o of open) {
           if (left <= 0.01) break;
           const part = round2(Math.min(left, o.owed));
-          const { payment } = await recordMoneyMovement(trx, {
+          const { payment, overdraft: od } = await recordMoneyMovement(trx, {
             ...common, payable: o.payable, amount: part, checkOutstanding: false,
             notes: notes || `Payment for ${source} ${label}${o.payable.category && source === 'lot' ? ` — ${o.payable.category}` : ''}`,
           });
           payments.push(payment);
+          overdraft = od || null; // the balance after the last part
           left = round2(left - part);
         }
       }
@@ -2278,6 +2326,8 @@ financeController.payPurchase = async (req, res) => {
         uncleared,
         postDated: uncleared,
         payments: payments.map((p) => ({ id: p.id, payment_no: p.payment_no, amount: parseFloat(p.amount) || 0, payable_id: p.linked_payable_id || null })),
+        // P2-31: allowed, with the warning (owner decision B2).
+        ...(overdraft ? { warning: overdraft } : {}),
       };
     });
 

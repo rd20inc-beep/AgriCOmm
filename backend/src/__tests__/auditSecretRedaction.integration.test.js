@@ -102,9 +102,10 @@ d('audit secret redaction (DB-gated)', () => {
     expect(wa.apiKey).toBe(FAKE_KEY);
     const row = await db('system_settings').where({ key: 'pkr_rate' }).first();
     expect(row.updated_by).toBeTruthy();
-    // fxRate fallback reads pkr_rate (no fx_rates row for this made-up currency)
+    // D-10 (P2-20): pkr_rate is NOT a fallback rate — a currency with no
+    // fx_rates row has no rate at all (it used to get this USD setting).
     const fx = await require('../modules/finance/fxRate.service').getLatestRate('ZZQ');
-    expect(fx.rate).toBe(287.25);
+    expect(fx).toMatchObject({ rate: null, missing: true });
 
     const bad = await request(app).put('/api/admin/settings').set(auth()).send({ pkrRate: 1 });
     expect(bad.status).toBe(400);

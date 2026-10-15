@@ -76,7 +76,7 @@ const MANAGER = { id: 2, role_id: 30 };
 beforeEach(() => {
   mockState.rows = {}; mockState.committed = []; mockDocNo = 0; mockId = 0;
   // role_id 30 is a Mill Manager (auto-confirms); anything else is a clerk.
-  mockState.first = { roles: (where) => (where && where[1] === 30 ? { name: 'Mill Manager' } : { name: 'Mill Operator' }) };
+  mockState.first = { bank_accounts: { id: 9, name: 'ZZ Cash', currency: 'PKR', current_balance: 0 }, roles: (where) => (where && where[1] === 30 ? { name: 'Mill Manager' } : { name: 'Mill Operator' }) };
   jest.clearAllMocks();
   jest.spyOn(console, 'error').mockImplementation(() => {});
 });

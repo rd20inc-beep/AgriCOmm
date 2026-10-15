@@ -1,6 +1,20 @@
 const db = require('../../config/database');
 const accountingService = require('../../services/accountingService');
 const bankReconciliation = require('./bankReconciliation.service');
+const auditService = require('../admin/audit.service');
+const { assertNoControlAccounts } = require('./controlAccounts');
+
+// A refusal the user can act on (typed 400/403/404/409) keeps its status and
+// message; anything else is a server fault and says nothing about internals.
+function journalError(res, err, label) {
+  const code = err.statusCode || 500;
+  if (code === 500) console.error(label, err);
+  return res.status(code).json({
+    success: false,
+    message: code === 500 ? 'Internal server error.' : err.message,
+    ...(err.reason ? { reason: err.reason } : {}),
+  });
+}
 
 // A reconciliation refusal carries its status (404 / 409 / 400); anything else is a 500.
 function reconError(res, err, label) {
@@ -161,104 +175,116 @@ const accountingController = {
     }
   },
 
+  // Manual journals (owner decision D-2): the Finance Manager posts them
+  // (finance.post_journal), validated by schemas.createJournal, and they may
+  // NOT touch a control account — bank / cash, AR, customer advances, AP,
+  // salaries payable, stock — which change only through their own documents.
+  // The audit row is written inside the same transaction (P2-30).
   async createJournal(req, res) {
     try {
-      const { date, entity, ref_type, ref_no, description, lines, currency, fx_rate } = req.body;
-
-      if (!lines || !Array.isArray(lines) || lines.length < 2) {
-        return res.status(400).json({ success: false, message: 'At least 2 journal lines are required.' });
-      }
+      const { date, entity, ref_type, ref_no, description, lines } = req.body;
 
       const journal = await db.transaction(async (trx) => {
-        return accountingService.createJournal(trx, {
-          date,
+        await assertNoControlAccounts(trx, lines);
+        const j = await accountingService.createJournal(trx, {
+          date: date instanceof Date ? date.toISOString().slice(0, 10) : date,
           entity,
-          refType: ref_type,
-          refNo: ref_no,
+          refType: ref_type || 'Manual Journal',
+          refNo: ref_no || null,
           description,
-          lines,
-          currency,
-          fxRate: fx_rate,
+          lines: lines.map((l) => ({
+            account_id: l.account_id,
+            debit: l.debit || 0,
+            credit: l.credit || 0,
+            narration: l.narration || l.description || null,
+          })),
+          // The GL is PKR-base: a manual journal is entered in PKR.
+          currency: 'PKR',
+          fxRate: 1,
           isAuto: false,
           userId: req.user?.id,
         });
+        await auditService.logInTrx(trx, req, {
+          action: 'create_journal', entityType: 'journal_entries', entityId: j.id,
+          result: { journal_no: j.journal_no, status: j.status },
+        });
+        return j;
       });
 
       return res.status(201).json({ success: true, data: { journal } });
     } catch (err) {
-      console.error('Create journal error:', err);
-      return res.status(400).json({ success: false, message: err.message });
+      return journalError(res, err, 'Create journal error:');
     }
   },
 
   async postJournal(req, res) {
     try {
-      const { id } = req.params;
+      const id = parseInt(req.params.id, 10);
 
       const journal = await db.transaction(async (trx) => {
-        return accountingService.postJournal(trx, parseInt(id));
+        const draft = await trx('journal_entries').where({ id }).forUpdate().first();
+        // A manual draft is re-checked at posting: it may predate the rule.
+        if (draft && !draft.is_auto) {
+          const lines = await trx('journal_lines').where({ journal_id: id }).select('account_id');
+          await assertNoControlAccounts(trx, lines);
+        }
+        const posted = await accountingService.postJournal(trx, id);
+        await auditService.logInTrx(trx, req, {
+          action: 'post_journal', entityType: 'journal_entries', entityId: id,
+          result: { journal_no: posted.journal_no, status: posted.status },
+        });
+        return posted;
       });
 
       return res.json({ success: true, data: { journal } });
     } catch (err) {
-      console.error('Post journal error:', err);
-      return res.status(400).json({ success: false, message: err.message });
+      return journalError(res, err, 'Post journal error:');
     }
   },
 
+  // Reversal (owner decision D-2): a reason and Owner approval (the route's
+  // ownerApproval middleware), posted as a dated signed-delta journal — the
+  // original is never edited, so a closed period's books never change and the
+  // delta itself must fall in an open period. Idempotent: reversing twice
+  // returns the first reversal. A journal on a control account was posted by
+  // its document and is reversed through that document, not here.
   async reverseJournal(req, res) {
     try {
-      const { id } = req.params;
-      const { reason } = req.body;
+      const id = parseInt(req.params.id, 10);
+      const { reason, date } = req.body;
 
-      const reversal = await db.transaction(async (trx) => {
-        return accountingService.reverseJournal(trx, {
-          journalId: parseInt(id),
+      const result = await db.transaction(async (trx) => {
+        const lines = await trx('journal_lines').where({ journal_id: id }).select('account_id');
+        await assertNoControlAccounts(trx, lines, 'A journal reversal');
+        const r = await accountingService.postReversalDelta(trx, {
+          journalId: id,
+          date: date instanceof Date ? date.toISOString().slice(0, 10) : date,
           reason,
           userId: req.user?.id,
         });
+        // Already reversed: nothing changed, so nothing to audit (and the
+        // route middleware must not log the no-op as a reversal either).
+        if (r.alreadyReversed) req.auditedInTrx = true;
+        else {
+          await auditService.logInTrx(trx, req, {
+            action: 'reverse_journal', entityType: 'journal_entries', entityId: id,
+            details: {
+              reason,
+              reversal_journal_id: r.journal.id,
+              reversal_journal_no: r.journal.journal_no,
+              authorized_by_owner_id: req.ownerAuth?.ownerId || null,
+            },
+          });
+        }
+        return r;
       });
 
-      return res.json({ success: true, data: { journal: reversal } });
-    } catch (err) {
-      console.error('Reverse journal error:', err);
-      return res.status(400).json({ success: false, message: err.message });
-    }
-  },
-
-  // ═══════════════════════════════════════════════════════════════════
-  // Auto-Posting (for testing)
-  // ═══════════════════════════════════════════════════════════════════
-
-  async triggerAutoPost(req, res) {
-    try {
-      const { trigger_event, entity, amount, currency, ref_type, ref_no, description } = req.body;
-
-      if (!trigger_event || !amount) {
-        return res.status(400).json({ success: false, message: 'trigger_event and amount are required.' });
-      }
-
-      const journal = await db.transaction(async (trx) => {
-        return accountingService.autoPost(trx, {
-          triggerEvent: trigger_event,
-          entity,
-          amount: parseFloat(amount),
-          currency,
-          refType: ref_type,
-          refNo: ref_no,
-          description,
-          userId: req.user?.id,
-        });
+      return res.status(result.alreadyReversed ? 200 : 201).json({
+        success: true,
+        data: { journal: result.journal, already_reversed: result.alreadyReversed },
       });
-
-      if (!journal) {
-        return res.json({ success: true, data: null, message: 'No matching posting rule found.' });
-      }
-
-      return res.status(201).json({ success: true, data: { journal } });
     } catch (err) {
-      console.error('Auto-post error:', err);
-      return res.status(400).json({ success: false, message: err.message });
+      return journalError(res, err, 'Reverse journal error:');
     }
   },
 
@@ -360,10 +386,15 @@ const accountingController = {
       const { id } = req.params;
 
       const period = await db.transaction(async (trx) => {
-        return accountingService.closePeriod(trx, {
+        const p = await accountingService.closePeriod(trx, {
           periodId: parseInt(id),
           userId: req.user?.id,
         });
+        await auditService.logInTrx(trx, req, {
+          action: 'close_period', entityType: 'accounting_periods', entityId: p.id,
+          result: { name: p.name, status: p.status },
+        });
+        return p;
       });
 
       return res.json({ success: true, data: { period } });
@@ -378,10 +409,15 @@ const accountingController = {
       const { id } = req.params;
 
       const period = await db.transaction(async (trx) => {
-        return accountingService.reopenPeriod(trx, {
+        const p = await accountingService.reopenPeriod(trx, {
           periodId: parseInt(id),
           userId: req.user?.id,
         });
+        await auditService.logInTrx(trx, req, {
+          action: 'reopen_period', entityType: 'accounting_periods', entityId: p.id,
+          details: { reason: req.body?.reason, result: { name: p.name, status: p.status }, authorized_by_owner_id: req.ownerAuth?.ownerId || null },
+        });
+        return p;
       });
 
       return res.json({ success: true, data: { period } });

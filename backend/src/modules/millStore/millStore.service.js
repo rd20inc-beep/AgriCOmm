@@ -1,4 +1,5 @@
 const db = require('../../config/database');
+const auditService = require('../admin/audit.service');
 const repo = require('./millStore.repository');
 const { classifyPackaging, deriveSizeFromLabel, sizeToKg, hasCapacity, isMissingSize } = require('../../shared/packagingTypes');
 
@@ -34,6 +35,7 @@ function packagingDefaults(item) {
   return out;
 }
 const { NotFoundError, ValidationError, ConflictError } = require('../../shared/errors');
+const { supplierRefusal } = require('../../shared/partyGate');
 
 const millStoreService = {
   // ─── Items ───
@@ -88,7 +90,9 @@ const millStoreService = {
   },
 
   // ─── Purchases ───
-  async createPurchase({ supplier_id, vendor_name, invoice_number, purchase_date, notes, lines, close_requirement_ids }, userId) {
+  // `req` (the HTTP request): its audit row is written inside the purchase's
+  // own transaction (P2-30), so it commits and rolls back with the purchase.
+  async createPurchase({ supplier_id, vendor_name, invoice_number, purchase_date, notes, lines, close_requirement_ids }, userId, { req = null } = {}) {
     if (!lines || lines.length === 0) throw new ValidationError('At least one line item is required.');
 
     // Validate all item_ids exist
@@ -134,6 +138,12 @@ const millStoreService = {
           }).returning('id');
           resolvedSupplierId = s.id || s;
         }
+      }
+      // A supplier rejected in master-data review cannot be bought from — also
+      // when a typed walk-in name matched one (P2-32).
+      const refusal = await supplierRefusal(trx, resolvedSupplierId);
+      if (refusal) {
+        throw new ConflictError(refusal.message);
       }
 
       const purchaseNo = await repo.generatePurchaseNo(trx);
@@ -186,6 +196,12 @@ const millStoreService = {
             updated_at: trx.fn.now(),
           });
         }
+      }
+      if (req) {
+        await auditService.logInTrx(trx, req, {
+          action: 'create', entityType: 'mill_purchase', entityId: purchase.id,
+          result: { purchase_no: purchase.purchase_no, total_amount: purchase.total_amount },
+        });
       }
       return purchase;
     });

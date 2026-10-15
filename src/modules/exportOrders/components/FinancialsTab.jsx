@@ -2,6 +2,7 @@ import React from 'react';
 import { DollarSign, Plus, Factory } from 'lucide-react';
 import { fmtKg } from '../../../shared/utils/format';
 import DebitNotesPanel from './DebitNotesPanel';
+import ShortBalanceWriteOff from './ShortBalanceWriteOff';
 import OrderReceipts from '../../finance/drawers/OrderReceipts';
 
 export default function FinancialsTab({ order, formatCurrency, formatPKR, totalCosts, grossProfit, marginPct, onConfirmAdvance, onRequestBalance, onAddExpense, canConfirmAdvance, canRequestBalance, exportCostCategories, addToast }) {
@@ -47,6 +48,10 @@ export default function FinancialsTab({ order, formatCurrency, formatPKR, totalC
           carrier's actual charge is known — the claim lands on the balance
           above, which is what the clause the buyer signed promises. */}
       <DebitNotesPanel order={order} addToast={addToast} />
+
+      {/* D-8: a shipped order's short balance (bank deductions, a buyer
+          short-paying) is written off with the Owner's approval. */}
+      <ShortBalanceWriteOff order={order} formatCurrency={formatCurrency} addToast={addToast} />
 
       {/* Outflows — mill→export costing order with a Korra Ready Rice subtotal (Batch 7) */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">

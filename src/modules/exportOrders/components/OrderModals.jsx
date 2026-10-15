@@ -587,6 +587,11 @@ export function ExpenseModal({
   expenseCategory, setExpenseCategory,
   expenseAmount, setExpenseAmount,
   expenseNotes, setExpenseNotes,
+  expenseSupplierId = '', setExpenseSupplierId = () => {},
+  expenseVendorName = '', setExpenseVendorName = () => {},
+  expenseBillRef = '', setExpenseBillRef = () => {},
+  suppliersList = [],
+  addToast,
   exportCostCategories,
   onConfirm,
   pending = false,
@@ -612,6 +617,40 @@ export function ExpenseModal({
               <option key={cat.key} value={cat.key}>{cat.label}</option>
             ))}
           </select>
+          <p className="text-xs text-gray-400 mt-1">Rice and milling are not added here — they are costed from stock at shipment and from the milling batch.</p>
+        </div>
+        {/* One bill per entry, with the vendor it is owed to (P2-05). */}
+        <div>
+          <SupplierPicker
+            label={<>Vendor <span className="text-red-500">*</span></>}
+            value={expenseSupplierId ? String(expenseSupplierId) : ''}
+            onChange={setExpenseSupplierId}
+            suppliers={suppliersList}
+            placeholder="Search the vendor who billed this…"
+            addToast={addToast}
+            clearable
+          />
+          {!expenseSupplierId && (
+            <input
+              type="text"
+              value={expenseVendorName}
+              onChange={e => setExpenseVendorName(e.target.value)}
+              placeholder="…or type the vendor's name"
+              maxLength={200}
+              className="mt-2 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+            />
+          )}
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Bill / Invoice No.</label>
+          <input
+            type="text"
+            value={expenseBillRef}
+            onChange={e => setExpenseBillRef(e.target.value)}
+            placeholder="Vendor's bill number"
+            maxLength={100}
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+          />
         </div>
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Amount (Rs) <span className="text-red-500">*</span></label>
@@ -632,6 +671,99 @@ export function ExpenseModal({
             placeholder="Optional notes about this expense"
             className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none"
           />
+        </div>
+      </div>
+    </SlideDrawer>
+  );
+}
+
+// Cancel an export order (P2-15 / D-7). Receipts are never deleted: when money
+// has been received the person cancelling chooses what happens to it — refund
+// it, keep it as the customer's credit, or (Owner-approved) forfeit it.
+const MONEY_DISPOSITIONS = [
+  { key: 'refund', label: 'Refund to the buyer', hint: 'Money goes back out of the bank, linked to each receipt.' },
+  { key: 'credit', label: 'Keep as customer credit', hint: 'Nothing leaves the bank; the buyer holds it as credit (Customer Advances).' },
+  { key: 'forfeit', label: 'Forfeit to other income', hint: 'Kept as income (4080). Needs the Owner\'s approval.' },
+];
+
+export function CancelOrderDrawer({
+  isOpen, onClose, order, moneyReceived = 0, currencyLabel = '',
+  bankAccountsList = [], onConfirm, pending = false,
+}) {
+  const [reason, setReason] = React.useState('');
+  const [disposition, setDisposition] = React.useState('');
+  const [bankId, setBankId] = React.useState('');
+  const [refundRef, setRefundRef] = React.useState('');
+  const [error, setError] = React.useState('');
+  // The form starts empty on every open: the parent re-keys this drawer per open.
+  const hasMoney = moneyReceived > 0;
+  const orderCurrency = (order && order.currency) || 'USD';
+  const banks = (bankAccountsList || []).filter((b) => !b.currency || b.currency === orderCurrency);
+
+  const submit = () => {
+    if (hasMoney && !disposition) { setError('Choose what happens to the money received.'); return; }
+    onConfirm({
+      reason: reason.trim() || undefined,
+      money_disposition: hasMoney ? disposition : undefined,
+      refund_bank_account_id: hasMoney && disposition === 'refund' && bankId ? parseInt(bankId, 10) : undefined,
+      refund_reference: hasMoney && disposition === 'refund' && refundRef.trim() ? refundRef.trim() : undefined,
+    });
+  };
+
+  return (
+    <SlideDrawer
+      open={isOpen}
+      onClose={onClose}
+      title={`Cancel export order ${order?.orderNo || order?.id || ''}`}
+      icon={Receipt}
+      size="md"
+      footer={<DrawerFooter onClose={onClose} onConfirm={submit} pending={pending} label="Cancel order" closeLabel="Keep the order" tone="bg-red-600 hover:bg-red-700" />}
+    >
+      <div className="space-y-4">
+        <p className="text-sm text-gray-600">
+          Reserved stock is freed, freight debit notes are cancelled and what is still owed is written off.
+          Receipts are never deleted. Costs already incurred with vendors stay payable. The Owner must authorise.
+        </p>
+        {hasMoney && (
+          <fieldset className="space-y-2">
+            <legend className="block text-sm font-medium text-gray-700 mb-1">
+              Money received: {currencyLabel} <span className="text-red-500">*</span>
+            </legend>
+            {MONEY_DISPOSITIONS.map((m) => (
+              <label key={m.key} className={`flex items-start gap-2 p-2 rounded-lg border ${disposition === m.key ? 'border-blue-500 bg-blue-50' : 'border-gray-200'}`}>
+                <input type="radio" name="money_disposition" value={m.key} checked={disposition === m.key}
+                  onChange={() => { setDisposition(m.key); setError(''); }} className="mt-1" />
+                <span>
+                  <span className="block text-sm font-medium text-gray-800">{m.label}</span>
+                  <span className="block text-xs text-gray-500">{m.hint}</span>
+                </span>
+              </label>
+            ))}
+            {error && <p className="text-xs text-red-600">{error}</p>}
+          </fieldset>
+        )}
+        {hasMoney && disposition === 'refund' && (
+          <>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Refund from</label>
+              <select value={bankId} onChange={(e) => setBankId(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
+                <option value="">The account each receipt was banked in</option>
+                {banks.map((b) => <option key={b.id} value={b.id}>{b.name}{b.currency ? ` (${b.currency})` : ''}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Bank reference</label>
+              <input type="text" value={refundRef} onChange={(e) => setRefundRef(e.target.value)} maxLength={100}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+            </div>
+          </>
+        )}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Reason</label>
+          <textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={3} maxLength={2000}
+            placeholder="Why is the order being cancelled?"
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none" />
         </div>
       </div>
     </SlideDrawer>

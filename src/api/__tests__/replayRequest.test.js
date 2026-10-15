@@ -23,8 +23,10 @@ describe('replayRequest', () => {
     expect(r.status).toBe(422);
   });
 
-  test('409 / 401 / 5xx / network → { retry:true } (pause, keep queued)', async () => {
-    globalThis.fetch = vi.fn(async () => ({ ok: false, status: 409, json: async () => ({}) }));
+  test('409-in-progress / 401 / 5xx / network → { retry:true } (pause, keep queued)', async () => {
+    globalThis.fetch = vi.fn(async () => ({ ok: false, status: 409, json: async () => ({ code: 'idempotency_in_progress' }) }));
+    expect((await replayRequest({ id: 'x', method: 'POST', endpoint: '/api/x' })).retry).toBe(true);
+    globalThis.fetch = vi.fn(async () => ({ ok: false, status: 401, json: async () => ({}) }));
     expect((await replayRequest({ id: 'x', method: 'POST', endpoint: '/api/x' })).retry).toBe(true);
     globalThis.fetch = vi.fn(async () => ({ ok: false, status: 503, json: async () => ({}) }));
     expect((await replayRequest({ id: 'x', method: 'POST', endpoint: '/api/x' })).retry).toBe(true);

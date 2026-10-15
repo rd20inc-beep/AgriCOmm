@@ -111,7 +111,11 @@ d('per-account ledger (DB-gated)', () => {
       await postDeltaOf(trx, { refNo: no, refTypes: ['Payment'], refType: 'Payment Reversal', description: 'rev', cashAccountId: acc.hoBank.id });
     });
     const lines = await linesFor(no);
-    expect(lines).toEqual([['2010', 900, 0], ['1000', 0, 900], ['2010', 0, 900], [code.hoBank, 900, 0]]);
+    // The reversal's lines come from a grouped query with no fixed order —
+    // compare the original journal in order, the reversal as a set.
+    const bySide = (x) => JSON.stringify(x);
+    expect(lines.slice(0, 2)).toEqual([['2010', 900, 0], ['1000', 0, 900]]);
+    expect(lines.slice(2).map(bySide).sort()).toEqual([['2010', 0, 900], [code.hoBank, 900, 0]].map(bySide).sort());
   });
 
   test('trial balance carries the 1000 group; cash flow counts the per-account GL', async () => {

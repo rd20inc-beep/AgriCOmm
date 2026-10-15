@@ -191,8 +191,10 @@ const millingService = {
     if (batchId) {
       const costCategory = utilityType ? utilityType.toLowerCase() : 'utility';
 
+      // Never merged into an expense's own row (P2-21).
       const existing = await trx('milling_costs')
         .where({ batch_id: batchId, category: costCategory })
+        .whereNull('business_expense_id')
         .first();
 
       if (existing) {

@@ -15,14 +15,13 @@ export function isMultiLine(order) {
   return Array.isArray(order?.items) && order.items.length > 1;
 }
 
-// The PUT body for the Contract Summary editor. qty/price are only sent when
-// they actually change, and never for a multi-line order: the server would have
+// The PUT body for the Contract Summary editor. qty/price/advance % are only
+// sent when they actually change, and never for a multi-line order: the server would have
 // to split a new total across lines it can't see, so it refuses, and those are
 // edited line by line in the Line Items card instead.
 export function contractEditPayload(order, contract, { qtyPriceEditable }) {
   const payload = {
     incoterm: contract.incoterm,
-    advance_pct: parseFloat(contract.advance_pct) || 0,
     destination_port: contract.destination_port || null,
     shipment_eta: contract.shipment_eta || null,
     doc_address_mode: contract.doc_address_mode || 'country',
@@ -37,6 +36,10 @@ export function contractEditPayload(order, contract, { qtyPriceEditable }) {
     freight_display: contract.freight_display || 'in_price',
     freight_clause: contract.freight_clause || null,
   };
+  // Advance % is part of the contract: sent only when it changes, so a port or
+  // ETA save never asks the server to recompute the receivables (EXP-01).
+  const advancePct = parseFloat(contract.advance_pct) || 0;
+  if (advancePct !== (parseFloat(order.advancePct) || 0)) payload.advance_pct = advancePct;
   if (contract.currency && contract.currency !== (order.currency || 'USD')) {
     payload.currency = contract.currency;
   }

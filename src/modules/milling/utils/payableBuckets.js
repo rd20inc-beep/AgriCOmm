@@ -20,6 +20,15 @@ export const UNASSIGNED = '__unassigned__';
 // Derived rows carry a lettered prefix; stored rows are plain integers.
 export const isStoredPayable = (p) => /^\d+$/.test(String(p?.id ?? ''));
 
+// Is this row money owed to a supplier? Every stored bill is. A derived row is
+// a cost allocation, with one exception: a batch's RAW RICE cost before its
+// yield (when the stored MILL-RICE payable is raised) is the supplier's debt.
+// Every other derived row (electricity, labour, packaging, transport on the
+// cost sheet) used to be counted under the batch's paddy supplier — debt the
+// Pay drawer could never clear, so the directory never reached zero (P2-21).
+export const isSupplierDebt = (p) => isStoredPayable(p)
+  || (p?.source === 'milling_costs' && String(p?.category || '').toLowerCase() === 'raw rice');
+
 // Does this payable belong in the "no supplier" bucket?
 export const isUnassignedPayable = (p) => isStoredPayable(p) && !p?.supplierName && !p?.supplierId;
 

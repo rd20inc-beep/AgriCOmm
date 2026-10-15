@@ -2,7 +2,7 @@ import { btnPrimary, btnSecondary } from '../utils/uiClasses';
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowLeftRight, Building2, Factory } from 'lucide-react';
 import SlideDrawer from '../../../components/SlideDrawer';
-import { useBankAccounts, useCreateFundTransfer } from '../../../api/queries';
+import { useBankAccounts, useCreateContraTransfer } from '../../../api/queries';
 import { favStar } from '../../../shared/utils/favorites';
 import FieldError from '../../../shared/components/FieldError';
 import { todayLocalISO, fmtPKR } from '../../../shared/utils/format';
@@ -14,9 +14,13 @@ const REQ = <span className="text-red-500">*</span>;
 // Reusable Head Office ⇄ Mill money-transfer drawer. Moves cash between two real
 // accounts AND records the inter-company GL; used from both Finance (Cash) and
 // Mill Finance. `defaultDirection` pre-selects ho_to_mill / mill_to_ho.
+// P2-31: it posts to the contra endpoint (POST /finance/contra-transfers), which
+// turns a Head Office ⇄ Mill pair into the same pending, accept-to-complete
+// transfer; the legacy POST /finance/fund-transfers is retired (410).
 export default function TransferFundsDrawer({ open, onClose, defaultDirection = 'ho_to_mill', lockDirection = null, onDone }) {
   const { data: accounts = [] } = useBankAccounts();
-  const createMut = useCreateFundTransfer();
+  const createMut = useCreateContraTransfer();
+  const [warning, setWarning] = useState('');
 
   // When lockDirection is set the direction is fixed (e.g. the Mill can only send
   // to Head Office) and the toggle is hidden.
@@ -62,18 +66,25 @@ export default function TransferFundsDrawer({ open, onClose, defaultDirection = 
   async function submit() {
     if (createMut.isPending) return;
     setError('');
+    setWarning('');
     const fe = {};
     if (!fromId) fe.from = 'Pick a source account.';
     if (!toId) fe.to = 'Pick a destination account.';
     if (fromId && toId && String(fromId) === String(toId)) fe.to = 'Source and destination must be different.';
     if (!(amt > 0)) fe.amount = 'Enter an amount greater than zero.';
+    if (!reference.trim()) fe.reference = 'Enter the slip / cheque / transaction number.';
     setFieldErrors(fe);
     if (Object.keys(fe).length) return;
     try {
-      await createMut.mutateAsync({
-        direction, from_account_id: Number(fromId), to_account_id: Number(toId),
-        amount: amt, transfer_date: date, method, reference: reference || null, notes: notes || null,
+      // The direction follows from the two accounts' entities (contra endpoint).
+      const res = await createMut.mutateAsync({
+        from_account_id: Number(fromId), to_account_id: Number(toId), currency: 'PKR',
+        amount: amt, transfer_date: date, method, reference: reference.trim(), notes: notes || null,
       });
+      // An overdraft goes through, with the server's warning (owner decision B2).
+      const w = res?.data?.warning || res?.warning;
+      setWarning(w?.message || '');
+      if (w) return;
       onClose?.();
       setAmount(''); setReference(''); setNotes('');
       onDone?.();
@@ -166,9 +177,10 @@ export default function TransferFundsDrawer({ open, onClose, defaultDirection = 
             </select>
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Reference <span className="text-gray-400 font-normal">· optional</span></label>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Reference {REQ}</label>
             <input type="text" value={reference} onChange={(e) => setReference(e.target.value)} placeholder="Slip / cheque #"
               className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900" />
+            <FieldError error={fieldErrors.reference} />
           </div>
         </div>
 
@@ -185,6 +197,7 @@ export default function TransferFundsDrawer({ open, onClose, defaultDirection = 
             <span className="font-medium break-words"> {toAcct.name}</span> and can be used.
           </div>
         )}
+        {warning && <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded p-2" data-testid="overdraft-warning">Recorded. {warning}</div>}
         {error && <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded p-2">{error}</div>}
       </div>
     </SlideDrawer>

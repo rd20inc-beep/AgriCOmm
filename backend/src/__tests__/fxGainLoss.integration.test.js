@@ -68,8 +68,13 @@ d('FX gain / loss (DB-gated)', () => {
   });
   afterAll(async () => { if (db) await db.destroy(); });
 
+  // A Balance receivable belongs to an order (chk_receivables_export_parent, P2-18).
   const receivable = async (tag, usd, booked) => (await db('receivables').insert({
     recv_no: `ZZ-FX-${tag}-${run}`, type: 'Balance', entity: 'export', customer_id: ids.cust, currency: 'USD',
+    order_id: (await db('export_orders').insert({
+      order_no: `ZZ-FX-${tag}-${run}`, customer_id: ids.cust, product_id: ids.product, created_by: userId,
+      currency: 'USD', status: 'Shipped', booked_fx_rate: booked, balance_expected: usd,
+    }).returning('id'))[0].id,
     expected_amount: usd, received_amount: 0, outstanding: usd, base_amount_pkr: usd * booked, fx_rate: booked, status: 'Pending',
   }).returning('*'))[0];
   const receipt = (rcv, usd, rate) => db.transaction((trx) => engine.recordMoneyMovement(trx, {

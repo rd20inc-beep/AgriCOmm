@@ -33,11 +33,20 @@ for (const file of routeFiles(modules)) {
 
 test('the owner-approved routes', () => {
   expect(gated.map((g) => `${g.verb.toUpperCase()} ${g.file.split(path.sep)[0]} ${g.route} [${g.kind}]`).sort()).toEqual([
+    // P2-13 / D-2: reversing a journal and reopening a closed period.
+    'POST accounting /journals/:id/reverse [journal_reversal]',
     'POST admin /approvals/:type/:id/approve [master_data]',
     'POST exportOrders /:id/cancel [export_cancel]',
+    'POST exportOrders /:id/cancel [export_cancel_forfeit]', // forfeiting money received (P2-15 / D-7)
     'POST exportOrders /:id/debit-notes/:noteId/cancel [export_balance]',
     'POST exportOrders /:id/packing-weight/resolve [packing_variance]',
+    'POST exportOrders /:id/write-off-balance [export_short_write_off]',
+    'POST finance /payments/:id/reverse [payment_reversal]',
     'POST milling /advances/:id/approve [salary_advance]',
+    'POST milling /advances/:id/void [salary_advance_void]',
+    'POST milling /payroll/final-settlements/:id/reverse [final_settlement_reversal]',
+    'POST serviceMilling /invoices/:id/void [service_invoice_void]',
+    'PUT accounting /periods/:id/reopen [period_reopen]',
   ]);
 });
 

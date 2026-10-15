@@ -92,7 +92,19 @@ describe('what the note claims', () => {
 
   it('a cancelled order takes no note', async () => {
     seed({ status: 'Cancelled' });
-    await expect(debitNotes.issue(1, { amount: 100 }, 1)).rejects.toThrow(/cancelled order/);
+    await expect(debitNotes.issue(1, { amount: 100 }, 1)).rejects.toThrow(/Shipped or Arrived/);
+  });
+
+  // EXP-01: before sailing the contract can still be edited; the note waits.
+  it.each(['Awaiting Advance', 'In Milling', 'Ready to Ship', 'Closed'])('a %s order takes no note', async (status) => {
+    seed({ status });
+    await expect(debitNotes.issue(1, { amount: 100 }, 1)).rejects.toThrow(/Shipped or Arrived/);
+  });
+
+  it('an Arrived order takes one', async () => {
+    seed({ status: 'Arrived' });
+    const note = await debitNotes.issue(1, { amount: 100 }, 1);
+    expect(note.amount).toBe(100);
   });
 });
 

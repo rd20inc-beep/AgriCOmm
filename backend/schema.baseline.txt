@@ -242,6 +242,7 @@ COL business_expenses.payment_reference:character varying:NULL
 COL business_expenses.payment_status:character varying:NOT NULL
 COL business_expenses.record_version:integer:NOT NULL
 COL business_expenses.recurrence:character varying:NULL
+COL business_expenses.recurrence_end_date:date:NULL
 COL business_expenses.server_ts:timestamp with time zone:NULL
 COL business_expenses.subcategory:character varying:NULL
 COL business_expenses.supplier_id:integer:NULL
@@ -408,6 +409,9 @@ COL customers.is_active:boolean:NOT NULL
 COL customers.is_favorite:boolean:NOT NULL
 COL customers.name:character varying:NOT NULL
 COL customers.payment_terms:character varying:NULL
+COL customers.pending_edit:jsonb:NULL
+COL customers.pending_edit_at:timestamp with time zone:NULL
+COL customers.pending_edit_by:integer:NULL
 COL customers.phone:character varying:NULL
 COL customers.port:character varying:NULL
 COL customers.review_notes:text:NULL
@@ -589,6 +593,8 @@ COL export_debit_notes.updated_at:timestamp with time zone:NOT NULL
 COL export_order_costs.amount:numeric:NOT NULL
 COL export_order_costs.bank_account_id:integer:NULL
 COL export_order_costs.base_amount_pkr:numeric:NOT NULL
+COL export_order_costs.bill_ref:character varying:NULL
+COL export_order_costs.business_expense_id:integer:NULL
 COL export_order_costs.category:character varying:NOT NULL
 COL export_order_costs.created_at:timestamp with time zone:NOT NULL
 COL export_order_costs.created_by:integer:NULL
@@ -602,7 +608,9 @@ COL export_order_costs.paid_at:timestamp with time zone:NULL
 COL export_order_costs.payment_method:character varying:NULL
 COL export_order_costs.payment_reference:character varying:NULL
 COL export_order_costs.payment_status:character varying:NOT NULL
+COL export_order_costs.supplier_id:integer:NULL
 COL export_order_costs.updated_at:timestamp with time zone:NOT NULL
+COL export_order_costs.vendor_name:character varying:NULL
 COL export_order_documents.created_at:timestamp with time zone:NOT NULL
 COL export_order_documents.doc_type:character varying:NOT NULL
 COL export_order_documents.file_path:text:NULL
@@ -836,6 +844,34 @@ COL export_quotations.total_amount:numeric:NOT NULL
 COL export_quotations.updated_at:timestamp with time zone:NOT NULL
 COL export_quotations.uuid:uuid:NULL
 COL export_quotations.valid_until:date:NULL
+COL export_receipt_dispositions.amount:numeric:NOT NULL
+COL export_receipt_dispositions.amount_pkr:numeric:NOT NULL
+COL export_receipt_dispositions.authorized_by_owner_id:integer:NULL
+COL export_receipt_dispositions.created_at:timestamp with time zone:NOT NULL
+COL export_receipt_dispositions.created_by:integer:NULL
+COL export_receipt_dispositions.credit_status:character varying:NULL
+COL export_receipt_dispositions.currency:character varying:NOT NULL
+COL export_receipt_dispositions.customer_id:integer:NULL
+COL export_receipt_dispositions.disposition:character varying:NOT NULL
+COL export_receipt_dispositions.id:integer:NOT NULL
+COL export_receipt_dispositions.journal_id:integer:NULL
+COL export_receipt_dispositions.order_id:integer:NOT NULL
+COL export_receipt_dispositions.payment_id:integer:NOT NULL
+COL export_receipt_dispositions.reason:text:NULL
+COL export_receipt_dispositions.refund_payment_id:integer:NULL
+COL export_receivable_write_offs.account_code:character varying:NOT NULL
+COL export_receivable_write_offs.amount:numeric:NOT NULL
+COL export_receivable_write_offs.amount_pkr:numeric:NOT NULL
+COL export_receivable_write_offs.approved_by_owner_id:integer:NULL
+COL export_receivable_write_offs.created_at:timestamp with time zone:NOT NULL
+COL export_receivable_write_offs.created_by:integer:NULL
+COL export_receivable_write_offs.currency:character varying:NOT NULL
+COL export_receivable_write_offs.fx_rate:numeric:NULL
+COL export_receivable_write_offs.id:integer:NOT NULL
+COL export_receivable_write_offs.journal_id:integer:NULL
+COL export_receivable_write_offs.order_id:integer:NOT NULL
+COL export_receivable_write_offs.reason:text:NOT NULL
+COL export_receivable_write_offs.receivable_id:integer:NOT NULL
 COL follow_ups.created_at:timestamp with time zone:NULL
 COL follow_ups.follow_up_date:date:NOT NULL
 COL follow_ups.id:integer:NOT NULL
@@ -1423,8 +1459,12 @@ COL mill_final_settlements.net_amount:numeric:NOT NULL
 COL mill_final_settlements.notes:text:NULL
 COL mill_final_settlements.other_deductions:numeric:NOT NULL
 COL mill_final_settlements.pay_method:character varying:NOT NULL
+COL mill_final_settlements.reversal_reason:text:NULL
+COL mill_final_settlements.reversed_at:timestamp with time zone:NULL
+COL mill_final_settlements.reversed_by:integer:NULL
 COL mill_final_settlements.service_years:numeric:NULL
 COL mill_final_settlements.settlement_date:date:NOT NULL
+COL mill_final_settlements.status:character varying:NOT NULL
 COL mill_final_settlements.updated_at:timestamp with time zone:NOT NULL
 COL mill_final_settlements.worker_id:integer:NOT NULL
 COL mill_items.avg_cost_per_unit:numeric:NULL
@@ -1495,10 +1535,13 @@ COL mill_packing_logs.tare_kg_per_bag:numeric:NOT NULL
 COL mill_packing_logs.tare_weight_kg:numeric:NOT NULL
 COL mill_packing_logs.total_cost:numeric:NULL
 COL mill_packing_logs.warehouse_id:integer:NULL
+COL mill_payroll_lines.active:boolean:NOT NULL
 COL mill_payroll_lines.advance_deducted:numeric:NOT NULL
 COL mill_payroll_lines.basic_pay:numeric:NOT NULL
 COL mill_payroll_lines.bonus_total:numeric:NOT NULL
 COL mill_payroll_lines.created_at:timestamp with time zone:NOT NULL
+COL mill_payroll_lines.daily_rate:numeric:NULL
+COL mill_payroll_lines.daily_rate_rule:character varying:NULL
 COL mill_payroll_lines.days_in_month:integer:NULL
 COL mill_payroll_lines.deduction_total:numeric:NOT NULL
 COL mill_payroll_lines.department:character varying:NULL
@@ -1514,8 +1557,11 @@ COL mill_payroll_lines.ot_pay:numeric:NOT NULL
 COL mill_payroll_lines.paid_at:timestamp with time zone:NULL
 COL mill_payroll_lines.paid_by:integer:NULL
 COL mill_payroll_lines.pay_type:character varying:NULL
+COL mill_payroll_lines.period:character varying:NOT NULL
 COL mill_payroll_lines.role:character varying:NULL
 COL mill_payroll_lines.run_id:integer:NOT NULL
+COL mill_payroll_lines.short_pay_amount:numeric:NOT NULL
+COL mill_payroll_lines.short_pay_carried_in:numeric:NOT NULL
 COL mill_payroll_lines.skip_reason:text:NULL
 COL mill_payroll_lines.statutory_json:jsonb:NULL
 COL mill_payroll_lines.statutory_total:numeric:NOT NULL
@@ -1545,6 +1591,7 @@ COL mill_payroll_runs.period:character varying:NOT NULL
 COL mill_payroll_runs.reversal_reason:text:NULL
 COL mill_payroll_runs.reversed_at:timestamp with time zone:NULL
 COL mill_payroll_runs.reversed_by:integer:NULL
+COL mill_payroll_runs.self_approved:boolean:NOT NULL
 COL mill_payroll_runs.status:character varying:NOT NULL
 COL mill_payroll_runs.updated_at:timestamp with time zone:NOT NULL
 COL mill_payroll_runs.void_reason:text:NULL
@@ -1644,6 +1691,10 @@ COL mill_statutory_remittances.period_to:character varying:NULL
 COL mill_statutory_remittances.reference:character varying:NULL
 COL mill_statutory_remittances.remit_date:date:NOT NULL
 COL mill_statutory_remittances.remittance_no:character varying:NOT NULL
+COL mill_statutory_remittances.reversal_reason:text:NULL
+COL mill_statutory_remittances.reversed_at:timestamp with time zone:NULL
+COL mill_statutory_remittances.reversed_by:integer:NULL
+COL mill_statutory_remittances.status:character varying:NOT NULL
 COL mill_statutory_remittances.updated_at:timestamp with time zone:NOT NULL
 COL mill_stock.created_at:timestamp with time zone:NULL
 COL mill_stock.id:integer:NOT NULL
@@ -1708,6 +1759,7 @@ COL mill_worker_advances.approval_status:character varying:NOT NULL
 COL mill_worker_advances.approved_at:timestamp with time zone:NULL
 COL mill_worker_advances.approved_by:integer:NULL
 COL mill_worker_advances.auto_deduct:boolean:NOT NULL
+COL mill_worker_advances.bank_account_id:integer:NULL
 COL mill_worker_advances.created_at:timestamp with time zone:NOT NULL
 COL mill_worker_advances.created_by:integer:NULL
 COL mill_worker_advances.deduction_percent:numeric:NULL
@@ -1716,12 +1768,19 @@ COL mill_worker_advances.id:integer:NOT NULL
 COL mill_worker_advances.installment_amount:numeric:NULL
 COL mill_worker_advances.installment_count:integer:NULL
 COL mill_worker_advances.notes:text:NULL
+COL mill_worker_advances.paid_at:date:NULL
+COL mill_worker_advances.paid_by:integer:NULL
+COL mill_worker_advances.pay_method:character varying:NULL
+COL mill_worker_advances.payout_gl:character varying:NOT NULL
 COL mill_worker_advances.recovered_amount:numeric:NOT NULL
 COL mill_worker_advances.recovery_method:character varying:NOT NULL
 COL mill_worker_advances.recovery_start_period:character varying:NULL
 COL mill_worker_advances.reject_reason:text:NULL
 COL mill_worker_advances.status:character varying:NOT NULL
 COL mill_worker_advances.updated_at:timestamp with time zone:NOT NULL
+COL mill_worker_advances.void_reason:text:NULL
+COL mill_worker_advances.voided_at:timestamp with time zone:NULL
+COL mill_worker_advances.voided_by:integer:NULL
 COL mill_worker_advances.worker_id:integer:NOT NULL
 COL mill_worker_requests.created_at:timestamp with time zone:NOT NULL
 COL mill_worker_requests.from_date:date:NULL
@@ -1868,6 +1927,7 @@ COL milling_batches.wastage_kg:numeric:NOT NULL
 COL milling_batches.yield_pct:numeric:NOT NULL
 COL milling_costs.amount:numeric:NOT NULL
 COL milling_costs.batch_id:integer:NOT NULL
+COL milling_costs.business_expense_id:integer:NULL
 COL milling_costs.category:character varying:NOT NULL
 COL milling_costs.created_at:timestamp with time zone:NOT NULL
 COL milling_costs.created_by:integer:NULL
@@ -2027,6 +2087,7 @@ COL payments.amount:numeric:NOT NULL
 COL payments.attachment_name:text:NULL
 COL payments.attachment_url:text:NULL
 COL payments.bank_account_id:integer:NULL
+COL payments.bank_charges:numeric:NOT NULL
 COL payments.bank_reference:character varying:NULL
 COL payments.base_amount_pkr:numeric:NOT NULL
 COL payments.bounce_reason:text:NULL
@@ -2052,6 +2113,7 @@ COL payments.payment_date:date:NOT NULL
 COL payments.payment_method:character varying:NULL
 COL payments.payment_no:character varying:NOT NULL
 COL payments.record_version:integer:NOT NULL
+COL payments.refund_of_payment_id:integer:NULL
 COL payments.reject_reason:text:NULL
 COL payments.reversal_reason:text:NULL
 COL payments.reversed_at:timestamp with time zone:NULL
@@ -2061,6 +2123,7 @@ COL payments.service_invoice_id:integer:NULL
 COL payments.source_id:integer:NULL
 COL payments.source_table:character varying:NULL
 COL payments.status:character varying:NOT NULL
+COL payments.superseded_by_payment_id:integer:NULL
 COL payments.sync_status:character varying:NOT NULL
 COL payments.type:character varying:NOT NULL
 COL payments.updated_at:timestamp with time zone:NULL
@@ -2426,8 +2489,10 @@ COL scheduled_reports.updated_at:timestamp with time zone:NOT NULL
 COL scheduled_tasks.config:jsonb:NULL
 COL scheduled_tasks.created_at:timestamp with time zone:NOT NULL
 COL scheduled_tasks.cron_expression:character varying:NULL
+COL scheduled_tasks.failure_count:integer:NOT NULL
 COL scheduled_tasks.id:integer:NOT NULL
 COL scheduled_tasks.is_active:boolean:NOT NULL
+COL scheduled_tasks.last_error:text:NULL
 COL scheduled_tasks.last_run:timestamp with time zone:NULL
 COL scheduled_tasks.last_status:character varying:NULL
 COL scheduled_tasks.name:character varying:NOT NULL
@@ -2484,6 +2549,7 @@ COL service_milling_invoices.rental_rate_per_katta:numeric:NULL
 COL service_milling_invoices.rental_to:date:NULL
 COL service_milling_invoices.server_ts:timestamp with time zone:NULL
 COL service_milling_invoices.service_batch_id:integer:NULL
+COL service_milling_invoices.status:character varying:NOT NULL
 COL service_milling_invoices.subtotal:numeric:NULL
 COL service_milling_invoices.sync_status:character varying:NOT NULL
 COL service_milling_invoices.tax_amount:numeric:NULL
@@ -2491,6 +2557,10 @@ COL service_milling_invoices.tax_pct:numeric:NULL
 COL service_milling_invoices.total_amount:numeric:NULL
 COL service_milling_invoices.updated_at:timestamp with time zone:NOT NULL
 COL service_milling_invoices.uuid:uuid:NULL
+COL service_milling_invoices.void_authorized_by:integer:NULL
+COL service_milling_invoices.void_reason:text:NULL
+COL service_milling_invoices.voided_at:timestamp with time zone:NULL
+COL service_milling_invoices.voided_by:integer:NULL
 COL shipment_containers.bags_count:integer:NULL
 COL shipment_containers.container_no:character varying:NOT NULL
 COL shipment_containers.container_type:character varying:NOT NULL
@@ -2899,6 +2969,7 @@ CON bank_transactions.bank_transactions_pkey(p)
 CON bank_transactions.bank_transactions_status_check(c)
 CON bank_transactions.bank_transactions_transaction_no_unique(u)
 CON bank_transactions.bank_transactions_type_check(c)
+CON bank_transactions.chk_bank_transactions_account_required(c)
 CON bank_transactions.uq_bank_transactions_uuid(u)
 CON batch_source_lots.batch_source_lots_batch_id_foreign(f)
 CON batch_source_lots.batch_source_lots_lot_id_foreign(f)
@@ -2976,6 +3047,7 @@ CON customer_scores.chk_customer_scores_volume_score_range(c)
 CON customer_scores.customer_scores_customer_id_foreign(f)
 CON customer_scores.customer_scores_pkey(p)
 CON customers.chk_customers_approval_status(c)
+CON customers.customers_pending_edit_by_foreign(f)
 CON customers.customers_pkey(p)
 CON customers.customers_reviewed_by_foreign(f)
 CON customers.customers_submitted_by_foreign(f)
@@ -3033,9 +3105,11 @@ CON export_order_costs.chk_export_order_costs_base_amount_pkr_nn(c)
 CON export_order_costs.chk_export_order_costs_paid_amount_nn(c)
 CON export_order_costs.chk_export_order_costs_payment_status_valid(c)
 CON export_order_costs.export_order_costs_bank_account_id_foreign(f)
+CON export_order_costs.export_order_costs_business_expense_id_foreign(f)
 CON export_order_costs.export_order_costs_created_by_fk(f)
 CON export_order_costs.export_order_costs_order_id_foreign(f)
 CON export_order_costs.export_order_costs_pkey(p)
+CON export_order_costs.export_order_costs_supplier_id_foreign(f)
 CON export_order_documents.chk_export_order_documents_status_valid(c)
 CON export_order_documents.chk_export_order_documents_version_nn(c)
 CON export_order_documents.export_order_documents_order_id_foreign(f)
@@ -3096,11 +3170,33 @@ CON export_quotations.export_quotations_customer_id_foreign(f)
 CON export_quotations.export_quotations_pkey(p)
 CON export_quotations.export_quotations_quotation_no_unique(u)
 CON export_quotations.uq_export_quotations_uuid(u)
+CON export_receipt_dispositions.chk_export_receipt_dispositions_amount_pos(c)
+CON export_receipt_dispositions.chk_export_receipt_dispositions_credit_status(c)
+CON export_receipt_dispositions.chk_export_receipt_dispositions_disposition(c)
+CON export_receipt_dispositions.chk_export_receipt_dispositions_refund_link(c)
+CON export_receipt_dispositions.export_receipt_dispositions_authorized_by_owner_id_foreign(f)
+CON export_receipt_dispositions.export_receipt_dispositions_created_by_foreign(f)
+CON export_receipt_dispositions.export_receipt_dispositions_customer_id_foreign(f)
+CON export_receipt_dispositions.export_receipt_dispositions_journal_id_foreign(f)
+CON export_receipt_dispositions.export_receipt_dispositions_order_id_foreign(f)
+CON export_receipt_dispositions.export_receipt_dispositions_payment_id_foreign(f)
+CON export_receipt_dispositions.export_receipt_dispositions_pkey(p)
+CON export_receipt_dispositions.export_receipt_dispositions_refund_payment_id_foreign(f)
+CON export_receipt_dispositions.uq_export_receipt_dispositions_payment(u)
+CON export_receivable_write_offs.chk_erwo_amount_pos(c)
+CON export_receivable_write_offs.export_receivable_write_offs_approved_by_owner_id_foreign(f)
+CON export_receivable_write_offs.export_receivable_write_offs_created_by_foreign(f)
+CON export_receivable_write_offs.export_receivable_write_offs_journal_id_foreign(f)
+CON export_receivable_write_offs.export_receivable_write_offs_order_id_foreign(f)
+CON export_receivable_write_offs.export_receivable_write_offs_pkey(p)
+CON export_receivable_write_offs.export_receivable_write_offs_receivable_id_foreign(f)
 CON follow_ups.chk_follow_ups_status_valid(c)
 CON follow_ups.follow_ups_pkey(p)
 CON follow_ups.follow_ups_user_id_foreign(f)
 CON fund_transfers.chk_fund_transfers_direction_valid(c)
+CON fund_transfers.chk_fund_transfers_from_account_required(c)
 CON fund_transfers.chk_fund_transfers_status_valid(c)
+CON fund_transfers.chk_fund_transfers_to_account_required(c)
 CON fund_transfers.fund_transfers_accepted_by_foreign(f)
 CON fund_transfers.fund_transfers_client_ref_unique(u)
 CON fund_transfers.fund_transfers_created_by_foreign(f)
@@ -3328,9 +3424,11 @@ CON mill_expenses.mill_expenses_created_by_foreign(f)
 CON mill_expenses.mill_expenses_mill_id_foreign(f)
 CON mill_expenses.mill_expenses_pkey(p)
 CON mill_expenses.uq_mill_expenses_uuid(u)
+CON mill_final_settlements.chk_mill_final_settlements_status_valid(c)
 CON mill_final_settlements.mill_final_settlements_bank_account_id_fk(f)
 CON mill_final_settlements.mill_final_settlements_expense_id_fk(f)
 CON mill_final_settlements.mill_final_settlements_pkey(p)
+CON mill_final_settlements.mill_final_settlements_reversed_by_foreign(f)
 CON mill_final_settlements.mill_final_settlements_worker_id_foreign(f)
 CON mill_items.chk_mill_items_avg_cost_per_unit_nn(c)
 CON mill_items.chk_mill_items_last_purchase_cost_nn(c)
@@ -3396,10 +3494,12 @@ CON mill_purchases.mill_purchases_supplier_id_foreign(f)
 CON mill_salary_revisions.mill_salary_revisions_pkey(p)
 CON mill_salary_revisions.mill_salary_revisions_worker_id_foreign(f)
 CON mill_statutory_deductions.mill_statutory_deductions_pkey(p)
+CON mill_statutory_remittances.chk_mill_statutory_remittances_status(c)
 CON mill_statutory_remittances.mill_statutory_remittances_account_id_fk(f)
 CON mill_statutory_remittances.mill_statutory_remittances_bank_account_id_fk(f)
 CON mill_statutory_remittances.mill_statutory_remittances_journal_id_fk(f)
 CON mill_statutory_remittances.mill_statutory_remittances_pkey(p)
+CON mill_statutory_remittances.mill_statutory_remittances_reversed_by_foreign(f)
 CON mill_statutory_remittances.uq_mill_statutory_remittances_remittance_no(u)
 CON mill_stock.chk_mill_stock_quantity_reserved_nn(c)
 CON mill_stock.mill_stock_available_non_neg(c)
@@ -3429,9 +3529,13 @@ CON mill_worker_advance_recovery_schedule.mill_worker_advance_recovery_schedule_
 CON mill_worker_advance_recovery_schedule.mill_worker_advance_recovery_schedule_pkey(p)
 CON mill_worker_advance_recovery_schedule.mill_worker_advance_recovery_schedule_worker_id_foreign(f)
 CON mill_worker_advances.chk_mill_worker_advances_approval_status_valid(c)
+CON mill_worker_advances.chk_mill_worker_advances_payout_gl(c)
 CON mill_worker_advances.chk_mill_worker_advances_status_valid(c)
+CON mill_worker_advances.mill_worker_advances_bank_account_id_foreign(f)
 CON mill_worker_advances.mill_worker_advances_expense_id_foreign(f)
+CON mill_worker_advances.mill_worker_advances_paid_by_foreign(f)
 CON mill_worker_advances.mill_worker_advances_pkey(p)
+CON mill_worker_advances.mill_worker_advances_voided_by_foreign(f)
 CON mill_worker_advances.mill_worker_advances_worker_id_foreign(f)
 CON mill_worker_requests.chk_mill_worker_requests_status_valid(c)
 CON mill_worker_requests.mill_worker_requests_pkey(p)
@@ -3497,6 +3601,7 @@ CON milling_batches.milling_batches_supplier_id_foreign(f)
 CON milling_batches.uq_milling_batches_uuid(u)
 CON milling_costs.chk_mc_amount_nonneg(c)
 CON milling_costs.milling_costs_batch_id_foreign(f)
+CON milling_costs.milling_costs_business_expense_id_foreign(f)
 CON milling_costs.milling_costs_created_by_fk(f)
 CON milling_costs.milling_costs_pkey(p)
 CON milling_output_market_prices.chk_milling_output_market_prices_bran_price_per_mt_nn(c)
@@ -3572,9 +3677,12 @@ CON payables.payables_pkey(p)
 CON payables.payables_supplier_id_foreign(f)
 CON payables.uq_payables_uuid(u)
 CON payments.chk_payments_amount_nonneg(c)
+CON payments.chk_payments_bank_charges_nonneg(c)
 CON payments.chk_payments_base_amount_pkr_nonneg(c)
 CON payments.chk_payments_currency_valid(c)
+CON payments.chk_payments_payable_is_payment(c)
 CON payments.chk_payments_payment_method_valid(c)
+CON payments.chk_payments_receivable_is_receipt(c)
 CON payments.chk_payments_status_valid(c)
 CON payments.payments_bank_account_id_foreign(f)
 CON payments.payments_bounced_by_foreign(f)
@@ -3585,8 +3693,10 @@ CON payments.payments_linked_receivable_id_foreign(f)
 CON payments.payments_local_sale_id_foreign(f)
 CON payments.payments_payment_no_unique(u)
 CON payments.payments_pkey(p)
+CON payments.payments_refund_of_payment_id_foreign(f)
 CON payments.payments_reversed_by_foreign(f)
 CON payments.payments_service_invoice_id_foreign(f)
+CON payments.payments_superseded_by_payment_id_foreign(f)
 CON payments.payments_type_check(c)
 CON payments.uq_payments_uuid(u)
 CON permissions.permissions_module_action_unique(u)
@@ -3679,8 +3789,11 @@ CON purchase_returns.purchase_returns_status_check(c)
 CON purchase_returns.purchase_returns_supplier_id_foreign(f)
 CON receivables.chk_receivables_base_amount_pkr_nonneg(c)
 CON receivables.chk_receivables_currency_valid(c)
+CON receivables.chk_receivables_export_parent(c)
+CON receivables.chk_receivables_outstanding_equation(c)
 CON receivables.chk_receivables_outstanding_nonneg(c)
 CON receivables.chk_receivables_received_amount_nonneg(c)
+CON receivables.chk_receivables_service_parent(c)
 CON receivables.chk_receivables_status_valid(c)
 CON receivables.chk_recv_expected_nonneg(c)
 CON receivables.receivables_created_by_foreign(f)
@@ -3745,11 +3858,14 @@ CON service_milling_dispatches.service_milling_dispatches_pkey(p)
 CON service_milling_dispatches.service_milling_dispatches_service_batch_id_foreign(f)
 CON service_milling_dispatches.uq_service_milling_dispatches_uuid(u)
 CON service_milling_invoices.chk_service_milling_invoices_payment_status_valid(c)
+CON service_milling_invoices.chk_service_milling_invoices_status_valid(c)
 CON service_milling_invoices.service_milling_invoices_client_customer_id_foreign(f)
 CON service_milling_invoices.service_milling_invoices_freight_hauler_id_foreign(f)
 CON service_milling_invoices.service_milling_invoices_invoice_no_unique(u)
 CON service_milling_invoices.service_milling_invoices_pkey(p)
 CON service_milling_invoices.service_milling_invoices_service_batch_id_foreign(f)
+CON service_milling_invoices.service_milling_invoices_void_authorized_by_foreign(f)
+CON service_milling_invoices.service_milling_invoices_voided_by_foreign(f)
 CON service_milling_invoices.uq_service_milling_invoices_uuid(u)
 CON shipment_containers.chk_shipment_containers_bags_count_nn(c)
 CON shipment_containers.chk_shipment_containers_gross_weight_kg_nn(c)

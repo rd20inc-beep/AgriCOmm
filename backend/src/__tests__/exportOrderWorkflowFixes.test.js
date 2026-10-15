@@ -193,9 +193,12 @@ describe('editing qty/price on the Overview keeps the P.I. lines in step', () =>
   });
 });
 
+const EUR_RATE = { id: 1, from_currency: 'EUR', to_currency: 'PKR', rate: 305, effective_date: '2026-01-01', is_active: true };
+
 describe('customer and currency are part of the locked contract', () => {
-  async function put(body, over) {
+  async function put(body, over, fxRates = []) {
     reset({
+      fx_rates: fxRates,
       export_orders: [order(over)],
       export_order_items: [item()],
       receivables: [
@@ -221,10 +224,29 @@ describe('customer and currency are part of the locked contract', () => {
   });
 
   it('before any money both may change, and the receivables follow', async () => {
-    const r = await put({ currency: 'EUR', customer_id: 99 }, {});
+    const r = await put({ currency: 'EUR', customer_id: 99 }, {}, [EUR_RATE]);
     expect(r.statusCode).toBe(200);
     expect(state.tables.export_orders[0]).toMatchObject({ currency: 'EUR', customer_id: 99 });
     for (const rc of state.tables.receivables) expect(rc).toMatchObject({ currency: 'EUR', customer_id: 99 });
+  });
+
+  // P2-20: a new currency re-locks the booked rate — EUR's own, never USD's.
+  it('a currency change re-locks the booked rate at the new currency\'s rate', async () => {
+    const r = await put({ currency: 'EUR' }, { booked_fx_rate: 280 }, [EUR_RATE]);
+    expect(r.statusCode).toBe(200);
+    const o = state.tables.export_orders[0];
+    expect(Number(o.booked_fx_rate)).toBe(305);
+    expect(Number(o.contract_value_pkr_locked)).toBe(Number(o.contract_value) * 305);
+  });
+
+  it('a typed rate wins; no rate on file for the new currency is refused (D-10)', async () => {
+    const typed = await put({ currency: 'EUR', booked_fx_rate: 310 }, { booked_fx_rate: 280 });
+    expect(typed.statusCode).toBe(200);
+    expect(Number(state.tables.export_orders[0].booked_fx_rate)).toBe(310);
+    const none = await put({ currency: 'EUR' }, { booked_fx_rate: 280 });
+    expect(none.statusCode).toBe(400);
+    expect(none.body.code).toBe('FX_RATE_MISSING');
+    expect(state.tables.export_orders[0]).toMatchObject({ currency: 'USD' });
   });
 
   it('the bank account and units per bag can be changed on edit', async () => {
@@ -329,7 +351,10 @@ describe('drafts', () => {
   });
 
   beforeEach(() => {
-    reset({ export_orders: [], export_order_items: [], receivables: [], export_order_status_history: [], document_checklists: [] });
+    reset({
+      export_orders: [], export_order_items: [], receivables: [], export_order_status_history: [], document_checklists: [],
+      fx_rates: [{ id: 1, from_currency: 'USD', to_currency: 'PKR', rate: 280, effective_date: '2026-01-01', is_active: true }],
+    });
     jest.spyOn(controller, '_raiseMaterialsFor').mockResolvedValue(['PR-1']);
   });
   afterEach(() => jest.restoreAllMocks());

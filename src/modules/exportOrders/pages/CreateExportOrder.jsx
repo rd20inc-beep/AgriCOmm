@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { useApp } from '../../../context/AppContext';
-import { useCreateExportOrder } from '../../../api/queries';
+import { useCreateExportOrder, useFxRates } from '../../../api/queries';
 import api from '../../../api/client';
 import {
   Save, Send, DollarSign, Calculator, ArrowLeft, Package, Truck,
@@ -79,7 +79,7 @@ export default function CreateExportOrder() {
     // Section 3: Quantity
     qtyMT: '', quantityUnit: 'ton', pricePerMT: '',
     // Section 4: Order terms
-    currency: 'USD', incoterm: 'FOB', advancePct: 20, source: 'Internal Mill',
+    currency: 'USD', bookedFxRate: '', incoterm: 'FOB', advancePct: 20, source: 'Internal Mill',
     paymentTerms: 'CAD', docAddressMode: 'country',
     // Documents print in KG, or LBS for the USA and Canada. Presentation only —
     // the engine stores kilograms whatever this says.
@@ -105,6 +105,9 @@ export default function CreateExportOrder() {
     notes: '', packingNotes: '',
     ...(duplicate?.form || {}),
   }));
+  // The latest rate on file for the order's currency (D-10: an estimate, shown as the default).
+  const { data: fxData } = useFxRates({ currency: form.currency });
+  const latestFx = fxData?.latest || null;
 
   // Mixed packing lines
   const [packingLines, setPackingLines] = useState(() => (
@@ -505,6 +508,17 @@ export default function CreateExportOrder() {
             <select value={form.currency} onChange={e => set('currency', e.target.value)} className="form-input">
               <option value="USD">USD</option><option value="EUR">EUR</option><option value="GBP">GBP</option>
             </select>
+          </div>
+          <div className="form-group">
+            <label className="form-label">Booked rate (PKR per {form.currency})</label>
+            <input type="number" min="0" step="0.0001" value={form.bookedFxRate}
+              onChange={e => set('bookedFxRate', e.target.value)} className="form-input"
+              placeholder={latestFx?.rate ? String(latestFx.rate) : 'Enter the rate'} data-testid="booked-fx-rate" />
+            <p className="text-[11px] text-gray-500 mt-1 leading-snug">
+              {latestFx?.rate
+                ? `Blank books it at the latest ${form.currency} rate on file — ${latestFx.rate}${latestFx.stale ? ' (an old rate — check it)' : ''}.`
+                : `No ${form.currency} rate is on file — enter the booked rate, or the order can only be saved as a draft.`}
+            </p>
           </div>
           <div className="form-group">
             <label className="form-label">Incoterm</label>
@@ -1263,10 +1277,12 @@ export default function CreateExportOrder() {
                   if (newCust.id) {
                     // Edit existing buyer → applies now + flagged for admin review.
                     const res = await api.put(`/api/admin/customers/${newCust.id}/submit-edit`, newCust);
-                    const c = res?.data?.data?.customer;
-                    set('country', (c?.country) || newCust.country || '');
+                    const body = res?.data?.customer ? res.data : (res?.data?.data || {});
+                    const c = body.customer;
+                    // A proposal leaves the live buyer unchanged until an approver applies it.
+                    if (!body.pending) set('country', (c?.country) || newCust.country || '');
                     qc.invalidateQueries({ queryKey: ['customers'] });
-                    addToast(res?.data?.data?.pending ? `Changes to "${newCust.name}" sent for admin review` : `Buyer "${newCust.name}" updated`, 'success');
+                    addToast(body.pending ? `Changes to "${newCust.name}" sent for admin review — they apply once approved` : `Buyer "${newCust.name}" updated`, 'success');
                   } else {
                     const res = await api.post('/api/customers', newCust);
                     const created = res?.data?.data?.customer || res?.data?.customer || res?.data;

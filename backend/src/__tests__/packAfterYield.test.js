@@ -39,7 +39,7 @@ describe('a packing run reaches the lot', () => {
   const pack = methodBody(PACKING, 'pack');
 
   it('pack() reconciles the batch, which is what stamps the spec', () => {
-    expect(pack).toContain('inventoryService.reconcileBatchKatta(trx, batchId, userId)');
+    expect(pack).toContain('inventoryService.reconcileBatchKatta(sp, batchId, userId)');
   });
 
   it('it runs inside the packing transaction', () => {
@@ -50,17 +50,18 @@ describe('a packing run reaches the lot', () => {
 
   it('it only runs once the batch has actually yielded', () => {
     // Before the yield there is no output lot to stamp.
-    expect(pack).toMatch(/if \(\(Number\(batch\.actual_finished_kg\) \|\| 0\) > 0\) \{\s*\n\s*try \{ (const katta = )?await inventoryService\.reconcileBatchKatta/);
+    expect(pack).toMatch(/if \(\(Number\(batch\.actual_finished_kg\) \|\| 0\) > 0\) \{\s*\n\s*try \{\s*\n\s*const katta = await trx\.transaction\(\(sp\) => inventoryService\.reconcileBatchKatta/);
   });
 
-  it('a failure there does not lose the packing run', () => {
-    // Same non-blocking treatment as the GL and cost steps above it. Anchored on
-    // the CALL, not the first mention — the comment above it names it too.
-    const call = 'await inventoryService.reconcileBatchKatta(trx, batchId, userId)';
+  it('a failure there does not lose the packing run — and cannot poison it', () => {
+    // Non-blocking, but in a SAVEPOINT (P2-02): a database error inside the
+    // reconcile used to abort the whole transaction, so COMMIT silently threw
+    // the packing run away while the user was told it worked.
+    const call = 'await trx.transaction((sp) => inventoryService.reconcileBatchKatta(sp, batchId, userId))';
     const idx = pack.indexOf(call);
     expect(idx).toBeGreaterThan(-1);
-    const line = pack.slice(pack.lastIndexOf('\n', idx) + 1, pack.indexOf('\n', idx));
-    expect(line.trim().startsWith('try {')).toBe(true);
+    const before = pack.slice(Math.max(0, idx - 80), idx);
+    expect(before).toMatch(/try \{\s*\n\s*const katta = $/);
     expect(pack.slice(idx, idx + 400)).toContain('catch');
   });
 });

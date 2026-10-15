@@ -34,3 +34,14 @@ export function overdraftWarning({ account, amount, currency } = {}) {
     message: `This will overdraw ${account.name || 'the account'} by ${fmtMoney(by, cur, { decimals: 2 })}.`,
   };
 }
+
+/**
+ * The overdraft warning a payment endpoint returned (P2-31): every money
+ * route answers `data.warning` (or `data.overdraft`) when the account ended
+ * below zero. Returns its message, or null. Accepts the mutation's raw result.
+ */
+export function serverOverdraft(res) {
+  const d = res && (res.data !== undefined ? res.data : res);
+  const w = d && (d.warning || d.overdraft || (d.data && (d.data.warning || d.data.overdraft)));
+  return w && w.message ? w.message : null;
+}

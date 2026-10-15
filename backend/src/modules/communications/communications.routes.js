@@ -1,4 +1,5 @@
 const express = require('express');
+const auditAction = require('../../middleware/audit');
 const router = express.Router();
 const authorize = require('../../middleware/rbac');
 const { authorizeAny } = require('../../middleware/rbac');
@@ -56,7 +57,7 @@ const canSendDocument = authorizeAny(
 // ============================================================
 // Email
 // ============================================================
-router.post('/email/send', canSend, communicationController.sendEmail);
+router.post('/email/send', canSend, auditAction('send_email', 'communication'), communicationController.sendEmail);
 router.get('/email/logs', canReadComms, communicationController.getEmailLogs);
 router.get('/email/logs/:type/:id', canReadComms, communicationController.getEmailLogsByEntity);
 
@@ -64,19 +65,19 @@ router.get('/email/logs/:type/:id', canReadComms, communicationController.getEma
 // Email Templates
 // ============================================================
 router.get('/email/templates', canReadComms, communicationController.listTemplates);
-router.post('/email/templates', canConfigure, communicationController.createTemplate);
-router.put('/email/templates/:id', canConfigure, communicationController.updateTemplate);
+router.post('/email/templates', canConfigure, auditAction('create', 'email_template'), communicationController.createTemplate);
+router.put('/email/templates/:id', canConfigure, auditAction('update', 'email_template'), communicationController.updateTemplate);
 
 // ============================================================
 // WhatsApp
 // ============================================================
 router.get('/whatsapp/templates', canReadComms, communicationController.listWhatsAppTemplates);
 router.get('/whatsapp/templates/:id', canReadComms, communicationController.getWhatsAppTemplate);
-router.post('/whatsapp/templates', canConfigure, communicationController.createWhatsAppTemplate);
-router.put('/whatsapp/templates/:id', canConfigure, communicationController.updateWhatsAppTemplate);
-router.delete('/whatsapp/templates/:id', canConfigure, communicationController.deleteWhatsAppTemplate);
-router.post('/whatsapp/send', canSend, communicationController.sendWhatsAppMessage);
-router.post('/whatsapp/send-document', canSendDocument, communicationController.sendWhatsAppDocument);
+router.post('/whatsapp/templates', canConfigure, auditAction('create', 'whatsapp_template'), communicationController.createWhatsAppTemplate);
+router.put('/whatsapp/templates/:id', canConfigure, auditAction('update', 'whatsapp_template'), communicationController.updateWhatsAppTemplate);
+router.delete('/whatsapp/templates/:id', canConfigure, auditAction('delete', 'whatsapp_template'), communicationController.deleteWhatsAppTemplate);
+router.post('/whatsapp/send', canSend, auditAction('send_whatsapp', 'communication'), communicationController.sendWhatsAppMessage);
+router.post('/whatsapp/send-document', canSendDocument, auditAction('send_whatsapp_document', 'communication'), communicationController.sendWhatsAppDocument);
 router.post('/whatsapp/preview', canReadComms, communicationController.previewWhatsAppTemplate);
 router.get('/whatsapp/logs', canReadComms, communicationController.getWhatsAppLogs);
 
@@ -89,7 +90,7 @@ const whatsappQr = require('./whatsappQr.service');
 router.get('/whatsapp/qr/status', async (req, res) => {
   return res.json({ success: true, data: whatsappQr.getStatus(req.user?.id) });
 });
-router.post('/whatsapp/qr/start', canConfigure, async (req, res) => {
+router.post('/whatsapp/qr/start', canConfigure, auditAction('whatsapp_link_start', 'whatsapp_session'), async (req, res) => {
   // R6 (offline Stage 16): WhatsApp-QR sessions keep in-memory, single-instance
   // state. Only the cloud instance may own them — a LAN site box must not pair a
   // second session against the same number. Site devices reach WhatsApp when the
@@ -100,7 +101,7 @@ router.post('/whatsapp/qr/start', canConfigure, async (req, res) => {
   const status = await whatsappQr.start(req.user?.id);
   return res.json({ success: true, data: status });
 });
-router.post('/whatsapp/qr/logout', canConfigure, async (req, res) => {
+router.post('/whatsapp/qr/logout', canConfigure, auditAction('whatsapp_logout', 'whatsapp_session'), async (req, res) => {
   const status = await whatsappQr.logout(req.user?.id);
   return res.json({ success: true, data: status });
 });
@@ -140,8 +141,8 @@ router.put('/notifications/read-all', communicationController.markAllNotificatio
 // Scheduled Tasks (admin)
 // ============================================================
 router.get('/scheduler/tasks', canConfigure, communicationController.listScheduledTasks);
-router.put('/scheduler/tasks/:id/toggle', canConfigure, communicationController.toggleScheduledTask);
-router.post('/scheduler/tasks/:id/run', canConfigure, communicationController.runScheduledTask);
+router.put('/scheduler/tasks/:id/toggle', canConfigure, auditAction('toggle', 'scheduled_task'), communicationController.toggleScheduledTask);
+router.post('/scheduler/tasks/:id/run', canConfigure, auditAction('run', 'scheduled_task'), communicationController.runScheduledTask);
 router.get('/scheduler/logs', canConfigure, communicationController.getExecutionLogs);
 
 module.exports = router;

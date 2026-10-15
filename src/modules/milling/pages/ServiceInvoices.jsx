@@ -31,7 +31,9 @@ export default function ServiceInvoices() {
   });
   const rows = Array.isArray(data) ? data : [];
 
-  const totals = rows.reduce((a, r) => {
+  // A voided invoice is kept for audit (P2-16) but bills nothing.
+  const isVoid = (r) => r.status === 'Void';
+  const totals = rows.filter((r) => !isVoid(r)).reduce((a, r) => {
     a.billed += num(r.total_amount); a.received += num(r.received_amount); a.outstanding += num(r.balance_amount);
     return a;
   }, { billed: 0, received: 0, outstanding: 0 });
@@ -87,10 +89,10 @@ export default function ServiceInvoices() {
                   <td data-label="Total" className="px-4 py-2.5 text-right font-medium text-gray-900">{pkr(r.total_amount)}</td>
                   <td data-label="Received" className="mob-hide px-4 py-2.5 text-right text-emerald-700">{pkr(r.received_amount)}</td>
                   <td data-label="Balance" className="px-4 py-2.5 text-right text-rose-600">{pkr(r.balance_amount)}</td>
-                  <td data-label="Status" className="px-4 py-2.5"><StatusBadge status={r.payment_status} /></td>
+                  <td data-label="Status" className="px-4 py-2.5"><StatusBadge status={isVoid(r) ? 'Void' : r.payment_status} />{isVoid(r) && r.void_reason && <div className="text-[11px] text-gray-400 max-w-[12rem] truncate" title={r.void_reason}>{r.void_reason}</div>}</td>
                   <td data-label="Action" className="px-4 py-2.5 text-right whitespace-nowrap">
                     <button onClick={() => viewInvoice(r.id)} className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 mr-2"><Printer size={12} /> View</button>
-                    {r.payment_status !== 'Paid' && canPay && (
+                    {r.payment_status !== 'Paid' && !isVoid(r) && canPay && (
                       <button onClick={() => openPayment(r.id)} className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100"><Wallet size={12} /> Pay</button>
                     )}
                   </td>

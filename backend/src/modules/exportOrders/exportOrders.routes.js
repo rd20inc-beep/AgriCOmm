@@ -7,6 +7,17 @@ const validate = require('../../middleware/validate');
 const schemas = require('../../middleware/schemas');
 const ownerApproval = require('../../middleware/ownerApproval');
 
+// The cancel route's Owner gate: the forfeit gate when the money received is
+// being forfeited (P2-15 / D-7), the plain cancel gate otherwise.
+function cancelOwnerApproval(forfeitGate, cancelGate) {
+  const gate = (req, res, next) => (
+    req.body && req.body.money_disposition === 'forfeit' ? forfeitGate : cancelGate
+  )(req, res, next);
+  gate.ownerApprovalGates = { forfeit: forfeitGate, other: cancelGate };
+  gate.ownerApproval = cancelGate.ownerApproval; // every path is Owner-gated
+  return gate;
+}
+
 // Multi-permission gates use the shared rbac authorizeAny (Owner / Super Admin
 // bypass and user module scopes, like every other gate). It replaces a local
 // copy that only Super Admin bypassed.
@@ -41,6 +52,7 @@ router.post(
 router.put(
   '/:id',
   authorize('export_orders', 'edit'),
+  validate(schemas.updateExportOrder),
   auditAction('update', 'export_order', (req) => req.params.id),
   controller.update
 );
@@ -105,13 +117,18 @@ router.post(
 router.post(
   '/:id/costs',
   authorize('export_orders', 'edit'),
+  validate(schemas.addExportOrderCost),
   auditAction('add_cost', 'export_order', (req) => req.params.id),
   controller.addCost
 );
 router.post(
   '/:id/cancel',
   authorize('export_orders', 'approve'),
-  ownerApproval('export_cancel'),
+  // Cancelling is always Owner-authorised. Forfeiting money the buyer paid to
+  // other income (D-7) is logged as its own kind of approval, so the Owner's
+  // approval trail says that is what they authorised.
+  cancelOwnerApproval(ownerApproval('export_cancel_forfeit'), ownerApproval('export_cancel')),
+  validate(schemas.cancelExportOrder),
   auditAction('cancel', 'export_order', (req) => req.params.id),
   controller.cancelOrder
 );
@@ -188,8 +205,19 @@ router.post(
 router.post(
   '/receipts/:paymentId/reject',
   authorize('finance', 'confirm_payment'),
+  validate(schemas.rejectExportReceipt),
   auditAction('reject_export_receipt', 'payment', (req) => req.params.paymentId),
   controller.rejectExportReceipt
+);
+// D-8: a short balance left after the last receipt (bank deductions the
+// recorder did not enter, a buyer short-paying). Always Owner-approved.
+router.post(
+  '/:id/write-off-balance',
+  authorize('finance', 'confirm_payment'),
+  ownerApproval('export_short_write_off'),
+  validate(schemas.writeOffExportBalance),
+  auditAction('write_off_balance', 'export_order', (req) => req.params.id),
+  controller.writeOffBalance
 );
 router.post(
   '/:id/allocate-stock',
@@ -251,29 +279,29 @@ router.get('/:id/documents/generate/:docType', authorize('export_orders', 'view'
 
 // Persisted / versioned generated documents (Phase E).
 const genDocController = require('../../modules/documents/generatedDocument.controller');
-router.put('/:id/documents/customer-style', authorize('export_orders', 'edit'), validate(schemas.documentCustomerStyle), genDocController.saveCustomerStyle);
+router.put('/:id/documents/customer-style', authorize('export_orders', 'edit'), auditAction('set_customer_style', 'generated_document'), validate(schemas.documentCustomerStyle), genDocController.saveCustomerStyle);
 // P1-08 / EXP-13: previewing writes nothing. A viewer previews through GET
 // /current (an existing version) or GET /generate (a stateless render); a
 // version row — and its GD number — is created only when someone who can edit
 // documents first saves, changes a setting or stores the rendering.
 const canEditDocuments = authorize.authorizeAny(['export_orders', 'edit'], ['documents', 'edit']);
-router.post('/:id/documents/:docType/draft', canEditDocuments, genDocController.createDraft);
+router.post('/:id/documents/:docType/draft', canEditDocuments, auditAction('create_draft', 'generated_document'), genDocController.createDraft);
 router.get('/:id/documents/:docType/current', authorize('export_orders', 'view'), genDocController.getCurrent);
 // P1-08 / EXP-12: PDF and send render the STORED version on the server — the
 // request carries no HTML. Sending needs an Approved version (Proforma Invoice
 // excepted, D-30); the PDF needs the documents download permission on top of
 // order view.
-router.post('/:id/documents/:docType/send-whatsapp', authorize('export_orders', 'send_email'), validate(schemas.sendDocumentWhatsApp), genDocController.sendWhatsApp);
-router.post('/:id/documents/:docType/send-email', authorize('export_orders', 'send_email'), validate(schemas.sendDocumentEmail), genDocController.sendEmail);
+router.post('/:id/documents/:docType/send-whatsapp', authorize('export_orders', 'send_email'), auditAction('send_whatsapp', 'generated_document'), validate(schemas.sendDocumentWhatsApp), genDocController.sendWhatsApp);
+router.post('/:id/documents/:docType/send-email', authorize('export_orders', 'send_email'), auditAction('send_email', 'generated_document'), validate(schemas.sendDocumentEmail), genDocController.sendEmail);
 router.post('/:id/documents/:docType/pdf', authorize('export_orders', 'view'), authorize('documents', 'download'), validate(schemas.downloadDocumentPdf), genDocController.downloadPdf);
 router.get('/:id/documents/:docType/versions', authorize('export_orders', 'view'), genDocController.listVersions);
-router.put('/documents/:genId/overrides', authorize('export_orders', 'edit'), validate(schemas.saveDocumentOverrides), genDocController.saveOverrides);
-router.put('/documents/:genId/rendering', canEditDocuments, validate(schemas.saveDocumentRendering), genDocController.saveRendering);
-router.put('/documents/:genId/settings', authorize('export_orders', 'edit'), validate(schemas.documentSettings), genDocController.updateSettings);
-router.put('/documents/:genId/submit', authorize('export_orders', 'edit'), genDocController.submit);
-router.put('/documents/:genId/approve', authorize('documents', 'approve'), validate(schemas.documentApprove), genDocController.approve);
-router.put('/documents/:genId/status', authorize('export_orders', 'edit'), validate(schemas.documentStatus), genDocController.setStatus);
-router.post('/documents/:genId/revise', authorize('export_orders', 'edit'), validate(schemas.documentRevise), genDocController.revise);
+router.put('/documents/:genId/overrides', authorize('export_orders', 'edit'), auditAction('set_overrides', 'generated_document', (req) => req.params.genId), validate(schemas.saveDocumentOverrides), genDocController.saveOverrides);
+router.put('/documents/:genId/rendering', canEditDocuments, auditAction('set_rendering', 'generated_document', (req) => req.params.genId), validate(schemas.saveDocumentRendering), genDocController.saveRendering);
+router.put('/documents/:genId/settings', authorize('export_orders', 'edit'), auditAction('set_settings', 'generated_document', (req) => req.params.genId), validate(schemas.documentSettings), genDocController.updateSettings);
+router.put('/documents/:genId/submit', authorize('export_orders', 'edit'), auditAction('submit', 'generated_document', (req) => req.params.genId), genDocController.submit);
+router.put('/documents/:genId/approve', authorize('documents', 'approve'), auditAction('approve', 'generated_document', (req) => req.params.genId), validate(schemas.documentApprove), genDocController.approve);
+router.put('/documents/:genId/status', authorize('export_orders', 'edit'), auditAction('set_status', 'generated_document', (req) => req.params.genId), validate(schemas.documentStatus), genDocController.setStatus);
+router.post('/documents/:genId/revise', authorize('export_orders', 'edit'), auditAction('revise', 'generated_document', (req) => req.params.genId), validate(schemas.documentRevise), genDocController.revise);
 router.get('/documents/:genId', authorize('export_orders', 'view'), genDocController.getVersion);
 
 module.exports = router;

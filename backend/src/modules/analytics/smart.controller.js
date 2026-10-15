@@ -112,10 +112,12 @@ const smartController = {
       const result = await smartService.simulateFxScenario({
         contractValueUSD: parseFloat(contractValueUSD),
         currentRate: currentRate ? parseFloat(currentRate) : null,
-        scenarios: scenarios || [{ rate: 275 }, { rate: 280 }, { rate: 285 }, { rate: 290 }],
+        // None given: the service spreads scenarios around the current rate.
+        scenarios: Array.isArray(scenarios) && scenarios.length ? scenarios : null,
       });
       return res.json({ success: true, data: result, message: 'FX scenario simulation complete.' });
     } catch (err) {
+      if (err.code === 'FX_RATE_MISSING') return res.status(422).json({ success: false, code: err.code, message: err.message });
       console.error('FX scenario error:', err);
       return res.status(500).json({ success: false, message: err.message || 'Internal server error.' });
     }

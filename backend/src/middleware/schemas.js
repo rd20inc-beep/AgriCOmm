@@ -160,6 +160,19 @@ const exportOrderItemDraft = exportOrderItem.keys({
   qty_mt: Joi.number().min(0).allow(...DRAFT_BLANK),
   price_per_mt: Joi.number().min(0).allow(...DRAFT_BLANK),
 });
+// P2-20: an order edit checks its money / currency fields; every other field
+// passes through untouched (.unknown) to the controller's own allow-list.
+// booked_fx_rate is read only with a currency change, which re-locks the rate.
+const BLANK = ['', null];
+const updateExportOrder = Joi.object({
+  currency: Joi.string().valid('USD', 'EUR', 'GBP', 'PKR'), // an existing PKR order may re-send its own
+  booked_fx_rate: Joi.number().positive().allow(...BLANK),
+  qty_mt: Joi.number().min(0).allow(...BLANK),
+  price_per_mt: Joi.number().min(0).allow(...BLANK),
+  advance_pct: Joi.number().min(0).max(100).allow(...BLANK),
+  customer_id: Joi.number().integer().positive().allow(...BLANK),
+}).unknown(true);
+
 const createExportOrderDraft = createExportOrder.keys({
   qty_mt: Joi.number().min(0).allow(...DRAFT_BLANK),
   price_per_mt: Joi.number().min(0).allow(...DRAFT_BLANK),
@@ -278,6 +291,32 @@ const cancelExportDebitNote = Joi.object({
   reason: Joi.string().allow('', null),
 });
 
+// P2-05: one row per vendor bill, PKR (a foreign bill is converted at entry).
+// rice / raw_rice / milling are not order expenses — the rice is costed at
+// shipment from stock (5020/1230) and milling is derived from the batch.
+const addExportOrderCost = Joi.object({
+  category: Joi.string().trim().lowercase().max(50).required()
+    .invalid('rice', 'raw_rice', 'milling')
+    .messages({ 'any.invalid': 'Rice and milling are costed from stock at shipment and from the milling batch — they cannot be added as an order expense.' }),
+  amount: Joi.number().positive().precision(2).max(1e12).required(),
+  currency: Joi.string().trim().uppercase().length(3).default('PKR'),
+  fx_rate: Joi.number().positive().allow(null, ''),
+  notes: Joi.string().max(2000).allow('', null),
+  supplier_id: Joi.number().integer().positive().allow(null, ''),
+  vendor_name: Joi.string().trim().max(200).allow('', null),
+  bill_ref: Joi.string().trim().max(100).allow('', null),
+});
+
+// P2-15 / D-7: what happens to money already received when an order is cancelled.
+const cancelExportOrder = Joi.object({
+  reason: Joi.string().max(2000).allow('', null),
+  money_disposition: Joi.string().valid('refund', 'credit', 'forfeit').allow(null, ''),
+  refund_bank_account_id: Joi.number().integer().positive().allow(null, ''),
+  refund_date: Joi.date().iso().allow(null, ''),
+  refund_reference: Joi.string().max(100).allow('', null),
+  authorized_by_owner_id: Joi.number().integer().positive().allow(null, ''),
+});
+
 const exportOrderDocumentAction = Joi.object({
   doc_type: Joi.string().required(),
   file_path: Joi.string().allow('', null),
@@ -296,6 +335,8 @@ const confirmAdvance = Joi.object({
   bank_reference: Joi.string().max(255).allow(null, ''),
   reference: Joi.string().max(255).allow(null, ''),
   notes: Joi.string().max(1000).allow(null, ''),
+  // What the banks deducted from the wire (USD, ≤ the tolerance setting, D-8).
+  bank_charges: Joi.number().min(0).allow(null),
 });
 
 const confirmBalance = Joi.object({
@@ -309,6 +350,8 @@ const confirmBalance = Joi.object({
   bank_reference: Joi.string().max(255).allow(null, ''),
   reference: Joi.string().max(255).allow(null, ''),
   notes: Joi.string().max(1000).allow(null, ''),
+  // What the banks deducted from the wire (USD, ≤ the tolerance setting, D-8).
+  bank_charges: Joi.number().min(0).allow(null),
 });
 
 // Mark a finished/by-product lot ready for export + set its export display name.
@@ -328,6 +371,8 @@ const recordExportReceipt = Joi.object({
   // The bank's reference for the credit, carried onto the posted receipt.
   bank_reference: Joi.string().max(255).allow(null, ''),
   notes: Joi.string().max(1000).allow(null, ''),
+  // What the banks deducted from the wire (USD, ≤ the tolerance setting, D-8).
+  bank_charges: Joi.number().min(0).allow(null),
 });
 
 // Finance confirms a pending export receipt with the actual FX rate → posts.
@@ -335,6 +380,22 @@ const confirmExportReceipt = Joi.object({
   fx_rate: Joi.number().positive().allow(null),
   bank_account_id: Joi.number().integer().positive().allow(null),
   payment_method: Joi.string().max(50).allow(null, ''),
+  // Finance may correct the charge the recorder entered.
+  bank_charges: Joi.number().min(0).allow(null),
+});
+
+// Finance rejects a pending export receipt (not received): the reason is kept
+// on the row for whoever recorded it.
+const rejectExportReceipt = Joi.object({
+  reason: Joi.string().trim().min(1).max(1000).required(),
+});
+
+// Owner-approved write-off of a shipped order's short balance (D-8). The
+// amount defaults to everything outstanding.
+const writeOffExportBalance = Joi.object({
+  amount: Joi.number().positive().allow(null),
+  reason: Joi.string().trim().min(1).max(1000).required(),
+  authorized_by_owner_id: Joi.number().integer().positive().allow(null),
 });
 
 const allocateExportStock = Joi.object({
@@ -581,6 +642,35 @@ const replaceContraTransfer = Joi.object({
     'string.empty': 'A reason is required to edit a transfer',
   }),
 });
+// P2-24: a local sale's money fields. Only these are checked — every other
+// field (items[], repacking, buyer, vehicle …) passes through untouched
+// (.unknown), so the controller still sees the whole body. The cap paid ≤
+// total needs the priced lines, so it is enforced in the controller.
+const LOCAL_SALE_MODES = ['cash', 'credit', 'cheque', 'bank_transfer', 'online', 'lc', 'tt', 'wire', 'mobile'];
+const localSaleCreate = Joi.object({
+  payment_mode: Joi.string().valid(...LOCAL_SALE_MODES).default('cash').messages({
+    'any.only': `payment_mode must be one of: ${LOCAL_SALE_MODES.join(', ')}`,
+  }),
+  paid_amount: Joi.number().min(0).allow(null, ''),
+  bank_account_id: Joi.number().integer().positive().allow(null, ''),
+  gate_pass_no: Joi.string().trim().max(60).allow(null, ''),
+}).unknown(true);
+const localSaleReceipt = Joi.object({
+  amount: Joi.number().positive().required(),
+  payment_method: Joi.string().lowercase().valid(...LOCAL_SALE_MODES.filter((m) => m !== 'credit')).default('cash'),
+}).unknown(true);
+
+// P2-19 / D-3: a payment reversal always carries its reason. The Owner's
+// approval (authorized_by_owner_id + X-Owner-Credential) is read by
+// ownerApproval BEFORE this runs, so it need not survive stripUnknown.
+const reversePayment = Joi.object({
+  reason: Joi.string().trim().min(1).max(2000).required().messages({
+    'any.required': 'A reason is required to reverse a payment',
+    'string.empty': 'A reason is required to reverse a payment',
+  }),
+  authorized_by_owner_id: Joi.number().integer().positive().allow(null, ''),
+});
+
 const reverseFundTransfer = Joi.object({
   reason: Joi.string().trim().min(1).max(2000).required().messages({
     'any.required': 'A reason is required to reverse a transfer',
@@ -622,24 +712,72 @@ const recordPayment = Joi.object({
   attachment_name: Joi.string().allow('', null),
 });
 
+// P2-31: one settlement across several invoices, in one transaction
+// (finance/settleAcross.js). The allocation items carry their own amount and,
+// for payments, WHT / discount.
+const settleAcross = Joi.object({
+  type: Joi.string().valid('receipt', 'payment').required(),
+  currency: Joi.string().trim().uppercase().length(3).allow(null, ''),
+  payment_method: Joi.string().valid('bank_transfer', 'cash', 'cheque', 'lc', 'tt', 'wire', 'online', 'mobile').required(),
+  bank_account_id: Joi.number().integer().positive().allow(null, ''),
+  bank_reference: Joi.string().max(200).allow('', null),
+  due_date: Joi.date().iso().allow(null, ''),
+  payment_date: Joi.date().iso().required(),
+  notes: Joi.string().max(2000).allow('', null),
+  collection_location: Joi.string().valid('Mill', 'Head Office').allow(null, ''),
+  allocations: Joi.array().min(1).max(200).required().items(Joi.object({
+    payable_id: Joi.number().integer().positive(),
+    receivable_id: Joi.number().integer().positive(),
+    sale_group_no: Joi.string().trim().max(60),
+    amount: Joi.number().positive().required(),
+    wht_amount: Joi.number().min(0).allow(null),
+    wht_rate: Joi.number().min(0).max(100).allow(null),
+    discount_amount: Joi.number().min(0).allow(null),
+  }).xor('payable_id', 'receivable_id', 'sale_group_no')),
+});
+
 // ===================== JOURNAL ENTRIES =====================
 
+// Manual journal (POST /api/accounting/journals). The fields are the ones the
+// controller reads — this schema existed but was never wired, and its old
+// field names (reference_type / reference_id / line description) were not the
+// controller's. Lines are PKR (the GL is PKR-base); each carries a debit OR a
+// credit. Control accounts are refused by the controller (D-2).
 const createJournal = Joi.object({
   date: Joi.date().iso().required(),
-  description: Joi.string().min(3).required(),
+  description: Joi.string().trim().min(3).max(1000).required(),
   entity: Joi.string().valid('export', 'mill', 'general').required(),
+  ref_type: Joi.string().trim().max(50).allow('', null),
+  ref_no: Joi.string().trim().max(50).allow('', null),
   lines: Joi.array().items(
     Joi.object({
       account_id: Joi.number().integer().positive().required(),
-      debit: Joi.number().min(0).default(0),
-      credit: Joi.number().min(0).default(0),
-      description: Joi.string().allow('', null),
+      debit: Joi.number().min(0).precision(2).default(0),
+      credit: Joi.number().min(0).precision(2).default(0),
+      narration: Joi.string().max(240).allow('', null),
+      description: Joi.string().max(240).allow('', null),
+    }).custom((line, helpers) => {
+      const dr = Number(line.debit) || 0;
+      const cr = Number(line.credit) || 0;
+      if ((dr > 0) === (cr > 0)) return helpers.message('Each journal line needs a debit or a credit (not both, not neither).');
+      return line;
     })
   ).min(2).required().messages({
     'array.min': 'Journal entry must have at least 2 lines',
   }),
-  reference_type: Joi.string().allow('', null),
-  reference_id: Joi.number().integer().allow(null),
+});
+
+// Reversing a journal (D-2): a reason is mandatory. `authorized_by_owner_id`
+// is read by ownerApproval (which runs first) and kept for the audit row.
+const reverseJournal = Joi.object({
+  reason: Joi.string().trim().min(5).max(500).required(),
+  date: Joi.date().iso().allow(null),
+  authorized_by_owner_id: Joi.number().integer().positive().allow(null),
+});
+
+const reopenPeriod = Joi.object({
+  reason: Joi.string().trim().min(5).max(500).required(),
+  authorized_by_owner_id: Joi.number().integer().positive().allow(null),
 });
 
 // ===================== STOCK ADJUSTMENT =====================
@@ -691,6 +829,57 @@ const rejectApproval = Joi.object({
 });
 
 // ===================== MILLING =====================
+
+// PUT /milling/batches/:id — the generic batch edit (EDITABLE_BATCH_FIELDS +
+// custom_tags). Status is not editable here; raw qty / supplier / fee are
+// further locked once the yield is recorded (P2-08 / MIL-38).
+const updateBatch = Joi.object({
+  supplier_id: Joi.number().integer().positive().allow(null),
+  raw_qty_kg: Joi.number().positive(),
+  planned_finished_kg: Joi.number().min(0).allow(null),
+  milling_fee_per_kg: Joi.number().min(0).allow(null),
+  mill_id: Joi.number().integer().positive(),
+  machine_line: Joi.string().max(100).allow('', null),
+  shift: Joi.string().valid('Day', 'Night', 'Full'),
+  notes: Joi.string().allow('', null),
+  variance_status: Joi.string().max(50).allow('', null),
+  batch_name: Joi.string().max(200).allow('', null),
+  custom_tags: Joi.alternatives().try(
+    Joi.array().items(Joi.string().max(60)),
+    Joi.string().allow('', null),
+  ),
+});
+
+// POST /service-milling/invoices (P2-16 / MIL-32). Quantities and rates are
+// overrides of the batch's own figures; blank means "use the batch's".
+const svcNum = Joi.number().min(0).allow(null, '');
+const svcDate = Joi.string().pattern(/^\d{4}-\d{2}-\d{2}/).allow(null, '');
+const createServiceInvoice = Joi.object({
+  service_batch_id: Joi.number().integer().positive().required(),
+  milling_qty_kg: svcNum,
+  milling_rate_per_kg: svcNum,
+  rental_kattas: Joi.number().integer().min(0).allow(null, ''),
+  rental_rate_per_katta: svcNum,
+  rental_from: svcDate,
+  rental_to: svcDate,
+  labour_kattas: Joi.number().integer().min(0).allow(null, ''),
+  labour_rate_per_katta: svcNum,
+  extra_charges: svcNum,
+  discount: svcNum,
+  tax_pct: Joi.number().min(0).max(100).allow(null, ''),
+  freight_amount: svcNum,
+  freight_hauler_id: Joi.number().integer().positive().allow(null, ''),
+  invoice_date: svcDate,
+  due_date: svcDate,
+  notes: Joi.string().max(2000).allow('', null),
+});
+
+// POST /service-milling/invoices/:id/void — a reason is mandatory; the owner
+// authorization travels as authorized_by_owner_id (+ X-Owner-Credential header).
+const voidServiceInvoice = Joi.object({
+  reason: Joi.string().trim().min(3).max(500).required(),
+  authorized_by_owner_id: Joi.number().integer().positive().allow(null, ''),
+});
 
 const createBatch = Joi.object({
   supplier_id: Joi.number().integer().positive().allow(null),
@@ -959,7 +1148,10 @@ const updateSettings = Joi.object({
   payment_reminder_days: Joi.number().integer().min(1).max(365),
   // automation.service scanLowMarginOrders
   min_margin_pct: Joi.number().min(0).max(100),
-  // fxRate.service fallback when no fx_rates row exists
+  // Legacy key, kept so older clients can still save settings. Nothing
+  // converts with it any more (D-10: no fallback FX rate — rates are kept per
+  // currency in fx_rates through POST /finance/fx-rates; addRate mirrors the
+  // latest USD rate here for display only).
   pkr_rate: Joi.number().positive().max(100000),
   // finance/collectionRate.js
   export_balance_term_days: Joi.number().integer().min(0).max(365),
@@ -991,16 +1183,21 @@ module.exports = {
   bundleDocuments,
   createExportOrder,
   createExportOrderDraft,
+  updateExportOrder,
   updateExportShipment,
   exportPackingWeight,
   exportOrderAction,
   saveBatchPackaging,
   issueExportDebitNote,
   cancelExportDebitNote,
+  addExportOrderCost,
+  cancelExportOrder,
   exportOrderDocumentAction,
   confirmAdvance,
   confirmBalance,
   recordExportReceipt,
+  rejectExportReceipt,
+  writeOffExportBalance,
   confirmExportReceipt,
   setExportReady,
   allocateExportStock,
@@ -1018,11 +1215,20 @@ module.exports = {
   createContraTransfer,
   replaceContraTransfer,
   reverseFundTransfer,
+  reversePayment,
+  settleAcross,
+  localSaleCreate,
+  localSaleReceipt,
   createJournal,
+  reverseJournal,
+  reopenPeriod,
   stockAdjustment,
   submitApproval,
   rejectApproval,
   createBatch,
+  updateBatch,
+  createServiceInvoice,
+  voidServiceInvoice,
   recordYield,
   saveDocumentOverrides,
   saveDocumentRendering,

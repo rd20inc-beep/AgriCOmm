@@ -197,24 +197,16 @@ export default function MillingBatchDetail() {
   const [priceForm, setPriceForm] = useState({
     broken: '', sortex: '', bran: '', husk: '', choba: '',
     b1: '', b2: '', b3: '', csr: '', shortGrain: '',
-    // Residual costing inputs (PKR totals) — finished cost is derived.
-    millingCost: '', otherExpenses: '',
+    // Legacy manual Milling / Other totals: only clearing them is allowed now.
+    clearManual: false,
   });
   const [priceLoading, setPriceLoading] = useState(false);
 
-  // Default Milling Cost / Other Expenses for the costing box: use the operator's
-  // saved manual values, else fall back to the milling fee total and the recorded
-  // processing costs (consumption/packing). Editable in the modal.
+  // Milling Cost / Other Expenses are the itemised cost-sheet lines (Costs tab)
+  // — one cost source, each line booked in the accounts. A legacy batch may still
+  // carry a manual total; the drawer can only clear it (P2-08 / MIL-03).
   function defaultCostInputs() {
-    // Exclude raw_rice (its own line) AND packaging (a separate always-added
-    // line) — Other Expenses is everything else.
-    const proc = Object.entries(batch?.costs || {}).reduce(
-      (s, [k, v]) => (k === 'raw_rice' || k === 'packaging' ? s : s + (parseFloat(v) || 0)), 0);
-    // Milling Cost defaults to 0 until entered (no auto milling fee). Other
-    // Expenses prefills from recorded processing costs.
-    const milling = batch?.manualMillingCostPkr != null ? parseFloat(batch.manualMillingCostPkr) : 0;
-    const other = batch?.manualOtherExpensesPkr != null ? parseFloat(batch.manualOtherExpensesPkr) : proc;
-    return { millingCost: String(Math.round(milling)), otherExpenses: String(Math.round(other)) };
+    return { clearManual: false };
   }
   const [vehicleForm, setVehicleForm] = useState({
     vehicleNo: '', driverName: '', driverPhone: '',
@@ -2268,8 +2260,17 @@ export default function MillingBatchDetail() {
           // Raw rice cost per kg — useful when only part of a lot is milled.
           const rawQtyKg = parseFloat(batch?.rawQtyKg) || 0;
           const rawCostPerKg = rawQtyKg > 0 ? rawPurchase / rawQtyKg : 0;
-          const millingCost = num(priceForm.millingCost);
-          const otherExpenses = num(priceForm.otherExpenses);
+          // Same rule as the server's residual engine: a legacy manual total (> 0)
+          // overrides its itemised lines until it is cleared.
+          const millingCat = num(batch?.costs?.processing);
+          const procTotal = Object.entries(batch?.costs || {}).reduce(
+            (s, [k, v]) => (k === 'raw_rice' || k === 'packaging' ? s : s + num(v)), 0);
+          const legacyMilling = num(batch?.manualMillingCostPkr);
+          const legacyOther = num(batch?.manualOtherExpensesPkr);
+          const hasLegacyManual = legacyMilling > 0 || legacyOther > 0;
+          const useLegacy = hasLegacyManual && !priceForm.clearManual;
+          const millingCost = useLegacy && legacyMilling > 0 ? legacyMilling : millingCat;
+          const otherExpenses = useLegacy && legacyOther > 0 ? legacyOther : Math.max(0, procTotal - millingCat);
           const packingCost = num(batch?.costs?.packaging); // auto from packing logs, always added
           const netPurchase = rawPurchase + millingCost + otherExpenses + packingCost;
           // prices are per-KG (Phase 5c); f.qty is MT → ×1000 to KG for the value.
@@ -2296,17 +2297,21 @@ export default function MillingBatchDetail() {
                   </div>
                   <div>
                     <label className="block text-xs text-gray-600 mb-1">Milling Cost</label>
-                    <input type="number" min="0" value={priceForm.millingCost}
-                      onChange={e => setPriceForm(p => ({ ...p, millingCost: e.target.value }))}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
+                    <div className="w-full border border-gray-200 bg-gray-50 rounded-lg px-3 py-2 text-sm text-gray-700">{Rs(millingCost)}</div>
                   </div>
                   <div>
                     <label className="block text-xs text-gray-600 mb-1">Other Expenses</label>
-                    <input type="number" min="0" value={priceForm.otherExpenses}
-                      onChange={e => setPriceForm(p => ({ ...p, otherExpenses: e.target.value }))}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
+                    <div className="w-full border border-gray-200 bg-gray-50 rounded-lg px-3 py-2 text-sm text-gray-700">{Rs(otherExpenses)}</div>
                   </div>
                 </div>
+                <p className="text-[11px] text-gray-500 mt-1">Milling and other costs come from the itemised lines on the Costs tab — add or correct them there so they are booked in the accounts.</p>
+                {hasLegacyManual && (
+                  <label className="mt-2 flex items-start gap-2 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2">
+                    <input type="checkbox" className="mt-0.5" checked={!!priceForm.clearManual}
+                      onChange={e => setPriceForm(p => ({ ...p, clearManual: e.target.checked }))} />
+                    <span>This batch still uses an old manual total ({legacyMilling > 0 ? `Milling ${Rs(legacyMilling)}` : ''}{legacyMilling > 0 && legacyOther > 0 ? ', ' : ''}{legacyOther > 0 ? `Other ${Rs(legacyOther)}` : ''}). Tick to replace it with the itemised costs.</span>
+                  </label>
+                )}
                 {packingCost > 0 && (
                   <div className="mt-2 flex items-center justify-between text-xs text-gray-500">
                     <span>Packing / Bags <span className="text-gray-400">(auto from packing)</span></span>
@@ -2375,8 +2380,9 @@ export default function MillingBatchDetail() {
                       powder_price_per_kg: num(priceForm.powder),
                       sweeping_price_per_kg: num(priceForm.sweeping),
                       choba_price_per_kg: num(priceForm.choba),
-                      manual_milling_cost_pkr: millingCost,
-                      manual_other_expenses_pkr: otherExpenses,
+                      // Only clearing a legacy manual total is sent; omitted = unchanged.
+                      ...(hasLegacyManual && priceForm.clearManual
+                        ? { manual_milling_cost_pkr: null, manual_other_expenses_pkr: null } : {}),
                     });
                     addToast('Costs saved — finished cost computed from Net Purchase − by-products');
                     invalidateBatch();

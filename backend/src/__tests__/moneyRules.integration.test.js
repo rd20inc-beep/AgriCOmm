@@ -52,7 +52,7 @@ d('money rules (DB-gated)', () => {
     const jwt = require('jsonwebtoken');
     const config = require('../config');
     const roleId = async (name) => (await db('roles').where({ name }).first()).id;
-    for (const [key, role] of [['sa', 'Super Admin'], ['op', 'Mill Operator']]) {
+    for (const [key, role] of [['sa', 'Super Admin'], ['op', 'Mill Operator'], ['owner', 'Owner']]) {
       const [u] = await db('users').insert({
         email: `zz-b-${key}-${run}@test.local`, full_name: `ZZ ${role} ${run}`,
         password_hash: 'x', role_id: await roleId(role), is_active: true, status: 'active',
@@ -133,7 +133,7 @@ d('money rules (DB-gated)', () => {
     // Twice, clear, reverse: all refused.
     expect((await post('sa', `/api/finance/payments/${p.id}/bounce`, { reason: 'again' })).status).toBe(409);
     expect((await post('sa', `/api/finance/payments/${p.id}/clear`, { bank_account_id: acc.bank.id })).status).toBe(409);
-    expect((await post('sa', `/api/finance/payments/${p.id}/reverse`, { reason: 'x' })).status).toBe(409);
+    expect((await post('owner', `/api/finance/payments/${p.id}/reverse`, { reason: 'x' })).status).toBe(409);
   });
 
   test('B1 refuses a cleared cheque and a reversed one (409); nothing moves', async () => {
@@ -148,7 +148,7 @@ d('money rules (DB-gated)', () => {
 
     const pa2 = await newPayable(1000);
     const c2 = (await cheque(pa2)).body.data.payment;
-    expect((await post('sa', `/api/finance/payments/${c2.id}/reverse`, { reason: 'typo' })).status).toBe(200);
+    expect((await post('owner', `/api/finance/payments/${c2.id}/reverse`, { reason: 'typo' })).status).toBe(200);
     const r2 = await post('sa', `/api/finance/payments/${c2.id}/bounce`, { reason: 'x' });
     expect(r2.status).toBe(409);
     expect((await db('payments').where({ id: c2.id }).first()).status).toBe('Reversed');

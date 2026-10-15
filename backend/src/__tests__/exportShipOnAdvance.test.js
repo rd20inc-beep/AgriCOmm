@@ -20,7 +20,7 @@ jest.mock('../services/inventoryService', () => mockInventory);
 jest.mock('../modules/inventory/inventory.service', () => mockInventory);
 
 const mockAccounting = {
-  autoPost: jest.fn().mockResolvedValue(null),
+  autoPost: jest.fn().mockResolvedValue({ id: 1 }), // a posted journal (null = rule missing → ship refused, P2-03)
   createJournal: jest.fn().mockResolvedValue({ id: 1 }),
   postJournal: jest.fn().mockResolvedValue(null),
 };
@@ -104,7 +104,9 @@ function seed({ o = {}, unfulfilled, documents = [] } = {}) {
     document_checklists: checklist({ unfulfilled }),
     inventory_reservations: [],
     export_packing_weights: [],
-    chart_of_accounts: [],
+    // The advance re-class at shipment needs 1310 / 1110 (a missing account now
+    // refuses the shipment rather than skipping the journal, P2-03).
+    chart_of_accounts: [{ id: 102, code: '1110', name: 'Export AR (USD)' }, { id: 103, code: '1310', name: 'Customer Advances Received' }, { id: 104, code: '6210', name: 'FX Gain/Loss' }],
   });
 }
 

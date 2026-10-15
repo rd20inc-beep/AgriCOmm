@@ -20,11 +20,10 @@ import { financeApi } from '../../../api/services';
 import StatusBadge from '../../../shared/components/StatusBadge';
 import FieldError from '../../../shared/components/FieldError';
 import { fmtMoney, fmtUSD, fmtNum, fmtPct, fmtDate } from '../../../shared/utils/format';
-import { DEFAULT_FX_RATE } from '../utils/fx';
+import { useFxRate } from '../utils/fx';
 
 // Page-level fallback — real rate comes from finance overview / fx_rates
 // elsewhere. Kept aliased so the rest of the file reads unchanged.
-const PKR_RATE_DEFAULT = DEFAULT_FX_RATE;
 
 // Exact, per-row currency (USD export costs, PKR mill costs).
 const formatAmount = (value, currency) => fmtMoney(value, currency || 'USD', { decimals: 2 });
@@ -38,6 +37,7 @@ export default function CostAllocation() {
   // Allocating is finance.confirm_payment (POST/DELETE /finance/cost-allocations…).
   const { hasPermission } = useAuth();
   const canAllocate = hasPermission('finance', 'confirm_payment');
+  const usdRate = useFxRate(); // latest USD rate on file, or null (D-10)
   const { exportOrders, millingBatches, addToast } = useApp();
 
   // Compute cost allocations from real order/batch data
@@ -133,11 +133,13 @@ export default function CostAllocation() {
     let countUnallocated = 0;
 
     costs.forEach(c => {
-      const grossUSD = c.currency === 'PKR' ? c.grossAmount / PKR_RATE_DEFAULT : c.grossAmount;
+      // PKR costs shown in USD at the latest rate (an estimate); none on file → 0 (D-10).
+      const usdOf = (pkr) => (usdRate ? pkr / usdRate : 0);
+      const grossUSD = c.currency === 'PKR' ? usdOf(c.grossAmount) : c.grossAmount;
       const allocatedAmt = c.allocations.reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
-      const allocatedUSD = c.currency === 'PKR' ? allocatedAmt / PKR_RATE_DEFAULT : allocatedAmt;
+      const allocatedUSD = c.currency === 'PKR' ? usdOf(allocatedAmt) : allocatedAmt;
       const unallocatedAmt = c.grossAmount - allocatedAmt;
-      const unallocatedUSD = c.currency === 'PKR' ? unallocatedAmt / PKR_RATE_DEFAULT : unallocatedAmt;
+      const unallocatedUSD = c.currency === 'PKR' ? usdOf(unallocatedAmt) : unallocatedAmt;
 
       totalGross += grossUSD;
       totalAllocated += allocatedUSD;
@@ -149,7 +151,7 @@ export default function CostAllocation() {
     });
 
     return { totalGross, totalAllocated, totalUnallocated, countAllocated, countPartial, countUnallocated };
-  }, [costs]);
+  }, [costs, usdRate]);
 
   function getAllocatedAmount(cost) {
     return cost.allocations.reduce((sum, a) => sum + (parseFloat(a.amount) || 0), 0);

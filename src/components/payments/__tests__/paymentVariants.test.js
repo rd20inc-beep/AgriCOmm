@@ -49,8 +49,10 @@ describe('endpoints and bodies', () => {
     const r = paymentRequest('receive_export', ctx, form({ fxRate: '281.5', reference: 'SWIFT1' }));
     expect(r).toEqual({
       method: 'post', url: '/api/export-orders/77/record-receipt',
-      body: { kind: 'advance', amount: 100, fx_rate: 281.5, payment_date: '2026-10-09', payment_method: 'bank_transfer', bank_account_id: 7, bank_reference: 'SWIFT1', notes: null },
+      body: { kind: 'advance', amount: 100, fx_rate: 281.5, bank_charges: 0, payment_date: '2026-10-09', payment_method: 'bank_transfer', bank_account_id: 7, bank_reference: 'SWIFT1', notes: null },
     });
+    // D-8: what the banks deducted rides along; the server checks the tolerance.
+    expect(paymentRequest('receive_export', ctx, form({ bankCharges: '15' })).body.bank_charges).toBe(15);
     expect(paymentRequest('receive_export', { ...ctx, kind: 'balance' }, form()).body.kind).toBe('balance');
   });
 

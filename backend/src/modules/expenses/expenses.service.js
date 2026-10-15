@@ -1,10 +1,22 @@
 const db = require('../../config/database');
+const fxRateService = require('../finance/fxRate.service');
 const { NotFoundError, ValidationError } = require('../../shared/errors');
 const accountingService = require('../accounting/accounting.service');
 const { normalizePaymentMethod } = require('../../shared/constants/paymentMethods');
 const { pendingChequeTotal, round2 } = require('../finance/paymentSettlement');
 const { recordMoneyMovement } = require('../finance/paymentEngine');
 const { postProcessingDelta } = require('../milling/millingCompletionJournal');
+const auditService = require('../admin/audit.service');
+const { ledgerFailure, missingAccounts } = require('../../shared/ledgerFailure');
+
+// Owner's Drawings (equity) — migration 350, owner decision D-9.
+const DRAWINGS_CODE = '3030';
+const { isInternalCostCategory } = require('../exportOrders/exportCosts');
+
+const toYmd = (d) => (d instanceof Date ? d.toISOString().slice(0, 10) : String(d).slice(0, 10));
+
+// The business_expenses category of a salary-advance payout (D-11).
+const STAFF_ADVANCE_CATEGORY = 'staff_advance';
 
 const CATEGORY_MAP = {
   general: [
@@ -40,7 +52,12 @@ async function generateExpenseNo(trx) {
 const expensesService = {
   // `millOnly` (a mill route's caller without finance.confirm_payment): a
   // pay-now may only draw on one of the mill's own accounts (paymentEngine).
-  async create(data, userId, existingTrx = null, { millOnly = false } = {}) {
+  // `req` (the HTTP request, when there is one): the audit row is written
+  // inside this transaction (P2-30) instead of after the response.
+  // `strictLedger` (payroll callers): the expense journal is part of the event —
+  // a posting failure rolls the whole expense back instead of being logged and
+  // skipped (shared/ledgerFailure.js).
+  async create(data, userId, existingTrx = null, { millOnly = false, req = null, strictLedger = false } = {}) {
     const {
       expense_type, category, subcategory, amount, currency, fx_rate,
       supplier_id, vendor_name, expense_date, due_date, invoice_reference,
@@ -51,12 +68,30 @@ const expensesService = {
 
     if (!amount || Number(amount) <= 0) throw new ValidationError('Amount must be positive.');
     if (!expense_date) throw new ValidationError('Expense date is required.');
+    // P2-05: rice / milling are costed at shipment from stock and from the
+    // milling batch — booking them as an export-order expense counts them twice.
+    if (order_id && expense_type === 'export' && isInternalCostCategory(category)) {
+      throw new ValidationError('Rice and milling are costed from stock at shipment and from the milling batch — they cannot be added as an export-order expense.');
+    }
+
+    // "Personal / Owner" arrives as a general expense with subcategory
+    // 'personal' (the form's payload). It is the owner's, not the business's:
+    // never costed to a batch or an order.
+    const personal = subcategory === 'personal';
+    if (personal && (batch_id || order_id)) {
+      throw new ValidationError("An owner's personal expense cannot be charged to a batch or an export order.");
+    }
 
     const amountNum = Number(amount);
     // Paying at create goes through the payment engine once the expense and
     // its payable exist (a cheque records but settles nothing until it clears).
-    const rate = Number(fx_rate) || (currency === 'PKR' ? 1 : 280);
-    const amountPkr = currency === 'PKR' ? amountNum : Number((amountNum * rate).toFixed(2));
+    // No currency means PKR (it is stored that way below). A foreign expense
+    // converts at the rate given, else the currency's rate for the expense
+    // date — refused when none is on file (D-10), never a flat 280.
+    const cur = String(currency || 'PKR').toUpperCase();
+    const rate = cur === 'PKR' ? 1
+      : (Number(fx_rate) > 0 ? Number(fx_rate) : await fxRateService.requireRate(cur, expense_date, { what: 'This expense' }));
+    const amountPkr = cur === 'PKR' ? amountNum : Number((amountNum * rate).toFixed(2));
 
     // Run inside a caller-supplied transaction when given, so the expense +
     // cash-out + GL commit atomically with the caller's own work (e.g. payroll
@@ -77,6 +112,30 @@ const expensesService = {
         ]);
         if (salDr) salaryDebitAccountId = salDr.id;
         if (salCr) salaryCreditAccountId = salCr.id;
+      }
+      // A salary advance is an ASSET recovered from salary, not a cost (owner
+      // decision D-11): DR 1330 Staff Advances / CR 2040, and the payment clears
+      // 2040 against cash — so the payout nets to Dr 1330 / Cr Cash & Bank. Each
+      // recovery from salary later moves it to cost (Dr 6135 / Cr 1330). No
+      // fallback: without 1330 the advance must not be booked as an expense.
+      if (category === STAFF_ADVANCE_CATEGORY) {
+        const [advDr, salCr] = await Promise.all([
+          trx('chart_of_accounts').where('code', '1330').first(),
+          trx('chart_of_accounts').where('code', '2040').first(),
+        ]);
+        if (!advDr || !salCr) throw missingAccounts(['1330', '2040'], 'The salary advance');
+        salaryDebitAccountId = advDr.id;
+        salaryCreditAccountId = salCr.id;
+      }
+
+      // The Owner's personal expenses are drawings, not operating expense
+      // (owner decision D-9): Dr 3030 Owner's Drawings (equity) instead of
+      // 6000. No fallback to 6000 — that would understate profit silently.
+      let drawingsAccountId = null;
+      if (personal) {
+        const dr = await trx('chart_of_accounts').where('code', DRAWINGS_CODE).first();
+        if (!dr) throw missingAccounts([DRAWINGS_CODE], 'The expense');
+        drawingsAccountId = dr.id;
       }
 
       const [expense] = await trx('business_expenses').insert({
@@ -112,23 +171,17 @@ const expensesService = {
       }).returning('*');
 
       // ─── Link to batch costs if mill ───
+      // Its OWN cost row, stamped with the expense (P2-21). It used to be
+      // merged into the batch's row for the category, which the payables feed
+      // then re-derived as a second bill (MC-…) next to this expense's own
+      // payable — paying one left the other outstanding. A stamped row counts
+      // in the batch costing but is never a bill: the expense's payable is.
       if (batch_id && expense_type === 'mill') {
-        const costCat = category || 'miscellaneous';
-        const existing = await trx('milling_costs')
-          .where({ batch_id, category: costCat })
-          .first();
-        if (existing) {
-          await trx('milling_costs').where('id', existing.id).update({
-            amount: trx.raw('amount + ?', [amountPkr]),
-            notes: `Updated via business expense ${expenseNo}`,
-            updated_at: trx.fn.now(),
-          });
-        } else {
-          await trx('milling_costs').insert({
-            batch_id, category: costCat, amount: amountPkr,
-            currency: 'PKR', notes: `From business expense ${expenseNo}`,
-          });
-        }
+        await trx('milling_costs').insert({
+          batch_id, category: category || 'miscellaneous', amount: amountPkr,
+          currency: 'PKR', notes: `From business expense ${expenseNo}`,
+          business_expense_id: expense.id, created_by: userId || null,
+        });
       }
 
       // ─── Link to order costs if export ───
@@ -138,6 +191,8 @@ const expensesService = {
         // applied at write or read time. Whatever the user entered in
         // PKR goes straight in. (Foreign-currency expenses get
         // converted to PKR via amount_pkr at the top of this method.)
+        // Stamped with the expense (P2-21): it is paid through the expense's
+        // payable, never as an export-cost bill of its own.
         await trx('export_order_costs').insert({
           order_id,
           category: category || 'miscellaneous',
@@ -146,6 +201,12 @@ const expensesService = {
           fx_rate: 1,
           base_amount_pkr: amountPkr,
           notes: `From business expense ${expenseNo}`,
+          business_expense_id: expense.id,
+          created_by: userId || null,
+          // One bill, with its vendor (P2-05).
+          supplier_id: supplier_id || null,
+          vendor_name: vendor_name || null,
+          bill_ref: invoice_reference || null,
         });
       }
 
@@ -203,7 +264,7 @@ const expensesService = {
           checkOutstanding: false,
           millOnly,
           bt: {
-            source: category === 'salaries' ? 'salaries' : 'expense',
+            source: (category === 'salaries' || category === STAFF_ADVANCE_CATEGORY) ? 'salaries' : 'expense',
             category: category || 'expense',
             counterparty: vendorLabel,
             notes: `Payment for ${expenseNo}`,
@@ -213,10 +274,14 @@ const expensesService = {
 
       // ─── Auto-post journal entry ───
       // expense_recorded rule: DR Operating Expenses, CR Supplier Payable.
-      // Wrapped in try/catch so accounting failures never block the
-      // user-facing expense save (matches the pattern in other flows).
+      // The expense and its journal are one event (P2-02): a journal that
+      // cannot be posted (no rule, closed period, missing account) used to be
+      // logged and swallowed, so the expense and its payable committed with
+      // nothing in the GL — or, on a database error, the whole transaction
+      // silently rolled back at COMMIT. It now rolls the expense back and the
+      // user is told why.
       try {
-        await accountingService.autoPost(trx, {
+        const journal = await accountingService.autoPost(trx, {
           triggerEvent: 'expense_recorded',
           entity: expense_type === 'mill' ? 'mill' : expense_type === 'export' ? 'export' : 'general',
           amount: amountPkr,
@@ -227,11 +292,15 @@ const expensesService = {
           userId,
           partyType: supplier_id ? 'supplier' : null,
           partyId: supplier_id || null,
-          debitAccountId: salaryDebitAccountId,
+          debitAccountId: drawingsAccountId || salaryDebitAccountId,
           creditAccountId: salaryCreditAccountId,
+          // A strict (payroll) expense is journalled on its own date, the
+          // same day its payment posts — not on the day it was keyed in.
+          date: strictLedger ? toYmd(expense_date) : null,
         });
+        if (strictLedger && !journal) throw new Error('no active expense_recorded posting rule');
       } catch (e) {
-        console.warn('Expense journal post failed:', e.message);
+        throw ledgerFailure(e, 'The expense');
       }
 
       // A mill expense booked against a batch whose completion is already on
@@ -246,6 +315,13 @@ const expensesService = {
             counterCode: salaryDebitAccountId ? '6135' : '6000',
           });
         }
+      }
+
+      if (req) {
+        await auditService.logInTrx(trx, req, {
+          action: 'create', entityType: 'business_expense', entityId: expense.id,
+          result: { expense_no: expenseNo, amount_pkr: amountPkr, pay_now: !!pay_now },
+        });
       }
 
       return pay_now ? trx('business_expenses').where('id', expense.id).first() : expense;
@@ -377,6 +453,9 @@ const expensesService = {
         })
         : 0;
 
+      // The audit row commits with the link (P2-30) and is NOT caught: inside a
+      // transaction a failed insert aborts it, so swallowing the error used to
+      // make COMMIT silently roll the link back while the user saw success.
       await trx('audit_logs').insert({
         user_id: userId || null,
         action: supplier ? 'link_supplier' : 'unlink_supplier',
@@ -390,7 +469,7 @@ const expensesService = {
           journals_stamped: stamped,
           journal_refs: refs,
         }),
-      }).catch(() => { /* audit is best-effort; the link still stands */ });
+      });
 
       return trx('business_expenses').where('id', id).first();
     });
@@ -398,7 +477,7 @@ const expensesService = {
 
   // `existingTrx` lets a caller (payroll settle) commit the payment atomically
   // with its own writes, as create() already allows.
-  async markPaid(id, { amount, bank_account_id, payment_method, payment_reference, paid_date, due_date, notes }, userId, existingTrx = null, { millOnly = false } = {}) {
+  async markPaid(id, { amount, bank_account_id, payment_method, payment_reference, paid_date, due_date, notes }, userId, existingTrx = null, { millOnly = false, req = null } = {}) {
     // Joi parses paid_date into a Date; normalize to a YYYY-MM-DD string so the
     // GL journal's date math (createJournal does string ops) doesn't choke.
     const rawPayDate = paid_date || new Date().toISOString().split('T')[0];
@@ -433,7 +512,7 @@ const expensesService = {
       // entity's cash float) with its bank_transactions row, posts Dr 2010
       // (2040 for salaries) / Cr 1000 and settles the payable and the expense.
       // A cheque records only; Clear Cheque settles it.
-      await recordMoneyMovement(trx, {
+      const moved = await recordMoneyMovement(trx, {
         type: 'payment',
         payable: payable || null,
         source: { table: 'business_expenses', id: expense.id },
@@ -456,7 +535,15 @@ const expensesService = {
           notes: notes || `Payment for ${expense.expense_no}`,
         },
       });
-      return trx('business_expenses').where('id', id).first();
+      if (req) {
+        await auditService.logInTrx(trx, req, {
+          action: 'pay', entityType: 'business_expense', entityId: expense.id,
+          result: { expense_no: expense.expense_no, amount: payAmt, method: payment_method || null },
+        });
+      }
+      const row = await trx('business_expenses').where('id', id).first();
+      // P2-31: the overdraft warning rides on the response (not a column).
+      return moved.overdraft ? { ...row, warning: moved.overdraft } : row;
     };
     return existingTrx ? run(existingTrx) : db.transaction(run);
   },

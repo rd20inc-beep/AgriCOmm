@@ -3,7 +3,8 @@
  * export-order handlers (rather than grep their source). Tables are plain
  * arrays on `state.tables`; each test seeds what it needs.
  *
- * Supported: where(obj | field, value | field, op, value), whereIn, orderBy,
+ * Supported: where(obj | field, value | field, op, value), whereIn, whereNull,
+ * whereNotNull, orderBy,
  * select, first, forUpdate, insert().returning, update().returning, del,
  * sum('col as alias').first(), count().first(), transaction, fn.now.
  *
@@ -30,18 +31,23 @@ function eq(a, b) {
   return String(a) === String(b);
 }
 
+// Numbers compare as numbers; anything else (an ISO date) as text.
+const ord = (v) => (v !== null && v !== '' && Number.isFinite(Number(v)) ? Number(v) : String(v instanceof Date ? v.toISOString().slice(0, 10) : v));
+
 function test(row, c) {
   if (c.type === 'obj') return Object.entries(c.value).every(([k, v]) => eq(row[k], v));
   if (c.type === 'in') return c.values.some((v) => eq(row[c.field], v));
+  if (c.type === 'null') return row[c.field] == null;
+  if (c.type === 'notnull') return row[c.field] != null;
   const l = row[c.field];
   const r = c.value;
   switch (c.op) {
     case '=': return eq(l, r);
     case '!=': case '<>': return !eq(l, r);
-    case '>': return parseFloat(l) > parseFloat(r);
-    case '>=': return parseFloat(l) >= parseFloat(r);
-    case '<': return parseFloat(l) < parseFloat(r);
-    case '<=': return parseFloat(l) <= parseFloat(r);
+    case '>': return ord(l) > ord(r);
+    case '>=': return ord(l) >= ord(r);
+    case '<': return ord(l) < ord(r);
+    case '<=': return ord(l) <= ord(r);
     case 'like': return String(l || '').includes(String(r).replace(/%/g, ''));
     default: throw new Error(`memoryDb: unsupported operator ${c.op}`);
   }
@@ -87,6 +93,8 @@ class Query {
   }
   andWhere(...args) { return this.where(...args); }
   whereIn(field, values) { this.conds.push({ type: 'in', field, values }); return this; }
+  whereNull(field) { this.conds.push({ type: 'null', field }); return this; }
+  whereNotNull(field) { this.conds.push({ type: 'notnull', field }); return this; }
   orderBy(field, dir = 'asc') { this.sort = { field, dir }; return this; }
   select(...f) { this.fields = f.flat(); return this; }
   forUpdate() { return this; }

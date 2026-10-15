@@ -2,6 +2,7 @@ const db = require('../../config/database');
 const accountingService = require('../accounting/accounting.service');
 const { NotFoundError, ValidationError, ConflictError } = require('../../shared/errors');
 const { nextDocNo } = require('../../utils/docNumber');
+const { ledgerFailure } = require('../../shared/ledgerFailure');
 
 // On-hand after applying a signed adjustment delta, or null when it would go
 // below zero (a 0.0001 tolerance absorbs float dust).
@@ -299,8 +300,10 @@ const millStoreRepo = {
       });
 
       // Auto-post journal: store_purchase rule (DR Bags & Packaging
-      // Stock, CR Supplier Payable). Wrapped so accounting failures
-      // don't block the purchase.
+      // Stock, CR Supplier Payable). The purchase, its payable and this
+      // journal are one event (P2-02): a journal that cannot be posted used to
+      // be logged and swallowed, leaving stock and a payable with nothing in
+      // 1250 / 2010. It now rolls the purchase back with the reason.
       try {
         await accountingService.autoPost(trx, {
           triggerEvent: 'store_purchase',
@@ -317,7 +320,7 @@ const millStoreRepo = {
           partyId: purchase.supplier_id || null,
         });
       } catch (e) {
-        console.warn('Mill purchase journal post failed:', e.message);
+        throw ledgerFailure(e, 'The mill store purchase');
       }
     }
 

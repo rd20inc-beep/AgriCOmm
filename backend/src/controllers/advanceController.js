@@ -1,6 +1,7 @@
 const db = require('../config/database');
 const accountingService = require('../services/accountingService');
 const { glAccountFor } = require('../shared/accountGl');
+const { postBankTransaction } = require('../shared/bankBalance');
 
 async function generateAdvanceNo(trx) {
   const last = await trx('advance_payments')
@@ -100,11 +101,13 @@ const advanceController = {
           })
           .returning('*');
 
-        // Credit bank account
+        // Credit bank account — balance and its bank row together (P2-17).
         if (bank_account_id) {
-          await trx('bank_accounts')
-            .where({ id: bank_account_id })
-            .increment('current_balance', amt);
+          await postBankTransaction(trx, {
+            accountId: bank_account_id, type: 'credit', amount: amt,
+            transaction_date: payment_date || new Date(), reference: bank_reference || advanceNo,
+            notes: `Buyer advance ${advanceNo}`, source: 'advance_receipt', created_by: req.user.id,
+          });
         }
 
         return advance;
