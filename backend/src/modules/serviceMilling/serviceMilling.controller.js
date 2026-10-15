@@ -490,7 +490,17 @@ module.exports = {
         .select('d.*', 'l.lot_no', 'l.item_name')
         .orderBy('d.created_at', 'desc');
 
-      const producedKg = lots.reduce((s, l) => s + (num(l.received_net_weight_kg) || num(l.qty)), 0);
+      // Produced = what the yield put into the OUTPUT lots, from the ledger
+      // (receipts net of receipt reversals) — not the raw lot's intake, and not
+      // inflated by a reversed dispatch (MIL-34).
+      const outIds = lots.filter((l) => l.type !== 'raw').map((l) => l.id);
+      const produced = outIds.length
+        ? await db('lot_transactions').whereIn('lot_id', outIds)
+          .where({ reference_module: 'milling_batch', reference_id: batch.id })
+          .whereIn('transaction_type', ['milling_receipt', 'byproduct_receipt', 'milling_receipt_reversal', 'byproduct_receipt_reversal'])
+          .sum('quantity_kg as kg').first()
+        : null;
+      const producedKg = num(produced && produced.kg);
       const remainingKg = lots.reduce((s, l) => s + num(l.available_qty), 0);
       const dispatchedKg = dispatches.reduce((s, d) => s + num(d.qty_kg), 0);
 

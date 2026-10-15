@@ -22,15 +22,17 @@ function conflict(message) {
   return e;
 }
 
-/** A batch has its yield on the books: output lots exist or its completion journal is Posted. */
+/**
+ * A batch has its yield on the books: live output lots exist or its completion
+ * journal is Posted and not reversed. A reversed yield (P3-03) is neither.
+ */
 async function batchYielded(q, batch) {
   if (!batch) return false;
-  const out = await q('inventory_lots')
-    .where({ batch_ref: `batch-${batch.id}` }).whereIn('type', ['finished', 'byproduct']).first('id');
-  if (out) return true;
-  const posted = await q('journal_entries')
-    .where({ ref_type: 'Milling Batch', ref_no: batch.batch_no, status: 'Posted' }).first('id');
-  return !!posted;
+  // Required lazily: the completion helper pulls in the accounting chain.
+  const { batchHasOutputLots } = require('./batchLifecycle');
+  const { hasPostedCompletion } = require('./millingCompletionJournal');
+  if (batch.id != null && await batchHasOutputLots(q, batch.id)) return true;
+  return !!batch.batch_no && hasPostedCompletion(q, batch.batch_no);
 }
 
 /** First output lot of the batch that has been sold / dispatched / re-milled / moved, or null. */
@@ -78,6 +80,19 @@ async function assertBatchRawCostEditable(q, batch) {
   if (await batchYielded(q, batch)) {
     throw conflict(`Batch ${batch.batch_no} already has its yield recorded, so its raw rice cost is locked — the supplier bill and the finished rice were booked at it. If the supplier's price really changed, ask Finance to record the difference against the supplier.`);
   }
+  // A reversed yield keeps the rice purchase it booked (the rice is back in raw
+  // stock, still owed): the cost stays locked to the bill (P3-03).
+  if (await ricePurchaseBooked(q, batch)) {
+    throw conflict(`Batch ${batch.batch_no}'s rice purchase is already booked to the supplier, so its raw rice cost is locked. If the supplier's price really changed, ask Finance to record the difference against the supplier.`);
+  }
+}
+
+/** The yield booked the batch's raw rice to its supplier ('Rice Purchase' journal Posted). */
+async function ricePurchaseBooked(q, batch) {
+  if (!batch || !batch.batch_no) return false;
+  const booked = await q('journal_entries')
+    .where({ ref_type: 'Rice Purchase', ref_no: batch.batch_no, status: 'Posted' }).first('id');
+  return !!booked;
 }
 
 /** Processing costs may still change after yield (a signed delta is posted) — until an output is sold or used. */
@@ -91,6 +106,7 @@ async function assertBatchOutputsUnsold(q, batch) {
 module.exports = {
   OUTBOUND_TXN_TYPES,
   batchYielded,
+  ricePurchaseBooked,
   consumedOutputLot,
   assertLotCostEditable,
   assertBatchRawCostEditable,

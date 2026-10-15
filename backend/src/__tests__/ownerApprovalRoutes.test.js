@@ -44,6 +44,7 @@ test('the owner-approved routes', () => {
     'POST finance /payments/:id/reverse [payment_reversal]',
     'POST milling /advances/:id/approve [salary_advance]',
     'POST milling /advances/:id/void [salary_advance_void]',
+    'POST milling /batches/:id/reverse-yield [milling_yield_reversal]', // P3-03 / MIL-20
     'POST milling /payroll/final-settlements/:id/reverse [final_settlement_reversal]',
     'POST serviceMilling /invoices/:id/void [service_invoice_void]',
     'PUT accounting /periods/:id/reopen [period_reopen]',

@@ -563,7 +563,8 @@ async function millBatchRows(conn, { startDate, endDate } = {}) {
            COALESCE(NULLIF(l.landed_cost_per_kg, 0), l.cost_per_unit, 0) AS per_kg,
            (SELECT COALESCE(SUM(t.quantity_kg), 0) FROM lot_transactions t
              WHERE t.lot_id = l.id AND t.reference_module = 'milling_batch'
-               AND t.transaction_type IN ('milling_receipt', 'byproduct_receipt')) AS yield_kg
+               AND t.transaction_type IN ('milling_receipt', 'byproduct_receipt',
+                                          'milling_receipt_reversal', 'byproduct_receipt_reversal')) AS yield_kg
       FROM inventory_lots l
      WHERE l.batch_ref = ANY(?) AND l.type IN ('finished', 'byproduct')
        AND l.status <> 'Closed' AND COALESCE(l.ownership, 'company') <> 'client'`, [refs]));

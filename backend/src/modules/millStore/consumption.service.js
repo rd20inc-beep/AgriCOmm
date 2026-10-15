@@ -2,6 +2,7 @@ const db = require('../../config/database');
 const auditService = require('../admin/audit.service');
 const accountingService = require('../accounting/accounting.service');
 const { postProcessingDelta } = require('../milling/millingCompletionJournal');
+const { assertBatchOutputsUnsold } = require('../milling/costEditLocks');
 const { NotFoundError, ValidationError } = require('../../shared/errors');
 const { ledgerFailure, missingAccounts } = require('../../shared/ledgerFailure');
 
@@ -118,9 +119,17 @@ const consumptionService = {
 
     const batch = await db('milling_batches').where('id', batchId).first();
     if (!batch) throw new NotFoundError('Batch not found.');
-    if (batch.status === 'Closed') throw new ValidationError('Cannot consume against a closed batch.');
+    // A real status guard (MIL-13): batches never reach 'Closed', so the old
+    // check let cancelled / rejected batches take stock and cost.
+    if (['Cancelled', 'Rejected'].includes(batch.status)) {
+      throw new ValidationError(`Cannot consume against batch ${batch.batch_no || batchId} — it is ${batch.status}.`);
+    }
 
     return db.transaction(async (trx) => {
+      // After the yield, a consumption re-costs the output lots — refused once
+      // an output has been sold or used (the same lock the Costs tab applies).
+      await assertBatchOutputsUnsold(trx, batch);
+
       const logs = [];
       const costByCategory = {};
 
@@ -214,15 +223,6 @@ const consumptionService = {
         }
       }
 
-      // Recompute total_cost_per_kg_finished if batch has finished output
-      const allCosts = await trx('milling_costs').where('batch_id', batchId);
-      const totalBatchCost = allCosts.reduce((s, c) => s + (Number(c.amount) || 0), 0);
-      const finishedKg = (Number(batch.actual_finished_kg) || 0);
-      if (finishedKg > 0) {
-        await trx('milling_batches').where('id', batchId).update({
-          total_cost_per_kg_finished: Number((totalBatchCost / finishedKg).toFixed(4)),
-        });
-      }
 
       // ── GL entry: move mill-store inventory → operating expense ──
       // store_purchase booked DR 1250 Bags & Packaging / CR 2010 Supplier
@@ -268,6 +268,17 @@ const consumptionService = {
         await postProcessingDelta(trx, accountingService, {
           batch, delta: totalConsumed, label: 'mill store consumption', userId,
         });
+      }
+
+      // After the yield, re-run the residual allocation (P3-07 / MIL-13) so the
+      // output lots, the batch's cost per kg and the 1220 / 1240 split carry
+      // the new cost — it used to overwrite total_cost_per_kg_finished with a
+      // plain Σ cost ÷ finished (not residual) and leave the lots stale.
+      // No-op before the yield (the yield allocates the whole sheet).
+      const inventoryService = require('../inventory/inventory.service');
+      const realloc = await inventoryService.recomputeBatchOutputsAfterPriceChange(trx, batchId, { userId });
+      if (realloc && realloc.reallocated && realloc.finishedCostPerKg != null) {
+        await trx('milling_batches').where({ id: batchId }).update({ finished_price_per_kg: realloc.finishedCostPerKg });
       }
 
       // Audited inside the transaction (P2-30) when called over HTTP.
