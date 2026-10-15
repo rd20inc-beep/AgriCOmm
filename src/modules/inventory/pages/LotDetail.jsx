@@ -335,6 +335,8 @@ export default function LotDetail() {
             the header focused. */}
         {millingBatches.length === 0
           && lot.type === 'raw'
+          && lot.entity === 'mill'
+          && lot.ownership !== 'client'
           && (parseFloat(lot.availableQty) > 0) && (
           <button onClick={() => setShowAllocateModal(true)} className="btn btn-sm btn-secondary">
             <Factory className="w-4 h-4" /> Use in Batch
@@ -1914,10 +1916,11 @@ function LotLineage({ lotId, lotNo }) {
 }
 
 // ─── Allocate to batch modal ──────────────────────────────────────────
-// Lets the user feed part / all of a raw Purchase Lot into an existing
-// open milling batch. Calls /api/lot-inventory/lots/:id/allocate-to-batch
-// which decrements the lot's available_qty, increments batch.raw_qty_mt,
-// and writes a milling_vehicle_arrivals row so the batch traces back.
+// Commits part / all of a raw Purchase Lot to an open milling batch that is
+// milled from purchase lots. Calls /api/lot-inventory/lots/:id/allocate-to-batch,
+// which links the lot as a batch source and HOLDS the qty for the batch (the
+// same path as Start Milling): yield consumes it, cancel releases it. A batch
+// fed by trucks is refused by the server.
 function AllocateToBatchModal({ isOpen, onClose, lot, addToast, refetch }) {
   const availableKg = parseFloat(lot?.availableQty) || 0; // availableQty is KG (post-5c)
   const [batchId, setBatchId] = useState('');
@@ -1977,6 +1980,7 @@ function AllocateToBatchModal({ isOpen, onClose, lot, addToast, refetch }) {
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-800">
           <p className="truncate" title={`${lot.itemName || ''}${lot.variety ? ` — ${lot.variety}` : ''}`}><strong>{lot.itemName}</strong>{lot.variety ? ` — ${lot.variety}` : ''}</p>
           <p>Available: <strong>{fmtNum(Math.round(availableKg))} kg</strong></p>
+          <p className="mt-1 text-blue-700">The weight is held for the batch and milled at yield. Batches that take trucks can't take a lot — start a new batch from this lot instead.</p>
         </div>
 
         <div>

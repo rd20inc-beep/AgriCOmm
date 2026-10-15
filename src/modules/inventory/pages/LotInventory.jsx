@@ -17,7 +17,8 @@ import { fmtPKR as fmtPKRBase, fmtKg, fmtNum } from '../../../shared/utils/forma
 // a page only bounds what is drawn — never what is counted.
 const PAGE_SIZE = 100;
 
-const STATUS_TABS = ['All', 'Available', 'Reserved', 'Closed'];
+// 'Depleted' = emptied by its movements (status follows the quantity, P3-01).
+const STATUS_TABS = ['All', 'Available', 'Reserved', 'Depleted', 'Closed'];
 const TYPE_TABS = ['All', 'raw', 'finished', 'byproduct'];
 const ENTITY_TABS = ['All', 'mill', 'export'];
 
