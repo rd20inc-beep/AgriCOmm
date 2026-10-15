@@ -11,7 +11,7 @@ const accountingService = require('../../services/accountingService');
 // Shared lot-number generators — keeps the Purchase Lot drawer and the
 // Add Vehicle flow on the same SUP-VARIETY-YYMMDD-SEQ format.
 const inventoryService = require('./inventory.service');
-const { blendPurchaseIntoLot, computeLotLanded, repriceLotPurchase, normalizeTransportPaidBy } = require('./lotCosting');
+const { blendPurchaseIntoLot, computeLotLanded, repriceLotPurchase, normalizeTransportPaidBy, isTransportCapitalised } = require('./lotCosting');
 const { nextDocNo } = require('../../utils/docNumber');
 const { inventoryAccountForLot } = require('../localSales/inventoryAccount');
 const { commitLotToBatch, batchHasOutputLots } = require('../milling/batchLifecycle');
@@ -23,6 +23,7 @@ const stockValuation = require('./stockValuation');
 // reports.view_cost (QC Analyst / Inventory Officer / Documentation Officer) — same rule as the reports.
 const { redactForUser, canSeeCost } = require('../../utils/costVisibility');
 const stockSql = require('./stockSql');
+const { restateLotPayment, lotSupplierPayables, paymentState } = require('./lotPayment');
 const movementConstants = require('./inventory.constants');
 
 // Lot screen "Record Transaction" → canonical movement type. Every type goes
@@ -567,6 +568,8 @@ async function applyRicePurchaseChange(trx, lot, { newPurchaseAmount, kg, lotFie
   if (Math.abs(r.equityDelta) > 0.01) {
     await postOpeningStockDelta(trx, { lot, delta: r.equityDelta, userId });
   }
+  // The supplier bill moved: restate paid / due against it (P3-10).
+  await restateLotPayment(trx, lot.id);
   return { payableUpdated: !!pay, isOpeningStock, ...r };
 }
 
@@ -707,41 +710,67 @@ module.exports = {
           'mva.departure_date', 'mva.gate_pass_no', db.raw('h.name as hauler_name'))
         .orderBy('mva.id', 'asc');
 
-      // Supplier payable for this lot (auto-created with linked_ref = lot_no).
-      // The payable is the source of truth for what's been paid — the lot's own
-      // paid_amount/due_amount can be stale (not synced on later finance payments).
-      const payable = await db('payables')
-        .where('linked_ref', lot.lot_no).andWhere('category', 'Raw Material').first();
+      // The supplier's bills for this lot — the rice line(s) and the itemised
+      // lines, ordered, this supplier only (the same lookup as Finance ▸
+      // Purchases and the lot's payment status, P3-10 / INV-10). They are the
+      // source of truth for what is owed and paid: the old lookup took ONE
+      // unordered 'Raw Material' row by lot number, so the extras, an added
+      // purchase and its payments were missing.
+      const payables = await lotSupplierPayables(db, lot, { includeReversed: true });
+      const live = payables.filter((p) => p.status !== 'Reversed');
+      const payableIds = payables.map((p) => p.id);
       const pays = await db('payments')
-        .andWhere('type', 'payment')
+        .where('type', 'payment')
+        .whereNotIn('status', ['Reversed', 'Rejected', 'Bounced', 'Superseded'])
         .where(function () {
-          if (payable) {
-            this.where('linked_payable_id', payable.id)
-              .orWhere(function () { this.where('source_table', 'inventory_lots').andWhere('source_id', lot.id); });
-          } else {
-            // Legacy fallback only when no payable exists.
-            this.where(function () { this.where('source_table', 'inventory_lots').andWhere('source_id', lot.id); })
-              .orWhere('notes', 'ilike', `%${lot.lot_no}%`);
-          }
+          this.where(function () { this.where('source_table', 'inventory_lots').andWhere('source_id', lot.id); });
+          if (payableIds.length) this.orWhereIn('linked_payable_id', payableIds);
+          // Legacy fallback only when the lot has no bill at all.
+          else this.orWhere('notes', 'ilike', `%${lot.lot_no}%`);
         })
-        .select('id', 'payment_no', 'payment_date', 'payment_method', 'amount', 'bank_reference', 'cleared', 'notes')
+        .select('id', 'payment_no', 'payment_date', 'payment_method', 'amount', 'bank_reference', 'cleared', 'notes', 'linked_payable_id')
         .orderBy('payment_date', 'asc').orderBy('id', 'asc');
 
       const qtyKg = num(lot.received_net_weight_kg) || num(lot.net_weight_kg);
       const amount = num(lot.purchase_amount) || num(lot.rate_per_kg) * qtyKg;
-      const landed = payable ? num(payable.original_amount) || num(lot.landed_cost_total) || amount
-        : num(lot.landed_cost_total) || amount;
-      // Prefer the payable (authoritative); fall back to the lot's own fields.
-      const paid = payable ? num(payable.paid_amount) : num(lot.paid_amount);
-      const outstanding = payable ? num(payable.outstanding) : num(lot.due_amount);
-      const paymentStatus = payable ? payable.status : lot.payment_status;
+      const landed = uc.round2(num(lot.landed_cost_total) || amount);
 
-      const timeline = [{ kind: 'created', date: lot.purchase_date || lot.created_at, label: 'Purchase recorded', amount: landed, balance: landed }];
-      let bal = landed;
+      // What the supplier is owed: Σ of the live bills; a lot with no bill
+      // (opening stock, legacy) is owed its landed total — what it was paid against.
+      const supplierTotal = live.length
+        ? uc.round2(live.reduce((s, p) => s + num(p.original_amount), 0)) : landed;
+      const paid = live.length
+        ? uc.round2(live.reduce((s, p) => s + num(p.paid_amount), 0)) : num(lot.paid_amount);
+      const { payment_status: paymentStatus, due_amount: outstanding } = paymentState(supplierTotal, paid);
+
+      const timeline = [{ kind: 'created', date: lot.purchase_date || lot.created_at, label: 'Purchase recorded', amount: supplierTotal, balance: supplierTotal }];
+      let bal = supplierTotal;
       for (const p of pays) {
-        bal = Math.max(0, bal - num(p.amount));
-        timeline.push({ kind: 'payment', date: p.payment_date, paymentNo: p.payment_no, mode: p.payment_method, reference: p.bank_reference || null, cleared: p.cleared !== false, amount: num(p.amount), balance: bal });
+        // An uncleared cheque is listed but has not reduced the bill yet.
+        const cleared = p.cleared !== false;
+        if (cleared) bal = Math.max(0, uc.round2(bal - num(p.amount)));
+        timeline.push({ kind: 'payment', date: p.payment_date, paymentNo: p.payment_no, mode: p.payment_method, reference: p.bank_reference || null, cleared, amount: num(p.amount), balance: bal });
       }
+
+      // Landed cost, line by line — every component that is in landed_cost_total,
+      // so the breakdown foots. Freight is in only when the company pays the
+      // hauler (computeLotLanded); a blended / split lot's cost columns don't
+      // partition its landed total, and the remainder shows as an adjustment.
+      const tRec = await findLotTransportRecord(db, lot.id);
+      const transportCapitalised = isTransportCapitalised(tRec?.paid_by);
+      const costLines = {
+        riceCost: uc.round2(amount),
+        labor: num(lot.labor_cost), unloading: num(lot.unloading_cost),
+        packing: num(lot.packing_cost), other: num(lot.other_cost),
+        bags: num(lot.total_bag_cost), commission: num(lot.commission_total),
+        transport: num(lot.transport_cost),
+      };
+      const componentsTotal = uc.round2(costLines.riceCost + costLines.labor + costLines.unloading + costLines.packing
+        + costLines.other + costLines.bags + costLines.commission + (transportCapitalised ? costLines.transport : 0));
+      const supplierBill = live.map((p) => ({
+        payNo: p.pay_no, category: p.category, sourceTable: p.source_table || null,
+        amount: num(p.original_amount), paid: num(p.paid_amount), outstanding: num(p.outstanding), status: p.status,
+      }));
 
       // Produced by-product pricing (INTERNAL/ADMIN ONLY — gated by role, mirrors
       // the sales invoice): the per-grade output valuation of the milling batches
@@ -832,20 +861,26 @@ module.exports = {
             bags: lot.total_bags != null ? Number(lot.total_bags) : null, bagWeightKg: num(lot.bag_weight_kg) || null,
             ratePerKg: num(lot.rate_per_kg), landedCostPerKg: num(lot.landed_cost_per_kg),
             amount, landedTotal: landed, paymentStatus,
-            paid, outstanding,
+            // paid / outstanding are against the SUPPLIER's bill (supplierTotal),
+            // not landed: freight and commission are other parties' bills.
+            supplierTotal, paid, outstanding,
             supplierHref: lot.supplier_id ? `/finance/statements?type=supplier&id=${lot.supplier_id}` : null,
             lotHref: `/lot-inventory/${lot.id}`,
           },
           costs: {
-            riceCost: num(lot.purchase_amount) || num(lot.rate_per_kg) * qtyKg,
-            transport: num(lot.transport_cost), transportVendor: lot.transport_vendor_name || null,
-            unloading: num(lot.unloading_cost), labor: num(lot.labor_cost),
-            packing: num(lot.packing_cost), other: num(lot.other_cost),
+            ...costLines,
+            transportVendor: lot.transport_vendor_name || null,
+            transportPaidBy: tRec?.paid_by || 'company',
+            transportCapitalised,
+            // Blended / split lots: what the columns above don't explain.
+            adjustment: uc.round2(landed - componentsTotal),
             landedTotal: landed,
           },
+          supplierBill: { lines: supplierBill, total: supplierTotal, paid, outstanding },
           intakeVehicles: vehs.map(v => ({ vehicleNo: v.vehicle_no, driverName: v.driver_name || null, driverPhone: v.driver_phone || null, weightKg: num(v.weight_kg), weighbridgeKg: num(v.weighbridge_kg), acceptedKg: num(v.accepted_kg), totalBags: v.total_bags != null ? Number(v.total_bags) : null, arrivalDate: v.arrival_date || null, departureDate: v.departure_date || null, gatePassNo: v.gate_pass_no || null, haulerName: v.hauler_name || null })),
           payments: timeline,
-          payable: payable ? { payNo: payable.pay_no, outstanding: num(payable.outstanding), status: payable.status } : null,
+          // The rice line (kept for older clients); supplierBill has them all.
+          payable: live[0] ? { payNo: live[0].pay_no, outstanding: num(live[0].outstanding), status: live[0].status } : null,
           producedByproducts, // INTERNAL/ADMIN ONLY — empty for non-admin viewers
         },
       });
@@ -1516,6 +1551,8 @@ module.exports = {
           });
         }
 
+        // Payment status / due against the supplier bills just raised (P3-10).
+        await restateLotPayment(trx, lot.id);
         // The row as the receipt left it (quantities, cost, status).
         return trx('inventory_lots').where({ id: lot.id }).first();
       };
@@ -1821,13 +1858,15 @@ module.exports = {
           // location — the original purchase payable stays as-is, and the new lot is
           // only newly billed for its added tranche. The remainder it carries was
           // already invoiced on the original lot's purchase.
-          return { __split: true, newLot: enrichLot(newLot), newLotNo, remainderMt: uc.kgToTon(remainderKg), committedMt: uc.kgToTon(committedKg) };
+          await restateLotPayment(trx, newLot.id);
+          const splitLot = await trx('inventory_lots').where({ id: newLot.id }).first();
+          return { __split: true, newLot: enrichLot(splitLot), newLotNo, remainderMt: uc.kgToTon(remainderKg), committedMt: uc.kgToTon(committedKg) };
         }
 
         // ── Blend into the existing lot (weighted-average landed cost) ──
         const {
           newBags, newLandedTotal, newPurchaseAmount,
-          newLandedPerKg, newRatePerKg, newPaid, newDue, newPaymentStatus,
+          newLandedPerKg, newRatePerKg,
         } = blendPurchaseIntoLot(lot, {
           netKg: addNetKg,
           bags: addBags,
@@ -1873,9 +1912,6 @@ module.exports = {
           landed_cost_per_kg: newLandedPerKg,
           cost_per_unit: newLandedPerKg,
           total_value: newLandedTotal,
-          paid_amount: newPaid,
-          due_amount: newDue,
-          payment_status: newPaymentStatus,
           updated_at: trx.fn.now(),
         });
 
@@ -1911,6 +1947,8 @@ module.exports = {
           });
         }
 
+        // paid / due / status against the supplier bills, the new one included (P3-10).
+        await restateLotPayment(trx, lotId);
         return trx('inventory_lots').where({ id: lotId }).first();
       });
 
@@ -2393,6 +2431,8 @@ module.exports = {
             });
           }
           await postSupplierDelta(supplierDelta);
+          // The supplier's bills moved: restate paid / due against them (P3-10).
+          await restateLotPayment(trx, lotId);
         }
 
         // Cascade the corrected cost into any batch that already consumed this

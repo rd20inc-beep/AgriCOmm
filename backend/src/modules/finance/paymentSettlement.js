@@ -14,12 +14,16 @@ const { nextDocNo } = require('../../utils/docNumber');
 const accountingService = require('../accounting/accounting.service');
 const { ledgerFailure, missingAccounts } = require('../../shared/ledgerFailure');
 const { glAccountFor, remapControlLines } = require('../../shared/accountGl');
+const { LOT_SUPPLIER_LINES, lotPaymentTotal } = require('../inventory/lotPayment');
 
 const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 const num = (v) => parseFloat(v) || 0;
 
 // Source rows that carry their own paid_amount / payment_status, how to read
 // their total (PKR), and the word each CHECK constraint uses for "nothing paid".
+// A lot's status is measured against its SUPPLIER bills, not its landed cost
+// (freight and commission are other parties' bills — P3-10 / INV-11):
+// totalOf reads them; total is the same figure for a lot with no bill.
 const SOURCES = {
   business_expenses: { total: (r) => num(r.amount_pkr), unpaid: 'Pending', paidDate: 'paid_date' },
   mill_purchases: { total: (r) => num(r.total_amount), unpaid: 'Pending', paidDate: 'paid_date' },
@@ -28,15 +32,15 @@ const SOURCES = {
     unpaid: 'Pending', paidDate: 'paid_at',
   },
   printed_bag_orders: { total: (r) => num(r.total_amount), unpaid: 'Unpaid' },
-  inventory_lots: { total: (r) => num(r.landed_cost_total), unpaid: 'Pending', due: 'due_amount' },
+  inventory_lots: {
+    total: (r) => num(r.landed_cost_total), totalOf: lotPaymentTotal, unpaid: 'Pending', due: 'due_amount',
+  },
 };
 // Legacy payables carry no source_table, only the source row's natural key.
 const NATURAL_KEYS = [['inventory_lots', 'lot_no'], ['mill_purchases', 'purchase_no'], ['business_expenses', 'expense_no']];
-// The itemised supplier lines of a purchase lot (labour, bags, …) are part of
-// the same purchase as its 'Raw Material' line: each carries source_id = the
-// lot, so a payment on any of them is a payment on that lot. Lines owed to
-// another party (lot_transport → hauler, lot_commission → broker) are not.
-const LOT_SUPPLIER_LINES = ['lot_labor', 'lot_unloading', 'lot_packing', 'lot_other', 'lot_bag'];
+// LOT_SUPPLIER_LINES (lotPayment): the itemised supplier lines of a purchase
+// lot carry source_id = the lot, so a payment on any of them is a payment on
+// that lot. Lines owed to another party (transport, commission) are not.
 
 /**
  * The source row a payment settles: the payment's own source ref (payPurchase
@@ -78,7 +82,7 @@ async function mirrorSourcePaid(trx, source, deltaPkr, extra = {}, paidOn = null
   const spec = SOURCES[source.table];
   const row = await trx(source.table).where({ id: source.id }).forUpdate().first();
   if (!row) return null;
-  const total = spec.total(row);
+  const total = spec.totalOf ? await spec.totalOf(trx, row) : spec.total(row);
   const paid = Math.max(0, round2(num(row.paid_amount) + deltaPkr));
   const status = paid <= 0.01 ? spec.unpaid : (total - paid <= 0.01 ? 'Paid' : 'Partial');
   const upd = { paid_amount: paid, payment_status: status, updated_at: trx.fn.now(), ...extra };

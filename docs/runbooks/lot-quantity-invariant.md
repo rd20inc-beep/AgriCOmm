@@ -94,3 +94,21 @@ stays NOT VALID while any A1-yielded / A2 lot remains — those need the reviews
 The script only restates derived fields (`available_qty`, `status`) and converts allocations into
 holds; restore the tables from the step 2 backup if needed. Migration 371's `down` drops the two
 CHECKs and maps `Depleted` back to `Available`.
+
+## Lot payment status (P3-10)
+
+From P3-10 a purchase lot's `payment_status` and `due_amount` are measured against what it owes its
+**supplier** — Σ of its live supplier payables (rice + itemised extras + bags; an added purchase
+included) — not its landed cost, which also carries the broker's commission and company-paid
+freight (those are the broker's / hauler's own bills). A lot with no supplier bill (opening stock,
+legacy) keeps its landed total. Lots paid before the deploy keep the old figure until their next
+payment or edit; restate them (derived values only — `paid_amount`, payables, payments and the GL
+are not touched):
+
+```bash
+docker exec -it riceflow-backend node scripts/restateLotPaymentStatus.js                     # dry run: counts + lot ids
+docker exec -it -e RESTATE_LOT_PAYMENT_STATUS=1 riceflow-backend node scripts/restateLotPaymentStatus.js
+```
+
+The dry run groups the lots by move (e.g. `Partial → Paid`). Expect mostly `Partial → Paid` for lots
+with freight or commission whose supplier is settled.
