@@ -9,14 +9,20 @@ import { useExceptions, useExceptionStats, useScanExceptions, useResolveExceptio
 import { useApp } from '../../../context/AppContext';
 import { LoadingSpinner, ErrorState } from '../../../components/LoadingState';
 import Modal from '../../../components/Modal';
-import { fmtDateTime, fmtUSD } from '../../../shared/utils/format';
+import { fmtDateTime, fmtMoney } from '../../../shared/utils/format';
 
+// The severities the scan stores (intelligence.service): critical / warning /
+// info. The page used to offer High / Medium / Low, which never matched, and
+// read stats.high / stats.resolvedToday, which were never sent (RPT-18).
 const SEVERITY_CONFIG = {
-  critical: { color: 'bg-red-500', bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-700', icon: AlertCircle },
-  high: { color: 'bg-amber-500', bg: 'bg-amber-50', border: 'border-amber-200', text: 'text-amber-700', icon: AlertTriangle },
-  medium: { color: 'bg-amber-500', bg: 'bg-amber-50', border: 'border-amber-200', text: 'text-amber-700', icon: AlertTriangle },
-  low: { color: 'bg-blue-500', bg: 'bg-blue-50', border: 'border-blue-200', text: 'text-blue-700', icon: Shield },
+  critical: { color: 'bg-red-500', bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-700', ring: 'ring-red-200', icon: AlertCircle },
+  warning: { color: 'bg-amber-500', bg: 'bg-amber-50', border: 'border-amber-200', text: 'text-amber-700', ring: 'ring-amber-200', icon: AlertTriangle },
+  info: { color: 'bg-blue-500', bg: 'bg-blue-50', border: 'border-blue-200', text: 'text-blue-700', ring: 'ring-blue-200', icon: Shield },
 };
+const SEVERITIES = ['critical', 'warning', 'info'];
+// Money at risk is in the exception's own currency — never shown as $ by default.
+const atRisk = (ex) => fmtMoney(Number(ex.amountAtRisk) || 0, ex.currency || 'USD', { decimals: 2 });
+const entityHref = (ex) => (ex.linkedType === 'export_order' ? `/export/${ex.linkedRef}` : ex.linkedType === 'milling_batch' ? `/milling/${ex.linkedId || ex.linkedRef}` : null);
 
 const TYPE_ICONS = {
   overdue_advance: Clock, overdue_balance: DollarSign, delayed_shipment: Ship,
@@ -37,8 +43,10 @@ export default function ExceptionDashboard() {
   const [selectedEx, setSelectedEx] = useState(null);
   const [resolveNotes, setResolveNotes] = useState('');
 
+  // Severity filters on the server, so the list is not "200 rows then filter".
   const { data: exceptions = [], isLoading, error, refetch } = useExceptions({
     ...(statusFilter !== 'All' && { status: statusFilter }),
+    ...(severityFilter !== 'All' && { severity: severityFilter }),
   });
   const { data: stats = {} } = useExceptionStats();
   const scanMutation = useScanExceptions();
@@ -47,17 +55,16 @@ export default function ExceptionDashboard() {
 
   const filtered = useMemo(() => {
     let list = exceptions;
-    if (severityFilter !== 'All') list = list.filter(e => e.severity === severityFilter.toLowerCase());
     if (searchTerm) {
       const term = searchTerm.toLowerCase();
       list = list.filter(e =>
         (e.title || '').toLowerCase().includes(term) ||
-        (e.entityRef || '').toLowerCase().includes(term) ||
-        (e.type || '').toLowerCase().includes(term)
+        (e.linkedRef || '').toLowerCase().includes(term) ||
+        (e.exceptionType || '').toLowerCase().includes(term)
       );
     }
     return list;
-  }, [exceptions, severityFilter, searchTerm]);
+  }, [exceptions, searchTerm]);
 
   async function handleScan() {
     try {
@@ -87,9 +94,11 @@ export default function ExceptionDashboard() {
   if (isLoading) return <LoadingSpinner message="Loading exceptions..." />;
   if (error) return <ErrorState message={error.message} onRetry={refetch} />;
 
-  const openCount = stats.open || exceptions.filter(e => e.status === 'Open').length;
-  const criticalCount = stats.critical || exceptions.filter(e => e.severity === 'critical' && e.status === 'Open').length;
-  const highCount = stats.high || exceptions.filter(e => e.severity === 'high' && e.status === 'Open').length;
+  // Tiles are the server's counts over the whole inbox (not the loaded page).
+  const openCount = stats.open ?? 0;
+  const criticalCount = stats.critical ?? 0;
+  const warningCount = stats.warning ?? 0;
+  const riskLines = Object.entries(stats.amountAtRiskByCurrency || {});
 
   return (
     <div className="space-y-6">
@@ -119,14 +128,19 @@ export default function ExceptionDashboard() {
           <p className="text-3xl font-bold text-red-700 mt-1">{criticalCount}</p>
         </div>
         <div className="bg-amber-50 rounded-xl border border-amber-100 p-4">
-          <p className="text-xs font-medium text-amber-600 uppercase">High</p>
-          <p className="text-3xl font-bold text-amber-700 mt-1">{highCount}</p>
+          <p className="text-xs font-medium text-amber-600 uppercase">Warning</p>
+          <p className="text-3xl font-bold text-amber-700 mt-1">{warningCount}</p>
         </div>
         <div className="bg-white rounded-xl border border-gray-100 p-4">
           <p className="text-xs font-medium text-gray-500 uppercase">Resolved Today</p>
-          <p className="text-3xl font-bold text-emerald-600 mt-1">{stats.resolvedToday || 0}</p>
+          <p className="text-3xl font-bold text-emerald-600 mt-1">{stats.resolvedToday ?? 0}</p>
         </div>
       </div>
+      {riskLines.length > 0 && (
+        <p className="text-xs text-gray-600" data-testid="risk-by-currency">
+          Money at risk on open exceptions: {riskLines.map(([cur, v]) => `${fmtMoney(v.amount, cur, { decimals: 2 })} (${v.count})`).join(' · ')} — per currency, never added together.
+        </p>
+      )}
 
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-3">
@@ -143,10 +157,7 @@ export default function ExceptionDashboard() {
         <select value={severityFilter} onChange={e => setSeverityFilter(e.target.value)}
           className="form-input py-1.5 pr-8 text-sm w-auto">
           <option value="All">All Severity</option>
-          <option value="Critical">Critical</option>
-          <option value="High">High</option>
-          <option value="Medium">Medium</option>
-          <option value="Low">Low</option>
+          {SEVERITIES.map(s => <option key={s} value={s}>{s[0].toUpperCase() + s.slice(1)}</option>)}
         </select>
         <div className="relative flex-1 max-w-xs">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -164,8 +175,9 @@ export default function ExceptionDashboard() {
             <p className="text-gray-500">No exceptions found. All clear.</p>
           </div>
         ) : filtered.map(ex => {
-          const sev = SEVERITY_CONFIG[ex.severity] || SEVERITY_CONFIG.medium;
-          const TypeIcon = TYPE_ICONS[ex.type] || AlertTriangle;
+          const sev = SEVERITY_CONFIG[ex.severity] || SEVERITY_CONFIG.warning;
+          const TypeIcon = TYPE_ICONS[ex.exceptionType] || AlertTriangle;
+          const href = entityHref(ex);
           return (
             <div key={ex.id} className={`bg-white rounded-xl border ${sev.border} p-4 hover:shadow-md transition-shadow`}>
               <div className="flex items-start gap-3">
@@ -174,24 +186,21 @@ export default function ExceptionDashboard() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap mb-1">
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-semibold ring-1 ring-inset ${sev.bg} ${sev.text} ring-${ex.severity === 'critical' ? 'red' : ex.severity === 'high' ? 'orange' : 'amber'}-200`}>
-                      {(ex.severity || 'medium').toUpperCase()}
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-semibold ring-1 ring-inset ${sev.bg} ${sev.text} ${sev.ring}`}>
+                      {(ex.severity || 'warning').toUpperCase()}
                     </span>
-                    <span className="text-xs text-gray-400">{(ex.type || '').replace(/_/g, ' ')}</span>
-                    {ex.entityRef && (
-                      <Link to={ex.entityType === 'export_order' ? `/export/${ex.entityRef}` : ex.entityType === 'milling_batch' ? `/milling/${ex.entityRef}` : '#'}
-                        className="text-xs text-blue-600 hover:text-blue-800 font-medium">
-                        {ex.entityRef}
-                      </Link>
-                    )}
+                    <span className="text-xs text-gray-400">{(ex.exceptionType || '').replace(/_/g, ' ')}</span>
+                    {ex.linkedRef && (href
+                      ? <Link to={href} className="text-xs text-blue-600 hover:text-blue-800 font-medium">{ex.linkedRef}</Link>
+                      : <span className="text-xs text-gray-500">{ex.linkedRef}</span>)}
                   </div>
                   <h3 className="text-sm font-semibold text-gray-900">{ex.title}</h3>
                   <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{ex.description || ex.message}</p>
                   <div className="flex items-center gap-4 mt-2 text-xs text-gray-400">
                     <span>{formatDate(ex.detectedAt || ex.createdAt)}</span>
                     {ex.assignedToName && <span>Assigned: {ex.assignedToName}</span>}
-                    {ex.amountAtRisk > 0 && (
-                      <span className="font-medium text-red-600">{fmtUSD(ex.amountAtRisk)} at risk</span>
+                    {Number(ex.amountAtRisk) > 0 && (
+                      <span className="font-medium text-red-600">{atRisk(ex)} at risk</span>
                     )}
                   </div>
                 </div>
@@ -219,26 +228,26 @@ export default function ExceptionDashboard() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <p className="text-xs font-medium text-gray-500 uppercase">Type</p>
-                <p className="text-sm text-gray-900 mt-1">{(selectedEx.type || '').replace(/_/g, ' ')}</p>
+                <p className="text-sm text-gray-900 mt-1">{(selectedEx.exceptionType || '').replace(/_/g, ' ')}</p>
               </div>
               <div>
                 <p className="text-xs font-medium text-gray-500 uppercase">Severity</p>
                 <p className={`text-sm font-semibold mt-1 ${(SEVERITY_CONFIG[selectedEx.severity] || {}).text || 'text-gray-700'}`}>
-                  {(selectedEx.severity || 'medium').toUpperCase()}
+                  {(selectedEx.severity || 'warning').toUpperCase()}
                 </p>
               </div>
               <div>
                 <p className="text-xs font-medium text-gray-500 uppercase">Entity</p>
-                <p className="text-sm text-gray-900 mt-1">{selectedEx.entityRef || `${selectedEx.entityType} #${selectedEx.entityId}`}</p>
+                <p className="text-sm text-gray-900 mt-1">{selectedEx.linkedRef || (selectedEx.linkedType ? `${selectedEx.linkedType} #${selectedEx.linkedId}` : '—')}</p>
               </div>
               <div>
                 <p className="text-xs font-medium text-gray-500 uppercase">Detected</p>
                 <p className="text-sm text-gray-900 mt-1">{formatDate(selectedEx.detectedAt || selectedEx.createdAt)}</p>
               </div>
-              {selectedEx.amountAtRisk > 0 && (
+              {Number(selectedEx.amountAtRisk) > 0 && (
                 <div>
                   <p className="text-xs font-medium text-gray-500 uppercase">Amount at Risk</p>
-                  <p className="text-sm font-semibold text-red-600 mt-1">{fmtUSD(selectedEx.amountAtRisk)}</p>
+                  <p className="text-sm font-semibold text-red-600 mt-1">{atRisk(selectedEx)}</p>
                 </div>
               )}
             </div>
