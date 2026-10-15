@@ -8,15 +8,17 @@ import { useGlEntity, glParams, pkr } from '../utils/glStatements';
 import {
   EntityFilter, PeriodLine, StatementHeader, BalancedBadge, StateBox, AccountSection,
 } from '../components/GlStatementParts';
+import { ServerCsvButton } from '../../analytics/components/ReportChrome';
 
 export default function BalanceSheet() {
   const { queryParams: range } = useFinanceDateRange();
   const { entity, setEntity, apiEntity } = useGlEntity();
-  const { data, isLoading, error, refetch } = useBalanceSheet(glParams('asOf', range, apiEntity));
-  return <BalanceSheetView data={data} isLoading={isLoading} error={error} onRetry={refetch} entity={entity} onEntity={setEntity} asOf={range.to_date} />;
+  const params = glParams('asOf', range, apiEntity);
+  const { data, isLoading, error, refetch } = useBalanceSheet(params);
+  return <BalanceSheetView data={data} isLoading={isLoading} error={error} onRetry={refetch} entity={entity} onEntity={setEntity} asOf={range.to_date} csvParams={params} />;
 }
 
-export function BalanceSheetView({ data, isLoading, error, onRetry, entity, onEntity, asOf }) {
+export function BalanceSheetView({ data, isLoading, error, onRetry, entity, onEntity, asOf, csvParams }) {
   const assets = data?.assets || {};
   const liabilities = data?.liabilities || {};
   const equity = data?.equity || {};
@@ -30,10 +32,13 @@ export function BalanceSheetView({ data, isLoading, error, onRetry, entity, onEn
       </StatementHeader>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <EntityFilter entity={entity} onChange={onEntity} />
-        {!isLoading && !error && data && (
-          <BalancedBadge balanced={!!data.isBalanced} difference={totalAssets - totalLE}
-            label="Assets = Liabilities + Equity" />
-        )}
+        <span className="inline-flex items-center gap-2">
+          {!isLoading && !error && data && (
+            <BalancedBadge balanced={!!data.isBalanced} difference={totalAssets - totalLE}
+              label="Assets = Liabilities + Equity" />
+          )}
+          {csvParams && <ServerCsvButton endpoint="/api/accounting/statements/balance-sheet" params={csvParams} filename={`balance-sheet${asOf ? `_${asOf}` : ''}`} label="CSV" />}
+        </span>
       </div>
       <StateBox isLoading={isLoading} error={error} onRetry={onRetry} empty={empty}>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
