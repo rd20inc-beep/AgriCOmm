@@ -110,7 +110,7 @@ module.exports = {
   // longer needed, e.g. one flagged for review after its order shrank. The
   // reason is required (schemas.cancelPurchaseRequirement). Finance is told
   // when an approved one, which it may be about to buy, is cancelled.
-  async cancel(req, res) {
+  async cancelRequirement(req, res) {
     try {
       const reason = String(req.body.reason || '').trim();
       const row = await db.transaction(async (trx) => {

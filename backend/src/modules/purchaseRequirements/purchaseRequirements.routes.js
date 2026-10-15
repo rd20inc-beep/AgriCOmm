@@ -17,7 +17,7 @@ router.post('/', authorizeAny(['milling', 'edit'], ['inventory', 'create'], ['mi
 router.post('/:id/approve', authorizeRole('Super Admin', 'Owner', 'Mill Manager'), auditAction('approve', 'purchase_requirement', (req) => req.params.id), controller.approve);
 router.post('/:id/reject', authorizeRole('Super Admin', 'Owner', 'Mill Manager'), auditAction('reject', 'purchase_requirement', (req) => req.params.id), controller.reject);
 // Same approvers as approve/reject; a reason is required.
-router.post('/:id/cancel', authorizeRole('Super Admin', 'Owner', 'Mill Manager'), validate(schemas.cancelPurchaseRequirement), auditAction('cancel', 'purchase_requirement', (req) => req.params.id), controller.cancel);
+router.post('/:id/cancel', authorizeRole('Super Admin', 'Owner', 'Mill Manager'), validate(schemas.cancelPurchaseRequirement), auditAction('cancel', 'purchase_requirement', (req) => req.params.id), controller.cancelRequirement);
 router.post('/:id/mark-purchased', authorizeAny(['finance', 'confirm_payment'], ['milling', 'edit'], ['mill_store', 'create_purchase']), auditAction('purchased', 'purchase_requirement', (req) => req.params.id), controller.markPurchased);
 
 module.exports = router;
