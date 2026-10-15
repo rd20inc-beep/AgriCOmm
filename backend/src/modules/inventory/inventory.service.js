@@ -3287,7 +3287,7 @@ const inventoryService = {
           await trx('mill_stock').where({ id: st.id }).update({ quantity_available: trx.raw('GREATEST(quantity_available - ?, 0)', [used]), updated_at: trx.fn.now() });
           movements.push({ item_id: it.id, warehouse_id: u.warehouseId, movement_type: 'consumption', quantity: -used, reference_type: 'batch_katta', reference_id: batchId, reason: `${it.name} used by packing run(s) (batch ${batchId})`, performed_by: userId || null });
         }
-        if (need > used) shortages.push({ size: num(it.capacity_kg), item: it.name, needed: need, available: avail, short: need - used });
+        if (need > used) shortages.push({ item_id: it.id, size: num(it.capacity_kg), item: it.name, needed: need, available: avail, short: need - used });
       }
     };
 
@@ -3486,7 +3486,7 @@ const inventoryService = {
         movements.push({ item_id: it.id, warehouse_id: null, movement_type: 'consumption', quantity: -consumed, reference_type: 'batch_katta', reference_id: batchId, reason: `${size}kg bags used to pack export outputs (batch ${batchId})`, performed_by: userId || null });
       }
       const short = Math.max(0, need - avail);
-      if (short > 0) shortages.push({ size, item: it.name, needed: need, available: avail, short });
+      if (short > 0) shortages.push({ item_id: it.id, size, item: it.name, needed: need, available: avail, short });
     }
     await consumeKattaRuns(movements, shortages);
     await trx('mill_stock_movements').insert(movements);
