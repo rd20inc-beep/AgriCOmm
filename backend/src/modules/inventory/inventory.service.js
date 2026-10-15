@@ -868,6 +868,14 @@ const inventoryService = {
       lot = await trx('inventory_lots').where('id', lot.id).first();
     }
 
+    // D-6: truck rice is bought at receipt (supplier payable + Dr 1210 /
+    // Cr 2010, like New Purchase Lot) and, being the batch's input, moves
+    // straight on into 1260 Milling WIP. Client-owned (service) intake is
+    // skipped inside. A posting failure rolls the receipt back.
+    if (lot && !svcBatch?.is_service_milling) {
+      await require('../milling/millingWip').syncBatchIntake(trx, batchId, { userId, reason: 'truck rice received' });
+    }
+
     return { lot, movement };
   },
 
@@ -1908,8 +1916,8 @@ const inventoryService = {
       .sum('il.qty as total_qty')
       .sum('il.reserved_qty as total_reserved')
       .sum('il.available_qty as total_available')
-      .sum('il.total_value as total_value')
-      .where('il.status', '!=', 'Depleted')
+      // D-14 (stockValue.js) — not the stored total_value, which is the intake value.
+      .select(db.raw(`COALESCE(SUM(${require('./stockValue').lotValueSql('il')}), 0) as total_value`))
       // Company-owned only — client-owned Service Milling stock is physically in
       // our warehouse but must never inflate company stock counts or valuation.
       .where('il.ownership', 'company');
@@ -2476,16 +2484,20 @@ const inventoryService = {
   async takeValuationSnapshot() {
     // Company-owned only — client-owned (service-milling) stock must never
     // inflate company inventory valuation or average cost.
-    const lots = await db('inventory_lots').where('available_qty', '>', 0).where('ownership', 'company').select('type', 'entity', 'available_qty', 'rate_per_kg', 'landed_cost_per_kg', 'net_weight_kg');
+    // D-14 (stockValue.js): on-hand KG × landed cost/kg, no fallback price.
+    const lots = await db('inventory_lots').where('ownership', 'company').where((q) => q.where('net_weight_kg', '>', 0).orWhere('qty', '>', 0))
+      .select('type', 'entity', 'qty', 'landed_cost_per_kg', 'net_weight_kg');
+    const { lotValue } = require('./stockValue');
 
     const groups = {};
     for (const lot of lots) {
       const key = `${lot.entity || 'unknown'}|${lot.type || 'unknown'}`;
       if (!groups[key]) groups[key] = { entity: lot.entity, type: lot.type, totalKg: 0, totalValue: 0 };
-      const costKg = parseFloat(lot.landed_cost_per_kg) || parseFloat(lot.rate_per_kg) || 0;
-      const qtyKg = parseFloat(lot.available_qty); // KG (Phase 5c)
+      const net = parseFloat(lot.net_weight_kg) || 0;
+      const qtyKg = net > 0 ? net : (parseFloat(lot.qty) || 0);
+      if (!(qtyKg > 0)) continue;
       groups[key].totalKg += qtyKg;
-      groups[key].totalValue += costKg * qtyKg;
+      groups[key].totalValue += lotValue(lot);
     }
 
     const today = new Date().toISOString().split('T')[0];
@@ -2879,6 +2891,10 @@ const inventoryService = {
   // price ignores both, so for such a batch the trucks only refresh yield %,
   // and a raw cost an earlier truck recompute wrote is replaced by the lot cost.
   async recomputeRawRiceCostFromVehicles(trx, batchId, userId) {
+    // Every truck add / edit / delete lands here: re-sync the truck purchase
+    // and the batch's WIP to the raw lot as it now stands (D-6). A no-op once
+    // the batch has yielded.
+    await require('../milling/millingWip').syncBatchIntake(trx, batchId, { userId, reason: 'trucks changed' });
     const vrows = await trx('milling_vehicle_arrivals').where({ batch_id: batchId });
     if (!vrows.length) return;
     let pricedW = 0, pricedCost = 0, totalW = 0;
@@ -3123,6 +3139,10 @@ const inventoryService = {
           summary.cogsUpdated += 1;
         }
       }
+
+      // The committed rice is carried in 1260 Milling WIP at its landed cost
+      // (D-6): move the re-price there too (the lot's own edit posted it to 1210).
+      await require('../milling/millingWip').syncBatchIntake(trx, batchId, { userId, reason: `lot ${lot.lot_no} re-priced` });
 
       // 5. Audit trail.
       await trx('historical_cost_repair_log').insert({

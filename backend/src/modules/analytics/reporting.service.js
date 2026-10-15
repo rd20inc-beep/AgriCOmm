@@ -5,6 +5,8 @@ const db = require('../../config/database');
 // touches req/rbac itself.
 const { applyWarehouseScope, isWarehouseInScope } = require('../../utils/warehouseScope');
 const { companyStock } = require('../inventory/stockSql');
+// D-14 stock value (landed cost/kg × on hand, no fallback price) — stockValue.js.
+const { lotValueSql } = require('../inventory/stockValue');
 const { exportProfit, EXCLUDED_ORDER_STATUSES } = require('../finance/profitDefinitions');
 const { collectionRate: computeCollectionRate } = require('../finance/collectionRate');
 const fxRateService = require('../finance/fxRate.service');
@@ -201,7 +203,7 @@ const reportingService = {
     // Company stock only — client-owned service-milling lots are not ours.
     const inventoryValue = await companyStock(db('inventory_lots'), null)
       .where('qty', '>', 0)
-      .select(db.raw('COALESCE(SUM(total_value), 0) as total'))
+      .select(db.raw(`COALESCE(SUM(${lotValueSql('inventory_lots')}), 0) as total`))
       .first();
 
     const openRecvRows = await db('receivables')
@@ -1259,7 +1261,7 @@ const reportingService = {
     const totOut = events.reduce((s, e) => s + e.outKg, 0);
 
     // ── Comprehensive Lot 360 enrichment (purchase → milling → output → sale) ──
-    const lotCostPerKg = num(lot.landed_cost_per_kg) || num(lot.rate_per_kg);
+    const lotCostPerKg = num(lot.landed_cost_per_kg); // D-14: no fallback price
     const receivedKg = num(lot.received_net_weight_kg) || num(lot.net_weight_kg);
     const remainingKg = num(lot.net_weight_kg);
 
@@ -1525,9 +1527,7 @@ const reportingService = {
         db.raw('COUNT(l.id) as lot_count'),
         db.raw('COALESCE(SUM(COALESCE(l.received_net_weight_kg, l.net_weight_kg)), 0) as purchased_kg'),
         db.raw('COALESCE(SUM(l.net_weight_kg), 0) as remaining_kg'),
-        // NULLIF so a 0 landed cost (zero-cost intake) falls back to rate_per_kg,
-        // keeping the picker's stock value consistent with the Supplier 360.
-        db.raw('COALESCE(SUM(l.net_weight_kg * COALESCE(NULLIF(l.landed_cost_per_kg, 0), l.rate_per_kg, 0)), 0) as stock_value'))
+        db.raw(`COALESCE(SUM(${lotValueSql('l')}), 0) as stock_value`))
       .orderBy('s.name', 'asc');
     const supIds = rows.map(r => r.supplierId);
     const pay = supIds.length
@@ -1595,7 +1595,7 @@ const reportingService = {
         riceType: lot.variety || lot.product_name || lot.item_name || '—', grade: lot.grade || null,
         purchaseDate: lot.purchase_date || lot.created_at, warehouse: lot.warehouse_name || null,
         moisturePct: lot.moisture_pct != null ? num(lot.moisture_pct) : null,
-        costPerKg: num(lot.landed_cost_per_kg) || num(lot.rate_per_kg),
+        costPerKg: num(lot.landed_cost_per_kg),
         purchasedKg, milledKg, soldKg, remainingKg,
         reservedKg: num(qs.reservedKg), lossKg: num(qs.processingLossKg),
         purchaseValue: num(fs.purchaseValue), stockValue: num(fs.remainingStockValue),
@@ -1672,9 +1672,7 @@ const reportingService = {
         db.raw("COALESCE(SUM(CASE WHEN l.type = 'raw' THEN COALESCE(l.received_net_weight_kg, l.net_weight_kg) ELSE 0 END), 0) as purchased_kg"),
         db.raw("COALESCE(SUM(CASE WHEN l.type = 'finished' THEN COALESCE(l.received_net_weight_kg, l.net_weight_kg) ELSE 0 END), 0) as produced_kg"),
         db.raw('COALESCE(SUM(l.net_weight_kg), 0) as remaining_kg'),
-        // landed_cost_per_kg can be 0 (not NULL) on zero-cost intakes — NULLIF so
-        // it falls back to rate_per_kg, matching the detail page + Lot 360.
-        db.raw('COALESCE(SUM(l.net_weight_kg * COALESCE(NULLIF(l.landed_cost_per_kg, 0), l.rate_per_kg, 0)), 0) as stock_value'))
+        db.raw(`COALESCE(SUM(${lotValueSql('l')}), 0) as stock_value`))
       .orderBy('p.name', 'asc');
     return {
       rows: rows.map(r => ({
@@ -1711,7 +1709,7 @@ const reportingService = {
         'l.supplier_id', 'l.ownership', 's.name as supplier_name', 'w.name as warehouse_name', 'l.purchase_date', 'l.created_at')
       .orderBy('l.type', 'asc').orderBy('l.id', 'asc');
 
-    const cpkOf = (l) => num(l.landed_cost_per_kg) || num(l.rate_per_kg);
+    const cpkOf = (l) => num(l.landed_cost_per_kg); // D-14: no fallback price
     // Company totals exclude client-owned Service Milling lots (the client's
     // stock, not ours). The lot LIST below still shows them, tagged.
     const companyLots = lots.filter(l => l.ownership !== 'client');
@@ -1804,8 +1802,8 @@ const reportingService = {
   /**
    * Warehouse Index — the picker list for the Warehouse Ledger. One row per
    * active warehouse with on-hand lot count, on-hand / reserved / available KG
-   * and stock value. Empty warehouses are shown too (0s). NULLIF on the cost
-   * so a 0 landed cost falls back to rate_per_kg (matches the detail / Lot 360).
+   * and stock value (D-14: landed cost/kg × on hand). Empty warehouses are
+   * shown too (0s).
    */
   async getWarehouseIndex(warehouseScope = null) {
     const num = (v) => parseFloat(v) || 0;
@@ -1823,7 +1821,7 @@ const reportingService = {
         db.raw('COUNT(l.id) as lot_count'),
         db.raw('COALESCE(SUM(l.net_weight_kg), 0) as onhand_kg'),
         db.raw('COALESCE(SUM(l.reserved_qty), 0) as reserved_kg'),
-        db.raw('COALESCE(SUM(l.net_weight_kg * COALESCE(NULLIF(l.landed_cost_per_kg, 0), l.rate_per_kg, 0)), 0) as stock_value'));
+        db.raw(`COALESCE(SUM(${lotValueSql('l')}), 0) as stock_value`));
     const byId = Object.fromEntries(agg.map(a => [a.warehouse_id, a]));
     return {
       rows: whs.map(w => {
@@ -1867,7 +1865,7 @@ const reportingService = {
         'p.name as product_name', 'l.supplier_id', 'l.ownership', 's.name as supplier_name', 'l.purchase_date', 'l.created_at')
       .orderBy('l.type', 'asc').orderBy('l.id', 'asc');
 
-    const cpkOf = (l) => num(l.landed_cost_per_kg) || num(l.rate_per_kg);
+    const cpkOf = (l) => num(l.landed_cost_per_kg); // D-14: no fallback price
     let onHand = 0, reserved = 0, value = 0, totalIn = 0, totalOut = 0;
     const byType = {}, byRice = {};
     const lotRows = lots.map((l) => {
@@ -2685,9 +2683,8 @@ const reportingService = {
       const onHand = num(l.net_weight_kg);
       const reserved = num(l.reserved_qty);
       const sold = num(l.sold_weight_kg) || Math.max(0, produced - onHand);
-      // landed_cost_per_kg can be 0 on zero-cost intakes — fall back to rate_per_kg
-      // so value matches the Warehouse / Rice Type ledgers + Lot 360.
-      const cpk = num(l.landed_cost_per_kg) || num(l.rate_per_kg);
+      // D-14: landed cost/kg × on hand, no fallback price (stockValue.js).
+      const cpk = num(l.landed_cost_per_kg);
       g.producedKg += produced; g.onHandKg += onHand; g.reservedKg += reserved; g.soldKg += sold;
       g.valuePkr += onHand * cpk;
       g.lots.push({ lotId: l.id, lotNo: l.lot_no, item: l.grade || l.item_name, variety: l.variety, isBlend: l.processing_type === 'blended', producedKg: produced, onHandKg: onHand, reservedKg: reserved, soldKg: sold, costPerKg: cpk, valuePkr: onHand * cpk, href: `/lot-inventory/${l.id}` });
@@ -3421,8 +3418,8 @@ const reportingService = {
         'il.entity',
         'il.qty',
         'il.unit',
-        'il.cost_per_unit',
-        'il.total_value',
+        'il.landed_cost_per_kg',
+        db.raw(`${lotValueSql('il')} as total_value`),
         'w.name as warehouse_name',
         'il.created_at',
         db.raw("EXTRACT(DAY FROM NOW() - il.created_at)::int as days_in_stock")
@@ -3442,7 +3439,7 @@ const reportingService = {
         entity: l.entity,
         qty: parseFloat(l.qty),
         unit: l.unit,
-        costPerUnit: parseFloat(l.cost_per_unit) || 0,
+        costPerUnit: parseFloat(l.landed_cost_per_kg) || 0,
         totalValue: parseFloat(l.total_value) || 0,
         warehouseName: l.warehouse_name,
         daysInStock: l.days_in_stock || 0,
@@ -3521,7 +3518,7 @@ const reportingService = {
     const byType = await query.clone()
       .select(
         'il.type',
-        db.raw('COALESCE(SUM(il.qty * il.cost_per_unit), 0) as total_value'),
+        db.raw(`COALESCE(SUM(${lotValueSql('il')}), 0) as total_value`),
         db.raw('COALESCE(SUM(il.qty), 0) as total_qty'),
         db.raw('COUNT(il.id) as lot_count')
       )
@@ -3533,7 +3530,7 @@ const reportingService = {
       .select(
         'w.name as warehouse_name',
         'il.entity',
-        db.raw('COALESCE(SUM(il.qty * il.cost_per_unit), 0) as total_value'),
+        db.raw(`COALESCE(SUM(${lotValueSql('il')}), 0) as total_value`),
         db.raw('COALESCE(SUM(il.qty), 0) as total_qty'),
         db.raw('COUNT(il.id) as lot_count')
       )
@@ -3541,7 +3538,7 @@ const reportingService = {
       .orderBy('total_value', 'desc');
 
     const grandTotal = await query.clone()
-      .select(db.raw('COALESCE(SUM(il.qty * il.cost_per_unit), 0) as grand_total'))
+      .select(db.raw(`COALESCE(SUM(${lotValueSql('il')}), 0) as grand_total`))
       .first();
 
     return {

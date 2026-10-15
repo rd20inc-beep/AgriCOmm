@@ -10,6 +10,17 @@ export function onHandKg(lot) {
   return n(lot.net_weight_kg) > 0 ? n(lot.net_weight_kg) : n(lot.qty);
 }
 
+/**
+ * D-14 stock value of a lot: landed cost per KG × KG on hand, no fallback price
+ * (mirrors backend stockValue.js). Takes snake_case or camelCase rows.
+ */
+export function lotValue(lot) {
+  if (!lot) return 0;
+  const net = n(lot.net_weight_kg ?? lot.netWeightKg);
+  const kg = net > 0 ? net : n(lot.qty);
+  return kg * n(lot.landed_cost_per_kg ?? lot.landedCostPerKg);
+}
+
 /** Pack size of a lot in kg (0 = unknown, which counts as a 50 kg katta). */
 export function packKg(lot) {
   return n(lot.bag_weight_kg) || n(lot.bag_size_kg) || 0;

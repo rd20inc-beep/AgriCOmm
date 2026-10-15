@@ -104,6 +104,14 @@ jest.mock('../services/accountingService', () => ({
   autoPost: jest.fn(), createJournal: jest.fn(), postJournal: jest.fn(),
 }));
 jest.mock('../services/automationService', () => ({ onBatchCompleted: jest.fn() }));
+// The GL side of a commitment / cancel / delete (D-6 WIP, truck purchase) is
+// covered against a real DB in millingWip.integration.test.js.
+jest.mock('../modules/milling/millingWip', () => ({
+  syncBatchWip: jest.fn(async () => null), syncBatchIntake: jest.fn(async () => null),
+}));
+jest.mock('../modules/milling/truckIntakePurchase', () => ({
+  syncTruckIntakePurchase: jest.fn(async () => null), voidTruckIntakePurchase: jest.fn(async () => null),
+}));
 jest.mock('../services/exportOrderWorkflowService', () => ({}));
 jest.mock('../services/notificationService', () => ({}));
 jest.mock('../services/exportOrderEventBus', () => ({ publishExportOrderUpdate: jest.fn() }));

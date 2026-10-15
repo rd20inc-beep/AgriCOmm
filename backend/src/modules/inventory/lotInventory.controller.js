@@ -21,6 +21,7 @@ const { commitLotToBatch, batchHasOutputLots } = require('../milling/batchLifecy
 const { assertLotCostEditable } = require('../milling/costEditLocks');
 // #9-scoping: per-user warehouse restriction, applied to READ paths only.
 const whScope = require('../../utils/warehouseScope');
+const stockValue = require('./stockValue');
 const stockValuation = require('./stockValuation');
 // Purchase rates, landed cost and stock value are hidden from roles without
 // reports.view_cost (QC Analyst / Inventory Officer / Documentation Officer) — same rule as the reports.
@@ -2162,10 +2163,8 @@ module.exports = {
           // stored landed_cost_total would carry the original received value even
           // after a lot is milled/sold down (e.g. 3 MT left still showing the full
           // 33 MT cost). Compute it so value always tracks current quantity.
-          db.raw(`COALESCE(SUM(
-            ${stockSql.ON_HAND_KG}
-            * COALESCE(NULLIF(l.landed_cost_per_kg, 0), NULLIF(l.rate_per_kg, 0), CAST(l.cost_per_unit AS DECIMAL), 0)
-          ), 0) as total_value`),
+          // D-14 (stockValue.js): landed cost/kg × on hand, no fallback price.
+          db.raw(`COALESCE(SUM(${stockValue.lotValueSql('l')}), 0) as total_value`),
         )
         .groupBy(groupCol, nameCol)
         .orderBy('total_kg', 'desc');
@@ -3622,6 +3621,21 @@ module.exports = {
       return res.status(status).json({ success: false, message: err.message });
     }
   },
+  // ─── Stock ↔ GL tie-out (P3-19) ───
+  // Company stock at the D-14 value, per GL inventory account (1210 / 1220 /
+  // 1230 / 1240) and 1260 Milling WIP, beside the Posted GL balance. Rice
+  // committed to an open milling batch is expected in WIP, not in its stock
+  // account; `wipNotBooked` is committed rice whose batch has not moved it yet
+  // (committed before WIP existed) and `unexplained` is the rest of the gap.
+  async getStockTieOut(req, res) {
+    try {
+      return res.json({ success: true, data: await stockValue.inventoryTieOut(db) });
+    } catch (err) {
+      console.error('getStockTieOut error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
   // ─── Held-stock profit ───
   // Cost is on the lot; the SELLING price comes from commodity_rate_master, keyed
   // by product + grade (by-products are priced per grade, finished/raw per
@@ -3634,7 +3648,8 @@ module.exports = {
       let query = db('inventory_lots as l')
         .leftJoin('products as p', 'l.product_id', 'p.id')
         .select('l.id', 'l.lot_no', 'l.type', 'l.grade', 'l.brand', 'l.product_id',
-                'l.available_qty', 'l.cost_per_unit', 'l.entity', 'l.warehouse_id',
+                'l.available_qty', 'l.qty', 'l.net_weight_kg', 'l.landed_cost_per_kg',
+                'l.cost_per_unit', 'l.entity', 'l.warehouse_id',
                 'p.name as product_name');
 
       query = stockSql.companyStock(query, 'l', ownership);
@@ -3642,7 +3657,9 @@ module.exports = {
       if (entity) query = query.where('l.entity', entity);
       if (type) query = query.where('l.type', type);
       query = whScope.applyWarehouseScope(query, await whScope.resolveWarehouseScope(req), 'l.warehouse_id');
-      query = query.where('l.available_qty', '>', 0);
+      // On hand, like every stock value (D-14): reserved / milling-committed
+      // rice is still ours until it ships or is milled.
+      query = stockSql.hasStock(query, 'l');
 
       const lots = await query.orderBy('l.type').orderBy('l.available_qty', 'desc');
 

@@ -625,15 +625,15 @@ const millingService = {
   },
 
   async getSupplierRecoveryComparison() {
-    const rows = await db('milling_batches as mb')
-      .leftJoin('suppliers as s', 'mb.supplier_id', 's.id')
-      .where('mb.status', 'Completed')
-      .where('mb.raw_qty_kg', '>', 0)
+    // D-14: weighted (Σ finished ÷ Σ raw), completed company batches only.
+    const { yieldBatches, weightedYieldPctSql } = require('./millingYield');
+    const rows = await yieldBatches(db('milling_batches as mb')
+      .leftJoin('suppliers as s', 'mb.supplier_id', 's.id'), 'mb')
       .select(
         'mb.supplier_id',
-        's.name as supplier_name'
+        's.name as supplier_name',
+        db.raw(`${weightedYieldPctSql('mb')} as avg_yield_pct`),
       )
-      .avg('mb.yield_pct as avg_yield_pct')
       .sum('mb.raw_qty_kg as total_raw_mt')
       .sum('mb.actual_finished_kg as total_finished_mt')
       .sum('mb.broken_kg as total_broken_mt')

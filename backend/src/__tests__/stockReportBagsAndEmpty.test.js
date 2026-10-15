@@ -35,7 +35,8 @@ describe('a lot holding nothing is not stock', () => {
   for (const handler of ['printableStock', 'printableStockDetail']) {
     it(`${handler} filters out zero on-hand lots`, () => {
       const fn = methodBody(reporting, handler);
-      if (!/net_weight_kg[\s\S]{0,80}> 0/.test(fn.replace(/\n/g, ' '))) {
+      // ON_HAND is stockSql.ON_HAND_KG (net_weight_kg, else qty).
+      if (!/(net_weight_kg|ON_HAND\})[\s\S]{0,80}> 0/.test(fn.replace(/\n/g, ' '))) {
         throw new Error(`${handler} does not filter on remaining weight`);
       }
     });

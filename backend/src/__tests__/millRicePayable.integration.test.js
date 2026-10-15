@@ -88,7 +88,7 @@ d('MILL-RICE payable only for rice not yet on the books (DB-gated)', () => {
   });
   afterAll(async () => { if (db) await db.destroy(); });
 
-  test('truck intake (no source lots) books the raw purchase once', async () => {
+  test('truck intake (no source lots) books the raw purchase once — at receipt (D-6)', async () => {
     const b = await makeBatch({ raw_qty_kg: 0 });
     await db.transaction((trx) => inventory.receiveRice(trx, {
       batchId: b.id, weightKg: 10000, costPerKg: 100, currency: 'PKR', supplierId: ids.sup, productId: ids.product, userId: ids.user,
@@ -98,10 +98,13 @@ d('MILL-RICE payable only for rice not yet on the books (DB-gated)', () => {
     const res = await yieldOf(b.id);
     expect(res.body && res.body.message).toBeUndefined();
     expect(res.statusCode).toBe(200);
-    const p = await millRice(b.id);
-    expect(p).toBeTruthy();
+    // Bought once, on the truck lot at receipt — the yield books no MILL-RICE.
+    const lot = await db('inventory_lots').where({ batch_ref: `batch-${b.id}`, type: 'raw' }).first();
+    const p = await db('payables').where({ linked_ref: lot.lot_no, category: 'Raw Material' }).first();
     expect(Number(p.original_amount)).toBe(1000000);
-    expect(await glNet(b.batch_no, '2010', ['Rice Purchase'])).toBe(-1000000);
+    expect(await millRice(b.id)).toBeUndefined();
+    expect(await glNet(lot.lot_no, '2010', ['Purchase Lot'])).toBe(-1000000);
+    expect(await glNet(b.batch_no, '2010')).toBe(0);
   });
 
   test('re-mill of ONE finished lot creates no supplier payable', async () => {

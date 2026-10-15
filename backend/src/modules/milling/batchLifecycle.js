@@ -153,7 +153,9 @@ function commitRefusal(lot, batch) {
  * qty (P6a) as a milling_hold movement — milling_reserved_qty goes up and
  * available_qty down, with a ledger row, so the rice can't be sold or
  * export-allocated before yield. Yield (consumeForMilling) consumes exactly
- * this qty; delete/cancel releases it (releaseBatchSources).
+ * this qty; delete/cancel releases it (releaseBatchSources). The GL follows
+ * (D-6): the committed value moves from the lot's stock account into 1260
+ * Milling WIP (millingWip.syncBatchWip).
  *
  * `row` carries extra batch_source_lots columns (costs, variety, notes…).
  * `userId` stamps the ledger row (default: the batch's creator).
@@ -197,6 +199,8 @@ async function commitLotToBatch(trx, { batchId, lotId, qtyKg, row = {}, userId =
     milling_status: 'In Milling',
     updated_at: trx.fn.now(),
   });
+  // D-6: the committed rice leaves its stock account for 1260 Milling WIP.
+  await require('./millingWip').syncBatchWip(trx, batchId, { reason: `lot ${lot.lot_no || lot.id} committed` });
   return { lot, qty };
 }
 

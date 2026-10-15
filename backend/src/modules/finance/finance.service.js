@@ -69,7 +69,8 @@ const financeService = {
       .where('entity', 'mill').whereIn('type', ['finished', 'byproduct'])
       .where('qty', '>', 0).whereNot('status', 'Closed')
       .whereRaw("COALESCE(ownership, 'company') <> 'client'")
-      .select(db.raw('COALESCE(SUM(qty * COALESCE(NULLIF(landed_cost_per_kg, 0), cost_per_unit, 0)), 0) as value'))
+      // D-14 (stockValue.js): landed cost/kg × on hand, no fallback price.
+      .select(db.raw(`COALESCE(SUM(${require('../inventory/stockValue').lotValueSql('inventory_lots')}), 0) as value`))
       .first();
 
     // ── Local sales: collection figures over ALL local sales; profit over the

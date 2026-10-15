@@ -97,6 +97,15 @@ async function loadPayablesFeed(query = {}) {
   const batchesFromSourceLots = new Set(
     (await db('batch_source_lots').distinct('batch_id').select('batch_id')).map((r) => r.batch_id),
   );
+  // Truck rice bought at receipt (D-6, P3-09): the payable sits on the batch's
+  // truck lot (linked_ref = lot_no), so the batch's raw_rice is already owed.
+  const storedLotRefs = new Set(storedRows.filter((r) => r.category === 'Raw Material' && r.linked_ref).map((r) => r.linked_ref));
+  const truckBookedBatchIds = new Set(
+    (await db('inventory_lots').where({ type: 'raw', entity: 'mill' }).where('batch_ref', 'like', 'batch-%')
+      .select('lot_no', 'batch_ref'))
+      .filter((l) => storedLotRefs.has(l.lot_no))
+      .map((l) => parseInt(String(l.batch_ref).slice(6), 10)),
+  );
 
   // Derive payables from cost tables. Resolve the supplier from the batch's
   // supplier_id (the denormalized supplier_name is sometimes null) and carry
@@ -161,6 +170,8 @@ async function loadPayablesFeed(query = {}) {
     // Batch fed by source lots → its raw cost is already owed via those lots'
     // purchase payables; deriving it again would double-count the supplier.
     if (mc.category === 'raw_rice' && batchesFromSourceLots.has(mc.batch_id)) return;
+    // Truck rice bought at receipt — owed on the truck lot's own payable.
+    if (mc.category === 'raw_rice' && truckBookedBatchIds.has(mc.batch_id)) return;
     // #14 — transport for this batch is a real (payable) transporter payable.
     if (mc.category === 'transport' && storedBatchTransportBatchIds.has(mc.batch_id)) return;
     derived.push({
