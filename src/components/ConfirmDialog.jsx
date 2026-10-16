@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { AlertTriangle, Loader2, X } from 'lucide-react';
 
 /**
@@ -31,6 +31,7 @@ export default function ConfirmDialog({
   cancelLabel = 'Cancel', danger = true, busy = false, onConfirm, onCancel,
 }) {
   const [text, setText] = useState('');
+  const reasonId = useId();
   const confirmRef = useRef(null);
   const panelRef = useRef(null);
 
@@ -58,7 +59,7 @@ export default function ConfirmDialog({
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center p-4"
       role="dialog" aria-modal="true" aria-labelledby="confirm-title">
-      <div className="absolute inset-0 bg-black/40" onClick={() => !busy && onCancel?.()} />
+      <div className="absolute inset-0 bg-black/40" aria-hidden="true" onClick={() => !busy && onCancel?.()} />
       <div ref={panelRef} className="relative w-full max-w-md bg-white rounded-xl shadow-xl">
         <div className="flex items-start gap-3 p-5 pb-3">
           {danger && (
@@ -88,10 +89,10 @@ export default function ConfirmDialog({
 
         {reason && (
           <div className="px-5 pb-1">
-            <label className="block text-xs font-medium text-gray-600 mb-1">
+            <label htmlFor={reasonId} className="block text-xs font-medium text-gray-600 mb-1">
               Reason {reason === 'optional' && <span className="font-normal text-gray-400">(optional)</span>}
             </label>
-            <textarea rows={2} value={text} onChange={(e) => setText(e.target.value)}
+            <textarea id={reasonId} rows={2} value={text} onChange={(e) => setText(e.target.value)}
               className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
               placeholder="Recorded on the audit trail" />
           </div>

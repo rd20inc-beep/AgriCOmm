@@ -69,7 +69,7 @@ export default function ScanDrawer() {
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 p-4" onClick={close}>
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 p-4" role="presentation" onClick={close}>
       <div className="w-full max-w-sm rounded-xl bg-white p-4" onClick={(e) => e.stopPropagation()}>
         <div className="mb-3 flex items-center justify-between">
           <h2 className="inline-flex items-center gap-2 text-base font-semibold text-gray-900"><ScanLine size={18} /> Scan code</h2>

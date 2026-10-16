@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useId } from 'react';
 import { Search, Plus, X, Truck } from 'lucide-react';
 import { haulersApi } from '../modules/inventory/api/services';
 import { useAuth } from '../context/AuthContext';
@@ -16,6 +16,8 @@ const CAN_ADD_HAULER = [['admin', 'manage_master_data'], ['inventory', 'create']
  * placeholder, addToast, clearable (default true), onCreated(hauler).
  */
 export default function HaulerPicker({ label, value, onChange, haulers = [], placeholder = 'Search hauler…', addToast, clearable = true, onCreated }) {
+  // Ties the visible label to the search box / current choice (P5-14).
+  const fieldId = useId();
   const [localHaulers, setLocalHaulers] = useState([]);
   const [loaded, setLoaded] = useState([]);
   const [search, setSearch] = useState('');
@@ -96,7 +98,7 @@ export default function HaulerPicker({ label, value, onChange, haulers = [], pla
   return (
     <div data-hauler-picker>
       <div className="flex items-center justify-between mb-1">
-        {label && <label className="block text-sm font-medium text-gray-700">{label}</label>}
+        {label && <label htmlFor={fieldId} className="block text-sm font-medium text-gray-700">{label}</label>}
         {canAdd && (
           <button type="button" onClick={() => { setAdding(v => !v); setOpen(false); }}
             className="text-xs text-blue-600 hover:text-blue-700 font-medium inline-flex items-center gap-1">
@@ -108,7 +110,7 @@ export default function HaulerPicker({ label, value, onChange, haulers = [], pla
       <div className="relative">
         {value && selected && !open ? (
           <div className="w-full px-3 py-2 rounded-lg border border-gray-300 bg-white flex items-center justify-between gap-2">
-            <button type="button" onClick={() => { setOpen(true); setSearch(''); }} className="flex-1 text-left truncate text-gray-900 font-medium inline-flex items-center gap-2">
+            <button id={fieldId} type="button" onClick={() => { setOpen(true); setSearch(''); }} className="flex-1 text-left truncate text-gray-900 font-medium inline-flex items-center gap-2">
               <Truck size={14} className="text-gray-400 flex-shrink-0" />{selected.name}
             </button>
             <div className="flex items-center gap-2 flex-shrink-0">
@@ -119,7 +121,7 @@ export default function HaulerPicker({ label, value, onChange, haulers = [], pla
         ) : (
           <>
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input type="text" value={search} onChange={e => { setSearch(e.target.value); setOpen(true); }} onFocus={() => setOpen(true)}
+            <input id={fieldId} type="text" value={search} onChange={e => { setSearch(e.target.value); setOpen(true); }} onFocus={() => setOpen(true)}
               placeholder={placeholder}
               className="w-full rounded-lg border border-gray-300 pl-9 pr-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white" />
             {open && (
@@ -143,13 +145,13 @@ export default function HaulerPicker({ label, value, onChange, haulers = [], pla
       {adding && canAdd && (
         <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-lg space-y-3">
           <p className="text-xs font-semibold text-blue-800 uppercase tracking-wide">Add new hauler</p>
-          <input value={draft.name} autoFocus onChange={e => setDraft(d => ({ ...d, name: e.target.value }))}
+          <input aria-label="Name" value={draft.name} autoFocus onChange={e => setDraft(d => ({ ...d, name: e.target.value }))}
             placeholder="Name * — e.g. Malik Goods Transport"
             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
           <div className="grid grid-cols-2 gap-3">
-            <input value={draft.contact_person} onChange={e => setDraft(d => ({ ...d, contact_person: e.target.value }))} placeholder="Contact person"
+            <input aria-label="Contact person" value={draft.contact_person} onChange={e => setDraft(d => ({ ...d, contact_person: e.target.value }))} placeholder="Contact person"
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
-            <input value={draft.phone} onChange={e => setDraft(d => ({ ...d, phone: e.target.value }))} placeholder="Phone"
+            <input aria-label="Phone" value={draft.phone} onChange={e => setDraft(d => ({ ...d, phone: e.target.value }))} placeholder="Phone"
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
           </div>
           <div className="flex justify-end gap-2">

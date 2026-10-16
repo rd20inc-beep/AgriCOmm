@@ -33,6 +33,7 @@ import { lotFreeKg, lotSaleBlock } from '../utils/saleLot';
 import { keepPreviousData } from '@tanstack/react-query';
 import useDebouncedValue from '../../../hooks/useDebouncedValue';
 import ListCapHint from '../../../shared/components/ListCapHint';
+import { clickableProps } from '../../../shared/utils/a11y';
 
 // Local-sale money is shown to the paisa (2 dp), exact, en-PK grouping.
 const fmtPKR = (v) => fmtPKRExact(parseFloat(v) || 0, { decimals: 2 });
@@ -349,7 +350,7 @@ export default function LocalSales() {
                 if (g.items.length === 1) {
                   const s = g.items[0];
                   return (
-                    <tr key={s.id} onClick={() => openSaleDetail(s)} className="hover:bg-gray-50 cursor-pointer">
+                    <tr key={s.id} {...clickableProps(() => openSaleDetail(s))} className="hover:bg-gray-50 cursor-pointer">
                       <td data-label="Sale #" className="py-2.5 px-4 font-medium text-blue-600">
                         {s.saleNo}
                         {s.status === 'Pending' && <span className="ml-1.5 align-middle"><StatusBadge status="Pending" /></span>}
@@ -381,7 +382,7 @@ export default function LocalSales() {
                 const head = g.items[0];
                 return (
                   <Fragment key={g.key}>
-                    <tr onClick={() => toggleGroup(g.key)} className="hover:bg-gray-50 cursor-pointer bg-gray-50/40">
+                    <tr {...clickableProps(() => toggleGroup(g.key), { expanded: open })} className="hover:bg-gray-50 cursor-pointer bg-gray-50/40">
                       <td data-label="Sale #" className="py-2.5 px-4 font-medium text-blue-600">
                         <span className="inline-flex items-center gap-1.5">
                           <ChevronRight size={14} className={`text-gray-400 transition-transform ${open ? 'rotate-90' : ''}`} />
@@ -409,7 +410,7 @@ export default function LocalSales() {
                       </td>
                     </tr>
                     {open && g.items.map(s => (
-                      <tr key={s.id} onClick={() => openSaleDetail(s)} className="hover:bg-blue-50/40 cursor-pointer bg-white">
+                      <tr key={s.id} {...clickableProps(() => openSaleDetail(s))} className="hover:bg-blue-50/40 cursor-pointer bg-white">
                         <td data-label="Sale #" className="py-2 px-4 pl-10 text-xs text-gray-400">{s.saleNo}</td>
                         <td className="py-2 px-4"></td>
                         <td className="py-2 px-4"></td>

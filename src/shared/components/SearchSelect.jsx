@@ -5,7 +5,9 @@ import { Search } from 'lucide-react';
 // options are shown as given — the server already filtered them; `footer`
 // (e.g. "Showing 50 of 1,234") sits under the list. `selectedOption` keeps the
 // picked row's label when a later search no longer returns it.
-export default function SearchSelect({ value, onChange, options, placeholder, onSearch, footer, selectedOption }) {
+// `id` lets a caller's <label htmlFor> name the input; without a visible label
+// pass `ariaLabel` (falls back to the placeholder) so a screen reader has one.
+export default function SearchSelect({ value, onChange, options, placeholder, onSearch, footer, selectedOption, id, ariaLabel }) {
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
@@ -26,8 +28,13 @@ export default function SearchSelect({ value, onChange, options, placeholder, on
   return (
     <div ref={ref} className="relative">
       <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" aria-hidden="true" />
         <input
+          id={id}
+          aria-label={id ? undefined : (ariaLabel || placeholder)}
+          aria-expanded={open}
+          aria-autocomplete="list"
+          role="combobox"
           type="text"
           value={open ? query : (selected ? `${selected.label}${selected.sub ? ` (${selected.sub})` : ''}` : '')}
           onChange={e => { setQuery(e.target.value); onSearch?.(e.target.value); if (!open) setOpen(true); }}

@@ -36,7 +36,7 @@ export default function SyncConflictsDrawer() {
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[70] flex justify-end bg-black/40" onClick={() => setOpen(false)}>
+    <div className="fixed inset-0 z-[70] flex justify-end bg-black/40" role="presentation" onClick={() => setOpen(false)}>
       <div className="h-full w-full max-w-md overflow-y-auto bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between border-b px-4 py-3">
           <h2 className="text-base font-semibold text-gray-900">Sync conflicts</h2>

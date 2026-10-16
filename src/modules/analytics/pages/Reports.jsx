@@ -39,6 +39,7 @@ import {
 } from '../../../shared/utils/format';
 import { moneyTile, netTile, currencyLines, formatCurrencyLines, cappedHint } from '../utils/moneyFeed';
 import { forecastCards, forecastRows, forecastEquivText, money as forecastMoney } from '../utils/cashForecastView';
+import { clickableProps } from '../../../shared/utils/a11y';
 
 // ─── Formatting ────────────────────────────────────────────────────────
 // Reports are reconciled line by line, so money is always shown in full —
@@ -841,7 +842,7 @@ export default function Reports() {
             </Link>
           </div>
           {(ledgersOpen || toolsOpen || savedOpen) && (
-            <div className="fixed inset-0 z-20" onClick={() => { setLedgersOpen(false); setToolsOpen(false); setSavedOpen(false); }} />
+            <div className="fixed inset-0 z-20" aria-hidden="true" onClick={() => { setLedgersOpen(false); setToolsOpen(false); setSavedOpen(false); }} />
           )}
         </div>
       </div>
@@ -926,7 +927,7 @@ export default function Reports() {
               });
             })()}
           </div>
-          {openGroup && <div className="fixed inset-0 z-20" onClick={() => setOpenGroup(null)} />}
+          {openGroup && <div className="fixed inset-0 z-20" aria-hidden="true" onClick={() => setOpenGroup(null)} />}
         </nav>
 
         <div className="p-4 sm:p-6">
@@ -1377,7 +1378,7 @@ function PurchasesTab({ params, statementHref, openDoc }) {
               const href = statementHref?.('supplier', r.supplierId);
               return (
                 <Fragment key={k}>
-                  <tr onClick={() => setOpen(isOpen ? null : k)} className="hover:bg-gray-50 cursor-pointer">
+                  <tr {...clickableProps(() => setOpen(isOpen ? null : k), { expanded: isOpen })} className="hover:bg-gray-50 cursor-pointer">
                     <td data-label="" className="mob-hide py-2.5 px-3 text-gray-400">{isOpen ? <ChevronDown size={15} /> : <ChevronRight size={15} />}</td>
                     <td data-label="Date" className="py-2.5 px-3">{r.date ? new Date(r.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : '—'}</td>
                     <td data-label="Ref" className="py-2.5 px-3 font-mono text-xs">{r.ref}</td>
@@ -2790,7 +2791,7 @@ function FinishedGoodsLedgerSection({ entity, hideValue }) {
           <tbody className="divide-y divide-gray-100">
             {rows.map((r) => (
               <Fragment key={r.key}>
-                <tr className="hover:bg-gray-50 cursor-pointer" onClick={() => setExp(e => ({ ...e, [r.key]: !e[r.key] }))}>
+                <tr className="hover:bg-gray-50 cursor-pointer" {...clickableProps(() => setExp(e => ({ ...e, [r.key]: !e[r.key] })), { expanded: !!exp[r.key] })}>
                   <td data-label="Output" className="px-3 py-2 font-medium text-gray-800"><ChevronRight size={13} className={`inline transition-transform mr-1 text-gray-400 ${exp[r.key] ? 'rotate-90' : ''}`} />{gradeLabel(r.key)}<span className="text-gray-400 font-normal"> · {r.type === 'byproduct' ? 'by-product' : 'finished'} · {r.lots.length} lot{r.lots.length === 1 ? '' : 's'}</span></td>
                   <td data-label="Produced" className="px-3 py-2 text-right tabular-nums">{kg(r.producedKg)}</td>
                   <td data-label="Sold" className="px-3 py-2 text-right tabular-nums text-slate-600">{kg(r.soldKg)}</td>
@@ -3072,7 +3073,7 @@ function Table({ head, align = [], rows, rowClick }) {
           {rows.map((row, ri) => {
             const onClick = rowClick?.[ri];
             return (
-              <tr key={ri} onClick={onClick}
+              <tr key={ri} {...(onClick ? clickableProps(onClick) : {})}
                 className={`hover:bg-gray-50 ${onClick ? 'cursor-pointer' : ''}`}>
                 {row.map((cell, ci) => (
                   <td data-label={head[ci]} key={ci} className={`text-${align[ci] || 'left'} py-2.5 px-3 text-gray-800`}>{cell}</td>

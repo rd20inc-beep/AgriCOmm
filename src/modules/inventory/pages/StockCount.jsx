@@ -7,9 +7,11 @@ import { useAuth } from '../../../context/AuthContext';
 import useConfirm from '../../../hooks/useConfirm';
 import SlideDrawer from '../../../components/SlideDrawer';
 import StatusBadge from '../../../shared/components/StatusBadge';
+import FormField from '../../../shared/components/FormField';
 import { fmtNum } from '../../../shared/utils/format';
 import { saveDraft, loadDraft, clearDraft } from '../../../shared/utils/formDraft';
 import { stockCountDraftName, unsavedCounts } from '../utils/stockCountDraft';
+import { clickableProps } from '../../../shared/utils/a11y';
 
 const n = (v) => Number(v) || 0;
 // Lot quantities are KG (Phase 5c).
@@ -29,6 +31,7 @@ const WRITE_OFF_APPROVERS = ['Owner', 'Super Admin'];
 const BIG_VARIANCE_SHARE = 0.5;
 
 const TYPE_LABEL = { full: 'Full count', cycle: 'Cycle count', spot: 'Spot check' };
+const COUNT_LABEL = 'block text-xs font-medium text-gray-500 mb-1.5';
 
 
 // Stock-take (physical count) workflow — create a count, enter what you
@@ -85,7 +88,7 @@ export default function StockCount() {
               </thead>
               <tbody>
                 {counts.map((c) => (
-                  <tr key={c.id} onClick={() => setOpenId(c.id)} className="border-b border-gray-50 last:border-0 hover:bg-blue-50/50 cursor-pointer">
+                  <tr key={c.id} {...clickableProps(() => setOpenId(c.id), { label: `Open count ${c.count_no}` })} className="border-b border-gray-50 last:border-0 hover:bg-blue-50/50 cursor-pointer">
                     <td data-label="Count" className="px-4 py-2.5 font-medium text-gray-900">{c.count_no}</td>
                     <td data-label="Type" className="mob-hide px-4 py-2.5 text-gray-600">{TYPE_LABEL[c.count_type] || c.count_type}</td>
                     <td data-label="Warehouse" className="px-4 py-2.5 text-gray-600">{c.warehouse_name || 'All warehouses'}</td>
@@ -124,29 +127,26 @@ function NewCountDrawer({ onClose, onCreated }) {
   return (
     <Drawer title="New stock count" onClose={onClose}>
       <div className="space-y-4">
-        <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1.5">Count type</label>
+        <div role="group" aria-labelledby="new-count-type">
+          <p id="new-count-type" className="block text-xs font-medium text-gray-500 mb-1.5">Count type</p>
           <div className="flex gap-2">
             {['full', 'cycle', 'spot'].map((t) => (
-              <button key={t} onClick={() => setCountType(t)}
+              <button key={t} type="button" aria-pressed={countType === t} onClick={() => setCountType(t)}
                 className={`px-3 py-1.5 text-xs font-medium rounded-lg border ${countType === t ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600'}`}>{TYPE_LABEL[t]}</button>
             ))}
           </div>
         </div>
-        <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1.5">Warehouse</label>
+        <FormField label="Warehouse" hint="Every stock batch here becomes a line for you to count." labelClassName={COUNT_LABEL}>
           <select value={warehouseId} onChange={(e) => setWarehouseId(e.target.value)}
             className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
             <option value="">All warehouses</option>
             {warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
           </select>
-          <p className="text-[11px] text-gray-400 mt-1">Every stock batch here becomes a line for you to count.</p>
-        </div>
-        <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1.5">Planned date (optional)</label>
+        </FormField>
+        <FormField label="Planned date (optional)" labelClassName={COUNT_LABEL}>
           <input type="date" value={plannedDate} onChange={(e) => setPlannedDate(e.target.value)}
             className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
-        </div>
+        </FormField>
         {create.isError && <p className="text-xs text-red-600">{create.error?.message || 'Failed to create count.'}</p>}
         <button onClick={() => create.mutate()} disabled={create.isPending}
           className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white text-sm font-medium py-2.5 rounded-lg inline-flex items-center justify-center gap-2">
@@ -321,7 +321,7 @@ function CountDetailDrawer({ countId, onClose, onChanged }) {
                               {/* Reject reason capture */}
                               {!completed && rejectId === it.id && (
                                 <div className="flex items-center gap-1">
-                                  <input autoFocus value={rejectReason} placeholder="Reason…"
+                                  <input autoFocus value={rejectReason} placeholder="Reason…" aria-label="Reason for rejecting this difference"
                                     onChange={(e) => setRejectReason(e.target.value)}
                                     onKeyDown={(e) => { if (e.key === 'Enter' && rejectReason.trim()) review.mutate({ itemId: it.id, decision: 'reject', reason: rejectReason.trim() }); }}
                                     className="w-28 border border-red-300 rounded px-1.5 py-0.5 text-[11px]" />

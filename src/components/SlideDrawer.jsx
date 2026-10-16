@@ -115,6 +115,7 @@ export default function SlideDrawer({ open, onClose, title, subtitle, icon: Icon
     <>
     <div
       className="fixed inset-0 z-50 bg-black/30 backdrop-blur-sm flex items-stretch justify-end"
+      role="presentation"
       onClick={closeOnBackdrop ? close : undefined}
     >
       <div

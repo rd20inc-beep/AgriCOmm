@@ -847,7 +847,7 @@ export default function ExportOrderDetail() {
             });
           })()}
         </div>
-        {openGroup && <div className="fixed inset-0 z-20" onClick={() => setOpenGroup(null)} />}
+        {openGroup && <div className="fixed inset-0 z-20" aria-hidden="true" onClick={() => setOpenGroup(null)} />}
       </div>
 
       {/* Tab Content */}
