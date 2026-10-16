@@ -35,6 +35,8 @@ vi.mock('../../purchaseRequirements/components/PurchaseRequirementsPanel', () =>
 vi.mock('../components/NeedsAttention', () => ({ default: () => <div data-testid="needs-attention" /> }));
 vi.mock('../components/RecentActivity', () => ({ default: () => <div data-testid="recent-activity" /> }));
 vi.mock('../../../api/client', () => ({ default: { upload: vi.fn() } }));
+// FinanceTable warns through the app toast when a CSV was capped (W19).
+vi.mock('../../../context/AppContext', () => ({ useApp: () => ({ addToast: vi.fn() }) }));
 
 const { default: FinanceLayout } = await import('../pages/FinanceLayout');
 const { default: FinanceOverview } = await import('../pages/FinanceOverview');

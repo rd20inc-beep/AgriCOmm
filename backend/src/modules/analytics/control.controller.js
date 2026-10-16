@@ -2,6 +2,9 @@ const controlService = require('../../services/controlService');
 const db = require('../../config/database');
 // #9-scoping: per-user warehouse restriction (stock take reads).
 const whScope = require('../../utils/warehouseScope');
+// One bulk stock-take save covers a full count; bounded so one request
+// cannot hold a transaction open over an unbounded list.
+const MAX_BULK_COUNT_LINES = 2000;
 
 /**
  * Control Systems Controller — Phase 11
@@ -314,6 +317,50 @@ const controlController = {
         : /already|cancelled|must be/.test(err.message) ? 400
         : 500;
       return res.status(status).json({ success: false, message: err.message || 'Internal server error.' });
+    }
+  },
+
+  // Many counted lines in one request (INV-34). Each line goes through the
+  // same recordCountItem as a single save; one transaction, so a bad line
+  // (unknown item, negative kg, closed count) saves nothing and is named.
+  async recordCountItemsBulk(req, res) {
+    const lines = Array.isArray(req.body?.lines) ? req.body.lines : null;
+    if (!lines || lines.length === 0) {
+      return res.status(400).json({ success: false, message: 'Send at least one counted line.' });
+    }
+    if (lines.length > MAX_BULK_COUNT_LINES) {
+      return res.status(400).json({ success: false, message: `At most ${MAX_BULK_COUNT_LINES} lines per save.` });
+    }
+    const seen = new Set();
+    for (const l of lines) {
+      const key = String(l?.item_id);
+      if (seen.has(key)) return res.status(400).json({ success: false, message: `Item ${key} appears twice in this save.` });
+      seen.add(key);
+    }
+    let current = null;
+    try {
+      const saved = await db.transaction(async (trx) => {
+        const out = [];
+        for (const l of lines) {
+          current = l;
+          out.push(await controlService.recordCountItem(trx, {
+            stockCountId: parseInt(req.params.id, 10),
+            itemId: l.item_id,
+            countedQty: l.counted_qty,
+            notes: l.notes,
+            userId: req.user.id,
+          }));
+        }
+        return out;
+      });
+      return res.json({ success: true, data: saved, message: `${saved.length} count line(s) recorded.` });
+    } catch (err) {
+      console.error('Bulk record count error:', err);
+      const status = err.message.includes('not found') ? 404
+        : /already|cancelled|must be/.test(err.message) ? 400
+        : 500;
+      const where = current && current.item_id != null ? ` (line ${current.item_id})` : '';
+      return res.status(status).json({ success: false, message: `${err.message || 'Internal server error.'}${where} Nothing was saved.` });
     }
   },
 

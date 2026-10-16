@@ -10,6 +10,7 @@ import { useCreatePurchaseLot } from '../../../api/queries';
 import { STANDARD_BAG_SIZES, snapBagSizeKg, isStandardBagSize, DEFAULT_BAG_SIZE_KG } from '../../../utils/bagSize';
 import { todayLocalISO, fmtKg, fmtNum, fmtPKR, fmtPct } from '../../../shared/utils/format';
 import useCanSeeCost from '../../../hooks/useCanSeeCost';
+import { readLastPurchaseParties, rememberPurchaseParties, forgetPurchaseParties, applyRememberedParties } from '../utils/lastPurchaseParties';
 
 /**
  * Modern slide-from-right drawer for recording a rice purchase lot.
@@ -150,6 +151,8 @@ export default function PurchaseLotDrawer({
   // received weight ÷ bag size until the user hand-adjusts the bag count.
   const brokerTouched = useRef(false);
   const bagsTouched = useRef(false);
+  // W01: which parties were prefilled from the last purchase (shown, editable).
+  const [rememberedFrom, setRememberedFrom] = useState(null);
 
   // Item 2: keep the bag count in sync with received weight ÷ bag size, until
   // the user hand-adjusts it (then bagsTouched stops the auto-fill so we never
@@ -167,10 +170,14 @@ export default function PurchaseLotDrawer({
 
   useEffect(() => {
     if (isOpen) {
-      setForm(defaultForm());
+      // Start on the last purchase's supplier / broker / transporter (W01) —
+      // only a supplier still in the list, and always visible and editable.
+      const remembered = applyRememberedParties(defaultForm(), readLastPurchaseParties(), (suppliers || []).map(s => s.id));
+      setForm(remembered.form);
+      setRememberedFrom(remembered.applied ? remembered.form : null);
       setKeptBagSize(null);
       setLotNoTouched(false);
-      brokerTouched.current = false;
+      brokerTouched.current = remembered.brokerDiffers;
       bagsTouched.current = false;
       setShowMore(false);
       setShowVehicles(false);
@@ -184,7 +191,7 @@ export default function PurchaseLotDrawer({
       setLocalSuppliers([]);
       setLocalProducts([]);
     }
-  }, [isOpen]);
+  }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps -- reset once per open
 
   // Preview the auto lot number from supplier + rice type + date, and keep it
   // following them while the operator hasn't typed their own. The preview is
@@ -447,6 +454,7 @@ export default function PurchaseLotDrawer({
       });
       const savedLotNo = created?.data?.lot?.lot_no || created?.lot?.lot_no || created?.data?.lot?.lotNo || created?.lot?.lotNo;
       addToast?.(`Rice purchase lot ${savedLotNo ? `${savedLotNo} ` : ''}recorded — ${fmtKg(Math.round(weightKg))}`, 'success');
+      rememberPurchaseParties(form);
       onSuccess?.();
       if (keepOpen) {
         // Same supplier + rice type + date; everything else fresh. The broker
@@ -622,6 +630,24 @@ export default function PurchaseLotDrawer({
               <Plus size={12} /> {addingSupplier ? 'Cancel' : 'Add new'}
             </button>
           </div>
+          {rememberedFrom && String(form.supplier_id) === String(rememberedFrom.supplier_id) && (
+            <div className="mb-1.5 flex items-center justify-between gap-2 rounded-md bg-blue-50 border border-blue-100 px-2.5 py-1.5 text-[11px] text-blue-800" data-testid="remembered-parties">
+              <span>
+                From your last purchase: supplier <b>{selectedSupplier?.name || '—'}</b>
+                {form.broker_id && String(form.broker_id) !== String(form.supplier_id) ? <>, broker <b>{mergedSuppliers.find(x => String(x.id) === String(form.broker_id))?.name || '—'}</b></> : null}
+                {form.hauler_id ? ', and the same transporter' : ''}. Change any of them below.
+              </span>
+              <button type="button" className="font-medium text-blue-700 hover:underline whitespace-nowrap"
+                onClick={() => {
+                  forgetPurchaseParties();
+                  brokerTouched.current = false;
+                  setRememberedFrom(null);
+                  setForm(prev => ({ ...prev, supplier_id: '', broker_id: '', hauler_id: '' }));
+                }}>
+                Clear
+              </button>
+            </div>
+          )}
           <SearchableSelect
             value={form.supplier_id}
             onChange={(id) => setForm(prev => ({

@@ -5,7 +5,7 @@
 // Any list report that returns { rows, totals, pagination, meta } can use them.
 import { useState } from 'react';
 import { ChevronLeft, ChevronRight, Download, AlertTriangle } from 'lucide-react';
-import { downloadServerCsv } from '../../../shared/utils/csv';
+import { downloadServerCsv, serverCsvWarning } from '../../../shared/utils/csv';
 import { pagerText, metaText, fmtCount } from '../utils/reportChrome';
 
 export function ReportPager({ pagination, onPage, className = '', totalsNote = true }) {
@@ -40,7 +40,10 @@ export function ServerCsvButton({ endpoint, params, filename, label = 'Export CS
   const [err, setErr] = useState(null);
   const run = async () => {
     setBusy(true); setErr(null);
-    try { await downloadServerCsv(endpoint, params, filename); } catch (e) { setErr(e?.message || 'Export failed'); } finally { setBusy(false); }
+    try {
+      // W19: say so when even the full export was cut at the server's cap.
+      setErr(serverCsvWarning(await downloadServerCsv(endpoint, params, filename)));
+    } catch (e) { setErr(e?.message || 'Export failed'); } finally { setBusy(false); }
   };
   return (
     <span className="inline-flex items-center gap-2 print:hidden">

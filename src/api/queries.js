@@ -2602,8 +2602,10 @@ export function useAuditLogs(params = {}) {
     queryKey: ['audit-logs', params],
     queryFn: async () => {
       const res = await auditApi.list({ limit: 100, ...params });
-      return transformKeys(unwrap(res, 'logs') || unwrap(res, 'auditLogs') || unwrap(res) || []);
+      // listTotal = the server's match count, so the page can say "showing 100 of N".
+      return withListTotal(transformKeys(unwrap(res, 'logs') || unwrap(res, 'auditLogs') || unwrap(res) || []), res);
     },
+    structuralSharing: false,
   });
 }
 

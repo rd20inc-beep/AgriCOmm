@@ -145,6 +145,13 @@ d('party + invoice ledgers (DB-gated)', () => {
       expect(r.totals.sale.total).toBe(300);
     });
 
+    // W19: the CSV asks with export=1 — the screen cap is lifted.
+    test('export=1 returns every invoice the filter matches', async () => {
+      const r = await svc.getInvoiceLedger({ q: tag, limit: 1, export: '1' });
+      expect(r.rows).toHaveLength(3);
+      expect(r.totals).toMatchObject({ count: 3, listed: 3, truncated: false });
+    });
+
     test('cost-blind role sees no purchase money; profit-blind sees no sale money', async () => {
       const blind = redactInvoiceLedger(await svc.getInvoiceLedger({ q: tag }), { cost: false, profit: true });
       const p = blind.rows.find((x) => x.kind === 'purchase');

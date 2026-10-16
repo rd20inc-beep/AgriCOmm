@@ -446,6 +446,15 @@ async function downloadFile(endpoint, filename) {
   const blob = await res.blob();
   cacheDownload(endpoint, blob, filename); // cache for offline print/access
   saveBlob(blob, fallbackName());
+  // What the server said about the file (W19): a CSV export that hit its cap
+  // sends X-Truncated so the caller can warn the user.
+  const h = res.headers;
+  const num = (v) => (v == null || v === '' ? null : Number(v));
+  return {
+    rowCount: num(h?.get?.('X-Row-Count')),
+    total: num(h?.get?.('X-Total-Count')),
+    truncated: h?.get?.('X-Truncated') === '1',
+  };
 }
 
 // Authenticated OPEN-IN-TAB. Same fetch as a download (the endpoint needs the

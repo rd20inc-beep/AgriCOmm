@@ -1,6 +1,8 @@
 const db = require('../../config/database');
 const { BALANCE_COLLECTION_STATUSES, BALANCE_OUTSTANDING_SQL } = require('../exportOrders/balanceCollection');
 const emailService = require('../communications/email.service');
+// Automatic customer emails are opt-in per event and post-commit (P5-12).
+const customerEmail = require('../communications/customerEmailPolicy');
 const expensesService = require('../expenses/expenses.service');
 const { nextSlot } = require('./schedulerSlots');
 
@@ -288,12 +290,10 @@ const automationService = {
           status: 'Open',
         });
 
-        // Send overdue email
-        try {
-          await emailService.sendAdvanceRequest({ orderId: order.id, userId: null });
-        } catch (e) {
-          console.error('Failed to send advance reminder:', e.message);
-        }
+        // Customer reminder — only when the owner switched it on (P5-12).
+        const out = await customerEmail.sendCustomerEmail(db, 'overdue_advance',
+          () => emailService.sendAdvanceRequest({ orderId: order.id, userId: null }));
+        await out.done;
       }
 
       processed++;
@@ -335,11 +335,10 @@ const automationService = {
           status: 'Open',
         });
 
-        try {
-          await emailService.sendBalanceReminder({ orderId: order.id, userId: null });
-        } catch (e) {
-          console.error('Failed to send balance reminder:', e.message);
-        }
+        // Customer reminder — only when the owner switched it on (P5-12).
+        const out = await customerEmail.sendCustomerEmail(db, 'overdue_balance',
+          () => emailService.sendBalanceReminder({ orderId: order.id, userId: null }));
+        await out.done;
       }
 
       processed++;
@@ -683,17 +682,18 @@ const automationService = {
   // ============================================================
   // Event-Driven Automations (called inline from controllers)
   // ============================================================
-  async onAdvanceConfirmed(trx, { orderId, amount, userId }) {
+  async onAdvanceConfirmed(trx, { orderId, amount, currency, userId }) {
     const order = await trx('export_orders').where({ id: orderId }).first();
     if (!order) return;
 
-    // Send payment confirmation email (non-blocking)
-    emailService.sendPaymentConfirmation({
+    // Payment confirmation to the buyer: opt-in, after commit, in the
+    // receipt's / order's own currency (it was hard-coded USD — PLT-14).
+    await customerEmail.sendCustomerEmail(trx, 'advance_confirmed', () => emailService.sendPaymentConfirmation({
       orderId,
       amount,
-      currency: 'USD',
+      currency: currency || order.currency || 'USD',
       userId,
-    }).catch((err) => console.error('Advance confirmation email failed:', err.message));
+    }));
 
     // Recipients by role NAME (role ids differ between installs — PLT-15).
     const notificationService = require('../../services/notificationService');
@@ -718,17 +718,18 @@ const automationService = {
     }
   },
 
-  async onBalanceConfirmed(trx, { orderId, amount, userId }) {
+  async onBalanceConfirmed(trx, { orderId, amount, currency, userId }) {
     const order = await trx('export_orders').where({ id: orderId }).first();
     if (!order) return;
 
-    // Send confirmation email (non-blocking)
-    emailService.sendPaymentConfirmation({
+    // Payment confirmation to the buyer: opt-in, after commit, in the
+    // receipt's / order's own currency (P5-12).
+    await customerEmail.sendCustomerEmail(trx, 'balance_confirmed', () => emailService.sendPaymentConfirmation({
       orderId,
       amount,
-      currency: 'USD',
+      currency: currency || order.currency || 'USD',
       userId,
-    }).catch((err) => console.error('Balance confirmation email failed:', err.message));
+    }));
 
     // Notification: "Ready to ship" — recipients by role NAME (PLT-15).
     const notificationService = require('../../services/notificationService');
@@ -761,9 +762,9 @@ const automationService = {
     const order = await trx('export_orders').where({ id: orderId }).first();
     if (!order) return;
 
-    // Send balance reminder email (non-blocking)
-    emailService.sendBalanceReminder({ orderId, userId })
-      .catch((err) => console.error('BL draft approved email failed:', err.message));
+    // Balance reminder to the buyer: opt-in, after commit (P5-12).
+    await customerEmail.sendCustomerEmail(trx, 'bl_draft_approved',
+      () => emailService.sendBalanceReminder({ orderId, userId }));
 
     // Create task for finance: follow up balance collection
     const notificationService = require('../../services/notificationService');
@@ -824,9 +825,11 @@ const automationService = {
     const doc = await trx('document_store').where({ id: documentId }).first();
     if (!doc || doc.linked_type !== 'export_order' || !doc.linked_id) return;
 
-    // Send email notification (non-blocking)
-    emailService.sendDocumentApprovalNotification({ documentId, userId })
-      .catch((err) => console.error('Doc approval email failed:', err.message));
+    // Tells the (internal) uploader their file was approved — not a customer
+    // email, so not opt-in; but sent only once the approval has committed.
+    customerEmail.afterCommit(trx,
+      () => emailService.sendDocumentApprovalNotification({ documentId, userId }),
+      'Doc approval email');
 
     // Check if all docs are now complete
     const missingDocs = await trx('document_checklists')
@@ -851,9 +854,11 @@ const automationService = {
     const order = await trx('export_orders').where({ id: orderId }).first();
     if (!order) return;
 
-    // Send shipment notification to customer (non-blocking)
-    emailService.sendShipmentNotification({ orderId, userId })
-      .catch((err) => console.error('Shipment notification email failed:', err.message));
+    // Shipment notice to the buyer: opt-in, and only once the shipment's
+    // transaction has COMMITTED — it used to fire before, so a rolled-back
+    // departure could still tell the buyer the goods had sailed (PLT-14).
+    await customerEmail.sendCustomerEmail(trx, 'shipment_departed',
+      () => emailService.sendShipmentNotification({ orderId, userId }));
 
     // Domain separation (Phase 4): the actionable "chase the customer for the
     // balance" task belongs to the Export desk (it has the order/customer context).

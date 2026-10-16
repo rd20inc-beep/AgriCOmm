@@ -8,3 +8,15 @@ export function cappedHint(shown, total) {
   if (!Number.isFinite(t) || t <= s) return null;
   return `Showing ${s.toLocaleString('en-US')} of ${t.toLocaleString('en-US')}`;
 }
+
+/**
+ * W19 — the warning for a CSV written from a capped list: the export holds the
+ * `loaded` rows the server sent, not all `total` that match. null when the
+ * list was complete.
+ */
+export function csvCapWarning(loaded, total) {
+  const l = Number(loaded) || 0;
+  const t = Number(total);
+  if (!Number.isFinite(t) || t <= l) return null;
+  return `CSV holds ${l.toLocaleString('en-US')} of ${t.toLocaleString('en-US')} matching rows (list limit reached). Narrow the date range or filters to export the rest.`;
+}

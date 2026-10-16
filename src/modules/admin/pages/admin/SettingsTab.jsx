@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Settings, Server, Mail, FileText, Eye, Edit3, Building2 } from 'lucide-react';
 import { useApp } from '../../../../context/AppContext';
+import CustomerEmailSettings from './CustomerEmailSettings';
 
 export default function SettingsTab() {
   const {
@@ -266,6 +267,9 @@ export default function SettingsTab() {
           ))}
         </div>
       </div>
+
+      {/* P5-12: automatic customer emails are opt-in per event (default OFF). */}
+      <CustomerEmailSettings addToast={addToast} />
     </div>
   );
 }

@@ -1,9 +1,11 @@
-import { useState } from 'react';
-import { Link } from 'react-router-dom';
-import { ArrowRightLeft, Calendar, CheckCircle, Clock, Truck, Loader2, ArrowDown, Info } from 'lucide-react';
+import { useState, useMemo } from 'react';
+import { ArrowRightLeft, Calendar, CheckCircle, Clock, Truck, Loader2, ArrowDown, Info, Plus, Search } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
-import { useInternalTransfers, useInternalTransfer, useConfirmTransferExport } from '../../../api/queries';
+import { useInternalTransfers, useInternalTransfer, useConfirmTransferExport, useLotInventoryPage } from '../../../api/queries';
+import { TransferToExportDrawer } from '../components/StockTransferDrawers';
+import { canTransferLotToExport } from '../utils/lotActions';
+import useDebouncedValue from '../../../hooks/useDebouncedValue';
 
 // Only finance / owner (management) see which export order a transfer is linked
 // to; mill-side roles transfer to the export pool.
@@ -17,39 +19,67 @@ import { perMtToPerKg } from '../../../shared/utils/unitConversion';
 const formatPKR = (value) => fmtPKR(parseFloat(value) || 0, { decimals: 2 });
 const formatUSD = (value) => fmtUSD(parseFloat(value) || 0);
 
-// Read-only history of Mill → Export stock transfers. The old batch → order
-// "New Transfer" form is retired (POST /api/finance/internal-transfers is 410
-// Gone): it booked the export side in USD straight into the PKR ledger. New
-// transfers are made per lot from Lot Detail → "Transfer to Export", which is
-// lot-precise and still lands in this list.
+// The one Stock transfers page (NAV-21): Mill → Export stock moves, their
+// history and a "New transfer" entry. A transfer is always lot-precise — the
+// user picks a finished / by-product mill lot and the shared Transfer to
+// Export drawer posts it (POST /lot-inventory/lots/:id/transfer-to-export,
+// inventory.transfer), exactly as from Lot Detail or a Lot Inventory row. The
+// old batch → order form stays retired (POST /api/finance/internal-transfers
+// is 410 Gone). Finance ▸ Accounting ▸ Stock transfers redirects here.
 export default function InternalTransfer() {
-  const { user } = useAuth();
-  const { data: transfers = [], isLoading: loading } = useInternalTransfers();
+  const { user, hasPermission } = useAuth();
+  const { addToast } = useApp();
+  const { data: transfers = [], isLoading: loading, refetch } = useInternalTransfers();
   const canLinkOrder = ORDER_LINK_ROLES.includes(user?.role);
+  const canTransfer = hasPermission('inventory', 'transfer');
   const [openId, setOpenId] = useState(null);
+  const [picking, setPicking] = useState(false);
+  const [transferLot, setTransferLot] = useState(null);
+  const totals = useMemo(() => transfers.reduce((acc, t) => {
+    acc.count += 1;
+    acc.pkr += parseFloat(t.totalValuePkr) || 0;
+    acc.kg += transferKg(t);
+    return acc;
+  }, { count: 0, pkr: 0, kg: 0 }), [transfers]);
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Internal Transfer</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Mill-to-Export entity stock transfer history</p>
+          <h1 className="text-2xl font-bold text-gray-900">Stock transfers</h1>
+          <p className="text-sm text-gray-500 mt-0.5">
+            Finished rice moved from the Mill to the Export entity. This is stock, not money: no cash or bank balance changes here.
+          </p>
         </div>
-        <div className="flex items-center gap-2 text-sm text-gray-500">
-          <ArrowRightLeft className="w-4 h-4" />
-          Mill Finished Goods &rarr; Export Dispatch
+        {canTransfer && (
+          <button onClick={() => setPicking(true)} className="btn btn-primary btn-sm">
+            <Plus className="w-4 h-4" /> New transfer
+          </button>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="bg-white rounded-xl border border-gray-200 p-4">
+          <p className="text-xs font-medium text-gray-500 uppercase">Stock transfers</p>
+          <p className="text-xl font-bold text-gray-900">{totals.count}</p>
+        </div>
+        <div className="bg-white rounded-xl border border-gray-200 p-4">
+          <p className="text-xs font-medium text-gray-500 uppercase">Quantity moved</p>
+          <p className="text-xl font-bold text-gray-900">{fmtNum(Math.round(totals.kg))} kg</p>
+        </div>
+        <div className="bg-white rounded-xl border border-gray-200 p-4">
+          <p className="text-xs font-medium text-gray-500 uppercase">Stock value (PKR)</p>
+          <p className="text-xl font-bold text-purple-700">{formatPKR(totals.pkr)}</p>
+          <p className="text-[11px] text-gray-400 mt-0.5">internal transfer pricing; eliminated in consolidation</p>
         </div>
       </div>
 
       <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 flex items-start gap-3">
         <Info className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
-        <div className="text-sm text-blue-900">
-          <p className="font-medium">New transfers are made from the lot itself.</p>
-          <p className="mt-0.5 text-blue-800">
-            Open the finished-rice lot in <Link to="/lot-inventory" className="font-semibold underline">Lot Inventory</Link> and
-            use <span className="font-semibold">Transfer to Export</span> on Lot Detail. It moves exactly that lot and shows up in this list.
-          </p>
-        </div>
+        <p className="text-sm text-blue-900">
+          Every transfer moves one lot: pick it under <span className="font-semibold">New transfer</span>, or use
+          <span className="font-semibold"> Transfer to Export</span> on the lot row in Lot Inventory or on Lot Detail.
+        </p>
       </div>
 
 
@@ -105,7 +135,67 @@ export default function InternalTransfer() {
       </div>
 
       <TransferDetailDrawer transferId={openId} onClose={() => setOpenId(null)} canLinkOrder={canLinkOrder} />
+      {canTransfer && (
+        <>
+          <PickLotDrawer
+            open={picking}
+            onClose={() => setPicking(false)}
+            onPick={(lot) => { setPicking(false); setTransferLot(lot); }}
+          />
+          <TransferToExportDrawer
+            isOpen={!!transferLot}
+            lot={transferLot}
+            addToast={addToast}
+            onClose={() => setTransferLot(null)}
+            onSuccess={() => refetch()}
+          />
+        </>
+      )}
     </div>
+  );
+}
+
+// Step 1 of "New transfer": choose the mill lot to move. Server-searched over
+// mill lots with free quantity; only lots that may move to export (finished or
+// by-product, company-owned) are offered. The transfer drawer re-checks the
+// quantity and the server validates it again.
+function PickLotDrawer({ open, onClose, onPick }) {
+  const [search, setSearch] = useState('');
+  const q = useDebouncedValue(search.trim());
+  const { data, isLoading } = useLotInventoryPage({
+    entity: 'mill', has_available: 'true', limit: 50,
+    ...(q ? { search: q } : {}),
+  });
+  const lots = (data?.lots || []).filter(canTransferLotToExport);
+  return (
+    <SlideDrawer open={open} onClose={onClose} title="New stock transfer" subtitle="Choose the mill lot to move to Export" icon={ArrowRightLeft} size="md">
+      <div className="space-y-3">
+        <div className="relative">
+          <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" aria-hidden="true" />
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search lot no, item, variety…" aria-label="Search lots"
+            className="w-full rounded-lg border border-gray-300 pl-9 pr-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
+        </div>
+        {isLoading ? (
+          <p className="text-sm text-gray-400 py-6 text-center">Loading…</p>
+        ) : lots.length === 0 ? (
+          <p className="text-sm text-gray-400 py-6 text-center">No finished or by-product mill lot with free stock{q ? ` matches “${q}”` : ''}.</p>
+        ) : (
+          <ul className="divide-y divide-gray-100 border border-gray-200 rounded-lg">
+            {lots.map(l => (
+              <li key={l.id}>
+                <button type="button" onClick={() => onPick(l)} className="w-full text-left px-3 py-2.5 hover:bg-blue-50 flex items-center justify-between gap-3">
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium text-blue-700">{l.lotNo}</span>
+                    <span className="block text-xs text-gray-500 truncate">{l.itemName}{l.variety ? ` · ${l.variety}` : ''}</span>
+                  </span>
+                  <span className="text-xs text-emerald-700 font-medium whitespace-nowrap">{fmtNum(Math.round(parseFloat(l.availableQty) || 0))} kg free</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </SlideDrawer>
   );
 }
 

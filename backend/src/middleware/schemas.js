@@ -1240,6 +1240,12 @@ const updateSettings = Joi.object({
   whatsapp_api_url: settingStr(500),
   whatsapp_api_key: settingStr(1000),
   whatsapp_sender_phone: settingStr(30),
+  // communications/customerEmailPolicy — automatic CUSTOMER emails, opt-in per
+  // event (P5-12). Absent / false = OFF. Only the known events are accepted.
+  customer_email_events: Joi.object(Object.fromEntries(
+    Object.keys(require('../modules/communications/customerEmailPolicy').CUSTOMER_EMAIL_EVENTS)
+      .map((k) => [k, Joi.boolean()]),
+  )).unknown(false),
 })
   // collection_target_pct_USD / _PKR … (collectionRate.collectionTargets)
   .pattern(/^collection_target_pct_[A-Za-z]{3}$/, Joi.number().min(0).max(100))

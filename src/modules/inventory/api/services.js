@@ -89,6 +89,8 @@ export const stockCountApi = {
   get: (id) => api.get(`/api/control/stock-counts/${id}`),
   create: (data) => api.post('/api/control/stock-counts', data),
   record: (id, data) => api.put(`/api/control/stock-counts/${id}/record`, data),
+  // Many lines in one save, all-or-nothing (INV-34): { lines: [{ item_id, counted_qty }] }.
+  recordBulk: (id, lines) => api.put(`/api/control/stock-counts/${id}/record-bulk`, { lines }),
   review: (id, itemId, data) => api.put(`/api/control/stock-counts/${id}/items/${itemId}/review`, data),
   approve: (id) => api.put(`/api/control/stock-counts/${id}/approve`),
 };

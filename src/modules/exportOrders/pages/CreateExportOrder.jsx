@@ -1,10 +1,10 @@
 import { useState, useMemo, useEffect, useRef, useDeferredValue } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import { canSeeProfit } from '../../../hooks/useCanSeeCost';
-import { useCreateExportOrder, useFxRates, useExportProfitPreview } from '../../../api/queries';
+import { useCreateExportOrder, useFxRates, useExportProfitPreview, useExportOrder } from '../../../api/queries';
 import api from '../../../api/client';
 import {
   Save, Send, DollarSign, Calculator, ArrowLeft, Package, Truck,
@@ -29,7 +29,7 @@ import { favStar } from '../../../shared/utils/favorites';
 import {
   EMPTY_ITEM, requiresMasterBag, masterOptionsFor, orderTotals, needsBagWidgetFor,
   mixedPackingTotals, singleBagCountFor, advanceSplit, profitPreviewBody, buildCreateOrderPayload,
-  customerPrefill, lastOrderPrefill,
+  customerPrefill, lastOrderPrefill, duplicateStateFromOrder,
   EXPORT_WIZARD_DRAFT, wizardDraftSnapshot, restoreWizardDraft, wizardDraftHasContent,
 } from '../utils/createOrderForm';
 import useDirtyGuard from '../../../shared/hooks/useDirtyGuard';
@@ -54,7 +54,35 @@ const PACKING_TYPES = [
 ];
 const BAG_MATERIALS = ['Polythene', 'Woven', 'Non-Woven', 'Cotton'];
 
+// Duplicate Order (W04/W05). The detail page hands the source order over in
+// router state; a list row (or a bookmarked link) only carries
+// ?duplicate=<order no>, so the order is loaded here first and the form is
+// mounted with it. Only terms and lines are copied (duplicateStateFromOrder):
+// never payments, receipts, documents, shipment dates or the contract number.
+// The copy gets a new number when saved.
 export default function CreateExportOrder() {
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const fromState = location.state?.duplicate || null;
+  const dupId = fromState ? null : searchParams.get('duplicate');
+  const { data: source, isLoading, isError } = useExportOrder(dupId || undefined);
+  if (dupId && isLoading) {
+    return <div className="p-8 text-center text-sm text-gray-500">Loading order {dupId} to duplicate…</div>;
+  }
+  const duplicate = fromState || (dupId && source ? duplicateStateFromOrder(source) : null);
+  return (
+    <>
+      {dupId && (isError || !source) && (
+        <div role="alert" className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">
+          Order {dupId} could not be loaded, so nothing was copied. Fill in the new order below.
+        </div>
+      )}
+      <CreateExportOrderForm key={duplicate?.sourceOrderNo || 'new'} duplicate={duplicate} />
+    </>
+  );
+}
+
+function CreateExportOrderForm({ duplicate = null }) {
   const { addToast, customersList: customers, productsList: products, exportCostCategories, bagTypesList, suppliersList, bankAccountsList } = useApp();
   const createOrderMut = useCreateExportOrder();
   const { hasPermission, user } = useAuth();
@@ -67,11 +95,9 @@ export default function CreateExportOrder() {
   const navigate = useNavigate();
   const qc = useQueryClient();
 
-  // "Duplicate Order" hands the source order over in router state (see
-  // duplicateStateFromOrder): items, qty, price, packing, bank, incoterm,
-  // freight and payment terms. Read once, as the initial form state.
-  const location = useLocation();
-  const duplicate = location.state?.duplicate || null;
+  // "Duplicate Order": items, qty, price, packing, bank, incoterm, freight
+  // and payment terms of the source order (see the wrapper above). Read once,
+  // as the initial form state.
 
   // Quick-add customer
   const [showAddCustomer, setShowAddCustomer] = useState(false);
@@ -390,6 +416,13 @@ export default function CreateExportOrder() {
             <button type="button" onClick={discardDraft} className="btn btn-secondary">Discard</button>
             <button type="button" onClick={restoreDraft} className="btn btn-primary">Restore draft</button>
           </div>
+        </div>
+      )}
+      {duplicate?.sourceOrderNo && (
+        <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm text-blue-900">
+          Copy of <span className="font-semibold">{duplicate.sourceOrderNo}</span>: buyer, terms, packing and lines are filled in.
+          Payments, documents, shipment dates and the contract number are not copied. It gets a new order number when saved;
+          use <span className="font-semibold">Save Draft</span> to keep it as a draft.
         </div>
       )}
       <div className="bg-white rounded-xl border border-gray-200 px-6 py-4">
@@ -1272,9 +1305,6 @@ export default function CreateExportOrder() {
           <div className="flex flex-wrap items-center justify-end gap-3">
             <button onClick={() => handleSubmit('Draft')} disabled={submitting} className="btn btn-secondary mobile-full-btn disabled:opacity-50"><Save className="w-4 h-4" /> Save Draft</button>
             <button onClick={() => handleSubmit(createStatus)} disabled={!isValid || submitting} className="btn btn-primary mobile-full-btn disabled:opacity-50"><Send className="w-4 h-4" /> Create Order</button>
-            {advPct > 0 && (
-              <button onClick={() => handleSubmit('Awaiting Advance')} disabled={!isValid || submitting} className="btn mobile-full-btn disabled:opacity-50 bg-emerald-600 text-white hover:bg-emerald-700 border-emerald-600"><DollarSign className="w-4 h-4" /> Create & Request Advance</button>
-            )}
           </div>
         );
       })()}

@@ -42,8 +42,7 @@ import SlideDrawer from '../../../components/SlideDrawer';
 import RiceTypePicker from '../../../components/RiceTypePicker';
 import { lotCategory, CAT_ORDER, CAT_COLOR, millableLots } from '../../../utils/lotCategory';
 import SupplierPicker from '../../../components/SupplierPicker';
-import CustomerPicker from '../../../components/CustomerPicker';
-import { serviceMillingApi } from '../api/services';
+import ServiceLotDrawer from '../components/ServiceLotDrawer';
 import MillExpenseDrawer from '../../../components/MillExpenseDrawer';
 import { fmtPKR, fmtKg, fmtNum, fmtPct } from '../../../shared/utils/format';
 import { stockKgByType } from '../../inventory/utils/stockMath';
@@ -101,44 +100,16 @@ export default function MillingDashboard() {
     millId: '', shift: 'Day', notes: '',
     // Custom label + free-form tags for easy referencing (esp. blends).
     batchName: '', customTags: '',
-    // Service milling (toll/job-work) — client owns the rice; we bill service fees.
-    clientCustomerId: '',
-    serviceMillingRatePerKg: '', serviceRentalRatePerKatta: '', serviceLabourRatePerKatta: '',
-    // Received in kattas (50kg) or small bags (2–25kg). `kattaCount`/`kattaSizeKg`
-    // hold the unit count + size for whichever is chosen.
-    receivedUnit: 'katta', // 'katta' | 'bag'
-    dateReceived: '', kattaCount: '', kattaSizeKg: '50', bagCount: '', expectedOutputKg: '', serviceRemarks: '',
-    serviceVehicles: [], // [{ vehicle_no, driver_name, weight_kg, total_bags }]
   });
+  // Service (toll) milling has its own drawer (ServiceLotDrawer), shared
+  // with the Service Milling page — the New Batch drawer is own-stock only.
+  const [showServiceLot, setShowServiceLot] = useState(false);
   // Inline field errors for the New Batch drawer (set alongside the toast on submit).
   const [batchErrors, setBatchErrors] = useState({});
   const setBF = (k, v) => {
     setBatchForm(p => ({ ...p, [k]: v }));
     setBatchErrors(e => (e[k] ? { ...e, [k]: undefined } : e));
   };
-  // Service milling: Kattas × Katta size → auto-fills Quantity Received (weight)
-  // + Expected Finished. Weight stays editable (this only pre-fills it).
-  const recomputeKattaWeight = (nextKatta, nextSize) => {
-    const count = parseFloat(nextKatta); const size = parseFloat(nextSize);
-    setBatchForm(p => {
-      const upd = { ...p, kattaCount: nextKatta, kattaSizeKg: nextSize };
-      // Number of packing bags = the count of kattas/bags received.
-      upd.totalBags = nextKatta || '';
-      if (count > 0 && size > 0) {
-        const w = Math.round(count * size);
-        upd.rawQtyKg = String(w);
-        upd.plannedFinishedKg = String(Math.round(w * 0.65));
-      }
-      return upd;
-    });
-  };
-  // Switch received unit: kattas default to 50 kg, bags to a blank custom size (2–25).
-  const setReceivedUnit = (unit) => {
-    const size = unit === 'katta' ? '50' : '';
-    recomputeKattaWeight('', size);
-    setBatchForm(p => ({ ...p, receivedUnit: unit }));
-  };
-  const isBagUnit = batchForm.receivedUnit === 'bag';
   // Blend: consume partial quantities from multiple stock lots (mixed
   // varieties / leftover finished rice) into one batch.
   // Source of the rice. true = from existing stock lot(s): landed cost flows in
@@ -204,11 +175,6 @@ export default function MillingDashboard() {
       millingType: 'own_stock', productId: '', supplierId: '', rawQtyKg: '', totalBags: '', plannedFinishedKg: '',
       millingFeePerKg: '0',
       millId: '', shift: 'Day', notes: '', batchName: '', customTags: '',
-      clientCustomerId: '',
-      serviceMillingRatePerKg: '', serviceRentalRatePerKatta: '', serviceLabourRatePerKatta: '',
-      receivedUnit: 'katta',
-      dateReceived: '', kattaCount: '', kattaSizeKg: '50', bagCount: '', expectedOutputKg: '', serviceRemarks: '',
-      serviceVehicles: [],
     });
     setUseBlend(true); setBlendProductId(''); setBlendRows([]); setBlendTag('All');
     setBatchErrors({});
@@ -222,12 +188,9 @@ export default function MillingDashboard() {
     const mode = searchParams.get('new');
     if (mode === '1' || mode === 'service') {
       resetBatchForm();
-      // ?new=service (Service Milling → "New service lot") opens in Service mode.
-      if (mode === 'service') {
-        setBF('millingType', 'service_milling');
-        setUseBlend(false);
-      }
-      setShowNewBatch(true);
+      // ?new=service (old Service Milling link) opens the service-lot drawer.
+      if (mode === 'service') setShowServiceLot(true);
+      else setShowNewBatch(true);
       searchParams.delete('new');
       setSearchParams(searchParams, { replace: true });
     }
@@ -262,12 +225,6 @@ export default function MillingDashboard() {
       setBatchErrors({ productId: 'Rice type is required' });
       addToast('Rice type is required so the batch can be tracked', 'error');
       return;
-    } else if (batchForm.millingType === 'service_milling') {
-      // Service milling: rice comes from the client (no company supplier). Require
-      // the client + a received quantity (typed, or from the incoming vehicles).
-      const vehicleKg = (batchForm.serviceVehicles || []).reduce((s, v) => s + (parseFloat(v.weight_kg) || 0), 0);
-      if (!batchForm.clientCustomerId) { setBatchErrors({ clientCustomerId: 'Select the client' }); addToast('Select the client we are milling for (service milling)', 'error'); return; }
-      if (!batchForm.rawQtyKg && vehicleKg <= 0) { setBatchErrors({ rawQtyKg: 'Enter the quantity received' }); addToast('Enter the quantity received, or add the incoming vehicle(s)', 'error'); return; }
     } else if (!batchForm.supplierId || !(parseFloat(batchForm.rawQtyKg) > 0)) {
       setBatchErrors({
         ...(!batchForm.supplierId ? { supplierId: 'Supplier is required' } : {}),
@@ -283,10 +240,7 @@ export default function MillingDashboard() {
       return;
     }
     setBatchErrors({});
-    const isService = batchForm.millingType === 'service_milling';
-    const vehicleKg = (batchForm.serviceVehicles || []).reduce((s, v) => s + (parseFloat(v.weight_kg) || 0), 0);
-    // Service milling qty comes from the trucks when entered, else the typed field.
-    const rawKg = (isService && vehicleKg > 0) ? vehicleKg : (parseFloat(batchForm.rawQtyKg) || 0);
+    const rawKg = parseFloat(batchForm.rawQtyKg) || 0;
 
     try {
       const payload = {
@@ -298,33 +252,12 @@ export default function MillingDashboard() {
         batch_name: batchForm.batchName?.trim() || null,
         custom_tags: batchForm.customTags,  // comma string → backend normalises to array
         notes: batchForm.notes || null,
-        // Service milling — client-owned toll batch + service rates (structured).
-        ...(isService ? {
-          is_service_milling: true,
-          client_customer_id: parseInt(batchForm.clientCustomerId),
-          service_milling_rate_per_kg: batchForm.serviceMillingRatePerKg || null,
-          service_rental_rate_per_katta: batchForm.serviceRentalRatePerKatta || null,
-          service_labour_rate_per_katta: batchForm.serviceLabourRatePerKatta || null,
-          date_received: batchForm.dateReceived || null,
-          // The count goes to the matching column — kattas or bags — so billing
-          // (rental/labour per unit) and the dashboard read the right unit.
-          katta_count: isBagUnit ? null : (batchForm.kattaCount || null),
-          bag_count: isBagUnit ? (batchForm.kattaCount || null) : (batchForm.bagCount || null),
-          expected_output_kg: batchForm.expectedOutputKg || null,
-          service_remarks: batchForm.serviceRemarks || null,
-          // Incoming trucks → recorded as arrivals + rice received (client-owned raw lot).
-          vehicles: (batchForm.serviceVehicles || [])
-            .filter(v => v.vehicle_no || parseFloat(v.weight_kg) > 0 || parseInt(v.total_bags, 10) > 0)
-            .map(v => ({ vehicle_no: v.vehicle_no || null, driver_name: v.driver_name || null, weight_kg: v.weight_kg || null, total_bags: v.total_bags || null })),
-        } : {}),
         ...(useBlend
           ? { source_lots: blendLots, product_id: blendProductId ? parseInt(blendProductId) : null, processing_type: blendRecipe.processingType }
-          // Service milling has no company supplier — the raw lot is stamped
-          // client-owned (owner = the selected client) on the backend.
-          : { supplier_id: isService ? null : parseInt(batchForm.supplierId), raw_qty_kg: rawKg, product_id: parseInt(batchForm.productId) }),
+          : { supplier_id: parseInt(batchForm.supplierId), raw_qty_kg: rawKg, product_id: parseInt(batchForm.productId) }),
         // Direct supplier intake: the first truck, priced (per-truck price is
         // per MT on the wire, same as Add Vehicle), creates the priced raw lot.
-        ...(!useBlend && !isService ? {
+        ...(!useBlend ? {
           ...(showMoney ? { purchase_price_per_kg: parseFloat(batchForm.directPricePerKg) } : {}),
           vehicles: [{
             vehicle_no: batchForm.directTruckNo?.trim() || null,
@@ -1118,7 +1051,7 @@ export default function MillingDashboard() {
               </button>
               <button
                 type="button"
-                onClick={() => { setBF('millingType', 'service_milling'); setUseBlend(false); }}
+                onClick={() => { setShowNewBatch(false); setShowServiceLot(true); }}
                 className={`p-3 rounded-lg border-2 text-center transition-all text-sm ${
                   batchForm.millingType === 'service_milling'
                     ? 'border-amber-500 bg-amber-50 text-amber-700 font-semibold'
@@ -1132,156 +1065,8 @@ export default function MillingDashboard() {
             </div>
           </div>
 
-          {/* Service Milling — client-owned toll batch: client + intake + service rates */}
-          {batchForm.millingType === 'service_milling' && (
-            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 space-y-4">
-              <div className="flex items-center gap-2">
-                <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-amber-200 text-amber-900 uppercase tracking-wide">Client-Owned</span>
-                <p className="text-xs text-amber-800">This rice belongs to the client — it is tracked as Service Milling stock, never company stock.</p>
-              </div>
-
-              <CustomerPicker
-                label={<span className="text-xs font-semibold text-amber-800 uppercase">Service Milling Client <span className="text-red-500">*</span></span>}
-                value={batchForm.clientCustomerId}
-                onChange={(id) => setBF('clientCustomerId', id)}
-                addToast={addToast}
-                placeholder="Search client we are milling for…"
-                clearable
-                // Scoped to service-milling clients / non-export parties — never export buyers.
-                listFn={() => serviceMillingApi.listClients()}
-                createFn={(data) => serviceMillingApi.createClient(data)}
-              />
-              <FieldError error={batchErrors.clientCustomerId} />
-
-              {/* Received in 50kg kattas or small (2–25kg) bags — the count is the
-                  billable unit (rental/labour per katta/bag). */}
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-medium text-gray-700">Received in:</span>
-                <div className="inline-flex rounded-lg border border-amber-300 overflow-hidden text-xs">
-                  <button type="button" onClick={() => setReceivedUnit('katta')}
-                    className={`px-3 py-1.5 font-medium ${!isBagUnit ? 'bg-amber-500 text-white' : 'bg-white text-gray-600 hover:bg-amber-50'}`}>Kattas (50 kg)</button>
-                  <button type="button" onClick={() => setReceivedUnit('bag')}
-                    className={`px-3 py-1.5 font-medium border-l border-amber-300 ${isBagUnit ? 'bg-amber-500 text-white' : 'bg-white text-gray-600 hover:bg-amber-50'}`}>Bags (2–25 kg)</button>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Date Received</label>
-                  <input type="date" value={batchForm.dateReceived} onChange={e => setBF('dateReceived', e.target.value)} className="w-full border border-amber-300 rounded-lg px-3 py-2 text-sm outline-none bg-white" />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">{isBagUnit ? 'Bags Received' : 'Kattas Received'}</label>
-                  <input type="number" min="0" value={batchForm.kattaCount} onChange={e => recomputeKattaWeight(e.target.value, batchForm.kattaSizeKg)} placeholder={isBagUnit ? 'e.g. 800' : 'e.g. 200'} className="w-full border border-amber-300 rounded-lg px-3 py-2 text-sm outline-none bg-white" />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">{isBagUnit ? 'Bag Size (kg)' : 'Katta Size (kg)'}</label>
-                  <input type="number" min="0" step="0.5" value={batchForm.kattaSizeKg} onChange={e => recomputeKattaWeight(batchForm.kattaCount, e.target.value)} placeholder={isBagUnit ? 'e.g. 25' : 'e.g. 50'} className="w-full border border-amber-300 rounded-lg px-3 py-2 text-sm outline-none bg-white" />
-                  {batchForm.kattaCount && batchForm.kattaSizeKg && (
-                    <p className="text-[11px] text-emerald-700 mt-0.5">= {fmtKg((parseFloat(batchForm.kattaCount) || 0) * (parseFloat(batchForm.kattaSizeKg) || 0))}</p>
-                  )}
-                  {isBagUnit && <p className="text-[11px] text-gray-400 mt-0.5">Mixed bag sizes? Enter total bags + type the weighed quantity below.</p>}
-                </div>
-              </div>
-
-              <div>
-                <h4 className="text-xs font-semibold text-amber-800 uppercase mb-2">Service Charges</h4>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-gray-700 mb-1">Milling (PKR / kg)</label>
-                    <input type="number" step="0.01" min="0" value={batchForm.serviceMillingRatePerKg} onChange={e => setBF('serviceMillingRatePerKg', e.target.value)} placeholder="e.g. 3.5" className="w-full border border-amber-300 rounded-lg px-3 py-2 text-sm outline-none bg-white" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-700 mb-1">Rental (PKR / {isBagUnit ? 'bag' : 'katta'})</label>
-                    <input type="number" step="0.01" min="0" value={batchForm.serviceRentalRatePerKatta} onChange={e => setBF('serviceRentalRatePerKatta', e.target.value)} placeholder="e.g. 10" className="w-full border border-amber-300 rounded-lg px-3 py-2 text-sm outline-none bg-white" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-700 mb-1">Labour (PKR / {isBagUnit ? 'bag' : 'katta'})</label>
-                    <input type="number" step="0.01" min="0" value={batchForm.serviceLabourRatePerKatta} onChange={e => setBF('serviceLabourRatePerKatta', e.target.value)} placeholder="e.g. 5" className="w-full border border-amber-300 rounded-lg px-3 py-2 text-sm outline-none bg-white" />
-                  </div>
-                </div>
-                {/* Live service billing preview (final amounts computed at invoicing) */}
-                {(() => {
-                  const kattas = parseFloat(batchForm.kattaCount) || parseFloat(batchForm.bagCount) || 0;
-                  const milledKg = parseFloat(batchForm.expectedOutputKg) || parseFloat(batchForm.rawQtyKg) || 0;
-                  const mill = milledKg * (parseFloat(batchForm.serviceMillingRatePerKg) || 0);
-                  const rent = kattas * (parseFloat(batchForm.serviceRentalRatePerKatta) || 0);
-                  const lab = kattas * (parseFloat(batchForm.serviceLabourRatePerKatta) || 0);
-                  const total = mill + rent + lab;
-                  if (total <= 0) return null;
-                  return (
-                    <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs bg-white rounded-lg border border-amber-200 px-3 py-2">
-                      <span className="text-gray-500">Milling <b className="text-gray-800">{fmtPKR(mill, { decimals: 2 })}</b></span>
-                      <span className="text-gray-500">Rental <b className="text-gray-800">{fmtPKR(rent, { decimals: 2 })}</b></span>
-                      <span className="text-gray-500">Labour <b className="text-gray-800">{fmtPKR(lab, { decimals: 2 })}</b></span>
-                      <span className="ml-auto text-emerald-700 font-bold">Est. Service Total {fmtPKR(total, { decimals: 2 })}</span>
-                    </div>
-                  );
-                })()}
-              </div>
-
-              {/* Incoming vehicles / trucks bringing the client's rice. Each is
-                  recorded as an arrival and its rice received into the (client-
-                  owned) batch raw lot, so the lot is ready to mill. */}
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <h4 className="text-xs font-semibold text-amber-800 uppercase">Incoming Vehicles <span className="normal-case font-normal text-gray-400">(optional — trucks bringing the client's rice)</span></h4>
-                  <button type="button"
-                    onClick={() => {
-                      // Prefill the new truck with the weight + bags not yet
-                      // assigned to a vehicle (first truck carries the full load;
-                      // add more to split it). All fields stay editable.
-                      const list = batchForm.serviceVehicles || [];
-                      const totalWeight = parseFloat(batchForm.rawQtyKg) || 0;
-                      const totalBags = parseInt(batchForm.totalBags, 10) || parseInt(batchForm.kattaCount, 10) || 0;
-                      const usedWeight = list.reduce((s, v) => s + (parseFloat(v.weight_kg) || 0), 0);
-                      const usedBags = list.reduce((s, v) => s + (parseInt(v.total_bags, 10) || 0), 0);
-                      const remW = Math.max(0, Math.round(totalWeight - usedWeight));
-                      const remB = Math.max(0, totalBags - usedBags);
-                      setBF('serviceVehicles', [...list, { vehicle_no: '', driver_name: '', weight_kg: remW > 0 ? String(remW) : '', total_bags: remB > 0 ? String(remB) : '' }]);
-                    }}
-                    className="text-xs text-blue-600 hover:text-blue-700 font-medium inline-flex items-center gap-1">
-                    <Plus size={12} /> Add vehicle
-                  </button>
-                </div>
-                {(batchForm.serviceVehicles || []).length === 0 ? (
-                  <p className="text-[11px] text-gray-400">No vehicles added. You can add trucks here (their rice is received as client-owned stock) or record the total quantity below.</p>
-                ) : (
-                  <div className="space-y-2">
-                    <div className="grid grid-cols-12 gap-2 px-2 text-[10px] font-semibold text-gray-500 uppercase tracking-wide">
-                      <span className="col-span-3">Truck No</span>
-                      <span className="col-span-3">Driver</span>
-                      <span className="col-span-3">Weight (KG)</span>
-                      <span className="col-span-2">Bags</span>
-                      <span className="col-span-1" />
-                    </div>
-                    {(batchForm.serviceVehicles || []).map((v, i) => (
-                      <div key={i} className="grid grid-cols-12 gap-2 items-center bg-white rounded-lg border border-amber-200 p-2">
-                        <input value={v.vehicle_no} onChange={e => { const arr = [...batchForm.serviceVehicles]; arr[i] = { ...v, vehicle_no: e.target.value }; setBF('serviceVehicles', arr); }} placeholder="Truck no" className="col-span-3 border border-gray-200 rounded px-2 py-1.5 text-xs outline-none" />
-                        <input value={v.driver_name} onChange={e => { const arr = [...batchForm.serviceVehicles]; arr[i] = { ...v, driver_name: e.target.value }; setBF('serviceVehicles', arr); }} placeholder="Driver" className="col-span-3 border border-gray-200 rounded px-2 py-1.5 text-xs outline-none" />
-                        <input type="number" min="0" value={v.weight_kg} onChange={e => { const arr = [...batchForm.serviceVehicles]; arr[i] = { ...v, weight_kg: e.target.value }; setBF('serviceVehicles', arr); }} placeholder="Weight KG" className="col-span-3 border border-gray-200 rounded px-2 py-1.5 text-xs outline-none" />
-                        <input type="number" min="0" value={v.total_bags} onChange={e => { const arr = [...batchForm.serviceVehicles]; arr[i] = { ...v, total_bags: e.target.value }; setBF('serviceVehicles', arr); }} placeholder="Bags" className="col-span-2 border border-gray-200 rounded px-2 py-1.5 text-xs outline-none" />
-                        <button type="button" aria-label="Remove vehicle" title="Remove vehicle" onClick={() => setBF('serviceVehicles', batchForm.serviceVehicles.filter((_, j) => j !== i))} className="col-span-1 text-gray-300 hover:text-rose-500 flex justify-center"><X size={14} /></button>
-                      </div>
-                    ))}
-                    {(() => {
-                      const sum = (batchForm.serviceVehicles || []).reduce((s, v) => s + (parseFloat(v.weight_kg) || 0), 0);
-                      const bags = (batchForm.serviceVehicles || []).reduce((s, v) => s + (parseInt(v.total_bags, 10) || 0), 0);
-                      if (sum <= 0 && bags <= 0) return null;
-                      return <p className="text-[11px] text-emerald-700 font-medium">Total received: {fmtKg(sum)} · {bags} bags — this becomes the batch quantity.</p>;
-                    })()}
-                  </div>
-                )}
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Notes / Remarks</label>
-                <input type="text" value={batchForm.serviceRemarks} onChange={e => setBF('serviceRemarks', e.target.value)} placeholder="e.g. paddy variety, moisture, handling notes" className="w-full border border-amber-300 rounded-lg px-3 py-2 text-sm outline-none bg-white" />
-              </div>
-            </div>
-          )}
-
           {/* Rice source (own-stock only): from a purchase lot vs direct */}
-          {batchForm.millingType !== 'service_milling' && (
+          {(
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">Rice Source</label>
               <div className="grid grid-cols-2 gap-3">
@@ -1310,7 +1095,7 @@ export default function MillingDashboard() {
           )}
 
           {/* Blend source-lot picker */}
-          {useBlend && batchForm.millingType !== 'service_milling' && (
+          {useBlend && (
             <div className="space-y-3 rounded-lg border border-blue-200 bg-blue-50/40 p-3">
               <div>
                 <RiceTypePicker
@@ -1425,7 +1210,7 @@ export default function MillingDashboard() {
           {!useBlend && (
           <div>
             <RiceTypePicker
-              label={<>{batchForm.millingType === 'service_milling' ? 'Received Rice / Paddy Type' : 'Rice Type'} <span className="text-red-500">*</span></>}
+              label={<>Rice Type <span className="text-red-500">*</span></>}
               value={batchForm.productId}
               onChange={(id) => setBF('productId', id)}
               products={products}
@@ -1441,7 +1226,7 @@ export default function MillingDashboard() {
           {/* Supplier (rice source) — OWN-STOCK ONLY. Service milling rice comes
               from the client selected above (client-owned), never a company
               supplier, so this field is hidden for service milling. */}
-          {!useBlend && batchForm.millingType !== 'service_milling' && (
+          {!useBlend && (
           <div>
             <SupplierPicker
               label={<>Supplier <span className="text-red-500">*</span></>}
@@ -1454,17 +1239,10 @@ export default function MillingDashboard() {
             <FieldError error={batchErrors.supplierId} />
           </div>
           )}
-          {/* Service milling: the stock source is the client (client-owned). */}
-          {!useBlend && batchForm.millingType === 'service_milling' && (
-          <div className="rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2 text-xs text-amber-800">
-            <span className="font-semibold">Stock received from:</span> the Service Milling client selected above. This is <b>client-owned stock</b> — it enters inventory tagged “Service Milling / Client-Owned” and never comes from company purchases.
-          </div>
-          )}
-
           {/* Direct supplier intake: the first truck — its weight is the raw qty,
               its bags and the Rs/kg price go in with it, so the batch has a
               priced raw lot and is ready to yield as soon as it's created. */}
-          {!useBlend && batchForm.millingType !== 'service_milling' && (
+          {!useBlend && (
           <div className="space-y-3 rounded-lg border border-gray-200 p-3">
             <p className="text-xs font-semibold text-gray-600 uppercase tracking-wider">First Vehicle</p>
             <div className={`grid grid-cols-2 ${showMoney ? 'sm:grid-cols-4' : 'sm:grid-cols-3'} gap-3`}>
@@ -1502,38 +1280,6 @@ export default function MillingDashboard() {
           </div>
           )}
 
-          {/* Quantities (service milling) */}
-          {!useBlend && batchForm.millingType === 'service_milling' && (
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">{batchForm.millingType === 'service_milling' ? 'Quantity Received (KG)' : 'Raw Qty (KG)'} <span className="text-red-500">*</span></label>
-              <input
-                type="number"
-                value={batchForm.rawQtyKg}
-                onChange={e => setBF('rawQtyKg', e.target.value)}
-                placeholder="e.g. 30000"
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none"
-              />
-              <FieldError error={batchErrors.rawQtyKg} />
-              {batchForm.rawQtyKg && (
-                <p className="text-xs text-gray-400 mt-0.5">{fmtKg(parseFloat(batchForm.rawQtyKg) || 0)}</p>
-              )}
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Number of Bags</label>
-              <input
-                type="number"
-                value={batchForm.totalBags}
-                onChange={e => setBF('totalBags', e.target.value)}
-                placeholder="e.g. 600"
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none"
-              />
-              {batchForm.rawQtyKg && batchForm.totalBags && parseInt(batchForm.totalBags, 10) > 0 && (
-                <p className="text-xs text-emerald-600 mt-0.5 font-medium">Avg: {fmtNum(parseFloat(batchForm.rawQtyKg) / parseInt(batchForm.totalBags, 10), 2)} kg/bag</p>
-              )}
-            </div>
-          </div>
-          )}
           {/* Expected finished qty is not entered — it's decided by the yield output. */}
 
           {/* Mill & shift are not asked: there is a single mill (resolved
@@ -1566,7 +1312,7 @@ export default function MillingDashboard() {
           </div>
 
           {/* Notes — hidden for service milling (its card already has Notes / Remarks). */}
-          {batchForm.millingType !== 'service_milling' && (
+          {(
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
             <textarea value={batchForm.notes} onChange={e => setBF('notes', e.target.value)} rows={2} placeholder="Special instructions, quality requirements..." className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none resize-none" />
@@ -1576,22 +1322,26 @@ export default function MillingDashboard() {
           {/* Summary */}
           {batchForm.rawQtyKg && (
             <div className="bg-gray-50 rounded-lg border border-gray-200 p-3 text-sm">
-              <div className="flex justify-between"><span className="text-gray-500">Type</span><span className="font-medium">{batchForm.millingType === 'service_milling' ? 'Service Milling' : 'Own Stock'}</span></div>
-              <div className="flex justify-between"><span className="text-gray-500">{batchForm.millingType === 'service_milling' ? 'Received' : 'Raw Input'}</span><span className="font-medium">{fmtNum(batchForm.rawQtyKg)} kg ({fmtNum(parseFloat(batchForm.rawQtyKg) / 1000, 2)} MT)</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">Type</span><span className="font-medium">Own Stock</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">Raw Input</span><span className="font-medium">{fmtNum(batchForm.rawQtyKg)} kg ({fmtNum(parseFloat(batchForm.rawQtyKg) / 1000, 2)} MT)</span></div>
               {batchForm.totalBags && parseInt(batchForm.totalBags, 10) > 0 && (
                 <div className="flex justify-between"><span className="text-gray-500">Bags</span><span className="font-medium">{batchForm.totalBags} bags · {fmtNum(parseFloat(batchForm.rawQtyKg) / parseInt(batchForm.totalBags, 10), 2)} kg/bag avg</span></div>
-              )}
-              {batchForm.millingType === 'service_milling' && batchForm.serviceMillingRatePerKg && (
-                <div className="flex justify-between border-t border-gray-200 mt-1 pt-1">
-                  <span className="text-gray-500">Est. Milling Service</span>
-                  <span className="font-bold text-emerald-700">{fmtPKR(parseFloat(batchForm.serviceMillingRatePerKg) * (parseFloat(batchForm.expectedOutputKg) || parseFloat(batchForm.rawQtyKg) || 0), { decimals: 2 })}</span>
-                </div>
               )}
             </div>
           )}
 
         </div>
       </SlideDrawer>
+
+      <ServiceLotDrawer
+        open={showServiceLot}
+        addToast={addToast}
+        onClose={() => setShowServiceLot(false)}
+        onCreated={(batchNo) => {
+          setShowServiceLot(false);
+          if (batchNo) navigate(`/service-milling/${batchNo}`);
+        }}
+      />
     </div>
   );
 }

@@ -54,3 +54,23 @@ export function printableCsv(data) {
   }
   return toCsv(rows, [{ label: 'Section', key: 'Section' }, ...keys.map((k) => ({ label: k, key: k }))]);
 }
+
+/**
+ * W19 — the sections the server cut short. A printable report caps its detail
+ * lists (e.g. the 200 largest lines) and flags it (`truncated: true`,
+ * `detailTruncated: { export: true }`). Pure: the dotted paths of every true
+ * flag, so the CSV button can warn that those blocks are not complete.
+ */
+export function printableTruncations(data) {
+  const out = [];
+  const walk = (node, path, depth) => {
+    if (!isPlain(node) || depth > 4) return;
+    for (const [k, v] of Object.entries(node)) {
+      const p = path ? `${path}.${k}` : k;
+      if (v === true && (/truncated$/i.test(k) || /truncated/i.test(path))) out.push(p);
+      else if (isPlain(v)) walk(v, p, depth + 1);
+    }
+  };
+  walk(data, '', 0);
+  return out;
+}

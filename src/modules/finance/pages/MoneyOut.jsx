@@ -154,7 +154,7 @@ export default function MoneyOut() {
         <FinanceTable
           columns={columns} data={filtered}
           searchKeys={['supplierName', 'haulerName', 'payNo', 'category', 'linkedRef']}
-          onRowClick={(row) => drawers?.openDocument(docOf(row))} exportFilename="payables" emptyText="No payables in this period." loading={isLoading} error={error} onRetry={refetch}
+          onRowClick={(row) => drawers?.openDocument(docOf(row))} exportFilename="payables" listCap={{ loaded: payables.length, total: payables.listTotal }} emptyText="No payables in this period." loading={isLoading} error={error} onRetry={refetch}
           actions={(row) => (
             <div className="inline-flex items-center gap-1.5">
               {row.status !== 'Paid' && parseFloat(row.outstanding) > 0 && isDerivedPayable(row) && (

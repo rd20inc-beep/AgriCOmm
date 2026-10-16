@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef } from 'react';
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import OrderRefLink from '../../../shared/components/OrderRefLink';
 import {
@@ -7,6 +7,8 @@ import {
 } from 'lucide-react';
 import NewPurchaseDrawer from '../../../components/NewPurchaseDrawer';
 import { usePurchases } from '../../../api/queries';
+import { financeApi } from '../../../api/services';
+import { transformKeys } from '../../../api/transforms';
 import { useAuth } from '../../../context/AuthContext';
 import { useFinanceDrawers } from '../drawers/drawersContext';
 import { isSettleable, canRecordVariant } from '../../../components/payments/paymentVariants';
@@ -56,9 +58,12 @@ const RANGE_LABEL = {
   year:    'This Year',
 };
 
+// Most purchases one CSV export may pull (W19); past it the user is warned.
+const PURCHASES_EXPORT_MAX = 50000;
+
 export default function Purchases() {
   const navigate = useNavigate();
-  const { companyProfileData } = useApp();
+  const { companyProfileData, addToast } = useApp();
   const { queryParams: rangeParams, rangeKey } = useFinanceDateRange();
   const [source, setSource] = useState('all');
   const [statusFilter, setStatusFilter] = useState('All');
@@ -118,22 +123,21 @@ export default function Purchases() {
   const purchases = data?.purchases || [];
   const totals = data?.totals || { totalPkr: 0, count: 0, bySource: {}, byStatus: {} };
 
-  const filtered = useMemo(() => {
-    return purchases.filter(p => {
-      if (statusFilter !== 'All' && String(p.paymentStatus || 'Pending').toLowerCase() !== statusFilter.toLowerCase()) return false;
-      if (searchTerm) {
-        const t = searchTerm.toLowerCase();
-        if (!(
-          (p.ref || '').toLowerCase().includes(t) ||
-          (p.supplierName || '').toLowerCase().includes(t) ||
-          (p.category || '').toLowerCase().includes(t) ||
-          (p.createdByName || '').toLowerCase().includes(t) ||
-          (p.approvedByName || '').toLowerCase().includes(t)
-        )) return false;
-      }
-      return true;
-    });
-  }, [purchases, statusFilter, searchTerm]);
+  const matches = useCallback((p) => {
+    if (statusFilter !== 'All' && String(p.paymentStatus || 'Pending').toLowerCase() !== statusFilter.toLowerCase()) return false;
+    if (searchTerm) {
+      const t = searchTerm.toLowerCase();
+      if (!(
+        (p.ref || '').toLowerCase().includes(t) ||
+        (p.supplierName || '').toLowerCase().includes(t) ||
+        (p.category || '').toLowerCase().includes(t) ||
+        (p.createdByName || '').toLowerCase().includes(t) ||
+        (p.approvedByName || '').toLowerCase().includes(t)
+      )) return false;
+    }
+    return true;
+  }, [statusFilter, searchTerm]);
+  const filtered = useMemo(() => purchases.filter(matches), [purchases, matches]);
 
   // Re-aggregate from the filtered set so KPI tiles reflect what's on screen
   const filteredTotals = useMemo(() => {
@@ -148,8 +152,22 @@ export default function Purchases() {
     return out;
   }, [filtered]);
 
-  function exportCsv() {
-    const rows = filtered.map(p => ({
+  // W19: the screen holds the newest 500; the CSV asks the server for every
+  // purchase in the period/source (up to PURCHASES_EXPORT_MAX), applies the
+  // same status/search filter, and warns if even that was cut short.
+  async function exportCsv() {
+    let all = purchases;
+    let cut = null;
+    try {
+      const res = await financeApi.purchases({ ...params, limit: PURCHASES_EXPORT_MAX });
+      const d = res?.data || {};
+      all = transformKeys(d.purchases || []);
+      if (d.totals?.truncated) cut = { listed: all.length, total: d.totals.matched_count };
+    } catch (e) {
+      addToast?.(e?.message || 'CSV export failed', 'error');
+      return;
+    }
+    const rows = all.filter(matches).map(p => ({
       Date: p.date || '',
       Source: SOURCE_META[p.source]?.label || p.source,
       Ref: p.ref || '',
@@ -162,6 +180,7 @@ export default function Purchases() {
       Approved_By: p.approvedByName || '',
     }));
     downloadCSV(rows, `purchases-${todayLocalISO()}.csv`);
+    if (cut) addToast?.(`CSV holds ${cut.listed.toLocaleString('en-US')} of ${Number(cut.total).toLocaleString('en-US')} purchases (export limit). Narrow the date range to export the rest.`, 'warning');
   }
 
   if (isLoading) {

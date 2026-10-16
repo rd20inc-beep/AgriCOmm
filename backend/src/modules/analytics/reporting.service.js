@@ -25,6 +25,7 @@ const { foldCashForecast, addDays } = require('./cashForecast');
 const { PENDING_CHEQUE, NEVER_MONEY } = require('../finance/paymentsFeedTotals');
 const { kgToMt, KG_PER_MT } = require('../../shared/units');
 const { inclusiveEnd, pageMeta } = require('./reportContract');
+const reportContract = require('./reportContract');
 
 // Parse a milling_batches.custom_tags jsonb value into a plain array. The pg
 // driver usually returns jsonb already parsed (array/object), but a string may
@@ -2264,9 +2265,10 @@ const reportingService = {
    *    list is shorter. Voided purchases are listed but carry no money.
    * Money redaction for cost / profit-blind roles is applied by the controller.
    */
-  async getInvoiceLedger({ q, from, to, status, outstanding, entity, kind, limit = 500 } = {}) {
+  async getInvoiceLedger({ q, from, to, status, outstanding, entity, kind, limit = 500, export: exportAll } = {}) {
     const num = (v) => parseFloat(v) || 0;
-    const cap = Math.min(parseInt(limit, 10) || 500, 2000);
+    // A CSV export (export=1) asks for the whole filtered list (W19).
+    const cap = reportContract.listCap({ limit, export: exportAll }, { defaultLimit: 500, maxLimit: 2000 });
     const term = String(q || '').trim();
     const wantOutstanding = (outstanding === '1' || outstanding === true || outstanding === 'true');
     const statusOf = (out, paid) => (out > 0.01 ? (paid > 0.01 ? 'Partial' : 'Unpaid') : 'Paid');
@@ -2547,9 +2549,10 @@ const reportingService = {
    * list is shorter than the match.
    * Read-only. Filters: dateFrom, dateTo, movementType, entity, lotId, warehouseId.
    */
-  async getInventoryLedger({ dateFrom, dateTo, movementType, entity, lotId, warehouseId, warehouseScope = null, limit = 300 } = {}) {
+  async getInventoryLedger({ dateFrom, dateTo, movementType, entity, lotId, warehouseId, warehouseScope = null, limit = 300, export: exportAll } = {}) {
     const num = (v) => parseFloat(v) || 0;
-    const cap = Math.min(parseInt(limit, 10) || 300, 1000);
+    // A CSV export (export=1) asks for the whole filtered list (W19).
+    const cap = reportContract.listCap({ limit, export: exportAll }, { defaultLimit: 300, maxLimit: 1000 });
 
     const filtered = () => {
       let q = db('lot_transactions as t')
