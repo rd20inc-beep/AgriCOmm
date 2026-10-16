@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { FileText, Search, Filter, Eye, CheckCircle, RotateCcw, FileCheck } from 'lucide-react';
 import PartyLink from '../../../shared/components/PartyLink';
 import { useApp } from '../../../context/AppContext';
+import { useCompanyProfile, useExportOrdersList } from '../../../shared/hooks/useMasterData';
 import { queryKeys } from '../../../api/queryClient';
 import { exportOrdersApi } from '../../../api/services';
 import StatusBadge from '../../../components/StatusBadge';
@@ -27,7 +28,9 @@ const allStatuses = ['All', 'Pending', 'Draft Uploaded', 'Approved', 'Under Revi
 export default function Documents() {
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const { exportOrders, addToast, companyProfileData } = useApp();
+  const { addToast } = useApp();
+  const { data: exportOrders } = useExportOrdersList();
+  const companyProfileData = useCompanyProfile();
 
   const getOrderForDoc = (orderId) => exportOrders.find(o => o.id === orderId);
 

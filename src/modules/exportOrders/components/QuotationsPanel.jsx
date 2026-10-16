@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Eye, Edit2, Send, Check, X, ArrowRightCircle, Trash2, FileText, ExternalLink } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
+import { useCompanyProfile } from '../../../shared/hooks/useMasterData';
 import Modal from '../../../components/Modal';
 import ProformaInvoice from '../../../components/ProformaInvoice';
 import QuotationDrawer from './QuotationDrawer';
@@ -15,7 +16,8 @@ const num = (v) => parseFloat(v) || 0;
 const STATUS_TABS = ['All', 'Draft', 'Sent', 'Accepted', 'Rejected', 'Expired'];
 
 export default function QuotationsPanel() {
-  const { companyProfileData, addToast } = useApp();
+  const { addToast } = useApp();
+  const companyProfileData = useCompanyProfile();
   const navigate = useNavigate();
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);

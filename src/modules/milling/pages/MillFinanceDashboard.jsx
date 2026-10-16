@@ -7,6 +7,7 @@ import {
   Pencil, Trash2, HandCoins, CalendarDays, Phone, CreditCard, Power, X, FileText, RefreshCw, Sparkles, ArrowLeftRight, Inbox, Check, ShoppingCart, Clock, Landmark, LogOut, History, ChevronDown, ChevronRight,
 } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
+import { useBankAccountsList, useCompanyProfile, useMillingBatchesList } from '../../../shared/hooks/useMasterData';
 import { useAuth } from '../../../context/AuthContext';
 import { useOwnerAuth } from '../../../context/OwnerAuthContext';
 import {
@@ -197,7 +198,10 @@ function PayPayableDrawer({ payTarget, onClose, addToast }) {
 // other tabs) so the SAME payroll UI can be surfaced on the Head Office finance
 // dashboard (/finance/payroll) — payroll is a single set of mill workers.
 export default function MillFinanceDashboard({ payrollOnly = false }) {
-  const { millingBatches, addToast, companyProfileData, bankAccountsList } = useApp();
+  const { addToast } = useApp();
+  const { data: millingBatches } = useMillingBatchesList();
+  const companyProfileData = useCompanyProfile();
+  const { data: bankAccountsList } = useBankAccountsList();
   const [confirm, confirmDialog] = useConfirm();
   // ONE period for the whole dashboard (fiscal year July–June, D-1); the
   // server resolves it to dates. Profit, production and cash are all for it.

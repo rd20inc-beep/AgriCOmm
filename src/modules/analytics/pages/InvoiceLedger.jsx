@@ -9,7 +9,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { Search, Download, Printer, FileText, AlertTriangle, BookUser, ChevronRight, ChevronDown, Factory, ArrowLeft } from 'lucide-react';
 import { reportingApi } from '../api/services';
 import { localSalesApi, lotInventoryApi } from '../../../api/services';
-import { useApp } from '../../../context/AppContext';
+import { useCompanyProfile } from '../../../shared/hooks/useMasterData';
 import { useAuth } from '../../../context/AuthContext';
 import { exportLedgerCSV, printLedger } from '../utils/ledgerExport';
 import { todayLocalISO, fmtDate, fmtPKR, fmtKg } from '../../../shared/utils/format';
@@ -44,7 +44,7 @@ const COLS = [
 ];
 
 export default function InvoiceLedger() {
-  const { companyProfileData } = useApp();
+  const companyProfileData = useCompanyProfile();
   const { user } = useAuth();
   const [params, setParams] = useSearchParams();
   const [qInput, setQInput] = useState(params.get('q') || '');

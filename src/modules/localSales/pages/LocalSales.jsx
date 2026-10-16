@@ -10,6 +10,7 @@ import { useLocalSales, useLocalSalesSummary, useCreateLocalSale, useLotInventor
   usePendingLocalSales, useConfirmLocalSale, useRejectLocalSale } from '../../../api/queries';
 import PaymentFormDrawer from '../../../components/payments/PaymentFormDrawer';
 import { useApp } from '../../../context/AppContext';
+import { useBankAccountsList, useCompanyProfile, useCustomersList } from '../../../shared/hooks/useMasterData';
 import { useAuth } from '../../../context/AuthContext';
 import TransactionDocument from '../../../components/TransactionDocument';
 import { useMillStoreItems } from '../../millStore/api/queries';
@@ -55,7 +56,10 @@ const SELECT = INPUT;
 const LABEL = "block text-xs font-semibold text-gray-600 uppercase mb-1";
 
 export default function LocalSales() {
-  const { addToast, customersList, refreshFromApi, bankAccountsList = [], companyProfileData } = useApp();
+  const { addToast, refreshFromApi } = useApp();
+  const { data: customersList } = useCustomersList();
+  const { data: bankAccountsList } = useBankAccountsList();
+  const companyProfileData = useCompanyProfile();
   const [showSaleModal, setShowSaleModal] = useState(false);
   const [invoiceSale, setInvoiceSale] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -554,7 +558,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
   const [pickedLot, setPickedLot] = useState(null);
   const lotById = (id) => safeLots.find(l => String(l.id) === String(id))
     || (pickedLot && String(pickedLot.id) === String(id) ? pickedLot : null);
-  const { bankAccountsList = [] } = useApp();
+  const { data: bankAccountsList } = useBankAccountsList();
   const bankOptions = useMemo(() => (Array.isArray(bankAccountsList) ? bankAccountsList : [])
     .filter(b => (b.type || '') !== 'cash' && (b.isActive ?? b.is_active ?? true) && accountTakesCurrency(b, 'PKR')), [bankAccountsList]);
   // Mill-store packaging items (e.g. empty katta) are sellable too — count-based.

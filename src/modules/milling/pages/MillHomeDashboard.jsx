@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import NewPurchaseDrawer from '../../../components/NewPurchaseDrawer';
 import PurchaseLotDrawer from '../../inventory/components/PurchaseLotDrawer';
 import { useApp } from '../../../context/AppContext';
+import { useProductsList, useSuppliersList, useWarehousesList } from '../../../shared/hooks/useMasterData';
 import { useAuth } from '../../../context/AuthContext';
 import PendingApprovalsCard from '../../dashboard/components/PendingApprovalsCard';
 import {
@@ -137,7 +138,10 @@ export default function MillHomeDashboard() {
   const navigate = useNavigate();
   const [showNewPurchase, setShowNewPurchase] = useState(false);
   const [showRicePurchase, setShowRicePurchase] = useState(false);
-  const { addToast, suppliersList, warehousesList, productsList } = useApp();
+  const { addToast } = useApp();
+  const { data: suppliersList } = useSuppliersList();
+  const { data: warehousesList } = useWarehousesList();
+  const { data: productsList } = useProductsList();
   const { hasPermission } = useAuth();
   const canBuyRice = hasPermission('inventory', 'create');
   const { summary, isLoading, batches: rawBatches } = useMillSummary();

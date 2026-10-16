@@ -9,7 +9,7 @@ import { downloadServerCsv } from '../../../shared/utils/csv';
 import { useFinanceDateRange, overviewSummaryParams } from '../hooks/useFinanceDateRange';
 import { rangeLabel } from '../financeNav';
 import { fxRateLabel } from '../utils/fx';
-import { useApp } from '../../../context/AppContext';
+import { useCompanyProfile } from '../../../shared/hooks/useMasterData';
 import StatusBadge from '../../../shared/components/StatusBadge';
 import { fmtPKR, fmtMoney, fmtPct, fmtDate, fmtDateTime, fmtKg } from '../../../shared/utils/format';
 import { HeadlineCard, TypeChip } from '../components/FinanceUI';
@@ -44,7 +44,7 @@ function AccuracyBadge({ status }) {
 }
 
 export default function Profit() {
-  const { companyProfileData } = useApp();
+  const companyProfileData = useCompanyProfile();
   const [tab, setTab] = useState('Export');
   // Every figure here is the server's one profit definition
   // (backend finance/profitDefinitions.js), for the period in the URL.

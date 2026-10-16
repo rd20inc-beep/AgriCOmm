@@ -9,7 +9,7 @@ import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, Printer, Download, Truck, ArrowDownLeft, ArrowUpRight } from 'lucide-react';
 import { reportingApi } from '../api/services';
 import { useWarehouses } from '../../../api/queries';
-import { useApp } from '../../../context/AppContext';
+import { useCompanyProfile } from '../../../shared/hooks/useMasterData';
 import { useAuth } from '../../../context/AuthContext';
 import { exportLedgerCSV, printInventoryMovementLedger } from '../utils/ledgerExport';
 import { fmtDate, fmtNum, fmtPKR } from '../../../shared/utils/format';
@@ -31,7 +31,7 @@ const MOVEMENT_TYPES = [
 
 export default function InventoryMovementLedger() {
   const navigate = useNavigate();
-  const { companyProfileData } = useApp();
+  const companyProfileData = useCompanyProfile();
   const { user } = useAuth();
   const { data: warehouses = [] } = useWarehouses();
   const [entity, setEntity] = useState('');

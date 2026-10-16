@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { useLotInventoryPage, useLotInventoryTotals } from '../../../api/queries';
 import { useApp } from '../../../context/AppContext';
+import { useProductsList, useSuppliersList, useWarehousesList } from '../../../shared/hooks/useMasterData';
 import { LoadingSpinner, ErrorState, EmptyState } from '../../../components/LoadingState';
 import StatusBadge from '../../../components/StatusBadge';
 import PurchaseLotDrawer from '../components/PurchaseLotDrawer';
@@ -203,7 +204,10 @@ function renderLotRow(lot, displayUnit, navigate, indented, showCost = true) {
 }
 
 export default function LotInventory() {
-  const { addToast, suppliersList, warehousesList, productsList } = useApp();
+  const { addToast } = useApp();
+  const { data: suppliersList } = useSuppliersList();
+  const { data: warehousesList } = useWarehousesList();
+  const { data: productsList } = useProductsList();
   const navigate = useNavigate();
   // Landed cost / value / "capital locked" are hidden from roles without
   // reports.view_cost (QC Analyst / Inventory Officer / Documentation Officer); the API nulls them too.

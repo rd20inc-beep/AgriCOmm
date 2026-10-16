@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import PartyLink from '../../../../shared/components/PartyLink';
 import { Truck, Plus, MapPin, Pencil, Trash2, Star, BookOpen } from 'lucide-react';
 import { useApp } from '../../../../context/AppContext';
+import { useSuppliersList } from '../../../../shared/hooks/useMasterData';
 import { useCreateSupplier, useUpdateSupplier, useDeleteSupplier } from '../../../../api/queries';
 import Modal from '../../components/AdminDrawer';
 import FieldError from '../../../../shared/components/FieldError';
@@ -17,7 +18,8 @@ const EMPTY = { name: '', type: 'Rice Supplier', address: '', contact_person: ''
 
 export default function SuppliersTab() {
   const canWrite = useAdminCanWrite();
-  const { suppliersList, addToast } = useApp();
+  const { addToast } = useApp();
+  const { data: suppliersList } = useSuppliersList();
   const navigate = useNavigate();
   const createMut = useCreateSupplier();
   const updateMut = useUpdateSupplier();

@@ -5,7 +5,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { Download, Printer, Users, AlertTriangle } from 'lucide-react';
 import { reportingApi } from '../api/services';
-import { useApp } from '../../../context/AppContext';
+import { useCompanyProfile } from '../../../shared/hooks/useMasterData';
 import { useAuth } from '../../../context/AuthContext';
 import { exportLedgerCSV, printLedger } from '../utils/ledgerExport';
 import { todayLocalISO, fmtDate, fmtPKR } from '../../../shared/utils/format';
@@ -33,7 +33,7 @@ const COLS = [
 ];
 
 export default function PayrollLedger() {
-  const { companyProfileData } = useApp();
+  const companyProfileData = useCompanyProfile();
   const { user } = useAuth();
   const EMPTY = { from: '', to: '', month: '', role: '', department: '', payMethod: '', status: 'paid', entity: '' };
   const [filters, setFilters] = useState(EMPTY);

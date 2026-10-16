@@ -10,7 +10,7 @@ import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, Printer } from 'lucide-react';
 import { reportingApi } from '../api/services';
-import { useApp } from '../../../context/AppContext';
+import { useCompanyProfile } from '../../../shared/hooks/useMasterData';
 import { fmtDate, fmtNum } from '../../../shared/utils/format';
 
 const n0 = (v) => fmtNum(v, 0);
@@ -20,7 +20,7 @@ const DIM_LABEL = { variety: 'Variety', grade: 'Grade', byproduct: 'By-Product',
 
 export default function StockLedger() {
   const navigate = useNavigate();
-  const { companyProfileData } = useApp();
+  const companyProfileData = useCompanyProfile();
   const [params, setParams] = useSearchParams();
   const dimension = params.get('dimension') || 'variety';
   const key = params.get('key') || '';

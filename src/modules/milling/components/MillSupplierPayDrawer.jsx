@@ -2,6 +2,7 @@ import { useMemo, useState, useEffect } from 'react';
 import { Landmark, FileText } from 'lucide-react';
 import SlideDrawer from '../../../components/SlideDrawer';
 import { useApp } from '../../../context/AppContext';
+import { useBankAccountsList } from '../../../shared/hooks/useMasterData';
 import { useAuth } from '../../../context/AuthContext';
 import { usePayables, useMillPayables, useRecordPayment } from '../../../api/queries';
 import { payablesForRow } from '../utils/payableBuckets';
@@ -14,7 +15,8 @@ const fmtDate = (d) => (d ? fmtDateHouse(d) : '');
 // which invoice it settled — reconcilable later. Uses recordPayment with
 // linked_payable_id (updates the payable + bank + posts a party-stamped journal).
 export default function MillSupplierPayDrawer({ supplier, onClose }) {
-  const { addToast, bankAccountsList = [] } = useApp();
+  const { addToast } = useApp();
+  const { data: bankAccountsList } = useBankAccountsList();
   // Finance reads the company feed; a mill role without finance.view (the Mill
   // Operator) reads the mill's own payables — the only ones it may pay.
   const { hasPermission } = useAuth();

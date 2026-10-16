@@ -10,6 +10,7 @@ import FundTransferDetailDrawer from '../components/FundTransferDetailDrawer';
 import { transferRowLabel, transferStatusLabel, DIRECTION_LABEL } from '../utils/contraTransfer';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { useApp } from '../../../context/AppContext';
+import { useCompanyProfile } from '../../../shared/hooks/useMasterData';
 import { useAuth } from '../../../context/AuthContext';
 import { useFinanceDrawers } from '../drawers/drawersContext';
 import { canAcceptTransfer } from '../utils/transferPermissions';
@@ -20,7 +21,8 @@ import { Section, TypeChip, EmptyLine } from '../components/FinanceUI';
 import { btnSecondary, btnRowPrimary, btnRowSecondary, th, tdMoney } from '../utils/uiClasses';
 
 export default function Cash() {
-  const { companyProfileData, addToast } = useApp();
+  const { addToast } = useApp();
+  const companyProfileData = useCompanyProfile();
   const { queryParams: rangeParams } = useFinanceDateRange();
   const { data: accounts = [], isLoading: loadingAccounts, error: accountsError, refetch: refetchAccounts } = useBankAccounts();
   const { data: txData, isLoading: loadingTx, error: txError, refetch: refetchTx } = useBankTransactions(rangeParams);

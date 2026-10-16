@@ -13,7 +13,7 @@ import { accountingApi } from '../../accounting/api/services';
 import { useCustomers, useSuppliers } from '../../../api/queries';
 import { favStar } from '../../../shared/utils/favorites';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
-import { useApp } from '../../../context/AppContext';
+import { useCompanyProfile } from '../../../shared/hooks/useMasterData';
 import { useAuth } from '../../../context/AuthContext';
 import { useFinanceDrawers } from '../drawers/drawersContext';
 import StatusBadge from '../../../shared/components/StatusBadge';
@@ -37,7 +37,7 @@ const refLink = (refNo) => {
 const STATUS_ROW = { Paid: 'bg-emerald-50', Partial: 'bg-amber-50', Unpaid: 'bg-red-50' };
 
 export default function PartyLedger() {
-  const { companyProfileData } = useApp();
+  const companyProfileData = useCompanyProfile();
   const { hasPermission } = useAuth();
   const drawers = useFinanceDrawers();
   const canPay = hasPermission('finance', 'confirm_payment') || hasPermission('milling', 'edit');

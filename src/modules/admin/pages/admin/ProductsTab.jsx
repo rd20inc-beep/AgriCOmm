@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Package, Plus, Pencil, Trash2 } from 'lucide-react';
 import { useApp } from '../../../../context/AppContext';
+import { useProductsList } from '../../../../shared/hooks/useMasterData';
 import { useCreateProduct, useUpdateProduct, useDeleteProduct } from '../../../../api/queries';
 import Modal from '../../components/AdminDrawer';
 import FieldError from '../../../../shared/components/FieldError';
@@ -14,7 +15,8 @@ const EMPTY = { name: '', code: '', grade: 'Premium', category: '', description:
 
 export default function ProductsTab() {
   const canWrite = useAdminCanWrite();
-  const { productsList, addToast } = useApp();
+  const { addToast } = useApp();
+  const { data: productsList } = useProductsList();
   const createMut = useCreateProduct();
   const updateMut = useUpdateProduct();
   const deleteMut = useDeleteProduct();

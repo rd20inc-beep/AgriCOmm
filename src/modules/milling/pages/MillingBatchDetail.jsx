@@ -25,6 +25,7 @@ import {
   RotateCcw,
 } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
+import { useCompanyProfile, useSuppliersList } from '../../../shared/hooks/useMasterData';
 import { useAuth } from '../../../context/AuthContext';
 import OrderRefLink from '../../../shared/components/OrderRefLink';
 import { useOwnerAuth } from '../../../context/OwnerAuthContext';
@@ -79,7 +80,9 @@ export default function MillingBatchDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const { addToast, millingCostCategories, companyProfileData, suppliersList } = useApp();
+  const { addToast, millingCostCategories } = useApp();
+  const companyProfileData = useCompanyProfile();
+  const { data: suppliersList } = useSuppliersList();
   const { user, hasPermission } = useAuth();
   const canReports = hasPermission('reports', 'view');
   const { requestOwnerApproval } = useOwnerAuth();

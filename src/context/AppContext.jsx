@@ -1,32 +1,16 @@
 import { createContext, useContext, useState, useCallback } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '../api/queryClient';
-import { transformKeys } from '../api/transforms';
-import { useAuth } from './AuthContext';
-import {
-  useExportOrders, useMillingBatches, useCustomers, useSuppliers,
-  useProducts, useWarehouses, useBagTypes, useBankAccounts,
-  useInventory, useSettings as useSettingsQuery, useUpdateSettings,
-} from '../api/queries';
-
-// Company profile — static defaults; any field can be overridden by
-// the companyProfile object saved in system_settings.
-import companyProfileDefaults from '../data/companyProfile.json';
-import { todayLocalISO } from '../shared/utils/format';
 import { isInternalExportCostCategory } from '../shared/constants/costCategories';
 
-const AppContext = createContext();
+// App-wide UI state only (P5-13). This provider fetches NOTHING: the master
+// lists, orders, batches, lots, settings and the company profile that it used
+// to load for every user at login are now asked for by the page that shows
+// them (shared/hooks/useMasterData.js). What is left is local state — toasts,
+// the cost-category pick lists, the email sender label — and
+// refreshFromApi, which only invalidates queries.
 
-const defaultSettings = {
-  qualityThreshold: 1.0,
-  defaultAdvancePct: 20,
-  defaultCurrency: 'USD',
-  millCurrency: 'PKR',
-  pkrRate: null, // no default FX rate (D-10) — rates live in Finance › Rates
-  paymentReminderDays: 7,
-  lowMarginThreshold: 5,
-  minMarginPct: 5,
-};
+const AppContext = createContext();
 
 // Display-only sender identity for the email composer. SMTP itself is
 // configured on the server (SMTP_* environment), not from the browser.
@@ -37,47 +21,8 @@ const defaultEmailSettings = {
 
 export function AppProvider({ children }) {
   const qc = useQueryClient();
-  const { token, hasPermission } = useAuth();
-  const isLoggedIn = !!token && token !== 'mock-prototype-token';
-
-  // === TanStack Query data (only fetch when authenticated) ===
-  const queryOpts = { enabled: isLoggedIn };
-  const { data: exportOrders = [], isLoading: ordersLoading } = useExportOrders({}, queryOpts);
-  const { data: millingBatches = [], isLoading: batchesLoading } = useMillingBatches({}, queryOpts);
-  const { data: customersList = [], isLoading: customersLoading } = useCustomers({}, queryOpts);
-  const { data: suppliersList = [], isLoading: suppliersLoading } = useSuppliers({}, queryOpts);
-  const { data: productsList = [], isLoading: productsLoading } = useProducts({}, queryOpts);
-  const { data: warehousesList = [] } = useWarehouses(queryOpts);
-  const { data: bagTypesList = [] } = useBagTypes(queryOpts);
-  // Without finance.view (the Mill Operator) the payment pickers list the mill's
-  // own accounts, the only ones it may pay through.
-  const { data: bankAccountsList = [] } = useBankAccounts({ ...queryOpts, millOnly: isLoggedIn && !hasPermission('finance', 'view') });
-  const { data: rawInventoryData } = useInventory({}, queryOpts);
-  const inventoryData = Array.isArray(rawInventoryData) ? rawInventoryData : [];
-  const { data: apiSettings } = useSettingsQuery(queryOpts);
-
-  // Merge API settings with defaults
-  const resolvedSettings = { ...defaultSettings, ...(apiSettings || {}) };
-
-  // Local-only state (not backed by API queries)
-  const [alerts, setAlerts] = useState([]);
   const [toasts, setToasts] = useState([]);
-  const [entityFilter, setEntityFilter] = useState('All');
-  const [localSettings, setLocalSettings] = useState({});
   const [emailSettings, setEmailSettings] = useState(defaultEmailSettings);
-
-  const settings = { ...resolvedSettings, ...localSettings };
-
-  // Merge any companyProfile overrides saved in system_settings on top
-  // of the static JSON defaults. So a Super Admin can change "AGRI
-  // COMMODITIES" → their actual legal name, and every printed sheet +
-  // hero band immediately reflects it.
-  const companyProfileData = {
-    ...companyProfileDefaults,
-    ...(settings.companyProfile || {}),
-  };
-
-  const updateSettingsMut = useUpdateSettings();
 
   // Dynamic cost categories (user can add more — local state for now).
   // No rice / milling (P2-05): the rice is costed from stock at shipment and
@@ -135,43 +80,9 @@ export function AppProvider({ children }) {
     setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 4000);
   }, []);
 
-  const dismissAlert = useCallback((alertId) => {
-    setAlerts(prev => prev.filter(a => a.id !== alertId));
-  }, []);
-
-  const addAlert = useCallback((alert) => {
-    setAlerts(prev => [{ id: Date.now(), date: todayLocalISO(), ...alert }, ...prev]);
-  }, []);
-
-  // Persist to /api/admin/settings (snake_case keys the backend reads — see
-  // schemas.updateSettings). Returns the mutation promise so the caller can
-  // await it and toast success only when the server accepted the change; the
-  // local overlay is applied only after success, never optimistically.
-  const updateSettings = useCallback(async (newSettings) => {
-    if (!isLoggedIn) throw new Error('Not signed in');
-    const res = await updateSettingsMut.mutateAsync(newSettings);
-    setLocalSettings(prev => ({ ...prev, ...transformKeys(newSettings) }));
-    return res;
-  }, [isLoggedIn, updateSettingsMut]);
-
   const updateEmailSettings = useCallback((newEmailSettings) => {
     setEmailSettings(prev => ({ ...prev, ...newEmailSettings }));
   }, []);
-
-  const getOrdersByStatus = useCallback((status) => {
-    return exportOrders.filter(o => o.status === status);
-  }, [exportOrders]);
-
-  const getOrderPipelineCounts = useCallback(() => {
-    const counts = {};
-    exportOrders.forEach(o => {
-      counts[o.status] = (counts[o.status] || 0) + 1;
-    });
-    return counts;
-  }, [exportOrders]);
-
-  // Composite loading state
-  const dataLoading = ordersLoading || batchesLoading || customersLoading || suppliersLoading || productsLoading;
 
   // Refresh via query invalidation (replaces old manual API calls)
   const refreshFromApi = useCallback(async (entity) => {
@@ -207,24 +118,10 @@ export function AppProvider({ children }) {
 
   return (
     <AppContext.Provider value={{
-      exportOrders,
-      apiConnected: true, dataLoading, refreshFromApi,
-      millingBatches,
-      inventory: inventoryData,
-      alerts, setAlerts, dismissAlert, addAlert,
-      toasts, addToast,
-      entityFilter, setEntityFilter,
-      settings, updateSettings,
-      customersList,
-      suppliersList,
-      productsList,
-      warehousesList,
-      bagTypesList,
-      bankAccountsList,
-      companyProfileData,
+      refreshFromApi,
+      toasts, setToasts, addToast,
       exportCostCategories, addExportCostCategory,
       millingCostCategories, addMillingCostCategory,
-      getOrdersByStatus, getOrderPipelineCounts,
       emailSettings, updateEmailSettings,
     }}>
       {children}

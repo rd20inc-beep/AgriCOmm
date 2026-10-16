@@ -67,6 +67,20 @@ vi.mock('../../../context/AuthContext', () => ({ useAuth: () => ({ hasPermission
 vi.mock('../../../context/AppContext', () => ({
   useApp: () => ({ addToast: vi.fn(), exportOrders: FIX.exportOrders, settings: { paymentReminderDays: 7 }, customersList: [], bankAccountsList: FIX.accounts, suppliersList: [] }),
 }));
+// P5-13: pages read their lists from the per-page hooks, not AppContext.
+vi.mock('../../../shared/hooks/useMasterData', () => ({
+  useCustomersList: () => ({ data: [] }),
+  useSuppliersList: () => ({ data: [] }),
+  useProductsList: () => ({ data: [] }),
+  useWarehousesList: () => ({ data: [] }),
+  useBagTypesList: () => ({ data: [] }),
+  useBankAccountsList: () => ({ data: FIX.accounts }),
+  useExportOrdersList: () => ({ data: FIX.exportOrders }),
+  useMillingBatchesList: () => ({ data: [] }),
+  useInventoryLots: () => ({ data: [] }),
+  useCompanyProfile: () => ({ name: 'AGRI COMMODITIES' }),
+  useAppSettings: () => ({ settings: { paymentReminderDays: 7 }, updateSettings: vi.fn() }),
+}));
 vi.mock('../drawers/drawersContext', () => ({ useFinanceDrawers: () => ({ openPayment: vi.fn(), openDocument: vi.fn(), openTransaction: vi.fn(), openAccount: vi.fn(), openParty: null }) }));
 vi.mock('../../../hooks/useConfirm', () => ({ default: () => [vi.fn(), null] }));
 vi.mock('../hooks/useFinanceDateRange', () => ({ useFinanceDateRange: () => ({ queryParams: {}, rangeKey: '' }) }));

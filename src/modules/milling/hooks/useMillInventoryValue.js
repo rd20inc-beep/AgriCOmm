@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { useApp } from '../../../context/AppContext';
+import { useInventoryLots } from '../../../shared/hooks/useMasterData';
 import { useCommodityRates } from '../../../api/queries';
 
 /**
@@ -16,7 +16,7 @@ function getRatePerKG(rates, rateType, fallback) {
 }
 
 export function useMillInventoryValue() {
-  const { inventory } = useApp();
+  const { data: inventory } = useInventoryLots();
   const { data: rates = [] } = useCommodityRates();
 
   return useMemo(() => {

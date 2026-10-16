@@ -8,6 +8,7 @@ import TransactionDocument from '../../../components/TransactionDocument';
 import api from '../../../api/client';
 import { useAuth } from '../../../context/AuthContext';
 import { useApp } from '../../../context/AppContext';
+import { useCompanyProfile, useSuppliersList } from '../../../shared/hooks/useMasterData';
 import { useReceivableReceipts, usePayablePayments, usePurchasePaymentTrail } from '../../../api/queries';
 import { METHOD_LABEL } from '../../../components/payments/paymentPayload';
 import { contextForDocument, isSettleable, canRecordVariant } from '../../../components/payments/paymentVariants';
@@ -43,7 +44,9 @@ function useHistory(docKind, r) {
 export default function DocumentDrawer({ doc, onClose }) {
   const drawers = useFinanceDrawers();
   const { hasPermission } = useAuth();
-  const { addToast, suppliersList, companyProfileData } = useApp() || {};
+  const { addToast } = useApp() || {};
+  const { data: suppliersList } = useSuppliersList();
+  const companyProfileData = useCompanyProfile();
   const qc = useQueryClient();
   const row = useDocumentRow(doc);
   const docKind = doc?.docKind === 'receivable' && row?.kind === 'local_sale' ? 'local_sale' : doc?.docKind;

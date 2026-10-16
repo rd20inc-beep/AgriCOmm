@@ -13,6 +13,7 @@ import {
 } from '../../../api/queries';
 import HaulerPicker from '../../../components/HaulerPicker';
 import { useApp } from '../../../context/AppContext';
+import { useCompanyProfile, useWarehousesList } from '../../../shared/hooks/useMasterData';
 import { useAuth } from '../../../context/AuthContext';
 import OrderRefLink from '../../../shared/components/OrderRefLink';
 import { LoadingSpinner, ErrorState } from '../../../components/LoadingState';
@@ -67,7 +68,9 @@ export default function LotDetail() {
     if (typeof window !== 'undefined' && window.history.state && window.history.state.idx > 0) navigate(-1);
     else navigate('/lot-inventory');
   };
-  const { addToast, warehousesList, companyProfileData } = useApp();
+  const { addToast } = useApp();
+  const { data: warehousesList } = useWarehousesList();
+  const companyProfileData = useCompanyProfile();
   const { user, hasPermission } = useAuth();
   const canReports = hasPermission('reports', 'view');
   const canExport = hasPermission('export_orders', 'view');

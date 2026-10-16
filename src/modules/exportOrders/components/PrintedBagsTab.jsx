@@ -3,6 +3,7 @@ import {
   Printer, Plus, Loader2, Truck, CheckCircle2, Trash2, Wallet, X, PackageCheck, AlertCircle,
 } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
+import { useBagTypesList, useBankAccountsList, useSuppliersList } from '../../../shared/hooks/useMasterData';
 import SlideDrawer from '../../../components/SlideDrawer';
 import BagTypePicker from '../../../components/BagTypePicker';
 import SupplierPicker from '../../../components/SupplierPicker';
@@ -31,7 +32,10 @@ function PayPill({ status, outstanding }) {
 }
 
 export default function PrintedBagsTab({ order, onUpdated }) {
-  const { addToast, suppliersList, bagTypesList, bankAccountsList } = useApp();
+  const { addToast } = useApp();
+  const { data: suppliersList } = useSuppliersList();
+  const { data: bagTypesList } = useBagTypesList();
+  const { data: bankAccountsList } = useBankAccountsList();
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState(null);

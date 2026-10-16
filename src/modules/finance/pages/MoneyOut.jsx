@@ -5,7 +5,7 @@ import { FinanceKPI, FinanceTable, FinanceFilterBar } from '../../../components/
 import ListCapHint from '../../../shared/components/ListCapHint';
 import { usePayables } from '../../../api/queries';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
-import { useApp } from '../../../context/AppContext';
+import { useCompanyProfile } from '../../../shared/hooks/useMasterData';
 import { useAuth } from '../../../context/AuthContext';
 import PartyLink from '../../../shared/components/PartyLink';
 import { shortenRef } from '../utils/refs';
@@ -28,7 +28,7 @@ const eqStatus = (a, b) => String(a || '').toLowerCase() === String(b || '').toL
 // PKR payable, as before). A cost-derived row (MC- / EC- / ME-) has no payable
 // to settle, so it says where it is settled instead of offering Pay.
 export default function MoneyOut() {
-  const { companyProfileData } = useApp() || {};
+  const companyProfileData = useCompanyProfile();
   const { hasPermission } = useAuth();
   const drawers = useFinanceDrawers();
   const { queryParams: rangeParams } = useFinanceDateRange();

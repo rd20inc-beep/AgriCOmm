@@ -10,7 +10,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, Printer, Download, Users, Package, ShoppingCart, BookUser, Search } from 'lucide-react';
 import { reportingApi } from '../api/services';
-import { useApp } from '../../../context/AppContext';
+import { useCompanyProfile } from '../../../shared/hooks/useMasterData';
 import { useAuth } from '../../../context/AuthContext';
 import { exportLedgerCSV, printSupplierLedger } from '../utils/ledgerExport';
 import { fmtDate, fmtKg, fmtPKR, fmtPct } from '../../../shared/utils/format';
@@ -93,7 +93,7 @@ function SupplierPicker() {
 // ── Detail: full Supplier 360 ──
 function SupplierDetail({ id }) {
   const navigate = useNavigate();
-  const { companyProfileData } = useApp();
+  const companyProfileData = useCompanyProfile();
   const { user } = useAuth();
 
   const { data, isLoading, isError, error } = useQuery({

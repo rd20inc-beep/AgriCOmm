@@ -10,6 +10,7 @@ import {
   PieChart, Pie, Cell,
 } from 'recharts';
 import { useApp } from '../../../context/AppContext';
+import { useCustomersList, useExportOrdersList, useMillingBatchesList, useSuppliersList } from '../../../shared/hooks/useMasterData';
 import {
   useProfitabilitySummary, useSupplierScoreboard, useCustomerScoreboard,
   usePredictiveAlerts, useTopRiskOrders, useTopRiskCustomers,
@@ -41,7 +42,7 @@ function formatCurrency(v, currency = 'USD') {
 }
 
 function ProfitabilityTab() {
-  const { exportOrders } = useApp();
+  const { data: exportOrders } = useExportOrdersList();
   // Booked profit per order, all PKR at the order's booked rate — the same
   // rows as Finance ▸ Profit. Unpriced orders are left out, never guessed.
   const { data: summary = {}, isLoading } = useProfitabilitySummary();
@@ -154,7 +155,10 @@ function ProfitabilityTab() {
 function ScoringTab({ type }) {
   const isCustomer = type === 'customer';
   const { data: scoreboard = [], isLoading } = isCustomer ? useCustomerScoreboard() : useSupplierScoreboard();
-  const { exportOrders, millingBatches, customersList, suppliersList } = useApp();
+  const { data: exportOrders } = useExportOrdersList();
+  const { data: millingBatches } = useMillingBatchesList();
+  const { data: customersList } = useCustomersList();
+  const { data: suppliersList } = useSuppliersList();
   const { data: profitSummary = {} } = useProfitabilitySummary({}, { enabled: isCustomer });
 
   // Compute scores from real data if API returns empty

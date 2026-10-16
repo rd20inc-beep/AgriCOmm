@@ -30,6 +30,7 @@ import {
   Legend,
 } from 'recharts';
 import { useApp } from '../../../context/AppContext';
+import { useMillingBatchesList, useSuppliersList } from '../../../shared/hooks/useMasterData';
 import { useAuth } from '../../../context/AuthContext';
 import { canSeeCost } from '../../../hooks/useCanSeeCost';
 import OrderRefLink from '../../../shared/components/OrderRefLink';
@@ -66,7 +67,9 @@ export function RawStockTile({ inventory }) {
 
 export default function MillingDashboard() {
   const navigate = useNavigate();
-  const { millingBatches, suppliersList, addToast, millingCostCategories = [] } = useApp();
+  const { addToast, millingCostCategories = [] } = useApp();
+  const { data: millingBatches } = useMillingBatchesList();
+  const { data: suppliersList } = useSuppliersList();
   const { hasPermission } = useAuth();
   const canSellLocally = hasPermission('inventory', 'view');
   // Mill P&L, expenses, cost trend and sales value are money — hidden from the

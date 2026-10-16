@@ -15,7 +15,7 @@ import { EmptyLine, InlineError } from '../components/FinanceUI';
 import { btnSecondary, btnRowSecondary, btnIcon, th, tdMoney, kpiLabel, kpiValue, kpiSub, errorText } from '../utils/uiClasses';
 import { downloadCSV } from '../../../utils/csvExport';
 import { csvNum } from '../../../shared/utils/csv';
-import { useApp } from '../../../context/AppContext';
+import { useCompanyProfile } from '../../../shared/hooks/useMasterData';
 import { shortenRef } from '../utils/refs';
 import PartyLink from '../../../shared/components/PartyLink';
 import { todayLocalISO, fmtPKR, fmtMoney, fmtDate, fmtDateTime } from '../../../shared/utils/format';
@@ -58,7 +58,7 @@ const RANGE_LABEL = {
 
 export default function Purchases() {
   const navigate = useNavigate();
-  const { companyProfileData } = useApp();
+  const companyProfileData = useCompanyProfile();
   const { queryParams: rangeParams, rangeKey } = useFinanceDateRange();
   const [source, setSource] = useState('all');
   const [statusFilter, setStatusFilter] = useState('All');
