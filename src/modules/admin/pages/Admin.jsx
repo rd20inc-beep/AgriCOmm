@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Users, Truck, Package, Warehouse, Settings, ShoppingBag, Landmark, Tags, Factory, Files, UsersRound, MessageSquare, Shield, Building2, Inbox, ShieldAlert, Database, ChevronDown, Smartphone } from 'lucide-react';
 import { useAuth } from '../../../context/AuthContext';
 
@@ -89,14 +90,21 @@ const NAV = [
 export default function Admin() {
   const { user, hasPermission } = useAuth();
   const isSuperAdmin = user?.role === 'Super Admin';
-  const [activeTab, setActiveTab] = useState('approvals');
-  const [openGroup, setOpenGroup] = useState(null);
   const canSee = (key) => {
     const t = tabByKey[key];
     if (t?.superAdminOnly && !isSuperAdmin) return false;
     if (t?.allowRoles && !t.allowRoles.includes(user?.role)) return false;
     return true;
   };
+  // ?tab=<key> opens that tab on arrival (the header search links a
+  // transporter to ?tab=haulers&hauler=<id>); an unknown or hidden tab falls
+  // back to Approvals.
+  const [searchParams] = useSearchParams();
+  const [activeTab, setActiveTab] = useState(() => {
+    const t = searchParams.get('tab');
+    return t && tabComponents[t] && canSee(t) ? t : 'approvals';
+  });
+  const [openGroup, setOpenGroup] = useState(null);
   const [pendingCount, setPendingCount] = useState(0);
 
   // Poll the approvals count so the badge stays fresh while admins are

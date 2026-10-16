@@ -3091,6 +3091,30 @@ export function useAcceptLocalSalePayment() {
   });
 }
 
+// P5-03 — header global search (GET /api/search). One request across orders,
+// batches, lots, parties, sales, finance records and documents; the server
+// filters each type by permission. api.get does NOT transform keys.
+export function globalSearchQuery(term) {
+  const q = String(term || '').trim();
+  return {
+    queryKey: ['global-search', q],
+    queryFn: async () => {
+      const res = await api.get('/api/search', { q });
+      return { query: res?.query ?? q, groups: res?.groups || res?.data?.groups || [] };
+    },
+    staleTime: 10 * 1000,
+  };
+}
+
+export function useGlobalSearch(term) {
+  const q = String(term || '').trim();
+  return useQuery({
+    ...globalSearchQuery(q),
+    enabled: q.length >= 2 && isAuthenticated(),
+    placeholderData: keepPreviousData,
+  });
+}
+
 // One receipt for a whole multi-item sale (sale_group_no) — the server splits
 // it across the lines, oldest first, all or nothing.
 export function useAcceptLocalSaleGroupPayment() {
