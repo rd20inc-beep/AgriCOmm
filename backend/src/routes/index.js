@@ -47,6 +47,8 @@ router.use('/smart', authenticate, require('./smart'));
 router.use('/ai', authenticate, require('../modules/ai/ai.routes'));
 router.use('/chat', authenticate, require('../modules/chat/chat.routes'));
 router.use('/sync', authenticate, require('../modules/sync/sync.routes'));
+// One approvals inbox (P5-02): read-only, filtered per type by each approve route's guard.
+router.use('/approvals-inbox', authenticate, require('../modules/approvalsInbox/approvalsInbox.routes'));
 
 // Chat attachment serving — short-lived single-purpose ticket in ?ticket= (so
 // <img src> works without headers; never the session JWT); the chat service checks

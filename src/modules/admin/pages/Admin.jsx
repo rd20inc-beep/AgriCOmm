@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Users, Truck, Package, Warehouse, Settings, ShoppingBag, Landmark, Tags, Factory, Files, UsersRound, MessageSquare, Shield, Building2, Inbox, ShieldAlert, Database, ChevronDown, Smartphone } from 'lucide-react';
 import { useAuth } from '../../../context/AuthContext';
@@ -23,7 +23,7 @@ import MasterDataApprovalsTab from './admin/MasterDataApprovalsTab';
 import DangerZoneTab from './admin/DangerZoneTab';
 import DevicesTab from './admin/DevicesTab';
 import MobileNavTab from './admin/MobileNavTab';
-import { adminApi } from '../api/services';
+import { useApprovalsInboxTypeCount } from '../../governance/useApprovalsInbox';
 import { AdminWriteContext, canWriteTab } from './admin/adminWrite';
 
 const tabs = [
@@ -105,23 +105,10 @@ export default function Admin() {
     return t && tabComponents[t] && canSee(t) ? t : 'approvals';
   });
   const [openGroup, setOpenGroup] = useState(null);
-  const [pendingCount, setPendingCount] = useState(0);
-
-  // Poll the approvals count so the badge stays fresh while admins are
-  // on other tabs. 30s is plenty — these submissions are infrequent.
-  useEffect(() => {
-    let alive = true;
-    async function refresh() {
-      try {
-        const res = await adminApi.approvalsCount();
-        const total = res?.data?.total ?? res?.total ?? 0;
-        if (alive) setPendingCount(total);
-      } catch { /* non-critical */ }
-    }
-    refresh();
-    const t = setInterval(refresh, 30000);
-    return () => { alive = false; clearInterval(t); };
-  }, [activeTab]); // re-fetch when leaving/returning to the tab too
+  // The Approvals-tab badge reads the approvals inbox (one query key shared
+  // with the sidebar badge and the inbox page — NAV-29): master-data items this
+  // user can act on.
+  const pendingCount = useApprovalsInboxTypeCount('master_data');
 
   const ActiveComponent = tabComponents[activeTab];
 

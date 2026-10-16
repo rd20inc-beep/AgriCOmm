@@ -320,7 +320,7 @@ const millStoreService = {
   async requestAdjustment(data, userId) {
     const item = await repo.getItemById(data.item_id);
     if (!item) throw new NotFoundError('Item not found.');
-    return repo.createAdjustment({
+    const adjustment = await repo.createAdjustment({
       item_id: data.item_id,
       warehouse_id: data.warehouse_id || null,
       adjustment_type: data.adjustment_type,
@@ -329,6 +329,22 @@ const millStoreService = {
       status: 'Pending',
       requested_by: userId,
     });
+    // Tell the approvers (whoever holds mill_store.approve_adjustment — the
+    // Owner) that a request is waiting; it sat unseen before (INV-40). A failed
+    // notification never undoes the request.
+    try {
+      await require('../../services/notificationService').createForPermission(null, {
+        permission: ['mill_store', 'approve_adjustment'],
+        excludeUserId: userId,
+        title: 'Store adjustment to approve',
+        message: `${data.adjustment_type || 'Adjustment'} of ${data.quantity_delta} ${item.unit || ''} on ${item.name}${data.reason ? ` — ${data.reason}` : ''}`.replace(/\s+/g, ' ').trim(),
+        type: 'approval',
+        link: '/approvals?type=store_adjustment',
+      });
+    } catch (err) {
+      console.error('Store adjustment notification failed:', err.message);
+    }
+    return adjustment;
   },
 
   async listAdjustments(params) {
