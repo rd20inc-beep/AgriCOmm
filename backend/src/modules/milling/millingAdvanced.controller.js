@@ -738,16 +738,28 @@ const millingAdvancedController = {
         return q;
       };
 
+      // Audit columns for the unified transaction history (P5-09): the
+      // payment's own currency and amount (amount_pkr stays the counted
+      // figure), who recorded it and who confirmed it. Display only — nothing
+      // here feeds a total.
+      const auditCols = [
+        'p.currency', 'p.amount as amount_original',
+        'ucr.full_name as recorded_by', 'ucf.full_name as approved_by',
+      ];
+
       // Cash OUT — payments settling a mill payable.
       const outRows = await applyDates(
         db('payments as p')
           .join('payables as pa', 'pa.id', 'p.linked_payable_id')
           .leftJoin('suppliers as s', 's.id', 'pa.supplier_id')
+          .leftJoin('users as ucr', 'ucr.id', 'p.created_by')
+          .leftJoin('users as ucf', 'ucf.id', 'p.confirmed_by')
           .where('p.type', 'payment').andWhere('pa.entity', 'mill')
           .whereRaw(inLedgerSql('p'))
           .select(
             'p.id', 'p.payment_no', 'p.payment_date', 'p.payment_method', 'p.status', 'p.cleared',
             db.raw(`${amtPkr} as amount_pkr`),
+            ...auditCols,
             'pa.category', 'pa.pay_no as ref', 'pa.source_table', 'pa.source_id', 'pa.linked_ref',
             's.name as counterparty'
           )
@@ -758,11 +770,14 @@ const millingAdvancedController = {
         db('payments as p')
           .join('local_sales as ls', 'ls.id', 'p.local_sale_id')
           .leftJoin('customers as c', 'c.id', 'ls.customer_id')
+          .leftJoin('users as ucr', 'ucr.id', 'p.created_by')
+          .leftJoin('users as ucf', 'ucf.id', 'p.confirmed_by')
           .where('p.type', 'receipt').andWhere('ls.entity', 'mill')
           .whereRaw(inLedgerSql('p'))
           .select(
             'p.id', 'p.payment_no', 'p.payment_date', 'p.payment_method', 'p.status', 'p.cleared',
             db.raw(`${amtPkr} as amount_pkr`),
+            ...auditCols,
             'ls.item_name as category', 'ls.sale_no as ref',
             db.raw('COALESCE(c.name, ls.buyer_name) as counterparty')
           )
@@ -783,7 +798,10 @@ const millingAdvancedController = {
         // A contra between two of the mill's OWN accounts (direction 'internal')
         // is not cash flow: nothing entered or left the mill.
         .whereNot('ft.direction', 'internal')
-        .select('ft.id', 'ft.transfer_no', 'ft.transfer_date', 'ft.method', 'ft.amount', 'ft.from_entity', 'ft.to_entity', 'ft.status');
+        .leftJoin('users as ucr', 'ucr.id', 'ft.created_by')
+        .leftJoin('users as uac', 'uac.id', 'ft.accepted_by')
+        .select('ft.id', 'ft.transfer_no', 'ft.transfer_date', 'ft.method', 'ft.amount', 'ft.currency', 'ft.from_entity', 'ft.to_entity', 'ft.status',
+          'ucr.full_name as recorded_by', 'uac.full_name as approved_by');
       if (from_date) ftQ = ftQ.where('ft.transfer_date', '>=', from_date);
       if (to_date) ftQ = ftQ.where('ft.transfer_date', '<=', to_date);
       const ftRows = (await ftQ).map((r) => ({
@@ -792,6 +810,8 @@ const millingAdvancedController = {
         category: 'Fund transfer', ref: r.transfer_no,
         counterparty: r.to_entity === 'mill' ? 'From Head Office' : 'To Head Office',
         direction: r.to_entity === 'mill' ? 'in' : 'out', isTransfer: true,
+        status: r.status, currency: r.currency || 'PKR', amount_original: num(r.amount),
+        recorded_by: r.recorded_by || null, approved_by: r.approved_by || null,
       }));
 
       // Incoming transfers awaiting the mill supervisor's acceptance (the alert).
