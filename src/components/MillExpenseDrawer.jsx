@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { TrendingDown } from 'lucide-react';
 import SlideDrawer from './SlideDrawer';
+import { isFormDirty } from '../shared/utils/dirtyGuard';
 import { useCreateMillExpense, useExpenseVendors } from '../api/queries';
 import { todayLocalISO } from '../shared/utils/format';
 
@@ -34,19 +35,24 @@ export default function MillExpenseDrawer({ open, onClose, addToast, prefill, on
     amount: '', expense_date: todayLocalISO(), reference: '', notes: '',
   });
 
+  // What the drawer opens with (prefill applied).
+  const openingForm = () => ({
+    category: prefill?.category || 'salaries',
+    vendor_preset: '', vendor_name: '',
+    description: prefill?.description || '',
+    amount: prefill?.amount != null ? String(prefill.amount) : '',
+    expense_date: todayLocalISO(),
+    reference: '', notes: '',
+  });
+
   // Reset (and apply any prefill) each time the drawer opens.
   useEffect(() => {
     if (!open) return;
-    setForm({
-      category: prefill?.category || 'salaries',
-      vendor_preset: '', vendor_name: '',
-      description: prefill?.description || '',
-      amount: prefill?.amount != null ? String(prefill.amount) : '',
-      expense_date: todayLocalISO(),
-      reference: '', notes: '',
-    });
+    setForm(openingForm());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+  // Unsaved-change guard (P5-07): Esc / X ask once anything was typed.
+  const dirty = open && isFormDirty(openingForm(), form);
 
   async function handleSave() {
     if (!form.amount) { addToast?.('Amount required', 'error'); return; }
@@ -75,6 +81,7 @@ export default function MillExpenseDrawer({ open, onClose, addToast, prefill, on
     <SlideDrawer
       open={open}
       onClose={onClose}
+      dirty={dirty}
       title="Add Mill Expense"
       subtitle="Flows into Finance Dashboard, Money Out, and GL"
       icon={TrendingDown}
