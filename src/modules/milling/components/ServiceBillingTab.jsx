@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Wallet, FileText, Receipt, Printer, Ban } from 'lucide-react';
 import { millingApi, serviceMillingApi } from '../api/services';
 import { useApp } from '../../../context/AppContext';
+import { useCompanyProfile } from '../../../shared/hooks/useMasterData';
 import { useAuth } from '../../../context/AuthContext';
 import { useOwnerAuth } from '../../../context/OwnerAuthContext';
 import { CreateInvoiceDrawer, RecordPaymentDrawer } from './ServiceInvoiceDrawers';
@@ -21,7 +22,8 @@ const pkr = (v) => fmtPKR(num(v), { decimals: 2 });
  * drawers. This is a SERVICE fee, not a sale of rice.
  */
 export default function ServiceBillingTab({ routeId, batchDbId, onChanged }) {
-  const { addToast, companyProfileData } = useApp();
+  const { addToast } = useApp();
+  const companyProfileData = useCompanyProfile();
   const { hasPermission } = useAuth();
   const canInvoice = hasPermission('service_milling', 'create_invoice');
   const canPay = hasPermission('service_milling', 'record_payment');

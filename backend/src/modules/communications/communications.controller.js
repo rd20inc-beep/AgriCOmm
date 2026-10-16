@@ -38,6 +38,15 @@ async function findOwnTask(id, userId) {
   return mine ? task : undefined;
 }
 
+// Where pairing actually lives: the "Pair my WhatsApp" panel that opens from
+// every WhatsApp send button (there is no Communications page).
+const WA_NOT_CONNECTED_MESSAGE = 'Your WhatsApp is not connected. Use "Pair my WhatsApp" on the WhatsApp send button and scan the QR code with your phone, then send again.';
+
+// Export documents are sent through the Document Center endpoints, which
+// render the STORED version and refuse an unapproved one (D-19). This generic
+// route renders posted HTML, so it must not become a way around that gate.
+const EXPORT_DOC_LINKED_TYPES = new Set(['export_order', 'generated_document', 'export_document']);
+
 const communicationController = {
   // Render posted print-ready HTML to a PDF and send it to a customer's
   // WhatsApp via the QR-paired session. Generic — used by any document viewer
@@ -47,10 +56,13 @@ const communicationController = {
       const { to, html, caption, filename, linked_type, linked_id } = req.body;
       if (!to || !String(to).trim()) return res.status(400).json({ success: false, message: 'Recipient WhatsApp number is required.' });
       if (!html || !String(html).trim()) return res.status(400).json({ success: false, message: 'Document content is required.' });
+      if (EXPORT_DOC_LINKED_TYPES.has(String(linked_type || '').toLowerCase())) {
+        return res.status(409).json({ success: false, code: 'USE_DOCUMENT_CENTER', message: 'Export documents are sent from the order\'s Document Center, which sends only an approved version (the Proforma Invoice excepted).' });
+      }
 
       const wa = whatsappQr.getStatus(req.user?.id);
       if (wa.status !== 'connected') {
-        return res.status(409).json({ success: false, code: 'WA_NOT_CONNECTED', message: 'Your WhatsApp is not connected. Pair your own account in Communications by scanning the QR code.' });
+        return res.status(409).json({ success: false, code: 'WA_NOT_CONNECTED', message: WA_NOT_CONNECTED_MESSAGE });
       }
 
       let pdf;
@@ -628,10 +640,11 @@ const communicationController = {
   // ============================================================
   async listNotifications(req, res) {
     try {
-      const { page, limit } = req.query;
+      const { page, limit, unread } = req.query;
       const result = await notificationService.getAll(req.user.id, {
         page: page || 1,
         limit: limit || 20,
+        unreadOnly: unread === '1' || unread === 'true',
       });
 
       return res.json({ success: true, data: result });

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { Printer, RefreshCw, Search, FileText, CheckSquare, Square, ArrowLeft } from 'lucide-react';
 import api from '../../../api/client';
 import { useApp } from '../../../context/AppContext';
+import { useCompanyProfile } from '../../../shared/hooks/useMasterData';
 import { LotReportView } from './LotReportViews';
 import { fmtNum } from '../../../shared/utils/format';
 import ListCapHint from '../../../shared/components/ListCapHint';
@@ -19,7 +20,8 @@ const typeLabel = (t) => (t === 'raw' ? 'Unprocessed Rice' : t === 'finished' ? 
 const fmtMt = (kg) => fmtNum((parseFloat(kg) || 0) / 1000, 3);
 
 export default function LotReport() {
-  const { addToast, companyProfileData } = useApp();
+  const { addToast } = useApp();
+  const companyProfileData = useCompanyProfile();
 
   // ── Lot picking ──
   const [filters, setFilters] = useState({ type: '', search: '' });

@@ -79,7 +79,12 @@ function summarise(rows) {
   };
 }
 
-async function listRicePurchases(db, { from_date, to_date, supplier_id, product_id, limit = 500 } = {}) {
+// Most trucks one CSV export may pull (W19); `export=1` asks for them all.
+const EXPORT_CAP = 50000;
+
+async function listRicePurchases(db, { from_date, to_date, supplier_id, product_id, limit = 500, export: exportAll } = {}) {
+  const wantsAll = exportAll === true || exportAll === '1' || exportAll === 'true';
+  const cap = wantsAll ? EXPORT_CAP : Math.min(parseInt(limit, 10) || 500, 2000);
   let q = db('milling_vehicle_arrivals as va')
     .leftJoin('milling_batches as mb', 'va.batch_id', 'mb.id')
     // The batch's raw lot (one per batch with the merge logic) — picked
@@ -119,15 +124,20 @@ async function listRicePurchases(db, { from_date, to_date, supplier_id, product_
     )
     .orderBy('va.arrival_date', 'desc')
     .orderBy('va.created_at', 'desc')
-    .limit(Math.min(parseInt(limit, 10) || 500, 2000));
+    // One row past the cap tells us the list was cut (truncated).
+    .limit(cap + 1);
 
   if (from_date) q = q.where('va.arrival_date', '>=', from_date);
   if (to_date) q = q.where('va.arrival_date', '<=', to_date);
   if (supplier_id) q = q.whereRaw('COALESCE(mb.supplier_id, vl.supplier_id) = ?', [supplier_id]);
   if (product_id) q = q.whereRaw('COALESCE(mb.product_id, vl.product_id) = ?', [product_id]);
 
-  const purchases = (await q).map(shapePurchaseRow);
-  return { purchases, summary: summarise(purchases) };
+  const rows = await q;
+  const truncated = rows.length > cap;
+  const purchases = rows.slice(0, cap).map(shapePurchaseRow);
+  // truncated: more trucks match than were returned — the screen and a CSV
+  // export must say so instead of passing the list off as complete (W19).
+  return { purchases, summary: summarise(purchases), truncated, limit: cap };
 }
 
 module.exports = { listRicePurchases, vehiclePricePerKg, shapePurchaseRow, summarise };

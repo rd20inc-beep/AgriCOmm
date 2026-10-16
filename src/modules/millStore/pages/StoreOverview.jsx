@@ -1,18 +1,18 @@
 import { useState, useMemo, useEffect } from 'react';
-import PaymentDrawer from '../../../components/payments/PaymentDrawer';
-import { purchasePayPayload, money } from '../../../components/payments/paymentPayload';
+import PaymentFormDrawer from '../../../components/payments/PaymentFormDrawer';
+import { millStorePurchaseCtx } from '../../../components/payments/purchasePayContext';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
   Package, AlertTriangle, ShoppingCart, TrendingDown,
   Search, Pencil, Save, Loader2, Boxes, Wallet, DollarSign,
 } from 'lucide-react';
-import { useMillStoreItems, useMillStoreItem, useMillStoreSummary, useSetMillStock, useUpdateMillStoreItem, useRevalueMillItem, useKattaSummary, useMillStorePurchases, usePayMillPurchase } from '../api/queries';
+import { useMillStoreItems, useMillStoreItem, useMillStoreSummary, useSetMillStock, useUpdateMillStoreItem, useRevalueMillItem, useKattaSummary, useMillStorePurchases } from '../api/queries';
 import { useOwnerAuth } from '../../../context/OwnerAuthContext';
-import { useBankAccounts } from '../../../api/queries';
 import NewPurchaseDrawer from '../../../components/NewPurchaseDrawer';
 import SlideDrawer from '../../../components/SlideDrawer';
 import SupplierPicker from '../../../components/SupplierPicker';
 import { useApp } from '../../../context/AppContext';
+import { useSuppliersList } from '../../../shared/hooks/useMasterData';
 import { useAuth } from '../../../context/AuthContext';
 import useCanSeeCost from '../../../hooks/useCanSeeCost';
 import VoidPurchaseButton from '../../../shared/components/VoidPurchaseButton';
@@ -283,8 +283,6 @@ function PurchasePaymentsCard() {
   const canVoid = hasPermission('mill_store', 'create_purchase');
   const queryClient = useQueryClient();
   const { data: purchasesRaw = [] } = useMillStorePurchases() // every page (INV-48);
-  const { data: bankAccounts = [] } = useBankAccounts({ millOnly: !hasPermission('finance', 'view') });
-  const pay = usePayMillPurchase();
   const [target, setTarget] = useState(null);
 
   const purchases = Array.isArray(purchasesRaw) ? purchasesRaw : (purchasesRaw.purchases || purchasesRaw.data || []);
@@ -337,27 +335,16 @@ function PurchasePaymentsCard() {
         </table>
       </div>
 
-      {/* Settles the purchase DOCUMENT via POST /finance/purchases/pay (see
-          usePayMillPurchase), which posts the journal too. Cash comes
-          from a cash account and a transfer from a bank one, as before; the
-          server holds a post-dated cheque until it clears. */}
+      {/* Settles the purchase DOCUMENT via POST /finance/purchases/pay — the
+          shared Payment form (variant pay_purchase), which posts the journal
+          too. Cash comes from a cash account and a transfer from a bank one,
+          as before; the server holds a post-dated cheque until it clears. */}
       {target && (
-        <PaymentDrawer
-          title={`Pay \u2014 ${target.purchase_no}`}
-          subtitle={`Due ${formatPKR(due(target))}`}
-          icon={Wallet}
-          summary={[['Due', money(due(target))]]}
-          outstanding={due(target)}
-          accounts={bankAccounts}
-          defaultMethod="cash"
-          filterAccountsByMethod
-          extras={false}
-          onSubmit={(_body, form) => pay.mutateAsync({ id: target.id, data: purchasePayPayload(form, { source: 'mill_store', sourceId: target.id }) })}
-          onDone={(form) => {
-            addToast(`Payment of ${money(form.amount)} recorded for ${target.purchase_no}`, 'success');
-            setTarget(null);
-          }}
-          onClose={() => setTarget(null)} addToast={addToast}
+        <PaymentFormDrawer
+          variant="pay_purchase"
+          ctx={millStorePurchaseCtx(target)}
+          onDone={() => queryClient.invalidateQueries({ queryKey: ['mill-store'] })}
+          onClose={() => setTarget(null)}
         />
       )}
     </div>
@@ -368,7 +355,8 @@ function PurchasePaymentsCard() {
 const locKey = (loc) => (loc.warehouse_id == null ? 'main' : String(loc.warehouse_id));
 
 function StockEditDrawer({ item, onClose }) {
-  const { addToast, suppliersList } = useApp();
+  const { addToast } = useApp();
+  const { data: suppliersList } = useSuppliersList();
   const setStock = useSetMillStock();
   const updateItem = useUpdateMillStoreItem();
   const revalue = useRevalueMillItem();

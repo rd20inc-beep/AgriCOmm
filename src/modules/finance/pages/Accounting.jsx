@@ -8,7 +8,7 @@ import { useJournalEntries, useTrialBalance } from '../../../api/queries';
 import { withRange } from '../financeNav';
 import ListCapHint from '../../../shared/components/ListCapHint';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
-import { useApp } from '../../../context/AppContext';
+import { useCompanyProfile } from '../../../shared/hooks/useMasterData';
 import StatusBadge from '../../../shared/components/StatusBadge';
 import { fmtPKR, fmtMoney, fmtDate, fmtDateTime } from '../../../shared/utils/format';
 
@@ -23,7 +23,7 @@ function originalAmount(v, currency) {
 
 export default function Accounting() {
   const { queryParams: rangeParams, rangeKey } = useFinanceDateRange();
-  const { companyProfileData } = useApp();
+  const companyProfileData = useCompanyProfile();
   const { data: journalData = [], isLoading, error, refetch } = useJournalEntries(rangeParams);
   const [expanded, setExpanded] = useState(() => new Set());
 

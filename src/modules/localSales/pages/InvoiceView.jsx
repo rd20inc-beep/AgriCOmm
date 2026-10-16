@@ -12,12 +12,14 @@ import {
 } from 'lucide-react';
 import { localSalesApi } from '../api/services';
 import { useApp } from '../../../context/AppContext';
+import { useCompanyProfile } from '../../../shared/hooks/useMasterData';
 import { useAuth } from '../../../context/AuthContext';
 import PaymentFormDrawer from '../../../components/payments/PaymentFormDrawer';
 import SlideDrawer from '../../../components/SlideDrawer';
 import { printCustomerInvoice, printAdminInvoice, printGatePass } from '../utils/invoicePrint';
 import { fmtPKR, fmtKg, fmtNum, fmtDate } from '../../../shared/utils/format';
 import StatusBadge from '../../../shared/components/StatusBadge';
+import { goBack } from '../../../shared/utils/goBack';
 
 // Roles allowed to view the admin invoice copy (mirrors the backend route gate).
 const ADMIN_INVOICE_ROLES = ['Super Admin', 'Owner', 'Finance Manager', 'Mill Manager'];
@@ -29,7 +31,8 @@ const kg0 = (v) => fmtKg(Math.round(parseFloat(v) || 0));
 export default function InvoiceView() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { companyProfileData, addToast } = useApp();
+  const { addToast } = useApp();
+  const companyProfileData = useCompanyProfile();
   const { user } = useAuth();
   const canSeeAdminCopy = ADMIN_INVOICE_ROLES.includes(user?.role);
   const [adminBusy, setAdminBusy] = useState(false);
@@ -76,7 +79,7 @@ export default function InvoiceView() {
   if (isLoading) return <div className="p-6 text-sm text-gray-400">Loading invoice…</div>;
   if (isError || !data?.sale) return (
     <div className="p-6">
-      <button onClick={() => navigate(-1)} className="text-blue-600 hover:underline inline-flex items-center gap-1 text-sm"><ArrowLeft size={14} /> Back</button>
+      <button type="button" onClick={() => goBack(navigate, '/local-sales')} className="text-blue-600 hover:underline inline-flex items-center gap-1 text-sm"><ArrowLeft size={14} /> Back</button>
       <p className="mt-4 text-sm text-red-600">Invoice not found.</p>
     </div>
   );
@@ -155,7 +158,7 @@ export default function InvoiceView() {
       {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <button onClick={() => navigate(-1)} className="text-blue-600 hover:underline inline-flex items-center gap-1 text-sm mb-1"><ArrowLeft size={14} /> Back</button>
+          <button type="button" onClick={() => goBack(navigate, '/local-sales')} className="text-blue-600 hover:underline inline-flex items-center gap-1 text-sm mb-1"><ArrowLeft size={14} /> Back</button>
           <h1 className="text-2xl font-bold text-gray-900 inline-flex items-center gap-2">
             Invoice {sale.invoiceNo}
             {sale.paymentStatus && <StatusBadge status={sale.paymentStatus} />}

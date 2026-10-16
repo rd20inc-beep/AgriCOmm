@@ -474,7 +474,7 @@ const adminController = {
   // Audit Logs
   async getAuditLogs(req, res) {
     try {
-      const { page = 1, limit = 50, entity_type, user_id, from_date, to_date } = req.query;
+      const { page = 1, limit = 50, entity_type, user_id, from_date, to_date, action } = req.query;
       const offset = (Math.max(1, parseInt(page)) - 1) * parseInt(limit);
 
       let query = db('audit_logs as al')
@@ -486,6 +486,10 @@ const adminController = {
       }
       if (user_id) {
         query = query.where('al.user_id', user_id);
+      }
+      // The Audit Trail's Action filter (it was sent but never applied).
+      if (action) {
+        query = query.where('al.action', action);
       }
       if (from_date) {
         query = query.where('al.created_at', '>=', from_date);

@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useId } from 'react';
 import { Search, Plus, X } from 'lucide-react';
 import { lotInventoryApi } from '../modules/inventory/api/services';
 
@@ -20,6 +20,8 @@ export default function BagTypePicker({
   label, value, onChange, bagTypes = [], placeholder = 'Search bag type…',
   addToast, onCreated, clearable = true, sizeFilter = true,
 }) {
+  // Ties the visible label to the search box / current choice (P5-14).
+  const fieldId = useId();
   const [localTypes, setLocalTypes] = useState([]);
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState(false);
@@ -90,7 +92,7 @@ export default function BagTypePicker({
   return (
     <div data-bagtype-picker className="relative">
       <div className="flex items-center justify-between mb-1">
-        {label && <label className="block text-sm font-medium text-gray-700">{label}</label>}
+        {label && <label htmlFor={fieldId} className="block text-sm font-medium text-gray-700">{label}</label>}
         <button type="button" onClick={() => { setAdding(v => !v); setOpen(false); }}
           className="text-xs text-blue-600 hover:text-blue-700 font-medium inline-flex items-center gap-1">
           <Plus size={12} /> {adding ? 'Cancel' : 'Add new'}
@@ -100,7 +102,7 @@ export default function BagTypePicker({
       <div className="relative">
         {value && selected && !open ? (
           <div className="w-full px-3 py-2 rounded-lg border border-gray-300 bg-white flex items-center justify-between gap-2">
-            <button type="button" onClick={() => { setOpen(true); setSearch(''); }} className="flex-1 text-left truncate text-gray-900 font-medium">
+            <button id={fieldId} type="button" onClick={() => { setOpen(true); setSearch(''); }} className="flex-1 text-left truncate text-gray-900 font-medium">
               {selected.name}
               {sizeOf(selected) && <span className="text-xs text-gray-400 ml-1">({sizeOf(selected)} kg)</span>}
             </button>
@@ -112,7 +114,7 @@ export default function BagTypePicker({
         ) : (
           <>
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input type="text" value={search} onChange={e => { setSearch(e.target.value); setOpen(true); }} onFocus={() => setOpen(true)}
+            <input id={fieldId} type="text" value={search} onChange={e => { setSearch(e.target.value); setOpen(true); }} onFocus={() => setOpen(true)}
               placeholder={placeholder}
               className="w-full rounded-lg border border-gray-300 pl-9 pr-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white" />
             {open && (
@@ -139,15 +141,15 @@ export default function BagTypePicker({
         <div className="absolute top-full left-0 z-30 mt-1 w-80 max-w-[calc(100vw-2rem)] p-3 bg-blue-50 border border-blue-200 rounded-lg shadow-lg space-y-3">
           <p className="text-xs font-semibold text-blue-800 uppercase tracking-wide">Add new bag type</p>
           <div>
-            <label className="block text-[11px] font-medium text-gray-600 mb-1">Name <span className="text-red-500">*</span></label>
-            <input value={draft.name} autoFocus onChange={e => setDraft(d => ({ ...d, name: e.target.value }))}
+            <label htmlFor={`${fieldId}-name`} className="block text-[11px] font-medium text-gray-600 mb-1">Name <span className="text-red-500">*</span></label>
+            <input id={`${fieldId}-name`} value={draft.name} autoFocus onChange={e => setDraft(d => ({ ...d, name: e.target.value }))}
               placeholder="e.g. PP Woven 25kg (Buyer Logo)"
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
           </div>
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <label className="block text-[11px] font-medium text-gray-600 mb-1">Category</label>
-              <select value={draft.category} onChange={e => setDraft(d => ({ ...d, category: e.target.value }))}
+              <label htmlFor={`${fieldId}-category`} className="block text-[11px] font-medium text-gray-600 mb-1">Category</label>
+              <select id={`${fieldId}-category`} value={draft.category} onChange={e => setDraft(d => ({ ...d, category: e.target.value }))}
                 className="w-full rounded-lg border border-gray-300 px-2 py-2 text-sm focus:ring-2 focus:ring-blue-500">
                 <option value="branded">Branded</option>
                 <option value="empty">Empty</option>
@@ -155,16 +157,16 @@ export default function BagTypePicker({
               </select>
             </div>
             <div>
-              <label className="block text-[11px] font-medium text-gray-600 mb-1">Size (kg)</label>
-              <select value={draft.size_kg} onChange={e => setDraft(d => ({ ...d, size_kg: e.target.value }))}
+              <label htmlFor={`${fieldId}-size_kg`} className="block text-[11px] font-medium text-gray-600 mb-1">Size (kg)</label>
+              <select id={`${fieldId}-size_kg`} value={draft.size_kg} onChange={e => setDraft(d => ({ ...d, size_kg: e.target.value }))}
                 className="w-full rounded-lg border border-gray-300 px-2 py-2 text-sm focus:ring-2 focus:ring-blue-500">
                 {SIZE_OPTIONS.map(s => <option key={s} value={s}>{s} kg</option>)}
               </select>
             </div>
           </div>
           <div>
-            <label className="block text-[11px] font-medium text-gray-600 mb-1">Material</label>
-            <input value={draft.material} onChange={e => setDraft(d => ({ ...d, material: e.target.value }))} placeholder="e.g. PP Woven"
+            <label htmlFor={`${fieldId}-material`} className="block text-[11px] font-medium text-gray-600 mb-1">Material</label>
+            <input id={`${fieldId}-material`} value={draft.material} onChange={e => setDraft(d => ({ ...d, material: e.target.value }))} placeholder="e.g. PP Woven"
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
           </div>
           <div className="flex justify-end gap-2">

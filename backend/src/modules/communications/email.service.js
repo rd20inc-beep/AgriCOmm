@@ -306,7 +306,8 @@ const emailService = {
         orderNo: order.order_no,
         customerName: order.customer_name,
         amount: amount || 0,
-        currency: currency || 'USD',
+        // The receipt's currency, else the order's own — never a blanket USD.
+        currency: currency || order.currency || 'USD',
       },
       linkedType: 'export_order',
       linkedId: orderId,
@@ -318,8 +319,12 @@ const emailService = {
     const batch = await db('milling_batches').where({ id: batchId }).first();
     if (!batch) return null;
 
-    // Send to mill manager (role_id = 4)
-    const millManagers = await db('users').where({ role_id: 4, is_active: true });
+    // Send to every Mill Manager — by role NAME; role ids differ between
+    // installs (PLT-15).
+    const millManagers = await db('users as u')
+      .join('roles as r', 'u.role_id', 'r.id')
+      .where('r.name', 'Mill Manager').where('u.is_active', true)
+      .orderBy('u.id').select('u.id', 'u.email');
     const results = [];
 
     for (const manager of millManagers) {

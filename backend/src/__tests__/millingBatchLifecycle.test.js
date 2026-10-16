@@ -56,8 +56,9 @@ function builder(conn, table) {
           return Promise.resolve(hit).then(res, rej);
         }
         if (op === 'insert') {
-          rows.push(payload);
-          return Promise.resolve([payload]).then(res, rej);
+          const inserted = Array.isArray(payload) ? payload : [payload];
+          rows.push(...inserted);
+          return Promise.resolve(inserted).then(res, rej);
         }
         if (op === 'del') {
           state.tables[table] = rows.filter((r) => !matches(r));
@@ -295,14 +296,18 @@ describe('cancel releases the source-lot reservations', () => {
 describe('onBatchCompleted', () => {
   test('notifies by role name and states the finished kg', async () => {
     const automation = jest.requireActual('../modules/admin/automation.service');
-    // Rows carry the joined columns the role-name lookup filters on.
+    // Recipients come from the real notificationService (role NAME lookup).
+    Object.assign(require('../services/notificationService'), jest.requireActual('../services/notificationService'));
+    // Role ids deliberately unlike any install's: recipients are found by
+    // role NAME (user 2 sits on role id 2, which here is NOT Export Manager).
     seed({
       milling_batches: [{ id: 2, batch_no: 'M-002', linked_export_order_id: 11, actual_finished_kg: '12500.5' }],
       export_orders: [{ id: 11, order_no: 'EX-011' }],
+      roles: [{ id: 21, name: 'Export Manager' }, { id: 26, name: 'Inventory Officer' }, { id: 2, name: 'Finance Manager' }],
       users: [
-        { id: 4, 'r.name': 'Export Manager', 'u.is_active': true },
-        { id: 6, 'r.name': 'Inventory Officer', 'u.is_active': true },
-        { id: 2, 'r.name': 'Finance Manager', 'u.is_active': true },
+        { id: 4, role_id: 21, is_active: true },
+        { id: 6, role_id: 26, is_active: true },
+        { id: 2, role_id: 2, is_active: true },
       ],
     });
     await automation.onBatchCompleted(mockDb, { batchId: 2, userId: 1 });

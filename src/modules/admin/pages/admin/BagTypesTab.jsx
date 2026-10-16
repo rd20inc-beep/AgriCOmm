@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ShoppingBag, Plus, Pencil, Trash2 } from 'lucide-react';
 import { useApp } from '../../../../context/AppContext';
+import { useBagTypesList } from '../../../../shared/hooks/useMasterData';
 import { useCreateBagType, useUpdateBagType, useDeleteBagType } from '../../../../api/queries';
 import Modal from '../../components/AdminDrawer';
 import FieldError from '../../../../shared/components/FieldError';
@@ -11,7 +12,8 @@ const EMPTY = { name: '', category: 'empty', sizeKg: '25', material: '', descrip
 
 export default function BagTypesTab() {
   const canWrite = useAdminCanWrite();
-  const { bagTypesList, addToast } = useApp();
+  const { addToast } = useApp();
+  const { data: bagTypesList } = useBagTypesList();
   const createMut = useCreateBagType();
   const updateMut = useUpdateBagType();
   const deleteMut = useDeleteBagType();

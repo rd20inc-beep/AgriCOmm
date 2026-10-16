@@ -394,7 +394,7 @@ export default function StoreAdjustments() {
 
       {/* Reject modal */}
       {rejectId && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setRejectId(null)}>
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" role="presentation" onClick={() => setRejectId(null)}>
           <div className="bg-white rounded-xl p-6 w-full max-w-md space-y-4" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-lg font-semibold text-gray-900">Reject Adjustment</h3>
             <div>

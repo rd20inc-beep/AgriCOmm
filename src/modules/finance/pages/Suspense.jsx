@@ -9,6 +9,7 @@ import SlideDrawer from '../../../components/SlideDrawer';
 import SearchSelect from '../../../components/SearchSelect';
 import { financeApi } from '../api/services';
 import { useApp } from '../../../context/AppContext';
+import { useBankAccountsList } from '../../../shared/hooks/useMasterData';
 import { useAuth } from '../../../context/AuthContext';
 import PermissionGate from '../../../shared/components/PermissionGate';
 import { favStar } from '../../../shared/utils/favorites';
@@ -39,7 +40,8 @@ const TARGET_TYPES = [
 ];
 
 export default function Suspense() {
-  const { addToast, bankAccountsList = [] } = useApp();
+  const { addToast } = useApp();
+  const { data: bankAccountsList } = useBankAccountsList();
   const qc = useQueryClient();
   const [statusTab, setStatusTab] = useState('All');
   const [search, setSearch] = useState('');

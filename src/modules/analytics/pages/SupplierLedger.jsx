@@ -10,10 +10,11 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, Printer, Download, Users, Package, ShoppingCart, BookUser, Search } from 'lucide-react';
 import { reportingApi } from '../api/services';
-import { useApp } from '../../../context/AppContext';
+import { useCompanyProfile } from '../../../shared/hooks/useMasterData';
 import { useAuth } from '../../../context/AuthContext';
 import { exportLedgerCSV, printSupplierLedger } from '../utils/ledgerExport';
 import { fmtDate, fmtKg, fmtPKR, fmtPct } from '../../../shared/utils/format';
+import { goBack } from '../../../shared/utils/goBack';
 
 const pkr = (v) => fmtPKR(v, { decimals: 2 });
 const kg = (v) => fmtKg(v);
@@ -93,7 +94,7 @@ function SupplierPicker() {
 // ── Detail: full Supplier 360 ──
 function SupplierDetail({ id }) {
   const navigate = useNavigate();
-  const { companyProfileData } = useApp();
+  const companyProfileData = useCompanyProfile();
   const { user } = useAuth();
 
   const { data, isLoading, isError, error } = useQuery({
@@ -105,7 +106,7 @@ function SupplierDetail({ id }) {
   if (isLoading) return <div className="p-6 text-sm text-gray-400">Loading supplier ledger…</div>;
   if (isError || !data?.supplier) return (
     <div className="p-6">
-      <button onClick={() => navigate(-1)} className="text-blue-600 hover:underline inline-flex items-center gap-1 text-sm"><ArrowLeft size={14} /> Back</button>
+      <button type="button" onClick={() => goBack(navigate, '/reports')} className="text-blue-600 hover:underline inline-flex items-center gap-1 text-sm"><ArrowLeft size={14} /> Back</button>
       <p className="mt-4 text-sm text-red-600">{error?.message || 'Supplier ledger not available.'}</p>
     </div>
   );

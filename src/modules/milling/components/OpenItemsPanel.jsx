@@ -8,7 +8,9 @@ import { fmtMoney, fmtDate } from '../../../shared/utils/format';
 const fmt = (v, c) => fmtMoney(parseFloat(v) || 0, c, { decimals: 0 });
 const isOverdue = (d) => d && new Date(d) < new Date(new Date().toDateString());
 
-export default function OpenItemsPanel({ items, partyType }) {
+// `actionFor(item)` (optional) → { label, onClick } puts a Pay / Receive button
+// on the row (W02/W03); the host decides who may see it and what it opens.
+export default function OpenItemsPanel({ items, partyType, actionFor = null }) {
   if (!items || items.length === 0) return null;
   const isCustomer = partyType === 'customer';
   const totals = {};
@@ -35,12 +37,14 @@ export default function OpenItemsPanel({ items, partyType }) {
               <th className="text-left font-medium px-4 py-2">Type</th>
               <th className="text-left font-medium px-4 py-2">Due</th>
               <th className="text-right font-medium px-4 py-2">Outstanding</th>
+              {actionFor && <th className="px-4 py-2"><span className="sr-only">Actions</span></th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
             {items.map((i, idx) => {
               // Partial = something already paid; otherwise fully unpaid.
               const partial = (parseFloat(i.received) || 0) > 0;
+              const action = actionFor ? actionFor(i) : null;
               return (
                 <tr key={idx} className={partial ? 'bg-amber-50' : 'bg-red-50'}>
                   <td data-label="Reference" className="px-4 py-2 font-medium text-gray-800 max-w-[420px]">
@@ -57,6 +61,16 @@ export default function OpenItemsPanel({ items, partyType }) {
                     {isOverdue(i.due_date) && <span className="ml-1 text-[10px] text-red-500 inline-flex items-center gap-0.5"><AlertTriangle size={10} /> overdue</span>}
                   </td>
                   <td data-label="Outstanding" className={`px-4 py-2 text-right tabular-nums font-medium ${partial ? 'text-amber-700' : 'text-red-700'}`}>{fmt(i.outstanding, i.currency)}</td>
+                  {actionFor && (
+                    <td data-label="" className="px-4 py-2 text-right">
+                      {action && (
+                        <button type="button" onClick={action.onClick} data-action="open-item-settle"
+                          className="inline-flex items-center px-2.5 min-h-9 text-xs font-medium rounded-lg border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+                          {action.label}
+                        </button>
+                      )}
+                    </td>
+                  )}
                 </tr>
               );
             })}

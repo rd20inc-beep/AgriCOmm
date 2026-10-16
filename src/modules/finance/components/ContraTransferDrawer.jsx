@@ -9,9 +9,10 @@ import { useAuth } from '../../../context/AuthContext';
 import { useApp } from '../../../context/AppContext';
 import { favStar } from '../../../shared/utils/favorites';
 import { todayLocalISO, fmtMoney } from '../../../shared/utils/format';
+import { useDefaultAccount } from '../../../shared/hooks/useDefaultAccount';
 import {
   cur, ent, entityLabel, classifyTransfer, isCrossCurrency, foreignCurrency,
-  convertAmount, rateFromConverted, validateContra, contraOverdraft, newClientRef,
+  convertAmount, rateFromConverted, validateContra, contraOverdraft, newClientRef, transferDefaults,
 } from '../utils/contraTransfer';
 
 const REQ = <span className="text-red-500">*</span>;
@@ -30,30 +31,46 @@ const ENTITY_ORDER = { general: 0, mill: 1, export: 2 };
  *
  * `editing` (a transfer, camelCase) turns the drawer into Edit: the server
  * reverses the original and records this as its replacement, in one step.
+ *
+ * W08–W10 — this is the ONE transfer flow. `lockDirection="mill_to_ho"` (Mill
+ * Finance › Send Funds to Head Office, formerly TransferFundsDrawer) narrows it
+ * to Mill PKR accounts → Head Office PKR accounts and hides Head Office
+ * balances; every transfer goes through the same validation, the same review
+ * step and the same duplicate guard (client_ref). The source and destination
+ * this user last used are offered again (useDefaultAccount), shown and
+ * editable; nothing is sent before Confirm.
  */
-export default function ContraTransferDrawer({ open, onClose, editing = null, onDone, fromAccountId = null }) {
+export default function ContraTransferDrawer({ open, onClose, editing = null, onDone, fromAccountId = null, lockDirection = null }) {
   const { hasPermission } = useAuth();
   const { addToast } = useApp();
+  const locked = lockDirection === 'mill_to_ho' || lockDirection === 'ho_to_mill';
   // A mill role that pays only through milling.edit may use only the mill's accounts.
   const millOnly = !hasPermission('finance', 'confirm_payment') && hasPermission('milling', 'edit');
-  const { data: allAccounts = [] } = useBankAccounts({ millOnly });
+  // Locked Mill → Head Office: the destination is a Head Office account, so the
+  // finance list is read whenever the role may (as the old drawer did); its
+  // Head Office balances are not shown.
+  const { data: allAccounts = [] } = useBankAccounts({ millOnly: locked ? !hasPermission('finance', 'view') : millOnly });
   const createMut = useCreateContraTransfer();
   const replaceMut = useReplaceFundTransfer();
   const busy = createMut.isPending || replaceMut.isPending;
 
   const accounts = useMemo(
-    () => allAccounts.filter((a) => a.isActive !== false && (!millOnly || ent(a) === 'mill')),
-    [allAccounts, millOnly],
+    () => allAccounts.filter((a) => a.isActive !== false && (locked || !millOnly || ent(a) === 'mill')),
+    [allAccounts, millOnly, locked],
   );
-  const groups = useMemo(() => {
-    const m = new Map();
-    for (const a of accounts) {
-      const key = `${ent(a)}|${cur(a)}`;
-      if (!m.has(key)) m.set(key, { key, label: `${entityLabel(ent(a))} · ${cur(a)}`, entity: ent(a), list: [] });
-      m.get(key).list.push(a);
-    }
-    return [...m.values()].sort((x, y) => (ENTITY_ORDER[x.entity] ?? 9) - (ENTITY_ORDER[y.entity] ?? 9) || x.label.localeCompare(y.label));
-  }, [accounts]);
+  const { fromAccounts, toAccounts } = useMemo(() => {
+    if (!locked) return { fromAccounts: accounts, toAccounts: accounts };
+    const pkr = accounts.filter((a) => cur(a) === 'PKR');
+    const mill = pkr.filter((a) => ent(a) === 'mill');
+    const ho = pkr.filter((a) => ent(a) === 'general');
+    return lockDirection === 'mill_to_ho' ? { fromAccounts: mill, toAccounts: ho } : { fromAccounts: ho, toAccounts: mill };
+  }, [accounts, locked, lockDirection]);
+  const hideToBalance = lockDirection === 'mill_to_ho';
+  const fromGroups = useMemo(() => groupAccounts(fromAccounts), [fromAccounts]);
+  const toGroups = useMemo(() => groupAccounts(toAccounts), [toAccounts]);
+  const memoryEntity = lockDirection || 'contra';
+  const { accountId: lastFrom, remember: rememberFrom } = useDefaultAccount({ currency: '*', entity: memoryEntity, purpose: 'transfer_from', accounts: fromAccounts });
+  const { accountId: lastTo, remember: rememberTo } = useDefaultAccount({ currency: '*', entity: memoryEntity, purpose: 'transfer_to', accounts: toAccounts });
 
   // `fromAccountId` — opened from an account (Account drawer › Transfer): the
   // source is inherited, still changeable.
@@ -63,6 +80,7 @@ export default function ContraTransferDrawer({ open, onClose, editing = null, on
   const [step, setStep] = useState('form'); // 'form' | 'review'
   const [clientRef, setClientRef] = useState(newClientRef);
   const [rateTouched, setRateTouched] = useState(false);
+  const [methodTouched, setMethodTouched] = useState(false);
   const [uploading, setUploading] = useState(false);
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -70,11 +88,30 @@ export default function ContraTransferDrawer({ open, onClose, editing = null, on
   useEffect(() => {
     if (!open) return;
     setError(''); setFieldErrors({}); setStep('form'); setClientRef(newClientRef()); setRateTouched(!!editing);
+    setMethodTouched(!!editing);
     setForm(initialForm(editing, fromAccountId));
   }, [open, editing, fromAccountId]);
 
-  const fromAcct = accounts.find((a) => String(a.id) === String(form.fromId));
-  const toAcct = accounts.find((a) => String(a.id) === String(form.toId));
+  // Defaults for a new transfer, once the accounts are known: the source and
+  // destination this user last used here; locked Mill → Head Office falls back
+  // to the first Mill / Head Office account, as the old drawer did. Never over
+  // a choice already made.
+  const fromKey = fromAccounts.map((a) => a.id).join(',');
+  const toKey = toAccounts.map((a) => a.id).join(',');
+  useEffect(() => {
+    if (!open || editing) return;
+    setForm((f) => {
+      const { fromId, toId } = transferDefaults({ fromId: f.fromId, toId: f.toId, fromAccounts, toAccounts, lastFrom, lastTo, locked });
+      return fromId === f.fromId && toId === f.toId ? f : { ...f, fromId, toId };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, editing, fromKey, toKey, lastFrom, lastTo, locked]);
+
+  const fromAcct = fromAccounts.find((a) => String(a.id) === String(form.fromId));
+  const toAcct = toAccounts.find((a) => String(a.id) === String(form.toId));
+  // How the money moved — cash out of a cash account, otherwise a bank
+  // transfer — until the user picks one.
+  const method = methodTouched ? form.method : (fromAcct?.type === 'cash' ? 'cash' : 'bank_transfer');
   const fromCur = cur(fromAcct);
   const toCur = cur(toAcct);
   const kind = classifyTransfer(fromAcct, toAcct);
@@ -152,7 +189,7 @@ export default function ContraTransferDrawer({ open, onClose, editing = null, on
       fx_rate: fx ? Number(form.rate) : null,
       rate_date: fx ? form.date : null,
       bank_charges: Number(form.charges) > 0 ? Number(form.charges) : 0,
-      transfer_date: form.date, method: 'bank_transfer',
+      transfer_date: form.date, method,
       reference: String(form.reference).trim(), notes: form.notes || null,
       attachment_url: form.attachmentUrl || null, attachment_name: form.attachmentName || null,
       client_ref: clientRef,
@@ -161,6 +198,8 @@ export default function ContraTransferDrawer({ open, onClose, editing = null, on
       const res = editing
         ? await replaceMut.mutateAsync({ id: editing.id, ...body, reason: String(form.reason).trim() })
         : await createMut.mutateAsync(body);
+      // Remember the two ends for next time (shown and editable, never auto-sent).
+      if (!editing) { rememberFrom(form.fromId); rememberTo(form.toId); }
       if (res?._offlineQueued) addToast?.('Offline — the transfer will be recorded when the connection returns.', 'info');
       else {
         const t = res?.data?.transfer;
@@ -195,17 +234,32 @@ export default function ContraTransferDrawer({ open, onClose, editing = null, on
       {favStar(a)}{a.name}{a.currentBalance != null ? ` — ${fmtMoney(Number(a.currentBalance) || 0, cur(a), { decimals: 2 })}` : ''}
     </option>
   );
-  const select = (value, onChange, placeholder) => (
-    <select value={value} onChange={(e) => onChange(e.target.value)} className={inp}>
+  const select = (value, onChange, placeholder, groups, { hideBalance = false, id } = {}) => (
+    <select id={id} value={value} onChange={(e) => onChange(e.target.value)} className={inp}>
       <option value="">{placeholder}</option>
-      {groups.map((g) => <optgroup key={g.key} label={g.label}>{g.list.map(acctOption)}</optgroup>)}
+      {groups.map((g) => (
+        <optgroup key={g.key} label={g.label}>
+          {g.list.map((a) => (hideBalance ? <option key={a.id} value={a.id}>{favStar(a)}{a.name}</option> : acctOption(a)))}
+        </optgroup>
+      ))}
     </select>
   );
+  const lastUsedHint = (id, last) => (last && String(id) === String(last)
+    ? <p className="text-[11px] text-gray-500 mt-1" data-testid="account-default-hint">Last used — change it if needed.</p>
+    : null);
+  const title = editing ? `Edit ${editing.transferNo}`
+    : lockDirection === 'mill_to_ho' ? 'Send Funds to Head Office'
+    : lockDirection === 'ho_to_mill' ? 'Send Funds to the Mill'
+    : 'Contra Transfer';
+  const subtitle = editing ? 'The original is reversed and this replaces it'
+    : lockDirection === 'mill_to_ho' ? 'From a Mill account to a Head Office account — Head Office accepts it'
+    : "Move money between the company's own accounts";
+  const noSource = locked && fromAccounts.length === 0;
 
   return (
     <SlideDrawer open={open} onClose={onClose} size="lg"
-      title={editing ? `Edit ${editing.transferNo}` : 'Contra Transfer'}
-      subtitle={editing ? 'The original is reversed and this replaces it' : "Move money between the company's own accounts"}
+      title={title}
+      subtitle={subtitle}
       icon={ArrowLeftRight}
       footer={
         <div className="flex items-center justify-end gap-2">
@@ -217,7 +271,7 @@ export default function ContraTransferDrawer({ open, onClose, editing = null, on
               <ArrowLeftRight className="w-4 h-4" aria-hidden="true" /> {busy ? 'Saving…' : (editing ? 'Reverse & replace' : 'Confirm transfer')}
             </button>
           ) : (
-            <button type="button" onClick={review} disabled={uploading} className={btnPrimary}>
+            <button type="button" onClick={review} disabled={uploading || noSource} className={btnPrimary} data-action="review-transfer">
               Review
             </button>
           )}
@@ -226,15 +280,20 @@ export default function ContraTransferDrawer({ open, onClose, editing = null, on
       <div className="space-y-4">
         {step === 'form' ? (
           <>
+            {noSource && (
+              <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2" data-testid="no-source-account">No active account to send from.</div>
+            )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className={lbl}>From account {REQ}</label>
-                {select(form.fromId || '', (v) => { set('fromId', v); setRateTouched(!!editing); }, 'Select account…')}
+                <label className={lbl} htmlFor="contra-from">From account{lockDirection === 'mill_to_ho' ? ' (Mill)' : lockDirection === 'ho_to_mill' ? ' (Head Office)' : ''} {REQ}</label>
+                {select(form.fromId || '', (v) => { set('fromId', v); setRateTouched(!!editing); }, 'Select account…', fromGroups, { id: 'contra-from' })}
+                {lastUsedHint(form.fromId, lastFrom)}
                 <FieldError error={fieldErrors.from} />
               </div>
               <div>
-                <label className={lbl}>To account {REQ}</label>
-                {select(form.toId || '', (v) => { set('toId', v); setRateTouched(!!editing); }, 'Select account…')}
+                <label className={lbl} htmlFor="contra-to">To account{lockDirection === 'mill_to_ho' ? ' (Head Office)' : lockDirection === 'ho_to_mill' ? ' (Mill)' : ''} {REQ}</label>
+                {select(form.toId || '', (v) => { set('toId', v); setRateTouched(!!editing); }, 'Select account…', toGroups, { hideBalance: hideToBalance, id: 'contra-to' })}
+                {lastUsedHint(form.toId, lastTo)}
                 <FieldError error={fieldErrors.to} />
               </div>
             </div>
@@ -292,7 +351,16 @@ export default function ContraTransferDrawer({ open, onClose, editing = null, on
               </div>
             )}
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div>
+                <label className={lbl} htmlFor="contra-method">Method</label>
+                <select id="contra-method" value={method} onChange={(e) => { setMethodTouched(true); set('method', e.target.value); }} className={inp}>
+                  <option value="bank_transfer">Bank transfer</option>
+                  <option value="cash">Cash</option>
+                  <option value="cheque">Cheque</option>
+                  <option value="online">Online</option>
+                </select>
+              </div>
               <div>
                 <label className={lbl}>Reference / transaction no. {REQ}</label>
                 <input type="text" value={form.reference || ''} onChange={(e) => set('reference', e.target.value)} placeholder="Slip / TT / cheque #" className={inp} />
@@ -337,7 +405,7 @@ export default function ContraTransferDrawer({ open, onClose, editing = null, on
         ) : (
           <ContraSummary fromAcct={fromAcct} toAcct={toAcct} amount={amt} converted={converted} charges={charges}
             rate={fx ? Number(form.rate) : null} kind={kind} fx={fx} pkrEquivalent={pkrEquivalent}
-            reference={form.reference} date={form.date} editing={editing} />
+            reference={form.reference} date={form.date} editing={editing} method={method} />
         )}
         {step === 'review' && overdraftNote}
         {error && <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded p-2">{error}</div>}
@@ -346,15 +414,29 @@ export default function ContraTransferDrawer({ open, onClose, editing = null, on
   );
 }
 
+// Account picker groups: Head Office / Mill / Export, each per currency.
+function groupAccounts(list) {
+  const m = new Map();
+  for (const a of list) {
+    const key = `${ent(a)}|${cur(a)}`;
+    if (!m.has(key)) m.set(key, { key, label: `${entityLabel(ent(a))} · ${cur(a)}`, entity: ent(a), list: [] });
+    m.get(key).list.push(a);
+  }
+  return [...m.values()].sort((x, y) => (ENTITY_ORDER[x.entity] ?? 9) - (ENTITY_ORDER[y.entity] ?? 9) || x.label.localeCompare(y.label));
+}
+
+const METHOD_LABEL = { bank_transfer: 'Bank transfer', cash: 'Cash', cheque: 'Cheque', online: 'Online' };
+
 // The form for a new transfer, or pre-filled from the transfer being edited.
 function initialForm(editing, fromAccountId = null) {
   if (!editing) {
     return {
       fromId: fromAccountId ? String(fromAccountId) : '', toId: '', amount: '', date: todayLocalISO(), reference: '', notes: '',
-      rate: '', converted: '', charges: '', attachmentUrl: '', attachmentName: '', reason: '',
+      rate: '', converted: '', charges: '', attachmentUrl: '', attachmentName: '', reason: '', method: 'bank_transfer',
     };
   }
   return {
+    method: editing.method || 'bank_transfer',
     fromId: String(editing.fromAccountId || ''), toId: String(editing.toAccountId || ''),
     amount: editing.amount != null ? String(Number(editing.amount)) : '',
     date: String(editing.transferDate || todayLocalISO()).slice(0, 10),
@@ -373,7 +455,7 @@ function fmtInput(n, dp = 2) {
 }
 
 /** The pre-confirm summary. Exported for tests. */
-export function ContraSummary({ fromAcct, toAcct, amount, converted, charges, rate, kind, fx, pkrEquivalent, reference, date, editing }) {
+export function ContraSummary({ fromAcct, toAcct, amount, converted, charges, rate, kind, fx, pkrEquivalent, reference, date, editing, method = null }) {
   const fc = cur(fromAcct); const tc = cur(toAcct);
   const row = (k, v, cls = '') => (
     <div className="flex items-start justify-between gap-3 py-1.5 border-b border-gray-100 last:border-0">
@@ -388,6 +470,7 @@ export function ContraSummary({ fromAcct, toAcct, amount, converted, charges, ra
         {row('To', `${toAcct?.name || '—'} (${entityLabel(ent(toAcct))} · ${tc})`)}
         {row('Date', date || '—')}
         {row('Reference', reference || '—')}
+        {method && row('Method', METHOD_LABEL[method] || method)}
         {row('Amount', fmtMoney(amount, fc, { decimals: 2 }))}
         {fx && row('Converted', `${fmtMoney(converted, tc, { decimals: 2 })} @ ${rate}`)}
         {row('Bank charges', charges > 0 ? `${fmtMoney(charges, fc, { decimals: 2 })} — expense (6200)` : 'None')}

@@ -313,7 +313,7 @@ const generatedDocumentController = {
 
       const wa = whatsappQr.getStatus(req.user?.id);
       if (wa.status !== 'connected') {
-        return res.status(409).json({ success: false, code: 'WA_NOT_CONNECTED', message: 'Your WhatsApp is not connected. Pair your own account in Communications by scanning the QR code.' });
+        return res.status(409).json({ success: false, code: 'WA_NOT_CONNECTED', message: 'Your WhatsApp is not connected. Use "Pair my WhatsApp" on the WhatsApp send button and scan the QR code with your phone, then send again.' });
       }
 
       let pdf;

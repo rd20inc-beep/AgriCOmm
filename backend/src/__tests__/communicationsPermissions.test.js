@@ -52,6 +52,11 @@ describe('sending a DOCUMENT asks for a write in the module it came from', () =>
     expect(l).not.toContain('canSend,');
   });
 
+  it('also needs the pairing permission, so a read-only role holding documents.download cannot send', () => {
+    expect(line('post', '/whatsapp/send-document')).toMatch(/canSendDocument, canPair,/);
+    expect(ROUTES).toContain("const canPair = authorize('communications', 'whatsapp_pair')");
+  });
+
   it('admits every module that embeds the component', () => {
     expect(ROUTES).toContain("['documents', 'download']");
     expect(ROUTES).toContain("['finance', 'confirm_payment']");
@@ -82,10 +87,6 @@ describe('changing the company configuration needs manage_settings', () => {
     ['post', '/whatsapp/templates'],
     ['put', '/whatsapp/templates/:id'],
     ['delete', '/whatsapp/templates/:id'],
-    // The WhatsApp session itself: starting it shows a QR that pairs the
-    // company's number, and logout disconnects everyone.
-    ['post', '/whatsapp/qr/start'],
-    ['post', '/whatsapp/qr/logout'],
     // Firing a scheduled job by hand, and silencing one.
     ['post', '/scheduler/tasks/:id/run'],
     ['put', '/scheduler/tasks/:id/toggle'],
@@ -97,6 +98,24 @@ describe('changing the company configuration needs manage_settings', () => {
 
   it('canConfigure is the permission that already exists for it', () => {
     expect(ROUTES).toContain("const canConfigure = authorize('admin', 'manage_settings')");
+  });
+});
+
+describe('pairing YOUR OWN WhatsApp has its own permission (P5-12 / PLT-18)', () => {
+  // Sessions are per user (whatsappQr.service keys them by user id), so pairing
+  // is not a company-configuration act: it needs communications.whatsapp_pair
+  // (mig 440), held by every role that may send, not admin.manage_settings.
+  it.each([
+    ['post', '/whatsapp/qr/start'],
+    ['post', '/whatsapp/qr/logout'],
+  ])('%s %s', (method, routePath) => {
+    const l = line(method, routePath);
+    expect(l).toContain('canPair');
+    expect(l).not.toContain('canConfigure');
+  });
+
+  it('canPair is the dedicated permission', () => {
+    expect(ROUTES).toContain("const canPair = authorize('communications', 'whatsapp_pair')");
   });
 });
 
@@ -152,7 +171,7 @@ describe('no write route is left unguarded by accident', () => {
     const writes = [...ROUTES.matchAll(/router\.(post|put|delete)\('([^']+)'([^\n]*)/g)];
     expect(writes.length).toBeGreaterThan(15);
     const unaccounted = writes
-      .filter(([, , p, rest]) => !/canSend|canConfigure|canReadComms/.test(rest) && !PER_USER.includes(p))
+      .filter(([, , p, rest]) => !/canSend|canConfigure|canReadComms|canPair/.test(rest) && !PER_USER.includes(p))
       .map(([, m, p]) => `${m.toUpperCase()} ${p}`);
     if (unaccounted.length) {
       throw new Error(`unguarded and not on the per-user list: ${unaccounted.join(', ')}`);

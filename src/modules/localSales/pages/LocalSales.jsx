@@ -1,5 +1,5 @@
-import { useState, useMemo, useRef, Fragment } from 'react';
-import { Link } from 'react-router-dom';
+import { useState, useMemo, useRef, useEffect, Fragment } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import PartyLink from '../../../shared/components/PartyLink';
 import {
   ShoppingCart, Plus, Search, DollarSign, Package, Truck,
@@ -10,6 +10,7 @@ import { useLocalSales, useLocalSalesSummary, useCreateLocalSale, useLotInventor
   usePendingLocalSales, useConfirmLocalSale, useRejectLocalSale } from '../../../api/queries';
 import PaymentFormDrawer from '../../../components/payments/PaymentFormDrawer';
 import { useApp } from '../../../context/AppContext';
+import { useBankAccountsList, useCompanyProfile, useCustomersList } from '../../../shared/hooks/useMasterData';
 import { useAuth } from '../../../context/AuthContext';
 import TransactionDocument from '../../../components/TransactionDocument';
 import { useMillStoreItems } from '../../millStore/api/queries';
@@ -29,10 +30,11 @@ import { paymentWord, groupPaymentWord, payableDue, localToday, readLastCustomer
 import { todayLocalISO, fmtPKR as fmtPKRExact, fmtNum, fmtDate, fmtDateTime } from '../../../shared/utils/format';
 import { accountTakesCurrency } from '../../../shared/utils/accountCurrency';
 import { saleLineTotal, isFullyPaid, isOverPaid } from '../utils/saleMoney';
-import { lotFreeKg, lotSaleBlock } from '../utils/saleLot';
+import { lotFreeKg, lotSaleBlock, saleIntentFromParams, matchPresetLot } from '../utils/saleLot';
 import { keepPreviousData } from '@tanstack/react-query';
 import useDebouncedValue from '../../../hooks/useDebouncedValue';
 import ListCapHint from '../../../shared/components/ListCapHint';
+import { clickableProps } from '../../../shared/utils/a11y';
 
 // Local-sale money is shown to the paisa (2 dp), exact, en-PK grouping.
 const fmtPKR = (v) => fmtPKRExact(parseFloat(v) || 0, { decimals: 2 });
@@ -55,8 +57,22 @@ const SELECT = INPUT;
 const LABEL = "block text-xs font-semibold text-gray-600 uppercase mb-1";
 
 export default function LocalSales() {
-  const { addToast, customersList, refreshFromApi, bankAccountsList = [], companyProfileData } = useApp();
-  const [showSaleModal, setShowSaleModal] = useState(false);
+  const { addToast, refreshFromApi } = useApp();
+  const { data: customersList } = useCustomersList();
+  const { data: bankAccountsList } = useBankAccountsList();
+  const companyProfileData = useCompanyProfile();
+  // ?new=1 opens New Local Sale; &lot=<lot no> (Lot Detail's "Sell Locally",
+  // NAV-20) also picks that lot, so it is not searched for again. Read once;
+  // the params are then dropped so a refresh does not reopen the drawer.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [intent] = useState(() => saleIntentFromParams(searchParams));
+  const [showSaleModal, setShowSaleModal] = useState(intent.open);
+  useEffect(() => {
+    if (!searchParams.has('new') && !searchParams.has('lot')) return;
+    const next = new URLSearchParams(searchParams);
+    next.delete('new'); next.delete('lot');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
   const [invoiceSale, setInvoiceSale] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [displayUnit, setDisplayUnit] = useState('kg');
@@ -349,7 +365,7 @@ export default function LocalSales() {
                 if (g.items.length === 1) {
                   const s = g.items[0];
                   return (
-                    <tr key={s.id} onClick={() => openSaleDetail(s)} className="hover:bg-gray-50 cursor-pointer">
+                    <tr key={s.id} {...clickableProps(() => openSaleDetail(s))} className="hover:bg-gray-50 cursor-pointer">
                       <td data-label="Sale #" className="py-2.5 px-4 font-medium text-blue-600">
                         {s.saleNo}
                         {s.status === 'Pending' && <span className="ml-1.5 align-middle"><StatusBadge status="Pending" /></span>}
@@ -381,7 +397,7 @@ export default function LocalSales() {
                 const head = g.items[0];
                 return (
                   <Fragment key={g.key}>
-                    <tr onClick={() => toggleGroup(g.key)} className="hover:bg-gray-50 cursor-pointer bg-gray-50/40">
+                    <tr {...clickableProps(() => toggleGroup(g.key), { expanded: open })} className="hover:bg-gray-50 cursor-pointer bg-gray-50/40">
                       <td data-label="Sale #" className="py-2.5 px-4 font-medium text-blue-600">
                         <span className="inline-flex items-center gap-1.5">
                           <ChevronRight size={14} className={`text-gray-400 transition-transform ${open ? 'rotate-90' : ''}`} />
@@ -409,7 +425,7 @@ export default function LocalSales() {
                       </td>
                     </tr>
                     {open && g.items.map(s => (
-                      <tr key={s.id} onClick={() => openSaleDetail(s)} className="hover:bg-blue-50/40 cursor-pointer bg-white">
+                      <tr key={s.id} {...clickableProps(() => openSaleDetail(s))} className="hover:bg-blue-50/40 cursor-pointer bg-white">
                         <td data-label="Sale #" className="py-2 px-4 pl-10 text-xs text-gray-400">{s.saleNo}</td>
                         <td className="py-2 px-4"></td>
                         <td className="py-2 px-4"></td>
@@ -430,7 +446,7 @@ export default function LocalSales() {
       )}
 
       {/* New Sale Modal */}
-      <SaleModal isOpen={showSaleModal} onClose={() => setShowSaleModal(false)} customers={customersList} addToast={addToast} refetch={refetch} refreshFromApi={refreshFromApi} onCreated={(s) => setInvoiceSale(s)} />
+      <SaleModal isOpen={showSaleModal} presetLotRef={intent.lotRef} onClose={() => setShowSaleModal(false)} customers={customersList} addToast={addToast} refetch={refetch} refreshFromApi={refreshFromApi} onCreated={(s) => setInvoiceSale(s)} />
 
       {/* Invoice for the just-created sale — print / download */}
       {invoiceSale && (
@@ -534,12 +550,14 @@ export default function LocalSales() {
 // The sale lot picker's server filter: company lots holding KG free to sell.
 const SALE_LOT_PICK = { status: 'Available', in_stock: 'true', has_available: 'true', limit: 100 };
 
-function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromApi, onCreated }) {
+function SaleModal({ isOpen, presetLotRef = null, onClose, customers, addToast, refetch, refreshFromApi, onCreated }) {
   const createMutation = useCreateLocalSale();
   // Lot picker: searched and tag-filtered ON THE SERVER over every lot with KG
   // free to sell. It used to be the 100 newest 'Available' lots — empty ones
   // included — so older stock (opening lots) could not be sold (INV-04).
-  const [lotSearch, setLotSearch] = useState('');
+  // A lot handed over from Lot Detail starts as the search, so the server
+  // returns it; it is then picked once (below).
+  const [lotSearch, setLotSearch] = useState(presetLotRef || '');
   const lotQuery = useDebouncedValue(lotSearch.trim());
   const [tag, setTag] = useState('All');
   const { data: tagPage } = useLotInventoryPage(SALE_LOT_PICK);
@@ -554,7 +572,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
   const [pickedLot, setPickedLot] = useState(null);
   const lotById = (id) => safeLots.find(l => String(l.id) === String(id))
     || (pickedLot && String(pickedLot.id) === String(id) ? pickedLot : null);
-  const { bankAccountsList = [] } = useApp();
+  const { data: bankAccountsList } = useBankAccountsList();
   const bankOptions = useMemo(() => (Array.isArray(bankAccountsList) ? bankAccountsList : [])
     .filter(b => (b.type || '') !== 'cash' && (b.isActive ?? b.is_active ?? true) && accountTakesCurrency(b, 'PKR')), [bankAccountsList]);
   // Mill-store packaging items (e.g. empty katta) are sellable too — count-based.
@@ -640,8 +658,8 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
   // the user has not typed; a typed rate always wins.
   const lotPickRef = useRef(0);
   const shownRate = (perKg, unit, bagWt) => String(Math.round(rateFromPerKg(perKg, unit, parseFloat(bagWt) || 50) * 100) / 100);
-  async function pickLot(lotId) {
-    const lot = lotById(lotId);
+  async function pickLot(lotId, lotObj = null) {
+    const lot = lotObj || lotById(lotId);
     setPickedLot(lot);
     setLine(p => ({
       ...p, lot_id: lotId, mill_item_id: '', item_name: lot ? (lot.itemName || '') : p.item_name, item_type: lot ? (lot.type || '') : p.item_type,
@@ -659,6 +677,25 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
       }));
     } catch { /* no rate available — the user types one */ }
   }
+  // Pick the preset lot once its search result arrives (and only once — the
+  // user may change it afterwards). A lot that cannot be sold (no free qty)
+  // simply isn't in the in-stock list, so nothing is picked.
+  const presetDone = useRef(!presetLotRef);
+  useEffect(() => {
+    if (presetDone.current || !isOpen) return;
+    const lot = matchPresetLot(safeLots, presetLotRef);
+    if (!lot) return;
+    // Picked after the render that delivered the search result (the same
+    // path as choosing it in the select, rate suggestion included).
+    let cancelled = false;
+    Promise.resolve().then(() => {
+      if (cancelled || presetDone.current) return;
+      presetDone.current = true;
+      pickLot(String(lot.id), lot);
+    });
+    return () => { cancelled = true; };
+  }, [isOpen, safeLots, presetLotRef]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // A unit change re-expresses an auto-filled rate in the new unit.
   function setRateUnit(unit, alsoQty) {
     setLine(p => ({
@@ -861,6 +898,10 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
     } catch (err) { addToast(err.message || 'Sale failed', 'error'); }
   }
 
+  // Unsaved-change guard (P5-07): a cart, a half-built line or typed buyer
+  // details make Esc / X ask before the sale is dropped.
+  const saleDirty = cart.length > 0 || !!(line.lot_id || line.mill_item_id || line.quantity_input)
+    || !!(form.buyer_name || form.buyer_phone || form.notes || form.vehicle_no || form.gate_pass_no) || !!repack.enabled;
   const step1Valid = cart.length > 0 && (!!customerId || !!form.buyer_name);
   function tryNext() {
     if (!customerId && !form.buyer_name) { addToast('Select a customer or enter buyer name', 'error'); return; }
@@ -898,7 +939,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
   );
 
   return (
-    <SlideDrawer open={isOpen} onClose={onClose} title="New Local Sale" subtitle={STEPS[step - 1]?.label} icon={ShoppingCart} size="xl" footer={footer}>
+    <SlideDrawer open={isOpen} onClose={onClose} dirty={saleDirty} title="New Local Sale" subtitle={STEPS[step - 1]?.label} icon={ShoppingCart} size="xl" footer={footer}>
         {/* Step indicator */}
         <div className="-mx-5 -mt-5 mb-5 px-5 pt-4 pb-4 border-b border-gray-100 bg-gray-50/60">
           <div className="flex items-center justify-between max-w-md mx-auto">

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import PartyLink from '../../../../shared/components/PartyLink';
 import { Users, Plus, Globe, Mail, Phone, Pencil, Trash2, Star, BookOpen } from 'lucide-react';
 import { useApp } from '../../../../context/AppContext';
+import { useCustomersList } from '../../../../shared/hooks/useMasterData';
 import { useCreateCustomer, useUpdateCustomer, useDeleteCustomer } from '../../../../api/queries';
 import Modal from '../../components/AdminDrawer';
 import FieldError from '../../../../shared/components/FieldError';
@@ -13,7 +14,8 @@ const EMPTY = { name: '', country: '', contact_person: '', email: '', phone: '' 
 
 export default function CustomersTab() {
   const canWrite = useAdminCanWrite();
-  const { customersList, addToast } = useApp();
+  const { addToast } = useApp();
+  const { data: customersList } = useCustomersList();
   const navigate = useNavigate();
   const createMut = useCreateCustomer();
   const updateMut = useUpdateCustomer();

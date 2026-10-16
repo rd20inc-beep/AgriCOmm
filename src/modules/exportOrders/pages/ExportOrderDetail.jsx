@@ -15,6 +15,7 @@ const DETAIL_NAV = [
 ];
 import { useQueryClient } from '@tanstack/react-query';
 import { useApp } from '../../../context/AppContext';
+import { useBankAccountsList, useCompanyProfile, useMillingBatchesList, useSuppliersList } from '../../../shared/hooks/useMasterData';
 import { useAuth } from '../../../context/AuthContext';
 import { useOwnerAuth } from '../../../context/OwnerAuthContext';
 import { realtimeRepo } from '../../../data/repositories/realtime';
@@ -49,8 +50,14 @@ import {
   CancelOrderDrawer,
   InvoicePreviewModal,
   getVisibleTabs,
+  tabList,
   documentLabels,
 } from '../components';
+import { useUrlTab } from '../../../shared/hooks/useUrlTab';
+import { goBack } from '../../../shared/utils/goBack';
+import Breadcrumbs from '../../../shared/components/Breadcrumbs';
+
+const TAB_KEYS = tabList.map((t) => t.key);
 
 export default function ExportOrderDetail() {
   const { id } = useParams();
@@ -58,7 +65,11 @@ export default function ExportOrderDetail() {
   const qc = useQueryClient();
   const { token } = useAuth();
   const { requestOwnerApproval } = useOwnerAuth();
-  const { millingBatches, addToast, exportCostCategories, companyProfileData, bankAccountsList, suppliersList } = useApp();
+  const { addToast, exportCostCategories } = useApp();
+  const { data: millingBatches } = useMillingBatchesList();
+  const companyProfileData = useCompanyProfile();
+  const { data: bankAccountsList } = useBankAccountsList();
+  const { data: suppliersList } = useSuppliersList();
 
   // Fetch order detail via TanStack Query
   const { data: order, isLoading: orderLoading } = useExportOrder(id);
@@ -73,7 +84,8 @@ export default function ExportOrderDetail() {
   const startDocsMut = useStartDocs();
   const createMillingMut = useCreateMillingBatch();
 
-  const [activeTab, setActiveTab] = useState('overview');
+  // ?tab= keeps the tab across refresh, Back and shared links (P5-08).
+  const [activeTab, setActiveTab] = useUrlTab('overview', TAB_KEYS);
   const [openGroup, setOpenGroup] = useState(null);
   const [showActions, setShowActions] = useState(false);
   const [showInvoicePreview, setShowInvoicePreview] = useState(false);
@@ -90,17 +102,20 @@ export default function ExportOrderDetail() {
   // `?send=proforma` (from the orders list) asks for the same thing on arrival.
   const [searchParams, setSearchParams] = useSearchParams();
   const [docRequest, setDocRequest] = useState(null);
-  const requestProformaEmail = React.useCallback(() => {
+  const requestProformaEmail = () => {
     setActiveTab('documents');
     setDocRequest({ docType: 'proforma-invoice', action: 'email', nonce: Date.now() });
-  }, []);
+  };
   React.useEffect(() => {
     if (searchParams.get('send') !== 'proforma') return;
-    requestProformaEmail();
+    setDocRequest({ docType: 'proforma-invoice', action: 'email', nonce: Date.now() });
+    // One URL update: drop ?send and land on the Documents tab (two separate
+    // updates in one tick would overwrite each other).
     const next = new URLSearchParams(searchParams);
     next.delete('send');
+    next.set('tab', 'documents');
     setSearchParams(next, { replace: true });
-  }, [searchParams, setSearchParams, requestProformaEmail]);
+  }, [searchParams, setSearchParams]);
 
   // Recording an advance / balance: the shared Payment form (variant
   // receive_export → POST /export-orders/:id/record-receipt), a PENDING
@@ -189,7 +204,7 @@ export default function ExportOrderDetail() {
     if (!tabKeys.includes(activeTab)) {
       setActiveTab(tabKeys[0] || 'overview');
     }
-  }, [orderStatus]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [orderStatus, activeTab]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Early returns AFTER all hooks
   if (orderLoading && !order) {
@@ -629,13 +644,14 @@ export default function ExportOrderDetail() {
 
   return (
     <div className="space-y-6">
+      <Breadcrumbs items={[{ label: 'Export Orders', to: '/export' }, { label: order.id }]} />
       {/* Header */}
       <OrderHeader
         order={order}
         formatCurrency={formatCurrency}
         showActions={showActions}
         setShowActions={setShowActions}
-        onNavigateBack={() => navigate('/export')}
+        onNavigateBack={() => goBack(navigate, '/export')}
         onShowInvoicePreview={() => setShowInvoicePreview(true)}
         onShowEmailComposer={requestProformaEmail}
         onDuplicate={() => {
@@ -696,7 +712,7 @@ export default function ExportOrderDetail() {
             {canCreateMilling && !order.millingOrderId && (
               <button onClick={openMillingModal} className="px-4 py-2 bg-white border border-amber-400 text-amber-800 rounded-lg text-sm font-medium hover:bg-amber-100">Create Milling Batch</button>
             )}
-            <button onClick={openAdvanceModal} className="px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700">Confirm Advance Received</button>
+            <button onClick={openAdvanceModal} className="px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700" title="Records the advance the buyer paid; Finance then confirms it against the bank">Record Advance Receipt</button>
           </div>
         </div>
       )}
@@ -746,7 +762,7 @@ export default function ExportOrderDetail() {
             <p className="text-xs text-amber-700">Expected: {formatCurrency(order.balanceExpected)} | Received: {formatCurrency(order.balanceReceived)} | Outstanding: {formatCurrency(order.balanceExpected - order.balanceReceived)}</p>
             <p className="text-xs text-amber-700 mt-1">The order shipped on the advance. It closes once the balance is received and the BL Final and certificate of origin are approved.</p>
           </div>
-          <button onClick={openBalanceModal} className="shrink-0 px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700">Record Balance</button>
+          <button onClick={openBalanceModal} className="shrink-0 px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700" title="Records the balance the buyer paid; Finance then confirms it against the bank">Record Balance Receipt</button>
         </div>
       )}
       {order.status === 'Ready to Ship' && (
@@ -836,7 +852,7 @@ export default function ExportOrderDetail() {
             });
           })()}
         </div>
-        {openGroup && <div className="fixed inset-0 z-20" onClick={() => setOpenGroup(null)} />}
+        {openGroup && <div className="fixed inset-0 z-20" aria-hidden="true" onClick={() => setOpenGroup(null)} />}
       </div>
 
       {/* Tab Content */}

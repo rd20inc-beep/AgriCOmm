@@ -8,9 +8,11 @@ import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, Printer, Truck, Package, BookUser, AlertTriangle, ShoppingCart, Factory } from 'lucide-react';
 import { lotInventoryApi } from '../../../api/services';
 import { useApp } from '../../../context/AppContext';
+import { useCompanyProfile } from '../../../shared/hooks/useMasterData';
 import { printPurchaseInvoice } from '../../localSales/utils/invoicePrint';
 import StatusBadge from '../../../shared/components/StatusBadge';
 import { fmtPKR, fmtDate, fmtNum, fmtPct } from '../../../shared/utils/format';
+import { goBack } from '../../../shared/utils/goBack';
 
 const pkr = (v) => fmtPKR(parseFloat(v) || 0, { decimals: 2 });
 const dt = (v) => (v ? fmtDate(v) : '—');
@@ -25,7 +27,8 @@ function Field({ label, value, sub, tone = 'gray' }) {
 export default function PurchaseInvoiceView() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { companyProfileData, addToast } = useApp();
+  const { addToast } = useApp();
+  const companyProfileData = useCompanyProfile();
 
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ['lot', 'purchase-invoice', id],
@@ -36,7 +39,7 @@ export default function PurchaseInvoiceView() {
   if (isLoading) return <div className="p-6 text-sm text-gray-400">Loading purchase invoice…</div>;
   if (isError || !data?.purchase) return (
     <div className="p-6">
-      <button onClick={() => navigate(-1)} className="text-blue-600 hover:underline inline-flex items-center gap-1 text-sm"><ArrowLeft size={14} /> Back</button>
+      <button type="button" onClick={() => goBack(navigate, '/lot-inventory')} className="text-blue-600 hover:underline inline-flex items-center gap-1 text-sm"><ArrowLeft size={14} /> Back</button>
       <p className="mt-4 text-sm text-red-600">{error?.message || 'Purchase invoice not available for this lot.'}</p>
     </div>
   );
@@ -61,7 +64,7 @@ export default function PurchaseInvoiceView() {
       {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <button onClick={() => navigate(-1)} className="text-blue-600 hover:underline inline-flex items-center gap-1 text-sm mb-1"><ArrowLeft size={14} /> Back</button>
+          <button type="button" onClick={() => goBack(navigate, '/lot-inventory')} className="text-blue-600 hover:underline inline-flex items-center gap-1 text-sm mb-1"><ArrowLeft size={14} /> Back</button>
           <h1 className="text-2xl font-bold text-gray-900 inline-flex items-center gap-2">
             <ShoppingCart size={20} /> Purchase {p.purchaseNo}
             <StatusBadge status={p.paymentStatus || '—'} />

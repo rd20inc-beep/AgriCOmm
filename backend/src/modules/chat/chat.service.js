@@ -1,5 +1,4 @@
 const db = require('../../config/database');
-const { BALANCE_COLLECTION_STATUSES, BALANCE_OUTSTANDING_SQL } = require('../exportOrders/balanceCollection');
 
 // In-app team chat. 1:1 direct messages (recipient_id set) and broadcast
 // "Announcements" (recipient_id NULL, is_broadcast). Unread is computed against a
@@ -145,70 +144,36 @@ async function getUnread(meId) {
   return { total: peerUnread + conv.broadcast.unread, broadcast: conv.broadcast.unread, direct: peerUnread };
 }
 
-// Pending approvals the current user can act on — surfaced in the chat widget so
-// money acceptances and master-data reviews are easy to find. Role-aware:
-//   Mill Manager(4)               → incoming fund transfers TO the mill
-//   Super Admin(1)/Owner(9)/Finance Manager(3) → incoming fund transfers TO Head Office
-//   Super Admin(1)/Owner(9)       → master-data (product/supplier/customer) approvals
+// Pending approvals the current user can act on — surfaced in the chat widget.
+// The list is the approvals inbox (approvalsInbox.service): every queue, each
+// filtered by its approve route's guard, with roles resolved by NAME (the old
+// hard-coded role ids differed between installs — PLT-15). Fund transfers stay
+// one line each, so they can be accepted inline; every other type is one
+// summary line linking to the inbox filtered to that type.
 async function getApprovals(meId) {
-  const me = await db('users').where('id', meId).first('role_id');
-  const roleId = me?.role_id;
-  const isMill = roleId === 4;
-  const isHO = [1, 9, 3].includes(roleId);
-  const isApprover = [1, 9].includes(roleId);
+  const { getInbox } = require('../approvalsInbox/approvalsInbox.service');
+  const inbox = await getInbox(meId);
   const items = [];
-
-  const ftEntity = isMill ? 'mill' : (isHO ? 'general' : null);
-  if (ftEntity) {
-    const fts = await db('fund_transfers as ft')
-      .where({ 'ft.to_entity': ftEntity, 'ft.status': 'pending' })
-      .orderBy('ft.transfer_date', 'desc')
-      .select('ft.id', 'ft.transfer_no', 'ft.amount', 'ft.from_entity', 'ft.transfer_date', 'ft.reference');
-    for (const f of fts) {
+  const grouped = new Map();
+  for (const it of inbox.items) {
+    if (it.type === 'fund_transfer') {
       items.push({
-        id: `ft-${f.id}`, kind: 'fund_transfer', transferId: f.id,
-        title: 'Accept funds', date: f.transfer_date,
-        message: `Rs ${Math.round(parseFloat(f.amount) || 0).toLocaleString()} from ${f.from_entity === 'general' ? 'Head Office' : 'Mill'} · ${f.transfer_no}`,
+        id: `ft-${it.id}`, kind: 'fund_transfer', transferId: it.id,
+        title: 'Accept funds', date: it.requestedAt,
+        message: `${it.currency === 'PKR' ? 'Rs' : it.currency} ${Math.round(it.amount || 0).toLocaleString()} · ${it.summary} · ${it.ref}`,
       });
+    } else {
+      if (!grouped.has(it.type)) grouped.set(it.type, { label: it.typeLabel, n: 0 });
+      grouped.get(it.type).n += 1;
     }
   }
-
-  if (isApprover) {
-    const [p, s, c] = await Promise.all([
-      db('products').where({ approval_status: 'pending' }).count('id as c').first().catch(() => ({ c: 0 })),
-      db('suppliers').where({ approval_status: 'pending' }).count('id as c').first().catch(() => ({ c: 0 })),
-      db('customers').where({ approval_status: 'pending' }).count('id as c').first().catch(() => ({ c: 0 })),
-    ]);
-    const total = (parseInt(p?.c, 10) || 0) + (parseInt(s?.c, 10) || 0) + (parseInt(c?.c, 10) || 0);
-    if (total > 0) {
-      items.push({ id: 'masterdata', kind: 'masterdata', title: 'Master-data approvals', message: `${total} item(s) awaiting review — products / suppliers / customers`, link: '/admin' });
-    }
+  for (const [type, { label, n }] of grouped) {
+    items.push({
+      id: type, kind: type, title: label,
+      message: `${n} item(s) awaiting your action.`,
+      link: `/approvals?type=${type}`,
+    });
   }
-
-  const safe = async (fn, dflt) => { try { return await fn(); } catch { return dflt; } };
-  const cnt = (r) => parseInt(r?.c, 10) || 0;
-
-  // Export-order confirmations (advance / balance) — finance & owner roles.
-  if ([1, 3, 9].includes(roleId)) {
-    const eo = await safe(() => db('export_orders')
-      .where((q) => q.where('status', 'Awaiting Advance')
-        .orWhere((b) => b.whereIn('status', BALANCE_COLLECTION_STATUSES).whereRaw(BALANCE_OUTSTANDING_SQL)))
-      .count('id as c').first(), { c: 0 });
-    if (cnt(eo) > 0) items.push({ id: 'export_confirmations', kind: 'confirmation', title: 'Export confirmations', message: `${cnt(eo)} order(s) awaiting advance / balance confirmation.`, link: '/finance/confirmations' });
-  }
-
-  // Milling batches awaiting approval — mill & owner roles.
-  if ([1, 4, 9].includes(roleId)) {
-    const mb = await safe(() => db('milling_batches').where('status', 'Pending Approval').count('id as c').first(), { c: 0 });
-    if (cnt(mb) > 0) items.push({ id: 'batch_approvals', kind: 'batch', title: 'Milling batches to approve', message: `${cnt(mb)} batch(es) pending approval.`, link: '/milling' });
-  }
-
-  // Stock adjustments awaiting approval — inventory, mill & owner roles.
-  if ([1, 4, 6, 9].includes(roleId)) {
-    const sa = await safe(() => db('stock_adjustments').where('approval_status', 'pending').count('id as c').first(), { c: 0 });
-    if (cnt(sa) > 0) items.push({ id: 'stock_adjustments', kind: 'stock_adjustment', title: 'Stock adjustments to approve', message: `${cnt(sa)} adjustment(s) awaiting approval.`, link: '/stock-adjustments' });
-  }
-
   return { items, count: items.length };
 }
 

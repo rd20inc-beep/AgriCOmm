@@ -145,10 +145,7 @@ router.post('/fund-transfers',
 // finance.confirm_payment, the Mill with milling.edit. It used to be
 // milling.edit for every transfer, so a Head-Office finance user could not
 // accept money sent to Head Office without a mill permission.
-const ACCEPT_PERMISSION = {
-  general: ['finance', 'confirm_payment'],
-  mill: ['milling', 'edit'],
-};
+const { ACCEPT_PERMISSION } = require('./transferAcceptPermission');
 async function authorizeTransferAccept(req, res, next) {
   try {
     const t = await db('fund_transfers').where({ id: req.params.id }).first('id', 'to_entity');

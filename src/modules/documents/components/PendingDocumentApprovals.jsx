@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { FileText, Check, X, Trash2, RefreshCw, Eye } from 'lucide-react';
 import { documentsApi } from '../api/services';
 import api from '../../../api/client';
@@ -17,6 +18,7 @@ export default function PendingDocumentApprovals() {
   const { addToast } = useApp();
   const { hasPermission } = useAuth();
   const canApprove = hasPermission('documents', 'approve');
+  const qc = useQueryClient();
 
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -37,7 +39,10 @@ export default function PendingDocumentApprovals() {
 
   async function act(row, fn, okMsg) {
     setBusyId(row.id);
-    try { await fn(); addToast?.(okMsg, 'success'); await load(); }
+    try {
+      await fn(); addToast?.(okMsg, 'success'); await load();
+      qc.invalidateQueries({ queryKey: ['approvals'] }); // the approvals inbox + badge
+    }
     catch (e) { addToast?.(e?.data?.message || e.message || 'Action failed', 'error'); }
     finally { setBusyId(null); }
   }
@@ -92,7 +97,7 @@ export default function PendingDocumentApprovals() {
                   </td>
                   <td data-label="Order" className="py-2">
                     {r.order_no
-                      ? <Link to={`/export-orders/${r.linked_id}`} className="text-blue-600 hover:underline">{r.order_no}</Link>
+                      ? <Link to={`/export/${r.linked_id}`} className="text-blue-600 hover:underline">{r.order_no}</Link>
                       : <span className="text-gray-400">{r.linked_type} #{r.linked_id}</span>}
                   </td>
                   <td data-label="Requested by" className="mob-hide py-2 text-gray-500">{r.requested_by_name || r.uploaded_by_name || '—'}</td>

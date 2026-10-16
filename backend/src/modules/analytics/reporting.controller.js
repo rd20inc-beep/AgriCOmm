@@ -218,6 +218,8 @@ const reportingController = {
         return sendCsv(res, {
           filename: 'order-profitability',
           rows: data.data,
+          truncated: !!(data.pagination && data.pagination.truncated),
+          total: data.total,
           columns: [
             { label: 'Order', key: 'orderNo' }, { label: 'Customer', key: 'customerName' },
             { label: 'Status', key: 'status' }, { label: 'Currency', key: 'currency' },
@@ -518,15 +520,10 @@ const reportingController = {
     }
   },
 
-  async globalSearch(req, res) {
-    try {
-      const { q, entity, limit } = req.query;
-      const data = await reportingService.globalSearch({ q, entity, limit, warehouseScope: await whScope.resolveWarehouseScope(req) });
-      return res.json({ success: true, ...data });
-    } catch (err) {
-      console.error('Global search error:', err);
-      return res.status(500).json({ success: false, message: 'Internal server error.' });
-    }
+  // One implementation for the Reports hero and the header search (P5-03):
+  // modules/analytics/globalSearch.js, filtered per record type by permission.
+  globalSearch(req, res) {
+    return require('./globalSearch').searchHandler(req, res);
   },
 
   async batchProfitability(req, res) {
@@ -640,7 +637,12 @@ const reportingController = {
         meta: reportMeta(req.reportRange, { unit: 'kg', currency: 'PKR', basis: 'Confirmed (Completed) sales by sale date; COGS = locked GL figure' }),
       };
       await redactReport(req, data);
-      if (wantsCsv(req)) return sendCsv(res, { filename: 'local-sales', rows: data.rows, columns: localSalesReport.CSV_COLUMNS });
+      if (wantsCsv(req)) {
+        return sendCsv(res, {
+          filename: 'local-sales', rows: data.rows, columns: localSalesReport.CSV_COLUMNS,
+          truncated: !!data.pagination.truncated, total: data.pagination.total,
+        });
+      }
       return res.json({ success: true, data });
     } catch (err) {
       console.error('Local sales report error:', err);

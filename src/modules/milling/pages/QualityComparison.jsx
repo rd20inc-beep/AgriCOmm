@@ -6,6 +6,7 @@ import {
   Filter, FlaskConical, Search, ExternalLink, RefreshCw,
 } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
+import { useMillingBatchesList } from '../../../shared/hooks/useMasterData';
 import { useUpdateMillingBatch, useBatchStatusAction } from '../../../api/queries';
 import api from '../../../api/client';
 import SlideDrawer from '../../../components/SlideDrawer';
@@ -44,7 +45,8 @@ function toAnalysis(a) {
 }
 
 export default function QualityComparison() {
-  const { millingBatches: rawBatches, addToast } = useApp();
+  const { addToast } = useApp();
+  const { data: rawBatches } = useMillingBatchesList();
   const updateBatchMut = useUpdateMillingBatch();
   const statusMut = useBatchStatusAction();
   const millingBatches = Array.isArray(rawBatches) ? rawBatches : [];

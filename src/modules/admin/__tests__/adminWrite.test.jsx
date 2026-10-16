@@ -17,6 +17,22 @@ vi.mock('../../../api/queries', () => ({
 vi.mock('../../../context/AppContext', () => ({
   useApp: () => ({ addToast: vi.fn(), customersList: [{ id: 1, name: 'Buyer One', country: 'UAE', isActive: true }] }),
 }));
+// P5-13: pages read their lists from the per-page hooks, not AppContext.
+vi.mock('../../../shared/hooks/useMasterData', () => ({
+  useCustomersList: () => ({ data: [{ id: 1, name: 'Buyer One', country: 'UAE', isActive: true }] }),
+  useSuppliersList: () => ({ data: [] }),
+  useProductsList: () => ({ data: [] }),
+  useWarehousesList: () => ({ data: [] }),
+  useBagTypesList: () => ({ data: [] }),
+  useBankAccountsList: () => ({ data: [] }),
+  useExportOrdersList: () => ({ data: [] }),
+  useMillingBatchesList: () => ({ data: [] }),
+  useInventoryLots: () => ({ data: [] }),
+  useCompanyProfile: () => ({ name: 'AGRI COMMODITIES' }),
+  useAppSettings: () => ({ settings: { paymentReminderDays: 7 }, updateSettings: vi.fn() }),
+}));
+// PartyLink reads the user's finance.view (P5-05).
+vi.mock('../../../context/AuthContext', () => ({ useAuth: () => ({ hasPermission: () => true }) }));
 vi.mock('react-router-dom', async (orig) => ({ ...(await orig()), useNavigate: () => vi.fn() }));
 vi.mock('../../../hooks/useConfirm', () => ({ default: () => [vi.fn(), null] }));
 

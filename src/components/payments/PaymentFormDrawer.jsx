@@ -10,7 +10,7 @@ import { invalidateMoney } from './invalidateMoney';
 import PaymentDrawer from './PaymentDrawer';
 import { money } from './paymentPayload';
 import {
-  variantConfig, paymentRequest, contextForDocument, canRecordVariant,
+  variantConfig, paymentRequest, contextForDocument, canRecordVariant, entityForPayment,
 } from './paymentVariants';
 
 /**
@@ -25,8 +25,18 @@ import {
  *
  *   <PaymentFormDrawer doc={{ docKind: 'payable', row }} onClose={…} onDone={…} />
  *   <PaymentFormDrawer variant="receive_export" ctx={{ orderId, kind: 'advance', currency: 'USD', outstanding }} … />
+ *
+ * A host keeps what is genuinely its own through `ctx` (never the endpoint):
+ *   ctx.entity           'general' | 'mill' | 'export' — whose account default to offer
+ *   ctx.defaultMethod    e.g. 'cash' for a mill-store bill
+ *   ctx.methods          narrow the variant's methods (values), e.g. ['cash']
+ *   ctx.fixedAccountId   pay from one account, no picker (Mill Cash)
+ *   ctx.filterAccountsByMethod  cash from a cash account, transfers from a bank one
+ * and `banner` / `before` for a host's own note or picker above the fields.
+ * The account the user last used for this currency + entity is pre-selected
+ * (useDefaultAccount), visibly and editable; nothing is sent until Submit.
  */
-export default function PaymentFormDrawer({ doc, variant: variantIn, ctx: ctxIn, onClose, onDone, open = true }) {
+export default function PaymentFormDrawer({ doc, variant: variantIn, ctx: ctxIn, onClose, onDone, open = true, banner: hostBanner = null }) {
   const ctx = ctxIn ? { ...ctxIn, variant: variantIn || ctxIn.variant } : contextForDocument(doc);
   const variant = variantIn || ctx?.variant;
   const cfg = variantConfig(variant);
@@ -73,12 +83,20 @@ export default function PaymentFormDrawer({ doc, variant: variantIn, ctx: ctxIn,
     ctx.outstanding != null ? ['Outstanding', money(ctx.outstanding, currency)] : null,
   ].filter(Boolean);
 
-  const banner = cfg.pending ? (
+  const pendingBanner = cfg.pending ? (
     <p className="flex items-start gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800" data-testid="pending-note">
       <Info size={13} className="mt-0.5 shrink-0" />
       This records the receipt for Finance to confirm with the rate the bank applied. Nothing moves in the bank or the ledger until then.
     </p>
   ) : null;
+  const banner = (pendingBanner || hostBanner) ? <>{hostBanner}{pendingBanner}</> : null;
+  const methods = Array.isArray(ctx.methods) && ctx.methods.length
+    ? cfg.methods.filter((m) => ctx.methods.includes(m.value))
+    : cfg.methods;
+  const defaultMethod = ctx.defaultMethod && methods.some((m) => m.value === ctx.defaultMethod)
+    ? ctx.defaultMethod
+    : (millOnly && methods.some((m) => m.value === 'cash') ? 'cash' : methods[0]?.value || 'bank_transfer');
+  const entity = entityForPayment(variant, ctx, { millOnly });
 
   async function submit(body) {
     const res = await api[req.method](req.url, body);
@@ -94,11 +112,14 @@ export default function PaymentFormDrawer({ doc, variant: variantIn, ctx: ctxIn,
       summary={summary} banner={banner}
       amountLabel={`${isReceipt ? 'Amount received' : 'Amount to pay'} (${currency}) *`}
       submitLabel={cfg.submit}
-      methods={cfg.methods} cashLocation={!!cfg.cashLocation}
+      methods={methods} cashLocation={!!cfg.cashLocation}
       extras={taxes || attach} taxes={taxes} attach={attach}
-      defaultMethod={millOnly ? 'cash' : 'bank_transfer'}
+      defaultMethod={defaultMethod}
+      filterAccountsByMethod={!!ctx.filterAccountsByMethod}
+      {...(ctx.fixedAccountId != null ? { fixedAccountId: ctx.fixedAccountId } : {})}
+      rememberAs={{ entity }}
       defaultNotes={ctx.notes || ''}
-      initial={{ bankAccountId: ctx.bankAccountId ? String(ctx.bankAccountId) : undefined, fxRate: ctx.fxRate ? String(ctx.fxRate) : undefined, collectionLocation: ctx.collectionLocation }}
+      initial={{ bankAccountId: (ctx.fixedAccountId ?? ctx.bankAccountId) ? String(ctx.fixedAccountId ?? ctx.bankAccountId) : undefined, fxRate: ctx.fxRate ? String(ctx.fxRate) : undefined, collectionLocation: ctx.collectionLocation }}
       requireAccountFor={cfg.accountRequired}
       accounts={accounts}
       formId={`payment-form-${variant}`}

@@ -151,3 +151,47 @@ describe('statement CSV rows', () => {
     expect(bs.find((r) => r.name === 'Total liabilities and equity').amount).toBe(700);
   });
 });
+
+// W19 — a report CSV is the FULL filtered set; when even that hits a cap the
+// browser is told (truncated flag / X-Truncated header) so it can warn.
+describe('export requests and capped exports (W19)', () => {
+  const { isExportRequest, listCap, EXPORT_ROW_CAP } = require('../modules/analytics/reportContract');
+  const { sendCsv } = require('../utils/csv');
+
+  test('export=1 or format=csv asks for every row up to the export cap', () => {
+    expect(isExportRequest({ export: '1' })).toBe(true);
+    expect(isExportRequest({ export: 'true' })).toBe(true);
+    expect(isExportRequest({ format: 'CSV' })).toBe(true);
+    expect(isExportRequest({ export: '0' })).toBe(false);
+    expect(isExportRequest({})).toBe(false);
+    expect(listCap({ export: '1', limit: 10 }, { defaultLimit: 300, maxLimit: 1000 })).toBe(EXPORT_ROW_CAP);
+    expect(listCap({ limit: 99999 }, { defaultLimit: 300, maxLimit: 1000 })).toBe(1000);
+    expect(listCap({}, { defaultLimit: 300, maxLimit: 1000 })).toBe(300);
+  });
+
+  function fakeRes() {
+    const headers = {};
+    return {
+      headers,
+      setHeader(k, v) { headers[k] = v; },
+      status() { return this; },
+      send(b) { this.body = b; return this; },
+    };
+  }
+
+  test('sendCsv flags a capped export in headers the browser can read', () => {
+    const res = fakeRes();
+    sendCsv(res, { filename: 'x', columns: [{ label: 'a', key: 'a' }], rows: [{ a: 1 }], truncated: true, total: 7 });
+    expect(res.headers['X-Truncated']).toBe('1');
+    expect(res.headers['X-Total-Count']).toBe('7');
+    expect(res.headers['X-Row-Count']).toBe('1');
+    expect(res.headers['Access-Control-Expose-Headers']).toMatch(/X-Truncated/);
+  });
+
+  test('a complete export carries no truncation flag', () => {
+    const res = fakeRes();
+    sendCsv(res, { filename: 'x', rows: [] });
+    expect(res.headers['X-Truncated']).toBeUndefined();
+    expect(res.headers['X-Total-Count']).toBeUndefined();
+  });
+});

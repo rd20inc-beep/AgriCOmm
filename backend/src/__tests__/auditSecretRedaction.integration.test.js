@@ -78,6 +78,14 @@ d('audit secret redaction (DB-gated)', () => {
     const list = await request(app).get('/api/audit-logs').query({ entity_type: 'user' }).set(auth());
     expect(list.status).toBe(200);
     expect(JSON.stringify(list.body)).not.toContain(FAKE_PW);
+
+    // W19: the Audit Trail's Action filter is applied by the server (it was
+    // sent but ignored), so a full CSV export of "create_user" is just those.
+    const byAction = await request(app).get('/api/audit-logs').query({ action: 'create_user', limit: 200 }).set(auth());
+    expect(byAction.status).toBe(200);
+    expect(byAction.body.data.logs.length).toBeGreaterThan(0);
+    expect(byAction.body.data.logs.every((l) => l.action === 'create_user')).toBe(true);
+    expect(byAction.body.data.pagination.total).toBe(byAction.body.data.logs.length);
   });
 
   test('WhatsApp key: write-only in settings, redacted in audit; saved settings reach their readers', async () => {

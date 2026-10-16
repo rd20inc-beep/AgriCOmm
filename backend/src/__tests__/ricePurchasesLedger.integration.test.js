@@ -114,6 +114,18 @@ d('rice purchases ledger (DB-gated)', () => {
     expect(s).toMatchObject({ count: 1, totalWeightKg: 10000, totalValuePKR: 855000 });
   });
 
+  // W19: a capped list says so; export=1 lifts the screen cap for the CSV.
+  test('a capped list is flagged truncated; export=1 returns every truck', async () => {
+    const window = { from_date: '2026-10-10', to_date: '2026-10-11' };
+    const capped = await listRicePurchases(db, { ...window, limit: 1 });
+    expect(capped.purchases).toHaveLength(1);
+    expect(capped.truncated).toBe(true);
+    const all = await listRicePurchases(db, { ...window, limit: 1, export: '1' });
+    expect(all.truncated).toBe(false);
+    expect(mine(all.purchases)).toHaveLength(2);
+    expect(all.limit).toBeGreaterThan(2000);
+  });
+
   test('GET /api/milling/rice-purchases returns the same KG figures', async () => {
     const res = await request(app).get('/api/milling/rice-purchases')
       .query({ supplier_id: ids.supB }).set('Authorization', `Bearer ${token}`);

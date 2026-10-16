@@ -47,6 +47,15 @@ const canReadComms = authorizeAny(['export_orders', 'send_email'], ['admin', 'ma
 // WHO may send a company document is ultimately a policy question, and a
 // dedicated communication:send permission is the right long-term answer. This
 // keeps today's users working without inventing that rule.
+// PAIRING your own WhatsApp (P5-12 / PLT-18). Sessions are per user (each
+// user links their own number — whatsappQr.service keys them by user id), so
+// pairing is not a company-configuration act any more: it has its own
+// permission, communications.whatsapp_pair (mig 440), held by every role that
+// may send over WhatsApp. It used to need admin.manage_settings, so a Mill or
+// Finance Manager allowed to send a document could never pair and every send
+// answered 409.
+const canPair = authorize('communications', 'whatsapp_pair');
+
 const canSendDocument = authorizeAny(
   ['documents', 'download'],        // export documents
   ['finance', 'confirm_payment'],   // Money In / Money Out receipts
@@ -77,7 +86,10 @@ router.post('/whatsapp/templates', canConfigure, auditAction('create', 'whatsapp
 router.put('/whatsapp/templates/:id', canConfigure, auditAction('update', 'whatsapp_template'), communicationController.updateWhatsAppTemplate);
 router.delete('/whatsapp/templates/:id', canConfigure, auditAction('delete', 'whatsapp_template'), communicationController.deleteWhatsAppTemplate);
 router.post('/whatsapp/send', canSend, auditAction('send_whatsapp', 'communication'), communicationController.sendWhatsAppMessage);
-router.post('/whatsapp/send-document', canSendDocument, auditAction('send_whatsapp_document', 'communication'), communicationController.sendWhatsAppDocument);
+// A send goes out from the caller's OWN paired WhatsApp, so it also needs the
+// pairing permission. documents.download alone (every order viewer since mig
+// 340, Read-Only Auditor included) no longer reaches the send.
+router.post('/whatsapp/send-document', canSendDocument, canPair, auditAction('send_whatsapp_document', 'communication'), communicationController.sendWhatsAppDocument);
 router.post('/whatsapp/preview', canReadComms, communicationController.previewWhatsAppTemplate);
 router.get('/whatsapp/logs', canReadComms, communicationController.getWhatsAppLogs);
 
@@ -90,7 +102,7 @@ const whatsappQr = require('./whatsappQr.service');
 router.get('/whatsapp/qr/status', async (req, res) => {
   return res.json({ success: true, data: whatsappQr.getStatus(req.user?.id) });
 });
-router.post('/whatsapp/qr/start', canConfigure, auditAction('whatsapp_link_start', 'whatsapp_session'), async (req, res) => {
+router.post('/whatsapp/qr/start', canPair, auditAction('whatsapp_link_start', 'whatsapp_session'), async (req, res) => {
   // R6 (offline Stage 16): WhatsApp-QR sessions keep in-memory, single-instance
   // state. Only the cloud instance may own them — a LAN site box must not pair a
   // second session against the same number. Site devices reach WhatsApp when the
@@ -101,7 +113,7 @@ router.post('/whatsapp/qr/start', canConfigure, auditAction('whatsapp_link_start
   const status = await whatsappQr.start(req.user?.id);
   return res.json({ success: true, data: status });
 });
-router.post('/whatsapp/qr/logout', canConfigure, auditAction('whatsapp_logout', 'whatsapp_session'), async (req, res) => {
+router.post('/whatsapp/qr/logout', canPair, auditAction('whatsapp_logout', 'whatsapp_session'), async (req, res) => {
   const status = await whatsappQr.logout(req.user?.id);
   return res.json({ success: true, data: status });
 });

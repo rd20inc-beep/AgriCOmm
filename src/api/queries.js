@@ -18,6 +18,7 @@ import {
   transformKeys,
 } from './transforms';
 import { byFavoriteThenName } from '../shared/utils/favorites';
+import { applyBellRead } from '../shared/utils/notificationBadge';
 import { fetchPageOrAll, attachListTotal } from '../shared/utils/fetchAllPages';
 
 // ===================== HELPERS =====================
@@ -1107,7 +1108,7 @@ export function useAcceptFundTransfer() {
     // No Owner authorisation: the receiving side's permission is the check.
     // Takes the transfer id (or { id } from older callers).
     mutationFn: (arg) => financeApi.acceptFundTransfer((arg && typeof arg === 'object') ? arg.id : arg),
-    onSuccess: () => { invalidateMoneyCaches(qc); qc.invalidateQueries({ queryKey: ['chat-approvals'] }); },
+    onSuccess: () => { invalidateMoneyCaches(qc); qc.invalidateQueries({ queryKey: ['chat-approvals'] }); qc.invalidateQueries({ queryKey: ['approvals'] }); },
   });
 }
 // Reverse a transfer (Owner / Super Admin): equal-and-opposite bank moves and
@@ -2494,10 +2495,33 @@ export {
 } from '../modules/analytics/api/reportHooks';
 
 // ===================== NOTIFICATIONS =====================
+// The header bell (P5-01). ONE query feeds both the list and the unread badge,
+// so the number on the bell is always the server's unread count for this user.
+// Each notification carries `link` — set by the server only when this user may
+// open that page.
+
+export const NOTIFICATION_BELL_KEY = [...queryKeys.notifications, 'bell'];
+export const NOTIFICATION_BELL_LIMIT = 20;
+
+export function useNotificationBell({ enabled = true } = {}) {
+  return useQuery({
+    queryKey: NOTIFICATION_BELL_KEY,
+    queryFn: async () => {
+      const res = await communicationApi.notifications({ limit: NOTIFICATION_BELL_LIMIT });
+      const data = res?.data ?? res ?? {};
+      return {
+        notifications: transformKeys(data.notifications || []),
+        unread: Number(data.unread) || 0,
+      };
+    },
+    enabled,
+    refetchInterval: 60 * 1000, // poll every minute
+  });
+}
 
 export function useNotifications(params = {}) {
   return useQuery({
-    queryKey: queryKeys.notifications,
+    queryKey: [...queryKeys.notifications, 'list', params],
     queryFn: async () => {
       const res = await communicationApi.notifications(params);
       return transformKeys(unwrap(res, 'notifications') || []);
@@ -2510,9 +2534,40 @@ export function useNotificationCount() {
     queryKey: queryKeys.notificationCount,
     queryFn: async () => {
       const res = await communicationApi.notificationCount();
-      return unwrap(res, 'count') ?? 0;
+      // The server answers { unread }.
+      return Number(res?.data?.unread ?? 0) || 0;
     },
     refetchInterval: 60 * 1000, // poll every minute
+  });
+}
+
+// Read state is per user on the server; locally the bell's cache is updated at
+// once so the badge drops on click, then refetched.
+function markBellRead(qc, id) {
+  qc.setQueryData(NOTIFICATION_BELL_KEY, (old) => applyBellRead(old, id));
+}
+
+export function useMarkNotificationRead() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id) => communicationApi.markRead(id),
+    onMutate: (id) => markBellRead(qc, id),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.notifications });
+      qc.invalidateQueries({ queryKey: queryKeys.notificationCount });
+    },
+  });
+}
+
+export function useMarkAllNotificationsRead() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => communicationApi.markAllRead(),
+    onMutate: () => markBellRead(qc, null),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.notifications });
+      qc.invalidateQueries({ queryKey: queryKeys.notificationCount });
+    },
   });
 }
 
@@ -2547,8 +2602,10 @@ export function useAuditLogs(params = {}) {
     queryKey: ['audit-logs', params],
     queryFn: async () => {
       const res = await auditApi.list({ limit: 100, ...params });
-      return transformKeys(unwrap(res, 'logs') || unwrap(res, 'auditLogs') || unwrap(res) || []);
+      // listTotal = the server's match count, so the page can say "showing 100 of N".
+      return withListTotal(transformKeys(unwrap(res, 'logs') || unwrap(res, 'auditLogs') || unwrap(res) || []), res);
     },
+    structuralSharing: false,
   });
 }
 
@@ -3088,6 +3145,30 @@ export function useAcceptLocalSalePayment() {
       qc.invalidateQueries({ queryKey: queryKeys.receivables.all });
       qc.invalidateQueries({ queryKey: queryKeys.financeOverview });
     },
+  });
+}
+
+// P5-03 — header global search (GET /api/search). One request across orders,
+// batches, lots, parties, sales, finance records and documents; the server
+// filters each type by permission. api.get does NOT transform keys.
+export function globalSearchQuery(term) {
+  const q = String(term || '').trim();
+  return {
+    queryKey: ['global-search', q],
+    queryFn: async () => {
+      const res = await api.get('/api/search', { q });
+      return { query: res?.query ?? q, groups: res?.groups || res?.data?.groups || [] };
+    },
+    staleTime: 10 * 1000,
+  };
+}
+
+export function useGlobalSearch(term) {
+  const q = String(term || '').trim();
+  return useQuery({
+    ...globalSearchQuery(q),
+    enabled: q.length >= 2 && isAuthenticated(),
+    placeholderData: keepPreviousData,
   });
 }
 

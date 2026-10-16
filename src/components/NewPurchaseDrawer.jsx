@@ -1,9 +1,15 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { Plus, Trash2, ShoppingCart, ClipboardCheck } from 'lucide-react';
 import SlideDrawer from './SlideDrawer';
+import { isFormDirty } from '../shared/utils/dirtyGuard';
 import SupplierPicker from './SupplierPicker';
 import ItemPicker from './ItemPicker';
 import { useApp } from '../context/AppContext';
+import { useAuth } from '../context/AuthContext';
+import PaymentFormDrawer from './payments/PaymentFormDrawer';
+import { canRecordVariant } from './payments/paymentVariants';
+import { lineNeedsBagKg, paidNowPaymentContext } from '../modules/millStore/utils/storePurchaseLine';
+import { useSuppliersList } from '../shared/hooks/useMasterData';
 import { useMillStoreItems, useCreatePurchase } from '../modules/millStore/api/queries';
 import { purchaseRequirementsApi } from '../modules/purchaseRequirements/api/services';
 import { todayLocalISO, fmtPKR, fmtNum } from '../shared/utils/format';
@@ -35,10 +41,18 @@ const hasSize = (v) => v != null && v !== '' && Number(v) > 0;
  * requirement_id }) — e.g. from a requirement's "Record Purchase".
  */
 export default function NewPurchaseDrawer({ open, onClose, onSaved, prefill = null }) {
-  const { suppliersList, addToast } = useApp();
+  const { addToast } = useApp();
+  const { data: suppliersList } = useSuppliersList();
   const { data: items = [] } = useMillStoreItems();
   const safeItems = Array.isArray(items) ? items : [];
   const createMut = useCreatePurchase();
+  const { hasPermission } = useAuth();
+  // "Paid now" (INV-61): after the purchase is recorded, the normal Pay
+  // purchase form opens on it (same engine and guard as Mill Store ▸ Pay), so
+  // a cash vendor doesn't sit as unpaid AP. Offered only to roles that may pay.
+  const canPayNow = canRecordVariant('pay_purchase', hasPermission);
+  const [paidNow, setPaidNow] = useState(false);
+  const [payCtx, setPayCtx] = useState(null);
 
   // Items added inline via the picker — merged on top so every line sees them.
   const [localItems, setLocalItems] = useState([]);
@@ -62,7 +76,7 @@ export default function NewPurchaseDrawer({ open, onClose, onSaved, prefill = nu
   // Reset the form each time it opens (applying any prefill).
   useEffect(() => {
     if (!open) return;
-    setSupplierId(''); setWalkIn(false); setVendorName(''); setInvoiceNumber(''); setNotes('');
+    setSupplierId(''); setWalkIn(false); setVendorName(''); setInvoiceNumber(''); setNotes(''); setPaidNow(false); setPayCtx(null);
     setPurchaseDate(todayLocalISO());
     prefillFixed.current = false;
     if (prefill?.item_id) {
@@ -128,15 +142,17 @@ export default function NewPurchaseDrawer({ open, onClose, onSaved, prefill = nu
     }
     const validLines = lines.filter(l => l.item_id && Number(l.quantity) > 0 && Number(l.cost_per_unit) >= 0);
     if (validLines.length === 0) { addToast('Add at least one line item', 'error'); return; }
-    // Packaging lines need a Bag Kg so we know how much rice each bag holds.
-    const badBag = validLines.find(l => l.category === 'packaging' && !(Number(l.bag_kg) > 0));
-    if (badBag) { addToast('Enter Bag Kg for each packaging item', 'error'); return; }
+    // Bag lines need a Bag Kg so we know how much rice each bag holds; liners,
+    // thread and labels don't hold rice and aren't asked (INV-61).
+    const itemOf = (l) => mergedItems.find(i => String(i.id) === String(l.item_id));
+    const badBag = validLines.find(l => lineNeedsBagKg(l.category, itemOf(l)) && !(Number(l.bag_kg) > 0));
+    if (badBag) { addToast('Enter Bag Kg for each bag', 'error'); return; }
     // Only close requirements whose item is still on the purchase.
     const closeIds = matchingReqs.filter(r => closeReqIds.has(Number(r.id))).map(r => Number(r.id));
     try {
       // Bag Kg / Tare Kg go WITH the purchase: the server fills them into the
       // item master inside the purchase transaction, only where it has none.
-      await createMut.mutateAsync({
+      const res = await createMut.mutateAsync({
         supplier_id: walkIn ? null : (supplierId ? Number(supplierId) : null),
         vendor_name: walkIn ? vendorName.trim() : null,
         invoice_number: invoiceNumber || null,
@@ -146,7 +162,7 @@ export default function NewPurchaseDrawer({ open, onClose, onSaved, prefill = nu
           item_id: Number(l.item_id),
           quantity: Number(l.quantity),
           cost_per_unit: Number(l.cost_per_unit),
-          ...(l.category === 'packaging' ? {
+          ...(lineNeedsBagKg(l.category, itemOf(l)) ? {
             bag_kg: Number(l.bag_kg) || null,
             tare_kg: l.tare_kg === '' || l.tare_kg == null ? null : Number(l.tare_kg),
           } : {}),
@@ -157,7 +173,12 @@ export default function NewPurchaseDrawer({ open, onClose, onSaved, prefill = nu
         ? `Purchase recorded — stock updated, ${closeIds.length} requirement${closeIds.length > 1 ? 's' : ''} closed`
         : 'Purchase recorded — stock updated', 'success');
       onSaved?.();
-      onClose?.();
+      const purchase = res?.data?.purchase || null;
+      const ctx = paidNow && canPayNow
+        ? paidNowPaymentContext(purchase, { supplierName: walkIn ? vendorName.trim() : (suppliersList || []).find(s => String(s.id) === String(supplierId))?.name })
+        : null;
+      if (ctx) setPayCtx(ctx); // the drawer closes once the payment form is done
+      else onClose?.();
     } catch (err) {
       addToast(`Failed: ${err?.response?.data?.message || err.message}`, 'error');
     }
@@ -166,10 +187,17 @@ export default function NewPurchaseDrawer({ open, onClose, onSaved, prefill = nu
   const INPUT = 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 bg-white';
   const LABEL = 'block text-xs font-semibold text-gray-600 uppercase mb-1';
 
+  // Unsaved-change guard (P5-07): anything typed beyond what the drawer opened
+  // with (a prefilled line counts as opened-with).
+  const dirty = !!(supplierId || vendorName.trim() || invoiceNumber.trim() || notes.trim())
+    || (prefill?.item_id ? lines.length > 1 : isFormDirty([newLine()], lines));
+
   return (
+    <>
     <SlideDrawer
-      open={open}
+      open={open && !payCtx}
       onClose={onClose}
+      dirty={dirty}
       title="Store Purchase"
       subtitle="Record a consumable materials purchase (bags, packaging, fuel…)"
       icon={ShoppingCart}
@@ -228,6 +256,15 @@ export default function NewPurchaseDrawer({ open, onClose, onSaved, prefill = nu
             <label className={LABEL}>Notes</label>
             <input type="text" value={notes} onChange={e => setNotes(e.target.value)} className={INPUT} placeholder="Optional" />
           </div>
+          {canPayNow && (
+            <label className="col-span-2 flex items-start gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 cursor-pointer">
+              <input type="checkbox" checked={paidNow} onChange={e => setPaidNow(e.target.checked)} className="mt-0.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+              <span className="text-sm text-gray-700">
+                Paid now (cash / on the spot)
+                <span className="block text-[11px] text-gray-400">After saving, the Pay purchase form opens with the total — choose the cash account and confirm.</span>
+              </span>
+            </label>
+          )}
         </div>
 
         {/* Line items */}
@@ -296,7 +333,7 @@ export default function NewPurchaseDrawer({ open, onClose, onSaved, prefill = nu
                       </p>
                     );
                   })()}
-                  {line.category === 'packaging' && line.item_id && (
+                  {line.item_id && lineNeedsBagKg(line.category, mergedItems.find(i => String(i.id) === String(line.item_id))) && (
                     <div className="grid grid-cols-2 gap-2">
                       <div>
                         <label className="block text-[10px] font-semibold text-blue-700 uppercase mb-0.5">Bag Kg <span className="text-red-500">*</span></label>
@@ -362,5 +399,14 @@ export default function NewPurchaseDrawer({ open, onClose, onSaved, prefill = nu
         </div>
       </div>
     </SlideDrawer>
+    {payCtx && (
+      <PaymentFormDrawer
+        variant="pay_purchase"
+        ctx={payCtx}
+        onClose={() => { setPayCtx(null); onClose?.(); }}
+        onDone={() => onSaved?.()}
+      />
+    )}
+    </>
   );
 }

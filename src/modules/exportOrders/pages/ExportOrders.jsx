@@ -1,14 +1,17 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { useApp } from '../../../context/AppContext';
+import { Link, Navigate, useNavigate } from 'react-router-dom';
+import { useUrlTab } from '../../../shared/hooks/useUrlTab';
+import { useAuth } from '../../../context/AuthContext';
+import { useCompanyProfile, useExportOrdersList } from '../../../shared/hooks/useMasterData';
 import StatusBadge from '../../../components/StatusBadge';
 import PartyLink from '../../../shared/components/PartyLink';
-import { Plus, Search, Eye, ArrowUpDown, Ship, FileText, DollarSign, Package, Clock, Filter, FileDown, Mail, Download } from 'lucide-react';
+import { Plus, Search, Eye, ArrowUpDown, Ship, FileText, DollarSign, Package, Clock, Filter, FileDown, Mail, Download, Copy } from 'lucide-react';
 import { downloadCSV } from '../../../utils/csvExport';
 import Modal from '../../../components/Modal';
 import ProformaInvoice from '../../../components/ProformaInvoice';
 import QuotationsPanel from '../components/QuotationsPanel';
 import { isBalanceDue } from '../components/constants';
+import { exportOrdersIntent, duplicateOrderHref } from '../utils/exportDeepLinks';
 import { todayLocalISO, fmtMoney, fmtPct } from '../../../shared/utils/format';
 
 const tabs = [
@@ -36,12 +39,18 @@ function matchesTab(order, tab) {
 }
 
 export default function ExportOrders() {
-  const { exportOrders, companyProfileData, dataLoading } = useApp();
+  const { data: exportOrders, isLoading: dataLoading } = useExportOrdersList();
+  const companyProfileData = useCompanyProfile();
   const navigate = useNavigate();
   // Read status filter from URL (from dashboard pipeline click)
   const urlParams = new URLSearchParams(window.location.search);
   const urlStatus = urlParams.get('status');
-  const [activeTab, setActiveTab] = useState(() => {
+  const intent = exportOrdersIntent(urlParams);
+  const { hasPermission } = useAuth();
+  const canCreate = hasPermission('export_orders', 'create');
+  // ?tab= keeps the tab across refresh and Back (P5-08); a dashboard link's
+  // ?status= still picks the starting tab.
+  const statusTab = (() => {
     if (!urlStatus) return 'All';
     if (urlStatus === 'Awaiting Advance') return 'Awaiting Advance';
     if (urlStatus === 'Advance Received' || urlStatus === 'Procurement Pending' || urlStatus === 'In Milling') return 'Procurement';
@@ -50,7 +59,8 @@ export default function ExportOrders() {
     if (urlStatus === 'Ready to Ship') return 'Ready to Ship';
     if (urlStatus === 'Shipped' || urlStatus === 'Arrived') return 'Shipped';
     return 'All';
-  });
+  })();
+  const [activeTab, setActiveTab] = useUrlTab(statusTab, tabs.map((t) => t.key));
   const [searchTerm, setSearchTerm] = useState('');
   const [sortBy, setSortBy] = useState('Created Date');
   const [piOrder, setPiOrder] = useState(null);
@@ -105,6 +115,10 @@ export default function ExportOrders() {
     if (m == null) return '—';
     return `${fmtPct(m)}${order.profit.estimated ? ' est.' : ''}`;
   };
+
+  // Old quick-action link /export?new=1 (NAV-09): go straight to the form
+  // instead of the list. Hooks above run first, so the early return is safe.
+  if (intent.create) return <Navigate to={intent.to} replace />;
 
   return (
     <div className="space-y-6">
@@ -276,6 +290,21 @@ export default function ExportOrders() {
                         >
                           <Mail className="w-3.5 h-3.5" />
                         </button>
+                        {canCreate && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              // W04/W05: a new order prefilled with this one's
+                              // terms and lines; payments/documents never copy.
+                              navigate(duplicateOrderHref(order.id));
+                            }}
+                            className="inline-flex items-center text-gray-500 hover:text-blue-600 text-xs font-medium"
+                            title="Duplicate order"
+                            aria-label={`Duplicate order ${order.id}`}
+                          >
+                            <Copy className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>

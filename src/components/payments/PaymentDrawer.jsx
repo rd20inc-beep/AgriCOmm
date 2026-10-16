@@ -5,6 +5,7 @@ import PaymentFields from './PaymentFields';
 import PaymentHistory from './PaymentHistory';
 import { blankPaymentForm, paymentPayload, paymentFieldError } from './paymentPayload';
 import { overdraftWarning, serverOverdraft } from '../../shared/utils/overdraft';
+import { useDefaultAccount } from '../../shared/hooks/useDefaultAccount';
 
 // The Finance-wide button styles (one filled primary at the right).
 const btnBase = 'inline-flex items-center justify-center gap-1.5 rounded-lg text-sm font-medium whitespace-nowrap px-3.5 min-h-10 sm:min-h-9 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1';
@@ -65,6 +66,10 @@ export default function PaymentDrawer({
   methods, cashLocation = false, taxes = true, attach = true,
   requireAccountFor = null, initial = {}, renderExtra = null,
   formId = 'payment-drawer-form',
+  // { entity, purpose? } — offer the account this user last used for this
+  // currency + entity (useDefaultAccount), and remember the one used after a
+  // successful submit. Shown and editable; it never submits anything itself.
+  rememberAs = null,
 }) {
   const prefill = defaultAmount !== undefined
     ? defaultAmount
@@ -72,6 +77,10 @@ export default function PaymentDrawer({
   const [form, setForm] = useState(() => blankPaymentForm({ ...initial, amount: prefill, method: defaultMethod }));
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState({});
+  const remembering = !!rememberAs && fixedAccountId === undefined;
+  const { accountId: preferredAccountId, remember } = useDefaultAccount({
+    currency, entity: rememberAs?.entity, purpose: rememberAs?.purpose, accounts: remembering ? accounts : [],
+  });
   // Editing a field clears the message shown under it.
   const set = (k, v) => {
     setForm((p) => ({ ...p, [k]: v }));
@@ -99,6 +108,8 @@ export default function PaymentDrawer({
         ...(fixedAccountId !== undefined ? { bankAccountId: fixedAccountId } : {}),
       });
       const res = await onSubmit(body, form);
+      // The account actually used (cash routed by collection point uses none).
+      if (remembering && form.bankAccountId && !(cashLocation && form.method === 'cash')) remember(form.bankAccountId);
       // P2-31: the server says when the payment left its account overdrawn
       // (the form's own warning only knows the balance it was shown).
       const serverWarning = serverOverdraft(res);
@@ -153,6 +164,7 @@ export default function PaymentDrawer({
           errors={errors}
           {...(methods ? { methods } : {})}
           cashLocation={cashLocation} taxes={taxes} attach={attach}
+          preferredAccountId={remembering ? preferredAccountId : ''}
         />
         {renderExtra && renderExtra({ form, set })}
         {overdraft && (

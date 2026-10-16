@@ -3,7 +3,7 @@ import { Percent, Paperclip, FileText, X, ChevronDown } from 'lucide-react';
 import api from '../../api/client';
 import { favStar } from '../../shared/utils/favorites';
 import FieldError from '../../shared/components/FieldError';
-import { PAYMENT_METHODS, money, netCash, pickAccountForMethod, CHEQUE_DATE_LABEL, CHEQUE_HINT } from './paymentPayload';
+import { PAYMENT_METHODS, money, netCash, pickAccountForMethod, pickDefaultAccount, CHEQUE_DATE_LABEL, CHEQUE_HINT } from './paymentPayload';
 import { accountsForCurrency } from '../../shared/utils/accountCurrency';
 
 /**
@@ -37,7 +37,7 @@ export function ChequeHint({ className = '' }) {
 }
 
 /** Cash / bank account picker. Favourites first, cash accounts marked. */
-export function AccountSelect({ accounts = [], value, onChange, label = 'Cash / Bank account *', id, error }) {
+export function AccountSelect({ accounts = [], value, onChange, label = 'Cash / Bank account *', id, error, hint = null }) {
   return (
     <div>
       <label className={lbl} htmlFor={id}><RequiredLabel text={label} /></label>
@@ -49,6 +49,7 @@ export function AccountSelect({ accounts = [], value, onChange, label = 'Cash / 
           </option>
         ))}
       </select>
+      {hint && <p className="mt-1 text-[11px] text-gray-500" data-testid="account-default-hint">{hint}</p>}
       <FieldError error={error} />
     </div>
   );
@@ -176,6 +177,10 @@ export default function PaymentFields({
   cashLocation = false,
   // Which parts of the optional block this path's endpoint reads.
   taxes = true, attach = true,
+  // The account this user last used for this currency + entity
+  // (useDefaultAccount): picked first when nothing is chosen, if it suits the
+  // method. Shown and editable — never submitted on its own.
+  preferredAccountId = '',
 }) {
   // A non-PKR (e.g. USD) account carries only its own currency; a PKR account
   // takes any (the server refuses the rest).
@@ -200,10 +205,11 @@ export default function PaymentFields({
   const accountKey = accounts.map((a) => `${a.id}:${a.type}:${a.isFavorite || a.is_favorite ? 1 : 0}`).join(',');
   useEffect(() => {
     if (hideAccount || form.bankAccountId) return;
-    const next = pickAccountForMethod({ accounts, method: form.method, current: '' });
+    const next = pickDefaultAccount({ accounts, accountOptions, method: form.method, preferredAccountId });
     if (next) set('bankAccountId', next);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hideAccount, form.method, form.bankAccountId, accountKey]);
+  }, [hideAccount, form.method, form.bankAccountId, accountKey, preferredAccountId]);
+  const showingRemembered = !!preferredAccountId && String(form.bankAccountId) === String(preferredAccountId);
   return (
     <>
       <div>
@@ -241,7 +247,8 @@ export default function PaymentFields({
         <AccountSelect id={`${idPrefix}-account`} accounts={accountOptions}
           label={form.method === 'cheque' ? 'Bank account it will clear through (optional)'
             : filterAccountsByMethod && form.method === 'cash' ? 'Cash account *' : 'Cash / Bank account *'}
-          value={form.bankAccountId} onChange={(v) => set('bankAccountId', v)} error={errors.bankAccountId} />
+          value={form.bankAccountId} onChange={(v) => set('bankAccountId', v)} error={errors.bankAccountId}
+          hint={showingRemembered ? `Last used for ${String(currency || 'PKR').toUpperCase()} — change it if this payment goes elsewhere.` : null} />
       )}
       <div>
         <label className={lbl} htmlFor={`${idPrefix}-ref`}>

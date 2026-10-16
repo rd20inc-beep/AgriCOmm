@@ -10,6 +10,7 @@ import FundTransferDetailDrawer from '../components/FundTransferDetailDrawer';
 import { transferRowLabel, transferStatusLabel, DIRECTION_LABEL } from '../utils/contraTransfer';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { useApp } from '../../../context/AppContext';
+import { useCompanyProfile } from '../../../shared/hooks/useMasterData';
 import { useAuth } from '../../../context/AuthContext';
 import { useFinanceDrawers } from '../drawers/drawersContext';
 import { canAcceptTransfer } from '../utils/transferPermissions';
@@ -20,7 +21,8 @@ import { Section, TypeChip, EmptyLine } from '../components/FinanceUI';
 import { btnSecondary, btnRowPrimary, btnRowSecondary, th, tdMoney } from '../utils/uiClasses';
 
 export default function Cash() {
-  const { companyProfileData, addToast } = useApp();
+  const { addToast } = useApp();
+  const companyProfileData = useCompanyProfile();
   const { queryParams: rangeParams } = useFinanceDateRange();
   const { data: accounts = [], isLoading: loadingAccounts, error: accountsError, refetch: refetchAccounts } = useBankAccounts();
   const { data: txData, isLoading: loadingTx, error: txError, refetch: refetchTx } = useBankTransactions(rangeParams);
@@ -326,7 +328,7 @@ export default function Cash() {
               if (row.fundTransferId) setDetailId(row.fundTransferId);
               else drawers?.openTransaction?.('bank', row.id);
             }}
-            searchKeys={['reference', 'counterparty', 'accountName', 'category', 'ftFromAccountName', 'ftToAccountName']} exportFilename="bank-transactions" loading={loadingTx}
+            searchKeys={['reference', 'counterparty', 'accountName', 'category', 'ftFromAccountName', 'ftToAccountName']} exportFilename="bank-transactions" listCap={{ loaded: allTransactions.length, total: txData?.listTotal }} loading={loadingTx}
             error={txError} onRetry={refetchTx} emptyText="No transactions in this period." />
         </div>
       )}

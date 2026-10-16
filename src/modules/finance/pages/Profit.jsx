@@ -1,15 +1,17 @@
-import { useState, useMemo } from 'react';
+import { useApp } from '../../../context/AppContext';
+import { useMemo } from 'react';
+import { useUrlTab } from '../../../shared/hooks/useUrlTab';
 import OrderRefLink from '../../../shared/components/OrderRefLink';
 import { TrendingUp, TrendingDown, DollarSign, Factory, Store, AlertTriangle, CheckCircle, RefreshCw, Activity, Printer } from 'lucide-react';
 import { FinanceKPI, FinanceTable, FinanceChart } from '../../../components/finance';
 import { useProfitabilitySummary, useLocalSalesReport } from '../../../api/queries';
 import { usePageFor } from '../../analytics/api/reportHooks';
 import { ReportPager } from '../../analytics/components/ReportChrome';
-import { downloadServerCsv } from '../../../shared/utils/csv';
+import { downloadServerCsv, serverCsvWarning } from '../../../shared/utils/csv';
 import { useFinanceDateRange, overviewSummaryParams } from '../hooks/useFinanceDateRange';
 import { rangeLabel } from '../financeNav';
 import { fxRateLabel } from '../utils/fx';
-import { useApp } from '../../../context/AppContext';
+import { useCompanyProfile } from '../../../shared/hooks/useMasterData';
 import StatusBadge from '../../../shared/components/StatusBadge';
 import { fmtPKR, fmtMoney, fmtPct, fmtDate, fmtDateTime, fmtKg } from '../../../shared/utils/format';
 import { HeadlineCard, TypeChip } from '../components/FinanceUI';
@@ -44,8 +46,10 @@ function AccuracyBadge({ status }) {
 }
 
 export default function Profit() {
-  const { companyProfileData } = useApp();
-  const [tab, setTab] = useState('Export');
+  const { addToast } = useApp();
+  const companyProfileData = useCompanyProfile();
+  // ?tab= keeps the tab across refresh, Back and shared links (P5-08).
+  const [tab, setTab] = useUrlTab('Export', TABS);
   // Every figure here is the server's one profit definition
   // (backend finance/profitDefinitions.js), for the period in the URL.
   const { queryParams: rangeParams, rangeKey } = useFinanceDateRange();
@@ -296,7 +300,9 @@ export default function Profit() {
           <ReportPager pagination={localPaging} onPage={setLocalPage} />
           <FinanceTable title="Local Sales — confirmed, PKR (sales of mill output count in Mill profit)" columns={localColumns} data={localSales}
             searchKeys={['saleNo', 'buyerName', 'itemName']} loading={localLoading}
-            onExport={() => downloadServerCsv('/api/reporting/local-sales', rangeParams, 'local-sales-profitability-pkr')} />
+            onExport={() => downloadServerCsv('/api/reporting/local-sales', rangeParams, 'local-sales-profitability-pkr')
+              .then((info) => { const w = serverCsvWarning(info); if (w) addToast?.(w, 'warning'); })
+              .catch((e) => addToast?.(e?.message || 'CSV export failed', 'error'))} />
         </>
       )}
       </div>{/* /.print-report */}

@@ -4,14 +4,15 @@
 // ref; filter by date, payment status and outstanding-only. Each row opens the
 // Invoice 360 and links to the customer ledger. Read-only; commercial figures
 // only (no COGS/margin). Reuses the shared ledger CSV/print helpers.
+import { useApp } from '../../../context/AppContext';
 import { useState, useEffect, useMemo, Fragment } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Search, Download, Printer, FileText, AlertTriangle, BookUser, ChevronRight, ChevronDown, Factory, ArrowLeft } from 'lucide-react';
 import { reportingApi } from '../api/services';
 import { localSalesApi, lotInventoryApi } from '../../../api/services';
-import { useApp } from '../../../context/AppContext';
+import { useCompanyProfile } from '../../../shared/hooks/useMasterData';
 import { useAuth } from '../../../context/AuthContext';
-import { exportLedgerCSV, printLedger } from '../utils/ledgerExport';
+import { exportFullLedgerCSV, printLedger } from '../utils/ledgerExport';
 import { todayLocalISO, fmtDate, fmtPKR, fmtKg } from '../../../shared/utils/format';
 
 // Roles allowed to see internal by-product pricing (mirrors the invoice gates).
@@ -44,7 +45,8 @@ const COLS = [
 ];
 
 export default function InvoiceLedger() {
-  const { companyProfileData } = useApp();
+  const { addToast } = useApp();
+  const companyProfileData = useCompanyProfile();
   const { user } = useAuth();
   const [params, setParams] = useSearchParams();
   const [qInput, setQInput] = useState(params.get('q') || '');
@@ -88,13 +90,23 @@ export default function InvoiceLedger() {
     }
   };
 
+  const filterParams = { ...(q ? { q } : {}), ...(status ? { status } : {}), ...(kind ? { kind } : {}), ...(outstanding ? { outstanding: '1' } : {}), ...(from ? { from } : {}), ...(to ? { to } : {}) };
+  // W19: the screen lists up to 500 invoices; the CSV asks the server for every
+  // invoice matching the filters and warns if even that hit the export cap.
+  const onCsv = () => exportFullLedgerCSV({
+    fetchAll: (extra) => reportingApi.invoiceLedger({ ...filterParams, ...extra }),
+    onWarn: (msg) => addToast?.(msg, 'warning'),
+    filename: `invoice-ledger_${todayLocalISO()}.csv`,
+    columns: COLS,
+  }).catch((e) => addToast?.(e?.message || 'CSV export failed', 'error'));
+
   useEffect(() => {
     setLoading(true); setError(null);
-    reportingApi.invoiceLedger({ ...(q ? { q } : {}), ...(status ? { status } : {}), ...(kind ? { kind } : {}), ...(outstanding ? { outstanding: '1' } : {}), ...(from ? { from } : {}), ...(to ? { to } : {}) })
+    reportingApi.invoiceLedger(filterParams)
       .then(res => setData(res?.rows ? res : (res?.data || res)))
       .catch(e => { setError(e?.status === 403 ? 'You are not permitted to view the invoice ledger.' : (e?.message || 'Failed to load.')); setData({ rows: [] }); })
       .finally(() => setLoading(false));
-  }, [q, status, kind, outstanding, from, to]);
+  }, [q, status, kind, outstanding, from, to]); // eslint-disable-line react-hooks/exhaustive-deps -- filterParams is built from exactly these
 
   // Debounce the search box → URL.
   useEffect(() => {
@@ -104,7 +116,6 @@ export default function InvoiceLedger() {
 
   const rows = data?.rows || [];
   const totals = data?.totals || {};
-  const stamp = todayLocalISO();
   const exportMeta = useMemo(() => [
     `${rows.length} of ${totals.count ?? rows.length} invoices`, q ? `Search: ${q}` : null, status ? `Status: ${status}` : null, outstanding ? 'Outstanding only' : null,
   ].filter(Boolean), [rows.length, totals.count, q, status, outstanding]);
@@ -118,7 +129,7 @@ export default function InvoiceLedger() {
           <p className="text-sm text-gray-500">Search and trace every sales & purchase invoice.</p>
         </div>
         <div className="flex gap-2">
-          <button onClick={() => exportLedgerCSV({ filename: `invoice-ledger_${stamp}.csv`, columns: COLS, rows })} disabled={!rows.length}
+          <button onClick={onCsv} disabled={!rows.length}
             className="inline-flex items-center gap-1.5 px-2.5 py-2 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-40">
             <Download size={13} /> Export CSV
           </button>

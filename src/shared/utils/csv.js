@@ -110,8 +110,19 @@ function queryString(params) {
 /**
  * The FULL filtered result from a report endpoint that supports format=csv
  * (authenticated download). Use whenever the screen holds only one page.
+ * Resolves to { rowCount, total, truncated } from the response headers; when
+ * `truncated` the export hit the server's cap (W19) — use serverCsvWarning.
  */
-export function downloadServerCsv(endpoint, params, filename) {
+export async function downloadServerCsv(endpoint, params, filename) {
   const qs = queryString({ ...(params || {}), format: 'csv' });
-  return api.download(`${endpoint}?${qs}`, withCsvExt(filename));
+  const info = await api.download(`${endpoint}?${qs}`, withCsvExt(filename));
+  return info || { rowCount: null, total: null, truncated: false };
+}
+
+/** The user-facing warning for a capped server CSV, or null when complete. */
+export function serverCsvWarning(info) {
+  if (!info || !info.truncated) return null;
+  const n = (v) => Number(v).toLocaleString('en-US');
+  const of = info.total != null && info.rowCount != null ? `${n(info.rowCount)} of ${n(info.total)} matching rows` : 'only part of the matching rows';
+  return `CSV holds ${of} (export limit reached). Narrow the filters to export the rest.`;
 }

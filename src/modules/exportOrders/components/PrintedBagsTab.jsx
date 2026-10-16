@@ -3,13 +3,16 @@ import {
   Printer, Plus, Loader2, Truck, CheckCircle2, Trash2, Wallet, X, PackageCheck, AlertCircle,
 } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
+import { useBagTypesList, useSuppliersList } from '../../../shared/hooks/useMasterData';
 import SlideDrawer from '../../../components/SlideDrawer';
 import BagTypePicker from '../../../components/BagTypePicker';
 import SupplierPicker from '../../../components/SupplierPicker';
 import { printedBagsApi } from '../api/services';
 import useConfirm from '../../../hooks/useConfirm';
-import PaymentDrawer from '../../../components/payments/PaymentDrawer';
-import { purchasePayPayload } from '../../../components/payments/paymentPayload';
+import PaymentFormDrawer from '../../../components/payments/PaymentFormDrawer';
+import { canRecordVariant } from '../../../components/payments/paymentVariants';
+import { printedBagOrderCtx } from '../../../components/payments/purchasePayContext';
+import { useAuth } from '../../../context/AuthContext';
 import { fmtPKR, fmtNum } from '../../../shared/utils/format';
 
 const PRINTING_OPTIONS = ['Plain', 'Buyer Logo', 'Buyer Logo + Text', 'Custom Design'];
@@ -31,7 +34,13 @@ function PayPill({ status, outstanding }) {
 }
 
 export default function PrintedBagsTab({ order, onUpdated }) {
-  const { addToast, suppliersList, bagTypesList, bankAccountsList } = useApp();
+  const { addToast } = useApp();
+  const { data: suppliersList } = useSuppliersList();
+  const { data: bagTypesList } = useBagTypesList();
+  // Paying the vendor is POST /finance/purchases/pay — the route asks
+  // finance.confirm_payment or milling.edit; the button says the same.
+  const { hasPermission } = useAuth();
+  const canPay = canRecordVariant('pay_purchase', hasPermission);
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState(null);
@@ -188,7 +197,7 @@ export default function PrintedBagsTab({ order, onUpdated }) {
                           {busyId === r.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />} Receive
                         </button>
                       )}
-                      {(parseFloat(r.outstanding) || 0) > 0.01 && (
+                      {canPay && (parseFloat(r.outstanding) || 0) > 0.01 && (
                         <button onClick={() => setPayTarget(r)} title="Pay vendor"
                           className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded hover:bg-blue-100">
                           <Wallet className="w-3 h-3" /> Pay
@@ -268,40 +277,25 @@ export default function PrintedBagsTab({ order, onUpdated }) {
       </SlideDrawer>
 
       {/* Pay drawer */}
-      <PayDrawer target={payTarget} bankAccounts={bankAccountsList} onClose={() => setPayTarget(null)}
-        onPaid={async () => { setPayTarget(null); await load(); onUpdated?.(); }} addToast={addToast} />
+      <PayDrawer target={payTarget} onClose={() => setPayTarget(null)}
+        onPaid={async () => { setPayTarget(null); await load(); onUpdated?.(); }} />
       {confirmDialog}
     </div>
   );
 }
 
-function PayDrawer({ target, bankAccounts = [], onClose, onPaid, addToast }) {
+function PayDrawer({ target, onClose, onPaid }) {
   if (!target) return null;
   // POST /finance/purchases/pay, not recordPayment: this settles the printed-bag
   // ORDER document, and the server clamps the amount to the outstanding and
-  // holds a post-dated cheque until it clears. The hand-written drawer this
-  // replaces never sent the cheque date, so a post-dated cheque settled the
-  // order on the spot.
+  // holds a post-dated cheque until it clears. The shared Payment form
+  // (variant pay_purchase) sends the cheque clearing date with it.
   return (
-    <PaymentDrawer
-      title={`Pay \u2014 ${target.pbo_no}`}
-      subtitle={`${rs(target.outstanding)} due`}
-      icon={Wallet}
-      summary={[
-        ['Vendor', target.vendor_name || '\u2014'],
-        ['Outstanding', rs(target.outstanding)],
-      ]}
-      outstanding={target.outstanding}
-      accounts={bankAccounts}
-      defaultMethod="cash"
-      defaultAmount={String(Math.round(((parseFloat(target.outstanding) || 0) + Number.EPSILON) * 100) / 100)}
-      extras={false}
-      onSubmit={(_body, form) => printedBagsApi.pay(purchasePayPayload(form, { source: 'printed_bag', sourceId: target.id }))}
-      onDone={(form) => {
-        addToast?.(`Paid ${rs(form.amount)} to ${target.vendor_name || 'vendor'}`, 'success');
-        onPaid?.();
-      }}
-      onClose={onClose} addToast={addToast}
+    <PaymentFormDrawer
+      variant="pay_purchase"
+      ctx={printedBagOrderCtx(target)}
+      onDone={() => onPaid?.()}
+      onClose={onClose}
     />
   );
 }

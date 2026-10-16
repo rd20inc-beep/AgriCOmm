@@ -6,6 +6,8 @@ import { useAuth } from '../../../context/AuthContext';
 import Modal from '../../../components/Modal';
 import WhatsAppSendModal from '../../../components/WhatsAppSendModal';
 import EmailSendModal from '../../../components/EmailSendModal';
+import WhatsAppPairModal from '../../../shared/components/WhatsAppPairModal';
+import { useCanPairWhatsApp } from '../../../shared/components/whatsAppPair';
 import { incotermLabel } from '../../../shared/constants/incoterms';
 import { formatWeight, formatPackSize, weightUnit } from '../../../shared/constants/weightUnits';
 import { freightBreakdown } from '../../../shared/constants/exportFreight';
@@ -2517,6 +2519,8 @@ export default function DocumentCenter({ order, request = null, onRequestHandled
   const [docStyle, setDocStyle] = useState({ fontFamily: DEFAULT_DOC_FONT, fontScale: 1 });
   const [styleDirty, setStyleDirty] = useState(false);   // unsaved font changes
   const [waSending, setWaSending] = useState(false);     // WhatsApp send in flight
+  const [waPairOpen, setWaPairOpen] = useState(false); // "Pair my WhatsApp" (P5-12)
+  const canPairWhatsApp = useCanPairWhatsApp();
   const [waModal, setWaModal] = useState(null);          // { defaultNumber, who } while the send dialog is open
   const [emailSending, setEmailSending] = useState(false); // email send in flight
   const [emailModal, setEmailModal] = useState(null);    // { defaultEmail, who } while the email dialog is open
@@ -2883,11 +2887,17 @@ export default function DocumentCenter({ order, request = null, onRequestHandled
       const st = await api.get('/api/communication/whatsapp/qr/status');
       const status = st?.data?.status || st?.status;
       if (status !== 'connected') {
-        addToast('Your WhatsApp is not connected. Pair your own account in Admin → WhatsApp (scan the QR).', 'error');
+        // Pair right here (per-user session, own permission) instead of
+        // sending the user to an admin page they may not be able to open.
+        if (canPairWhatsApp) setWaPairOpen(true);
+        else addToast('Your WhatsApp is not connected, and pairing it needs the "Pair WhatsApp" permission — ask an administrator.', 'error');
         return;
       }
     } catch { /* proceed; the send endpoint re-checks and reports clearly */ }
+    openWhatsAppSendDialog();
+  }
 
+  function openWhatsAppSendDialog() {
     const defaultNumber = (previewDoc?.buyer?.phone || '').toString().replace(/[^\d]/g, '');
     const who = previewDoc?.buyer?.name || order.customerName || null;
     setWaModal({ defaultNumber, who });
@@ -3034,6 +3044,12 @@ export default function DocumentCenter({ order, request = null, onRequestHandled
                   {waSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                 </button>
               </div>
+              {/* D-19: say WHY Email / WhatsApp are off, not only on hover. */}
+              {!sendable && (
+                <p role="note" data-testid="doc-send-blocked-reason" className="w-full text-xs text-amber-700">
+                  Email and WhatsApp are off until this document is approved — only the Proforma Invoice can be sent before approval. Download and Print stay available for internal use.
+                </p>
+              )}
             </div>
 
             {/* Font controls — apply live to the preview and can be saved as the
@@ -3207,6 +3223,12 @@ export default function DocumentCenter({ order, request = null, onRequestHandled
           </div>
         </Modal>
       )}
+
+      <WhatsAppPairModal
+        isOpen={waPairOpen}
+        onClose={() => setWaPairOpen(false)}
+        onConnected={() => { setWaPairOpen(false); openWhatsAppSendDialog(); }}
+      />
 
       <WhatsAppSendModal
         isOpen={!!waModal}

@@ -51,7 +51,8 @@ const find = (method, p) => all.find((r) => r.method === method && r.path === p)
 // The screens that open the owner modal, and the route each one posts to.
 const OWNER_MODAL_SCREENS = {
   'modules/admin/pages/admin/MasterDataApprovalsTab.jsx': ['post', '/admin/approvals/:type/:id/approve'],
-  'modules/milling/pages/MillFinanceDashboard.jsx': ['post', '/milling/advances/:id/approve'],
+  'modules/milling/pages/millFinance/payroll/PayrollWorkspace.jsx': ['post', '/milling/advances/:id/approve'],
+  'modules/milling/pages/millFinance/payroll/advances.jsx': ['post', '/milling/advances/:id/void'],
   'modules/exportOrders/pages/ExportOrderDetail.jsx': ['post', '/export-orders/:id/cancel'],
   'modules/exportOrders/components/DebitNotesPanel.jsx': ['post', '/export-orders/:id/debit-notes/:noteId/cancel'],
   'modules/exportOrders/components/PackingWeightCard.jsx': ['post', '/export-orders/:id/packing-weight/resolve'],

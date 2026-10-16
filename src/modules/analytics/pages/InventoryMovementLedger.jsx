@@ -3,15 +3,16 @@
 // dispatch, reservation, adjustment, write-off…). Filter by entity, movement
 // type, warehouse and date range; each row links to its lot / batch / order.
 // Read-only; reuses /api/reporting/inventory-ledger. Finance-gated route.
+import { useApp } from '../../../context/AppContext';
 import { useState, useMemo } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, Printer, Download, Truck, ArrowDownLeft, ArrowUpRight } from 'lucide-react';
 import { reportingApi } from '../api/services';
 import { useWarehouses } from '../../../api/queries';
-import { useApp } from '../../../context/AppContext';
+import { useCompanyProfile } from '../../../shared/hooks/useMasterData';
 import { useAuth } from '../../../context/AuthContext';
-import { exportLedgerCSV, printInventoryMovementLedger } from '../utils/ledgerExport';
+import { exportFullLedgerCSV, printInventoryMovementLedger } from '../utils/ledgerExport';
 import { fmtDate, fmtNum, fmtPKR } from '../../../shared/utils/format';
 
 const pkr = (v) => fmtPKR(v, { decimals: 2 });
@@ -31,7 +32,8 @@ const MOVEMENT_TYPES = [
 
 export default function InventoryMovementLedger() {
   const navigate = useNavigate();
-  const { companyProfileData } = useApp();
+  const { addToast } = useApp();
+  const companyProfileData = useCompanyProfile();
   const { user } = useAuth();
   const { data: warehouses = [] } = useWarehouses();
   const [entity, setEntity] = useState('');
@@ -65,7 +67,11 @@ export default function InventoryMovementLedger() {
   ].filter(Boolean).join(' · ') || 'All movements', [entity, type, warehouseId, from, to, warehouses]);
 
   const onPrint = () => data && printInventoryMovementLedger(data, { companyName, generatedBy: user?.name || user?.email, filterText });
-  const onCsv = () => exportLedgerCSV({
+  // W19: the screen lists the newest 500; the CSV re-asks the server for every
+  // movement matching the filters and warns if even that hit the export cap.
+  const onCsv = () => exportFullLedgerCSV({
+    fetchAll: (extra) => reportingApi.inventoryLedger({ ...params, ...extra }),
+    onWarn: (msg) => addToast?.(msg, 'warning'),
     filename: `inventory-movements${type ? '_' + type : ''}.csv`,
     columns: [
       { label: 'Date', accessor: (r) => dt(r.date) },
@@ -79,8 +85,7 @@ export default function InventoryMovementLedger() {
       { label: 'Qty (kg)', align: 'right', accessor: (r) => (r.direction === 'out' ? -Math.round(r.qtyKg) : Math.round(r.qtyKg)) },
       { label: 'Cost (PKR)', align: 'right', accessor: (r) => Math.round(r.costPkr) },
     ],
-    rows,
-  });
+  }).catch((e) => addToast?.(e?.message || 'CSV export failed', 'error'));
 
   const Kpi = ({ label, value, tone = 'gray', icon: Icon }) => {
     const t = { emerald: 'text-emerald-700', rose: 'text-red-600', gray: 'text-gray-900' }[tone] || 'text-gray-900';

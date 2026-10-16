@@ -4,7 +4,7 @@ const AFFECTED = [
   ['receivables'], ['payables'], ['finance'], ['finance-overview'], ['bank-accounts'], ['bank-transactions'],
   ['finance-bank-transactions'], ['payments-feed'], ['purchases-feed'], ['purchases'], ['expenses'], ['local-sales'],
   ['export', 'pending-receipts'], ['export-orders'], ['journals'], ['party-statement'], ['finance-transaction'],
-  ['service-milling'], ['mill-expenses'], ['mill-cash-flow'], ['hauler-ledger'],
+  ['service-milling'], ['mill-expenses'], ['mill-cash-flow'], ['hauler-ledger'], ['mill-store'], ['printed-bags'],
 ];
 export function invalidateMoney(qc) {
   for (const queryKey of AFFECTED) qc.invalidateQueries({ queryKey });

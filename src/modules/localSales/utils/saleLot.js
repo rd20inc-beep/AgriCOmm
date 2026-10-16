@@ -45,3 +45,24 @@ export function saleCogs(s) {
   const est = landed || num(s.costPerKg ?? s.cost_per_kg) * num(s.quantityKg ?? s.quantity_kg);
   return { cost: est, locked: false };
 }
+
+// Deep link into New Local Sale (P5-10, NAV-20): /local-sales?new=1 opens the
+// drawer; &lot=<lot no or id> (Lot Detail's "Sell Locally") also preselects
+// that lot. A lot alone implies opening the drawer.
+export function saleIntentFromParams(params) {
+  const get = (k) => (params && typeof params.get === 'function' ? params.get(k) : null);
+  const lotRef = (get('lot') || '').trim() || null;
+  const n = get('new');
+  return { open: n === '1' || n === 'true' || !!lotRef, lotRef };
+}
+
+// The lot a preset reference points at, among the lots the picker loaded:
+// matched on lot number first, then id. Never a fuzzy match — picking the
+// wrong lot is the risk this link exists to remove.
+export function matchPresetLot(lots, ref) {
+  if (!ref || !Array.isArray(lots)) return null;
+  const r = String(ref).trim().toLowerCase();
+  return lots.find((l) => String(l.lotNo ?? l.lot_no ?? '').toLowerCase() === r)
+    || lots.find((l) => String(l.id) === String(ref).trim())
+    || null;
+}

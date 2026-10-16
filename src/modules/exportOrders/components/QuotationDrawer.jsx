@@ -1,7 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { FileText, Plus, Trash2 } from 'lucide-react';
 import SlideDrawer from '../../../components/SlideDrawer';
+import { isFormDirty } from '../../../shared/utils/dirtyGuard';
 import { useApp } from '../../../context/AppContext';
+import { useCustomersList, useProductsList } from '../../../shared/hooks/useMasterData';
 import { INCOTERMS } from '../../../shared/constants/incoterms';
 import CustomerPicker from '../../../components/CustomerPicker';
 import RiceTypePicker from '../../../components/RiceTypePicker';
@@ -29,7 +31,9 @@ const emptyPack = () => ({ bagItemId: '', bagSize: '', bagUnitCost: '', masterIt
  * and calls onSaved with the fresh row.
  */
 export default function QuotationDrawer({ open, onClose, quotation, onSaved }) {
-  const { customersList = [], productsList = [], addToast } = useApp();
+  const { addToast } = useApp();
+  const { data: customersList } = useCustomersList();
+  const { data: productsList } = useProductsList();
   const isEdit = !!quotation?.id;
 
   const [form, setForm] = useState(defaults());
@@ -265,11 +269,15 @@ export default function QuotationDrawer({ open, onClose, quotation, onSaved }) {
   }
 
   const inputCls = 'w-full rounded-lg border border-gray-300 px-2.5 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500';
+  // Unsaved-change guard (P5-07) for a new quotation: Esc / X ask once a
+  // buyer, a line or a term was entered. (Edits start from the saved quote.)
+  const dirty = open && !isEdit && (isFormDirty(defaults(), form) || isFormDirty([emptyItem()], items));
 
   return (
     <SlideDrawer
       open={open}
       onClose={onClose}
+      dirty={dirty}
       title={isEdit ? `Edit ${quotation.quotation_no}` : 'New Quotation'}
       subtitle="Pre-order price quote for an export customer"
       icon={FileText}

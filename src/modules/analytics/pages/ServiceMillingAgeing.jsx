@@ -7,7 +7,7 @@ import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, Printer, Download, Clock, ChevronRight } from 'lucide-react';
 import { reportingApi } from '../api/services';
-import { useApp } from '../../../context/AppContext';
+import { useCompanyProfile } from '../../../shared/hooks/useMasterData';
 import { useAuth } from '../../../context/AuthContext';
 import { exportLedgerCSV, printLedger } from '../utils/ledgerExport';
 import { fmtKg } from '../../../shared/utils/format';
@@ -26,7 +26,7 @@ function Kpi({ label, value, tone = 'gray' }) {
 }
 
 export default function ServiceMillingAgeing() {
-  const { companyProfileData } = useApp();
+  const companyProfileData = useCompanyProfile();
   const { user } = useAuth();
   const [exp, setExp] = useState({});
 

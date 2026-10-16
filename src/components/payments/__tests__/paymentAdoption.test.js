@@ -170,15 +170,32 @@ describe('the shared drawer', () => {
   it('is what the payable-settling screens use', () => {
     // These four were one drawer copied four times. If a new copy appears, or
     // one of these stops using the shared drawer, that is a regression.
+    // Mill Finance's payable drawers live in their own file since the P5-09 split.
+    const hit = FILES.find(([n]) => n === 'modules/milling/pages/millFinance/drawers/PayableDrawers.jsx');
+    expect(hit).toBeTruthy();
+    expect(hit[1]).toMatch(/PaymentFormDrawer|PaymentDrawer/);
+  });
+
+  it('P5-11: the converged screens open the Payment form (PaymentFormDrawer), not a drawer of their own', () => {
     for (const f of [
-      'modules/milling/pages/MillFinanceDashboard.jsx',
       'modules/exportOrders/components/PrintedBagsTab.jsx',
       'modules/millStore/pages/StoreOverview.jsx',
+      'modules/milling/components/MillSupplierPayDrawer.jsx',
+      'modules/milling/components/MillCustomerPayDrawer.jsx',
     ]) {
       const hit = FILES.find(([n]) => n === f);
       expect(hit, f).toBeTruthy();
-      expect(hit[1], f).toContain('PaymentDrawer');
+      expect(hit[1], f).toContain('<PaymentFormDrawer');
+      // …and builds no request body or mutation of its own.
+      expect(hit[1], f).not.toMatch(/useRecordPayment|useAcceptLocalSalePayment|usePayMillPurchase|purchasePayPayload|printedBagsApi\.pay\(/);
     }
+    // Only the shared form, and Mill Finance's payable drawers (which keep the
+    // payable's payment history beside the form), mount the bare PaymentDrawer.
+    const bare = FILES
+      .filter(([f]) => !f.startsWith('components/payments/'))
+      .filter(([, src]) => /import PaymentDrawer from/.test(src))
+      .map(([f]) => f);
+    expect(bare).toEqual(['modules/milling/pages/millFinance/drawers/PayableDrawers.jsx']);
   });
 
   it('needs no exemption for a non-canonical method value', () => {
@@ -196,12 +213,13 @@ describe('the shared drawer', () => {
     expect(src('modules/localSales/pages/LocalSales.jsx')).toContain('PaymentFormDrawer');
     expect(src('modules/localSales/pages/LocalSales.jsx')).toMatch(/variant: 'receive_local_sale'/);
     expect(src('modules/localSales/pages/InvoiceView.jsx')).toMatch(/<PaymentFormDrawer variant="receive_local_sale"/);
-    // Nothing else posts one by hand; Mill Finance keeps its Mill-Cash drawer (owner decision).
+    // Nothing else posts one by hand — the Mill customer drawer now opens the
+    // same form (variant receive_local_sale_line) under its invoice picker.
     const direct = FILES
       .filter(([, s]) => /useAcceptLocalSalePayment|useAcceptGroupPayment|localSalesApi\.accept(Group)?Payment/.test(s))
       .map(([f]) => f)
       .filter((f) => !f.startsWith('api/') && !f.startsWith('modules/localSales/api/'));
-    expect(direct).toEqual(['modules/milling/components/MillCustomerPayDrawer.jsx']);
+    expect(direct).toEqual([]);
   });
 
   it('owns the payment arithmetic — no screen reimplements the overpayment check', () => {

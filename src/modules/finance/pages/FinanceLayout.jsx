@@ -14,6 +14,7 @@ import { FinanceDrawersProvider } from '../drawers/FinanceDrawers';
 import { useFinanceDrawers } from '../drawers/drawersContext';
 import { headerActionDrawer } from '../drawers/drawerLogic';
 import FinanceSearch from '../drawers/FinanceSearch';
+import { useOpenDrawerFromUrl } from '../drawers/openFromUrl';
 
 // Finance shell: one header (title + actions + search + period + print), six
 // workspaces, and a row of views for the workspace you are in. Workspaces and
@@ -31,6 +32,8 @@ export default function FinanceLayout({ children }) {
 
 function FinanceShell({ children }) {
   const drawers = useFinanceDrawers();
+  // ?open=payment:42 (from the header global search) opens that drawer.
+  useOpenDrawerFromUrl();
   const [params, setParams] = useSearchParams();
   const { hasPermission } = useAuth();
   const location = useLocation();

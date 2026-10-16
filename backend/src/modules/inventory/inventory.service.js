@@ -2459,6 +2459,23 @@ const inventoryService = {
       reference_note: referenceNote || null,
     }).returning('*');
 
+    // Tell the approvers (inventory.approve_write_off — Owner / Super Admin)
+    // that a request is waiting. In a savepoint so a failed notification can
+    // neither abort the caller's transaction nor undo the request.
+    try {
+      const notify = (c) => require('../../services/notificationService').createForPermission(c, {
+        permission: ['inventory', 'approve_write_off'],
+        excludeUserId: userId,
+        title: 'Stock adjustment to approve',
+        message: `${String(adjustmentType).replace(/_/g, ' ')} of ${Math.abs(qk)} kg on lot ${lot.lot_no}${reason ? ` — ${reason}` : ''}`,
+        type: 'approval',
+        link: '/approvals?type=stock_adjustment',
+      });
+      if (trx) await trx.transaction((sp) => notify(sp)); else await notify(db);
+    } catch (err) {
+      console.error('Stock adjustment notification failed:', err.message);
+    }
+
     return adj;
   },
 

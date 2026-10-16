@@ -390,7 +390,7 @@ function getStatus(userId) {
 async function sendMessage(userId, phone, text) {
   const st = sessionFor(requireUser(userId));
   if (st.status !== 'connected' || !st.sock) {
-    return { ok: false, error: 'Your WhatsApp is not connected — pair it from Communications first.' };
+    return { ok: false, error: 'Your WhatsApp is not connected — use "Pair my WhatsApp" on the WhatsApp send button first.' };
   }
   const digits = String(phone || '').replace(/\D/g, '');
   if (!digits) return { ok: false, error: 'Invalid phone number' };
@@ -413,7 +413,7 @@ async function sendMessage(userId, phone, text) {
 async function sendDocument(userId, phone, buffer, { fileName = 'document.pdf', mimetype = 'application/pdf', caption } = {}) {
   const st = sessionFor(requireUser(userId));
   if (st.status !== 'connected' || !st.sock) {
-    return { ok: false, error: 'Your WhatsApp is not connected — pair it from Communications first.' };
+    return { ok: false, error: 'Your WhatsApp is not connected — use "Pair my WhatsApp" on the WhatsApp send button first.' };
   }
   const digits = String(phone || '').replace(/\D/g, '');
   if (!digits) return { ok: false, error: 'Invalid phone number' };

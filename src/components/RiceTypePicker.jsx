@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useId } from 'react';
 import { Search, Plus, X } from 'lucide-react';
 import { lotInventoryApi } from '../modules/inventory/api/services';
 
@@ -19,6 +19,8 @@ function PendingBadge() {
 }
 
 export default function RiceTypePicker({ label, value, onChange, products = [], placeholder = 'Search rice type…', addToast, clearable = true }) {
+  // Ties the visible label to the search box / current choice (P5-14).
+  const fieldId = useId();
   const [localProducts, setLocalProducts] = useState([]);
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState(false);
@@ -83,7 +85,7 @@ export default function RiceTypePicker({ label, value, onChange, products = [], 
   return (
     <div data-ricetype-picker>
       <div className="flex items-center justify-between mb-1">
-        {label && <label className="block text-sm font-medium text-gray-700">{label}</label>}
+        {label && <label htmlFor={fieldId} className="block text-sm font-medium text-gray-700">{label}</label>}
         <button type="button" onClick={() => { setAdding(v => !v); setOpen(false); }}
           className="text-xs text-blue-600 hover:text-blue-700 font-medium inline-flex items-center gap-1">
           <Plus size={12} /> {adding ? 'Cancel' : 'Add new'}
@@ -93,7 +95,7 @@ export default function RiceTypePicker({ label, value, onChange, products = [], 
       <div className="relative">
         {value && selected && !open ? (
           <div className="w-full px-3 py-2 rounded-lg border border-gray-300 bg-white flex items-center justify-between gap-2">
-            <button type="button" onClick={() => { setOpen(true); setSearch(''); }} className="flex-1 text-left truncate text-gray-900 font-medium">
+            <button id={fieldId} type="button" onClick={() => { setOpen(true); setSearch(''); }} className="flex-1 text-left truncate text-gray-900 font-medium">
               {selected.name || selected.code}
               {selected.grade && <span className="text-xs text-gray-400 ml-1">({selected.grade})</span>}
             </button>
@@ -106,7 +108,7 @@ export default function RiceTypePicker({ label, value, onChange, products = [], 
         ) : (
           <>
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input type="text" value={search} onChange={e => { setSearch(e.target.value); setOpen(true); }} onFocus={() => setOpen(true)}
+            <input id={fieldId} type="text" value={search} onChange={e => { setSearch(e.target.value); setOpen(true); }} onFocus={() => setOpen(true)}
               placeholder={placeholder}
               className="w-full rounded-lg border border-gray-300 pl-9 pr-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white" />
             {open && (
@@ -134,13 +136,13 @@ export default function RiceTypePicker({ label, value, onChange, products = [], 
       {adding && (
         <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-lg space-y-3">
           <p className="text-xs font-semibold text-blue-800 uppercase tracking-wide">Add new rice type</p>
-          <input value={draft.name} autoFocus onChange={e => setDraft(d => ({ ...d, name: e.target.value }))}
+          <input aria-label="Name" value={draft.name} autoFocus onChange={e => setDraft(d => ({ ...d, name: e.target.value }))}
             placeholder="Name * — e.g. 1121 Basmati Sella"
             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
           <div className="grid grid-cols-2 gap-3">
-            <input value={draft.code} onChange={e => setDraft(d => ({ ...d, code: e.target.value }))} placeholder="Code"
+            <input aria-label="Code" value={draft.code} onChange={e => setDraft(d => ({ ...d, code: e.target.value }))} placeholder="Code"
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
-            <input value={draft.grade} onChange={e => setDraft(d => ({ ...d, grade: e.target.value }))} placeholder="Grade"
+            <input aria-label="Grade" value={draft.grade} onChange={e => setDraft(d => ({ ...d, grade: e.target.value }))} placeholder="Grade"
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
           </div>
           <div className="flex justify-end gap-2">

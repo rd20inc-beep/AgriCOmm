@@ -67,6 +67,20 @@ vi.mock('../../../context/AuthContext', () => ({ useAuth: () => ({ hasPermission
 vi.mock('../../../context/AppContext', () => ({
   useApp: () => ({ addToast: vi.fn(), exportOrders: FIX.exportOrders, settings: { paymentReminderDays: 7 }, customersList: [], bankAccountsList: FIX.accounts, suppliersList: [] }),
 }));
+// P5-13: pages read their lists from the per-page hooks, not AppContext.
+vi.mock('../../../shared/hooks/useMasterData', () => ({
+  useCustomersList: () => ({ data: [] }),
+  useSuppliersList: () => ({ data: [] }),
+  useProductsList: () => ({ data: [] }),
+  useWarehousesList: () => ({ data: [] }),
+  useBagTypesList: () => ({ data: [] }),
+  useBankAccountsList: () => ({ data: FIX.accounts }),
+  useExportOrdersList: () => ({ data: FIX.exportOrders }),
+  useMillingBatchesList: () => ({ data: [] }),
+  useInventoryLots: () => ({ data: [] }),
+  useCompanyProfile: () => ({ name: 'AGRI COMMODITIES' }),
+  useAppSettings: () => ({ settings: { paymentReminderDays: 7 }, updateSettings: vi.fn() }),
+}));
 vi.mock('../drawers/drawersContext', () => ({ useFinanceDrawers: () => ({ openPayment: vi.fn(), openDocument: vi.fn(), openTransaction: vi.fn(), openAccount: vi.fn(), openParty: null }) }));
 vi.mock('../../../hooks/useConfirm', () => ({ default: () => [vi.fn(), null] }));
 vi.mock('../hooks/useFinanceDateRange', () => ({ useFinanceDateRange: () => ({ queryParams: {}, rangeKey: '' }) }));
@@ -111,7 +125,8 @@ const FM_EXPECTS = {
   DueDates: ['bounce-cheque'],
   Suspense: ['record-suspense', 'review', 'resolve', 'reverse'],
   RatesCenter: ['add-fx-rate', 'refresh-fx'],
-  Confirmations: ['confirm-receipt', 'hold', 'receive'],
+  // FIN-22: 'hold' removed — it sent a status no transition allows.
+  Confirmations: ['confirm-receipt', 'receive'],
   LocalSalesFinance: [],
   PartyLedger: ['receive'],
   Cash: [],
@@ -134,6 +149,13 @@ describe('a Finance Manager sees the actions its guards admit', () => {
   it.each(Object.keys(pages))('%s', (name) => {
     const html = render(pages[name], URL[name]);
     expect(actions(html)).toEqual(expect.arrayContaining(FM_EXPECTS[name]));
+  });
+
+  it('FIN-22: Confirmations has no Hold — not even for a role that may approve export orders', () => {
+    mockPerms = allow('finance.view', 'finance.confirm_payment', 'export_orders.approve', 'export_orders.view');
+    const html = render(pages.Confirmations);
+    expect(actions(html)).not.toContain('hold');
+    expect(html).not.toMatch(/>\s*Hold\s*</);
   });
 
   it('rates need finance.set_rates and suspense review needs confirm_payment, not view', () => {

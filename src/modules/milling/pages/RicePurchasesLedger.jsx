@@ -1,10 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Truck, Search, Filter, Download } from 'lucide-react';
+import { Truck, Search, Filter, Download, Plus } from 'lucide-react';
 import api from '../../../api/client';
+import { useApp } from '../../../context/AppContext';
+import { useAuth } from '../../../context/AuthContext';
+import PurchaseLotDrawer from '../../inventory/components/PurchaseLotDrawer';
 import { favStar } from '../../../shared/utils/favorites';
 import { toLocalISODate, todayLocalISO, fmtPKR, fmtKg } from '../../../shared/utils/format';
 import { purchaseFigures, downloadPurchasesCsv } from '../ricePurchases';
+import { useProductsList, useSuppliersList, useWarehousesList } from '../../../shared/hooks/useMasterData';
 
 function formatPKR(value) {
   if (!value) return '—';
@@ -27,7 +31,27 @@ function daysAgoISO(days) {
   return toLocalISODate(d);
 }
 
+// The search box's match, shared by the screen and the full CSV export.
+function matchesSearch(r, q) {
+  if (!q) return true;
+  return (r.vehicle_no || '').toLowerCase().includes(q) ||
+    (r.driver_name || '').toLowerCase().includes(q) ||
+    (r.lot_no || '').toLowerCase().includes(q) ||
+    (r.batch_no || '').toLowerCase().includes(q) ||
+    (r.supplier_name || '').toLowerCase().includes(q) ||
+    (r.gate_pass_no || '').toLowerCase().includes(q);
+}
+
 export default function RicePurchasesLedger() {
+  const { addToast } = useApp();
+  const { data: suppliersList } = useSuppliersList();
+  const { data: warehousesList } = useWarehousesList();
+  const { data: productsList } = useProductsList();
+  const { hasPermission } = useAuth();
+  // W01: New Purchase right here, the same drawer as Lot Inventory.
+  const canCreatePurchase = hasPermission('inventory', 'create');
+  const [showNewPurchase, setShowNewPurchase] = useState(false);
+  const [truncated, setTruncated] = useState(false);
   const [purchases, setPurchases] = useState([]);
   const [summary, setSummary] = useState({ count: 0, totalWeightKg: 0, totalValuePKR: 0 });
   const [loading, setLoading] = useState(true);
@@ -67,6 +91,7 @@ export default function RicePurchasesLedger() {
       const res = await api.get('/api/milling/rice-purchases', params);
       const data = res?.data || res;
       setPurchases(data.purchases || []);
+      setTruncated(!!data.truncated);
       setSummary(data.summary || { count: 0, totalWeightKg: 0, totalValuePKR: 0 });
     } catch (err) {
       setError(err.message || 'Failed to load purchases');
@@ -82,19 +107,35 @@ export default function RicePurchasesLedger() {
 
   const filteredRows = useMemo(() => {
     const q = filters.search.trim().toLowerCase();
-    if (!q) return purchases;
-    return purchases.filter(r =>
-      (r.vehicle_no || '').toLowerCase().includes(q) ||
-      (r.driver_name || '').toLowerCase().includes(q) ||
-      (r.lot_no || '').toLowerCase().includes(q) ||
-      (r.batch_no || '').toLowerCase().includes(q) ||
-      (r.supplier_name || '').toLowerCase().includes(q) ||
-      (r.gate_pass_no || '').toLowerCase().includes(q)
-    );
+    return q ? purchases.filter(r => matchesSearch(r, q)) : purchases;
   }, [purchases, filters.search]);
 
-  function exportCSV() {
-    downloadPurchasesCsv(filteredRows, `rice-purchases-${todayISO()}.csv`);
+  // W19: the CSV is every truck matching the filters, fetched from the server
+  // (export=1, capped at 50,000) — not the 500 on screen — and says so if the
+  // server still had to cut it.
+  const [exporting, setExporting] = useState(false);
+  async function exportCSV() {
+    setExporting(true);
+    try {
+      const res = await api.get('/api/milling/rice-purchases', {
+        from_date: filters.fromDate || undefined,
+        to_date: filters.toDate || undefined,
+        supplier_id: filters.supplierId || undefined,
+        product_id: filters.productId || undefined,
+        export: '1',
+      });
+      const data = res?.data || res;
+      const q = filters.search.trim().toLowerCase();
+      const rows = (data.purchases || []).filter(r => matchesSearch(r, q));
+      downloadPurchasesCsv(rows, `rice-purchases-${todayISO()}.csv`);
+      if (data.truncated) {
+        addToast?.(`CSV holds the first ${data.limit || rows.length} trucks only — narrow the dates to export the rest.`, 'warning');
+      }
+    } catch (err) {
+      addToast?.(`CSV export failed: ${err.message}`, 'error');
+    } finally {
+      setExporting(false);
+    }
   }
 
   return (
@@ -107,13 +148,40 @@ export default function RicePurchasesLedger() {
           </h1>
           <p className="text-sm text-gray-500 mt-1">All incoming rice receipts — one row per truck.</p>
         </div>
-        <button
-          onClick={exportCSV}
-          className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
-        >
-          <Download size={16} /> Export CSV
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={exportCSV}
+            disabled={exporting}
+            className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+          >
+            <Download size={16} /> {exporting ? 'Exporting…' : 'Export CSV'}
+          </button>
+          {canCreatePurchase && (
+            <button
+              onClick={() => setShowNewPurchase(true)}
+              className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700"
+            >
+              <Plus size={16} /> New Purchase
+            </button>
+          )}
+        </div>
       </div>
+      {truncated && (
+        <p className="mb-4 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+          Showing the newest trucks only — more match these filters. Export CSV pulls all of them.
+        </p>
+      )}
+      {canCreatePurchase && (
+        <PurchaseLotDrawer
+          isOpen={showNewPurchase}
+          onClose={() => setShowNewPurchase(false)}
+          suppliers={suppliersList}
+          warehouses={warehousesList}
+          products={productsList}
+          addToast={addToast}
+          onSuccess={load}
+        />
+      )}
 
       {/* Summary tiles */}
       <div className="grid grid-cols-3 gap-4 mb-6">

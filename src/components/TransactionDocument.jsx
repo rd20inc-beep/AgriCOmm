@@ -2,7 +2,10 @@ import { useRef, useState } from 'react';
 import { Printer, Download, Send, Loader2 } from 'lucide-react';
 import api from '../api/client';
 import { useApp } from '../context/AppContext';
+import { useCustomersList } from '../shared/hooks/useMasterData';
 import WhatsAppSendModal from './WhatsAppSendModal';
+import WhatsAppPairModal from '../shared/components/WhatsAppPairModal';
+import { useCanPairWhatsApp } from '../shared/components/whatsAppPair';
 import { fmtDate, fmtNum } from '../shared/utils/format';
 
 // One printable/downloadable document for the three transaction kinds:
@@ -86,9 +89,12 @@ function model(kind, d) {
 
 export default function TransactionDocument({ kind = 'receipt', data, companyProfile }) {
   const ref = useRef(null);
-  const { addToast, customersList } = useApp();
+  const { addToast } = useApp();
+  const { data: customersList } = useCustomersList();
   const [waSending, setWaSending] = useState(false);
   const [waModal, setWaModal] = useState(null); // { defaultNumber, who } while the send dialog is open
+  const [waPairOpen, setWaPairOpen] = useState(false); // "Pair my WhatsApp" (P5-12)
+  const canPairWhatsApp = useCanPairWhatsApp();
   if (!data) return null;
   const m = model(kind, data);
   const cur = m.currency;
@@ -144,9 +150,16 @@ export default function TransactionDocument({ kind = 'receipt', data, companyPro
     try {
       const st = await api.get('/api/communication/whatsapp/qr/status');
       const status = st?.data?.status || st?.status;
-      if (status !== 'connected') { addToast('Your WhatsApp is not connected. Pair your own account in Admin → WhatsApp (scan the QR).', 'error'); return; }
+      if (status !== 'connected') {
+        if (canPairWhatsApp) setWaPairOpen(true);
+        else addToast('Your WhatsApp is not connected, and pairing it needs the "Pair WhatsApp" permission — ask an administrator.', 'error');
+        return;
+      }
     } catch { /* the send endpoint re-checks and reports clearly */ }
+    openSendDialog();
+  };
 
+  const openSendDialog = () => {
     // Prefer a number on file — from the record, else the customer master.
     const customer = (customersList || []).find((c) => String(c.id) === String(data.customerId));
     const onFile = String(data.customerPhone || data.phone || data.buyerPhone || (customer && customer.phone) || '').replace(/[^\d]/g, '');
@@ -210,6 +223,11 @@ export default function TransactionDocument({ kind = 'receipt', data, companyPro
         </button>
       </div>
 
+      <WhatsAppPairModal
+        isOpen={waPairOpen}
+        onClose={() => setWaPairOpen(false)}
+        onConnected={() => { setWaPairOpen(false); openSendDialog(); }}
+      />
       <WhatsAppSendModal
         isOpen={!!waModal}
         onClose={() => setWaModal(null)}

@@ -32,11 +32,16 @@ router.use('/expense-vendors', authenticate, require('../modules/expenseVendors/
 router.use('/advances', authenticate, require('./advances'));
 router.use('/procurement', authenticate, require('./procurement'));
 router.use('/admin', authenticate, require('./admin'));
+// Letterhead fields only, any signed-in role (print headers) — P5-13.
+router.use('/company-profile', authenticate, require('../modules/admin/companyProfile.routes'));
 router.use('/audit-logs', authenticate, require('./auditLogs'));
 router.use('/accounting', authenticate, require('./accounting'));
 router.use('/documents', authenticate, require('./documents'));
 router.use('/communication', authenticate, require('./communication'));
 router.use('/reporting', authenticate, require('./reporting'));
+// Header global search (P5-03): any signed-in user; every record type inside is
+// filtered by the permission of the page it links to (globalSearch.js).
+router.get('/search', authenticate, require('../modules/analytics/globalSearch').searchHandler);
 router.use('/enterprise', require('./enterprise')); // Note: health is public, rest require auth (handled in route file)
 router.use('/control', authenticate, require('./control'));
 router.use('/intelligence', authenticate, require('./intelligence'));
@@ -44,6 +49,8 @@ router.use('/smart', authenticate, require('./smart'));
 router.use('/ai', authenticate, require('../modules/ai/ai.routes'));
 router.use('/chat', authenticate, require('../modules/chat/chat.routes'));
 router.use('/sync', authenticate, require('../modules/sync/sync.routes'));
+// One approvals inbox (P5-02): read-only, filtered per type by each approve route's guard.
+router.use('/approvals-inbox', authenticate, require('../modules/approvalsInbox/approvalsInbox.routes'));
 
 // Chat attachment serving — short-lived single-purpose ticket in ?ticket= (so
 // <img src> works without headers; never the session JWT); the chat service checks

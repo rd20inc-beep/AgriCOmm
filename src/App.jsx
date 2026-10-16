@@ -1,5 +1,5 @@
-import { lazy, Suspense } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { Suspense } from 'react';
+import { createBrowserRouter, RouterProvider, Routes, Route } from 'react-router-dom';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { queryClient } from './api/queryClient';
 import { AppProvider } from './context/AppContext';
@@ -7,452 +7,94 @@ import { AuthProvider } from './context/AuthContext';
 import { OwnerAuthProvider } from './context/OwnerAuthContext';
 import ErrorBoundary from './components/ErrorBoundary';
 import Layout from './components/Layout';
-import MillLayout from './components/MillLayout';
-import ExportLayout from './components/ExportLayout';
 import ProtectedRoute from './components/ProtectedRoute';
 import { useAuth } from './context/AuthContext';
 import Toast from './components/Toast';
 import QueryErrorHandler from './components/QueryErrorHandler';
 import { LoadingSpinner } from './components/LoadingState';
-import { LEGACY_FINANCE_REDIRECTS } from './modules/finance/financeNav';
-import { LegacyFinanceRedirect, FinanceCatchAll } from './modules/finance/components/LegacyFinanceRedirect';
+import {
+  AppRoutes, Login, ResetPassword, ChangePassword, EmployeePortal, StandalonePrintReport,
+} from './app/routeTable';
 
-// Lazy import that self-heals stale chunks after a deploy. A new build replaces
-// every hashed chunk, so an already-open tab still pointing at an old chunk hash
-// gets a "Failed to fetch dynamically imported module" 404 when it lazy-loads a
-// route. On that failure, reload once to pull the fresh index.html + chunks. A
-// short time-window guard prevents a reload loop if the chunk is genuinely
-// unreachable (network down) rather than just stale.
-function lazyWithReload(factory) {
-  return lazy(() =>
-    factory().catch((err) => {
-      const KEY = 'rf_chunk_reload_ts';
-      const last = Number(sessionStorage.getItem(KEY) || 0);
-      if (Date.now() - last > 10000) {
-        sessionStorage.setItem(KEY, String(Date.now()));
-        window.location.reload();
-        return new Promise(() => {}); // halt rendering until the reload happens
-      }
-      throw err; // already reloaded recently — let the error boundary show it
-    })
-  );
-}
-
-// Lazy-loaded page components (pointing at modular locations)
-const Login = lazyWithReload(() => import('./modules/admin/pages/Login'));
-const ChangePassword = lazyWithReload(() => import('./modules/admin/pages/ChangePassword'));
-const ResetPassword = lazyWithReload(() => import('./modules/admin/pages/ResetPassword'));
-const Profile = lazyWithReload(() => import('./modules/admin/pages/Profile'));
-const EmployeePortal = lazyWithReload(() => import('./modules/portal/EmployeePortal'));
-const Dashboard = lazyWithReload(() => import('./modules/dashboard/pages/Dashboard'));
-const Buyers = lazyWithReload(() => import('./modules/exportOrders/pages/Buyers'));
-const ExportOrders = lazyWithReload(() => import('./modules/exportOrders/pages/ExportOrders'));
-const CreateExportOrder = lazyWithReload(() => import('./modules/exportOrders/pages/CreateExportOrder'));
-const ExportOrderDetail = lazyWithReload(() => import('./modules/exportOrders/pages/ExportOrderDetail'));
-const ExportHomeDashboard = lazyWithReload(() => import('./modules/exportOrders/pages/ExportHomeDashboard'));
-const MillingDashboard = lazyWithReload(() => import('./modules/milling/pages/MillingDashboard'));
-const ServiceMilling = lazyWithReload(() => import('./modules/milling/pages/ServiceMilling'));
-const ServiceInvoices = lazyWithReload(() => import('./modules/milling/pages/ServiceInvoices'));
-const PurchaseRequirements = lazyWithReload(() => import('./modules/purchaseRequirements/pages/PurchaseRequirements'));
-const SampleAnalysis = lazyWithReload(() => import('./modules/sampleAnalysis/pages/SampleAnalysis'));
-const MillHomeDashboard = lazyWithReload(() => import('./modules/milling/pages/MillHomeDashboard'));
-const StoreOverview = lazyWithReload(() => import('./modules/millStore/pages/StoreOverview'));
-const LocalSaleDetail = lazyWithReload(() => import('./modules/localSales/pages/LocalSaleDetail'));
-const InvoiceView = lazyWithReload(() => import('./modules/localSales/pages/InvoiceView'));
-const StoreAlerts = lazyWithReload(() => import('./modules/millStore/pages/StoreAlerts'));
-const StoreAdjustments = lazyWithReload(() => import('./modules/millStore/pages/StoreAdjustments'));
-const StoreRatios = lazyWithReload(() => import('./modules/millStore/pages/StoreRatios'));
-const MillingBatchDetail = lazyWithReload(() => import('./modules/milling/pages/MillingBatchDetail'));
-const ServiceMillingBatchDetail = lazyWithReload(() => import('./modules/milling/pages/ServiceMillingBatchDetail'));
-const MillFinanceDashboard = lazyWithReload(() => import('./modules/milling/pages/MillFinanceDashboard'));
-const RicePurchasesLedger = lazyWithReload(() => import('./modules/milling/pages/RicePurchasesLedger'));
-const MillCustomers = lazyWithReload(() => import('./modules/milling/pages/MillCustomers'));
-const MillSuppliers = lazyWithReload(() => import('./modules/milling/pages/MillSuppliers'));
-const QualityComparison = lazyWithReload(() => import('./modules/milling/pages/QualityComparison'));
-const StockAdjustments = lazyWithReload(() => import('./modules/inventory/pages/StockAdjustments'));
-const InternalTransfer = lazyWithReload(() => import('./modules/inventory/pages/InternalTransfer'));
-const Inventory = lazyWithReload(() => import('./modules/inventory/pages/Inventory'));
-const Documents = lazyWithReload(() => import('./modules/documents/pages/Documents'));
-const Reports = lazyWithReload(() => import('./modules/analytics/pages/Reports'));
-const PrintableReports = lazyWithReload(() => import('./modules/analytics/pages/PrintableReports'));
-const LotReport = lazyWithReload(() => import('./modules/analytics/pages/LotReport'));
-const InvoiceLedger = lazyWithReload(() => import('./modules/analytics/pages/InvoiceLedger'));
-const PayrollLedger = lazyWithReload(() => import('./modules/analytics/pages/PayrollLedger'));
-const PayrollAnalytics = lazyWithReload(() => import('./modules/analytics/pages/PayrollAnalytics'));
-const LotLedger = lazyWithReload(() => import('./modules/analytics/pages/LotLedger'));
-const BatchLedger = lazyWithReload(() => import('./modules/analytics/pages/BatchLedger'));
-const SupplierLedger = lazyWithReload(() => import('./modules/analytics/pages/SupplierLedger'));
-const RiceTypeLedger = lazyWithReload(() => import('./modules/analytics/pages/RiceTypeLedger'));
-const WarehouseLedger = lazyWithReload(() => import('./modules/analytics/pages/WarehouseLedger'));
-const ProcessingLossLedger = lazyWithReload(() => import('./modules/analytics/pages/ProcessingLossLedger'));
-const FinishedGoodsLedger = lazyWithReload(() => import('./modules/analytics/pages/FinishedGoodsLedger'));
-const ServiceMillingStock = lazyWithReload(() => import('./modules/analytics/pages/ServiceMillingStock'));
-const ServiceMillingAgeing = lazyWithReload(() => import('./modules/analytics/pages/ServiceMillingAgeing'));
-const ServiceMillingPendingDispatch = lazyWithReload(() => import('./modules/analytics/pages/ServiceMillingPendingDispatch'));
-const ServiceMillingReconciliation = lazyWithReload(() => import('./modules/analytics/pages/ServiceMillingReconciliation'));
-const InventoryMovementLedger = lazyWithReload(() => import('./modules/analytics/pages/InventoryMovementLedger'));
-const StockLedger = lazyWithReload(() => import('./modules/analytics/pages/StockLedger'));
-const StandalonePrintReport = lazyWithReload(() => import('./modules/analytics/pages/StandalonePrintReport'));
-const Approvals = lazyWithReload(() => import('./modules/admin/pages/Approvals'));
-const AuditLog = lazyWithReload(() => import('./modules/admin/pages/AuditLog'));
-const LotInventory = lazyWithReload(() => import('./modules/inventory/pages/LotInventory'));
-const StockSummary = lazyWithReload(() => import('./modules/inventory/pages/StockSummary'));
-const StockCount = lazyWithReload(() => import('./modules/inventory/pages/StockCount'));
-const LocalSales = lazyWithReload(() => import('./modules/localSales/pages/LocalSales'));
-const LotDetail = lazyWithReload(() => import('./modules/inventory/pages/LotDetail'));
-const PurchaseInvoiceView = lazyWithReload(() => import('./modules/inventory/pages/PurchaseInvoiceView'));
-const ExceptionDashboard = lazyWithReload(() => import('./modules/analytics/pages/ExceptionDashboard'));
-const AiAssistant = lazyWithReload(() => import('./modules/ai/pages/AiAssistant'));
-const Intelligence = lazyWithReload(() => import('./modules/analytics/pages/Intelligence'));
-const ScenarioSimulator = lazyWithReload(() => import('./modules/analytics/pages/ScenarioSimulator'));
-const Admin = lazyWithReload(() => import('./modules/admin/pages/Admin'));
-
-// Finance sub-pages (lazy) — money-flow structure
-const FinanceLayout = lazyWithReload(() => import('./modules/finance/pages/FinanceLayout'));
-const FinanceOverview = lazyWithReload(() => import('./modules/finance/pages/FinanceOverview'));
-const MoneyIn = lazyWithReload(() => import('./modules/finance/pages/MoneyIn'));
-const MoneyOut = lazyWithReload(() => import('./modules/finance/pages/MoneyOut'));
-const DueDates = lazyWithReload(() => import('./modules/finance/pages/DueDates'));
-const Cash = lazyWithReload(() => import('./modules/finance/pages/Cash'));
-const Profit = lazyWithReload(() => import('./modules/finance/pages/Profit'));
-const Accounting = lazyWithReload(() => import('./modules/finance/pages/Accounting'));
-const PartyLedger = lazyWithReload(() => import('./modules/finance/pages/PartyLedger'));
-const RatesCenter = lazyWithReload(() => import('./modules/finance/pages/RatesCenter'));
-const FinanceAlerts = lazyWithReload(() => import('./modules/finance/pages/Alerts'));
-// Legacy routes (still accessible via direct URL)
-const FinanceConfirmations = lazyWithReload(() => import('./modules/finance/pages/Confirmations'));
-const FinanceTransfers = lazyWithReload(() => import('./modules/finance/pages/InternalTransfers'));
-const Expenses = lazyWithReload(() => import('./modules/finance/pages/Expenses'));
-const Purchases = lazyWithReload(() => import('./modules/finance/pages/Purchases'));
-const LocalSalesFinance = lazyWithReload(() => import('./modules/finance/pages/LocalSalesFinance'));
-const FinancePayroll = lazyWithReload(() => import('./modules/finance/pages/FinancePayroll'));
-const FinanceSuspense = lazyWithReload(() => import('./modules/finance/pages/Suspense'));
-const BankReconciliation = lazyWithReload(() => import('./modules/finance/pages/BankReconciliation'));
-const TrialBalance = lazyWithReload(() => import('./modules/finance/pages/TrialBalance'));
-const GlProfitLoss = lazyWithReload(() => import('./modules/finance/pages/GlProfitLoss'));
-const BalanceSheet = lazyWithReload(() => import('./modules/finance/pages/BalanceSheet'));
-const AccountingPeriods = lazyWithReload(() => import('./modules/finance/pages/Periods'));
-
-function FinanceRoutes() {
-  return (
-    <FinanceLayout>
-      <Routes>
-        {/* Six workspaces; a workspace's default view is its own path, the
-            other views are nested paths (map: modules/finance/financeNav.js). */}
-        <Route index element={<FinanceOverview />} />
-        {/* Money In */}
-        <Route path="money-in" element={<MoneyIn />} />
-        <Route path="money-in/to-confirm" element={<FinanceConfirmations />} />
-        <Route path="money-in/local-sales" element={<LocalSalesFinance />} />
-        {/* Money Out */}
-        <Route path="money-out" element={<MoneyOut />} />
-        <Route path="money-out/purchases" element={<Purchases />} />
-        <Route path="money-out/expenses" element={<Expenses />} />
-        {/* Accounts */}
-        <Route path="accounts" element={<Cash />} />
-        <Route path="accounts/cheques" element={<DueDates />} />
-        <Route path="accounts/suspense" element={<FinanceSuspense />} />
-        <Route path="accounts/reconcile" element={<ProtectedRoute module="finance" action="view"><BankReconciliation /></ProtectedRoute>} />
-        {/* Accounting */}
-        <Route path="accounting" element={<Accounting />} />
-        <Route path="accounting/trial-balance" element={<ProtectedRoute module="finance" action="view"><TrialBalance /></ProtectedRoute>} />
-        <Route path="accounting/pnl" element={<ProtectedRoute module="finance" action="view"><GlProfitLoss /></ProtectedRoute>} />
-        <Route path="accounting/balance-sheet" element={<ProtectedRoute module="finance" action="view"><BalanceSheet /></ProtectedRoute>} />
-        <Route path="accounting/periods" element={<ProtectedRoute module="finance" action="view"><AccountingPeriods /></ProtectedRoute>} />
-        <Route path="accounting/profit" element={<Profit />} />
-        <Route path="accounting/statements" element={<PartyLedger />} />
-        <Route path="accounting/rates" element={<RatesCenter />} />
-        {/* Mill → Export STOCK transfers (not money). Was /finance/transfers. */}
-        <Route path="accounting/stock-transfers" element={<ProtectedRoute module="finance" action="view"><FinanceTransfers /></ProtectedRoute>} />
-        {/* Payroll */}
-        <Route path="payroll" element={<ProtectedRoute module="payroll" action="view"><FinancePayroll /></ProtectedRoute>} />
-        {/* Reached from Home's alerts panel (Needs Attention replaces it later). */}
-        <Route path="alerts" element={<FinanceAlerts />} />
-        {/* Every pre-redesign path → its new view, query string kept. The
-            orphan Cost Allocation (/finance/costs) and Reconciliation
-            (/finance/reconciliation) pages summed PKR and USD (FIN-23) and are
-            deleted; their URLs redirect too (Profit, Money In). */}
-        {Object.keys(LEGACY_FINANCE_REDIRECTS).map((seg) => (
-          <Route key={seg} path={seg} element={<LegacyFinanceRedirect />} />
-        ))}
-        <Route path="*" element={<FinanceCatchAll />} />
-      </Routes>
-    </FinanceLayout>
-  );
-}
-
-function ExportRoutes() {
-  return (
-    <ExportLayout>
-      <Routes>
-        <Route path="/" element={<ExportHomeDashboard />} />
-        <Route path="/export" element={<ExportOrders />} />
-        <Route path="/export/create" element={<CreateExportOrder />} />
-        <Route path="/export/:id" element={<ExportOrderDetail />} />
-        <Route path="/buyers" element={<Buyers />} />
-        <Route path="/documents" element={<Documents />} />
-        {/* Finance (owner decisions G-9 / G-10): the same tree and the same
-            finance.view gate as StandardRoutes, so every finance link works
-            for this role; backend permissions are unchanged. */}
-        <Route path="/finance/*" element={<ProtectedRoute module="finance" action="view"><FinanceRoutes /></ProtectedRoute>} />
-        {/* Pages the finance screens link to (a batch, a local sale, a lot) —
-            same gates as StandardRoutes, so a finance link never bounces home. */}
-        <Route path="/milling/:id" element={<ProtectedRoute module="milling" action="view"><MillingBatchDetail /></ProtectedRoute>} />
-        <Route path="/local-sales/:id" element={<ProtectedRoute anyOf={[{ module: 'inventory', action: 'view' }, { module: 'finance', action: 'view' }]}><LocalSaleDetail /></ProtectedRoute>} />
-        <Route path="/lot-inventory/:id" element={<ProtectedRoute module="inventory" action="view"><LotDetail /></ProtectedRoute>} />
-        <Route path="/reports" element={<Reports />} />
-        <Route path="/reports/print" element={<PrintableReports />} />
-        <Route path="/reports/lots" element={<LotReport />} />
-        <Route path="/reports/invoices" element={<InvoiceLedger />} />
-        <Route path="/reports/payroll" element={<ProtectedRoute module="payroll" action="view"><PayrollLedger /></ProtectedRoute>} />
-        <Route path="/reports/payroll-analytics" element={<ProtectedRoute module="payroll" action="view"><PayrollAnalytics /></ProtectedRoute>} />
-        <Route path="/reports/lot-ledger/:id" element={<LotLedger />} />
-        <Route path="/reports/batch-ledger/:id" element={<BatchLedger />} />
-        <Route path="/reports/supplier-ledger" element={<SupplierLedger />} />
-        <Route path="/reports/supplier-ledger/:id" element={<SupplierLedger />} />
-        <Route path="/reports/rice-type-ledger" element={<RiceTypeLedger />} />
-        <Route path="/reports/rice-type-ledger/:id" element={<RiceTypeLedger />} />
-        <Route path="/reports/warehouse-ledger" element={<WarehouseLedger />} />
-        <Route path="/reports/warehouse-ledger/:id" element={<WarehouseLedger />} />
-        <Route path="/reports/processing-loss-ledger" element={<ProcessingLossLedger />} />
-        <Route path="/reports/finished-goods-ledger" element={<FinishedGoodsLedger />} />
-        <Route path="/reports/service-milling-stock" element={<ServiceMillingStock />} />
-        <Route path="/reports/service-milling-ageing" element={<ServiceMillingAgeing />} />
-        <Route path="/reports/service-milling-pending-dispatch" element={<ServiceMillingPendingDispatch />} />
-        <Route path="/reports/service-milling-reconciliation" element={<ServiceMillingReconciliation />} />
-        <Route path="/reports/inventory-movement-ledger" element={<InventoryMovementLedger />} />
-        <Route path="/reports/stock-ledger" element={<StockLedger />} />
-        {/* Personal pages. Without these the scoped layouts' catch-all
-            redirect sends a Mill or Export user back to the dashboard when
-            they click Profile or Change password in their own menu. */}
-        <Route path="/profile" element={<Profile />} />
-        <Route path="/change-password" element={<ChangePassword />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </ExportLayout>
-  );
-}
-
-// Who may open the money pages (purchase rates, stock value, mill finance) —
-// the same rule as useCanSeeCost / backend utils/costVisibility.
-const COST_VIEWERS = [{ module: 'reports', action: 'view_cost' }, { module: 'finance', action: 'view' }];
-
-function MillRoutes() {
-  return (
-    <MillLayout>
-      <Routes>
-        <Route path="/" element={<MillHomeDashboard />} />
-        <Route path="/milling" element={<MillingDashboard />} />
-        <Route path="/milling/service" element={<ServiceMilling />} />
-        <Route path="/service-milling/invoices" element={<ServiceInvoices />} />
-        <Route path="/service-milling/:id" element={<ServiceMillingBatchDetail />} />
-        <Route path="/milling/finance" element={<MillFinanceDashboard />} />
-        {/* Finance (owner decisions G-9 / G-10): the same tree and the same
-            finance.view gate as StandardRoutes, so every finance link works
-            for this role; backend permissions are unchanged. */}
-        <Route path="/finance/*" element={<ProtectedRoute module="finance" action="view"><FinanceRoutes /></ProtectedRoute>} />
-        {/* The export orders the finance screens link to — same gates as
-            StandardRoutes, so a finance link never bounces home. */}
-        <Route path="/export" element={<ProtectedRoute module="export_orders" action="view"><ExportOrders /></ProtectedRoute>} />
-        <Route path="/export/:id" element={<ProtectedRoute module="export_orders" action="view"><ExportOrderDetail /></ProtectedRoute>} />
-        <Route path="/milling/rice-purchases" element={<RicePurchasesLedger />} />
-        <Route path="/milling/customers" element={<MillCustomers />} />
-        <Route path="/milling/suppliers" element={<MillSuppliers />} />
-        <Route path="/milling/statements" element={<PartyLedger />} />
-        <Route path="/milling/:id" element={<MillingBatchDetail />} />
-        <Route path="/quality" element={<QualityComparison />} />
-        <Route path="/mill-store" element={<StoreOverview />} />
-        <Route path="/mill-store/purchases/new" element={<Navigate to="/mill-store?action=purchase" replace />} />
-        <Route path="/mill-store/alerts" element={<StoreAlerts />} />
-        <Route path="/mill-store/adjustments" element={<StoreAdjustments />} />
-        <Route path="/mill-store/ratios" element={<StoreRatios />} />
-        <Route path="/stock-adjustments" element={<StockAdjustments />} />
-        <Route path="/transfer" element={<InternalTransfer />} />
-        <Route path="/lot-inventory" element={<LotInventory />} />
-        <Route path="/stock-summary" element={<StockSummary />} />
-        <Route path="/purchase-requirements" element={<PurchaseRequirements />} />
-        <Route path="/sample-analysis" element={<SampleAnalysis />} />
-        <Route path="/stock-count" element={<StockCount />} />
-        <Route path="/lot-inventory/:id/purchase-invoice" element={<PurchaseInvoiceView />} />
-        <Route path="/lot-inventory/:id" element={<LotDetail />} />
-        <Route path="/local-sales" element={<LocalSales />} />
-        <Route path="/local-sales/:id/invoice" element={<InvoiceView />} />
-        <Route path="/local-sales/:id/print" element={<InvoiceView />} />
-        <Route path="/local-sales/:id" element={<LocalSaleDetail />} />
-        <Route path="/reports" element={<Reports />} />
-        <Route path="/reports/print" element={<PrintableReports />} />
-        <Route path="/reports/lots" element={<LotReport />} />
-        <Route path="/reports/invoices" element={<InvoiceLedger />} />
-        <Route path="/reports/payroll" element={<ProtectedRoute module="payroll" action="view"><PayrollLedger /></ProtectedRoute>} />
-        <Route path="/reports/payroll-analytics" element={<ProtectedRoute module="payroll" action="view"><PayrollAnalytics /></ProtectedRoute>} />
-        <Route path="/reports/lot-ledger/:id" element={<LotLedger />} />
-        <Route path="/reports/batch-ledger/:id" element={<BatchLedger />} />
-        <Route path="/reports/supplier-ledger" element={<SupplierLedger />} />
-        <Route path="/reports/supplier-ledger/:id" element={<SupplierLedger />} />
-        <Route path="/reports/rice-type-ledger" element={<RiceTypeLedger />} />
-        <Route path="/reports/rice-type-ledger/:id" element={<RiceTypeLedger />} />
-        <Route path="/reports/warehouse-ledger" element={<WarehouseLedger />} />
-        <Route path="/reports/warehouse-ledger/:id" element={<WarehouseLedger />} />
-        <Route path="/reports/processing-loss-ledger" element={<ProcessingLossLedger />} />
-        <Route path="/reports/finished-goods-ledger" element={<FinishedGoodsLedger />} />
-        <Route path="/reports/service-milling-stock" element={<ServiceMillingStock />} />
-        <Route path="/reports/service-milling-ageing" element={<ServiceMillingAgeing />} />
-        <Route path="/reports/service-milling-pending-dispatch" element={<ServiceMillingPendingDispatch />} />
-        <Route path="/reports/service-milling-reconciliation" element={<ServiceMillingReconciliation />} />
-        <Route path="/reports/inventory-movement-ledger" element={<InventoryMovementLedger />} />
-        <Route path="/reports/stock-ledger" element={<StockLedger />} />
-        {/* Personal pages. Without these the scoped layouts' catch-all
-            redirect sends a Mill or Export user back to the dashboard when
-            they click Profile or Change password in their own menu. */}
-        <Route path="/profile" element={<Profile />} />
-        <Route path="/change-password" element={<ChangePassword />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </MillLayout>
-  );
-}
-
-function StandardRoutes() {
+// The signed-in app: ONE shell (components/Layout) for every role, ONE route
+// table (app/routeTable + app/routeGates). The shell and the home dashboard
+// are chosen by permission set (app/workspace), not by the role's name.
+//
+// #9 A user flagged force_password_change sees only the change-password
+// screen, outside the shell, until they set a new password (ProtectedRoute
+// sends every other URL there; the backend clears the flag on success).
+function SignedInApp() {
+  const { user } = useAuth();
+  const mustChangePw = !!(user?.force_password_change || user?.forcePasswordChange);
+  if (mustChangePw) return <ChangePassword />;
   return (
     <Layout>
-      <Routes>
-        <Route path="/" element={<Dashboard />} />
-        <Route path="/buyers" element={<ProtectedRoute module="export_orders" action="view"><Buyers /></ProtectedRoute>} />
-        <Route path="/export" element={<ProtectedRoute module="export_orders" action="view"><ExportOrders /></ProtectedRoute>} />
-        <Route path="/export/create" element={<ProtectedRoute module="export_orders" action="create"><CreateExportOrder /></ProtectedRoute>} />
-        <Route path="/export/:id" element={<ProtectedRoute module="export_orders" action="view"><ExportOrderDetail /></ProtectedRoute>} />
-        <Route path="/finance/*" element={<ProtectedRoute module="finance" action="view"><FinanceRoutes /></ProtectedRoute>} />
-        <Route path="/milling" element={<ProtectedRoute module="milling" action="view"><MillingDashboard /></ProtectedRoute>} />
-        <Route path="/milling/service" element={<ProtectedRoute module="service_milling" action="view"><ServiceMilling /></ProtectedRoute>} />
-        <Route path="/service-milling/invoices" element={<ProtectedRoute module="service_milling" action="view_invoice"><ServiceInvoices /></ProtectedRoute>} />
-        <Route path="/service-milling/:id" element={<ProtectedRoute module="service_milling" action="view"><ServiceMillingBatchDetail /></ProtectedRoute>} />
-        {/* Mill money pages also need cost visibility (reports.view_cost or finance.view). */}
-        <Route path="/milling/finance" element={<ProtectedRoute module="milling" action="view" anyOf={COST_VIEWERS}><MillFinanceDashboard /></ProtectedRoute>} />
-        <Route path="/milling/rice-purchases" element={<ProtectedRoute module="milling" action="view" anyOf={COST_VIEWERS}><RicePurchasesLedger /></ProtectedRoute>} />
-        {/* Static /milling/* pages must be declared here, or a Standard-shell user
-            following a link to them lands on /milling/:id with id="customers". */}
-        <Route path="/milling/customers" element={<ProtectedRoute module="export_orders" action="view"><MillCustomers /></ProtectedRoute>} />
-        <Route path="/milling/suppliers" element={<ProtectedRoute module="milling" action="view"><MillSuppliers /></ProtectedRoute>} />
-        <Route path="/milling/statements" element={<ProtectedRoute module="finance" action="view"><PartyLedger /></ProtectedRoute>} />
-        <Route path="/purchase-requirements" element={<ProtectedRoute anyOf={[{ module: 'milling', action: 'view' }, { module: 'inventory', action: 'view' }, { module: 'finance', action: 'view' }]}><PurchaseRequirements /></ProtectedRoute>} />
-        <Route path="/stock-adjustments" element={<ProtectedRoute module="inventory" action="view"><StockAdjustments /></ProtectedRoute>} />
-        <Route path="/milling/:id" element={<ProtectedRoute module="milling" action="view"><MillingBatchDetail /></ProtectedRoute>} />
-        <Route path="/quality" element={<ProtectedRoute module="milling" action="view"><QualityComparison /></ProtectedRoute>} />
-        <Route path="/sample-analysis" element={<ProtectedRoute anyOf={[{ module: 'inventory', action: 'view' }, { module: 'milling', action: 'view' }]}><SampleAnalysis /></ProtectedRoute>} />
-        <Route path="/transfer" element={<ProtectedRoute module="inventory" action="view"><InternalTransfer /></ProtectedRoute>} />
-        <Route path="/inventory" element={<ProtectedRoute module="inventory" action="view"><Inventory /></ProtectedRoute>} />
-        <Route path="/lot-inventory" element={<ProtectedRoute module="inventory" action="view"><LotInventory /></ProtectedRoute>} />
-        <Route path="/stock-summary" element={<ProtectedRoute module="inventory" action="view"><StockSummary /></ProtectedRoute>} />
-        <Route path="/stock-count" element={<ProtectedRoute module="inventory" action="view"><StockCount /></ProtectedRoute>} />
-        <Route path="/local-sales" element={<ProtectedRoute anyOf={[{ module: 'inventory', action: 'view' }, { module: 'finance', action: 'view' }]}><LocalSales /></ProtectedRoute>} />
-        <Route path="/local-sales/:id/invoice" element={<ProtectedRoute anyOf={[{ module: 'inventory', action: 'view' }, { module: 'finance', action: 'view' }]}><InvoiceView /></ProtectedRoute>} />
-        <Route path="/local-sales/:id/print" element={<ProtectedRoute anyOf={[{ module: 'inventory', action: 'view' }, { module: 'finance', action: 'view' }]}><InvoiceView /></ProtectedRoute>} />
-        <Route path="/local-sales/:id" element={<ProtectedRoute anyOf={[{ module: 'inventory', action: 'view' }, { module: 'finance', action: 'view' }]}><LocalSaleDetail /></ProtectedRoute>} />
-        <Route path="/lot-inventory/:id/purchase-invoice" element={<ProtectedRoute module="inventory" action="view" anyOf={COST_VIEWERS}><PurchaseInvoiceView /></ProtectedRoute>} />
-        <Route path="/lot-inventory/:id" element={<ProtectedRoute module="inventory" action="view"><LotDetail /></ProtectedRoute>} />
-        <Route path="/documents" element={<ProtectedRoute module="documents" action="view"><Documents /></ProtectedRoute>} />
-        {/* Mill Store — was previously only in MillRoutes, so non-Mill-Manager
-            roles (Super Admin / Owner) couldn't reach the New Purchase form
-            and got bounced to the dashboard by the catch-all. */}
-        <Route path="/mill-store"               element={<ProtectedRoute module="mill_store" action="view"><StoreOverview /></ProtectedRoute>} />
-        <Route path="/mill-store/purchases/new" element={<Navigate to="/mill-store?action=purchase" replace />} />
-        <Route path="/mill-store/alerts"        element={<ProtectedRoute module="mill_store" action="view"><StoreAlerts /></ProtectedRoute>} />
-        <Route path="/mill-store/adjustments"   element={<ProtectedRoute module="mill_store" action="view"><StoreAdjustments /></ProtectedRoute>} />
-        <Route path="/mill-store/ratios"        element={<ProtectedRoute module="mill_store" action="view"><StoreRatios /></ProtectedRoute>} />
-        <Route path="/reports" element={<ProtectedRoute module="reports" action="view"><Reports /></ProtectedRoute>} />
-        <Route path="/reports/print" element={<ProtectedRoute module="reports" action="view"><PrintableReports /></ProtectedRoute>} />
-        <Route path="/reports/lots" element={<ProtectedRoute module="reports" action="view"><LotReport /></ProtectedRoute>} />
-        <Route path="/reports/invoices" element={<ProtectedRoute module="reports" action="view"><InvoiceLedger /></ProtectedRoute>} />
-        <Route path="/reports/payroll" element={<ProtectedRoute module="payroll" action="view"><PayrollLedger /></ProtectedRoute>} />
-        <Route path="/reports/payroll-analytics" element={<ProtectedRoute module="payroll" action="view"><PayrollAnalytics /></ProtectedRoute>} />
-        <Route path="/reports/lot-ledger/:id" element={<ProtectedRoute module="reports" action="view"><LotLedger /></ProtectedRoute>} />
-        <Route path="/reports/batch-ledger/:id" element={<ProtectedRoute module="reports" action="view"><BatchLedger /></ProtectedRoute>} />
-        <Route path="/reports/supplier-ledger" element={<ProtectedRoute module="reports" action="view"><SupplierLedger /></ProtectedRoute>} />
-        <Route path="/reports/supplier-ledger/:id" element={<ProtectedRoute module="reports" action="view"><SupplierLedger /></ProtectedRoute>} />
-        <Route path="/reports/rice-type-ledger" element={<ProtectedRoute module="reports" action="view"><RiceTypeLedger /></ProtectedRoute>} />
-        <Route path="/reports/rice-type-ledger/:id" element={<ProtectedRoute module="reports" action="view"><RiceTypeLedger /></ProtectedRoute>} />
-        <Route path="/reports/warehouse-ledger" element={<ProtectedRoute module="reports" action="view"><WarehouseLedger /></ProtectedRoute>} />
-        <Route path="/reports/warehouse-ledger/:id" element={<ProtectedRoute module="reports" action="view"><WarehouseLedger /></ProtectedRoute>} />
-        <Route path="/reports/processing-loss-ledger" element={<ProtectedRoute module="reports" action="view"><ProcessingLossLedger /></ProtectedRoute>} />
-        <Route path="/reports/finished-goods-ledger" element={<ProtectedRoute module="reports" action="view"><FinishedGoodsLedger /></ProtectedRoute>} />
-        <Route path="/reports/service-milling-stock" element={<ProtectedRoute module="reports" action="view"><ServiceMillingStock /></ProtectedRoute>} />
-        <Route path="/reports/service-milling-ageing" element={<ProtectedRoute module="reports" action="view"><ServiceMillingAgeing /></ProtectedRoute>} />
-        <Route path="/reports/service-milling-pending-dispatch" element={<ProtectedRoute module="reports" action="view"><ServiceMillingPendingDispatch /></ProtectedRoute>} />
-        <Route path="/reports/service-milling-reconciliation" element={<ProtectedRoute module="reports" action="view"><ServiceMillingReconciliation /></ProtectedRoute>} />
-        <Route path="/reports/inventory-movement-ledger" element={<ProtectedRoute module="reports" action="view"><InventoryMovementLedger /></ProtectedRoute>} />
-        <Route path="/reports/stock-ledger" element={<ProtectedRoute module="reports" action="view"><StockLedger /></ProtectedRoute>} />
-        <Route path="/exceptions" element={<ProtectedRoute module="admin" action="view"><ExceptionDashboard /></ProtectedRoute>} />
-        <Route path="/ai" element={<ProtectedRoute anyOf={[{ module: 'reports', action: 'view_cost' }, { module: 'finance', action: 'view' }]}><AiAssistant /></ProtectedRoute>} />
-        <Route path="/intelligence" element={<ProtectedRoute module="admin" action="view"><Intelligence /></ProtectedRoute>} />
-        <Route path="/simulator" element={<ProtectedRoute module="admin" action="view"><ScenarioSimulator /></ProtectedRoute>} />
-        <Route path="/approvals" element={<ProtectedRoute module="admin" action="view"><Approvals /></ProtectedRoute>} />
-        <Route path="/audit" element={<ProtectedRoute module="admin" action="view"><AuditLog /></ProtectedRoute>} />
-        <Route path="/admin" element={<ProtectedRoute module="admin" action="view"><Admin /></ProtectedRoute>} />
-        {/* Personal pages. Without these the scoped layouts' catch-all
-            redirect sends a Mill or Export user back to the dashboard when
-            they click Profile or Change password in their own menu. */}
-        <Route path="/profile" element={<Profile />} />
-        <Route path="/change-password" element={<ChangePassword />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+      <AppRoutes />
     </Layout>
   );
 }
 
-function RoleGatedShell() {
-  const { user } = useAuth();
-  if (user?.role === 'Mill Manager') return <MillRoutes />;
-  if (user?.role === 'Export Manager') return <ExportRoutes />;
-  return <StandardRoutes />;
+// Everything that needs the router (AuthProvider navigates on logout/expiry,
+// every page reads the location) renders inside the one root route.
+function RootProviders() {
+  return (
+    <AuthProvider>
+      <AppProvider>
+        <OwnerAuthProvider>
+        <Suspense fallback={<LoadingSpinner message="Loading page..." />}>
+          <Routes>
+            <Route path="/login" element={<Login />} />
+            {/* Public: target of the emailed / admin-issued password-reset link. */}
+            <Route path="/reset-password" element={<ResetPassword />} />
+            {/* Employee self-service portal — fully public (own CNIC+PIN auth),
+                mounted OUTSIDE the staff app shell / ProtectedRoute. */}
+            <Route path="/portal" element={<EmployeePortal />} />
+            {/* Standalone print page — mounted OUTSIDE the app shell
+                so the browser prints a clean document (no sidebar /
+                header / scroll container fight). */}
+            <Route
+              path="/print-report"
+              element={
+                <ProtectedRoute module="reports" action="view">
+                  <StandalonePrintReport />
+                </ProtectedRoute>
+              }
+            />
+            {/* Everything else — including /profile and /change-password —
+                renders inside the one shell. */}
+            <Route
+              path="/*"
+              element={
+                <ProtectedRoute>
+                  <SignedInApp />
+                </ProtectedRoute>
+              }
+            />
+          </Routes>
+        </Suspense>
+        <Toast />
+        <QueryErrorHandler />
+        </OwnerAuthProvider>
+      </AppProvider>
+    </AuthProvider>
+  );
 }
+
+// A data router (was <BrowserRouter>) so unsaved-change guards (useBlocker /
+// useDirtyGuard) can also intercept the browser Back button. One splat root
+// route; the app's own <Routes> tables below it are unchanged, so every URL
+// resolves exactly as before. The app ErrorBoundary sits inside the route as
+// well, so a render error shows our own crash card, not the router's default
+// error page.
+const router = createBrowserRouter([
+  { path: '*', element: <ErrorBoundary><RootProviders /></ErrorBoundary> },
+]);
 
 function App() {
   return (
     <ErrorBoundary>
     <QueryClientProvider client={queryClient}>
-    <BrowserRouter>
-      <AuthProvider>
-        <AppProvider>
-          <OwnerAuthProvider>
-          <Suspense fallback={<LoadingSpinner message="Loading page..." />}>
-            <Routes>
-              <Route path="/login" element={<Login />} />
-              {/* Public: target of the emailed / admin-issued password-reset link. */}
-              <Route path="/reset-password" element={<ResetPassword />} />
-              {/* #9 Forced/self-service password change — auth-gated, standalone
-                  (outside the app shell) so a force_password_change user lands here. */}
-              <Route path="/change-password" element={<ProtectedRoute><ChangePassword /></ProtectedRoute>} />
-              <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
-              {/* Employee self-service portal — fully public (own CNIC+PIN auth),
-                  mounted OUTSIDE the staff app shell / ProtectedRoute. */}
-              <Route path="/portal" element={<EmployeePortal />} />
-              {/* Standalone print page — mounted OUTSIDE the app shell
-                  so the browser prints a clean document (no sidebar /
-                  header / scroll container fight). */}
-              <Route
-                path="/print-report"
-                element={
-                  <ProtectedRoute module="reports" action="view">
-                    <StandalonePrintReport />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/*"
-                element={
-                  <ProtectedRoute>
-                    <RoleGatedShell />
-                  </ProtectedRoute>
-                }
-              />
-            </Routes>
-          </Suspense>
-          <Toast />
-          <QueryErrorHandler />
-          </OwnerAuthProvider>
-        </AppProvider>
-      </AuthProvider>
-    </BrowserRouter>
+      <RouterProvider router={router} />
     </QueryClientProvider>
     </ErrorBoundary>
   );

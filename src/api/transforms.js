@@ -488,6 +488,9 @@ export function transformBankAccount(db) {
     isExportDefault: db.is_export_default || false,
     approvedForCustomer: db.approved_for_customer || false,
     isFavorite: !!db.is_favorite,
+    // An account switched off stays in the list (history, statements) but is
+    // never offered as a default or a transfer end (useDefaultAccount).
+    isActive: db.is_active !== false,
   };
 }
 

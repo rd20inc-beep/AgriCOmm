@@ -58,3 +58,29 @@ export async function fetchPageOrAll(list, params = {}, key, opts) {
   const d = dataOf(res);
   return attachListTotal(Array.isArray(d?.[key]) ? d[key] : [], d?.pagination?.total);
 }
+
+/**
+ * W19 — every row for an EXPORT, walking the pages but stopping at `maxRows`
+ * so one click can't pull an unbounded table. Resolves to
+ * { rows, total, truncated } — truncated = more rows match than were fetched,
+ * so the caller must warn that the CSV is not the whole list.
+ */
+export async function fetchAllPagesCapped(list, params = {}, key, { pageSize = ALL_PAGE_SIZE, maxRows = 20000 } = {}) {
+  const read = (res) => {
+    const d = dataOf(res);
+    const rows = Array.isArray(d?.[key]) ? d[key] : [];
+    const total = parseInt(d?.pagination?.total, 10);
+    return { rows, total: Number.isFinite(total) ? total : null };
+  };
+  const first = read(await list({ ...params, page: 1, limit: pageSize }));
+  const rows = [...first.rows];
+  if (first.total == null) return { rows, total: rows.length, truncated: false };
+  const lastPage = Math.min(Math.ceil(first.total / pageSize), Math.ceil(maxRows / pageSize));
+  for (let p = 2; p <= lastPage; p += PARALLEL) {
+    const batch = [];
+    for (let q = p; q < p + PARALLEL && q <= lastPage; q += 1) batch.push(list({ ...params, page: q, limit: pageSize }));
+    (await Promise.all(batch)).forEach((res) => rows.push(...read(res).rows));
+  }
+  if (rows.length > maxRows) rows.length = maxRows;
+  return { rows, total: first.total, truncated: first.total > rows.length };
+}

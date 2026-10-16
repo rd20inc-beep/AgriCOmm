@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Warehouse, Plus, Pencil, Trash2 } from 'lucide-react';
 import { useApp } from '../../../../context/AppContext';
+import { useWarehousesList } from '../../../../shared/hooks/useMasterData';
 import { useCreateWarehouse, useUpdateWarehouse, useDeleteWarehouse } from '../../../../api/queries';
 import Modal from '../../components/AdminDrawer';
 import FieldError from '../../../../shared/components/FieldError';
@@ -11,7 +12,8 @@ const EMPTY = { name: '', entity: 'mill', type: 'raw' };
 
 export default function WarehousesTab() {
   const canWrite = useAdminCanWrite();
-  const { warehousesList, addToast } = useApp();
+  const { addToast } = useApp();
+  const { data: warehousesList } = useWarehousesList();
   const createMut = useCreateWarehouse();
   const updateMut = useUpdateWarehouse();
   const deleteMut = useDeleteWarehouse();

@@ -8,7 +8,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, Printer, Download, Factory, ChevronRight, Package } from 'lucide-react';
 import { reportingApi } from '../api/services';
-import { useApp } from '../../../context/AppContext';
+import { useCompanyProfile } from '../../../shared/hooks/useMasterData';
 import { useAuth } from '../../../context/AuthContext';
 import { exportLedgerCSV, printFinishedGoodsLedger } from '../utils/ledgerExport';
 import { fmtKg, fmtPKR } from '../../../shared/utils/format';
@@ -18,7 +18,7 @@ const kg = (v) => fmtKg(v);
 
 export default function FinishedGoodsLedger() {
   const navigate = useNavigate();
-  const { companyProfileData } = useApp();
+  const companyProfileData = useCompanyProfile();
   const { user } = useAuth();
   const [entity, setEntity] = useState('');
   const [type, setType] = useState('');

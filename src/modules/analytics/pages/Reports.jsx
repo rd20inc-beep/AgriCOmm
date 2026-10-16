@@ -2,7 +2,7 @@ import { useMemo, useState, useEffect, useRef, Fragment } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../../context/AuthContext';
 import useCanSeeCost, { useCanSeeProfit } from '../../../hooks/useCanSeeCost';
-import { useApp } from '../../../context/AppContext';
+import { useCompanyProfile } from '../../../shared/hooks/useMasterData';
 import {
   BarChart3, TrendingUp, Users, Globe, Package, Award, Coins, Printer, RefreshCw,
   ArrowUpRight, ArrowDownLeft, Activity, Calendar, ExternalLink, AlertTriangle, FileText,
@@ -39,6 +39,7 @@ import {
 } from '../../../shared/utils/format';
 import { moneyTile, netTile, currencyLines, formatCurrencyLines, cappedHint } from '../utils/moneyFeed';
 import { forecastCards, forecastRows, forecastEquivText, money as forecastMoney } from '../utils/cashForecastView';
+import { clickableProps } from '../../../shared/utils/a11y';
 
 // ─── Formatting ────────────────────────────────────────────────────────
 // Reports are reconciled line by line, so money is always shown in full —
@@ -183,7 +184,7 @@ function GlobalSearchBox({ entity }) {
 // Shared Export-CSV + Print bar for the Phase 2 ledger reports. Pass the
 // ledger's column defs + rows; Print uses the standardized template.
 function LedgerExportBar({ title, subtitle, meta, columns, rows, footerNote, fileBase }) {
-  const { companyProfileData } = useApp();
+  const companyProfileData = useCompanyProfile();
   const { user } = useAuth();
   const companyName = companyProfileData?.legalName || companyProfileData?.name || 'AGRI COMMODITIES';
   const stamp = todayLocalISO();
@@ -466,7 +467,13 @@ const REPORT_DATASETS = {
   },
   inventory_movements: {
     label: 'Inventory movements',
-    load: async () => { const r = await reportingApi.inventoryLedger({ limit: 500 }); return (r?.rows || r?.data?.rows || []); },
+    // W19: the builder exports what it loads, so it asks for the FULL list
+    // (export=1) and keeps the server's truncated flag to warn if capped.
+    load: async () => {
+      const r = await reportingApi.inventoryLedger({ export: '1' });
+      const d = r?.rows ? r : (r?.data || r || {});
+      return { rows: d.rows || [], truncated: !!d.totals?.truncated, total: d.totals?.count };
+    },
     columns: [
       { key: 'date', label: 'Date', accessor: r => RB_DATE(r.date) },
       { key: 'label', label: 'Movement', accessor: r => r.label },
@@ -484,6 +491,8 @@ const RB_LAYOUTS_KEY = 'rf_report_builder_layouts';
 function ReportBuilderDrawer() {
   const [datasetKey, setDatasetKey] = useState('lots');
   const [rows, setRows] = useState([]);
+  // { total } when the server capped the dataset (W19) — shown, never hidden.
+  const [capped, setCapped] = useState(null);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState(REPORT_DATASETS.lots.columns.map(c => c.key));
   const [filterText, setFilterText] = useState('');
@@ -494,7 +503,12 @@ function ReportBuilderDrawer() {
   const ds = REPORT_DATASETS[datasetKey];
   useEffect(() => {
     setLoading(true);
-    ds.load().then(r => setRows(Array.isArray(r) ? r : [])).catch(() => setRows([])).finally(() => setLoading(false));
+    ds.load().then(r => {
+      // A dataset loads either a plain row array or { rows, truncated, total }.
+      const list = Array.isArray(r) ? r : (Array.isArray(r?.rows) ? r.rows : []);
+      setRows(list);
+      setCapped(!Array.isArray(r) && r?.truncated ? { total: r.total, listed: list.length } : null);
+    }).catch(() => { setRows([]); setCapped(null); }).finally(() => setLoading(false));
   }, [datasetKey]); // eslint-disable-line
 
   const cols = ds.columns.filter(c => selected.includes(c.key));
@@ -605,13 +619,18 @@ function ReportBuilderDrawer() {
         </div>
       )}
       {view.length > 300 && <p className="text-[11px] text-gray-400">Showing first 300 of {view.length} rows — export for the full set.</p>}
+      {capped && (
+        <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1" role="alert">
+          Export limit reached: loaded {capped.listed.toLocaleString()}{capped.total ? ` of ${Number(capped.total).toLocaleString()}` : ''} rows, so the CSV is incomplete. Narrow the data on the Inventory Movement Ledger to export the rest.
+        </p>
+      )}
     </div>
   );
 }
 
 export default function Reports() {
   const { user } = useAuth();
-  const { companyProfileData } = useApp();
+  const companyProfileData = useCompanyProfile();
   // A Mill role's reports must stay mill-only — no export-order profitability,
   // customers, countries or export A/R / booked profit.
   const millScoped = user?.role === 'Mill Manager';
@@ -841,7 +860,7 @@ export default function Reports() {
             </Link>
           </div>
           {(ledgersOpen || toolsOpen || savedOpen) && (
-            <div className="fixed inset-0 z-20" onClick={() => { setLedgersOpen(false); setToolsOpen(false); setSavedOpen(false); }} />
+            <div className="fixed inset-0 z-20" aria-hidden="true" onClick={() => { setLedgersOpen(false); setToolsOpen(false); setSavedOpen(false); }} />
           )}
         </div>
       </div>
@@ -926,7 +945,7 @@ export default function Reports() {
               });
             })()}
           </div>
-          {openGroup && <div className="fixed inset-0 z-20" onClick={() => setOpenGroup(null)} />}
+          {openGroup && <div className="fixed inset-0 z-20" aria-hidden="true" onClick={() => setOpenGroup(null)} />}
         </nav>
 
         <div className="p-4 sm:p-6">
@@ -1377,7 +1396,7 @@ function PurchasesTab({ params, statementHref, openDoc }) {
               const href = statementHref?.('supplier', r.supplierId);
               return (
                 <Fragment key={k}>
-                  <tr onClick={() => setOpen(isOpen ? null : k)} className="hover:bg-gray-50 cursor-pointer">
+                  <tr {...clickableProps(() => setOpen(isOpen ? null : k), { expanded: isOpen })} className="hover:bg-gray-50 cursor-pointer">
                     <td data-label="" className="mob-hide py-2.5 px-3 text-gray-400">{isOpen ? <ChevronDown size={15} /> : <ChevronRight size={15} />}</td>
                     <td data-label="Date" className="py-2.5 px-3">{r.date ? new Date(r.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : '—'}</td>
                     <td data-label="Ref" className="py-2.5 px-3 font-mono text-xs">{r.ref}</td>
@@ -2790,7 +2809,7 @@ function FinishedGoodsLedgerSection({ entity, hideValue }) {
           <tbody className="divide-y divide-gray-100">
             {rows.map((r) => (
               <Fragment key={r.key}>
-                <tr className="hover:bg-gray-50 cursor-pointer" onClick={() => setExp(e => ({ ...e, [r.key]: !e[r.key] }))}>
+                <tr className="hover:bg-gray-50 cursor-pointer" {...clickableProps(() => setExp(e => ({ ...e, [r.key]: !e[r.key] })), { expanded: !!exp[r.key] })}>
                   <td data-label="Output" className="px-3 py-2 font-medium text-gray-800"><ChevronRight size={13} className={`inline transition-transform mr-1 text-gray-400 ${exp[r.key] ? 'rotate-90' : ''}`} />{gradeLabel(r.key)}<span className="text-gray-400 font-normal"> · {r.type === 'byproduct' ? 'by-product' : 'finished'} · {r.lots.length} lot{r.lots.length === 1 ? '' : 's'}</span></td>
                   <td data-label="Produced" className="px-3 py-2 text-right tabular-nums">{kg(r.producedKg)}</td>
                   <td data-label="Sold" className="px-3 py-2 text-right tabular-nums text-slate-600">{kg(r.soldKg)}</td>
@@ -3072,7 +3091,7 @@ function Table({ head, align = [], rows, rowClick }) {
           {rows.map((row, ri) => {
             const onClick = rowClick?.[ri];
             return (
-              <tr key={ri} onClick={onClick}
+              <tr key={ri} {...(onClick ? clickableProps(onClick) : {})}
                 className={`hover:bg-gray-50 ${onClick ? 'cursor-pointer' : ''}`}>
                 {row.map((cell, ci) => (
                   <td data-label={head[ci]} key={ci} className={`text-${align[ci] || 'left'} py-2.5 px-3 text-gray-800`}>{cell}</td>

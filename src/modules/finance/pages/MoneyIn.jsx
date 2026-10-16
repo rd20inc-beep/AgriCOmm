@@ -5,7 +5,7 @@ import { FinanceKPI, FinanceTable, FinanceFilterBar } from '../../../components/
 import ListCapHint from '../../../shared/components/ListCapHint';
 import { useReceivables, useReceivablesSummary } from '../../../api/queries';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
-import { useApp } from '../../../context/AppContext';
+import { useCompanyProfile } from '../../../shared/hooks/useMasterData';
 import { useAuth } from '../../../context/AuthContext';
 import PartyLink from '../../../shared/components/PartyLink';
 import { pkrEquivText } from '../utils/currencyTiles';
@@ -28,7 +28,7 @@ const docOf = (row) => ({ docKind: row.kind === 'local_sale' ? 'local_sale' : 'r
 // exactly as on the order. The button shows only to a role whose route
 // guard would take the receipt.
 export default function MoneyIn() {
-  const { companyProfileData } = useApp() || {};
+  const companyProfileData = useCompanyProfile();
   const { hasPermission } = useAuth();
   const drawers = useFinanceDrawers();
   const { queryParams: rangeParams } = useFinanceDateRange();
@@ -156,6 +156,7 @@ export default function MoneyIn() {
           searchKeys={['customerName', 'recvNo', 'orderId']}
           onRowClick={(row) => drawers?.openDocument(docOf(row))}
           exportFilename="receivables"
+          listCap={{ loaded: receivables.length, total: receivables.listTotal }}
           emptyText="No receivables in this period."
           loading={isLoading}
           error={error}
