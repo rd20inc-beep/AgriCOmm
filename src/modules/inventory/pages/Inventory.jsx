@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
+import { useUrlTab } from '../../../shared/hooks/useUrlTab';
 import { Package, Wheat, FlaskConical, Box, Truck, Search, Filter, Eye, RefreshCw, ArrowRight, Layers } from 'lucide-react';
 import { useLotInventory, useStockReport } from '../../../api/queries';
 import { LoadingSpinner, ErrorState } from '../../../components/LoadingState';
@@ -20,7 +21,8 @@ const tabs = [
 const fmtPKR = (v) => fmtPKRBase(v, { decimals: 2 });
 
 export default function Inventory() {
-  const [activeTab, setActiveTab] = useState('all');
+  // ?tab= keeps the tab across refresh, Back and shared links (P5-08).
+  const [activeTab, setActiveTab] = useUrlTab('all', tabs.map((t) => t.key));
   const [entityFilter, setEntityFilter] = useState('All');
   const [searchTerm, setSearchTerm] = useState('');
   const [displayUnit, setDisplayUnit] = useState('kg');

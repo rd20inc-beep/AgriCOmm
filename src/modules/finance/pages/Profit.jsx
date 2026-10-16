@@ -1,4 +1,5 @@
-import { useState, useMemo } from 'react';
+import { useMemo } from 'react';
+import { useUrlTab } from '../../../shared/hooks/useUrlTab';
 import OrderRefLink from '../../../shared/components/OrderRefLink';
 import { TrendingUp, TrendingDown, DollarSign, Factory, Store, AlertTriangle, CheckCircle, RefreshCw, Activity, Printer } from 'lucide-react';
 import { FinanceKPI, FinanceTable, FinanceChart } from '../../../components/finance';
@@ -45,7 +46,8 @@ function AccuracyBadge({ status }) {
 
 export default function Profit() {
   const { companyProfileData } = useApp();
-  const [tab, setTab] = useState('Export');
+  // ?tab= keeps the tab across refresh, Back and shared links (P5-08).
+  const [tab, setTab] = useUrlTab('Export', TABS);
   // Every figure here is the server's one profit definition
   // (backend finance/profitDefinitions.js), for the period in the URL.
   const { queryParams: rangeParams, rangeKey } = useFinanceDateRange();

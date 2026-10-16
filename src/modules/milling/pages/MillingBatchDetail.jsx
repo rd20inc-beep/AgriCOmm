@@ -56,6 +56,8 @@ import { qualityParams } from '../qualityParams';
 import useCanSeeCost from '../../../hooks/useCanSeeCost';
 import { todayLocalISO, fmtPKR, fmtKg, fmtPct, fmtNum, fmtDateTime } from '../../../shared/utils/format';
 import { MAX_PRICE_PER_KG, isImplausiblePerKg } from '../utils/byproductPrices';
+import { useUrlTab } from '../../../shared/hooks/useUrlTab';
+import Breadcrumbs from '../../../shared/components/Breadcrumbs';
 
 const tabs = [
   { key: 'overview', label: 'Overview', icon: Package },
@@ -144,7 +146,8 @@ export default function MillingBatchDetail() {
     qc.invalidateQueries({ queryKey: queryKeys.inventory.all });
   };
 
-  const [activeTab, setActiveTab] = useState('overview');
+  // ?tab= keeps the tab across refresh, Back and shared links (P5-08).
+  const [activeTab, setActiveTab] = useUrlTab('overview', visibleTabs.map((t) => t.key));
 
   // Custom name + tags — inline edit.
   const [editingMeta, setEditingMeta] = useState(false);
@@ -843,9 +846,7 @@ export default function MillingBatchDetail() {
       {/* Header */}
       <div>
         <div className="flex items-center justify-between gap-2 mb-3">
-          <Link to="/milling" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700">
-            <ArrowLeft size={16} /> Back to Milling Dashboard
-          </Link>
+          <Breadcrumbs items={[{ label: 'Milling', to: '/milling' }, { label: batch.id }]} className="text-sm" />
           {canReports && (
           <Link to={`/reports/batch-ledger/${batch.dbId || batch.id}`} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100">
             <BarChart3 size={14} /> Batch 360 / Ledger
@@ -1040,6 +1041,8 @@ export default function MillingBatchDetail() {
             return (
               <button
                 key={tab.key}
+                type="button"
+                aria-current={activeTab === tab.key ? 'page' : undefined}
                 onClick={() => setActiveTab(tab.key)}
                 className={`inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
                   activeTab === tab.key

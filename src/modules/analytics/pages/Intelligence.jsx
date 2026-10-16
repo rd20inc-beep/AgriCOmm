@@ -1,5 +1,6 @@
-import { useState, useMemo } from 'react';
+import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
+import { useUrlTab } from '../../../shared/hooks/useUrlTab';
 import {
   Brain, TrendingUp, TrendingDown, Users, Truck, BarChart3, DollarSign,
   AlertTriangle, Star, ArrowUpRight, ArrowDownRight, Eye, RefreshCw,
@@ -400,7 +401,8 @@ function SmartAlertsTab() {
 }
 
 export default function Intelligence() {
-  const [activeTab, setActiveTab] = useState('Profitability');
+  // ?tab= keeps the tab across refresh, Back and shared links (P5-08).
+  const [activeTab, setActiveTab] = useUrlTab('Profitability', TABS);
 
   return (
     <div className="space-y-6">

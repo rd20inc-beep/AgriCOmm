@@ -10,6 +10,7 @@ import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import { exportLedgerCSV, printBatchLedger } from '../utils/ledgerExport';
 import { fmtDate, fmtKg, fmtPKR, fmtPct } from '../../../shared/utils/format';
+import { goBack } from '../../../shared/utils/goBack';
 
 const pkr = (v) => fmtPKR(v, { decimals: 2 });
 const kg = (v) => fmtKg(v);
@@ -42,7 +43,7 @@ export default function BatchLedger() {
   if (isLoading) return <div className="p-6 text-sm text-gray-400">Loading batch ledger…</div>;
   if (isError || !data?.batch) return (
     <div className="p-6">
-      <button onClick={() => navigate(-1)} className="text-blue-600 hover:underline inline-flex items-center gap-1 text-sm"><ArrowLeft size={14} /> Back</button>
+      <button type="button" onClick={() => goBack(navigate, '/reports')} className="text-blue-600 hover:underline inline-flex items-center gap-1 text-sm"><ArrowLeft size={14} /> Back</button>
       <p className="mt-4 text-sm text-red-600">{error?.message || 'Batch ledger not available.'}</p>
     </div>
   );
@@ -69,7 +70,7 @@ export default function BatchLedger() {
       {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <button onClick={() => navigate(-1)} className="text-blue-600 hover:underline inline-flex items-center gap-1 text-sm mb-1"><ArrowLeft size={14} /> Back</button>
+          <button type="button" onClick={() => goBack(navigate, '/reports')} className="text-blue-600 hover:underline inline-flex items-center gap-1 text-sm mb-1"><ArrowLeft size={14} /> Back</button>
           <h1 className="text-2xl font-bold text-gray-900 inline-flex items-center gap-2"><Factory size={20} /> Batch {b.batchNo}
             <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-gray-100 text-gray-600">{b.status}</span>
             {b.isBlend && <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-violet-100 text-violet-700">Blend</span>}

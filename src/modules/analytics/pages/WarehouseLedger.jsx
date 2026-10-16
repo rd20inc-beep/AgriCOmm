@@ -12,6 +12,7 @@ import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import { exportLedgerCSV, printWarehouseLedger } from '../utils/ledgerExport';
 import { fmtKg, fmtPKR } from '../../../shared/utils/format';
+import { goBack } from '../../../shared/utils/goBack';
 
 const pkr = (v) => fmtPKR(v, { decimals: 2 });
 const kg = (v) => fmtKg(v);
@@ -101,7 +102,7 @@ function WarehouseDetail({ id }) {
   if (isLoading) return <div className="p-6 text-sm text-gray-400">Loading warehouse ledger…</div>;
   if (isError || !data?.warehouse) return (
     <div className="p-6">
-      <button onClick={() => navigate(-1)} className="text-blue-600 hover:underline inline-flex items-center gap-1 text-sm"><ArrowLeft size={14} /> Back</button>
+      <button type="button" onClick={() => goBack(navigate, '/reports')} className="text-blue-600 hover:underline inline-flex items-center gap-1 text-sm"><ArrowLeft size={14} /> Back</button>
       <p className="mt-4 text-sm text-red-600">{error?.message || 'Warehouse ledger not available.'}</p>
     </div>
   );

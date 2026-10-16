@@ -29,6 +29,9 @@ import useCanSeeCost from '../../../hooks/useCanSeeCost';
 import { todayLocalISO, fmtPKR as fmtPKRBase, fmtNum, fmtPct, fmtDate } from '../../../shared/utils/format';
 import useConfirm from '../../../hooks/useConfirm';
 import VoidPurchaseButton from '../../../shared/components/VoidPurchaseButton';
+import { useUrlTab } from '../../../shared/hooks/useUrlTab';
+import { goBack as safeGoBack } from '../../../shared/utils/goBack';
+import Breadcrumbs from '../../../shared/components/Breadcrumbs';
 
 // Lot money is exact to the paisa; a missing figure reads Rs 0.00 here.
 const fmtPKR = (v, opts) => fmtPKRBase(parseFloat(v) || 0, { decimals: 2, ...opts });
@@ -63,10 +66,7 @@ export default function LotDetail() {
   const navigate = useNavigate();
   // Back returns to wherever the lot was opened from (Stock Summary, a report,
   // a ledger…); a lot opened directly (no history) falls back to Lot Inventory.
-  const goBack = () => {
-    if (typeof window !== 'undefined' && window.history.state && window.history.state.idx > 0) navigate(-1);
-    else navigate('/lot-inventory');
-  };
+  const goBack = () => safeGoBack(navigate, '/lot-inventory');
   const { addToast, warehousesList, companyProfileData } = useApp();
   const { user, hasPermission } = useAuth();
   const canReports = hasPermission('reports', 'view');
@@ -76,7 +76,9 @@ export default function LotDetail() {
   // The API nulls the same fields; this keeps empty "Rs 0.00" off the page.
   const showCost = useCanSeeCost();
   const tabs = TABS.filter((t) => showCost || !t.cost);
-  const [activeTab, setActiveTab] = useState('overview');
+  // ?tab= keeps the tab across refresh, Back and shared links (P5-08). A
+  // cost tab deep-linked by a cost-blind role falls back to Overview.
+  const [activeTab, setActiveTab] = useUrlTab('overview', tabs.map((t) => t.key));
   const [displayUnit, setDisplayUnit] = useState('katta');
   const [showTxnModal, setShowTxnModal] = useState(false);
   const [showCostModal, setShowCostModal] = useState(false);
@@ -248,9 +250,10 @@ export default function LotDetail() {
 
   return (
     <div className="space-y-6">
+      <Breadcrumbs items={[{ label: 'Lot Inventory', to: '/lot-inventory' }, { label: lot.lotNo }]} />
       {/* Header */}
       <div className="flex items-center gap-4">
-        <button onClick={goBack} title="Back" aria-label="Back" className="p-2 hover:bg-gray-100 rounded-lg"><ArrowLeft className="w-5 h-5 text-gray-600" /></button>
+        <button type="button" onClick={goBack} title="Back" aria-label="Back" className="p-2 hover:bg-gray-100 rounded-lg"><ArrowLeft className="w-5 h-5 text-gray-600" /></button>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-3 flex-wrap">
             <h1 className="text-2xl font-bold text-gray-900">{lot.lotNo}</h1>

@@ -12,6 +12,7 @@ import { ArrowLeft, Printer } from 'lucide-react';
 import { reportingApi } from '../api/services';
 import { useApp } from '../../../context/AppContext';
 import { fmtDate, fmtNum } from '../../../shared/utils/format';
+import { goBack } from '../../../shared/utils/goBack';
 
 const n0 = (v) => fmtNum(v, 0);
 const cell = (v) => (parseFloat(v) > 0 ? n0(v) : '—');
@@ -54,7 +55,7 @@ export default function StockLedger() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between no-print">
-        <button onClick={() => navigate(-1)} className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700">
+        <button type="button" onClick={() => goBack(navigate, '/reports')} className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700">
           <ArrowLeft size={16} /> Back
         </button>
         <button onClick={() => window.print()} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700">
