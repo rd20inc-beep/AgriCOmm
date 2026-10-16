@@ -1,14 +1,16 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { useApp } from '../../../context/AppContext';
+import { useAuth } from '../../../context/AuthContext';
 import StatusBadge from '../../../components/StatusBadge';
 import PartyLink from '../../../shared/components/PartyLink';
-import { Plus, Search, Eye, ArrowUpDown, Ship, FileText, DollarSign, Package, Clock, Filter, FileDown, Mail, Download } from 'lucide-react';
+import { Plus, Search, Eye, ArrowUpDown, Ship, FileText, DollarSign, Package, Clock, Filter, FileDown, Mail, Download, Copy } from 'lucide-react';
 import { downloadCSV } from '../../../utils/csvExport';
 import Modal from '../../../components/Modal';
 import ProformaInvoice from '../../../components/ProformaInvoice';
 import QuotationsPanel from '../components/QuotationsPanel';
 import { isBalanceDue } from '../components/constants';
+import { exportOrdersIntent, duplicateOrderHref } from '../utils/exportDeepLinks';
 import { todayLocalISO, fmtMoney, fmtPct } from '../../../shared/utils/format';
 
 const tabs = [
@@ -41,6 +43,9 @@ export default function ExportOrders() {
   // Read status filter from URL (from dashboard pipeline click)
   const urlParams = new URLSearchParams(window.location.search);
   const urlStatus = urlParams.get('status');
+  const intent = exportOrdersIntent(urlParams);
+  const { hasPermission } = useAuth();
+  const canCreate = hasPermission('export_orders', 'create');
   const [activeTab, setActiveTab] = useState(() => {
     if (!urlStatus) return 'All';
     if (urlStatus === 'Awaiting Advance') return 'Awaiting Advance';
@@ -105,6 +110,10 @@ export default function ExportOrders() {
     if (m == null) return '—';
     return `${fmtPct(m)}${order.profit.estimated ? ' est.' : ''}`;
   };
+
+  // Old quick-action link /export?new=1 (NAV-09): go straight to the form
+  // instead of the list. Hooks above run first, so the early return is safe.
+  if (intent.create) return <Navigate to={intent.to} replace />;
 
   return (
     <div className="space-y-6">
@@ -276,6 +285,21 @@ export default function ExportOrders() {
                         >
                           <Mail className="w-3.5 h-3.5" />
                         </button>
+                        {canCreate && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              // W04/W05: a new order prefilled with this one's
+                              // terms and lines; payments/documents never copy.
+                              navigate(duplicateOrderHref(order.id));
+                            }}
+                            className="inline-flex items-center text-gray-500 hover:text-blue-600 text-xs font-medium"
+                            title="Duplicate order"
+                            aria-label={`Duplicate order ${order.id}`}
+                          >
+                            <Copy className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>

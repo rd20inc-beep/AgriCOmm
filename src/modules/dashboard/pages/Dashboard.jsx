@@ -28,6 +28,7 @@ import StatusBadge from '../../../shared/components/StatusBadge';
 import useConfirm from '../../../hooks/useConfirm';
 import { fmtPKR, fmtMT, fmtKg, fmtPct, fmtDate } from '../../../shared/utils/format';
 import { isActiveOrder } from '../../../shared/constants/orderStatus';
+import { CREATE_ORDER_PATH } from '../../exportOrders/utils/exportDeepLinks';
 
 // ─── Formatting ────────────────────────────────────────────────────────
 // Exact figures from the shared formatter (en-PK locale, no abbreviation).
@@ -66,6 +67,8 @@ export default function Dashboard() {
   // Documentation Officer) would hit Access Denied on tiles that jump to /export
   // or /milling. Only show those to roles that can actually open them.
   const canExport = hasPermission('export_orders', 'view');
+  // The quick action opens the create form itself (NAV-09), so it needs create.
+  const canCreateExport = hasPermission('export_orders', 'create');
   const canMill = hasPermission('milling', 'view');
   const canFinance = hasPermission('finance', 'view');
   const canReports = hasPermission('reports', 'view');
@@ -499,7 +502,7 @@ export default function Dashboard() {
       <div className="bg-gradient-to-r from-gray-900 to-gray-800 rounded-xl p-4 text-white">
         <div className="flex flex-wrap items-center gap-3">
           <span className="text-xs uppercase tracking-wider text-gray-400 mr-2">Quick actions</span>
-          {canExport && <QuickAction icon={Plus} label="New Export Order" onClick={() => navigate("/export?new=1")} tone="blue" />}
+          {canCreateExport && <QuickAction icon={Plus} label="New Export Order" onClick={() => navigate(CREATE_ORDER_PATH)} tone="blue" />}
           {canMill && <QuickAction icon={Factory} label="New Milling Batch" onClick={() => navigate("/milling?new=1")} tone="amber" />}
           {canFinance && <QuickAction icon={ArrowDownLeft} label="Record Receipt" onClick={() => navigate('/finance/money-in')} tone="emerald" />}
           {canFinance && <QuickAction icon={ArrowUpRight} label="Make Payment" onClick={() => navigate('/finance/money-out')} tone="rose" />}
