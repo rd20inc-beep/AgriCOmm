@@ -106,6 +106,24 @@ export function variantForDocument(doc) {
   }
 }
 
+/**
+ * Whose money a payment moves — the entity its remembered account default is
+ * kept under (useDefaultAccount). The host may say (ctx.entity); otherwise the
+ * variant decides: an export receipt is Export's, a local-sale / service
+ * receipt is the Mill's, and a mill-only payer only ever uses Mill accounts.
+ */
+const VARIANT_ENTITY = {
+  receive_export: 'export',
+  receive_local_sale: 'mill',
+  receive_local_sale_line: 'mill',
+  receive_service: 'mill',
+};
+export function entityForPayment(variant, ctx = {}, { millOnly = false } = {}) {
+  if (millOnly) return 'mill';
+  if (ctx?.entity) return String(ctx.entity).toLowerCase();
+  return VARIANT_ENTITY[variant] || 'general';
+}
+
 /** Methods offered, the tax block, and whether an account must be picked. */
 export function variantConfig(variant) {
   const v = VARIANTS[variant];

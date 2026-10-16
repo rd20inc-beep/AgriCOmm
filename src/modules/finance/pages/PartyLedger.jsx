@@ -10,7 +10,8 @@ import LedgerTypeCounts from '../../milling/components/LedgerTypeCounts';
 import PartyAllocationLedger from '../../milling/components/PartyAllocationLedger';
 import OpenItemsPanel from '../../milling/components/OpenItemsPanel';
 import { accountingApi } from '../../accounting/api/services';
-import { useCustomers, useSuppliers } from '../../../api/queries';
+import { useCustomers, useSuppliers, useReceivables, usePayables } from '../../../api/queries';
+import { settleActionForOpenItem } from '../utils/openItemSettle';
 import { favStar } from '../../../shared/utils/favorites';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { useApp } from '../../../context/AppContext';
@@ -95,6 +96,16 @@ export default function PartyLedger() {
       return res?.data ?? res;
     },
   });
+
+  // W02/W03: Pay / Receive on each open item, opening the shared Payment form
+  // pre-filled with the party, the document and its outstanding (editable).
+  // The sub-ledger lists are read only when the user may record a payment.
+  const { data: receivables = [] } = useReceivables({}, { enabled: !!drawers && canPay && mode === 'customer' && !!partyId });
+  const { data: payables = [] } = usePayables({}, { enabled: !!drawers && canPay && mode === 'supplier' && !!partyId });
+  const openItemAction = drawers && canPay ? (item) => {
+    const doc = settleActionForOpenItem(item, { mode, receivables, payables, partyId }, hasPermission);
+    return doc ? { label: mode === 'customer' ? 'Receive' : 'Pay', onClick: () => drawers.openPayment(doc) } : null;
+  } : null;
 
   const transactions = statement?.transactions || [];
   const cur = statement?.currency || 'PKR';
@@ -369,7 +380,7 @@ export default function PartyLedger() {
           {/* Open items — outstanding receivables/payables (incl. ones not yet on
               the GL, e.g. export orders awaiting advance) so the statement isn't
               blank when Due Dates shows money owed. */}
-          <OpenItemsPanel items={statement?.open_items} partyType={mode} />
+          <OpenItemsPanel items={statement?.open_items} partyType={mode} actionFor={openItemAction} />
         </div>
       )}
 

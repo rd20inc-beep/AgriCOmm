@@ -6,7 +6,6 @@ import {
   Clock,
   AlertTriangle,
   CheckCircle,
-  PauseCircle,
   CreditCard,
   Banknote,
   FileText,
@@ -18,7 +17,7 @@ import {
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import { isOwnPendingReceipt, OWN_RECEIPT_NOTE } from '../utils/receiptMakerChecker';
-import { useUpdateOrderStatus, usePendingExportReceipts, useConfirmExportReceipt, useRejectExportReceipt, useReceivables } from '../../../api/queries';
+import { usePendingExportReceipts, useConfirmExportReceipt, useRejectExportReceipt, useReceivables } from '../../../api/queries';
 import { useFinanceDrawers } from '../drawers/drawersContext';
 import { canRecordVariant } from '../../../components/payments/paymentVariants';
 import StatusBadge from '../../../shared/components/StatusBadge';
@@ -48,11 +47,13 @@ export default function FinanceConfirmations() {
   const canViewExport = hasPermission('export_orders', 'view');
   // What each button asks of the server: recording a receipt is
   // export_orders.confirm_advance or finance.confirm_payment (record-receipt);
-  // confirming / rejecting one is finance.confirm_payment; holding an order
-  // is a status change, export_orders.approve.
+  // confirming / rejecting one is finance.confirm_payment.
+  // FIN-22: there is no 'Hold' here. It used to send status 'Cancelled',
+  // which no export-order transition allows from these statuses, so the
+  // button always failed; there is no hold flag on an export order to set
+  // instead. Stopping an order is Cancel Order on the order itself.
   const canRecord = canRecordVariant('receive_export', hasPermission);
   const canConfirm = hasPermission('finance', 'confirm_payment');
-  const canHold = hasPermission('export_orders', 'approve');
   const drawers = useFinanceDrawers();
   const [confirm, confirmDialog] = useConfirm();
   const orderRef = (id, cls = 'font-semibold text-blue-600 hover:text-blue-800') =>
@@ -77,7 +78,6 @@ export default function FinanceConfirmations() {
     return { expected, received, outstanding: Math.max(0, expected - received) };
   }, [receivables]);
 
-  const updateStatusMut = useUpdateOrderStatus();
   // Item 14 — pending export receipts inbox (Finance verifies FX + confirms).
   const { data: pendingReceipts = [] } = usePendingExportReceipts();
   const confirmReceiptMut = useConfirmExportReceipt();
@@ -136,7 +136,7 @@ export default function FinanceConfirmations() {
     return { totalReceivables, totalReceived, totalOutstanding, totalContractValue };
   }, [exportOrders]);
 
-  // === RECEIPT + HOLD ===
+  // === RECEIPT ===
   // Recording an advance / balance opens the shared Payment form (variant
   // receive_export → POST /export-orders/:id/record-receipt): a PENDING
   // receipt Finance confirms above with the rate the bank applied.
@@ -154,27 +154,6 @@ export default function FinanceConfirmations() {
         notes: `${type === 'advance' ? 'Advance' : 'Balance'} payment for ${order.id}`,
       },
     });
-  }
-
-  async function handlePutOnHold(order) {
-    if (!order || updateStatusMut.isPending) return;
-    const ok = await confirm({
-      title: `Put ${order.id} on hold?`,
-      consequence: 'The order is cancelled for a payment issue. The reason is recorded on the order.',
-      reason: 'required',
-      confirmLabel: 'Put on hold',
-      cancelLabel: 'Go back',
-    });
-    if (!ok) return;
-    try {
-      await updateStatusMut.mutateAsync({
-        id: order.dbId || order.id,
-        data: { status: 'Cancelled', notes: `Put on hold by Finance. Reason: ${ok.reason || 'Payment issue'}` },
-      });
-      addToast(`${order.id} cancelled due to payment hold`, 'warning');
-    } catch (err) {
-      addToast(`Failed to update order: ${err.message || 'Server error'}`, 'error');
-    }
   }
 
   // Finance confirms a PENDING receipt with the actual FX rate → posts it.
@@ -284,13 +263,6 @@ export default function FinanceConfirmations() {
           >
             <Mail size={15} aria-hidden="true" />
           </button>
-          {canHold && (
-            <button type="button" onClick={() => handlePutOnHold(order)} disabled={updateStatusMut.isPending} data-action="hold"
-              className={btnRowSecondary}
-              title="Put the order on hold (cancels it for a payment issue)">
-              <PauseCircle size={13} aria-hidden="true" /> Hold
-            </button>
-          )}
           {canRecord && (
             <button type="button" onClick={() => openReceipt(order, type)} data-action="receive" className={btnRowPrimary}>
               <CheckCircle size={14} aria-hidden="true" />

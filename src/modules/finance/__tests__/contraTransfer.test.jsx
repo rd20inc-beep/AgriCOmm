@@ -213,3 +213,80 @@ describe('history row label', () => {
     expect(transferStatusLabel({ status: 'reversed', direction: 'internal' })).toBe('Reversed');
   });
 });
+
+// ── W08–W10: one transfer flow ─────────────────────────────────────────
+const { default: TransferFundsDrawer } = await import('../components/TransferFundsDrawer');
+const { transferDefaults } = await import('../utils/contraTransfer');
+const selectHtml = (html, id) => html.slice(html.indexOf(`id="${id}"`), html.indexOf('</select>', html.indexOf(`id="${id}"`)));
+
+describe('one transfer flow — Mill → Head Office is the contra drawer, locked', () => {
+  it('TransferFundsDrawer renders the contra drawer with the direction locked', () => {
+    const html = renderToStaticMarkup(<TransferFundsDrawer open lockDirection="mill_to_ho" onClose={() => {}} />);
+    expect(html).toContain('Send Funds to Head Office');
+    // The same review step as every transfer — nothing is sent from the form.
+    expect(html).toContain('data-action="review-transfer"');
+    expect(html).not.toContain('Confirm transfer');
+  });
+
+  it('offers Mill PKR accounts as the source and Head Office PKR accounts as the destination, without Head Office balances', () => {
+    const html = renderToStaticMarkup(<ContraTransferDrawer open lockDirection="mill_to_ho" onClose={() => {}} />);
+    const from = selectHtml(html, 'contra-from');
+    const to = selectHtml(html, 'contra-to');
+    expect(from).toContain('Mill Cash');
+    expect(from).not.toContain('HO Cash');
+    expect(to).toContain('>HO Cash</option>');
+    expect(to).toContain('>HO Bank</option>');
+    expect(to).not.toContain('USD Bank');
+    expect(to).not.toContain('Mill Cash');
+    expect(to).not.toMatch(/HO Cash —/); // no balance shown
+  });
+
+  it('the free contra form still offers every account, with balances, and a method field', () => {
+    const html = renderToStaticMarkup(<ContraTransferDrawer open onClose={() => {}} />);
+    expect(selectHtml(html, 'contra-to')).toContain('USD Bank');
+    expect(selectHtml(html, 'contra-to')).toMatch(/HO Cash —/);
+    expect(html).toContain('id="contra-method"');
+  });
+
+  it('the review summary names the method', () => {
+    const html = renderToStaticMarkup(<ContraSummary fromAcct={byId(4)} toAcct={byId(2)} amount={500} converted={500} charges={0}
+      kind="cross_entity" fx={false} reference="SLIP-1" date="2026-10-16" method="cash" />);
+    expect(html).toContain('Method');
+    expect(html).toContain('Cash');
+    expect(html).toContain('after acceptance');
+  });
+});
+
+describe('transfer defaults — remembered ends, never the same account twice', () => {
+  const mill = [byId(4)];
+  const ho = [byId(1), byId(2)];
+  it('a choice already made wins', () => {
+    expect(transferDefaults({ fromId: '4', toId: '2', fromAccounts: mill, toAccounts: ho, lastFrom: '4', lastTo: '1', locked: true }))
+      .toEqual({ fromId: '4', toId: '2' });
+  });
+  it('the ends last used are offered while they are still offered', () => {
+    expect(transferDefaults({ fromAccounts: ACCOUNTS, toAccounts: ACCOUNTS, lastFrom: '1', lastTo: '2' })).toEqual({ fromId: '1', toId: '2' });
+    // A remembered account no longer in the list is not offered.
+    expect(transferDefaults({ fromAccounts: ho, toAccounts: ho, lastFrom: '99', lastTo: '98' })).toEqual({ fromId: '', toId: '' });
+  });
+  it('never the same account on both ends', () => {
+    expect(transferDefaults({ fromAccounts: ACCOUNTS, toAccounts: ACCOUNTS, lastFrom: '1', lastTo: '1' })).toEqual({ fromId: '1', toId: '' });
+  });
+  it('locked Mill → Head Office falls back to the first account on each side (as the old drawer did)', () => {
+    expect(transferDefaults({ fromAccounts: mill, toAccounts: ho, locked: true })).toEqual({ fromId: '4', toId: '1' });
+  });
+  it('the free form leaves the ends empty when nothing was used before', () => {
+    expect(transferDefaults({ fromAccounts: ACCOUNTS, toAccounts: ACCOUNTS })).toEqual({ fromId: '', toId: '' });
+  });
+});
+
+describe('transfer validation (the same for every transfer)', () => {
+  it('blocks a missing end, the same account, Head Office ⇄ Mill in USD, no reference, no amount', () => {
+    expect(validateContra({ fromAcct: null, toAcct: byId(2), amount: 1, reference: 'R' })).toHaveProperty('from');
+    expect(validateContra({ fromAcct: byId(4), toAcct: byId(4), amount: 1, reference: 'R' })).toHaveProperty('to');
+    expect(validateContra({ fromAcct: byId(4), toAcct: byId(3), amount: 1, reference: 'R' }).to).toMatch(/PKR only/);
+    expect(validateContra({ fromAcct: byId(4), toAcct: byId(2), amount: 1, reference: '' })).toHaveProperty('reference');
+    expect(validateContra({ fromAcct: byId(4), toAcct: byId(2), amount: 0, reference: 'R' })).toHaveProperty('amount');
+    expect(validateContra({ fromAcct: byId(4), toAcct: byId(2), amount: 100, reference: 'SLIP' })).toEqual({});
+  });
+});

@@ -707,7 +707,7 @@ export default function ExportOrderDetail() {
             {canCreateMilling && !order.millingOrderId && (
               <button onClick={openMillingModal} className="px-4 py-2 bg-white border border-amber-400 text-amber-800 rounded-lg text-sm font-medium hover:bg-amber-100">Create Milling Batch</button>
             )}
-            <button onClick={openAdvanceModal} className="px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700">Confirm Advance Received</button>
+            <button onClick={openAdvanceModal} className="px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700" title="Records the advance the buyer paid; Finance then confirms it against the bank">Record Advance Receipt</button>
           </div>
         </div>
       )}
@@ -757,7 +757,7 @@ export default function ExportOrderDetail() {
             <p className="text-xs text-amber-700">Expected: {formatCurrency(order.balanceExpected)} | Received: {formatCurrency(order.balanceReceived)} | Outstanding: {formatCurrency(order.balanceExpected - order.balanceReceived)}</p>
             <p className="text-xs text-amber-700 mt-1">The order shipped on the advance. It closes once the balance is received and the BL Final and certificate of origin are approved.</p>
           </div>
-          <button onClick={openBalanceModal} className="shrink-0 px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700">Record Balance</button>
+          <button onClick={openBalanceModal} className="shrink-0 px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700" title="Records the balance the buyer paid; Finance then confirms it against the bank">Record Balance Receipt</button>
         </div>
       )}
       {order.status === 'Ready to Ship' && (

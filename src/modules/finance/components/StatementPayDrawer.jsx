@@ -1,5 +1,5 @@
 import { btnPrimary, btnSecondary } from '../utils/uiClasses';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { CheckCircle, Wallet, HandCoins, Info } from 'lucide-react';
 import SlideDrawer from '../../../components/SlideDrawer';
@@ -13,6 +13,7 @@ import StatusBadge from '../../../shared/components/StatusBadge';
 import FieldError from '../../../shared/components/FieldError';
 import { todayLocalISO, fmtMoney, fmtDate } from '../../../shared/utils/format';
 import { serverOverdraft } from '../../../shared/utils/overdraft';
+import { useDefaultAccount } from '../../../shared/hooks/useDefaultAccount';
 
 // Exact, two decimals, in the invoice's own currency.
 const fmt = (v, cur) => fmtMoney(parseFloat(v) || 0, cur || 'PKR', { decimals: 2 });
@@ -33,7 +34,7 @@ const sumOut = (rows) => rows.reduce((s, r) => s + (parseFloat(r.outstanding) ||
  * (It used to be one request per invoice, so a failure part-way left the
  * earlier invoices settled.) A single targeted bill may carry WHT / discount.
  */
-export default function StatementPayDrawer({ mode, party, onClose }) {
+export default function StatementPayDrawer({ mode, party, onClose, entity = 'general' }) {
   const isCustomer = mode === 'customer';
   const { addToast } = useApp();
   const qc = useQueryClient();
@@ -110,6 +111,19 @@ export default function StatementPayDrawer({ mode, party, onClose }) {
     discount: '',
   });
 
+  // The account this user last used for this currency (and entity) — offered,
+  // shown and editable; it posts nothing by itself (useDefaultAccount).
+  const currencyAccounts = useMemo(() => accountsForCurrency(bankAccounts, activeCur), [bankAccounts, activeCur]);
+  const { accountId: defaultAccountId, remember } = useDefaultAccount({ currency: activeCur, entity, accounts: currencyAccounts });
+  useEffect(() => {
+    if (!defaultAccountId) return;
+    setForm((f) => {
+      if (f.bankAccountId) return f;
+      const acct = currencyAccounts.find((a) => String(a.id) === defaultAccountId);
+      return { ...f, bankAccountId: defaultAccountId, method: acct?.type === 'cash' ? 'cash' : f.method };
+    });
+  }, [defaultAccountId, currencyAccounts]);
+
   // Default the amount to the full bucket once the queue resolves / currency
   // switches, unless the user has typed their own figure.
   const [amountTouched, setAmountTouched] = useState(false);
@@ -182,6 +196,7 @@ export default function StatementPayDrawer({ mode, party, onClose }) {
           };
         }),
       });
+      if (form.bankAccountId) remember(form.bankAccountId);
       // The statement is GL-driven, so refresh it too.
       qc.invalidateQueries({ queryKey: ['party-statement'] });
       addToast(
@@ -306,12 +321,15 @@ export default function StatementPayDrawer({ mode, party, onClose }) {
               }}
               className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
               <option value="">Select bank account…</option>
-              {accountsForCurrency(bankAccounts, activeCur).map((a) => (
+              {currencyAccounts.map((a) => (
                 <option key={a.id} value={a.id}>
                   {favStar(a)}{a.name} — {a.bankName || ''} ({fmt(a.currentBalance, a.currency || 'PKR')})
                 </option>
               ))}
             </select>
+            {defaultAccountId && String(form.bankAccountId) === defaultAccountId && (
+              <p className="text-[11px] text-gray-500 mt-1" data-testid="account-default-hint">Last used for {activeCur} — change it if this {verb.toLowerCase()} goes elsewhere.</p>
+            )}
           </div>
 
           {/* Amount + date */}

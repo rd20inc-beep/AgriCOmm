@@ -22,6 +22,7 @@ export function PayTransporterDrawer({ payTransport, onClose, addToast }) {
       outstanding={payTransport.outstanding}
       payableId={payTransport.payableId}
       accounts={bankAccounts}
+      rememberAs={{ entity: 'mill' }}
       defaultNotes={`Transport payment — ${payTransport.haulerName || ''}`.trim()}
       submitLabel="Pay Transporter"
       onSubmit={(body) => recordMut.mutateAsync(body)}
@@ -47,6 +48,7 @@ export function PayPayableDrawer({ payTarget, onClose, addToast }) {
       outstanding={payTarget.outstanding}
       payableId={payTarget.payableId}
       accounts={bankAccounts}
+      rememberAs={{ entity: 'mill' }}
       defaultNotes={`${payTarget.stream || 'Payable'} payment — ${payTarget.party || ''}`.trim()}
       history={payTarget.payableId ? (payHistory?.payments || []) : undefined}
       historyLoading={payTarget.payableId ? payHistLoading : false}
