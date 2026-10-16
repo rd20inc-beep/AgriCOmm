@@ -31,7 +31,10 @@ describe('one settle request', () => {
 
   it('the legacy fund-transfer create is gone from the client', () => {
     expect(financeApi.createFundTransfer).toBeUndefined();
-    const drawer = readFileSync(resolve(HERE, '../components/TransferFundsDrawer.jsx'), 'utf8');
+    // W08–W10: TransferFundsDrawer is the one transfer flow (ContraTransferDrawer, locked direction).
+    const wrapper = readFileSync(resolve(HERE, '../components/TransferFundsDrawer.jsx'), 'utf8');
+    expect(wrapper).toMatch(/<ContraTransferDrawer/);
+    const drawer = readFileSync(resolve(HERE, '../components/ContraTransferDrawer.jsx'), 'utf8');
     expect(drawer).toMatch(/useCreateContraTransfer/);
   });
 });
