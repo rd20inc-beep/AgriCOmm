@@ -78,6 +78,43 @@ const lockSeries = (trx, e) => trx.raw('SELECT pg_advisory_xact_lock(hashtext(?)
 const SERIES_COLS = ['id', 'expense_no', 'category', 'subcategory', 'vendor_name', 'supplier_id',
   'employee_id', 'recurrence', 'description', 'amount_pkr as amount', 'expense_date', 'recurrence_end_date'];
 
+// ── Scan alerts → the bell (P5-01 / PLT-02) ──────────────────────────────
+// The `alerts` table stays the scans' de-duplication ledger (one Open row per
+// finding); nothing ever displayed it. Each NEW finding is now also delivered
+// as a notification to the people who act on it, resolved by role NAME:
+//   money findings (overdue receivable / payable, unallocated cost)
+//                       → Owner (with the reference) + Finance Manager (masked,
+//                         no reference — the Phase 4 domain-separation rule)
+//   mill findings       → Owner + Mill Manager
+//   export findings     → Owner + Export Manager
+const FINANCE_ALERTS = new Set(['Significantly Overdue Receivable', 'Overdue Payable', 'Unallocated Cost']);
+
+function alertRecipients(alert) {
+  if (FINANCE_ALERTS.has(alert.title)) return { roles: ['Owner'], finance: true };
+  if (alert.entity === 'mill') return { roles: ['Owner', 'Mill Manager'], finance: false };
+  return { roles: ['Owner', 'Export Manager'], finance: false };
+}
+
+async function raiseAlert(alert, conn = db) {
+  const [row] = await conn('alerts').insert(alert).returning('*');
+  const notificationService = require('../../services/notificationService');
+  const { roles, finance } = alertRecipients(alert);
+  try {
+    await notificationService.createForRole(conn, {
+      roleNames: roles, title: alert.title, message: alert.summary, type: 'alert', linkedRef: alert.linked_ref || null,
+    });
+    if (finance) {
+      await notificationService.createForRole(conn, {
+        roleName: 'Finance Manager', title: alert.title, message: alert.summary, type: 'alert', linkedRef: null,
+      });
+    }
+  } catch (err) {
+    // The finding is recorded; a failed delivery must not stop the scan.
+    console.error('Alert notification failed:', err.message);
+  }
+  return row;
+}
+
 const automationService = {
   // ============================================================
   // Scheduled Task Runner
@@ -239,7 +276,7 @@ const automationService = {
 
       if (!existingAlert) {
         const daysSince = Math.floor((Date.now() - new Date(order.created_at).getTime()) / (1000 * 60 * 60 * 24));
-        await db('alerts').insert({
+        await raiseAlert({
           severity: daysSince > 14 ? 'high' : 'medium',
           entity: 'export',
           linked_ref: order.order_no,
@@ -286,7 +323,7 @@ const automationService = {
 
       if (!existingAlert) {
         const balanceDue = parseFloat(order.balance_expected || 0) - parseFloat(order.balance_received || 0);
-        await db('alerts').insert({
+        await raiseAlert({
           severity: 'high',
           entity: 'export',
           linked_ref: order.order_no,
@@ -331,7 +368,7 @@ const automationService = {
 
         if (!existingAlert) {
           const docTypes = missingDocs.map((d) => d.doc_type).join(', ');
-          await db('alerts').insert({
+          await raiseAlert({
             severity: 'medium',
             entity: 'export',
             linked_ref: order.order_no,
@@ -382,7 +419,7 @@ const automationService = {
 
         if (!existingAlert) {
           const pkr = receivablePkrAtBooked(rec);
-          await db('alerts').insert({
+          await raiseAlert({
             severity: 'high',
             entity: rec.entity || 'export',
             linked_ref: ref,
@@ -430,7 +467,7 @@ const automationService = {
         if (!existingAlert) {
           // A payable keeps no booked rate: PKR as is, a foreign one unpriced.
           const isPkr = String(pay.currency || 'PKR').toUpperCase() === 'PKR';
-          await db('alerts').insert({
+          await raiseAlert({
             severity: 'medium',
             entity: pay.entity || 'mill',
             linked_ref: ref,
@@ -468,7 +505,7 @@ const automationService = {
 
       if (!existingAlert) {
         const daysLate = Math.floor((Date.now() - new Date(order.eta).getTime()) / (1000 * 60 * 60 * 24));
-        await db('alerts').insert({
+        await raiseAlert({
           severity: daysLate > 7 ? 'high' : 'medium',
           entity: 'export',
           linked_ref: order.order_no,
@@ -512,7 +549,7 @@ const automationService = {
         .first();
 
       if (!existingAlert) {
-        await db('alerts').insert({
+        await raiseAlert({
           severity: f.negative ? 'critical' : 'medium',
           entity: 'export',
           linked_ref: order.orderNo,
@@ -549,7 +586,7 @@ const automationService = {
         .first();
 
       if (!existingAlert) {
-        await db('alerts').insert({
+        await raiseAlert({
           severity: 'medium',
           entity: 'mill',
           linked_ref: batch.batch_no,
@@ -588,7 +625,7 @@ const automationService = {
         .first();
 
       if (!existingAlert) {
-        await db('alerts').insert({
+        await raiseAlert({
           severity: 'high',
           entity: 'export',
           linked_ref: lot.order_no,
@@ -624,7 +661,7 @@ const automationService = {
         .first();
 
       if (!existingAlert) {
-        await db('alerts').insert({
+        await raiseAlert({
           severity: 'low',
           entity: cost.entity || 'export',
           linked_ref: `COST-${cost.id}`,
@@ -658,31 +695,26 @@ const automationService = {
       userId,
     }).catch((err) => console.error('Advance confirmation email failed:', err.message));
 
-    // Create notification for export manager (role_id = 2)
-    const exportManagers = await trx('users').where({ role_id: 2, is_active: true });
-    for (const manager of exportManagers) {
-      await trx('notifications').insert({
-        user_id: manager.id,
-        title: 'Advance Payment Confirmed',
-        message: `Advance of ${amount} received for order ${order.order_no}`,
-        type: 'payment',
-        linked_ref: order.order_no,
-      });
-    }
+    // Recipients by role NAME (role ids differ between installs — PLT-15).
+    const notificationService = require('../../services/notificationService');
+    await notificationService.createForRole(trx, {
+      roleName: 'Export Manager',
+      title: 'Advance Payment Confirmed',
+      message: `Advance of ${amount} received for order ${order.order_no}`,
+      type: 'payment',
+      linkedRef: order.order_no,
+    });
 
     // If milling order exists, notify mill manager
     const millingBatch = await trx('milling_batches').where({ linked_export_order_id: orderId }).first();
     if (millingBatch) {
-      const millManagers = await trx('users').where({ role_id: 4, is_active: true });
-      for (const manager of millManagers) {
-        await trx('notifications').insert({
-          user_id: manager.id,
-          title: 'Advance Confirmed — Milling Can Proceed',
-          message: `Advance received for ${order.order_no}. Milling batch ${millingBatch.batch_no} can proceed.`,
-          type: 'payment',
-          linked_ref: millingBatch.batch_no,
-        });
-      }
+      await notificationService.createForRole(trx, {
+        roleName: 'Mill Manager',
+        title: 'Advance Confirmed — Milling Can Proceed',
+        message: `Advance received for ${order.order_no}. Milling batch ${millingBatch.batch_no} can proceed.`,
+        type: 'payment',
+        linkedRef: millingBatch.batch_no,
+      });
     }
   },
 
@@ -698,21 +730,19 @@ const automationService = {
       userId,
     }).catch((err) => console.error('Balance confirmation email failed:', err.message));
 
-    // Notification: "Ready to ship"
-    const exportManagers = await trx('users').where({ role_id: 2, is_active: true });
-    for (const manager of exportManagers) {
-      await trx('notifications').insert({
-        user_id: manager.id,
-        title: 'Balance Received — Ready to Ship',
-        message: `Full balance received for ${order.order_no}. Order is ready for shipment.`,
-        type: 'payment',
-        linked_ref: order.order_no,
-      });
-    }
+    // Notification: "Ready to ship" — recipients by role NAME (PLT-15).
+    const notificationService = require('../../services/notificationService');
+    await notificationService.createForRole(trx, {
+      roleName: 'Export Manager',
+      title: 'Balance Received — Ready to Ship',
+      message: `Full balance received for ${order.order_no}. Order is ready for shipment.`,
+      type: 'payment',
+      linkedRef: order.order_no,
+    });
 
     // Create task: "Prepare final documents"
     const taskNo = `TSK-${Date.now().toString(36).toUpperCase()}`;
-    const docOfficers = await trx('users').where({ role_id: 7, is_active: true }).first();
+    const [docOfficers] = await notificationService.usersInRoles(trx, 'Documentation Officer');
     await trx('tasks_assignments').insert({
       task_no: taskNo,
       title: `Prepare final documents for ${order.order_no}`,
@@ -736,7 +766,8 @@ const automationService = {
       .catch((err) => console.error('BL draft approved email failed:', err.message));
 
     // Create task for finance: follow up balance collection
-    const financeManagers = await trx('users').where({ role_id: 3, is_active: true }).first();
+    const notificationService = require('../../services/notificationService');
+    const [financeManagers] = await notificationService.usersInRoles(trx, 'Finance Manager');
     const taskNo = `TSK-${Date.now().toString(36).toUpperCase()}`;
     await trx('tasks_assignments').insert({
       task_no: taskNo,
@@ -761,26 +792,18 @@ const automationService = {
       const order = await trx('export_orders').where({ id: batch.linked_export_order_id }).first();
       // Recipients by role NAME — role ids differ between installs (e.g. Owner
       // is 9 on prod, 10 locally), so hard-coded ids reach the wrong people.
-      const usersInRole = (name) => trx('users as u')
-        .join('roles as r', 'u.role_id', 'r.id')
-        .where('r.name', name)
-        .where('u.is_active', true)
-        .select('u.id')
-        .orderBy('u.id');
-      const exportManagers = await usersInRole('Export Manager');
+      const notificationService = require('../../services/notificationService');
       const finishedKg = parseFloat(batch.actual_finished_kg) || 0;
-      for (const manager of exportManagers) {
-        await trx('notifications').insert({
-          user_id: manager.id,
-          title: 'Milling Batch Completed',
-          message: `Batch ${batch.batch_no} completed. ${finishedKg.toLocaleString('en-US', { maximumFractionDigits: 2 })} kg finished rice produced${order ? ` for order ${order.order_no}` : ''}.`,
-          type: 'milling',
-          linked_ref: batch.batch_no,
-        });
-      }
+      await notificationService.createForRole(trx, {
+        roleName: 'Export Manager',
+        title: 'Milling Batch Completed',
+        message: `Batch ${batch.batch_no} completed. ${finishedKg.toLocaleString('en-US', { maximumFractionDigits: 2 })} kg finished rice produced${order ? ` for order ${order.order_no}` : ''}.`,
+        type: 'milling',
+        linkedRef: batch.batch_no,
+      });
 
       // Create task: arrange internal transfer
-      const invOfficers = (await usersInRole('Inventory Officer'))[0];
+      const [invOfficers] = await notificationService.usersInRoles(trx, 'Inventory Officer');
       const taskNo = `TSK-${Date.now().toString(36).toUpperCase()}`;
       await trx('tasks_assignments').insert({
         task_no: taskNo,
@@ -813,16 +836,14 @@ const automationService = {
 
     if (parseInt(missingDocs.count) === 0) {
       const order = await trx('export_orders').where({ id: doc.linked_id }).first();
-      const exportManagers = await trx('users').where({ role_id: 2, is_active: true });
-      for (const manager of exportManagers) {
-        await trx('notifications').insert({
-          user_id: manager.id,
-          title: 'All Documents Complete',
-          message: `All required documents for order ${order ? order.order_no : doc.linked_id} are now approved. Order is ready for shipment.`,
-          type: 'document',
-          linked_ref: order ? order.order_no : `ORD-${doc.linked_id}`,
-        });
-      }
+      const notificationService = require('../../services/notificationService');
+      await notificationService.createForRole(trx, {
+        roleName: 'Export Manager',
+        title: 'All Documents Complete',
+        message: `All required documents for order ${order ? order.order_no : doc.linked_id} are now approved. Order is ready for shipment.`,
+        type: 'document',
+        linkedRef: order ? order.order_no : `ORD-${doc.linked_id}`,
+      });
     }
   },
 

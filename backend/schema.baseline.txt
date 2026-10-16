@@ -2075,6 +2075,7 @@ COL mobile_uploads.uploaded_by:integer:NULL
 COL notifications.created_at:timestamp with time zone:NULL
 COL notifications.id:integer:NOT NULL
 COL notifications.is_read:boolean:NOT NULL
+COL notifications.link:character varying:NULL
 COL notifications.linked_ref:character varying:NULL
 COL notifications.message:text:NULL
 COL notifications.title:character varying:NULL

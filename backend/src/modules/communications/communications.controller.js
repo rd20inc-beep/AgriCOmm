@@ -628,10 +628,11 @@ const communicationController = {
   // ============================================================
   async listNotifications(req, res) {
     try {
-      const { page, limit } = req.query;
+      const { page, limit, unread } = req.query;
       const result = await notificationService.getAll(req.user.id, {
         page: page || 1,
         limit: limit || 20,
+        unreadOnly: unread === '1' || unread === 'true',
       });
 
       return res.json({ success: true, data: result });
