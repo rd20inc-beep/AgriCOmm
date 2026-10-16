@@ -37,6 +37,9 @@ router.use('/accounting', authenticate, require('./accounting'));
 router.use('/documents', authenticate, require('./documents'));
 router.use('/communication', authenticate, require('./communication'));
 router.use('/reporting', authenticate, require('./reporting'));
+// Header global search (P5-03): any signed-in user; every record type inside is
+// filtered by the permission of the page it links to (globalSearch.js).
+router.get('/search', authenticate, require('../modules/analytics/globalSearch').searchHandler);
 router.use('/enterprise', require('./enterprise')); // Note: health is public, rest require auth (handled in route file)
 router.use('/control', authenticate, require('./control'));
 router.use('/intelligence', authenticate, require('./intelligence'));
