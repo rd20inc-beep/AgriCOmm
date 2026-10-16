@@ -1,5 +1,7 @@
-import { useEffect, useId, useRef } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { X } from 'lucide-react';
+import DiscardChangesDialog from '../shared/components/DiscardChangesDialog';
+import { escapeAction, requestClose } from '../shared/utils/dirtyGuard';
 
 const FOCUSABLE = [
   'a[href]', 'area[href]', 'button:not([disabled])', 'input:not([disabled]):not([type="hidden"])',
@@ -40,15 +42,29 @@ export function trapTarget(focusables, active, shiftKey) {
  * closes; focus moves into the panel on open, Tab/Shift+Tab cycle inside it,
  * and focus returns to whatever opened it on close. A field with `autoFocus`
  * keeps its focus. Click-outside closes only with `closeOnBackdrop`.
+ *
+ * `dirty` (P5-07): while the form has unsaved changes, Escape, the X button and
+ * a backdrop click ask "Discard unsaved changes?" in-app before closing. The
+ * caller's own Cancel button is an explicit choice and closes as before.
  */
-export default function SlideDrawer({ open, onClose, title, subtitle, icon: Icon, children, footer, size = 'md', closeOnBackdrop = false }) {
+export default function SlideDrawer({ open, onClose, title, subtitle, icon: Icon, children, footer, size = 'md', closeOnBackdrop = false, dirty = false, dirtyMessage }) {
   const titleId = useId();
   const panelRef = useRef(null);
-  // Callers often pass an inline onClose; read it through a ref so the open
-  // effect below runs once per open, not on every render (re-running it would
-  // yank focus out of the field being typed in).
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
+  const [confirming, setConfirming] = useState(null); // pending close fn
+  const close = () => requestClose({
+    dirty,
+    onClose,
+    ask: (fn) => setConfirming(() => fn),
+  });
+  // Callers often pass an inline onClose; the key handler reads the latest
+  // close/prompt state through a ref so the open effect below runs once per
+  // open, not on every render (re-running it would yank focus out of the field
+  // being typed in).
+  const latestRef = useRef({ close, asking: false });
+  useEffect(() => { latestRef.current = { close, asking: !!confirming }; });
+  // A drawer that closes (from outside) must not leave its prompt behind.
+  const [wasOpen, setWasOpen] = useState(open);
+  if (wasOpen !== open) { setWasOpen(open); setConfirming(null); }
 
   // While any drawer is open, <body data-drawers="n"> lets floating widgets
   // (the chat bubble) step aside so they never cover the drawer's footer buttons.
@@ -69,7 +85,10 @@ export default function SlideDrawer({ open, onClose, title, subtitle, icon: Icon
     if (panel && !panel.contains(document.activeElement)) panel.focus({ preventScroll: true });
 
     const onKey = (e) => {
-      if (e.key === 'Escape') { onCloseRef.current?.(); return; }
+      if (e.key === 'Escape') {
+        if (escapeAction(e, { asking: latestRef.current.asking })) latestRef.current.close();
+        return;
+      }
       if (e.key !== 'Tab' || !panel) return;
       // Only trap when focus is in this drawer (a nested drawer or a confirm
       // dialog on top handles its own Tab).
@@ -93,9 +112,10 @@ export default function SlideDrawer({ open, onClose, title, subtitle, icon: Icon
   const subtitleText = typeof subtitle === 'string' || typeof subtitle === 'number' ? String(subtitle) : undefined;
 
   return (
+    <>
     <div
       className="fixed inset-0 z-50 bg-black/30 backdrop-blur-sm flex items-stretch justify-end"
-      onClick={closeOnBackdrop ? onClose : undefined}
+      onClick={closeOnBackdrop ? close : undefined}
     >
       <div
         ref={panelRef}
@@ -118,7 +138,7 @@ export default function SlideDrawer({ open, onClose, title, subtitle, icon: Icon
               {subtitle && <p className="text-xs text-gray-500 mt-0.5 truncate" title={subtitleText}>{subtitle}</p>}
             </div>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close"
+          <button type="button" onClick={close} aria-label="Close"
             className="-mr-2 inline-flex items-center justify-center w-10 h-10 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 flex-shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
             <X size={18} aria-hidden="true" />
           </button>
@@ -132,5 +152,12 @@ export default function SlideDrawer({ open, onClose, title, subtitle, icon: Icon
         )}
       </div>
     </div>
+    <DiscardChangesDialog
+      open={!!confirming}
+      consequence={dirtyMessage}
+      onDiscard={() => { const fn = confirming; setConfirming(null); fn?.(); }}
+      onKeep={() => setConfirming(null)}
+    />
+    </>
   );
 }

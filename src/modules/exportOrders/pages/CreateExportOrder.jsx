@@ -30,7 +30,11 @@ import {
   EMPTY_ITEM, requiresMasterBag, masterOptionsFor, orderTotals, needsBagWidgetFor,
   mixedPackingTotals, singleBagCountFor, advanceSplit, profitPreviewBody, buildCreateOrderPayload,
   customerPrefill, lastOrderPrefill,
+  EXPORT_WIZARD_DRAFT, wizardDraftSnapshot, restoreWizardDraft, wizardDraftHasContent,
 } from '../utils/createOrderForm';
+import useDirtyGuard from '../../../shared/hooks/useDirtyGuard';
+import { saveDraft, loadDraft, clearDraft } from '../../../shared/utils/formDraft';
+import { goBack } from '../../../shared/utils/goBack';
 import { todayLocalISO, fmtNum, fmtPKR, fmtPct, fmtMoney } from '../../../shared/utils/format';
 
 const RECEIVING_MODES = [
@@ -53,7 +57,7 @@ const BAG_MATERIALS = ['Polythene', 'Woven', 'Non-Woven', 'Cotton'];
 export default function CreateExportOrder() {
   const { addToast, customersList: customers, productsList: products, exportCostCategories, bagTypesList, suppliersList, bankAccountsList } = useApp();
   const createOrderMut = useCreateExportOrder();
-  const { hasPermission } = useAuth();
+  const { hasPermission, user } = useAuth();
   // One submit at a time. The ref blocks a second click in the same tick (state
   // hasn't re-rendered yet); the state drives the disabled buttons. It stays set
   // through the navigate, so a click while it runs can't create a second order
@@ -155,10 +159,13 @@ export default function CreateExportOrder() {
   // buyer's most recent order — one small GET. Skipped for a duplicate's own
   // buyer, whose terms came with the source order.
   const lastOrderFor = useRef(null);
+  const restoredCustomerRef = useRef(null);
   useEffect(() => {
     const customerId = form.customerId;
     if (!customerId) return undefined;
     if (duplicate && String(duplicate.form?.customerId) === String(customerId)) return undefined;
+    // A restored local draft already carries this buyer's terms as the user left them.
+    if (restoredCustomerRef.current === String(customerId)) { restoredCustomerRef.current = null; return undefined; }
     lastOrderFor.current = customerId;
     let cancelled = false;
     exportOrdersApi.list({ customer_id: customerId, limit: 1 })
@@ -218,6 +225,45 @@ export default function CreateExportOrder() {
   // ─── Wizard step ───
   // 1 = Buyer & Items, 2 = Terms & Packing, 3 = Specs & Review
   const [step, setStep] = useState(1);
+
+  // ─── Unsaved-change guard + local draft (P5-07) ───
+  // Dirty = anything differs from what the page opened with. The draft is
+  // saved locally (per user) at every step change and shortly after typing,
+  // offered back when the page is reopened, and cleared once the order is
+  // created. It never posts anything itself.
+  const draftUser = user?.id ?? user?.email ?? null;
+  const editable = { form, items, packingLines, printedBags };
+  const [baseline] = useState(() => JSON.stringify(editable));
+  const dirty = JSON.stringify(editable) !== baseline;
+  const guard = useDirtyGuard(dirty, { consequence: 'The order you were entering is not created. A local draft is kept and offered when you reopen this page.' });
+  const [draftOffer, setDraftOffer] = useState(() => {
+    if (duplicate) return null;
+    const d = loadDraft(EXPORT_WIZARD_DRAFT, draftUser);
+    return d && wizardDraftHasContent(d.data) ? d : null;
+  });
+  const writeDraft = (nextStep) => {
+    if (draftOffer || !dirty || submittingRef.current) return;
+    saveDraft(EXPORT_WIZARD_DRAFT, draftUser, wizardDraftSnapshot({ form, items, packingLines, printedBags, step: nextStep }));
+  };
+  useEffect(() => {
+    if (draftOffer || !dirty) return undefined;
+    const t = setTimeout(() => {
+      if (submittingRef.current) return;
+      saveDraft(EXPORT_WIZARD_DRAFT, draftUser, wizardDraftSnapshot({ form, items, packingLines, printedBags, step }));
+    }, 800);
+    return () => clearTimeout(t);
+  }, [form, items, packingLines, printedBags, step, dirty, draftOffer, draftUser]);
+  const goToStep = (n) => { setStep(n); writeDraft(n); };
+  function restoreDraft() {
+    const r = restoreWizardDraft(draftOffer?.data, { form, items, packingLines, printedBags });
+    restoredCustomerRef.current = r.form.customerId ? String(r.form.customerId) : null;
+    setForm(r.form); setItems(r.items); setPackingLines(r.packingLines); setPrintedBags(r.printedBags); setStep(r.step);
+    setDraftOffer(null);
+  }
+  function discardDraft() {
+    clearDraft(EXPORT_WIZARD_DRAFT, draftUser);
+    setDraftOffer(null);
+  }
 
   // ─── Validation ───
   const [formErrors, setFormErrors] = useState({});
@@ -286,6 +332,9 @@ export default function CreateExportOrder() {
       const held = res.data?.order?.draft_side_costs;
       if (status === 'Draft' && held) addToast('Printed bags / pallet cost are held on the draft and post when it is submitted', 'info');
       addToast(`Order ${res.data?.order?.order_no || ''} ${status === 'Draft' ? 'saved as draft' : 'created'}`, 'success');
+      // Saved (or queued offline) — the local draft has done its job.
+      clearDraft(EXPORT_WIZARD_DRAFT, draftUser);
+      guard.release();
       navigate(`/export/${res.data?.order?.order_no || res.data?.order?.id || ''}`);
     } catch (err) {
       addToast(err.message || 'Failed to create order', 'error');
@@ -315,7 +364,7 @@ export default function CreateExportOrder() {
   function tryNext() {
     if (step === 1 && !step1Valid) { addToast('Pick a customer and add at least one item with qty + price', 'error'); return; }
     if (step === 2 && !step2Valid) { addToast('Choose a receiving mode', 'error'); return; }
-    setStep(s => Math.min(3, s + 1));
+    goToStep(Math.min(3, step + 1));
   }
 
   const STEPS = [
@@ -328,9 +377,21 @@ export default function CreateExportOrder() {
     <div className="space-y-6 max-w-5xl">
       {/* Header + Step indicator */}
       <div className="flex items-center gap-4">
-        <button onClick={() => navigate(-1)} aria-label="Back" className="p-2 hover:bg-gray-100 rounded-lg"><ArrowLeft className="w-5 h-5 text-gray-600" /></button>
+        <button type="button" onClick={() => goBack(navigate, '/export')} aria-label="Back" className="p-2 hover:bg-gray-100 rounded-lg"><ArrowLeft className="w-5 h-5 text-gray-600" /></button>
         <h1 className="text-2xl font-bold text-gray-900">Create Export Order</h1>
       </div>
+      {guard.dialog}
+      {draftOffer && (
+        <div role="status" className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <p className="text-sm text-amber-900">
+            You have an unfinished export order{draftOffer.data?.form?.customerId ? ` for ${customers.find(c => String(c.id) === String(draftOffer.data.form.customerId))?.name || 'a buyer'}` : ''}, saved on this device {new Date(draftOffer.savedAt).toLocaleString()}. Restore it?
+          </p>
+          <div className="flex gap-2 flex-shrink-0">
+            <button type="button" onClick={discardDraft} className="btn btn-secondary">Discard</button>
+            <button type="button" onClick={restoreDraft} className="btn btn-primary">Restore draft</button>
+          </div>
+        </div>
+      )}
       <div className="bg-white rounded-xl border border-gray-200 px-6 py-4">
         <div className="flex items-center justify-between max-w-2xl mx-auto">
           {STEPS.map((s, idx) => {
@@ -340,7 +401,8 @@ export default function CreateExportOrder() {
               <div key={s.n} className="flex items-center flex-1">
                 <button
                   type="button"
-                  onClick={() => setStep(s.n)}
+                  onClick={() => goToStep(s.n)}
+                  aria-current={isActive ? 'step' : undefined}
                   className="flex flex-col items-center group"
                 >
                   <span className={`inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-medium transition-all ${
@@ -1233,7 +1295,7 @@ export default function CreateExportOrder() {
             </div>
             <div className="flex items-center gap-2">
               {step > 1 && (
-                <button onClick={() => setStep(s => Math.max(1, s - 1))} className="px-3 py-1.5 text-sm text-gray-700 hover:text-gray-900 inline-flex items-center gap-1">
+                <button type="button" onClick={() => goToStep(Math.max(1, step - 1))} className="px-3 py-1.5 text-sm text-gray-700 hover:text-gray-900 inline-flex items-center gap-1">
                   <ChevronLeft size={14} /> Back
                 </button>
               )}

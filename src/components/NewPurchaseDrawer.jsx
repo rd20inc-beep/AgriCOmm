@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { Plus, Trash2, ShoppingCart, ClipboardCheck } from 'lucide-react';
 import SlideDrawer from './SlideDrawer';
+import { isFormDirty } from '../shared/utils/dirtyGuard';
 import SupplierPicker from './SupplierPicker';
 import ItemPicker from './ItemPicker';
 import { useApp } from '../context/AppContext';
@@ -166,10 +167,16 @@ export default function NewPurchaseDrawer({ open, onClose, onSaved, prefill = nu
   const INPUT = 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 bg-white';
   const LABEL = 'block text-xs font-semibold text-gray-600 uppercase mb-1';
 
+  // Unsaved-change guard (P5-07): anything typed beyond what the drawer opened
+  // with (a prefilled line counts as opened-with).
+  const dirty = !!(supplierId || vendorName.trim() || invoiceNumber.trim() || notes.trim())
+    || (prefill?.item_id ? lines.length > 1 : isFormDirty([newLine()], lines));
+
   return (
     <SlideDrawer
       open={open}
       onClose={onClose}
+      dirty={dirty}
       title="Store Purchase"
       subtitle="Record a consumable materials purchase (bags, packaging, fuel…)"
       icon={ShoppingCart}

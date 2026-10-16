@@ -861,6 +861,10 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
     } catch (err) { addToast(err.message || 'Sale failed', 'error'); }
   }
 
+  // Unsaved-change guard (P5-07): a cart, a half-built line or typed buyer
+  // details make Esc / X ask before the sale is dropped.
+  const saleDirty = cart.length > 0 || !!(line.lot_id || line.mill_item_id || line.quantity_input)
+    || !!(form.buyer_name || form.buyer_phone || form.notes || form.vehicle_no || form.gate_pass_no) || !!repack.enabled;
   const step1Valid = cart.length > 0 && (!!customerId || !!form.buyer_name);
   function tryNext() {
     if (!customerId && !form.buyer_name) { addToast('Select a customer or enter buyer name', 'error'); return; }
@@ -898,7 +902,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
   );
 
   return (
-    <SlideDrawer open={isOpen} onClose={onClose} title="New Local Sale" subtitle={STEPS[step - 1]?.label} icon={ShoppingCart} size="xl" footer={footer}>
+    <SlideDrawer open={isOpen} onClose={onClose} dirty={saleDirty} title="New Local Sale" subtitle={STEPS[step - 1]?.label} icon={ShoppingCart} size="xl" footer={footer}>
         {/* Step indicator */}
         <div className="-mx-5 -mt-5 mb-5 px-5 pt-4 pb-4 border-b border-gray-100 bg-gray-50/60">
           <div className="flex items-center justify-between max-w-md mx-auto">

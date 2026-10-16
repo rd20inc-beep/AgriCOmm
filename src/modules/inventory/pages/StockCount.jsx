@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ClipboardCheck, Plus, X, CheckCircle2, AlertTriangle, Loader2, Check, XCircle } from 'lucide-react';
 import { stockCountApi } from '../api/services';
@@ -8,6 +8,8 @@ import useConfirm from '../../../hooks/useConfirm';
 import SlideDrawer from '../../../components/SlideDrawer';
 import StatusBadge from '../../../shared/components/StatusBadge';
 import { fmtNum } from '../../../shared/utils/format';
+import { saveDraft, loadDraft, clearDraft } from '../../../shared/utils/formDraft';
+import { stockCountDraftName, unsavedCounts } from '../utils/stockCountDraft';
 
 const n = (v) => Number(v) || 0;
 // Lot quantities are KG (Phase 5c).
@@ -160,7 +162,10 @@ function CountDetailDrawer({ countId, onClose, onChanged }) {
   const { user } = useAuth();
   const canApprove = WRITE_OFF_APPROVERS.includes(user?.role);
   const [confirm, confirmDialog] = useConfirm();
-  const [drafts, setDrafts] = useState({});
+  // Typed-but-unsaved counts survive closing the drawer or a reload (kept on
+  // this device per user until each line is saved).
+  const draftName = stockCountDraftName(countId);
+  const [drafts, setDrafts] = useState(() => loadDraft(draftName, user?.id)?.data || {});
 
   const { data: count, isLoading } = useQuery({
     queryKey: ['stock-count', countId],
@@ -190,8 +195,14 @@ function CountDetailDrawer({ countId, onClose, onChanged }) {
     onSuccess: () => { setRejectId(null); setRejectReason(''); refetch(); },
   });
 
-  const items = count?.items || [];
+  const items = useMemo(() => count?.items || [], [count]);
   const completed = count?.status === 'Completed' || count?.status === 'Cancelled';
+  const unsaved = useMemo(() => (completed ? {} : unsavedCounts(drafts, items)), [completed, drafts, items]);
+  const unsavedN = Object.keys(unsaved).length;
+  useEffect(() => {
+    if (unsavedN) saveDraft(draftName, user?.id, unsaved);
+    else if (count) clearDraft(draftName, user?.id);
+  }, [unsaved, unsavedN, draftName, user?.id, count]);
   const pendingCount = useMemo(() => items.filter((i) => i.status === 'Pending').length, [items]);
   const varianceCount = useMemo(() => items.filter((i) => n(i.variance_qty) !== 0).length, [items]);
   // Discrepancy lines that have been counted but not yet approved/rejected.
@@ -201,8 +212,15 @@ function CountDetailDrawer({ countId, onClose, onChanged }) {
   );
 
   return (
-    <Drawer title={count?.count_no || 'Stock count'} subtitle={count ? `${TYPE_LABEL[count.count_type] || count.count_type} · ${count.warehouse_name || 'All warehouses'}` : ''} onClose={onClose} wide>
+    <Drawer title={count?.count_no || 'Stock count'} subtitle={count ? `${TYPE_LABEL[count.count_type] || count.count_type} · ${count.warehouse_name || 'All warehouses'}` : ''} onClose={onClose} wide
+      dirty={unsavedN > 0}
+      dirtyMessage={`${unsavedN} typed count(s) are not saved yet. They stay on this device and come back when you reopen this count.`}>
       {confirmDialog}
+      {unsavedN > 0 && !completed && (
+        <p role="status" className="mb-3 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+          {unsavedN} line(s) have a count typed but not saved — press Save on each line to record it.
+        </p>
+      )}
       {isLoading || !count ? (
         <p className="text-sm text-gray-400 py-10 text-center">Loading…</p>
       ) : (
@@ -362,11 +380,12 @@ function CountDetailDrawer({ countId, onClose, onChanged }) {
   );
 }
 
-// The canonical SlideDrawer (accessible dialog, Escape, focus trap). These
-// drawers always closed on a backdrop click, so that is kept.
-function Drawer({ title, subtitle, children, onClose, wide }) {
+// The canonical SlideDrawer (accessible dialog, Escape, focus trap). No
+// backdrop close (P5-07): a stray tap on the warehouse floor must not drop a
+// count in progress; unsaved counts ask before closing.
+function Drawer({ title, subtitle, children, onClose, wide, dirty = false, dirtyMessage }) {
   return (
-    <SlideDrawer open onClose={onClose} title={title} subtitle={subtitle} icon={ClipboardCheck} size={wide ? '2xl' : 'md'} closeOnBackdrop>
+    <SlideDrawer open onClose={onClose} title={title} subtitle={subtitle} icon={ClipboardCheck} size={wide ? '2xl' : 'md'} dirty={dirty} dirtyMessage={dirtyMessage}>
       {children}
     </SlideDrawer>
   );

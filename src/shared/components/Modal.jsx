@@ -1,5 +1,7 @@
-import { useEffect } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { X } from 'lucide-react';
+import DiscardChangesDialog from './DiscardChangesDialog';
+import { escapeAction, requestClose } from '../utils/dirtyGuard';
 
 const sizeClasses = {
   sm: 'max-w-md',
@@ -9,7 +11,19 @@ const sizeClasses = {
   full: 'max-w-[calc(100vw-2rem)]',
 };
 
-export default function Modal({ isOpen, onClose, title, children, size = 'md', footer, closeOnBackdrop = false }) {
+/**
+ * `dirty` (P5-07): while the form inside has unsaved changes, Escape, the X
+ * button and a backdrop click ask "Discard unsaved changes?" in-app first.
+ */
+export default function Modal({ isOpen, onClose, title, children, size = 'md', footer, closeOnBackdrop = false, dirty = false, dirtyMessage }) {
+  const titleId = useId();
+  const [confirming, setConfirming] = useState(null);
+  const [wasOpen, setWasOpen] = useState(isOpen);
+  if (wasOpen !== isOpen) { setWasOpen(isOpen); setConfirming(null); }
+  const close = () => requestClose({ dirty, onClose, ask: (fn) => setConfirming(() => fn) });
+  const latestRef = useRef({ close, asking: false });
+  useEffect(() => { latestRef.current = { close, asking: !!confirming }; });
+
   useEffect(() => {
     if (isOpen) {
       document.body.style.overflow = 'hidden';
@@ -21,26 +35,30 @@ export default function Modal({ isOpen, onClose, title, children, size = 'md', f
 
   useEffect(() => {
     function handleEscape(e) {
-      if (e.key === 'Escape') onClose();
+      if (escapeAction(e, { asking: latestRef.current.asking })) latestRef.current.close();
     }
     if (isOpen) {
       document.addEventListener('keydown', handleEscape);
       return () => document.removeEventListener('keydown', handleEscape);
     }
-  }, [isOpen, onClose]);
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
   const widthClass = sizeClasses[size] || sizeClasses.md;
 
   return (
+    <>
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
       {/* Overlay — backdrop click does NOT close by default, so an accidental
           click while filling a form never wipes the entered data (use X/Cancel). */}
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-[2px]" onClick={closeOnBackdrop ? onClose : undefined} />
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-[2px]" onClick={closeOnBackdrop ? close : undefined} aria-hidden="true" />
 
       {/* Modal card - slides up on mobile, centers on desktop */}
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
         className={`relative w-full ${widthClass} sm:mx-4 bg-white rounded-t-2xl sm:rounded-xl shadow-2xl flex flex-col`}
         style={{ maxHeight: 'min(90vh, 90dvh)' }}
       >
@@ -48,9 +66,10 @@ export default function Modal({ isOpen, onClose, title, children, size = 'md', f
         <div className="flex items-center justify-between px-5 sm:px-6 py-4 border-b border-gray-100 flex-shrink-0">
           {/* Mobile drag indicator */}
           <div className="absolute top-2 left-1/2 -translate-x-1/2 w-10 h-1 rounded-full bg-gray-300 sm:hidden" />
-          <h2 className="text-base sm:text-lg font-semibold text-gray-900 pr-8">{title}</h2>
+          <h2 id={titleId} className="text-base sm:text-lg font-semibold text-gray-900 pr-8">{title}</h2>
           <button
-            onClick={onClose}
+            type="button"
+            onClick={close}
             className="absolute top-3.5 right-3.5 p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
             aria-label="Close"
           >
@@ -69,5 +88,12 @@ export default function Modal({ isOpen, onClose, title, children, size = 'md', f
         )}
       </div>
     </div>
+    <DiscardChangesDialog
+      open={!!confirming}
+      consequence={dirtyMessage}
+      onDiscard={() => { const fn = confirming; setConfirming(null); fn?.(); }}
+      onKeep={() => setConfirming(null)}
+    />
+    </>
   );
 }
