@@ -52,6 +52,11 @@ describe('sending a DOCUMENT asks for a write in the module it came from', () =>
     expect(l).not.toContain('canSend,');
   });
 
+  it('also needs the pairing permission, so a read-only role holding documents.download cannot send', () => {
+    expect(line('post', '/whatsapp/send-document')).toMatch(/canSendDocument, canPair,/);
+    expect(ROUTES).toContain("const canPair = authorize('communications', 'whatsapp_pair')");
+  });
+
   it('admits every module that embeds the component', () => {
     expect(ROUTES).toContain("['documents', 'download']");
     expect(ROUTES).toContain("['finance', 'confirm_payment']");

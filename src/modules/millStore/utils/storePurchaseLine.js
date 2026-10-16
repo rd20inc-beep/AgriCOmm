@@ -33,5 +33,9 @@ export function paidNowPaymentContext(purchase, { supplierName = null } = {}) {
     party: { type: 'supplier', id: purchase.supplier_id || null, name: supplierName || purchase.vendor_name || null },
     ref: purchase.purchase_no,
     notes: `Paid at purchase ${purchase.purchase_no || ''}`.trim(),
+    // "Paid now" on a store bill is almost always cash over the counter; the
+    // method stays visible and editable in the form.
+    defaultMethod: 'cash',
+    entity: 'mill',
   };
 }

@@ -282,3 +282,13 @@ describe('Mill Finance — sections render and load only their own data', () => 
     expect(calls.find((c) => c.name === 'useMillWorkers').args[0]).toEqual({ entity: 'general' });
   });
 });
+
+describe('payroll run actions follow the server gates', () => {
+  it('Accrue (pay later) needs payroll.pay, as POST /payroll/runs/:id/accrue does — not approve', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('../payroll/runs.jsx', import.meta.url), 'utf8');
+    const accrue = src.split('\n').find((l) => l.includes('Accrue (pay later)'));
+    expect(accrue).toMatch(/canPay && st === 'approved'/);
+    expect(accrue).not.toMatch(/canApprove/);
+  });
+});

@@ -86,7 +86,10 @@ router.post('/whatsapp/templates', canConfigure, auditAction('create', 'whatsapp
 router.put('/whatsapp/templates/:id', canConfigure, auditAction('update', 'whatsapp_template'), communicationController.updateWhatsAppTemplate);
 router.delete('/whatsapp/templates/:id', canConfigure, auditAction('delete', 'whatsapp_template'), communicationController.deleteWhatsAppTemplate);
 router.post('/whatsapp/send', canSend, auditAction('send_whatsapp', 'communication'), communicationController.sendWhatsAppMessage);
-router.post('/whatsapp/send-document', canSendDocument, auditAction('send_whatsapp_document', 'communication'), communicationController.sendWhatsAppDocument);
+// A send goes out from the caller's OWN paired WhatsApp, so it also needs the
+// pairing permission. documents.download alone (every order viewer since mig
+// 340, Read-Only Auditor included) no longer reaches the send.
+router.post('/whatsapp/send-document', canSendDocument, canPair, auditAction('send_whatsapp_document', 'communication'), communicationController.sendWhatsAppDocument);
 router.post('/whatsapp/preview', canReadComms, communicationController.previewWhatsAppTemplate);
 router.get('/whatsapp/logs', canReadComms, communicationController.getWhatsAppLogs);
 

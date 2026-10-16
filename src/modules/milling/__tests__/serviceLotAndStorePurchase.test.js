@@ -52,6 +52,7 @@ describe('store purchase drawer (INV-61)', () => {
     expect(ctx).toEqual({
       variant: 'pay_purchase', source: 'mill_store', sourceId: 41, currency: 'PKR', outstanding: 12500,
       party: { type: 'supplier', id: 7, name: 'Bag House' }, ref: 'MP-0041', notes: 'Paid at purchase MP-0041',
+      defaultMethod: 'cash', entity: 'mill',
     });
     expect(paidNowPaymentContext({ id: 1, total_amount: 0 })).toBeNull();
     expect(paidNowPaymentContext(null)).toBeNull();
