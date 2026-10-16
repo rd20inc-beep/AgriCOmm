@@ -25,6 +25,7 @@ vi.mock('../../../api/queries', () => ({
   useCreateExportOrder: () => ({ mutateAsync: vi.fn() }),
   useFxRates: () => ({ data: null }),
   useExportProfitPreview: () => ({ data: null, isFetching: false }),
+  useExportOrder: () => ({ data: undefined, isLoading: false, isError: false }),
 }));
 vi.mock('../../../api/client', () => ({ default: { get: vi.fn(), post: vi.fn() } }));
 vi.mock('../api/services', () => ({ exportOrdersApi: { list: vi.fn(() => Promise.resolve({})) } }));
