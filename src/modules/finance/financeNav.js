@@ -13,16 +13,38 @@ import {
   LayoutDashboard, ArrowDownLeft, ArrowUpRight, Landmark, BookOpen, Users,
 } from 'lucide-react';
 
-// The period choices (?range=). '' = all time.
+// The period choices (?range=). '' = all time. The fiscal year is the
+// Pakistani tax year, 1 July – 30 June (owner decision D-1). A custom range
+// travels in the same param as 'YYYY-MM-DD..YYYY-MM-DD' (CUSTOM_RANGE), so
+// every link that carries ?range= carries it too.
 export const PERIOD_PRESETS = [
   { value: '', label: 'All Time' },
   { value: 'today', label: 'Today' },
   { value: 'week', label: 'This Week' },
   { value: 'month', label: 'This Month' },
+  { value: 'last_month', label: 'Last Month' },
   { value: 'quarter', label: 'This Quarter' },
-  { value: 'year', label: 'This Year' },
+  { value: 'last_quarter', label: 'Last Quarter' },
+  { value: 'fy', label: 'This Fiscal Year' },
+  { value: 'last_fy', label: 'Last Fiscal Year' },
+  { value: 'year', label: 'This Calendar Year' },
 ];
+export const CUSTOM_RANGE = /^(\d{4}-\d{2}-\d{2})\.\.(\d{4}-\d{2}-\d{2})$/;
+
+/** ?range= value for a custom range (from ≤ to, both 'YYYY-MM-DD'), else ''. */
+export function customRangeKey(from, to) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from || '') || !/^\d{4}-\d{2}-\d{2}$/.test(to || '')) return '';
+  return from <= to ? `${from}..${to}` : `${to}..${from}`;
+}
+
+const fmtDay = (iso) => {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+};
+
 export function rangeLabel(rangeKey) {
+  const custom = String(rangeKey || '').match(CUSTOM_RANGE);
+  if (custom) return `${fmtDay(custom[1])} – ${fmtDay(custom[2])}`;
   return (PERIOD_PRESETS.find((p) => p.value === (rangeKey || '')) || PERIOD_PRESETS[0]).label;
 }
 
@@ -77,6 +99,11 @@ export const WORKSPACES = [
         permission: { module: 'finance', action: 'view' } },
       { key: 'balance-sheet', label: 'Balance sheet', path: '/finance/accounting/balance-sheet', period: 'asOf',
         permission: { module: 'finance', action: 'view' } },
+      // D-1: monthly periods of the Jul–Jun fiscal year — close (Finance
+      // Manager) / reopen (Owner) / create the next year. Reading is
+      // finance.view; the actions are finance.post_journal, gated on the page.
+      { key: 'periods', label: 'Periods', path: '/finance/accounting/periods', period: false,
+        permission: { module: 'finance', action: 'view' } },
       { key: 'profit', label: 'Profit', path: '/finance/accounting/profit', period: false },
       { key: 'statements', label: 'Statements', path: '/finance/accounting/statements', period: 'range' },
       { key: 'rates', label: 'Rates', path: '/finance/accounting/rates', period: false },
@@ -95,13 +122,11 @@ export const WORKSPACES = [
 ];
 
 // Pages that keep a route but sit in no workspace. Alerts is reached from
-// Home's alerts panel; the two orphans stay URL-only (nothing links to them).
-// The old stock-transfer orphan (/finance/transfers) is now Accounting's
-// "Stock transfers" view; its URL redirects there.
+// Home's alerts panel. The old stock-transfer orphan (/finance/transfers) is
+// now Accounting's "Stock transfers" view; the Cost Allocation and
+// Reconciliation orphans are deleted (FIN-23) — their URLs redirect.
 const UNLISTED = [
   { path: '/finance/alerts', workspace: 'home', period: false },
-  { path: '/finance/costs', workspace: 'home', period: false },
-  { path: '/finance/reconciliation', workspace: 'home', period: false },
 ];
 
 // Every pre-redesign /finance/<segment> → its new home. The query string is
@@ -123,6 +148,9 @@ export const LEGACY_FINANCE_REDIRECTS = {
   'statements': '/finance/accounting/statements',
   'ledger': '/finance/accounting',
   'transfers': '/finance/accounting/stock-transfers',
+  // FIN-23: deleted orphans (they summed PKR and USD) → the views that own them.
+  'costs': '/finance/accounting/profit',
+  'reconciliation': '/finance/money-in',
 };
 
 const has = (hasPermission, p) => !p || hasPermission(p.module, p.action);

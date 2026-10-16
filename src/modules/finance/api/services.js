@@ -6,6 +6,8 @@ export const financeApi = {
   // B1: an uncleared cheque bounced — { reason, bank_charge?, charge_date?, charge_account_id? }.
   bounceCheque: (id, data) => api.post(`/api/finance/payments/${id}/bounce`, data || {}),
   receivables: (params) => api.get('/api/finance/receivables', params),
+  // Money In tiles + aging as at a date, per currency (P4-04).
+  receivablesSummary: (params) => api.get('/api/finance/receivables/summary', params),
   receivableReceipts: (id, source) => api.get(`/api/finance/receivables/${id}/receipts`, { source }),
   payablePayments: (id) => api.get(`/api/finance/payables/${id}/payments`),
   purchasePaymentTrail: (source, sourceId) => api.get(`/api/finance/purchases/${source}/${sourceId}/payments`),

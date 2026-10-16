@@ -128,7 +128,7 @@ const millStoreRepo = {
     }
 
     const [items, totalRow] = await Promise.all([
-      q.clone().orderBy('mi.name').limit(limit).offset(offset),
+      q.clone().orderBy('mi.name').orderBy('mi.id').limit(limit).offset(offset),
       q.clone().clearSelect().clearOrder().count({ c: 'mi.id' }).first(),
     ]);
 
@@ -311,7 +311,7 @@ const millStoreRepo = {
     if (paymentStatus) q.where('mp.payment_status', paymentStatus);
 
     const [items, totalRow] = await Promise.all([
-      q.clone().orderBy('mp.created_at', 'desc').limit(limit).offset(offset),
+      q.clone().orderBy('mp.created_at', 'desc').orderBy('mp.id', 'desc').limit(limit).offset(offset),
       q.clone().clearSelect().clearOrder().count({ c: 'mp.id' }).first(),
     ]);
     return { items, total: Number(totalRow?.c || 0) };
@@ -507,7 +507,7 @@ const millStoreRepo = {
     if (itemId) q.where('a.item_id', itemId);
 
     const [items, totalRow] = await Promise.all([
-      q.clone().orderBy('a.created_at', 'desc').limit(limit).offset(offset),
+      q.clone().orderBy('a.created_at', 'desc').orderBy('a.id', 'desc').limit(limit).offset(offset),
       q.clone().clearSelect().clearOrder().count({ c: 'a.id' }).first(),
     ]);
     return { items, total: Number(totalRow?.c || 0) };

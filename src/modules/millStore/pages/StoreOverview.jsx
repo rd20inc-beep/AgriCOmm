@@ -70,7 +70,6 @@ export default function StoreOverview() {
   const { data: items = [], isLoading } = useMillStoreItems({
     ...(category !== 'all' ? { category } : {}),
     ...(search ? { search } : {}),
-    limit: 200,
   });
 
   const safeItems = Array.isArray(items) ? items : [];
@@ -283,7 +282,7 @@ function PurchasePaymentsCard() {
   // Voiding a purchase entered by mistake (P3-11) — store purchase rights + the Owner.
   const canVoid = hasPermission('mill_store', 'create_purchase');
   const queryClient = useQueryClient();
-  const { data: purchasesRaw = [] } = useMillStorePurchases({ limit: 200 });
+  const { data: purchasesRaw = [] } = useMillStorePurchases() // every page (INV-48);
   const { data: bankAccounts = [] } = useBankAccounts({ millOnly: !hasPermission('finance', 'view') });
   const pay = usePayMillPurchase();
   const [target, setTarget] = useState(null);

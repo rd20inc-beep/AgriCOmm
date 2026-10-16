@@ -26,7 +26,7 @@ export default function PackingPanel({ batchId, batchStatus, addToast, exportOrd
   const showCost = useCanSeeCost();
   const { data = {}, isLoading } = usePackingHistory(batchId);
   const { data: katta } = useBatchKatta(batchId);
-  const { data: bagItems = [] } = useMillStoreItems({ category: 'packaging', limit: 200 });
+  const { data: bagItems = [] } = useMillStoreItems({ category: 'packaging' });
   // When the batch is for an export order, show the buyer's packing requirement.
   const { data: exportOrder } = useExportOrder(exportOrderId || null);
   const pack = usePackBatch();

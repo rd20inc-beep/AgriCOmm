@@ -12,13 +12,18 @@
  */
 const db = require('../../config/database');
 const fxRateService = require('./fxRate.service');
-const { profitDefinitions, millBatchRows } = require('./profitDefinitions');
+const { profitDefinitions, millBatchRows, EXCLUDED_ORDER_STATUSES } = require('./profitDefinitions');
 const { collectionRate: computeCollectionRate } = require('./collectionRate');
+const { payableOverdueSql } = require('../kpi/overdue');
+const { activeOrderSql } = require('../kpi/orderStatus');
 const { dayOf } = require('../exportOrders/balanceDueDate');
 
 // PKR equivalent of an open receivable's OUTSTANDING at its own booked rate
 // (C5) — shared with Reports ▸ Executive (currencyFigures.js).
-const { RECV_PKR_EQUIV_SQL, collectionRateFields } = require('./currencyFigures');
+const {
+  RECV_PKR_EQUIV_SQL, collectionRateFields, byCurrency, foldPkrEquiv, payablePkrToday,
+} = require('./currencyFigures');
+const { receivablesAsAt } = require('./receivablesAsAt');
 
 const financeService = {
 
@@ -45,14 +50,22 @@ const financeService = {
     if (startDate || endDate) orderQuery = dateFilter(orderQuery, 'created_at');
     const exportStats = await orderQuery.clone().select(
       db.raw("COUNT(*) as total_orders"),
-      db.raw("COUNT(CASE WHEN status NOT IN ('Closed','Cancelled') THEN 1 END) as active_orders"),
+      // D-15 (kpi/orderStatus.js): active = not Draft / Cancelled / Closed.
+      db.raw(`COUNT(*) FILTER (WHERE ${activeOrderSql('status')}) as active_orders`),
       // Pre-shipment = workflow stages before COGS gets locked at dispatch
       db.raw("COUNT(CASE WHEN status IN ('Draft','Awaiting Advance','Advance Received','Procurement Pending','In Milling','Docs In Preparation','Awaiting Balance','Ready to Ship') THEN 1 END) as pre_shipment_orders"),
       db.raw("COUNT(CASE WHEN status IN ('Shipped','Arrived','Closed') THEN 1 END) as shipped_orders"),
       db.raw("COUNT(CASE WHEN status IN ('Shipped','Arrived','Closed') AND (inventory_cogs_total_pkr IS NULL OR inventory_cogs_total_pkr = 0) THEN 1 END) as shipped_missing_cogs"),
-      db.raw("COALESCE(SUM(contract_value), 0) as total_revenue_foreign"),
     ).first();
-    const revenueForeign = parseFloat(exportStats.total_revenue_foreign) || 0;
+    // Contract value of the period's BOOKED orders (not Draft / Cancelled), one
+    // figure per currency — it was one SUM across USD and PKR orders labelled $.
+    let contractQuery = db('export_orders').whereNotIn('status', EXCLUDED_ORDER_STATUSES);
+    if (startDate || endDate) contractQuery = dateFilter(contractQuery, 'created_at');
+    const contractRows = await contractQuery
+      .select(db.raw("UPPER(COALESCE(currency, 'USD')) as currency"), db.raw('COALESCE(SUM(contract_value), 0) as total'))
+      .groupByRaw("UPPER(COALESCE(currency, 'USD'))");
+    const revenueByCurrency = byCurrency(contractRows, 'total');
+    const revenueForeign = revenueByCurrency.USD || 0;
     const confirmedRevenuePkr = defs.exportRows.filter((r) => r.inBookedPeriod)
       .reduce((s, r) => s + (r.revenuePkr || 0), 0);
 
@@ -92,46 +105,64 @@ const financeService = {
     // Per currency, in each receivable's OWN currency, from what is still
     // OUTSTANDING (not the full booked base_amount_pkr). A rupee receivable
     // (e.g. a PKR opening balance) is never added into the dollar figure.
-    const recvRows = await db('receivables').whereNot('status', 'Paid').whereNull('local_sale_id')
-      .select(
-        db.raw("COALESCE(currency, 'PKR') as currency"),
-        db.raw('COUNT(*) as count'),
-        db.raw('COALESCE(SUM(outstanding), 0) as outstanding'),
-        db.raw('COUNT(CASE WHEN due_date < CURRENT_DATE THEN 1 END) as overdue_count'),
-        db.raw('COALESCE(SUM(CASE WHEN due_date < CURRENT_DATE THEN outstanding END), 0) as overdue_amount'),
-        db.raw(`COALESCE(SUM(${RECV_PKR_EQUIV_SQL}), 0) as pkr_equiv`),
-        db.raw(`COUNT(*) FILTER (WHERE (${RECV_PKR_EQUIV_SQL}) IS NULL) as pkr_equiv_missing`),
-      )
-      .groupByRaw("COALESCE(currency, 'PKR')");
+    // Open = not Paid / Received / Written Off with something still owed, on
+    // an active order (RPT-10, D-15); overdue = past its EFFECTIVE due date (an
+    // export balance: sailing + term) with outstanding > 0. Same rows as Money
+    // In's as-at summary (receivablesAsAt.js), as at today.
+    const { rows: openRecv } = await receivablesAsAt(db, {});
     const recvByCurrency = {};
     let recvCount = 0; let recvOverdueCount = 0;
     let recvPkrEquiv = 0; let recvPkrEquivMissing = 0;
-    for (const r of Array.isArray(recvRows) ? recvRows : []) {
-      const cur = String(r.currency || 'PKR').toUpperCase();
-      recvByCurrency[cur] = {
-        count: parseInt(r.count, 10) || 0,
-        outstanding: parseFloat(r.outstanding) || 0,
-        overdueCount: parseInt(r.overdue_count, 10) || 0,
-        overdueAmount: parseFloat(r.overdue_amount) || 0,
-      };
-      recvCount += recvByCurrency[cur].count;
-      recvOverdueCount += recvByCurrency[cur].overdueCount;
-      recvPkrEquiv += parseFloat(r.pkr_equiv) || 0;
-      recvPkrEquivMissing += parseInt(r.pkr_equiv_missing, 10) || 0;
+    for (const r of openRecv) {
+      if (r.kind !== 'receivable') continue;
+      const cur = r.currency;
+      const c = recvByCurrency[cur] || (recvByCurrency[cur] = { count: 0, outstanding: 0, overdueCount: 0, overdueAmount: 0 });
+      c.count += 1;
+      c.outstanding = Math.round((c.outstanding + r.outstanding) * 100) / 100;
+      if (r.overdue) {
+        c.overdueCount += 1;
+        c.overdueAmount = Math.round((c.overdueAmount + r.outstanding) * 100) / 100;
+        recvOverdueCount += 1;
+      }
+      recvCount += 1;
+      if (r.outstandingPkr == null) recvPkrEquivMissing += 1;
+      else recvPkrEquiv += r.outstandingPkr;
     }
     const recvCur = (c) => recvByCurrency[c] || { count: 0, outstanding: 0, overdueCount: 0, overdueAmount: 0 };
 
     // ── Payables ──
-    const payStats = await db('payables').whereNot('status', 'Paid')
+    // Per currency (RPT-09): a USD payable is not a rupee figure. The PKR
+    // fields stay PKR-only; a foreign payable keeps no booked rate, so its
+    // ≈ PKR equivalent is at today's rate, dated.
+    const payRows = await db('payables').whereNot('status', 'Paid')
       .where(function () { this.where('payable_type', 'vendor').orWhereNull('payable_type'); })
       .select(
+        db.raw("UPPER(COALESCE(currency, 'PKR')) as currency"),
         db.raw("COUNT(*) as count"),
         db.raw("COALESCE(SUM(outstanding), 0) as total_outstanding"),
-        db.raw("COUNT(CASE WHEN due_date < CURRENT_DATE THEN 1 END) as overdue_count"),
-        db.raw("COALESCE(SUM(CASE WHEN due_date < CURRENT_DATE THEN outstanding END), 0) as overdue_amount"),
-      ).first();
-
-    const totalPayPKR = parseFloat(payStats?.total_outstanding) || 0;
+        db.raw(`COUNT(*) FILTER (WHERE ${payableOverdueSql({ p: 'payables' })}) as overdue_count`),
+        db.raw(`COALESCE(SUM(outstanding) FILTER (WHERE ${payableOverdueSql({ p: 'payables' })}), 0) as overdue_amount`),
+      )
+      .groupByRaw("UPPER(COALESCE(currency, 'PKR'))");
+    const payByCurrency = {};
+    const payStats = { count: 0, overdue_count: 0 };
+    for (const r of Array.isArray(payRows) ? payRows : []) {
+      payByCurrency[r.currency] = {
+        count: parseInt(r.count, 10) || 0,
+        outstanding: parseFloat(r.total_outstanding) || 0,
+        overdueCount: parseInt(r.overdue_count, 10) || 0,
+        overdueAmount: parseFloat(r.overdue_amount) || 0,
+      };
+      payStats.count += payByCurrency[r.currency].count;
+      payStats.overdue_count += payByCurrency[r.currency].overdueCount;
+    }
+    const payPkr = payByCurrency.PKR || { outstanding: 0, overdueAmount: 0 };
+    payStats.overdue_amount = payPkr.overdueAmount;
+    const totalPayPKR = payPkr.outstanding;
+    const payPkrEquiv = foldPkrEquiv(Object.entries(payByCurrency).map(([cur, p]) => {
+      const pkr = payablePkrToday(cur, p.outstanding, pkrRate);
+      return { currency: cur, pkr, basis: 'today', missing: pkr == null ? p.count : 0, today: p.count };
+    }), { rateDate: dayOf(currentFx.effectiveDate) });
 
     // ── Bank ──
     // Per-currency totals — a USD balance is not a rupee figure, so the two are
@@ -185,8 +216,10 @@ const financeService = {
         activeOrders: parseInt(exportStats.active_orders),
         // Confirmed orders (not Draft / Cancelled) the profit figures cover.
         confirmedOrders: et.orderCount,
+        // USD orders only (kept for callers); every currency in revenueByCurrency.
         revenueForeign: revenueForeign,
         revenueForeignCurrency: 'USD',
+        revenueByCurrency,
         // Booked PKR contract value of the confirmed orders (locked / booked rate).
         revenuePkrBooked: confirmedRevenuePkr,
         operationalCostsPkr: et.opCostsPkr,
@@ -286,10 +319,13 @@ const financeService = {
         pkrEquiv: { pkr: Math.round(recvPkrEquiv * 100) / 100, basis: 'booked', missingCount: recvPkrEquivMissing },
       },
       payables: {
-        count: parseInt(payStats.count),
+        count: payStats.count,
+        // PKR payables only, in rupees; every currency in byCurrency.
         totalOutstandingPkr: totalPayPKR,
-        overdueCount: parseInt(payStats.overdue_count),
-        overdueAmountPkr: parseFloat(payStats.overdue_amount),
+        overdueCount: payStats.overdue_count,
+        overdueAmountPkr: payStats.overdue_amount,
+        byCurrency: payByCurrency,
+        pkrEquiv: payPkrEquiv,
       },
       cashPosition: {
         bankBalancePkr: bankBalancePKR,

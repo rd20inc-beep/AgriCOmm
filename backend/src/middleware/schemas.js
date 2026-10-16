@@ -800,6 +800,11 @@ const reverseJournal = Joi.object({
   authorized_by_owner_id: Joi.number().integer().positive().allow(null),
 });
 
+// D-1: a fiscal year is named by the calendar year its July starts in.
+const createFiscalYear = Joi.object({
+  start_year: Joi.number().integer().min(2000).max(2100).required(),
+});
+
 const reopenPeriod = Joi.object({
   reason: Joi.string().trim().min(5).max(500).required(),
   authorized_by_owner_id: Joi.number().integer().positive().allow(null),
@@ -1292,6 +1297,7 @@ module.exports = {
   createJournal,
   reverseJournal,
   reopenPeriod,
+  createFiscalYear,
   stockAdjustment,
   submitApproval,
   rejectApproval,

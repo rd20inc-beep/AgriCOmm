@@ -23,7 +23,10 @@ const MOVEMENT_TYPES = [
   ['production_output', 'Milling output'], ['byproduct_output', 'By-product output'], ['local_sale', 'Local sale'],
   ['export_dispatch', 'Export dispatch'], ['transfer_out', 'Transfer out'], ['transfer_in', 'Transfer in'],
   ['adjustment_plus', 'Adjustment (+)'], ['adjustment_minus', 'Adjustment (−)'],
-  ['damage_writeoff', 'Damage write-off'], ['shortage_writeoff', 'Shortage write-off'], ['return', 'Return'],
+  ['damage_writeoff', 'Damage write-off'], ['shortage_writeoff', 'Shortage write-off'], ['return', 'Sale return'],
+  ['production_issue_reversal', 'Milling issue reversed'], ['production_output_reversal', 'Milling output reversed'],
+  ['byproduct_output_reversal', 'By-product output reversed'], ['purchase_void', 'Purchase voided'],
+  ['service_dispatch', 'Service dispatch (client rice)'], ['opening_balance', 'Opening balance'],
 ];
 
 export default function InventoryMovementLedger() {
@@ -152,6 +155,11 @@ export default function InventoryMovementLedger() {
                 <Kpi label="Total in" value={`${n0(totals.inKg)} kg`} tone="emerald" icon={ArrowDownLeft} />
                 <Kpi label="Total out" value={`${n0(totals.outKg)} kg`} tone="rose" icon={ArrowUpRight} />
               </div>
+              {totals.truncated && (
+                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                  Listing the newest {totals.listed} of {totals.count} movements. The totals above cover all {totals.count}; narrow the dates or filters to list the rest.
+                </p>
+              )}
 
               {/* Movement feed */}
               <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">

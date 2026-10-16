@@ -4,10 +4,16 @@ const db = require('../../config/database');
 // controller resolves it once per request and passes it down; the service never
 // touches req/rbac itself.
 const { applyWarehouseScope, isWarehouseInScope } = require('../../utils/warehouseScope');
-const { companyStock } = require('../inventory/stockSql');
+const { companyStock, normaliseOwnership, ON_HAND_KG } = require('../inventory/stockSql');
+// One movement-type map for every lot_transactions ledger (P4-06).
+const stockMovements = require('./stockMovements');
+// One rule for paid / earned / pending payslip lines (P4-08).
+const payrollLineStatus = require('../milling/payrollLineStatus');
 // D-14 stock value (landed cost/kg × on hand, no fallback price) — stockValue.js.
 const { lotValueSql } = require('../inventory/stockValue');
-const { exportProfit, EXCLUDED_ORDER_STATUSES } = require('../finance/profitDefinitions');
+const {
+  exportProfit, exportOrderProfit, costRowPkr, EXCLUDED_ORDER_STATUSES, batchSalesFigures,
+} = require('../finance/profitDefinitions');
 const { collectionRate: computeCollectionRate } = require('../finance/collectionRate');
 const fxRateService = require('../finance/fxRate.service');
 const { dayOf } = require('../exportOrders/balanceDueDate');
@@ -18,10 +24,21 @@ const {
 const { foldCashForecast, addDays } = require('./cashForecast');
 const { PENDING_CHEQUE, NEVER_MONEY } = require('../finance/paymentsFeedTotals');
 const { kgToMt, KG_PER_MT } = require('../../shared/units');
+const { inclusiveEnd, pageMeta } = require('./reportContract');
 
 // Parse a milling_batches.custom_tags jsonb value into a plain array. The pg
 // driver usually returns jsonb already parsed (array/object), but a string may
 // arrive from raw selects — JSON.parse with a [] fallback.
+// KG on hand of a lot row — JS twin of stockSql.onHandKg (net weight, else qty).
+function onHandOf(l) {
+  const net = parseFloat(l.net_weight_kg) || 0;
+  return net > 0 ? net : (parseFloat(l.qty) || 0);
+}
+
+// The Invoice Ledger's one payment-status vocabulary (P4-07 / RPT-17).
+const INVOICE_STATUSES = ['Paid', 'Partial', 'Unpaid', 'Void', 'Written Off'];
+const NOT_INVOICED_SALE_STATUSES = ['Draft', 'Pending', 'Cancelled', 'Voided'];
+
 function parseCustomTags(v) {
   if (v == null) return [];
   if (typeof v === 'string') { try { return JSON.parse(v); } catch { return []; } }
@@ -347,6 +364,7 @@ const reportingService = {
         'eo.currency',
         'eo.contract_value',
         'eo.contract_value_pkr_locked',
+        'eo.booked_fx_rate',
         'eo.inventory_cogs_total_pkr',
         'eo.status',
         'eo.created_at'
@@ -356,6 +374,8 @@ const reportingService = {
     if (dateTo) query.where('eo.created_at', '<=', dateTo);
     if (customerId) query.where('eo.customer_id', customerId);
     if (country) query.where('eo.country', country);
+    // Draft / Cancelled orders are not business (the Booked definition, profitDefinitions).
+    query.whereNotIn('eo.status', EXCLUDED_ORDER_STATUSES);
 
     const countQuery = query.clone().clearSelect().count('eo.id as total').first();
 
@@ -367,7 +387,7 @@ const reportingService = {
     const costs = orderIds.length > 0
       ? await db('export_order_costs')
           .whereIn('order_id', orderIds)
-          .select('order_id', 'category', 'amount')
+          .select('order_id', 'category', 'amount', 'currency', 'base_amount_pkr', 'fx_rate')
       : [];
 
     // Each order's line prices: on a multi-line order price_per_mt is the
@@ -375,28 +395,32 @@ const reportingService = {
     const { linePricesByOrder, priceSummary } = require('../exportOrders/orderLines');
     const linePrices = await linePricesByOrder(db, orderIds);
 
-    // Group costs by order
+    // Cost breakdown per order, each row in PKR (the definition's costRowPkr).
+    const bookedRateOf = Object.fromEntries(orders.map((o) => [o.id, parseFloat(o.booked_fx_rate) || 0]));
     const costMap = {};
     for (const cost of costs) {
-      if (!costMap[cost.order_id]) costMap[cost.order_id] = { total: 0, breakdown: {} };
-      const amt = parseFloat(cost.amount) || 0;
-      costMap[cost.order_id].total += amt;
+      if (!costMap[cost.order_id]) costMap[cost.order_id] = { breakdown: {} };
+      const amt = costRowPkr(cost, bookedRateOf[cost.order_id]);
       costMap[cost.order_id].breakdown[cost.category] = (costMap[cost.order_id].breakdown[cost.category] || 0) + amt;
     }
 
+    // RPT-25 / EXP-08: each order's figures from the ONE profit definition
+    // (profitDefinitions) — PKR at the order's booked rate, revenue incl.
+    // freight + debit notes, rice cost locked / reserved / estimated. A USD
+    // contract with no booked figure is UNPRICED (null), never read as rupees.
+    const profitRows = await exportOrderProfit(db, orderIds);
+
     const data = orders.map((o) => {
-      // Revenue must be in PKR to compare against PKR costs. Use the locked PKR
-      // contract value (contract_value_pkr_locked, set when the FX rate was
-      // booked); fall back to the raw contract value only if it's missing.
       const contractCur = parseFloat(o.contract_value) || 0;          // original currency
-      const revenuePkr = parseFloat(o.contract_value_pkr_locked) || contractCur;
+      const pr = profitRows.get(Number(o.id)) || {};
+      const revenuePkr = pr.revenuePkr ?? null;
       const orderCosts = costMap[o.id] || { total: 0, breakdown: {} };
-      const opCostsPkr = orderCosts.total;                            // export operational costs (PKR)
-      const cogsPkr = parseFloat(o.inventory_cogs_total_pkr) || 0;    // rice COGS (PKR, 0 until milled)
-      const totalCost = opCostsPkr + cogsPkr;
-      const grossProfit = revenuePkr - totalCost;
-      const margin = revenuePkr > 0 ? parseFloat(((grossProfit / revenuePkr) * 100).toFixed(2)) : 0;
-      const costPerMT = parseFloat(o.qty_mt) > 0 ? parseFloat((totalCost / parseFloat(o.qty_mt)).toFixed(2)) : 0;
+      const opCostsPkr = pr.opCostsPkr ?? 0;                          // op costs + printed bags (PKR)
+      const cogsPkr = pr.riceCostPkr ?? null;                         // rice cost (PKR), basis below
+      const totalCost = pr.totalCostPkr ?? null;
+      const grossProfit = pr.bookedProfitPkr ?? null;
+      const margin = pr.marginPct ?? null;
+      const costPerMT = totalCost != null && parseFloat(o.qty_mt) > 0 ? parseFloat((totalCost / parseFloat(o.qty_mt)).toFixed(2)) : null;
       const ps = priceSummary(o, linePrices[o.id] || []);
 
       return {
@@ -423,15 +447,29 @@ const reportingService = {
         margin,
         costPerMT,
         status: o.status,
-        riskFlags: margin < 10 ? ['low_margin'] : [],
+        riceCostBasis: pr.riceCostBasis || 'unpriced',
+        estimated: !!pr.estimated,
+        priced: !!pr.priced,
+        riskFlags: margin != null && margin < 10 ? ['low_margin'] : [],
       };
     });
 
-    return { data, total: parseInt(total.total, 10), page, limit };
+    const t = parseInt(total.total, 10);
+    // pagination.truncated tells the hub this page is not every order (RPT-14).
+    return { data, total: t, page, limit, pagination: pageMeta(t, { page, limit }, data.length) };
   },
 
   /**
-   * Per-batch profitability: revenue (finished * 72800 + byproducts), costs, profit, yield%, margin.
+   * Per-batch profitability (FIN-21) — no reference prices. Per batch:
+   *   input cost   = Σ its cost sheet (milling_costs: rice, processing, bags…)
+   *   output       = what its yield booked on the output lots, at cost
+   *   sold         = its output sold to date (local sales + transfers to
+   *                  export) and the COGS those sales locked — the same figures
+   *                  as Mill Finance (profitDefinitions.batchSalesFigures)
+   *   profit       = sold revenue − sold COGS (realised); unsold output is
+   *                  stock at cost, never profit.
+   * It used to price finished rice at a fixed Rs 72,800/MT and broken at
+   * 38,000 whatever the batch actually sold for. PKR; quantities in KG / MT.
    */
   async getBatchProfitability({ dateFrom, dateTo, supplierId, page = 1, limit = 50 }) {
     const offset = (page - 1) * limit;
@@ -477,18 +515,14 @@ const reportingService = {
       if (!costMap[cost.batch_id]) costMap[cost.batch_id] = 0;
       costMap[cost.batch_id] += parseFloat(cost.amount) || 0;
     }
-
-    const FINISHED_PRICE_PKR = 72800; // PKR per MT for finished rice
-    const BROKEN_PRICE_PKR = 38000;   // PKR per MT for broken rice
+    const figures = new Map((await batchSalesFigures(db, batches)).map((f) => [Number(f.id), f]));
 
     const data = batches.map((b) => {
-      // qty columns are KG (Phase 5c); the price constants are per-MT → ÷1000 the qty.
-      const finishedRevenue = ((parseFloat(b.actual_finished_kg) || 0) / 1000) * FINISHED_PRICE_PKR;
-      const brokenRevenue = ((parseFloat(b.broken_kg) || 0) / 1000) * BROKEN_PRICE_PKR;
-      const totalRevenue = finishedRevenue + brokenRevenue;
-      const totalCost = costMap[b.id] || 0;
-      const profit = totalRevenue - totalCost;
-      const margin = totalRevenue > 0 ? parseFloat(((profit / totalRevenue) * 100).toFixed(2)) : 0;
+      const f = figures.get(Number(b.id)) || {};
+      const revenue = f.soldRevenuePkr || 0;
+      const soldCogs = f.soldCogsPkr || 0;
+      const profit = Math.round((revenue - soldCogs) * 100) / 100;
+      const margin = revenue > 0 ? parseFloat(((profit / revenue) * 100).toFixed(2)) : 0;
 
       return {
         id: b.id,
@@ -500,10 +534,19 @@ const reportingService = {
         finishedMT: kgToMt(b.actual_finished_kg),
         brokenMT: kgToMt(b.broken_kg),
         yieldPct: parseFloat(b.yield_pct) || 0,
-        revenue: totalRevenue,
-        costs: totalCost,
+        inputCostPkr: costMap[b.id] || 0,
+        outputValueAtCostPkr: f.outputValueAtCostPkr || 0,
+        soldKg: f.soldKg || 0,
+        unsoldKg: f.unsoldKg || 0,
+        unsoldValueAtCostPkr: f.unsoldValueAtCostPkr || 0,
+        uncostedSales: f.uncostedSales || 0,
+        // revenue / costs / profit / margin: REALISED — the batch's output
+        // sold so far and the COGS those sales locked.
+        revenue,
+        costs: soldCogs,
         profit,
         margin,
+        basis: 'sold_to_date',
         currency: 'PKR',
         status: b.status,
       };
@@ -529,8 +572,12 @@ const reportingService = {
         'mb.manual_milling_cost_pkr', 'mb.manual_other_expenses_pkr');
     if (from_date) bq = bq.where('mb.created_at', '>=', from_date);
     if (to_date) bq = bq.where('mb.created_at', '<=', to_date);
-    const batches = await bq.orderBy('mb.created_at', 'desc').limit(parseInt(limit, 10));
-    if (!batches.length) return { batches: [] };
+    // How many batches match, so a capped list says so (RPT-14).
+    const [{ c: matched }] = await bq.clone().clearSelect().count('mb.id as c');
+    const cap = parseInt(limit, 10);
+    const batches = await bq.orderBy('mb.created_at', 'desc').limit(cap);
+    const pagination = pageMeta(matched, { page: 1, limit: cap }, batches.length);
+    if (!batches.length) return { batches: [], pagination };
     const ids = batches.map((b) => b.id);
 
     // Input cost must use the SAME basis the residual cost engine uses
@@ -638,161 +685,160 @@ const reportingService = {
         byproducts,
       };
     });
-    return { batches: data };
+    return { batches: data, pagination };
   },
 
   /**
-   * Aggregate by customer: total orders, revenue, profit, avg margin, outstanding receivables.
+   * Customers and countries (Reports hub, RPT-03). Both are roll-ups of the ONE
+   * export profit definition (finance/profitDefinitions exportProfit, Booked:
+   * orders not Draft / Cancelled whose ORDER DATE is in the period), so a
+   * customer's profit here is the sum of the same per-order figures the Profit
+   * page shows. Revenue and profit are PKR (the order's booked/locked rate —
+   * never a live one); an order with no booked revenue or no rice cost is
+   * counted as not costed and left out of revenue, profit and margin. Contract
+   * value is reported PER CURRENCY — USD and PKR contracts are never added.
+   *
+   * Before: revenue = SUM(contract_value) across currencies, costs = every
+   * export_order_costs row of the customer ever, no COGS, and the API's field
+   * names (revenue / profit / totalOrders) were not the ones the hub read
+   * (totalRevenuePkr / totalProfitPkr / orderCount), so every column was 0.
    */
-  async getCustomerProfitability({ dateFrom, dateTo, page = 1, limit = 50 }) {
-    const offset = (page - 1) * limit;
+  async _bookedOrdersWithParty({ dateFrom, dateTo }) {
+    const { rows } = await exportProfit(db, { startDate: dateFrom, endDate: dateTo });
+    const booked = rows.filter((r) => r.inBookedPeriod !== false);
+    if (!booked.length) return [];
+    const party = await db('export_orders as eo')
+      .leftJoin('customers as c', 'eo.customer_id', 'c.id')
+      .whereIn('eo.id', booked.map((r) => r.id))
+      .select('eo.id', 'eo.customer_id', 'c.name as customer_name', 'c.country as customer_country',
+        'eo.country', 'eo.qty_mt', 'eo.product_name');
+    const byId = new Map(party.map((p) => [Number(p.id), p]));
+    return booked.map((r) => ({ ...r, party: byId.get(Number(r.id)) || {} }));
+  },
 
-    const query = db('export_orders as eo')
-      .join('customers as c', 'eo.customer_id', 'c.id')
-      .select(
-        'c.id as customer_id',
-        'c.name as customer_name',
-        'c.country',
-        db.raw('COUNT(eo.id) as total_orders'),
-        db.raw('COALESCE(SUM(eo.contract_value), 0) as total_revenue'),
-        db.raw('COALESCE(SUM(eo.qty_mt), 0) as total_qty_mt')
-      )
-      .groupBy('c.id', 'c.name', 'c.country');
-
-    if (dateFrom) query.where('eo.created_at', '>=', dateFrom);
-    if (dateTo) query.where('eo.created_at', '<=', dateTo);
-
-    const customers = await query.orderBy('total_revenue', 'desc').limit(limit).offset(offset);
-
-    // Get costs per customer
-    const customerIds = customers.map((c) => c.customer_id);
-    const costsByCustomer = customerIds.length > 0
-      ? await db('export_order_costs as eoc')
-          .join('export_orders as eo', 'eoc.order_id', 'eo.id')
-          .whereIn('eo.customer_id', customerIds)
-          .select('eo.customer_id')
-          .sum('eoc.amount as total_costs')
-          .groupBy('eo.customer_id')
-      : [];
-
-    const costMap = {};
-    for (const c of costsByCustomer) {
-      costMap[c.customer_id] = parseFloat(c.total_costs) || 0;
+  _rollUp(orders, keyOf, init) {
+    const groups = new Map();
+    for (const o of orders) {
+      const key = keyOf(o);
+      if (key == null) continue;
+      let g = groups.get(key);
+      if (!g) {
+        g = {
+          ...init(o), orderCount: 0, pricedCount: 0, unpricedCount: 0, estimatedCount: 0,
+          qtyMt: 0, revenuePkr: 0, bookedProfitPkr: 0, contractByCurrency: {}, _products: new Map(),
+        };
+        groups.set(key, g);
+      }
+      g.orderCount += 1;
+      g.qtyMt += parseFloat(o.party.qty_mt) || 0;
+      const cur = String(o.currency || 'USD').toUpperCase();
+      g.contractByCurrency[cur] = Math.round(((g.contractByCurrency[cur] || 0) + (parseFloat(o.contractValueForeign) || 0)) * 100) / 100;
+      if (o.estimated) g.estimatedCount += 1;
+      if (o.priced) {
+        g.pricedCount += 1;
+        g.revenuePkr += o.revenuePkr || 0;
+        g.bookedProfitPkr += o.bookedProfitPkr || 0;
+      } else {
+        g.unpricedCount += 1;
+      }
+      const pn = o.party.product_name;
+      if (pn) g._products.set(pn, (g._products.get(pn) || 0) + 1);
     }
-
-    // Outstanding receivables per customer
-    const recvByCustomer = customerIds.length > 0
-      ? await db('receivables')
-          .whereIn('customer_id', customerIds)
-          .where('status', '!=', 'Closed')
-          .select('customer_id')
-          .sum('outstanding as total_outstanding')
-          .groupBy('customer_id')
-      : [];
-
-    const recvMap = {};
-    for (const r of recvByCustomer) {
-      recvMap[r.customer_id] = parseFloat(r.total_outstanding) || 0;
-    }
-
-    const countQuery = db('export_orders as eo')
-      .join('customers as c', 'eo.customer_id', 'c.id');
-    if (dateFrom) countQuery.where('eo.created_at', '>=', dateFrom);
-    if (dateTo) countQuery.where('eo.created_at', '<=', dateTo);
-    const totalCustomers = await countQuery.countDistinct('c.id as total').first();
-
-    const data = customers.map((c) => {
-      const revenue = parseFloat(c.total_revenue) || 0;
-      const costs = costMap[c.customer_id] || 0;
-      const profit = revenue - costs;
-      const avgMargin = revenue > 0 ? parseFloat(((profit / revenue) * 100).toFixed(2)) : 0;
-
+    const r2 = (n) => Math.round(n * 100) / 100;
+    return [...groups.values()].map((g) => {
+      const { _products, ...rest } = g;
       return {
-        customerId: c.customer_id,
-        customerName: c.customer_name,
-        country: c.country,
-        totalOrders: parseInt(c.total_orders, 10),
-        totalQtyMT: parseFloat(c.total_qty_mt),
-        revenue,
-        costs,
-        profit,
-        avgMargin,
-        outstandingReceivables: recvMap[c.customer_id] || 0,
+        ...rest,
+        qtyMt: Math.round(rest.qtyMt * 1000) / 1000,
+        revenuePkr: r2(rest.revenuePkr),
+        bookedProfitPkr: r2(rest.bookedProfitPkr),
+        marginPct: rest.revenuePkr > 0 ? parseFloat(((rest.bookedProfitPkr / rest.revenuePkr) * 100).toFixed(2)) : null,
+        topProducts: [..._products.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([n]) => n),
       };
     });
+  },
 
-    return { data, total: parseInt(totalCustomers.total, 10), page, limit };
+  _rollUpTotals(groups) {
+    const t = { groupCount: groups.length, orderCount: 0, pricedCount: 0, unpricedCount: 0, estimatedCount: 0, qtyMt: 0, revenuePkr: 0, bookedProfitPkr: 0, contractByCurrency: {} };
+    for (const g of groups) {
+      for (const k of ['orderCount', 'pricedCount', 'unpricedCount', 'estimatedCount', 'qtyMt', 'revenuePkr', 'bookedProfitPkr']) t[k] += g[k] || 0;
+      for (const [cur, amt] of Object.entries(g.contractByCurrency || {})) t.contractByCurrency[cur] = Math.round(((t.contractByCurrency[cur] || 0) + amt) * 100) / 100;
+    }
+    t.qtyMt = Math.round(t.qtyMt * 1000) / 1000;
+    t.revenuePkr = Math.round(t.revenuePkr * 100) / 100;
+    t.bookedProfitPkr = Math.round(t.bookedProfitPkr * 100) / 100;
+    t.marginPct = t.revenuePkr > 0 ? parseFloat(((t.bookedProfitPkr / t.revenuePkr) * 100).toFixed(2)) : null;
+    return t;
   },
 
   /**
-   * By country: orders, qty MT, revenue, avg price/MT, avg margin, top products.
+   * Aggregate by customer: orders, PKR revenue / booked profit / margin from
+   * profitDefinitions, contract value and open receivables per currency.
+   * Sorted by booked profit; totals cover every customer, not just the page.
    */
-  async getCountryAnalysis({ dateFrom, dateTo }) {
-    const query = db('export_orders as eo')
-      .select(
-        'eo.country',
-        db.raw('COUNT(eo.id) as total_orders'),
-        db.raw('COALESCE(SUM(eo.qty_mt), 0) as total_qty_mt'),
-        db.raw('COALESCE(SUM(eo.contract_value), 0) as total_revenue'),
-        db.raw('CASE WHEN SUM(eo.qty_mt) > 0 THEN SUM(eo.contract_value) / SUM(eo.qty_mt) ELSE 0 END as avg_price_per_mt')
-      )
-      .whereNotNull('eo.country')
-      .groupBy('eo.country')
-      .orderBy('total_revenue', 'desc');
+  async getCustomerProfitability({ dateFrom, dateTo, page = 1, limit = 50, all = false } = {}) {
+    const orders = await this._bookedOrdersWithParty({ dateFrom, dateTo });
+    const groups = this._rollUp(orders, (o) => (o.party.customer_id != null ? Number(o.party.customer_id) : null), (o) => ({
+      customerId: Number(o.party.customer_id),
+      customerName: o.party.customer_name || null,
+      country: o.party.customer_country || o.party.country || null,
+    }));
 
-    if (dateFrom) query.where('eo.created_at', '>=', dateFrom);
-    if (dateTo) query.where('eo.created_at', '<=', dateTo);
-
-    const countries = await query;
-
-    // Get costs by country
-    const costQuery = db('export_order_costs as eoc')
-      .join('export_orders as eo', 'eoc.order_id', 'eo.id')
-      .whereNotNull('eo.country')
-      .select('eo.country')
-      .sum('eoc.amount as total_costs')
-      .groupBy('eo.country');
-    if (dateFrom) costQuery.where('eo.created_at', '>=', dateFrom);
-    if (dateTo) costQuery.where('eo.created_at', '<=', dateTo);
-
-    const costRows = await costQuery;
-    const costMap = {};
-    for (const r of costRows) costMap[r.country] = parseFloat(r.total_costs) || 0;
-
-    // Top products by country
-    const productQuery = db('export_orders as eo')
-      .whereNotNull('eo.country')
-      .whereNotNull('eo.product_name')
-      .select('eo.country', 'eo.product_name')
-      .count('eo.id as cnt')
-      .groupBy('eo.country', 'eo.product_name')
-      .orderBy('cnt', 'desc');
-    if (dateFrom) productQuery.where('eo.created_at', '>=', dateFrom);
-    if (dateTo) productQuery.where('eo.created_at', '<=', dateTo);
-
-    const productRows = await productQuery;
-    const productMap = {};
-    for (const r of productRows) {
-      if (!productMap[r.country]) productMap[r.country] = [];
-      if (productMap[r.country].length < 3) productMap[r.country].push(r.product_name);
+    // Open receivables per customer and currency — as at today (a balance,
+    // not a period figure), closed statuses excluded (RECEIVABLE_CLOSED).
+    const ids = groups.map((g) => g.customerId);
+    const recv = ids.length ? await db('receivables')
+      .whereIn('customer_id', ids)
+      .whereNotIn('status', RECEIVABLE_CLOSED)
+      .where('outstanding', '>', 0)
+      .select('customer_id', db.raw("UPPER(COALESCE(currency, 'PKR')) as currency"))
+      .sum('outstanding as total')
+      .groupBy('customer_id', db.raw("UPPER(COALESCE(currency, 'PKR'))")) : [];
+    const recvBy = new Map();
+    for (const r of recv) {
+      const m = recvBy.get(Number(r.customer_id)) || {};
+      m[r.currency] = Math.round((parseFloat(r.total) || 0) * 100) / 100;
+      recvBy.set(Number(r.customer_id), m);
     }
+    for (const g of groups) g.outstandingByCurrency = recvBy.get(g.customerId) || {};
 
-    return countries.map((c) => {
-      const revenue = parseFloat(c.total_revenue) || 0;
-      const costs = costMap[c.country] || 0;
-      const profit = revenue - costs;
-      const avgMargin = revenue > 0 ? parseFloat(((profit / revenue) * 100).toFixed(2)) : 0;
+    groups.sort((a, b) => (b.bookedProfitPkr - a.bookedProfitPkr) || (b.orderCount - a.orderCount));
+    const p = all ? 1 : Math.max(1, parseInt(page, 10) || 1);
+    const l = all ? Math.max(1, groups.length) : Math.max(1, parseInt(limit, 10) || 50);
+    const rows = all ? groups : groups.slice((p - 1) * l, p * l);
+    return {
+      data: rows,
+      totals: this._rollUpTotals(groups),
+      pagination: pageMeta(groups.length, { page: p, limit: l }, rows.length),
+      total: groups.length, page: p, limit: l,
+    };
+  },
 
-      return {
-        country: c.country,
-        totalOrders: parseInt(c.total_orders, 10),
-        totalQtyMT: parseFloat(c.total_qty_mt),
-        totalRevenue: revenue,
-        avgPricePerMT: parseFloat(parseFloat(c.avg_price_per_kg).toFixed(2)),
-        avgMargin,
-        topProducts: productMap[c.country] || [],
-      };
-    });
+  /**
+   * By country (the order's destination country, else the customer's): the
+   * same roll-up as customers. Average price per MT is per currency.
+   */
+  async getCountryAnalysis({ dateFrom, dateTo } = {}) {
+    const orders = await this._bookedOrdersWithParty({ dateFrom, dateTo });
+    const countryOf = (o) => o.party.country || o.party.customer_country || null;
+    const groups = this._rollUp(orders, countryOf, (o) => ({ country: countryOf(o) }));
+    // Average contract price per MT, per currency (contract ÷ MT of that currency's orders).
+    const mtBy = new Map();
+    for (const o of orders) {
+      const key = countryOf(o);
+      if (!key) continue;
+      const k = `${key}|${String(o.currency || 'USD').toUpperCase()}`;
+      mtBy.set(k, (mtBy.get(k) || 0) + (parseFloat(o.party.qty_mt) || 0));
+    }
+    for (const g of groups) {
+      g.avgPricePerMtByCurrency = {};
+      for (const [cur, amt] of Object.entries(g.contractByCurrency)) {
+        const mt = mtBy.get(`${g.country}|${cur}`) || 0;
+        g.avgPricePerMtByCurrency[cur] = mt > 0 ? Math.round((amt / mt) * 100) / 100 : null;
+      }
+    }
+    groups.sort((a, b) => (b.revenuePkr - a.revenuePkr) || (b.orderCount - a.orderCount));
+    return { data: groups, totals: this._rollUpTotals(groups) };
   },
 
   /**
@@ -1005,32 +1051,7 @@ const reportingService = {
    * Batches ranked by yield %.
    */
   async getBatchRecoveryLeaderboard({ dateFrom, dateTo }) {
-    const query = db('milling_batches as mb')
-      .leftJoin('suppliers as s', 'mb.supplier_id', 's.id')
-      .leftJoin('products as p', function () {
-        this.on(db.raw('1 = 1')); // Will use product_name from batch's linked order
-      })
-      .select(
-        'mb.id',
-        'mb.batch_no',
-        's.name as supplier_name',
-        'mb.raw_qty_kg',
-        'mb.actual_finished_kg',
-        'mb.broken_kg',
-        'mb.bran_kg',
-        'mb.husk_kg',
-        'mb.wastage_kg',
-        'mb.yield_pct',
-        'mb.status'
-      )
-      .where('mb.status', 'Completed')
-      .where('mb.yield_pct', '>', 0)
-      .orderBy('mb.yield_pct', 'desc');
-
-    if (dateFrom) query.where('mb.created_at', '>=', dateFrom);
-    if (dateTo) query.where('mb.created_at', '<=', dateTo);
-
-    // Remove the incorrect join and re-query properly
+    // (A never-executed `1 = 1` cross-join query built here was removed.)
     const batches = await db('milling_batches as mb')
       .leftJoin('suppliers as s', 'mb.supplier_id', 's.id')
       .leftJoin('export_orders as eo', 'mb.linked_export_order_id', 'eo.id')
@@ -1069,7 +1090,11 @@ const reportingService = {
         customTags: parseCustomTags(b.custom_tags),
         supplierName: b.supplier_name,
         productName: b.product_name,
-        rawQtyMT: rawQty,
+        // KG canonical. rawQtyMT used to carry the KG figure under an MT name
+        // (RPT-24); both units are now what they say.
+        rawQtyKg: rawQty,
+        finishedQtyKg: parseFloat(b.actual_finished_kg) || 0,
+        rawQtyMT: kgToMt(rawQty),
         finishedQtyMT: kgToMt(b.actual_finished_kg),
         yieldPct: parseFloat(b.yield_pct) || 0,
         brokenPct,
@@ -1206,7 +1231,10 @@ const reportingService = {
         'l.net_weight_kg', 'l.received_net_weight_kg', 'l.available_qty', 'l.reserved_qty',
         'l.landed_cost_per_kg', 'l.rate_per_kg', 'l.landed_cost_total', 'l.purchase_amount', 'l.payment_status',
         'l.paid_amount', 'l.due_amount', 'l.bag_weight_kg', 'l.total_bags', 'l.moisture_pct', 'l.broken_pct',
-        'l.quality_json', 'l.processing_type', 'l.purchase_date', 'l.created_at',
+        'l.quality_json', 'l.processing_type', 'l.purchase_date', 'l.created_at', 'l.ownership',
+        // batch_ref drives "Milled from" below (RPT-16: it was never selected,
+        // so the lineage never rendered).
+        'l.batch_ref', 'l.milling_reserved_qty',
         'l.supplier_id', 's.name as supplier_name', 'p.name as product_name', 'w.name as warehouse_name')
       .first();
     if (!lot) return null;
@@ -1234,17 +1262,6 @@ const reportingService = {
     const saleByNo = Object.fromEntries(sales.map(s => [s.sale_no, s]));
     const whById = Object.fromEntries(warehouses.map(w => [w.id, w.name]));
 
-    const TYPE_LABELS = {
-      purchase_in: 'Purchase received', warehouse_transfer_in: 'Transfer in', warehouse_transfer_out: 'Transfer out',
-      milling_issue: 'Issued to milling', milling_receipt: 'Milling output', byproduct_receipt: 'By-product output',
-      export_dispatch_out: 'Export dispatch', local_sale_out: 'Local sale', export_allocation: 'Reserved for export',
-      export_release: 'Reservation released', stock_adjustment_plus: 'Adjustment (+)', stock_adjustment_minus: 'Adjustment (−)',
-      damage_out: 'Damage write-off', shortage_out: 'Shortage write-off', return_in: 'Return', opening_balance: 'Opening balance',
-      lot_split: 'Lot split', lot_merge: 'Lot merge',
-      milling_hold: 'Committed to milling', milling_release: 'Milling commitment released',
-      purchase_correction_in: 'Received qty corrected (+)', purchase_correction_out: 'Received qty corrected (−)',
-    };
-
     const events = txns.map((t) => {
       const tt = String(t.transaction_type || '');
       let counterparty = null, href = null, batchNo = null, batchName = null, customTags = null;
@@ -1256,7 +1273,7 @@ const reportingService = {
       const qtyKg = num(t.quantity_kg);
       return {
         id: t.id, date: t.transaction_date || t.created_at, txnNo: t.transaction_no,
-        type: tt, label: TYPE_LABELS[tt] || tt.replace(/_/g, ' '),
+        type: tt, label: stockMovements.labelOf(stockMovements.movementTypeOf(tt)),
         inKg: qtyKg > 0 ? qtyKg : 0, outKg: qtyKg < 0 ? -qtyKg : 0,
         balanceKg: num(t.balance_kg), ratePerKg: num(t.rate_per_kg), costImpact: num(t.cost_impact),
         reference: t.reference_no || null, counterparty, href, batchNo, batchName, customTags, remarks: t.remarks || null,
@@ -1455,7 +1472,7 @@ const reportingService = {
           batchId: srcBatch.id,
           batchNo: srcBatch.batch_no,
           batchName: srcBatch.batch_name || null,
-          batchHref: `/milling/${srcBatch.batch_no}`,
+          batchHref: `/milling/${srcBatch.id}`, // by id — every other batch link is
           processingType: srcBatch.processing_type || null,
           varieties,
           // Every source lot, so a blend shows what actually went in and how much.
@@ -1526,27 +1543,37 @@ const reportingService = {
     const rows = await applyWarehouseScope(db('inventory_lots as l')
       .join('suppliers as s', 'l.supplier_id', 's.id')
       .where('l.type', 'raw')
-      // exclude client-owned Service Milling stock
-      .whereNot('l.ownership', 'client'), warehouseScope, 'l.warehouse_id')
+      // company stock only — client-owned Service Milling lots are not ours
+      .where('l.ownership', 'company'), warehouseScope, 'l.warehouse_id')
       .groupBy('s.id', 's.name')
       .select('s.id as supplierId', 's.name as supplier',
         db.raw('COUNT(l.id) as lot_count'),
         db.raw('COALESCE(SUM(COALESCE(l.received_net_weight_kg, l.net_weight_kg)), 0) as purchased_kg'),
-        db.raw('COALESCE(SUM(l.net_weight_kg), 0) as remaining_kg'),
+        db.raw(`COALESCE(SUM(${ON_HAND_KG}), 0) as remaining_kg`),
         db.raw(`COALESCE(SUM(${lotValueSql('l')}), 0) as stock_value`))
       .orderBy('s.name', 'asc');
     const supIds = rows.map(r => r.supplierId);
     const pay = supIds.length
-      ? await db('payables').whereIn('supplier_id', supIds).groupBy('supplier_id')
-        .select('supplier_id', db.raw('COALESCE(SUM(outstanding), 0) as outstanding'))
+      ? await db('payables').whereIn('supplier_id', supIds)
+        .groupBy('supplier_id').groupByRaw("UPPER(COALESCE(currency, 'PKR'))")
+        .select('supplier_id', db.raw("UPPER(COALESCE(currency, 'PKR')) as currency"),
+          db.raw('COALESCE(SUM(outstanding), 0) as outstanding'))
       : [];
-    const payBy = Object.fromEntries(pay.map(p => [p.supplier_id, num(p.outstanding)]));
+    // RPT-09: per currency — payableOutstanding is the RUPEE figure; a foreign
+    // payable is in payableOutstandingByCurrency, never added into it.
+    const payBy = {};
+    const payByCur = {};
+    for (const p of pay) {
+      if (p.currency === 'PKR') payBy[p.supplier_id] = num(p.outstanding);
+      (payByCur[p.supplier_id] = payByCur[p.supplier_id] || {})[p.currency] = num(p.outstanding);
+    }
     return {
       rows: rows.map(r => ({
         supplierId: r.supplierId, supplier: r.supplier, href: `/reports/supplier-ledger/${r.supplierId}`,
         lotCount: Number(r.lot_count) || 0, purchasedKg: num(r.purchased_kg),
         remainingKg: num(r.remaining_kg), stockValue: num(r.stock_value),
         payableOutstanding: payBy[r.supplierId] || 0,
+        payableOutstandingByCurrency: payByCur[r.supplierId] || {},
       })),
     };
   },
@@ -1619,10 +1646,17 @@ const reportingService = {
     }
 
     // Outstanding payable + payments to this supplier (all payable sources).
-    const payRow = await db('payables').where('supplier_id', id)
-      .select(db.raw('COALESCE(SUM(original_amount), 0) as billed'),
+    // Per currency (RPT-09): the payable* fields are the RUPEE figures; every
+    // currency is in payableByCurrency, never summed together.
+    const payRows = await db('payables').where('supplier_id', id)
+      .groupByRaw("UPPER(COALESCE(currency, 'PKR'))")
+      .select(db.raw("UPPER(COALESCE(currency, 'PKR')) as currency"),
+        db.raw('COALESCE(SUM(original_amount), 0) as billed'),
         db.raw('COALESCE(SUM(paid_amount), 0) as paid'),
-        db.raw('COALESCE(SUM(outstanding), 0) as outstanding')).first();
+        db.raw('COALESCE(SUM(outstanding), 0) as outstanding'));
+    const payableByCurrency = Object.fromEntries(payRows.map((r) => [r.currency,
+      { billed: num(r.billed), paid: num(r.paid), outstanding: num(r.outstanding) }]));
+    const payRow = payRows.find((r) => r.currency === 'PKR');
 
     // Yield / quality performance across batches that consumed this supplier's lots.
     const lotIds = lots.map(l => l.id);
@@ -1651,6 +1685,7 @@ const reportingService = {
         realizedProfitPct: agg.revenue > 0 ? (agg.realizedProfit / agg.revenue) * 100 : 0,
         payableBilled: num(payRow && payRow.billed), payablePaid: num(payRow && payRow.paid),
         payableOutstanding: num(payRow && payRow.outstanding),
+        payableByCurrency,
         avgYieldPct, avgMoisture, batchesUsing,
         costBasis: 'Per-lot financials reuse the Lot 360 (residual costing); processing cost allocated by batch share — approximate where blended.',
       },
@@ -1670,14 +1705,14 @@ const reportingService = {
     const rows = await applyWarehouseScope(db('inventory_lots as l')
       .join('products as p', 'l.product_id', 'p.id')
       .where('p.is_byproduct', false)
-      // exclude client-owned Service Milling stock
-      .whereNot('l.ownership', 'client'), warehouseScope, 'l.warehouse_id')
+      // company stock only — client-owned Service Milling lots are not ours
+      .where('l.ownership', 'company'), warehouseScope, 'l.warehouse_id')
       .groupBy('p.id', 'p.name')
       .select('p.id as productId', 'p.name as riceType',
         db.raw('COUNT(l.id) as lot_count'),
         db.raw("COALESCE(SUM(CASE WHEN l.type = 'raw' THEN COALESCE(l.received_net_weight_kg, l.net_weight_kg) ELSE 0 END), 0) as purchased_kg"),
         db.raw("COALESCE(SUM(CASE WHEN l.type = 'finished' THEN COALESCE(l.received_net_weight_kg, l.net_weight_kg) ELSE 0 END), 0) as produced_kg"),
-        db.raw('COALESCE(SUM(l.net_weight_kg), 0) as remaining_kg'),
+        db.raw(`COALESCE(SUM(${ON_HAND_KG}), 0) as remaining_kg`),
         db.raw(`COALESCE(SUM(${lotValueSql('l')}), 0) as stock_value`))
       .orderBy('p.name', 'asc');
     return {
@@ -1718,7 +1753,7 @@ const reportingService = {
     const cpkOf = (l) => num(l.landed_cost_per_kg); // D-14: no fallback price
     // Company totals exclude client-owned Service Milling lots (the client's
     // stock, not ours). The lot LIST below still shows them, tagged.
-    const companyLots = lots.filter(l => l.ownership !== 'client');
+    const companyLots = lots.filter(l => l.ownership === 'company');
     const lotIds = companyLots.map(l => l.id);
     const rawIds = companyLots.filter(l => l.type === 'raw').map(l => l.id);
 
@@ -1818,15 +1853,16 @@ const reportingService = {
     const whs = await applyWarehouseScope(db('warehouses').where('is_active', true), warehouseScope, 'id')
       .orderBy('entity', 'asc').orderBy('name', 'asc')
       .select('id', 'name', 'entity', 'type');
-    const agg = await applyWarehouseScope(db('inventory_lots as l')
-      .whereNotNull('l.warehouse_id').where('l.net_weight_kg', '>', 0)
-      // exclude client-owned Service Milling stock
-      .whereNot('l.ownership', 'client'), warehouseScope, 'l.warehouse_id')
+    // Shared stock SQL (P4-06 / INV-28, RPT-32): company stock only, on hand =
+    // stockSql.onHandKg, and "reserved" counts BOTH holds — export reservations
+    // and rice committed to milling — so Available matches the Stock Summary.
+    const agg = await applyWarehouseScope(companyStock(db('inventory_lots as l')
+      .whereNotNull('l.warehouse_id').whereRaw(`${ON_HAND_KG} > 0`), 'l', 'company'), warehouseScope, 'l.warehouse_id')
       .groupBy('l.warehouse_id')
       .select('l.warehouse_id',
         db.raw('COUNT(l.id) as lot_count'),
-        db.raw('COALESCE(SUM(l.net_weight_kg), 0) as onhand_kg'),
-        db.raw('COALESCE(SUM(l.reserved_qty), 0) as reserved_kg'),
+        db.raw(`COALESCE(SUM(${ON_HAND_KG}), 0) as onhand_kg`),
+        db.raw('COALESCE(SUM(COALESCE(l.reserved_qty, 0) + COALESCE(l.milling_reserved_qty, 0)), 0) as reserved_kg'),
         db.raw(`COALESCE(SUM(${lotValueSql('l')}), 0) as stock_value`));
     const byId = Object.fromEntries(agg.map(a => [a.warehouse_id, a]));
     return {
@@ -1862,30 +1898,51 @@ const reportingService = {
     const w = await db('warehouses').where('id', id).first();
     if (!w) return null;
 
-    const lots = await db('inventory_lots as l')
+    // Every lot in the warehouse, depleted ones included — a lot that came in
+    // and went out this year is throughput even though nothing is left
+    // (RPT-32). Only lots with stock are LISTED.
+    const allLots = await db('inventory_lots as l')
       .leftJoin('products as p', 'l.product_id', 'p.id')
       .leftJoin('suppliers as s', 'l.supplier_id', 's.id')
-      .where('l.warehouse_id', id).where('l.net_weight_kg', '>', 0)
+      .where('l.warehouse_id', id)
       .select('l.id', 'l.lot_no', 'l.type', 'l.entity', 'l.item_name', 'l.grade', 'l.variety', 'l.batch_ref',
-        'l.received_net_weight_kg', 'l.net_weight_kg', 'l.reserved_qty', 'l.landed_cost_per_kg', 'l.rate_per_kg',
+        db.raw(`${ON_HAND_KG} AS on_hand_kg`), 'l.reserved_qty', 'l.milling_reserved_qty', 'l.landed_cost_per_kg',
         'p.name as product_name', 'l.supplier_id', 'l.ownership', 's.name as supplier_name', 'l.purchase_date', 'l.created_at')
       .orderBy('l.type', 'asc').orderBy('l.id', 'asc');
 
+    // In / Out per lot from the movement ledger (INV-28: Out used to be
+    // received − net, which hid what came back in, e.g. a reversed issue).
+    // Holds are zero-quantity rows and add nothing.
+    const flow = {};
+    if (allLots.length) {
+      const fr = await db('lot_transactions').whereIn('lot_id', allLots.map((l) => l.id))
+        .groupBy('lot_id')
+        .select('lot_id',
+          db.raw('COALESCE(SUM(CASE WHEN quantity_kg > 0 THEN quantity_kg ELSE 0 END), 0) AS in_kg'),
+          db.raw('COALESCE(SUM(CASE WHEN quantity_kg < 0 THEN -quantity_kg ELSE 0 END), 0) AS out_kg'));
+      for (const r of fr) flow[r.lot_id] = { inKg: num(r.in_kg), outKg: num(r.out_kg) };
+    }
+
     const cpkOf = (l) => num(l.landed_cost_per_kg); // D-14: no fallback price
-    let onHand = 0, reserved = 0, value = 0, totalIn = 0, totalOut = 0;
+    let onHand = 0, reserved = 0, value = 0, totalIn = 0, totalOut = 0, depletedLots = 0;
     const byType = {}, byRice = {};
-    const lotRows = lots.map((l) => {
-      const net = num(l.net_weight_kg);
-      const recv = num(l.received_net_weight_kg) || net;
-      const res = num(l.reserved_qty);
+    const lotRows = [];
+    for (const l of allLots) {
+      const net = num(l.on_hand_kg);
+      const res = num(l.reserved_qty) + num(l.milling_reserved_qty);
       const cpk = cpkOf(l);
       const val = net * cpk;
-      const outKg = Math.max(0, recv - net);
+      const f = flow[l.id] || { inKg: 0, outKg: 0 };
       // Client-owned Service Milling lots are shown (tagged) but excluded from
       // the warehouse's company totals + breakdowns.
       const isClient = l.ownership === 'client';
       if (!isClient) {
-        onHand += net; reserved += res; value += val; totalIn += recv; totalOut += outKg;
+        totalIn += f.inKg; totalOut += f.outKg;
+        if (net <= 0) depletedLots += 1;
+      }
+      if (net <= 0) continue;
+      if (!isClient) {
+        onHand += net; reserved += res; value += val;
         const t = l.type || 'other';
         const bt = byType[t] || (byType[t] = { type: t, onHandKg: 0, value: 0 });
         bt.onHandKg += net; bt.value += val;
@@ -1893,25 +1950,28 @@ const reportingService = {
         const br = byRice[rk] || (byRice[rk] = { riceType: rk, lots: 0, onHandKg: 0, reservedKg: 0, value: 0 });
         br.lots += 1; br.onHandKg += net; br.reservedKg += res; br.value += val;
       }
-      return {
+      lotRows.push({
         lotId: l.id, lotNo: l.lot_no, href: `/reports/lot-ledger/${l.id}`, type: l.type, entity: l.entity,
         riceType: l.product_name || l.variety || l.item_name || '—', label: l.grade || l.item_name || '—',
         batchRef: l.batch_ref || null, supplier: l.supplier_name || null, supplierId: l.supplier_id || null,
-        inKg: recv, outKg, reservedKg: res, availableKg: Math.max(0, net - res), closingKg: net,
+        inKg: f.inKg, outKg: f.outKg, reservedKg: res, availableKg: Math.max(0, net - res), closingKg: net,
+        // A lot whose quantity predates the ledger does not foot in − out; say so.
+        unreconciledKg: stockMovements.round3(net - (f.inKg - f.outKg)),
         costPerKg: cpk, value: val, date: l.purchase_date || l.created_at,
-        isServiceMilling: l.ownership === 'client',
-      };
-    });
+        isServiceMilling: isClient,
+      });
+    }
 
-    const companyLotCount = lots.filter((l) => l.ownership !== 'client').length;
+    const companyLotCount = lotRows.filter((l) => !l.isServiceMilling).length;
     return {
       warehouse: { id: w.id, name: w.name, entity: w.entity, type: w.type, lotCount: companyLotCount },
       summary: {
-        lotCount: companyLotCount, onHandKg: onHand, reservedKg: reserved,
+        lotCount: companyLotCount, depletedLotCount: depletedLots, onHandKg: onHand, reservedKg: reserved,
         availableKg: Math.max(0, onHand - reserved), stockValue: value,
         totalInKg: totalIn, totalOutKg: totalOut,
         byType: Object.values(byType).sort((a, b) => b.onHandKg - a.onHandKg),
-        costBasis: 'On-hand lots valued at landed cost/kg. In = total intake to the lot; Out = milled / sold / transferred since intake; Closing = current on-hand.',
+        unit: 'kg', currency: 'PKR', asOf: new Date().toISOString(),
+        costBasis: 'On-hand lots valued at landed cost/kg. In / Out = every movement into / out of the lots in this warehouse (depleted lots included), from the stock ledger; Reserved = export reservations + rice committed to milling; Closing = current on-hand.',
       },
       byRiceType: Object.values(byRice).sort((a, b) => b.onHandKg - a.onHandKg),
       lots: lotRows,
@@ -1935,11 +1995,15 @@ const reportingService = {
     let q = db('milling_batches as mb')
       .leftJoin('products as p', 'mb.product_id', 'p.id')
       .leftJoin('suppliers as s', 'mb.supplier_id', 's.id')
+      // Company milling only: a service (toll) batch mills the CLIENT's rice, so
+      // its loss is not the company's processing loss (RPT-32).
+      .whereRaw('mb.is_service_milling IS NOT TRUE')
       .select('mb.id', 'mb.batch_no', 'mb.batch_name', 'mb.custom_tags', 'mb.processing_type', 'mb.raw_qty_kg', 'mb.yield_pct',
         'mb.operator_name', 'mb.machine_line', 'mb.created_at', 'mb.completed_at',
         'p.name as product_name', 's.name as supplier_name');
     if (from) q = q.where('mb.created_at', '>=', from);
-    if (to) q = q.where('mb.created_at', '<=', `${to} 23:59:59`);
+    // inclusiveEnd: a date-only `to` covers the whole day (report contract).
+    if (to) q = q.where('mb.created_at', '<=', inclusiveEnd(to));
     const batches = await q.orderBy('mb.created_at', 'asc');
 
     const empty = {
@@ -2055,7 +2119,8 @@ const reportingService = {
     }
     const outById = Object.fromEntries(outputs.map(o => [o.id, o]));
 
-    const inputMt = sources.reduce((s, r) => s + kgToMt(r.qty_kg), 0);
+    const inputKg = sources.reduce((s, r) => s + num(r.qty_kg), 0);
+    const inputMt = kgToMt(inputKg);
     // Prefer per-source-lot cost; fall back to the batch's raw_cost_total when
     // source rows carry no cost (older/backfilled lineage).
     const rawCostFromSources = sources.reduce((s, r) => s + num(r.cost_total_pkr), 0);
@@ -2110,8 +2175,11 @@ const reportingService = {
     });
 
     // Yield summary.
-    const finishedMt = kgToMt(outputRows.filter(o => o.type === 'finished').reduce((s, o) => s + o.producedKg, 0));
-    const byproductMt = kgToMt(outputRows.filter(o => o.type === 'byproduct').reduce((s, o) => s + o.producedKg, 0));
+    const finishedKg = outputRows.filter(o => o.type === 'finished').reduce((s, o) => s + o.producedKg, 0);
+    const byproductKg = outputRows.filter(o => o.type === 'byproduct').reduce((s, o) => s + o.producedKg, 0);
+    const lossKg = Math.max(0, inputKg - outputKg);
+    const finishedMt = kgToMt(finishedKg);
+    const byproductMt = kgToMt(byproductKg);
     const totalOutputMt = kgToMt(outputKg);
     const lossMt = Math.max(0, inputMt - totalOutputMt);
 
@@ -2143,13 +2211,19 @@ const reportingService = {
         totalCostPerKgFinished: num(batch.total_cost_per_kg_finished),
         href: `/milling/${batch.id}`,
       },
-      inputs: sources.map(r => ({ lotId: r.lot_id, lotNo: r.lot_no, item: r.item_name, variety: r.variety, supplier: r.supplier, supplierId: r.supplier_id || null, qtyMt: kgToMt(r.qty_kg), unitCostPkr: num(r.unit_cost_pkr), costTotalPkr: num(r.cost_total_pkr), ratioPct: num(r.ratio_pct), href: r.lot_id ? `/lot-inventory/${r.lot_id}` : null, supplierHref: r.supplier_id ? `/finance/statements?type=supplier&id=${r.supplier_id}` : null })),
+      inputs: sources.map(r => ({ lotId: r.lot_id, lotNo: r.lot_no, item: r.item_name, variety: r.variety, supplier: r.supplier, supplierId: r.supplier_id || null, qtyKg: num(r.qty_kg), qtyMt: kgToMt(r.qty_kg), unitCostPkr: num(r.unit_cost_pkr), costTotalPkr: num(r.cost_total_pkr), ratioPct: num(r.ratio_pct), href: r.lot_id ? `/lot-inventory/${r.lot_id}` : null, supplierHref: r.supplier_id ? `/finance/statements?type=supplier&id=${r.supplier_id}` : null })),
       costs: costs.map(c => ({ id: c.id, category: c.category, amount: num(c.amount), notes: c.notes })),
       manualCosts: { milling: num(batch.manual_milling_cost_pkr), other: num(batch.manual_other_expenses_pkr) },
       outputs: outputRows,
       sales,
       exportUse: await this._exportUseForLots(outIds),
-      yieldSummary: { inputMt, finishedMt, byproductMt, totalOutputMt, lossMt, yieldPct: inputMt > 0 ? (finishedMt / inputMt) * 100 : num(batch.yield_pct) },
+      // KG is canonical (RPT-33): the page and its print read the *Kg fields;
+      // the *Mt twins stay for older callers.
+      yieldSummary: {
+        inputKg, finishedKg, byproductKg, totalOutputKg: outputKg, lossKg,
+        inputMt, finishedMt, byproductMt, totalOutputMt, lossMt,
+        yieldPct: inputKg > 0 ? (finishedKg / inputKg) * 100 : num(batch.yield_pct),
+      },
       financialSummary: {
         rawCost, processingCost, totalInputCost: inputCostPkr,
         outputValue: outputRows.reduce((s, o) => s + o.valuePkr, 0),
@@ -2158,7 +2232,7 @@ const reportingService = {
         byproductRecovery: outputRows.filter(o => o.type === 'byproduct').reduce((s, o) => s + o.recoveryValue, 0),
         costBasis: 'Residual costing: output cost/kg distributes net purchase (raw + processing) less by-product credit (by-products valued at the per-grade sale price below). Processing cost excludes the input-rice cost.',
       },
-      totals: { inputMt, inputCostPkr, outputKg, outputMt: totalOutputMt, lossMt },
+      totals: { inputKg, inputMt, inputCostPkr, outputKg, outputMt: totalOutputMt, lossKg, lossMt },
     };
   },
 
@@ -2169,108 +2243,122 @@ const reportingService = {
    */
   /**
    * Invoice Ledger — one row per local-sale invoice (multi-line sales grouped
-   * by sale_group_no), searchable by invoice no / customer / rice type / lot /
-   * batch / truck / payment reference, filterable by date, payment status and
-   * outstanding-only. Each row links to the Invoice 360 + customer ledger.
-   * Read-only. Commercial figures only (no COGS/margin).
+   * by sale_group_no) plus one per purchased rice lot, searchable by invoice
+   * no / customer / rice type / lot / batch / truck / payment reference,
+   * filterable by date, payment status and outstanding-only. Each row links to
+   * the Invoice 360 + party ledger. Read-only. Commercial figures only (no
+   * COGS/margin).
+   *
+   * P4-07 / RPT-17:
+   *  * ONE status vocabulary for both kinds — Paid / Partial / Unpaid, plus
+   *    Void (a voided purchase or a reversed bill) and Written Off — derived
+   *    from the amounts, so the filter matches purchases too (the payable's own
+   *    Pending / Overdue never matched "Unpaid");
+   *  * lines are GROUPED into invoices before anything is limited, a search
+   *    that hits one line brings the whole invoice, and the status /
+   *    outstanding filters apply to the invoice, not to a line;
+   *  * company purchases only — a client's (service milling) rice is not a
+   *    purchase of ours;
+   *  * totals are per kind over the WHOLE filtered result (sales revenue and
+   *    purchase cost are never added together) and `truncated` says when the
+   *    list is shorter. Voided purchases are listed but carry no money.
+   * Money redaction for cost / profit-blind roles is applied by the controller.
    */
   async getInvoiceLedger({ q, from, to, status, outstanding, entity, kind, limit = 500 } = {}) {
     const num = (v) => parseFloat(v) || 0;
     const cap = Math.min(parseInt(limit, 10) || 500, 2000);
     const term = String(q || '').trim();
     const wantOutstanding = (outstanding === '1' || outstanding === true || outstanding === 'true');
+    const statusOf = (out, paid) => (out > 0.01 ? (paid > 0.01 ? 'Partial' : 'Unpaid') : 'Paid');
     let saleInvoices = []; let purchaseInvoices = [];
 
     // ── SALES invoices (local_sales) ──
     if (kind !== 'purchase') {
-    // Resolve batch numbers matching the search term → their lot batch_ref tags.
-    let batchRefs = [];
-    if (term) {
-      const bms = await db('milling_batches')
-        .where('batch_no', 'ilike', `%${term}%`)
-        .orWhere('batch_name', 'ilike', `%${term}%`)
-        .select('id');
-      batchRefs = bms.map(b => `batch-${b.id}`);
-    }
+      // Resolve batch numbers matching the search term → their lot batch_ref tags.
+      let batchRefs = [];
+      if (term) {
+        const bms = await db('milling_batches')
+          .where('batch_no', 'ilike', `%${term}%`)
+          .orWhere('batch_name', 'ilike', `%${term}%`)
+          .select('id');
+        batchRefs = bms.map(b => `batch-${b.id}`);
+      }
+      const KEY = 'COALESCE(ls.sale_group_no, ls.sale_no)';
+      const lines = () => db('local_sales as ls')
+        .leftJoin('customers as c', 'ls.customer_id', 'c.id')
+        .leftJoin('inventory_lots as il', 'ls.lot_id', 'il.id')
+        .leftJoin('warehouses as w', 'il.warehouse_id', 'w.id')
+        // Only issued invoices: not a Draft, an unconfirmed (Pending), a
+        // rejected (Cancelled) or a Voided sale.
+        .whereNotIn('ls.status', NOT_INVOICED_SALE_STATUSES);
+      // The invoices that match (any line), then EVERY line of those invoices.
+      const matching = lines();
+      if (entity) matching.where('ls.entity', entity);
+      if (from) matching.where('ls.sale_date', '>=', from);
+      if (to) matching.where('ls.sale_date', '<=', to);
+      if (term) {
+        const like = `%${term}%`;
+        matching.where(function () {
+          this.where('ls.sale_no', 'ilike', like)
+            .orWhere('ls.sale_group_no', 'ilike', like)
+            .orWhere('c.name', 'ilike', like)
+            .orWhere('ls.buyer_name', 'ilike', like)
+            .orWhere('ls.item_name', 'ilike', like)
+            .orWhere('ls.lot_no', 'ilike', like)
+            .orWhere('il.lot_no', 'ilike', like)
+            .orWhere('ls.vehicle_no', 'ilike', like)
+            .orWhere('ls.payment_reference', 'ilike', like);
+          if (batchRefs.length) this.orWhereIn('il.batch_ref', batchRefs);
+        });
+      }
+      const groups = await lines()
+        .whereIn(db.raw(KEY), matching.distinct(db.raw(`${KEY} AS k`)))
+        .groupByRaw(KEY)
+        .select(
+          db.raw(`${KEY} AS key`), db.raw('MIN(ls.id) AS min_id'), db.raw('MIN(ls.sale_date) AS date'),
+          db.raw("MAX(COALESCE(c.name, ls.buyer_name, 'Walk-in')) AS customer"), db.raw('MAX(ls.customer_id) AS customer_id'),
+          db.raw('COALESCE(SUM(ls.total_amount), 0) AS total'), db.raw('COALESCE(SUM(ls.paid_amount), 0) AS received'),
+          db.raw('COALESCE(SUM(ls.due_amount), 0) AS outstanding'), db.raw('COALESCE(SUM(ls.quantity_kg), 0) AS qty_kg'),
+          db.raw('COUNT(*)::int AS line_count'),
+          db.raw('ARRAY_REMOVE(ARRAY_AGG(DISTINCT ls.item_name), NULL) AS items'),
+          db.raw('ARRAY_REMOVE(ARRAY_AGG(DISTINCT COALESCE(ls.lot_no, il.lot_no)), NULL) AS lots'),
+          db.raw('ARRAY_REMOVE(ARRAY_AGG(DISTINCT il.batch_ref), NULL) AS refs'),
+          db.raw('ARRAY_REMOVE(ARRAY_AGG(DISTINCT w.name), NULL) AS warehouses'),
+          db.raw('MAX(ls.vehicle_no) AS vehicle'), db.raw('BOOL_OR(ls.dispatched) AS dispatched'),
+          db.raw("MAX(COALESCE(ls.currency, 'PKR')) AS currency"),
+          // Goods returned against the invoice: a return lowers what is due,
+          // never the invoice total, so total = received + returned + outstanding.
+          db.raw(`COALESCE(SUM((SELECT COALESCE(SUM(r.return_value), 0) FROM local_sale_returns r
+            WHERE r.local_sale_id = ls.id)), 0) AS returned`),
+        );
 
-    let qb = db('local_sales as ls')
-      .leftJoin('customers as c', 'ls.customer_id', 'c.id')
-      .leftJoin('inventory_lots as il', 'ls.lot_id', 'il.id')
-      .leftJoin('warehouses as w', 'il.warehouse_id', 'w.id');
-    // Unconfirmed (Pending) and rejected (Cancelled) sales aren't realized revenue.
-    qb = qb.whereNotIn('ls.status', ['Pending', 'Cancelled']);
-    if (entity) qb = qb.where('ls.entity', entity);
-    if (from) qb = qb.where('ls.sale_date', '>=', from);
-    if (to) qb = qb.where('ls.sale_date', '<=', to);
-    if (wantOutstanding) qb = qb.where('ls.due_amount', '>', 0);
-    if (term) {
-      const like = `%${term}%`;
-      qb = qb.where(function () {
-        this.where('ls.sale_no', 'ilike', like)
-          .orWhere('ls.sale_group_no', 'ilike', like)
-          .orWhere('c.name', 'ilike', like)
-          .orWhere('ls.buyer_name', 'ilike', like)
-          .orWhere('ls.item_name', 'ilike', like)
-          .orWhere('ls.lot_no', 'ilike', like)
-          .orWhere('il.lot_no', 'ilike', like)
-          .orWhere('ls.vehicle_no', 'ilike', like)
-          .orWhere('ls.payment_reference', 'ilike', like);
-        if (batchRefs.length) this.orWhereIn('il.batch_ref', batchRefs);
+      const allRefs = new Set(groups.flatMap((g) => g.refs || []));
+      const batchIds = [...allRefs].map(ref => parseInt(String(ref).replace(/^batch-/, ''), 10)).filter(Boolean);
+      const batchByRef = {};
+      if (batchIds.length) {
+        const bs = await db('milling_batches').whereIn('id', batchIds).select('id', 'batch_no', 'batch_name');
+        for (const b of bs) batchByRef[`batch-${b.id}`] = b;
+      }
+
+      saleInvoices = groups.map((g) => {
+        const lots = g.lots || []; const items = g.items || []; const refs = g.refs || [];
+        const received = num(g.received); const out = num(g.outstanding);
+        return {
+          id: g.min_id, kind: 'sale', invoiceNo: g.key, isGroup: g.line_count > 1,
+          date: g.date, party: g.customer, partyType: 'Customer', customer: g.customer, customerId: g.customer_id || null,
+          items, lots,
+          batches: refs.map(ref => (batchByRef[ref] || {}).batch_no).filter(Boolean),
+          batchNames: refs.map(ref => (batchByRef[ref] || {}).batch_name).filter(Boolean),
+          warehouses: g.warehouses || [], vehicle: g.vehicle || null, dispatched: !!g.dispatched,
+          qtyKg: num(g.qty_kg), currency: g.currency || 'PKR',
+          total: num(g.total), received, returned: num(g.returned), outstanding: out,
+          paymentStatus: statusOf(out, received),
+          href: `/local-sales/${g.min_id}/invoice`,
+          partyHref: g.customer_id ? `/finance/statements?type=customer&id=${g.customer_id}` : null,
+          customerHref: g.customer_id ? `/finance/statements?type=customer&id=${g.customer_id}` : null,
+        };
       });
     }
-    const rows = await qb.select(
-      'ls.id', 'ls.sale_no', 'ls.sale_group_no', 'ls.sale_date', 'ls.item_name',
-      'ls.quantity_kg', 'ls.total_amount', 'ls.paid_amount', 'ls.due_amount',
-      'ls.vehicle_no', 'ls.dispatched', 'ls.customer_id', 'ls.lot_no',
-      db.raw("COALESCE(c.name, ls.buyer_name, 'Walk-in') as customer"),
-      'il.lot_no as lot_ref', 'il.batch_ref', 'w.name as warehouse_name',
-    ).orderBy('ls.id', 'desc').limit(cap * 4);
-
-    // Group lines into one row per invoice (sale_group_no, else sale_no).
-    const groups = {}; const allRefs = new Set();
-    for (const r of rows) {
-      const key = r.sale_group_no || r.sale_no;
-      const g = groups[key] || (groups[key] = {
-        key, minId: r.id, date: r.sale_date, customer: r.customer, customerId: r.customer_id || null,
-        total: 0, received: 0, outstanding: 0, qtyKg: 0,
-        items: new Set(), lots: new Set(), refs: new Set(), warehouses: new Set(),
-        vehicle: r.vehicle_no || null, dispatched: false,
-      });
-      g.minId = Math.min(g.minId, r.id);
-      g.total += num(r.total_amount); g.received += num(r.paid_amount); g.outstanding += num(r.due_amount);
-      g.qtyKg += num(r.quantity_kg);
-      if (r.item_name) g.items.add(r.item_name);
-      const lot = r.lot_no || r.lot_ref; if (lot) g.lots.add(lot);
-      if (r.batch_ref) { g.refs.add(r.batch_ref); allRefs.add(r.batch_ref); }
-      if (r.warehouse_name) g.warehouses.add(r.warehouse_name);
-      if (r.vehicle_no && !g.vehicle) g.vehicle = r.vehicle_no;
-      if (r.dispatched) g.dispatched = true;
-    }
-
-    const batchIds = [...allRefs].map(ref => parseInt(String(ref).replace(/^batch-/, ''), 10)).filter(Boolean);
-    const batchNoByRef = {}; const batchNameByRef = {};
-    if (batchIds.length) {
-      const bs = await db('milling_batches').whereIn('id', batchIds).select('id', 'batch_no', 'batch_name');
-      const byId = Object.fromEntries(bs.map(b => [b.id, b.batch_no]));
-      const nameById = Object.fromEntries(bs.map(b => [b.id, b.batch_name]));
-      for (const ref of allRefs) { const id = parseInt(String(ref).replace(/^batch-/, ''), 10); if (byId[id]) batchNoByRef[ref] = byId[id]; if (nameById[id]) batchNameByRef[ref] = nameById[id]; }
-    }
-
-    saleInvoices = Object.values(groups).map(g => ({
-      id: g.minId, kind: 'sale', invoiceNo: g.key, isGroup: [...g.lots].length + g.items.size > 1 || g.refs.size > 1 || false,
-      date: g.date, party: g.customer, partyType: 'Customer', customer: g.customer, customerId: g.customerId,
-      items: [...g.items], lots: [...g.lots],
-      batches: [...g.refs].map(ref => batchNoByRef[ref]).filter(Boolean),
-      batchNames: [...g.refs].map(ref => batchNameByRef[ref]).filter(Boolean),
-      warehouses: [...g.warehouses], vehicle: g.vehicle, dispatched: g.dispatched,
-      qtyKg: g.qtyKg, total: g.total, received: g.received, outstanding: g.outstanding,
-      paymentStatus: g.outstanding > 0.01 ? (g.received > 0.01 ? 'Partial' : 'Unpaid') : 'Paid',
-      href: `/local-sales/${g.minId}/invoice`,
-      partyHref: g.customerId ? `/finance/statements?type=customer&id=${g.customerId}` : null,
-      customerHref: g.customerId ? `/finance/statements?type=customer&id=${g.customerId}` : null,
-    }));
-    if (status) saleInvoices = saleInvoices.filter(i => i.paymentStatus === status);
-    } // end sales block
 
     // ── PURCHASE invoices (purchased rice lots) ──
     if (kind !== 'sale') {
@@ -2279,10 +2367,10 @@ const reportingService = {
         const vs = await db('milling_vehicle_arrivals').where('vehicle_no', 'ilike', `%${term}%`).whereNotNull('lot_id').select('lot_id');
         vehLotIds = vs.map(v => v.lot_id);
       }
-      let pq = db('inventory_lots as l')
+      let pq = companyStock(db('inventory_lots as l')
         .leftJoin('suppliers as s', 'l.supplier_id', 's.id')
         .leftJoin('warehouses as w', 'l.warehouse_id', 'w.id')
-        .where('l.type', 'raw');
+        .where('l.type', 'raw'), 'l', 'company');
       if (entity) pq = pq.where('l.entity', entity);
       if (from) pq = pq.where('l.purchase_date', '>=', from);
       if (to) pq = pq.where('l.purchase_date', '<=', to);
@@ -2299,23 +2387,27 @@ const reportingService = {
       const lots = await pq.select(
         'l.id', 'l.lot_no', 'l.purchase_date', 'l.variety', 'l.item_name', 'l.grade',
         'l.net_weight_kg', 'l.received_net_weight_kg', 'l.total_bags', 'l.purchase_amount',
-        'l.landed_cost_total', 'l.paid_amount', 'l.due_amount', 'l.payment_status',
+        'l.landed_cost_total', 'l.paid_amount', 'l.due_amount', 'l.voided_at', 'l.cost_currency',
         'l.supplier_id', 's.name as supplier_name', 'w.name as warehouse_name',
-      ).orderBy('l.id', 'desc').limit(cap);
+      );
 
       // Payable (source of truth for paid/outstanding) keyed by lot_no.
       const lotNos = lots.map(l => l.lot_no);
       const payByRef = {};
       if (lotNos.length) {
         const pbs = await db('payables').whereIn('linked_ref', lotNos).andWhere('category', 'Raw Material')
-          .select('linked_ref', 'original_amount', 'paid_amount', 'outstanding', 'status');
+          .select('linked_ref', 'original_amount', 'paid_amount', 'outstanding', 'status', 'currency');
         for (const pb of pbs) payByRef[pb.linked_ref] = pb;
       }
       purchaseInvoices = lots.map(l => {
         const pb = payByRef[l.lot_no];
+        const isVoid = !!l.voided_at || (pb && pb.status === 'Reversed');
         const landed = pb ? (num(pb.original_amount) || num(l.landed_cost_total)) : (num(l.landed_cost_total) || num(l.purchase_amount));
         const paid = pb ? num(pb.paid_amount) : num(l.paid_amount);
         const out = pb ? num(pb.outstanding) : num(l.due_amount);
+        let paymentStatus = statusOf(out, paid);
+        if (isVoid) paymentStatus = 'Void';
+        else if (pb && pb.status === 'Written Off') paymentStatus = 'Written Off';
         return {
           id: l.id, kind: 'purchase', invoiceNo: l.lot_no, isGroup: false,
           date: l.purchase_date, party: l.supplier_name || '—', partyType: 'Supplier',
@@ -2323,35 +2415,54 @@ const reportingService = {
           items: [l.variety || l.item_name || '—'], lots: [l.lot_no], batches: [],
           warehouses: l.warehouse_name ? [l.warehouse_name] : [], vehicle: null, dispatched: false,
           qtyKg: num(l.received_net_weight_kg) || num(l.net_weight_kg),
-          total: landed, received: paid, outstanding: out,
-          paymentStatus: pb ? pb.status : (out > 0.01 ? (paid > 0.01 ? 'Partial' : 'Unpaid') : 'Paid'),
+          currency: (pb && pb.currency) || l.cost_currency || 'PKR',
+          // A void bill is the record of what was billed; it owes nothing.
+          total: landed, received: paid, returned: 0, outstanding: isVoid ? 0 : out,
+          paymentStatus,
           href: `/lot-inventory/${l.id}/purchase-invoice`,
           partyHref: l.supplier_id ? `/finance/statements?type=supplier&id=${l.supplier_id}` : null,
           customerHref: l.supplier_id ? `/finance/statements?type=supplier&id=${l.supplier_id}` : null,
         };
       });
-      if (wantOutstanding) purchaseInvoices = purchaseInvoices.filter(i => i.outstanding > 0.01);
-      if (status) purchaseInvoices = purchaseInvoices.filter(i => i.paymentStatus === status);
     }
 
-    // ── Combine, sort newest-first, cap ──
-    let invoices = [...saleInvoices, ...purchaseInvoices].sort((a, b) => {
+    // ── Invoice-level filters, newest first, totals over all, then cap ──
+    let invoices = [...saleInvoices, ...purchaseInvoices];
+    if (wantOutstanding) invoices = invoices.filter((i) => i.outstanding > 0.01);
+    if (status) invoices = invoices.filter((i) => i.paymentStatus === status);
+    invoices.sort((a, b) => {
       const da = a.date ? new Date(a.date).getTime() : 0;
       const dbb = b.date ? new Date(b.date).getTime() : 0;
       if (da !== dbb) return dbb - da;
       return b.id - a.id;
-    }).slice(0, cap);
-
+    });
+    // Per kind and per currency — PKR and USD are never added together. The
+    // flat fields are the PKR figures; any other currency is in byCurrency.
+    const money = (k) => {
+      const r2 = (n) => Math.round(n * 100) / 100;
+      const byCurrency = {};
+      for (const i of invoices) {
+        if (i.kind !== k || i.paymentStatus === 'Void') continue;
+        const c = byCurrency[i.currency] || (byCurrency[i.currency] = { total: 0, received: 0, returned: 0, outstanding: 0 });
+        c.total += i.total; c.received += i.received; c.returned += i.returned; c.outstanding += i.outstanding;
+      }
+      for (const c of Object.values(byCurrency)) for (const f of Object.keys(c)) c[f] = r2(c[f]);
+      const pkr = byCurrency.PKR || { total: 0, received: 0, returned: 0, outstanding: 0 };
+      return { count: invoices.filter((i) => i.kind === k).length, currency: 'PKR', ...pkr, byCurrency };
+    };
+    const totals = {
+      count: invoices.length,
+      sales: invoices.filter((i) => i.kind === 'sale').length,
+      purchases: invoices.filter((i) => i.kind === 'purchase').length,
+      sale: money('sale'),
+      purchase: money('purchase'),
+      listed: Math.min(invoices.length, cap),
+      truncated: invoices.length > cap,
+    };
     return {
-      rows: invoices,
-      totals: {
-        count: invoices.length,
-        sales: invoices.filter(i => i.kind === 'sale').length,
-        purchases: invoices.filter(i => i.kind === 'purchase').length,
-        total: invoices.reduce((s, i) => s + i.total, 0),
-        received: invoices.reduce((s, i) => s + i.received, 0),
-        outstanding: invoices.reduce((s, i) => s + i.outstanding, 0),
-      },
+      rows: invoices.slice(0, cap),
+      totals,
+      meta: { currency: 'PKR', unit: 'kg', from: from || null, to: to || null, asOf: new Date().toISOString(), statuses: INVOICE_STATUSES },
     };
   },
 
@@ -2427,70 +2538,57 @@ const reportingService = {
    * quantity_kg) — not the legacy `inventory_movements`, which is an incomplete
    * parallel copy (missing opening balances and many milling/sale rows), so the
    * old report under-reported (P6c-A). Transaction types are mapped back to the
-   * legacy movement_type values so the API shape + the FE filter are unchanged.
+   * legacy movement_type values (stockMovements.js) so the API shape + the FE
+   * filter are unchanged.
+   *
+   * The newest `limit` rows are listed; the totals are aggregated in SQL over
+   * EVERY matching row (P4-06 / INV-27 — they used to be summed over the capped
+   * list, so they silently stopped being totals), and `truncated` says when the
+   * list is shorter than the match.
    * Read-only. Filters: dateFrom, dateTo, movementType, entity, lotId, warehouseId.
    */
   async getInventoryLedger({ dateFrom, dateTo, movementType, entity, lotId, warehouseId, warehouseScope = null, limit = 300 } = {}) {
     const num = (v) => parseFloat(v) || 0;
     const cap = Math.min(parseInt(limit, 10) || 300, 1000);
 
-    // lot_transactions.transaction_type → the legacy movement_type the FE filter
-    // dropdown + the labels below use. Keeps the response shape identical.
-    const TXN_TO_MT = {
-      purchase_in: 'purchase_receipt', warehouse_transfer_in: 'transfer_in', transfer_to_mill: 'transfer_in',
-      milling_issue: 'production_issue', milling_receipt: 'production_output', byproduct_receipt: 'byproduct_output',
-      warehouse_transfer_out: 'transfer_out', transfer_to_export: 'transfer_out',
-      export_dispatch_out: 'export_dispatch', local_sale_out: 'local_sale',
-      export_allocation: 'reservation_hold', export_release: 'reservation_release',
-      stock_adjustment_plus: 'adjustment_plus', stock_adjustment_minus: 'adjustment_minus',
-      damage_out: 'damage_writeoff', shortage_out: 'shortage_writeoff', return_in: 'return',
-      opening_balance: 'opening_balance', lot_split: 'adjustment_minus', lot_merge: 'adjustment_plus',
-      milling_hold: 'milling_hold', milling_release: 'milling_release',
-      purchase_correction_in: 'receipt_correction_in', purchase_correction_out: 'receipt_correction_out',
-    };
-    const LABELS = {
-      purchase_receipt: 'Purchase received', internal_receipt: 'Internal receipt', production_issue: 'Issued to milling',
-      production_output: 'Milling output', byproduct_output: 'By-product output', transfer_out: 'Transfer out',
-      transfer_in: 'Transfer in', export_dispatch: 'Export dispatch', local_sale: 'Local sale',
-      reservation_hold: 'Reserved', reservation_release: 'Reservation released', adjustment_plus: 'Adjustment (+)',
-      adjustment_minus: 'Adjustment (−)', damage_writeoff: 'Damage write-off', shortage_writeoff: 'Shortage write-off',
-      return: 'Return', opening_balance: 'Opening balance',
-      milling_hold: 'Committed to milling', milling_release: 'Milling commitment released',
-      receipt_correction_in: 'Received qty corrected (+)', receipt_correction_out: 'Received qty corrected (−)',
+    const filtered = () => {
+      let q = db('lot_transactions as t')
+        .leftJoin('inventory_lots as l', 't.lot_id', 'l.id')
+        .leftJoin('warehouses as wf', 't.warehouse_from_id', 'wf.id')
+        .leftJoin('warehouses as wt', 't.warehouse_to_id', 'wt.id');
+      if (dateFrom) q = q.where('t.transaction_date', '>=', dateFrom);
+      if (dateTo) q = q.where('t.transaction_date', '<=', dateTo);
+      if (movementType) q = q.whereIn('t.transaction_type', stockMovements.txnTypesFor(movementType));
+      if (entity) q = q.where(function () { this.where('t.entity_from', entity).orWhere('t.entity_to', entity).orWhere('l.entity', entity); });
+      if (lotId) q = q.where('t.lot_id', parseInt(lotId, 10));
+      if (warehouseId) { const w = parseInt(warehouseId, 10); q = q.where(function () { this.where('t.warehouse_from_id', w).orWhere('t.warehouse_to_id', w).orWhere('l.warehouse_id', w); }); }
+      // #9-scoping: keep a movement if ANY of its warehouses is in scope — a
+      // transfer OUT of a scoped warehouse is the caller's business even though
+      // the lot now lives somewhere they can't see.
+      if (warehouseScope) {
+        const ids = warehouseScope.length ? warehouseScope : [-1];
+        q = q.where(function () {
+          this.whereIn('l.warehouse_id', ids)
+            .orWhereIn('t.warehouse_from_id', ids)
+            .orWhereIn('t.warehouse_to_id', ids);
+        });
+      }
+      return q;
     };
 
-    let q = db('lot_transactions as t')
-      .leftJoin('inventory_lots as l', 't.lot_id', 'l.id')
-      .leftJoin('warehouses as wf', 't.warehouse_from_id', 'wf.id')
-      .leftJoin('warehouses as wt', 't.warehouse_to_id', 'wt.id');
-    if (dateFrom) q = q.where('t.transaction_date', '>=', dateFrom);
-    if (dateTo) q = q.where('t.transaction_date', '<=', dateTo);
-    if (movementType) {
-      // Reverse-map the requested movement_type to its lot_transaction type(s).
-      const wanted = Object.keys(TXN_TO_MT).filter((k) => TXN_TO_MT[k] === movementType);
-      q = q.whereIn('t.transaction_type', wanted.length ? wanted : [movementType]);
-    }
-    if (entity) q = q.where(function () { this.where('t.entity_from', entity).orWhere('t.entity_to', entity).orWhere('l.entity', entity); });
-    if (lotId) q = q.where('t.lot_id', parseInt(lotId, 10));
-    if (warehouseId) { const w = parseInt(warehouseId, 10); q = q.where(function () { this.where('t.warehouse_from_id', w).orWhere('t.warehouse_to_id', w).orWhere('l.warehouse_id', w); }); }
-    // #9-scoping: keep a movement if ANY of its warehouses is in scope — a
-    // transfer OUT of a scoped warehouse is the caller's business even though
-    // the lot now lives somewhere they can't see.
-    if (warehouseScope) {
-      const ids = warehouseScope.length ? warehouseScope : [-1];
-      q = q.where(function () {
-        this.whereIn('l.warehouse_id', ids)
-          .orWhereIn('t.warehouse_from_id', ids)
-          .orWhereIn('t.warehouse_to_id', ids);
-      });
-    }
-
-    const rows = await q.select(
-      't.id', 't.transaction_date', 't.created_at', 't.transaction_type', 't.quantity_kg', 't.cost_impact', 't.total_cost',
-      't.lot_id', 't.reference_module', 't.reference_id', 't.reference_no', 't.entity_from', 't.entity_to',
-      'l.lot_no', 'l.item_name', 'l.type as lot_type',
-      'wf.name as from_wh', 'wt.name as to_wh',
-    ).orderBy('t.transaction_date', 'desc').orderBy('t.id', 'desc').limit(cap);
+    const [rows, agg] = await Promise.all([
+      filtered().select(
+        't.id', 't.transaction_date', 't.created_at', 't.transaction_type', 't.quantity_kg', 't.cost_impact', 't.total_cost',
+        't.lot_id', 't.reference_module', 't.reference_id', 't.reference_no', 't.entity_from', 't.entity_to',
+        'l.lot_no', 'l.item_name', 'l.type as lot_type',
+        'wf.name as from_wh', 'wt.name as to_wh',
+      ).orderBy('t.transaction_date', 'desc').orderBy('t.created_at', 'desc').orderBy('t.id', 'desc').limit(cap),
+      filtered().first(
+        db.raw('COUNT(*)::int AS n'),
+        db.raw('COALESCE(SUM(CASE WHEN t.quantity_kg > 0 THEN t.quantity_kg ELSE 0 END), 0) AS in_kg'),
+        db.raw('COALESCE(SUM(CASE WHEN t.quantity_kg < 0 THEN -t.quantity_kg ELSE 0 END), 0) AS out_kg'),
+      ),
+    ]);
 
     // Resolve batch_no for milling-batch references (lot_transactions stores the
     // batch via reference_module='milling_batch' + reference_id, not a batch_id).
@@ -2502,8 +2600,7 @@ const reportingService = {
     }
 
     const out = rows.map((r) => {
-      const tt = String(r.transaction_type || '');
-      const mt = TXN_TO_MT[tt] || tt.replace(/_/g, ' ');
+      const mt = stockMovements.movementTypeOf(r.transaction_type);
       const qkg = num(r.quantity_kg);
       const isBatch = r.reference_module === 'milling_batch' && r.reference_id;
       const isOrder = r.reference_module === 'export_order' && r.reference_id;
@@ -2512,7 +2609,7 @@ const reportingService = {
       else if (isOrder) href = `/export/${r.reference_id}`;
       else if (r.lot_id) href = `/lot-inventory/${r.lot_id}`;
       return {
-        id: r.id, date: r.transaction_date || r.created_at, type: mt, label: LABELS[mt] || mt.replace(/_/g, ' '),
+        id: r.id, date: r.transaction_date || r.created_at, type: mt, label: stockMovements.labelOf(mt),
         lotId: r.lot_id, lotNo: r.lot_no, item: r.item_name, lotType: r.lot_type,
         batchNo: isBatch ? ((batchById[r.reference_id] || {}).batch_no || null) : null,
         batchName: isBatch ? ((batchById[r.reference_id] || {}).batch_name || null) : null,
@@ -2522,7 +2619,15 @@ const reportingService = {
         fromWh: r.from_wh, toWh: r.to_wh, entity: r.entity_to || r.entity_from || null, href,
       };
     });
-    return { rows: out, totals: { count: out.length, inKg: out.filter(r => r.direction === 'in').reduce((s, r) => s + r.qtyKg, 0), outKg: out.filter(r => r.direction === 'out').reduce((s, r) => s + r.qtyKg, 0) } };
+    const total = Number(agg && agg.n) || 0;
+    return {
+      rows: out,
+      totals: {
+        count: total, listed: out.length, truncated: total > out.length,
+        inKg: stockMovements.round3(agg && agg.in_kg), outKg: stockMovements.round3(agg && agg.out_kg),
+      },
+      meta: { unit: 'kg', currency: 'PKR', dateFrom: dateFrom || null, dateTo: dateTo || null, asOf: new Date().toISOString() },
+    };
   },
 
   // Movement ledger for a stock DIMENSION (variety | grade | byproduct | product),
@@ -2530,41 +2635,25 @@ const reportingService = {
   // Opening/Inward/Outward/Packing/Transfer/Sales columns + running Balance +
   // Source Lot / Date / User / Reference (Batch 5, item 5). Packing is derived
   // from mill_packing_logs (no rice-lot packing movement exists).
-  async getStockLedger({ dimension = 'variety', key, variety, dateFrom, dateTo, warehouseScope = null, limit = 2000 } = {}) {
+  //
+  // P4-06 / RPT-04, INV-27:
+  //  * sorted by (transaction_date, created_at, id) — events used to be sorted
+  //    by String(Date), i.e. by weekday name, so the running balance was wrong;
+  //  * the NEWEST `limit` rows are listed (the oldest were kept before), and the
+  //    balance carried in from everything older — before dateFrom AND any rows
+  //    of the period not listed — is the opening of the listed rows;
+  //  * totals are Σ over EVERY row of the period, in SQL, with signed buckets so
+  //    reversals net their originals (stockMovements.js) and the identity
+  //      balance = opening + inward − outward + transfer − sales + other
+  //    holds;
+  //  * company stock by default (stockSql.companyStock); ?ownership=client|all
+  //    for the service view;
+  //  * hold rows (reservations, milling commitments) move no quantity and are
+  //    not listed.
+  async getStockLedger({ dimension = 'variety', key, variety, dateFrom, dateTo, ownership = 'company', warehouseScope = null, limit = 2000 } = {}) {
     const num = (v) => parseFloat(v) || 0;
     const cap = Math.min(parseInt(limit, 10) || 2000, 5000);
-    if (!key && dimension !== 'variety') { /* allow empty variety */ }
-
-    const TXN_TO_MT = {
-      purchase_in: 'purchase_receipt', warehouse_transfer_in: 'transfer_in', transfer_to_mill: 'transfer_in',
-      milling_issue: 'production_issue', milling_receipt: 'production_output', byproduct_receipt: 'byproduct_output',
-      warehouse_transfer_out: 'transfer_out', transfer_to_export: 'transfer_out',
-      export_dispatch_out: 'export_dispatch', local_sale_out: 'local_sale',
-      stock_adjustment_plus: 'adjustment_plus', stock_adjustment_minus: 'adjustment_minus',
-      damage_out: 'damage_writeoff', shortage_out: 'shortage_writeoff', return_in: 'return',
-      opening_balance: 'opening_balance', lot_split: 'adjustment_minus', lot_merge: 'adjustment_plus',
-      milling_hold: 'milling_hold', milling_release: 'milling_release',
-      purchase_correction_in: 'receipt_correction_in', purchase_correction_out: 'receipt_correction_out',
-    };
-    const LABELS = {
-      purchase_receipt: 'Purchase received', production_issue: 'Issued to milling', production_output: 'Milling output',
-      byproduct_output: 'By-product output', transfer_out: 'Transfer out', transfer_in: 'Transfer in',
-      export_dispatch: 'Export dispatch', local_sale: 'Local sale', adjustment_plus: 'Adjustment (+)',
-      adjustment_minus: 'Adjustment (−)', damage_writeoff: 'Damage write-off', shortage_writeoff: 'Shortage write-off',
-      return: 'Return', opening_balance: 'Opening balance',
-      milling_hold: 'Committed to milling', milling_release: 'Milling commitment released',
-      receipt_correction_in: 'Received qty corrected (+)', receipt_correction_out: 'Received qty corrected (−)',
-    };
-    // movement_type → the ledger column bucket
-    const BUCKET = {
-      opening_balance: 'opening',
-      purchase_receipt: 'inward', production_output: 'inward', byproduct_output: 'inward', return: 'inward', adjustment_plus: 'inward',
-      receipt_correction_in: 'inward',
-      production_issue: 'outward', adjustment_minus: 'outward', damage_writeoff: 'outward', shortage_writeoff: 'outward',
-      receipt_correction_out: 'outward',
-      transfer_in: 'transfer', transfer_out: 'transfer',
-      local_sale: 'sales', export_dispatch: 'sales',
-    };
+    const r3 = stockMovements.round3;
 
     const TAG_CASE = `CASE
       WHEN l.grade IN ('B1','B2','B3','CSR','Short Grain') THEN l.grade
@@ -2580,6 +2669,7 @@ const reportingService = {
       else if (dimension === 'grade') qb.where('l.grade', key);
       else if (dimension === 'product') qb.where('l.product_id', parseInt(key, 10) || -1);
       else if (dimension === 'byproduct') { qb.where('l.type', 'byproduct').whereRaw(`(${TAG_CASE}) = ?`, [key]); if (variety) qb.where('l.variety', variety); }
+      companyStock(qb, 'l', ownership);
       // #9-scoping: applied here so it reaches BOTH the movement query and the
       // packing-log whereExists subquery, which share this predicate.
       applyWarehouseScope(qb, warehouseScope, 'l.warehouse_id');
@@ -2589,73 +2679,120 @@ const reportingService = {
       ? `${variety ? variety + ' — ' : ''}${key}`
       : (key || '(unset)');
 
-    // Movement rows (oldest → newest for the running balance).
-    let q = db('lot_transactions as t')
-      .join('inventory_lots as l', 't.lot_id', 'l.id')
-      .leftJoin('users as u', 't.created_by', 'u.id');
-    applyDim(q);
-    if (dateFrom) q = q.where('t.transaction_date', '>=', dateFrom);
-    if (dateTo) q = q.where('t.transaction_date', '<=', dateTo);
-    const txns = await q.select(
-      't.id', 't.transaction_date', 't.transaction_type', 't.quantity_kg', 't.reference_no',
-      't.reference_module', 't.reference_id', 'l.lot_no', 'l.id as lot_id', 'l.item_name', 'l.type as lot_type',
-      'u.full_name as user_name',
-    ).orderBy('t.transaction_date', 'asc').orderBy('t.id', 'asc').limit(cap);
+    // Quantity movements of the dimension (holds excluded — zero quantity).
+    const moves = () => applyDim(db('lot_transactions as t')
+      .join('inventory_lots as l', 't.lot_id', 'l.id'))
+      .whereNotIn('t.transaction_type', stockMovements.HOLD_TXN_TYPES);
+    const inPeriod = (qb) => {
+      if (dateFrom) qb.where('t.transaction_date', '>=', dateFrom);
+      if (dateTo) qb.where('t.transaction_date', '<=', dateTo);
+      return qb;
+    };
+    const packs = () => {
+      const qb = db('mill_packing_logs as pl')
+        .whereExists(function () {
+          this.select(db.raw('1')).from('inventory_lots as l')
+            .whereRaw("l.batch_ref = 'batch-' || pl.batch_id");
+          applyDim(this);
+        });
+      if (dateFrom) qb.whereRaw('pl.created_at::date >= ?', [dateFrom]);
+      if (dateTo) qb.whereRaw('pl.created_at::date <= ?', [dateTo]);
+      return qb;
+    };
 
-    // Packing rows (mill_packing_logs whose batch produced a matching lot).
-    const packLogs = await db('mill_packing_logs as pl')
-      .leftJoin('milling_batches as mb', 'mb.id', 'pl.batch_id')
-      .leftJoin('users as u', 'pl.packed_by', 'u.id')
-      .whereExists(function () {
-        this.select(db.raw('1')).from('inventory_lots as l')
-          .whereRaw("l.batch_ref = 'batch-' || pl.batch_id");
-        applyDim(this);
-      })
-      .select('pl.id', 'pl.packed_weight_kg', 'pl.bags_count', 'pl.created_at', 'mb.batch_no', 'mb.id as batch_id', 'u.full_name as user_name')
-      .orderBy('pl.created_at', 'asc').limit(cap);
+    const [carriedRow, bucketRows, packRow, txns, packLogs] = await Promise.all([
+      // Balance brought forward from before the period.
+      dateFrom
+        ? moves().where('t.transaction_date', '<', dateFrom).first(db.raw('COALESCE(SUM(t.quantity_kg), 0) AS kg'))
+        : Promise.resolve({ kg: 0 }),
+      inPeriod(moves()).groupByRaw(stockMovements.bucketCaseSql('t.transaction_type'))
+        .select(db.raw(`${stockMovements.bucketCaseSql('t.transaction_type')} AS bucket`),
+          db.raw('COALESCE(SUM(t.quantity_kg), 0) AS kg'), db.raw('COUNT(*)::int AS n')),
+      packs().first(db.raw('COALESCE(SUM(pl.packed_weight_kg), 0) AS kg'), db.raw('COUNT(*)::int AS n')),
+      // Newest rows of the period.
+      inPeriod(moves()).leftJoin('users as u', 't.created_by', 'u.id').select(
+        't.id', db.raw("to_char(t.transaction_date, 'YYYY-MM-DD') AS day"), 't.created_at',
+        't.transaction_type', 't.quantity_kg', 't.reference_no',
+        't.reference_module', 't.reference_id', 'l.lot_no', 'l.id as lot_id',
+        'u.full_name as user_name',
+      ).orderBy('t.transaction_date', 'desc').orderBy('t.created_at', 'desc').orderBy('t.id', 'desc').limit(cap),
+      packs().leftJoin('milling_batches as mb', 'mb.id', 'pl.batch_id')
+        .leftJoin('users as u', 'pl.packed_by', 'u.id')
+        .select('pl.id', 'pl.packed_weight_kg', 'pl.created_at', db.raw("to_char(pl.created_at::date, 'YYYY-MM-DD') AS day"),
+          'mb.batch_no', 'mb.id as batch_id', 'u.full_name as user_name')
+        .orderBy('pl.created_at', 'desc').orderBy('pl.id', 'desc').limit(cap),
+    ]);
 
-    // Merge into one timeline. Packing does NOT change rice qty → balance untouched.
-    const events = [];
-    for (const t of txns) {
-      const mt = TXN_TO_MT[String(t.transaction_type || '')] || String(t.transaction_type || '');
-      const qkg = num(t.quantity_kg);
-      const isBatch = t.reference_module === 'milling_batch' && t.reference_id;
-      const isOrder = t.reference_module === 'export_order' && t.reference_id;
-      events.push({
-        sort: [t.transaction_date, t.id], date: t.transaction_date, lotNo: t.lot_no,
-        type: mt, label: LABELS[mt] || mt.replace(/_/g, ' '), bucket: BUCKET[mt] || 'other',
-        deltaKg: qkg, inKg: qkg > 0 ? qkg : 0, outKg: qkg < 0 ? -qkg : 0, packedKg: 0,
-        user: t.user_name || null, reference: t.reference_no || null,
-        href: isBatch ? `/milling/${t.reference_id}` : isOrder ? `/export/${t.reference_id}` : (t.lot_id ? `/lot-inventory/${t.lot_id}` : null),
-      });
-    }
-    for (const pl of packLogs) {
-      events.push({
-        sort: [pl.created_at, 100000 + pl.id], date: pl.created_at, lotNo: pl.batch_no || null,
+    const sums = {}; let periodRows = 0;
+    for (const b of bucketRows) { sums[b.bucket] = num(b.kg); periodRows += Number(b.n) || 0; }
+    const periodNetKg = Object.values(sums).reduce((s, v) => s + v, 0);
+    const carriedKg = num(carriedRow && carriedRow.kg);
+    const signed = stockMovements.signedBucketTotals(sums);
+    const closing = carriedKg + periodNetKg;
+
+    // One timeline, newest first, then keep the newest `cap`. Sort key: the
+    // business day, then when the row was written, then id — never a string
+    // of a Date (that sorted by weekday name). Packing moves no rice quantity.
+    const ts = (v) => (v ? new Date(v).getTime() : 0);
+    const events = [
+      ...txns.map((t) => {
+        const mt = stockMovements.movementTypeOf(t.transaction_type);
+        const qkg = num(t.quantity_kg);
+        const isBatch = t.reference_module === 'milling_batch' && t.reference_id;
+        const isOrder = t.reference_module === 'export_order' && t.reference_id;
+        return {
+          day: t.day, at: ts(t.created_at), id: t.id, date: t.day, lotNo: t.lot_no,
+          type: mt, label: stockMovements.labelOf(mt), bucket: stockMovements.bucketOf(mt),
+          deltaKg: qkg, inKg: qkg > 0 ? qkg : 0, outKg: qkg < 0 ? -qkg : 0, packedKg: 0,
+          user: t.user_name || null, reference: t.reference_no || null,
+          href: isBatch ? `/milling/${t.reference_id}` : isOrder ? `/export/${t.reference_id}` : (t.lot_id ? `/lot-inventory/${t.lot_id}` : null),
+        };
+      }),
+      ...packLogs.map((pl) => ({
+        day: pl.day, at: ts(pl.created_at), id: pl.id, date: pl.day, lotNo: pl.batch_no || null,
         type: 'packing', label: 'Packed', bucket: 'packing', deltaKg: 0, inKg: 0, outKg: 0,
         packedKg: num(pl.packed_weight_kg), user: pl.user_name || null,
         reference: `PACK-${pl.id}`, href: pl.batch_id ? `/milling/${pl.batch_id}` : null,
-      });
-    }
-    events.sort((a, b) => (String(a.sort[0]) < String(b.sort[0]) ? -1 : String(a.sort[0]) > String(b.sort[0]) ? 1 : a.sort[1] - b.sort[1]));
+      })),
+    ].sort((a, b) => (a.day < b.day ? 1 : a.day > b.day ? -1 : (b.at - a.at) || (b.id - a.id)))
+      .slice(0, cap);
 
-    let bal = 0;
-    const rows = events.map((e) => { bal += e.deltaKg; return {
+    // Running balance, walking back from the closing balance: a row's balance is
+    // the closing less every LATER listed row. What is left before the oldest
+    // listed row is the balance brought forward into the list.
+    let bal = closing;
+    const desc = events.map((e) => { const row = { ...e, balanceKg: r3(bal) }; bal -= e.deltaKg; return row; });
+    const broughtForwardKg = r3(bal);
+    const rows = desc.reverse().map((e) => ({
       date: e.date, lotNo: e.lotNo, type: e.type, label: e.label, bucket: e.bucket,
-      inKg: e.inKg, outKg: e.outKg, packedKg: e.packedKg, balanceKg: Math.round(bal * 1000) / 1000,
+      inKg: e.inKg, outKg: e.outKg, packedKg: e.packedKg, balanceKg: e.balanceKg,
       user: e.user, reference: e.reference, href: e.href,
-    }; });
+    }));
 
-    const totals = rows.reduce((a, r) => ({
-      inward: a.inward + (r.bucket === 'inward' ? r.inKg : 0),
-      outward: a.outward + (r.bucket === 'outward' ? r.outKg : 0),
-      transfer: a.transfer + (r.bucket === 'transfer' ? (r.inKg - r.outKg) : 0),
-      sales: a.sales + (r.bucket === 'sales' ? r.outKg : 0),
-      packing: a.packing + r.packedKg,
-    }), { inward: 0, outward: 0, transfer: 0, sales: 0, packing: 0 });
-    const opening = rows.filter((r) => r.bucket === 'opening').reduce((s, r) => s + r.inKg - r.outKg, 0);
-
-    return { meta: { dimension, key: key || null, variety: variety || null, label }, rows, opening, balance: Math.round(bal * 1000) / 1000, totals };
+    const packCount = Number(packRow && packRow.n) || 0;
+    const totals = {
+      inward: r3(signed.inward), outward: r3(signed.outward), transfer: r3(signed.transfer),
+      sales: r3(signed.sales), other: r3(signed.other), packing: r3(num(packRow && packRow.kg)),
+    };
+    return {
+      meta: {
+        dimension, key: key || null, variety: variety || null, label,
+        dateFrom: dateFrom || null, dateTo: dateTo || null, ownership: normaliseOwnership(ownership),
+        unit: 'kg', asOf: new Date().toISOString(),
+      },
+      rows,
+      // Opening = brought forward from before dateFrom + opening-balance loads
+      // inside the period (go-live stock), so balance = opening + the columns.
+      opening: r3(carriedKg + signed.opening),
+      openingCarriedKg: r3(carriedKg),
+      openingLoadedKg: r3(signed.opening),
+      broughtForwardKg,
+      balance: r3(closing),
+      totals,
+      rowCount: periodRows + packCount,
+      listed: rows.length,
+      truncated: periodRows + packCount > rows.length,
+    };
   },
 
   /**
@@ -2675,7 +2812,7 @@ const reportingService = {
     q = applyWarehouseScope(q, warehouseScope, 'l.warehouse_id');
     const lots = await q.select(
       'l.id', 'l.lot_no', 'l.type', 'l.item_name', 'l.grade', 'l.variety', 'l.processing_type',
-      'l.net_weight_kg', 'l.received_net_weight_kg', 'l.available_qty', 'l.reserved_qty', 'l.sold_weight_kg',
+      'l.net_weight_kg', 'l.qty', 'l.received_net_weight_kg', 'l.available_qty', 'l.reserved_qty', 'l.sold_weight_kg',
       'l.landed_cost_per_kg', 'l.rate_per_kg', 'p.name as product_name',
     );
 
@@ -2686,7 +2823,7 @@ const reportingService = {
       const key = isBy ? (l.grade || l.item_name || 'By-product') : (l.product_name || l.item_name || 'Finished Rice');
       const g = groups[key] || (groups[key] = { key, type: l.type, producedKg: 0, onHandKg: 0, reservedKg: 0, soldKg: 0, valuePkr: 0, lots: [] });
       const produced = num(l.received_net_weight_kg) || num(l.net_weight_kg);
-      const onHand = num(l.net_weight_kg);
+      const onHand = onHandOf(l);
       const reserved = num(l.reserved_qty);
       const sold = num(l.sold_weight_kg) || Math.max(0, produced - onHand);
       // D-14: landed cost/kg × on hand, no fallback price (stockValue.js).
@@ -2745,7 +2882,9 @@ const reportingService = {
         ? (num(l.received_net_weight_kg) || num(l.net_weight_kg) || num(l.qty))
         : num(l.produced_ledger_kg),
       dispatchedKg: num(l.dispatched_kg),
-      onHandKg: num(l.available_qty),
+      // On hand, not available — the same basis as every other stock report
+      // (stockSql.onHandKg); available_qty drops whatever is on hold (RPT-32).
+      onHandKg: onHandOf(l),
       ageDays: Math.round(num(l.age_days)),
       href: `/lot-inventory/${l.id}`,
     }));
@@ -2943,8 +3082,10 @@ const reportingService = {
       const arr = Array.isArray(lots) ? lots : (lots?.data || []);
       return {
         title: 'Stock Aging',
-        columns: ['Lot', 'Item', 'Type', 'Qty', 'Value', 'Days held'],
-        rows: arr.map(l => [l.lotNo || '—', l.itemName || '—', l.type || '—', `${num(l.qty).toLocaleString()} ${l.unit || 'MT'}`, fmtPkr(l.totalValue), String(l.daysInStock || 0)]),
+        // qty is KG for every lot (Phase 5c); the stale lot.unit column still
+        // says 'MT' on older rows, so it is not used as the label (RPT-33).
+        columns: ['Lot', 'Item', 'Type', 'Qty (kg)', 'Value', 'Days held'],
+        rows: arr.map(l => [l.lotNo || '—', l.itemName || '—', l.type || '—', fmtKg(l.qty), fmtPkr(l.totalValue), String(l.daysInStock || 0)]),
       };
     }
     if (reportType === 'recovery_by_variety') {
@@ -3468,7 +3609,7 @@ const reportingService = {
         type: l.type,
         entity: l.entity,
         qty: parseFloat(l.qty),
-        unit: l.unit,
+        unit: 'kg', // qty is KG; the lot.unit column is stale ('MT') on older rows
         costPerUnit: parseFloat(l.landed_cost_per_kg) || 0,
         totalValue: parseFloat(l.total_value) || 0,
         warehouseName: l.warehouse_name,
@@ -3605,9 +3746,14 @@ const reportingService = {
         'm.name as mill_name',
         'm.capacity_mt_per_day',
         db.raw('COUNT(mb.id) as batches_processed'),
+        db.raw('COALESCE(SUM(mb.raw_qty_kg), 0) as total_input_kg'),
+        db.raw('COALESCE(SUM(mb.actual_finished_kg), 0) as total_output_kg'),
         db.raw(`COALESCE(SUM(mb.raw_qty_kg), 0)/${KG_PER_MT} as total_input_mt`),
         db.raw(`COALESCE(SUM(mb.actual_finished_kg), 0)/${KG_PER_MT} as total_output_mt`),
-        db.raw('COALESCE(AVG(mb.yield_pct), 0) as avg_yield'),
+        // D-14 yield: Σ finished ÷ Σ raw over completed company batches.
+        db.raw(`ROUND(100.0 * COALESCE(SUM(mb.actual_finished_kg) FILTER (WHERE mb.status = 'Completed' AND NOT COALESCE(mb.is_service_milling, false)), 0)
+          / NULLIF(SUM(mb.raw_qty_kg) FILTER (WHERE mb.status = 'Completed' AND NOT COALESCE(mb.is_service_milling, false)), 0), 2) as avg_yield`),
+        db.raw('MIN(mb.created_at) as first_batch_at'),
         db.raw('COALESCE(SUM(mb.processing_hours), 0) as total_processing_hours')
       )
       .groupBy('m.id', 'm.name', 'm.capacity_mt_per_day');
@@ -3642,17 +3788,21 @@ const reportingService = {
       };
     }
 
-    // Calculate date range days for utilization
-    let rangeDays = 30;
-    if (dateFrom && dateTo) {
-      rangeDays = Math.max(1, Math.ceil((new Date(dateTo) - new Date(dateFrom)) / (1000 * 60 * 60 * 24)));
-    }
+    // Days the utilisation is measured over: the selected period; for "all
+    // time" (or an open end) from the earliest batch in the set to today —
+    // not a fixed 30 days (RPT-24). Inclusive of both end days.
+    const DAY_MS = 1000 * 60 * 60 * 24;
+    const earliest = mills.reduce((m, r) => (r.first_batch_at && (!m || new Date(r.first_batch_at) < m) ? new Date(r.first_batch_at) : m), null);
+    const start = dateFrom ? new Date(dateFrom) : earliest;
+    const end = dateTo ? new Date(dateTo) : new Date();
+    const rangeDays = start ? Math.max(1, Math.ceil((end - start) / DAY_MS)) : 1;
 
     return mills.map((m) => {
       const capacity = parseFloat(m.capacity_mt_per_day) || 0;
       const totalCapacity = capacity * rangeDays;
       const totalInput = parseFloat(m.total_input_mt);
-      const utilization = totalCapacity > 0 ? parseFloat(((totalInput / totalCapacity) * 100).toFixed(1)) : 0;
+      // A PERCENTAGE (0–100+). The hub used to multiply it by 100 again.
+      const utilization = totalCapacity > 0 ? parseFloat(((totalInput / totalCapacity) * 100).toFixed(1)) : null;
       const downtime = downtimeMap[m.mill_id] || { minutes: 0, impactMT: 0 };
 
       return {
@@ -3660,11 +3810,15 @@ const reportingService = {
         millName: m.mill_name,
         capacityMTPerDay: capacity,
         batchesProcessed: parseInt(m.batches_processed, 10),
+        totalInputKg: parseFloat(m.total_input_kg) || 0,
+        totalOutputKg: parseFloat(m.total_output_kg) || 0,
         totalInputMT: totalInput,
         totalOutputMT: parseFloat(m.total_output_mt),
-        avgYield: parseFloat(parseFloat(m.avg_yield).toFixed(1)),
+        avgYield: m.avg_yield == null ? null : parseFloat(m.avg_yield),
         totalProcessingHours: parseFloat(m.total_processing_hours),
         utilization,
+        utilizationPct: utilization,
+        utilizationDays: rangeDays,
         downtimeHours: parseFloat((downtime.minutes / 60).toFixed(1)),
         downtimeImpactMT: downtime.impactMT,
       };
@@ -3781,32 +3935,23 @@ const reportingService = {
       })
       .orderBy('id');
 
-    const results = [];
-
-    for (const bm of benchmarks) {
+    // Each KPI is computed ONCE — several benchmarks (one per entity) may
+    // share a name — and all of them in parallel, instead of one awaited query
+    // chain per benchmark row (TEC-15 hot path). Formulas unchanged here; the
+    // KPI definitions themselves belong to the KPI contracts (P4-01).
+    // Per-KPI extras a figure carries beside `actual` (the collection rate's
+    // per-currency split), keyed by KPI name.
+    const extras = new Map();
+    const computeActual = async (kpiName) => {
       let actual = null;
-
       try {
-        switch (bm.kpi_name) {
+        switch (kpiName) {
           case 'Export Margin': {
-            const orders = await db('export_orders')
-              .modify((qb) => {
-                if (periodStart) qb.where('created_at', '>=', periodStart);
-                if (periodEnd) qb.where('created_at', '<=', periodEnd);
-              })
-              .select(db.raw('COALESCE(SUM(contract_value), 0) as revenue'))
-              .first();
-            const costs = await db('export_order_costs as eoc')
-              .join('export_orders as eo', 'eoc.order_id', 'eo.id')
-              .modify((qb) => {
-                if (periodStart) qb.where('eo.created_at', '>=', periodStart);
-                if (periodEnd) qb.where('eo.created_at', '<=', periodEnd);
-              })
-              .sum('eoc.amount as total')
-              .first();
-            const rev = parseFloat(orders.revenue) || 0;
-            const cost = parseFloat(costs.total) || 0;
-            actual = rev > 0 ? parseFloat((((rev - cost) / rev) * 100).toFixed(2)) : 0;
+            // RPT-25: the Booked margin of the one profit definition (PKR at
+            // booked rates, priced orders only) — it was USD + PKR contract
+            // minus PKR costs. null when no order in the period is priced.
+            const { totals } = await exportProfit(db, { startDate: periodStart, endDate: periodEnd });
+            actual = totals.bookedMarginPct;
             break;
           }
 
@@ -3825,14 +3970,12 @@ const reportingService = {
           }
 
           case 'Collection Rate': {
-            const recv = await db('receivables')
-              .select(
-                db.raw('COALESCE(SUM(expected_amount), 0) as expected'),
-                db.raw('COALESCE(SUM(received_amount), 0) as received')
-              )
-              .first();
-            const expected = parseFloat(recv.expected) || 0;
-            actual = expected > 0 ? parseFloat(((parseFloat(recv.received) / expected) * 100).toFixed(2)) : 0;
+            // C6 per currency (received ÷ due); one rate only when one
+            // currency is due — dollars and rupees were summed here.
+            const { collectionRate: computeCollection } = require('../finance/collectionRate');
+            const fields = collectionRateFields(await computeCollection(db));
+            actual = fields.collectionRate;
+            extras.set(kpiName, { actualByCurrency: fields.collectionRateByCurrency });
             break;
           }
 
@@ -3970,6 +4113,14 @@ const reportingService = {
       } catch (err) {
         actual = null;
       }
+      return actual;
+    };
+    const names = [...new Set(benchmarks.map((b) => b.kpi_name))];
+    const actuals = new Map(await Promise.all(names.map(async (n) => [n, await computeActual(n)])));
+
+    const results = [];
+    for (const bm of benchmarks) {
+      const actual = actuals.get(bm.kpi_name);
 
       // Determine status
       let status = 'Unknown';
@@ -3999,6 +4150,7 @@ const reportingService = {
         status,
         variance: actual !== null ? parseFloat((actual - target).toFixed(2)) : null,
         period: bm.period,
+        ...(extras.get(bm.kpi_name) || {}),
       });
     }
 
@@ -4152,16 +4304,25 @@ const reportingService = {
 
   // ── Payroll Ledger — one row per employee per payroll run, with filters. ──
   // Read-only over mill_payroll_lines/runs/workers. Reuses existing payroll data;
-  // creates none. (Finance/Reports surface; gated reports.view, no Mill Operator.)
-  async getPayrollLedger({ from, to, month, employee, role, department, payMethod, status } = {}) {
+  // creates none. (Finance/Reports surface; gated reports.view + payroll.view,
+  // no Mill Operator.)
+  //
+  // P4-08 / PAY-21: `status` is applied — paid (default) | accrued | unpaid |
+  // pending | voided | all, by the one line rule in payrollLineStatus.js;
+  // `entity` (mill | general) filters the run; bonus, statutory, other
+  // deductions and short pay are their own columns so
+  //   gross + bonus − statutory − deductions − advance = net (+ short pay)
+  // reads off the row; a cash run with no account recorded says so instead of
+  // being labelled "Mill Cash".
+  async getPayrollLedger({ from, to, month, employee, role, department, payMethod, status, entity } = {}) {
     const num = (v) => parseFloat(v) || 0;
     let q = db('mill_payroll_lines as l')
       .join('mill_payroll_runs as r', 'r.id', 'l.run_id')
       .leftJoin('mill_workers as w', 'w.id', 'l.worker_id')
       .leftJoin('bank_accounts as b', 'b.id', 'r.bank_account_id')
-      // A line counts as paid when it has paid_at (partial or normal pay) OR its
-      // run is fully paid/posted (legacy runs whose lines predate paid_at).
-      .where(function () { this.whereNotNull('l.paid_at').orWhereIn('r.status', ['paid', 'posted']); });
+      .whereRaw(payrollLineStatus.statusFilterSql(status));
+    const ent = payrollLineStatus.normaliseEntity(entity);
+    if (ent) q = q.where('r.entity', ent);
     if (month) q = q.where('r.period', month);
     if (from) q = q.where('r.period', '>=', from);
     if (to) q = q.where('r.period', '<=', to);
@@ -4170,40 +4331,53 @@ const reportingService = {
     if (department) q = q.where('l.department', department);
     if (payMethod) q = q.where('r.pay_method', payMethod);
     const rows = await q
-      .select('l.id', 'r.id as run_id', 'r.period', 'r.pay_date', 'r.pay_method', 'b.name as account_name',
+      .select('l.id', 'r.id as run_id', 'r.period', 'r.pay_date', 'r.pay_method', 'r.status as run_status', 'r.entity',
+        'l.paid_at', 'b.name as account_name',
         'l.worker_id', 'l.worker_name', 'l.role', 'l.department', 'l.pay_type', 'l.effective_days', 'l.ot_hours',
-        'l.gross_pay', 'l.advance_deducted', 'l.net_pay')
+        'l.gross_pay', 'l.bonus_total', 'l.statutory_total', 'l.deduction_total', 'l.advance_deducted', 'l.net_pay',
+        'l.short_pay_amount')
       .orderBy('r.pay_date', 'desc').orderBy('l.id', 'desc');
-    const out = rows.map((r) => ({
-      id: r.id, runId: r.run_id, period: r.period, date: r.pay_date,
-      employee: r.worker_name, workerId: r.worker_id || null, role: r.role || '—', department: r.department || '—', payType: r.pay_type || '—',
-      effectiveDays: num(r.effective_days), otHours: num(r.ot_hours),
-      gross: Math.round(num(r.gross_pay)), advanceDeducted: Math.round(num(r.advance_deducted)), net: Math.round(num(r.net_pay)),
-      payMethod: r.pay_method || 'cash', account: r.account_name || (r.pay_method === 'bank' ? '—' : 'Mill Cash'),
-      status: 'Paid',
-      employeeHref: r.worker_id ? `/milling/finance` : null,
-    }));
+    const STATE_LABEL = { paid: 'Paid', accrued: 'Accrued', pending: 'Pending', voided: 'Voided', reversed: 'Reversed' };
+    const out = rows.map((r) => {
+      const state = payrollLineStatus.lineState(r);
+      return {
+        id: r.id, runId: r.run_id, period: r.period, date: r.pay_date, entity: r.entity,
+        employee: r.worker_name, workerId: r.worker_id || null, role: r.role || '—', department: r.department || '—', payType: r.pay_type || '—',
+        effectiveDays: num(r.effective_days), otHours: num(r.ot_hours),
+        gross: Math.round(num(r.gross_pay)), bonus: Math.round(num(r.bonus_total)),
+        statutory: Math.round(num(r.statutory_total)), deductions: Math.round(num(r.deduction_total)),
+        advanceDeducted: Math.round(num(r.advance_deducted)), net: Math.round(num(r.net_pay)),
+        shortPay: Math.round(num(r.short_pay_amount)),
+        payMethod: r.pay_method || 'cash',
+        account: r.account_name || (r.pay_method === 'cash' ? 'Cash (no account recorded)' : '—'),
+        status: STATE_LABEL[state] || state, runStatus: r.run_status,
+        employeeHref: r.worker_id ? `/milling/finance` : null,
+      };
+    });
+    const sum = (k) => out.reduce((s, r) => s + r[k], 0);
     const totals = {
       count: out.length,
-      gross: out.reduce((s, r) => s + r.gross, 0),
-      advance: out.reduce((s, r) => s + r.advanceDeducted, 0),
-      net: out.reduce((s, r) => s + r.net, 0),
+      gross: sum('gross'), bonus: sum('bonus'), statutory: sum('statutory'), deductions: sum('deductions'),
+      advance: sum('advanceDeducted'), net: sum('net'), shortPay: sum('shortPay'),
+      currency: 'PKR', status: String(status || 'paid').toLowerCase(),
     };
     // Distinct roles for the filter dropdown.
     const roles = [...new Set(out.map((r) => r.role).filter((x) => x && x !== '—'))];
     const departments = [...new Set(out.map((r) => r.department).filter((x) => x && x !== '—'))];
-    return { rows: out, totals, roles, departments };
+    return { rows: out, totals, roles, departments, meta: { currency: 'PKR', entity: ent, asOf: new Date().toISOString() } };
   },
 
   // ── Payroll overview KPIs for the Head-Office Finance dashboard. ──
   // Consolidated from existing mill payroll data + salary expenses; no new data.
-  async getPayrollOverview({ month } = {}) {
+  async getPayrollOverview({ month, entity } = {}) {
     const num = (v) => parseFloat(v) || 0;
     const period = /^\d{4}-\d{2}$/.test(month || '') ? month : new Date().toISOString().slice(0, 7);
+    const ent = payrollLineStatus.normaliseEntity(entity);
+    const inEntity = (qb) => (ent ? qb.where('r.entity', ent) : qb);
     // Paid-line level so a partially_paid run contributes its paid portion.
-    const runAgg = await db('mill_payroll_lines as l').join('mill_payroll_runs as r', 'r.id', 'l.run_id')
+    const runAgg = await inEntity(db('mill_payroll_lines as l').join('mill_payroll_runs as r', 'r.id', 'l.run_id'))
       .where('r.period', period)
-      .where(function () { this.whereNotNull('l.paid_at').orWhereIn('r.status', ['paid', 'posted']); })
+      .whereRaw(payrollLineStatus.PAID_SQL)
       .select(db.raw('COALESCE(SUM(l.net_pay),0) as net'), db.raw('COALESCE(SUM(l.gross_pay),0) as gross'), db.raw('COALESCE(SUM(l.advance_deducted),0) as advance'), db.raw('COUNT(DISTINCT l.run_id) as runs')).first();
     const advOut = await db('mill_worker_advances').where('status', 'outstanding')
       .select(db.raw('COALESCE(SUM(amount - recovered_amount),0) as outstanding')).first();
@@ -4216,8 +4390,8 @@ const reportingService = {
       .whereRaw("TO_CHAR(expense_date, 'YYYY-MM') = ?", [period])
       .select(db.raw('COALESCE(SUM(COALESCE(amount_pkr, amount)),0) as total')).first();
     // 6-month net payroll trend.
-    const trendRows = await db('mill_payroll_lines as l').join('mill_payroll_runs as r', 'r.id', 'l.run_id')
-      .where(function () { this.whereNotNull('l.paid_at').orWhereIn('r.status', ['paid', 'posted']); })
+    const trendRows = await inEntity(db('mill_payroll_lines as l').join('mill_payroll_runs as r', 'r.id', 'l.run_id'))
+      .whereRaw(payrollLineStatus.PAID_SQL)
       .select('r.period as period', db.raw('COALESCE(SUM(l.net_pay),0) as net'))
       .groupBy('r.period').orderBy('r.period', 'desc').limit(6);
     const salaryTotal = num(salaryExp.total); const allTotal = num(allExp.total);
@@ -4271,8 +4445,9 @@ const reportingService = {
   // ── Payroll analytics (dashboard): trend, cost-by-role, advances, headcount,
   // top earners — over a YYYY-MM range (default last 12 months). Paid/posted
   // runs only. Read-only over the mill payroll tables.
-  async getPayrollAnalytics({ from, to } = {}) {
+  async getPayrollAnalytics({ from, to, entity } = {}) {
     const num = (v) => parseFloat(v) || 0;
+    const ent = payrollLineStatus.normaliseEntity(entity);
     const addMonth = (p, n) => { const y = +p.slice(0, 4); const m = +p.slice(5, 7); const d = new Date(Date.UTC(y, m - 1 + n, 1)); return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`; };
     const toM = /^\d{4}-\d{2}$/.test(to || '') ? to : new Date().toISOString().slice(0, 7);
     const fromM = /^\d{4}-\d{2}$/.test(from || '') ? from : addMonth(toM, -11);
@@ -4283,7 +4458,8 @@ const reportingService = {
     // partially_paid run contributes the employees it has actually paid.
     const lines = await db('mill_payroll_lines as l').join('mill_payroll_runs as r', 'r.id', 'l.run_id')
       .where('r.period', '>=', fromM).where('r.period', '<=', toM)
-      .where(function () { this.whereNotNull('l.paid_at').orWhereIn('r.status', ['paid', 'posted']); })
+      .modify((qb) => { if (ent) qb.where('r.entity', ent); })
+      .whereRaw(payrollLineStatus.PAID_SQL)
       .select('l.run_id', 'l.worker_id', 'l.worker_name', 'l.role', 'l.department', 'l.pay_type', 'l.gross_pay', 'l.net_pay', 'l.advance_deducted', 'l.ot_hours', 'r.period');
 
     // Monthly trend (fill zeros for empty months) — from paid lines.
@@ -4306,11 +4482,17 @@ const reportingService = {
     const topEarners = Object.values(earnMap).map((e) => ({ ...e, net: Math.round(e.net) })).sort((a, b) => b.net - a.net).slice(0, 8);
 
     // Headcount (current) + advances.
-    const workers = await db('mill_workers').select('is_active', 'pay_type');
+    const workers = await db('mill_workers').modify((qb) => { if (ent) qb.where('entity', ent); }).select('is_active', 'pay_type');
     const activeWorkers = workers.filter((w) => w.is_active).length;
     const byPayType = { daily: workers.filter((w) => w.is_active && w.pay_type !== 'monthly').length, monthly: workers.filter((w) => w.is_active && w.pay_type === 'monthly').length };
-    const advGivenRow = await db('mill_worker_advances').whereRaw("TO_CHAR(advance_date,'YYYY-MM') >= ?", [fromM]).whereRaw("TO_CHAR(advance_date,'YYYY-MM') <= ?", [toM]).select(db.raw('COALESCE(SUM(amount),0) as given')).first();
-    const advOutRow = await db('mill_worker_advances').where('status', 'outstanding').select(db.raw('COALESCE(SUM(amount - recovered_amount),0) as outstanding')).first();
+    // PAY-21: advances GIVEN are the ones paid out — a pending, approved-not-
+    // paid, rejected or voided request moved no money and must not lower the
+    // recovery rate.
+    const advBase = () => db('mill_worker_advances as a').join('mill_workers as w', 'w.id', 'a.worker_id')
+      .where('a.approval_status', 'paid')
+      .modify((qb) => { if (ent) qb.where('w.entity', ent); });
+    const advGivenRow = await advBase().whereRaw("TO_CHAR(a.advance_date,'YYYY-MM') >= ?", [fromM]).whereRaw("TO_CHAR(a.advance_date,'YYYY-MM') <= ?", [toM]).select(db.raw('COALESCE(SUM(a.amount),0) as given')).first();
+    const advOutRow = await advBase().where('a.status', 'outstanding').select(db.raw('COALESCE(SUM(a.amount - a.recovered_amount),0) as outstanding')).first();
 
     const totalGross = lines.reduce((s, l) => s + num(l.gross_pay), 0);
     const totalNet = lines.reduce((s, l) => s + num(l.net_pay), 0);
@@ -4320,7 +4502,7 @@ const reportingService = {
     const given = num(advGivenRow.given);
 
     return {
-      range: { from: fromM, to: toM },
+      range: { from: fromM, to: toM }, entity: ent, currency: 'PKR',
       summary: {
         totalGross: Math.round(totalGross), totalNet: Math.round(totalNet), totalAdvanceRecovered: Math.round(totalAdvanceRecovered),
         runs: runCount, paidEmployees, activeWorkers, byPayType,

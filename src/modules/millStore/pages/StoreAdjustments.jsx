@@ -42,7 +42,7 @@ export default function StoreAdjustments() {
   const { data: adjustments = [], isLoading, refetch } = useMillStoreAdjustments({
     status: filters.status === 'all' || filters.status === '' ? undefined : filters.status,
   });
-  const { data: items = [] } = useMillStoreItems({ limit: 500 });
+  const { data: items = [] } = useMillStoreItems();
   const safeAdj = Array.isArray(adjustments) ? adjustments : [];
   // Items quick-added from the picker show up before the list refetches.
   const [addedItems, setAddedItems] = useState([]);

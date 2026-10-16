@@ -148,10 +148,10 @@ export default function StandalonePrintReport() {
           {type === 'cashflow' && data.summary && (
             <CashflowReportView data={data} companyName={companyName} range={range} preset={preset} />
           )}
-          {type === 'ar_aging' && data.buckets && (
+          {type === 'ar_aging' && data.byCurrency && (
             <AgingReportView data={data} companyName={companyName} kind="receivable" />
           )}
-          {type === 'ap_aging' && data.buckets && (
+          {type === 'ap_aging' && data.byCurrency && (
             <AgingReportView data={data} companyName={companyName} kind="payable" />
           )}
           {type === 'lot' && Array.isArray(data.lots) && (

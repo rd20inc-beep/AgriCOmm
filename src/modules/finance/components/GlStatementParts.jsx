@@ -32,6 +32,26 @@ export function PeriodLine({ mode, from, to }) {
   return <span>{text}</span>;
 }
 
+// Where the as-at date sits in the period calendar (D-1): a Closed / Locked
+// month's figures are final; an Open month's can still change. The server
+// sends period_status = { period: { name }, status, final, fiscalYear }.
+export function PeriodStatusBadge({ status }) {
+  if (!status) return null;
+  const name = status.period?.name;
+  if (!name) {
+    return <span data-testid="period-status" className="text-xs text-gray-500">{status.fiscalYear} · no accounting period</span>;
+  }
+  return status.final ? (
+    <span data-testid="period-status" data-final="true" className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 ring-1 ring-gray-200">
+      {name} {String(status.status).toLowerCase()} · final · {status.fiscalYear}
+    </span>
+  ) : (
+    <span data-testid="period-status" data-final="false" className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 ring-1 ring-amber-200">
+      {name} open · provisional · {status.fiscalYear}
+    </span>
+  );
+}
+
 export function StatementHeader({ title, children }) {
   return (
     <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2">

@@ -6,7 +6,7 @@ import {
   CreditCard, X, Clock, CheckCircle, RefreshCw, Download,
   Check, ChevronLeft, ChevronRight, UserPlus, Eye, User, Inbox,
 } from 'lucide-react';
-import { useLocalSales, useLocalSalesSummary, useCreateLocalSale, useLotInventory,
+import { useLocalSales, useLocalSalesSummary, useCreateLocalSale, useLotInventoryPage,
   usePendingLocalSales, useConfirmLocalSale, useRejectLocalSale } from '../../../api/queries';
 import PaymentFormDrawer from '../../../components/payments/PaymentFormDrawer';
 import { useApp } from '../../../context/AppContext';
@@ -22,7 +22,7 @@ import CustomerPicker from '../../../components/CustomerPicker';
 import { localSalesApi } from '../../../api/services';
 import { toKg, fromKg, rateToPerKg, rateFromPerKg, allEquivalents, allRateEquivalents, UNITS } from '../../../shared/utils/unitConversion';
 import { downloadCSV } from '../../../utils/csvExport';
-import { lotCategory, CAT_ORDER, CAT_COLOR } from '../../../utils/lotCategory';
+import { lotCategory, CAT_ORDER, CAT_COLOR, CAT_SUBTYPE } from '../../../utils/lotCategory';
 import { favStar, isFavorite } from '../../../shared/utils/favorites';
 import useConfirm from '../../../hooks/useConfirm';
 import { paymentWord, groupPaymentWord, payableDue, localToday, readLastCustomerId, rememberLastCustomerId, defaultBankAccountId } from '../utils/saleStatus';
@@ -30,6 +30,9 @@ import { todayLocalISO, fmtPKR as fmtPKRExact, fmtNum, fmtDate, fmtDateTime } fr
 import { accountTakesCurrency } from '../../../shared/utils/accountCurrency';
 import { saleLineTotal, isFullyPaid, isOverPaid } from '../utils/saleMoney';
 import { lotFreeKg, lotSaleBlock } from '../utils/saleLot';
+import { keepPreviousData } from '@tanstack/react-query';
+import useDebouncedValue from '../../../hooks/useDebouncedValue';
+import ListCapHint from '../../../shared/components/ListCapHint';
 
 // Local-sale money is shown to the paisa (2 dp), exact, en-PK grouping.
 const fmtPKR = (v) => fmtPKRExact(parseFloat(v) || 0, { decimals: 2 });
@@ -67,7 +70,10 @@ export default function LocalSales() {
   // /local-sales/group/:groupNo/payments), one line through
   // POST /local-sales/:id/payments — the same endpoints as before.
   const [payCtx, setPayCtx] = useState(null);
-  const { data: sales = [], isLoading, error, refetch } = useLocalSales();
+  // Searched on the server over every sale (sale no, item, buyer, customer,
+  // gate pass) — not inside the newest 100 (P4-11).
+  const search = useDebouncedValue(searchTerm.trim());
+  const { data: sales = [], isLoading, error, refetch } = useLocalSales(search ? { search } : {}, { placeholderData: keepPreviousData });
   const { data: summary = {} } = useLocalSalesSummary();
   function openGroupPay(g) {
     const first = g.items[0] || {};
@@ -147,16 +153,8 @@ export default function LocalSales() {
       if (!showRejected) list = list.filter(s => s.status !== 'Cancelled');
       if (statusFilter) list = list.filter(s => paymentWord(s) === statusFilter);
     }
-    if (searchTerm) {
-      const t = searchTerm.toLowerCase();
-      list = list.filter(s =>
-        (s.saleNo || '').toLowerCase().includes(t) ||
-        (s.itemName || '').toLowerCase().includes(t) ||
-        (s.buyerName || s.customerName || '').toLowerCase().includes(t)
-      );
-    }
     return list;
-  }, [safeSales, searchTerm, statusFilter, showRejected]);
+  }, [safeSales, statusFilter, showRejected]);
 
   // Group the line rows of a multi-item sale (shared sale_group_no) so one sale
   // shows as a single expandable row. Single-item sales render as a plain row.
@@ -533,15 +531,34 @@ export default function LocalSales() {
 // lotCategory / CAT_ORDER / CAT_COLOR now live in utils/lotCategory (shared
 // with the Mill New-Batch lot picker).
 
+// The sale lot picker's server filter: company lots holding KG free to sell.
+const SALE_LOT_PICK = { status: 'Available', in_stock: 'true', has_available: 'true', limit: 100 };
+
 function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromApi, onCreated }) {
   const createMutation = useCreateLocalSale();
-  const { data: lots = [] } = useLotInventory({ status: 'Available' });
-  const safeLots = useMemo(() => (Array.isArray(lots) ? lots : []).filter(l => (parseFloat(l.availableQty) || 0) > 0), [lots]);
+  // Lot picker: searched and tag-filtered ON THE SERVER over every lot with KG
+  // free to sell. It used to be the 100 newest 'Available' lots — empty ones
+  // included — so older stock (opening lots) could not be sold (INV-04).
+  const [lotSearch, setLotSearch] = useState('');
+  const lotQuery = useDebouncedValue(lotSearch.trim());
+  const [tag, setTag] = useState('All');
+  const { data: tagPage } = useLotInventoryPage(SALE_LOT_PICK);
+  const { data: lotPage } = useLotInventoryPage({
+    ...SALE_LOT_PICK,
+    ...(lotQuery ? { search: lotQuery } : {}),
+    ...(CAT_SUBTYPE[tag] ? { subtype: CAT_SUBTYPE[tag] } : {}),
+  });
+  const safeLots = useMemo(() => (lotPage?.lots || []).filter(l => (parseFloat(l.availableQty) || 0) > 0), [lotPage]);
+  const lotTotal = lotPage?.pagination?.total;
+  // The picked lot stays resolvable after the search moves on.
+  const [pickedLot, setPickedLot] = useState(null);
+  const lotById = (id) => safeLots.find(l => String(l.id) === String(id))
+    || (pickedLot && String(pickedLot.id) === String(id) ? pickedLot : null);
   const { bankAccountsList = [] } = useApp();
   const bankOptions = useMemo(() => (Array.isArray(bankAccountsList) ? bankAccountsList : [])
     .filter(b => (b.type || '') !== 'cash' && (b.isActive ?? b.is_active ?? true) && accountTakesCurrency(b, 'PKR')), [bankAccountsList]);
   // Mill-store packaging items (e.g. empty katta) are sellable too — count-based.
-  const { data: pkgItemsRaw = [] } = useMillStoreItems({ category: 'packaging', limit: 200 });
+  const { data: pkgItemsRaw = [] } = useMillStoreItems({ category: 'packaging' });
   const pkgItems = useMemo(() => (Array.isArray(pkgItemsRaw) ? pkgItemsRaw : []).filter(i => Number(i.quantity_available) > 0), [pkgItemsRaw]);
 
   // Starts on the last customer this browser sold to (LS-10) and today's
@@ -574,7 +591,6 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
   const [cart, setCart] = useState([]);
   const [line, setLine] = useState(EMPTY_LINE);
   const setL = (k, v) => setLine(p => ({ ...p, [k]: v }));
-  const [tag, setTag] = useState('All');
 
   // #5 Repacking: bag source (customer / company inventory / none) + optional
   // labour charge + packing loss. Company bags become a packaging sale line;
@@ -592,13 +608,14 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
   // Tags = product categories in stock, plus "Packaging" for sellable mill-store
   // items (empty katta) when any are on hand.
   const tags = useMemo(() => {
-    const present = new Set(safeLots.map(lotCategory));
-    const base = ['All', ...CAT_ORDER.filter(c => present.has(c))];
+    const present = new Set((tagPage?.lots || []).map(lotCategory));
+    if (tag !== 'All' && tag !== 'Packaging') present.add(tag);
+    const base = ['All', ...CAT_ORDER.filter(c => present.has(c) && CAT_SUBTYPE[c])];
     if (pkgItems.length) base.push('Packaging');
     return base;
-  }, [safeLots, pkgItems]);
+  }, [tagPage, tag, pkgItems]);
   const isPkg = tag === 'Packaging' || !!line.mill_item_id; // count-based line
-  const filteredLots = useMemo(() => (tag === 'All' ? safeLots : safeLots.filter(l => lotCategory(l) === tag)), [safeLots, tag]);
+  const filteredLots = safeLots; // already filtered by tag + search on the server
 
   const lineBagWt = parseFloat(line.bag_weight_kg) || 50;
   const lineCount = parseFloat(line.quantity_input) || 0;
@@ -607,7 +624,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
   const lineRatePerKg = isPkg ? lineRate : rateToPerKg(line.rate_input, line.rate_unit, lineBagWt);
   // Whole rupees — the same rule the server applies (utils/saleMoney, P2-24).
   const lineTotal = saleLineTotal(isPkg ? lineCount * lineRate : lineQtyKg * lineRatePerKg);
-  const selectedLot = safeLots.find(l => String(l.id) === String(line.lot_id));
+  const selectedLot = line.lot_id ? lotById(line.lot_id) : null;
   const selectedPkg = pkgItems.find(i => String(i.id) === String(line.mill_item_id));
   const cartQtyForLot = (lotId) => cart.filter(c => lotId && String(c.lot_id) === String(lotId)).reduce((s, c) => s + c.qtyKg, 0);
   const cartCountForPkg = (mid) => cart.filter(c => mid && String(c.mill_item_id) === String(mid)).reduce((s, c) => s + (c.count || 0), 0);
@@ -624,7 +641,8 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
   const lotPickRef = useRef(0);
   const shownRate = (perKg, unit, bagWt) => String(Math.round(rateFromPerKg(perKg, unit, parseFloat(bagWt) || 50) * 100) / 100);
   async function pickLot(lotId) {
-    const lot = safeLots.find(l => String(l.id) === String(lotId));
+    const lot = lotById(lotId);
+    setPickedLot(lot);
     setLine(p => ({
       ...p, lot_id: lotId, mill_item_id: '', item_name: lot ? (lot.itemName || '') : p.item_name, item_type: lot ? (lot.type || '') : p.item_type,
       suggested_per_kg: null, ...(p.rate_auto ? { rate_input: '', rate_auto: false } : {}),
@@ -744,7 +762,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
 
   function reset() {
     setForm(EMPTY_FORM()); setErrors({});
-    setCart([]); setLine(EMPTY_LINE); setTag('All'); setStep(1); setPaidTouched(false);
+    setCart([]); setLine(EMPTY_LINE); setTag('All'); setLotSearch(''); setPickedLot(null); setStep(1); setPaidTouched(false);
     setRepack({ enabled: false, bag_source: 'none', packaging_item_id: '', freed_katta_to_store: true, original_bag_size_kg: '', original_bag_count: '', new_bag_size_kg: '', new_bag_count: '', bag_rate: '', labour_enabled: false, labour_mode: 'per_bag', labour_rate: '', packing_loss_kg: '', final_dispatched_kg: '', notes: '' });
   }
 
@@ -923,7 +941,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
                 value={customerId}
                 onChange={(v) => setForm(p => ({ ...p, customer_id: v || '', ...(v ? { buyer_name: '', buyer_phone: '' } : {}) }))}
                 customers={(customers || []).filter(c => (c.customerType || c.customer_type || 'local') === 'local')}
-                listFn={() => customersApi.list({ type: 'local', limit: 500 })}
+                listFn={(p) => customersApi.list({ ...p, type: 'local' })}
                 placeholder="Search local customer… (empty = walk-in)"
                 addToast={addToast}
                 clearable
@@ -986,8 +1004,14 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
                   })}
                 </select>
               ) : (
+                <>
+                <input value={lotSearch} onChange={e => setLotSearch(e.target.value)} className={`${INPUT} mb-1.5`}
+                  placeholder="Search lot no, item, variety, supplier, gate pass…" aria-label="Search lots" />
                 <select value={line.lot_id} onChange={e => pickLot(e.target.value)} className={SELECT}>
                   <option value="">No lot (manual entry)</option>
+                  {selectedLot && !filteredLots.some(l => String(l.id) === String(selectedLot.id)) && (
+                    <option value={selectedLot.id}>{selectedLot.lotNo} — {selectedLot.itemName}</option>
+                  )}
                   {filteredLots.map(l => {
                     const avail = lotFreeKg(l) - cartQtyForLot(l.id);
                     const costKg = parseFloat(l.landedCostPerKg) || parseFloat(l.ratePerKg) || (parseFloat(l.costPerUnit) || 0) / 1000;
@@ -995,6 +1019,8 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
                     return <option key={l.id} value={l.id} disabled={avail <= 0}>{l.lotNo} — {l.itemName} ({fmtNum(Math.round(avail))} KG){costLabel}</option>;
                   })}
                 </select>
+                <ListCapHint rows={filteredLots} total={lotTotal} className="mt-1" />
+                </>
               )}
             </div>
             <div>

@@ -12,7 +12,7 @@ export default function StoreRatios() {
   const { addToast } = useApp();
   const qc = useQueryClient();
   const { data: ratios = [], isLoading } = useMillStoreRatios();
-  const { data: items = [] } = useMillStoreItems({ limit: 500 });
+  const { data: items = [] } = useMillStoreItems();
   const safeRatios = Array.isArray(ratios) ? ratios : [];
   const safeItems = Array.isArray(items) ? items : [];
 

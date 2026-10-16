@@ -2,6 +2,7 @@ COL accounting_periods.closed_at:timestamp with time zone:NULL
 COL accounting_periods.closed_by:integer:NULL
 COL accounting_periods.created_at:timestamp with time zone:NOT NULL
 COL accounting_periods.fiscal_year:integer:NOT NULL
+COL accounting_periods.fy_label:character varying:NULL
 COL accounting_periods.id:integer:NOT NULL
 COL accounting_periods.name:character varying:NOT NULL
 COL accounting_periods.period_end:date:NOT NULL

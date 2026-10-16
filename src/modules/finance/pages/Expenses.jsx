@@ -4,6 +4,7 @@ import { Plus, Search, CreditCard, Download, Wallet, Eye } from 'lucide-react';
 import { downloadCSV } from '../../../utils/csvExport';
 import { useQuery } from '@tanstack/react-query';
 import api from '../../../api/client';
+import { fetchPageOrAll } from '../../../shared/utils/fetchAllPages';
 import { useAuth } from '../../../context/AuthContext';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { useFinanceDrawers } from '../drawers/drawersContext';
@@ -26,7 +27,9 @@ function unwrap(res, key) {
 function useExpenses(params = {}) {
   return useQuery({
     queryKey: ['expenses', 'list', params],
-    queryFn: async () => { const r = await api.get('/api/expenses', params); return unwrap(r, 'expenses') || []; },
+    // Every expense in the filter (all pages) — the newest 100 used to pass
+    // for the whole period (P4-11).
+    queryFn: () => fetchPageOrAll((p) => api.get('/api/expenses', p), params, 'expenses'),
   });
 }
 function useExpenseSummary() {
@@ -55,7 +58,6 @@ export default function Expenses() {
     ...(typeFilter ? { expense_type: typeFilter } : {}),
     ...(statusFilter ? { payment_status: statusFilter } : {}),
     ...rangeParams,
-    limit: 100,
   });
   const { data: summary = {} } = useExpenseSummary();
 

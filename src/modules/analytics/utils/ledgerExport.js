@@ -3,21 +3,25 @@
 // a self-contained window with a standard template (company header ·
 // filters-applied · generated-by/on · signature line) so every ledger prints
 // the same way regardless of which drawer it lives in.
-import { downloadCSV } from '../../../utils/csvExport';
+import { downloadCsv } from '../../../shared/utils/csv';
 import { fmtDate, fmtDateTime, fmtKg, fmtMT, fmtNum, fmtPKR, fmtPct } from '../../../shared/utils/format';
 
 // columns: [{ label, key?, accessor?(row), align? }]  rows: object[]
 export function exportLedgerCSV({ filename = 'ledger.csv', columns, rows }) {
-  downloadCSV(rows || [], columns || [], filename);
+  downloadCsv({ rows: rows || [], columns: columns || [], filename });
 }
 
 function esc(s) {
   return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+// Print shows figures grouped to the paisa; a raw number (the CSV form) is
+// formatted here, a missing / redacted one prints blank — never "0".
 function cellValue(col, row) {
   const v = typeof col.accessor === 'function' ? col.accessor(row) : row[col.key];
-  return v == null ? '' : v;
+  if (v == null) return '';
+  if (typeof v === 'number') return Number.isFinite(v) ? fmtNum(v) : '';
+  return v;
 }
 
 // Opens a print window with the standard ledger template and triggers print.
@@ -58,7 +62,7 @@ export function printLedger({ companyName = 'AGRI COMMODITIES', title, subtitle,
   </body></html>`;
 
   const w = window.open('', '_blank', 'width=980,height=720');
-  if (!w) return; // popup blocked
+  if (!w) return false; // popup blocked — the caller can say so
   w.document.open();
   w.document.write(html);
   w.document.close();
@@ -413,7 +417,6 @@ export function printBatchLedger(data, { companyName = 'AGRI COMMODITIES', gener
   const e = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const pkr = (v) => fmtPKR(parseFloat(v) || 0, { decimals: 2 });
   const kg = (v) => fmtKg(parseFloat(v) || 0);
-  const mt = (v) => fmtMT(parseFloat(v) || 0, { decimals: 2 });
   const dd = (v) => fmtDate(v);
   const { batch: b = {}, inputs = [], outputs = [], sales = [], costs = [], manualCosts: mc = {}, yieldSummary: ys = {}, financialSummary: fs = {}, exportUse = {} } = data;
   const exportOrders = exportUse.orders || [];
@@ -443,11 +446,11 @@ export function printBatchLedger(data, { companyName = 'AGRI COMMODITIES', gener
       ['Operator', e(b.operator || '—')], ['Machine line', e(b.machineLine || '—')], ['Shift', e(b.shift || '—')],
     ])}</div><div>${kv([
       ['Created', dd(b.createdAt)], ['Completed', dd(b.completedAt)], ['Processing hours', b.processingHours || '—'],
-      ['Input', mt(ys.inputMt)], ['Finished', mt(ys.finishedMt)], ['Yield', `${(parseFloat(ys.yieldPct) || 0).toFixed(1)}%`],
+      ['Input', kg(ys.inputKg)], ['Finished', kg(ys.finishedKg)], ['Yield', `${(parseFloat(ys.yieldPct) || 0).toFixed(1)}%`],
     ])}</div></div>
 
     <h4>Yield Summary</h4>
-    ${kv([['Input', mt(ys.inputMt)], ['Finished', mt(ys.finishedMt)], ['By-product', mt(ys.byproductMt)], ['Total output', mt(ys.totalOutputMt)], ['Processing loss', mt(ys.lossMt)], ['Yield %', `${(parseFloat(ys.yieldPct) || 0).toFixed(1)}%`]])}
+    ${kv([['Input', kg(ys.inputKg)], ['Finished', kg(ys.finishedKg)], ['By-product', kg(ys.byproductKg)], ['Total output', kg(ys.totalOutputKg)], ['Processing loss', kg(ys.lossKg)], ['Yield %', `${(parseFloat(ys.yieldPct) || 0).toFixed(1)}%`]])}
 
     <h4>Financial Summary</h4>
     ${kv([
@@ -460,7 +463,7 @@ export function printBatchLedger(data, { companyName = 'AGRI COMMODITIES', gener
     <div class="muted" style="margin-top:4px">${e(fs.costBasis || '')}</div>
 
     <h4>Inputs — source rice lots</h4>
-    ${tbl([{ t: 'Lot' }, { t: 'Rice' }, { t: 'Supplier' }, { t: 'Qty', r: 1 }, { t: 'Cost', r: 1 }], inputs.map(i => [e(i.lotNo || '—'), e(i.item || i.variety || '—'), e(i.supplier || '—'), mt(i.qtyMt), pkr(i.costTotalPkr)]))}
+    ${tbl([{ t: 'Lot' }, { t: 'Rice' }, { t: 'Supplier' }, { t: 'Qty', r: 1 }, { t: 'Cost', r: 1 }], inputs.map(i => [e(i.lotNo || '—'), e(i.item || i.variety || '—'), e(i.supplier || '—'), kg(i.qtyKg), pkr(i.costTotalPkr)]))}
 
     <h4>Processing costs</h4>
     ${costRows.length ? kv(costRows) : '<div class="muted">No recorded processing costs.</div>'}

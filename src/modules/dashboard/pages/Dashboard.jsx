@@ -21,16 +21,18 @@ import RecentActivity from './dashboard/RecentActivity';
 import PendingApprovalsCard from '../components/PendingApprovalsCard';
 import { useOwnerAuth } from '../../../context/OwnerAuthContext';
 import { canSeeCost, canSeeProfit } from '../../../hooks/useCanSeeCost';
-import { useProfitHeadline, useCollectionRate } from '../../../api/queries';
-import { collectionTile } from '../../finance/utils/currencyTiles';
+import { useProfitHeadline, useCollectionRate, useExportOrderBook } from '../../../api/queries';
+import { collectionTile, byCurrencyText, pkrEquivText } from '../../finance/utils/currencyTiles';
 import { isBalanceDue } from '../../exportOrders/components/constants';
 import StatusBadge from '../../../shared/components/StatusBadge';
 import useConfirm from '../../../hooks/useConfirm';
-import { fmtUSD, fmtPKR, fmtMT, fmtKg, fmtPct, fmtDate } from '../../../shared/utils/format';
+import { fmtPKR, fmtMT, fmtKg, fmtPct, fmtDate } from '../../../shared/utils/format';
+import { isActiveOrder } from '../../../shared/constants/orderStatus';
 
 // ─── Formatting ────────────────────────────────────────────────────────
 // Exact figures from the shared formatter (en-PK locale, no abbreviation).
-const fmt = (v) => fmtUSD(Number(v) || 0, { decimals: 0 });
+// Money is one figure PER CURRENCY from the server (P4-09) — never summed.
+const fmtBy = (by) => byCurrencyText(by).all;
 // Milling quantities are stored as MT on the batch; the mill reads kg.
 const fmtMtAsKg = (v) => fmtKg((Number(v) || 0) * 1000);
 
@@ -79,6 +81,8 @@ export default function Dashboard() {
   // received ÷ contract value against a fixed 80%.
   const { data: collectionData } = useCollectionRate({ enabled: showMoney });
   const collection = collectionTile({ collection: collectionData || { byCurrency: {}, targetPct: 95 } });
+  // P4-09: Order Book / Money Received / Outstanding per currency, from the server.
+  const { data: orderBookData } = useExportOrderBook({ enabled: showMoney });
   const bookedExport = profitHeadline.export || {};
   const bookedHint = [
     (bookedExport.estimatedCount || 0) > 0 ? `${bookedExport.estimatedCount} estimated` : null,
@@ -117,21 +121,26 @@ export default function Dashboard() {
   const totalActions = pendingApprovalBatches.length + awaitingAdvance + docsInPrep + readyToShip + varianceAlerts + masterApprovals + dashApprovals;
 
   // ─── KPIs ───
-  const activeOrders = safeOrders.filter(o => !['Draft', 'Closed', 'Cancelled'].includes(o.status)).length;
+  const activeOrders = safeOrders.filter(isActiveOrder).length; // D-15 (shared/constants/orderStatus)
   const activeBatches = safeBatches.filter(b => ['In Progress', 'Queued', 'Pending Approval'].includes(b.status)).length;
   const shipmentsInTransit = safeOrders.filter(o => o.status === 'Shipped').length;
-  const totalReceivable = safeOrders.reduce((s, o) => {
-    const out = (Number(o.contractValue) || 0) - (Number(o.advanceReceived) || 0) - (Number(o.balanceReceived) || 0);
-    return out > 0 ? s + out : s;
-  }, 0);
-  const totalContractValue = safeOrders.reduce((s, o) => s + (Number(o.contractValue) || 0), 0);
+  // ─── Order book (server, per currency; Draft / Cancelled excluded) ───
+  const orderBook = orderBookData?.orderBook || null;
+  const orderBookText = byCurrencyText(orderBook?.byCurrency);
+  const receivedText = byCurrencyText(orderBookData?.received?.byCurrency);
+  const outstandingText = byCurrencyText(orderBookData?.outstanding?.byCurrency);
 
   // ─── Pipeline ───
+  // Counts and per-currency values from the server's phases (a Draft is
+  // counted, never valued); before it loads, counts from the order list.
+  const serverPhases = Object.fromEntries((orderBookData?.phases || []).map((p) => [p.label, p]));
   const phaseCounts = PHASES.map(phase => ({
     ...phase,
-    count: safeOrders.filter(o => phase.statuses.includes(o.status)).length,
-    value: safeOrders.filter(o => phase.statuses.includes(o.status)).reduce((s, o) => s + (Number(o.contractValue) || 0), 0),
+    count: serverPhases[phase.label]?.count ?? safeOrders.filter(o => phase.statuses.includes(o.status)).length,
+    byCurrency: serverPhases[phase.label]?.byCurrency || null,
   }));
+  // The phases cover every status but Cancelled and a Draft is never valued,
+  // so their values together ARE the order book (server figure, per currency).
   const totalPipelineOrders = phaseCounts.reduce((s, p) => s + p.count, 0);
 
   // ─── Production summary (this week / month) ───
@@ -154,17 +163,6 @@ export default function Dashboard() {
   const productionWeek = sumProduction(startOfWeek);
   const productionMonth = sumProduction(startOfMonth);
   const yieldWeek = productionWeek.rawMt > 0 ? (productionWeek.finishedMt / productionWeek.rawMt) * 100 : null;
-
-  // ─── Money flow snapshot — derived from order receipts ───
-  const moneyFlow = safeOrders.reduce(
-    (a, o) => {
-      const recv = (Number(o.advanceReceived) || 0) + (Number(o.balanceReceived) || 0);
-      a.received += recv;
-      a.outstanding += Math.max(0, (Number(o.contractValue) || 0) - recv);
-      return a;
-    },
-    { received: 0, outstanding: 0 }
-  );
 
   // ─── Yield distribution ───
   const yieldDistribution = useMemo(() => {
@@ -346,17 +344,17 @@ export default function Dashboard() {
           icon={Ship}
           tone="blue"
           label="Order Book"
-          primary={fmt(totalContractValue)}
-          secondary={`${activeOrders} active orders`}
-          hint={`${shipmentsInTransit} in transit`}
+          primary={orderBookText.primary}
+          secondary={[orderBookText.rest, `${orderBook?.count ?? 0} booked orders (excl. Draft / Cancelled)`].filter(Boolean).join(' · ')}
+          hint={pkrEquivText(orderBook?.pkrEquiv) || `${activeOrders} active · ${shipmentsInTransit} in transit`}
           onClick={canExport ? () => navigate('/export') : undefined}
         />
         <KpiTile
           icon={Wallet}
           tone="emerald"
           label="Money Received"
-          primary={fmt(moneyFlow.received)}
-          secondary={`Collection ${collection.primary} of amounts due`}
+          primary={receivedText.primary}
+          secondary={[receivedText.rest, `Collection ${collection.primary} of amounts due`].filter(Boolean).join(' · ')}
           hint={collection.hint}
           hintBad={collection.bad}
           onClick={canFinance ? () => navigate('/finance/money-in') : undefined}
@@ -365,8 +363,8 @@ export default function Dashboard() {
           icon={Clock}
           tone="amber"
           label="Outstanding"
-          primary={fmt(moneyFlow.outstanding)}
-          secondary="Open balance to collect"
+          primary={outstandingText.primary}
+          secondary={[outstandingText.rest, 'Open receivables to collect'].filter(Boolean).join(' · ')}
           hint={awaitingBalance > 0 ? `${awaitingBalance} awaiting balance` : 'No urgent collections'}
           hintBad={awaitingBalance > 0}
           onClick={canFinance ? () => navigate('/finance/money-in') : undefined}
@@ -391,7 +389,7 @@ export default function Dashboard() {
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
             <Activity size={14} className="text-blue-500" /> Order Pipeline
-            <span className="text-xs text-gray-400 font-normal">({totalPipelineOrders} orders{showMoney ? ` · ${fmt(phaseCounts.reduce((s, p) => s + p.value, 0))}` : ''})</span>
+            <span className="text-xs text-gray-400 font-normal">({totalPipelineOrders} orders{showMoney ? ` · ${fmtBy(orderBook?.byCurrency)}` : ''})</span>
           </h2>
           {canExport && <Link to="/export" className="text-xs text-blue-600 hover:underline">All orders →</Link>}
         </div>
@@ -420,7 +418,7 @@ export default function Dashboard() {
                     <p className="text-[11px] font-semibold text-gray-600 uppercase tracking-wider">{phase.label}</p>
                   </div>
                   <p className="text-2xl font-bold text-gray-900 leading-none">{phase.count}</p>
-                  {showMoney && <p className="text-[11px] text-gray-500 mt-1">{fmt(phase.value)}</p>}
+                  {showMoney && <p className="text-[11px] text-gray-500 mt-1">{phase.byCurrency ? fmtBy(phase.byCurrency) : '—'}</p>}
                 </button>
               ))}
             </div>

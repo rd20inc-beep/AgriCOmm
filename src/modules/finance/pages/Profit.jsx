@@ -2,7 +2,10 @@ import { useState, useMemo } from 'react';
 import OrderRefLink from '../../../shared/components/OrderRefLink';
 import { TrendingUp, TrendingDown, DollarSign, Factory, Store, AlertTriangle, CheckCircle, RefreshCw, Activity, Printer } from 'lucide-react';
 import { FinanceKPI, FinanceTable, FinanceChart } from '../../../components/finance';
-import { useProfitabilitySummary, useLocalSales } from '../../../api/queries';
+import { useProfitabilitySummary, useLocalSalesReport } from '../../../api/queries';
+import { usePageFor } from '../../analytics/api/reportHooks';
+import { ReportPager } from '../../analytics/components/ReportChrome';
+import { downloadServerCsv } from '../../../shared/utils/csv';
 import { useFinanceDateRange, overviewSummaryParams } from '../hooks/useFinanceDateRange';
 import { rangeLabel } from '../financeNav';
 import { fxRateLabel } from '../utils/fx';
@@ -10,7 +13,6 @@ import { useApp } from '../../../context/AppContext';
 import StatusBadge from '../../../shared/components/StatusBadge';
 import { fmtPKR, fmtMoney, fmtPct, fmtDate, fmtDateTime, fmtKg } from '../../../shared/utils/format';
 import { HeadlineCard, TypeChip } from '../components/FinanceUI';
-import { saleCogs } from '../../localSales/utils/saleLot';
 
 const TABS = ['Export', 'Mill', 'Local', 'Consolidated'];
 
@@ -43,13 +45,17 @@ function AccuracyBadge({ status }) {
 
 export default function Profit() {
   const { companyProfileData } = useApp();
+  const [tab, setTab] = useState('Export');
   // Every figure here is the server's one profit definition
   // (backend finance/profitDefinitions.js), for the period in the URL.
   const { queryParams: rangeParams, rangeKey } = useFinanceDateRange();
   const periodLabel = rangeKey ? rangeLabel(rangeKey) : 'All time';
   const { data: summary = {}, isLoading } = useProfitabilitySummary(overviewSummaryParams(rangeParams));
-  const { data: localSales = [], isLoading: localLoading } = useLocalSales();
-  const [tab, setTab] = useState('Export');
+  // Local tab: CONFIRMED sales in the period, one server page with server
+  // totals (RPT-31) — it used to be the 100 newest sales of any status, undated.
+  const [localPage, setLocalPage] = usePageFor(rangeParams);
+  const { data: { rows: localSales = [], totals: localTotals, pagination: localPaging } = {}, isLoading: localLoading } =
+    useLocalSalesReport({ ...rangeParams, page: localPage, limit: 200 }, { enabled: tab === 'Local' || tab === 'Consolidated' });
 
   function handlePrint() {
     document.body.classList.add('app-print-mask');
@@ -147,15 +153,10 @@ export default function Profit() {
       }));
     }
     if (tab === 'Local') {
+      // Costed confirmed sales on this page: the locked COGS the GL posted.
       return (localSales || [])
-        .filter(s => parseFloat(s.totalAmount) > 0)
-        .map(s => ({
-          name: s.saleNo,
-          Revenue: parseFloat(s.totalAmount) || 0,
-          // The locked COGS the GL posted (pending: estimate) — P3-12.
-          Cost:    saleCogs(s).cost,
-          Profit:  (parseFloat(s.totalAmount) || 0) - saleCogs(s).cost,
-        }));
+        .filter(s => s.costed && parseFloat(s.totalAmount) > 0)
+        .map(s => ({ name: s.saleNo, Revenue: s.totalAmount, Cost: s.cogs, Profit: s.grossProfit }));
     }
     if (tab === 'Consolidated') {
       // Server totals: export Booked, mill realised, local other — each sale once.
@@ -180,13 +181,12 @@ export default function Profit() {
     { key: 'itemName', label: 'Item', render: (v) => v || '—' },
     { key: 'quantityKg', label: 'Qty (kg)', sortable: true, align: 'right', render: (v) => fmtKg(parseFloat(v) || 0) },
     { key: 'totalAmount', label: 'Revenue', sortable: true, align: 'right', render: (v) => fmtPKR(v) },
-    { key: 'cogsTotalPkr', label: 'Cost', align: 'right', render: (v, row) => fmtPKR(saleCogs(row).cost) },
-    { key: 'grossProfit', label: 'Profit', sortable: true, align: 'right', render: (v, row) => {
-      const n = (parseFloat(row.totalAmount) || 0) - saleCogs(row).cost;
-      return <span className={n >= 0 ? 'text-emerald-600 font-medium' : 'text-red-600 font-medium'}>{fmtPKR(n)}</span>;
-    }},
-    { key: 'marginPct', label: 'Margin', sortable: true, align: 'right', render: (v) => fmtPct(v) },
-    { key: 'paymentStatus', label: 'Status', render: (v) => <StatusBadge status={v || 'Pending'} /> },
+    { key: 'cogs', label: 'Cost', sortable: true, align: 'right', render: (v, row) => (row.costed ? fmtPKR(v) : <span className="text-xs text-amber-700">not costed</span>) },
+    { key: 'grossProfit', label: 'Profit', sortable: true, align: 'right', render: (v) => (v == null ? '—' : (
+      <span className={v >= 0 ? 'text-emerald-600 font-medium' : 'text-red-600 font-medium'}>{fmtPKR(v)}</span>
+    ))},
+    { key: 'marginPct', label: 'Margin', sortable: true, align: 'right', render: (v) => (v == null ? '—' : fmtPct(v)) },
+    { key: 'paymentWord', label: 'Payment', render: (v) => <StatusBadge status={v} /> },
   ];
 
   const HeroIcon = consolidatedPkr >= 0 ? TrendingUp : TrendingDown;
@@ -285,8 +285,19 @@ export default function Profit() {
           searchKeys={['batchNo']} exportFilename="mill-profitability-pkr" loading={isLoading} />
       )}
       {(tab === 'Local' || tab === 'Consolidated') && (
-        <FinanceTable title="Local Sales — PKR (all; sales of mill output count in Mill profit)" columns={localColumns} data={localSales}
-          searchKeys={['saleNo', 'buyerName', 'itemName']} exportFilename="local-sales-profitability-pkr" loading={localLoading} />
+        <>
+          {localTotals && (
+            <p className="text-xs text-gray-600" data-testid="local-totals">
+              {localTotals.count} confirmed sale{localTotals.count === 1 ? '' : 's'} · {periodLabel} · revenue {fmtPKR(localTotals.revenue)} · COGS {fmtPKR(localTotals.cogs)} · gross {fmtPKR(localTotals.grossProfit)}
+              {localTotals.marginPct != null && <> ({fmtPct(localTotals.marginPct)})</>}
+              {localTotals.uncostedCount > 0 && <> · {localTotals.uncostedCount} not costed ({fmtPKR(localTotals.uncostedRevenue)}) left out of profit</>}
+            </p>
+          )}
+          <ReportPager pagination={localPaging} onPage={setLocalPage} />
+          <FinanceTable title="Local Sales — confirmed, PKR (sales of mill output count in Mill profit)" columns={localColumns} data={localSales}
+            searchKeys={['saleNo', 'buyerName', 'itemName']} loading={localLoading}
+            onExport={() => downloadServerCsv('/api/reporting/local-sales', rangeParams, 'local-sales-profitability-pkr')} />
+        </>
       )}
       </div>{/* /.print-report */}
     </div>

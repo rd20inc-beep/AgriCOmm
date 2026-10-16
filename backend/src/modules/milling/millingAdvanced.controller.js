@@ -1,6 +1,10 @@
 const db = require('../../config/database');
 const millingService = require('../../services/millingService');
 const { redactForUser } = require('../../utils/costVisibility');
+const { resolvePeriod } = require('../../shared/fiscalYear');
+const { foldMillCash, inLedgerSql } = require('../kpi/millCashFlow');
+const { KPI_CONTRACTS } = require('../kpi/contracts');
+const { LOCAL_SALE_EXCLUDED } = require('../finance/profitDefinitions');
 
 // Editable columns per master table. An update copies only these from the
 // body — never id, timestamps or anything else a caller adds (mass-assign).
@@ -713,7 +717,13 @@ const millingAdvancedController = {
   // =========================================================================
   async cashFlow(req, res) {
     try {
-      const { from_date, to_date } = req.query;
+      // A period key (month / quarter / fytd / fy / all, fiscal year July–June)
+      // resolves on the server; explicit from_date / to_date still work.
+      let { from_date, to_date } = req.query;
+      if (req.query.period) {
+        const p = resolvePeriod({ period: req.query.period, from: from_date, to: to_date });
+        from_date = p.from; to_date = p.to;
+      }
       // PKR-normalized amount. base_amount_pkr is the locked PKR value, but some
       // rows (e.g. local-sale receipts) leave it 0 — so fall back to the PKR
       // amount, or convert a foreign amount by its fx rate. (COALESCE alone
@@ -734,8 +744,9 @@ const millingAdvancedController = {
           .join('payables as pa', 'pa.id', 'p.linked_payable_id')
           .leftJoin('suppliers as s', 's.id', 'pa.supplier_id')
           .where('p.type', 'payment').andWhere('pa.entity', 'mill')
+          .whereRaw(inLedgerSql('p'))
           .select(
-            'p.id', 'p.payment_no', 'p.payment_date', 'p.payment_method',
+            'p.id', 'p.payment_no', 'p.payment_date', 'p.payment_method', 'p.status', 'p.cleared',
             db.raw(`${amtPkr} as amount_pkr`),
             'pa.category', 'pa.pay_no as ref', 'pa.source_table', 'pa.source_id', 'pa.linked_ref',
             's.name as counterparty'
@@ -748,8 +759,9 @@ const millingAdvancedController = {
           .join('local_sales as ls', 'ls.id', 'p.local_sale_id')
           .leftJoin('customers as c', 'c.id', 'ls.customer_id')
           .where('p.type', 'receipt').andWhere('ls.entity', 'mill')
+          .whereRaw(inLedgerSql('p'))
           .select(
-            'p.id', 'p.payment_no', 'p.payment_date', 'p.payment_method',
+            'p.id', 'p.payment_no', 'p.payment_date', 'p.payment_method', 'p.status', 'p.cleared',
             db.raw(`${amtPkr} as amount_pkr`),
             'ls.item_name as category', 'ls.sale_no as ref',
             db.raw('COALESCE(c.name, ls.buyer_name) as counterparty')
@@ -862,14 +874,14 @@ const millingAdvancedController = {
         }
       }
 
-      const ledger = [
+      // mill_cash_flow.v1 (kpi/millCashFlow.js): every row is listed, but only
+      // settled money counts — not a Reversed / Bounced payment, not an
+      // uncleared cheque (the finance feed's rule, MIL-27).
+      const { ledger, summary } = foldMillCash([
         ...outRows.map((r) => ({ ...r, direction: 'out', amount_pkr: num(r.amount_pkr) })),
         ...inRows.map((r) => ({ ...r, direction: 'in', amount_pkr: num(r.amount_pkr) })),
         ...ftRows,
-      ].sort((a, b) => new Date(a.payment_date) - new Date(b.payment_date) || (String(a.id) < String(b.id) ? -1 : 1));
-
-      const cashOut = outRows.reduce((s, r) => s + num(r.amount_pkr), 0) + ftRows.filter((r) => r.direction === 'out').reduce((s, r) => s + r.amount_pkr, 0);
-      const cashIn = inRows.reduce((s, r) => s + num(r.amount_pkr), 0) + ftRows.filter((r) => r.direction === 'in').reduce((s, r) => s + r.amount_pkr, 0);
+      ].sort((a, b) => new Date(a.payment_date) - new Date(b.payment_date) || (String(a.id) < String(b.id) ? -1 : 1)));
 
       // Money-out streams: current paid-vs-outstanding snapshot. Every mill
       // payable is bucketed into a human-readable stream so transport, commission
@@ -887,8 +899,10 @@ const millingAdvancedController = {
             WHEN source_table = 'mill_purchases' THEN 'Mill store purchases'
             WHEN source_table IN ('mill_expenses', 'business_expenses') THEN 'Expenses & overhead'
             ELSE COALESCE(NULLIF(category, ''), source_table, 'Other') END`;
+      // A Reversed payable was never owed (its reversal undid it).
       const streamRows = await db('payables')
         .where('entity', 'mill')
+        .whereRaw("COALESCE(status, '') <> 'Reversed'")
         .select(
           db.raw(`${STREAM_CASE} as stream`),
           db.raw('SUM(original_amount) as billed'),
@@ -904,6 +918,7 @@ const millingAdvancedController = {
       const streamPayables = (await db('payables as p')
         .where('p.entity', 'mill')
         .where('p.outstanding', '>', 0.01)
+        .whereRaw("COALESCE(p.status, '') <> 'Reversed'")
         .leftJoin('suppliers as s', 's.id', 'p.supplier_id')
         .leftJoin('haulers as h', 'h.id', 'p.hauler_id')
         .select(
@@ -922,8 +937,12 @@ const millingAdvancedController = {
         }));
 
       // Money-in summary: local-sale collected vs outstanding.
-      const inSummary = await db('local_sales')
-        .where('entity', 'mill').whereNotIn('status', ['Cancelled', 'Voided', 'Pending'])
+      // Sales in the period (by sale date), by the profit rule's statuses.
+      let inQ = db('local_sales')
+        .where('entity', 'mill').whereNotIn('status', LOCAL_SALE_EXCLUDED);
+      if (from_date) inQ = inQ.where('sale_date', '>=', from_date);
+      if (to_date) inQ = inQ.where('sale_date', '<=', to_date);
+      const inSummary = await inQ
         .select(
           db.raw('COALESCE(SUM(total_amount), 0) as billed'),
           db.raw('COALESCE(SUM(paid_amount), 0) as collected'),
@@ -934,7 +953,10 @@ const millingAdvancedController = {
         success: true,
         data: {
           ledger,
-          summary: { cashIn, cashOut, net: cashIn - cashOut, count: ledger.length },
+          summary,
+          period: { from: from_date || null, to: to_date || null },
+          currency: 'PKR',
+          contract: KPI_CONTRACTS.millCashFlow,
           moneyOutStreams: streamRows.map((r) => ({
             stream: r.stream, billed: num(r.billed), paid: num(r.paid), outstanding: num(r.outstanding),
           })).sort((a, b) => b.billed - a.billed),
@@ -948,6 +970,7 @@ const millingAdvancedController = {
         },
       });
     } catch (err) {
+      if (err.status === 400) return res.status(400).json({ success: false, message: err.message });
       console.error('cashFlow error:', err);
       return res.status(500).json({ success: false, message: 'Internal server error.' });
     }

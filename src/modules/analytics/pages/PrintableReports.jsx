@@ -12,7 +12,9 @@ import {
   PurchaseLedgerView, SalesLedgerView, StockDetailView, PnlAccrualView, PnlCompareView,
   AuditReportView, FreightRecoveryView,
 } from './PrintableReportsViews';
-import { toLocalISODate } from '../../../shared/utils/format';
+import { toLocalISODate, todayLocalISO } from '../../../shared/utils/format';
+import { downloadCsvText } from '../../../shared/utils/csv';
+import { printableCsv } from '../utils/printableCsv';
 
 // ─── Period helpers ────────────────────────────────────────────────────
 // Each preset returns ISO strings for { from, to } and a label for
@@ -147,7 +149,7 @@ export default function PrintableReports() {
 
   // Period-based reports use the period selector; snapshot reports
   // (stock + AR/AP aging) ignore it.
-  const usesPeriod = ['production', 'pnl', 'pnl_accrual', 'pnl_compare', 'cashflow', 'purchase_ledger', 'sales_ledger', 'audit_trail'].includes(reportType);
+  const usesPeriod = ['production', 'pnl', 'pnl_accrual', 'pnl_compare', 'cashflow', 'purchase_ledger', 'sales_ledger', 'freight_recovery', 'audit_trail'].includes(reportType);
 
   const range = useMemo(() => {
     if (preset === 'custom' && customFrom && customTo) {
@@ -165,7 +167,10 @@ export default function PrintableReports() {
     setData(null);
     try {
       let res;
-      const periodParams = { from: range.from.toISOString(), to: range.to.toISOString() };
+      // The report contract (P4-05): from_date / to_date as LOCAL calendar days,
+      // both inclusive — not UTC instants, which put a Pakistan midnight on the
+      // previous day.
+      const periodParams = { from_date: toLocalISODate(range.from), to_date: toLocalISODate(range.to) };
       if (reportType === 'production') {
         res = await api.get('/api/reporting/printable/production', periodParams);
       } else if (reportType === 'pnl') {
@@ -323,6 +328,15 @@ export default function PrintableReports() {
               {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
               Refresh
             </button>
+            {/* The loaded report as a spreadsheet — raw figures, every section. */}
+            <button
+              onClick={() => downloadCsvText(printableCsv(data),
+                `${reportType}${usesPeriod ? `_${toLocalISODate(range.from)}_${toLocalISODate(range.to)}` : `_${todayLocalISO()}`}`)}
+              disabled={!data}
+              className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+            >
+              <FileText className="w-4 h-4" /> CSV
+            </button>
             <button
               onClick={handlePrint}
               disabled={!data}
@@ -352,16 +366,16 @@ export default function PrintableReports() {
           <PnlReportView data={data} companyName={companyName} range={range} preset={preset} />
         ) : reportType === 'cashflow' && data.summary ? (
           <CashflowReportView data={data} companyName={companyName} range={range} preset={preset} />
-        ) : reportType === 'ar_aging' && data.buckets ? (
+        ) : reportType === 'ar_aging' && data.byCurrency ? (
           <AgingReportView data={data} companyName={companyName} kind="receivable" />
-        ) : reportType === 'ap_aging' && data.buckets ? (
+        ) : reportType === 'ap_aging' && data.byCurrency ? (
           <AgingReportView data={data} companyName={companyName} kind="payable" />
         ) : reportType === 'purchase_ledger' && data.rows && data.totals ? (
           <PurchaseLedgerView data={data} companyName={companyName} range={range} />
         ) : reportType === 'sales_ledger' && data.local !== undefined ? (
           <SalesLedgerView data={data} companyName={companyName} range={range} />
         ) : reportType === 'freight_recovery' && data.totals ? (
-          <FreightRecoveryView data={data} companyName={companyName} />
+          <FreightRecoveryView data={data} companyName={companyName} range={range} />
         ) : reportType === 'stock_detail' && data.rows && data.millStore !== undefined ? (
           <StockDetailView data={data} companyName={companyName} showCost={showCost} />
         ) : reportType === 'audit_trail' && data.byCategory ? (

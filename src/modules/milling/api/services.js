@@ -21,6 +21,13 @@ export const millingApi = {
   getBatch: (id) => api.get(`/api/milling/batches/${id}`),
   sourceLots: (id) => api.get(`/api/milling/batches/${id}/source-lots`),
   cashFlow: (params) => api.get('/api/milling/cash-flow', params),
+  // Mill Finance KPIs (docs/AGRIRICE_KPI_CONTRACTS.md) — every figure computed
+  // on the server for a period: { period: 'month'|'quarter'|'fytd'|'fy'|'all' }.
+  financeKpis: (params) => api.get('/api/milling/finance-kpis', params),
+  // The rows behind a KPI: { part: 'sales'|'overheads'|'batches'|'stock', period, page, limit }.
+  financeKpiDetail: (params) => api.get('/api/milling/finance-kpis/detail', params),
+  // yield.v1 alone (no money): { period }.
+  yieldKpi: (params) => api.get('/api/milling/kpi/yield', params),
   // The mill's own payables / receivables, read-only, for mill roles without
   // finance.view (same shape as /api/finance/payables + /receivables).
   payables: (params) => api.get('/api/milling/payables', params),

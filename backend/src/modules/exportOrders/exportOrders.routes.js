@@ -40,6 +40,17 @@ router.get('/available-stock', authorizeAny(['export_orders', 'view'], ['invento
 // The suggested lot per order line (D-18): a proposal the user confirms with
 // allocate-stock { suggested: true }. Reserves nothing.
 router.get('/:id/suggested-lots', authorizeAny(['export_orders', 'view'], ['milling', 'view']), controller.suggestedLots);
+// P4-09: the order book per currency (dashboard + Export Desk tiles). Receivable
+// money is returned only to callers with the profit permission.
+router.get('/order-book', authorizeAny(['export_orders', 'view'], ['finance', 'view'], ['reports', 'view']),
+  require('./orderBook').orderBookHandler);
+// EXP-08: the create form's margin preview from the one profit definition.
+// Read-only (nothing is saved); profit-permission holders only.
+router.post('/profit-preview', authorize('export_orders', 'create'), (req, res, next) => {
+  require('../../utils/costVisibility').canSeeProfit(req).then((ok) => (ok ? next()
+    : res.status(403).json({ success: false, message: 'Forbidden. The margin preview needs the "View profit" permission.' })))
+    .catch(next);
+}, controller.profitPreview);
 router.get('/:id', authorize('export_orders', 'view'), controller.getById);
 router.post(
   '/',

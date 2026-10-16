@@ -9,7 +9,7 @@ import Modal from '../../../components/Modal';
 import ProformaInvoice from '../../../components/ProformaInvoice';
 import QuotationsPanel from '../components/QuotationsPanel';
 import { isBalanceDue } from '../components/constants';
-import { todayLocalISO, fmtUSD, fmtPct } from '../../../shared/utils/format';
+import { todayLocalISO, fmtMoney, fmtPct } from '../../../shared/utils/format';
 
 const tabs = [
   { key: 'All', label: 'All' },
@@ -77,7 +77,8 @@ export default function ExportOrders() {
       return 0;
     });
 
-  const formatCurrency = (value) => fmtUSD(value);
+  // In the order's own currency — EUR/GBP orders printed as '$' (EXP-23).
+  const formatCurrency = (value, currency) => fmtMoney(value, currency || 'USD');
 
   const getAdvanceStatus = (order) => {
     if (order.advanceReceived >= order.advanceExpected && order.advanceExpected > 0) return 'received';
@@ -96,13 +97,13 @@ export default function ExportOrders() {
     return 'Not Booked';
   };
 
+  // EXP-08: the order's Booked margin from the server's one profit definition
+  // (PKR at the booked rate) — it was a USD contract minus PKR costs. '—' when
+  // the order is not priced yet or the viewer may not see profit.
   const getMargin = (order) => {
-    const totalCosts = Object.values(order.costs || {}).reduce((sum, c) => sum + (parseFloat(c) || 0), 0);
-    if (totalCosts === 0) return '—';
-    const cv = parseFloat(order.contractValue) || 0;
-    if (cv === 0) return '—';
-    const margin = ((cv - totalCosts) / cv) * 100;
-    return fmtPct(margin);
+    const m = order.profit?.marginPct;
+    if (m == null) return '—';
+    return `${fmtPct(m)}${order.profit.estimated ? ' est.' : ''}`;
   };
 
   return (
@@ -121,6 +122,7 @@ export default function ExportOrders() {
               // Contract value ÷ qty: an average when the lines are priced differently.
               { key: 'pricePerMT', label: 'Avg Price/MT' },
               { key: 'contractValue', label: 'Contract Value' },
+              { key: 'currency', label: 'Currency' },
               { key: 'status', label: 'Status' },
               { key: 'createdAt', label: 'Created' },
             ], `export-orders-${todayLocalISO()}.csv`)}
@@ -224,7 +226,7 @@ export default function ExportOrders() {
                     <td data-label="Country" className="mob-hide px-4 py-3 text-gray-600">{order.country}</td>
                     <td data-label="Product" className="mob-hide px-4 py-3 text-gray-600">{order.productName}</td>
                     <td data-label="Qty MT" className="px-4 py-3 text-right text-gray-900 font-medium">{order.qtyMT}</td>
-                    <td data-label="Value" className="px-4 py-3 text-right text-gray-900 font-medium">{formatCurrency(order.contractValue)}</td>
+                    <td data-label="Value" className="px-4 py-3 text-right text-gray-900 font-medium">{formatCurrency(order.contractValue, order.currency)}</td>
                     <td data-label="Advance" className="mob-hide px-4 py-3 text-center">
                       <StatusBadge status={advanceStatus === 'received' ? 'Received' : 'Pending'} />
                     </td>

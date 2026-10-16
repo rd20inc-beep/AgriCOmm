@@ -1,8 +1,10 @@
-import { useState, useMemo, useEffect, useRef } from 'react';
+import { useState, useMemo, useEffect, useRef, useDeferredValue } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { useApp } from '../../../context/AppContext';
-import { useCreateExportOrder, useFxRates } from '../../../api/queries';
+import { useAuth } from '../../../context/AuthContext';
+import { canSeeProfit } from '../../../hooks/useCanSeeCost';
+import { useCreateExportOrder, useFxRates, useExportProfitPreview } from '../../../api/queries';
 import api from '../../../api/client';
 import {
   Save, Send, DollarSign, Calculator, ArrowLeft, Package, Truck,
@@ -26,10 +28,10 @@ import { PORTS } from '../../../shared/constants/ports';
 import { favStar } from '../../../shared/utils/favorites';
 import {
   EMPTY_ITEM, requiresMasterBag, masterOptionsFor, orderTotals, needsBagWidgetFor,
-  mixedPackingTotals, singleBagCountFor, estimateCosting, buildCreateOrderPayload,
+  mixedPackingTotals, singleBagCountFor, advanceSplit, profitPreviewBody, buildCreateOrderPayload,
   customerPrefill, lastOrderPrefill,
 } from '../utils/createOrderForm';
-import { todayLocalISO, fmtNum, fmtUSD, fmtPKR, fmtPct } from '../../../shared/utils/format';
+import { todayLocalISO, fmtNum, fmtPKR, fmtPct, fmtMoney } from '../../../shared/utils/format';
 
 const RECEIVING_MODES = [
   { value: 'bags', label: 'In Bags', desc: 'Standard packed bags', icon: ShoppingBag },
@@ -51,6 +53,7 @@ const BAG_MATERIALS = ['Polythene', 'Woven', 'Non-Woven', 'Cotton'];
 export default function CreateExportOrder() {
   const { addToast, customersList: customers, productsList: products, exportCostCategories, bagTypesList, suppliersList, bankAccountsList } = useApp();
   const createOrderMut = useCreateExportOrder();
+  const { hasPermission } = useAuth();
   // One submit at a time. The ref blocks a second click in the same tick (state
   // hasn't re-rendered yet); the state drives the disabled buttons. It stays set
   // through the navigate, so a click while it runs can't create a second order
@@ -200,8 +203,16 @@ export default function CreateExportOrder() {
   // Single bag mode totals
   const singleBagCount = singleBagCountFor(form, totalKg);
 
-  // ─── Costing ─── (see estimateCosting: entered freight beats the $65/MT guess)
-  const costing = useMemo(() => estimateCosting(form, items), [form, items]);
+  // ─── Costing ─── advance / balance in the order's currency; the margin is
+  // the server's profit definition run on the unsaved order (EXP-08).
+  const costing = useMemo(() => advanceSplit(form, items), [form, items]);
+  const canProfit = canSeeProfit(hasPermission);
+  const previewBody = useDeferredValue(useMemo(
+    () => profitPreviewBody(form, items, printedBags), [form, items, printedBags],
+  ));
+  const { data: preview, isFetching: previewLoading } = useExportProfitPreview(previewBody, {
+    enabled: canProfit && previewBody.contract_value > 0 && previewBody.items.length > 0,
+  });
 
 
   // ─── Wizard step ───
@@ -613,7 +624,7 @@ export default function CreateExportOrder() {
                 <p className="text-[11px] text-gray-600 mt-1 leading-snug">
                   {form.freightDisplay === 'in_price'
                     ? `The price per MT above is read as the delivered ${form.incoterm} price, and the documents show the FOB value inside it.`
-                    : `The price per MT above is read as the FOB price; freight is charged beside it, so the buyer owes ${fmtUSD(qtyMT * ((parseFloat(form.freightPerMT) || 0) + (parseFloat(form.insurancePerMT) || 0)))} on top of the contract value.`}
+                    : `The price per MT above is read as the FOB price; freight is charged beside it, so the buyer owes ${fmtMoney(qtyMT * ((parseFloat(form.freightPerMT) || 0) + (parseFloat(form.insurancePerMT) || 0)), form.currency || 'USD')} on top of the contract value.`}
                 </p>
               )}
             </div>
@@ -631,7 +642,7 @@ export default function CreateExportOrder() {
               <div><span className="text-blue-600">MT:</span> <span className="font-bold text-gray-900">{qtyMT}</span></div>
             </div>
             {contractValue > 0 && (
-              <p className="mt-2 text-sm font-semibold text-blue-800">Contract Value: {fmtUSD(contractValue)}</p>
+              <p className="mt-2 text-sm font-semibold text-blue-800">Contract Value: {fmtMoney(contractValue, form.currency || 'USD')}</p>
             )}
           </div>
         )}
@@ -1149,36 +1160,43 @@ export default function CreateExportOrder() {
         <div className="bg-white rounded-xl border border-gray-200 p-6">
           <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-4 flex items-center gap-2"><DollarSign className="w-4 h-4" /> Costing Preview</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* EXP-08: the margin comes from the server's profit definition run
+                on this unsaved order — rice cost ESTIMATED from current stock
+                cost / the rate master, op costs = the printed bags above
+                (nothing else is recorded yet). PKR at the booked rate. */}
             <div className="space-y-2">
-              {[
-                ['Estimated Raw Qty', `${costing.estimatedRawQty} MT`],
-                ['Rice Cost', fmtUSD(costing.riceCost)],
-                ...(form.receivingMode !== 'loose' ? [['Bags Cost', fmtUSD(costing.bagsCost)]] : []),
-                ['Loading', fmtUSD(costing.loadingCost)],
-                ['Clearing', fmtUSD(costing.clearingCost)],
-                ...(costing.freightCost > 0 ? [['Freight', fmtUSD(costing.freightCost)]] : []),
-              ].map(([l, v]) => (
-                <div key={l} className="flex justify-between text-sm"><span className="text-gray-600">{l}</span><span className="font-medium">{v}</span></div>
-              ))}
-              <div className="border-t pt-2 flex justify-between text-sm font-semibold"><span>Total Est. Cost</span><span>{fmtUSD(costing.totalEstimatedCost)}</span></div>
+              {!canProfit ? (
+                <p className="text-sm text-gray-500">The margin preview is shown to roles that may see profit.</p>
+              ) : !preview ? (
+                <p className="text-sm text-gray-500">{previewLoading ? 'Pricing…' : 'Pick a product and quantity to see the estimated margin.'}</p>
+              ) : (
+                <>
+                  <div className="flex justify-between text-sm"><span className="text-gray-600">Revenue (PKR)</span><span className="font-medium">{preview.revenuePkr == null ? '—' : fmtPKR(preview.revenuePkr)}</span></div>
+                  {preview.freightRevenuePkr > 0 && <div className="flex justify-between text-xs text-gray-500"><span>incl. freight charged separately</span><span>{fmtPKR(preview.freightRevenuePkr)}</span></div>}
+                  <div className="flex justify-between text-sm"><span className="text-gray-600">Rice cost (estimated)</span><span className="font-medium">{preview.riceCostPkr == null ? '—' : fmtPKR(preview.riceCostPkr)}</span></div>
+                  {preview.printedBagsCostPkr > 0 && <div className="flex justify-between text-sm"><span className="text-gray-600">Printed bags</span><span className="font-medium">{fmtPKR(preview.printedBagsCostPkr)}</span></div>}
+                  <div className="border-t pt-2 flex justify-between text-sm font-semibold">
+                    <span>Est. Booked Profit (PKR)</span>
+                    <span className={preview.bookedProfitPkr == null ? 'text-gray-400' : preview.bookedProfitPkr >= 0 ? 'text-emerald-600' : 'text-red-600'}>{preview.bookedProfitPkr == null ? '—' : fmtPKR(preview.bookedProfitPkr)}</span>
+                  </div>
+                  <div className="flex justify-between text-sm font-semibold">
+                    <span>Est. Margin</span>
+                    <span>{preview.marginPct == null ? '—' : fmtPct(preview.marginPct)}</span>
+                  </div>
+                  <p className="text-xs text-gray-500">
+                    {preview.priced
+                      ? `Rice cost from ${String(preview.riceCostBasis || '').includes('rate_master') ? 'the commodity rate master' : 'current stock cost'}; freight, clearing and other costs are added once recorded on the order.`
+                      : (preview.revenuePkr == null ? 'No booked rate — enter one (or add a rate in Finance › Rates) to price it.' : 'No stock or rate-master price for this product — the margin cannot be estimated yet.')}
+                    {preview.fxEstimated ? ` Valued at the latest rate (${preview.fxRateUsed}), an estimate.` : ''}
+                  </p>
+                </>
+              )}
             </div>
             <div className="space-y-2">
-              <div className="flex justify-between text-sm"><span className="text-gray-600">Contract Value</span><span className="font-medium">{fmtUSD(contractValue)}</span></div>
-              <div className="flex justify-between text-sm"><span className="text-gray-600">Est. Cost</span><span className="font-medium">{fmtUSD(costing.totalEstimatedCost)}</span></div>
-              <div className="border-t pt-2 flex justify-between text-sm font-semibold">
-                <span>Gross Profit</span>
-                <span className={costing.estimatedGrossProfit >= 0 ? 'text-emerald-600' : 'text-red-600'}>{fmtUSD(costing.estimatedGrossProfit)}</span>
-              </div>
-              <div className="flex justify-between text-sm font-semibold">
-                <span>Margin</span>
-                <span className={costing.marginPct >= 15 ? 'text-emerald-600' : costing.marginPct >= 5 ? 'text-amber-600' : 'text-red-600'}>{fmtPct(costing.marginPct)}</span>
-              </div>
+              <div className="flex justify-between text-sm"><span className="text-gray-600">Contract Value</span><span className="font-medium">{fmtMoney(contractValue, form.currency || 'USD')}</span></div>
               {/* Advance / balance split, driven by the incoterm-derived advance % */}
-              <div className="border-t pt-2 flex justify-between text-sm"><span className="text-gray-600">Advance ({costing.advPct}%)</span><span className="font-medium">{fmtUSD(costing.advanceExpected)}</span></div>
-              <div className="flex justify-between text-sm"><span className="text-gray-600">Balance ({Math.max(0, 100 - costing.advPct)}%)</span><span className="font-medium">{fmtUSD(costing.balanceExpected)}</span></div>
-              <div className={`mt-2 p-2.5 rounded-lg text-xs font-medium ${costing.marginPct >= 15 ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : costing.marginPct >= 5 ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
-                {costing.marginPct >= 15 ? 'Healthy margin' : costing.marginPct >= 5 ? 'Low margin — review costs' : 'Negative/very low margin — reconsider pricing'}
-              </div>
+              <div className="border-t pt-2 flex justify-between text-sm"><span className="text-gray-600">Advance ({costing.advPct}%)</span><span className="font-medium">{fmtMoney(costing.advanceExpected, form.currency || 'USD')}</span></div>
+              <div className="flex justify-between text-sm"><span className="text-gray-600">Balance ({Math.max(0, 100 - costing.advPct)}%)</span><span className="font-medium">{fmtMoney(costing.balanceExpected, form.currency || 'USD')}</span></div>
             </div>
           </div>
         </div>

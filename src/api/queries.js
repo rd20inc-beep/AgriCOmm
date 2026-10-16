@@ -8,7 +8,7 @@ import api from './client';
 import { queryKeys } from './queryClient';
 import {
   exportOrdersApi, millingApi, inventoryApi, financeApi, accountingApi,
-  documentsApi, adminApi, communicationApi, reportingApi, procurementApi,
+  documentsApi, adminApi, communicationApi, procurementApi,
   auditApi, approvalsApi, intelligenceApi, controlApi, smartApi, lotInventoryApi,
   localSalesApi, usersApi, customersApi,
 } from './services';
@@ -18,6 +18,7 @@ import {
   transformKeys,
 } from './transforms';
 import { byFavoriteThenName } from '../shared/utils/favorites';
+import { fetchPageOrAll, attachListTotal } from '../shared/utils/fetchAllPages';
 
 // ===================== HELPERS =====================
 
@@ -52,14 +53,16 @@ function withListTotal(arr, res) {
 
 // ===================== EXPORT ORDERS =====================
 
+// Every order matching params (all pages) unless a page/limit is asked for —
+// the newest 200 used to pass for the whole book (EXP-23 / P4-11).
 export function useExportOrders(params = {}, opts = {}) {
   return useQuery({
     queryKey: queryKeys.orders.list(params),
     queryFn: async () => {
-      const res = await exportOrdersApi.list({ limit: 200, ...params });
-      const orders = unwrap(res, 'orders') || [];
-      return transformOrders(orders);
+      const orders = await fetchPageOrAll(exportOrdersApi.list, params, 'orders');
+      return attachListTotal(transformOrders(orders), orders.listTotal);
     },
+    structuralSharing: false,
     ...opts,
   });
 }
@@ -80,6 +83,7 @@ export function useExportOrder(id) {
         packingLines: res?.data?.packingLines || [],
         purchaseLots: res?.data?.purchaseLots || [],
         batchByproducts: res?.data?.batchByproducts || [],
+        profit: res?.data?.profit ?? null, // EXP-08: the one profit definition's row
         canSeeSupplierName: res?.data?.canSeeSupplierName !== false, // supplier privacy
       };
       return transformOrder(raw);
@@ -304,10 +308,11 @@ export function useMillingBatches(params = {}, opts = {}) {
   return useQuery({
     queryKey: queryKeys.batches.list(params),
     queryFn: async () => {
-      const res = await millingApi.listBatches({ limit: 200, ...params });
-      const batches = unwrap(res, 'batches') || [];
-      return transformBatches(batches);
+      // All pages unless a page/limit is asked for (P4-11: was the newest 200).
+      const batches = await fetchPageOrAll(millingApi.listBatches, params, 'batches');
+      return attachListTotal(transformBatches(batches), batches.listTotal);
     },
+    structuralSharing: false,
     ...opts,
   });
 }
@@ -394,6 +399,47 @@ export function useMillCashFlow(params = {}) {
       return res?.data || res || {};
     },
     staleTime: 15 * 1000,
+  });
+}
+
+// Mill Finance KPIs (P4-02): mill profit (D-13 headline), production value
+// (secondary), yield and working capital, all from the backend for a period.
+// Raw response, no key transform — the figures are read as the server names them.
+export function useMillFinanceKpis(params = {}, opts = {}) {
+  return useQuery({
+    queryKey: ['mill-finance-kpis', params],
+    queryFn: async () => {
+      const res = await millingApi.financeKpis(params);
+      return res?.data || res || null;
+    },
+    staleTime: 30 * 1000,
+    ...opts,
+  });
+}
+
+// Weighted milling yield (yield.v1) — quantities only, no cost gate.
+export function useMillingYieldKpi(params = {}, opts = {}) {
+  return useQuery({
+    queryKey: ['milling-yield-kpi', params],
+    queryFn: async () => {
+      const res = await millingApi.yieldKpi(params);
+      return res?.data || res || null;
+    },
+    staleTime: 60 * 1000,
+    ...opts,
+  });
+}
+
+// The rows behind a Mill Finance KPI, paged on the server.
+export function useMillFinanceKpiDetail(params = {}, opts = {}) {
+  return useQuery({
+    queryKey: ['mill-finance-kpi-detail', params],
+    queryFn: async () => {
+      const res = await millingApi.financeKpiDetail(params);
+      return res?.data || res || null;
+    },
+    staleTime: 30 * 1000,
+    ...opts,
   });
 }
 
@@ -660,6 +706,36 @@ export function useProfitHeadline(params = {}, options = {}) {
   });
 }
 
+// P4-09: the export order book, one figure per currency (never summed), from
+// the server (backend exportOrders/orderBook.js). Received / outstanding are
+// null for a caller without the profit permission.
+export function useExportOrderBook(options = {}) {
+  return useQuery({
+    queryKey: ['export-order-book'],
+    queryFn: async () => {
+      const res = await exportOrdersApi.orderBook();
+      return unwrap(res) || {};
+    },
+    staleTime: 30 * 1000,
+    ...options,
+  });
+}
+
+// EXP-08: the create form's margin preview — the same per-order row the order
+// page shows once saved (rice cost estimated from stock / the rate master).
+export function useExportProfitPreview(body, options = {}) {
+  return useQuery({
+    queryKey: ['export-profit-preview', body],
+    queryFn: async () => {
+      const res = await exportOrdersApi.profitPreview(body);
+      return unwrap(res) || null;
+    },
+    staleTime: 30 * 1000,
+    retry: false,
+    ...options,
+  });
+}
+
 // Collection rate (C6): received ÷ amounts due, per currency, with the
 // configurable target and the overdue amounts. Point in time.
 export function useCollectionRate(options = {}) {
@@ -719,6 +795,27 @@ export function useReceivables(params = {}, { enabled = true } = {}) {
     enabled,
     staleTime: 5 * 1000, // Finance data refreshes quickly
     refetchOnMount: 'always',
+  });
+}
+
+// Money In ▸ tiles + aging (P4-04), computed on the server: outstanding,
+// overdue and aging AS AT params.as_of, collected from params.from_date —
+// per currency, never summed.
+export function useReceivablesSummary(params = {}, { enabled = true } = {}) {
+  return useQuery({
+    queryKey: [...queryKeys.receivables.all, 'summary', params],
+    queryFn: async () => transformKeys(unwrap(await financeApi.receivablesSummary(params)) || {}),
+    enabled,
+    staleTime: 5 * 1000,
+    refetchOnMount: 'always',
+  });
+}
+
+// Accounting periods (D-1) — every month, or one fiscal year (params.fy).
+export function useAccountingPeriods(params = {}) {
+  return useQuery({
+    queryKey: ['accounting-periods', params],
+    queryFn: async () => transformKeys(unwrap(await accountingApi.periods(params)) || {}),
   });
 }
 
@@ -1220,12 +1317,13 @@ export function useCustomers(params = {}, opts = {}) {
   return useQuery({
     queryKey: queryKeys.customers.list(params),
     queryFn: async () => {
-      const res = await customersApi.list({ limit: 3000, ...params });
-      const list = unwrap(res, 'customers') || [];
+      // Every page: the server clamps a page to 200, so 'limit: 3000' silently
+      // returned the first 200 and the 201st customer vanished (TEC-07).
+      const list = await fetchPageOrAll(customersApi.list, params, 'customers');
       // Favorites first, then alphabetical — same contract as useBankAccounts.
       // The server orders this way too; sorting here keeps the offline/site
       // replica and any pre-existing cached payload consistent.
-      return list.map(transformCustomer).sort(byFavoriteThenName);
+      return attachListTotal(list.map(transformCustomer).sort(byFavoriteThenName), list.listTotal);
     },
     staleTime: 5 * 60 * 1000,
     ...opts,
@@ -1236,9 +1334,8 @@ export function useSuppliers(params = {}, opts = {}) {
   return useQuery({
     queryKey: queryKeys.suppliers.list(params),
     queryFn: async () => {
-      const res = await api.get('/api/suppliers', { limit: 500, ...params });
-      const list = unwrap(res, 'suppliers') || [];
-      return list.map(transformSupplier).sort(byFavoriteThenName);
+      const list = await fetchPageOrAll((p) => api.get('/api/suppliers', p), params, 'suppliers');
+      return attachListTotal(list.map(transformSupplier).sort(byFavoriteThenName), list.listTotal);
     },
     staleTime: 5 * 60 * 1000,
     ...opts,
@@ -1249,9 +1346,8 @@ export function useProducts(params = {}, opts = {}) {
   return useQuery({
     queryKey: queryKeys.products.list(params),
     queryFn: async () => {
-      const res = await api.get('/api/products', { limit: 200, ...params });
-      const list = unwrap(res, 'products') || [];
-      return list.map(transformProduct);
+      const list = await fetchPageOrAll((p) => api.get('/api/products', p), params, 'products');
+      return attachListTotal(list.map(transformProduct), list.listTotal);
     },
     staleTime: 5 * 60 * 1000,
     ...opts,
@@ -1262,8 +1358,8 @@ export function useWarehouses(opts = {}) {
   return useQuery({
     queryKey: queryKeys.warehouses.all,
     queryFn: async () => {
-      const res = await adminApi.warehouses({ limit: 100 });
-      return transformKeys(unwrap(res, 'warehouses') || []);
+      // Every page (P4-11) — a single page used to pass for the whole list.
+      return transformKeys(await fetchPageOrAll(adminApi.warehouses, {}, 'warehouses'));
     },
     staleTime: 10 * 60 * 1000,
     ...opts,
@@ -1274,8 +1370,7 @@ export function useBagTypes(opts = {}) {
   return useQuery({
     queryKey: ['bag-types'],
     queryFn: async () => {
-      const res = await adminApi.bagTypes({ limit: 100 });
-      return transformKeys(unwrap(res, 'bag_types') || unwrap(res, 'bagTypes') || []);
+      return transformKeys(await fetchPageOrAll(adminApi.bagTypes, {}, 'bag_types'));
     },
     staleTime: 10 * 60 * 1000,
     ...opts,
@@ -1571,8 +1666,8 @@ export function useBuyers(params = {}) {
   return useQuery({
     queryKey: ['buyers', 'list', params],
     queryFn: async () => {
-      const res = await customersApi.list({ limit: 500, ...params });
-      return unwrap(res, 'customers') || [];
+      // Every page (P4-11): 'limit: 500' was clamped to 200 by the server.
+      return fetchPageOrAll(customersApi.list, params, 'customers');
     },
     staleTime: 30 * 1000,
   });
@@ -2298,8 +2393,8 @@ export function useProductCategories() {
   return useQuery({
     queryKey: ['product-categories'],
     queryFn: async () => {
-      const res = await adminApi.productCategories({ limit: 500 });
-      return transformKeys(unwrap(res, 'product_categories') || unwrap(res, 'productCategories') || unwrap(res, 'rows') || []);
+      // Every page (P4-11): 'limit: 500' was read as the whole list.
+      return transformKeys(await fetchPageOrAll(adminApi.productCategories, {}, 'product_categories'));
     },
     staleTime: 5 * 60 * 1000,
   });
@@ -2366,18 +2461,15 @@ export function useDashboard() {
     queryKey: queryKeys.dashboard,
     queryFn: async () => {
       // Dashboard aggregates from multiple endpoints
+      // Every order / batch, not the newest 200 (P4-11).
       const [ordersRes, batchesRes, finRes] = await Promise.allSettled([
-        exportOrdersApi.list({ limit: 200 }),
-        millingApi.listBatches({ limit: 200 }),
+        fetchPageOrAll(exportOrdersApi.list, {}, 'orders'),
+        fetchPageOrAll(millingApi.listBatches, {}, 'batches'),
         financeApi.overview(),
       ]);
 
-      const orders = ordersRes.status === 'fulfilled'
-        ? transformOrders(unwrap(ordersRes.value, 'orders') || [])
-        : [];
-      const batches = batchesRes.status === 'fulfilled'
-        ? transformBatches(unwrap(batchesRes.value, 'batches') || [])
-        : [];
+      const orders = ordersRes.status === 'fulfilled' ? transformOrders(ordersRes.value) : [];
+      const batches = batchesRes.status === 'fulfilled' ? transformBatches(batchesRes.value) : [];
       const finance = finRes.status === 'fulfilled'
         ? transformKeys(unwrap(finRes.value) || {})
         : {};
@@ -2389,212 +2481,17 @@ export function useDashboard() {
 }
 
 // ===================== REPORTING =====================
-
-export function useExecutiveSummary(params = {}) {
-  return useQuery({
-    queryKey: ['executive-summary', params],
-    queryFn: async () => {
-      const res = await reportingApi.executiveSummary(params);
-      return transformKeys(unwrap(res) || {});
-    },
-  });
-}
-
-export function useOrderProfitability(params = {}) {
-  return useQuery({
-    queryKey: ['order-profitability', params],
-    queryFn: async () => {
-      const res = await reportingApi.orderProfitability(params);
-      return transformKeys(unwrap(res, 'orders') || unwrap(res) || []);
-    },
-  });
-}
-
-export function useCustomerProfitability(params = {}) {
-  return useQuery({
-    queryKey: ['customer-profitability', params],
-    queryFn: async () => {
-      const res = await reportingApi.customerProfitability(params);
-      return transformKeys(unwrap(res, 'customers') || unwrap(res) || []);
-    },
-  });
-}
-
-export function useCountryAnalysis(params = {}) {
-  return useQuery({
-    queryKey: ['country-analysis', params],
-    queryFn: async () => {
-      const res = await reportingApi.countryAnalysis(params);
-      return transformKeys(unwrap(res, 'countries') || unwrap(res) || []);
-    },
-  });
-}
-
-export function useLotTracker(params = {}) {
-  return useQuery({
-    queryKey: ['lot-tracker', params],
-    queryFn: async () => {
-      const res = await reportingApi.lotTracker(params);
-      const arr = res?.rows || res?.data?.rows || [];
-      return transformKeys(Array.isArray(arr) ? arr : []);
-    },
-    staleTime: 10 * 1000,
-  });
-}
-
-export function useSalesTracker(params = {}) {
-  return useQuery({
-    queryKey: ['sales-tracker', params],
-    queryFn: async () => {
-      const res = await reportingApi.salesTracker(params);
-      const arr = res?.rows || res?.data?.rows || [];
-      return transformKeys(Array.isArray(arr) ? arr : []);
-    },
-    staleTime: 10 * 1000,
-  });
-}
-
-export function useBatchMargin(params = {}) {
-  return useQuery({
-    queryKey: ['batch-margin', params],
-    queryFn: async () => {
-      const res = await reportingApi.batchMargin(params);
-      // Controller returns { success, batches } at the top level (api.get gives
-      // the body as `res`), so read res.batches — not the nested res.data.
-      const arr = res?.batches || res?.data?.batches || [];
-      return transformKeys(Array.isArray(arr) ? arr : []);
-    },
-    staleTime: 10 * 1000,
-  });
-}
-
-export function useStockAgingReport() {
-  return useQuery({
-    queryKey: ['stock-aging-report'],
-    queryFn: async () => {
-      const res = await reportingApi.stockAging();
-      return transformKeys(unwrap(res, 'aging') || unwrap(res) || []);
-    },
-  });
-}
-
-export function usePrintableStock(groupBy = 'product', status = 'Available') {
-  return useQuery({
-    queryKey: ['printable-stock', groupBy, status],
-    queryFn: async () => {
-      const res = await reportingApi.printableStock({ group_by: groupBy, status });
-      return transformKeys(unwrap(res) || {});
-    },
-  });
-}
-
-export function useSupplierQualityRanking(params = {}) {
-  return useQuery({
-    queryKey: ['supplier-quality-ranking', params],
-    queryFn: async () => {
-      const res = await reportingApi.supplierQualityRanking(params);
-      return transformKeys(unwrap(res, 'suppliers') || unwrap(res) || []);
-    },
-  });
-}
-
-export function useCashForecast(params = {}) {
-  return useQuery({
-    queryKey: ['cash-forecast', params],
-    queryFn: async () => {
-      const res = await reportingApi.cashForecast(params);
-      return transformKeys(unwrap(res) || {});
-    },
-  });
-}
-
-export function useKpiBenchmarks(params = {}) {
-  return useQuery({
-    queryKey: ['kpi-benchmarks', params],
-    queryFn: async () => { const res = await reportingApi.kpiBenchmarks(params); return transformKeys(unwrap(res) || []); },
-    staleTime: 30 * 1000,
-  });
-}
-
-export function useMillEfficiency(params = {}) {
-  return useQuery({
-    queryKey: ['mill-efficiency', params],
-    queryFn: async () => transformKeys(unwrap(await reportingApi.millEfficiency(params)) || []),
-    staleTime: 30 * 1000,
-  });
-}
-
-export function useRecoveryLeaderboard(params = {}) {
-  return useQuery({
-    queryKey: ['recovery-leaderboard', params],
-    queryFn: async () => transformKeys(unwrap(await reportingApi.recoveryLeaderboard(params)) || []),
-    staleTime: 30 * 1000,
-  });
-}
-
-export function useStockValuation(params = {}) {
-  return useQuery({
-    queryKey: ['stock-valuation', params],
-    queryFn: async () => transformKeys(unwrap(await reportingApi.stockValuation(params)) || {}),
-    staleTime: 30 * 1000,
-  });
-}
-
-export function useStockTurnover(params = {}) {
-  return useQuery({
-    queryKey: ['stock-turnover', params],
-    queryFn: async () => transformKeys(unwrap(await reportingApi.stockTurnover(params)) || {}),
-    staleTime: 30 * 1000,
-  });
-}
-
-export function useOperatorProductivity(params = {}) {
-  return useQuery({
-    queryKey: ['operator-productivity', params],
-    queryFn: async () => transformKeys(unwrap(await reportingApi.operatorProductivity(params)) || []),
-    staleTime: 30 * 1000,
-  });
-}
-
-export function useUtilityConsumption(params = {}) {
-  return useQuery({
-    queryKey: ['utility-consumption', params],
-    queryFn: async () => transformKeys(unwrap(await reportingApi.utilityConsumption(params)) || {}),
-    staleTime: 30 * 1000,
-  });
-}
-
-export function useRecoveryByVariety(params = {}) {
-  return useQuery({
-    queryKey: ['recovery-by-variety', params],
-    queryFn: async () => transformKeys(unwrap(await reportingApi.recoveryByVariety(params)) || []),
-    staleTime: 30 * 1000,
-  });
-}
-
-export function useSavedReports() {
-  return useQuery({
-    queryKey: ['saved-reports'],
-    queryFn: async () => transformKeys(unwrap(await reportingApi.savedReports(), 'reports') || []),
-    staleTime: 30 * 1000,
-  });
-}
-
-export function useSaveReport() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (data) => reportingApi.saveReport(data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['saved-reports'] }),
-  });
-}
-
-export function useDeleteSavedReport() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (id) => reportingApi.deleteSavedReport(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['saved-reports'] }),
-  });
-}
+// The report hooks live in ONE layer — modules/analytics/api/reportHooks.js
+// (camelCase always; list reports return { rows, totals, pagination, meta }).
+// Re-exported here so existing imports keep working.
+export {
+  useReport, useExecutiveSummary, useOrderProfitability, useCustomerProfitability,
+  useCountryAnalysis, useLotTracker, useSalesTracker, useBatchMargin, useLocalSalesReport,
+  useStockAgingReport, usePrintableStock, useSupplierQualityRanking, useCashForecast,
+  useKpiBenchmarks, useMillEfficiency, useRecoveryLeaderboard, useStockValuation,
+  useStockTurnover, useOperatorProductivity, useUtilityConsumption, useRecoveryByVariety,
+  useSavedReports, useSaveReport, useDeleteSavedReport,
+} from '../modules/analytics/api/reportHooks';
 
 // ===================== NOTIFICATIONS =====================
 
@@ -2894,13 +2791,17 @@ export function useRunScenario() {
 
 // ===================== LOT INVENTORY =====================
 
+// Every lot matching params (all pages) unless a page/limit is asked for — the
+// newest 100 used to pass for the whole inventory (INV-04). Pickers should
+// prefer useLotInventoryPage with a server search instead.
 export function useLotInventory(params = {}) {
   return useQuery({
     queryKey: ['lot-inventory', 'list', params],
     queryFn: async () => {
-      const res = await lotInventoryApi.listLots({ limit: 100, ...params });
-      return transformKeys(unwrap(res, 'lots') || []);
+      const lots = await fetchPageOrAll(lotInventoryApi.listLots, params, 'lots');
+      return attachListTotal(transformKeys(lots), lots.listTotal);
     },
+    structuralSharing: false,
     staleTime: 10 * 1000,
     refetchOnMount: 'always',
   });
@@ -3098,15 +2999,19 @@ export function useLocalSalePayments(id) {
   });
 }
 
-export function useLocalSales(params = {}) {
+// Every sale matching params (all pages, server-filtered) unless a page/limit
+// is asked for. The newest 100 used to pass for the whole ledger (P4-11).
+export function useLocalSales(params = {}, opts = {}) {
   return useQuery({
     queryKey: ['local-sales', 'list', params],
     queryFn: async () => {
-      const res = await localSalesApi.list({ limit: 100, ...params });
-      return transformKeys(unwrap(res, 'sales') || []);
+      const sales = await fetchPageOrAll(localSalesApi.list, params, 'sales');
+      return attachListTotal(transformKeys(sales), sales.listTotal);
     },
+    structuralSharing: false,
     staleTime: 10 * 1000,
     refetchOnMount: 'always',
+    ...opts,
   });
 }
 
@@ -3165,8 +3070,8 @@ export function useLocalSalesByLot(lotId) {
   return useQuery({
     queryKey: ['local-sales', 'by-lot', lotId],
     queryFn: async () => {
-      const res = await localSalesApi.list({ lot_id: lotId, limit: 200 });
-      return (unwrap(res, 'sales') || []);
+      // Every sale of the lot, not the newest 200 (P4-11).
+      return fetchPageOrAll(localSalesApi.list, { lot_id: lotId }, 'sales');
     },
     enabled: !!lotId,
     staleTime: 10 * 1000,

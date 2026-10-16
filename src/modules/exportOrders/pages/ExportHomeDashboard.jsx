@@ -6,14 +6,16 @@ import {
   Ship, AlertTriangle, Clock, FileText, CreditCard,
   TrendingUp, Users, Package, ArrowRight, Plus, CheckCircle2, ArrowRightLeft, Loader2,
 } from 'lucide-react';
-import { useExportOrders, useCustomers, useInternalTransfers, useConfirmTransferExport } from '../../../api/queries';
+import { useExportOrders, useCustomers, useInternalTransfers, useConfirmTransferExport, useExportOrderBook } from '../../../api/queries';
+import { byCurrencyText } from '../../finance/utils/currencyTiles';
 import { useApp } from '../../../context/AppContext';
 import { workflowSteps, isBalanceDue } from '../components/constants';
-import { fmtUSD, fmtKg, fmtDate } from '../../../shared/utils/format';
+import { fmtKg, fmtDate } from '../../../shared/utils/format';
 import { transferKg } from '../../inventory/utils/stockMath';
+import { isActiveOrder } from '../../../shared/constants/orderStatus';
 
-// Exact figures — money is never abbreviated to K/M (see shared/utils/format.js).
-const formatUSD = (value) => fmtUSD(Number(value) || 0);
+// Money is exact (never K/M) and one figure per currency, from the server's
+// order book (backend exportOrders/orderBook.js) — never summed in here.
 
 function daysBetween(a, b) {
   return Math.round((new Date(b) - new Date(a)) / (1000 * 60 * 60 * 24));
@@ -70,6 +72,8 @@ export default function ExportHomeDashboard() {
   const navigate = useNavigate();
   const { addToast } = useApp();
   const { data: orders = [], isLoading: ordersLoading } = useExportOrders({});
+  // P4-09: money tiles + pipeline values per currency, from the server.
+  const { data: orderBook } = useExportOrderBook();
   const { data: customers = [] } = useCustomers({});
 
   // Incoming stock the mill has transferred to export but not yet accepted.
@@ -87,16 +91,9 @@ export default function ExportHomeDashboard() {
 
   const stats = useMemo(() => {
     const now = new Date();
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
     const in14Days = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
 
-    const active = orders.filter(o => !['Closed', 'Cancelled'].includes(o.status));
-    const closed = orders.filter(o => o.status === 'Closed');
-    const closedMTD = closed.filter(o => new Date(o.createdAt) >= monthStart);
-
-    const bookedRevenueMTD = orders
-      .filter(o => new Date(o.createdAt) >= monthStart)
-      .reduce((s, o) => s + (Number(o.contractValue) || 0), 0);
+    const active = orders.filter(isActiveOrder); // D-15: not Draft / Cancelled / Closed
 
     const shippedWithETD = orders.filter(o => o.etd && o.atd);
     const avgDaysToShip = shippedWithETD.length > 0
@@ -106,17 +103,21 @@ export default function ExportHomeDashboard() {
         )
       : null;
 
-    // Pipeline grouping by status
+    // Pipeline steps: counts + per-currency values from the server (P4-09);
+    // before it loads, counts from the order list and no value.
+    const serverSteps = Object.fromEntries((orderBook?.deskSteps || []).map((s) => [s.status, s]));
     const pipelineSteps = workflowSteps.filter(s => !['Draft', 'Closed', 'Cancelled'].includes(s.status));
     const pipeline = pipelineSteps.map(step => {
+      const server = serverSteps[step.status];
       // The Balance step counts every sailed order still owed its balance.
-      const ordersInStep = step.status === 'Balance Due'
-        ? orders.filter(isBalanceDue)
-        : orders.filter(o => step.statuses.includes(o.status));
+      const localCount = step.status === 'Balance Due'
+        ? orders.filter(isBalanceDue).length
+        : orders.filter(o => step.statuses.includes(o.status)).length;
       return {
         ...step,
-        count: ordersInStep.length,
-        value: ordersInStep.reduce((s, o) => s + (Number(o.contractValue) || 0), 0),
+        count: server ? server.count : localCount,
+        byCurrency: server ? server.byCurrency : null,
+        valueBasis: server ? server.valueBasis : null,
       };
     });
 
@@ -134,12 +135,9 @@ export default function ExportHomeDashboard() {
       return !o.vesselName || !o.bookingNo || !o.fiNumber;
     }).length;
 
-    // Ship on the advance: the balance is collected after sailing.
-    const balanceOverdue = orders.filter(o => {
-      if (!isBalanceDue(o)) return false;
-      const etd = o.etd ? new Date(o.etd) : null;
-      return etd && etd < now;
-    }).length;
+    // Ship on the advance: the balance is due a term after SAILING (C6 — the
+    // server's sailing date + balance term), not the planned ETD.
+    const balanceOverdue = orderBook?.balanceOverdue?.count ?? 0;
 
     // Upcoming shipments
     const upcoming = orders
@@ -160,8 +158,10 @@ export default function ExportHomeDashboard() {
 
     return {
       activeCount: active.length,
-      closedMTDCount: closedMTD.length,
-      bookedRevenueMTD,
+      // Closed in the month by the day the order moved to Closed (server).
+      closedMTDCount: orderBook ? orderBook.closedMtdCount : null,
+      bookedMtd: orderBook?.bookedMtd || null,
+      shippedMtd: orderBook?.shippedMtd || null,
       avgDaysToShip,
       pipeline,
       awaitingAdvance,
@@ -172,7 +172,7 @@ export default function ExportHomeDashboard() {
       recentOrders,
       newBuyers,
     };
-  }, [orders, customers]);
+  }, [orders, customers, orderBook]);
 
   if (ordersLoading) {
     return (
@@ -286,9 +286,19 @@ export default function ExportHomeDashboard() {
       </div>
 
       {/* KPI Row */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <KPI icon={Ship} label="Active Orders" value={stats.activeCount} accent="blue" />
-        <KPI icon={TrendingUp} label="Booked Revenue (MTD)" value={formatUSD(stats.bookedRevenueMTD)} accent="green" />
+        {/* P4-09 / EXP-22: per currency (never summed), Draft / Cancelled
+            excluded. Booked = order intake by order date; Revenue = shipped
+            orders by the revenue date (D-16: BL date, else the day shipped). */}
+        <KPI icon={TrendingUp} label="Booked Contracts (MTD)"
+          value={stats.bookedMtd ? byCurrencyText(stats.bookedMtd.byCurrency).primary : '—'}
+          sub={stats.bookedMtd ? [byCurrencyText(stats.bookedMtd.byCurrency).rest, `${stats.bookedMtd.count} orders, by order date`].filter(Boolean).join(' · ') : null}
+          accent="green" />
+        <KPI icon={TrendingUp} label="Revenue Shipped (MTD)"
+          value={stats.shippedMtd ? byCurrencyText(stats.shippedMtd.byCurrency).primary : '—'}
+          sub={stats.shippedMtd ? [byCurrencyText(stats.shippedMtd.byCurrency).rest, `${stats.shippedMtd.count} orders, by BL date`].filter(Boolean).join(' · ') : null}
+          accent="green" />
         <KPI
           icon={Clock}
           label="Avg Order → Ship"
@@ -296,7 +306,7 @@ export default function ExportHomeDashboard() {
           sub={stats.avgDaysToShip != null ? 'based on shipped orders' : 'no shipped orders yet'}
           accent="amber"
         />
-        <KPI icon={CheckCircle2} label="Closed (MTD)" value={stats.closedMTDCount} accent="green" />
+        <KPI icon={CheckCircle2} label="Closed (MTD)" value={stats.closedMTDCount ?? '—'} accent="green" />
       </div>
 
       {/* Pipeline Strip */}
@@ -314,7 +324,7 @@ export default function ExportHomeDashboard() {
             >
               <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide truncate">{step.label}</p>
               <p className="text-xl font-bold text-gray-900 mt-1">{step.count}</p>
-              <p className="text-[11px] text-gray-500 mt-0.5">{formatUSD(step.value)}</p>
+              <p className="text-[11px] text-gray-500 mt-0.5" title={step.valueBasis === 'balance_outstanding' ? 'Balance still owed' : 'Contract value'}>{step.byCurrency ? byCurrencyText(step.byCurrency).all : '—'}</p>
             </button>
           ))}
         </div>

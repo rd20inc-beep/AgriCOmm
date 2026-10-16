@@ -16,7 +16,7 @@ import { describe, it, expect } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 import {
-  buildCreateOrderPayload, estimateCosting, orderTotals, customerPrefill,
+  buildCreateOrderPayload, advanceSplit, profitPreviewBody, orderTotals, customerPrefill,
   lastOrderPrefill, duplicateStateFromOrder, EMPTY_ITEM,
 } from '../utils/createOrderForm';
 import { contractEditPayload, lineItemsPayload, orderHasReceipts } from '../utils/orderEdits';
@@ -114,19 +114,37 @@ describe('the create payload', () => {
   });
 });
 
-describe('the costing preview', () => {
-  it('uses the freight that was entered', () => {
-    const c = estimateCosting({ ...baseForm, freightPerMT: '45', insurancePerMT: '5' }, items);
-    expect(c.freightCost).toBe(150 * 50);
+describe('the costing preview (EXP-08)', () => {
+  it('no longer guesses a margin in the browser', () => {
+    const src = read('src/modules/exportOrders/utils/createOrderForm.js');
+    expect(src).not.toMatch(/export function estimateCosting/);
+    expect(src).not.toMatch(/\* 0\.5\b|qtyMT \* 65|qtyMT \* 25/);
+    const page = read('src/modules/exportOrders/pages/CreateExportOrder.jsx');
+    expect(page).not.toMatch(/Healthy margin/);
+    expect(page).toMatch(/useExportProfitPreview/);
   });
 
-  it('falls back to the flat $65/MT only for CIF/CNF without a rate', () => {
-    expect(estimateCosting({ ...baseForm, freightPerMT: '', incoterm: 'CIF' }, items).freightCost).toBe(150 * 65);
-    expect(estimateCosting({ ...baseForm, freightPerMT: '', incoterm: 'FOB' }, items).freightCost).toBe(0);
+  it('asks the server with the unsaved order as the profit definition reads it', () => {
+    const body = profitPreviewBody(
+      { ...baseForm, freightDisplay: 'separate', freightPerMT: '45', insurancePerMT: '5', bookedFxRate: '280' },
+      items,
+      [{ quantity: '1000', unitCost: '12.5' }, { quantity: '0', unitCost: '99' }],
+    );
+    expect(body).toEqual({
+      currency: 'USD',
+      booked_fx_rate: 280,
+      contract_value: 82500,
+      items: [{ product_id: 20, qty_mt: 100 }, { product_id: 21, qty_mt: 50 }],
+      freight_display: 'separate',
+      freight_per_mt: 45,
+      insurance_per_mt: 5,
+      printed_bags_pkr: 12500,
+    });
+    expect(profitPreviewBody({ ...baseForm, bookedFxRate: '' }, items).booked_fx_rate).toBeNull();
   });
 
   it('splits advance and balance by the advance %', () => {
-    const c = estimateCosting({ ...baseForm, advancePct: 30 }, items);
+    const c = advanceSplit({ ...baseForm, advancePct: 30 }, items);
     expect(c.advanceExpected).toBeCloseTo(24750);
     expect(c.balanceExpected).toBeCloseTo(57750);
   });

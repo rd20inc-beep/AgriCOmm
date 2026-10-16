@@ -28,6 +28,15 @@ export function lotCategory(lot) {
 
 export const CAT_ORDER = ['Finished Rice', 'B1', 'B2', 'B3', 'CSR', 'Short Grain', 'Broken', 'Powder', 'Sweeping', 'Choba', 'Bran', 'Husk', 'Sortex', 'Raw Rice', 'Packaging', 'Other'];
 
+// The server's Lot Inventory subtype filter (?subtype=, stockSql.lotSubtypeSql)
+// for each picker tag, so a tag filters over every lot on the server rather
+// than inside one loaded page (P4-11).
+export const CAT_SUBTYPE = {
+  'Finished Rice': 'finished', 'Raw Rice': 'rice-in',
+  B1: 'broken-b1', B2: 'broken-b2', B3: 'broken-b3', CSR: 'broken-csr', 'Short Grain': 'broken-sg', Broken: 'broken',
+  Powder: 'powder', Sweeping: 'sweeping', Choba: 'choba', Bran: 'bran', Husk: 'husk', Sortex: 'sortex', Other: 'other',
+};
+
 export const CAT_COLOR = {
   'Finished Rice': 'bg-emerald-100 text-emerald-700', B1: 'bg-amber-100 text-amber-700', B2: 'bg-orange-100 text-orange-700',
   B3: 'bg-yellow-100 text-yellow-700', CSR: 'bg-lime-100 text-lime-700', 'Short Grain': 'bg-amber-100 text-amber-700',

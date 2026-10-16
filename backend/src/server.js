@@ -24,6 +24,15 @@ function startScheduler() {
       }
     } catch (err) {
       console.error('[RiceFlow ERP] Scheduled task runner error:', err.message);
+    }
+    // D-1: keep the current and the next fiscal year's monthly periods in
+    // place (all Open; idempotent), so a month is always there to close.
+    try {
+      const { created } = await require('./modules/accounting/periods')
+        .ensureCurrentAndNextFiscalYear(require('./config/database'));
+      if (created > 0) console.log(`[RiceFlow ERP] Created ${created} accounting period(s) ahead.`);
+    } catch (err) {
+      console.error('[RiceFlow ERP] Accounting period check error:', err.message);
     } finally {
       schedulerBusy = false;
     }

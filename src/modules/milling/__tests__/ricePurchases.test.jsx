@@ -44,13 +44,15 @@ describe('Rice Purchases row', () => {
 describe('Rice Purchases CSV', () => {
   it('matches the screen: KG weight, Rs/kg, value', () => {
     const csv = purchasesCsv([row]);
-    const [header, line] = csv.split('\n');
+    expect(csv.charCodeAt(0)).toBe(0xFEFF); // BOM — Excel reads names right
+    const [header, line] = csv.slice(1).split('\r\n');
     expect(header).toContain('Weight (KG)');
     expect(header).toContain('Price/KG');
     const cells = line.split(',').map((c) => c.replace(/^"|"$/g, ''));
-    expect(cells[7]).toBe('21825.00');
+    // Raw numbers (the one exporter, P4-14) — not 2-dp strings.
+    expect(Number(cells[7])).toBe(21825);
     expect(cells[9]).toBe('85.5');
-    expect(cells[10]).toBe('1866037.50');
+    expect(Number(cells[10])).toBeCloseTo(1866037.5, 2);
     const f = purchaseFigures(row);
     expect(f.valuePkr).toBeCloseTo(f.weightKg * f.pricePerKg, 2);
   });

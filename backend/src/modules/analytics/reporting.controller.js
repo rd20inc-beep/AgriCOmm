@@ -14,6 +14,8 @@ const whScope = require('../../utils/warehouseScope');
 const stockSql = require('../inventory/stockSql');
 // D-14 stock value (landed cost/kg × on hand, no fallback price) — stockValue.js.
 const { lotValueSql, landedPerKgSql } = require('../inventory/stockValue');
+const { exportRevenueInPeriod } = require('../finance/profitDefinitions');
+const { feedBase, SETTLED, PENDING_CHEQUE } = require('../finance/paymentsFeedTotals');
 
 // Parse a milling_batches.custom_tags jsonb value into a plain array. The pg
 // driver usually returns jsonb already parsed (array/object), but a string may
@@ -30,6 +32,22 @@ function parseCustomTags(v) {
 // utils/costVisibility so the lot/inventory endpoints redact the same fields.
 const { redactForUser } = require('../../utils/costVisibility');
 const { kgToMt, KG_PER_MT } = require('../../shared/units');
+// Report contract (P4-05/12/14): paging, truncation flag, period meta, CSV.
+const { pageParams, pageMeta, reportMeta } = require('./reportContract');
+const { sendCsv, wantsCsv } = require('../../utils/csv');
+const localSalesReport = require('./localSalesReport');
+
+// Revenue / contract money on the export roll-ups is redacted with the cost
+// figures for a role that may see neither (the API keys are named per currency).
+const EXPORT_REVENUE_KEYS = ['revenuePkr', 'contractByCurrency', 'outstandingByCurrency', 'avgPricePerMtByCurrency', 'contractValue'];
+// Drill-down line lists on the printable P&Ls are capped; each is fetched with
+// one extra row so the payload can SAY it was cut (detailTruncated) instead of
+// silently showing the biggest N as if they were all (RPT-14). The totals are
+// separate SQL aggregates over the whole period and are never capped.
+const DETAIL_CAP = 200;
+const OPEX_LINE_CAP = 500;
+const capList = (rows, cap) => ({ rows: rows.slice(0, cap), truncated: rows.length > cap });
+const perCurrency = (m) => Object.entries(m || {}).map(([c, v]) => `${c} ${v}`).join('; ');
 
 // A scheduled report email the caller may run / delete: task_type must be
 // report_email, and the caller must have created it or hold admin.manage_settings
@@ -58,6 +76,23 @@ function redactReport(req, data, opts) {
   return redactForUser(req, data, opts);
 }
 
+
+// Invoice Ledger money (P4-07 / RPT-17). A purchase bill's amounts are what
+// the rice COST — hidden without the cost right; a sale's are revenue and
+// receivables — hidden without the profit right. The generic key-name redaction
+// cannot tell them apart (both are `total`), so this goes by row kind.
+const INVOICE_MONEY_KEYS = ['total', 'received', 'returned', 'outstanding'];
+function redactInvoiceLedger(data, { cost, profit }) {
+  if (cost && profit) return data;
+  const blind = { purchase: !cost, sale: !profit };
+  for (const r of data.rows || []) {
+    if (blind[r.kind]) for (const k of INVOICE_MONEY_KEYS) r[k] = null;
+  }
+  const t = data.totals || {};
+  if (blind.purchase && t.purchase) t.purchase = { count: t.purchase.count, redacted: true };
+  if (blind.sale && t.sale) t.sale = { count: t.sale.count, redacted: true };
+  return data;
+}
 
 // A packaging size as the mill says it — "25 KG", "8 LBS".
 //
@@ -97,6 +132,25 @@ function emptyFreightTotals() {
     orders: 0, withFreight: 0, chargedPkr: 0, paidPkr: 0, gapPkr: 0,
     recoveryPct: null, shortOrders: 0, unbilledOrders: 0, debitNotes: 0, debitNotePkr: 0,
   };
+}
+
+// exportRevenueInPeriod rows → the printable P&L's export lines (customer and
+// product added), in the rows' order. amount_pkr / rev = PKR revenue (goods +
+// freight + debit notes); cogs = the locked COGS (0 until shipped with one).
+async function exportLinesFor(db, rows) {
+  if (!rows.length) return [];
+  const meta = await db('export_orders as o').leftJoin('customers as c', 'o.customer_id', 'c.id')
+    .whereIn('o.id', rows.map((r) => r.id))
+    .select('o.id', 'o.product_name', 'o.customer_id', db.raw("COALESCE(c.name,'—') as customer"));
+  const byId = new Map(meta.map((m) => [Number(m.id), m]));
+  return rows.map((r) => {
+    const m = byId.get(Number(r.id)) || {};
+    return {
+      id: r.id, order_no: r.orderNo, product_name: m.product_name || null, customer_id: m.customer_id || null,
+      customer: m.customer || '—', revenue_date: r.revenueDate,
+      amount_pkr: r.revenuePkr, rev: r.revenuePkr, cogs: r.riceCostBasis === 'locked' ? r.riceCostPkr : 0,
+    };
+  });
 }
 
 const reportingController = {
@@ -148,16 +202,31 @@ const reportingController = {
 
   async orderProfitability(req, res) {
     try {
-      const { entity, dateFrom, dateTo, customerId, country, page, limit } = req.query;
+      const { entity, dateFrom, dateTo, customerId, country } = req.query;
+      const paging = pageParams(req.query, { defaultLimit: 50, maxLimit: 500, exportCap: 20000 });
       const data = await reportingService.getOrderProfitability({
         entity,
         dateFrom,
         dateTo,
         customerId: customerId ? parseInt(customerId, 10) : undefined,
         country,
-        page: parseInt(page, 10) || 1,
-        limit: parseInt(limit, 10) || 50,
+        page: paging.page,
+        limit: paging.limit,
       });
+      data.meta = reportMeta(req.reportRange, { unit: 'MT', currency: 'PKR (contract in its own currency)' });
+      if (wantsCsv(req)) {
+        return sendCsv(res, {
+          filename: 'order-profitability',
+          rows: data.data,
+          columns: [
+            { label: 'Order', key: 'orderNo' }, { label: 'Customer', key: 'customerName' },
+            { label: 'Status', key: 'status' }, { label: 'Currency', key: 'currency' },
+            { label: 'Contract', key: 'contractValue' }, { label: 'Qty (MT)', key: 'qtyMT' },
+            { label: 'Revenue (PKR)', key: 'revenuePkr' }, { label: 'Cost (PKR)', key: 'costs' },
+            { label: 'Gross Profit (PKR)', key: 'grossProfit' }, { label: 'Margin %', key: 'margin' },
+          ],
+        });
+      }
       return res.json({ success: true, ...data });
     } catch (err) {
       console.error('Order profitability error:', err);
@@ -189,7 +258,8 @@ const reportingController = {
 
   async invoiceLedger(req, res) {
     try {
-      const data = await reportingService.getInvoiceLedger(req.query || {});
+      const data = redactInvoiceLedger(await reportingService.getInvoiceLedger(req.query || {}),
+        await require('../../utils/costVisibility').moneyVisibility(req));
       return res.json({ success: true, ...data });
     } catch (err) {
       console.error('Invoice ledger error:', err);
@@ -493,13 +563,28 @@ const reportingController = {
 
   async customerProfitability(req, res) {
     try {
-      const { dateFrom, dateTo, page, limit } = req.query;
+      const { dateFrom, dateTo } = req.query;
+      const paging = pageParams(req.query, { defaultLimit: 50, maxLimit: 500 });
       const data = await reportingService.getCustomerProfitability({
-        dateFrom,
-        dateTo,
-        page: parseInt(page, 10) || 1,
-        limit: parseInt(limit, 10) || 50,
+        dateFrom, dateTo, page: paging.page, limit: paging.limit, all: paging.exporting,
       });
+      data.meta = reportMeta(req.reportRange, { unit: 'MT', currency: 'PKR; contract and receivables per currency', basis: 'Booked (order date), profitDefinitions' });
+      await redactReport(req, data, { extraCostKeys: EXPORT_REVENUE_KEYS });
+      if (wantsCsv(req)) {
+        return sendCsv(res, {
+          filename: 'customer-profitability',
+          rows: data.data,
+          columns: [
+            { label: 'Customer', key: 'customerName' }, { label: 'Country', key: 'country' },
+            { label: 'Orders', key: 'orderCount' }, { label: 'Not costed', key: 'unpricedCount' },
+            { label: 'Qty (MT)', key: 'qtyMt' },
+            { label: 'Contract by currency', value: (r) => perCurrency(r.contractByCurrency) },
+            { label: 'Revenue (PKR)', key: 'revenuePkr' }, { label: 'Booked Profit (PKR)', key: 'bookedProfitPkr' },
+            { label: 'Margin %', key: 'marginPct' },
+            { label: 'Open receivables by currency', value: (r) => perCurrency(r.outstandingByCurrency) },
+          ],
+        });
+      }
       return res.json({ success: true, ...data });
     } catch (err) {
       console.error('Customer profitability error:', err);
@@ -510,10 +595,55 @@ const reportingController = {
   async countryAnalysis(req, res) {
     try {
       const { dateFrom, dateTo } = req.query;
-      const data = await reportingService.getCountryAnalysis({ dateFrom, dateTo });
-      return res.json({ success: true, data });
+      const out = await reportingService.getCountryAnalysis({ dateFrom, dateTo });
+      out.meta = reportMeta(req.reportRange, { unit: 'MT', currency: 'PKR; contract and price per currency', basis: 'Booked (order date), profitDefinitions' });
+      await redactReport(req, out, { extraCostKeys: EXPORT_REVENUE_KEYS });
+      if (wantsCsv(req)) {
+        return sendCsv(res, {
+          filename: 'country-analysis',
+          rows: out.data,
+          columns: [
+            { label: 'Country', key: 'country' }, { label: 'Orders', key: 'orderCount' },
+            { label: 'Not costed', key: 'unpricedCount' }, { label: 'Qty (MT)', key: 'qtyMt' },
+            { label: 'Contract by currency', value: (r) => perCurrency(r.contractByCurrency) },
+            { label: 'Avg price / MT by currency', value: (r) => perCurrency(r.avgPricePerMtByCurrency) },
+            { label: 'Revenue (PKR)', key: 'revenuePkr' }, { label: 'Booked Profit (PKR)', key: 'bookedProfitPkr' },
+            { label: 'Margin %', key: 'marginPct' },
+          ],
+        });
+      }
+      return res.json({ success: true, ...out });
     } catch (err) {
       console.error('Country analysis error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
+  // Confirmed local sales for the period: one page of rows + totals over the
+  // whole filter (P4-12). format=csv = every matching row.
+  async localSalesReport(req, res) {
+    try {
+      const { dateFrom, dateTo, entity, q, payment, lot_id: lotId, customer_id: customerId } = req.query;
+      const paging = pageParams(req.query, { defaultLimit: 100, maxLimit: 500 });
+      const { rows, totals } = await localSalesReport.getLocalSalesReport(
+        { dateFrom, dateTo, entity, q, payment, lotId, customerId }, paging,
+      );
+      // Same confidentiality rule as the local-sales list: a finance-readable
+      // role sees the sale, not the buyer's name.
+      if (await require('../../shared/partyMask').isPartyMasked(req)) {
+        for (const r of rows) { r.customerName = r.customerName ? 'Customer' : r.customerName; r.buyerName = r.buyerName ? 'Customer' : r.buyerName; }
+      }
+      const data = {
+        rows,
+        totals,
+        pagination: pageMeta(totals.count, paging, rows.length),
+        meta: reportMeta(req.reportRange, { unit: 'kg', currency: 'PKR', basis: 'Confirmed (Completed) sales by sale date; COGS = locked GL figure' }),
+      };
+      await redactReport(req, data);
+      if (wantsCsv(req)) return sendCsv(res, { filename: 'local-sales', rows: data.rows, columns: localSalesReport.CSV_COLUMNS });
+      return res.json({ success: true, data });
+    } catch (err) {
+      console.error('Local sales report error:', err);
       return res.status(500).json({ success: false, message: 'Internal server error.' });
     }
   },
@@ -676,7 +806,27 @@ const reportingController = {
     try {
       const { dateFrom, dateTo } = req.query;
       const data = await reportingService.getProductionEfficiencyByMill({ dateFrom, dateTo });
-      return res.json({ success: true, data });
+      // Tab headline from the server (D-14): input / output KG of every batch in
+      // the period, yield Σ finished ÷ Σ raw over completed company batches.
+      const db = require('../../config/database');
+      const { yieldBatches, weightedYieldPctSql } = require('../milling/millingYield');
+      const inRange = (q) => {
+        if (dateFrom) q.where('mb.created_at', '>=', dateFrom);
+        if (dateTo) q.where('mb.created_at', '<=', dateTo);
+        return q;
+      };
+      const [all, yld] = await Promise.all([
+        inRange(db('milling_batches as mb').whereNotNull('mb.mill_id'))
+          .select(db.raw('COALESCE(SUM(mb.raw_qty_kg), 0) AS input_kg'), db.raw('COALESCE(SUM(mb.actual_finished_kg), 0) AS output_kg')).first(),
+        inRange(yieldBatches(db('milling_batches as mb'))).select(db.raw(`${weightedYieldPctSql('mb')} AS yield_pct`)).first(),
+      ]);
+      const totals = {
+        mills: data.length,
+        inputKg: parseFloat(all && all.input_kg) || 0,
+        outputKg: parseFloat(all && all.output_kg) || 0,
+        yieldPct: yld && yld.yield_pct != null ? parseFloat(yld.yield_pct) : null,
+      };
+      return res.json({ success: true, data, totals, meta: reportMeta(req.reportRange, { unit: 'kg', basis: 'yield = Σ finished ÷ Σ raw, completed company batches' }) });
     } catch (err) {
       console.error('Mill efficiency error:', err);
       return res.status(500).json({ success: false, message: 'Internal server error.' });
@@ -1044,13 +1194,12 @@ const reportingController = {
       }
 
       // ─── Revenue ────────────────────────────────────────────────
-      // Export: shipped/closed orders booked in PKR at locked rate
-      const exportRevRow = await db('export_orders')
-        .whereIn('status', ['Shipped', 'Arrived', 'Closed'])
-        .whereBetween('updated_at', [fromDate, toDate])
-        .sum({ revenuePkr: 'contract_value_pkr_locked' })
-        .count({ cnt: 'id' })
-        .first();
+      // Export: shipped orders whose REVENUE DATE (D-16: BL date, else the
+      // Shipped transition) is in the period, at the PKR revenue the one
+      // profit definition uses (goods + freight + debit notes, booked rate).
+      // It was dated by updated_at, so any later edit moved the sale.
+      const exportRev = await exportRevenueInPeriod(db, { startDate: from, endDate: to });
+      const exportRevRow = { revenuePkr: exportRev.revenuePkr, cnt: exportRev.count };
 
       // Local sales — completed sales in PKR
       const localRevRow = await db('local_sales')
@@ -1131,23 +1280,28 @@ const reportingController = {
       const marginPct = revenue.totalPkr > 0 ? (netProfitPkr / revenue.totalPkr) * 100 : 0;
 
       // ─── Line-item detail (clickable drill-downs) ───────────────
-      const exportLines = await db('export_orders as o').leftJoin('customers as c', 'o.customer_id', 'c.id')
-        .whereIn('o.status', ['Shipped', 'Arrived', 'Closed']).whereBetween('o.updated_at', [fromDate, toDate])
-        .select('o.id', 'o.order_no', 'o.product_name', 'o.customer_id', db.raw('COALESCE(o.contract_value_pkr_locked,0) as amount_pkr'), db.raw("COALESCE(c.name,'—') as customer"))
-        .orderByRaw('amount_pkr desc').limit(200);
+      // One more than the cap, so the truncation flag below can tell.
+      const exportLines = await exportLinesFor(db, exportRev.rows.slice(0, DETAIL_CAP + 1));
       const localLines = await db('local_sales as ls').leftJoin('customers as c', 'ls.customer_id', 'c.id')
         .where('ls.status', 'Completed').whereBetween('ls.sale_date', [fromDate, toDate])
         .select('ls.id', 'ls.sale_no', 'ls.lot_id', 'ls.item_name', 'ls.total_amount', 'ls.customer_id', db.raw("COALESCE(c.name, ls.buyer_name, 'Walk-in') as customer"))
-        .orderBy('ls.total_amount', 'desc').limit(200);
+        .orderBy('ls.total_amount', 'desc').limit(DETAIL_CAP + 1);
       const purchaseLines = await db('inventory_lots as l').leftJoin('suppliers as s', 'l.supplier_id', 's.id')
         .whereBetween('l.purchase_date', [fromDate, toDate])
         .select('l.id', 'l.lot_no', 'l.item_name', 'l.supplier_id', 'l.landed_cost_total', db.raw("COALESCE(s.name,'—') as supplier"))
-        .orderBy('l.landed_cost_total', 'desc').limit(200);
+        .orderBy('l.landed_cost_total', 'desc').limit(DETAIL_CAP + 1);
       const expenseLines = await db('business_expenses')
         .whereBetween('expense_date', [fromDate, toDate]).where('amount_pkr', '>', 0)
         .whereNot('payment_status', 'Reversed')
-        .select('id', 'expense_no', 'category', 'vendor_name', 'supplier_id', 'amount_pkr', 'expense_type').orderBy('amount_pkr', 'desc').limit(200);
+        .select('id', 'expense_no', 'category', 'vendor_name', 'supplier_id', 'amount_pkr', 'expense_type').orderBy('amount_pkr', 'desc').limit(DETAIL_CAP + 1);
 
+      const cut = {
+        export: capList(exportLines, DETAIL_CAP), local: capList(localLines, DETAIL_CAP),
+        purchases: capList(purchaseLines, DETAIL_CAP), expenses: capList(expenseLines, DETAIL_CAP),
+      };
+      const detailTruncated = Object.fromEntries(Object.entries(cut).map(([k, v]) => [k, v.truncated]));
+      exportLines.length = cut.export.rows.length; localLines.length = cut.local.rows.length;
+      purchaseLines.length = cut.purchases.rows.length; expenseLines.length = cut.expenses.rows.length;
       const detail = {
         export: exportLines.map((r) => ({ id: r.id, ref: r.order_no, party: r.customer, customerId: r.customer_id || null, item: r.product_name, amountPkr: parseFloat(r.amount_pkr) || 0 })),
         local: localLines.map((r) => ({ id: r.id, ref: r.sale_no, lotId: r.lot_id, party: r.customer, customerId: r.customer_id || null, item: r.item_name, amountPkr: parseFloat(r.total_amount) || 0 })),
@@ -1164,6 +1318,8 @@ const reportingController = {
           netProfitPkr,
           marginPct,
           detail,
+          detailCap: DETAIL_CAP,
+          detailTruncated,
         },
       });
     } catch (err) {
@@ -1186,63 +1342,84 @@ const reportingController = {
         return res.status(400).json({ success: false, message: 'Invalid from/to date.' });
       }
 
-      const totals = await db('payments')
-        .whereBetween('payment_date', [fromDate, toDate])
-        .select('type')
-        .sum({ totalPkr: 'base_amount_pkr' })
-        .count({ cnt: 'id' })
-        .groupBy('type');
+      // RPT-05: SETTLED money only — the same set Money In / Money Out total
+      // (paymentsFeedTotals): no unconfirmed / rejected receipts, no reversed
+      // or bounced payments, no uncleared cheque (listed apart). And per
+      // currency, in that currency: a USD receipt is never folded into Rs.
+      const filters = { from_date: from, to_date: to };
+      const CUR = "UPPER(COALESCE(p.currency, 'PKR'))";
+      const num = (v) => Math.round((parseFloat(v) || 0) * 100) / 100;
+      const [totals, pending, daily] = await Promise.all([
+        feedBase(db, filters).whereRaw(SETTLED)
+          .select('p.type', db.raw(`${CUR} as currency`))
+          .sum({ amt: 'p.amount' }).count({ cnt: 'p.id' })
+          .groupBy('p.type').groupByRaw(CUR),
+        feedBase(db, filters).whereRaw(PENDING_CHEQUE)
+          .select('p.type', db.raw(`${CUR} as currency`))
+          .sum({ amt: 'p.amount' }).count({ cnt: 'p.id' })
+          .groupBy('p.type').groupByRaw(CUR),
+        feedBase(db, filters).whereRaw(SETTLED)
+          .select(db.raw('p.payment_date::date::text as day'), 'p.type', db.raw(`${CUR} as currency`))
+          .sum({ amt: 'p.amount' })
+          .groupByRaw(`p.payment_date::date, p.type, ${CUR}`)
+          .orderByRaw('p.payment_date::date asc'),
+      ]);
 
-      const summary = { inPkr: 0, outPkr: 0, inCount: 0, outCount: 0 };
+      const byCurrency = {};
+      const slot = (c) => (byCurrency[c] = byCurrency[c] || { in: 0, out: 0, net: 0, inCount: 0, outCount: 0 });
       for (const t of totals) {
-        if (t.type === 'receipt') {
-          summary.inPkr = parseFloat(t.totalPkr) || 0;
-          summary.inCount = parseInt(t.cnt, 10) || 0;
-        } else if (t.type === 'payment') {
-          summary.outPkr = parseFloat(t.totalPkr) || 0;
-          summary.outCount = parseInt(t.cnt, 10) || 0;
-        }
+        const s = slot(t.currency);
+        if (t.type === 'receipt') { s.in = num(t.amt); s.inCount = parseInt(t.cnt, 10) || 0; }
+        else if (t.type === 'payment') { s.out = num(t.amt); s.outCount = parseInt(t.cnt, 10) || 0; }
       }
-      summary.netPkr = summary.inPkr - summary.outPkr;
+      for (const s of Object.values(byCurrency)) s.net = num(s.in - s.out);
+      const pendingCheques = {};
+      for (const t of pending) {
+        const p = (pendingCheques[t.currency] = pendingCheques[t.currency] || { in: 0, out: 0, count: 0 });
+        p[t.type === 'receipt' ? 'in' : 'out'] = num(t.amt);
+        p.count += parseInt(t.cnt, 10) || 0;
+      }
+      const pkr = byCurrency.PKR || { in: 0, out: 0, net: 0, inCount: 0, outCount: 0 };
+      // inPkr / outPkr / netPkr: the RUPEE payments only (kept for callers).
+      const summary = {
+        inPkr: pkr.in, outPkr: pkr.out, netPkr: pkr.net, inCount: pkr.inCount, outCount: pkr.outCount,
+        byCurrency, pendingCheques, basis: 'settled', currencies: Object.keys(byCurrency).sort(),
+      };
 
-      // Daily buckets — keep it client-friendly for charts.
-      const daily = await db('payments')
-        .whereBetween('payment_date', [fromDate, toDate])
-        .select(db.raw('payment_date::date as day'))
-        .select('type')
-        .sum({ amt: 'base_amount_pkr' })
-        .groupBy('day', 'type')
-        .orderBy('day', 'asc');
-
+      // Daily buckets, one row per day and currency.
       const byDay = new Map();
       for (const r of daily) {
-        const key = (r.day instanceof Date ? r.day.toISOString().slice(0, 10) : String(r.day).slice(0, 10));
-        if (!byDay.has(key)) byDay.set(key, { day: key, In: 0, Out: 0 });
-        if (r.type === 'receipt') byDay.get(key).In += parseFloat(r.amt) || 0;
-        else if (r.type === 'payment') byDay.get(key).Out += parseFloat(r.amt) || 0;
+        const key = `${String(r.day).slice(0, 10)}|${r.currency}`;
+        if (!byDay.has(key)) byDay.set(key, { day: String(r.day).slice(0, 10), currency: r.currency, In: 0, Out: 0 });
+        if (r.type === 'receipt') byDay.get(key).In += num(r.amt);
+        else if (r.type === 'payment') byDay.get(key).Out += num(r.amt);
       }
-      const days = Array.from(byDay.values()).map((b) => ({ ...b, Net: b.In - b.Out }));
+      const days = Array.from(byDay.values()).map((b) => ({ ...b, Net: num(b.In - b.Out) }));
 
-      // Top 10 receipts + top 10 payments for the body of the report
-      const topReceipts = await db('payments as p')
-        .leftJoin('receivables as r', 'p.linked_receivable_id', 'r.id')
-        .leftJoin('customers as c',   'r.customer_id', 'c.id')
-        .where('p.type', 'receipt')
-        .whereBetween('p.payment_date', [fromDate, toDate])
-        .select('p.payment_no', 'p.payment_date', 'p.base_amount_pkr', 'p.payment_method', 'c.id as customer_id')
-        .select(db.raw("COALESCE(c.name, 'Counterparty') as counterparty"))
-        .orderBy('p.base_amount_pkr', 'desc')
+      // The largest settled receipts / payments, each in its own currency.
+      const top = (type) => feedBase(db, { ...filters, type }).whereRaw(SETTLED)
+        .leftJoin('customers as c', 'r.customer_id', 'c.id')
+        .leftJoin('suppliers as s', 'pa.supplier_id', 's.id')
+        .select('p.payment_no', 'p.payment_date', 'p.amount', 'p.currency', 'p.base_amount_pkr', 'p.payment_method',
+          'c.id as customer_id', 's.id as supplier_id')
+        .select(db.raw(type === 'receipt'
+          ? "COALESCE(c.name, ls.buyer_name, 'Counterparty') as counterparty"
+          : "COALESCE(s.name, pa.linked_ref, 'Vendor') as counterparty"))
+        .orderByRaw('COALESCE(p.base_amount_pkr, p.amount) DESC')
         .limit(200);
-
-      const topPayments = await db('payments as p')
-        .leftJoin('payables as pay', 'p.linked_payable_id', 'pay.id')
-        .leftJoin('suppliers as s',  'pay.supplier_id', 's.id')
-        .where('p.type', 'payment')
-        .whereBetween('p.payment_date', [fromDate, toDate])
-        .select('p.payment_no', 'p.payment_date', 'p.base_amount_pkr', 'p.payment_method', 's.id as supplier_id')
-        .select(db.raw("COALESCE(s.name, pay.linked_ref, 'Vendor') as counterparty"))
-        .orderBy('p.base_amount_pkr', 'desc')
-        .limit(200);
+      const [topReceipts, topPayments] = await Promise.all([top('receipt'), top('payment')]);
+      const line = (r) => ({
+        paymentNo: r.payment_no,
+        date: r.payment_date,
+        counterparty: r.counterparty,
+        customerId: r.customer_id || null,
+        supplierId: r.supplier_id || null,
+        method: r.payment_method,
+        currency: String(r.currency || 'PKR').toUpperCase(),
+        amount: num(r.amount),
+        // Rupee lines only; a foreign line has its own amount + currency.
+        amountPkr: String(r.currency || 'PKR').toUpperCase() === 'PKR' ? num(r.amount) : null,
+      });
 
       return res.json({
         success: true,
@@ -1250,22 +1427,8 @@ const reportingController = {
           range: { from: fromDate.toISOString(), to: toDate.toISOString() },
           summary,
           daily: days,
-          topReceipts: topReceipts.map((r) => ({
-            paymentNo: r.payment_no,
-            date: r.payment_date,
-            counterparty: r.counterparty,
-            customerId: r.customer_id,
-            method: r.payment_method,
-            amountPkr: parseFloat(r.base_amount_pkr) || 0,
-          })),
-          topPayments: topPayments.map((r) => ({
-            paymentNo: r.payment_no,
-            date: r.payment_date,
-            counterparty: r.counterparty,
-            supplierId: r.supplier_id,
-            method: r.payment_method,
-            amountPkr: parseFloat(r.base_amount_pkr) || 0,
-          })),
+          topReceipts: topReceipts.map(line),
+          topPayments: topPayments.map(line),
         },
       });
     } catch (err) {
@@ -1275,56 +1438,36 @@ const reportingController = {
   },
 
   // ──── AR Aging (printable) ─────────────────────────────────────
-  // Open receivables bucketed by age (0-30 / 31-60 / 61-90 / 90+ days
-  // since due). Always reflects current state — no period filter.
+  // Open receivables AS AT ?as_of (default today), by days past their
+  // effective due date, per currency (P4-04 / RPT-06): the same rows as Money
+  // In (finance/receivablesAsAt.js). Closed statuses never count; a partly
+  // paid USD row is outstanding × its booked rate share, never the full
+  // base_amount_pkr; dollars and rupees are separate totals.
   async printableArAging(req, res) {
     try {
       const db = require('../../config/database');
-      const today = new Date();
-      const rows = await db('receivables as r')
-        .leftJoin('customers as c', 'r.customer_id', 'c.id')
-        .leftJoin('export_orders as eo', 'r.order_id', 'eo.id')
-        .whereNotIn('r.status', ['Paid', 'Written Off'])
-        .where('r.outstanding', '>', 0)
-        .select(
-          'r.id', 'r.recv_no', 'r.due_date', 'r.outstanding', 'r.customer_id',
-          'r.currency', 'r.fx_rate', 'r.base_amount_pkr', 'r.type',
-          db.raw('COALESCE(c.name, eo.order_no) as counterparty'),
-          'eo.order_no'
-        )
-        .orderBy('r.due_date', 'asc');
-
-      const buckets = { '0-30': { count: 0, totalPkr: 0 }, '31-60': { count: 0, totalPkr: 0 }, '61-90': { count: 0, totalPkr: 0 }, '90+': { count: 0, totalPkr: 0 } };
-      let totalPkr = 0;
-      const detail = rows.map((r) => {
-        const due = r.due_date ? new Date(r.due_date) : null;
-        const days = due ? Math.floor((today - due) / (1000 * 60 * 60 * 24)) : 0;
-        const bucket = days <= 30 ? '0-30' : days <= 60 ? '31-60' : days <= 90 ? '61-90' : '90+';
-        const out = parseFloat(r.outstanding) || 0;
-        const cur = String(r.currency || 'PKR').toUpperCase();
-        const stamped = parseFloat(r.base_amount_pkr) || 0;
-        // Stamped PKR, else the row's own rate; with neither the row has no PKR
-        // figure and adds nothing to the PKR buckets (D-10: no flat 280).
-        const fxRate = parseFloat(r.fx_rate) || 0;
-        const outPkr = cur === 'PKR' ? out : (stamped > 0 ? stamped * (out / parseFloat(r.outstanding || 1)) : out * fxRate);
-        buckets[bucket].count += 1;
-        buckets[bucket].totalPkr += outPkr;
-        totalPkr += outPkr;
-        return {
-          recvNo: r.recv_no, dueDate: r.due_date,
-          counterparty: r.counterparty || '—', customerId: r.customer_id,
-          type: r.type, currency: cur,
-          outstanding: out, outstandingPkr: outPkr,
-          ageDays: days, bucket,
-        };
-      });
-
+      const { receivablesAsAt, summarizeReceivables, BUCKETS } = require('../finance/receivablesAsAt');
+      const asOf = req.query.as_of && /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.as_of)) ? req.query.as_of : null;
+      const { asOf: d, rows } = await receivablesAsAt(db, { asOf });
+      const ids = [...new Set(rows.map((r) => r.customerId).filter(Boolean))];
+      const names = ids.length
+        ? Object.fromEntries((await db('customers').whereIn('id', ids).select('id', 'name')).map((c) => [c.id, c.name]))
+        : {};
+      const summary = summarizeReceivables(rows, { asOf: d });
       return res.json({
         success: true,
         data: {
-          asOf: today.toISOString(),
-          buckets, totalPkr,
-          rows: detail,
+          asOf: d,
+          bucketKeys: BUCKETS,
+          byCurrency: summary.byCurrency,
+          pkrEquiv: summary.pkrEquiv.outstanding,
+          rows: rows.map((r) => ({
+            recvNo: r.recvNo, dueDate: r.dueDate,
+            counterparty: names[r.customerId] || '—', customerId: r.customerId,
+            type: r.type, currency: r.currency,
+            outstanding: r.outstanding, outstandingPkr: r.outstandingPkr,
+            ageDays: r.daysPastDue, bucket: r.bucket,
+          })),
         },
       });
     } catch (err) {
@@ -1334,46 +1477,49 @@ const reportingController = {
   },
 
   // ──── AP Aging (printable) ─────────────────────────────────────
+  // Open payables by days past due, per currency (RPT-06: a USD payable is
+  // never printed as rupees). Point in time (today).
   async printableApAging(req, res) {
     try {
       const db = require('../../config/database');
-      const today = new Date();
+      const { PAYABLE_CLOSED } = require('../finance/currencyFigures');
+      const { bucketOf, daysPastDue, BUCKETS } = require('../finance/receivablesAsAt');
+      const { dayOf } = require('../../shared/fiscalYear');
+      const today = dayOf(new Date());
       const rows = await db('payables as p')
         .leftJoin('suppliers as s', 'p.supplier_id', 's.id')
-        .whereNotIn('p.status', ['Paid', 'Written Off'])
+        .whereNotIn('p.status', PAYABLE_CLOSED)
         .where('p.outstanding', '>', 0)
         .select(
-          'p.id', 'p.pay_no', 'p.due_date', 'p.outstanding', 'p.source_table', 'p.supplier_id',
+          'p.id', 'p.pay_no', 'p.due_date', 'p.outstanding', 'p.currency', 'p.source_table', 'p.supplier_id',
           db.raw("COALESCE(s.name, p.linked_ref, 'Vendor') as counterparty")
         )
         .orderBy('p.due_date', 'asc');
 
-      const buckets = { '0-30': { count: 0, totalPkr: 0 }, '31-60': { count: 0, totalPkr: 0 }, '61-90': { count: 0, totalPkr: 0 }, '90+': { count: 0, totalPkr: 0 } };
-      let totalPkr = 0;
+      const byCurrency = {};
       const detail = rows.map((r) => {
-        const due = r.due_date ? new Date(r.due_date) : null;
-        const days = due ? Math.floor((today - due) / (1000 * 60 * 60 * 24)) : 0;
-        const bucket = days <= 30 ? '0-30' : days <= 60 ? '31-60' : days <= 90 ? '61-90' : '90+';
-        const outPkr = parseFloat(r.outstanding) || 0;
-        buckets[bucket].count += 1;
-        buckets[bucket].totalPkr += outPkr;
-        totalPkr += outPkr;
+        const days = daysPastDue(dayOf(r.due_date), today);
+        const bucket = bucketOf(days);
+        const out = Math.round((parseFloat(r.outstanding) || 0) * 100) / 100;
+        const cur = String(r.currency || 'PKR').toUpperCase();
+        const c = byCurrency[cur] || (byCurrency[cur] = {
+          count: 0, outstanding: 0, buckets: Object.fromEntries(BUCKETS.map((k) => [k, 0])),
+        });
+        c.count += 1;
+        c.outstanding = Math.round((c.outstanding + out) * 100) / 100;
+        c.buckets[bucket] = Math.round((c.buckets[bucket] + out) * 100) / 100;
         return {
-          payableNo: r.pay_no, dueDate: r.due_date,
+          payableNo: r.pay_no, dueDate: dayOf(r.due_date),
           counterparty: r.counterparty || '—', supplierId: r.supplier_id,
-          sourceTable: r.source_table,
-          outstandingPkr: outPkr,
-          ageDays: days, bucket,
+          sourceTable: r.source_table, currency: cur,
+          outstanding: out,
+          ageDays: days != null && days > 0 ? days : 0, bucket,
         };
       });
 
       return res.json({
         success: true,
-        data: {
-          asOf: today.toISOString(),
-          buckets, totalPkr,
-          rows: detail,
-        },
+        data: { asOf: today, bucketKeys: BUCKETS, byCurrency, rows: detail },
       });
     } catch (err) {
       console.error('Printable AP aging report error:', err);
@@ -2392,8 +2538,11 @@ const reportingController = {
       const num = (v) => parseFloat(v) || 0;
 
       // Revenue + matched COGS (recognized when sold/shipped).
-      const exportRow = await db('export_orders').whereIn('status', ['Shipped', 'Arrived', 'Closed']).whereBetween('updated_at', [fromDate, toDate])
-        .sum({ rev: 'contract_value_pkr_locked' }).sum({ cogs: 'inventory_cogs_total_pkr' }).count({ cnt: 'id' }).first();
+      // Export: dated by the REVENUE DATE (D-16: BL date, else the Shipped
+      // transition), at the one definition's PKR revenue — not updated_at.
+      const exportRev = await exportRevenueInPeriod(db, { startDate: from, endDate: to });
+      const exportRow = { rev: exportRev.revenuePkr, cogs: exportRev.cogsPkr, cnt: exportRev.count };
+      const shippedIds = exportRev.rows.map((r) => r.id);
       const localRow = await db('local_sales').where('status', 'Completed').whereBetween('sale_date', [fromDate, toDate])
         .sum({ rev: 'total_amount' }).sum({ cogs: 'cogs_total_pkr' }).count({ cnt: 'id' }).first();
 
@@ -2410,13 +2559,15 @@ const reportingController = {
         .whereBetween('e.expense_date', [fromDate, toDate]).where('e.amount_pkr', '>', 0)
         .whereNot('e.payment_status', 'Reversed')
         .select('e.expense_no', 'e.category', 'e.vendor_name', 'e.supplier_id', 'e.amount_pkr', 'e.expense_date', db.raw("COALESCE(s.name, e.vendor_name, '—') as payee"))
-        .orderBy('e.amount_pkr', 'desc').limit(500);
+        .orderBy('e.amount_pkr', 'desc').limit(OPEX_LINE_CAP + 1);
+      const opexCut = capList(opexLines, OPEX_LINE_CAP);
+      opexLines.length = opexCut.rows.length;
       // Export selling costs are matched to the SHIPPED export revenue (recognized
       // when the order ships), not when the cost was incurred — costs for orders
       // still in progress stay deferred (WIP), keeping the accrual matching clean.
       const sellingRow = await db('export_order_costs as eoc')
         .join('export_orders as eo', 'eoc.order_id', 'eo.id')
-        .whereIn('eo.status', ['Shipped', 'Arrived', 'Closed']).whereBetween('eo.updated_at', [fromDate, toDate])
+        .whereIn('eo.id', shippedIds.length ? shippedIds : [0])
         .where('eoc.amount', '>', 0)
         .whereRaw("COALESCE(eoc.notes,'') NOT ILIKE 'From business expense%'")
         .sum({ total: db.raw('CASE WHEN COALESCE(eoc.base_amount_pkr,0) > 0 THEN eoc.base_amount_pkr ELSE COALESCE(eoc.amount,0)*COALESCE(eoc.fx_rate,1) END') }).count({ cnt: 'eoc.id' }).first();
@@ -2444,12 +2595,16 @@ const reportingController = {
       const netMarginPct = revenue.totalPkr > 0 ? (netProfitPkr / revenue.totalPkr) * 100 : 0;
 
       // Per-sale detail (revenue, COGS, gross) — clickable.
-      const exportLines = await db('export_orders as o').leftJoin('customers as c', 'o.customer_id', 'c.id')
-        .whereIn('o.status', ['Shipped', 'Arrived', 'Closed']).whereBetween('o.updated_at', [fromDate, toDate])
-        .select('o.id', 'o.order_no', 'o.product_name', 'o.customer_id', db.raw('COALESCE(o.contract_value_pkr_locked,0) as rev'), db.raw('COALESCE(o.inventory_cogs_total_pkr,0) as cogs'), db.raw("COALESCE(c.name,'—') as customer")).orderByRaw('rev DESC').limit(200);
+      // One more than the cap, so the truncation flag below can tell.
+      const exportLines = await exportLinesFor(db, exportRev.rows.slice(0, DETAIL_CAP + 1));
       const localLines = await db('local_sales as ls').leftJoin('customers as c', 'ls.customer_id', 'c.id')
         .where('ls.status', 'Completed').whereBetween('ls.sale_date', [fromDate, toDate])
-        .select('ls.id', 'ls.sale_no', 'ls.lot_id', 'ls.item_name', 'ls.total_amount', 'ls.cogs_total_pkr', 'ls.customer_id', db.raw("COALESCE(c.name, ls.buyer_name, 'Walk-in') as customer")).orderBy('ls.total_amount', 'desc').limit(200);
+        .select('ls.id', 'ls.sale_no', 'ls.lot_id', 'ls.item_name', 'ls.total_amount', 'ls.cogs_total_pkr', 'ls.customer_id', db.raw("COALESCE(c.name, ls.buyer_name, 'Walk-in') as customer")).orderBy('ls.total_amount', 'desc').limit(DETAIL_CAP + 1);
+      const accrualTruncated = {
+        export: exportLines.length > DETAIL_CAP, local: localLines.length > DETAIL_CAP, expenses: opexCut.truncated,
+      };
+      exportLines.length = Math.min(exportLines.length, DETAIL_CAP);
+      localLines.length = Math.min(localLines.length, DETAIL_CAP);
       const sales = [
         ...exportLines.map((r) => ({ channel: 'Export', id: r.id, ref: r.order_no, party: r.customer, customerId: r.customer_id || null, item: r.product_name, revPkr: num(r.rev), cogsPkr: num(r.cogs), grossPkr: num(r.rev) - num(r.cogs) })),
         ...localLines.map((r) => ({ channel: 'Local', id: r.id, lotId: r.lot_id, ref: r.sale_no, party: r.customer, customerId: r.customer_id || null, item: r.item_name, revPkr: num(r.total_amount), cogsPkr: num(r.cogs_total_pkr), grossPkr: num(r.total_amount) - num(r.cogs_total_pkr) })),
@@ -2471,6 +2626,8 @@ const reportingController = {
             return { openingPkr, purchasesPkr, cogsPkr: cogs.totalPkr, closingPkr };
           })(),
           detail: { sales, expenses: opex.byCategory },
+          detailCap: DETAIL_CAP,
+          detailTruncated: accrualTruncated,
         },
       });
     } catch (err) { console.error('Accrual P&L error:', err); return res.status(500).json({ success: false, message: 'Internal server error.' }); }
@@ -2545,3 +2702,5 @@ const reportingController = {
 };
 
 module.exports = reportingController;
+// Exported for tests.
+module.exports.redactInvoiceLedger = redactInvoiceLedger;

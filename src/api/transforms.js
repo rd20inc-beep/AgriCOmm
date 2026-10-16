@@ -251,6 +251,9 @@ export function transformOrder(dbOrder) {
     canSeeSupplierName: dbOrder.canSeeSupplierName !== false, // supplier-name privacy
     // Source-batch by-product pricing (internal/admin-only; empty for non-admin)
     batchByproducts: dbOrder.batchByproducts || [],
+    // EXP-08: Booked / Realised profit from the server's one definition (PKR,
+    // camelCase already) — null when the viewer may not see profit.
+    profit: dbOrder.profit || null,
     // Costs — convert array to keyed object if needed
     costs: transformCosts(dbOrder.costs),
     // Documents — convert array to keyed object if needed
@@ -331,7 +334,7 @@ export function transformBatch(dbBatch) {
     variancePct: dbBatch.variance_pct != null ? parseFloat(dbBatch.variance_pct) : null,
     varianceStatus: dbBatch.variance_status || null,
     vehicleArrivals: dbBatch.vehicleArrivals || [],
-    millingFeePerKg: parseFloat(dbBatch.milling_fee_per_kg) || 5,
+    millingFeePerKg: parseFloat(dbBatch.milling_fee_per_kg) || 0, // MIL-02: 0 is a real fee, never 5
     finishedPricePerMT: perKgToPerMt(dbBatch.finished_price_per_kg),
     brokenPricePerMT: perKgToPerMt(dbBatch.broken_price_per_kg),
     branPricePerMT: perKgToPerMt(dbBatch.bran_price_per_kg),

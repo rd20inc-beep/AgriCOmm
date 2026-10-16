@@ -6,17 +6,19 @@ import { useProfitLoss } from '../../../api/queries';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { useGlEntity, glParams, pkr } from '../utils/glStatements';
 import {
-  EntityFilter, PeriodLine, StatementHeader, StateBox, AccountSection,
+  EntityFilter, PeriodLine, PeriodStatusBadge, StatementHeader, StateBox, AccountSection,
 } from '../components/GlStatementParts';
+import { ServerCsvButton } from '../../analytics/components/ReportChrome';
 
 export default function GlProfitLoss() {
   const { queryParams: range } = useFinanceDateRange();
   const { entity, setEntity, apiEntity } = useGlEntity();
-  const { data, isLoading, error, refetch } = useProfitLoss(glParams('period', range, apiEntity));
-  return <ProfitLossView data={data} isLoading={isLoading} error={error} onRetry={refetch} entity={entity} onEntity={setEntity} from={range.from_date} to={range.to_date} />;
+  const params = glParams('period', range, apiEntity);
+  const { data, isLoading, error, refetch } = useProfitLoss(params);
+  return <ProfitLossView data={data} isLoading={isLoading} error={error} onRetry={refetch} entity={entity} onEntity={setEntity} from={range.from_date} to={range.to_date} csvParams={params} />;
 }
 
-export function ProfitLossView({ data, isLoading, error, onRetry, entity, onEntity, from, to }) {
+export function ProfitLossView({ data, isLoading, error, onRetry, entity, onEntity, from, to, csvParams }) {
   const revenue = data?.revenue || {};
   const cogs = data?.cogs || {};
   const expenses = data?.expenses || {};
@@ -25,9 +27,12 @@ export function ProfitLossView({ data, isLoading, error, onRetry, entity, onEnti
   return (
     <div className="print-report space-y-4 pb-4">
       <StatementHeader title="Profit & loss (general ledger)">
-        <PeriodLine mode="period" from={from} to={to} /> · PKR · Posted journals only
+        <PeriodLine mode="period" from={from} to={to} /> · PKR · Posted journals only{data?.periodStatus && <> · <PeriodStatusBadge status={data.periodStatus} /></>}
       </StatementHeader>
-      <EntityFilter entity={entity} onChange={onEntity} />
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <EntityFilter entity={entity} onChange={onEntity} />
+        {csvParams && <ServerCsvButton endpoint="/api/accounting/statements/profit-loss" params={csvParams} filename={`profit-and-loss${from ? `_${from}` : ''}${to ? `_${to}` : ''}`} label="CSV" />}
+      </div>
       <StateBox isLoading={isLoading} error={error} onRetry={onRetry} empty={empty}>
         <div className="space-y-3 max-w-3xl">
           <AccountSection title="Revenue" accounts={revenue.accounts} valueKey="amount" total={revenue.total} />

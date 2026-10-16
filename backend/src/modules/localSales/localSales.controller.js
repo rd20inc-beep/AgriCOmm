@@ -957,7 +957,8 @@ module.exports = {
       }
 
       const [{ count: total }] = await query.clone().clearSelect().count('ls.id as count');
-      let sales = await query.orderBy('ls.sale_date', 'desc').limit(limit).offset(offset);
+      // id breaks same-day ties so paging never skips or repeats a sale (P4-11).
+      let sales = await query.orderBy('ls.sale_date', 'desc').orderBy('ls.id', 'desc').limit(limit).offset(offset);
 
       // Confidentiality: a finance-readable (non Owner/Admin) role sees the sale
       // reference but NOT the customer name — mask customer_name + buyer_name.
@@ -965,7 +966,7 @@ module.exports = {
         sales = sales.map((s) => ({ ...s, customer_name: 'Customer', buyer_name: s.buyer_name ? 'Customer' : s.buyer_name }));
       }
 
-      return res.json({ success: true, data: { sales, pagination: { page: +page, limit: +limit, total: +total } } });
+      return res.json({ success: true, data: { sales, pagination: { page: +page, limit: +limit, total: +total, totalPages: Math.ceil(total / limit) } } });
     } catch (err) {
       console.error('Local sales list error:', err);
       return res.status(500).json({ success: false, message: err.message });

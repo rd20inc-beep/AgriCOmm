@@ -114,12 +114,27 @@ const notificationService = require('../../services/notificationService');
 // #9-scoping: per-user warehouse restriction, applied to stock READ paths only
 // (the dispatch/reservation engine is never scoped).
 const whScope = require('../../utils/warehouseScope');
-const { canSeeCost, redactMoney } = require('../../utils/costVisibility');
+const { canSeeCost, canSeeProfit, redactMoney } = require('../../utils/costVisibility');
+const { exportOrderProfit, previewExportProfit } = require('../finance/profitDefinitions');
 const documentGate = require('./documentGate');
 const { reservationCover } = require('./reservationGate');
 const { applyExportPool, exportPoolProblem, lotCostPerKg } = require('../inventory/exportPool');
 const { suggestLots } = require('./lotSuggestion');
 const { MONEY_EPSILON, settledAmount, getStepForStatus, getAllowedActions, deriveFinancialStatus } = workflowService;
+
+/**
+ * Each order's profit row from the ONE definition (profitDefinitions, EXP-08):
+ * Map(id → row), or null when the caller may not see profit. A caller who sees
+ * profit but not cost gets the row with its cost figures nulled.
+ */
+async function profitRowsFor(req, ids) {
+  if (!ids.length || !(await canSeeProfit(req))) return null;
+  const rows = await exportOrderProfit(db, ids);
+  if (!(await canSeeCost(req))) {
+    for (const row of rows.values()) redactMoney(row, { cost: false, profit: true });
+  }
+  return rows;
+}
 
 /**
  * Resolve an :id route param to a numeric export_orders.id.
@@ -572,6 +587,41 @@ const exportOrderController = {
     } catch (err) { return next(err); }
   },
 
+  /**
+   * POST /profit-preview — the create form's costing preview (EXP-08) through
+   * the one profit definition: rice cost ESTIMATED from stock / the rate
+   * master, op costs = the printed bags entered. With no booked rate typed the
+   * currency's latest rate is used and flagged estimated (D-10: display only).
+   */
+  async profitPreview(req, res) {
+    try {
+      const b = req.body || {};
+      const currency = String(b.currency || 'USD').toUpperCase();
+      let rate = parseFloat(b.booked_fx_rate) || 0;
+      let fxEstimated = false;
+      if (currency !== 'PKR' && !(rate > 0)) {
+        const latest = await require('../finance/fxRate.service').getLatestRate(currency).catch(() => null);
+        rate = (latest && parseFloat(latest.rate)) || 0;
+        fxEstimated = rate > 0;
+      }
+      const row = await previewExportProfit(db, {
+        currency,
+        booked_fx_rate: currency === 'PKR' ? 1 : rate,
+        contract_value: b.contract_value,
+        items: Array.isArray(b.items) ? b.items : [],
+        freight_display: b.freight_display,
+        freight_per_mt: b.freight_per_mt,
+        insurance_per_mt: b.insurance_per_mt,
+        printed_bags_pkr: b.printed_bags_pkr,
+      });
+      if (!(await canSeeCost(req))) redactMoney(row, { cost: false, profit: true });
+      return res.json({ success: true, data: { ...row, fxEstimated, fxRateUsed: rate || null, basis: 'booked_definition_estimate' } });
+    } catch (err) {
+      console.error('Export profit preview error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+  },
+
   async list(req, res) {
     try {
       const {
@@ -614,7 +664,8 @@ const exportOrderController = {
       const countQuery = query.clone().clearSelect().clearOrder().count('eo.id as total').first();
 
       const [orders, countResult] = await Promise.all([
-        query.orderBy('eo.created_at', 'desc').limit(parseInt(limit)).offset(offset),
+        // id breaks created_at ties so paging never skips or repeats an order.
+        query.orderBy('eo.created_at', 'desc').orderBy('eo.id', 'desc').limit(parseInt(limit)).offset(offset),
         countQuery,
       ]);
 
@@ -639,6 +690,12 @@ const exportOrderController = {
         });
         orders.forEach((o) => { o.items = byOrder[o.id] || []; });
       }
+
+      // EXP-08: the list's margin is the order's Booked margin from the one
+      // profit definition (PKR, booked rate), not contract − costs in the
+      // browser across currencies. null for a caller who may not see profit.
+      const profits = await profitRowsFor(req, ids);
+      orders.forEach((o) => { o.profit = profits ? (profits.get(Number(o.id)) || null) : null; });
 
       return res.json({
         success: true,
@@ -969,6 +1026,7 @@ const exportOrderController = {
       // milling_costs (P2-05) — never the stored 'milling' copy, which was
       // written once at completion in the order's currency and never refreshed.
       // It is batch cost, so cost-blind roles don't get it.
+      const profitRows = await profitRowsFor(req, [orderId]);
       const orderCosts = [
         ...costs.filter((c) => String(c.category || '').toLowerCase() !== 'milling'),
         ...(seesCost ? await derivedMillingCosts(db, orderId) : []),
@@ -995,6 +1053,9 @@ const exportOrderController = {
           purchaseLots,
           canSeeSupplierName, // FE gates the linked-batch supplier link on this
           batchByproducts, // INTERNAL/ADMIN ONLY — empty for non-admin viewers
+          // EXP-08: Booked / Realised profit from the one definition
+          // (profitDefinitions) — null without the profit permission.
+          profit: profitRows ? (profitRows.get(Number(orderId)) || null) : null,
         },
       });
     } catch (err) {

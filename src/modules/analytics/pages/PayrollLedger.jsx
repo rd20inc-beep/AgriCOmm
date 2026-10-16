@@ -21,7 +21,11 @@ const COLS = [
   { label: 'Department', key: 'department' },
   { label: 'Pay type', key: 'payType' },
   { label: 'Gross', align: 'right', accessor: (r) => Math.round(r.gross) },
+  { label: 'Bonus', align: 'right', accessor: (r) => Math.round(r.bonus || 0) },
+  { label: 'Statutory', align: 'right', accessor: (r) => Math.round(r.statutory || 0) },
+  { label: 'Deductions', align: 'right', accessor: (r) => Math.round(r.deductions || 0) },
   { label: 'Advance deducted', align: 'right', accessor: (r) => Math.round(r.advanceDeducted) },
+  { label: 'Short paid', align: 'right', accessor: (r) => Math.round(r.shortPay || 0) },
   { label: 'Net pay', align: 'right', accessor: (r) => Math.round(r.net) },
   { label: 'Mode', key: 'payMethod' },
   { label: 'Account', key: 'account' },
@@ -31,7 +35,8 @@ const COLS = [
 export default function PayrollLedger() {
   const { companyProfileData } = useApp();
   const { user } = useAuth();
-  const [filters, setFilters] = useState({ from: '', to: '', month: '', role: '', department: '', payMethod: '' });
+  const EMPTY = { from: '', to: '', month: '', role: '', department: '', payMethod: '', status: 'paid', entity: '' };
+  const [filters, setFilters] = useState(EMPTY);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -88,13 +93,24 @@ export default function PayrollLedger() {
             <option value="">All departments</option>{departments.map(d => <option key={d} value={d}>{d}</option>)}
           </select>
         </div>
+        <div><label className="block text-[11px] text-gray-500 mb-1">Status</label>
+          <select value={filters.status} onChange={e => set({ status: e.target.value })} className="text-sm border border-gray-200 rounded-lg px-2 py-1.5 bg-white">
+            <option value="paid">Paid</option><option value="accrued">Accrued (not paid)</option><option value="unpaid">All unpaid</option>
+            <option value="pending">Pending approval / payment</option><option value="voided">Voided / reversed</option><option value="all">All</option>
+          </select>
+        </div>
+        <div><label className="block text-[11px] text-gray-500 mb-1">Entity</label>
+          <select value={filters.entity} onChange={e => set({ entity: e.target.value })} className="text-sm border border-gray-200 rounded-lg px-2 py-1.5 bg-white">
+            <option value="">All</option><option value="mill">Mill</option><option value="general">Head office</option>
+          </select>
+        </div>
         <div><label className="block text-[11px] text-gray-500 mb-1">Mode</label>
           <select value={filters.payMethod} onChange={e => set({ payMethod: e.target.value })} className="text-sm border border-gray-200 rounded-lg px-2 py-1.5 bg-white">
             <option value="">All</option><option value="cash">Cash</option><option value="bank">Bank</option>
           </select>
         </div>
-        {(filters.month || filters.from || filters.to || filters.role || filters.department || filters.payMethod) && (
-          <button onClick={() => setFilters({ from: '', to: '', month: '', role: '', department: '', payMethod: '' })} className="text-xs text-blue-600 hover:underline ml-auto">Clear</button>
+        {(filters.month || filters.from || filters.to || filters.role || filters.department || filters.payMethod || filters.entity || filters.status !== 'paid') && (
+          <button onClick={() => setFilters(EMPTY)} className="text-xs text-blue-600 hover:underline ml-auto">Clear</button>
         )}
       </div>
 
@@ -103,7 +119,7 @@ export default function PayrollLedger() {
         <Kpi label="Salary lines" value={`${totals.count ?? rows.length}`} />
         <Kpi label="Gross payroll" value={pkr(totals.gross)} />
         <Kpi label="Advance recovered" value={pkr(totals.advance)} tone="amber" />
-        <Kpi label="Net paid" value={pkr(totals.net)} tone="emerald" />
+        <Kpi label={filters.status === 'paid' ? 'Net paid' : 'Net pay'} value={pkr(totals.net)} tone="emerald" />
       </div>
 
       {/* Table */}
@@ -117,6 +133,8 @@ export default function PayrollLedger() {
               <th className="px-3 py-2 text-left font-medium">Role</th>
               <th className="px-3 py-2 text-left font-medium">Department</th>
               <th className="px-3 py-2 text-right font-medium">Gross</th>
+              <th className="px-3 py-2 text-right font-medium">Bonus</th>
+              <th className="px-3 py-2 text-right font-medium">Statutory + ded.</th>
               <th className="px-3 py-2 text-right font-medium">Advance ded.</th>
               <th className="px-3 py-2 text-right font-medium">Net pay</th>
               <th className="px-3 py-2 text-left font-medium">Mode</th>
@@ -125,9 +143,9 @@ export default function PayrollLedger() {
           </thead>
           <tbody className="divide-y divide-gray-100">
             {loading ? (
-              <tr><td colSpan={10} className="px-3 py-8 text-center text-gray-400">Loading…</td></tr>
+              <tr><td colSpan={12} className="px-3 py-8 text-center text-gray-400">Loading…</td></tr>
             ) : rows.length === 0 ? (
-              <tr><td colSpan={10} className="px-3 py-8 text-center text-gray-400">No payroll lines match.</td></tr>
+              <tr><td colSpan={12} className="px-3 py-8 text-center text-gray-400">No payroll lines match.</td></tr>
             ) : rows.map((r) => (
               <tr key={r.id} className="hover:bg-blue-50/40">
                 <td data-label="Date" className="mob-hide px-3 py-2 whitespace-nowrap text-gray-600">{dt(r.date)}</td>
@@ -136,10 +154,12 @@ export default function PayrollLedger() {
                 <td data-label="Role" className="mob-hide px-3 py-2 text-gray-600">{r.role}</td>
                 <td data-label="Department" className="mob-hide px-3 py-2 text-gray-600">{r.department}</td>
                 <td data-label="Gross" className="px-3 py-2 text-right tabular-nums">{pkr(r.gross)}</td>
+                <td data-label="Bonus" className="mob-hide px-3 py-2 text-right tabular-nums">{r.bonus ? pkr(r.bonus) : '—'}</td>
+                <td data-label="Statutory + ded." className="mob-hide px-3 py-2 text-right tabular-nums">{(r.statutory || r.deductions) ? pkr((r.statutory || 0) + (r.deductions || 0)) : '—'}</td>
                 <td data-label="Advance ded." className="mob-hide px-3 py-2 text-right tabular-nums text-amber-700">{r.advanceDeducted ? pkr(r.advanceDeducted) : '—'}</td>
                 <td data-label="Net pay" className="px-3 py-2 text-right tabular-nums font-medium">{pkr(r.net)}</td>
                 <td data-label="Mode" className="mob-hide px-3 py-2 text-gray-600 capitalize">{r.payMethod}</td>
-                <td data-label="Status" className="px-3 py-2"><span className="text-xs px-2 py-0.5 rounded-full font-medium bg-emerald-100 text-emerald-700">{r.status}</span></td>
+                <td data-label="Status" className="px-3 py-2"><span className={`text-xs px-2 py-0.5 rounded-full font-medium ${r.status === 'Paid' ? 'bg-emerald-100 text-emerald-700' : r.status === 'Accrued' ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-600'}`}>{r.status}</span></td>
               </tr>
             ))}
           </tbody>

@@ -4,7 +4,7 @@ import { Truck, Search, Filter, Download } from 'lucide-react';
 import api from '../../../api/client';
 import { favStar } from '../../../shared/utils/favorites';
 import { toLocalISODate, todayLocalISO, fmtPKR, fmtKg } from '../../../shared/utils/format';
-import { purchaseFigures, purchasesCsv } from '../ricePurchases';
+import { purchaseFigures, downloadPurchasesCsv } from '../ricePurchases';
 
 function formatPKR(value) {
   if (!value) return '—';
@@ -94,14 +94,7 @@ export default function RicePurchasesLedger() {
   }, [purchases, filters.search]);
 
   function exportCSV() {
-    const csv = purchasesCsv(filteredRows);
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `rice-purchases-${todayISO()}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadPurchasesCsv(filteredRows, `rice-purchases-${todayISO()}.csv`);
   }
 
   return (

@@ -5,7 +5,7 @@
 import { useState, Fragment } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  fmtNum, fmtPKR, fmtUSD, fmtPct as houseFmtPct, fmtDate as houseFmtDate, fmtDateTime as fmtStamp,
+  fmtNum, fmtPKR, fmtUSD, fmtMoney, fmtPct as houseFmtPct, fmtDate as houseFmtDate, fmtDateTime as fmtStamp,
 } from '../../../shared/utils/format';
 
 // A reference that's a clickable link on screen but prints as plain text.
@@ -293,33 +293,49 @@ export function PnlReportView({ data, companyName, range, preset }) {
 export function CashflowReportView({ data, companyName, range, preset }) {
   const { summary, daily, topReceipts, topPayments } = data;
   const periodLabel = preset === 'daily' ? 'Daily' : preset === 'weekly' ? 'Weekly' : preset === 'monthly' ? 'Monthly' : 'Custom Range';
+  // RPT-05: settled money only, one block per currency (never summed). An
+  // older payload without byCurrency is read as rupees.
+  const byCur = summary.byCurrency || { PKR: { in: summary.inPkr, out: summary.outPkr, net: summary.netPkr, inCount: summary.inCount, outCount: summary.outCount } };
+  const curs = Object.keys(byCur).sort((a, b) => (a === 'PKR' ? -1 : b === 'PKR' ? 1 : a.localeCompare(b)));
+  const money = (v, cur) => fmtMoney(parseFloat(v) || 0, cur || 'PKR');
+  const pending = Object.entries(summary.pendingCheques || {});
   return (
     <div className="print-report space-y-6 text-sm text-gray-900">
-      <Header companyName={companyName} title={`${periodLabel} Cashflow`} subtitle={range ? `${fmtDate(range.from)} – ${fmtDate(range.to)}` : ''} />
-      <SummaryRow items={[
-        { label: 'Money In', value: fmtPkr(summary.inPkr) },
-        { label: 'Money Out', value: fmtPkr(summary.outPkr) },
-        { label: 'Net Cashflow', value: fmtPkr(summary.netPkr) },
-        { label: 'Receipts', value: summary.inCount },
-        { label: 'Payments', value: summary.outCount },
-      ]} />
+      <Header companyName={companyName} title={`${periodLabel} Cashflow`} subtitle={range ? `${fmtDate(range.from)} – ${fmtDate(range.to)} · settled payments only, per currency` : ''} />
+      {(curs.length ? curs : ['PKR']).map((cur) => {
+        const s = byCur[cur] || {};
+        return (
+          <SummaryRow key={cur} items={[
+            { label: `Money In (${cur})`, value: money(s.in, cur) },
+            { label: `Money Out (${cur})`, value: money(s.out, cur) },
+            { label: `Net Cashflow (${cur})`, value: money(s.net, cur) },
+            { label: 'Receipts', value: s.inCount || 0 },
+            { label: 'Payments', value: s.outCount || 0 },
+          ]} />
+        );
+      })}
+      {pending.length > 0 && (
+        <p className="text-xs text-gray-500">
+          Not included — cheques not yet cleared: {pending.map(([cur, p]) => `${p.count} (${money((p.in || 0), cur)} in / ${money((p.out || 0), cur)} out)`).join('; ')}.
+        </p>
+      )}
       <Section title="Daily Movement">
         <Table
-          head={['Date', 'In (PKR)', 'Out (PKR)', 'Net (PKR)']}
-          align={['left', 'right', 'right', 'right']}
-          rows={(daily || []).map(d => [d.day, fmtPkr(d.In), fmtPkr(d.Out), fmtPkr(d.Net)])}
-          empty="No payments recorded in this period."
+          head={['Date', 'Currency', 'In', 'Out', 'Net']}
+          align={['left', 'left', 'right', 'right', 'right']}
+          rows={(daily || []).map(d => [d.day, d.currency || 'PKR', money(d.In, d.currency), money(d.Out, d.currency), money(d.Net, d.currency)])}
+          empty="No settled payments in this period."
         />
       </Section>
       {(topReceipts || []).length > 0 && (
         <Section title="Receipts (largest first)">
           <Table
-            head={['Payment', 'Date', 'Received From', 'Method', 'Amount (PKR)']}
+            head={['Payment', 'Date', 'Received From', 'Method', 'Amount']}
             align={['left', 'left', 'left', 'left', 'right']}
             rows={topReceipts.map(r => [
               r.paymentNo, fmtDate(r.date),
               r.customerId ? <RefLink to={`/finance/accounting/statements?type=customer&id=${r.customerId}`}>{r.counterparty}</RefLink> : r.counterparty,
-              r.method || '—', fmtPkr(r.amountPkr),
+              r.method || '—', r.currency ? fmtMoney(r.amount, r.currency) : fmtPkr(r.amountPkr),
             ])}
             empty=""
           />
@@ -328,12 +344,12 @@ export function CashflowReportView({ data, companyName, range, preset }) {
       {(topPayments || []).length > 0 && (
         <Section title="Payments (largest first)">
           <Table
-            head={['Payment', 'Date', 'Paid To', 'Method', 'Amount (PKR)']}
+            head={['Payment', 'Date', 'Paid To', 'Method', 'Amount']}
             align={['left', 'left', 'left', 'left', 'right']}
             rows={topPayments.map(r => [
               r.paymentNo, fmtDate(r.date),
               r.supplierId ? <RefLink to={`/finance/accounting/statements?type=supplier&id=${r.supplierId}`}>{r.counterparty}</RefLink> : r.counterparty,
-              r.method || '—', fmtPkr(r.amountPkr),
+              r.method || '—', r.currency ? fmtMoney(r.amount, r.currency) : fmtPkr(r.amountPkr),
             ])}
             empty=""
           />
@@ -345,69 +361,82 @@ export function CashflowReportView({ data, companyName, range, preset }) {
 }
 
 // ─── Aging report view (AR or AP) ──────────────────────────────────────
+// Aging (P4-04 / RPT-06): one section per currency — dollars and rupees are
+// never added together. Buckets are days past the effective due date at the
+// as-at date; 'current' is not yet due. AR also shows ≈ PKR at each row's own
+// booked rate (the outstanding share of its booked PKR) — a secondary line.
+const AGING_LABEL = { current: 'Not yet due', '1-30': '1–30 days', '31-60': '31–60 days', '61-90': '61–90 days', '90+': '90+ days' };
+
 export function AgingReportView({ data, companyName, kind }) {
-  const { asOf, buckets, totalPkr, rows } = data;
+  const { asOf, byCurrency = {}, rows = [], pkrEquiv } = data;
+  const keys = data.bucketKeys || ['current', '1-30', '31-60', '61-90', '90+'];
   const isAR = kind === 'receivable';
   const title = isAR ? 'Accounts Receivable Aging' : 'Accounts Payable Aging';
-  const BUCKETS = ['0-30', '31-60', '61-90', '90+'];
+  const currencies = Object.keys(byCurrency).sort();
+  const money = (v, cur) => fmtMoney(parseFloat(v) || 0, cur, { decimals: 2 });
+  const partyCell = (r) => {
+    const partyId = isAR ? r.customerId : r.supplierId;
+    return partyId ? <RefLink to={`/finance/accounting/statements?type=${isAR ? 'customer' : 'supplier'}&id=${partyId}`}>{r.counterparty}</RefLink> : r.counterparty;
+  };
   return (
     <div className="print-report space-y-6 text-sm text-gray-900">
-      <Header companyName={companyName} title={title} subtitle={`As of ${fmtStamp(asOf)}`} />
-      <SummaryRow items={[
-        ...BUCKETS.map(b => ({ label: `${b} days`, value: fmtPkr(buckets[b]?.totalPkr || 0) })),
-        { label: 'Total Outstanding', value: fmtPkr(totalPkr) },
-      ]} />
-      <Section title="By Bucket">
-        <ExpandableGroupTable
-          head={['Bucket / Item', 'Counterparty', 'Due', 'Days / Count', 'Outstanding (PKR)', '% of Total']}
-          align={['left', 'left', 'left', 'right', 'right', 'right']}
-          groups={BUCKETS.map(b => {
-            const mine = rows.filter(r => r.bucket === b);
-            return {
-              key: b,
-              cells: [
-                `${b} days`, '', '',
-                buckets[b]?.count || 0,
-                fmtPkr(buckets[b]?.totalPkr || 0),
-                totalPkr > 0 ? `${((buckets[b]?.totalPkr || 0) / totalPkr * 100).toFixed(1)}%` : '—',
-              ],
-              childRows: mine.map(r => {
-                const partyId = isAR ? r.customerId : r.supplierId;
-                return [
-                  isAR ? r.recvNo : r.payableNo,
-                  partyId ? <RefLink to={`/finance/accounting/statements?type=${isAR ? 'customer' : 'supplier'}&id=${partyId}`}>{r.counterparty}</RefLink> : r.counterparty,
-                  r.dueDate ? fmtDate(r.dueDate) : '—', r.ageDays, fmtPkr(r.outstandingPkr), '',
-                ];
-              }),
-            };
-          })}
-          totalRow={['TOTAL', '', '', rows.length, fmtPkr(totalPkr), '100%']}
-          empty="No open balances."
-          hint="Click a bucket to see its open items."
-        />
-      </Section>
+      <Header companyName={companyName} title={title} subtitle={`As at ${fmtDate(asOf)} · days past due · per currency`} />
+      {currencies.length === 0 && <p className="text-gray-500">No open balances.</p>}
+      {currencies.map((cur) => {
+        const c = byCurrency[cur];
+        const mine = rows.filter((r) => r.currency === cur);
+        return (
+          <Fragment key={cur}>
+            <SummaryRow items={[
+              ...keys.map((b) => ({ label: `${cur} · ${AGING_LABEL[b] || b}`, value: money(c.buckets?.[b], cur) })),
+              { label: `${cur} · Total outstanding`, value: money(c.outstanding, cur) },
+            ]} />
+            <Section title={`${cur} — by bucket`}>
+              <ExpandableGroupTable
+                head={['Bucket / Item', 'Counterparty', 'Due', 'Days / Count', `Outstanding (${cur})`, '% of Total']}
+                align={['left', 'left', 'left', 'right', 'right', 'right']}
+                groups={keys.map((b) => {
+                  const inB = mine.filter((r) => r.bucket === b);
+                  const amt = parseFloat(c.buckets?.[b]) || 0;
+                  return {
+                    key: `${cur}-${b}`,
+                    cells: [
+                      AGING_LABEL[b] || b, '', '', inB.length, money(amt, cur),
+                      c.outstanding > 0 ? `${(amt / c.outstanding * 100).toFixed(1)}%` : '—',
+                    ],
+                    childRows: inB.map((r) => [
+                      isAR ? r.recvNo : r.payableNo, partyCell(r),
+                      r.dueDate ? fmtDate(r.dueDate) : '—', r.ageDays, money(r.outstanding, cur), '',
+                    ]),
+                  };
+                })}
+                totalRow={['TOTAL', '', '', c.count, money(c.outstanding, cur), '100%']}
+                empty="No open balances."
+                hint="Click a bucket to see its open items."
+              />
+            </Section>
+          </Fragment>
+        );
+      })}
+      {isAR && pkrEquiv && pkrEquiv.foreign && (
+        <p className="text-xs text-gray-500" data-testid="aging-pkr-equiv">
+          ≈ {fmtPkr(pkrEquiv.pkr)} PKR equivalent at each receivable&apos;s booked rate
+          {pkrEquiv.missingCount > 0 ? ` · ${pkrEquiv.missingCount} without a booked rate left out` : ''} — for reference, not a total.
+        </p>
+      )}
       <Section title={isAR ? 'Open Receivables (oldest first)' : 'Open Payables (oldest first)'}>
         <Table
-          head={[
-            isAR ? 'Receivable' : 'Payable',
-            'Counterparty',
-            'Due',
-            'Days',
-            'Bucket',
-            'Outstanding (PKR)',
-          ]}
-          align={['left', 'left', 'left', 'right', 'left', 'right']}
-          rows={rows.map(r => {
-            const partyId = isAR ? r.customerId : r.supplierId;
-            return [
-              isAR ? r.recvNo : r.payableNo,
-              partyId ? <RefLink to={`/finance/accounting/statements?type=${isAR ? 'customer' : 'supplier'}&id=${partyId}`}>{r.counterparty}</RefLink> : r.counterparty,
-              r.dueDate ? fmtDate(r.dueDate) : '—',
-              r.ageDays,
-              r.bucket,
-              fmtPkr(r.outstandingPkr),
-            ];
-          })}
+          head={[isAR ? 'Receivable' : 'Payable', 'Counterparty', 'Due', 'Days', 'Bucket', 'Currency', 'Outstanding']}
+          align={['left', 'left', 'left', 'right', 'left', 'left', 'right']}
+          rows={rows.map((r) => [
+            isAR ? r.recvNo : r.payableNo,
+            partyCell(r),
+            r.dueDate ? fmtDate(r.dueDate) : '—',
+            r.ageDays,
+            AGING_LABEL[r.bucket] || r.bucket,
+            r.currency,
+            money(r.outstanding, r.currency),
+          ])}
           empty="No open balances."
         />
       </Section>
@@ -416,7 +445,6 @@ export function AgingReportView({ data, companyName, kind }) {
   );
 }
 
-// ─── Shared print blocks ───────────────────────────────────────────────
 export function Header({ companyName, title, subtitle }) {
   return (
     <div className="border-b-2 border-gray-900 pb-3">
@@ -550,8 +578,10 @@ export function ExpandableGroupTable({ head, align = [], groups, totalRow, empty
                       </td>
                     ))}
                   </tr>
-                  {isOpen && kids.map((cr, ri) => (
-                    <tr key={ri} className="bg-gray-50/50 border-b border-gray-100 text-gray-600">
+                  {/* Collapsed groups still PRINT their rows (RPT-23): the rows are
+                      always rendered, hidden on screen until opened. */}
+                  {kids.map((cr, ri) => (
+                    <tr key={ri} className={`bg-gray-50/50 border-b border-gray-100 text-gray-600 ${isOpen ? '' : 'hidden print:table-row'}`}>
                       {cr.map((c, ci) => (
                         <td key={ci} className={`px-3 py-1 text-${align[ci] || 'left'} ${ci === 0 ? 'pl-9' : ''}`}>{c}</td>
                       ))}
@@ -1200,7 +1230,7 @@ export function AuditReportView({ data, companyName, range }) {
 // freight terms are working — and the aggregate can look covered while half the
 // shipments lose money, so the per-order rows carry the report and the ones that
 // came up short are called out rather than averaged away.
-export function FreightRecoveryView({ data, companyName }) {
+export function FreightRecoveryView({ data, companyName, range }) {
   const { rows = [], totals = {}, gl = {} } = data || {};
   const pct = (v) => (v == null ? '—' : `${v.toFixed(1)}%`);
   // Recovery reads as a percentage OF what was paid: 100% is break-even, under
@@ -1211,7 +1241,8 @@ export function FreightRecoveryView({ data, companyName }) {
 
   return (
     <div className="print-report space-y-6 text-sm text-gray-900">
-      <Header companyName={companyName} title="Freight Recovery" subtitle="Charged to buyers vs paid to carriers" />
+      <Header companyName={companyName} title="Freight Recovery"
+        subtitle={`Charged to buyers vs paid to carriers${range ? ` · orders created ${fmtDate(range.from)} – ${fmtDate(range.to)}` : ''}`} />
 
       <SummaryRow items={[
         { label: 'Charged to buyers', value: fmtPkr(totals.chargedPkr) },

@@ -6,6 +6,12 @@ export const accountingApi = {
   trialBalance: (params) => api.get('/api/accounting/statements/trial-balance', params),
   profitLoss: (params) => api.get('/api/accounting/statements/profit-loss', params),
   balanceSheet: (params) => api.get('/api/accounting/statements/balance-sheet', params),
+  // Accounting periods (D-1): list (?fy=2026-27), create a fiscal year ahead,
+  // close a month (Finance Manager), reopen (reason + the Owner's approval).
+  periods: (params) => api.get('/api/accounting/periods', params),
+  createFiscalYear: (startYear) => api.post('/api/accounting/periods/fiscal-years', { start_year: startYear }),
+  closePeriod: (id) => api.put(`/api/accounting/periods/${id}/close`, {}),
+  reopenPeriod: (id, reason, ownerId) => api.put(`/api/accounting/periods/${id}/reopen`, { reason, authorized_by_owner_id: ownerId }),
   customerStatement: (id, params) => api.get(`/api/accounting/statements/customer/${id}`, params),
   supplierStatement: (id, params) => api.get(`/api/accounting/statements/supplier/${id}`, params),
   partyAllocation: (type, id) => api.get(`/api/accounting/statements/allocation/${type}/${id}`),

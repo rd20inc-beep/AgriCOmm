@@ -4,7 +4,9 @@ import { useApp } from '../../../context/AppContext';
 import { useOwnerAuth } from '../../../context/OwnerAuthContext';
 import { useAuth } from '../../../context/AuthContext';
 import { lotInventoryApi } from '../../../api/services';
-import { useLotInventory } from '../../../api/queries';
+import { useLotInventoryPage } from '../../../api/queries';
+import useDebouncedValue from '../../../hooks/useDebouncedValue';
+import { cappedHint } from '../../../shared/utils/listCap';
 import SlideDrawer from '../../../components/SlideDrawer';
 import StatusBadge from '../../../components/StatusBadge';
 import FieldError from '../../../shared/components/FieldError';
@@ -43,7 +45,13 @@ export default function StockAdjustments() {
   // The adjustment being approved/rejected right now — its buttons are
   // disabled so a double click cannot fire a second request.
   const [decidingId, setDecidingId] = useState(null);
-  const { data: lots = [] } = useLotInventory({});
+  // Lot picker searched on the server over every lot — it used to be the 100
+  // newest, so an older lot could not be adjusted (INV-04).
+  const [lotSearch, setLotSearch] = useState('');
+  const lotQuery = useDebouncedValue(lotSearch.trim());
+  const { data: lotPage } = useLotInventoryPage({ limit: 50, ...(lotQuery ? { search: lotQuery } : {}) });
+  const lots = useMemo(() => lotPage?.lots || [], [lotPage]);
+  const [pickedLot, setPickedLot] = useState(null);
   const [adjustments, setAdjustments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState({ status: 'all', types: [], fromDate: '', toDate: '' });
@@ -103,7 +111,8 @@ export default function StockAdjustments() {
   // Cost-impact preview while filling the modal — shows the operator what
   // they're about to write off before they submit.
   const costPreview = useMemo(() => {
-    const lot = lots.find((l) => Number(l.id) === Number(form.lot_id));
+    const lot = lots.find((l) => Number(l.id) === Number(form.lot_id))
+      || (pickedLot && Number(pickedLot.id) === Number(form.lot_id) ? pickedLot : null);
     if (!lot) return null;
     const qty = parseFloat(form.quantityKg) || 0;
     if (qty <= 0) return null;
@@ -119,7 +128,7 @@ export default function StockAdjustments() {
       lotName: lot.itemName,
       lotQtyMT: parseFloat(lot.qty),
     };
-  }, [form.lot_id, form.quantityKg, form.adjustmentType, lots]);
+  }, [form.lot_id, form.quantityKg, form.adjustmentType, lots, pickedLot]);
 
   function closeModal() { setShowModal(false); setTriedSubmit(false); }
 
@@ -358,9 +367,12 @@ export default function StockAdjustments() {
             <label className="block text-sm font-medium text-gray-700 mb-1">Lot <span className="text-red-500">*</span></label>
             <SearchSelect
               value={form.lot_id}
-              onChange={(v) => setForm((p) => ({ ...p, lot_id: v }))}
+              onChange={(v) => { setForm((p) => ({ ...p, lot_id: v })); setPickedLot(lots.find((l) => String(l.id) === String(v)) || null); }}
               options={lots.map((l) => ({ value: l.id, label: l.lotNo, sub: `${l.itemName} — ${fmtKg(Math.round(parseFloat(l.qty) || 0))}` }))}
-              placeholder="Search lot…"
+              selectedOption={pickedLot ? { value: pickedLot.id, label: pickedLot.lotNo, sub: pickedLot.itemName } : undefined}
+              onSearch={setLotSearch}
+              footer={cappedHint(lots.length, lotPage?.pagination?.total) ? `${cappedHint(lots.length, lotPage?.pagination?.total)} — type to search` : null}
+              placeholder="Search lot no, item, variety, supplier…"
             />
             <FieldError error={formErrors.lot_id} />
           </div>

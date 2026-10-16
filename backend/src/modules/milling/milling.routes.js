@@ -30,6 +30,8 @@ const { listRicePurchases } = require('./ricePurchasesLedger');
 const { listQualityComparison } = require('./qualityVariance');
 const { batchYielded, ricePurchaseBooked, assertBatchOutputsUnsold } = require('./costEditLocks');
 const { reverseExpenseTrail, reverseStatutoryJournal, remittedStatutoryForRun, mirrorJournals } = require('./payrollReversal');
+// One rule for paid / earned / pending payslip lines in every payroll report (P4-08).
+const payrollLineStatus = require('./payrollLineStatus');
 const { buildLastPrices, findImplausiblePrices, implausiblePriceMessage } = require('./byproductPrices');
 
 // =============================================================================
@@ -267,6 +269,45 @@ router.put(
 // The MILL cash account only: payments on entity='mill' payables, receipts on
 // mill local sales, Head Office ⇄ Mill transfers and the mill cash float.
 router.get('/cash-flow', authorize('milling', 'view'), requireCostVisibility, advancedController.cashFlow);
+// Mill Finance KPIs (P4-01 / P4-02, docs/AGRIRICE_KPI_CONTRACTS.md): the D-13
+// mill profit headline, production value (secondary), yield and working
+// capital for a period (?period=month|quarter|fytd|fy|all|custom&from=&to=),
+// and the rows behind each figure (/detail?part=sales|overheads|batches|stock).
+// Profit and stock value are cost figures: View cost is required.
+router.get('/finance-kpis', authorize('milling', 'view'), requireCostVisibility, async (req, res) => {
+  try {
+    const { millFinanceKpis } = require('../kpi/millFinance');
+    const { period, from, to } = req.query;
+    return res.json({ success: true, data: await millFinanceKpis(db, { period, from, to }) });
+  } catch (err) {
+    if (err.status === 400) return res.status(400).json({ success: false, message: err.message });
+    console.error('finance-kpis error:', err);
+    return res.status(500).json({ success: false, message: 'Internal server error.' });
+  }
+});
+// yield.v1 alone (quantities, no money) — no View cost needed.
+router.get('/kpi/yield', authorize('milling', 'view'), async (req, res) => {
+  try {
+    const { yieldKpi } = require('../kpi/millFinance');
+    const { period, from, to } = req.query;
+    return res.json({ success: true, data: await yieldKpi(db, { period: period || 'all', from, to }) });
+  } catch (err) {
+    if (err.status === 400) return res.status(400).json({ success: false, message: err.message });
+    console.error('kpi/yield error:', err);
+    return res.status(500).json({ success: false, message: 'Internal server error.' });
+  }
+});
+router.get('/finance-kpis/detail', authorize('milling', 'view'), requireCostVisibility, async (req, res) => {
+  try {
+    const { millFinanceDetail } = require('../kpi/millFinance');
+    const { part, period, from, to, page, limit } = req.query;
+    return res.json({ success: true, data: await millFinanceDetail(db, { part, period, from, to, page, limit }) });
+  } catch (err) {
+    if (err.status === 400) return res.status(400).json({ success: false, message: err.message });
+    console.error('finance-kpis detail error:', err);
+    return res.status(500).json({ success: false, message: 'Internal server error.' });
+  }
+});
 router.get('/cost-trend', authorize('milling', 'view'), requireCostVisibility, controller.costTrend);
 // Mill Finance ▸ Suppliers / Customers for mill roles without finance.view (the
 // Mill Operator, owner decision 2026-10-05): the mill's OWN payables and
@@ -1580,9 +1621,15 @@ router.get('/workers/:id/advances', authorize('payroll', 'view'), async (req, re
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
 
-// Per-employee LEDGER — every amount given to a worker, across:
-//   • salary advances (mill_worker_advances)
-//   • payroll net pay (mill_payroll_lines → run.pay_date)
+// Per-employee LEDGER — the company's running liability to one worker:
+//   • salary advances paid out (mill_worker_advances, approval_status 'paid')
+//   • payroll lines (mill_payroll_lines) — P4-08 / PAY-19: only EARNED lines
+//     credit the worker (paid, or accrued), and only PAID lines debit "Salary
+//     paid" (payrollLineStatus.js). Prepared / approved lines book nothing and
+//     are summarised as pending. Bonus is earned with the gross; statutory
+//     (tax / EOBI…) and other deductions are withheld from it, so
+//     gross + bonus − statutory − deductions − advance recovered = net, and a
+//     net paid short of that (D-12 short pay) stays on the balance as owed.
 //   • any other salary disbursement booked directly against them
 //     (business_expenses.employee_id, excluding the advances' own cash-outs so
 //      they aren't double-counted).
@@ -1591,6 +1638,7 @@ router.get('/workers/:id/ledger', authorize('payroll', 'view'), async (req, res)
     const workerId = parseInt(req.params.id, 10);
     const worker = await db('mill_workers').where('id', workerId).first();
     if (!worker) return res.status(404).json({ success: false, message: 'Worker not found.' });
+    const num = (v) => parseFloat(v) || 0;
 
     // Only disbursed advances are real money — pending/approved/rejected requests
     // (Batch 6 · item 8) must not inflate the employee ledger.
@@ -1601,49 +1649,77 @@ router.get('/workers/:id/ledger', authorize('payroll', 'view'), async (req, res)
     const payLines = await db('mill_payroll_lines as l')
       .join('mill_payroll_runs as r', 'r.id', 'l.run_id')
       .where('l.worker_id', workerId)
-      .whereNotIn('r.status', ['voided', 'reversed']) // never paid / undone
-      .select('l.id', 'r.period', 'r.pay_date', 'r.pay_method', 'l.gross_pay', 'l.advance_deducted', 'l.net_pay');
+      .whereRaw(payrollLineStatus.LIVE_SQL) // never paid / undone
+      .select('l.id', 'r.period', 'r.pay_date', 'r.pay_method', 'r.status as run_status', 'l.paid_at',
+        db.raw("to_char(COALESCE(l.paid_at, r.paid_at, r.pay_date::timestamptz), 'YYYY-MM-DD') AS paid_day"),
+        'l.gross_pay', 'l.bonus_total', 'l.statutory_total', 'l.deduction_total', 'l.advance_deducted', 'l.net_pay',
+        'l.short_pay_amount');
 
     let otherExpQ = db('business_expenses').where('employee_id', workerId).whereNot('payment_status', 'Reversed');
     if (advanceExpenseIds.length) otherExpQ = otherExpQ.whereNotIn('id', advanceExpenseIds);
     const otherExp = await otherExpQ.select('id', 'expense_no', 'expense_date', 'amount', 'amount_pkr', 'description', 'category');
 
-    // Double-entry employee ledger from the COMPANY's view of net liability to
-    // the worker. credit = we owe them (salary earned); debit = we paid them
-    // (advance given, salary paid). Running balance > 0 → salary still payable;
+    const lines = payLines.map((p) => ({ ...p, state: payrollLineStatus.lineState(p) }));
+    const earned = lines.filter((p) => p.state === 'paid' || p.state === 'accrued');
+    const paid = lines.filter((p) => p.state === 'paid');
+    const pending = lines.filter((p) => p.state === 'pending');
+
+    // credit = we owe them (salary earned); debit = we paid them or withheld
+    // it on their behalf. Running balance > 0 → salary still payable;
     // balance < 0 → worker owes us (outstanding advance not yet recovered).
     const raw = [
       ...advances.map((a) => ({
         date: a.advance_date, ord: 1, type: 'advance', label: 'Advance given',
         reference: a.expense_id ? `ADV-${a.id}` : null, note: a.notes || null,
-        debit: parseFloat(a.amount) || 0, credit: 0,
+        debit: num(a.amount), credit: 0,
         // legacy alias kept so older UI keeps rendering
-        amount: parseFloat(a.amount) || 0, status: a.status, recovered: parseFloat(a.recovered_amount) || 0,
+        amount: num(a.amount), status: a.status, recovered: num(a.recovered_amount),
       })),
-      ...payLines.flatMap((p) => {
-        const gross = parseFloat(p.gross_pay) || 0; const net = parseFloat(p.net_pay) || 0; const adv = parseFloat(p.advance_deducted) || 0;
-        return [
-          { date: p.pay_date, ord: 0, type: 'salary_earned', label: `Salary earned ${p.period}`, reference: p.period, debit: 0, credit: gross, amount: gross, note: 'Gross salary' },
-          { date: p.pay_date, ord: 2, type: 'salary_paid', label: `Salary paid ${p.period}`, reference: p.period, debit: net, credit: 0, amount: net, note: `${adv > 0 ? `incl. advance recovered ${Math.round(adv).toLocaleString()} · ` : ''}via ${p.pay_method || 'cash'}` },
+      ...earned.flatMap((p) => {
+        const gross = num(p.gross_pay); const bonus = num(p.bonus_total);
+        const stat = num(p.statutory_total); const ded = num(p.deduction_total);
+        const rows = [
+          { date: p.pay_date, ord: 0, type: 'salary_earned', label: `Salary earned ${p.period}`, reference: p.period, debit: 0, credit: gross, amount: gross, note: p.state === 'accrued' ? 'Gross salary · accrued, not yet paid' : 'Gross salary' },
         ];
+        if (bonus) rows.push({ date: p.pay_date, ord: 0, type: 'bonus', label: `Bonus ${p.period}`, reference: p.period, debit: 0, credit: bonus, amount: bonus });
+        if (stat) rows.push({ date: p.pay_date, ord: 1, type: 'statutory', label: `Tax / statutory withheld ${p.period}`, reference: p.period, debit: stat, credit: 0, amount: stat, note: 'Paid to the authority on the employee’s behalf' });
+        if (ded) rows.push({ date: p.pay_date, ord: 1, type: 'deduction', label: `Deductions ${p.period}`, reference: p.period, debit: ded, credit: 0, amount: ded });
+        return rows;
+      }),
+      ...paid.map((p) => {
+        const net = num(p.net_pay); const adv = num(p.advance_deducted); const short = num(p.short_pay_amount);
+        const notes = [
+          adv > 0 ? `advance recovered ${Math.round(adv).toLocaleString()}` : null,
+          short > 0 ? `short-paid ${Math.round(short).toLocaleString()} (carried forward)` : null,
+          `via ${p.pay_method || 'cash'}`,
+        ].filter(Boolean).join(' · ');
+        return { date: p.paid_day || p.pay_date, ord: 2, type: 'salary_paid', label: `Salary paid ${p.period}`, reference: p.period, debit: net, credit: 0, amount: net, note: notes };
       }),
       ...otherExp.map((e) => ({
         date: e.expense_date, ord: 1, type: 'other', label: e.description || 'Disbursement',
-        reference: e.expense_no, note: e.category, debit: parseFloat(e.amount_pkr) || parseFloat(e.amount) || 0, credit: 0,
-        amount: parseFloat(e.amount_pkr) || parseFloat(e.amount) || 0,
+        reference: e.expense_no, note: e.category, debit: num(e.amount_pkr) || num(e.amount), credit: 0,
+        amount: num(e.amount_pkr) || num(e.amount),
       })),
     ].sort((a, b) => (new Date(a.date) - new Date(b.date)) || (a.ord - b.ord));
 
     let bal = 0;
     const entries = raw.map((e) => { bal += (e.credit || 0) - (e.debit || 0); return { ...e, balance: Math.round(bal) }; });
 
+    const sum = (arr, k) => Math.round(arr.reduce((s, p) => s + num(p[k]), 0));
     const summary = {
-      salaryEarned: Math.round(payLines.reduce((s, p) => s + (parseFloat(p.gross_pay) || 0), 0)),
-      advancesTaken: Math.round(advances.reduce((s, a) => s + (parseFloat(a.amount) || 0), 0)),
-      advanceDeducted: Math.round(payLines.reduce((s, p) => s + (parseFloat(p.advance_deducted) || 0), 0)),
-      salaryPaid: Math.round(payLines.reduce((s, p) => s + (parseFloat(p.net_pay) || 0), 0)),
-      advanceOutstanding: Math.round(advances.reduce((s, a) => s + Math.max(0, (parseFloat(a.amount) || 0) - (parseFloat(a.recovered_amount) || 0)), 0)),
+      salaryEarned: sum(earned, 'gross_pay'),
+      bonus: sum(earned, 'bonus_total'),
+      statutoryWithheld: sum(earned, 'statutory_total'),
+      deductions: sum(earned, 'deduction_total'),
+      advancesTaken: Math.round(advances.reduce((s, a) => s + num(a.amount), 0)),
+      advanceDeducted: sum(earned, 'advance_deducted'),
+      salaryPaid: sum(paid, 'net_pay'),
+      accruedUnpaid: sum(earned.filter((p) => p.state === 'accrued'), 'net_pay'),
+      advanceOutstanding: Math.round(advances.reduce((s, a) => s + Math.max(0, num(a.amount) - num(a.recovered_amount)), 0)),
+      pendingLines: pending.length,
+      pendingNet: sum(pending, 'net_pay'),
       currentBalance: Math.round(bal),
+      currency: 'PKR',
     };
     // entries displayed newest-first; balance already computed chronologically
     const displayEntries = [...entries].reverse();
@@ -2142,16 +2218,28 @@ router.get('/payroll/tax-statement', authorize('payroll', 'view'), async (req, r
 
 router.get('/attendance', authorize('payroll', 'view'), async (req, res) => {
   try {
-    const { month, worker_id } = req.query;
+    const { month, worker_id, entity } = req.query;
+    // The register is one month × one entity's employees. It used to read the
+    // 500 newest rows of every entity, so once employees × days passed 500 the
+    // older days showed blank and were re-marked (PAY-10). A month (or one
+    // employee) is now required and nothing is capped.
+    if (!/^\d{4}-\d{2}$/.test(String(month || '')) && !worker_id) {
+      return res.status(400).json({ success: false, message: 'month (YYYY-MM) or worker_id is required.' });
+    }
     let query = db('mill_attendance as a')
       .leftJoin('mill_workers as w', 'a.worker_id', 'w.id')
-      .select('a.*', 'w.name as worker_name', 'w.daily_wage')
-      .orderBy('a.date', 'desc');
-    // Match the calendar month directly — `${month}-32` is an invalid date and
-    // Postgres throws "date/time field value out of range".
-    if (month) query = query.whereRaw("TO_CHAR(a.date, 'YYYY-MM') = ?", [month]);
+      .select('a.*', 'w.name as worker_name', 'w.daily_wage', 'w.entity as worker_entity')
+      .orderBy('a.date', 'desc').orderBy('a.id', 'desc');
+    // Match the calendar month as a date range — `${month}-32` is an invalid
+    // date and Postgres throws "date/time field value out of range".
+    if (month) {
+      const [y, m] = String(month).split('-').map(Number);
+      const next = m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, '0')}-01`;
+      query = query.where('a.date', '>=', `${month}-01`).where('a.date', '<', next);
+    }
     if (worker_id) query = query.where('a.worker_id', worker_id);
-    const records = await query.limit(500);
+    if (entity === 'mill' || entity === 'general') query = query.where('w.entity', entity);
+    const records = await query;
     return res.json({ success: true, data: { attendance: records } });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }
 });
@@ -2412,20 +2500,45 @@ router.get('/payroll/report', authorize('payroll', 'view'), async (req, res) => 
     if (from) q = q.where('r.period', '>=', from);
     if (to) q = q.where('r.period', '<=', to);
     if (entity) q = q.where('r.entity', entity);
+    // ?status=paid,approved… narrows the runs listed (P4-08 / PAY-20).
+    const wanted = String(req.query.status || '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
+    if (wanted.length) q = q.whereIn('r.status', wanted);
     const runs = await q;
     const runIds = runs.map((r) => r.id);
     const lines = runIds.length
       ? await enrichPayslipLines(await db('mill_payroll_lines').whereIn('run_id', runIds).orderBy('worker_name'))
       : [];
+    const runById = new Map(runs.map((r) => [r.id, r]));
     const byRun = {};
-    for (const l of lines) (byRun[l.run_id] = byRun[l.run_id] || []).push(l);
+    for (const l of lines) {
+      l.line_state = payrollLineStatus.lineState({ paid_at: l.paid_at, run_status: (runById.get(l.run_id) || {}).status });
+      (byRun[l.run_id] = byRun[l.run_id] || []).push(l);
+    }
     const withLines = runs.map((r) => ({ ...r, lines: byRun[r.id] || [] }));
+    // Totals are what was PAID — paid lines only (a partially-paid run counts
+    // its paid employees); prepared / approved / voided / reversed runs are
+    // listed but add nothing. byStatus shows every run status separately.
+    const n = (v) => parseFloat(v || 0);
+    const paidLines = lines.filter((l) => l.line_state === 'paid');
+    const sumL = (k) => paidLines.reduce((s, l) => s + n(l[k]), 0);
+    const byStatus = {};
+    for (const r of runs) {
+      const b = byStatus[r.status] || (byStatus[r.status] = { runs: 0, grossTotal: 0, netTotal: 0 });
+      b.runs += 1; b.grossTotal += n(r.gross_total); b.netTotal += n(r.net_total);
+    }
     const totals = {
       runs: runs.length,
-      employees: lines.length,
-      grossTotal: runs.reduce((s, r) => s + parseFloat(r.gross_total || 0), 0),
-      advanceTotal: runs.reduce((s, r) => s + parseFloat(r.advance_total || 0), 0),
-      netTotal: runs.reduce((s, r) => s + parseFloat(r.net_total || 0), 0),
+      paidRuns: new Set(paidLines.map((l) => l.run_id)).size,
+      employees: paidLines.length,
+      grossTotal: sumL('gross_pay'),
+      bonusTotal: sumL('bonus_total'),
+      statutoryTotal: sumL('statutory_total'),
+      deductionTotal: sumL('deduction_total'),
+      advanceTotal: sumL('advance_deducted'),
+      netTotal: sumL('net_pay'),
+      basis: 'paid lines',
+      currency: 'PKR',
+      byStatus,
     };
     return res.json({ success: true, data: { runs: withLines, totals } });
   } catch (err) { return res.status(500).json({ success: false, message: err.message }); }

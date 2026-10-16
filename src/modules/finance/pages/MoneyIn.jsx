@@ -3,14 +3,13 @@ import { Link } from 'react-router-dom';
 import { ArrowDownLeft, DollarSign, AlertTriangle, CheckCircle, Clock, Eye } from 'lucide-react';
 import { FinanceKPI, FinanceTable, FinanceFilterBar } from '../../../components/finance';
 import ListCapHint from '../../../shared/components/ListCapHint';
-import { useReceivables } from '../../../api/queries';
+import { useReceivables, useReceivablesSummary } from '../../../api/queries';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
 import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import PartyLink from '../../../shared/components/PartyLink';
-import { BUCKET_KEYS, bucketize } from '../utils/aging';
-import { receivablesPkrEquiv, pkrEquivText } from '../utils/currencyTiles';
-import { moneyInTiles, agingByCurrency, curOf } from '../utils/moneyTiles';
+import { pkrEquivText } from '../utils/currencyTiles';
+import { moneyInTilesFromSummary, AS_AT_BUCKET_LABEL, curOf, isOverdueRow } from '../utils/moneyTiles';
 import { shortenRef } from '../utils/refs';
 import { isSettleable, canRecordVariant, contextForDocument } from '../../../components/payments/paymentVariants';
 import { useFinanceDrawers } from '../drawers/drawersContext';
@@ -34,29 +33,31 @@ export default function MoneyIn() {
   const drawers = useFinanceDrawers();
   const { queryParams: rangeParams } = useFinanceDateRange();
   const { data: receivables = [], isLoading, error, refetch } = useReceivables(rangeParams);
+  // Tiles + aging come from the server as at the END of the period (P4-04):
+  // outstanding / overdue / aging at that date, collected within the period.
+  const { data: summary, isLoading: summaryLoading } = useReceivablesSummary(
+    { ...(rangeParams.to_date ? { as_of: rangeParams.to_date } : {}), ...(rangeParams.from_date ? { from_date: rangeParams.from_date } : {}) },
+  );
   const [statusFilter, setStatusFilter] = useState('All');
   const [typeFilter, setTypeFilter] = useState('All');
 
   const filtered = useMemo(() => receivables.filter((r) => {
-    if (statusFilter !== 'All' && !eqStatus(r.status, statusFilter)) return false;
+    // 'Overdue' is the server's D-15 flag, not a status word (export rows never carry it).
+    if (statusFilter === 'Overdue') { if (!isOverdueRow(r)) return false; }
+    else if (statusFilter !== 'All' && !eqStatus(r.status, statusFilter)) return false;
     if (typeFilter !== 'All' && r.type !== typeFilter) return false;
     return true;
-  }).map((r) => ({ ...r, _highlight: eqStatus(r.status, 'Overdue') ? 'danger' : undefined })), [receivables, statusFilter, typeFilter]);
+  }).map((r) => ({ ...r, _highlight: isOverdueRow(r) ? 'danger' : undefined })), [receivables, statusFilter, typeFilter]);
 
-  const tiles = useMemo(() => moneyInTiles(receivables), [receivables]);
-  const aging = useMemo(() => agingByCurrency(receivables), [receivables]);
-  // C5: ≈ PKR equivalents at each row's own booked rate — a secondary line
-  // under figures that span currencies, never the figure itself.
-  const equiv = useMemo(() => {
-    const withCur = receivables.map((r) => ({ ...r, currency: curOf(r) }));
-    const open = withCur.filter((r) => !eqStatus(r.status, 'Paid'));
-    return {
-      outstanding: pkrEquivText(receivablesPkrEquiv(open, 'outstanding')),
-      overdue: pkrEquivText(receivablesPkrEquiv(open.filter((r) => eqStatus(r.status, 'Overdue')), 'outstanding')),
-      collected: pkrEquivText(receivablesPkrEquiv(withCur, 'receivedAmount')),
-      aging: bucketize(withCur, { mode: 'mixed' }),
-    };
-  }, [receivables]);
+  const tiles = useMemo(() => moneyInTilesFromSummary(summary || {}), [summary]);
+  const aging = tiles.aging;
+  // C5: ≈ PKR equivalents at each row's own booked rate (server-side) — a
+  // secondary line under figures that span currencies, never the figure itself.
+  const equiv = {
+    outstanding: pkrEquivText(summary?.pkrEquiv?.outstanding),
+    overdue: pkrEquivText(summary?.pkrEquiv?.overdue),
+  };
+  const asAtText = tiles.asOf ? `as at ${fmtDate(tiles.asOf)}` : 'as at today';
   const canReceive = (row) => {
     const d = docOf(row);
     return isSettleable(d) && canRecordVariant(contextForDocument(d)?.variant, hasPermission);
@@ -102,39 +103,34 @@ export default function MoneyIn() {
           </div>
         </div>
 
-        {/* Tiles — one figure per currency, never summed across currencies */}
+        {/* Tiles — one figure per currency, never summed across currencies;
+            computed on the server as at the end of the period (P4-04). */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <FinanceKPI icon={ArrowDownLeft} title="Outstanding" value={<PerCurrency totals={tiles.outstanding} empty="Nothing open" className="flex-col" />}
-            subtitle={`${tiles.openCount} open`} status="info" loading={isLoading} footnote={<PkrEquivLine text={equiv.outstanding} />} />
+            subtitle={`${tiles.openCount} open · ${asAtText}`} status="info" loading={summaryLoading} footnote={<PkrEquivLine text={equiv.outstanding} />} />
           <FinanceKPI icon={AlertTriangle} title="Overdue" value={<PerCurrency totals={tiles.overdue} empty="None" className="flex-col" />}
-            subtitle="Past due date" status={Object.keys(tiles.overdue).length ? 'danger' : 'good'} loading={isLoading} footnote={<PkrEquivLine text={equiv.overdue} />} />
+            subtitle={`Past due date · ${asAtText}`} status={Object.keys(tiles.overdue).length ? 'danger' : 'good'} loading={summaryLoading} footnote={<PkrEquivLine text={equiv.overdue} />} />
           <FinanceKPI icon={CheckCircle} title="Collected" value={<PerCurrency totals={tiles.collected} empty="—" className="flex-col" />}
-            subtitle="Received so far" status="good" loading={isLoading} footnote={<PkrEquivLine text={equiv.collected} />} />
-          <FinanceKPI icon={Clock} title="Pending" value={String(tiles.pendingCount)}
-            subtitle="Awaiting payment" status={tiles.pendingCount > 0 ? 'warning' : 'good'} loading={isLoading} />
+            subtitle={rangeParams.from_date ? 'Receipts dated in the period' : 'All receipts to date'} status="good" loading={summaryLoading} />
+          <FinanceKPI icon={Clock} title="Overdue items" value={String(tiles.overdueCount)}
+            subtitle={`Past due with a balance · ${asAtText}`} status={tiles.overdueCount > 0 ? 'warning' : 'good'} loading={summaryLoading} />
         </div>
 
-        {/* Aging — days past due, one row per currency */}
+        {/* Aging — days past the effective due date, one row per currency */}
         {agingCurrencies.length > 0 && (
           <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto mobile-cards" data-testid="aging-by-currency">
             <table className="w-full text-sm">
               <thead><tr>
-                <th className={`${th} text-left`}>Aging · days past due</th>
-                {BUCKET_KEYS.map((k) => <th key={k} className={`${th} text-right`}>{k} days</th>)}
+                <th className={`${th} text-left`}>Aging {asAtText}</th>
+                {tiles.buckets.map((k) => <th key={k} className={`${th} text-right`}>{AS_AT_BUCKET_LABEL[k] || k}</th>)}
               </tr></thead>
               <tbody>
                 {agingCurrencies.map((c) => (
                   <tr key={c} className="border-t border-gray-100">
                     <td data-label="Currency" className="px-4 py-2.5 font-medium text-gray-700">{c}</td>
-                    {BUCKET_KEYS.map((k) => <td key={k} data-label={`${k} days`} className={`px-4 py-2.5 ${tdMoney}`}>{aging[c][k] ? fmtAmt(aging[c][k], c) : '—'}</td>)}
+                    {tiles.buckets.map((k) => <td key={k} data-label={AS_AT_BUCKET_LABEL[k] || k} className={`px-4 py-2.5 ${tdMoney}`}>{aging[c][k] ? fmtAmt(aging[c][k], c) : '—'}</td>)}
                   </tr>
                 ))}
-                {equiv.aging.foreign && (
-                  <tr className="border-t border-gray-100 text-gray-500" data-testid="pkr-equiv">
-                    <td data-label="Equivalent" className="px-4 py-2 text-xs">≈ PKR equiv. (booked rates){equiv.aging.missingCount > 0 ? ` · ${equiv.aging.missingCount} without a rate left out` : ''}</td>
-                    {BUCKET_KEYS.map((k) => <td key={k} data-label={`${k} days`} className={`px-4 py-2 text-xs ${tdMoney}`}>{equiv.aging[k].totalPkr ? `≈ ${fmtAmt(equiv.aging[k].totalPkr, 'PKR')}` : '—'}</td>)}
-                  </tr>
-                )}
               </tbody>
             </table>
           </div>
@@ -150,6 +146,9 @@ export default function MoneyIn() {
           onReset={() => { setStatusFilter('All'); setTypeFilter('All'); }}
         />
 
+        {rangeParams.from_date && (
+          <p className="text-xs text-gray-500" data-testid="list-scope">The list below shows receivables raised in the period; the tiles and aging are {asAtText}.</p>
+        )}
         <ListCapHint rows={receivables} />
         <FinanceTable
           columns={columns}

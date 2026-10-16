@@ -24,6 +24,14 @@ function mockBuilder(table) {
   };
   return b;
 }
+// D-1 period lock: refusing money dated in a closed month is tested against a
+// real database (accountingPeriods.integration.test.js); here every date is open.
+jest.mock('../modules/accounting/periods', () => ({
+  assertDateOpen: jest.fn(async () => ({ id: 1, status: 'Open' })),
+  ensurePeriodForDate: jest.fn(async () => ({ id: 1, status: 'Open' })),
+  periodForDate: jest.fn(async () => undefined),
+  periodStatusAsOf: jest.fn(async () => null),
+}));
 jest.mock('../config/database', () => {
   const db = (table) => mockBuilder(table);
   db.transaction = async (cb) => cb(db);

@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { Search, Plus, X, Star } from 'lucide-react';
 import { isFavorite, byFavoriteThenName } from '../shared/utils/favorites';
 import { customersApi, adminApi } from '../modules/admin/api/services';
+import { fetchAllPages, ALL_PAGE_SIZE } from '../shared/utils/fetchAllPages';
 
 /**
  * Searchable customer/client picker with an inline "+ Add new" that quick-adds a
@@ -24,8 +25,8 @@ export default function CustomerPicker({
   label, value, onChange, customers = [], placeholder = 'Search client…', addToast, clearable = false, onCreated,
   // Data source — defaults to the admin customer list + quick-add. Callers that
   // need a scoped party set (e.g. Service Milling clients, never export buyers)
-  // pass their own listFn/createFn.
-  listFn = () => customersApi.list(),
+  // pass their own listFn(params)/createFn.
+  listFn = (params) => customersApi.list(params),
   createFn = (data) => adminApi.customersQuickAdd(data),
 }) {
   const [fetched, setFetched] = useState([]);
@@ -40,8 +41,15 @@ export default function CustomerPicker({
     let alive = true;
     (async () => {
       try {
-        const res = await listFn();
-        const rows = res?.data?.customers || res?.data || res?.customers || [];
+        // Every page: one page (the server default is 50) used to pass for the
+        // whole customer list, so later customers could not be picked (P4-11).
+        // The server orders favorites first, so a star survives paging.
+        const res = await listFn({ page: 1, limit: ALL_PAGE_SIZE });
+        let rows = res?.data?.customers || res?.data || res?.customers || [];
+        const total = parseInt(res?.data?.pagination?.total, 10);
+        if (Array.isArray(rows) && Number.isFinite(total) && total > rows.length) {
+          rows = await fetchAllPages(listFn, {}, 'customers');
+        }
         if (alive) setFetched(Array.isArray(rows) ? rows : []);
       } catch { /* non-fatal — parent-provided list / quick-add still work */ }
     })();
