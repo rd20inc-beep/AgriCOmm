@@ -87,6 +87,22 @@ export function validateContra({ fromAcct, toAcct, amount, rate, converted, refe
 }
 
 /**
+ * The source / destination a new transfer starts on (W08–W10): what is already
+ * chosen wins; then the account this user last used there (if still offered);
+ * a direction-locked transfer (Mill → Head Office) falls back to the first
+ * account on each side. Never the same account on both ends.
+ */
+export function transferDefaults({ fromId = '', toId = '', fromAccounts = [], toAccounts = [], lastFrom = '', lastTo = '', locked = false }) {
+  const offered = (list, id) => !!id && list.some((a) => String(a.id) === String(id));
+  const from = fromId || (offered(fromAccounts, lastFrom) ? String(lastFrom) : '') || (locked && fromAccounts[0] ? String(fromAccounts[0].id) : '');
+  const firstOther = locked ? toAccounts.find((a) => String(a.id) !== String(from)) : null;
+  const to = toId
+    || (offered(toAccounts, lastTo) && String(lastTo) !== String(from) ? String(lastTo) : '')
+    || (firstOther ? String(firstOther.id) : '');
+  return { fromId: from, toId: to };
+}
+
+/**
  * The non-blocking warning when the transfer (amount + bank charges) takes
  * the source below zero, or null. `returning` — on an edit, what the reversal
  * gives back first. A balance this role may not see (null) gives no warning.
