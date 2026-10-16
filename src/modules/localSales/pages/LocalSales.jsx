@@ -1,5 +1,5 @@
-import { useState, useMemo, useRef, Fragment } from 'react';
-import { Link } from 'react-router-dom';
+import { useState, useMemo, useRef, useEffect, Fragment } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import PartyLink from '../../../shared/components/PartyLink';
 import {
   ShoppingCart, Plus, Search, DollarSign, Package, Truck,
@@ -29,7 +29,7 @@ import { paymentWord, groupPaymentWord, payableDue, localToday, readLastCustomer
 import { todayLocalISO, fmtPKR as fmtPKRExact, fmtNum, fmtDate, fmtDateTime } from '../../../shared/utils/format';
 import { accountTakesCurrency } from '../../../shared/utils/accountCurrency';
 import { saleLineTotal, isFullyPaid, isOverPaid } from '../utils/saleMoney';
-import { lotFreeKg, lotSaleBlock } from '../utils/saleLot';
+import { lotFreeKg, lotSaleBlock, saleIntentFromParams, matchPresetLot } from '../utils/saleLot';
 import { keepPreviousData } from '@tanstack/react-query';
 import useDebouncedValue from '../../../hooks/useDebouncedValue';
 import ListCapHint from '../../../shared/components/ListCapHint';
@@ -56,7 +56,18 @@ const LABEL = "block text-xs font-semibold text-gray-600 uppercase mb-1";
 
 export default function LocalSales() {
   const { addToast, customersList, refreshFromApi, bankAccountsList = [], companyProfileData } = useApp();
-  const [showSaleModal, setShowSaleModal] = useState(false);
+  // ?new=1 opens New Local Sale; &lot=<lot no> (Lot Detail's "Sell Locally",
+  // NAV-20) also picks that lot, so it is not searched for again. Read once;
+  // the params are then dropped so a refresh does not reopen the drawer.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [intent] = useState(() => saleIntentFromParams(searchParams));
+  const [showSaleModal, setShowSaleModal] = useState(intent.open);
+  useEffect(() => {
+    if (!searchParams.has('new') && !searchParams.has('lot')) return;
+    const next = new URLSearchParams(searchParams);
+    next.delete('new'); next.delete('lot');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
   const [invoiceSale, setInvoiceSale] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [displayUnit, setDisplayUnit] = useState('kg');
@@ -430,7 +441,7 @@ export default function LocalSales() {
       )}
 
       {/* New Sale Modal */}
-      <SaleModal isOpen={showSaleModal} onClose={() => setShowSaleModal(false)} customers={customersList} addToast={addToast} refetch={refetch} refreshFromApi={refreshFromApi} onCreated={(s) => setInvoiceSale(s)} />
+      <SaleModal isOpen={showSaleModal} presetLotRef={intent.lotRef} onClose={() => setShowSaleModal(false)} customers={customersList} addToast={addToast} refetch={refetch} refreshFromApi={refreshFromApi} onCreated={(s) => setInvoiceSale(s)} />
 
       {/* Invoice for the just-created sale — print / download */}
       {invoiceSale && (
@@ -534,12 +545,14 @@ export default function LocalSales() {
 // The sale lot picker's server filter: company lots holding KG free to sell.
 const SALE_LOT_PICK = { status: 'Available', in_stock: 'true', has_available: 'true', limit: 100 };
 
-function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromApi, onCreated }) {
+function SaleModal({ isOpen, presetLotRef = null, onClose, customers, addToast, refetch, refreshFromApi, onCreated }) {
   const createMutation = useCreateLocalSale();
   // Lot picker: searched and tag-filtered ON THE SERVER over every lot with KG
   // free to sell. It used to be the 100 newest 'Available' lots — empty ones
   // included — so older stock (opening lots) could not be sold (INV-04).
-  const [lotSearch, setLotSearch] = useState('');
+  // A lot handed over from Lot Detail starts as the search, so the server
+  // returns it; it is then picked once (below).
+  const [lotSearch, setLotSearch] = useState(presetLotRef || '');
   const lotQuery = useDebouncedValue(lotSearch.trim());
   const [tag, setTag] = useState('All');
   const { data: tagPage } = useLotInventoryPage(SALE_LOT_PICK);
@@ -640,8 +653,8 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
   // the user has not typed; a typed rate always wins.
   const lotPickRef = useRef(0);
   const shownRate = (perKg, unit, bagWt) => String(Math.round(rateFromPerKg(perKg, unit, parseFloat(bagWt) || 50) * 100) / 100);
-  async function pickLot(lotId) {
-    const lot = lotById(lotId);
+  async function pickLot(lotId, lotObj = null) {
+    const lot = lotObj || lotById(lotId);
     setPickedLot(lot);
     setLine(p => ({
       ...p, lot_id: lotId, mill_item_id: '', item_name: lot ? (lot.itemName || '') : p.item_name, item_type: lot ? (lot.type || '') : p.item_type,
@@ -659,6 +672,25 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
       }));
     } catch { /* no rate available — the user types one */ }
   }
+  // Pick the preset lot once its search result arrives (and only once — the
+  // user may change it afterwards). A lot that cannot be sold (no free qty)
+  // simply isn't in the in-stock list, so nothing is picked.
+  const presetDone = useRef(!presetLotRef);
+  useEffect(() => {
+    if (presetDone.current || !isOpen) return;
+    const lot = matchPresetLot(safeLots, presetLotRef);
+    if (!lot) return;
+    // Picked after the render that delivered the search result (the same
+    // path as choosing it in the select, rate suggestion included).
+    let cancelled = false;
+    Promise.resolve().then(() => {
+      if (cancelled || presetDone.current) return;
+      presetDone.current = true;
+      pickLot(String(lot.id), lot);
+    });
+    return () => { cancelled = true; };
+  }, [isOpen, safeLots, presetLotRef]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // A unit change re-expresses an auto-filled rate in the new unit.
   function setRateUnit(unit, alsoQty) {
     setLine(p => ({

@@ -2,13 +2,16 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import PartyLink from '../../../shared/components/PartyLink';
 import {
-  Package, Search, Plus, Eye, RefreshCw, ChevronLeft, ChevronRight,
+  Package, Search, Plus, Eye, RefreshCw, ChevronLeft, ChevronRight, ArrowRightLeft,
 } from 'lucide-react';
 import { useLotInventoryPage, useLotInventoryTotals } from '../../../api/queries';
 import { useApp } from '../../../context/AppContext';
+import { useAuth } from '../../../context/AuthContext';
 import { LoadingSpinner, ErrorState, EmptyState } from '../../../components/LoadingState';
 import StatusBadge from '../../../components/StatusBadge';
 import PurchaseLotDrawer from '../components/PurchaseLotDrawer';
+import { TransferToExportDrawer } from '../components/StockTransferDrawers';
+import { canTransferLotToExport, lotInventoryFiltersFromParams } from '../utils/lotActions';
 import useCanSeeCost from '../../../hooks/useCanSeeCost';
 import { fromKg, UNITS, lotBagKg, sumLotsFromKg } from '../../../shared/utils/unitConversion';
 import { lotValue } from '../utils/stockMath';
@@ -123,7 +126,7 @@ function riceTypeName(lot) {
  * Single-lot row renderer — used by both flat view and the expanded
  * children inside grouped view (with a slight indent in the latter).
  */
-function renderLotRow(lot, displayUnit, navigate, indented, showCost = true) {
+function renderLotRow(lot, displayUnit, navigate, indented, showCost = true, onTransfer = null) {
   const netKg = parseFloat(lot.netWeightKg) || parseFloat(lot.qty) || 0;
   const availKg = (parseFloat(lot.availableQty) || 0);
   const bw = lotBagKg(lot);
@@ -194,9 +197,18 @@ function renderLotRow(lot, displayUnit, navigate, indented, showCost = true) {
       </td>
       <td data-label="Status" className="text-center"><StatusBadge status={lot.status} /></td>
       <td className={`mob-hide text-center sticky right-0 group-hover:bg-gray-50 shadow-[inset_1px_0_0_rgba(0,0,0,0.06)] z-10 ${indented ? 'bg-slate-50/40' : 'bg-white'}`}>
-        <button onClick={e => { e.stopPropagation(); navigate(`/lot-inventory/${lot.lotNo || lot.id}`); }} className="btn btn-ghost btn-sm" title="View lot" aria-label={`View lot ${lot.lotNo || ''}`.trim()}>
-          <Eye className="w-4 h-4" aria-hidden="true" />
-        </button>
+        <div className="inline-flex items-center gap-0.5">
+          {/* W14: move finished/by-product mill stock to export straight from
+              the list — same drawer + endpoint as Lot Detail. */}
+          {onTransfer && canTransferLotToExport(lot) && (
+            <button onClick={e => { e.stopPropagation(); onTransfer(lot); }} className="btn btn-ghost btn-sm" title="Transfer to Export" aria-label={`Transfer lot ${lot.lotNo || ''} to export`.trim()}>
+              <ArrowRightLeft className="w-4 h-4" aria-hidden="true" />
+            </button>
+          )}
+          <button onClick={e => { e.stopPropagation(); navigate(`/lot-inventory/${lot.lotNo || lot.id}`); }} className="btn btn-ghost btn-sm" title="View lot" aria-label={`View lot ${lot.lotNo || ''}`.trim()}>
+            <Eye className="w-4 h-4" aria-hidden="true" />
+          </button>
+        </div>
       </td>
     </tr>
   );
@@ -208,8 +220,18 @@ export default function LotInventory() {
   // Landed cost / value / "capital locked" are hidden from roles without
   // reports.view_cost (QC Analyst / Inventory Officer / Documentation Officer); the API nulls them too.
   const showCost = useCanSeeCost();
-  const [statusFilter, setStatusFilter] = useState('Available');
-  const [typeFilter, setTypeFilter] = useState('All');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { hasPermission } = useAuth();
+  // Deep links (?type=raw from the Mill dashboard's Raw Stock card, ?status=)
+  // pick the starting filters; the page defaults apply otherwise (NAV-09).
+  const [initialFilters] = useState(() => lotInventoryFiltersFromParams(searchParams));
+  const [statusFilter, setStatusFilter] = useState(initialFilters.status);
+  const [typeFilter, setTypeFilter] = useState(initialFilters.type);
+  // Lot whose Transfer to Export drawer is open (row action, W14). Needs the
+  // same inventory.transfer permission the endpoint checks.
+  const canTransfer = hasPermission('inventory', 'transfer');
+  const [transferLot, setTransferLot] = useState(null);
+  const onTransfer = canTransfer ? setTransferLot : null;
   const [subtypeFilter, setSubtypeFilter] = useState('All');
   const [entityFilter, setEntityFilter] = useState('All');
   // Ownership scope: 'company' (default — company-owned only), 'client'
@@ -229,7 +251,6 @@ export default function LotInventory() {
   const [expandedGroups, setExpandedGroups] = useState(() => new Set());
   const [displayUnit, setDisplayUnit] = useState('katta');
   const [showPurchaseModal, setShowPurchaseModal] = useState(false);
-  const [searchParams, setSearchParams] = useSearchParams();
 
   // Allow ?action=new (used by the Finance Purchases "+Add Purchase"
   // dropdown) to deep-link straight into the create modal.
@@ -551,12 +572,12 @@ export default function LotInventory() {
               </thead>
               <tbody>
                 {viewMode === 'flat'
-                  ? filtered.map((lot) => renderLotRow(lot, displayUnit, navigate, false, showCost))
+                  ? filtered.map((lot) => renderLotRow(lot, displayUnit, navigate, false, showCost, onTransfer))
                   : (
                     <>
                       {/* Standalone lots (raw rice purchases) — each one
                           is a distinct receipt, never grouped. */}
-                      {visualGroups.standalone.map((lot) => renderLotRow(lot, displayUnit, navigate, false, showCost))}
+                      {visualGroups.standalone.map((lot) => renderLotRow(lot, displayUnit, navigate, false, showCost, onTransfer))}
                       {/* One summary row per (subtype, variety) group;
                           click to expand the individual lots beneath. */}
                       {visualGroups.groups.map((g) => {
@@ -614,7 +635,7 @@ export default function LotInventory() {
                                 <span className="text-gray-400 text-xs">{open ? '▾' : '▸'}</span>
                               </td>
                             </tr>
-                            {open && g.lots.map((lot) => renderLotRow(lot, displayUnit, navigate, true, showCost))}
+                            {open && g.lots.map((lot) => renderLotRow(lot, displayUnit, navigate, true, showCost, onTransfer))}
                           </React.Fragment>
                         );
                       })}
@@ -654,6 +675,13 @@ export default function LotInventory() {
         products={productsList}
         addToast={addToast}
         onSuccess={refetch}
+      />
+      <TransferToExportDrawer
+        isOpen={!!transferLot}
+        lot={transferLot}
+        addToast={addToast}
+        onClose={() => setTransferLot(null)}
+        onSuccess={() => refetch()}
       />
     </div>
   );

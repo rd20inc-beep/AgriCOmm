@@ -109,6 +109,14 @@ router.put(
   auditAction('record_stock_count', 'stock_count_items'),
   controller.recordCountItem
 );
+// Bulk entry (INV-34): many lines in one Save, all-or-nothing. Same gate,
+// audit and per-line service validation as /record above.
+router.put(
+  '/stock-counts/:id/record-bulk',
+  authorize('inventory', 'adjust'),
+  auditAction('record_stock_count_bulk', 'stock_count_items'),
+  controller.recordCountItemsBulk
+);
 router.put(
   '/stock-counts/:id/items/:itemId/review',
   authorize('inventory', 'adjust'),

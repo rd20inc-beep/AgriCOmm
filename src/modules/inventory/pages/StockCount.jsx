@@ -8,6 +8,7 @@ import useConfirm from '../../../hooks/useConfirm';
 import SlideDrawer from '../../../components/SlideDrawer';
 import StatusBadge from '../../../shared/components/StatusBadge';
 import { fmtNum } from '../../../shared/utils/format';
+import { bulkCountLines, bigVarianceLines, BIG_VARIANCE_SHARE } from '../utils/stockCountBulk';
 
 const n = (v) => Number(v) || 0;
 // Lot quantities are KG (Phase 5c).
@@ -23,8 +24,6 @@ function packEquivalent(kg, it) {
 }
 // Stock write-offs are approved by the Owner only (owner decision 2026-10-05).
 const WRITE_OFF_APPROVERS = ['Owner', 'Super Admin'];
-// A count this far off the record is more likely a typo than a loss.
-const BIG_VARIANCE_SHARE = 0.5;
 
 const TYPE_LABEL = { full: 'Full count', cycle: 'Cycle count', spot: 'Spot check' };
 
@@ -179,6 +178,19 @@ function CountDetailDrawer({ countId, onClose, onChanged }) {
     mutationFn: ({ itemId, countedQty, notes }) => stockCountApi.record(countId, { item_id: itemId, counted_qty: countedQty, notes }),
     onSuccess: refetch,
   });
+  // One Save for every typed line (INV-34) — same server checks per line,
+  // all-or-nothing. Saved drafts are cleared so the table shows the record.
+  const recordAll = useMutation({
+    mutationFn: (lines) => stockCountApi.recordBulk(countId, lines),
+    onSuccess: (_res, lines) => {
+      setDrafts((d) => {
+        const next = { ...d };
+        lines.forEach((l) => { delete next[l.item_id]; });
+        return next;
+      });
+      refetch();
+    },
+  });
   const approve = useMutation({
     mutationFn: () => stockCountApi.approve(countId),
     onSuccess: () => { refetch(); onClose(); },
@@ -199,6 +211,24 @@ function CountDetailDrawer({ countId, onClose, onChanged }) {
     () => items.filter((i) => i.status === 'Counted' && n(i.variance_qty) !== 0).length,
     [items]
   );
+  const bulkLines = useMemo(() => bulkCountLines(items, drafts), [items, drafts]);
+
+  async function saveAll() {
+    if (bulkLines.length === 0) return;
+    // The same typo safety net as a single save, once for all the lines.
+    const big = bigVarianceLines(items, bulkLines);
+    if (big.length > 0) {
+      const list = big.slice(0, 5).map((b) => `${b.item?.item_name || b.item?.lot_no || 'Line'}: ${fmtKg(b.counted_qty)} vs ${fmtKg(b.system)} on record`).join('; ');
+      const ok = await confirm({
+        title: `Save ${big.length} count(s) this far off?`,
+        consequence: `${list}${big.length > 5 ? `; and ${big.length - 5} more` : ''}. Counts are in kg, not katta or MT.`,
+        confirmLabel: `Save ${bulkLines.length} line(s)`,
+        cancelLabel: 'Go back',
+      });
+      if (!ok) return;
+    }
+    recordAll.mutate(bulkLines);
+  }
 
   return (
     <Drawer title={count?.count_no || 'Stock count'} subtitle={count ? `${TYPE_LABEL[count.count_type] || count.count_type} · ${count.warehouse_name || 'All warehouses'}` : ''} onClose={onClose} wide>
@@ -213,8 +243,19 @@ function CountDetailDrawer({ countId, onClose, onChanged }) {
           </div>
           {!completed && (
             <p className="text-xs text-gray-500 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">
-              Type what you physically counted for each item and hit <span className="font-medium">Save</span>. Any line that differs from the records must then be <span className="font-medium text-emerald-700">Approved</span> (the system will be corrected) or <span className="font-medium text-red-600">Rejected</span> (the records stand). Once every difference is reviewed, hit <span className="font-medium">Approve &amp; update stock</span>.
+              Type what you physically counted for each item, then hit <span className="font-medium">Save all counts</span> (or <span className="font-medium">Save</span> on one line). Any line that differs from the records must then be <span className="font-medium text-emerald-700">Approved</span> (the system will be corrected) or <span className="font-medium text-red-600">Rejected</span> (the records stand). Once every difference is reviewed, hit <span className="font-medium">Approve &amp; update stock</span>.
             </p>
+          )}
+
+          {!completed && (
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs text-gray-500">{bulkLines.length > 0 ? `${bulkLines.length} typed line(s) not saved yet` : 'No unsaved counts'}</span>
+              <button onClick={saveAll} disabled={bulkLines.length === 0 || recordAll.isPending}
+                className="inline-flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-medium px-3 py-1.5 rounded-lg">
+                {recordAll.isPending ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={14} />}
+                Save all counts{bulkLines.length > 0 ? ` (${bulkLines.length})` : ''}
+              </button>
+            </div>
           )}
 
           <div className="border border-gray-200 rounded-lg overflow-hidden mobile-cards">
@@ -334,6 +375,7 @@ function CountDetailDrawer({ countId, onClose, onChanged }) {
 
           {!completed && (
             <div className="space-y-2">
+              {recordAll.isError && <p className="text-xs text-red-600 flex items-center gap-1"><AlertTriangle size={13} /> {recordAll.error?.message || 'Could not save the counts.'}</p>}
               {record.isError && <p className="text-xs text-red-600 flex items-center gap-1"><AlertTriangle size={13} /> {record.error?.message || 'Could not save the count.'}</p>}
               {review.isError && <p className="text-xs text-red-600 flex items-center gap-1"><AlertTriangle size={13} /> {review.error?.message || 'Review failed.'}</p>}
               {approve.isError && <p className="text-xs text-red-600 flex items-center gap-1"><AlertTriangle size={13} /> {approve.error?.message || 'Approval failed.'}</p>}
