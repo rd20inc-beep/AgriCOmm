@@ -92,6 +92,20 @@ export function pickAccountForMethod({ accounts = [], method, current = '' }) {
 }
 
 /**
+ * The account a form starts on when nothing is chosen yet: the one this user
+ * last used for this currency + entity (useDefaultAccount) if it is offered and
+ * suits the method; otherwise the only matching account, else the starred one;
+ * else '' (the user picks). `accountOptions` is what the picker shows (it may
+ * be narrowed by method). Pure; PaymentFields applies it.
+ */
+export function pickDefaultAccount({ accounts = [], accountOptions = accounts, method, preferredAccountId = '' }) {
+  const remembered = preferredAccountId
+    ? pickAccountForMethod({ accounts: accountOptions, method, current: preferredAccountId })
+    : '';
+  return remembered || pickAccountForMethod({ accounts, method, current: '' });
+}
+
+/**
  * The cash that actually leaves the account. WHT and the early-payment discount
  * reduce the cash but NOT the amount settled against the payable: the vendor's
  * claim is cleared in full, the withheld tax is remitted to FBR and the discount

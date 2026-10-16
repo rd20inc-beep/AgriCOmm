@@ -124,3 +124,49 @@ describe('the route guard, mirrored', () => {
     expect(drawerProps).toBeNull();
   });
 });
+
+describe('P5-11 host options through ctx (same endpoint, same body)', () => {
+  it('passes the entity whose remembered account to offer — variant default, host override', () => {
+    render(<PaymentFormDrawer variant="receive_export" ctx={{ orderId: 1, kind: 'advance', currency: 'USD', outstanding: 10 }} onClose={() => {}} />);
+    expect(drawerProps.rememberAs).toEqual({ entity: 'export' });
+    render(<PaymentFormDrawer variant="pay_purchase" ctx={{ source: 'mill_store', sourceId: 2, currency: 'PKR', outstanding: 5, entity: 'mill' }} onClose={() => {}} />);
+    expect(drawerProps.rememberAs).toEqual({ entity: 'mill' });
+    render(<PaymentFormDrawer doc={{ docKind: 'payable', row: { id: 40, payNo: 'PAY-9', currency: 'PKR', outstanding: 1200, supplierName: 'Rice Co' } }} onClose={() => {}} />);
+    expect(drawerProps.rememberAs).toEqual({ entity: 'general' });
+  });
+
+  it('narrows methods, sets the default method, fixes the account, filters accounts by method', () => {
+    render(<PaymentFormDrawer variant="pay_payable"
+      ctx={{ payableId: 5, currency: 'PKR', outstanding: 300, methods: ['cash'], defaultMethod: 'cash', fixedAccountId: 9, entity: 'mill' }} onClose={() => {}} />);
+    expect(drawerProps.methods.map((m) => m.value)).toEqual(['cash']);
+    expect(drawerProps.defaultMethod).toBe('cash');
+    expect(drawerProps.fixedAccountId).toBe(9);
+    // The body builder reads the account from the form, so the fixed one is seeded there.
+    expect(drawerProps.initial.bankAccountId).toBe('9');
+    render(<PaymentFormDrawer variant="pay_purchase" ctx={{ source: 'mill_store', sourceId: 2, currency: 'PKR', outstanding: 5, defaultMethod: 'cash', filterAccountsByMethod: true }} onClose={() => {}} />);
+    expect(drawerProps.defaultMethod).toBe('cash');
+    expect(drawerProps.filterAccountsByMethod).toBe(true);
+    expect(drawerProps.fixedAccountId).toBeUndefined();
+  });
+
+  it('a default method the variant does not accept is ignored', () => {
+    render(<PaymentFormDrawer variant="receive_export" ctx={{ orderId: 1, kind: 'advance', currency: 'USD', outstanding: 10, defaultMethod: 'cheque' }} onClose={() => {}} />);
+    expect(drawerProps.defaultMethod).toBe('bank_transfer');
+  });
+
+  it("shows the host's own banner (an invoice picker) above the fields, and posts nothing on open", () => {
+    const html = render(<PaymentFormDrawer variant="pay_payable" ctx={{ payableId: 5, currency: 'PKR', outstanding: 300 }}
+      banner={<div data-testid="host-picker">pick</div>} onClose={() => {}} />);
+    expect(html).toContain('data-testid="host-picker"');
+    expect(calls.post).toEqual([]);
+    expect(calls.put).toEqual([]);
+  });
+
+  it('a mill supplier bill paid from Mill Cash still goes to POST /finance/payments with the payable linked', async () => {
+    render(<PaymentFormDrawer variant="pay_payable"
+      ctx={{ payableId: 5, currency: 'PKR', outstanding: 300, methods: ['cash'], defaultMethod: 'cash', fixedAccountId: 9, notes: 'Payment for PAY-5 — S' }} onClose={() => {}} />);
+    const body = await submit({ method: 'cash', bankAccountId: '9', amount: '300' });
+    expect(calls.post[0].url).toBe('/api/finance/payments');
+    expect(body).toMatchObject({ type: 'payment', linked_payable_id: 5, bank_account_id: 9, payment_method: 'cash', amount: 300 });
+  });
+});
