@@ -23,6 +23,8 @@ import { qualityParams, aggregateVehicleQuality } from '../qualityParams';
 import useConfirm from '../../../hooks/useConfirm';
 import useCanSeeCost from '../../../hooks/useCanSeeCost';
 import { todayLocalISO, fmtKg, fmtNum } from '../../../shared/utils/format';
+import { useUrlTab } from '../../../shared/hooks/useUrlTab';
+import Breadcrumbs from '../../../shared/components/Breadcrumbs';
 
 const num = (v) => parseFloat(v) || 0;
 const kg = (v) => fmtKg(num(v));
@@ -69,7 +71,8 @@ export default function ServiceMillingBatchDetail() {
   const deleteVehicleMut = useDeleteVehicle();
   const deleteBatchMut = useDeleteBatch();
 
-  const [activeTab, setActiveTab] = useState('intake');
+  // ?tab= keeps the tab across refresh, Back and shared links (P5-08).
+  const [activeTab, setActiveTab] = useUrlTab('intake', TABS.filter((t) => showCost || !t.cost).map((t) => t.key));
 
   // Rename the service lot — a friendly custom name, like regular batches/lots.
   const [editingName, setEditingName] = useState(false);
@@ -389,9 +392,7 @@ export default function ServiceMillingBatchDetail() {
     <div className="space-y-5 pb-6">
       {/* Header */}
       <div>
-        <Link to="/milling/service" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-2">
-          <ArrowLeft size={16} /> Back to Service Milling
-        </Link>
+        <Breadcrumbs items={[{ label: 'Service Milling', to: '/milling/service' }, { label: batch.id }]} className="text-sm mb-2" />
         <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
           <div>
             <div className="flex items-center gap-2 flex-wrap">
@@ -470,7 +471,8 @@ export default function ServiceMillingBatchDetail() {
           {TABS.filter((t) => showCost || !t.cost).map((t) => {
             const Icon = t.icon;
             return (
-              <button key={t.key} onClick={() => setActiveTab(t.key)}
+              <button key={t.key} type="button" onClick={() => setActiveTab(t.key)}
+                aria-current={activeTab === t.key ? 'page' : undefined}
                 className={`inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 whitespace-nowrap transition-colors ${
                   activeTab === t.key ? 'border-amber-600 text-amber-700' : 'border-transparent text-gray-500 hover:text-gray-700'
                 }`}>

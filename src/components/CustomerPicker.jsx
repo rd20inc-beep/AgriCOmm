@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useId } from 'react';
 import { Search, Plus, X, Star } from 'lucide-react';
 import { isFavorite, byFavoriteThenName } from '../shared/utils/favorites';
 import { customersApi, adminApi } from '../modules/admin/api/services';
@@ -29,6 +29,8 @@ export default function CustomerPicker({
   listFn = (params) => customersApi.list(params),
   createFn = (data) => adminApi.customersQuickAdd(data),
 }) {
+  // Ties the visible label to the search box / current choice (P5-14).
+  const fieldId = useId();
   const [fetched, setFetched] = useState([]);
   const [local, setLocal] = useState([]);
   const [search, setSearch] = useState('');
@@ -115,7 +117,7 @@ export default function CustomerPicker({
   return (
     <div data-customer-picker>
       <div className="flex items-center justify-between mb-1">
-        {label && <label className="block text-sm font-medium text-gray-700">{label}</label>}
+        {label && <label htmlFor={fieldId} className="block text-sm font-medium text-gray-700">{label}</label>}
         <button type="button" onClick={() => { setAdding(v => !v); setOpen(false); }}
           className="text-xs text-blue-600 hover:text-blue-700 font-medium inline-flex items-center gap-1">
           <Plus size={12} /> {adding ? 'Cancel' : 'Add new'}
@@ -125,7 +127,7 @@ export default function CustomerPicker({
       <div className="relative">
         {value && selected && !open ? (
           <div className="w-full px-3 py-2 rounded-lg border border-gray-300 bg-white flex items-center justify-between gap-2">
-            <button type="button" onClick={() => { setOpen(true); setSearch(''); }} title={selected.name} className="flex-1 text-left truncate text-gray-900 font-medium">
+            <button id={fieldId} type="button" onClick={() => { setOpen(true); setSearch(''); }} title={selected.name} className="flex-1 text-left truncate text-gray-900 font-medium">
               {isFavorite(selected) && <Star className="w-3.5 h-3.5 inline-block mr-1 -mt-0.5 fill-amber-400 text-amber-500" />}
               {selected.name}
             </button>
@@ -138,7 +140,7 @@ export default function CustomerPicker({
         ) : (
           <>
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input type="text" value={search} onChange={e => { setSearch(e.target.value); setOpen(true); }} onFocus={() => setOpen(true)}
+            <input id={fieldId} type="text" value={search} onChange={e => { setSearch(e.target.value); setOpen(true); }} onFocus={() => setOpen(true)}
               placeholder={placeholder}
               className="w-full rounded-lg border border-gray-300 pl-9 pr-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white" />
             {open && (
@@ -165,7 +167,7 @@ export default function CustomerPicker({
       {adding && (
         <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-lg space-y-3">
           <p className="text-xs font-semibold text-blue-800 uppercase tracking-wide">Add new client</p>
-          <input value={draft.name} autoFocus onChange={e => setDraft(d => ({ ...d, name: e.target.value }))}
+          <input aria-label="Name" value={draft.name} autoFocus onChange={e => setDraft(d => ({ ...d, name: e.target.value }))}
             placeholder="Name * — e.g. Al Karam Rice Mills" aria-label="Client name (required)" aria-required="true"
             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
           <div className="grid grid-cols-2 gap-3">

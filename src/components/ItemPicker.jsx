@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useId } from 'react';
 import { Search, Plus } from 'lucide-react';
 import { millStoreApi } from '../modules/millStore/api/services';
 
@@ -15,6 +15,8 @@ const UNITS = ['piece', 'kg', 'liter', 'meter', 'roll', 'bag', 'box', 'set'];
  * category; for 'packaging' the quick-add also collects Bag Kg + Tare Kg).
  */
 export default function ItemPicker({ label, value, onChange, items = [], onItemAdded, addToast, placeholder = 'Search item…', category = null }) {
+  // Ties the visible label to the search box / current choice (P5-14).
+  const fieldId = useId();
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState(false);
   const [adding, setAdding] = useState(false);
@@ -81,7 +83,7 @@ export default function ItemPicker({ label, value, onChange, items = [], onItemA
   return (
     <div data-item-picker>
       <div className="flex items-center justify-between mb-1">
-        {label ? <label className="block text-[10px] font-semibold text-gray-500 uppercase">{label}</label> : <span />}
+        {label ? <label htmlFor={fieldId} className="block text-[10px] font-semibold text-gray-500 uppercase">{label}</label> : <span />}
         <button type="button" onClick={() => { setAdding(v => !v); setOpen(false); }}
           className="text-xs text-blue-600 hover:text-blue-700 font-medium inline-flex items-center gap-1">
           <Plus size={12} /> {adding ? 'Cancel' : 'Add new'}
@@ -90,7 +92,7 @@ export default function ItemPicker({ label, value, onChange, items = [], onItemA
 
       <div className="relative">
         {value && selected && !open ? (
-          <button type="button" onClick={() => { setOpen(true); setSearch(''); }}
+          <button id={fieldId} type="button" onClick={() => { setOpen(true); setSearch(''); }}
             className="w-full text-left px-3 py-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 flex items-center justify-between gap-2">
             <span className="truncate text-gray-900 font-medium">{selected.code} — {selected.name} <span className="text-xs text-gray-400">({selected.unit})</span></span>
             <span className="text-xs text-blue-600 flex-shrink-0">Change</span>
@@ -98,7 +100,7 @@ export default function ItemPicker({ label, value, onChange, items = [], onItemA
         ) : (
           <>
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input type="text" value={search} onChange={e => { setSearch(e.target.value); setOpen(true); }} onFocus={() => setOpen(true)}
+            <input id={fieldId} type="text" value={search} onChange={e => { setSearch(e.target.value); setOpen(true); }} onFocus={() => setOpen(true)}
               placeholder={placeholder}
               className="w-full rounded-lg border border-gray-300 pl-9 pr-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 bg-white" />
             {open && (
@@ -121,34 +123,34 @@ export default function ItemPicker({ label, value, onChange, items = [], onItemA
       {adding && (
         <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-lg space-y-2">
           <p className="text-xs font-semibold text-blue-800 uppercase tracking-wide">Add new item</p>
-          <input value={draft.name} autoFocus onChange={e => setDraft(d => ({ ...d, name: e.target.value }))} placeholder="Name * — e.g. PP Bag 50kg" className={INPUT} />
+          <input aria-label="Name" value={draft.name} autoFocus onChange={e => setDraft(d => ({ ...d, name: e.target.value }))} placeholder="Name * — e.g. PP Bag 50kg" className={INPUT} />
           <div className="grid grid-cols-2 gap-2">
-            <input value={draft.code} onChange={e => setDraft(d => ({ ...d, code: e.target.value.toUpperCase() }))} placeholder="Code * — e.g. PP-50" className={INPUT} />
-            <input type="number" min="0" value={draft.reorder_level} onChange={e => setDraft(d => ({ ...d, reorder_level: e.target.value }))} placeholder="Reorder level" className={INPUT} />
+            <input aria-label="Code" value={draft.code} onChange={e => setDraft(d => ({ ...d, code: e.target.value.toUpperCase() }))} placeholder="Code * — e.g. PP-50" className={INPUT} />
+            <input type="number" min="0" aria-label="Reorder level" value={draft.reorder_level} onChange={e => setDraft(d => ({ ...d, reorder_level: e.target.value }))} placeholder="Reorder level" className={INPUT} />
           </div>
           <div className="grid grid-cols-2 gap-2">
             {category ? (
               <div className={`${INPUT} bg-white/70 flex items-center text-gray-500 capitalize`}>{category}</div>
             ) : (
-              <select value={draft.category} onChange={e => setDraft(d => ({ ...d, category: e.target.value }))} className={INPUT}>
+              <select aria-label="Category" value={draft.category} onChange={e => setDraft(d => ({ ...d, category: e.target.value }))} className={INPUT}>
                 {CATEGORIES.map(c => <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>)}
               </select>
             )}
-            <select value={draft.unit} onChange={e => setDraft(d => ({ ...d, unit: e.target.value }))} className={INPUT}>
+            <select aria-label="Unit" value={draft.unit} onChange={e => setDraft(d => ({ ...d, unit: e.target.value }))} className={INPUT}>
               {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
             </select>
           </div>
           {draftCat === 'packaging' && (
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <label className="block text-[10px] font-semibold text-blue-700 uppercase mb-0.5">Bag Kg *</label>
-                <input type="number" min="0" step="any" value={draft.capacity_kg}
+                <label htmlFor={`${fieldId}-capacity_kg`} className="block text-[10px] font-semibold text-blue-700 uppercase mb-0.5">Bag Kg *</label>
+                <input type="number" min="0" step="any" id={`${fieldId}-capacity_kg`} value={draft.capacity_kg}
                   onChange={e => setDraft(d => ({ ...d, capacity_kg: e.target.value }))}
                   placeholder="rice per bag — e.g. 50" className={INPUT} />
               </div>
               <div>
-                <label className="block text-[10px] font-semibold text-blue-700 uppercase mb-0.5">Tare Kg</label>
-                <input type="number" min="0" step="any" value={draft.tare_weight_kg}
+                <label htmlFor={`${fieldId}-tare_weight_kg`} className="block text-[10px] font-semibold text-blue-700 uppercase mb-0.5">Tare Kg</label>
+                <input type="number" min="0" step="any" id={`${fieldId}-tare_weight_kg`} value={draft.tare_weight_kg}
                   onChange={e => setDraft(d => ({ ...d, tare_weight_kg: e.target.value }))}
                   placeholder="empty bag wt — e.g. 0.12" className={INPUT} />
               </div>

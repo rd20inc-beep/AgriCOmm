@@ -33,6 +33,7 @@ import { lotFreeKg, lotSaleBlock } from '../utils/saleLot';
 import { keepPreviousData } from '@tanstack/react-query';
 import useDebouncedValue from '../../../hooks/useDebouncedValue';
 import ListCapHint from '../../../shared/components/ListCapHint';
+import { clickableProps } from '../../../shared/utils/a11y';
 
 // Local-sale money is shown to the paisa (2 dp), exact, en-PK grouping.
 const fmtPKR = (v) => fmtPKRExact(parseFloat(v) || 0, { decimals: 2 });
@@ -349,7 +350,7 @@ export default function LocalSales() {
                 if (g.items.length === 1) {
                   const s = g.items[0];
                   return (
-                    <tr key={s.id} onClick={() => openSaleDetail(s)} className="hover:bg-gray-50 cursor-pointer">
+                    <tr key={s.id} {...clickableProps(() => openSaleDetail(s))} className="hover:bg-gray-50 cursor-pointer">
                       <td data-label="Sale #" className="py-2.5 px-4 font-medium text-blue-600">
                         {s.saleNo}
                         {s.status === 'Pending' && <span className="ml-1.5 align-middle"><StatusBadge status="Pending" /></span>}
@@ -381,7 +382,7 @@ export default function LocalSales() {
                 const head = g.items[0];
                 return (
                   <Fragment key={g.key}>
-                    <tr onClick={() => toggleGroup(g.key)} className="hover:bg-gray-50 cursor-pointer bg-gray-50/40">
+                    <tr {...clickableProps(() => toggleGroup(g.key), { expanded: open })} className="hover:bg-gray-50 cursor-pointer bg-gray-50/40">
                       <td data-label="Sale #" className="py-2.5 px-4 font-medium text-blue-600">
                         <span className="inline-flex items-center gap-1.5">
                           <ChevronRight size={14} className={`text-gray-400 transition-transform ${open ? 'rotate-90' : ''}`} />
@@ -409,7 +410,7 @@ export default function LocalSales() {
                       </td>
                     </tr>
                     {open && g.items.map(s => (
-                      <tr key={s.id} onClick={() => openSaleDetail(s)} className="hover:bg-blue-50/40 cursor-pointer bg-white">
+                      <tr key={s.id} {...clickableProps(() => openSaleDetail(s))} className="hover:bg-blue-50/40 cursor-pointer bg-white">
                         <td data-label="Sale #" className="py-2 px-4 pl-10 text-xs text-gray-400">{s.saleNo}</td>
                         <td className="py-2 px-4"></td>
                         <td className="py-2 px-4"></td>
@@ -861,6 +862,10 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
     } catch (err) { addToast(err.message || 'Sale failed', 'error'); }
   }
 
+  // Unsaved-change guard (P5-07): a cart, a half-built line or typed buyer
+  // details make Esc / X ask before the sale is dropped.
+  const saleDirty = cart.length > 0 || !!(line.lot_id || line.mill_item_id || line.quantity_input)
+    || !!(form.buyer_name || form.buyer_phone || form.notes || form.vehicle_no || form.gate_pass_no) || !!repack.enabled;
   const step1Valid = cart.length > 0 && (!!customerId || !!form.buyer_name);
   function tryNext() {
     if (!customerId && !form.buyer_name) { addToast('Select a customer or enter buyer name', 'error'); return; }
@@ -898,7 +903,7 @@ function SaleModal({ isOpen, onClose, customers, addToast, refetch, refreshFromA
   );
 
   return (
-    <SlideDrawer open={isOpen} onClose={onClose} title="New Local Sale" subtitle={STEPS[step - 1]?.label} icon={ShoppingCart} size="xl" footer={footer}>
+    <SlideDrawer open={isOpen} onClose={onClose} dirty={saleDirty} title="New Local Sale" subtitle={STEPS[step - 1]?.label} icon={ShoppingCart} size="xl" footer={footer}>
         {/* Step indicator */}
         <div className="-mx-5 -mt-5 mb-5 px-5 pt-4 pb-4 border-b border-gray-100 bg-gray-50/60">
           <div className="flex items-center justify-between max-w-md mx-auto">

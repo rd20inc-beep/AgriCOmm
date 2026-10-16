@@ -48,6 +48,7 @@ import MillExpenseDrawer from '../../../components/MillExpenseDrawer';
 import { fmtPKR, fmtKg, fmtNum, fmtPct } from '../../../shared/utils/format';
 import { stockKgByType } from '../../inventory/utils/stockMath';
 import FieldError from '../../../shared/components/FieldError';
+import { clickableProps } from '../../../shared/utils/a11y';
 // Chart data computed from real batch data below (no mock imports)
 
 // REMOVED: hardcoded MILL_PRICES_PKR — now uses useCommodityPrices() hook
@@ -671,7 +672,7 @@ export default function MillingDashboard() {
                           const bCost = sb.totalCost != null ? sb.totalCost : Object.values(b.costs || {}).reduce((s, c) => s + (parseFloat(c) || 0), 0);
                           const bProfit = sb.profit != null ? sb.profit : (bRevenue - bCost);
                           return (
-                            <tr key={b.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => navigate(`/milling/${b.id}`)}>
+                            <tr key={b.id} className="hover:bg-gray-50 cursor-pointer" {...clickableProps(() => navigate(`/milling/${b.id}`))}>
                               <td data-label="Batch" className="py-2 px-2 font-medium text-blue-600">{b.id}{b.batchName && <span className="text-gray-400"> · {b.batchName}</span>}</td>
                               <td data-label="Raw kg" className="mob-hide py-2 px-2 text-right">{fmtNum(b.rawQtyKg, 0)}</td>
                               <td data-label="Finished kg" className="py-2 px-2 text-right">{fmtNum(b.actualFinishedKg, 0)}</td>
@@ -745,7 +746,7 @@ export default function MillingDashboard() {
                   const reserved = parseFloat(lot.reservedQty) || 0;
                   const isAtExport = lot.entity === 'export';
                   return (
-                    <tr key={lot.id || lot.lotNo} className="hover:bg-gray-50 cursor-pointer" onClick={() => navigate(`/lot-inventory/${lot.lotNo || lot.id}`)}>
+                    <tr key={lot.id || lot.lotNo} className="hover:bg-gray-50 cursor-pointer" {...clickableProps(() => navigate(`/lot-inventory/${lot.lotNo || lot.id}`))}>
                       <td data-label="Lot" className="py-2 px-3">
                         <Link to={`/lot-inventory/${lot.lotNo || lot.id}`} className="font-medium text-blue-600 hover:underline">
                           {lot.lotNo}

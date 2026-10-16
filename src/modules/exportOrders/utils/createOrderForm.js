@@ -364,3 +364,40 @@ export function duplicateStateFromOrder(order) {
 
   return { sourceOrderNo: order.id, form, items: lines, packingLines };
 }
+
+// ─── Local wizard draft (P5-07) ───
+// The create wizard keeps a local copy of what has been entered, saved at each
+// step and as the user types, so a slipped Escape or a closed tab does not lose
+// a three-step order. Local only — nothing is created on the server until the
+// user presses Save Draft / Create Order.
+export const EXPORT_WIZARD_DRAFT = 'export-order-create';
+
+/** What the wizard stores: the editable state, nothing derived. */
+export function wizardDraftSnapshot({ form, items, packingLines, printedBags, step }) {
+  return { form, items, packingLines, printedBags, step };
+}
+
+/**
+ * State to restore from a saved draft, falling back to the given defaults for
+ * anything missing or malformed (a draft from an older build must not crash
+ * the page).
+ */
+export function restoreWizardDraft(data, defaults) {
+  const d = data && typeof data === 'object' ? data : {};
+  const arr = (v, fb) => (Array.isArray(v) && v.length ? v : fb);
+  const step = [1, 2, 3].includes(Number(d.step)) ? Number(d.step) : 1;
+  return {
+    form: { ...defaults.form, ...(d.form && typeof d.form === 'object' ? d.form : {}) },
+    items: arr(d.items, defaults.items),
+    packingLines: arr(d.packingLines, defaults.packingLines),
+    printedBags: Array.isArray(d.printedBags) ? d.printedBags : defaults.printedBags,
+    step,
+  };
+}
+
+/** Is there anything in the draft worth offering back? (A buyer or a line started.) */
+export function wizardDraftHasContent(data) {
+  if (!data || typeof data !== 'object') return false;
+  if (data.form?.customerId) return true;
+  return Array.isArray(data.items) && data.items.some((it) => it?.productId || it?.qtyMT || it?.pricePerMT);
+}

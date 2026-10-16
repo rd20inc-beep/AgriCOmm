@@ -15,6 +15,8 @@ import { LoadingSpinner, ErrorState } from '../../../components/LoadingState';
 import StatusBadge from '../../../shared/components/StatusBadge';
 import SaleReturnsPanel from '../components/SaleReturnsPanel';
 import { fmtPKR, fmtKg, fmtNum, fmtPct, fmtDate } from '../../../shared/utils/format';
+import { goBack } from '../../../shared/utils/goBack';
+import Breadcrumbs from '../../../shared/components/Breadcrumbs';
 
 // Money on this page is shown to the paisa, as before.
 const fmtPkr = (n) => fmtPKR(parseFloat(n) || 0, { decimals: 2 });
@@ -52,9 +54,10 @@ export default function LocalSaleDetail() {
 
   return (
     <div className="space-y-5 pb-4">
+      <Breadcrumbs items={[{ label: 'Local Sales', to: '/local-sales' }, { label: sale.saleNo }]} />
       {/* Back button + Invoice 360 entry */}
       <div className="flex items-center justify-between gap-2">
-        <button onClick={() => navigate(-1)}
+        <button type="button" onClick={() => goBack(navigate, '/local-sales')}
           className="inline-flex items-center gap-1.5 text-sm text-gray-600 hover:text-gray-900">
           <ArrowLeft size={15} /> Back
         </button>

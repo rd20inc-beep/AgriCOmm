@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Search, Plus, Truck, Package, DollarSign, CheckCircle2, AlertCircle, Loader2, Star } from 'lucide-react';
 import SlideDrawer from '../../../components/SlideDrawer';
+import { isFormDirty } from '../../../shared/utils/dirtyGuard';
 import SupplierPicker from '../../../components/SupplierPicker';
 import { isFavorite, byFavoriteThenName } from '../../../shared/utils/favorites';
 import HaulerPicker from '../../../components/HaulerPicker';
@@ -74,6 +75,11 @@ const defaultForm = () => ({
   quality: emptyQuality(),
   vehicles: [],
 });
+
+// The drawer fills these itself (lot-number preview, bags from weight), so they
+// do not make the form "dirty" on their own (P5-07).
+// eslint-disable-next-line no-unused-vars
+const userEntered = ({ lot_no, total_bags, ...rest }) => rest;
 
 const emptyVehicle = () => ({ vehicle_no: '', driver_name: '', driver_phone: '', weight_kg: '', total_bags: '', weighbridge_kg: '', accepted_kg: '', arrival_date: todayLocalISO(), gate_pass_no: '', quality: {} });
 
@@ -548,10 +554,14 @@ export default function PurchaseLotDrawer({
     }
   }
 
+  // Unsaved-change guard: Esc / X / backdrop ask before dropping the entry.
+  const dirty = lotNoTouched || isFormDirty(userEntered(defaultForm()), userEntered(form));
+
   return (
     <SlideDrawer
       open={isOpen}
       onClose={onClose}
+      dirty={dirty}
       title="New Rice Purchase"
       subtitle="Record a rice lot received from a supplier"
       size="xl"

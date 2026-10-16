@@ -49,8 +49,14 @@ import {
   CancelOrderDrawer,
   InvoicePreviewModal,
   getVisibleTabs,
+  tabList,
   documentLabels,
 } from '../components';
+import { useUrlTab } from '../../../shared/hooks/useUrlTab';
+import { goBack } from '../../../shared/utils/goBack';
+import Breadcrumbs from '../../../shared/components/Breadcrumbs';
+
+const TAB_KEYS = tabList.map((t) => t.key);
 
 export default function ExportOrderDetail() {
   const { id } = useParams();
@@ -73,7 +79,8 @@ export default function ExportOrderDetail() {
   const startDocsMut = useStartDocs();
   const createMillingMut = useCreateMillingBatch();
 
-  const [activeTab, setActiveTab] = useState('overview');
+  // ?tab= keeps the tab across refresh, Back and shared links (P5-08).
+  const [activeTab, setActiveTab] = useUrlTab('overview', TAB_KEYS);
   const [openGroup, setOpenGroup] = useState(null);
   const [showActions, setShowActions] = useState(false);
   const [showInvoicePreview, setShowInvoicePreview] = useState(false);
@@ -90,17 +97,20 @@ export default function ExportOrderDetail() {
   // `?send=proforma` (from the orders list) asks for the same thing on arrival.
   const [searchParams, setSearchParams] = useSearchParams();
   const [docRequest, setDocRequest] = useState(null);
-  const requestProformaEmail = React.useCallback(() => {
+  const requestProformaEmail = () => {
     setActiveTab('documents');
     setDocRequest({ docType: 'proforma-invoice', action: 'email', nonce: Date.now() });
-  }, []);
+  };
   React.useEffect(() => {
     if (searchParams.get('send') !== 'proforma') return;
-    requestProformaEmail();
+    setDocRequest({ docType: 'proforma-invoice', action: 'email', nonce: Date.now() });
+    // One URL update: drop ?send and land on the Documents tab (two separate
+    // updates in one tick would overwrite each other).
     const next = new URLSearchParams(searchParams);
     next.delete('send');
+    next.set('tab', 'documents');
     setSearchParams(next, { replace: true });
-  }, [searchParams, setSearchParams, requestProformaEmail]);
+  }, [searchParams, setSearchParams]);
 
   // Recording an advance / balance: the shared Payment form (variant
   // receive_export → POST /export-orders/:id/record-receipt), a PENDING
@@ -189,7 +199,7 @@ export default function ExportOrderDetail() {
     if (!tabKeys.includes(activeTab)) {
       setActiveTab(tabKeys[0] || 'overview');
     }
-  }, [orderStatus]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [orderStatus, activeTab]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Early returns AFTER all hooks
   if (orderLoading && !order) {
@@ -629,13 +639,14 @@ export default function ExportOrderDetail() {
 
   return (
     <div className="space-y-6">
+      <Breadcrumbs items={[{ label: 'Export Orders', to: '/export' }, { label: order.id }]} />
       {/* Header */}
       <OrderHeader
         order={order}
         formatCurrency={formatCurrency}
         showActions={showActions}
         setShowActions={setShowActions}
-        onNavigateBack={() => navigate('/export')}
+        onNavigateBack={() => goBack(navigate, '/export')}
         onShowInvoicePreview={() => setShowInvoicePreview(true)}
         onShowEmailComposer={requestProformaEmail}
         onDuplicate={() => {
@@ -836,7 +847,7 @@ export default function ExportOrderDetail() {
             });
           })()}
         </div>
-        {openGroup && <div className="fixed inset-0 z-20" onClick={() => setOpenGroup(null)} />}
+        {openGroup && <div className="fixed inset-0 z-20" aria-hidden="true" onClick={() => setOpenGroup(null)} />}
       </div>
 
       {/* Tab Content */}

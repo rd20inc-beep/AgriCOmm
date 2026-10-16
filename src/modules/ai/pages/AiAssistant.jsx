@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useUrlTab } from '../../../shared/hooks/useUrlTab';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { Sparkles, Search, Mail, AlertTriangle, Copy, Database, Loader2, MessageSquare } from 'lucide-react';
 import api from '../../../api/client';
@@ -16,7 +17,8 @@ const TABS = [
 ];
 
 export default function AiAssistant() {
-  const [tab, setTab] = useState('ask');
+  // ?tab= keeps the tab across refresh, Back and shared links (P5-08).
+  const [tab, setTab] = useUrlTab('ask', TABS.map((t) => t.key));
   const { data: status } = useQuery({ queryKey: ['ai-status'], queryFn: async () => (await api.get('/api/ai/status'))?.data });
   const enabled = status?.enabled;
 

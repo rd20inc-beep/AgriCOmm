@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { useUrlTab } from '../../../shared/hooks/useUrlTab';
 import { useApp } from '../../../context/AppContext';
 import StatusBadge from '../../../components/StatusBadge';
 import PartyLink from '../../../shared/components/PartyLink';
@@ -41,7 +42,9 @@ export default function ExportOrders() {
   // Read status filter from URL (from dashboard pipeline click)
   const urlParams = new URLSearchParams(window.location.search);
   const urlStatus = urlParams.get('status');
-  const [activeTab, setActiveTab] = useState(() => {
+  // ?tab= keeps the tab across refresh and Back (P5-08); a dashboard link's
+  // ?status= still picks the starting tab.
+  const statusTab = (() => {
     if (!urlStatus) return 'All';
     if (urlStatus === 'Awaiting Advance') return 'Awaiting Advance';
     if (urlStatus === 'Advance Received' || urlStatus === 'Procurement Pending' || urlStatus === 'In Milling') return 'Procurement';
@@ -50,7 +53,8 @@ export default function ExportOrders() {
     if (urlStatus === 'Ready to Ship') return 'Ready to Ship';
     if (urlStatus === 'Shipped' || urlStatus === 'Arrived') return 'Shipped';
     return 'All';
-  });
+  })();
+  const [activeTab, setActiveTab] = useUrlTab(statusTab, tabs.map((t) => t.key));
   const [searchTerm, setSearchTerm] = useState('');
   const [sortBy, setSortBy] = useState('Created Date');
   const [piOrder, setPiOrder] = useState(null);
