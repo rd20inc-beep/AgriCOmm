@@ -32,6 +32,8 @@ router.use('/expense-vendors', authenticate, require('../modules/expenseVendors/
 router.use('/advances', authenticate, require('./advances'));
 router.use('/procurement', authenticate, require('./procurement'));
 router.use('/admin', authenticate, require('./admin'));
+// Letterhead fields only, any signed-in role (print headers) — P5-13.
+router.use('/company-profile', authenticate, require('../modules/admin/companyProfile.routes'));
 router.use('/audit-logs', authenticate, require('./auditLogs'));
 router.use('/accounting', authenticate, require('./accounting'));
 router.use('/documents', authenticate, require('./documents'));
