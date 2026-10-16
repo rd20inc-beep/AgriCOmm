@@ -37,7 +37,7 @@ export default function ChangePassword() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
+    <div className={`${forced ? 'min-h-screen bg-gray-50' : 'min-h-[60vh]'} flex items-center justify-center p-4`}>
       <div className="w-full max-w-sm bg-white rounded-xl border border-gray-200 shadow-sm p-6 space-y-4">
         <div className="text-center">
           <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-blue-50 mb-2"><KeyRound className="w-6 h-6 text-blue-600" /></div>
