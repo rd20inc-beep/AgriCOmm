@@ -20,6 +20,7 @@ import { fmtMoney, fmtDate, todayLocalISO } from '../../../shared/utils/format';
 import { EmptyLine, InlineError } from '../components/FinanceUI';
 import { btnPrimary, btnSecondary, btnQuiet, card, cardPad, th, tdMoney, kpiLabel, errorText } from '../utils/uiClasses';
 import { reconFigures, ticksChanged, parseStatementCsv } from '../utils/bankRecon';
+import { useDefaultAccount } from '../../../shared/hooks/useDefaultAccount';
 
 const inp = 'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-900';
 const lbl = 'block text-xs font-medium text-gray-600 mb-1';
@@ -80,6 +81,9 @@ function Workspace({ id, canEdit, onChanged }) {
   const [tickEdits, setTickEdits] = useState(null);
   const [statementEdit, setStatementEdit] = useState(null);
   const [busy, setBusy] = useState(false);
+  // W18: completing clears every ticked transaction at once, so it goes
+  // through a review of what is about to be cleared first.
+  const [reviewing, setReviewing] = useState(false);
 
   if (isLoading) return <div className="h-40 bg-gray-100 rounded-xl animate-pulse" aria-busy="true" />;
   if (error || !ws) return <InlineError message={errorText(error, 'The reconciliation')} onRetry={refetch} />;
@@ -115,6 +119,7 @@ function Workspace({ id, canEdit, onChanged }) {
     try { await save(); onChanged?.(); } catch (e) { addToast?.(errMsg(e, 'Could not save.'), 'error'); } finally { setBusy(false); }
   }
   async function onComplete() {
+    setReviewing(false);
     setBusy(true);
     try {
       if (dirty) await save({ quiet: true });
@@ -180,11 +185,18 @@ function Workspace({ id, canEdit, onChanged }) {
             <button type="button" onClick={onSave} disabled={busy || !dirty} className={btnSecondary} data-action="save-reconciliation">
               <Save size={14} aria-hidden="true" /> Save progress
             </button>
-            <button type="button" onClick={onComplete} disabled={busy || !fig.balanced}
+            <button type="button" onClick={() => setReviewing(true)} disabled={busy || !fig.balanced || reviewing}
               title={fig.balanced ? undefined : 'The difference must be 0 to complete'} className={btnPrimary} data-action="complete-reconciliation">
-              <CheckCircle2 size={14} aria-hidden="true" /> Complete
+              <CheckCircle2 size={14} aria-hidden="true" /> Complete…
             </button>
           </div>
+        </PermissionGate>
+      )}
+
+      {editable && reviewing && (
+        <PermissionGate module="finance" action="post_journal">
+          <CompleteReview account={ws.account} statementDate={r.statement_date} fig={fig} statementBalance={statementBalance}
+            money={money} unsaved={dirty} busy={busy} onBack={() => setReviewing(false)} onConfirm={onComplete} />
         </PermissionGate>
       )}
 
@@ -248,12 +260,54 @@ function Workspace({ id, canEdit, onChanged }) {
   );
 }
 
+/**
+ * The review before Complete (W18): what is about to be cleared, in one place,
+ * with an explicit confirm. Exported for tests.
+ */
+export function CompleteReview({ account, statementDate, fig, statementBalance, money, unsaved, busy, onBack, onConfirm }) {
+  const row = (k, v) => (
+    <div className="flex items-start justify-between gap-3 py-1.5 border-b border-gray-100 last:border-0">
+      <span className="text-gray-500">{k}</span><span className="text-right font-medium text-gray-900 tabular-nums">{v}</span>
+    </div>
+  );
+  return (
+    <div className={`${card} ${cardPad} space-y-3 border-blue-200`} data-testid="recon-complete-review" role="region" aria-label="Review before completing">
+      <p className="text-sm font-semibold text-gray-900">Check before you complete</p>
+      <div className="text-xs rounded-lg border border-gray-200 bg-white px-3">
+        {row('Account', account?.name || '—')}
+        {row('Statement date', fmtDate(statementDate))}
+        {row('Transactions to clear', String(fig.count))}
+        {row('Money in cleared', money(fig.tickedIn))}
+        {row('Money out cleared', money(fig.tickedOut))}
+        {row('Cleared balance', money(fig.cleared))}
+        {row('Statement balance', money(statementBalance))}
+        {row('Difference', money(fig.difference))}
+      </div>
+      <p className="text-xs text-gray-600">
+        {fig.count} transaction{fig.count === 1 ? '' : 's'} will be marked reconciled to this statement. Nothing is posted to the ledger.
+        {unsaved ? ' Your unsaved ticks are saved first.' : ''}
+      </p>
+      <div className="flex flex-wrap justify-end gap-2">
+        <button type="button" onClick={onBack} disabled={busy} className={btnSecondary} data-action="review-back">Back</button>
+        <button type="button" onClick={onConfirm} disabled={busy || !fig.balanced} className={btnPrimary} data-action="confirm-complete-reconciliation">
+          <CheckCircle2 size={14} aria-hidden="true" /> {busy ? 'Completing…' : 'Confirm & complete'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function BankReconciliation() {
   const { data: accounts = [], isLoading: accLoading } = useBankAccounts();
-  // ?account=<id> opens on that account (e.g. linked from the Account drawer).
+  // ?account=<id> opens on that account (e.g. linked from the Account drawer);
+  // otherwise the account this user reconciled last (W18), if still active.
   const [params] = useSearchParams();
-  const [accountId, setAccountId] = useState(params.get('account') || '');
+  const [picked, setPicked] = useState(params.get('account') || null);
   const [openId, setOpenId] = useState(null);
+  const activeAccounts = useMemo(() => accounts.filter((a) => a.isActive !== false), [accounts]);
+  const { accountId: lastAccountId, remember } = useDefaultAccount({ currency: '*', entity: 'all', purpose: 'reconcile', accounts: activeAccounts });
+  const accountId = picked ?? lastAccountId;
+  const setAccountId = (id) => { setPicked(id); if (id) remember(id); };
   const account = accounts.find((a) => String(a.id) === String(accountId));
   const { data: history = [], refetch: refetchHistory, isLoading: histLoading } = useQuery({
     queryKey: ['reconciliations', accountId],
@@ -262,7 +316,7 @@ export default function BankReconciliation() {
   });
   const inProgress = history.find((h) => h.status !== 'Completed');
   const shownId = openId || inProgress?.id || null;
-  const active = accounts.filter((a) => a.isActive !== false);
+  const active = activeAccounts;
 
   return (
     <div className="space-y-5">
@@ -278,6 +332,9 @@ export default function BankReconciliation() {
               <option key={a.id} value={a.id}>{favStar(a)}{a.name}{a.bankName ? ` — ${a.bankName}` : ''} ({a.currency || 'PKR'})</option>
             ))}
           </select>
+          {!picked && lastAccountId && String(accountId) === String(lastAccountId) && (
+            <p className="text-[11px] text-gray-500 mt-1" data-testid="account-default-hint">The account you reconciled last — choose another if needed.</p>
+          )}
         </div>
         {account && (
           <div className="text-sm text-gray-600 self-end">
