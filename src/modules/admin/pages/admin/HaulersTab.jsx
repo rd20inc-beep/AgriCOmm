@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Truck, Plus, Pencil, Trash2, Eye, EyeOff, History } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
   useHaulers,
   useHaulerLedger,
@@ -198,7 +198,9 @@ export default function HaulersTab() {
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(EMPTY);
-  const [historyId, setHistoryId] = useState(null);
+  // ?hauler=<id> (from the header search) opens that transporter's ledger.
+  const [searchParams] = useSearchParams();
+  const [historyId, setHistoryId] = useState(() => Number(searchParams.get('hauler')) || null);
   const [reconcileOpen, setReconcileOpen] = useState(false);
   const { data: unrec } = useUnreconciledTransport();
   const unrecCount = unrec?.total || 0;
