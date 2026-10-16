@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import PendingDocumentApprovals from '../../../documents/components/PendingDocumentApprovals';
 import { CheckCircle2, XCircle, Clock, User as UserIcon, Calendar, RefreshCw, Truck, Package, AlertCircle, Loader2, Users } from 'lucide-react';
 import { adminApi } from '../../api/services';
@@ -195,6 +196,7 @@ export default function MasterDataApprovalsTab() {
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState(null);
   const [rejectTarget, setRejectTarget] = useState(null);
+  const qc = useQueryClient();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -219,6 +221,7 @@ export default function MasterDataApprovalsTab() {
       await requestOwnerApproval((ownerId) => adminApi.approvalApprove(row._type, row.id, { authorized_by_owner_id: ownerId }));
       addToast?.(`Approved ${row.name}`, 'success');
       load();
+      qc.invalidateQueries({ queryKey: ['approvals'] }); // the approvals inbox + badges
     } catch (err) {
       if (err?.message !== 'Owner authorization cancelled') addToast?.(err?.response?.data?.message || err.message || 'Failed to approve', 'error');
     } finally {
@@ -233,6 +236,7 @@ export default function MasterDataApprovalsTab() {
       addToast?.(`Rejected ${row.name}`, 'success');
       setRejectTarget(null);
       load();
+      qc.invalidateQueries({ queryKey: ['approvals'] });
     } catch (err) {
       addToast?.(err?.response?.data?.message || err.message || 'Failed to reject', 'error');
     } finally {
