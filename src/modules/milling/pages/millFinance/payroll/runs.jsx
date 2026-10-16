@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { DollarSign, Wallet, Printer, Banknote, Receipt, HandCoins, FileText, Clock } from 'lucide-react';
 import { usePayrollRun, usePayrollReport, usePayrollSchedule, useSavePayrollSchedule } from '../../../../../api/queries';
 import { downloadCSV } from '../../../../../utils/csvExport';
@@ -15,14 +15,17 @@ export function PayrollScheduleDrawer({ canManage, canPrepare, onClose, onRunNow
   const { data: schedule, isLoading } = usePayrollSchedule();
   const saveMut = useSavePayrollSchedule();
   const [form, setForm] = useState(null);
-  useEffect(() => {
-    if (schedule !== undefined) setForm({
+  // The loaded schedule seeds the form (adjusted during render, not in an effect).
+  const [formFor, setFormFor] = useState(undefined);
+  if (schedule !== undefined && schedule !== formFor) {
+    setFormFor(schedule);
+    setForm({
       active: schedule?.active ?? false,
       day_of_month: schedule?.dayOfMonth ?? 28,
       pay_method: schedule?.payMethod ?? 'cash',
       notes: schedule?.notes ?? '',
     });
-  }, [schedule]);
+  }
   const f = form || { active: false, day_of_month: 28, pay_method: 'cash', notes: '' };
   const save = async (patch) => {
     const next = { ...f, ...patch };
@@ -94,7 +97,10 @@ export function PayslipsPanel({ runId, companyProfile, canApprove, canPay, canDe
   const unpaidLines = lines.filter((l) => !l.paidAt);
   const paidCount = lines.length - unpaidLines.length;
   const [selected, setSelected] = useState(() => new Set());
-  useEffect(() => { setSelected(new Set()); }, [runId, st]);
+  // Another run, or the same run in a new status, starts with nothing ticked.
+  const selKey = `${runId}|${st}`;
+  const [selFor, setSelFor] = useState(selKey);
+  if (selFor !== selKey) { setSelFor(selKey); setSelected(new Set()); }
   const toggleSel = (id) => setSelected((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const selectedUnpaid = unpaidLines.filter((l) => selected.has(l.id));
   const selectedTotal = selectedUnpaid.reduce((s, l) => s + (parseFloat(l.netPay) || 0), 0);

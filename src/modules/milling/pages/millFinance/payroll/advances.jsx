@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Plus, Banknote, Trash2, HandCoins, CalendarDays, X } from 'lucide-react';
 import { useOwnerAuth } from '../../../../../context/OwnerAuthContext';
 import { useWorkerAdvances, useDeleteWorkerAdvance, useVoidWorkerAdvance, useAdvanceLedger, useWorkerAdjustments, useCreateWorkerAdjustment, useDeleteWorkerAdjustment } from '../../../../../api/queries';
@@ -209,7 +209,9 @@ export function AdjustmentsDrawer({ worker, month, onClose, addToast }) {
   const createMut = useCreateWorkerAdjustment();
   const delMut = useDeleteWorkerAdjustment();
   const [form, setForm] = useState({ type: 'bonus', label: '', amount: '', recurring: false, period: month });
-  useEffect(() => { setForm(f => ({ ...f, period: month })); }, [month]);
+  // A new month re-points the form (adjusted during render, not in an effect).
+  const [formMonth, setFormMonth] = useState(month);
+  if (formMonth !== month) { setFormMonth(month); setForm(f => ({ ...f, period: month })); }
   const submit = async () => {
     if (!form.label.trim()) { addToast('Enter a label', 'error'); return; }
     if (!(parseFloat(form.amount) > 0)) { addToast('Enter a positive amount', 'error'); return; }

@@ -45,7 +45,7 @@ export function PayrollRunDrawer({ month, entity = 'mill', employees, preselectI
     setRow(r.id, { advance, net: netOf(r, advance) });
   };
   const onNet = (r, raw) => setRow(r.id, { net: Math.min(netOf(r, r.advance), Math.max(0, Math.round(parseFloat(raw) || 0))) });
-  const useScheduled = (r) => setRow(r.id, { advance: r.scheduled, net: netOf(r, r.scheduled), reason: '' });
+  const applyScheduled = (r) => setRow(r.id, { advance: r.scheduled, net: netOf(r, r.scheduled), reason: '' });
   const skipRow = (r) => setRow(r.id, { advance: 0, net: netOf(r, 0) });
 
   const included = rows.filter(r => r.include);
@@ -165,7 +165,7 @@ export function PayrollRunDrawer({ month, entity = 'mill', employees, preselectI
                       )}
                       {r.include && r.outstanding > 0 && (
                         <div className="flex gap-2 mt-0.5">
-                          <button onClick={() => useScheduled(r)} className="text-[10px] text-blue-600 hover:underline">Use scheduled</button>
+                          <button onClick={() => applyScheduled(r)} className="text-[10px] text-blue-600 hover:underline">Use scheduled</button>
                           <button onClick={() => skipRow(r)} className="text-[10px] text-red-600 hover:underline">Skip this month</button>
                         </div>
                       )}

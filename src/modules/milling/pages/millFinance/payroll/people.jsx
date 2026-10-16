@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { TrendingUp, Printer, Trash2, CalendarDays, Inbox, LogOut, History } from 'lucide-react';
 import { useWorkerRequests, useResolveWorkerRequest, useLeaveTypes, useLeaveRequests, useCreateLeaveType, useUpdateLeaveType, useDeleteLeaveType, useApproveLeaveRequest, useRejectLeaveRequest, useFinalSettlement, useFinalizeSettlement, usePayrollAudit, useSalaryRevisions, useReviseSalary } from '../../../../../api/queries';
 import SlideDrawer from '../../../../../components/SlideDrawer';
@@ -212,13 +212,16 @@ export function FinalSettlementDrawer({ worker, bankAccounts = [], company, onCl
   const payBanks = accountsForCurrency((bankAccounts || []).filter((a) => a.type !== 'cash'), 'PKR');
   const [confirm, confirmDialog] = useConfirm();
   const [form, setForm] = useState(null);
-  useEffect(() => {
-    if (calc) setForm({
+  // A fresh calculation re-seeds the form (adjusted during render, not in an effect).
+  const [formFor, setFormFor] = useState(null);
+  if (calc && calc !== formFor) {
+    setFormFor(calc);
+    setForm({
       final_salary: calc.finalSalary, leave_encashment: calc.leaveEncashment, gratuity: calc.gratuity,
       advances_deducted: calc.advancesOutstanding, other_deductions: 0, adjustment_reason: '',
       pay_method: 'cash', bank_account_id: '', left_date: calc.left, settlement_date: calc.today, service_years: calc.serviceYears, notes: '',
     });
-  }, [calc]);
+  }
   const lowered = form && calc && ((parseFloat(form.final_salary) || 0) < calc.finalSalary - 1 || (parseFloat(form.leave_encashment) || 0) < calc.leaveEncashment - 1);
   const set = (p) => setForm((f) => ({ ...f, ...p }));
   const n = (v) => parseFloat(v) || 0;
