@@ -10,7 +10,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, Printer, Download, Wheat, Package, ShoppingCart, Factory, Search, Building2 } from 'lucide-react';
 import { reportingApi } from '../api/services';
-import { useApp } from '../../../context/AppContext';
+import { useCompanyProfile } from '../../../shared/hooks/useMasterData';
 import { useAuth } from '../../../context/AuthContext';
 import { exportLedgerCSV, printRiceTypeLedger } from '../utils/ledgerExport';
 import { fmtDate, fmtKg, fmtPKR, fmtPct } from '../../../shared/utils/format';
@@ -94,7 +94,7 @@ function RiceTypePicker() {
 // ── Detail: full Rice Type Ledger ──
 function RiceTypeDetail({ id }) {
   const navigate = useNavigate();
-  const { companyProfileData } = useApp();
+  const companyProfileData = useCompanyProfile();
   const { user } = useAuth();
 
   const { data, isLoading, isError, error } = useQuery({

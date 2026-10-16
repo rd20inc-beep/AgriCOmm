@@ -9,7 +9,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, Printer, Download, Scale, Factory, Users, Wrench, Calendar, Wheat } from 'lucide-react';
 import { reportingApi } from '../api/services';
-import { useApp } from '../../../context/AppContext';
+import { useCompanyProfile } from '../../../shared/hooks/useMasterData';
 import { useAuth } from '../../../context/AuthContext';
 import { exportLedgerCSV, printProcessingLossLedger } from '../utils/ledgerExport';
 import { fmtDate, fmtMT, fmtPct } from '../../../shared/utils/format';
@@ -21,7 +21,7 @@ const dt = (v) => fmtDate(v);
 
 export default function ProcessingLossLedger() {
   const navigate = useNavigate();
-  const { companyProfileData } = useApp();
+  const companyProfileData = useCompanyProfile();
   const { user } = useAuth();
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');

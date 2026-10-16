@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { localSalesApi } from '../api/services';
 import { useApp } from '../../../context/AppContext';
+import { useCompanyProfile } from '../../../shared/hooks/useMasterData';
 import { useAuth } from '../../../context/AuthContext';
 import PaymentFormDrawer from '../../../components/payments/PaymentFormDrawer';
 import SlideDrawer from '../../../components/SlideDrawer';
@@ -30,7 +31,8 @@ const kg0 = (v) => fmtKg(Math.round(parseFloat(v) || 0));
 export default function InvoiceView() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { companyProfileData, addToast } = useApp();
+  const { addToast } = useApp();
+  const companyProfileData = useCompanyProfile();
   const { user } = useAuth();
   const canSeeAdminCopy = ADMIN_INVOICE_ROLES.includes(user?.role);
   const [adminBusy, setAdminBusy] = useState(false);

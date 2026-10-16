@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { FileText, Wallet, RefreshCw, Printer } from 'lucide-react';
 import { serviceMillingApi } from '../api/services';
 import { useApp } from '../../../context/AppContext';
+import { useCompanyProfile } from '../../../shared/hooks/useMasterData';
 import { useAuth } from '../../../context/AuthContext';
 import { RecordPaymentDrawer } from '../components/ServiceInvoiceDrawers';
 import { printServiceInvoice } from '../utils/serviceInvoicePrint';
@@ -13,7 +14,8 @@ const num = (v) => parseFloat(v) || 0;
 const pkr = (v) => fmtPKR(num(v), { decimals: 2 });
 
 export default function ServiceInvoices() {
-  const { addToast, companyProfileData } = useApp();
+  const { addToast } = useApp();
+  const companyProfileData = useCompanyProfile();
   const { hasPermission } = useAuth();
   const canPay = hasPermission('service_milling', 'record_payment');
   const [payInvoice, setPayInvoice] = useState(null);

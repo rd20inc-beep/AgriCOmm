@@ -7,7 +7,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, Printer, Download, Package, Factory, ShoppingCart, Truck, BookUser, AlertTriangle, Ship } from 'lucide-react';
 import { reportingApi } from '../api/services';
-import { useApp } from '../../../context/AppContext';
+import { useCompanyProfile } from '../../../shared/hooks/useMasterData';
 import { useAuth } from '../../../context/AuthContext';
 import { exportLedgerCSV, printLotLedger } from '../utils/ledgerExport';
 import { fmtDate, fmtKg, fmtPKR, fmtNum, fmtPct } from '../../../shared/utils/format';
@@ -20,7 +20,7 @@ const dt = (v) => fmtDate(v);
 export default function LotLedger() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { companyProfileData } = useApp();
+  const companyProfileData = useCompanyProfile();
   const { user } = useAuth();
 
   const { data, isLoading, isError, error } = useQuery({

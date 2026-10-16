@@ -2,14 +2,12 @@ import { useState, useEffect } from 'react';
 import { Settings, Server, Mail, FileText, Eye, Edit3, Building2 } from 'lucide-react';
 import { useApp } from '../../../../context/AppContext';
 import CustomerEmailSettings from './CustomerEmailSettings';
+import { useAppSettings, useCompanyProfile } from '../../../../shared/hooks/useMasterData';
 
 export default function SettingsTab() {
-  const {
-    settings, updateSettings,
-    emailSettings,
-    companyProfileData,
-    addToast,
-  } = useApp();
+  const { emailSettings, addToast } = useApp();
+  const companyProfileData = useCompanyProfile();
+  const { settings, updateSettings } = useAppSettings();
 
   // Company profile editable state (seeded from resolved profile data)
   const [companyName, setCompanyName] = useState(companyProfileData?.name || '');

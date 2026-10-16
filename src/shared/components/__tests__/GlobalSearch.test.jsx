@@ -109,9 +109,12 @@ describe('navigation targets', () => {
     expect(isKnownTarget(undefined)).toBe(false);
   });
 
-  it('every link target is a route in App.jsx', () => {
-    const app = readFileSync(fileURLToPath(new URL('../../../App.jsx', import.meta.url)), 'utf8');
-    const top = new Set([...app.matchAll(/path="(\/[^"]*)"/g)].map((m) => m[1]));
+  it('every link target is a route in the route table', () => {
+    // The one route table (P5-05): app/routeGates.js lists every path; the
+    // /finance/* children are declared in app/routeTable.jsx.
+    const app = readFileSync(fileURLToPath(new URL('../../../app/routeTable.jsx', import.meta.url)), 'utf8');
+    const gates = readFileSync(fileURLToPath(new URL('../../../app/routeGates.js', import.meta.url)), 'utf8');
+    const top = new Set([...gates.matchAll(/path: '(\/[^']*)'/g)].map((m) => m[1]));
     // FinanceRoutes nests relative paths under /finance/*.
     const finance = new Set([...app.matchAll(/path="([a-z][^"]*)"/g)].map((m) => `/finance/${m[1]}`));
     expect(top.has('/finance/*')).toBe(true);

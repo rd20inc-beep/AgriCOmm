@@ -1,14 +1,11 @@
 import { useState } from 'react';
 import { Tags, Factory, Plus } from 'lucide-react';
 import { useApp } from '../../../../context/AppContext';
+import { useCompanyProfile } from '../../../../shared/hooks/useMasterData';
 
 export default function CostCategoriesTab() {
-  const {
-    exportCostCategories, addExportCostCategory,
-    millingCostCategories, addMillingCostCategory,
-    companyProfileData,
-    addToast,
-  } = useApp();
+  const { exportCostCategories, addExportCostCategory, millingCostCategories, addMillingCostCategory, addToast } = useApp();
+  const companyProfileData = useCompanyProfile();
 
   // Export cost category inline form state
   const [showCostCatForm, setShowCostCatForm] = useState(false);

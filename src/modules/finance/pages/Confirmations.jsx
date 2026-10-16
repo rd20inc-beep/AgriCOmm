@@ -15,6 +15,7 @@ import {
   Landmark,
 } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
+import { useAppSettings, useCustomersList, useExportOrdersList } from '../../../shared/hooks/useMasterData';
 import { useAuth } from '../../../context/AuthContext';
 import { isOwnPendingReceipt, OWN_RECEIPT_NOTE } from '../utils/receiptMakerChecker';
 import { usePendingExportReceipts, useConfirmExportReceipt, useRejectExportReceipt, useReceivables } from '../../../api/queries';
@@ -40,7 +41,10 @@ function daysSince(dateStr) {
 }
 
 export default function FinanceConfirmations() {
-  const { exportOrders, addToast, settings, customersList = [] } = useApp();
+  const { addToast } = useApp();
+  const { data: exportOrders } = useExportOrdersList();
+  const { data: customersList } = useCustomersList();
+  const { settings } = useAppSettings();
   const { hasPermission, user } = useAuth();
   // Finance (payments-only) can't open export order pages — render order numbers
   // as plain text for them instead of an /export link that lands on Access Denied.

@@ -9,6 +9,7 @@ import ExpensePayDrawer from '../drawers/ExpensePayDrawer';
 import useMillFinancePerms from '../hooks/useMillFinancePerms';
 import { PKR, UTILITY_CATS } from '../constants';
 import { mfHref } from '../urlState';
+import { useBankAccountsList, useCompanyProfile } from '../../../../../shared/hooks/useMasterData';
 
 /**
  * Mill expenses — every one, with its payable status, a Pay / voucher drawer
@@ -17,7 +18,9 @@ import { mfHref } from '../urlState';
  * totals.
  */
 export default function ExpensesView({ period, cat }) {
-  const { companyProfileData, bankAccountsList, addToast } = useApp();
+  const { addToast } = useApp();
+  const companyProfileData = useCompanyProfile();
+  const { data: bankAccountsList } = useBankAccountsList();
   const { canPay, canRecordExpense } = useMillFinancePerms();
   const { data: expData } = useMillExpenses();
   const allExpenses = expData?.expenses || [];

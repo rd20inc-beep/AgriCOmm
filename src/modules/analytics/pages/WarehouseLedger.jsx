@@ -8,7 +8,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, Printer, Download, Warehouse, Package, Layers, Search, ArrowDownLeft, ArrowUpRight } from 'lucide-react';
 import { reportingApi } from '../api/services';
-import { useApp } from '../../../context/AppContext';
+import { useCompanyProfile } from '../../../shared/hooks/useMasterData';
 import { useAuth } from '../../../context/AuthContext';
 import { exportLedgerCSV, printWarehouseLedger } from '../utils/ledgerExport';
 import { fmtKg, fmtPKR } from '../../../shared/utils/format';
@@ -90,7 +90,7 @@ function WarehousePicker() {
 // ── Detail: Warehouse roll-forward ──
 function WarehouseDetail({ id }) {
   const navigate = useNavigate();
-  const { companyProfileData } = useApp();
+  const companyProfileData = useCompanyProfile();
   const { user } = useAuth();
 
   const { data, isLoading, isError, error } = useQuery({

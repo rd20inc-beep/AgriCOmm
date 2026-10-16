@@ -6,7 +6,7 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import api from '../../../api/client';
-import { useApp } from '../../../context/AppContext';
+import { useCompanyProfile } from '../../../shared/hooks/useMasterData';
 import {
   ProductionReportView, StockReportView,
   PnlReportView, CashflowReportView, AgingReportView,
@@ -22,7 +22,7 @@ const STOCK_GROUP_OPTIONS = [
 ];
 
 export default function StandalonePrintReport() {
-  const { companyProfileData } = useApp();
+  const companyProfileData = useCompanyProfile();
   const [params] = useSearchParams();
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);

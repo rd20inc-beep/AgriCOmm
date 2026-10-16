@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { AlertTriangle, Trash2, Landmark, Box, Receipt, ShieldAlert } from 'lucide-react';
 import { useApp } from '../../../../context/AppContext';
+import { useBankAccountsList } from '../../../../shared/hooks/useMasterData';
 import { useLotInventory } from '../../../../api/queries';
 import { adminApi } from '../../api/services';
 import { favStar } from '../../../../shared/utils/favorites';
@@ -43,7 +44,8 @@ const INPUT = 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outlin
 const LABEL = 'block text-[11px] font-semibold text-gray-600 uppercase mb-1';
 
 export default function DangerZoneTab() {
-  const { addToast, bankAccountsList = [] } = useApp();
+  const { addToast } = useApp();
+  const { data: bankAccountsList } = useBankAccountsList();
   const { data: lots = [] } = useLotInventory({}); // every lot (P4-11)
   const [confirm, confirmDialog] = useConfirm();
 

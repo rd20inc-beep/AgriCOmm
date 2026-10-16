@@ -8,6 +8,7 @@ import PurchaseLotDrawer from '../../inventory/components/PurchaseLotDrawer';
 import { favStar } from '../../../shared/utils/favorites';
 import { toLocalISODate, todayLocalISO, fmtPKR, fmtKg } from '../../../shared/utils/format';
 import { purchaseFigures, downloadPurchasesCsv } from '../ricePurchases';
+import { useProductsList, useSuppliersList, useWarehousesList } from '../../../shared/hooks/useMasterData';
 
 function formatPKR(value) {
   if (!value) return '—';
@@ -42,7 +43,10 @@ function matchesSearch(r, q) {
 }
 
 export default function RicePurchasesLedger() {
-  const { addToast, suppliersList, warehousesList, productsList } = useApp();
+  const { addToast } = useApp();
+  const { data: suppliersList } = useSuppliersList();
+  const { data: warehousesList } = useWarehousesList();
+  const { data: productsList } = useProductsList();
   const { hasPermission } = useAuth();
   // W01: New Purchase right here, the same drawer as Lot Inventory.
   const canCreatePurchase = hasPermission('inventory', 'create');

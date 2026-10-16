@@ -1,3 +1,4 @@
+import { useApp } from '../../../context/AppContext';
 import { useMemo } from 'react';
 import { useUrlTab } from '../../../shared/hooks/useUrlTab';
 import OrderRefLink from '../../../shared/components/OrderRefLink';
@@ -10,7 +11,7 @@ import { downloadServerCsv, serverCsvWarning } from '../../../shared/utils/csv';
 import { useFinanceDateRange, overviewSummaryParams } from '../hooks/useFinanceDateRange';
 import { rangeLabel } from '../financeNav';
 import { fxRateLabel } from '../utils/fx';
-import { useApp } from '../../../context/AppContext';
+import { useCompanyProfile } from '../../../shared/hooks/useMasterData';
 import StatusBadge from '../../../shared/components/StatusBadge';
 import { fmtPKR, fmtMoney, fmtPct, fmtDate, fmtDateTime, fmtKg } from '../../../shared/utils/format';
 import { HeadlineCard, TypeChip } from '../components/FinanceUI';
@@ -45,7 +46,8 @@ function AccuracyBadge({ status }) {
 }
 
 export default function Profit() {
-  const { companyProfileData, addToast } = useApp();
+  const { addToast } = useApp();
+  const companyProfileData = useCompanyProfile();
   // ?tab= keeps the tab across refresh, Back and shared links (P5-08).
   const [tab, setTab] = useUrlTab('Export', TABS);
   // Every figure here is the server's one profit definition

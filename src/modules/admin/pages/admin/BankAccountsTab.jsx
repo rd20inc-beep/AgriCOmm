@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Landmark, Plus, Pencil, Trash2, Star } from 'lucide-react';
 import { useApp } from '../../../../context/AppContext';
+import { useBankAccountsList } from '../../../../shared/hooks/useMasterData';
 import {
   useCreateBankAccount,
   useUpdateBankAccount,
@@ -40,7 +41,8 @@ const EMPTY = {
 
 export default function BankAccountsTab() {
   const canWrite = useAdminCanWrite();
-  const { bankAccountsList, addToast } = useApp();
+  const { addToast } = useApp();
+  const { data: bankAccountsList } = useBankAccountsList();
   const createMut = useCreateBankAccount();
   const updateMut = useUpdateBankAccount();
   const deleteMut = useDeleteBankAccount();

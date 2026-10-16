@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { useUrlTab } from '../../../shared/hooks/useUrlTab';
-import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
+import { useCompanyProfile, useExportOrdersList } from '../../../shared/hooks/useMasterData';
 import StatusBadge from '../../../components/StatusBadge';
 import PartyLink from '../../../shared/components/PartyLink';
 import { Plus, Search, Eye, ArrowUpDown, Ship, FileText, DollarSign, Package, Clock, Filter, FileDown, Mail, Download, Copy } from 'lucide-react';
@@ -39,7 +39,8 @@ function matchesTab(order, tab) {
 }
 
 export default function ExportOrders() {
-  const { exportOrders, companyProfileData, dataLoading } = useApp();
+  const { data: exportOrders, isLoading: dataLoading } = useExportOrdersList();
+  const companyProfileData = useCompanyProfile();
   const navigate = useNavigate();
   // Read status filter from URL (from dashboard pipeline click)
   const urlParams = new URLSearchParams(window.location.search);

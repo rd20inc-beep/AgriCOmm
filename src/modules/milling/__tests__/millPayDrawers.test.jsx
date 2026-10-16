@@ -19,6 +19,18 @@ const posted = [];
 vi.mock('../../../api/client', () => ({ default: { post: vi.fn(async (u, b) => { posted.push([u, b]); return {}; }) } }));
 let mockPayables = [];
 let mockSales = [];
+// Per-page master data (P5-13) — the accounts the drawer picks Mill Cash from.
+vi.mock('../../../shared/hooks/useMasterData', () => ({
+  useCustomersList: () => ({ data: [], isLoading: false }), useSuppliersList: () => ({ data: [], isLoading: false }),
+  useProductsList: () => ({ data: [], isLoading: false }), useWarehousesList: () => ({ data: [], isLoading: false }),
+  useBagTypesList: () => ({ data: [], isLoading: false }),
+  useBankAccountsList: () => ({ data: [
+    { id: 1, name: 'HO Bank', type: 'bank', entity: 'general' },
+    { id: 7, name: 'Mill Cash', type: 'cash', entity: 'mill' },
+  ], isLoading: false }),
+  useExportOrdersList: () => ({ data: [], isLoading: false }), useMillingBatchesList: () => ({ data: [], isLoading: false }),
+  useInventoryLots: () => ({ data: [], isLoading: false }), useCompanyProfile: () => ({}),
+}));
 vi.mock('../../../api/queries', () => ({
   usePayables: () => ({ data: mockPayables }),
   useMillPayables: () => ({ data: mockPayables }),

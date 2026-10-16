@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { useFinanceDrawers } from '../../modules/finance/drawers/drawersContext';
+import { useAuth } from '../../context/AuthContext';
 
 // Renders a customer/supplier/buyer name as a link to that party. Inside the
 // app shell it opens the Party drawer (balance per currency, open items,
@@ -13,9 +14,16 @@ import { useFinanceDrawers } from '../../modules/finance/drawers/drawersContext'
 // stopPropagation keeps it from also triggering a parent row's onClick.
 export default function PartyLink({ type, id, name, className = '', fallback = '—' }) {
   const drawers = useFinanceDrawers();
+  const { hasPermission } = useAuth() || {};
   const label = name || fallback;
   const t = type === 'supplier' ? 'supplier' : 'customer';
   if (!id || !name) return <span className={className}>{label}</span>;
+  // P5-05: the party drawer and the statement both read finance.view routes
+  // (/api/finance, /api/accounting/statements). Without it the name is plain
+  // text — never a link that lands on Access Denied.
+  if (typeof hasPermission === 'function' && !hasPermission('finance', 'view')) {
+    return <span className={className}>{label}</span>;
+  }
   if (drawers?.openParty) {
     return (
       <button

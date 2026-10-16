@@ -12,6 +12,14 @@ import { fileURLToPath } from 'url';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 let mockPerms = () => true;
+// Per-page master data (P5-13) — empty lists here.
+vi.mock('../../hooks/useMasterData', () => ({
+  useCustomersList: () => ({ data: [], isLoading: false }), useSuppliersList: () => ({ data: [], isLoading: false }),
+  useProductsList: () => ({ data: [], isLoading: false }), useWarehousesList: () => ({ data: [], isLoading: false }),
+  useBagTypesList: () => ({ data: [], isLoading: false }), useBankAccountsList: () => ({ data: [], isLoading: false }),
+  useExportOrdersList: () => ({ data: [], isLoading: false }), useMillingBatchesList: () => ({ data: [], isLoading: false }),
+  useInventoryLots: () => ({ data: [], isLoading: false }), useCompanyProfile: () => ({}),
+}));
 vi.mock('../../../api/client', () => ({ default: { get: vi.fn(async () => ({})), post: vi.fn(async () => ({})) } }));
 vi.mock('../../../context/AuthContext', () => ({ useAuth: () => ({ hasPermission: (m, a) => mockPerms(m, a) }) }));
 vi.mock('../../../context/AppContext', () => ({ useApp: () => ({ addToast: vi.fn(), customersList: [] }) }));

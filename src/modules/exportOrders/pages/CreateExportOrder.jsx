@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, useRef, useDeferredValue } from 'react';
 import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { useApp } from '../../../context/AppContext';
+import { useBagTypesList, useBankAccountsList, useCustomersList, useProductsList, useSuppliersList } from '../../../shared/hooks/useMasterData';
 import { useAuth } from '../../../context/AuthContext';
 import { canSeeProfit } from '../../../hooks/useCanSeeCost';
 import { useCreateExportOrder, useFxRates, useExportProfitPreview, useExportOrder } from '../../../api/queries';
@@ -83,7 +84,12 @@ export default function CreateExportOrder() {
 }
 
 function CreateExportOrderForm({ duplicate = null }) {
-  const { addToast, customersList: customers, productsList: products, exportCostCategories, bagTypesList, suppliersList, bankAccountsList } = useApp();
+  const { addToast, exportCostCategories } = useApp();
+  const { data: customers } = useCustomersList();
+  const { data: products } = useProductsList();
+  const { data: bagTypesList } = useBagTypesList();
+  const { data: suppliersList } = useSuppliersList();
+  const { data: bankAccountsList } = useBankAccountsList();
   const createOrderMut = useCreateExportOrder();
   const { hasPermission, user } = useAuth();
   // One submit at a time. The ref blocks a second click in the same tick (state

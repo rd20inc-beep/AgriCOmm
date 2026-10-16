@@ -3,7 +3,6 @@ import { Link } from 'react-router-dom';
 import {
   DollarSign, TrendingUp, TrendingDown, AlertTriangle, Receipt, Factory, Package, Shield, Sparkles,
 } from 'lucide-react';
-import { useApp } from '../../../../../context/AppContext';
 import {
   useMillFinanceKpis, useMillFinanceKpiDetail, useProfitLoss, useHeldStockProfit, useMillExpenses,
 } from '../../../../../api/queries';
@@ -11,6 +10,7 @@ import { fmtPKR, fmtNum, fmtPct, fmtKg, fmtDate } from '../../../../../shared/ut
 import AnomalyWatchCard from '../../../../ai/components/AnomalyWatchCard';
 import Stat from '../components/Stat';
 import { PKR, COMPACT_PKR } from '../constants';
+import { useMillingBatchesList } from '../../../../../shared/hooks/useMasterData';
 
 const EFF_LIMIT = 500;
 
@@ -24,7 +24,7 @@ const EFF_LIMIT = 500;
  * when the user asks (P5-09).
  */
 export default function PerformanceSection({ period, focus }) {
-  const { millingBatches = [] } = useApp();
+  const { data: millingBatches } = useMillingBatchesList();
   const { data: kpiData } = useMillFinanceKpis({ period });
   const mk = useMemo(() => ({
     period: kpiData?.period || null,

@@ -3,7 +3,7 @@ import { Landmark, FileText } from 'lucide-react';
 import SlideDrawer from '../../../components/SlideDrawer';
 import PaymentFormDrawer from '../../../components/payments/PaymentFormDrawer';
 import { contextForDocument } from '../../../components/payments/paymentVariants';
-import { useApp } from '../../../context/AppContext';
+import { useBankAccountsList } from '../../../shared/hooks/useMasterData';
 import { useAuth } from '../../../context/AuthContext';
 import { usePayables, useMillPayables } from '../../../api/queries';
 import { payablesForRow } from '../utils/payableBuckets';
@@ -25,7 +25,7 @@ const idOf = (p) => String(p.dbId || p.id);
  * (Mill Cash), so the form stays fixed to cash from that account.
  */
 export default function MillSupplierPayDrawer({ supplier, onClose }) {
-  const { bankAccountsList = [] } = useApp();
+  const { data: bankAccountsList } = useBankAccountsList();
   // Finance reads the company feed; a mill role without finance.view (the Mill
   // Operator) reads the mill's own payables — the only ones it may pay.
   const { hasPermission } = useAuth();

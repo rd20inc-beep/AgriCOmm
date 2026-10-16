@@ -32,6 +32,20 @@ const mockDrawers = {
 
 vi.mock('../../../context/AuthContext', () => ({ useAuth: () => ({ hasPermission: (m, a) => mockPerms(m, a) }) }));
 vi.mock('../../../context/AppContext', () => ({ useApp: () => ({ addToast: vi.fn(), suppliersList: [] }) }));
+// P5-13: pages read their lists from the per-page hooks, not AppContext.
+vi.mock('../../../shared/hooks/useMasterData', () => ({
+  useCustomersList: () => ({ data: [] }),
+  useSuppliersList: () => ({ data: [] }),
+  useProductsList: () => ({ data: [] }),
+  useWarehousesList: () => ({ data: [] }),
+  useBagTypesList: () => ({ data: [] }),
+  useBankAccountsList: () => ({ data: [] }),
+  useExportOrdersList: () => ({ data: [] }),
+  useMillingBatchesList: () => ({ data: [] }),
+  useInventoryLots: () => ({ data: [] }),
+  useCompanyProfile: () => ({ name: 'AGRI COMMODITIES' }),
+  useAppSettings: () => ({ settings: { paymentReminderDays: 7 }, updateSettings: vi.fn() }),
+}));
 vi.mock('../../../hooks/useConfirm', () => ({ default: () => [vi.fn(), null] }));
 vi.mock('../drawers/drawersContext', () => ({ useFinanceDrawers: () => mockDrawers }));
 vi.mock('../drawers/drawerHooks', () => ({

@@ -3,13 +3,14 @@
 // dispatch, reservation, adjustment, write-off…). Filter by entity, movement
 // type, warehouse and date range; each row links to its lot / batch / order.
 // Read-only; reuses /api/reporting/inventory-ledger. Finance-gated route.
+import { useApp } from '../../../context/AppContext';
 import { useState, useMemo } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, Printer, Download, Truck, ArrowDownLeft, ArrowUpRight } from 'lucide-react';
 import { reportingApi } from '../api/services';
 import { useWarehouses } from '../../../api/queries';
-import { useApp } from '../../../context/AppContext';
+import { useCompanyProfile } from '../../../shared/hooks/useMasterData';
 import { useAuth } from '../../../context/AuthContext';
 import { exportFullLedgerCSV, printInventoryMovementLedger } from '../utils/ledgerExport';
 import { fmtDate, fmtNum, fmtPKR } from '../../../shared/utils/format';
@@ -31,7 +32,8 @@ const MOVEMENT_TYPES = [
 
 export default function InventoryMovementLedger() {
   const navigate = useNavigate();
-  const { companyProfileData, addToast } = useApp();
+  const { addToast } = useApp();
+  const companyProfileData = useCompanyProfile();
   const { user } = useAuth();
   const { data: warehouses = [] } = useWarehouses();
   const [entity, setEntity] = useState('');

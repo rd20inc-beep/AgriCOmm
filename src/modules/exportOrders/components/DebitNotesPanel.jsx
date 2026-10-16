@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { FileWarning, Plus, Loader2, Ban } from 'lucide-react';
 import SlideDrawer from '../../../components/SlideDrawer';
 import useConfirm from '../../../hooks/useConfirm';
+import { useAuth } from '../../../context/AuthContext';
 import { useDebitNotes, useIssueDebitNote, useCancelDebitNote } from '../../../api/queries';
 import { todayLocalISO, fmtMoney, fmtNum, fmtDate } from '../../../shared/utils/format';
 import StatusBadge from '../../../shared/components/StatusBadge';
@@ -28,7 +29,13 @@ const BASES = [
 
 const inputCls = 'w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none';
 
-export default function DebitNotesPanel({ order, addToast, canIssue = true }) {
+export default function DebitNotesPanel({ order, addToast, canIssue: canIssueProp = true }) {
+  // P5-05: raising / cancelling a debit note is confirm_balance or
+  // finance.confirm_payment on the server (exportOrders.routes) — hide the
+  // buttons from anyone else instead of letting them 403.
+  const { hasPermission } = useAuth();
+  const canIssue = canIssueProp
+    && (hasPermission('export_orders', 'confirm_balance') || hasPermission('finance', 'confirm_payment'));
   const orderId = order?.dbId || order?.id;
   const { data: notes = [], isLoading } = useDebitNotes(orderId);
   const issue = useIssueDebitNote();

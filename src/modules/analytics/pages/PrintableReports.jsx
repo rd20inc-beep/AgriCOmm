@@ -3,6 +3,7 @@ import { Printer, RefreshCw, Calendar, Factory, Boxes, TrendingUp, Wallet, Arrow
 import { useSearchParams } from 'react-router-dom';
 import api from '../../../api/client';
 import { useApp } from '../../../context/AppContext';
+import { useCompanyProfile } from '../../../shared/hooks/useMasterData';
 import { useAuth } from '../../../context/AuthContext';
 import { useSummarizeReport } from '../../../api/queries';
 import { canSeeCost } from '../../../hooks/useCanSeeCost';
@@ -111,7 +112,8 @@ const STOCK_GROUP_OPTIONS = [
 ];
 
 export default function PrintableReports() {
-  const { addToast, companyProfileData } = useApp();
+  const { addToast } = useApp();
+  const companyProfileData = useCompanyProfile();
   const { user, hasPermission } = useAuth();
   const [searchParams] = useSearchParams();
   // A Mill role only gets the mill/inventory reports — the company-wide

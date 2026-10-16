@@ -116,11 +116,17 @@ describe('per-user filtering', () => {
 });
 
 describe('links are real routes and permission-safe', () => {
-  const app = path.join(__dirname, '../../../src/App.jsx');
-  const hasApp = fs.existsSync(app);
+  // The one route table (P5-05): app/routeGates.js lists every path; the
+  // /finance/* children are declared in app/routeTable.jsx.
+  const app = path.join(__dirname, '../../../src/app/routeTable.jsx');
+  const gatesFile = path.join(__dirname, '../../../src/app/routeGates.js');
+  const hasApp = fs.existsSync(app) && fs.existsSync(gatesFile);
   (hasApp ? it : it.skip)('every routeAccess path is an App.jsx route', () => {
     const src = fs.readFileSync(app, 'utf8');
-    const paths = new Set([...src.matchAll(/path="([^"]+)"/g)].map((m) => m[1]));
+    const paths = new Set([
+      ...[...src.matchAll(/path="([^"]+)"/g)].map((m) => m[1]),
+      ...[...fs.readFileSync(gatesFile, 'utf8').matchAll(/path: '([^']+)'/g)].map((m) => m[1]),
+    ]);
     // /finance/* children are declared relative to the parent route.
     const financeChild = (p) => p.startsWith('/finance/') && paths.has(p.slice('/finance/'.length));
     for (const r of ROUTES) {

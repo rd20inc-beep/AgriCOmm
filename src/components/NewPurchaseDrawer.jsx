@@ -9,6 +9,7 @@ import { useAuth } from '../context/AuthContext';
 import PaymentFormDrawer from './payments/PaymentFormDrawer';
 import { canRecordVariant } from './payments/paymentVariants';
 import { lineNeedsBagKg, paidNowPaymentContext } from '../modules/millStore/utils/storePurchaseLine';
+import { useSuppliersList } from '../shared/hooks/useMasterData';
 import { useMillStoreItems, useCreatePurchase } from '../modules/millStore/api/queries';
 import { purchaseRequirementsApi } from '../modules/purchaseRequirements/api/services';
 import { todayLocalISO, fmtPKR, fmtNum } from '../shared/utils/format';
@@ -40,7 +41,8 @@ const hasSize = (v) => v != null && v !== '' && Number(v) > 0;
  * requirement_id }) — e.g. from a requirement's "Record Purchase".
  */
 export default function NewPurchaseDrawer({ open, onClose, onSaved, prefill = null }) {
-  const { suppliersList, addToast } = useApp();
+  const { addToast } = useApp();
+  const { data: suppliersList } = useSuppliersList();
   const { data: items = [] } = useMillStoreItems();
   const safeItems = Array.isArray(items) ? items : [];
   const createMut = useCreatePurchase();

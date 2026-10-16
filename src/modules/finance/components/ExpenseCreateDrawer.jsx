@@ -4,6 +4,7 @@ import { DollarSign, Loader2, Receipt, Calendar } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import SlideDrawer from '../../../components/SlideDrawer';
 import { useApp } from '../../../context/AppContext';
+import { useBankAccountsList, useExportOrdersList, useMillingBatchesList, useSuppliersList } from '../../../shared/hooks/useMasterData';
 import { useAuth } from '../../../context/AuthContext';
 import api from '../../../api/client';
 import { useExpenseVendors } from '../../../api/queries';
@@ -49,7 +50,11 @@ const INIT_FORM = () => ({
 });
 
 export default function ExpenseCreateDrawer({ open = true, onClose, onCreated }) {
-  const { addToast, suppliersList, bankAccountsList, millingBatches, exportOrders } = useApp() || {};
+  const { addToast } = useApp() || {};
+  const { data: suppliersList } = useSuppliersList();
+  const { data: bankAccountsList } = useBankAccountsList();
+  const { data: millingBatches } = useMillingBatchesList();
+  const { data: exportOrders } = useExportOrdersList();
   const createMut = useCreateExpense();
   const [form, setForm] = useState(INIT_FORM);
   const [errors, setErrors] = useState({});

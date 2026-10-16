@@ -4,6 +4,7 @@ import {
   ArrowRightLeft, Wheat, Globe, Calculator, RefreshCw,
 } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
+import { useAppSettings, useCustomersList, useMillingBatchesList, useProductsList } from '../../../shared/hooks/useMasterData';
 import CustomerPicker from '../../../components/CustomerPicker';
 import { useRunScenario, useCostPredict, useFinanceOverviewSummary } from '../../../api/queries';
 import { useCommodityPrices } from '../../../modules/milling/hooks/useCommodityPrices';
@@ -28,7 +29,8 @@ function ResultCard({ label, value, subtitle, positive }) {
 }
 
 function CostSimulator() {
-  const { productsList, settings } = useApp();
+  const { data: productsList } = useProductsList();
+  const { settings } = useAppSettings();
   const [productId, setProductId] = useState('');
   const { data: prediction = {}, isLoading } = useCostPredict(productId || null);
 
@@ -174,7 +176,7 @@ const YIELD_CATEGORIES = [
 ];
 
 function YieldSimulator() {
-  const { millingBatches } = useApp();
+  const { data: millingBatches } = useMillingBatchesList();
   const prices = useCommodityPrices(); // canonical per-MT rates (finished/broken/…)
   const [supplier, setSupplier] = useState('All');
   const [rawQtyKg, setRawQtyKg] = useState(50000);
@@ -334,7 +336,10 @@ function YieldSimulator() {
 }
 
 function FullOrderSimulator() {
-  const { customersList, productsList, settings, addToast } = useApp();
+  const { addToast } = useApp();
+  const { data: customersList } = useCustomersList();
+  const { data: productsList } = useProductsList();
+  const { settings } = useAppSettings();
   const scenarioMutation = useRunScenario();
   const [form, setForm] = useState({
     customer_id: '', product_id: '', qty_mt: 50, incoterm: 'FOB', margin_target: 15,

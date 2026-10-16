@@ -64,6 +64,8 @@ describe('the open-items panel shows the action only when the host provides one'
 describe('W18 — the reconciliation review before clearing', async () => {
   vi.mock('../../../api/queries', () => ({ useBankAccounts: () => ({ data: [], isLoading: false }) }));
   vi.mock('../../../context/AppContext', () => ({ useApp: () => ({ addToast: () => {} }) }));
+  // OrderHeader gates each action on the backend's permission (P5-05).
+  vi.mock('../../../context/AuthContext', () => ({ useAuth: () => ({ hasPermission: () => true }) }));
   const { CompleteReview } = await import('../pages/BankReconciliation');
   const money = (v) => `Rs ${Number(v).toFixed(2)}`;
   const fig = { count: 3, tickedIn: 25000, tickedOut: 3000, cleared: 22000, difference: 0, balanced: true };

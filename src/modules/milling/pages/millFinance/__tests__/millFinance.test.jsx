@@ -32,6 +32,14 @@ const HOOKS = `useAcceptFundTransfer useAcceptLocalSalePayment useAccruePayrollR
   const auth = { granted: new Set() };
   return { calls, FIXTURES, MUTATION, HOOKS, hook, auth };
 });
+// Per-page master data (P5-13) — empty lists here.
+vi.mock('../../../../../shared/hooks/useMasterData', () => ({
+  useCustomersList: () => ({ data: [], isLoading: false }), useSuppliersList: () => ({ data: [], isLoading: false }),
+  useProductsList: () => ({ data: [], isLoading: false }), useWarehousesList: () => ({ data: [], isLoading: false }),
+  useBagTypesList: () => ({ data: [], isLoading: false }), useBankAccountsList: () => ({ data: [], isLoading: false }),
+  useExportOrdersList: () => ({ data: [], isLoading: false }), useMillingBatchesList: () => ({ data: [], isLoading: false }),
+  useInventoryLots: () => ({ data: [], isLoading: false }), useCompanyProfile: () => ({}),
+}));
 vi.mock('../../../../../api/queries', () => Object.fromEntries(HOOKS.map((n) => [n, hook(n)])));
 
 vi.mock('../../../../../context/AuthContext', () => ({

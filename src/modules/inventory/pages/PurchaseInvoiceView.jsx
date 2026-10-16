@@ -8,6 +8,7 @@ import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, Printer, Truck, Package, BookUser, AlertTriangle, ShoppingCart, Factory } from 'lucide-react';
 import { lotInventoryApi } from '../../../api/services';
 import { useApp } from '../../../context/AppContext';
+import { useCompanyProfile } from '../../../shared/hooks/useMasterData';
 import { printPurchaseInvoice } from '../../localSales/utils/invoicePrint';
 import StatusBadge from '../../../shared/components/StatusBadge';
 import { fmtPKR, fmtDate, fmtNum, fmtPct } from '../../../shared/utils/format';
@@ -26,7 +27,8 @@ function Field({ label, value, sub, tone = 'gray' }) {
 export default function PurchaseInvoiceView() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { companyProfileData, addToast } = useApp();
+  const { addToast } = useApp();
+  const companyProfileData = useCompanyProfile();
 
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ['lot', 'purchase-invoice', id],

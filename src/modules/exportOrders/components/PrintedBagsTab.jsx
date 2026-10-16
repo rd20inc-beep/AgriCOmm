@@ -3,6 +3,7 @@ import {
   Printer, Plus, Loader2, Truck, CheckCircle2, Trash2, Wallet, X, PackageCheck, AlertCircle,
 } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
+import { useBagTypesList, useSuppliersList } from '../../../shared/hooks/useMasterData';
 import SlideDrawer from '../../../components/SlideDrawer';
 import BagTypePicker from '../../../components/BagTypePicker';
 import SupplierPicker from '../../../components/SupplierPicker';
@@ -33,7 +34,9 @@ function PayPill({ status, outstanding }) {
 }
 
 export default function PrintedBagsTab({ order, onUpdated }) {
-  const { addToast, suppliersList, bagTypesList } = useApp();
+  const { addToast } = useApp();
+  const { data: suppliersList } = useSuppliersList();
+  const { data: bagTypesList } = useBagTypesList();
   // Paying the vendor is POST /finance/purchases/pay — the route asks
   // finance.confirm_payment or milling.edit; the button says the same.
   const { hasPermission } = useAuth();

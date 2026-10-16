@@ -2,34 +2,32 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { ROUTE_GATES, canOpen } from '../../app/routeGates';
+import { ROLE_PERMISSIONS, permsFor } from '../../test/fixtures/rolePermissions';
 
-// P1-06 / D-24: salaries are for payroll.view only. Every shell that mounts a
-// /reports/payroll* page must wrap it in a payroll.view guard — reports.view
-// alone is held by Export Manager, QC and Inventory roles.
+// P1-06 / D-24: salaries are for payroll.view only. Every /reports/payroll*
+// route in the one route table needs payroll.view — reports.view alone is
+// held by Export Manager, QC and Inventory roles.
 const SRC = fileURLToPath(new URL('../..', import.meta.url));
 const src = (p) => readFileSync(resolve(SRC, p), 'utf8');
-const app = src('App.jsx');
 
-const shellBody = (name) => {
-  const start = app.indexOf(`function ${name}()`);
-  expect(start).toBeGreaterThan(-1);
-  const end = app.indexOf('\nfunction ', start + 1);
-  return app.slice(start, end === -1 ? undefined : end);
-};
+describe('payroll report routes need payroll.view', () => {
+  const payrollRoutes = ROUTE_GATES.filter((r) => r.path.startsWith('/reports/payroll'));
 
-describe('payroll report routes need payroll.view in every shell', () => {
-  const shells = ['ExportRoutes', 'MillRoutes', 'StandardRoutes'];
-  it.each(shells)('%s', (name) => {
-    const routes = [...shellBody(name).matchAll(/<Route\s+path="(\/reports\/payroll[^"]*)"[^\n]*/g)];
-    for (const [line] of routes) {
-      expect(line).toContain('<ProtectedRoute module="payroll" action="view">');
-    }
+  it('every /reports/payroll* route is gated on payroll.view', () => {
+    expect(payrollRoutes.map((r) => r.path).sort()).toEqual(['/reports/payroll', '/reports/payroll-analytics']);
+    for (const r of payrollRoutes) expect(r.gate).toEqual({ module: 'payroll', action: 'view' });
   });
 
-  it('no payroll report route is mounted bare anywhere in App.jsx', () => {
-    const all = [...app.matchAll(/<Route\s+path="\/reports\/payroll[^"]*"[^\n]*/g)].map((m) => m[0]);
-    expect(all.length).toBeGreaterThanOrEqual(6);
-    for (const line of all) expect(line).toContain('module="payroll" action="view"');
+  it.each(Object.keys(ROLE_PERMISSIONS))('%s opens payroll reports only with payroll.view', (role) => {
+    const can = permsFor(role);
+    const hasPayroll = can('payroll', 'view');
+    for (const r of payrollRoutes) expect(canOpen(r.path, can)).toBe(hasPayroll);
+  });
+
+  it('the finance payroll workspace keeps its own payroll.view guard', () => {
+    const table = src('app/routeTable.jsx');
+    expect(table).toContain('<Route path="payroll" element={<ProtectedRoute module="payroll" action="view"><FinancePayroll /></ProtectedRoute>} />');
   });
 });
 

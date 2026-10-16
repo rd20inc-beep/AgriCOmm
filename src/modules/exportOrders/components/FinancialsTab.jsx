@@ -4,9 +4,15 @@ import { fmtKg } from '../../../shared/utils/format';
 import DebitNotesPanel from './DebitNotesPanel';
 import ShortBalanceWriteOff from './ShortBalanceWriteOff';
 import OrderReceipts from '../../finance/drawers/OrderReceipts';
+import { useAuth } from '../../../context/AuthContext';
 
 export default function FinancialsTab({ order, formatCurrency, formatPKR, totalCosts, grossProfit, marginPct, onConfirmAdvance, onRequestBalance, onAddExpense, canConfirmAdvance, canRequestBalance, exportCostCategories, addToast }) {
   const formatCost = formatPKR || formatCurrency;
+  // P5-05: each button only for those the backend lets use it.
+  const { hasPermission } = useAuth();
+  const mayAdvance = hasPermission('export_orders', 'confirm_advance') || hasPermission('finance', 'confirm_payment');
+  const mayBalance = hasPermission('export_orders', 'confirm_balance') || hasPermission('finance', 'confirm_payment');
+  const mayAddExpense = hasPermission('export_orders', 'edit'); // POST /:id/costs
   const profit = order.profit || null;
   const totalReceivables = order.advanceExpected + order.balanceExpected;
   const totalReceived = order.advanceReceived + order.balanceReceived;
@@ -205,29 +211,32 @@ export default function FinancialsTab({ order, formatCurrency, formatPKR, totalC
 
       {/* Action Buttons */}
       <div className="flex items-center gap-3">
-        <button
+        {mayAdvance && <button
+          data-action="advance"
           disabled={!canConfirmAdvance}
           onClick={onConfirmAdvance}
           className={`inline-flex items-center gap-2 px-4 py-2.5 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition-colors ${!canConfirmAdvance ? 'opacity-50 cursor-not-allowed' : ''}`}
         >
           <DollarSign className="w-4 h-4" />
           Record Advance Receipt
-        </button>
-        <button
+        </button>}
+        {mayBalance && <button
+          data-action="balance"
           disabled={!canRequestBalance}
           onClick={onRequestBalance}
           className={`inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors ${!canRequestBalance ? 'opacity-50 cursor-not-allowed' : ''}`}
         >
           <DollarSign className="w-4 h-4" />
           Record Balance Receipt
-        </button>
-        <button
+        </button>}
+        {mayAddExpense && <button
+          data-action="add-expense"
           onClick={onAddExpense}
           className="inline-flex items-center gap-2 px-4 py-2.5 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 transition-colors"
         >
           <Plus className="w-4 h-4" />
           Add Expense
-        </button>
+        </button>}
       </div>
     </div>
   );

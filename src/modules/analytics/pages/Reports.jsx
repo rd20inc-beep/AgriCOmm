@@ -2,7 +2,7 @@ import { useMemo, useState, useEffect, useRef, Fragment } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../../context/AuthContext';
 import useCanSeeCost, { useCanSeeProfit } from '../../../hooks/useCanSeeCost';
-import { useApp } from '../../../context/AppContext';
+import { useCompanyProfile } from '../../../shared/hooks/useMasterData';
 import {
   BarChart3, TrendingUp, Users, Globe, Package, Award, Coins, Printer, RefreshCw,
   ArrowUpRight, ArrowDownLeft, Activity, Calendar, ExternalLink, AlertTriangle, FileText,
@@ -184,7 +184,7 @@ function GlobalSearchBox({ entity }) {
 // Shared Export-CSV + Print bar for the Phase 2 ledger reports. Pass the
 // ledger's column defs + rows; Print uses the standardized template.
 function LedgerExportBar({ title, subtitle, meta, columns, rows, footerNote, fileBase }) {
-  const { companyProfileData } = useApp();
+  const companyProfileData = useCompanyProfile();
   const { user } = useAuth();
   const companyName = companyProfileData?.legalName || companyProfileData?.name || 'AGRI COMMODITIES';
   const stamp = todayLocalISO();
@@ -630,7 +630,7 @@ function ReportBuilderDrawer() {
 
 export default function Reports() {
   const { user } = useAuth();
-  const { companyProfileData } = useApp();
+  const companyProfileData = useCompanyProfile();
   // A Mill role's reports must stay mill-only — no export-order profitability,
   // customers, countries or export A/R / booked profit.
   const millScoped = user?.role === 'Mill Manager';

@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { Printer, Download, Send, Loader2 } from 'lucide-react';
 import api from '../api/client';
 import { useApp } from '../context/AppContext';
+import { useCustomersList } from '../shared/hooks/useMasterData';
 import WhatsAppSendModal from './WhatsAppSendModal';
 import WhatsAppPairModal from '../shared/components/WhatsAppPairModal';
 import { useCanPairWhatsApp } from '../shared/components/whatsAppPair';
@@ -88,7 +89,8 @@ function model(kind, d) {
 
 export default function TransactionDocument({ kind = 'receipt', data, companyProfile }) {
   const ref = useRef(null);
-  const { addToast, customersList } = useApp();
+  const { addToast } = useApp();
+  const { data: customersList } = useCustomersList();
   const [waSending, setWaSending] = useState(false);
   const [waModal, setWaModal] = useState(null); // { defaultNumber, who } while the send dialog is open
   const [waPairOpen, setWaPairOpen] = useState(false); // "Pair my WhatsApp" (P5-12)

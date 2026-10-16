@@ -2,14 +2,16 @@ import { NavLink } from 'react-router-dom';
 import { Menu } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { resolveMobileNav } from '../lib/mobileNavItems';
+import { resolveWorkspace } from '../app/workspace';
 
 // Native-style bottom tab bar for phones (hidden on lg+ where the sidebar shows).
 // The four shortcuts are configurable per role (Admin → Access → Mobile Menu) and
-// stored on the user's role (user.mobileNav); they fall back to a default set and
-// are filtered by permission. A fixed "Menu" button opens the full sidebar.
+// stored on the user's role (user.mobileNav); they fall back to the workspace's
+// default set and show only routes the user can open (the route table's gates).
+// A fixed "Menu" button opens the full sidebar.
 export default function MobileBottomNav({ onMenu }) {
   const { user, hasPermission } = useAuth();
-  const items = resolveMobileNav(user?.mobileNav, hasPermission);
+  const items = resolveMobileNav(user?.mobileNav, hasPermission, resolveWorkspace(hasPermission));
 
   const cls = ({ isActive }) =>
     `flex flex-col items-center justify-center gap-0.5 flex-1 min-w-0 h-14 text-[10px] font-medium transition-colors ${

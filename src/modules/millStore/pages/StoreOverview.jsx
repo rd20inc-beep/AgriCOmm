@@ -12,6 +12,7 @@ import NewPurchaseDrawer from '../../../components/NewPurchaseDrawer';
 import SlideDrawer from '../../../components/SlideDrawer';
 import SupplierPicker from '../../../components/SupplierPicker';
 import { useApp } from '../../../context/AppContext';
+import { useSuppliersList } from '../../../shared/hooks/useMasterData';
 import { useAuth } from '../../../context/AuthContext';
 import useCanSeeCost from '../../../hooks/useCanSeeCost';
 import VoidPurchaseButton from '../../../shared/components/VoidPurchaseButton';
@@ -354,7 +355,8 @@ function PurchasePaymentsCard() {
 const locKey = (loc) => (loc.warehouse_id == null ? 'main' : String(loc.warehouse_id));
 
 function StockEditDrawer({ item, onClose }) {
-  const { addToast, suppliersList } = useApp();
+  const { addToast } = useApp();
+  const { data: suppliersList } = useSuppliersList();
   const setStock = useSetMillStock();
   const updateItem = useUpdateMillStoreItem();
   const revalue = useRevalueMillItem();

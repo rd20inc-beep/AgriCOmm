@@ -4,12 +4,13 @@
 // ref; filter by date, payment status and outstanding-only. Each row opens the
 // Invoice 360 and links to the customer ledger. Read-only; commercial figures
 // only (no COGS/margin). Reuses the shared ledger CSV/print helpers.
+import { useApp } from '../../../context/AppContext';
 import { useState, useEffect, useMemo, Fragment } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Search, Download, Printer, FileText, AlertTriangle, BookUser, ChevronRight, ChevronDown, Factory, ArrowLeft } from 'lucide-react';
 import { reportingApi } from '../api/services';
 import { localSalesApi, lotInventoryApi } from '../../../api/services';
-import { useApp } from '../../../context/AppContext';
+import { useCompanyProfile } from '../../../shared/hooks/useMasterData';
 import { useAuth } from '../../../context/AuthContext';
 import { exportFullLedgerCSV, printLedger } from '../utils/ledgerExport';
 import { todayLocalISO, fmtDate, fmtPKR, fmtKg } from '../../../shared/utils/format';
@@ -44,7 +45,8 @@ const COLS = [
 ];
 
 export default function InvoiceLedger() {
-  const { companyProfileData, addToast } = useApp();
+  const { addToast } = useApp();
+  const companyProfileData = useCompanyProfile();
   const { user } = useAuth();
   const [params, setParams] = useSearchParams();
   const [qInput, setQInput] = useState(params.get('q') || '');

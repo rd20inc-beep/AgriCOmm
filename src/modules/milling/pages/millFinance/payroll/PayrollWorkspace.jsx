@@ -27,6 +27,7 @@ import { StatutoryDeductionsDrawer, TaxStatementDrawer } from './statutory';
 import { SalaryRevisionDrawer, PayrollAuditDrawer, FinalSettlementDrawer, LeaveDrawer, WorkerRequestsDrawer } from './people';
 import { PayrollScheduleDrawer, PayslipsPanel, PayrollReport } from './runs';
 import { EmployeeLedgerDrawer } from './EmployeeLedgerDrawer';
+import { useBankAccountsList, useCompanyProfile } from '../../../../../shared/hooks/useMasterData';
 
 /**
  * The payroll workspace — workers, attendance, runs (prepare → approve → pay),
@@ -36,7 +37,9 @@ import { EmployeeLedgerDrawer } from './EmployeeLedgerDrawer';
  * Every action keeps its payroll.* permission gate, Owner approval and confirm.
  */
 export default function PayrollWorkspace({ defaultEntity = 'mill', intro = false }) {
-  const { addToast, companyProfileData, bankAccountsList } = useApp();
+  const { addToast } = useApp();
+  const companyProfileData = useCompanyProfile();
+  const { data: bankAccountsList } = useBankAccountsList();
   const [confirm, confirmDialog] = useConfirm();
   const { hasPermission } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();

@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { SkeletonDashboard as DashboardSkeleton } from '../../../components/Skeleton';
 import { useApp } from '../../../context/AppContext';
+import { useExportOrdersList, useMillingBatchesList } from '../../../shared/hooks/useMasterData';
 import { useAuth } from '../../../context/AuthContext';
 import { useMasterDataApprovalsCount } from '../../../modules/admin/api/queries';
 import { millingApi } from '../../../modules/milling/api/services';
@@ -50,7 +51,10 @@ const PHASES = [
 export default function Dashboard() {
   const navigate = useNavigate();
   const { requestOwnerApproval } = useOwnerAuth();
-  const { exportOrders, millingBatches, dataLoading, refreshFromApi, addToast } = useApp();
+  const { refreshFromApi, addToast } = useApp();
+  const { data: exportOrders, isLoading: ordersLoading } = useExportOrdersList();
+  const { data: millingBatches, isLoading: batchesLoading } = useMillingBatchesList();
+  const dataLoading = ordersLoading || batchesLoading;
   const { user, hasPermission } = useAuth();
   const [confirm, confirmDialog] = useConfirm();
   const isOwnerOrAdmin = user?.role === 'Owner' || user?.role === 'Super Admin';

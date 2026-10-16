@@ -100,11 +100,14 @@ describe('filterInboxItems', () => {
 });
 
 describe('every approval link resolves to a real route', () => {
-  const app = fs.readFileSync(path.resolve(__dirname, '../../../App.jsx'), 'utf8');
+  // The one route table (P5-05): paths + gates in app/routeGates.js, the
+  // /finance/* children in app/routeTable.jsx's FinanceRoutes.
+  const app = fs.readFileSync(path.resolve(__dirname, '../../../app/routeTable.jsx'), 'utf8');
+  const gates = fs.readFileSync(path.resolve(__dirname, '../../../app/routeGates.js'), 'utf8');
   // Top-level routes plus the /finance/* children (declared relative to it).
   const fn = /function FinanceRoutes\(\)[\s\S]*?\n}\n/.exec(app)[0];
   const financeChildren = [...fn.matchAll(/path="([^"]+)"/g)].map((m) => `/finance/${m[1]}`);
-  const top = [...app.matchAll(/path="(\/[^"]*)"/g)].map((m) => m[1]).filter((p) => p !== '/*' && p !== '*');
+  const top = [...gates.matchAll(/path: '(\/[^']*)'/g)].map((m) => m[1]).filter((p) => p !== '/*' && p !== '*');
   const patterns = [...new Set([...top, ...financeChildren, '/finance'])].filter((p) => !p.endsWith('/*'));
   const resolves = (href) => {
     const pathname = href.split(/[?#]/)[0];

@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { ArrowDownRight, ArrowUpRight, Wallet, Search, ChevronLeft, ChevronRight } from 'lucide-react';
-import { useApp } from '../../../../../context/AppContext';
 import { useMillCashFlow } from '../../../../../api/queries';
 import { fmtDate, fmtMoney } from '../../../../../shared/utils/format';
 import Stat from '../components/Stat';
@@ -9,6 +8,7 @@ import CashEntryDrawer from '../drawers/CashEntryDrawer';
 import { PKR, COMPACT_PKR } from '../constants';
 import { mfHref } from '../urlState';
 import { historyRows, filterHistory, HISTORY_PAGE_SIZE } from './history';
+import { useCompanyProfile } from '../../../../../shared/hooks/useMasterData';
 
 const DIRS = [['all', 'All'], ['in', 'Money in'], ['out', 'Money out'], ['transfers', 'Transfers']];
 const STATUSES = [['all', 'Any status'], ['settled', 'Settled'], ['pending', 'Uncleared / pending'], ['not_counted', 'Reversed / bounced']];
@@ -25,7 +25,7 @@ const STATUSES = [['all', 'Any status'], ['settled', 'Settled'], ['pending', 'Un
  * endpoint yet (noted in P5-09).
  */
 export default function HistoryView({ period, go }) {
-  const { companyProfileData } = useApp();
+  const companyProfileData = useCompanyProfile();
   const [params] = useSearchParams();
   const dir = params.get('dir') || 'all';
   const status = params.get('status') || 'all';

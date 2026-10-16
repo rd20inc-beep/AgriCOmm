@@ -15,6 +15,7 @@ const DETAIL_NAV = [
 ];
 import { useQueryClient } from '@tanstack/react-query';
 import { useApp } from '../../../context/AppContext';
+import { useBankAccountsList, useCompanyProfile, useMillingBatchesList, useSuppliersList } from '../../../shared/hooks/useMasterData';
 import { useAuth } from '../../../context/AuthContext';
 import { useOwnerAuth } from '../../../context/OwnerAuthContext';
 import { realtimeRepo } from '../../../data/repositories/realtime';
@@ -64,7 +65,11 @@ export default function ExportOrderDetail() {
   const qc = useQueryClient();
   const { token } = useAuth();
   const { requestOwnerApproval } = useOwnerAuth();
-  const { millingBatches, addToast, exportCostCategories, companyProfileData, bankAccountsList, suppliersList } = useApp();
+  const { addToast, exportCostCategories } = useApp();
+  const { data: millingBatches } = useMillingBatchesList();
+  const companyProfileData = useCompanyProfile();
+  const { data: bankAccountsList } = useBankAccountsList();
+  const { data: suppliersList } = useSuppliersList();
 
   // Fetch order detail via TanStack Query
   const { data: order, isLoading: orderLoading } = useExportOrder(id);

@@ -21,6 +21,14 @@ vi.mock('../../../context/AppContext', () => ({
     exportCostCategories: [], bagTypesList: [], suppliersList: [], bankAccountsList: [],
   }),
 }));
+// Per-page master data (P5-13) — the one buyer the drafts name.
+vi.mock('../../../shared/hooks/useMasterData', () => ({
+  useCustomersList: () => ({ data: [{ id: 5, name: 'Gulf Foods LLC' }], isLoading: false }), useSuppliersList: () => ({ data: [], isLoading: false }),
+  useProductsList: () => ({ data: [], isLoading: false }), useWarehousesList: () => ({ data: [], isLoading: false }),
+  useBagTypesList: () => ({ data: [], isLoading: false }), useBankAccountsList: () => ({ data: [], isLoading: false }),
+  useExportOrdersList: () => ({ data: [], isLoading: false }), useMillingBatchesList: () => ({ data: [], isLoading: false }),
+  useInventoryLots: () => ({ data: [], isLoading: false }), useCompanyProfile: () => ({}),
+}));
 vi.mock('../../../api/queries', () => ({
   useCreateExportOrder: () => ({ mutateAsync: vi.fn() }),
   useFxRates: () => ({ data: null }),

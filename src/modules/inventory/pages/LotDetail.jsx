@@ -13,6 +13,7 @@ import {
 } from '../../../api/queries';
 import HaulerPicker from '../../../components/HaulerPicker';
 import { useApp } from '../../../context/AppContext';
+import { useCompanyProfile, useWarehousesList } from '../../../shared/hooks/useMasterData';
 import { useAuth } from '../../../context/AuthContext';
 import OrderRefLink from '../../../shared/components/OrderRefLink';
 import { LoadingSpinner, ErrorState } from '../../../components/LoadingState';
@@ -69,7 +70,9 @@ export default function LotDetail() {
   // Back returns to wherever the lot was opened from (Stock Summary, a report,
   // a ledger…); a lot opened directly (no history) falls back to Lot Inventory.
   const goBack = () => safeGoBack(navigate, '/lot-inventory');
-  const { addToast, warehousesList, companyProfileData } = useApp();
+  const { addToast } = useApp();
+  const { data: warehousesList } = useWarehousesList();
+  const companyProfileData = useCompanyProfile();
   const { user, hasPermission } = useAuth();
   const canReports = hasPermission('reports', 'view');
   const canExport = hasPermission('export_orders', 'view');
