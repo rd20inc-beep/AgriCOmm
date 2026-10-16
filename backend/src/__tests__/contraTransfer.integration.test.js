@@ -400,6 +400,24 @@ d('contra transfers (DB-gated)', () => {
     expect((await post('sa', `/api/finance/fund-transfers/${ok.body.data.transfer.id}/reverse`, { reason: 'test' })).status).toBe(200);
   });
 
+  // ── P5-09: the mill cash-flow ledger carries the history columns ──
+  test('mill cash-flow ledger rows carry currency, original amount, status and who recorded them', async () => {
+    const r = await contra('fm', { from_account_id: acc.millCash.id, to_account_id: acc.hoBank.id, amount: 444 });
+    expect(r.status).toBe(200);
+    const no = r.body.data.transfer.transfer_no;
+    const cf = await get('owner', '/api/milling/cash-flow');
+    expect(cf.status).toBe(200);
+    const row = cf.body.data.ledger.find((l) => l.ref === no);
+    expect(row).toBeTruthy();
+    expect(row).toMatchObject({
+      direction: 'out', currency: 'PKR', amount_original: 444, status: r.body.data.transfer.status,
+      recorded_by: `ZZ Finance Manager ${run}`,
+    });
+    // Display columns only: the counted figure is unchanged.
+    expect(row.amount_pkr).toBe(444);
+    expect(row.counted).toBe(true);
+  });
+
   // ── T8 dashboards ──
   test('T8 dashboards: Money Out / Money In / printable cash flow / P&L / mill cash flow unchanged; Cash totals right', async () => {
     const range = `from=2000-01-01&to=2100-12-31`;

@@ -171,7 +171,7 @@ describe('the shared drawer', () => {
     // These four were one drawer copied four times. If a new copy appears, or
     // one of these stops using the shared drawer, that is a regression.
     for (const f of [
-      'modules/milling/pages/MillFinanceDashboard.jsx',
+      'modules/milling/pages/millFinance/drawers/PayableDrawers.jsx',
       'modules/exportOrders/components/PrintedBagsTab.jsx',
       'modules/millStore/pages/StoreOverview.jsx',
     ]) {

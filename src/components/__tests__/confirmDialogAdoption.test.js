@@ -48,7 +48,10 @@ const MONEY_MOVING = [
   'modules/milling/components/ServiceBillingTab.jsx',    // void a service invoice
   'modules/milling/pages/MillingBatchDetail.jsx',         // delete a batch / arrival
   'modules/milling/pages/ServiceMillingBatchDetail.jsx',  // delete a service lot / arrival
-  'modules/milling/pages/MillFinanceDashboard.jsx',       // reject an advance, final settlement
+  'modules/milling/pages/millFinance/payroll/PayrollWorkspace.jsx', // reject an advance, undo / pay a payroll run
+  'modules/milling/pages/millFinance/payroll/people.jsx',           // final settlement
+  'modules/milling/pages/millFinance/payroll/advances.jsx',         // void an advance
+  'modules/milling/pages/millFinance/transactions/RecurringView.jsx', // stop a recurring series
   'modules/localSales/pages/LocalSales.jsx',              // reject a pending sale
   'modules/exportOrders/components/DebitNotesPanel.jsx',  // cancel a debit note
   'modules/exportOrders/components/PrintedBagsTab.jsx',   // delete a printed-bag order
