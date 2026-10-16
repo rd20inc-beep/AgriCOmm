@@ -306,7 +306,8 @@ const emailService = {
         orderNo: order.order_no,
         customerName: order.customer_name,
         amount: amount || 0,
-        currency: currency || 'USD',
+        // The receipt's currency, else the order's own — never a blanket USD.
+        currency: currency || order.currency || 'USD',
       },
       linkedType: 'export_order',
       linkedId: orderId,

@@ -269,7 +269,7 @@ function emitExportOrderUpdate(orderId, eventType, extra = {}) {
 async function runReceiptAutomation(ctx, isAdvance, userId) {
   try {
     const fn = isAdvance ? automationService.onAdvanceConfirmed : automationService.onBalanceConfirmed;
-    if (typeof fn === 'function') await fn.call(automationService, db, { orderId: ctx.orderId, amount: parseFloat(ctx.payment?.amount) || 0, userId });
+    if (typeof fn === 'function') await fn.call(automationService, db, { orderId: ctx.orderId, amount: parseFloat(ctx.payment?.amount) || 0, currency: ctx.payment?.currency || null, userId });
   } catch (e) { console.warn(`${isAdvance ? 'Advance' : 'Balance'} automation failed:`, e.message); }
 }
 
