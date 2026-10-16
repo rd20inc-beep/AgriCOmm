@@ -7,6 +7,7 @@ import { useApp } from '../../../context/AppContext';
 import { useAuth } from '../../../context/AuthContext';
 import { canSeeCost } from '../../../hooks/useCanSeeCost';
 import { CreateInvoiceDrawer, RecordPaymentDrawer } from '../components/ServiceInvoiceDrawers';
+import ServiceLotDrawer from '../components/ServiceLotDrawer';
 import { fmtPKR, fmtKg, fmtNum, fmtDate } from '../../../shared/utils/format';
 import StatusBadge from '../../../shared/components/StatusBadge';
 
@@ -41,6 +42,9 @@ export default function ServiceMilling() {
   const navigate = useNavigate();
   const [invoiceBatch, setInvoiceBatch] = useState(null);
   const [payInvoice, setPayInvoice] = useState(null);
+  // New service lot opens here (NAV-28) — it used to jump to the Milling
+  // dashboard and leave the user there after saving.
+  const [showNewLot, setShowNewLot] = useState(false);
 
   const { data, isLoading, refetch, isFetching } = useQuery({
     queryKey: ['service-milling', 'batches'],
@@ -82,8 +86,7 @@ export default function ServiceMilling() {
           </div>
           <div className="flex items-center gap-2 self-start">
             {canCreateLot && (
-              // Opens the New Batch drawer on the milling page, already in Service mode.
-              <button onClick={() => navigate('/milling?new=service')} className="bg-white text-amber-800 hover:bg-amber-50 px-3 py-2 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5">
+              <button onClick={() => setShowNewLot(true)} className="bg-white text-amber-800 hover:bg-amber-50 px-3 py-2 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5">
                 <Plus size={13} /> New service lot
               </button>
             )}
@@ -129,7 +132,7 @@ export default function ServiceMilling() {
               {isLoading ? (
                 <tr><td colSpan={showCost ? 11 : 10} className="px-4 py-10 text-center text-gray-400">Loading…</td></tr>
               ) : rows.length === 0 ? (
-                <tr><td colSpan={showCost ? 11 : 10} className="px-4 py-10 text-center text-gray-400">No service-milling lots yet. Create one from Mill → New Batch → Service Milling.</td></tr>
+                <tr><td colSpan={showCost ? 11 : 10} className="px-4 py-10 text-center text-gray-400">No service-milling lots yet. Use “New service lot” above to record the first one.</td></tr>
               ) : rows.map((b) => {
                 const received = num(b.raw_qty_kg) || num(b.quantities?.receivedKg);
                 // "Raw Rice" = the raw still UNMILLED (received − milled), NOT the
@@ -190,6 +193,18 @@ export default function ServiceMilling() {
 
       <CreateInvoiceDrawer open={!!invoiceBatch} batch={invoiceBatch} addToast={addToast}
         onClose={() => setInvoiceBatch(null)} onCreated={() => refetch()} />
+      {canCreateLot && (
+        <ServiceLotDrawer
+          open={showNewLot}
+          addToast={addToast}
+          onClose={() => setShowNewLot(false)}
+          onCreated={(batchNo) => {
+            setShowNewLot(false);
+            refetch();
+            if (batchNo) navigate(`/service-milling/${batchNo}`);
+          }}
+        />
+      )}
       <RecordPaymentDrawer open={!!payInvoice} invoice={payInvoice} addToast={addToast}
         onClose={() => setPayInvoice(null)} onPaid={() => refetch()} />
     </div>
