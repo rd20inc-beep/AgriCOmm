@@ -12,7 +12,8 @@ import { useAuth } from '../../../context/AuthContext';
 import { useFinanceDrawers } from '../drawers/drawersContext';
 import { canRecordVariant } from '../../../components/payments/paymentVariants';
 import { useFinanceDateRange } from '../hooks/useFinanceDateRange';
-import { downloadServerCsv } from '../../../shared/utils/csv';
+import { downloadServerCsv, serverCsvWarning } from '../../../shared/utils/csv';
+import { useApp } from '../../../context/AppContext';
 import SlideDrawer from '../../../components/SlideDrawer';
 import { paymentWord } from '../../localSales/utils/saleStatus';
 import { todayLocalISO, fmtPKR, fmtKg, fmtNum, fmtPct, fmtDate, fmtDateTime } from '../../../shared/utils/format';
@@ -82,8 +83,15 @@ export default function LocalSalesFinance() {
   const marginPct = totals?.marginPct ?? null;
 
   // Every matching confirmed sale, from the server — not the page on screen.
-  function exportCsv() {
-    downloadServerCsv('/api/reporting/local-sales', filters, `local-sales-${todayLocalISO()}`);
+  // W19: warn when even the full export hit the server's cap.
+  const app = useApp();
+  async function exportCsv() {
+    try {
+      const warn = serverCsvWarning(await downloadServerCsv('/api/reporting/local-sales', filters, `local-sales-${todayLocalISO()}`));
+      if (warn) app?.addToast?.(warn, 'warning');
+    } catch (e) {
+      app?.addToast?.(e?.message || 'CSV export failed', 'error');
+    }
   }
 
   return (

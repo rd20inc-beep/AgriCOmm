@@ -177,7 +177,32 @@ function reportMeta(range, { unit = null, currency = null, basis = null } = {}) 
   };
 }
 
+/**
+ * Most rows one export may return (W19). A screen shows a capped page; its CSV
+ * asks the SAME endpoint for everything (`export=1` or `format=csv`) up to this
+ * cap, and the response's `truncated` flag tells the browser to warn the user
+ * when even the export was cut short.
+ */
+const EXPORT_ROW_CAP = 50000;
+
+/** True when the caller wants the full filtered result for an export. */
+function isExportRequest(query = {}) {
+  const q = query || {};
+  if (String(q.format || '').toLowerCase() === 'csv') return true;
+  const e = String(q.export == null ? '' : q.export).toLowerCase();
+  return e === '1' || e === 'true';
+}
+
+/** Row cap for a list report: the screen cap, or EXPORT_ROW_CAP for an export. */
+function listCap(query = {}, { defaultLimit, maxLimit }) {
+  if (isExportRequest(query)) return EXPORT_ROW_CAP;
+  return Math.min(parseInt(query.limit, 10) || defaultLimit, maxLimit);
+}
+
 module.exports = {
+  EXPORT_ROW_CAP,
+  isExportRequest,
+  listCap,
   FROM_ALIASES,
   TO_ALIASES,
   reportQuerySchema,

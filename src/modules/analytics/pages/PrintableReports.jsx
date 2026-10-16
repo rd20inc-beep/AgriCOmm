@@ -14,7 +14,7 @@ import {
 } from './PrintableReportsViews';
 import { toLocalISODate, todayLocalISO } from '../../../shared/utils/format';
 import { downloadCsvText } from '../../../shared/utils/csv';
-import { printableCsv } from '../utils/printableCsv';
+import { printableCsv, printableTruncations } from '../utils/printableCsv';
 
 // ─── Period helpers ────────────────────────────────────────────────────
 // Each preset returns ISO strings for { from, to } and a label for
@@ -330,8 +330,13 @@ export default function PrintableReports() {
             </button>
             {/* The loaded report as a spreadsheet — raw figures, every section. */}
             <button
-              onClick={() => downloadCsvText(printableCsv(data),
-                `${reportType}${usesPeriod ? `_${toLocalISODate(range.from)}_${toLocalISODate(range.to)}` : `_${todayLocalISO()}`}`)}
+              onClick={() => {
+                downloadCsvText(printableCsv(data),
+                  `${reportType}${usesPeriod ? `_${toLocalISODate(range.from)}_${toLocalISODate(range.to)}` : `_${todayLocalISO()}`}`);
+                // W19: say so when the server capped a detail list in this report.
+                const cut = printableTruncations(data);
+                if (cut.length) addToast(`Some detail lists in this report are capped by the server (${cut.join(', ')}); the CSV holds what the report shows, not every line.`, 'warning');
+              }}
               disabled={!data}
               className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
             >

@@ -2,6 +2,8 @@ import { useState, useMemo } from 'react';
 import { Search, ChevronUp, ChevronDown, Download, ChevronLeft, ChevronRight, Inbox, AlertCircle, RefreshCw } from 'lucide-react';
 import StatusBadge from '../StatusBadge';
 import { downloadCsv } from '../../shared/utils/csv';
+import { useApp } from '../../context/AppContext';
+import { csvCapWarning } from '../../shared/utils/listCap';
 
 /**
  * Standardized finance data table with search, sort, pagination, export.
@@ -21,6 +23,9 @@ import { downloadCsv } from '../../shared/utils/csv';
  *   actions    — (row) => ReactNode for action column
  *   exportFilename — enables CSV export button (columns may carry csv(row))
  *   onExport   — replaces the client CSV with a full server export
+ *   listCap    — { loaded, total }: the server list behind `data` was capped
+ *                (loaded < total). The CSV still writes every loaded row, but
+ *                the user is told it is not the whole list (W19).
  *
  * Layout: money columns (align: 'right') are right-aligned with tabular
  * figures; on phones (≤767px) the table becomes the app's stacked
@@ -30,8 +35,10 @@ import { downloadCsv } from '../../shared/utils/csv';
 export default function FinanceTable({
   columns = [], data = [], searchKeys = [], onRowClick,
   pageSize = 15, emptyText = 'No records found', emptyAction = null, title,
-  loading, error = null, onRetry, actions, exportFilename, onExport,
+  loading, error = null, onRetry, actions, exportFilename, onExport, listCap = null,
 }) {
+  const app = useApp();
+  const [capWarn, setCapWarn] = useState(null);
   const [search, setSearch] = useState('');
   const [sortKey, setSortKey] = useState(null);
   const [sortDir, setSortDir] = useState('asc');
@@ -78,6 +85,9 @@ export default function FinanceTable({
       rows: filtered,
       columns: columns.filter(c => c.label).map(c => ({ label: c.label, accessor: c.csv || ((r) => r[c.key]) })),
     });
+    const warn = csvCapWarning(listCap?.loaded, listCap?.total);
+    setCapWarn(warn);
+    if (warn) app?.addToast?.(warn, 'warning');
   }
 
   const SortIcon = ({ col }) => {
@@ -127,6 +137,7 @@ export default function FinanceTable({
               </button>
             )}
           </div>
+          {capWarn && <p role="status" className="w-full text-[11px] text-amber-700" data-testid="csv-cap-warning">{capWarn}</p>}
         </div>
       )}
 

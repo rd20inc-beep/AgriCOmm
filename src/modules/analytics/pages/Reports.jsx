@@ -466,7 +466,13 @@ const REPORT_DATASETS = {
   },
   inventory_movements: {
     label: 'Inventory movements',
-    load: async () => { const r = await reportingApi.inventoryLedger({ limit: 500 }); return (r?.rows || r?.data?.rows || []); },
+    // W19: the builder exports what it loads, so it asks for the FULL list
+    // (export=1) and keeps the server's truncated flag to warn if capped.
+    load: async () => {
+      const r = await reportingApi.inventoryLedger({ export: '1' });
+      const d = r?.rows ? r : (r?.data || r || {});
+      return { rows: d.rows || [], truncated: !!d.totals?.truncated, total: d.totals?.count };
+    },
     columns: [
       { key: 'date', label: 'Date', accessor: r => RB_DATE(r.date) },
       { key: 'label', label: 'Movement', accessor: r => r.label },
@@ -484,6 +490,8 @@ const RB_LAYOUTS_KEY = 'rf_report_builder_layouts';
 function ReportBuilderDrawer() {
   const [datasetKey, setDatasetKey] = useState('lots');
   const [rows, setRows] = useState([]);
+  // { total } when the server capped the dataset (W19) — shown, never hidden.
+  const [capped, setCapped] = useState(null);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState(REPORT_DATASETS.lots.columns.map(c => c.key));
   const [filterText, setFilterText] = useState('');
@@ -494,7 +502,12 @@ function ReportBuilderDrawer() {
   const ds = REPORT_DATASETS[datasetKey];
   useEffect(() => {
     setLoading(true);
-    ds.load().then(r => setRows(Array.isArray(r) ? r : [])).catch(() => setRows([])).finally(() => setLoading(false));
+    ds.load().then(r => {
+      // A dataset loads either a plain row array or { rows, truncated, total }.
+      const list = Array.isArray(r) ? r : (Array.isArray(r?.rows) ? r.rows : []);
+      setRows(list);
+      setCapped(!Array.isArray(r) && r?.truncated ? { total: r.total, listed: list.length } : null);
+    }).catch(() => { setRows([]); setCapped(null); }).finally(() => setLoading(false));
   }, [datasetKey]); // eslint-disable-line
 
   const cols = ds.columns.filter(c => selected.includes(c.key));
@@ -605,6 +618,11 @@ function ReportBuilderDrawer() {
         </div>
       )}
       {view.length > 300 && <p className="text-[11px] text-gray-400">Showing first 300 of {view.length} rows — export for the full set.</p>}
+      {capped && (
+        <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1" role="alert">
+          Export limit reached: loaded {capped.listed.toLocaleString()}{capped.total ? ` of ${Number(capped.total).toLocaleString()}` : ''} rows, so the CSV is incomplete. Narrow the data on the Inventory Movement Ledger to export the rest.
+        </p>
+      )}
     </div>
   );
 }

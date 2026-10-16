@@ -139,4 +139,14 @@ d('stock + movement ledgers (DB-gated)', () => {
     expect(r.lot.source.batchHref).toBe(`/milling/${ids.batch}`);
     expect(r.lot.sourceBatchNo).toBe(`ZZSL-${run}`);
   });
+
+  // W19: the movement ledger screen is capped; its CSV asks with export=1.
+  test('inventory movement ledger: capped page is flagged, export=1 returns every movement', async () => {
+    const capped = await svc.getInventoryLedger({ lotId: ids.lotA, limit: 2 });
+    expect(capped.rows).toHaveLength(2);
+    expect(capped.totals.truncated).toBe(true);
+    const all = await svc.getInventoryLedger({ lotId: ids.lotA, limit: 2, export: '1' });
+    expect(all.rows).toHaveLength(capped.totals.count);
+    expect(all.totals).toMatchObject({ listed: capped.totals.count, truncated: false });
+  });
 });

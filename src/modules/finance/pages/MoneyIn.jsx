@@ -156,6 +156,7 @@ export default function MoneyIn() {
           searchKeys={['customerName', 'recvNo', 'orderId']}
           onRowClick={(row) => drawers?.openDocument(docOf(row))}
           exportFilename="receivables"
+          listCap={{ loaded: receivables.length, total: receivables.listTotal }}
           emptyText="No receivables in this period."
           loading={isLoading}
           error={error}

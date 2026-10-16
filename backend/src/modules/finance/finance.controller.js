@@ -2202,6 +2202,10 @@ financeController.listPurchases = async (req, res) => {
       acc.by_status[k] = (acc.by_status[k] || 0) + pkr;
       return acc;
     }, { total_pkr: 0, count: sliced.length, by_source: {}, by_status: {}, unconverted_count: 0 });
+    // How many rows matched vs were returned, so a screen or a CSV export can
+    // say when the list was cut at `limit` (W19).
+    totals.matched_count = all.length;
+    totals.truncated = all.length > sliced.length;
 
     return res.json({ success: true, data: { purchases: sliced, totals } });
   } catch (err) {

@@ -11,6 +11,30 @@ export function exportLedgerCSV({ filename = 'ledger.csv', columns, rows }) {
   downloadCsv({ rows: rows || [], columns: columns || [], filename });
 }
 
+/**
+ * W19 — export the FULL filtered result, not the capped page on screen.
+ * `fetchAll(extraParams)` re-asks the report endpoint with `{ export: '1' }`
+ * (the server lifts its screen cap up to its export cap) and resolves to the
+ * report payload `{ rows, totals: { count, listed, truncated } }` (or
+ * `{ rows, truncated, rowCount }`). If even the export was cut short, `onWarn`
+ * is told how many rows were written out of how many matched — the CSV is
+ * never presented as complete when it is not.
+ * Returns { written, total, truncated }.
+ */
+export async function exportFullLedgerCSV({ fetchAll, filename = 'ledger.csv', columns, onWarn }) {
+  const raw = await fetchAll({ export: '1' });
+  const data = raw && (raw.rows ? raw : (raw.data || raw));
+  const rows = Array.isArray(data?.rows) ? data.rows : [];
+  const t = data?.totals || {};
+  const truncated = !!(t.truncated ?? data?.truncated ?? data?.pagination?.truncated);
+  const total = Number(t.count ?? data?.rowCount ?? data?.pagination?.total ?? rows.length) || rows.length;
+  downloadCsv({ rows, columns: columns || [], filename });
+  if (truncated && typeof onWarn === 'function') {
+    onWarn(`CSV holds ${rows.length.toLocaleString()} of ${total.toLocaleString()} matching rows (export limit reached). Narrow the filters (e.g. a shorter date range) to export the rest.`);
+  }
+  return { written: rows.length, total, truncated };
+}
+
 function esc(s) {
   return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }

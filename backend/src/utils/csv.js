@@ -57,14 +57,18 @@ function safeFilename(name) {
 
 /**
  * Send a CSV download. Header X-Row-Count carries the number of data rows so a
- * caller (or a test) can check the export is the whole filtered result.
+ * caller (or a test) can check the export is the whole filtered result. When
+ * the export itself hit a cap, pass `truncated` (and the matching `total`):
+ * X-Truncated: 1 + X-Total-Count let the browser warn the user (W19).
  */
-function sendCsv(res, { filename, columns, rows }) {
+function sendCsv(res, { filename, columns, rows, truncated = false, total = null }) {
   const body = toCsv(rows || [], columns);
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="${safeFilename(filename)}"`);
   res.setHeader('X-Row-Count', String((rows || []).length));
-  res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, X-Row-Count');
+  if (truncated) res.setHeader('X-Truncated', '1');
+  if (total != null && Number.isFinite(Number(total))) res.setHeader('X-Total-Count', String(Number(total)));
+  res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, X-Row-Count, X-Truncated, X-Total-Count');
   return res.status(200).send(body);
 }
 

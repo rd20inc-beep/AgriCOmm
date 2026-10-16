@@ -5,25 +5,9 @@ import { useAuditLogs } from '../../../api/queries';
 import { LoadingSpinner, ErrorState } from '../../../components/LoadingState';
 import Modal from '../components/AdminDrawer';
 import { todayLocalISO, fmtDateTime } from '../../../shared/utils/format';
-import { downloadCsv } from '../../../shared/utils/csv';
-
-// Download a CSV of the currently-filtered audit rows (the one exporter).
-function exportAuditCsv(rows) {
-  downloadCsv({
-    filename: `audit-trail-${todayLocalISO()}.csv`,
-    rows,
-    columns: [
-      { label: 'Timestamp', accessor: (l) => (l.createdAt ? new Date(l.createdAt).toISOString() : null) },
-      { label: 'User', accessor: (l) => l.userName || l.userEmail || 'System' },
-      { label: 'Email', key: 'userEmail' },
-      { label: 'Action', key: 'action' },
-      { label: 'Entity Type', key: 'entityType' },
-      { label: 'Entity ID', key: 'entityId' },
-      { label: 'IP Address', key: 'ipAddress' },
-      { label: 'Details', accessor: (l) => (l.details ? JSON.stringify(l.details) : null) },
-    ],
-  });
-}
+import ListCapHint from '../../../shared/components/ListCapHint';
+import { useApp } from '../../../context/AppContext';
+import { exportAuditCsvAll, auditMatches, AUDIT_EXPORT_MAX } from '../utils/auditCsv';
 
 const ACTION_COLORS = {
   create: 'bg-emerald-100 text-emerald-700',
@@ -84,28 +68,33 @@ export default function AuditLog() {
   const [dateTo, setDateTo] = useState('');
   const [selectedLog, setSelectedLog] = useState(null);
 
-  const { data: logs = [], isLoading, error, refetch } = useAuditLogs({
+  // The server reads from_date / to_date (date_from / date_to were ignored, so
+  // the date filter silently showed everything); to_date covers the whole day.
+  const serverParams = {
     ...(actionFilter !== 'All' && { action: actionFilter }),
     ...(entityFilter !== 'All' && { entity_type: entityFilter }),
-    ...(dateFrom && { date_from: dateFrom }),
-    ...(dateTo && { date_to: dateTo }),
-  });
+    ...(dateFrom && { from_date: dateFrom }),
+    ...(dateTo && { to_date: `${dateTo}T23:59:59.999` }),
+  };
+  const { data: logs = [], isLoading, error, refetch } = useAuditLogs(serverParams);
+  const app = useApp();
+  const [exporting, setExporting] = useState(false);
+  const onExportCsv = async () => {
+    setExporting(true);
+    try {
+      await exportAuditCsvAll({ params: serverParams, searchTerm, onWarn: (m) => app?.addToast?.(m, 'warning') });
+    } catch (e) {
+      app?.addToast?.(e?.message || 'CSV export failed', 'error');
+    } finally {
+      setExporting(false);
+    }
+  };
 
   // Derive filter options from data
   const actions = useMemo(() => ['All', ...new Set(logs.map(l => l.action).filter(Boolean))], [logs]);
   const entityTypes = useMemo(() => ['All', ...new Set(logs.map(l => l.entityType).filter(Boolean))], [logs]);
 
-  const filtered = useMemo(() => {
-    if (!searchTerm) return logs;
-    const term = searchTerm.toLowerCase();
-    return logs.filter(l =>
-      (l.action || '').toLowerCase().includes(term) ||
-      (l.entityType || '').toLowerCase().includes(term) ||
-      (l.entityId || '').toString().includes(term) ||
-      (l.userName || l.userEmail || '').toLowerCase().includes(term) ||
-      JSON.stringify(l.details || {}).toLowerCase().includes(term)
-    );
-  }, [logs, searchTerm]);
+  const filtered = useMemo(() => logs.filter((l) => auditMatches(l, searchTerm)), [logs, searchTerm]);
 
   if (isLoading) return <LoadingSpinner message="Loading audit trail..." />;
   if (error) return <ErrorState message={error.message} onRetry={refetch} />;
@@ -123,12 +112,12 @@ export default function AuditLog() {
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={() => exportAuditCsv(filtered)}
-            disabled={filtered.length === 0}
+            onClick={onExportCsv}
+            disabled={filtered.length === 0 || exporting}
             className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
           >
             <Download className="w-4 h-4" />
-            Export CSV
+            {exporting ? 'Exporting…' : 'Export CSV'}
           </button>
           <Link
             to="/reports/print?type=audit_trail"
@@ -146,6 +135,8 @@ export default function AuditLog() {
           </button>
         </div>
       </div>
+
+      <ListCapHint rows={logs} />
 
       {/* Summary Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">

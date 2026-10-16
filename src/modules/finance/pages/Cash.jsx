@@ -326,7 +326,7 @@ export default function Cash() {
               if (row.fundTransferId) setDetailId(row.fundTransferId);
               else drawers?.openTransaction?.('bank', row.id);
             }}
-            searchKeys={['reference', 'counterparty', 'accountName', 'category', 'ftFromAccountName', 'ftToAccountName']} exportFilename="bank-transactions" loading={loadingTx}
+            searchKeys={['reference', 'counterparty', 'accountName', 'category', 'ftFromAccountName', 'ftToAccountName']} exportFilename="bank-transactions" listCap={{ loaded: allTransactions.length, total: txData?.listTotal }} loading={loadingTx}
             error={txError} onRetry={refetchTx} emptyText="No transactions in this period." />
         </div>
       )}

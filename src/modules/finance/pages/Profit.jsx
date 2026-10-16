@@ -5,7 +5,7 @@ import { FinanceKPI, FinanceTable, FinanceChart } from '../../../components/fina
 import { useProfitabilitySummary, useLocalSalesReport } from '../../../api/queries';
 import { usePageFor } from '../../analytics/api/reportHooks';
 import { ReportPager } from '../../analytics/components/ReportChrome';
-import { downloadServerCsv } from '../../../shared/utils/csv';
+import { downloadServerCsv, serverCsvWarning } from '../../../shared/utils/csv';
 import { useFinanceDateRange, overviewSummaryParams } from '../hooks/useFinanceDateRange';
 import { rangeLabel } from '../financeNav';
 import { fxRateLabel } from '../utils/fx';
@@ -44,7 +44,7 @@ function AccuracyBadge({ status }) {
 }
 
 export default function Profit() {
-  const { companyProfileData } = useApp();
+  const { companyProfileData, addToast } = useApp();
   const [tab, setTab] = useState('Export');
   // Every figure here is the server's one profit definition
   // (backend finance/profitDefinitions.js), for the period in the URL.
@@ -296,7 +296,9 @@ export default function Profit() {
           <ReportPager pagination={localPaging} onPage={setLocalPage} />
           <FinanceTable title="Local Sales — confirmed, PKR (sales of mill output count in Mill profit)" columns={localColumns} data={localSales}
             searchKeys={['saleNo', 'buyerName', 'itemName']} loading={localLoading}
-            onExport={() => downloadServerCsv('/api/reporting/local-sales', rangeParams, 'local-sales-profitability-pkr')} />
+            onExport={() => downloadServerCsv('/api/reporting/local-sales', rangeParams, 'local-sales-profitability-pkr')
+              .then((info) => { const w = serverCsvWarning(info); if (w) addToast?.(w, 'warning'); })
+              .catch((e) => addToast?.(e?.message || 'CSV export failed', 'error'))} />
         </>
       )}
       </div>{/* /.print-report */}
