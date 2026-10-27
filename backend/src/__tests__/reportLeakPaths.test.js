@@ -16,10 +16,12 @@ const rdb = require('./helpers/rbacMemoryDb');
 const automation = require('../modules/admin/automation.service');
 const reportingService = require('../modules/analytics/reporting.service');
 
+// reports.view_finance: what mig 470 grants every reports.view holder but the
+// Mill Operator / Mill Manager.
 const ROLES = {
-  'Finance Manager': ['reports.view', 'finance.view'],
-  'Export Manager': ['reports.view', 'finance.view'],
-  'QC Analyst': ['reports.view'],
+  'Finance Manager': ['reports.view', 'reports.view_finance', 'finance.view'],
+  'Export Manager': ['reports.view', 'reports.view_finance', 'finance.view'],
+  'QC Analyst': ['reports.view', 'reports.view_finance'],
   'Mill Operator': ['reports.view', 'reports.view_cost'],
   Owner: [],
 };

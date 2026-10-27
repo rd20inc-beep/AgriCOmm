@@ -57,7 +57,7 @@ import { resolveLocation, LEGACY_TABS, mfHref } from '../urlState';
 import { historyRows, filterHistory } from '../transactions/history';
 import { groupBalances } from '../balances';
 
-const ALL_MONEY = ['finance.view', 'finance.confirm_payment', 'milling.view', 'milling.edit', 'milling.create',
+const ALL_MONEY = ['mill_finance.view', 'finance.view', 'finance.confirm_payment', 'milling.view', 'milling.edit', 'milling.create',
   'mill_store.create_purchase', 'reports.view', 'payroll.view', 'payroll.create'];
 
 function render(url) {
@@ -200,7 +200,7 @@ describe('Mill Finance — Overview', () => {
   });
 
   it('hides Head Office balances and the accept button from roles without the permission', () => {
-    auth.granted = new Set(['milling.view']);
+    auth.granted = new Set(['mill_finance.view', 'milling.view']);
     FIXTURES.useMillCashFlow = { pendingTransfers: [{ id: 4, transferNo: 'FT-4', amount: 10 }], pendingTransfersTotal: 10 };
     const html = render('/milling/finance');
     expect(html).toContain('visible to Finance only');
@@ -213,25 +213,25 @@ describe('Mill Finance — primary actions are permission-gated', () => {
   const actions = (html) => ['record-expense', 'pay-supplier', 'receive-money', 'transfer-funds'].filter((a) => html.includes(`data-testid="action-${a}"`));
 
   it('a view-only role sees none of them', () => {
-    auth.granted = new Set(['milling.view', 'reports.view_cost']);
+    auth.granted = new Set(['mill_finance.view', 'milling.view', 'reports.view_cost']);
     expect(actions(render('/milling/finance'))).toEqual([]);
   });
   it('milling.create alone → Record Expense only', () => {
-    auth.granted = new Set(['milling.view', 'milling.create']);
+    auth.granted = new Set(['mill_finance.view', 'milling.view', 'milling.create']);
     expect(actions(render('/milling/finance'))).toEqual(['record-expense']);
   });
   it('finance.confirm_payment → Pay / Receive / Transfer, not Record Expense', () => {
-    auth.granted = new Set(['finance.view', 'finance.confirm_payment']);
+    auth.granted = new Set(['mill_finance.view', 'finance.view', 'finance.confirm_payment']);
     expect(actions(render('/milling/finance'))).toEqual(['pay-supplier', 'receive-money', 'transfer-funds']);
   });
   it("the mill operator (milling.edit) can pay and transfer the mill's own money", () => {
-    auth.granted = new Set(['milling.view', 'milling.edit', 'milling.create']);
+    auth.granted = new Set(['mill_finance.view', 'milling.view', 'milling.edit', 'milling.create']);
     expect(actions(render('/milling/finance'))).toEqual(['record-expense', 'pay-supplier', 'receive-money', 'transfer-funds']);
   });
   it('the payroll workspace link only for payroll holders', () => {
-    auth.granted = new Set(['milling.view']);
+    auth.granted = new Set(['mill_finance.view', 'milling.view']);
     expect(render('/milling/finance')).not.toContain('data-testid="payroll-workspace-link"');
-    auth.granted = new Set(['milling.view', 'payroll.view']);
+    auth.granted = new Set(['mill_finance.view', 'milling.view', 'payroll.view']);
     expect(render('/milling/finance')).toContain('data-testid="payroll-workspace-link"');
   });
 });
@@ -280,6 +280,16 @@ describe('Mill Finance — sections render and load only their own data', () => 
     auth.granted = new Set(['milling.view']);
     html = render('/milling/finance?workspace=payroll');
     expect(html).toContain('data-testid="payroll-no-access"');
+  });
+  it('without mill_finance.view only the payroll workspace opens (the Mill Manager, mig 470)', () => {
+    auth.granted = new Set(['milling.view', 'reports.view_cost']);
+    let html = render('/milling/finance');
+    expect(html).toContain('data-testid="mill-finance-no-access"');
+    expect(html).not.toContain('data-testid="mill-finance"');
+    auth.granted = new Set(['milling.view', 'reports.view_cost', 'payroll.view']);
+    html = render('/milling/finance?workspace=payroll');
+    expect(html).toContain('data-testid="payroll-workspace"');
+    expect(html).not.toContain('Mill Finance</a>');
   });
   it('Head Office Finance ▸ Payroll still renders the same workspace', () => {
     auth.granted = new Set(['payroll.view']);

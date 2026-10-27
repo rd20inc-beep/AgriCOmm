@@ -9,8 +9,9 @@ const reportingService = require('../../services/reportingService');
 // aging, invoice + payroll ledgers): those are company-level and consolidate
 // sales, expenses and payroll that carry no warehouse at all — filtering only
 // their inventory legs would produce numbers that don't foot. They stay closed
-// to the Mill Operator by role (noFinanceForOperator) instead.
+// to roles without reports.view_finance (financeReports, reporting.routes.js) instead.
 const whScope = require('../../utils/warehouseScope');
+const { userHasPermission } = require('../../middleware/rbac');
 const stockSql = require('../inventory/stockSql');
 // D-14 stock value (landed cost/kg × on hand, no fallback price) — stockValue.js.
 const { lotValueSql, landedPerKgSql } = require('../inventory/stockValue');
@@ -56,7 +57,6 @@ async function mayManageScheduledReport(req, id) {
   const taskId = parseInt(id, 10);
   if (!Number.isFinite(taskId)) return null;
   const db = require('../../config/database');
-  const { userHasPermission } = require('../../middleware/rbac');
   const task = await db('scheduled_tasks').where({ id: taskId, task_type: 'report_email' }).first();
   if (!task) return null;
   let cfg = {};
@@ -468,7 +468,6 @@ const reportingController = {
     try {
       const all = await reportingService.listScheduledReportEmails();
       // An admin sees every schedule; anyone else only the ones they created.
-      const { userHasPermission } = require('../../middleware/rbac');
       const isAdmin = await userHasPermission(req, 'admin', 'manage_settings');
       const data = isAdmin ? all : all.filter((r) => r.createdBy != null && Number(r.createdBy) === Number(req.user.id));
       return res.json({ success: true, rows: data, types: reportingService.SCHEDULED_REPORT_TYPES });
@@ -2080,7 +2079,8 @@ const reportingController = {
       ls = ls.whereNotIn('ls.status', ['Pending', 'Cancelled']); // realized sales only
       if (from) ls = ls.where('ls.sale_date', '>=', from);
       if (to) ls = ls.where('ls.sale_date', '<=', to);
-      const localRows = await ls.orderBy('ls.sale_date', 'desc');
+      // Local rows only for a role that may see Local Sales (local_sales.view).
+      const localRows = await userHasPermission(req, 'local_sales', 'view') ? await ls.orderBy('ls.sale_date', 'desc') : [];
       // Resolve batch numbers for milled output (lot.batch_ref = 'batch-<id>').
       const lsRefIds = [...new Set(localRows.map((r) => r.batch_ref).filter(Boolean).map((r) => parseInt(String(r).replace(/^batch-/, ''), 10)).filter(Boolean))];
       const lsBatchByRef = {}; const lsBatchNameByRef = {};

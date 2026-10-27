@@ -32,7 +32,11 @@ export const PRIMARY_NAV = [
     key: 'milling', label: 'Milling', icon: Factory,
     children: [
       { label: 'Operations', to: '/milling', icon: Factory },
-      { label: 'Mill Finance', to: '/milling/finance', icon: DollarSign },
+      // The money sections need mill_finance.view; its payroll workspace has
+      // its own entry (payroll.view) so a role without Mill Finance — the
+      // Mill Manager — still reaches payroll.
+      { label: 'Mill Finance', to: '/milling/finance', icon: DollarSign, requires: p('mill_finance', 'view') },
+      { label: 'Payroll', to: '/milling/finance?workspace=payroll', icon: Users, requires: p('payroll', 'view') },
       { label: 'Local Sales', to: '/local-sales', icon: ShoppingCart },
       { label: 'Mill Customers', to: '/milling/customers', icon: Users },
     ],

@@ -3,6 +3,8 @@ import { useAuth } from '../../../../../context/AuthContext';
 /**
  * Every gate on the Mill Finance screens, in one place, mirroring the server:
  *
+ *  - canMillFinance  mill_finance.view — the money sections (mig 470). Without
+ *                 it only the payroll workspace opens.
  *  - canFinance   finance.view — Head Office balances (read).
  *  - canFinanceDashboard  finance.view_dashboard — links into the Finance module.
  *  - canPay       finance.confirm_payment, or milling.edit for the mill's own
@@ -18,6 +20,7 @@ export default function useMillFinancePerms() {
   const canFinance = hasPermission('finance', 'view');
   const canPay = hasPermission('finance', 'confirm_payment') || hasPermission('milling', 'edit');
   return {
+    canMillFinance: hasPermission('mill_finance', 'view'),
     canFinance,
     canFinanceDashboard: hasPermission('finance', 'view_dashboard'),
     canPay,

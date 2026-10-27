@@ -150,7 +150,8 @@ describe('sidebar entries', () => {
     expect(labels('Export Manager')).not.toContain('Mill Customers');
     expect(labels('Export Manager')).toContain('Finance');
     expect(labels('Mill Manager')).not.toContain('Finance');
-    expect(labels('Mill Manager')).toContain('Mill Finance');
+    expect(labels('Mill Manager')).not.toContain('Mill Finance');
+    expect(labels('Mill Manager')).toContain('Payroll');
     expect(labels('Mill Manager')).toContain('Local Sales');
     expect(labels('Mill Manager')).toContain('Mill Customers');
   });

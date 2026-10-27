@@ -20,6 +20,8 @@ export default function MillSuppliers() {
   // Finance, or the Mill Operator (milling.edit) for the mill's own rows — the
   // server keeps it to mill payables / sales and mill accounts.
   const canPay = hasPermission('finance', 'confirm_payment') || hasPermission('milling', 'edit');
+  // Statements live in Mill Finance (mill_finance.view).
+  const canStatement = hasPermission('mill_finance', 'view');
   const qc = useQueryClient();
   const [search, setSearch] = useState('');
   const [paySupplier, setPaySupplier] = useState(null);
@@ -104,10 +106,12 @@ export default function MillSuppliers() {
                           <Banknote className="w-3.5 h-3.5" /> Record Payment
                         </button>
                       )}
-                      <Link to={`/milling/finance?tab=suppliers&supplier=${s.id}`}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-amber-700 bg-amber-50 rounded-lg hover:bg-amber-100">
-                        <FileText className="w-3.5 h-3.5" /> View Statement
-                      </Link>
+                      {canStatement && (
+                        <Link to={`/milling/finance?tab=suppliers&supplier=${s.id}`}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-amber-700 bg-amber-50 rounded-lg hover:bg-amber-100">
+                          <FileText className="w-3.5 h-3.5" /> View Statement
+                        </Link>
+                      )}
                     </div>
                   </td>
                 </tr>

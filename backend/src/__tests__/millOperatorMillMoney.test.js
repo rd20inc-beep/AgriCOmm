@@ -117,17 +117,31 @@ describe('reporting routes — mill reports opened, company finance still closed
     expect(stack.map((h) => h.permission)).toContain('reports.view');
   });
 
+  // Company finance is reports.view_finance (mig 470), which the Mill Operator
+  // (and Mill Manager) are not granted — no longer a role-name deny.
   test.each([
     ['get', '/scheduled-reports'], ['post', '/scheduled-reports'], ['delete', '/scheduled-reports/:id'], ['post', '/scheduled-reports/:id/run'],
-    ['get', '/invoice-ledger'], ['get', '/payroll-ledger'], ['get', '/payroll-overview'], ['get', '/payroll-pending'], ['get', '/payroll-analytics'],
+    ['get', '/invoice-ledger'],
     ['get', '/executive/summary'], ['get', '/executive/pipeline'], ['get', '/executive/advance-funnel'],
     ['get', '/profitability/orders'], ['get', '/profitability/customers'], ['get', '/profitability/countries'],
     ['get', '/profitability/products'], ['get', '/profitability/monthly-trend'],
     ['get', '/financial/receivable-recovery'], ['get', '/financial/payable-analysis'], ['get', '/financial/cash-forecast'], ['get', '/financial/fx-exposure'],
     ['get', '/printable/pnl'], ['get', '/printable/pnl-accrual'], ['get', '/printable/cashflow'],
     ['get', '/printable/ar-aging'], ['get', '/printable/ap-aging'], ['get', '/printable/sales-ledger'],
-  ])('%s %s: still closed to the Mill Operator', (method, path) => {
-    expect(deniesOperator(stackOf(reporting, method, path))).toBe(true);
+  ])('%s %s: still closed to the Mill Operator (reports.view_finance)', (method, path) => {
+    expect(stackOf(reporting, method, path).map((h) => h.permission)).toContain('reports.view_finance');
+  });
+
+  // Payroll reports are payroll.view on top of reports.view — whoever runs
+  // payroll (the Mill Manager) reads them; the Mill Operator holds no payroll.view.
+  test.each(['/payroll-ledger', '/payroll-overview', '/payroll-pending', '/payroll-analytics'])('GET %s: payroll.view, not a finance report', (path) => {
+    const perms = stackOf(reporting, 'get', path).map((h) => h.permission);
+    expect(perms).toEqual(expect.arrayContaining(['reports.view', 'payroll.view']));
+    expect(perms).not.toContain('reports.view_finance');
+  });
+
+  test.each(['/sales-tracker', '/sale-detail/:id', '/local-sales'])('GET %s: local-sale reports also need local_sales.view', (path) => {
+    expect(stackOf(reporting, 'get', path).map((h) => h.permission)).toContain('local_sales.view');
   });
 });
 

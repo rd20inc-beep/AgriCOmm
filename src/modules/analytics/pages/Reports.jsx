@@ -629,20 +629,19 @@ function ReportBuilderDrawer() {
 }
 
 export default function Reports() {
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
   const companyProfileData = useCompanyProfile();
   // A Mill role's reports must stay mill-only — no export-order profitability,
   // customers, countries or export A/R / booked profit.
   const millScoped = user?.role === 'Mill Manager';
-  // Mill Operator — owner decision 2026-10-05: "see everything regarding the
-  // mill". The mill's money follows the cost / profit permissions (granted to
-  // the operator by mig 314): lot + local-sale trackers and stock value need
-  // reports.view_cost, batch / sale margin needs reports.view_profit. Company
-  // finance stays closed BY ROLE, mirroring the API's denyRoles('Mill Operator'):
-  // the Money In/Out + Purchases feeds (finance.view), cash forecast, export
-  // orders / customers / countries, the KPI benchmarks, the headline A/R +
-  // booked-profit strip, the invoice ledger and the AI / scheduled-email tools.
-  const operatorScoped = user?.role === 'Mill Operator';
+  // Company finance follows reports.view_finance (mig 470; the API's
+  // financeReports guard): without it — the Mill Operator, the Mill Manager —
+  // the reports are the mill's: lot + local-sale trackers and stock value need
+  // reports.view_cost, batch / sale margin needs reports.view_profit, and the
+  // Money In/Out + Purchases feeds, cash forecast, export orders / customers /
+  // countries, the KPI benchmarks, the headline money strip, the invoice
+  // ledger and the AI / scheduled-email tools are not shown.
+  const operatorScoped = !hasPermission('reports', 'view_finance');
   const canCost = useCanSeeCost();
   const canProfit = useCanSeeProfit();
   // The operator's view is the mill's, so its feeds are scoped to entity=mill.
@@ -652,11 +651,14 @@ export default function Reports() {
     ...(canProfit ? ['margin'] : []),
     'production', 'inventory', 'quality',
   ];
-  const visibleTabs = operatorScoped
+  // The local-sale tracker also needs local_sales.view (the Export Manager has
+  // reports.view but is kept out of Local Sales).
+  const canLocalSales = hasPermission('local_sales', 'view');
+  const visibleTabs = (operatorScoped
     ? TABS.filter(t => operatorTabs.includes(t.key))
     : millScoped
       ? TABS.filter(t => ['moneyIn', 'moneyOut', 'sales', 'purchases', 'lots', 'margin', 'production', 'inventory', 'kpis', 'quality'].includes(t.key))
-      : TABS;
+      : TABS).filter(t => t.key !== 'sales' || canLocalSales);
 
   // Party statements live under /milling for the Mill role, /finance otherwise.
   // The Mill Operator reaches neither (finance), so its rows link to nothing.
@@ -889,7 +891,7 @@ export default function Reports() {
       </div>
       )}
 
-      {/* Scope banner for the Mill Operator role. */}
+      {/* Scope banner for a role without the finance reports. */}
       {operatorScoped && (
         <div className="rounded-xl border border-blue-200 bg-blue-50/60 px-4 py-3 text-sm text-blue-800 flex items-center gap-2">
           <Factory size={16} /> Mill view — lots, sales, margins, production, quality and stock for the mill. Company finance (cash, receivables, payables, P&amp;L, payroll, export) is not shown for this role.
