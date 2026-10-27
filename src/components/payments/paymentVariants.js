@@ -9,7 +9,7 @@
  *   receive_receivable   POST /api/finance/payments            type=receipt  any(finance.confirm_payment, milling.edit)
  *   receive_export       POST /api/export-orders/:id/record-receipt          any(export_orders.confirm_advance, finance.confirm_payment)
  *                        → a PENDING receipt Finance confirms (maker ≠ checker)
- *   receive_local_sale   POST /api/local-sales/group/:groupNo/payments       any(inventory.create, finance.confirm_payment, milling.edit)
+ *   receive_local_sale   POST /api/local-sales/group/:groupNo/payments       any(local_sales.create, finance.confirm_payment, milling.edit)
  *   receive_local_sale_line POST /api/local-sales/:id/payments (one line)   (same guard)
  *   receive_service      POST /api/service-milling/invoices/:id/payments     service_milling.record_payment
  *   pay_payable          POST /api/finance/payments            type=payment  any(finance.confirm_payment, milling.edit)
@@ -46,12 +46,12 @@ export const VARIANTS = {
   },
   receive_local_sale: {
     side: 'receipt', title: 'Receive local-sale payment', submit: 'Record receipt',
-    anyOf: [['inventory', 'create'], ['finance', 'confirm_payment'], ['milling', 'edit']],
+    anyOf: [['local_sales', 'create'], ['finance', 'confirm_payment'], ['milling', 'edit']],
     methods: STANDARD, taxes: false, attach: false, cashLocation: true,
   },
   receive_local_sale_line: {
     side: 'receipt', title: 'Receive local-sale payment', submit: 'Record receipt',
-    anyOf: [['inventory', 'create'], ['finance', 'confirm_payment'], ['milling', 'edit']],
+    anyOf: [['local_sales', 'create'], ['finance', 'confirm_payment'], ['milling', 'edit']],
     methods: STANDARD, taxes: false, attach: false, cashLocation: true,
   },
   receive_service: {

@@ -5,8 +5,9 @@
 //              → Mill home (Mill Manager, Mill Operator)
 //   export   — creates export orders but does not run the mill
 //              → Export home (Export Manager)
-//   finance  — money only: finance.view and none of the operational views the
-//              company Dashboard is built from → the Finance home (/finance)
+//   finance  — money only: the Finance module (finance.view_dashboard) and
+//              none of the operational views the company Dashboard is built
+//              from → the Finance home (/finance)
 //   standard — everyone else (Owner, Super Admin, auditors, QC, inventory)
 //              → the company Dashboard
 // Owner and Super Admin pass every check (AuthContext), so they are standard.
@@ -25,7 +26,7 @@ export function resolveWorkspace(hasPermission) {
   if (runsMill && !createsExports) return 'mill';
   if (createsExports && !runsMill) return 'export';
   const seesDashboard = DASHBOARD_VIEWS.some(([m, a]) => hasPermission(m, a));
-  if (!seesDashboard && hasPermission('finance', 'view')) return 'finance';
+  if (!seesDashboard && hasPermission('finance', 'view_dashboard')) return 'finance';
   return 'standard';
 }
 

@@ -18,6 +18,14 @@ const p = (module, action) => ({ module, action });
 export const COST_VIEWERS = [p('reports', 'view_cost'), p('finance', 'view')];
 
 const INV_OR_FIN = { anyOf: [p('inventory', 'view'), p('finance', 'view')] };
+const LOCAL_SALES = p('local_sales', 'view');
+// The Finance module (sidebar entry, dashboard, its pages). finance.view alone
+// reads the money APIs (Mill Finance, party statements); a role can hold it
+// without the module — the Mill Manager (mig 470).
+export const FINANCE_DASHBOARD = p('finance', 'view_dashboard');
+// Finance pages open on finance.view alone: party statements are linked from
+// Mill Finance, reports and ledgers across the app.
+export const FINANCE_VIEW_ONLY_PATHS = ['/finance/accounting/statements'];
 const REPORTS = p('reports', 'view');
 const ADMIN = p('admin', 'view');
 const PAYROLL = p('payroll', 'view');
@@ -51,7 +59,9 @@ export const ROUTE_GATES = [
   { path: '/buyers', gate: p('export_orders', 'view') },
   { path: '/documents', gate: p('documents', 'view') },
 
-  // Finance (its own nested table — see FinanceRoutes)
+  // Finance (its own nested table — see FinanceRoutes). The section is
+  // finance.view; every page in it except FINANCE_VIEW_ONLY_PATHS also needs
+  // FINANCE_DASHBOARD (FinanceRoutes and canOpen apply it).
   { path: '/finance/*', gate: p('finance', 'view') },
 
   // Milling
@@ -63,7 +73,7 @@ export const ROUTE_GATES = [
   // /rice-purchases) is milling.view + requireCostVisibility.
   { path: '/milling/finance', gate: { ...p('milling', 'view'), anyOf: COST_VIEWERS } },
   { path: '/milling/rice-purchases', gate: { ...p('milling', 'view'), anyOf: COST_VIEWERS } },
-  { path: '/milling/customers', gate: p('export_orders', 'view') },
+  { path: '/milling/customers', gate: p('mill_customers', 'view') },
   { path: '/milling/suppliers', gate: p('milling', 'view') },
   // Statements read /api/accounting/statements/* (finance.view).
   { path: '/milling/statements', gate: p('finance', 'view') },
@@ -82,10 +92,10 @@ export const ROUTE_GATES = [
   { path: '/stock-adjustments', gate: p('inventory', 'view') },
   // Stock transfers (Mill ⇄ Export) — one page; was also /finance/accounting/stock-transfers.
   { path: '/transfer', gate: INV_OR_FIN },
-  { path: '/local-sales', gate: INV_OR_FIN },
-  { path: '/local-sales/:id', gate: INV_OR_FIN },
-  { path: '/local-sales/:id/invoice', gate: INV_OR_FIN },
-  { path: '/local-sales/:id/print', gate: INV_OR_FIN },
+  { path: '/local-sales', gate: LOCAL_SALES },
+  { path: '/local-sales/:id', gate: LOCAL_SALES },
+  { path: '/local-sales/:id/invoice', gate: LOCAL_SALES },
+  { path: '/local-sales/:id/print', gate: LOCAL_SALES },
 
   // Mill Store
   { path: '/mill-store', gate: p('mill_store', 'view') },
@@ -147,11 +157,19 @@ export function matchRoutePath(url) {
   return hit ? hit[hit.length - 1].route.path : null;
 }
 
+/** Does a /finance/* pathname need the Finance module permission? */
+export function needsFinanceDashboard(pathname) {
+  const path = String(pathname || '').split(/[?#]/)[0].replace(/\/+$/, '');
+  return !FINANCE_VIEW_ONLY_PATHS.includes(path);
+}
+
 /** Can this user open this URL? Unknown URLs are never openable. */
 export function canOpen(url, hasPermission) {
   const path = matchRoutePath(url);
   if (!path) return false;
-  return passesGate(GATE_BY_PATH.get(path), hasPermission);
+  if (!passesGate(GATE_BY_PATH.get(path), hasPermission)) return false;
+  if (path === '/finance/*' && needsFinanceDashboard(url)) return passesGate(FINANCE_DASHBOARD, hasPermission);
+  return true;
 }
 
 export function gateFor(path) {

@@ -31,7 +31,7 @@ router.post(
 );
 router.post(
   '/customers/quick-add',
-  authorize('inventory', 'create'),
+  authorize('local_sales', 'create'),
   auditAction('quick_add', 'customer', (req, data) => data?.data?.customer?.id),
   approvalsCtrl.quickAddCustomer
 );
@@ -98,13 +98,15 @@ router.get('/document-templates', authorize('admin', 'view'), controller.listDoc
 router.get('/document-templates/:id', authorize('admin', 'view'), controller.getDocumentTemplate);
 router.get('/product-categories', authorize('admin', 'view'), controller.listProductCategories);
 router.get('/product-categories/:id', authorize('admin', 'view'), controller.getProductCategory);
-// Roles & Permissions — read is admin.view (so the page can render),
-// write is Super-Admin-only (changing permissions is irreducible authority).
+// Roles & Permissions — read is admin.view (so the page can render), write is
+// Super Admin or Owner (owner request 2026-10-27). Both bypass every permission
+// check, so neither can lock themselves out; the Super Admin role itself stays
+// immutable (controller).
 router.get('/permissions', authorize('admin', 'view'), controller.listPermissions);
 router.get('/roles-with-permissions', authorize('admin', 'view'), controller.listRolesWithPermissions);
 router.put(
   '/roles/:id/permissions',
-  authorizeRole('Super Admin'),
+  authorizeRole('Super Admin', 'Owner'),
   auditAction('update_role_permissions', 'role', (req) => req.params.id),
   controller.updateRolePermissions
 );

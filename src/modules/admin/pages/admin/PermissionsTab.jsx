@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect } from 'react';
 import {
   Shield, Search, Save, RotateCcw, Lock, Check, AlertCircle, Users,
   Ship, Factory, Package, DollarSign, FileText, Settings, BarChart3, Wrench,
+  ShoppingCart, BookUser,
 } from 'lucide-react';
 import { useApp } from '../../../../context/AppContext';
 import { useAuth } from '../../../../context/AuthContext';
@@ -19,6 +20,8 @@ const MODULE_META = {
   admin:         { label: 'Admin',         icon: Settings,    accent: 'rose' },
   reports:       { label: 'Reports',       icon: BarChart3,   accent: 'indigo' },
   mill_store:    { label: 'Mill Store',    icon: Wrench,      accent: 'orange' },
+  local_sales:   { label: 'Local Sales',   icon: ShoppingCart, accent: 'emerald' },
+  mill_customers: { label: 'Mill Customers', icon: BookUser,  accent: 'amber' },
 };
 
 const ACCENT_TONES = {
@@ -54,7 +57,9 @@ function humaniseAction(action) {
 export default function PermissionsTab() {
   const { addToast } = useApp();
   const { user, isRole } = useAuth();
-  const isSuperAdmin = isRole?.('Super Admin') ?? (user?.role === 'Super Admin');
+  // Super Admin and Owner edit role permissions (PUT /admin/roles/:id/permissions).
+  const hasRole = (name) => isRole?.(name) ?? (user?.role === name);
+  const canEditRoles = hasRole('Super Admin') || hasRole('Owner');
 
   const { data: permissions = [], isLoading: permsLoading } = usePermissions();
   const { data: roles = [], isLoading: rolesLoading } = useRolesWithPermissions();
@@ -107,7 +112,7 @@ export default function PermissionsTab() {
     return false;
   }, [selectedRole, draft]);
 
-  const isReadOnly = !isSuperAdmin || (selectedRole && selectedRole.name === 'Super Admin');
+  const isReadOnly = !canEditRoles || (selectedRole && selectedRole.name === 'Super Admin');
 
   function toggle(permId) {
     if (isReadOnly) return;
@@ -267,7 +272,7 @@ export default function PermissionsTab() {
                 <p className="text-amber-800">
                   {selectedRole.name === 'Super Admin'
                     ? 'Super Admin is the irreducible all-access role and cannot be edited from this UI.'
-                    : 'Only Super Admin users can edit role permissions.'}
+                    : 'Only Super Admin and Owner users can edit role permissions.'}
                 </p>
               </div>
             )}

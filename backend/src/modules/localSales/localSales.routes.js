@@ -16,10 +16,10 @@ const ADMIN_INVOICE_ROLES = ['Super Admin', 'Owner', 'Finance Manager', 'Mill Ma
 // it (Batch 6 · item 9). Same roles may reject a pending sale.
 const CONFIRM_ROLES = ['Super Admin', 'Owner', 'Mill Manager'];
 
-// READ routes accept inventory.view OR finance.view — a payments-only Finance
-// Manager gets read-only Local Sales (to match what they see in Money In) without
-// gaining broad inventory access. Write routes below stay inventory/mill-gated.
-const canReadSales = authorizeAny(['inventory', 'view'], ['finance', 'view']);
+// Local Sales has its own permissions (mig 470) so a role can be kept out of it
+// — the Export Manager holds inventory.view for export stock but must not see
+// local sales. local_sales.view reads, local_sales.create records/edits.
+const canReadSales = authorize('local_sales', 'view');
 router.get('/', canReadSales, controller.list);
 router.get('/summary', canReadSales, controller.summary);
 router.get('/pending', canReadSales, controller.listPending);
@@ -28,7 +28,7 @@ router.get('/rate-suggestion', canReadSales, controller.rateSuggestion);
 router.get('/:id', canReadSales, controller.getById);
 router.post(
   '/',
-  authorize('inventory', 'create'),
+  authorize('local_sales', 'create'),
   requireIdempotencyKey, // money-creating: one record per submit (P2-12)
   validate(schemas.localSaleCreate),
   auditAction('create_local_sale', 'local_sale'),
@@ -36,7 +36,7 @@ router.post(
 );
 // Edit a sale. Presentation fields on any sale; quantity/rate only while Pending
 // (see controller.update). Same permission as recording one.
-router.put('/:id', authorize('inventory', 'create'),
+router.put('/:id', authorize('local_sales', 'create'),
   auditAction('update_local_sale', 'local_sale', (req) => req.params.id),
   controller.update);
 
@@ -46,10 +46,10 @@ router.post(
   '/:id/payments',
   // Recording a receipt against a local-sale receivable is a FINANCE action, so a
   // payments-only Finance Manager (finance.confirm_payment) must be able to do it
-  // from Money In — not only inventory/mill roles (inventory.create). The Mill
+  // from Money In — not only sales/mill roles (local_sales.create). The Mill
   // Operator (milling.edit) takes receipts on MILL sales only, through a mill
   // account — enforced in the handler (shared/millPayer).
-  authorizeAny(['inventory', 'create'], ['finance', 'confirm_payment'], ['milling', 'edit']),
+  authorizeAny(['local_sales', 'create'], ['finance', 'confirm_payment'], ['milling', 'edit']),
   requireIdempotencyKey,
   validate(schemas.localSaleReceipt),
   auditAction('accept_local_sale_payment', 'local_sale'),
@@ -59,7 +59,7 @@ router.post(
 // Same permission as the per-line receipt above.
 router.post(
   '/group/:groupNo/payments',
-  authorizeAny(['inventory', 'create'], ['finance', 'confirm_payment'], ['milling', 'edit']),
+  authorizeAny(['local_sales', 'create'], ['finance', 'confirm_payment'], ['milling', 'edit']),
   requireIdempotencyKey,
   validate(schemas.localSaleReceipt),
   auditAction('accept_local_sale_group_payment', 'local_sale', (req) => req.params.groupNo),
@@ -72,7 +72,7 @@ router.post(
 router.get('/:id/returns', canReadSales, saleReturns.list);
 router.post(
   '/:id/returns',
-  authorize('inventory', 'create'),
+  authorize('local_sales', 'create'),
   ownerApproval('local_sale_return'),
   requireIdempotencyKey,
   validate(schemas.localSaleReturn),
@@ -84,6 +84,6 @@ router.get('/:id/invoice', canReadSales, controller.getInvoice);
 // Gate pass — refused (409) while the sale awaits a manager's confirmation.
 router.get('/:id/gate-pass', canReadSales, controller.getGatePass);
 router.get('/:id/invoice-admin', authorizeRole(...ADMIN_INVOICE_ROLES), controller.getInvoiceAdmin);
-router.post('/:id/email-invoice', authorize('inventory', 'create'), auditAction('email_invoice', 'local_sale'), controller.emailInvoice);
+router.post('/:id/email-invoice', authorize('local_sales', 'create'), auditAction('email_invoice', 'local_sale'), controller.emailInvoice);
 
 module.exports = router;

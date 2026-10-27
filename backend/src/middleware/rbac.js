@@ -1,4 +1,5 @@
 const db = require('../config/database');
+const { scopeAreaOf } = require('../shared/scopeArea');
 
 // Every guard carries a description of what it checks (`guard.authz`), so the
 // route-permission inventory test can prove each mutating route is guarded and
@@ -63,7 +64,7 @@ function authorize(module, action) {
 
       // #9-scoping: if the user has a module allow-list, the requested module
       // must be in it (on top of the permission check below).
-      if (req.user.moduleScopes && req.user.moduleScopes.size > 0 && !req.user.moduleScopes.has(module)) {
+      if (req.user.moduleScopes && req.user.moduleScopes.size > 0 && !req.user.moduleScopes.has(scopeAreaOf(module))) {
         return res.status(403).json({
           success: false,
           message: `Access restricted — your account is not scoped to the ${module} area.`,
@@ -127,7 +128,7 @@ function authorizeAny(...pairs) {
       // #9-scoping: allow if any pair's permission is held AND (no module scope,
       // or that pair's module is in the user's allow-list).
       const scoped = req.user.moduleScopes && req.user.moduleScopes.size > 0;
-      const ok = pairs.some(([m, a]) => req.user.permissions.has(`${m}.${a}`) && (!scoped || req.user.moduleScopes.has(m)));
+      const ok = pairs.some(([m, a]) => req.user.permissions.has(`${m}.${a}`) && (!scoped || req.user.moduleScopes.has(scopeAreaOf(m))));
       if (!ok) {
         return res.status(403).json({ success: false, message: 'Forbidden. You do not have permission to perform this action.' });
       }

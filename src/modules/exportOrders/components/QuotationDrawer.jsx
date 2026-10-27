@@ -10,6 +10,7 @@ import RiceTypePicker from '../../../components/RiceTypePicker';
 import ItemPicker from '../../../components/ItemPicker';
 import { millStoreApi } from '../../millStore/api/services';
 import { quotationsApi } from '../api/services';
+import { customersApi } from '../../admin/api/services';
 import { fmtNum, LOCALE } from '../../../shared/utils/format';
 import FieldError from '../../../shared/components/FieldError';
 import { requiresMasterBag, masterOptionsFor } from '../utils/createOrderForm';
@@ -304,6 +305,10 @@ export default function QuotationDrawer({ open, onClose, quotation, onSaved }) {
               onCreated={(c) => { if (c?.id) { set('customerId', c.id); if (c.country) set('country', c.country); } }}
               addToast={addToast}
               clearable
+              // Export buyers only: the default quick-add registers a LOCAL
+              // (mill) customer, which export roles cannot see.
+              listFn={(p) => customersApi.list({ ...p, type: 'export' })}
+              createFn={(data) => customersApi.create(data)}
             />
             <FieldError error={customerError} />
           </div>

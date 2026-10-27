@@ -114,15 +114,13 @@ const STOCK_GROUP_OPTIONS = [
 export default function PrintableReports() {
   const { addToast } = useApp();
   const companyProfileData = useCompanyProfile();
-  const { user, hasPermission } = useAuth();
+  const { hasPermission } = useAuth();
   const [searchParams] = useSearchParams();
-  // A Mill role only gets the mill/inventory reports — the company-wide
-  // financials (P&L, Cashflow, AR/AP aging, the export sales ledger) mix export
-  // data, which the mill must not see. Their mill financials live on the Mill
-  // Finance dashboard. The Mill Operator sees the mill's money (owner decision
-  // 2026-10-05, mig 314) but company finance stays closed to it at the API, so
-  // it gets the same mill set as the Mill Manager.
-  const millScoped = ['Mill Manager', 'Mill Operator'].includes(user?.role);
+  // Without reports.view_finance (mig 470 — the Mill Manager and Mill
+  // Operator) only the mill/inventory reports: the company-wide financials
+  // (P&L, Cashflow, AR/AP aging, the sales ledger) mix export data and are
+  // closed at the API (financeReports).
+  const millScoped = !hasPermission?.('reports', 'view_finance');
   // The audit trail is admin-only (gated admin.view on the endpoint too).
   const canAudit = hasPermission?.('admin', 'view');
   // Without reports.view_cost (QC Analyst / Inventory Officer / Documentation

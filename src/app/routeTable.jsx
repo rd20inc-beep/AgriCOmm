@@ -8,13 +8,13 @@
 // table). A URL with no route shows "Not available in your workspace" instead
 // of the old silent redirect to the dashboard.
 import { lazy } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import ProtectedRoute from '../components/ProtectedRoute';
 import { useAuth } from '../context/AuthContext';
 import NotAvailable from '../shared/components/NotAvailable';
 import { LEGACY_FINANCE_REDIRECTS } from '../modules/finance/financeNav';
 import { LegacyFinanceRedirect, FinanceCatchAll } from '../modules/finance/components/LegacyFinanceRedirect';
-import { ROUTE_GATES } from './routeGates';
+import { ROUTE_GATES, FINANCE_DASHBOARD } from './routeGates';
 import { resolveWorkspace } from './workspace';
 
 // Lazy import that self-heals stale chunks after a deploy. A new build replaces
@@ -135,10 +135,23 @@ const GlProfitLoss = lazyWithReload(() => import('../modules/finance/pages/GlPro
 const BalanceSheet = lazyWithReload(() => import('../modules/finance/pages/BalanceSheet'));
 const AccountingPeriods = lazyWithReload(() => import('../modules/finance/pages/Periods'));
 
+function FinanceDashboardGate() {
+  return (
+    <ProtectedRoute module={FINANCE_DASHBOARD.module} action={FINANCE_DASHBOARD.action}>
+      <Outlet />
+    </ProtectedRoute>
+  );
+}
+
 export function FinanceRoutes() {
   return (
     <FinanceLayout>
       <Routes>
+        {/* Party statements open on finance.view alone (FINANCE_VIEW_ONLY_PATHS):
+            Mill Finance, reports and ledgers link here. */}
+        <Route path="accounting/statements" element={<PartyLedger />} />
+        {/* Everything else is the Finance module: finance.view_dashboard too. */}
+        <Route element={<FinanceDashboardGate />}>
         {/* Six workspaces; a workspace's default view is its own path, the
             other views are nested paths (map: modules/finance/financeNav.js). */}
         <Route index element={<FinanceOverview />} />
@@ -162,7 +175,6 @@ export function FinanceRoutes() {
         <Route path="accounting/balance-sheet" element={<ProtectedRoute module="finance" action="view"><BalanceSheet /></ProtectedRoute>} />
         <Route path="accounting/periods" element={<ProtectedRoute module="finance" action="view"><AccountingPeriods /></ProtectedRoute>} />
         <Route path="accounting/profit" element={<Profit />} />
-        <Route path="accounting/statements" element={<PartyLedger />} />
         <Route path="accounting/rates" element={<RatesCenter />} />
         {/* Mill → Export STOCK transfers (not money) live on one page, /transfer
             (P5 CLICKS); the old Finance URL redirects there. */}
@@ -171,6 +183,7 @@ export function FinanceRoutes() {
         <Route path="payroll" element={<ProtectedRoute module="payroll" action="view"><FinancePayroll /></ProtectedRoute>} />
         {/* Reached from Home's alerts panel (Needs Attention replaces it later). */}
         <Route path="alerts" element={<FinanceAlerts />} />
+        </Route>
         {/* Every pre-redesign path → its new view, query string kept. The
             orphan Cost Allocation (/finance/costs) and Reconciliation
             (/finance/reconciliation) pages summed PKR and USD (FIN-23) and are

@@ -8,6 +8,7 @@
  * NAME — role ids differ between installs (Owner is 9 on prod, 10 locally).
  */
 const db = require('../config/database');
+const { scopeAreaOf } = require('../shared/scopeArea');
 
 // rbac.js: Super Admin and Owner pass every authorize / authorizeAny check.
 // authorizeRole has NO bypass — it lists the roles it allows.
@@ -49,7 +50,7 @@ const isBypass = (a) => !!a && BYPASS_ROLES.includes(a.roleName);
 function can(a, module, action) {
   if (!a) return false;
   if (isBypass(a)) return true;
-  if (a.moduleScopes.size > 0 && !a.moduleScopes.has(module)) return false;
+  if (a.moduleScopes.size > 0 && !a.moduleScopes.has(scopeAreaOf(module))) return false;
   return a.permissions.has(`${module}.${action}`);
 }
 

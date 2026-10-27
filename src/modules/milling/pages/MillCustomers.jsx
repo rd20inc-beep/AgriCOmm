@@ -21,6 +21,10 @@ export default function MillCustomers() {
   // Finance, or the Mill Operator (milling.edit) for the mill's own rows — the
   // server keeps it to mill payables / sales and mill accounts.
   const canPay = hasPermission('finance', 'confirm_payment') || hasPermission('milling', 'edit');
+  // Statements live in Mill Finance (mill_finance.view).
+  const canStatement = hasPermission('mill_finance', 'view');
+  // Quick-add registers a local customer: POST /admin/customers/quick-add.
+  const canAdd = hasPermission('local_sales', 'create');
   const qc = useQueryClient();
   const [search, setSearch] = useState('');
   const [payCustomer, setPayCustomer] = useState(null);
@@ -33,7 +37,7 @@ export default function MillCustomers() {
     if (!draft.name.trim()) { addToast('Customer name is required', 'error'); return; }
     setSaving(true);
     try {
-      // quick-add tags the customer 'local' (and uses inventory permission).
+      // quick-add tags the customer 'local' (local_sales.create).
       const res = await adminApi.customersQuickAdd(draft);
       const created = res?.data?.data?.customer;
       qc.invalidateQueries({ queryKey: ['customers'] });
@@ -62,10 +66,12 @@ export default function MillCustomers() {
           <Users className="w-6 h-6 text-blue-600" />
           <h1 className="text-xl font-bold text-gray-900">Customers</h1>
         </div>
-        <button onClick={() => { setDraft({ ...EMPTY_CUST }); setShowAdd(true); }}
-          className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700">
-          <Plus className="w-4 h-4" /> Add Customer
-        </button>
+        {canAdd && (
+          <button onClick={() => { setDraft({ ...EMPTY_CUST }); setShowAdd(true); }}
+            className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700">
+            <Plus className="w-4 h-4" /> Add Customer
+          </button>
+        )}
       </div>
       <p className="text-sm text-gray-500 mb-5">Local-sales customers. Click a customer to view their statement.</p>
 
@@ -108,10 +114,12 @@ export default function MillCustomers() {
                           <Banknote className="w-3.5 h-3.5" /> Record Payment
                         </button>
                       )}
-                      <Link to={`/milling/finance?tab=customers&customer=${c.id}`}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100">
-                        <FileText className="w-3.5 h-3.5" /> View Statement
-                      </Link>
+                      {canStatement && (
+                        <Link to={`/milling/finance?tab=customers&customer=${c.id}`}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100">
+                          <FileText className="w-3.5 h-3.5" /> View Statement
+                        </Link>
+                      )}
                     </div>
                   </td>
                 </tr>

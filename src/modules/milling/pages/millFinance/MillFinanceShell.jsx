@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, Navigate } from 'react-router-dom';
 import {
   DollarSign, Wallet, Users, TrendingUp, Plus, Banknote, HandCoins, ArrowLeftRight, ShoppingCart,
   UserPlus, RefreshCw, Sparkles, Printer, FileText, BookOpen, ArrowLeft, ChevronRight,
@@ -62,13 +62,21 @@ export default function MillFinanceShell() {
   const [action, setAction] = useState(null); // expense | paySupplier | receive | transfer | storePurchase
   const close = () => setAction(null);
 
+  // Without mill_finance.view the page is the payroll workspace only.
+  if (!perms.canMillFinance && loc.workspace !== 'payroll') {
+    if (perms.canViewPayroll) return <Navigate to={mfHref({ workspace: 'payroll' })} replace />;
+    return <p className="rounded-xl border border-gray-200 bg-white p-6 text-sm text-gray-500" data-testid="mill-finance-no-access">Mill Finance needs the Mill Finance view permission.</p>;
+  }
+
   if (loc.workspace === 'payroll') {
     return (
       <div className="space-y-4">
         <div className="flex items-center gap-2 text-sm no-print">
-          <Link to={mfHref({ section: 'overview' }, loc.period)} className="inline-flex items-center gap-1 text-blue-600 hover:underline">
-            <ArrowLeft size={14} aria-hidden="true" /> Mill Finance
-          </Link>
+          {perms.canMillFinance ? (
+            <Link to={mfHref({ section: 'overview' }, loc.period)} className="inline-flex items-center gap-1 text-blue-600 hover:underline">
+              <ArrowLeft size={14} aria-hidden="true" /> Mill Finance
+            </Link>
+          ) : <span className="text-gray-500">Mill</span>}
           <ChevronRight size={14} className="text-gray-300" aria-hidden="true" />
           <span className="font-medium text-gray-800">Payroll</span>
         </div>
@@ -87,7 +95,7 @@ export default function MillFinanceShell() {
     { key: 'anomalies', label: 'Anomaly analysis (AI)', icon: Sparkles, to: mfHref({ section: 'performance', focus: 'anomalies' }, loc.period) },
     { key: 'rice-purchases', label: 'Rice purchases ledger', icon: BookOpen, to: '/milling/rice-purchases' },
     perms.canViewReports && { key: 'reports', label: 'Detailed reports', icon: FileText, to: '/reports' },
-    perms.canFinance && { key: 'finance', label: 'Finance dashboard', icon: Wallet, to: '/finance' },
+    perms.canFinanceDashboard && { key: 'finance', label: 'Finance dashboard', icon: Wallet, to: '/finance' },
     { key: 'print', label: 'Print this page', icon: Printer, onClick: printPage },
   ].filter(Boolean);
 

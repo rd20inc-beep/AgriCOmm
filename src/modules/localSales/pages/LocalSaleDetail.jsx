@@ -30,7 +30,7 @@ export default function LocalSaleDetail() {
   // PUT /api/local-sales/:id is gated on inventory.create — same check here so
   // a read-only viewer (e.g. Finance) is not offered an edit that would 403.
   const { hasPermission } = useAuth();
-  const canEdit = hasPermission('inventory', 'create');
+  const canEdit = hasPermission('local_sales', 'create');
   // A confirmed sale has already moved stock and posted its journals, so only
   // the presentation fields can change. While it is still Pending nothing
   // downstream exists, so quantity and rate are editable too.

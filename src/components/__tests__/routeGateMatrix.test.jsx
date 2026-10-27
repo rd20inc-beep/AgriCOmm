@@ -26,7 +26,13 @@ const { default: NotAvailable } = await import('../../shared/components/NotAvail
 const MATRIX = [
   ['/milling/finance', ['Owner', 'Super Admin', 'Mill Manager', 'Mill Operator', 'Export Manager', 'Read-Only Auditor']],
   ['/milling/statements', ['Owner', 'Super Admin', 'Mill Manager', 'Export Manager', 'Finance Manager', 'Read-Only Auditor']],
-  ['/finance/money-in', ['Owner', 'Super Admin', 'Mill Manager', 'Export Manager', 'Finance Manager', 'Read-Only Auditor']],
+  // The Finance module is finance.view + finance.view_dashboard (mig 470): not
+  // the Mill Manager, who still opens party statements on finance.view.
+  ['/finance/money-in', ['Owner', 'Super Admin', 'Export Manager', 'Finance Manager', 'Read-Only Auditor']],
+  ['/finance/accounting/statements', ['Owner', 'Super Admin', 'Mill Manager', 'Export Manager', 'Finance Manager', 'Read-Only Auditor']],
+  // Local Sales / Mill Customers have their own permissions — not the Export Manager.
+  ['/local-sales/5', ['Owner', 'Super Admin', 'Mill Manager', 'Mill Operator', 'Finance Manager', 'Inventory Officer', 'QC Analyst', 'Read-Only Auditor']],
+  ['/milling/customers', ['Owner', 'Super Admin', 'Mill Manager', 'Inventory Officer', 'Documentation Officer', 'Read-Only Auditor']],
   ['/export/create', ['Owner', 'Super Admin', 'Export Manager']],
   ['/export/7', ['Owner', 'Super Admin', 'Mill Manager', 'Export Manager', 'Inventory Officer', 'Documentation Officer', 'Read-Only Auditor']],
   ['/mill-store/adjustments', ['Owner', 'Super Admin', 'Mill Manager', 'Mill Operator', 'QC Analyst', 'Read-Only Auditor']],

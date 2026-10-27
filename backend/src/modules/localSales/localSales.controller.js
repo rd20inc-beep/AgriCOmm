@@ -1492,7 +1492,7 @@ module.exports = {
       const input = readReceiptInput(req.body);
       if (input.error) return res.status(400).json({ success: false, message: input.error });
       // Came in on milling.edit alone (the Mill Operator): mill sales only.
-      const millOnly = await isMillOnlyPayer(req, [['inventory', 'create']]);
+      const millOnly = await isMillOnlyPayer(req, [['local_sales', 'create']]);
 
       await db.transaction(async (trx) => {
         // Read (and lock) the sale INSIDE the transaction: two receipts racing
@@ -1544,7 +1544,7 @@ module.exports = {
       if (!groupNo) return res.status(400).json({ success: false, message: 'A sale number is required.' });
       const input = readReceiptInput(req.body);
       if (input.error) return res.status(400).json({ success: false, message: input.error });
-      const millOnly = await isMillOnlyPayer(req, [['inventory', 'create']]);
+      const millOnly = await isMillOnlyPayer(req, [['local_sales', 'create']]);
 
       const result = await db.transaction((trx) => receiveOnSaleGroup(trx, groupNo, input, { millOnly, userId: req.user?.id }));
 

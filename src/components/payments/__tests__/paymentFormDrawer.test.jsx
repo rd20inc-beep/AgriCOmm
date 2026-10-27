@@ -103,7 +103,7 @@ describe('submits to the variant\'s endpoint', () => {
   });
 
   it('local sale (whole sale) → the group endpoint', async () => {
-    mockPerms = allow('inventory.create');
+    mockPerms = allow('local_sales.create');
     render(<PaymentFormDrawer doc={{ docKind: 'local_sale', row: { id: 9, kind: 'local_sale', saleGroupNo: 'LS-7', outstanding: 900 } }} onClose={() => {}} />);
     await submit({ method: 'cash', collectionLocation: 'Mill' });
     expect(calls.post[0]).toEqual({ url: '/api/local-sales/group/LS-7/payments', body: expect.objectContaining({ payment_method: 'cash', collection_location: 'Mill', bank_account_id: null }) });

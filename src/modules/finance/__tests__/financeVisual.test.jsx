@@ -15,7 +15,7 @@ import { statusStyle } from '../../../shared/utils/statusStyle';
  */
 
 const allow = (...perms) => (m, a) => perms.includes(`${m}.${a}`);
-let mockPerms = allow('finance.view', 'finance.confirm_payment', 'finance.allocate_cost', 'payroll.view');
+let mockPerms = allow('finance.view', 'finance.view_dashboard', 'finance.confirm_payment', 'finance.allocate_cost', 'payroll.view');
 vi.mock('../../../context/AuthContext', () => ({ useAuth: () => ({ hasPermission: (m, a) => mockPerms(m, a) }) }));
 vi.mock('../../../api/queries', () => ({
   usePendingExportReceipts: () => ({ data: [] }),
