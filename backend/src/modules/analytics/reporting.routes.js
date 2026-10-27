@@ -14,6 +14,11 @@ const { authorizeAny } = require('../../middleware/rbac');
 // rice purchase ledger) stay on reports.view with the reports.view_cost /
 // view_profit redaction (#535).
 const financeReports = authorize('reports', 'view_finance');
+// Export profitability (orders / customers / countries / products / monthly
+// trend) is the export desk's own report: reports.view_finance OR
+// export_orders.view. The Mill roles hold neither; the Export Manager keeps
+// these without the company finance reports (owner request 2026-10-27).
+const exportReports = authorizeAny(['reports', 'view_finance'], ['export_orders', 'view']);
 // Local-sale reports also need local_sales.view — a role kept out of Local
 // Sales (the Export Manager) must not read them here either.
 const localSalesReports = authorize('local_sales', 'view');
@@ -68,7 +73,7 @@ router.get('/executive/advance-funnel', authorize('reports', 'view'), financeRep
 // ═══════════════════════════════════════════════════════════════════
 // Profitability
 // ═══════════════════════════════════════════════════════════════════
-router.get('/profitability/orders', authorize('reports', 'view'), financeReports, controller.orderProfitability);
+router.get('/profitability/orders', authorize('reports', 'view'), exportReports, controller.orderProfitability);
 router.get('/profitability/batches', authorize('reports', 'view'), controller.batchProfitability);
 router.get('/profitability/batch-margin', authorize('reports', 'view'), controller.batchMargin);
 router.get('/lot-tracker', authorize('reports', 'view'), controller.lotTracker);
@@ -77,10 +82,10 @@ router.get('/sales-tracker', authorize('reports', 'view'), localSalesReports, co
 // Profit ▸ Local, Finance ▸ Local Sales). Read by reports or finance roles;
 // money redacted per view_cost / view_profit, buyer masked like the sales list.
 router.get('/local-sales', authorizeAny(['reports', 'view'], ['finance', 'view']), localSalesReports, controller.localSalesReport);
-router.get('/profitability/customers', authorize('reports', 'view'), financeReports, controller.customerProfitability);
-router.get('/profitability/countries', authorize('reports', 'view'), financeReports, controller.countryAnalysis);
-router.get('/profitability/products', authorize('reports', 'view'), financeReports, controller.productProfitability);
-router.get('/profitability/monthly-trend', authorize('reports', 'view'), financeReports, controller.monthlyTrend);
+router.get('/profitability/customers', authorize('reports', 'view'), exportReports, controller.customerProfitability);
+router.get('/profitability/countries', authorize('reports', 'view'), exportReports, controller.countryAnalysis);
+router.get('/profitability/products', authorize('reports', 'view'), exportReports, controller.productProfitability);
+router.get('/profitability/monthly-trend', authorize('reports', 'view'), exportReports, controller.monthlyTrend);
 
 // ═══════════════════════════════════════════════════════════════════
 // Supplier & Quality

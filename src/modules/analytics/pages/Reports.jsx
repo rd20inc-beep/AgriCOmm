@@ -635,30 +635,35 @@ export default function Reports() {
   // customers, countries or export A/R / booked profit.
   const millScoped = user?.role === 'Mill Manager';
   // Company finance follows reports.view_finance (mig 470; the API's
-  // financeReports guard): without it — the Mill Operator, the Mill Manager —
-  // the reports are the mill's: lot + local-sale trackers and stock value need
-  // reports.view_cost, batch / sale margin needs reports.view_profit, and the
-  // Money In/Out + Purchases feeds, cash forecast, export orders / customers /
-  // countries, the KPI benchmarks, the headline money strip, the invoice
-  // ledger and the AI / scheduled-email tools are not shown.
+  // financeReports guard). Without it — the Mill Operator, the Mill Manager,
+  // the Export Manager (mig 471) — the Money In/Out + Purchases feeds, cash
+  // forecast, the KPI benchmarks, the headline money strip, the invoice ledger
+  // and the AI / scheduled-email tools are not shown.
   const operatorScoped = !hasPermission('reports', 'view_finance');
   const canCost = useCanSeeCost();
   const canProfit = useCanSeeProfit();
-  // The operator's view is the mill's, so its feeds are scoped to entity=mill.
-  const millEntity = millScoped || operatorScoped;
-  const operatorTabs = [
-    ...(canCost ? ['sales', 'lots'] : []),
-    ...(canProfit ? ['margin'] : []),
-    'production', 'inventory', 'quality',
-  ];
-  // The local-sale tracker also needs local_sales.view (the Export Manager has
-  // reports.view but is kept out of Local Sales).
+  // The mill roles' feeds are scoped to entity=mill.
+  const millEntity = millScoped || user?.role === 'Mill Operator';
+  // Each tab group by its own permission (the API's guard for its feed):
+  //   finance tabs     reports.view_finance
+  //   export tabs      reports.view_finance or export_orders.view (exportReports)
+  //   local sales      local_sales.view
+  const FINANCE_TABS = ['moneyIn', 'moneyOut', 'purchases', 'forecast', 'kpis'];
+  const EXPORT_TABS = ['orders', 'customers', 'countries'];
+  const canExportReports = !operatorScoped || hasPermission('export_orders', 'view');
   const canLocalSales = hasPermission('local_sales', 'view');
-  const visibleTabs = (operatorScoped
-    ? TABS.filter(t => operatorTabs.includes(t.key))
-    : millScoped
-      ? TABS.filter(t => ['moneyIn', 'moneyOut', 'sales', 'purchases', 'lots', 'margin', 'production', 'inventory', 'kpis', 'quality'].includes(t.key))
-      : TABS).filter(t => t.key !== 'sales' || canLocalSales);
+  const visibleTabs = (millScoped
+    ? TABS.filter(t => ['moneyIn', 'moneyOut', 'sales', 'purchases', 'lots', 'margin', 'production', 'inventory', 'kpis', 'quality'].includes(t.key))
+    : TABS).filter((t) => {
+    if (operatorScoped && FINANCE_TABS.includes(t.key)) return false;
+    if (!canExportReports && EXPORT_TABS.includes(t.key)) return false;
+    if (t.key === 'sales' && !canLocalSales) return false;
+    // Without the company finance reports the money views follow cost / profit:
+    // lot + local-sale trackers need reports.view_cost, margin reports.view_profit.
+    if (operatorScoped && (t.key === 'sales' || t.key === 'lots') && !canCost) return false;
+    if (operatorScoped && t.key === 'margin' && !canProfit) return false;
+    return true;
+  });
 
   // Party statements live under /milling for the Mill role, /finance otherwise.
   // The Mill Operator reaches neither (finance), so its rows link to nothing.
@@ -894,7 +899,7 @@ export default function Reports() {
       {/* Scope banner for a role without the finance reports. */}
       {operatorScoped && (
         <div className="rounded-xl border border-blue-200 bg-blue-50/60 px-4 py-3 text-sm text-blue-800 flex items-center gap-2">
-          <Factory size={16} /> Mill view — lots, sales, margins, production, quality and stock for the mill. Company finance (cash, receivables, payables, P&amp;L, payroll, export) is not shown for this role.
+          <Factory size={16} /> {millEntity ? 'Mill view — lots, sales, margins, production, quality and stock for the mill. ' : ''}Company finance (cash, receivables, payables, P&amp;L, payroll) is not shown for this role.
         </div>
       )}
 
