@@ -5,6 +5,7 @@
 // The push path (offline writes → server) lands in Stage 6b.
 const db = require('../../config/database');
 const { userHasPermission } = require('../../middleware/rbac');
+const { scopeAreaOf } = require('../../shared/scopeArea');
 const { isCostKey, isProfitKey, moneyVisibility } = require('../../utils/costVisibility');
 const whScope = require('../../utils/warehouseScope');
 
@@ -160,7 +161,7 @@ async function moduleScopeAllows(req, modules) {
   const role = req.user.role_id && await db('roles').where({ id: req.user.role_id }).first('name');
   if (role && ['Owner', 'Super Admin'].includes(role.name)) return true;
   const scoped = await db('user_scopes').where({ user_id: req.user.id, scope_type: 'module' }).pluck('scope_value');
-  return !scoped.length || modules.some((m) => scoped.includes(m));
+  return !scoped.length || modules.some((m) => scoped.includes(scopeAreaOf(m)));
 }
 
 const DEFAULT_PAGE = 500;

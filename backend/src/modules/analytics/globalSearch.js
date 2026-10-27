@@ -37,6 +37,7 @@
 const db = require('../../config/database');
 const { userHasPermission } = require('../../middleware/rbac');
 const { isPartyMasked } = require('../../shared/partyMask');
+const { scopeAreaOf } = require('../../shared/scopeArea');
 const { resolveWarehouseScope, applyWarehouseScope } = require('../../utils/warehouseScope');
 
 const MAX_LIMIT = 20;
@@ -74,7 +75,7 @@ async function permissionChecker(req) {
   return async (module, action) => {
     const key = `${module}.${action}`;
     if (!cache.has(key)) {
-      const ok = (await userHasPermission(req, module, action)) && (bypass || !scopes || scopes.has(module));
+      const ok = (await userHasPermission(req, module, action)) && (bypass || !scopes || scopes.has(scopeAreaOf(module)));
       cache.set(key, ok);
     }
     return cache.get(key);
