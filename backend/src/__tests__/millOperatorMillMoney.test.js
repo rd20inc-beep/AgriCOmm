@@ -21,6 +21,11 @@ jest.mock('../middleware/rbac', () => {
     return guard;
   };
   const passThrough = () => (req, res, next) => next();
+  const authorizeAny = (...pairs) => {
+    const guard = (req, res, next) => next();
+    guard.anyOf = pairs.map(([m, a]) => `${m}.${a}`);
+    return guard;
+  };
   const denyRoles = (...roles) => {
     const guard = (req, res, next) => next();
     guard.deniedRoles = roles;
@@ -31,7 +36,7 @@ jest.mock('../middleware/rbac', () => {
     return !!req.user?.permissions?.has(`${module}.${action}`);
   };
   return Object.assign(authorize, {
-    authorize, authorizeAny: passThrough, authorizeRole: passThrough, denyRoles,
+    authorize, authorizeAny, authorizeRole: passThrough, denyRoles,
     userHasPermission, getScopedWarehouseIds: async () => null,
   });
 });
@@ -123,8 +128,6 @@ describe('reporting routes — mill reports opened, company finance still closed
     ['get', '/scheduled-reports'], ['post', '/scheduled-reports'], ['delete', '/scheduled-reports/:id'], ['post', '/scheduled-reports/:id/run'],
     ['get', '/invoice-ledger'],
     ['get', '/executive/summary'], ['get', '/executive/pipeline'], ['get', '/executive/advance-funnel'],
-    ['get', '/profitability/orders'], ['get', '/profitability/customers'], ['get', '/profitability/countries'],
-    ['get', '/profitability/products'], ['get', '/profitability/monthly-trend'],
     ['get', '/financial/receivable-recovery'], ['get', '/financial/payable-analysis'], ['get', '/financial/cash-forecast'], ['get', '/financial/fx-exposure'],
     ['get', '/printable/pnl'], ['get', '/printable/pnl-accrual'], ['get', '/printable/cashflow'],
     ['get', '/printable/ar-aging'], ['get', '/printable/ap-aging'], ['get', '/printable/sales-ledger'],
@@ -139,6 +142,15 @@ describe('reporting routes — mill reports opened, company finance still closed
     expect(perms).toEqual(expect.arrayContaining(['reports.view', 'payroll.view']));
     expect(perms).not.toContain('reports.view_finance');
   });
+
+  // Export profitability: the company finance reports OR the export desk
+  // (export_orders.view) — the Mill roles hold neither; the Export Manager
+  // keeps it without reports.view_finance (mig 471).
+  test.each(['/profitability/orders', '/profitability/customers', '/profitability/countries', '/profitability/products', '/profitability/monthly-trend'])(
+    'GET %s: reports.view_finance or export_orders.view', (path) => {
+      const anyOf = stackOf(reporting, 'get', path).find((h) => h.anyOf);
+      expect(anyOf.anyOf).toEqual(['reports.view_finance', 'export_orders.view']);
+    });
 
   test.each(['/sales-tracker', '/sale-detail/:id', '/local-sales'])('GET %s: local-sale reports also need local_sales.view', (path) => {
     expect(stackOf(reporting, 'get', path).map((h) => h.permission)).toContain('local_sales.view');

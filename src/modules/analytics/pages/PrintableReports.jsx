@@ -116,8 +116,8 @@ export default function PrintableReports() {
   const companyProfileData = useCompanyProfile();
   const { hasPermission } = useAuth();
   const [searchParams] = useSearchParams();
-  // Without reports.view_finance (mig 470 — the Mill Manager and Mill
-  // Operator) only the mill/inventory reports: the company-wide financials
+  // Without reports.view_finance (mig 470/471 — the Mill Manager, Mill
+  // Operator and Export Manager) only the mill/inventory reports: the company-wide financials
   // (P&L, Cashflow, AR/AP aging, the sales ledger) mix export data and are
   // closed at the API (financeReports).
   const millScoped = !hasPermission?.('reports', 'view_finance');
@@ -130,7 +130,8 @@ export default function PrintableReports() {
   const REPORT_TYPES = !showCost
     ? ['production', 'stock', 'stock_detail']
     : millScoped
-    ? ['production', 'stock', 'stock_detail', 'purchase_ledger']
+    // Freight recovery is per export order (reports.view) — the export desk keeps it.
+    ? ['production', 'stock', 'stock_detail', 'purchase_ledger', ...(hasPermission?.('export_orders', 'view') ? ['freight_recovery'] : [])]
     : ['production', 'stock', 'stock_detail', 'purchase_ledger', 'sales_ledger', 'freight_recovery', 'pnl_accrual', 'pnl', 'pnl_compare', 'cashflow', 'ar_aging', 'ap_aging', ...(canAudit ? ['audit_trail'] : [])];
 
   // Preselect via ?type= (e.g. the Audit Trail page links here with type=audit_trail).
