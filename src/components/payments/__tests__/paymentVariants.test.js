@@ -16,7 +16,7 @@ const FM = allow('finance.view', 'finance.confirm_payment', 'finance.allocate_co
 const AUDITOR = allow('finance.view');
 const MILL_OP = allow('milling.view', 'milling.edit');
 const EXPORT_MGR = allow('finance.view', 'export_orders.confirm_advance', 'finance.confirm_payment');
-const INV_OFFICER = allow('inventory.create');
+const INV_OFFICER = allow('local_sales.create');
 
 const form = (over = {}) => ({ ...blankPaymentForm({ amount: '100', method: 'bank_transfer', date: '2026-10-09' }), bankAccountId: '7', ...over });
 
@@ -148,7 +148,7 @@ describe('the variants match the backend guards in the route files', () => {
   const read = (f) => fs.readFileSync(path.join(B, f), 'utf8');
   it('record-receipt, local-sale, service and expense-pay guards are what the variants say', () => {
     expect(read('exportOrders/exportOrders.routes.js')).toMatch(/'\/:id\/record-receipt',\s*authorizeAny\(\['export_orders', 'confirm_advance'\], \['finance', 'confirm_payment'\]\)/);
-    expect(read('localSales/localSales.routes.js')).toMatch(/'\/group\/:groupNo\/payments',\s*authorizeAny\(\['inventory', 'create'\], \['finance', 'confirm_payment'\], \['milling', 'edit'\]\)/);
+    expect(read('localSales/localSales.routes.js')).toMatch(/'\/group\/:groupNo\/payments',\s*authorizeAny\(\['local_sales', 'create'\], \['finance', 'confirm_payment'\], \['milling', 'edit'\]\)/);
     expect(read('serviceMilling/serviceMilling.routes.js')).toMatch(/'\/invoices\/:id\/payments',\s*authorize\('service_milling', 'record_payment'\)/);
     expect(read('expenses/expenses.routes.js')).toMatch(/'\/:id\/pay',\s*authorize\('finance', 'confirm_payment'\)/);
     expect(read('finance/finance.routes.js')).toMatch(/const canPayFinanceOrMill = authorizeAny\(\['finance', 'confirm_payment'\], \['milling', 'edit'\]\)/);

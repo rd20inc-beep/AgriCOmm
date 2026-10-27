@@ -130,7 +130,7 @@ export default function OverviewSection({ period }) {
           note={pendingTransfers.length ? `${PKR(pendingTransfersTotal)} from Head Office not yet accepted — not in these balances.` : null} />
         {perms.canFinance ? (
           <PositionCard title="Head Office — cash & bank" icon={Building2} groups={balances.general} testId="mf-position-ho"
-            to="/finance/accounts" linkLabel="Accounts" />
+            to={perms.canFinanceDashboard ? '/finance/accounts' : null} linkLabel="Accounts" />
         ) : (
           <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50/50 p-4 text-sm text-gray-400" data-testid="mf-position-ho">
             <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide inline-flex items-center gap-1.5 mb-1"><Building2 size={14} aria-hidden="true" /> Head Office</h3>

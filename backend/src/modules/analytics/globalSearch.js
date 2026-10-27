@@ -13,10 +13,12 @@
  *   export orders, containers  export_orders.view
  *   milling batches            milling.view (service batches: service_milling.view)
  *   lots                       inventory.view, inside the user's warehouse scope
- *   local sales                inventory.view OR finance.view
+ *   local sales                local_sales.view
  *   receivables / payables /   finance.view (they open the Finance drawers)
  *   payments / bank / expenses
- *   customers                  finance.view → the party statement (W11)
+ *   customers                  finance.view → the party statement (W11);
+ *                              local customers also need local_sales.view or
+ *                              mill_customers.view
  *   suppliers                  finance.view → the party statement (W12);
  *                              else reports.view → the supplier ledger
  *   transporters               admin.view → the transporter ledger
@@ -128,18 +130,21 @@ async function globalSearch(req, { q, limit, entity } = {}) {
   const isMill = entity === 'mill';
 
   const has = await permissionChecker(req);
-  const [exportView, millingView, serviceView, inventoryView, financeView, reportsView, adminView, documentsView, masked] =
+  const [exportView, millingView, serviceView, inventoryView, financeView, reportsView, adminView, documentsView, masked,
+    salesView, millCustomersView] =
     await Promise.all([
       has('export_orders', 'view'), has('milling', 'view'), has('service_milling', 'view'),
       has('inventory', 'view'), has('finance', 'view'), has('reports', 'view'),
       has('admin', 'view'), has('documents', 'view'), isPartyMasked(req),
+      has('local_sales', 'view'), has('mill_customers', 'view'),
     ]);
   const can = {
     exportView: exportView && !isMill,
     millingView,
     serviceView,
     lotsView: inventoryView,
-    salesView: inventoryView || financeView,
+    salesView,
+    localCustomers: salesView || millCustomersView,
     financeView,
     customers: financeView && !masked,
     suppliers: (financeView || reportsView) && !masked,
@@ -197,6 +202,7 @@ async function globalSearch(req, { q, limit, entity } = {}) {
       )
       .orderBy([{ column: 'rank' }, { column: 'id', order: 'desc' }]).limit(cap) : none,
     can.customers ? db('customers').where('name', 'ilike', like)
+      .modify((q) => { if (!can.localCustomers) q.where('customer_type', 'export'); })
       .select('id', 'name', 'customer_type', 'country', rankSql(['name'], term, prefix))
       .orderBy([{ column: 'rank' }, { column: 'name' }]).limit(cap) : none,
     can.suppliers ? whereAnyLike(db('suppliers'), ['name', 'supplier_code'], like)

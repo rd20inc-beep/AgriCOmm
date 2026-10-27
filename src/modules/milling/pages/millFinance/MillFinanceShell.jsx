@@ -87,7 +87,7 @@ export default function MillFinanceShell() {
     { key: 'anomalies', label: 'Anomaly analysis (AI)', icon: Sparkles, to: mfHref({ section: 'performance', focus: 'anomalies' }, loc.period) },
     { key: 'rice-purchases', label: 'Rice purchases ledger', icon: BookOpen, to: '/milling/rice-purchases' },
     perms.canViewReports && { key: 'reports', label: 'Detailed reports', icon: FileText, to: '/reports' },
-    perms.canFinance && { key: 'finance', label: 'Finance dashboard', icon: Wallet, to: '/finance' },
+    perms.canFinanceDashboard && { key: 'finance', label: 'Finance dashboard', icon: Wallet, to: '/finance' },
     { key: 'print', label: 'Print this page', icon: Printer, onClick: printPage },
   ].filter(Boolean);
 

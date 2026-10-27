@@ -14,7 +14,7 @@ import {
 
 // ── permission helpers ────────────────────────────────────────────────
 const allow = (...perms) => (m, a) => perms.includes(`${m}.${a}`);
-const FINANCE_MANAGER = allow('finance.view', 'finance.confirm_payment', 'finance.allocate_cost',
+const FINANCE_MANAGER = allow('finance.view', 'finance.view_dashboard', 'finance.confirm_payment', 'finance.allocate_cost',
   'payroll.view', 'service_milling.view_invoice');
 
 // ── layout render (mocks only what the shell touches) ─────────────────
@@ -56,22 +56,28 @@ describe('six workspaces', () => {
     ]);
   });
 
-  it('Payroll is hidden without payroll.view', () => {
+  it('no workspaces without the Finance module (finance.view_dashboard) — the Mill Manager reaching a statement', () => {
+    expect(visibleWorkspaces(allow('finance.view', 'payroll.view'))).toEqual([]);
     mockPerms = allow('finance.view');
+    expect(renderAt('/finance/accounting/statements')).not.toContain('data-workspace=');
+  });
+
+  it('Payroll is hidden without payroll.view', () => {
+    mockPerms = allow('finance.view', 'finance.view_dashboard');
     expect(visibleWorkspaces(mockPerms).map((w) => w.key)).not.toContain('payroll');
     expect(renderAt('/finance')).not.toContain('data-workspace="payroll"');
   });
 
   it('Accounting hides the GL statement views when finance.view is missing, and keeps the rest', () => {
     const acc = (perms) => visibleWorkspaces(perms).find((w) => w.key === 'accounting').views.map((v) => v.key);
-    expect(acc(allow('finance.view'))).toEqual(['journal', 'trial-balance', 'pnl', 'balance-sheet', 'periods', 'profit', 'statements', 'rates', 'stock-transfers']);
-    expect(acc(allow())).toEqual(['journal', 'profit', 'statements', 'rates']);
+    expect(acc(allow('finance.view', 'finance.view_dashboard'))).toEqual(['journal', 'trial-balance', 'pnl', 'balance-sheet', 'periods', 'profit', 'statements', 'rates', 'stock-transfers']);
+    expect(acc(allow('finance.view_dashboard'))).toEqual(['journal', 'profit', 'statements', 'rates']);
   });
 
   it('B5: Accounts has Reconcile (finance.view), not filtered by period', () => {
     const acc = (perms) => visibleWorkspaces(perms).find((w) => w.key === 'accounts').views.map((v) => v.key);
-    expect(acc(allow('finance.view'))).toEqual(['cash', 'cheques', 'suspense', 'reconcile']);
-    expect(acc(allow())).toEqual(['cash', 'cheques', 'suspense']);
+    expect(acc(allow('finance.view', 'finance.view_dashboard'))).toEqual(['cash', 'cheques', 'suspense', 'reconcile']);
+    expect(acc(allow('finance.view_dashboard'))).toEqual(['cash', 'cheques', 'suspense']);
     expect(matchFinanceLocation('/finance/accounts/reconcile')).toMatchObject({ workspace: { key: 'accounts' }, view: { key: 'reconcile', period: false } });
     const html = renderAt('/finance/accounts/reconcile');
     expect(hrefsOf(html, 'data-view')).toContainEqual({ key: 'reconcile', href: '/finance/accounts/reconcile' });
@@ -82,7 +88,7 @@ describe('six workspaces', () => {
     const html = renderAt('/finance/money-in');
     expect(html).toContain('data-view="service-invoices"');
     expect(html).toContain('leaves Finance');
-    mockPerms = allow('finance.view');
+    mockPerms = allow('finance.view', 'finance.view_dashboard');
     expect(renderAt('/finance/money-in')).not.toContain('data-view="service-invoices"');
   });
 
@@ -219,7 +225,7 @@ describe('Stock transfers (D3: the old /finance/transfers orphan)', () => {
   });
 
   it('is hidden from a user without finance.view', () => {
-    const acc = visibleWorkspaces(allow()).find((w) => w.key === 'accounting').views.map((v) => v.key);
+    const acc = visibleWorkspaces(allow('finance.view_dashboard')).find((w) => w.key === 'accounting').views.map((v) => v.key);
     expect(acc).not.toContain('stock-transfers');
   });
 
@@ -245,21 +251,21 @@ describe('header actions', () => {
   });
 
   it('a view-only user sees none, and the header renders no action group', () => {
-    expect(keys(allow('finance.view'))).toEqual([]);
-    mockPerms = allow('finance.view');
+    expect(keys(allow('finance.view', 'finance.view_dashboard'))).toEqual([]);
+    mockPerms = allow('finance.view', 'finance.view_dashboard');
     expect(renderAt('/finance')).not.toContain('data-testid="finance-actions"');
   });
 
   it('receive / pay / transfer follow the payment guard (confirm_payment or milling.edit); expense needs allocate_cost', () => {
-    expect(keys(allow('finance.view', 'milling.edit'))).toEqual(['receive', 'pay', 'transfer']);
-    expect(keys(allow('finance.view', 'finance.allocate_cost'))).toEqual(['expense']);
+    expect(keys(allow('finance.view', 'finance.view_dashboard', 'milling.edit'))).toEqual(['receive', 'pay', 'transfer']);
+    expect(keys(allow('finance.view', 'finance.view_dashboard', 'finance.allocate_cost'))).toEqual(['expense']);
   });
 
   it('renders the permitted actions in the header as drawer buttons, next to the search', () => {
     const html = renderAt('/finance');
     expect(buttonsOf(html, 'data-action')).toEqual(['receive', 'pay', 'transfer', 'expense']);
     expect(html).toContain('data-testid="finance-search"');
-    mockPerms = allow('finance.view', 'milling.edit');
+    mockPerms = allow('finance.view', 'finance.view_dashboard', 'milling.edit');
     expect(buttonsOf(renderAt('/finance'), 'data-action')).toEqual(['receive', 'pay', 'transfer']);
   });
 });

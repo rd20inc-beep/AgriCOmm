@@ -227,7 +227,7 @@ describe('the routes', () => {
 
   test.each(['/:id/payments', '/group/:groupNo/payments'])('local sales POST %s admits milling.edit', (path) => {
     const guard = stackOf(require('../modules/localSales/localSales.routes'), 'post', path).find((h) => h.anyOf);
-    expect(guard.anyOf).toEqual(['inventory.create', 'finance.confirm_payment', 'milling.edit']);
+    expect(guard.anyOf).toEqual(['local_sales.create', 'finance.confirm_payment', 'milling.edit']);
   });
 });
 

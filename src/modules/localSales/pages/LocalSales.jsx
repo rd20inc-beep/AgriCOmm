@@ -129,7 +129,7 @@ export default function LocalSales() {
   const { user, hasPermission } = useAuth();
   const canConfirm = ['Super Admin', 'Owner', 'Mill Manager'].includes(user?.role);
   // Read-only roles (e.g. Finance Manager viewing to reconcile) can't create sales.
-  const canCreate = hasPermission('inventory', 'create');
+  const canCreate = hasPermission('local_sales', 'create');
   const { data: pendingSales = [] } = usePendingLocalSales(canConfirm);
   const confirmSaleMut = useConfirmLocalSale();
   const rejectSaleMut = useRejectLocalSale();

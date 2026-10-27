@@ -3,6 +3,8 @@ import { useAuth } from '../../../../../context/AuthContext';
 /**
  * Every gate on the Mill Finance screens, in one place, mirroring the server:
  *
+ *  - canFinance   finance.view — Head Office balances (read).
+ *  - canFinanceDashboard  finance.view_dashboard — links into the Finance module.
  *  - canPay       finance.confirm_payment, or milling.edit for the mill's own
  *                 rows (the Mill Operator). recordPayment refuses anything else.
  *  - canTransfer  the contra-transfer route's canMoveMoney — the same pair.
@@ -17,6 +19,7 @@ export default function useMillFinancePerms() {
   const canPay = hasPermission('finance', 'confirm_payment') || hasPermission('milling', 'edit');
   return {
     canFinance,
+    canFinanceDashboard: hasPermission('finance', 'view_dashboard'),
     canPay,
     canTransfer: canPay,
     canAcceptTransfer: hasPermission('milling', 'edit'),

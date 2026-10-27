@@ -12,7 +12,7 @@ const { userHasPermission } = require('../middleware/rbac');
 
 // True when the caller reached the payment route through the MILL permission
 // (milling.edit) and holds none of the permissions that allow paying anything:
-// finance.confirm_payment always, plus what the caller adds (inventory.create on
+// finance.confirm_payment always, plus what the caller adds (local_sales.create on
 // local sales, whose holders were never restricted by entity). The route only
 // admits those permissions, so "not unrestricted" here means "came in on
 // milling.edit".

@@ -156,8 +156,11 @@ export const LEGACY_FINANCE_REDIRECTS = {
 const has = (hasPermission, p) => !p || hasPermission(p.module, p.action);
 const hasAny = (hasPermission, list) => list.some((p) => hasPermission(p.module, p.action));
 
-// The workspaces (and their views) this user may see.
+// The workspaces (and their views) this user may see. None without the
+// Finance module (finance.view_dashboard): a finance.view-only role reaches
+// just the party statements here, so there is nothing to switch to.
 export function visibleWorkspaces(hasPermission) {
+  if (!hasPermission('finance', 'view_dashboard')) return [];
   return WORKSPACES
     .filter((w) => has(hasPermission, w.permission))
     .map((w) => ({ ...w, views: w.views.filter((v) => has(hasPermission, v.permission)) }));

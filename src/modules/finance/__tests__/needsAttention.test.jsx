@@ -90,7 +90,7 @@ describe('buildNeedsAttention', () => {
     expect(only(['finance.post_journal'])).toContain('resolveSuspense');
     expect(only(['finance.post_journal'])).not.toContain('confirmReceipt');
     expect(only(['milling.edit'])).toEqual(expect.arrayContaining(['acceptTransfer', 'markPurchased']));
-    expect(only(['inventory.create'])).toEqual(expect.arrayContaining(['receive'])); // a local sale's receipt route
+    expect(only(['local_sales.create'])).toEqual(expect.arrayContaining(['receive'])); // a local sale's receipt route
   });
 
   it('a fresh rate raises nothing; a missing one (system default) does', () => {

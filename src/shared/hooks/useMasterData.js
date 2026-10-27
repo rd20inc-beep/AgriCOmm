@@ -26,9 +26,12 @@ function useCan(...perms) {
   return perms.some(([m, a]) => !!hasPermission?.(m, a));
 }
 
-// GET /api/customers — export_orders.view
+// GET /api/customers — export_orders.view, mill_customers.view or
+// local_sales.view; the server returns only the customer types the user may read.
 export function useCustomersList() {
-  const q = useCustomers({}, { enabled: useCan(['export_orders', 'view']) });
+  const q = useCustomers({}, {
+    enabled: useCan(['export_orders', 'view'], ['mill_customers', 'view'], ['local_sales', 'view']),
+  });
   return { data: list(q), isLoading: q.isLoading };
 }
 

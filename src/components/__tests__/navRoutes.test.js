@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { ROUTE_GATES, matchRoutePath, canOpen, gateFor } from '../../app/routeGates';
-import { PRIMARY_NAV, MORE_NAV, PINNED_NAV, allNavTargets } from '../../app/navConfig';
+import { PRIMARY_NAV, MORE_NAV, PINNED_NAV, allNavTargets, buildNav } from '../../app/navConfig';
 import { PAGES } from '../../app/routeTable';
 import { permsFor } from '../../test/fixtures/rolePermissions';
 
@@ -121,13 +121,37 @@ describe('sidebar entries', () => {
       '/stock-count', '/purchase-requirements', '/mill-store/adjustments']) expect(label.has(p)).toBe(true);
   });
 
-  it('Mill and Export managers reach the Finance screens behind finance.view (G-9 / G-10)', () => {
+  it('Mill and Export managers reach the screens of their own desk (G-9 / G-10, owner request 2026-10-27)', () => {
     expect(gateFor('/finance/*')).toEqual({ module: 'finance', action: 'view' });
-    for (const role of ['Mill Manager', 'Export Manager']) {
-      const can = permsFor(role);
-      for (const url of ['/finance', '/finance/accounting/profit', '/export/7', '/milling/3', '/local-sales/5', '/lot-inventory/9']) {
-        expect([role, url, canOpen(url, can)]).toEqual([role, url, true]);
-      }
+    // Export Manager: the Finance module and export screens; not the mill's
+    // local sales or local customers.
+    for (const url of ['/finance', '/finance/accounting/profit', '/export/7', '/milling/3', '/lot-inventory/9']) {
+      expect(['Export Manager', url, canOpen(url, permsFor('Export Manager'))]).toEqual(['Export Manager', url, true]);
     }
+    for (const url of ['/local-sales', '/local-sales/5', '/local-sales/5/invoice', '/milling/customers']) {
+      expect(['Export Manager', url, canOpen(url, permsFor('Export Manager'))]).toEqual(['Export Manager', url, false]);
+    }
+    // Mill Manager: Mill Finance, party statements, local sales and customers;
+    // not the company Finance module (finance.view without view_dashboard).
+    for (const url of ['/milling/finance', '/milling/statements', '/finance/accounting/statements', '/local-sales/5', '/milling/customers', '/milling/3']) {
+      expect(['Mill Manager', url, canOpen(url, permsFor('Mill Manager'))]).toEqual(['Mill Manager', url, true]);
+    }
+    for (const url of ['/finance', '/finance/money-in', '/finance/accounting/profit', '/finance/accounts']) {
+      expect(['Mill Manager', url, canOpen(url, permsFor('Mill Manager'))]).toEqual(['Mill Manager', url, false]);
+    }
+  });
+
+  it('neither sees the hidden entries in the sidebar', () => {
+    const labels = (role) => {
+      const { primary, more } = buildNav(permsFor(role), { workspace: 'standard' });
+      return [...primary.flatMap((i) => [i.label, ...(i.children || []).map((c) => c.label)]), ...more.map((i) => i.label)];
+    };
+    expect(labels('Export Manager')).not.toContain('Local Sales');
+    expect(labels('Export Manager')).not.toContain('Mill Customers');
+    expect(labels('Export Manager')).toContain('Finance');
+    expect(labels('Mill Manager')).not.toContain('Finance');
+    expect(labels('Mill Manager')).toContain('Mill Finance');
+    expect(labels('Mill Manager')).toContain('Local Sales');
+    expect(labels('Mill Manager')).toContain('Mill Customers');
   });
 });
